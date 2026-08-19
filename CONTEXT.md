@@ -10,6 +10,9 @@ target repo, so an agent inside a cell cannot follow a reference to it. It is
 tagged `—` are for the operator and the design documents only; nothing inside a
 cell can act on them.
 
+Only three phases appear in the table. REPAIR and REBUT resume the implementer's
+session and inherit its sections; PACKAGE involves no model.
+
 It is *definitional*, not behavioural — it says what words mean, never what to do —
 so it stays out of `CLAUDE.md` and is exempt from the ~200-line budget in §8.
 Rules of conduct belong in `CLAUDE.md`; rules of naming belong here.
@@ -21,7 +24,7 @@ is what makes two log lines, two prompts, and a ledger column quietly disagree.
 |---|---|---|
 | 1 | Core | DIAGNOSE · IMPLEMENT · REVIEW |
 | 2 | Work | DIAGNOSE · IMPLEMENT · REVIEW |
-| 3 | Scope | DIAGNOSE · IMPLEMENT |
+| 3 | Scope | DIAGNOSE · IMPLEMENT · REVIEW |
 | 4 | Verification | IMPLEMENT · REVIEW |
 | 5 | Review | REVIEW |
 | 6 | Outcomes | — |

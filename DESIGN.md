@@ -44,7 +44,7 @@ The important inversion: **the product of this factory is not code, it is a revi
 | # | Requirement | Target |
 |---|---|---|
 | N1 | Unattended safety | Zero writes to real infrastructure, prod DB, or remote `main` — enforced structurally, not by prompt or by in-agent hook |
-| N2 | Bounded spend | Per-attempt, per-task, and per-batch USD ceilings; hard stop |
+| N2 | Bounded spend | Per-attempt, per-task, and per-batch USD ceilings; hard stop, enforced host-side against reported spend (§4.1) |
 | N3 | Bounded time | Batch completes inside the sleep window (~8h) or is killed and reclaimed cleanly |
 | N4 | Throughput | 3 concurrent tasks on a 32GB M-series Mac; 6–12 accepted PRs per week |
 | N5 | Auditability | Any merged change reconstructible from stored artifacts alone — expressed as a derivation-chain query, so it is checkable rather than asserted (§4.6) |
@@ -108,7 +108,7 @@ This list is a **living refusal record**, not a one-time scoping exercise. Each 
      │  CELL #1        │  │ CELL #2  │  │ CELL #3  │  ← one container per task
      │                 │  └────┬─────┘  └────┬─────┘
      │  /work worktree │       │             │
-     │  fixture PG     │       │             │
+     │  fixture svcs   │       │             │
      │  agent proc     │       ▼             ▼
      │  no credentials │  ┌───────────────────────────┐
      │  no default rte ├─▶│  egress proxy (allowlist) │──▶ api.anthropic.com
@@ -121,7 +121,7 @@ Three planes, deliberately separated:
 - **Cells** (containers, untrusted): where agents and their code execute. Assume everything inside is adversarial.
 - **Ledger + batch tree** (host, append-mostly): the audit trail.
 
-The single most important line in this document: **a cell is untrusted, and "untrusted" means every control that matters lives outside it.** Concretely, the controls that hold regardless of agent cooperation are: no credentials in the container, no default route except through an allowlisting proxy, the only git remote is a local bare mirror, and the gate runner is invoked by the host and reports to the host. Prompts and in-agent hooks are *inside* the cell — they shape behavior and reduce wasted turns, but they are not the boundary and must never be counted as one (§5.3).
+The single most important line in this document: **a cell is untrusted, and "untrusted" means every control that matters lives outside it.** Concretely, the controls that hold regardless of agent cooperation are: no target-repo credentials in the container — the agent's own API key being the one exception, and §5.1 states it as part of the rule rather than beside it — no default route except through an allowlisting proxy, the only git remote is a local bare mirror, and the gate runner is invoked by the host and reports to the host. Prompts and in-agent hooks are *inside* the cell — they shape behavior and reduce wasted turns, but they are not the boundary and must never be counted as one (§5.3).
 
 ### 2.1 The core/repo boundary
 
@@ -265,17 +265,19 @@ Terminal states that reach you: `SCOPE_REVIEW`, `PLAN_REJECTED`, `EXHAUSTED`, `R
 Not Postgres, not Timescale, despite that being home turf. Single writer, single machine, no ops, trivially backed up — and the real reason: the ledger must survive Docker being down, your Postgres being mid-migration, or the factory having broken its own environment. A dependency-free state store is what lets Saffron recover from Saffron.
 
 ```sql
-batches      (batch_id, started_at, ended_at, budget_usd, spent_usd,
+batches      (batch_id, started_at, ended_at, budget_usd, spent_usd_est,
               concurrency, until_ts, status)
 repos        (repo_id, name, origin, mirror_path, policy_sha, image_tag,
               image_built_at, enabled)
 runs         (run_id, batch_id, repo_id, base_sha, preflight, started_at,
               ended_at, status)
 tasks        (task_id, run_id, spec_id, spec_sha, state, priority, risk, branch,
-              parent_task_id, worktree, volume, budget_usd, spent_usd, updated_at)
+              parent_task_id, worktree, volume, budget_usd, spent_usd_est, updated_at)
 attempts     (attempt_id, task_id, phase, n, session_id, model, started_at,
-              ended_at, subtype, turns, cost_usd)
-gate_results (gate_result_id, attempt_id, gate, status, duration_ms)
+              ended_at, subtype, terminal_reason, num_turns, cost_usd_est)
+gate_results (gate_result_id, attempt_id, run_id, gate, status, duration_ms,
+              summary)
+failures     (failure_id, gate_result_id, file, code, message, line)
 findings     (finding_id, task_id, lens, severity, file, line, claim, anchored,
               verdict, adjudication, rebuttal)
 decisions    (decision_id, task_id, actor, action, reason, created_at)
@@ -285,9 +287,19 @@ decisions    (decision_id, task_id, actor, action, reason, created_at)
 
 `gate_results`, not `gate_runs` — "run" was doing three jobs (the nightly event, a repo's slice, one gate execution) and this is the one that had a better name available. It also matches what the gate contract emits (§5.4).
 
+**`failures` is a table, not a log line, and that is load-bearing.** Three separate mechanisms key on `(gate, file, code)` — baseline subtraction, no-progress detection (§5.4), and the flywheel's "which gate was the sole failure" question (§8) — so the identity has to be queryable, not gzipped in the batch tree. A status-only `gate_results` would have made N7 re-derive the baseline by parsing files after a crash, and would have made `SA-0001`'s Q3 unanswerable *in SQL for schema reasons rather than expressiveness ones*, quietly corrupting the SQL-equivalence challenge that spec exists to run. `line` is stored because the PR body and finding anchoring display it; it is not part of the identity (§5.4).
+
+**Exactly one of `attempt_id` and `run_id` is set**, and the null is the point: a gate result belongs to an attempt, *except* the baseline suite (§4.4), which runs against a run's `base_sha` with no agent, no session and no cost. Rev 7's schema had no column that could hold it. This is also §4.6's first criticism showing its teeth from the other side — `findings` stored `file`, `line` and `claim` in full while `gate_results` stored none of it, which is a strange asymmetry between two things the PR body already renders as one table.
+
 `findings` carries three distinct judgements and they must not collapse into one column: **`verdict`** is the critic's own confirm-or-withdraw at REBUT; **`adjudication`** is the operator's agree/disagree, which §4.6 flagged as belonging in a typed field rather than folded into `decisions.reason`, and which is the entire basis of the critic-ROI query; **`rebuttal`** is the implementer's argument. `anchored` records whether the finding survived reconciliation against the diff (§5.5) — dropped findings are kept, not deleted, because the drop rate is the signal that a lens is badly prompted.
 
+**`cost_usd_est`, and the suffix is not decoration.** Every dollar figure the agent runtime reports is a *client-side estimate*, computed locally from a price table bundled into the SDK at build time. It drifts when pricing changes, when the installed SDK doesn't recognize a model, and when billing rules apply that the client cannot model; the runtime's own documentation says not to make financial decisions from it. Saffron makes exactly one financial decision from it — the budget gate (§4.2) — and that is acceptable because the consequence of drift is a night that costs somewhat more or less than $50, not a wrong answer. What is *not* acceptable is `spent_usd` silently becoming the number you reason about in §7.1, so the estimate carries its suffix everywhere it is stored, and cost-per-accepted-PR is reconciled against real billing periodically rather than trusted outright. **A column named for a measurement it cannot make is how an estimate becomes a fact.**
+
+`terminal_reason` exists for the same reason the supervisor measures doneness from git (§4.3): the agent runtime distinguishes a clean finish from an abort, and a crashed session (`subtype = error_during_execution`) **may report every cost field as zero**. An attempt that burned $4 and then crashed records $0 unless the supervisor falls back to the last good figure it saw before the crash. Unattended overnight, this is the difference between a budget that holds and one that silently stops counting.
+
 `spec_sha` matters: edit a spec while a batch is running and the task is invalidated rather than silently building the old thing. `policy_sha` does the same one level up — change a repo's gate declarations mid-batch and its in-flight tasks are invalidated, because a task judged against a policy that no longer exists is not evidence of anything. `image_built_at` versus the `.saffron/Dockerfile` mtime is what triggers a rebuild at preflight.
+
+**Both invalidations need a moment to fire at, and it is a mirror refetch at task scheduling.** Preflight fetches once and pins `base_sha` (§4.4), so nothing else in the batch ever re-reads the repo — which would leave these two columns recording a check that structurally cannot happen. The scheduler therefore refetches the mirror before each task starts and compares both shas then; it is a local `git fetch` against a bare repo, it costs milliseconds, and it is the only point in a batch where a mid-flight edit can be noticed at all. Note what this deliberately does *not* do: `base_sha` stays pinned for the whole run, so a refetch invalidates tasks and never moves the baseline out from under them.
 
 Artifacts — transcripts, diffs, gate logs, coverage XML — go in a **plain directory tree**, not a content-addressed store:
 
@@ -301,11 +313,13 @@ Content addressing would dedupe repeated gate output, but the volume is tens of 
 
 Selects the next runnable task when a cell frees:
 
-0. **Refusal gate — decided before a cell starts, and it is the cheapest gate in the system.** A task is refused outright, with a reason, if: an open unmerged PR already targets this spec; its `touches` overlaps an open PR's changed files; the spec is malformed or its `spec_sha` moved; or the repo failed preflight. Refusals cost nothing — no container, no tokens — and land in the morning queue as one line. The instinct is to let the agent discover these and report back; that instinct costs $8 to learn something a `gh pr list` call knew for free. **Every condition you can check without starting a cell, check without starting a cell.**
+0. **Refusal gate — decided before a cell starts, and it is the cheapest gate in the system.** A task is refused outright, with a reason, if: an open unmerged PR from **another task** already targets this spec; its `touches` overlaps an open PR's changed files; the spec is malformed or its `spec_sha` moved; or the repo failed preflight. Refusals cost nothing — no container, no tokens — and land in the morning queue as one line. The instinct is to let the agent discover these and report back; that instinct costs $8 to learn something a `gh pr list` call knew for free. **Every condition you can check without starting a cell, check without starting a cell.**
+   > *Another* task, because a `CHANGES_REQUESTED` task re-queues (§3.3) while its own PR is still open — the unqualified version refuses every re-queued task in the system, which is the one case this gate is most obviously not for. Refusal is keyed on `task_id`, not on the spec.
 1. **Dependency gate** — all `depends_on` tasks have reached **`READY_FOR_REVIEW`** (not `MERGED`). A dependent task branches off its parent's branch rather than `base_sha` — stacked branches.
    > Requiring `MERGED` would mean a dependency can never be satisfied inside a batch, since merging requires your morning approval. A 3-node DAG would take three nights, two cells idle each night. Stacking is the fix; the risk it introduces (parent gets rejected, child is built on sand) is exactly the risk the merge train exists to catch, and it costs one wasted task rather than three wasted nights.
 2. **Conflict gate** — the task's `touches` do not overlap any in-flight task's `touches` **in the same repo**, except for a stacked child of an in-flight parent, which is serialized behind it by definition. **File conflicts are prevented by scheduling, not resolved by rebasing.** Conflict sets never span repos; two repos are trivially parallel, which is the one place multi-repo makes life easier rather than harder.
-3. **Budget gate** — remaining batch budget ≥ task budget.
+   > **Bugs are scheduled twice, and they have to be.** A bug spec has no `touches` until DIAGNOSE proposes one and you ratify it (§5.2), so at first scheduling both this gate and gate 0's overlap test have nothing to compare — the task is admitted on its `envelope`, which is explicitly never enforced against anything. So **gates 0 and 2 re-run at ratification**, against the ratified set, before IMPLEMENT opens; a bug whose real blast radius collides with an in-flight task waits there instead of being discovered by two agents editing the same file. Checking only at intake leaves the conflict machinery blind for exactly the task type whose scope is least predictable — which is the whole reason DIAGNOSE exists.
+3. **Budget gate** — uncommitted batch budget ≥ task budget, where *uncommitted* is `budget_usd − spent_usd_est − Σ(budget of in-flight tasks)`. The task's budget is **reserved when it is scheduled and the unspent remainder released when it reaches a terminal state**, which is the difference between a hard stop and a soft one: comparing against `spent_usd_est` alone lets K tasks each pass the gate on the same last $12 and overshoot by up to K× a task budget, because spend is recognized as it happens and the gate runs before any of it has.
 4. **Order** — priority, then dependency depth (unblock the most work), then **round-robin across repos**, then FIFO.
 
 Round-robin matters more than it looks. Straight priority ordering lets one repo with a deep queue monopolize a night, and you wake up to twelve PRs in one codebase and none in the other two — which is worse for review than four each, because your context-switching cost is paid once per repo either way. Interleaving also spreads the risk of a bad night: a repo whose gates are misconfigured burns a third of the budget, not all of it.
@@ -314,7 +328,7 @@ Round-robin matters more than it looks. Straight priority ordering lets one repo
 
 **Dependencies do not cross repos.** A cross-repo `depends_on` would require coordinated merges across two review queues, and there is no version of that which is simple. If two repos must change together, that is one spec in each and a note in both — you sequence them by running one batch, merging, then the next. Stated as a limit rather than discovered as a bug.
 
-Concurrency cap **K = 3**, and the arithmetic has to close against two ceilings: the *Docker VM allocation*, not 32GB of Mac, and the *performance-core count* (§5.1). At `--memory 4g` per cell that's 12GB of containers in a 16GB VM, leaving the proxy and Docker's own overhead the remainder — tight rather than comfortable, and worth remembering that a repo's fixture services run *inside* the cell, so 4g is the whole budget for Postgres, the toolchain and the test process together. This is the first number here likely to be wrong; K is the knob, and it turns down. Do not raise K: throughput is model-latency-bound most of the time, but gate runs are not, and oversubscribing makes gate timings flaky — which poisons the repair loop's only signal.
+Concurrency cap **K = 3**, and the arithmetic has to close against two ceilings: the *Docker VM allocation*, not 32GB of Mac, and the *performance-core count* (§5.1). At `--memory 4g` per cell that's 12GB of containers in a 16GB VM, leaving the proxy and Docker's own overhead the remainder — tight rather than comfortable, and worth remembering that a repo's fixture services run *inside* the cell, so 4g is the whole budget for a database, the toolchain and the test process together. This is the first number here likely to be wrong; K is the knob, and it turns down. Do not raise K: throughput is model-latency-bound most of the time, but gate runs are not, and oversubscribing makes gate timings flaky — which poisons the repair loop's only signal.
 
 ### 4.3 Supervisor
 
@@ -325,10 +339,12 @@ Every phase is bounded on five axes, all enforced host-side:
 | Axis | Mechanism | Catches |
 |---|---|---|
 | Turns | `ClaudeAgentOptions(max_turns=…)` | thrash |
-| Spend | `max_budget_usd` per attempt; supervisor sums against task and batch ceilings | expensive thrash |
+| Spend | supervisor sums reported cost against task and batch ceilings; `max_budget_usd` per attempt as an in-cell backstop | expensive thrash |
 | Idle | no output for N seconds | a stalled agent |
 | Completion | a *short* silence window after the agent signals done | a finished agent whose child process (an MCP server, a spawned CLI) holds stdout open so EOF never arrives |
 | Wall clock | `asyncio.wait_for` + container timeout | deadlock |
+
+**Note the order of the spend row, because it inverts the obvious one.** The agent runtime offers a per-query spend ceiling, and it is tempting to treat that as *the* budget enforcement. It is not: it is evaluated by the runtime process, which runs **inside the cell**, against the runtime's own running estimate. That places it on the untrusted side of §2's boundary — the same category as the `PreToolUse` path check (§5.3), valuable for cutting off a runaway attempt a few seconds earlier, worthless as a guarantee. The ceiling that holds is the supervisor's, because the supervisor is on the host and stops the cell rather than asking it to stop itself. The in-cell ceiling is still worth setting, for the same reason the path check is: it saves turns. It is just not what N2 rests on.
 
 Five, and the last two are the ones you only discover by running this overnight — rev 2 had three. Splitting **idle** from **completion** matters because they want opposite treatment: silence *before* the agent claims to be done is a stall, and silence *after* is almost always a lingering child process. Collapsing them means a finished agent burns the full idle timeout and then gets treated as a failure.
 
@@ -357,8 +373,8 @@ The repair loop retries gate failures (§5.4). Nothing else in the system retrie
 ### 4.4 Batch orchestration
 
 ```
-saffron batch --repos saffron,thermal-edge --budget 120 --until 06:30 --concurrency 3
-saffron batch --all --budget 120 --until 06:30          # every enabled repo
+saffron batch --repos saffron,thermal-edge --budget 50 --until 06:30 --concurrency 3
+saffron batch --all --budget 50 --until 06:30           # every enabled repo
 ```
 
 Nightly via `launchd` (not cron — `launchd` handles wake and won't silently skip a sleeping Mac). One batch spans all selected repos: **one concurrency pool, one budget, one morning queue.** Per-repo budgets would need per-repo tuning you have no data for, and separate batches would contend for the same three cells without knowing it.
@@ -379,9 +395,11 @@ Steps 2 and 3 together are what make "only new failures count" (§5.4) do real w
 
 - List Docker volumes matching `saffron-wt-*` and `git worktree list` in the mirror.
 - Diff against non-terminal ledger tasks.
-- Anything unreferenced, or referenced by a task that has been `ORPHANED` for more than 24h, has its artifacts flushed to the batch tree and its volume and worktree removed.
+- Anything unreferenced, or referenced by a task that has been `ORPHANED` for more than **12h**, has its artifacts flushed to the batch tree and its volume and worktree removed.
 
-**`ORPHANED` is stamped when the cell dies, not when gc notices.** The supervisor sets it on kill, on crash, and on `--until`; gc only reclaims. Deriving the state from a stale `updated_at` instead puts reclamation a full night out of phase — a cell killed at 06:30 is twelve hours old when the next batch starts, so nothing is freed and you carry an extra night of volumes in steady state, permanently. The 24h delay is still the feature (§4.3, never auto-clean on failure); it just runs from the death rather than from gc's first glance at the corpse.
+**Twelve, not twenty-four, and the number is set by the cycle rather than by taste.** A 24h rule evaluated by a once-nightly gc can never reclaim on the cycle that produced the corpse: a cell killed at 06:30 is ~15h old at the next batch's 22:00 preflight and survives to the night after. That is a bounded leak rather than rev 7's unbounded one, but it still means carrying an extra night of volumes in steady state — the same symptom, one cause further out. **A delay rule and its evaluation interval have to be chosen together; either one alone is a guess.** Twelve hours keeps the "never auto-clean on failure" property that the delay exists for (§4.3) — a corpse from last night is still there when you sit down with coffee — while landing inside the next preflight rather than after it.
+
+**`ORPHANED` is stamped when the cell dies, not when gc notices.** The supervisor sets it on kill, on crash, and on `--until`; gc only reclaims. Deriving the state from a stale `updated_at` instead puts reclamation a full night out of phase — a cell killed at 06:30 is twelve hours old when the next batch starts, so nothing is freed and you carry an extra night of volumes in steady state, permanently. The delay is still the feature (§4.3, never auto-clean on failure); it just runs from the death rather than from gc's first glance at the corpse.
 
 Without this, `--until 06:30` killing three mid-flight cells leaks three multi-GB volumes a night. Two weeks and the disk is full — and preflight would detect it and abort, which is detection without reclamation. F10 exists because of this.
 
@@ -455,7 +473,8 @@ docker run --rm \
 
 Every flag there is load-bearing:
 
-- **No real credentials — for any repo, ever.** No API keys, no host `.env`, no cloud profile. Tests run against recorded fixtures. A task that genuinely needs live data is a task you run attended. This one rule eliminates a whole category of overnight disaster, and it is a rule core enforces rather than a rule each repo is trusted to follow: the cell simply never receives them.
+- **No target-repo credentials — for any repo, ever, and exactly one credential of any kind.** No host `.env`, no cloud profile, no database URL, no third-party API key. Tests run against recorded fixtures. A task that genuinely needs live data is a task you run attended. This is a rule core enforces rather than one each repo is trusted to follow: the cell simply never receives them.
+  **The exception is `ANTHROPIC_API_KEY`, and it is stated here because an unstated exception is an abandoned rule (Appendix F, principle 29).** The agent cannot run without it, so the cell holds one live billing credential and the blast radius of that is spend, not data — which is why it is tolerable and why §2's boundary claim is written in terms of *target-repo* credentials. But it does mean N2's ceilings are an accounting sum over numbers the cell reports, not a limit the cell is subject to: an agent that leaks or misuses the key spends outside the supervisor's view entirely. Two mitigations, neither of which needs building before v1: use a **separate key for the factory** so it can be revoked without touching your interactive work, and set a **provider-side monthly cap on that key** — the only ceiling in the whole design that holds without the cell's cooperation. Moving custody into the proxy is the principled fix and is not available: `CONNECT` tunnels are opaque, so the proxy cannot inject a header it cannot see.
 - **Egress via an allowlisting proxy, not iptables.** Two reasons the obvious version doesn't work: `--cap-drop ALL` removes `CAP_NET_ADMIN`, so a cell entrypoint cannot install firewall rules (and granting it that capability would let the untrusted cell rewrite its own firewall); and `api.anthropic.com` is behind a CDN, so an IP allowlist resolved at startup starts failing mid-batch. A sibling proxy on both the internal and external networks doing hostname-based `CONNECT` filtering solves both — hostnames not IPs, zero capabilities in the cell.
 - **`CLAUDE_CONFIG_DIR` on a separate volume, never under `/work`.** Session state and any OAuth credential file must not live in the tree the agent has write access to, that the `scope` gate walks, that the secret scanner scans, and that gets patch-exported. Putting them together means the agent can read its own credentials and the secret scan trips on a real token.
 - **`--cpuset-cpus`, not `--cpus`, plus explicit thread caps.** `--cpus` is a CFS quota, not a core mask: Polars, pyarrow, and numpy's BLAS all size their thread pools from the *visible* core count and will each spawn ~10 threads inside a 2-CPU quota. The result is heavy throttling and wildly variable test timings — the exact flaky-gate failure mode §7 warns about, self-inflicted.
@@ -472,13 +491,17 @@ Read-only tools, scoped to `envelope`. Output is `scope.json`: the proposed `tou
 
 This phase exists because of a specific trap. The obvious design — human declares `touches`, agent is confined to it — is sound for features and fatal for bugs. In the TE-0142 example, "no rows from any of three providers" most plausibly originates *outside* `ingest/nws/**`: a shared HTTP retry helper, a Polars schema change producing a silently empty frame, a continuous-aggregate refresh policy, a chunk-interval/retention interaction, a migration that changed a constraint. Several of those are in `forbidden` or outside a hand-written `touches`. The agent would correctly find the cause and then be auto-rejected for looking in the right place — and the rejection would read as "your spec needs work," which is both wrong and unactionable.
 
-So: the agent proposes scope, you ratify. `SCOPE_REVIEW` items appear at the top of the morning queue as a diff of proposed `touches` plus the one-paragraph root cause — a genuine 10-second decision, versus a rewrite-the-spec-and-lose-a-night loop. Ratified scope is recorded in the ledger, and written into the spec file **on the task's own branch, as its first commit** — so it reaches `main` through the task's normal PR and needs no exception to N1's rule that nothing unattended writes to a remote `main`. Two things fall out, both load-bearing. The ledger is authoritative until that PR merges, so enforcement starts at turn one of IMPLEMENT rather than next batch. And `spec_sha` on `main` deliberately does *not* move while the task is in flight — writing the spec back to `main` directly would invalidate (§4.1) the very task that ratification just unblocked.
+So: the agent proposes scope, you ratify. `SCOPE_REVIEW` items appear at the top of the morning queue as a diff of proposed `touches` plus the one-paragraph root cause — a genuine 10-second decision, versus a rewrite-the-spec-and-lose-a-night loop. Ratified scope is recorded in the ledger, and written into the spec file **on the task's own branch, as its first commit** — so it reaches `main` through the task's normal PR and needs no exception to N1's rule that nothing unattended writes to a remote `main`. **The task's own spec path is added to the ratified `touches` when it is recorded**, or that first commit fails the `scope` gate on every bug task: the writeback changes `.saffron/specs/…`, which is not a path DIAGNOSE would ever propose. A control artifact that has to be committed has to be in scope to be committed. Two further things fall out, both load-bearing. The ledger is authoritative until that PR merges, so enforcement starts at turn one of IMPLEMENT rather than next batch. And `spec_sha` on `main` deliberately does *not* move while the task is in flight — writing the spec back to `main` directly would invalidate (§4.1) the very task that ratification just unblocked.
 
 Cost: ~$0.30–1.00. Cheapest possible place to catch a misconceived task.
 
 ### 5.3 Phase 2 — IMPLEMENT (with a plan checkpoint)
 
-Full write tools inside `/work`. `permission_mode="acceptEdits"` with an explicit `allowed_tools` list.
+Full write tools inside `/work`, with an explicit `allowed_tools` list and a permission mode that **cannot prompt**.
+
+That second requirement is easy to miss and fatal to get wrong. The obvious mode auto-accepts file *edits* — which covers Edit and Write and nothing else. A shell command outside `allowed_tools` still raises a permission prompt, and at 03:00 inside a container there is nobody to answer it: the attempt burns its idle timeout (§4.3) and reads as a stall. **Unattended operation requires a mode whose behaviour on an unapproved tool is to deny, not to ask.** The runtime offers one; it also offers a mode that skips permission checks entirely, which is the wrong fix — it removes the wasted-turn savings along with the prompt, and buys nothing safety-wise since the real controls are structural anyway (§2).
+
+The general form, because it will recur with every runtime option: **in an unattended system, "ask the operator" is not a fallback, it is a hang.** Any option whose failure mode is a prompt needs its non-interactive equivalent chosen deliberately.
 
 #### Control artifacts never stay in the workspace
 
@@ -488,7 +511,9 @@ The general rule, which applies to anything the harness needs to be true: *if a 
 
 #### Spec text is data, never a template
 
-**Vocabulary is injected per phase, not wholesale.** `CONTEXT.md` is the controlled vocabulary, and it is a host artifact — it lives in Saffron, not in any target repo, so an agent inside a cell cannot follow a reference to it. It is injected into the system prompt, and only the sections that phase needs: the critic gets findings, severities and lenses; the implementer gets scope, gates and statuses; neither gets the flywheel or the merge train, because nothing inside a cell can act on those. Injecting all of it into three prompts on every attempt of every task is real money for terms the agent has no use for, and a long glossary crowds out the instructions that actually change behaviour.
+**Vocabulary is injected per phase, not wholesale.** `CONTEXT.md` is the controlled vocabulary, and it is a host artifact — it lives in Saffron, not in any target repo, so an agent inside a cell cannot follow a reference to it. It is injected into the system prompt, and only the sections that phase needs: the critic gets findings, severities and lenses; the implementer gets gates and statuses; **both get the scope section**, because §5.5 asks the critic for "behavior change outside the stated scope" and bare "scope" is the one word `CONTEXT.md` insists is never safe unqualified — a critic that cannot tell `envelope` from ratified `touches` from the `scope` gate is being asked to judge against a term it was not given. Neither gets the flywheel or the merge train, because nothing inside a cell can act on those.
+
+REPAIR and REBUT take no injection of their own: both resume a session that already has the implementer's sections, and re-injecting on a resumed session pays for the same terms twice. Injecting all of it into three prompts on every attempt of every task is real money for terms the agent has no use for, and a long glossary crowds out the instructions that actually change behaviour.
 
 The document is sectioned so this is a slice, not a rewrite. Sections are declared per phase in one table in `agents/prompts/`, and adding a term to the wrong section is caught by the same review that catches everything else.
 
@@ -643,6 +668,12 @@ Two lenses in v1, a third at elevated risk — **different lenses, not repeated 
 2. **Contract & schema** — public API compatibility, migration reversibility, serialization and schema conformance, anything downstream consumers depend on.
 3. *(elevated)* **Blast radius** — what else calls this, what breaks downstream, what the diff changes that the spec never asked for.
 
+**Each lens is a separate host-invoked session, not a subagent.** The runtime has a subagent facility that fits a lens almost perfectly — per-agent model, effort level, and a read-only tool list — and it is the wrong mechanism here for one reason: *the model decides when to spawn a subagent.* A REVIEW phase that asks one session to delegate to two or three lens subagents produces a lens set that varies by task, silently, with no error when a lens is skipped. Saffron needs all declared lenses to run on every reviewed diff, so the host invokes each one and collects its findings. The subagent *shape* is still the right configuration — it is where per-lens model and effort live — it just gets driven from the host rather than requested in a prompt.
+
+This is §4.3's doneness rule again, one level out: **anything that must happen every time is measured and driven by the host; anything the model decides is a claim.** A lens that runs only when the model thinks it is relevant is not a lens, it is a suggestion.
+
+One property the subagent facility does confirm: a fresh session receives no parent conversation at all — only what its invoker puts in the prompt. That is exactly the isolation this phase requires, and it means the diff, the spec, the gate results and the acceptance criteria must all be passed explicitly. There is no context to inherit, by design.
+
 **Any single blocker routes to REBUT.** No voting. A majority rule sounds rigorous and is decoration here: the lenses are disjoint by construction, so the schema critic will never independently corroborate the correctness critic's timezone finding, and "majority" with two disjoint lenses means "never." False positives are handled by the rebuttal plus queue ordering (§6), which is the better mechanism anyway.
 
 Note that lens #3 in a naive design would be "test quality" — but the `revert` gate now answers that mechanically and for free. Per §8's own triage rule, that's a bucket-1 solution displacing a bucket-3 one, which is exactly the direction things should move.
@@ -680,7 +711,7 @@ So the deliverable is one small static page, ~50 lines of Jinja: a sorted list o
 ```
 thermal-edge  TE-0139  READY   2 att $6.40  1 concern  +180/−22  → PR #211
 thermal-edge  TE-0144  SCOPE   diagnosed: shared retry helper    → ratify?
-saffron       SA-0001  READY   1 att $8.20  0 findings +410/−0   → PR #14
+saffron       SA-0001  READY   1 att $8.20  0 concerns +410/−0   → PR #14
 thermal-edge  TE-0142  MERGE_FAILED  conflicts with #209         → PR #213
 saffron       SA-0003  EXHAUSTED  3 att $9.10  types: 4 new      → log
 toolbox       —        SKIPPED  policy.yaml: unknown gate role "typecheck"
@@ -692,7 +723,7 @@ Sort order, designed so you can dismiss in 10 seconds and accept in two minutes:
 1. `SCOPE_REVIEW` — one-click, and it unblocks the next night
 2. `MERGE_FAILED`, `PLAN_REJECTED` — fast to triage, unblocks the queue
 3. `risk: elevated`
-4. Everything else by findings count descending
+4. Everything else by concern count descending — concerns, not findings (`CONTEXT.md` §5): `note` is excluded by construction and `blocker` never reaches this page unrebutted
 
 **Sort by state, not by repo.** The temptation with multiple repos is to group them, and it is worth resisting: the most urgent item across all repos should be the top line, and grouping buries a skipped repo under another repo's routine PRs. Repo is a column you scan, not a heading you navigate.
 
@@ -747,9 +778,21 @@ Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents
 | **No-progress detection never fires** | Byte comparison over a line-shifting failure set | Same identity as baseline subtraction, so the comparison is stable (§5.4) |
 | **Blast-radius findings all dropped** | Anchoring admits only lines inside a hunk | Second anchor: a line naming an identifier the diff changed (§5.5) |
 | **REBUT reds a gate and hangs** | No edge out of REBUTTING except success | A red re-run is `EXHAUSTED`, with the rebuttal kept to read (§5.6) |
-| **Volumes reclaimed a night late** | `ORPHANED` inferred from a 24h-stale timestamp | Supervisor stamps `ORPHANED` at death; gc's 24h runs from then (§4.5) |
+| **Volumes reclaimed a night late** | `ORPHANED` inferred from a 24h-stale timestamp | Supervisor stamps `ORPHANED` at death; gc's 12h delay runs from then and lands inside the next preflight (§4.5) |
 | **Cells with unequal cores** | `--cpuset-cpus` indexes into a hybrid core list | Pin P-cores only; K falls out of the count (§5.1) |
 | **Silent batch no-op** | Docker down, Mac asleep, auth expired | `launchd` + preflight that fails loudly into the queue |
+| **Batch overshoots its budget by up to K×** | Budget gate compares against spend, which lags scheduling | Reserve the task budget at schedule, release the remainder at terminal state (§4.2) |
+| **Every re-queued task is refused** | Gate 0 sees the task's own open PR | Refusal keyed on another task's PR, not on the spec (§4.2) |
+| **Ratified bug tasks fail `scope` on their first commit** | The writeback edits a spec path DIAGNOSE never proposed | The spec's own path joins the ratified `touches` (§5.2) |
+| **Two bug tasks collide inside one file** | `touches` is empty when a bug is first scheduled | Gates 0 and 2 re-run at ratification against the ratified set (§4.2) |
+| **Baseline subtraction has nothing to subtract from** | `gate_results` stored status, not `failures[]` | `failures` table keyed `(gate, file, code)`; baseline rows hang off `run_id` (§4.1) |
+| **`spec_sha` invalidation never fires** | Nothing re-reads the repo after preflight pins `base_sha` | Mirror refetch and sha comparison at each task's scheduling (§4.1) |
+| **Spend outside the supervisor's accounting** | The cell holds a live API key by necessity | Separate factory key, provider-side monthly cap — the one ceiling not dependent on the cell (§5.1) |
+| **Unattended agent hangs on a permission prompt** | Auto-accepting edits doesn't cover shell commands | A permission mode that denies rather than asks; prompts are a hang, not a fallback (§5.3) |
+| **A crashed attempt records $0** | The runtime zeroes cost fields on session crash | `terminal_reason` stored; supervisor falls back to the last good figure before the crash (§4.1) |
+| **Repair loop pays full input price every attempt** | 5-minute cache TTL is shorter than a gate run | One-hour cache TTL set on the cell (§7.1) |
+| **A critic lens silently doesn't run** | Lenses spawned as subagents are invoked at the model's discretion | Each lens is a separate host-invoked session (§5.5) |
+| **An estimate hardens into a billing fact** | Runtime-reported cost is a local approximation | `_est` suffix on every stored figure; reconcile against real billing (§4.1) |
 
 ### 7.1 Cost model
 
@@ -762,9 +805,17 @@ Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents
 | Rebut | $0.50–1.50 |
 | **Total** | **$5–14** |
 
-Gate wall-clock is a real budget line, not just a token one: a full suite against a fixture Postgres is minutes, and the repair loop runs it up to 4× per task. Assume ~45–60 min per task at K=3, so ~25 task-slots in an 8-hour window, realistically 10–15 completed.
+**Extend the prompt-cache TTL, or the repair loop pays full price every attempt.** The default cache lifetime is five minutes. The repair loop resumes the same session *across a gate run*, and a gate run against real fixture services is minutes — so on most attempts the cache has expired and the entire accumulated context is re-billed as fresh input. The repair row above is the row this lands on, and it is the row that runs up to four times. The runtime exposes a one-hour TTL through an environment variable; set it on the cell. It trades a higher cache-write rate for reads that actually survive a gate run, and it is the single cheapest cost lever in the system — one env var against the most-repeated phase.
 
-**Set the nightly budget before you set the queue depth.** `--budget 120` with a hard stop is the difference between a useful factory and a surprising invoice. Track cost per *accepted* PR, not per task — that's the number that tells you whether the critic layer pays for itself.
+Worth stating as a general shape, because it is invisible until you look for it: **a cache TTL has to outlive the slowest thing between two uses of the cache.** Here that thing is not a model call, it is a test suite — which is why the default was never going to fit.
+
+Gate wall-clock is a real budget line, not just a token one: a full suite against a repo's fixture services is minutes, and the repair loop runs it up to 4× per task. Assume ~45–60 min per task at K=3, so ~25 task-slots in an 8-hour window, realistically 10–15 completed.
+
+**Set the nightly budget before you set the queue depth.** A hard stop is the difference between a useful factory and a surprising invoice.
+
+But size it against the queue you actually have, and note that three numbers in this document disagree about that: N4 wants 6–12 accepted PRs a *week*, the paragraph above sizes a night's *capacity* at 10–15 completed tasks, and §4.2 concedes the realistic queue is two or three deep because spec-writing binds first (§9). **Capacity is not throughput, and the budget should be set from the queue.** Three tasks at $5–14 is a $45 night with headroom; `--budget 120` buys a queue depth you will not have for months, which makes it a ceiling that never fires — and a ceiling that never fires is not a ceiling, it is a comment. Start at **$50**, raise it the first night the batch stops on budget rather than on an empty queue. That night is also the first real evidence about which of the three numbers was right.
+
+Track cost per *accepted* PR, not per task — that's the number that tells you whether the critic layer pays for itself.
 
 ---
 
@@ -813,7 +864,7 @@ Success criterion: replay a merged PR, and the gate table plus PR body tell you 
 
 ### v0.5 — one cell, attended (a weekend)
 
-Docker cell with proxy egress, fixture PG image layer, volume worktree, no credentials. One implement session, plan checkpoint, gate loop, no critic. You watch it run.
+Docker cell with proxy egress, fixture-service image layer, volume worktree, no credentials. One implement session, plan checkpoint, gate loop, no critic. You watch it run.
 
 Success criterion: an agent fixes one real bug inside the cell, and the cell demonstrably cannot reach your DB, your keys, or your remote.
 
@@ -879,7 +930,7 @@ If it says otherwise, move `ontology/queries/` into `docs/` as worked examples a
       diagnose.py  implement.py  repair.py  review.py  package.py
     agents/
       prompts/             # system prompts, versioned — treat as source
-      definitions.py       # AgentDefinition per critic lens
+      definitions.py       # per-lens model, effort, tools — host-invoked (§5.5)
       hooks.py             # audit tap + path check (NOT a security control)
     gates/
       runner.py            # host-invoked; shells out, parses the JSON contract
@@ -946,7 +997,7 @@ And the other half of the layout — the part that lives in every target repo, a
 | Test quality | `revert` gate | Mutation testing | Coarser signal; fits the window, costs one test run |
 | Coverage | Advisory | Blocking | Weaker guarantee; avoids rewarding assertion-free tests |
 | Egress | Allowlisting proxy | iptables in cell | Extra container; works with `--cap-drop ALL` and CDN endpoints |
-| Isolation | Container + volume + fixture PG | Worktree only | Real build/teardown complexity; the only thing that makes "unattended" defensible |
+| Isolation | Container + volume + repo fixture services | Worktree only | Real build/teardown complexity; the only thing that makes "unattended" defensible |
 | State | SQLite + plain batch tree | Postgres + content-addressed store | No dedupe; recovers when everything else is broken |
 | Factory analytics | Derived one-way RDF projection, provisional (§4.6) | Authoritative graph store; or nothing at all | A vocabulary to maintain and a sync step — and it may conclude it isn't worth emitting, which counts as a result |
 | Conflicts | Prevent by scheduling | Resolve by rebase | Lower parallelism; no "two green PRs that break each other" |
@@ -1077,7 +1128,7 @@ Also settled here: the vocabulary is injected per phase rather than wholesale (�
 - **Baseline subtraction was keyed on `line`.** The worst of them. Any diff that is not append-only shifts pre-existing failures, so untouched failures would have read as new and the repair loop would have spent attempts on code the task never wrote — the §7 countermeasure defeating the exact failure it was built for. Identity is now `(gate, file, code)`. The same fix rescues no-progress detection, which was comparing bytes across a set whose line numbers move every attempt, and would therefore never have fired.
 - **Finding anchoring would have zeroed out lens #3.** Blast radius is *what else calls this*, so its findings point at unchanged lines; a hunk-only reconciler drops them all, silently, and the drop-rate diagnostic would have blamed the prompt. A second anchor admits a line that names an identifier the diff changed.
 - **REBUT had no edge out of failure.** One attempt, gates re-run, and nothing in §3.3 said what happens when the re-run is red. It is `EXHAUSTED`.
-- **`saffron gc` ran a night behind itself.** `ORPHANED` was inferred from a 24h-stale `updated_at`, but a cell killed at 06:30 is twelve hours old at the next batch start — so nothing was ever freed on the cycle that killed it. The supervisor now stamps `ORPHANED` at death and the 24h runs from there.
+- **`saffron gc` ran a night behind itself.** `ORPHANED` was inferred from a 24h-stale `updated_at`, but a cell killed at 06:30 is twelve hours old at the next batch start — so nothing was ever freed on the cycle that killed it. The supervisor now stamps `ORPHANED` at death and the delay runs from there.
 - **`--cpuset-cpus` pins into a hybrid core list.** A cell landing on efficiency cores runs its gates several times slower than its siblings, reintroducing per-cell timing variance — the flaky-gate mode that bullet was written to remove. P-cores only, enumerated at preflight.
 - **`SCOPE_REVIEW` writeback had no home.** "Written back into the spec file" meant either an unattended write to a remote `main` (forbidden by N1) or a `spec_sha` move that invalidates the task ratification just unblocked (§4.1). It now rides the task's own branch as its first commit, which needs neither exception.
 
