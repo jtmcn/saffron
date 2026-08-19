@@ -1,0 +1,1093 @@
+# Saffron — System Design
+
+An agentic software factory: spec files in, reviewed pull requests out, running unattended overnight on one Mac.
+
+**Status:** design, rev 7 — rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F)
+
+**Companion document:** `CONTEXT.md` — the controlled vocabulary. It is authoritative for what words mean; this document is authoritative for what the system does. Where they disagree, one of them has a bug.
+**Scope:** language- and stack-agnostic. Saffron develops *any* repo that can satisfy the gate contract (§5.4). First repo is Saffron itself; `thermal-edge` is the first external one.
+
+> **Section numbers are an API.** `.saffron/specs/` cites this document by section (`SA-0001` references §4.1, §5.1, §5.6, §7.1, §8, §11, N5). Numbering is therefore held stable across revisions — new material is added as subsections, never by renumbering.
+**Author of record:** Joel · Aug 2026
+
+---
+
+## 0. The one-paragraph version
+
+Saffron is a Python orchestrator that reads spec files committed to a target repository, assigns each to an isolated containerized agent working in its own git worktree, drives that agent through a hard gate loop until the change is objectively green, subjects the resulting diff to an adversarial reviewer that tries to prove it wrong, and packages everything into a pull request plus a one-line verdict in a morning queue. Joel merges. Nothing else merges.
+
+The important inversion: **the product of this factory is not code, it is a reviewable artifact.** Code is cheap now. Your attention is the scarce resource, and every decision below is ultimately about spending less of it per accepted change. That principle also disqualifies designs that quietly move work back onto you — see §5.2, where it kills the most obvious version of scope control.
+
+---
+
+## 1. Requirements
+
+### 1.1 Functional
+
+| # | Requirement |
+|---|---|
+| F1 | Discover spec files in a target repo, validate them against a schema, and enqueue them as tasks |
+| F2 | Execute tasks unattended in batches (nightly), respecting dependencies and file-conflict sets |
+| F3 | Isolate each task: own branch, own filesystem, own database, own process |
+| F4 | Enforce hard verification gates; let the agent self-repair against gate output for a bounded number of attempts |
+| F5 | Run an independent adversarial review of the final diff before anything reaches the human queue |
+| F6 | Produce a PR per task carrying spec, plan, gate results, findings, and cost |
+| F7 | Present a single morning index across the whole batch |
+| F8 | Re-verify on merge, not just in isolation |
+| F9 | Record every run durably: transcripts, tool calls, gate output, spend |
+| F10 | Reclaim resources from killed, crashed, and orphaned tasks without operator intervention |
+| F11 | Operate on any repository, in any language, via a declared contract — **onboarding a repo requires no change to Saffron's source** |
+| F12 | Run a batch spanning multiple repos, sharing one concurrency pool and one budget |
+
+### 1.2 Non-functional
+
+| # | Requirement | Target |
+|---|---|---|
+| N1 | Unattended safety | Zero writes to real infrastructure, prod DB, or remote `main` — enforced structurally, not by prompt or by in-agent hook |
+| N2 | Bounded spend | Per-attempt, per-task, and per-batch USD ceilings; hard stop |
+| N3 | Bounded time | Batch completes inside the sleep window (~8h) or is killed and reclaimed cleanly |
+| N4 | Throughput | 3 concurrent tasks on a 32GB M-series Mac; 6–12 accepted PRs per week |
+| N5 | Auditability | Any merged change reconstructible from stored artifacts alone — expressed as a derivation-chain query, so it is checkable rather than asserted (§4.6) |
+| N6 | Operability | Single operator, zero standing services beyond Docker; `saffron` is one CLI |
+| N7 | Recoverability | Crash mid-batch resumes without losing completed work or leaking disk |
+| N8 | Onboarding cost | A new repo is productive after writing one `.saffron/` directory — target: an afternoon, not a Saffron release |
+
+### 1.3 Constraints
+
+- One machine (Mac, Docker Desktop → Linux VM), one operator, part-time attention.
+- **Saffron's harness is Python. The repos it works on are any language.** These are unrelated facts and the design must not let them become related.
+- API auth must reach a container without leaking any target repo's credentials into it.
+- **The generality is aspirational until proven.** The first two repos (Saffron, `thermal-edge`) are both Python. The language seam will be *designed* long before it is *exercised* — §7's "premature generality" row exists because of this, and §9 treats the third repo as the real test.
+- **Docker Desktop on macOS is a VM.** Bind-mount I/O is slow, host firewall rules don't see container traffic, and container memory comes out of a fixed VM allocation. Three separate design decisions below fall out of this one fact.
+
+### 1.4 Explicit non-goals for v1
+
+- Multi-tenant / multi-user. One operator.
+- Autonomous merge. Never, at any version.
+- Cloud runners. Local only until throughput actually binds.
+- Agents writing their own specs from a roadmap. That's v3 and it's the part most likely to waste money.
+- A bespoke diff viewer. GitHub already built the best one you'll ever have (§6).
+- An ontology-*driven* orchestrator. The factory ontology (§4.6) **describes** the run record; it never controls execution. SHACL shapes validate the projection; they do not gate state transitions, and no scheduling decision reads a triple.
+- Publishing the vocabulary at a resolvable IRI, or `owl:imports` of external ontologies at run time. Cells have no network (§5.1); external vocabularies are vendored and committed.
+- **Language auto-detection, or a plugin system.** A repo declares what it is; Saffron does not sniff for a `package.json`. Declaration is one file the repo owner writes once; detection is a heuristic that fails silently on the tenth repo.
+- **A gate marketplace / shared gate library.** Gates are shell programs in the repo. Copy-paste between repos beats a dependency for the first ten repos, and probably forever at this scale.
+
+This list is a **living refusal record**, not a one-time scoping exercise. Each entry gets what it costs: the thing refused, why, and which existing seam covers it instead. The failure mode it guards against is specific and it is the default trajectory of any personal tool — *a factory accretes one knob per bad night.* A written refusal turns the fifth time you want a feature into a link rather than an argument with yourself at 7am. Adding to this list is a normal outcome of a morning review, and so is deleting from it when a refusal stops being right.
+
+---
+
+## 2. High-level architecture
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│  ANY TARGET REPO   (saffron · thermal-edge · …)                          │
+│                                                                          │
+│   .saffron/                                                              │
+│     specs/         XX-0001-….md                   ← unit of work         │
+│     policy.yaml    gate roles, budgets, protected paths, envelopes       │
+│     gates/         executables emitting the gate JSON contract (§5.4)    │
+│     Dockerfile     cell image; FROM a saffron base                       │
+│   CLAUDE.md        standing agent instructions (the learning surface)    │
+└────────────────────────────────┬─────────────────────────────────────────┘
+                                 │ git (local bare mirror, no network)
+                                 ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  SAFFRON CONTROL PLANE   (host process, Python, ~/Code/saffron)          │
+│                                                                          │
+│   intake ─▶ gc ─▶ scheduler ─▶ supervisor ─▶ gate runner ─▶ packager     │
+│      │                 │            │            │             │         │
+│   validate      conflict sets   run/kill    HOST-INVOKED    PR + index   │
+│                 dep DAG        containers   deterministic                │
+│      ▼                                                                   │
+│   ledger (SQLite)  +  batch tree (~/.saffron/batches/…, plain files)     │
+└────────────────────────────────┬─────────────────────────────────────────┘
+                                 │ docker exec / stdio
+              ┌──────────────────┼──────────────────┐
+              ▼                  ▼                  ▼
+     ┌─────────────────┐  ┌──────────┐  ┌──────────┐
+     │  CELL #1        │  │ CELL #2  │  │ CELL #3  │  ← one container per task
+     │                 │  └────┬─────┘  └────┬─────┘
+     │  /work worktree │       │             │
+     │  fixture PG     │       │             │
+     │  agent proc     │       ▼             ▼
+     │  no credentials │  ┌───────────────────────────┐
+     │  no default rte ├─▶│  egress proxy (allowlist) │──▶ api.anthropic.com
+     └─────────────────┘  └───────────────────────────┘    package mirror
+```
+
+Three planes, deliberately separated:
+
+- **Control plane** (host, trusted): decides *what* runs, *when*, and *whether the result is acceptable*. Holds all state. Runs the gates. Never executes model-authored code.
+- **Cells** (containers, untrusted): where agents and their code execute. Assume everything inside is adversarial.
+- **Ledger + batch tree** (host, append-mostly): the audit trail.
+
+The single most important line in this document: **a cell is untrusted, and "untrusted" means every control that matters lives outside it.** Concretely, the controls that hold regardless of agent cooperation are: no credentials in the container, no default route except through an allowlisting proxy, the only git remote is a local bare mirror, and the gate runner is invoked by the host and reports to the host. Prompts and in-agent hooks are *inside* the cell — they shape behavior and reduce wasted turns, but they are not the boundary and must never be counted as one (§5.3).
+
+### 2.1 The core/repo boundary
+
+Saffron is repo-agnostic, which is a claim that only means something if you can say precisely where the knowledge lives. The rule:
+
+> **Saffron knows about diffs, git, containers, budgets, and the shape of a gate result. It knows nothing about languages, test runners, package managers, or databases. Everything in the second list lives in the target repo's `.saffron/` directory.**
+
+The consequence is F11: **onboarding a repo touches zero lines of Saffron.** If adding a Rust project requires a `rust.py` in the orchestrator, the boundary has already failed.
+
+| Concern | Owner | Why |
+|---|---|---|
+| Spec schema, task state machine, scheduler, budgets | **Core** | Universal; nothing language-shaped about a dependency edge |
+| Worktree, bare mirror, branch/PR mechanics | **Core** | git is git |
+| Cell lifecycle, network policy, resource limits | **Core** | Docker is Docker |
+| `scope`, `size`, `secrets` gates | **Core** | Operate on the diff as text and paths — no language knowledge needed |
+| `integrity` gate logic | **Core**, patterns from repo | "Was a test deleted or suppressed?" is universal; *what a test file looks like* and *what a suppression comment looks like* are not |
+| `revert` gate | **Core** logic, the repo's `tests` gate as runner | The sanctioned exception below: core re-invokes a declared gate, it does not run a tool |
+| `format`, `lint`, `types`, `tests`, `no-network` | **Repo** | Executables satisfying the gate contract |
+| Cell image, services (DB, cache, …), fixtures | **Repo** | `.saffron/Dockerfile` and a declared service list |
+| Risk-elevation paths, protected paths, envelope defaults | **Repo** | `policy.yaml` |
+| Standing agent instructions | **Repo** | `CLAUDE.md` |
+
+Saffron ships thin base images (`saffron/cell-base:python`, `:node`, …) carrying the agent runtime, git, and the gate-runner shim — and nothing else. A repo's `.saffron/Dockerfile` starts `FROM` one of those and installs whatever it needs. Saffron never installs a toolchain on a repo's behalf.
+
+**The seam to watch.** Most core gates are core precisely because they read the diff rather than run the code. That is not a coincidence and it is worth protecting: every time a proposed core gate needs to *execute* something in the repo, it belongs on the repo side of the line.
+
+**The one sanctioned exception is `revert` (§5.4), and the shape of the exception is the real rule.** `revert` does run something — but what it runs is a gate the repo already declared, invoked through the same JSON contract as every other gate, with one extra argument. Core still knows nothing about the toolchain: it knows only that a `tests` gate exists and that the contract obliges it to accept a test subset. So the rule is not "core never executes"; it is **core invokes declared gates, never tools.** Any future core gate that wants to run something must fit that shape or move to the repo side. Stated positively because the absolute version was false the moment `revert` was added — and a rule with an unstated exception is a rule that has quietly been abandoned.
+
+The moment core code branches on language, the boundary is gone and you have a monolith with a config file.
+
+---
+
+## 3. The unit of work: spec files
+
+### 3.1 Where specs live — and why
+
+Specs live in the **target repo**, at `.saffron/specs/`, not in Saffron.
+
+| | Specs in target repo (chosen) | Specs in Saffron |
+|---|---|---|
+| Spec travels with the code it changed | ✅ git history shows asked-vs-built | ❌ split-brain |
+| Multi-repo factory | ✅ Saffron stays generic | ❌ Saffron accumulates repo knowledge |
+| Spec references code paths | ✅ same tree, checkable | ❌ stale references |
+| Merge noise in target repo | ❌ specs churn alongside code | ✅ clean |
+| Saffron can improve itself | ✅ point it at `~/Code/saffron` | ✅ |
+
+The merge-noise cost is real but small, and it buys the thing that matters at review time: opening a PR and seeing the original ask, verbatim, in the same tree.
+
+### 3.2 Spec format
+
+Markdown with YAML frontmatter. Machine-checkable header, human-written body. The schema is core; everything it references (paths, gate names, risk paths) is the repo's. The example below is from one repo's `.saffron/specs/` and is illustrative — a Rust repo's spec has identical structure and different nouns.
+
+```markdown
+---
+id: TE-0142
+title: NWS forecast ingest has produced no rows since 2026-08-11
+type: bug                       # feature | bug | refactor | test | docs | chore
+priority: 2
+depends_on: [TE-0139]           # satisfied at READY_FOR_REVIEW, see §4.2
+envelope:                       # outer bound for DIAGNOSE; required for bugs
+  - src/thermal_edge/**
+  - tests/**
+touches:                        # optional for bugs — agent proposes, you ratify (§5.2)
+forbidden:                      # hard deny, beyond global protected paths
+  - alembic/versions/**
+budget_usd: 12
+max_attempts: 4
+risk: standard                  # standard | elevated (§5.6)
+---
+
+## Context
+`forecast_raw` has received no rows from any of the three providers since
+2026-08-11. The sync job logs success. Ops note: docs/ops/2026-08-11-gap.md.
+
+## Problem
+State the observable defect, not the suspected cause.
+
+## Acceptance criteria
+- [ ] A regression test exists that fails on the current `main`
+- [ ] `forecast_raw` receives rows for all ERCOT zones over a 48h backfill
+- [ ] The silent-success path is removed: ingest raises on zero-row responses
+- [ ] No change to the `forecast_raw` schema
+
+## Out of scope
+Kalshi sync errors. Portfolio snapshot staleness. Separate specs.
+
+## Notes for the agent
+Fixtures in `tests/fixtures/nws/`. Do not hit the live NWS API; use the
+recorded cassettes. Timescale hypertable — watch chunk boundaries on backfill.
+```
+
+Design notes:
+
+- **`envelope` vs `touches` is the central fix in rev 2.** For features and refactors you know the blast radius, so you write `touches` directly and it is enforced from the start. For **bugs you do not know the blast radius — that's what a bug is.** Requiring you to declare it means you must diagnose before the agent does, which inverts the entire economics (you do the expensive part; the agent types). So for bugs you declare a loose `envelope`, the DIAGNOSE phase proposes a `touches` set inside it, and you ratify that in one click (§5.2). Hard scope enforcement survives; human pre-diagnosis does not.
+- **`touches`, once fixed, is load-bearing.** It feeds the conflict-set scheduler (§4.2) and the `scope` gate (§5.4). An agent that wanders outside it fails mechanically.
+- **Acceptance criteria are checkboxes** because the packager renders them into the PR body as a checklist, and the critic is handed them as its rubric.
+- **"Out of scope" measurably reduces sprawl.** Agents are eager. Naming the adjacent broken things stops them from opportunistically fixing three of them in one unreviewable diff.
+- **No `estimated_diff_lines`.** A self-reported number from the model being gated is not a gate. Size is enforced post-implementation where it's measurable, and at plan time via `len(files_to_change)`, which is checkable against `touches`.
+
+### 3.3 Task state machine
+
+```
+  DRAFT ──▶ QUEUED ──┬─(bug)──▶ DIAGNOSING ──▶ SCOPE_REVIEW ──▶ (you: 1 click)
+                     │                              │
+                     └─(other)─────────────────────▶│
+                                                    ▼
+                                          IMPLEMENTING (plan checkpoint inside)
+                                                    │
+                                          PLAN_REJECTED ──▶ (you)
+                                                    │
+                                                    ▼
+                                            GATING ⇄ REPAIRING ──▶ EXHAUSTED
+                                                    │                  ▲
+                                                REVIEWING              │  gates red
+                                                    │                  │  after rebuttal
+                                                REBUTTING ─────────────┘
+                                                    ▼
+                                          READY_FOR_REVIEW ──▶ (you)
+                                                    │
+                          ┌─────────────────────────┼──────────────────────┐
+                          ▼                         ▼                      ▼
+                      APPROVED             CHANGES_REQUESTED           REJECTED
+                          │                         │                      │
+                     MERGE_TRAIN               (re-queue)              LEARN (§8)
+                          │
+                   MERGED / MERGE_FAILED
+
+  ORPHANED ◀── any state, on crash/kill; reclaimed by `saffron gc` (§4.5)
+```
+
+Terminal states that reach you: `SCOPE_REVIEW`, `PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`. Everything else is internal.
+
+---
+
+## 4. Control plane
+
+### 4.1 Ledger and batch tree
+
+**SQLite**, one file, WAL mode, at `~/.saffron/ledger.db`.
+
+Not Postgres, not Timescale, despite that being home turf. Single writer, single machine, no ops, trivially backed up — and the real reason: the ledger must survive Docker being down, your Postgres being mid-migration, or the factory having broken its own environment. A dependency-free state store is what lets Saffron recover from Saffron.
+
+```sql
+batches      (batch_id, started_at, ended_at, budget_usd, spent_usd,
+              concurrency, until_ts, status)
+repos        (repo_id, name, origin, mirror_path, policy_sha, image_tag,
+              image_built_at, enabled)
+runs         (run_id, batch_id, repo_id, base_sha, preflight, started_at,
+              ended_at, status)
+tasks        (task_id, run_id, spec_id, spec_sha, state, priority, risk, branch,
+              parent_task_id, worktree, volume, budget_usd, spent_usd, updated_at)
+attempts     (attempt_id, task_id, phase, n, session_id, model, started_at,
+              ended_at, subtype, turns, cost_usd)
+gate_results (gate_result_id, attempt_id, gate, status, duration_ms)
+findings     (finding_id, task_id, lens, severity, file, line, claim, anchored,
+              verdict, adjudication, rebuttal)
+decisions    (decision_id, task_id, actor, action, reason, created_at)
+```
+
+**A batch is not a run.** A **batch** is one night: one budget, one concurrency pool, one `--until`, spanning every selected repo. A **run** is one repo's slice of that batch, owning its own `base_sha`, its own preflight outcome, and its own baseline. Rev 4 made these genuinely different and left them sharing a table; a multi-repo night had no identity you could query. Budget lives on the batch, because that is the level it is actually enforced at.
+
+`gate_results`, not `gate_runs` — "run" was doing three jobs (the nightly event, a repo's slice, one gate execution) and this is the one that had a better name available. It also matches what the gate contract emits (§5.4).
+
+`findings` carries three distinct judgements and they must not collapse into one column: **`verdict`** is the critic's own confirm-or-withdraw at REBUT; **`adjudication`** is the operator's agree/disagree, which §4.6 flagged as belonging in a typed field rather than folded into `decisions.reason`, and which is the entire basis of the critic-ROI query; **`rebuttal`** is the implementer's argument. `anchored` records whether the finding survived reconciliation against the diff (§5.5) — dropped findings are kept, not deleted, because the drop rate is the signal that a lens is badly prompted.
+
+`spec_sha` matters: edit a spec while a batch is running and the task is invalidated rather than silently building the old thing. `policy_sha` does the same one level up — change a repo's gate declarations mid-batch and its in-flight tasks are invalidated, because a task judged against a policy that no longer exists is not evidence of anything. `image_built_at` versus the `.saffron/Dockerfile` mtime is what triggers a rebuild at preflight.
+
+Artifacts — transcripts, diffs, gate logs, coverage XML — go in a **plain directory tree**, not a content-addressed store:
+
+```
+~/.saffron/batches/<batch_id>/<repo>/<task_id>/<phase>/<n>.{log.gz,json,diff}
+```
+
+Content addressing would dedupe repeated gate output, but the volume is tens of MB a night. A plain tree is greppable with `rg`, inspectable when the ledger itself is what's broken, and navigable at 7am without a tool. Dedupe you don't need is not worth losing `ls`.
+
+### 4.2 Scheduler
+
+Selects the next runnable task when a cell frees:
+
+0. **Refusal gate — decided before a cell starts, and it is the cheapest gate in the system.** A task is refused outright, with a reason, if: an open unmerged PR already targets this spec; its `touches` overlaps an open PR's changed files; the spec is malformed or its `spec_sha` moved; or the repo failed preflight. Refusals cost nothing — no container, no tokens — and land in the morning queue as one line. The instinct is to let the agent discover these and report back; that instinct costs $8 to learn something a `gh pr list` call knew for free. **Every condition you can check without starting a cell, check without starting a cell.**
+1. **Dependency gate** — all `depends_on` tasks have reached **`READY_FOR_REVIEW`** (not `MERGED`). A dependent task branches off its parent's branch rather than `base_sha` — stacked branches.
+   > Requiring `MERGED` would mean a dependency can never be satisfied inside a batch, since merging requires your morning approval. A 3-node DAG would take three nights, two cells idle each night. Stacking is the fix; the risk it introduces (parent gets rejected, child is built on sand) is exactly the risk the merge train exists to catch, and it costs one wasted task rather than three wasted nights.
+2. **Conflict gate** — the task's `touches` do not overlap any in-flight task's `touches` **in the same repo**, except for a stacked child of an in-flight parent, which is serialized behind it by definition. **File conflicts are prevented by scheduling, not resolved by rebasing.** Conflict sets never span repos; two repos are trivially parallel, which is the one place multi-repo makes life easier rather than harder.
+3. **Budget gate** — remaining batch budget ≥ task budget.
+4. **Order** — priority, then dependency depth (unblock the most work), then **round-robin across repos**, then FIFO.
+
+Round-robin matters more than it looks. Straight priority ordering lets one repo with a deep queue monopolize a night, and you wake up to twelve PRs in one codebase and none in the other two — which is worse for review than four each, because your context-switching cost is paid once per repo either way. Interleaving also spreads the risk of a bad night: a repo whose gates are misconfigured burns a third of the budget, not all of it.
+
+**Most of this is v2, and the queue depth is why.** §7.1 sizes a night at 10–15 completed tasks; N4 wants 6–12 accepted PRs a *week*; §9 concedes that spec-writing binds before throughput does. The realistic steady state is therefore a two- or three-deep queue against three cells — and at that depth priority-then-FIFO *is* the scheduler, while conflict sets, round-robin and dependency depth arbitrate contention that never arrives. So v1 builds gate 0, the budget gate, and ordering by priority. The rest is written down here because it is the right answer once the queue is deep, and each piece gets built the first night it actually binds: round-robin when one repo demonstrably monopolizes a night, conflict sets when two tasks first collide, stacking when a DAG first stalls. This is §9's rule about second implementations applied to a scheduler rather than to a language seam — the same rule catches both, and it caught the language seam only because someone wrote it down.
+
+**Dependencies do not cross repos.** A cross-repo `depends_on` would require coordinated merges across two review queues, and there is no version of that which is simple. If two repos must change together, that is one spec in each and a note in both — you sequence them by running one batch, merging, then the next. Stated as a limit rather than discovered as a bug.
+
+Concurrency cap **K = 3**, and the arithmetic has to close against two ceilings: the *Docker VM allocation*, not 32GB of Mac, and the *performance-core count* (§5.1). At `--memory 4g` per cell that's 12GB of containers in a 16GB VM, leaving the proxy and Docker's own overhead the remainder — tight rather than comfortable, and worth remembering that a repo's fixture services run *inside* the cell, so 4g is the whole budget for Postgres, the toolchain and the test process together. This is the first number here likely to be wrong; K is the knob, and it turns down. Do not raise K: throughput is model-latency-bound most of the time, but gate runs are not, and oversubscribing makes gate timings flaky — which poisons the repair loop's only signal.
+
+### 4.3 Supervisor
+
+Owns one cell's lifecycle: reconcile → create worktree and volume → start container → run phases → collect artifacts → tear down → mark reclaimed.
+
+Every phase is bounded on five axes, all enforced host-side:
+
+| Axis | Mechanism | Catches |
+|---|---|---|
+| Turns | `ClaudeAgentOptions(max_turns=…)` | thrash |
+| Spend | `max_budget_usd` per attempt; supervisor sums against task and batch ceilings | expensive thrash |
+| Idle | no output for N seconds | a stalled agent |
+| Completion | a *short* silence window after the agent signals done | a finished agent whose child process (an MCP server, a spawned CLI) holds stdout open so EOF never arrives |
+| Wall clock | `asyncio.wait_for` + container timeout | deadlock |
+
+Five, and the last two are the ones you only discover by running this overnight — rev 2 had three. Splitting **idle** from **completion** matters because they want opposite treatment: silence *before* the agent claims to be done is a stall, and silence *after* is almost always a lingering child process. Collapsing them means a finished agent burns the full idle timeout and then gets treated as a failure.
+
+**A timeout must never discard committed work.** Whichever bound fires, the supervisor evaluates what is actually in the worktree — commits exist or they don't — rather than throwing the attempt away because the process didn't exit cleanly. The corollary, and it is the same rule from a different angle: **never auto-clean on failure.** A failed or aborted task keeps its worktree and volume so you can look at them; `saffron gc` (§4.5) reclaims them on the 24-hour rule, and that delay is the feature.
+
+#### Doneness is measured, never reported
+
+The agent's claim that it finished is an input, not a verdict. Every phase transition is decided by a host-side measurement against git or the filesystem:
+
+| Phase | The measurement |
+|---|---|
+| IMPLEMENT | `git rev-list --count base..HEAD > 0` — an attempt that produced no commits failed, whatever the transcript says |
+| REPAIR | the gate result, which the agent never sees itself produce (§5.4) |
+| REBUT | HEAD moved, or an explicit recorded argument — not "I've addressed the findings" |
+| PACKAGE | rebase succeeded and `git diff --diff-filter=U` is empty |
+
+This is the same principle as host-invoked gates, applied to control flow rather than to quality. It is cheap, it is a handful of `git` calls, and it is what keeps a confident-sounding transcript from moving a task forward on its own authority.
+
+#### Retry taxonomy
+
+The repair loop retries gate failures (§5.4). Nothing else in the system retries by default, and the distinction is worth stating because "add a retry" is the reflex:
+
+- **Retry** idempotent infrastructure races — container start, mirror fetch, worktree creation. Re-running them is free.
+- **Fail fast** on hangs, on genuine errors, and above all on anything that assembles the *content the agent acts on*. A retried or degraded prompt build — a missing spec fragment silently dropped, a stale template — runs the agent against a subtly wrong instruction and burns a whole attempt producing plausible garbage. That is far more expensive to recover from unattended than a clean abort into the morning queue.
+
+### 4.4 Batch orchestration
+
+```
+saffron batch --repos saffron,thermal-edge --budget 120 --until 06:30 --concurrency 3
+saffron batch --all --budget 120 --until 06:30          # every enabled repo
+```
+
+Nightly via `launchd` (not cron — `launchd` handles wake and won't silently skip a sleeping Mac). One batch spans all selected repos: **one concurrency pool, one budget, one morning queue.** Per-repo budgets would need per-repo tuning you have no data for, and separate batches would contend for the same three cells without knowing it.
+
+The batch:
+
+1. **Preflight**, per repo: mirror fetch, `policy.yaml` parse and validate, cell image rebuild if `.saffron/Dockerfile` changed, Docker up, auth valid, disk headroom, then `saffron gc` (§4.5). **A repo that fails preflight is skipped, not fatal** — one broken `policy.yaml` must not cost the other repos their night. It appears in the morning queue as a skipped-repo line.
+2. Per repo: pin `base_sha` and **run the full gate suite on it, recording that repo's baseline failure set.** Baselines are per-repo and never compared across repos.
+3. **Do not skip a repo because its base is red.** Skip only on *infrastructure* failure — any gate returning `error` rather than `fail`, or >25% of tests failing — which means the baseline itself is untrustworthy. This is precisely why the contract separates `error` from `fail`: it is the signal that distinguishes "your codebase has three flaky tests" from "the toolchain is broken," and without it you would have to guess from a failure count. A single flaky timing test should never cancel a repo's night; "base was red in these 3 tests" is a line in the batch header, not a stop.
+4. Scheduler loop until the queue drains, the budget is gone, or `--until` hits.
+5. Emit the batch index.
+
+Steps 2 and 3 together are what make "only new failures count" (§5.4) do real work. An abort-on-red policy would make the baseline always-empty and the subtraction dead code.
+
+### 4.5 Garbage collection
+
+`saffron gc` runs at every batch start and on demand:
+
+- List Docker volumes matching `saffron-wt-*` and `git worktree list` in the mirror.
+- Diff against non-terminal ledger tasks.
+- Anything unreferenced, or referenced by a task that has been `ORPHANED` for more than 24h, has its artifacts flushed to the batch tree and its volume and worktree removed.
+
+**`ORPHANED` is stamped when the cell dies, not when gc notices.** The supervisor sets it on kill, on crash, and on `--until`; gc only reclaims. Deriving the state from a stale `updated_at` instead puts reclamation a full night out of phase — a cell killed at 06:30 is twelve hours old when the next batch starts, so nothing is freed and you carry an extra night of volumes in steady state, permanently. The 24h delay is still the feature (§4.3, never auto-clean on failure); it just runs from the death rather than from gc's first glance at the corpse.
+
+Without this, `--until 06:30` killing three mid-flight cells leaks three multi-GB volumes a night. Two weeks and the disk is full — and preflight would detect it and abort, which is detection without reclamation. F10 exists because of this.
+
+### 4.6 The run record as a provenance graph — derived, one-way, provisional
+
+The ledger is a good state store and a poor analytical surface. §8's flywheel is where that bill comes due: triaging a rejection into gate / `CLAUDE.md` / lens means joining an acceptance criterion to a critic finding to a gate result to a human decision — four tables and a directory of gzipped logs. Today that join happens in your head, monthly.
+
+`SA-0001` defines a vocabulary for the run record so those joins become expressible. Three rules keep it from becoming a liability:
+
+**1. Derived and one-way.** SQLite remains the system of record. The graph is a projection with no write path back. If it is stale, wrong, or absent, the factory still runs — which is the property (§4.1) that lets Saffron recover from Saffron. An authoritative graph store would trade that away for query convenience, and a dual-write arrangement would trade it away for nothing at all: divergence in an audit trail is worse than either store alone.
+
+**2. PROV-O and EARL, not a bespoke schema.** Runs, tasks, attempts, phases and gate runs are `prov:Activity`; specs, `plan.json`, `scope.json`, diffs, gate output and PRs are `prov:Entity`; the implementer session, each critic lens and the human are `prov:Agent`. `wasGeneratedBy`, `used`, `wasDerivedFrom`, `wasRevisionOf` and `wasInvalidatedBy` (which is exactly what `spec_sha` invalidation is, §4.1) carry the backbone. Gate results and critic findings are both `earl:Assertion`s over an `earl:TestSubject`. The genuinely Saffron-specific terms — the only part that justifies a new namespace — are the gate taxonomy with its blocking/advisory split, `envelope` versus ratified `touches`, lens disjointness, and the terminal-versus-internal state distinction of §3.3.
+
+**2b. The cheap rival the RATIONALE must also beat: a glossary.** Prior art (Appendix D) reaches the same need — a shared vocabulary its agents must read before touching code — and answers it with a 200-line markdown glossary where every term carries an explicit ***Avoid:*** list of the words not to use for it, plus an instruction to *flag* a conflict with a recorded decision rather than silently override it. That is a weekend's less work than an ontology and it does the thing an ontology is usually reached for. So `RATIONALE.md` has a second bar to clear: not only "is SPARQL better than SQL here," but "**is any of this better than a disambiguating glossary the agents actually read?**" If the honest answer is that the vocabulary's value is agent-facing rather than query-facing, write `GLOSSARY.md` and stop — the queries were the justification, and without them the RDF is decoration. Worth noting that Saffron needs the glossary either way; the ontology has to earn the *delta*.
+
+**3. Provisional by construction.** The deliverable includes `ontology/RATIONALE.md`, which challenges each of five queries against its SQL equivalent over the §4.1 schema. **"All five have easy SQL equivalents — don't build the emitter" is a successful outcome**, and is the cheapest form that answer can take. The vocabulary is a design artifact validated against hand-authored fixtures; the emitter and the store are a separate, conditional task (§9, v2.5).
+
+Rule 3 is the important one, and it is §9's build-order discipline applied to a data model: prove the layer is worth having before building the machinery that feeds it. A vocabulary costs a weekend and can be deleted. An always-on materialization pipeline cannot.
+
+#### What the modelling already surfaced
+
+Two schema criticisms that stand whether or not a single triple is ever stored:
+
+- **`gate_results` and `findings` are the same thing wearing different table names.** A type error and a critic blocker against an acceptance criterion are both *an assertion, by an agent, about a subject, with an outcome*. EARL says that in one shape. The SQL schema splits them because gates are deterministic and critics are not — which is a fact about how the assertion was *produced*, not about what it *is*. The PR body already renders them into one table, which is the tell. Worth reconciling in §4.1.
+- **A rebuttal is not a string.** §5.6 records implementer/critic disagreement across `verdict`, `adjudication` and `rebuttal`. Modelled as a `prov:qualifiedAssociation` the disagreement becomes a node carrying role, plan and time — which is what makes "blockers per lens, split by whether the operator agreed" answerable at all. *(The typed `adjudication` field this originally argued for landed in rev 6; the qualified-association question remains open.)*
+
+That is the ontology earning its keep before it ships: writing down what an *attempt* is in relation to a *gate run* produced two design corrections, not two triples.
+
+#### The trap it must avoid
+
+An isomorphic re-encoding of §4.1 — one class per table, one datatype property per column, one object property per foreign key. That is a mechanical transform (it is what W3C Direct Mapping does), it passes Turtle parsing and shape validation, and it is worth nothing, because anything expressible over it was already expressible in SQL. A term earns its place by delivering **alignment** (external PROV tooling works on it), **qualification** (a relationship becomes a node that carries role and time), or **an axiom the relational schema cannot state** (disjointness, set containment across rows). `rdfs:comment` prose proves none of these — prose is the part that is cheap to fake.
+
+`SA-0001` enforces this mechanically with a dead-term test: every term in the `saffron:` namespace must be referenced by at least one committed query or one shape, or it is deleted rather than commented. That check rides the existing blocking `tests` gate; it is not a new repo gate.
+
+---
+
+## 5. The cell pipeline
+
+```
+ ┌──────────┐  ┌──────────────────────┐  ┌────────────────┐  ┌────────┐  ┌────────┐
+ │ DIAGNOSE │─▶│      IMPLEMENT       │─▶│ GATE ⇄ REPAIR  │─▶│ REVIEW │─▶│PACKAGE │
+ │ bugs only│  │ plan checkpoint then │  │ bounded loop   │  │read-only│  │  host  │
+ │ read-only│  │ write, one session   │  │ host-invoked   │  │adversarial│ │no model│
+ └──────────┘  └──────────────────────┘  └────────────────┘  └────────┘  └────────┘
+```
+
+REVIEW is a separate session because it must be adversarial — it cannot be allowed to see the implementer's rationalizations. DIAGNOSE is separate because it runs under a different scope envelope and its output needs your ratification. PLAN is *not* separate: it's a checkpoint inside the implement session, because a planner and an implementer are not adversaries and splitting them pays full context cost twice for the same file reads.
+
+### 5.1 Cell construction
+
+```
+# one-time, per repo
+docker network create --internal saffron-cells
+docker run -d --name saffron-proxy \
+  --network saffron-cells --network saffron-egress \
+  saffron/proxy            # hostname CONNECT allowlist
+
+# per task
+docker run --rm \
+  --network saffron-cells \                       # no default route
+  -e HTTPS_PROXY=http://saffron-proxy:3128 \
+  -e ANTHROPIC_API_KEY \
+  -e CLAUDE_CONFIG_DIR=/agent-state \
+  $(policy.thread_env) \                          # repo-declared, see below
+  --cpuset-cpus 4,5 --memory 4g \
+  --security-opt no-new-privileges --cap-drop ALL \
+  --mount type=volume,src=saffron-wt-TE0142,dst=/work \
+  --mount type=volume,src=saffron-st-TE0142,dst=/agent-state \
+  saffron/cell:thermal-edge                       # built from .saffron/Dockerfile
+```
+
+Every flag there is load-bearing:
+
+- **No real credentials — for any repo, ever.** No API keys, no host `.env`, no cloud profile. Tests run against recorded fixtures. A task that genuinely needs live data is a task you run attended. This one rule eliminates a whole category of overnight disaster, and it is a rule core enforces rather than a rule each repo is trusted to follow: the cell simply never receives them.
+- **Egress via an allowlisting proxy, not iptables.** Two reasons the obvious version doesn't work: `--cap-drop ALL` removes `CAP_NET_ADMIN`, so a cell entrypoint cannot install firewall rules (and granting it that capability would let the untrusted cell rewrite its own firewall); and `api.anthropic.com` is behind a CDN, so an IP allowlist resolved at startup starts failing mid-batch. A sibling proxy on both the internal and external networks doing hostname-based `CONNECT` filtering solves both — hostnames not IPs, zero capabilities in the cell.
+- **`CLAUDE_CONFIG_DIR` on a separate volume, never under `/work`.** Session state and any OAuth credential file must not live in the tree the agent has write access to, that the `scope` gate walks, that the secret scanner scans, and that gets patch-exported. Putting them together means the agent can read its own credentials and the secret scan trips on a real token.
+- **`--cpuset-cpus`, not `--cpus`, plus explicit thread caps.** `--cpus` is a CFS quota, not a core mask: Polars, pyarrow, and numpy's BLAS all size their thread pools from the *visible* core count and will each spawn ~10 threads inside a 2-CPU quota. The result is heavy throttling and wildly variable test timings — the exact flaky-gate failure mode §7 warns about, self-inflicted.
+  **Pin performance cores only.** M-series is hybrid, and `--cpuset-cpus 4,5` is an index into a list with the efficiency cores at one end. A cell landing on them runs its gates several times slower than its siblings — reintroducing the variable timings this bullet exists to remove, and reintroducing them *per cell* rather than per machine, so the repair loop's only signal degrades differently for each task and the difference reads as task difficulty. Enumerate the P-cores once at preflight and let K fall out of how many there are, rather than hard-coding three pairs.
+  Core pins the cores; the repo declares *which* env vars cap its runtime's pools (`policy.thread_env`), because core has no business knowing that Rayon reads `RAYON_NUM_THREADS` and the JVM doesn't.
+- **Worktree on a Docker volume, not a bind mount.** macOS bind mounts are slow for the many-small-files pattern of pytest collection and mypy. Clone from a bare mirror into a named volume, work there, export a patch. Costs easy host-side inspection mid-run; buys gate runs 3–10× faster, compounding across a 4-attempt repair loop. Dependency directories (`.venv`, `node_modules`, `target/`) live in the volume too — never on a mount, in any language.
+- **Services and fixtures are baked into the repo's image layer, not orchestrated by core.** A repo that needs a database says so in its own `.saffron/Dockerfile`: install it, run the migrations, seed it, all at *image build* time. Every cell then starts from the layer — near-instant, no per-task restore, no "template database" subsystem in Saffron, and a real service so that migration and schema gates mean something. A repo needing nothing gets a smaller image and starts faster. Core's only involvement is rebuilding the image when `.saffron/Dockerfile` changes.
+  > Rejected alternative: a `services:` block in `policy.yaml` that core turns into a Compose file. It reads cleaner and it drags service lifecycle, health checks, and startup ordering into the orchestrator — which is exactly the kind of knowledge §2.1 exists to keep out. A Dockerfile is already the standard way to say this, and the repo owner already knows how to write one.
+- **Git remote is a local bare mirror.** The cell physically cannot reach your GitHub remote. The host pushes, after gates pass.
+
+### 5.2 Phase 1 — DIAGNOSE (bugs only)
+
+Read-only tools, scoped to `envelope`. Output is `scope.json`: the proposed `touches` set, the identified root cause, and the evidence for it.
+
+This phase exists because of a specific trap. The obvious design — human declares `touches`, agent is confined to it — is sound for features and fatal for bugs. In the TE-0142 example, "no rows from any of three providers" most plausibly originates *outside* `ingest/nws/**`: a shared HTTP retry helper, a Polars schema change producing a silently empty frame, a continuous-aggregate refresh policy, a chunk-interval/retention interaction, a migration that changed a constraint. Several of those are in `forbidden` or outside a hand-written `touches`. The agent would correctly find the cause and then be auto-rejected for looking in the right place — and the rejection would read as "your spec needs work," which is both wrong and unactionable.
+
+So: the agent proposes scope, you ratify. `SCOPE_REVIEW` items appear at the top of the morning queue as a diff of proposed `touches` plus the one-paragraph root cause — a genuine 10-second decision, versus a rewrite-the-spec-and-lose-a-night loop. Ratified scope is recorded in the ledger, and written into the spec file **on the task's own branch, as its first commit** — so it reaches `main` through the task's normal PR and needs no exception to N1's rule that nothing unattended writes to a remote `main`. Two things fall out, both load-bearing. The ledger is authoritative until that PR merges, so enforcement starts at turn one of IMPLEMENT rather than next batch. And `spec_sha` on `main` deliberately does *not* move while the task is in flight — writing the spec back to `main` directly would invalidate (§4.1) the very task that ratification just unblocked.
+
+Cost: ~$0.30–1.00. Cheapest possible place to catch a misconceived task.
+
+### 5.3 Phase 2 — IMPLEMENT (with a plan checkpoint)
+
+Full write tools inside `/work`. `permission_mode="acceptEdits"` with an explicit `allowed_tools` list.
+
+#### Control artifacts never stay in the workspace
+
+`plan.json` and `scope.json` are written into `/work`, which is the one directory the agent has full write access to. So: **the host extracts them the moment they are produced, hashes them, and never reads them from `/work` again.** Nothing downstream trusts a file the agent could have rewritten after it was validated — and a validated plan that the implementer then quietly edits is exactly the kind of failure that leaves no trace in the diff.
+
+The general rule, which applies to anything the harness needs to be true: *if a control artifact lives where the agent can write, it is a claim, not a record.* Session state already lives outside `/work` for the same reason (§5.1). Extraction closes the same hole for everything else.
+
+#### Spec text is data, never a template
+
+**Vocabulary is injected per phase, not wholesale.** `CONTEXT.md` is the controlled vocabulary, and it is a host artifact — it lives in Saffron, not in any target repo, so an agent inside a cell cannot follow a reference to it. It is injected into the system prompt, and only the sections that phase needs: the critic gets findings, severities and lenses; the implementer gets scope, gates and statuses; neither gets the flywheel or the merge train, because nothing inside a cell can act on those. Injecting all of it into three prompts on every attempt of every task is real money for terms the agent has no use for, and a long glossary crowds out the instructions that actually change behaviour.
+
+The document is sectioned so this is a slice, not a rewrite. Sections are declared per phase in one table in `agents/prompts/`, and adding a term to the wrong section is caught by the same review that catches everything else.
+
+Prompts are assembled from versioned template files plus substituted values. **The spec body is a substituted value, never a template**, and the assembler does not scan it for placeholders or command syntax. A spec that happens to contain `{{`, backticks, or anything else the templating layer would otherwise act on must pass through untouched — and specs are markdown written by a human about code, so it will happen. Two failure modes avoided at once: a hard crash mid-batch on a spec that looked fine, and the quieter one where user-supplied text reaches an expansion step it shouldn't.
+
+#### Structured output: the extraction turn
+
+The Agent SDK has no first-class structured-output guarantee, and asking an agent to both do work and emit clean JSON in one breath produces neither reliably. So structured output is its own turn: the host **resumes the same session** with a prompt that forbids further action —
+
+> Emit a single `<output>` block as the last thing in your response. **Do not change files. Do not run commands.** Do not include text outside the block.
+
+— and validates the result host-side with Pydantic. This is the **extraction turn**, and it is the only way a structured artifact is ever produced. On a schema failure, feed the validation error back and re-emit; twice, then reject. The retry is bounded and it is about *shape*, never about content, which keeps it clearly distinct from the gate repair loop.
+
+This applies uniformly to `plan.json`, `scope.json`, and critic findings. It costs one cheap turn per artifact and removes an entire class of "the agent wrote prose around the JSON" failure.
+
+The session opens by writing `plan.json` before touching anything:
+
+```json
+{"understanding": "...", "approach": "...",
+ "files_to_change": ["src/...", "tests/..."],
+ "test_strategy": "...", "risks": ["..."], "blocking_questions": []}
+```
+
+Validated host-side with Pydantic. **Auto-rejected — no model call — if:** `files_to_change` ⊄ `touches`; it intersects `forbidden` or global protected paths; `blocking_questions` is non-empty; or no test file appears and `type` ∈ {feature, bug}. On rejection the session is killed before a single implementation token is spent. On schema-invalid output, one re-prompt with the validation error, then reject.
+
+**On hooks.** `PreToolUse` hooks run *inside the agent's own process, inside the cell.* They sit on the untrusted side of the boundary and must not be counted as a control. Their two legitimate uses:
+
+1. **Audit tap** — every `PreToolUse` / `PostToolUse` / `SubagentStop` event appended to the attempt transcript. This is what you read when a PR looks strange and you want to know why.
+2. **A path check on `Edit`/`Write`** — deny writes outside `/work` or into protected paths. Its value is *fewer wasted turns*, not safety; the real protection is that there's nothing outside `/work` worth writing to.
+
+Explicitly **not** doing: a regex denylist over Bash command strings. It's the same category error as a prompt, one level down. It fails open on `python -c`, `make`, `sh -c "$(…)"`, any Makefile target, any interpolation — and far more often it fails *closed*, because `curl` appears in fixtures, `rm -rf` on a tmpdir is legitimate, and `git push --dry-run` in a doc check is harmless. You'd spend week two loosening it until it protects nothing, and then keep counting it as protection. The controls that actually hold — no credentials, no route, mirror-only remote — hold whether the agent cooperates or not.
+
+### 5.4 Phase 3 — GATE ⇄ REPAIR
+
+The gate runner is **host-invoked, deterministic, and not an agent**. It executes a declared sequence in the cell and returns structured results. The agent never runs the gates and never reports its own gate status — it only ever *receives* gate output as input. This is the single most important structural property in the pipeline.
+
+#### The gate contract
+
+This is what makes Saffron repo-agnostic, and it is deliberately tiny. **A gate is an executable in `.saffron/gates/` that emits one JSON object on stdout.** Saffron does not know or care what it ran.
+
+```json
+{ "gate": "types",
+  "status": "pass" | "fail" | "skip" | "error",
+  "failures": [ { "file": "src/ingest.py", "line": 88,
+                  "code": "arg-type", "message": "…" } ],
+  "summary": "4 errors in 2 files" }
+```
+
+Everything downstream is built on this and nothing else:
+
+- **The repair loop is language-agnostic** because it feeds `failures[]` back to the agent as structured text. It never parses compiler output; that translation is the gate's job, and it belongs in the repo where someone knows the tool.
+- **Baseline subtraction works** because failures are comparable by **`(gate, file, code)`** — deliberately *not* including `line`. A task that inserts thirty lines near the top of a file moves every pre-existing failure below it, so a line-keyed baseline entry stops matching and an untouched failure reads as new. The repair loop would then spend attempts on pre-existing code, which is the exact thing baselines exist to prevent: the countermeasure defeating itself on nearly every diff that is not append-only. `line` is carried for display and for anchoring (§5.5); it is never part of the identity. Where one file legitimately holds two failures with the same `code`, the normalized `message` breaks the tie. **An identity that includes a coordinate the change moves is not an identity.**
+- **`skip` is a first-class status**, so a repo simply omits gates it has no analogue for. A repo with no type system declares no `types` gate; nothing in core changes.
+- **`error` is distinct from `fail`** — the gate itself broke (toolchain missing, DB down). It never counts as a task failure, it aborts the attempt and surfaces as an infrastructure problem. Conflating these is how you get an agent spending four attempts "fixing" a crashed linter.
+
+Requiring gates to translate their own tool output is the price of admission, and it is the right price: it is ~20 lines of shell per gate, written once by the person who understands that tool, and it keeps every parser out of the orchestrator.
+
+#### Gate roles
+
+`policy.yaml` declares which roles the repo implements and their blocking level. Core supplies three; the repo supplies the rest.
+
+| Role | Owner | Blocking | Notes |
+|---|---|---|---|
+| `scope` | **core** | yes | changed files ⊆ `touches` |
+| `size` | **core** | at `elevated` | diff lines ≤ type ceiling (bug 300 / feature 600 / refactor 1000) |
+| `secrets` | **core** | yes | credential scan over the diff |
+| `integrity` | **core**, repo patterns | yes | test-tampering check (below) |
+| `revert` | core logic, repo runner | yes | new tests must fail without the source hunks (below) |
+| `format` | repo | yes | |
+| `lint` | repo | yes | |
+| `types` | repo | yes, or `skip` | untyped language ⇒ omit |
+| `tests` | repo | yes | must accept a test-subset argument, for `revert` |
+| `no-network` | repo | yes | the repo knows how to intercept its own sockets |
+| `coverage` | repo | **advisory, at every tier** | see below |
+| *(repo-defined)* | repo | declared | conditional on touched paths |
+
+The last row is where a repo's real leverage lives, and it is why the contract is worth having. A repo declares its own gates against its own hard-to-fake surfaces, conditioned on paths:
+
+```yaml
+# .saffron/policy.yaml — excerpt from one repo
+gates:
+  shacl:      { blocking: true, when: "**/*.ttl" }
+  migration:  { blocking: true, when: "migrations/**" }
+  perf-smoke: { blocking: false }
+```
+
+Core sees three more entries in a list. **The best gates are always the domain-specific ones** — a migration round-trip, a schema conformance check, an invariant only this codebase can state — because they are the ones an agent cannot satisfy by writing plausible-looking code. Onboarding a repo well means asking: *what is expensive to fake here?*
+
+Four roles carry most of the weight.
+
+**`integrity` — the anti-gaming gate.** The dominant failure mode of a hard-gate self-repair loop is not the agent giving up; it is the agent *making the gate pass*. Deleting a failing test, adding `@pytest.mark.skip` or `xfail`, sprinkling `# type: ignore`, loosening `==` to `is not None`, lowering a threshold in config. So: diff test files separately from source files, and fail on any deletion of an existing test, any newly added suppression, and any edit to gate configuration, unless `touches` explicitly includes it. Without this gate, hard gates actively *train the loop toward test destruction*, because that's the cheapest path to green.
+
+The *logic* is core — "was a test removed or silenced?" is a question about a diff, and it is identical in every language. The *vocabulary* is not, so the repo declares it:
+
+```yaml
+integrity:
+  test_paths:   ["tests/**", "**/*_test.go"]
+  suppressions: ["@pytest.mark.skip", "xfail", "# type: ignore", "# noqa"]
+  gate_config:  ["pyproject.toml", ".coveragerc", ".github/workflows/**"]
+```
+
+This split is the boundary of §2.1 in miniature, and it is the pattern to reach for whenever a check feels language-specific: usually the *question* is universal and only the *tokens* are local. Pushing the tokens into `policy.yaml` keeps the check in core where it gets maintained.
+
+**`revert` — the anti-theater gate, and the best cost/value ratio in the system.** Stash the source hunks of the diff, keep the test hunks, run only the new and changed tests, and require them to **fail**. One extra test run. This is the one place core reaches into the repo's toolchain, and it is why the contract requires the `tests` gate to accept a **test-subset argument** — the single most constraining line in the whole contract, and worth the constraint: every serious test runner supports it, and without it this gate degrades to a full-suite run per attempt. It mechanically answers the question critic lens #3 would otherwise be asked to reason about: does this test actually detect the thing it claims to? It catches deleted assertions, `assert result is not None`, and tests that pass identically on `main`.
+
+This replaces mutation testing, which was the obvious choice and doesn't fit: `mutmut` reruns the suite per mutant, a Timescale-backed suite takes minutes per run, and 15 mutants is an hour inside a 2-core cell competing with two siblings inside an 8-hour window that also has to fit 10–15 tasks. It would break N3 outright.
+
+**`coverage` is advisory, deliberately — and at every risk tier.** Blocking on changed-line coverage generates exactly the behavior `integrity` exists to prevent: the cheapest way to satisfy it is a test that *executes* new lines without asserting on them. It also misfires structurally here — `except` branches for provider timeouts, `if TYPE_CHECKING`, defensive gap handling, and pure refactors where every changed line is a moved line. Report it in the PR body; block on `tests` and `revert`.
+
+> Through rev 6, §5.6 made `coverage` blocking at `risk: elevated`, contradicting the paragraph above. Resolved in favour of the paragraph, and the reasoning generalizes: **an argument against a gate does not weaken as risk rises, it inverts.** Elevated risk is where a gamed gate does the most damage, so it is the last place to switch on the one gate whose cheapest satisfaction is theater. This is the same defect Appendix B caught in `size`, living in the same sentence, and it survived one revision longer because only half of the sentence was fixed.
+
+**`revert` generalizes past code, which is a useful test of a spec.** `SA-0001` produces a vocabulary, not a program, and the gate still bites: stashing "the source hunks" means removing `saffron.ttl` and the shapes, after which the shape and query tests must fail. Tests that pass against an empty graph get caught. Any artifact with an executable claim about it — a schema, a config, an ontology — is checkable this way. The corollary is a cheap smell test when writing a spec: *if you cannot say what reverting it should break, your acceptance criteria are prose.*
+
+**The repair loop:**
+
+```
+for n in 1..max_attempts:
+    results = run_gates(cell)
+    new_failures = results.failures - baseline.failures     # §4.4
+    if not new_failures: break
+    if new_failures == prev_failures: escalate_or_abandon() # no progress
+    agent.repair(new_failures)                              # resumed session
+```
+
+- **Only new failures count.** Failures on `base_sha` are pre-existing and not this task's problem. Otherwise every task inherits your flaky tests and burns its budget on them.
+- **No-progress detection.** The same new-failure set two attempts running — same `(gate, file, code)` identity as above, for the same reason — means the agent is stuck; stop paying. Comparing raw bytes instead would make this dead code, because every repair shifts line numbers, so a permanently stuck agent would look like it were making progress forever. Optionally escalate once to a fresh session rather than a resumed one — sometimes the accumulated context *is* the problem.
+- **`EXHAUSTED` is a respectable outcome.** A task that can't pass its own gates in four tries is telling you the spec was underspecified or the codebase is hostile at that point. Both worth knowing.
+
+### 5.5 Phase 4 — REVIEW (adversarial)
+
+Fresh session, read-only tools, different system prompt, ideally a different model or effort level. It never sees the implementer's transcript. It sees the spec, the diff, the gate results, and the acceptance criteria.
+
+Its instruction is not "review this code":
+
+> Find the reason this change should not be merged. Assume it is subtly wrong. The gates passed, so the defect is not something the gates check — look for what gates cannot see: an acceptance criterion technically satisfied but not actually met; a test that passes for the wrong reason; a fix that treats a symptom; behavior change outside the stated scope; an assumption about the data that holds in fixtures but not in production. Report only findings you can point at a specific line for. **If you cannot find a real defect, say so — do not manufacture one.**
+
+That last clause is not politeness. A critic prompted to find problems will always find problems, and you'll spend your mornings adjudicating invented ones.
+
+**Findings are reconciled against the diff before they count.** The critic emits `file` and `line` per finding; the host drops any finding it cannot anchor, and logs the drop. An unanchorable finding is either a hallucination or a complaint about pre-existing code, and neither belongs in a queue that is supposed to be about *this change*. Same move as measuring doneness from git (§4.3): treat agent output as claims, reconcile against a host-computed fact set. Perhaps twenty lines of code, and it is the difference between a critic you read and a critic you learn to skim.
+
+**Anchoring admits two targets, not one, and the second exists for lens #3.** The blast-radius lens is asked *what else calls this* — so its best findings point at lines the diff never touched: an unupdated caller, a missing migration, a serializer left behind. A hunk-only rule discards most of what that lens is for, and the drop-rate diagnostic below would then read as a prompting defect when the reconciler is what is wrong. So a finding anchors if its file and line fall **inside a diff hunk**, *or* if that line **mentions an identifier the diff added, removed or renamed**. The second test is deliberately crude — tokenize the changed lines on word boundaries, intersect with the tokens on the cited line, no language knowledge anywhere — and crude is enough, because anchoring only ever had to establish that a finding points at real code with a real connection to this change. Everything else is still dropped and still counted.
+
+> The general lesson, because it will recur: **a reconciler tuned to one producer silently disables another.** The hunk rule was written with lenses #1 and #2 in mind and would have zeroed out #3 without a single error message — the only symptom being a lens that looked badly prompted.
+
+Dropped findings are recorded with `anchored = false`, not deleted — a lens that keeps producing unanchorable findings is badly prompted, and the drop rate is how it tells you.
+
+**Severity is two levels that count and one that doesn't.** `blocker` routes to REBUT. `concern` reaches the operator's judgement and is the number in a queue line. `note` appears in the PR body and is excluded from every count — because without a third level, every true-but-trivial observation inflates the concern count that drives queue sort order, and you learn to ignore the number. The critic is told the distinction explicitly; a lens that files everything as `concern` is as much a prompting defect as one that hallucinates.
+
+Two lenses in v1, a third at elevated risk — **different lenses, not repeated ones**:
+
+1. **Correctness & data semantics** — timezones, chunk boundaries, null/gap propagation, unit errors, market-hours assumptions.
+2. **Contract & schema** — public API compatibility, migration reversibility, serialization and schema conformance, anything downstream consumers depend on.
+3. *(elevated)* **Blast radius** — what else calls this, what breaks downstream, what the diff changes that the spec never asked for.
+
+**Any single blocker routes to REBUT.** No voting. A majority rule sounds rigorous and is decoration here: the lenses are disjoint by construction, so the schema critic will never independently corroborate the correctness critic's timezone finding, and "majority" with two disjoint lenses means "never." False positives are handled by the rebuttal plus queue ordering (§6), which is the better mechanism anyway.
+
+Note that lens #3 in a naive design would be "test quality" — but the `revert` gate now answers that mechanically and for free. Per §8's own triage rule, that's a bucket-1 solution displacing a bucket-3 one, which is exactly the direction things should move.
+
+### 5.6 Phase 4b — REBUT
+
+The implementer session resumes and gets the confirmed blockers. **One** attempt to either fix them or argue the finding is wrong. Both outcomes recorded. Gates re-run.
+
+**If that re-run is red, the task is `EXHAUSTED` — REBUT does not re-enter the repair loop.** The rebuttal diff and the failing gate are both kept for you to read. Reopening repair here would let a task ping-pong between two phases on one budget, and it would be paying to paper over the most informative failure in the pipeline: a fix for a confirmed blocker that breaks something else is the clearest possible signal that the change and the finding both want your attention rather than another attempt.
+
+Why allow rebuttal rather than mandate a fix: sometimes the critic is wrong, and a recorded disagreement between two agents is a strong signal about *which part of the diff you should read carefully*. Unanimity is far less informative than a documented argument.
+
+**Risk tiering.** `risk: elevated` — set explicitly in the spec, or auto-elevated when the diff touches any path in the repo's `policy.elevate_on` (a repo with migrations and an ontology might list `migrations/**`, `**/*.ttl`, `trading/**`; Saffron's own lists `saffron/gates/**` and `saffron/cell/**`) — adds the third lens, makes `size` blocking, and marks the queue entry so you read it cold rather than skim. **`coverage` does not become blocking** — not at `elevated`, not ever; see §5.4.
+
+Getting `elevate_on` right is most of what "onboarding a repo" actually means. It is the repo owner answering one question — *where in here does a plausible-looking wrong change hurt most?* — and it is worth more than any amount of gate configuration.
+
+### 5.7 Phase 5 — PACKAGE (no model involved)
+
+Host-side, deterministic:
+
+1. Rebase onto current `main` (or onto the parent branch, if stacked). Conflicts → `MERGE_FAILED`. Never ask an agent to resolve conflicts unattended; a plausible-looking wrong answer there is very expensive. (Prior art suggests a middle path — see §11, "what I'd revisit".)
+2. Push `saffron/TE-0142-forecast-gap` to the real remote **with `--force-with-lease` pinned to the SHA the packager checked out.** If the branch moved underneath — a re-queued task, a second run, you pushing a fixup by hand — the push fails loudly instead of silently clobbering. Turning a race into an error costs one flag.
+   Branch mutation is also serialized: one writer per branch, ever, held across package and merge-train operations. A `CHANGES_REQUESTED` task that gets re-queued must not race the merge train rebasing the same branch.
+3. Open the PR. Body generated from the ledger: spec, root cause (if diagnosed), acceptance-criteria checklist with the critic's assessment of each, gate table, findings with rebuttals, attempt count, cost, transcript path.
+4. Append the verdict line to the batch index.
+
+---
+
+## 6. The morning queue
+
+**The queue is an index, not a viewer.** §5.7 already pushed a real branch and opened a real PR with the full body — so GitHub's review UI, with line comments, syntax highlighting, blame, and phone access, is already yours for free. Building a second diff viewer duplicates the best-engineered component in the stack for no gain.
+
+So the deliverable is one small static page, ~50 lines of Jinja: a sorted list of verdict lines, each linking to its PR.
+
+```
+thermal-edge  TE-0139  READY   2 att $6.40  1 concern  +180/−22  → PR #211
+thermal-edge  TE-0144  SCOPE   diagnosed: shared retry helper    → ratify?
+saffron       SA-0001  READY   1 att $8.20  0 findings +410/−0   → PR #14
+thermal-edge  TE-0142  MERGE_FAILED  conflicts with #209         → PR #213
+saffron       SA-0003  EXHAUSTED  3 att $9.10  types: 4 new      → log
+toolbox       —        SKIPPED  policy.yaml: unknown gate role "typecheck"
+```
+
+Sort order, designed so you can dismiss in 10 seconds and accept in two minutes:
+
+0. Skipped repos — an entire repo produced nothing, which is the most expensive thing on the page
+1. `SCOPE_REVIEW` — one-click, and it unblocks the next night
+2. `MERGE_FAILED`, `PLAN_REJECTED` — fast to triage, unblocks the queue
+3. `risk: elevated`
+4. Everything else by findings count descending
+
+**Sort by state, not by repo.** The temptation with multiple repos is to group them, and it is worth resisting: the most urgent item across all repos should be the top line, and grouping buries a skipped repo under another repo's routine PRs. Repo is a column you scan, not a heading you navigate.
+
+Batch header: counts by terminal state, total spend, wall clock, per-repo preflight and base-suite status, and the one number that says whether this is working — **trailing accept rate**.
+
+*Trailing*, and the qualifier is not pedantry. This batch's accept rate is unknowable when the batch ends: nothing has been merged yet, because merging is what you do next. The header can only show the rate over prior batches — a rolling window of about the last twenty completed tasks, which is also roughly the smallest n at which the number means anything (§8). A header field that claimed to score the night it was printed would be reporting on work that hadn't happened.
+
+Inside the PR body, the ordering that matters is: **disagreements first.** Anywhere the critic and implementer diverged goes above the gate table, because that's where your judgment is worth the most.
+
+### 6.1 Merge train
+
+You approve in GitHub; nothing merges on your click. Approved tasks enter a serial train that rebases onto current `main`, re-runs the **full** gate suite on the merged result, and merges only if green.
+
+Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents *file* collisions but not *semantic* ones — two tasks can each pass while jointly breaking an invariant — and stacked branches (§4.2) make this more likely, not less. The train catches it at machine cost rather than at yours.
+
+---
+
+## 7. Failure modes and countermeasures
+
+| Failure | Why it happens | Countermeasure |
+|---|---|---|
+| **Gate gaming** — tests deleted/skipped, `type: ignore`, thresholds lowered | Hard gates make "green" the objective; destroying the test is cheapest | `integrity` gate; test-file diff shown separately in the PR |
+| **Coverage theater** — tests that execute but don't assert | A blocking coverage gate rewards it | `coverage` advisory only; `revert` gate blocks |
+| **Plausible-but-wrong** — passes everything, subtly incorrect | Gates only check what you thought to check | Adversarial critic, disjoint lenses; disagreements surfaced first |
+| **Human does the diagnosis** | Hand-written `touches` on a bug spec | DIAGNOSE phase + `SCOPE_REVIEW` ratification (§5.2) |
+| **Dependencies never unblock** | `MERGED` unreachable within a batch | Dependency satisfied at `READY_FOR_REVIEW`; stacked branches |
+| **Runaway spend** | Repair loops are unbounded by nature | Per-attempt / task / batch ceilings, no-progress detection, wall clock |
+| **Chasing pre-existing failures** | Base was already red | Baseline gate run; only new failures count |
+| **Batch cancelled by one flaky test** | Abort-on-red policy | Abort only on infrastructure failure; red base is a header line |
+| **Parallel PRs that conflict** | Two agents edit the same files | Conflict-set scheduling + `scope` gate; merge train for semantic overlap |
+| **Scope creep** | Agents helpfully fix adjacent things | `touches` + `forbidden` + `scope` + `size` + "Out of scope" |
+| **Credential exposure** | Agent reads `.env` or its own OAuth file | No real credentials in the cell; `CLAUDE_CONFIG_DIR` off `/work` |
+| **Egress to something live** | Agent curls your broker | `--internal` network, no default route, hostname-allowlisting proxy |
+| **Destroying your repo** | `git push --force` | Local bare mirror is the cell's only remote; host does real pushes |
+| **Flaky gates poisoning the loop** | Thread oversubscription under concurrency | `--cpuset-cpus` + explicit thread caps; K=3; baseline comparison |
+| **Disk exhaustion** | Killed cells leak volumes and worktrees | `ORPHANED` state + `saffron gc` at every batch start |
+| **Saffron breaks Saffron** | Self-hosting | Dependency-free SQLite ledger; self-tasks are `risk: elevated`, put `saffron/` in `forbidden`, and never auto-enter the train |
+| **Premature generality** | Two Python repos look like proof of language independence and are not | Keep the contract (it's cheap and it's a boundary, not an abstraction layer); refuse new abstraction until a genuinely different repo forces it (§9) |
+| **Language knowledge leaks into core** | One `if lang == …` is always easier than a contract change | The four core gates read diffs and never execute repo code; any core gate that wants to *run* something belongs on the repo side (§2.1) |
+| **One repo starves the others** | Priority ordering across a shared pool | Round-robin across repos in the scheduler; per-repo lines in the batch header |
+| **A broken `policy.yaml` costs the whole night** | Preflight treated as fatal | Per-repo preflight; a failing repo is skipped and surfaces at the top of the queue |
+| **Gate `error` mistaken for `fail`** | Crashed toolchain looks like a red test | `error` is a distinct contract status; aborts the attempt, never counts against the task |
+| **Timeout discards committed work** | Process didn't exit ⇒ attempt treated as failed | Doneness measured from git after any bound fires; never auto-clean on failure (§4.3) |
+| **Agent rewrites a validated control artifact** | `plan.json` lives in the writable worktree | Host extracts and hashes it at validation; never re-read from `/work` (§5.3) |
+| **Hallucinated critic findings** | Nothing checks the finding points at a real changed line | Findings reconciled against diff hunks; unanchorable ones dropped and counted (§5.5) |
+| **Spec text breaks or hijacks prompt assembly** | Markdown containing template syntax | Spec body is a substituted value, never scanned as a template (§5.3) |
+| **Silent branch clobber** | Two writers on one branch | `--force-with-lease` pinned to the checked-out SHA; one writer per branch (§5.7) |
+| **Money spent to learn something free** | Refusable conditions discovered inside the cell | Refusal gate before any container starts (§4.2) |
+| **Ontology is a re-encoding of the schema** | Direct mapping passes every syntactic check and delivers nothing | Dead-term test; terms must earn alignment, qualification, or an unstatable axiom (§4.6) |
+| **Derived graph drifts from the ledger** | Two stores, one truth | Projection is one-way and disposable — rebuild it from the ledger, never reconcile into it |
+| **False new failures from line drift** | Baseline keyed on a coordinate the diff moves | Failure identity is `(gate, file, code)`; `line` is display-only (§5.4) |
+| **No-progress detection never fires** | Byte comparison over a line-shifting failure set | Same identity as baseline subtraction, so the comparison is stable (§5.4) |
+| **Blast-radius findings all dropped** | Anchoring admits only lines inside a hunk | Second anchor: a line naming an identifier the diff changed (§5.5) |
+| **REBUT reds a gate and hangs** | No edge out of REBUTTING except success | A red re-run is `EXHAUSTED`, with the rebuttal kept to read (§5.6) |
+| **Volumes reclaimed a night late** | `ORPHANED` inferred from a 24h-stale timestamp | Supervisor stamps `ORPHANED` at death; gc's 24h runs from then (§4.5) |
+| **Cells with unequal cores** | `--cpuset-cpus` indexes into a hybrid core list | Pin P-cores only; K falls out of the count (§5.1) |
+| **Silent batch no-op** | Docker down, Mac asleep, auth expired | `launchd` + preflight that fails loudly into the queue |
+
+### 7.1 Cost model
+
+| Phase | Typical |
+|---|---|
+| Diagnose (bugs) | $0.30–1.00 |
+| Implement (incl. plan) | $2–6 |
+| Repair × 2 | $1–4 |
+| Review × 2 lenses | $1–2 |
+| Rebut | $0.50–1.50 |
+| **Total** | **$5–14** |
+
+Gate wall-clock is a real budget line, not just a token one: a full suite against a fixture Postgres is minutes, and the repair loop runs it up to 4× per task. Assume ~45–60 min per task at K=3, so ~25 task-slots in an 8-hour window, realistically 10–15 completed.
+
+**Set the nightly budget before you set the queue depth.** `--budget 120` with a hard stop is the difference between a useful factory and a surprising invoice. Track cost per *accepted* PR, not per task — that's the number that tells you whether the critic layer pays for itself.
+
+---
+
+## 8. The flywheel
+
+A factory producing the same quality in month six as month one is an expensive script runner. The loop:
+
+**Every rejection becomes a rule.** When you reject or request changes, write one line of *why* — appended to `.saffron/rejections.md` in the target repo, by hand. Then triage it into exactly one of three destinations:
+
+1. **A new gate** — if it's mechanically checkable. "Don't use naive datetimes" is a lint rule, not a prompt. Best destination: strictly increasing quality, zero token cost, applies forever.
+2. **A line in the repo's `CLAUDE.md`** — if it's judgment the agent could apply given context. Second best.
+3. **A critic lens amendment** — if it's a defect class gates can't catch. Most expensive; use last.
+
+Reread the file monthly, not weekly. At 6–12 PRs a week you get 2–6 rejections; week-over-week accept rate on n≈8 swings ±20 points from two tasks and means nothing. This is a markdown file and a monthly habit, not a module with a taxonomy and a dashboard.
+
+**Promote toward bucket 1.** A rule's whole life should be a migration from lens (3) to `CLAUDE.md` (2) to gate (1) — each step cheaper, more reliable, and more permanent than the last. Say "promote to bucket 1", never "up" or "down": the buckets are printed 1, 2, 3 but ordered cheapest-first, so directional words point opposite ways depending on whether you mean the page or the cost.
+
+Two heuristics that need no code:
+
+- If most rejections keep landing in bucket 3, your gates are too weak.
+- If `CLAUDE.md` exceeds ~200 lines, you're using prompts where you should be using gates. Audit it and promote what's mechanizable. (The vocabulary in `CONTEXT.md` is exempt and does not count against this — it is definitional, not behavioural. Rules of conduct belong in `CLAUDE.md`; rules of naming belong in `CONTEXT.md`.)
+
+**On mechanizing the triage.** Three of `SA-0001`'s five queries are precisely the questions this section asks you to answer by hand: which acceptance criteria failed on rejected tasks and whether any gate or lens asserted on them; blockers per critic lens split by whether you agreed; and which gates were ever the sole failure — or never fired at all. That is not a licence to build a dashboard. At 6–12 PRs a week the statistics are still noise, and rev 2 cut `learn.py` for exactly that reason; **the cut stands.** The queries are worth having as evidence you can pull up *while* rereading the markdown file, not as a replacement for reading it. And if the RATIONALE concludes they are answerable in SQL, answer them in SQL. Either way: keep the monthly habit and the hand-written line.
+
+The `revert` gate (§5.4) is what this loop looks like when it works: a whole critic lens replaced by one deterministic check.
+
+---
+
+## 9. Build order
+
+Three rules govern this section. **"Unattended" is the last property you turn on, not the first.** And: **build for the repo in front of you, but put the seam where it will be needed.**
+
+And a third, which rev 7 earned the hard way: **the document is not the cheapest defect-finder available.** Appendix E's principle — that a derived artifact written with enough precision finds defects in what it derives from — is true, and it is why this document is as good as it is. But v0 costs one evening and $0, and the two most expensive defects rev 7 fixed (line-keyed baseline subtraction, §5.4; hunk-only finding anchoring, §5.5) are both things a single replayed PR surfaces in an hour and no amount of rereading surfaces at all. Six revisions is enough. **The next artifact written against this document should be v0.**
+
+The second needs stating carefully, because repo-agnostic is exactly the kind of goal that produces a beautiful abstraction serving one caller. The resolution: the *contract* (§5.4) is written now, because a contract is cheap, it is a boundary rather than a layer, and retrofitting one after core has grown language knowledge is genuinely painful. But **no second implementation of anything gets built until a repo needs it.** Saffron ships one base image until a repo needs a second. No plugin registry, no capability negotiation, no adapter interface with a single implementer.
+
+The honest state of the claim: repos one and two are both Python, so the language seam will be designed long before it is exercised. **Repo three is the test** — and it should be chosen for being *unlike* the others rather than for being useful. A small TypeScript or Rust project, onboarded in an afternoon, tells you whether §2.1 holds. If it touches Saffron's source, the boundary failed, and you found out for the price of a weekend rather than after building a plugin system on top of the mistake.
+
+### v0 — the harness, agent-free (one evening, $0 in tokens)
+
+No agent at all. Take three already-merged PRs from a real repo, write specs for them retroactively, and build: spec parse → **gate contract runner** → PR body → index page. The gate runner is written against the JSON contract from the first line — it is the one piece where doing it generically costs nothing extra, because "shell out and parse JSON" is simpler than "shell out and parse ruff."
+
+Why this and not "one agent fixes one bug": that version proves an agent can edit a repo and run pytest, which you already know from using Claude Code interactively. It defers everything unproven — whether the gate runner's structured-result contract survives real tool output, whether the gate set catches what you care about, whether the artifact actually saves you review time — and it runs unattended with your `.env`, your real Postgres, your real `origin`, and open network, which is the highest-risk configuration in the whole design.
+
+Success criterion: replay a merged PR, and the gate table plus PR body tell you something you'd have had to read the diff to learn.
+
+### v0.5 — one cell, attended (a weekend)
+
+Docker cell with proxy egress, fixture PG image layer, volume worktree, no credentials. One implement session, plan checkpoint, gate loop, no critic. You watch it run.
+
+Success criterion: an agent fixes one real bug inside the cell, and the cell demonstrably cannot reach your DB, your keys, or your remote.
+
+### v1 — the factory (2–3 weekends)
+
+- DIAGNOSE + `SCOPE_REVIEW`.
+- Full gate set including `scope`, `integrity`, `revert`, `secrets`, `no-network`, `size`.
+- Repair loop with baseline comparison and no-progress detection.
+- Adversarial review, 2 lenses; rebuttal.
+- Scheduler: refusal gate, budget gate, ordering by priority then FIFO. **Not** conflict sets, round-robin or stacking (§4.2) — with one repo and a shallow queue all three are dead code, and `depends_on` waits with them.
+- Real PRs + index page.
+- **One repo: Saffron itself.** No `--repos` flag yet, no round-robin, but the `repos` table and the `.saffron/` layout exist from the start so that adding the second is data rather than code.
+
+Self-hosting from day one is not the bold choice it sounds like, provided the first tasks put `saffron/` in `forbidden`. **`SA-0001` (the factory ontology) is close to an ideal first task**: `forbidden` covers `saffron/`, `pyproject.toml` and `DESIGN.md`, so the factory structurally cannot modify its own orchestrator or its own design while building it; validation is fixture-based and fully offline, so it runs in a no-route cell; and a wrong answer costs a weekend of Turtle rather than a broken pipeline. Run it *through* the pipeline rather than by hand.
+
+Success criterion: a full night runs while you sleep, and you merge at least half of what it produces before the coffee's cold.
+
+### v2 — the second repo, and sharpening
+
+- **`thermal-edge` onboarded**, and the onboarding is the point: write `.saffron/policy.yaml`, `.saffron/gates/*`, `.saffron/Dockerfile`, and `elevate_on`. **Time it.** If it takes more than an afternoon, N8 is not being met and the contract is wrong somewhere — that measurement is worth more than the repo.
+- Multi-repo batching: `--repos`, `--all`, round-robin, per-repo preflight and baselines, repo column in the queue.
+- Conflict sets, `depends_on` and stacked branches — two repos and a deeper queue are the condition §4.2 defers them to, and by v2 it has arrived.
+- Repo-declared conditional gates against domain surfaces — this is where a repo's real leverage shows up (§5.4).
+- Third lens and risk tiering.
+- Merge train with re-verification.
+- Rejection log habit (§8).
+
+Success criterion: a batch spans two repos, and the diff to Saffron's source required to onboard the second one is **empty**.
+
+### v2.5 — the emitter, conditional
+
+Only if `ontology/RATIONALE.md` says the queries are worth reading: ledger → RDF projection, pyoxigraph store, materialization at batch end, SHACL validation of the projection.
+
+If it says otherwise, move `ontology/queries/` into `docs/` as worked examples and keep the vocabulary as documentation. **That is a completed project, not an abandoned one** — you will have bought a precise answer to "is the relational model costing me anything?" for the price of a weekend, which is the cheapest that answer is ever available.
+
+### v3 — the generality test, then only if v2 is earning its keep
+
+- **A deliberately dissimilar third repo** — TypeScript, Rust, Go; small, chosen for being unlike the first two. This is the only real evidence that §2.1's boundary holds. Budget an afternoon; if it takes a weekend, spend the rest of that weekend fixing the contract rather than the repo.
+- Decomposition agent: coarse goal → spec DAG (you approve specs, not code).
+- Remote runners, if throughput actually binds — it probably won't before spec-writing does.
+
+**Do not build v3 first.** The gravitational pull of this project is toward the planner, because it's the interesting part. It also has the worst cost-to-value ratio until the verification layer beneath it is trustworthy. A factory that reliably executes good specs is worth a great deal; a factory that generates mediocre specs and executes them unreliably is worth *less than nothing*, because it consumes review attention.
+
+---
+
+## 10. Repository layout
+
+```
+~/Code/saffron/
+  pyproject.toml
+  DESIGN.md              # what the system does
+  CONTEXT.md             # what the words mean — injected per phase (§5.3)
+  saffron/
+    cli.py                 # batch, run, queue, ratify, gc
+    ledger.py              # SQLite schema + DAO
+    intake.py              # spec discovery, parse, validate (Pydantic)
+    scheduler.py           # dep DAG, stacking, conflict sets, budget
+    supervisor.py          # per-task lifecycle
+    gc.py                  # orphan reconciliation
+    cell/
+      docker.py  worktree.py  database.py  proxy.py
+    phases/
+      diagnose.py  implement.py  repair.py  review.py  package.py
+    agents/
+      prompts/             # system prompts, versioned — treat as source
+      definitions.py       # AgentDefinition per critic lens
+      hooks.py             # audit tap + path check (NOT a security control)
+    gates/
+      runner.py            # host-invoked; shells out, parses the JSON contract
+      contract.py          # the gate result schema — the whole repo-agnostic surface
+      core/                # scope, size, secrets, integrity — diff-only, no repo code run
+    repos/
+      registry.py          # repo table, mirrors, enable/disable
+      policy.py            # .saffron/policy.yaml parse + validate
+      image.py             # build .saffron/Dockerfile FROM a base, cache by sha
+    report/
+      index.py  pr_body.py  templates/
+  docker/
+    cell-base.python.Dockerfile    # agent runtime + git + gate shim. Nothing else.
+    cell-base.node.Dockerfile      # added only when a repo needs it
+    proxy.Dockerfile
+  ontology/                # SA-0001 — provisional, standalone, not imported by saffron/ (§4.6)
+    saffron.ttl            # the vocabulary
+    shapes/                # SHACL; every shape has a negative fixture it rejects
+    queries/               # Q1–Q5, each with expected results + its SQL challenge
+    vendor/                # prov-o.ttl, earl.ttl — committed by hand, never fetched
+    RATIONALE.md           # ≤40 lines; the verdict on whether to build the emitter
+  tests/
+  .saffron/                # Saffron is itself a target repo — same shape as any other
+    specs/  policy.yaml  gates/  Dockerfile
+```
+
+**Note what is absent: no `languages/`, no `adapters/`, no `plugins/`.** If a directory like that ever appears, §2.1 has been abandoned. The only language-shaped artifacts in the whole tree are the base Dockerfiles, which install a runtime and nothing else.
+
+And the other half of the layout — the part that lives in every target repo, and the entirety of what onboarding means:
+
+```
+<any-repo>/
+  .saffron/
+    policy.yaml            # gate roles + blocking levels, elevate_on, protected,
+                           #   envelope defaults, integrity patterns, thread_env
+    gates/
+      lint  types  tests  no-network  coverage   # executables → gate JSON (§5.4)
+      shacl  migration                            # repo-defined, conditional
+    Dockerfile             # FROM saffron/cell-base:<runtime>; toolchain, services,
+                           #   migrations and seed data baked at build time
+    specs/                 # the queue
+  CLAUDE.md                # standing agent instructions — the learning surface (§8)
+```
+
+`agents/prompts/` is a directory of versioned files, not string literals in Python. Prompts are the most-edited artifact in a system like this; you will want to diff them, blame them, and correlate a quality regression with a prompt change. Treat them as source.
+
+---
+
+## 11. Trade-offs, stated explicitly
+
+| Decision | Chosen | Rejected | Cost of the choice |
+|---|---|---|---|
+| Repo knowledge | Entirely in the repo's `.saffron/` | Adapters/plugins in Saffron | Every repo writes ~20 lines of shell per gate; core never learns a toolchain |
+| Gate interface | Executable → one JSON object | Core parses tool output | Repos do their own translation; the orchestrator has zero parsers |
+| Services (DB, cache) | Baked into the repo's `.saffron/Dockerfile` | `services:` in policy, core runs Compose | Repo owner writes a Dockerfile; core stays out of service lifecycle |
+| Batch scope | One pool, one budget, all repos | Per-repo batches | Repos contend for the same 3 cells — but visibly, with round-robin, rather than by accident |
+| Cross-repo deps | Not supported | Coordinated merge trains | Two specs and a manual sequence; no version of the alternative is simple |
+| Runtime | Local Mac, containerized | Cloud CI | K=3 ceiling; Mac must be awake; you own the Docker plumbing |
+| Orchestration | Agent SDK + custom Python | Claude Code headless + shell | Weeks of harness code you own forever — bought back in host-side gate enforcement and structured state |
+| Task queue | Spec files in target repo | GitHub issues | You write markdown instead of clicking; no notifications |
+| Review UI | GitHub PRs + a thin index | Custom dossier viewer | Index is dumb; you're in a browser tab, not a local page |
+| Scope control | Agent proposes, human ratifies (bugs) | Human declares upfront | One extra round trip per bug spec; avoids inverting who does the diagnosis |
+| Dependencies | Satisfied at `READY_FOR_REVIEW`, stacked | At `MERGED` | A rejected parent wastes its children; avoids one-task-per-night |
+| Test quality | `revert` gate | Mutation testing | Coarser signal; fits the window, costs one test run |
+| Coverage | Advisory | Blocking | Weaker guarantee; avoids rewarding assertion-free tests |
+| Egress | Allowlisting proxy | iptables in cell | Extra container; works with `--cap-drop ALL` and CDN endpoints |
+| Isolation | Container + volume + fixture PG | Worktree only | Real build/teardown complexity; the only thing that makes "unattended" defensible |
+| State | SQLite + plain batch tree | Postgres + content-addressed store | No dedupe; recovers when everything else is broken |
+| Factory analytics | Derived one-way RDF projection, provisional (§4.6) | Authoritative graph store; or nothing at all | A vocabulary to maintain and a sync step — and it may conclude it isn't worth emitting, which counts as a result |
+| Conflicts | Prevent by scheduling | Resolve by rebase | Lower parallelism; no "two green PRs that break each other" |
+| Merge | Human, always | Auto-merge on green | You remain the throughput ceiling — correctly, at this scale |
+
+**What I'd revisit as it grows:**
+
+- **K = 3 and the single machine.** The first real ceiling, and multi-repo brings it closer — three repos with healthy queues will saturate three cells long before one repo would. Revisit when a batch consistently fails to drain, not when it merely feels slow.
+- **The gate contract's shape.** It survives contact with two Python repos trivially. The interesting questions arrive with repo three: does `failures[]` with `file`/`line`/`code` fit a compiler that reports spans rather than lines, or a test runner that reports suites rather than files? Expect one field to be wrong. Change it then, with a real second opinion in hand, rather than speculatively widening it now.
+- **Refusing agent conflict resolution.** §5.7 sends every rebase conflict to `MERGE_FAILED`. Prior art (Appendix D) runs a better-shaped version: the host attempts `git merge` itself and only invokes an agent on genuine conflict, then verifies the result deterministically (`git diff --diff-filter=U` empty, HEAD actually moved) before allowing a push — with the agent explicitly told *"do not invent new behaviour; reconciliation is not feature work; if a sensible resolution requires logic that was on neither side, flag uncertainty rather than be creative."* Their version is weakly verified because they have no gates. **Saffron's would be gate-verified**, which is a materially different risk profile — a resolved conflict runs the full suite before it reaches you. Revisit once `MERGE_FAILED` volume is annoying enough to measure; the deterministic-first / LLM-as-fallback shape is the right one, and it should stay off until the gates have earned trust.
+- **Per-repo budgets.** Deliberately not built — you have no data to tune them with. Once you have three months of cost-per-accepted-PR *by repo*, a repo that reliably costs triple is an argument for its own ceiling.
+- **`revert` vs. mutation testing.** If gate wall-clock stops being the constraint (faster fixtures, more cores), mutation sampling on `risk: elevated` diffs becomes affordable and is strictly stronger.
+- **Conflict-set scheduling.** Limiting once you have many small tasks in one hot module. The principled upgrade is function-level conflict sets, which is a lot of work; the cheap alternative is batching hot-module specs into one task.
+- **`SCOPE_REVIEW` as a human step.** If ratification becomes rubber-stamping — you approve 95% of proposed scopes without edits — auto-ratify when the proposal stays inside `envelope` and only surface the exceptions.
+- **Human-in-the-loop merge.** Keep it. But the *shape* of your review should shrink as gates absorb your rejection reasons. If in six months you're still reading full diffs line by line, the flywheel isn't turning — and that's the thing to fix, not the merge click.
+- **The `gate_results` / `findings` split.** EARL models both as one assertion shape (§4.6). If the RATIONALE confirms that isn't an accident of vocabulary, unify them in SQL too — the PR body already renders them as one table.
+- **The critic layer's ROI.** Track how many blockers it raises that you agree with. If that trends toward zero, gates have absorbed its job and you can cut a lens and its cost. That would be a success, not a regression. (This is `SA-0001`'s Q2, and it is the query most likely to justify the whole projection — it is a three-way join across findings, decisions and lens identity that is genuinely unpleasant in SQL.)
+
+---
+
+## Appendix A — What changed in rev 2, and why
+
+Rev 1 was reviewed adversarially. Nine findings survived scrutiny; all are incorporated above. The ones worth remembering as *principles*, because they'll recur:
+
+1. **A gate that requires the human to already know the answer isn't a gate, it's a tax.** (Hand-written `touches` on bug specs → DIAGNOSE.)
+2. **A dependency edge that can only be satisfied by a human action outside the batch will never be satisfied inside it.** (`MERGED` → `READY_FOR_REVIEW`.)
+3. **A walking skeleton must contain the hard part.** Rev 1's v0 deferred the gate contract, the artifact, and all isolation — and turned unattended execution on first.
+4. **Controls inside the untrusted zone are not controls.** (In-agent hooks and Bash regex denylists demoted to ergonomics.)
+5. **Two safety mechanisms that make each other dead code mean you picked one without noticing.** (Abort-on-red vs. baseline subtraction.)
+6. **A blocking metric gate teaches the cheapest way to satisfy it.** (Coverage → advisory; `revert` → blocking.)
+7. **Resource limits that the runtime doesn't actually enforce produce flakiness you'll misattribute to the model.** (`--cpus` vs. `--cpuset-cpus` + thread env vars.)
+8. **Detection without reclamation is not a countermeasure.** (Disk preflight → `saffron gc`.)
+9. **A voting rule over disjoint voters never votes.** (Majority-of-lenses → any blocker.)
+
+Rev 1 sections that survived unchanged: specs-in-target-repo, SQLite-for-recoverability, three-axis bounding, host-invoked gates, the critic's "say so if there's nothing" clause, never letting an agent resolve conflicts, and the warning against building the planner first.
+
+---
+
+## Appendix B — rev 3: the factory ontology
+
+`SA-0001` defines a PROV-O/EARL vocabulary for Saffron's own run record (§4.6). Two principles it contributes, both generalizable beyond ontologies:
+
+10. **A design artifact can succeed by concluding "don't build it."** The spec's deliverable includes a rationale that challenges every one of its queries against a SQL equivalent, and a verdict of "SQL is fine" is a pass. This is the cheapest possible form of that answer. The expensive form is an emitter you maintain for a year before noticing nobody reads it.
+11. **Modelling pays before it ships.** Writing down what an *attempt* is in relation to a *gate run* produced two schema criticisms (§4.6) that hold whether or not a triple is ever stored. The output of a modelling exercise is not only the model.
+
+**And one correction the spec forced on the design.** §5.4 listed `size` as always-blocking; §5.6 described it as *becoming* blocking at `risk: elevated`. Both couldn't be true. `SA-0001`, written against the document and reasoning about its own 600-line ceiling, tripped on the contradiction. Resolved in favour of §5.6: `size` is advisory at standard risk, blocking at `elevated`.
+
+That is worth noting for its own sake. The first real spec written against this design found a defect in it — which is the same mechanism as §5.2's plan gate, operating one level up. Specs are a test suite for the design document, and they should be read that way: a spec that is awkward to write is evidence about the design, not about the spec author.
+
+---
+
+## Appendix C — rev 4: repo-agnostic
+
+Saffron develops any repo, in any language. `thermal-edge` is demoted from *the* target to *an* example — the second repo, after Saffron itself.
+
+**What actually changed, structurally.** Only one thing, and everything else follows from it: **the gate contract** (§5.4). A gate is an executable emitting one JSON object. That single decision is what lets the repair loop, baseline subtraction, and the whole review pipeline stay language-blind, because nothing downstream ever sees tool output — it sees `failures[]`. The corollary that makes it work is that gates translate their own output, which pushes ~20 lines of shell into each repo and keeps every parser out of the orchestrator.
+
+The rest is bookkeeping: a `repos` table, per-repo preflight and baselines, round-robin scheduling, a repo column in the queue.
+
+Three principles this revision contributes:
+
+12. **A boundary is cheap; an abstraction layer is not.** The contract gets written now because retrofitting one into a core that has grown language knowledge is painful. The *second implementation* of anything waits for a repo that needs it. There is no plugin registry with one plugin.
+13. **When a check feels language-specific, separate the question from the vocabulary.** "Was a test deleted or silenced?" is universal; `@pytest.mark.skip` is not. Put the question in core and the tokens in `policy.yaml` (§5.4, `integrity`). This is the single most reusable move in the whole design.
+14. **Generality is a claim, and claims need tests.** Two Python repos prove nothing about language independence. Repo three exists to falsify §2.1, should be chosen for dissimilarity rather than usefulness, and has a pass condition stated in advance: the diff to Saffron's source is empty.
+
+**What did not change, and shouldn't:** every safety property in §5.1 is about containers and git, not about languages, so repo-agnostic costs nothing there. The critic lenses (§5.5) are stated in terms of correctness, contracts and blast radius rather than any stack — that was accidental in rev 2 and is load-bearing now. And §8's flywheel becomes *more* valuable with multiple repos, because a rejection reason promoted from `CLAUDE.md` to a gate in one repo is a gate you can copy into the next.
+
+---
+
+## Appendix D — rev 5: lessons from prior art
+
+Reviewed `mattpocock/sandcastle` — a TypeScript library for orchestrating coding agents in sandboxes, plus the author's own factory built on it (a label-driven GitHub Actions pipeline, and two earlier abandoned generations: a local daemon and a parallel planner).
+
+**The headline finding is a negative one, and it is the most useful thing here.** Their pipeline has essentially no verification. `ci.yml` is `on: push: branches: [main]` — **no `pull_request` trigger**, so agent PRs receive zero automated checks before a human merges them. Every "run the tests" instruction is prose inside a prompt, executed and self-assessed by the agent. Their own library documents the host-side gate pattern explicitly — *"`sandbox.exec()` … handy for gating an implement step on a quick verification"* — and their factory never uses it. Their reviewer is framed as a refactoring agent told to *"preserve exact functionality"*, posts `event: "COMMENT"` (never `REQUEST_CHANGES`), and then calls `gh pr ready` — it advances the PR and structurally cannot block it. There is nothing anywhere on anti-gaming, baselines, or repair loops; their iteration terminates when the agent prints `<promise>COMPLETE</promise>`, a string the agent controls.
+
+This is a serious, well-engineered project by a capable author, and it converged on: **good process hygiene, near-zero verification.** Read that as evidence about where the gravity pulls. Process is visible, satisfying, and produces a working pipeline quickly; gates are invisible until the day one catches something. Saffron's entire bet is the other way round, and this is the strongest argument yet for not letting that bet erode when the harness work gets tedious.
+
+**What they do better, adopted here.** All operational, all things you learn by running something overnight rather than by designing it:
+
+15. **Treat agent output as claims; reconcile against a host-computed fact set.** They validate the reviewer's inline comments against parsed diff hunks and drop the ones that don't land. Generalized in rev 5 to critic findings (§5.5) and to phase transitions (§4.3, doneness measured from git — `commitsAhead`, HEAD-moved, `--diff-filter=U`). This is the same principle as host-invoked gates, extended from quality to control flow.
+16. **Bound liveness on more axes than you think, and never let a bound destroy work.** Their ADR-0019 documents an agent finishing, a spawned child holding stdout open, EOF never arriving, the full idle timeout burning, and *then the committed work being discarded*. Hence rev 5's split of idle from completion, and the rule that any bound firing still evaluates the worktree (§4.3).
+17. **Refuse before you spend.** Their workflows check issue shape and existing PRs before starting an agent. Rev 5 makes this scheduler gate 0 (§4.2).
+18. **Structured output is a separate, tool-less turn** — do the work, then resume the session with a prompt that forbids acting and asks only for the block (§5.3). Bounded schema retries, never content retries.
+19. **Retry idempotent infrastructure races; fail fast on everything that builds what the agent acts on.** Their ADR-0020, on a prompt-expansion timeout under parallel load: degradation is worse than abort, because a silently-wrong prompt burns an attempt producing plausible garbage (§4.3).
+20. **Control files in the workspace are agent-visible and agent-writable.** Their worktree lock deliberately lives outside the worktree — *"visible to the agent, which could delete or commit it."* Saffron had `plan.json` inside `/work` after validation; fixed (§5.3).
+21. **`--force-with-lease` pinned to the checked-out SHA, and one writer per branch** (§5.7). Turns a silent clobber into a loud failure for the price of a flag.
+22. **Source determines processing** — their ADR-0008: inline prompts skip templating entirely, because callers pipe issue bodies containing `{{...}}` into them. Spec text is data (§5.3).
+23. **A living refusal record.** Their `.out-of-scope/` gives each refused feature a doc: what, why, which seam covers it, and the prior requests. Adopted for §1.4.
+24. **A glossary with explicit *Avoid:* lists**, read by agents before they touch code. Cheap, and it competes directly with the ontology — so it is now a second bar `RATIONALE.md` has to clear (§4.6, rule 2b).
+
+**Deliberately not adopted.** GitHub labels as the task queue and state machine — it's a good fit for a public repo with contributors and a poor one here, where specs-in-repo buy version-controlled acceptance criteria and offline batches. Their `<promise>COMPLETE</promise>` completion signal, for the obvious reason. And their reviewer framing, which is the thing Saffron most specifically rejects.
+
+---
+
+**One thing to actually go read, independent of this design:** `docs/research/permissions-systemic-fix.md` and ADRs 0005/0014 — a full taxonomy of container UID/permission failures, including that macOS assigns GID 20 to `staff` while `node:22-bookworm` already uses it for `dialout`, so `groupmod -g 20` fails and the image build dies without `-o`. Also that a single-file bind mount whose parent doesn't exist in the image causes Docker to create the parent as `root:root` and silently break auth. Those will cost a day each to rediscover, and §5.1's cell will hit both.
+
+---
+
+## Appendix E — rev 6: what the vocabulary found
+
+`CONTEXT.md` (Appendix D, item 24) was written against this document. Like `SA-0001` before it, the artifact found defects in the design it was derived from — three, all of which had survived four revisions and an adversarial review:
+
+- **Accept rate could not appear in the batch header.** §6 claimed it; the definition — merged over completed — made the impossibility plain. Nothing is merged when a batch ends, because merging is the next morning's work. Now a *trailing* rate over prior batches (§6).
+- **`runs` had no batch identity.** Rev 4 quietly turned a run into *one repo's slice* of a night and left it in the table that used to mean the night itself. A multi-repo batch was unqueryable. Now `batches` exists, budget lives on it, and `gate_runs` became `gate_results` to retire the third sense of the word (§4.1).
+- **The finding severity scale was defined nowhere in this document.** It had a `severity` column, a rule about blockers, and a queue line printing "1 concern" — and never stated the levels. Writing them down surfaced that two levels were not enough: with only `blocker` and `concern`, every true-but-trivial observation inflates the number that drives queue sort order. `note` added (§5.5).
+
+Two principles from this, and the first is the one worth keeping:
+
+25. **A vocabulary is a test suite for a design, in the same way a spec is.** Both `SA-0001` and `CONTEXT.md` found real defects purely by being written *against* the document with enough precision to force a contradiction. This is now twice in a row, which stops being luck. **Any derived artifact that has to be exact — a glossary, a spec, a schema, a prompt template — is worth writing partly for the defects it will surface.**
+26. **Directional words need a fixed referent.** "Promote down the bucket list" is ambiguous the moment the list is printed 1, 2, 3 but ordered cheapest-first. Name the destination, not the direction (§8).
+
+Also settled here: the vocabulary is injected per phase rather than wholesale (§5.3), and it is exempt from the `CLAUDE.md` line budget because it is definitional rather than behavioural (§8).
+
+---
+
+## Appendix F — rev 7: what a read-through found
+
+`SA-0001` and `CONTEXT.md` each found defects by being *written against* this document (Appendix E, principle 25). Rev 7 is the cheap version of the same move: reading the document end to end against the vocabulary, writing nothing. It found nine things, and the two most expensive of them had survived an adversarial review and five revisions.
+
+**Three contradictions the document was already carrying.**
+
+- **`coverage` was blocking and advisory at the same time.** §5.4 argued at length that a blocking coverage gate rewards assertion-free tests; §5.6 then made it blocking at `risk: elevated`. Resolved in favour of §5.4, at every tier. This is the identical defect Appendix B caught in `size` — in the same sentence — and it survived because only half the sentence was fixed.
+- **"Bounded on three axes", followed by five rows and the words "Five, not three."** `CONTEXT.md` said five. A residue of rev 5, and the kind of thing the companion document exists to catch.
+- **`revert` broke §2.1's boundary as stated.** §2.1 said any core gate needing to *execute* something belongs on the repo side; §5.4 said `revert` is "the one place core reaches into the repo's toolchain." The rule is now stated so the exception fits inside it: **core invokes declared gates, never tools.**
+
+**Six defects that would have shipped.**
+
+- **Baseline subtraction was keyed on `line`.** The worst of them. Any diff that is not append-only shifts pre-existing failures, so untouched failures would have read as new and the repair loop would have spent attempts on code the task never wrote — the §7 countermeasure defeating the exact failure it was built for. Identity is now `(gate, file, code)`. The same fix rescues no-progress detection, which was comparing bytes across a set whose line numbers move every attempt, and would therefore never have fired.
+- **Finding anchoring would have zeroed out lens #3.** Blast radius is *what else calls this*, so its findings point at unchanged lines; a hunk-only reconciler drops them all, silently, and the drop-rate diagnostic would have blamed the prompt. A second anchor admits a line that names an identifier the diff changed.
+- **REBUT had no edge out of failure.** One attempt, gates re-run, and nothing in §3.3 said what happens when the re-run is red. It is `EXHAUSTED`.
+- **`saffron gc` ran a night behind itself.** `ORPHANED` was inferred from a 24h-stale `updated_at`, but a cell killed at 06:30 is twelve hours old at the next batch start — so nothing was ever freed on the cycle that killed it. The supervisor now stamps `ORPHANED` at death and the 24h runs from there.
+- **`--cpuset-cpus` pins into a hybrid core list.** A cell landing on efficiency cores runs its gates several times slower than its siblings, reintroducing per-cell timing variance — the flaky-gate mode that bullet was written to remove. P-cores only, enumerated at preflight.
+- **`SCOPE_REVIEW` writeback had no home.** "Written back into the spec file" meant either an unattended write to a remote `main` (forbidden by N1) or a `spec_sha` move that invalidates the task ratification just unblocked (§4.1). It now rides the task's own branch as its first commit, which needs neither exception.
+
+**Two scope corrections**, both applications of rules the document already states to places it had not applied them: the scheduler's conflict sets, round-robin and stacking are deferred to v2 (§4.2, §9), because at a two-deep queue they arbitrate contention that never arrives; and §9 gains a third rule.
+
+Four principles, and the first two are the ones that generalize past this system:
+
+27. **An identity that includes a coordinate the change moves is not an identity.** Line numbers, byte offsets, array indices, row numbers — anything the diff renumbers is a display field. Key on what survives the edit.
+28. **A reconciler tuned to one producer silently disables another.** Filters fail closed and leave no error, so the symptom shows up attributed to whatever they filtered. Every drop rule needs to be checked against every producer that feeds it, not just the one it was written for.
+29. **A rule with an unstated exception has been abandoned, not weakened.** §2.1's boundary was false from the moment `revert` was added, and stayed useful only because nobody tested it. Write the exception into the rule and the rule keeps working.
+30. **Fixing half a contradiction leaves a contradiction.** `size` and `coverage` were wrong in one sentence; rev 3 fixed one word of it and the appendix recorded a win.
+
+And the method note, promoted into §9 as its third rule: **this pass cost an hour and found more than rev 6 did.** But the two defects at the top of the list — line-keyed identity, hunk-only anchoring — are things a single replayed PR surfaces immediately and no reading surfaces reliably. Rev 8 should not be a document.
