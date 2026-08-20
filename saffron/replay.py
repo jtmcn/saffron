@@ -40,7 +40,10 @@ def replay(
 
     # Keyed on the origin path, not the directory name: two checkouts both
     # called "service" would otherwise share one mirror, and the second would
-    # resolve its pull request against the first repo's history.
+    # resolve its pull request against the first repo's history. The worktrees
+    # carry it too — add_worktree deletes whatever sits at its path, so a path
+    # two repos can both claim is a live worktree deleted mid-gate as soon as
+    # anything runs concurrently.
     digest = hashlib.sha256(str(repo_dir).encode()).hexdigest()[:12]
     mirror = git_mirror.ensure_mirror(repo_dir, mirrors_dir / f"{name}-{digest}.git")
     base_sha, head_sha, _ = git_mirror.resolve_pull_request(mirror, pr_number)
@@ -57,10 +60,10 @@ def replay(
     )
 
     gates = policy.gate_executables(repo_dir)
-    baseline = _suite(mirror, base_sha, mirrors_dir / f"wt-{spec.id}-base", gates,
-                      changed_files=[], touches=spec.touches, timeout_s=timeout_s)
-    head = _suite(mirror, head_sha, mirrors_dir / f"wt-{spec.id}-head", gates,
-                  changed_files=changed, touches=spec.touches, timeout_s=timeout_s)
+    baseline = _suite(mirror, base_sha, mirrors_dir / f"wt-{digest}-{spec.id}-base",
+                      gates, changed_files=[], touches=spec.touches, timeout_s=timeout_s)
+    head = _suite(mirror, head_sha, mirrors_dir / f"wt-{digest}-{spec.id}-head",
+                  gates, changed_files=changed, touches=spec.touches, timeout_s=timeout_s)
 
     for result in baseline:
         ledger.record_gate_result(result, run_id=run_id)

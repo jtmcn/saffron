@@ -6,6 +6,7 @@ import pytest
 
 from saffron.ledger import Ledger
 from saffron.replay import replay
+from saffron.repos import mirror as git_mirror
 
 SPEC = """---
 id: SY-9001
@@ -312,3 +313,26 @@ def test_new_failures_survive_a_gate_that_errored_at_base(target, ledger, tmp_pa
 
     assert "errored at base: tests" in line.note
     assert "1 new in lint" in line.note
+
+
+def test_two_repos_do_not_share_a_worktree_path(ledger, tmp_path, monkeypatch):
+    """Both fixtures carry spec SY-9001. add_worktree deletes whatever sits at
+    its path, so a path two repos can both claim is a live worktree deleted
+    mid-gate the moment anything runs concurrently."""
+    first = make_target(tmp_path / "a" / "target")
+    second = make_target(tmp_path / "b" / "target")
+
+    seen = []
+    real = git_mirror.add_worktree
+    monkeypatch.setattr(
+        git_mirror, "add_worktree",
+        lambda mirror, sha, dest: (seen.append(dest), real(mirror, sha, dest))[1],
+    )
+
+    mirrors = tmp_path / "mirrors"
+    replay(first, 7, ledger=ledger, out_dir=tmp_path / "out", mirrors_dir=mirrors)
+    boundary = len(seen)
+    replay(second, 7, ledger=ledger, out_dir=tmp_path / "out", mirrors_dir=mirrors)
+
+    assert boundary and len(seen) > boundary
+    assert set(seen[:boundary]).isdisjoint(seen[boundary:])
