@@ -1,3 +1,5 @@
+import os
+import sys
 from pathlib import Path
 
 from saffron.gates.runner import run_gate, run_suite
@@ -61,3 +63,24 @@ def test_run_suite_preserves_declaration_order(tmp_path):
         {"types": FIXTURES / "malformed", "lint": FIXTURES / "good"}, cwd=tmp_path
     )
     assert [r.gate for r in results] == ["types", "lint"]
+
+
+def test_saffrons_own_interpreter_activation_does_not_reach_the_gate(
+    tmp_path, monkeypatch
+):
+    """The false-green of the first live run: `uv run saffron` exported
+    VIRTUAL_ENV and Saffron's .venv/bin, so gates resolved Saffron's toolchain
+    instead of the repo's and reported `pass` for tools that were absent."""
+    monkeypatch.setattr(sys, "prefix", "/fake/venv")
+    monkeypatch.setenv("VIRTUAL_ENV", "/fake/venv")
+    monkeypatch.setenv("PYTHONPATH", "/fake/lib")
+    monkeypatch.setenv("PYTHONHOME", "/fake")
+    monkeypatch.setenv("PYTHONSTARTUP", "/fake/startup.py")
+    monkeypatch.setenv("PATH", os.pathsep.join(["/fake/venv/bin", "/usr/bin", "/bin"]))
+
+    summary = run_gate("env", FIXTURES / "echoes-env", cwd=tmp_path).summary
+
+    for name in ("VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP"):
+        assert f"{name}=[]" in summary
+    assert "/fake/venv/bin" not in summary
+    assert "/usr/bin" in summary

@@ -7,13 +7,34 @@ all, and this module is what proves the contract survives real tool output.
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 from saffron.gates.contract import GateResult, parse_gate_json
 
 _STDERR_TAIL = 800
+
+# Saffron runs under `uv run`, which exports VIRTUAL_ENV and puts its own
+# .venv/bin first on PATH. A gate resolving its toolchain (`poetry env info`,
+# a bare `python`) then finds Saffron's interpreter, where the repo's tools do
+# not exist — and a gate script that swallows "command not found" reports a
+# false `pass`. Language-agnostic: core un-declares its own activation, it does
+# not know what the gate will do with the environment.
+_LEAKED = ("VIRTUAL_ENV", "PYTHONHOME", "PYTHONPATH", "PYTHONSTARTUP")
+
+
+def _gate_env() -> dict[str, str]:
+    """A gate inherits the operator's environment, never Saffron's own runtime."""
+    env = {k: v for k, v in os.environ.items() if k not in _LEAKED}
+    if sys.prefix != sys.base_prefix:  # Saffron is running in a venv
+        bin_dir = str(Path(sys.prefix) / "bin")
+        env["PATH"] = os.pathsep.join(
+            p for p in env.get("PATH", "").split(os.pathsep) if p != bin_dir
+        )
+    return env
 
 
 def run_gate(
@@ -42,6 +63,7 @@ def run_gate(
             text=True,
             timeout=timeout_s,
             check=False,
+            env=_gate_env(),
         )
     except subprocess.TimeoutExpired:
         return _error(name, f"gate timed out after {timeout_s}s", started)
