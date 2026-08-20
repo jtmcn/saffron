@@ -47,10 +47,12 @@ class Plan(BaseModel):
 
 
 def parse_output_block(text: str) -> str:
-    match = _BLOCK.search(text)
-    if not match:
+    # The last block, because that is what EXTRACTION_PROMPT asks for: a draft
+    # block followed by the real one would otherwise validate the draft (§5.3).
+    blocks = _BLOCK.findall(text)
+    if not blocks:
         raise ValueError("no <output> block in the response")
-    return match.group(1).strip()
+    return blocks[-1].strip()
 
 
 def hash_artifact(raw: str) -> str:
