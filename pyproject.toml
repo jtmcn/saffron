@@ -13,7 +13,9 @@ dependencies = [
 saffron = "saffron.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+# ruff is declared, not assumed: the `format` and `lint` gates run it inside a
+# cell, where a globally-installed host binary does not exist.
+dev = ["pytest>=8", "ruff>=0.16.3"]
 
 [build-system]
 requires = ["hatchling"]
