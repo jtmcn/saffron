@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from saffron.repos.policy import PolicyError, load_policy
@@ -92,3 +94,22 @@ def test_the_policy_sha_moves_when_the_policy_does(tmp_path):
     (repo / ".saffron" / "policy.yaml").write_text(VALID + "\n# a comment\n")
     _, after = load_policy(repo)
     assert before != after
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permission bits")
+def test_an_unreadable_policy_file_is_a_policy_error(tmp_path):
+    repo = write_repo(tmp_path)
+    policy_path = repo / ".saffron" / "policy.yaml"
+    policy_path.chmod(0o000)
+    try:
+        with pytest.raises(PolicyError, match="policy.yaml"):
+            load_policy(repo)
+    finally:
+        policy_path.chmod(0o644)
+
+
+def test_a_non_utf8_policy_file_is_a_policy_error(tmp_path):
+    repo = write_repo(tmp_path)
+    (repo / ".saffron" / "policy.yaml").write_bytes(b"gates: {}\n\xff\xfe bad bytes")
+    with pytest.raises(PolicyError):
+        load_policy(repo)

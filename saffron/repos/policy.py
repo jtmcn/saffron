@@ -60,7 +60,11 @@ def load_policy(repo_dir: Path) -> tuple[Policy, str]:
     if not path.is_file():
         raise PolicyError(f"no policy.yaml at {path}")
 
-    raw = path.read_bytes()
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise PolicyError(f"policy.yaml at {path} could not be read: {exc}") from exc
+
     try:
         fields = yaml.safe_load(raw.decode()) or {}
     except (yaml.YAMLError, UnicodeDecodeError) as exc:
