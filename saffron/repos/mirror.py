@@ -1,0 +1,134 @@
+"""The local bare mirror, and worktrees cut from it.
+
+The mirror is the only remote anything downstream ever reads (DESIGN.md §5.1).
+v0 has no cell to enforce that against — it establishes the property because it
+is free now and expensive later.
+"""
+
+from __future__ import annotations
+
+import re
+import shutil
+import subprocess
+from pathlib import Path
+
+_ADDED = re.compile(r"(\d+) insertions?\(\+\)")
+_REMOVED = re.compile(r"(\d+) deletions?\(-\)")
+
+
+class GitError(RuntimeError):
+    """A git invocation that did not do what was asked."""
+
+
+def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run a git command, wrapping a missing `git` binary as GitError too."""
+    try:
+        return subprocess.run(args, capture_output=True, text=True, check=False)
+    except OSError as exc:
+        raise GitError(f"{' '.join(args)}: {exc}") from exc
+
+
+def _git(repo: Path, *args: str, strip: bool = True) -> str:
+    completed = _run(["git", "-C", str(repo), *args])
+    if completed.returncode != 0:
+        raise GitError(f"git {' '.join(args)}: {completed.stderr.strip()}")
+    # strip=False for NUL-delimited output, where a leading or trailing space
+    # is part of a filename rather than padding.
+    return completed.stdout.strip() if strip else completed.stdout
+
+
+def ensure_mirror(origin: Path | str, mirror_path: Path) -> Path:
+    """Create the bare mirror if absent, fetch it if present."""
+    if mirror_path.is_dir():
+        _git(mirror_path, "fetch", "--prune", "origin", "+refs/*:refs/*")
+        return mirror_path
+
+    mirror_path.parent.mkdir(parents=True, exist_ok=True)
+    completed = _run(["git", "clone", "--mirror", str(origin), str(mirror_path)])
+    if completed.returncode != 0:
+        raise GitError(f"git clone --mirror: {completed.stderr.strip()}")
+    return mirror_path
+
+
+def resolve_pull_request(mirror: Path, number: int) -> tuple[str, str, str]:
+    """Find a merged pull request's base and head.
+
+    Two shapes exist in the wild, both offline (`git log` against the bare
+    mirror, no API call, no credential, no network):
+
+    - merge commit: subject "Merge pull request #N from ...". `^2` is the
+      head that was merged; the base is the *merge base* of the two parents,
+      not `^1`. `^1` is main at merge time, so where main advanced while the
+      pull request was open it drags main's own commits into the diff and
+      into the baseline. Tried first — it names base and head unambiguously,
+      where a squash subject is just a number that happens to sit at the end
+      of a string.
+    - squash commit: subject ending "(#N)". The commit itself *is* the head;
+      its sole parent is the base — which for a squash *is* the merge base.
+    """
+    # Both anchors are matched in Python rather than by git's --grep: `^` and
+    # `$` in a --grep regex match per *line* of the commit message, so a merge
+    # whose body quotes another merge's subject matches the prefix too, and
+    # "(#4)" matches a subject ending "(#42)".
+    merge_prefix = f"Merge pull request #{number} from "
+    squash_suffix = f"(#{number})"
+    entries = [
+        line.split("\x1f", 2)
+        for line in _git(mirror, "log", "--all", "--format=%H\x1f%P\x1f%s").splitlines()
+        if line
+    ]
+
+    for sha, parents, subject in entries:
+        if len(parents.split()) > 1 and subject.startswith(merge_prefix):
+            base = _git(mirror, "merge-base", f"{sha}^1", f"{sha}^2")
+            return base, _git(mirror, "rev-parse", f"{sha}^2"), subject
+
+    for sha, _, subject in entries:
+        if subject.endswith(squash_suffix):
+            return _git(mirror, "rev-parse", f"{sha}^1"), sha, subject
+
+    raise GitError(f"no merge or squash commit for pull request #{number} in {mirror}")
+
+
+def add_worktree(mirror: Path, sha: str, dest: Path) -> Path:
+    # --force covers a stale registration, not an existing directory: git dies
+    # on the path before it looks at the registry. A worktree left behind by a
+    # killed process would otherwise wedge every later add at the same path.
+    shutil.rmtree(dest, ignore_errors=True)
+    _git(mirror, "worktree", "prune")
+    _git(mirror, "worktree", "add", "--detach", "--force", str(dest), sha)
+    return dest
+
+
+def remove_worktree(mirror: Path, dest: Path) -> None:
+    _git(mirror, "worktree", "remove", "--force", str(dest))
+
+
+def changed_files(mirror: Path, base: str, head: str) -> list[str]:
+    """Changed paths, verbatim — they are matched against `touches`.
+
+    git quotes and octal-escapes any path outside plain ASCII by default, and
+    `"src/caf\303\251.py"` matches no glob a human wrote. -z also keeps a
+    newline in a path from splitting into two entries.
+    """
+    output = _git(
+        mirror, "-c", "core.quotePath=false", "diff", "--name-only", "-z",
+        f"{base}..{head}", strip=False,
+    )
+    return [path for path in output.split("\0") if path]
+
+
+def diff_stat(mirror: Path, base: str, head: str) -> tuple[int, int]:
+    """Added and removed line counts, for the queue line.
+
+    Two searches rather than one optional-group pattern: every group in the
+    combined form is optional, so it matches the empty string at position 0
+    and reports (0, 0) for every diff.
+    """
+    summary = _git(mirror, "diff", "--shortstat", f"{base}..{head}")
+    added = _ADDED.search(summary)
+    removed = _REMOVED.search(summary)
+    return (
+        int(added.group(1)) if added else 0,
+        int(removed.group(1)) if removed else 0,
+    )
