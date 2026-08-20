@@ -39,6 +39,13 @@ def test_missing_output_block_raises():
         parse_output_block("no block here")
 
 
+def test_the_last_output_block_wins():
+    """EXTRACTION_PROMPT asks for the block *last*, so a draft followed by the
+    real one would otherwise validate the draft (§5.3)."""
+    text = '<output>{"draft": true}</output>\nOn reflection:\n<output>{"a": 1}</output>'
+    assert parse_output_block(text) == '{"a": 1}'
+
+
 def test_a_valid_plan_inside_touches_is_accepted():
     plan = validate_plan(
         _plan(), touches=TOUCHES, forbidden=[], protected=[], spec_type="feature"
