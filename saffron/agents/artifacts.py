@@ -8,12 +8,13 @@ of failure that leaves no trace in the diff.
 
 from __future__ import annotations
 
-import fnmatch
 import hashlib
 import json
 import re
 
 from pydantic import BaseModel, Field, ValidationError
+
+from saffron.gates.core.scope import matches
 
 EXTRACTION_PROMPT = (
     "Emit a single <output> block as the last thing in your response. "
@@ -49,7 +50,8 @@ def hash_artifact(raw: str) -> str:
 
 
 def _matches_any(path: str, patterns: list[str]) -> bool:
-    return any(fnmatch.fnmatch(path, pattern) for pattern in patterns)
+    """Same matcher scope_gate uses — a plan that clears this must also clear the gate."""
+    return any(matches(path, pattern) for pattern in patterns)
 
 
 def validate_plan(
@@ -70,6 +72,12 @@ def validate_plan(
         raise PlanRejected(
             "plan carries a blocking question, which means the spec is "
             f"underspecified: {plan.blocking_questions[0]}"
+        )
+
+    if not touches:
+        raise PlanRejected(
+            "the spec declares no touches — a plan cannot be validated "
+            "against an empty set"
         )
 
     for path in plan.files_to_change:

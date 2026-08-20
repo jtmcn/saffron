@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import fnmatch
-
 import pytest
 
 from saffron.agents.artifacts import (
@@ -11,6 +9,7 @@ from saffron.agents.artifacts import (
     parse_output_block,
     validate_plan,
 )
+from saffron.gates.core.scope import matches
 
 TOUCHES = ["saffron/gates/**", "tests/**"]
 
@@ -130,35 +129,61 @@ def test_the_artifact_is_hashed_at_validation():
     assert hash_artifact(raw) != hash_artifact(_plan(approach="different"))
 
 
-# --- fnmatch semantics for `touches`/`forbidden`/`protected` patterns ---
+# --- shared matcher semantics for `touches`/`forbidden`/`protected` patterns ---
 #
-# These document fnmatch's actual behaviour rather than assuming it. The same
-# `touches` patterns feed the `scope` gate elsewhere, so a mismatch here would
-# let a plan pass validation and then fail the gate mechanically.
+# validate_plan uses saffron.gates.core.scope.matches — the same matcher
+# scope_gate enforces the diff with — not fnmatch. fnmatch's `*` crosses `/`
+# (see R9 fix round 1), which would let a plan pass this checkpoint and then
+# fail scope_gate mechanically on the same pattern. These tests pin the
+# shell-glob semantics `matches` actually provides, and that both callers now
+# share by construction (one import, one implementation).
 
 
 def test_double_star_matches_a_nested_file():
     """`saffron/gates/**` matches a file two directories deeper."""
-    assert fnmatch.fnmatch("saffron/gates/core/size.py", "saffron/gates/**")
+    assert matches("saffron/gates/core/size.py", "saffron/gates/**")
 
 
 def test_double_star_matches_a_direct_child():
     """`saffron/gates/**` also matches a file directly in the directory."""
-    assert fnmatch.fnmatch("saffron/gates/runner.py", "saffron/gates/**")
+    assert matches("saffron/gates/runner.py", "saffron/gates/**")
 
 
-def test_single_star_also_crosses_directory_separators():
-    """Surprising but acceptable: fnmatch's `*` is not shell-glob `*`.
+def test_single_star_does_not_cross_directory_separators():
+    """Shell-glob semantics: `*` stops at `/`, unlike fnmatch's `*`.
 
-    It compiles to regex `.*`, so unlike shell globbing (and unlike
-    pathlib.Path.match), a single `*` crosses `/` — `saffron/gates/*` matches
-    a file nested arbitrarily deep, not just a direct child. `**` therefore
-    buys nothing over `*` under fnmatch; both patterns behave identically
-    here, which is why the brief specifies `**` for readability, not because
-    fnmatch treats it specially.
+    `saffron/gates/*` matches a direct child but not a nested file — this is
+    the behaviour a developer writing `saffron/gates/*.py` in a policy file
+    actually expects (this directory only), and it's why scope.py hand-rolls
+    `matches` instead of using fnmatch.
     """
-    assert fnmatch.fnmatch("saffron/gates/core/size.py", "saffron/gates/*")
+    assert not matches("saffron/gates/core/size.py", "saffron/gates/*")
 
 
-def test_single_star_matches_a_direct_child_too():
-    assert fnmatch.fnmatch("saffron/gates/runner.py", "saffron/gates/*")
+def test_single_star_matches_a_direct_child():
+    assert matches("saffron/gates/runner.py", "saffron/gates/*")
+
+
+def test_validate_plan_and_scope_gate_agree_on_a_bare_star():
+    """The specific divergence from R9: fnmatch said True, scope.matches says False.
+
+    A plan naming a nested file under a bare-`*` touches pattern must now be
+    rejected by validate_plan exactly as scope_gate would reject the diff —
+    no more "passes the checkpoint, fails the gate mechanically".
+    """
+    assert matches("saffron/gates/core/size.py", "saffron/gates/*") is False
+    with pytest.raises(PlanRejected, match="outside touches"):
+        validate_plan(
+            _plan(files_to_change=["saffron/gates/core/size.py"]),
+            touches=["saffron/gates/*"],
+            forbidden=[],
+            protected=[],
+            spec_type="docs",
+        )
+
+
+def test_empty_touches_is_a_deliberate_rejection_not_a_mystery():
+    """scope_gate skips on empty touches; validate_plan must fail closed instead —
+    but legibly, not as a false "outside touches" on the first file."""
+    with pytest.raises(PlanRejected, match="no touches"):
+        validate_plan(_plan(), touches=[], forbidden=[], protected=[], spec_type="docs")
