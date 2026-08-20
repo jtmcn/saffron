@@ -59,14 +59,15 @@ _Avoid_ also: "the container" when you mean the whole cell, "worker", "runner".
 **Container**: The runtime primitive specifically — the object the cell runtime
 creates and destroys. Use only when that object itself is the subject.
 
-**Cell runtime**: The program that creates cells. Undecided until v0.5, and the
-open question is an *architecture* — a shared VM behind a Docker socket
-(Docker Desktop or Colima, interchangeable) versus a VM per cell
-(`apple/container`). `DESIGN.md` Appendix G. Say "the cell runtime"; the seam is
-`saffron/cell/runtime.py` and it is the only module that knows the answer.
+**Cell runtime**: The program that creates cells. `apple/container` — a VM per
+cell — chosen in rev 10 against a four-assertion spike (`DESIGN.md` Appendix G).
+Say "the cell runtime"; the seam is `saffron/cell/runtime.py` and it stays the only
+module that names the product, because a decision made by spike can be remade by
+spike.
 _Avoid_: **"Docker"** as a generic term for it — that was a product name standing
-in for an unmade decision through seven revisions. _Avoid_ also "the container
-engine", "the VM", "the hypervisor".
+in for an unmade decision through seven revisions, and naming a different product
+generically would repeat the mistake. _Avoid_ also "the container engine", "the
+VM" (a cell now *has* one, so the phrase is ambiguous), "the hypervisor".
 
 **Worktree**: The git working tree a task edits, on a volume mounted at `/work`.
 A cell contains a worktree; it is not one.

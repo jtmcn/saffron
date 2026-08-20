@@ -2,7 +2,7 @@
 
 An agentic software factory: spec files in, reviewed pull requests out, running unattended overnight on one Mac.
 
-**Status:** rev 9 — v0 built and replayed against a real repo (Appendix H). Prior: rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime (Appendix G)
+**Status:** rev 10 — the cell runtime is `apple/container`, decided by spike rather than deferred (Appendix G). Prior: rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime named (Appendix G); rev 9 v0 built and replayed (Appendix H)
 
 **Companion document:** `CONTEXT.md` — the controlled vocabulary. It is authoritative for what words mean; this document is authoritative for what the system does. Where they disagree, one of them has a bug.
 **Scope:** language- and stack-agnostic. Saffron develops *any* repo that can satisfy the gate contract (§5.4). First repo is Saffron itself; `thermal-edge` is the first external one.
@@ -58,7 +58,7 @@ The important inversion: **the product of this factory is not code, it is a revi
 - **Saffron's harness is Python. The repos it works on are any language.** These are unrelated facts and the design must not let them become related.
 - API auth must reach a container without leaking any target repo's credentials into it.
 - **The generality is aspirational until proven.** The first two repos (Saffron, `thermal-edge`) are both Python. The language seam will be *designed* long before it is *exercised* — §7's "premature generality" row exists because of this, and §9 treats the third repo as the real test.
-- **Every container runtime on macOS is a VM, and which VM is a rev-8 open question (Appendix G).** Bind-mount I/O is slow, host firewall rules don't see container traffic, and no runtime can pin a container to a physical core. Under a *shared* VM (Docker Desktop or Colima) container memory also comes out of one fixed allocation; under a *per-container* VM (`apple/container`) it does not. Several design decisions below fall out of these facts, and §5.1 marks the ones that depend on which runtime is chosen.
+- **Every container runtime on macOS is a VM, and the VM is one per cell (`apple/container`, settled in rev 10 by the spike in Appendix G).** Bind-mount I/O is slow, host firewall rules don't see container traffic, and no runtime can pin a container to a physical core. A per-cell VM means there is no single fixed memory allocation to divide by K, and it means the guest's visible core count is structural rather than declared. Several design decisions below fall out of these facts.
 
 ### 1.4 Explicit non-goals for v1
 
@@ -328,7 +328,7 @@ Round-robin matters more than it looks. Straight priority ordering lets one repo
 
 **Dependencies do not cross repos.** A cross-repo `depends_on` would require coordinated merges across two review queues, and there is no version of that which is simple. If two repos must change together, that is one spec in each and a note in both — you sequence them by running one batch, merging, then the next. Stated as a limit rather than discovered as a bug.
 
-Concurrency cap **K = 3**, and the arithmetic has to close against a memory ceiling whose *shape depends on the runtime* (rev 8, Appendix G). Under a shared-VM runtime the ceiling is the *VM allocation*, not 32GB of Mac: at `--memory 4g` per cell that's 12GB of containers in a 16GB VM, leaving the proxy and the runtime's own overhead the remainder — tight rather than comfortable. Under a VM-per-cell runtime there is no shared allocation to divide and cells draw against the whole machine, which is the one place that choice buys real headroom. Either way a repo's fixture services run *inside* the cell, so 4g is the whole budget for a database, the toolchain and the test process together. This is the first number here likely to be wrong; K is the knob, and it turns down. Do not raise K: throughput is model-latency-bound most of the time, but gate runs are not, and oversubscribing makes gate timings flaky — which poisons the repair loop's only signal. **Rev 8 removed the second ceiling this paragraph used to close against.** It was the performance-core count, and no macOS runtime can pin a cell to one (Appendix G), so K is now bounded by memory and by measured gate-time variance rather than by a core enumeration that cannot be performed.
+Concurrency cap **K = 3**, and rev 10 settles what the arithmetic closes against. With a VM per cell there is no shared allocation to divide: three cells at `--memory 4g` draw 12GB against the whole Mac rather than against a fixed VM allocation, and nothing stands between batches. CPUs divide the same way — `--cpus 1` yields 2 vCPUs per cell (the calibration in §5.1), so K=3 is 6 vCPUs against a host of 11. A repo's fixture services run *inside* the cell, so 4g is the whole budget for a database, the toolchain and the test process together. This is the first number here likely to be wrong; K is the knob, and it turns down. Do not raise K: throughput is model-latency-bound most of the time, but gate runs are not, and oversubscribing makes gate timings flaky — which poisons the repair loop's only signal. **Rev 8 removed the second ceiling this paragraph used to close against.** It was the performance-core count, and no macOS runtime can pin a cell to one (Appendix G), so K is now bounded by memory and by measured gate-time variance rather than by a core enumeration that cannot be performed.
 
 ### 4.3 Supervisor
 
@@ -451,34 +451,35 @@ REVIEW is a separate session because it must be adversarial — it cannot be all
 ### 5.1 Cell construction
 
 ```
-# one-time, per repo
-docker network create --internal saffron-cells
-docker run -d --name saffron-proxy \
+# one-time
+container network create --internal --subnet 10.88.0.0/24 saffron-cells
+container run -d --name saffron-proxy \
   --network saffron-cells --network saffron-egress \
-  saffron/proxy            # hostname CONNECT allowlist
+  saffron/proxy            # hostname CONNECT allowlist, addressed by IP
 
 # per task
-docker run --rm \
+container run --rm \
   --network saffron-cells \                       # no default route
-  -e HTTPS_PROXY=http://saffron-proxy:3128 \
+  -e HTTPS_PROXY=http://10.88.0.2:3128 \          # by IP: internal nets have no DNS
   -e ANTHROPIC_API_KEY \
   -e CLAUDE_CONFIG_DIR=/agent-state \
   $(policy.thread_env) \                          # repo-declared, see below
-  --cpuset-cpus 4,5 --memory 4g \
-  --security-opt no-new-privileges --cap-drop ALL \
-  --mount type=volume,src=saffron-wt-TE0142,dst=/work \
-  --mount type=volume,src=saffron-st-TE0142,dst=/agent-state \
+  --cpus 1 --memory 4g \                          # 1 requested, 2 delivered — see below
+  --cap-drop ALL \
+  --mount type=volume,source=saffron-wt-TE0142,target=/work \
+  --mount type=volume,source=saffron-st-TE0142,target=/agent-state \
   saffron/cell:thermal-edge                       # built from .saffron/Dockerfile
 ```
 
-The block is written in Docker's flag vocabulary because that is the notation everything else in this section is stated in; **the runtime itself is not yet chosen** — Appendix G gives the `apple/container` equivalent of each line and the two flags that have none. Every flag there is load-bearing:
+**The runtime is `apple/container`,** decided in rev 10 against the four-assertion spike rather than left to taste (Appendix G). `no-new-privileges` and seccomp have no equivalent and are deliberately not replaced: the per-cell VM is the boundary offered instead, and §2's whole claim is that the structural controls are the ones that hold. Every remaining flag is load-bearing:
 
 - **No target-repo credentials — for any repo, ever, and exactly one credential of any kind.** No host `.env`, no cloud profile, no database URL, no third-party API key. Tests run against recorded fixtures. A task that genuinely needs live data is a task you run attended. This is a rule core enforces rather than one each repo is trusted to follow: the cell simply never receives them.
   **The exception is `ANTHROPIC_API_KEY`, and it is stated here because an unstated exception is an abandoned rule (Appendix F, principle 29).** The agent cannot run without it, so the cell holds one live billing credential and the blast radius of that is spend, not data — which is why it is tolerable and why §2's boundary claim is written in terms of *target-repo* credentials. But it does mean N2's ceilings are an accounting sum over numbers the cell reports, not a limit the cell is subject to: an agent that leaks or misuses the key spends outside the supervisor's view entirely. Two mitigations, neither of which needs building before v1: use a **separate key for the factory** so it can be revoked without touching your interactive work, and set a **provider-side monthly cap on that key** — the only ceiling in the whole design that holds without the cell's cooperation. Moving custody into the proxy is the principled fix and is not available: `CONNECT` tunnels are opaque, so the proxy cannot inject a header it cannot see.
 - **Egress via an allowlisting proxy, not iptables.** Two reasons the obvious version doesn't work: `--cap-drop ALL` removes `CAP_NET_ADMIN`, so a cell entrypoint cannot install firewall rules (and granting it that capability would let the untrusted cell rewrite its own firewall); and `api.anthropic.com` is behind a CDN, so an IP allowlist resolved at startup starts failing mid-batch. A sibling proxy on both the internal and external networks doing hostname-based `CONNECT` filtering solves both — hostnames not IPs, zero capabilities in the cell.
 - **`CLAUDE_CONFIG_DIR` on a separate volume, never under `/work`.** Session state and any OAuth credential file must not live in the tree the agent has write access to, that the `scope` gate walks, that the secret scanner scans, and that gets patch-exported. Putting them together means the agent can read its own credentials and the secret scan trips on a real token.
 - **A cell must see only the CPUs it has — not a quota, plus explicit thread caps.** Docker's `--cpus` is a CFS quota, not a core mask: Polars, pyarrow, and numpy's BLAS all size their thread pools from the *visible* core count and will each spawn ~10 threads inside a 2-CPU quota. The result is heavy throttling and wildly variable test timings — the exact flaky-gate failure mode §7 warns about, self-inflicted.
-  **What survives, and what rev 8 struck out.** The requirement above is durable and it is not really about `cpuset`: **a cell must see only the CPUs it actually has.** Both candidate architectures satisfy it, by different mechanisms — under a shared-VM runtime `--cpuset-cpus` restricts the affinity mask the guest kernel reports, and under a VM-per-cell runtime the cell's VM is simply configured with that many vCPUs and `nproc` is honest without any flag at all (Appendix G). Write the requirement, not the flag.
+  **What survives, and what rev 8 struck out.** The requirement above is durable and it is not really about `cpuset`: **a cell must see only the CPUs it actually has.** The chosen runtime satisfies it structurally — the cell's VM is configured with that many vCPUs, so `nproc` is honest with no affinity flag at all. Write the requirement, not the flag.
+  **Calibrated, because the physical world needs a knob a minimal model does not see.** `apple/container` 1.2.2 allocates **one vCPU more than `--cpus` requests** — deterministically, measured at 1→2, 2→3, 4→5, 6→7 (Appendix G). That is not the failure this bullet is about: the guest count is honest about the VM it is in, which is the property thread pools need, and the VM simply gets one more vCPU than asked for. So the supervisor requests `n − 1` and asserts the result, rather than trusting either number. **An offset that is measured, deterministic and asserted is a constant; the same offset assumed is a bug that surfaces as flaky gate timings.** Re-measure it on any runtime upgrade — the spike is the thing that measures it.
   ~~**Pin performance cores only.** Enumerate the P-cores once at preflight and let K fall out of how many there are.~~ **Struck in rev 8: this is not implementable on macOS under any runtime.** `--cpuset-cpus` is interpreted by the kernel that reads it, and on macOS that kernel is always inside a VM — so the mask indexes *virtual* CPUs, and which physical core a vCPU thread lands on is macOS's decision, not one any flag exposes. A VM-per-cell runtime has no pinning flag to offer in the first place. The underlying hazard is real and unchanged — vCPU threads prefer P-cores but spill to E-cores under contention, so a cell can run its gates slower than its siblings and the difference reads as task difficulty. It is now a thing to **detect rather than prevent**: record per-gate wall clock and treat cross-cell variance at equal K as a signal about the machine, not about the task (§7).
   The runtime caps the CPUs; the repo declares *which* env vars cap its toolchain's thread pools (`policy.thread_env`), because core has no business knowing that Rayon reads `RAYON_NUM_THREADS` and the JVM doesn't.
 - **Worktree on a named volume, not a bind mount.** macOS bind mounts are slow for the many-small-files pattern of pytest collection and mypy. Clone from a bare mirror into a named volume, work there, export a patch. Costs easy host-side inspection mid-run; buys gate runs 3–10× faster, compounding across a 4-attempt repair loop. Dependency directories (`.venv`, `node_modules`, `target/`) live in the volume too — never on a mount, in any language.
@@ -802,7 +803,8 @@ Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents
 | **Repair loop pays full input price every attempt** | 5-minute cache TTL is shorter than a gate run | One-hour cache TTL set on the cell (§7.1) |
 | **A critic lens silently doesn't run** | Lenses spawned as subagents are invoked at the model's discretion | Each lens is a separate host-invoked session (§5.5) |
 | **An estimate hardens into a billing fact** | Runtime-reported cost is a local approximation | `_est` suffix on every stored figure; reconcile against real billing (§4.1) |
-| **Host services reachable from an isolated cell** | An `--internal` network still routes to the host gateway | Bind host services to `127.0.0.1`, never `0.0.0.0`; verified by a preflight probe, because N1 rests on it (Appendix G) |
+| **Host services reachable from an isolated cell** | An `--internal` network still routes to the host gateway — **confirmed by spike**, at the gateway *and* at the LAN address | Bind host services to `127.0.0.1`, never `0.0.0.0`; verified by a preflight probe, because N1 rests on it (Appendix G) |
+| **A cell gets more CPU than it was allocated** | The runtime allocates `--cpus + 1` vCPUs | Request `n − 1` and assert the result; re-measure the offset on every runtime upgrade (§5.1, Appendix G) |
 | **The cell cannot resolve its own proxy** | Internal networks have no DNS | Pin the network subnet and address the proxy by IP (Appendix G) |
 | **A runtime flag silently means something else** | Container flags are interpreted inside a VM on macOS | State the requirement, not the flag; verify each control on the runtime actually chosen (Appendix G) |
 | **A gate that never ran reports `pass`** | An absent tool and a clean repo emit identical JSON | `tool`, obtained by executing the tool; non-zero exit with empty `failures[]` is `error` (§5.4, Appendix H) |
@@ -885,7 +887,7 @@ Success criterion: replay a merged PR, and the gate table plus PR body tell you 
 
 Containerized cell with proxy egress, fixture-service image layer, volume worktree, no credentials. One implement session, plan checkpoint, gate loop, no critic. You watch it run.
 
-**This is where the cell runtime gets chosen** (Appendix G). Run the four-assertion spike first — `nproc`, egress blocked, proxy reachable by IP, host Postgres unreachable — against `apple/container`, and fall back to a shared-VM runtime if any fails (Docker Desktop first — Appendix G). It is half an hour and it settles a question seven revisions left open.
+**The cell runtime is already chosen** — the spike ran ahead of v0.5 and returned `apple/container` on all four assertions (Appendix G, `spikes/cell-runtime.sh`). It cost half an hour and settled a question eight revisions left open, which is the argument for running it early rather than at the start of the weekend it belongs to.
 
 Success criterion: an agent fixes one real bug inside the cell, and the cell demonstrably cannot reach your DB, your keys, or your remote.
 
@@ -963,10 +965,12 @@ If it says otherwise, move `ontology/queries/` into `docs/` as worked examples a
       image.py             # build .saffron/Dockerfile FROM a base, cache by sha
     report/
       index.py  pr_body.py  templates/
-  docker/
+  images/                  # not docker/ — the runtime is not the format (principle 32)
     cell-base.python.Dockerfile    # agent runtime + git + gate shim. Nothing else.
     cell-base.node.Dockerfile      # added only when a repo needs it
     proxy.Dockerfile
+  spikes/
+    cell-runtime.sh        # Appendix G's four assertions; delete once cell/runtime.py lands
   ontology/                # SA-0001 — provisional, standalone, not imported by saffron/ (§4.6)
     saffron.ttl            # the vocabulary
     shapes/                # SHACL; every shape has a negative fixture it rejects
@@ -1010,7 +1014,7 @@ And the other half of the layout — the part that lives in every target repo, a
 | Batch scope | One pool, one budget, all repos | Per-repo batches | Repos contend for the same 3 cells — but visibly, with round-robin, rather than by accident |
 | Cross-repo deps | Not supported | Coordinated merge trains | Two specs and a manual sequence; no version of the alternative is simple |
 | Runtime | Local Mac, containerized | Cloud CI | K=3 ceiling; Mac must be awake; you own the container plumbing |
-| Cell runtime | **Deferred to v0.5** — shared VM (Docker Desktop/Colima) vs VM-per-cell (`apple/container`), Appendix G | Deciding now; or treating the product choice as architectural | One spike at v0.5 and a runtime-shaped seam in `cell/`; avoids naming a product in a design that only needed a contract |
+| Cell runtime | **`apple/container`** — VM per cell, decided by spike (Appendix G) | Shared VM (Docker Desktop/Colima); or deciding by taste | No `no-new-privileges` or seccomp, a young runtime, and a measured `--cpus` offset to carry; buys a private kernel per cell and no shared memory allocation |
 | Orchestration | Agent SDK + custom Python | Claude Code headless + shell | Weeks of harness code you own forever — bought back in host-side gate enforcement and structured state |
 | Task queue | Spec files in target repo | GitHub issues | You write markdown instead of clicking; no notifications |
 | Review UI | GitHub PRs + a thin index | Custom dossier viewer | Index is dumb; you're in a browser tab, not a local page |
@@ -1218,6 +1222,10 @@ Missing `no-new-privileges` and seccomp is a real deviation, but it is the devia
 
 ### The decision, and when it gets made
 
+*(Superseded by "The decision, made" below. Kept because the spike it specifies is
+the artifact that settled this, and because a prediction is only worth something
+if it stays legible next to its result.)*
+
 Deferred to **v0.5**, which is the first version where a cell exists at all — v0 is agent-free and touches no container. This is §9's rule about second implementations applied to a runtime: the *seam* gets written now because it is cheap, and it is one file. `saffron/cell/runtime.py` is the only module that knows which runtime, and the surface it hides is small enough to write down here: create a volume, run a container with a network, env, and CPU/memory limits, exec into it, collect artifacts, destroy it. Nothing above that file changes if the answer changes.
 
 The spike that decides it is half an hour, and it is four assertions against a real cell on an internal network:
@@ -1334,3 +1342,56 @@ first — a whole gate suite reporting green while doing nothing — is not visi
 any amount of rereading, because the document was never wrong about it. It simply
 never asked. **The next artifact should be v0.5**, and the four-assertion runtime
 spike is what it starts with.
+
+### The decision, made
+
+Run ahead of v0.5, as `spikes/cell-runtime.sh`, on 2026-08-19 against
+`apple/container` **1.2.2** (not the 1.0.0 this appendix was written against; the
+frozen-API-across-1.0.x claim no longer covers what installs today). All four
+assertions hold:
+
+```
+1. the cell sees only the CPUs it has     nproc = 3 for --cpus 2, host has 11
+2. egress to an unlisted host fails       example.com unreachable
+3. the proxy is reachable, by IP          10.88.0.3:3128 reachable
+4. host services are not reachable        127.0.0.1-bound unreachable, gateway and LAN
+```
+
+**Take it.** Every flag §5.1 needs exists — `--internal`, `--subnet`, `--cpus`,
+`--memory`, `--cap-drop`, `--network`, `--mount`, `--rm` — and the two that do not
+(`no-new-privileges`, seccomp) are the deviation this appendix already argued for.
+§5.1 is rewritten in the runtime's own vocabulary and is shorter for it.
+
+Three things the run found that reading could not:
+
+- **`--cpus n` allocates n+1 vCPUs, deterministically** — 1→2, 2→3, 4→5, 6→7. The
+  count is honest about the VM the cell is in, which is the property that matters;
+  the VM just gets one more than requested. A calibration constant, not a defect,
+  and §5.1 now carries it as one.
+- **Both no-DNS predictions were right.** The proxy answers on its IP and its name
+  does not resolve on an internal network. `HTTPS_PROXY` by hostname would have
+  failed at v0.5 with a DNS error nobody would have connected to this page.
+- **The `0.0.0.0` hazard is real on two paths, not one.** A host service bound to
+  the wildcard address is reachable from inside a cell at the gateway *and* at the
+  machine's LAN address, never touching the proxy. The `127.0.0.1`-bound one is
+  unreachable from both. N1 rests on a binding choice, and the preflight probe that
+  checks it is not optional.
+
+### What the spike did to itself
+
+Its first run reported `3 passed, 2 failed` against a runtime with **no kernel
+configured**, so no container ever started. "Egress blocked" and "host unreachable"
+both passed — by absence. That is principle 34, committed inside the spike written
+to test the runtime, hours after the principle was written down in Appendix H.
+
+The fix is the one §5.4 already specifies for gates, applied to the spike: a
+liveness gate before any assertion, a probe that reports the *probe's* exit code
+rather than the runtime's, and a third outcome — `error` — that refuses to print a
+verdict at all. Which is the useful part of the story:
+
+37. **Every harness that reports on something else needs the check it imposes.**
+    The gate contract grew `tool` because a gate could report green without running;
+    the spike grew a liveness gate for exactly the same reason, and did not inherit
+    it automatically from having been written by someone who had just fixed it
+    elsewhere. A rule about verification is not self-applying. Ask, of any reporting
+    harness: *what does this print when it does nothing at all?*
