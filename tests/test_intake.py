@@ -159,3 +159,17 @@ def test_an_unreadable_spec_path_is_a_specerror(tmp_path):
             load_spec(path)
     finally:
         path.chmod(0o644)
+
+
+def test_a_non_string_frontmatter_key_is_a_specerror():
+    """`on:` is YAML 1.1 for the boolean True, and ** on a non-string key
+    raises TypeError before pydantic ever sees the mapping."""
+    with pytest.raises(SpecError, match="invalid"):
+        parse_spec("---\non: nightly\nid: TE-1\ntitle: t\ntype: bug\n---\n")
+
+
+def test_a_non_utf8_spec_file_is_a_specerror(tmp_path):
+    path = tmp_path / "TE-9002-bytes.md"
+    path.write_bytes(b"---\nid: TE-9002\ntitle: \xff\xfe\ntype: bug\n---\n")
+    with pytest.raises(SpecError, match="could not be read"):
+        load_spec(path)

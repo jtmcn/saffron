@@ -162,3 +162,20 @@ def test_a_measured_zero_is_not_rendered_as_unmeasured():
     )
     assert "| 0.0s |" in rendered
     assert "a.py:0" in rendered
+
+
+def test_a_pipe_in_a_gate_message_does_not_split_the_table_row():
+    """Gate messages carry pipes routinely — a shell echo, a ruff rule, an
+    assertion diff. Both tables are four columns, so every row has five."""
+    rendered = render_pr_body(
+        SPEC,
+        [GateResult(gate="lint", status="fail", summary="ran `grep x | wc -l`")],
+        [NewFailure("lint", Failure(file="a.py", line=1, code="E1",
+                                    message="grep -n x | cut -d: -f1"))],
+        base_sha="a" * 40, head_sha="b" * 40, added=1, removed=0,
+        transcript_path="/t",
+    )
+    rows = [line for line in rendered.splitlines() if line.startswith("|")]
+    assert rows
+    for row in rows:
+        assert row.count("|") - row.count("\\|") == 5

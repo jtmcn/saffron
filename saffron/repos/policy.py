@@ -9,9 +9,14 @@ from __future__ import annotations
 import hashlib
 import os
 from pathlib import Path
+from typing import Annotated
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+# A gate name reaches a filesystem path and then an exec, so it is constrained
+# the way Spec.id is: no separator, nothing that climbs out of .saffron/gates.
+GateName = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]+$")]
 
 
 class PolicyError(ValueError):
@@ -42,7 +47,7 @@ class IntegrityPatterns(BaseModel):
 class Policy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    gates: dict[str, GateDeclaration] = Field(default_factory=dict)
+    gates: dict[GateName, GateDeclaration] = Field(default_factory=dict)
     elevate_on: list[str] = Field(default_factory=list)
     protected: list[str] = Field(default_factory=list)
     envelope_default: list[str] = Field(default_factory=list)

@@ -74,8 +74,10 @@ def parse_spec(text: str) -> Spec:
         if key in fields:
             raise SpecError(f"spec frontmatter may not set reserved key {key!r}")
 
+    # model_validate, not Spec(**fields): a non-string frontmatter key (`1:`,
+    # or an unquoted `on:`) makes ** raise TypeError past this guard.
     try:
-        return Spec(**fields, **reserved)
+        return Spec.model_validate({**fields, **reserved})
     except ValidationError as exc:
         raise SpecError(f"spec frontmatter is invalid: {exc}") from exc
 
@@ -88,9 +90,10 @@ def load_spec(path: Path) -> tuple[Spec, str]:
     """
     try:
         raw = path.read_bytes()
-    except OSError as exc:
+        text = raw.decode()
+    except (OSError, UnicodeDecodeError) as exc:
         raise SpecError(f"spec at {path} could not be read: {exc}") from exc
-    return parse_spec(raw.decode()), hashlib.sha256(raw).hexdigest()
+    return parse_spec(text), hashlib.sha256(raw).hexdigest()
 
 
 def _acceptance_criteria(body: str) -> list[str]:

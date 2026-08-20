@@ -47,7 +47,10 @@ def git(repo, *args):
 @pytest.fixture
 def target(tmp_path):
     """A target repo with one merged pull request and real .saffron/ gates."""
-    repo = tmp_path / "target"
+    return make_target(tmp_path / "target")
+
+
+def make_target(repo: Path):
     (repo / "src").mkdir(parents=True)
     gates = repo / ".saffron" / "gates"
     gates.mkdir(parents=True)
@@ -247,3 +250,65 @@ def test_a_gate_that_errored_at_base_says_so_rather_than_blaming_the_task(
 
     assert line.state == "EXHAUSTED"
     assert "errored at base: tests" in line.note
+
+
+def test_two_repos_of_the_same_name_do_not_share_one_mirror(ledger, tmp_path):
+    """Keyed on the directory name, the second replay would resolve its pull
+    request against the first repo's history and never say so."""
+    first = make_target(tmp_path / "a" / "target")
+    second = make_target(tmp_path / "b" / "target")
+    # A commit only the second repo has, so a shared mirror is visible in the diff.
+    (second / "src" / "only_here.py").write_text("z = 3\n")
+    git(second, "add", "-A")
+    git(second, "commit", "-qm", "second repo only")
+
+    mirrors = tmp_path / "mirrors"
+    replay(first, 7, ledger=ledger, out_dir=tmp_path / "out", mirrors_dir=mirrors)
+    replay(second, 7, ledger=ledger, out_dir=tmp_path / "out", mirrors_dir=mirrors)
+
+    clones = sorted(mirrors.glob("*.git"))
+    assert len(clones) == 2
+    # Exactly one mirror carries the second repo's commit: neither fetched the
+    # other's history.
+    has_it = [c for c in clones if "only_here.py" in _ls_tree(c)]
+    assert len(has_it) == 1
+
+
+def _ls_tree(mirror):
+    return subprocess.run(
+        ["git", "-C", str(mirror), "ls-tree", "-r", "--name-only", "main"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+
+
+def test_new_failures_survive_a_gate_that_errored_at_base(target, ledger, tmp_path):
+    """One gate with no usable baseline does not erase what another gate
+    reported — the queue line is the ten-second triage surface."""
+    (target / ".saffron" / "gates" / "tests").write_text(
+        '#!/bin/sh\n'
+        'if grep -q pad_0 src/a.py; then\n'
+        '  echo \'{"gate":"tests","status":"pass","summary":"12 passed"}\'\n'
+        'else\n'
+        '  echo "ModuleNotFoundError: No module named pytest" >&2\n'
+        '  exit 1\n'
+        'fi\n'
+    )
+    (target / ".saffron" / "gates" / "lint").write_text(
+        '#!/bin/sh\n'
+        'if grep -q pad_0 src/a.py; then\n'
+        '  echo \'{"gate":"lint","status":"fail","summary":"1 error",'
+        '"failures":[{"file":"src/a.py","line":1,"code":"E999","message":"new"}]}\'\n'
+        'else\n'
+        '  echo \'{"gate":"lint","status":"pass","summary":"clean"}\'\n'
+        'fi\n'
+    )
+    for name in ("lint", "tests"):
+        (target / ".saffron" / "gates" / name).chmod(0o755)
+    git(target, "add", "-A")
+    git(target, "commit", "-qm", "one gate errors at base, another fails at head")
+
+    line = replay(target, 7, ledger=ledger, out_dir=tmp_path / "out",
+                  mirrors_dir=tmp_path / "mirrors")
+
+    assert "errored at base: tests" in line.note
+    assert "1 new in lint" in line.note

@@ -113,3 +113,13 @@ def test_a_non_utf8_policy_file_is_a_policy_error(tmp_path):
     (repo / ".saffron" / "policy.yaml").write_bytes(b"gates: {}\n\xff\xfe bad bytes")
     with pytest.raises(PolicyError):
         load_policy(repo)
+
+
+def test_a_gate_name_that_climbs_out_of_the_gates_dir_is_a_policy_error(tmp_path):
+    """The name is joined to .saffron/gates and then executed."""
+    repo = write_repo(
+        tmp_path, policy_text='gates:\n  "../../../../bin/echo": { blocking: true }\n',
+        gates=(),
+    )
+    with pytest.raises(PolicyError, match="invalid"):
+        load_policy(repo)

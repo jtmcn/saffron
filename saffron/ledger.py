@@ -14,8 +14,8 @@ from saffron.gates.contract import Failure, GateResult
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS repos (
     repo_id     INTEGER PRIMARY KEY,
-    name        TEXT NOT NULL UNIQUE,
-    origin      TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    origin      TEXT NOT NULL UNIQUE,
     mirror_path TEXT NOT NULL,
     policy_sha  TEXT,
     enabled     INTEGER NOT NULL DEFAULT 1
@@ -92,15 +92,15 @@ class Ledger:
         self._db.execute(
             """INSERT INTO repos (name, origin, mirror_path, policy_sha)
                VALUES (?, ?, ?, ?)
-               ON CONFLICT(name) DO UPDATE
-                 SET origin=excluded.origin,
+               ON CONFLICT(origin) DO UPDATE
+                 SET name=excluded.name,
                      mirror_path=excluded.mirror_path,
                      policy_sha=excluded.policy_sha""",
             (name, str(origin), str(mirror_path), policy_sha),
         )
         self._db.commit()
         row = self._db.execute(
-            "SELECT repo_id FROM repos WHERE name = ?", (name,)
+            "SELECT repo_id FROM repos WHERE origin = ?", (str(origin),)
         ).fetchone()
         return int(row["repo_id"])
 

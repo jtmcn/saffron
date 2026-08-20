@@ -6,6 +6,7 @@ which run real tasks; nothing else in the tree knows this module exists.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -37,7 +38,11 @@ def replay(
     name = repo_dir.name
     policy, policy_sha = load_policy(repo_dir)
 
-    mirror = git_mirror.ensure_mirror(repo_dir, mirrors_dir / f"{name}.git")
+    # Keyed on the origin path, not the directory name: two checkouts both
+    # called "service" would otherwise share one mirror, and the second would
+    # resolve its pull request against the first repo's history.
+    digest = hashlib.sha256(str(repo_dir).encode()).hexdigest()[:12]
+    mirror = git_mirror.ensure_mirror(repo_dir, mirrors_dir / f"{name}-{digest}.git")
     base_sha, head_sha, _ = git_mirror.resolve_pull_request(mirror, pr_number)
     changed = git_mirror.changed_files(mirror, base_sha, head_sha)
     added, removed = git_mirror.diff_stat(mirror, base_sha, head_sha)
@@ -129,16 +134,19 @@ def _note(results: list[GateResult], baseline: list[GateResult], new_failures: l
     errored = [r.gate for r in results if r.status == "error"]
     if errored:
         return f"errored: {', '.join(errored)}"
+    parts = []
     # A gate that errored at base has no usable baseline, so its head failures
     # are unattributable rather than new — and EXHAUSTED alone reads as "this
     # task broke things", the opposite diagnosis.
     base_errored = [r.gate for r in baseline if r.status == "error"]
     if base_errored:
-        return f"errored at base: {', '.join(base_errored)}"
-    if not new_failures:
-        return "no new failures"
-    gates = sorted({gate for gate, _ in new_failures})
-    return f"{len(new_failures)} new in {', '.join(gates)}"
+        parts.append(f"errored at base: {', '.join(base_errored)}")
+    if new_failures:
+        gates = sorted({gate for gate, _ in new_failures})
+        parts.append(f"{len(new_failures)} new in {', '.join(gates)}")
+    # Both, when both hold: an unusable baseline for one gate does not make the
+    # new failures another gate did report disappear from the queue line.
+    return "; ".join(parts) or "no new failures"
 
 
 def _dump(path: Path, results: list[GateResult]) -> None:

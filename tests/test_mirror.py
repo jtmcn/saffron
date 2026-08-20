@@ -283,3 +283,60 @@ def test_an_advanced_main_does_not_leak_its_own_files_into_the_diff(tmp_path, ad
     base, head, _ = resolve_pull_request(mirror, 11)
     assert changed_files(mirror, base, head) == ["src/a.py"]
     assert diff_stat(mirror, base, head) == (2, 1)
+
+
+def _plain_repo(tmp_path, name):
+    repo = tmp_path / name
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "config", "user.email", "t@example.com")
+    git(repo, "config", "user.name", "Test")
+    return repo
+
+
+def test_a_non_ascii_path_is_not_reported_git_quoted(tmp_path):
+    """git octal-escapes and quotes such a path by default, and the quoted
+    string matches no `touches` glob — the diff reads as out of scope."""
+    repo = _plain_repo(tmp_path, "uni")
+    (repo / "keep.py").write_text("x = 1\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "base")
+    (repo / "café.py").write_text("y = 2\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "head")
+
+    mirror = ensure_mirror(repo, tmp_path / "uni.git")
+    base, head = git(mirror, "rev-parse", "main^"), git(mirror, "rev-parse", "main")
+    assert changed_files(mirror, base, head) == ["café.py"]
+
+
+def test_a_leftover_worktree_directory_does_not_wedge_the_next_add(tmp_path, origin):
+    """What a SIGKILL mid-gate leaves behind: the directory and its
+    registration, both live. --force covers the second, not the first."""
+    mirror = ensure_mirror(origin, tmp_path / "m.git")
+    base, _, _ = resolve_pull_request(mirror, 42)
+    dest = add_worktree(mirror, base, tmp_path / "wt")
+
+    again = add_worktree(mirror, base, dest)
+    assert (again / "a.py").exists()
+
+
+def test_a_merge_body_quoting_another_subject_is_not_taken_for_it(tmp_path):
+    """`^` in a --grep regex anchors to each line of the message, not to the
+    subject, so a body that quotes another merge's subject matched it."""
+    repo = _plain_repo(tmp_path, "decoy")
+    (repo / "a.py").write_text("x = 1\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "base")
+    git(repo, "checkout", "-qb", "feature")
+    (repo / "b.py").write_text("y = 2\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "the change")
+    git(repo, "checkout", "-q", "main")
+    git(repo, "merge", "--no-ff", "-q", "feature", "-m",
+        "Merge pull request #9 from someone/feature\n\n"
+        "Reverts the merge of\nMerge pull request #42 from someone/other")
+
+    mirror = ensure_mirror(repo, tmp_path / "decoy.git")
+    with pytest.raises(GitError, match="no merge or squash commit"):
+        resolve_pull_request(mirror, 42)

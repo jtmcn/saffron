@@ -149,3 +149,10 @@ def test_duration_ms_round_trips(ledger, task):
     )
     (result,) = ledger.baseline_results(run_id)
     assert result.duration_ms == 1234
+
+
+def test_two_repos_of_the_same_name_are_two_rows(ledger):
+    """The directory basename is not an identity — the origin is."""
+    first = ledger.upsert_repo("service", "/a/service", "/m/a.git", policy_sha="p")
+    second = ledger.upsert_repo("service", "/b/service", "/m/b.git", policy_sha="p")
+    assert first != second

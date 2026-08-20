@@ -8,6 +8,7 @@ is free now and expensive later.
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -27,11 +28,13 @@ def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
         raise GitError(f"{' '.join(args)}: {exc}") from exc
 
 
-def _git(repo: Path, *args: str) -> str:
+def _git(repo: Path, *args: str, strip: bool = True) -> str:
     completed = _run(["git", "-C", str(repo), *args])
     if completed.returncode != 0:
         raise GitError(f"git {' '.join(args)}: {completed.stderr.strip()}")
-    return completed.stdout.strip()
+    # strip=False for NUL-delimited output, where a leading or trailing space
+    # is part of a filename rather than padding.
+    return completed.stdout.strip() if strip else completed.stdout
 
 
 def ensure_mirror(origin: Path | str, mirror_path: Path) -> Path:
@@ -63,22 +66,24 @@ def resolve_pull_request(mirror: Path, number: int) -> tuple[str, str, str]:
     - squash commit: subject ending "(#N)". The commit itself *is* the head;
       its sole parent is the base — which for a squash *is* the merge base.
     """
-    merge_pattern = f"^Merge pull request #{number} from "
-    merge = _git(
-        mirror, "log", "--merges", "--grep", merge_pattern, "-E", "--format=%H", "-n", "1", "--all"
-    )
-    if merge:
-        title = _git(mirror, "log", "--format=%s", "-n", "1", merge)
-        base = _git(mirror, "merge-base", f"{merge}^1", f"{merge}^2")
-        return base, _git(mirror, "rev-parse", f"{merge}^2"), title
-
-    # Anchored in Python, not git's --grep, so "(#4)" can't match a subject
-    # ending "(#42)" and "(#42)" can't match one ending "(#142)" — a regex
-    # with $ inside a multi-line commit message is not worth trusting for this.
+    # Both anchors are matched in Python rather than by git's --grep: `^` and
+    # `$` in a --grep regex match per *line* of the commit message, so a merge
+    # whose body quotes another merge's subject matches the prefix too, and
+    # "(#4)" matches a subject ending "(#42)".
+    merge_prefix = f"Merge pull request #{number} from "
     squash_suffix = f"(#{number})"
-    log = _git(mirror, "log", "--all", "--format=%H\x1f%s")
-    for line in log.splitlines():
-        sha, _, subject = line.partition("\x1f")
+    entries = [
+        line.split("\x1f", 2)
+        for line in _git(mirror, "log", "--all", "--format=%H\x1f%P\x1f%s").splitlines()
+        if line
+    ]
+
+    for sha, parents, subject in entries:
+        if len(parents.split()) > 1 and subject.startswith(merge_prefix):
+            base = _git(mirror, "merge-base", f"{sha}^1", f"{sha}^2")
+            return base, _git(mirror, "rev-parse", f"{sha}^2"), subject
+
+    for sha, _, subject in entries:
         if subject.endswith(squash_suffix):
             return _git(mirror, "rev-parse", f"{sha}^1"), sha, subject
 
@@ -86,6 +91,11 @@ def resolve_pull_request(mirror: Path, number: int) -> tuple[str, str, str]:
 
 
 def add_worktree(mirror: Path, sha: str, dest: Path) -> Path:
+    # --force covers a stale registration, not an existing directory: git dies
+    # on the path before it looks at the registry. A worktree left behind by a
+    # killed process would otherwise wedge every later add at the same path.
+    shutil.rmtree(dest, ignore_errors=True)
+    _git(mirror, "worktree", "prune")
     _git(mirror, "worktree", "add", "--detach", "--force", str(dest), sha)
     return dest
 
@@ -95,8 +105,17 @@ def remove_worktree(mirror: Path, dest: Path) -> None:
 
 
 def changed_files(mirror: Path, base: str, head: str) -> list[str]:
-    output = _git(mirror, "diff", "--name-only", f"{base}..{head}")
-    return output.splitlines() if output else []
+    """Changed paths, verbatim — they are matched against `touches`.
+
+    git quotes and octal-escapes any path outside plain ASCII by default, and
+    `"src/caf\303\251.py"` matches no glob a human wrote. -z also keeps a
+    newline in a path from splitting into two entries.
+    """
+    output = _git(
+        mirror, "-c", "core.quotePath=false", "diff", "--name-only", "-z",
+        f"{base}..{head}", strip=False,
+    )
+    return [path for path in output.split("\0") if path]
 
 
 def diff_stat(mirror: Path, base: str, head: str) -> tuple[int, int]:

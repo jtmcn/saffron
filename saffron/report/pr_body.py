@@ -36,6 +36,12 @@ def render_pr_body(
     return "\n".join(section for section in sections if section) + "\n"
 
 
+def _cell(value: object) -> str:
+    """One table cell. A gate message routinely carries a pipe (a shell echo, a
+    ruff rule, an assertion diff), and an unescaped one splits the row."""
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
 def _criteria(spec: Spec) -> str:
     if not spec.acceptance_criteria:
         return ""
@@ -57,7 +63,10 @@ def _new_failures(new_failures: list[NewFailure]) -> str:
             f"{failure.file}:{failure.line}" if failure.line is not None
             else failure.file
         )
-        lines.append(f"| `{gate}` | {where} | `{failure.code}` | {failure.message} |")
+        lines.append(
+            f"| `{_cell(gate)}` | {_cell(where)} | `{_cell(failure.code)}` "
+            f"| {_cell(failure.message)} |"
+        )
     lines.append("")
     return "\n".join(lines)
 
@@ -72,7 +81,8 @@ def _gate_table(results: list[GateResult]) -> str:
             else "—"
         )
         lines.append(
-            f"| `{result.gate}` | `{result.status}` | {duration} | {result.summary} |"
+            f"| `{_cell(result.gate)}` | `{result.status}` | {duration} "
+            f"| {_cell(result.summary)} |"
         )
     lines += ["", "`skip` means the repo declares no such gate. `error` means the gate "
               "itself broke and is charged to nobody.", ""]
