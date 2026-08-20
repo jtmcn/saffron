@@ -208,3 +208,26 @@ def test_both_shapes_in_one_repo_resolve_independently(tmp_path, origin):
     assert base7 == git(origin, "rev-parse", f"{squash_sha}^1")
     assert head7 == squash_sha
     assert title7 == "Add c (#7)"
+
+
+def test_a_parenthesised_number_mid_subject_does_not_match(tmp_path):
+    origin = _squash_repo(tmp_path, "sqparenmid", "fix (#42) regression")
+    mirror = ensure_mirror(origin, tmp_path / "sqparenmid.git")
+    with pytest.raises(GitError, match="#42"):
+        resolve_pull_request(mirror, 42)
+
+
+def test_a_parenthesised_number_before_trailing_text_does_not_match(tmp_path):
+    origin = _squash_repo(tmp_path, "sqparenpos", "bump to v1 (#42) then rebase")
+    mirror = ensure_mirror(origin, tmp_path / "sqparenpos.git")
+    with pytest.raises(GitError, match="#42"):
+        resolve_pull_request(mirror, 42)
+
+
+def test_other_parens_before_a_trailing_number_still_matches(tmp_path):
+    origin = _squash_repo(tmp_path, "sqparentrail", "Something (other stuff) (#42)")
+    mirror = ensure_mirror(origin, tmp_path / "sqparentrail.git")
+    base, head, title = resolve_pull_request(mirror, 42)
+    assert head == git(origin, "rev-parse", "HEAD")
+    assert base == git(origin, "rev-parse", "HEAD^1")
+    assert title == "Something (other stuff) (#42)"
