@@ -382,6 +382,8 @@ def run_one_cell(
             return True
 
         if _over_budget():
+            # Same state as four red attempts, and only the watch line above
+            # tells them apart — acceptable while v0.5 is attended (§3.3).
             ledger.set_task_state(task_id, "EXHAUSTED")
             ledger.finish_run(run_id, "COMPLETE")
             return "EXHAUSTED"

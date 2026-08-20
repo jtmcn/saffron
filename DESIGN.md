@@ -257,6 +257,9 @@ Design notes:
                        a dead seam here would have returned an earned state
   GATE_ERROR       ◀── a gate errored, or the two suites drifted: infrastructure,
                        and never charged to the task (§5.4)
+  EXHAUSTED        ◀── also from IMPLEMENTING: the host-side spend ceiling stops
+                       a task before its next turn, and the budget stop and
+                       "four attempts, still red" share the state (§4.3)
 ```
 
 Terminal states that reach you: `SCOPE_REVIEW`, `PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`, `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`. Everything else is internal. The last three are named rather than folded into a neighbour because the alternative is an abort, or an attempt that produced nothing, reading as an ordinary task outcome — principle 34 wearing a state name.
@@ -663,6 +666,7 @@ for n in 1..max_attempts:
 - **Only new failures count.** Failures on `base_sha` are pre-existing and not this task's problem. Otherwise every task inherits your flaky tests and burns its budget on them.
 - **No-progress detection.** The same new-failure set two attempts running — same identity as above, and counted the same way, for the same reason — means the agent is stuck; stop paying. Comparing raw bytes instead would make this dead code, because every repair shifts line numbers, so a permanently stuck agent would look like it were making progress forever. Counted rather than set-compared because fixing three of four colliding failures is progress and a set cannot see it. Optionally escalate once to a fresh session rather than a resumed one — sometimes the accumulated context *is* the problem.
 - **`EXHAUSTED` is a respectable outcome.** A task that can't pass its own gates in four tries is telling you the spec was underspecified or the codebase is hostile at that point. Both worth knowing.
+- **The budget stop shares it, deliberately.** A task the spend ceiling stops before its next turn is `EXHAUSTED` too, and in the ledger and the morning queue that is indistinguishable from four failed attempts — the distinction lives only on the watch line. Accepted for v0.5, which is attended: the operator is reading that line as it happens, and the `tasks` row carries the budget and the spend. It stops being acceptable when the queue is read the next morning instead of watched, so v1 splits it — the two have opposite remedies, raise the budget versus rewrite the spec.
 
 ### 5.5 Phase 4 — REVIEW (adversarial)
 
