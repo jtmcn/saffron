@@ -231,3 +231,55 @@ def test_other_parens_before_a_trailing_number_still_matches(tmp_path):
     assert head == git(origin, "rev-parse", "HEAD")
     assert base == git(origin, "rev-parse", "HEAD^1")
     assert title == "Something (other stuff) (#42)"
+
+
+@pytest.fixture
+def advanced_origin(tmp_path):
+    """A pull request merged after main moved on without it.
+
+    The common shape in a repo with more than one contributor, and the one the
+    original fixture cannot produce: `main^1` here is not where the branch was
+    cut from, so a `^1` base pulls `other/main_only.py` into the diff and puts
+    main's newer commits into the baseline tree.
+    """
+    repo = tmp_path / "advanced"
+    (repo / "src").mkdir(parents=True)
+    (repo / "other").mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "config", "user.email", "t@example.com")
+    git(repo, "config", "user.name", "Test")
+    (repo / "src" / "a.py").write_text("print('one')\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "base")
+    branch_point = git(repo, "rev-parse", "HEAD")
+
+    git(repo, "checkout", "-qb", "feature")
+    (repo / "src" / "a.py").write_text("print('two')\nprint('extra')\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "the change")
+
+    git(repo, "checkout", "-q", "main")
+    (repo / "other" / "main_only.py").write_text("print('someone else')\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "unrelated work on main")
+
+    git(repo, "merge", "--no-ff", "-q", "feature", "-m",
+        "Merge pull request #11 from someone/feature")
+    return repo, branch_point
+
+
+def test_the_base_is_where_the_branch_was_cut_not_main_at_merge_time(tmp_path, advanced_origin):
+    origin, branch_point = advanced_origin
+    mirror = ensure_mirror(origin, tmp_path / "adv.git")
+    base, head, _ = resolve_pull_request(mirror, 11)
+    assert base == branch_point
+    assert base != git(origin, "rev-parse", "main^1")
+    assert head == git(origin, "rev-parse", "main^2")
+
+
+def test_an_advanced_main_does_not_leak_its_own_files_into_the_diff(tmp_path, advanced_origin):
+    origin, _ = advanced_origin
+    mirror = ensure_mirror(origin, tmp_path / "adv.git")
+    base, head, _ = resolve_pull_request(mirror, 11)
+    assert changed_files(mirror, base, head) == ["src/a.py"]
+    assert diff_stat(mirror, base, head) == (2, 1)

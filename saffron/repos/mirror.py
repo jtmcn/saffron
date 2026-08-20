@@ -53,12 +53,15 @@ def resolve_pull_request(mirror: Path, number: int) -> tuple[str, str, str]:
     Two shapes exist in the wild, both offline (`git log` against the bare
     mirror, no API call, no credential, no network):
 
-    - merge commit: subject "Merge pull request #N from ...". `^1` is the
-      base it was merged onto, `^2` is the head that was merged. Tried
-      first — it names base and head unambiguously, where a squash subject
-      is just a number that happens to sit at the end of a string.
+    - merge commit: subject "Merge pull request #N from ...". `^2` is the
+      head that was merged; the base is the *merge base* of the two parents,
+      not `^1`. `^1` is main at merge time, so where main advanced while the
+      pull request was open it drags main's own commits into the diff and
+      into the baseline. Tried first — it names base and head unambiguously,
+      where a squash subject is just a number that happens to sit at the end
+      of a string.
     - squash commit: subject ending "(#N)". The commit itself *is* the head;
-      its sole parent is the base.
+      its sole parent is the base — which for a squash *is* the merge base.
     """
     merge_pattern = f"^Merge pull request #{number} from "
     merge = _git(
@@ -66,7 +69,8 @@ def resolve_pull_request(mirror: Path, number: int) -> tuple[str, str, str]:
     )
     if merge:
         title = _git(mirror, "log", "--format=%s", "-n", "1", merge)
-        return _git(mirror, "rev-parse", f"{merge}^1"), _git(mirror, "rev-parse", f"{merge}^2"), title
+        base = _git(mirror, "merge-base", f"{merge}^1", f"{merge}^2")
+        return base, _git(mirror, "rev-parse", f"{merge}^2"), title
 
     # Anchored in Python, not git's --grep, so "(#4)" can't match a subject
     # ending "(#42)" and "(#42)" can't match one ending "(#142)" — a regex
