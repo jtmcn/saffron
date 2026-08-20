@@ -1,0 +1,63 @@
+from pathlib import Path
+
+from saffron.gates.runner import run_gate, run_suite
+
+FIXTURES = Path(__file__).parent / "fixtures" / "gates"
+
+
+def test_a_well_behaved_gate_is_parsed(tmp_path):
+    result = run_gate("lint", FIXTURES / "good", cwd=tmp_path)
+    assert result.status == "fail"
+    assert result.failures[0].code == "E501"
+    assert result.duration_ms is not None
+
+
+def test_unparseable_stdout_is_error_not_fail(tmp_path):
+    result = run_gate("lint", FIXTURES / "malformed", cwd=tmp_path)
+    assert result.status == "error"
+    assert result.failures == []
+    assert "ModuleNotFoundError" in result.summary
+
+
+def test_a_timeout_is_error(tmp_path):
+    result = run_gate("slow", FIXTURES / "hangs", cwd=tmp_path, timeout_s=0.5)
+    assert result.status == "error"
+    assert "timed out" in result.summary
+
+
+def test_a_missing_executable_is_error(tmp_path):
+    result = run_gate("types", FIXTURES / "does-not-exist", cwd=tmp_path)
+    assert result.status == "error"
+
+
+def test_valid_json_is_believed_regardless_of_exit_code(tmp_path):
+    result = run_gate("tests", FIXTURES / "nonzero-but-valid", cwd=tmp_path)
+    assert result.status == "fail"
+    assert result.failures[0].message == "boom"
+
+
+def test_a_crash_after_valid_output_is_still_believed(tmp_path):
+    result = run_gate("types", FIXTURES / "crashes", cwd=tmp_path)
+    assert result.status == "pass"
+
+
+def test_the_subset_argument_reaches_the_gate(tmp_path):
+    result = run_gate(
+        "tests", FIXTURES / "echoes-args", cwd=tmp_path, subset=["t/a.py", "t/b.py"]
+    )
+    assert result.summary == "args: t/a.py t/b.py"
+
+
+def test_run_suite_returns_one_result_per_declared_gate(tmp_path):
+    results = run_suite(
+        {"lint": FIXTURES / "good", "types": FIXTURES / "malformed"}, cwd=tmp_path
+    )
+    assert [r.gate for r in results] == ["lint", "types"]
+    assert [r.status for r in results] == ["fail", "error"]
+
+
+def test_run_suite_preserves_declaration_order(tmp_path):
+    results = run_suite(
+        {"types": FIXTURES / "malformed", "lint": FIXTURES / "good"}, cwd=tmp_path
+    )
+    assert [r.gate for r in results] == ["types", "lint"]

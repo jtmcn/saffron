@@ -1,0 +1,4 @@
+#!/bin/sh
+echo 'Traceback (most recent call last):'
+echo '  ModuleNotFoundError: No module named ruff'
+exit 1
