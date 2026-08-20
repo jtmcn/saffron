@@ -149,6 +149,7 @@ saffron/
   ledger.py              # the five tables + DAO
   intake.py              # spec frontmatter → validated model
   repos/policy.py        # policy.yaml → validated model
+  repos/mirror.py        # bare mirror, worktrees, changed files
   gates/contract.py      # the gate result schema
   gates/runner.py        # shell out, parse, time out, error ≠ fail
   gates/core/scope.py    # changed files ⊆ touches
@@ -158,6 +159,10 @@ saffron/
 
 `replay.py` is named as scaffolding deliberately. Everything beside it survives
 into v1 untouched; it does not.
+
+§10 puts mirror handling in `repos/registry.py` and worktrees in `cell/worktree.py`.
+v0 has neither a `repos` table to register nor a cell, so both live in
+`repos/mirror.py` until they have their own reasons to exist.
 
 ## Out of scope
 
