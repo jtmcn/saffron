@@ -1,0 +1,162 @@
+"""v0 only: replay an already-merged pull request through the modelless half.
+
+v1 deletes this file. Its job is taken over by scheduler.py and supervisor.py,
+which run real tasks; nothing else in the tree knows this module exists.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from saffron.gates.baseline import subtract_baseline
+from saffron.gates.core.scope import scope_gate
+from saffron.gates.contract import GateResult
+from saffron.gates.runner import run_suite
+from saffron.intake import Spec, load_spec
+from saffron.ledger import Ledger
+from saffron.repos import mirror as git_mirror
+from saffron.repos.policy import load_policy
+from saffron.report.index import QueueLine, render_index
+from saffron.report.pr_body import render_pr_body
+
+
+def replay(
+    repo_dir: Path,
+    pr_number: int,
+    *,
+    ledger: Ledger,
+    out_dir: Path,
+    mirrors_dir: Path,
+    spec_path: Path | None = None,
+    timeout_s: float = 900,
+) -> QueueLine:
+    repo_dir = repo_dir.resolve()
+    name = repo_dir.name
+    policy, policy_sha = load_policy(repo_dir)
+
+    mirror = git_mirror.ensure_mirror(repo_dir, mirrors_dir / f"{name}.git")
+    base_sha, head_sha, _ = git_mirror.resolve_pull_request(mirror, pr_number)
+    changed = git_mirror.changed_files(mirror, base_sha, head_sha)
+    added, removed = git_mirror.diff_stat(mirror, base_sha, head_sha)
+
+    spec, spec_sha = load_spec(spec_path or _sole_spec(repo_dir))
+
+    repo_id = ledger.upsert_repo(name, str(repo_dir), str(mirror), policy_sha)
+    run_id = ledger.create_run(repo_id, base_sha)
+    task_id = ledger.create_task(
+        run_id, spec.id, spec_sha, branch=f"saffron/{spec.id}", risk=spec.risk,
+        budget_usd=spec.budget_usd,
+    )
+
+    gates = policy.gate_executables(repo_dir)
+    baseline = _suite(mirror, base_sha, mirrors_dir / f"wt-{spec.id}-base", gates,
+                      changed_files=[], touches=spec.touches, timeout_s=timeout_s)
+    head = _suite(mirror, head_sha, mirrors_dir / f"wt-{spec.id}-head", gates,
+                  changed_files=changed, touches=spec.touches, timeout_s=timeout_s)
+
+    for result in baseline:
+        ledger.record_gate_result(result, run_id=run_id)
+    for result in head:
+        ledger.record_gate_result(result, attempt_id=task_id)
+
+    new_failures = subtract_baseline(head, baseline)
+    state = "READY_FOR_REVIEW" if not new_failures else "EXHAUSTED"
+    ledger.set_task_state(task_id, state)
+    ledger.finish_run(run_id, "COMPLETE")
+
+    task_dir = out_dir / spec.id
+    task_dir.mkdir(parents=True, exist_ok=True)
+    _dump(task_dir / "base.json", baseline)
+    _dump(task_dir / "head.json", head)
+    (task_dir / "pr_body.md").write_text(
+        render_pr_body(
+            spec, head, new_failures, base_sha=base_sha, head_sha=head_sha,
+            added=added, removed=removed, transcript_path=str(task_dir),
+        )
+    )
+
+    line = QueueLine(
+        repo=name, spec_id=spec.id, state=state, attempts=1, cost_usd_est=None,
+        concerns=0, added=added, removed=removed,
+        link=f"{spec.id}/pr_body.md", risk=spec.risk,
+        note=_note(head, new_failures),
+    )
+    _write_index(out_dir, line)
+    return line
+
+
+def _suite(
+    mirror: Path,
+    sha: str,
+    worktree: Path,
+    gates: dict[str, Path],
+    *,
+    changed_files: list[str],
+    touches: list[str],
+    timeout_s: float,
+) -> list[GateResult]:
+    """Run every declared gate plus core `scope` at one sha.
+
+    `scope` is given no changed files at base — the baseline is what the repo
+    looks like before this change, and nothing has changed there.
+    """
+    git_mirror.add_worktree(mirror, sha, worktree)
+    try:
+        results = run_suite(gates, cwd=worktree, timeout_s=timeout_s)
+        results.append(scope_gate(changed_files, touches))
+        return results
+    finally:
+        git_mirror.remove_worktree(mirror, worktree)
+
+
+def _sole_spec(repo_dir: Path) -> Path:
+    specs = sorted((repo_dir / ".saffron" / "specs").glob("*.md"))
+    if len(specs) != 1:
+        raise ValueError(
+            f"{len(specs)} specs in {repo_dir}/.saffron/specs — name one with --spec"
+        )
+    return specs[0]
+
+
+def _note(results: list[GateResult], new_failures: list) -> str:
+    errored = [r.gate for r in results if r.status == "error"]
+    if errored:
+        return f"errored: {', '.join(errored)}"
+    if not new_failures:
+        return "no new failures"
+    gates = sorted({gate for gate, _ in new_failures})
+    return f"{len(new_failures)} new in {', '.join(gates)}"
+
+
+def _dump(path: Path, results: list[GateResult]) -> None:
+    path.write_text(json.dumps([r.model_dump() for r in results], indent=2))
+
+
+def _write_index(out_dir: Path, line: QueueLine) -> None:
+    """Rewrite the index from every pr_body on disk, so replays accumulate."""
+    index_lines = _existing_lines(out_dir, exclude=line.spec_id) + [line]
+    (out_dir / "index.html").write_text(
+        render_index(
+            index_lines,
+            header={
+                "tasks": str(len(index_lines)),
+                "spend": "—",
+                "trailing accept rate": "—",
+            },
+        )
+    )
+    (out_dir / "lines.json").write_text(
+        json.dumps([vars(item) for item in index_lines], indent=2)
+    )
+
+
+def _existing_lines(out_dir: Path, exclude: str) -> list[QueueLine]:
+    path = out_dir / "lines.json"
+    if not path.is_file():
+        return []
+    return [
+        QueueLine(**item)
+        for item in json.loads(path.read_text())
+        if item["spec_id"] != exclude
+    ]
