@@ -1,0 +1,198 @@
+"""One cell, start to finish (DESIGN.md §5.1–§5.4).
+
+v0.5 only: no scheduler, no budget pool, no PR. The operator watches this run.
+`ponytail:` this is v0.5's supervisor. v1 replaces it with supervisor.py plus
+scheduler.py, and this file goes the way replay.py went.
+"""
+
+from __future__ import annotations
+
+import json
+from collections import Counter
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from saffron.gates.baseline import NewFailure
+from saffron.gates.contract import GateResult, identity
+
+if TYPE_CHECKING:
+    from saffron.ledger import Ledger
+
+# Where this file lives inside the Saffron tree, used to locate CONTEXT.md and
+# the prompt templates — Saffron's own files, never the target repo's (§5.3).
+_SAFFRON_ROOT = Path(__file__).resolve().parents[2]
+_SAFFRON_PKG = Path(__file__).resolve().parents[1]
+
+
+@dataclass
+class CellSpec:
+    spec_id: str
+    branch: str
+    base_sha: str
+    touches: list[str]
+    spec_type: str
+    body: str
+    forbidden: list[str] = field(default_factory=list)
+    budget_usd: float = 12.0
+    max_attempts: int = 4
+    max_turns: int = 60
+
+
+def aborted_gates(results: Sequence[GateResult]) -> list[str]:
+    """Gates that errored. The gate itself broke — the attempt aborts and
+    nothing here is charged to the task (§5.4)."""
+    return [r.gate for r in results if r.status == "error"]
+
+
+def _counted(failures: Sequence[NewFailure]) -> Counter:
+    return Counter(identity(f.gate, f.failure) for f in failures)
+
+
+def repair_decision(
+    *,
+    attempt: int,
+    max_attempts: int,
+    new: Sequence[NewFailure],
+    previous: Sequence[NewFailure],
+) -> str:
+    """What the loop does next: green | no-progress | exhausted | repair."""
+    if not new:
+        return "green"
+    if previous and _counted(new) == _counted(previous):
+        # The same new-failure set two attempts running, on the same counted
+        # identity as the subtraction. Stop paying (§5.4).
+        return "no-progress"
+    if attempt >= max_attempts:
+        return "exhausted"
+    return "repair"
+
+
+def run_one_cell(
+    spec: CellSpec,
+    *,
+    repo: Path,
+    mirror: Path,
+    ledger: Ledger,
+    out_dir: Path,
+    watch: Callable[[str], None] = print,
+) -> str:
+    """Create a cell, run the baseline suite, and stop at the SDK seam.
+
+    Returns a terminal state. Every transition is printed, because v0.5's
+    whole point is that the operator watches it.
+
+    Scope boundary (this task): this function does not drive the agent SDK —
+    no `query()`, no `ClaudeSDKClient`, no message stream. It builds the system
+    prompt and the agent options and stops there. A later task adds the actual
+    session drive and the GATE/REPAIR loop around `repair_decision` above.
+    """
+    from saffron.agents import context
+    from saffron.cell import proxy, runtime, worktree
+    from saffron.gates.runner import CellExecutor, run_suite
+    from saffron.phases import implement
+    from saffron.preflight import assert_host_is_unreachable
+    from saffron.repos.image import BASE_TAG
+    from saffron.repos.policy import load_policy
+
+    # R2: policy is read from the host repo to learn gate *names* and to keep
+    # the existing on-host validation (declared gate exists, is executable).
+    # The paths run_suite is given must be cell-side — CellExecutor always
+    # execs at /work (Task 6) and a host path there resolves to nothing.
+    policy, policy_sha = load_policy(repo)
+    gates = {
+        name: Path(worktree.WORKTREE_MOUNT) / ".saffron" / "gates" / name
+        for name in policy.gates
+    }
+
+    repo_id = ledger.upsert_repo(repo.name, str(repo), str(mirror), policy_sha)
+    run_id = ledger.create_run(repo_id, spec.base_sha)
+    task_id = ledger.create_task(
+        run_id,
+        spec.spec_id,
+        policy_sha,
+        branch=spec.branch,
+        budget_usd=spec.budget_usd,
+    )
+
+    network = "saffron-cells"
+    volume = f"saffron-wt-{spec.spec_id}"
+    state = f"saffron-st-{spec.spec_id}"
+    container = f"saffron-cell-{spec.spec_id}"
+
+    runtime.remove_container(container)
+    runtime.remove_network(network)
+    runtime.create_network(network)
+    try:
+        watch("preflight: probing host bindings")
+        assert_host_is_unreachable(BASE_TAG, network)
+
+        watch("preflight: starting the proxy")
+        proxy_ip = proxy.start_proxy(network)
+        watch(f"preflight: proxy at {proxy_ip}")
+
+        runtime.create_volume(volume)
+        worktree.prepare_worktree(
+            mirror=mirror,
+            volume=volume,
+            base_sha=spec.base_sha,
+            branch=spec.branch,
+            image=BASE_TAG,
+            container=container,
+            state_volume=state,
+        )
+        watch(f"cell: {container} up, worktree at {spec.base_sha[:8]}")
+
+        executor = CellExecutor(container)
+        baseline = run_suite(gates, cwd=repo, executor=executor)
+        watch("baseline: " + ", ".join(f"{r.gate}={r.status}" for r in baseline))
+        for result in baseline:
+            ledger.record_gate_result(result, run_id=run_id)
+
+        task_dir = out_dir / spec.spec_id
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / "baseline.json").write_text(
+            json.dumps([r.model_dump() for r in baseline], indent=2)
+        )
+
+        if aborted := aborted_gates(baseline):
+            watch(
+                f"baseline errored in {aborted} — the toolchain is broken, not the code"
+            )
+            ledger.set_task_state(task_id, "PREFLIGHT_FAILED")
+            ledger.finish_run(run_id, "COMPLETE")
+            return "PREFLIGHT_FAILED"
+
+        # The agent session runs on the host and acts on the cell. v0.5 keeps
+        # the SDK host-side so the operator can watch the stream; the agent's
+        # tools reach /work through the cell, never the host filesystem.
+        context_md = (_SAFFRON_ROOT / "CONTEXT.md").read_text()
+        template = (_SAFFRON_PKG / "agents" / "prompts" / "implement.md").read_text()
+        system_prompt = context.build_system_prompt(
+            "IMPLEMENT", context_md, template=template, spec=spec.body
+        )
+        options = implement.agent_options(
+            system_prompt=system_prompt,
+            cwd=worktree.WORKTREE_MOUNT,
+            max_turns=spec.max_turns,
+            budget_usd=spec.budget_usd,
+        )
+        watch(f"IMPLEMENT: system prompt {len(system_prompt)} chars")
+        watch(
+            f"IMPLEMENT: agent options built ({len(options['allowed_tools'])} "
+            "tools, dontAsk) — ready to drive the session"
+        )
+        # SEAM: this is where a later task drives the SDK — open a
+        # ClaudeSDKClient with `options`, stream the IMPLEMENT turn, extract
+        # and validate plan.json (saffron.agents.artifacts.validate_plan),
+        # then loop GATE (run_suite again) -> repair_decision -> REPAIR,
+        # resuming the same session, until green/no-progress/exhausted. Left
+        # unimplemented on purpose (task scope): the loop's shape depends on
+        # what the message stream actually yields.
+        return "NOT_IMPLEMENTED"
+    finally:
+        watch("teardown")
+        runtime.remove_container(container)
+        proxy.stop_proxy()
+        runtime.remove_network(network)
