@@ -52,22 +52,26 @@ def _run_argv(
     image: str,
     command: Sequence[str],
     name: str | None,
-    network: str | None,
+    network: str | Sequence[str] | None,
     env: Mapping[str, str] | None,
     cpus: int | None,
     memory: str | None,
     mounts: Sequence[Mount],
     detach: bool,
+    user: str | None = None,
 ) -> list[str]:
     argv = [RUNTIME, "run"]
     argv += ["-d"] if detach else ["--rm"]
     # No capabilities. §5.1: a cell that could install firewall rules could
     # rewrite its own, which is why egress is a proxy and not iptables.
     argv += ["--cap-drop", "ALL"]
+    if user:
+        argv += ["--user", user]
     if name:
         argv += ["--name", name]
-    if network:
-        argv += ["--network", network]
+    # The proxy is dual-homed (cells network + egress network); a cell is not.
+    for net in [network] if isinstance(network, str) else network or ():
+        argv += ["--network", net]
     if cpus is not None:
         argv += ["--cpus", str(cpus)]
     if memory:
@@ -139,11 +143,12 @@ def run_detached(
     image: str,
     *,
     command: Sequence[str] = (),
-    network: str | None = None,
+    network: str | Sequence[str] | None = None,
     env: Mapping[str, str] | None = None,
     cpus: int | None = None,
     memory: str | None = None,
     mounts: Sequence[Mount] = (),
+    user: str | None = None,
 ) -> None:
     _must(
         _run_argv(
@@ -156,6 +161,7 @@ def run_detached(
             memory=memory,
             mounts=mounts,
             detach=True,
+            user=user,
         ),
         timeout_s=300,
     )
