@@ -17,9 +17,15 @@ RUN pip install --no-cache-dir claude-agent-sdk
 # The bundled binary is the whole reason this image is Debian. If a source
 # distribution was installed instead, the agent has no runtime and every cell
 # fails at turn one with an error nobody would trace back to the image.
-RUN python -c "import claude_agent_sdk, pathlib, sys; \
+# Located *and run*, and the version string is the assertion: an empty or
+# non-ELF file fails `execve` with ENOEXEC and the shell then runs it as a
+# script, so a zero-byte stub exits 0 with no output. Measured (principle 39).
+RUN set -eu; \
+    bin="$(python -c "import claude_agent_sdk, pathlib, sys; \
 p = pathlib.Path(claude_agent_sdk.__file__).parent; \
 found = list(p.rglob('claude-code*')) + list(p.rglob('claude')); \
-sys.exit(0) if found else sys.exit('no bundled Claude Code binary in the wheel')"
+print(found[0] if found else sys.exit('no bundled Claude Code binary in the wheel'))")"; \
+    "$bin" --version | grep -q . \
+      || { echo "the bundled Claude Code binary reported no version" >&2; exit 1; }
 
 WORKDIR /work

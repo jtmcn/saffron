@@ -25,4 +25,4 @@ ENV VIRTUAL_ENV=/opt/venv PATH="/opt/venv/bin:$PATH"
 # console script whose shebang is broken, which is how the relocated venv above
 # shipped: a green check that reads identically when the tool cannot run
 # (Appendix H, principle 34).
-RUN ruff --version && pytest --version && git --version
+RUN ruff --version && pytest --version && git --version && pgrep --version
