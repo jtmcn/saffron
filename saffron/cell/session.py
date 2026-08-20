@@ -255,6 +255,13 @@ def run_one_cell(
     state = f"saffron-st-{spec.spec_id}"
     container = f"saffron-cell-{spec.spec_id}"
 
+    # Only what this run reached the creation of can leak. `volume rm` on a
+    # name that never existed also exits non-zero, so reporting every failure
+    # prints survivors for a run that aborted in preflight — absent reading as
+    # leaked, which trains the operator to ignore the line. Recorded before the
+    # call: a create that fails part-way can still have left the resource.
+    created: set[str] = set()
+
     try:
         # Inside the guarantee, not above it: a leftover network from a SIGKILLed
         # run makes `create_network` the first thing that raises on a re-run.
@@ -262,6 +269,7 @@ def run_one_cell(
         runtime.remove_network(network)
         runtime.remove_volume(volume)
         runtime.remove_volume(state)
+        created.add(network)
         runtime.create_network(network)
 
         # The cell runs the repo's own image, never the base: the base carries
@@ -281,6 +289,8 @@ def run_one_cell(
         proxy_ip = proxy.start_proxy(network)
         watch(f"preflight: proxy at {proxy_ip}")
 
+        # prepare_worktree creates the state volume and the container.
+        created.update((volume, state, container))
         runtime.create_volume(volume)
         worktree.prepare_worktree(
             mirror=mirror,
@@ -472,5 +482,5 @@ def run_one_cell(
         # a silent one is what let the state volume survive teardown unnoticed.
         # Reported, never raised: this is a `finally`.
         for kind, name, done in removed:
-            if done.returncode != 0:
+            if done.returncode != 0 and name in created:
                 watch(f"teardown: {kind} {name} survived — {done.stderr.strip()[:160]}")

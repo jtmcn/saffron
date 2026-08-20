@@ -394,6 +394,56 @@ def test_teardown_removes_both_volumes_not_the_loops_result(monkeypatch, tmp_pat
     ]
 
 
+def _every_removal_fails(monkeypatch, cell):
+    """What the runtime prints for a leak and for a name that never existed:
+    `container volume rm <missing>` exits 1, measured."""
+
+    def _remove(kind):
+        def _f(name):
+            cell.removed.append((kind, name))
+            return runtime.Completed(1, "", f"no such {kind}")
+
+        return _f
+
+    for kind in ("container", "network", "volume"):
+        monkeypatch.setattr(f"saffron.cell.runtime.remove_{kind}", _remove(kind))
+
+
+def test_teardown_reports_only_what_this_run_created(monkeypatch, tmp_path):
+    """C1 inverted: a run that aborts before `create_volume` reported survivors
+    for volumes that never existed, training the operator to ignore the exact
+    line C1 needed visible. The network this run did create is still reported."""
+    cell = _stub_the_runtime(monkeypatch)
+    _every_removal_fails(monkeypatch, cell)
+
+    def _boom(_repo):
+        raise RuntimeError("the image build failed")
+
+    monkeypatch.setattr("saffron.repos.image.build_cell_image", _boom)
+    with pytest.raises(RuntimeError, match="image build"):
+        _drive(monkeypatch, tmp_path, cell=cell, turns=[])
+
+    assert [line for line in cell.watched if "survived" in line] == [
+        "teardown: network saffron-cells survived — no such network"
+    ]
+
+
+def test_a_volume_this_run_created_and_could_not_remove_is_reported(
+    monkeypatch, tmp_path
+):
+    """The other half: a silent non-zero teardown is what let the state volume
+    survive every run unnoticed."""
+    cell = _stub_the_runtime(monkeypatch)
+    _every_removal_fails(monkeypatch, cell)
+    state, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert state == "READY_FOR_REVIEW"
+    survived = [line for line in cell.watched if "survived" in line]
+    assert any("volume saffron-wt-SY-1 survived" in line for line in survived)
+    assert any("volume saffron-st-SY-1 survived" in line for line in survived)
+
+
 def test_doneness_is_measured_from_after_the_plan_turn(monkeypatch, tmp_path):
     """I7: the plan turn holds Write/Edit/Bash, so a commit it makes would
     otherwise satisfy the implement turn's measurement."""
