@@ -113,3 +113,20 @@ def test_a_bad_sha_raises_rather_than_silently_producing_nothing(tmp_path, origi
     mirror = ensure_mirror(origin, tmp_path / "m.git")
     with pytest.raises(GitError):
         add_worktree(mirror, "0" * 40, tmp_path / "wt")
+
+
+def test_a_missing_git_binary_surfaces_as_giterror(tmp_path, origin, monkeypatch):
+    mirror = ensure_mirror(origin, tmp_path / "m.git")
+
+    def raise_oserror(*args, **kwargs):
+        raise OSError("git: command not found")
+
+    monkeypatch.setattr(subprocess, "run", raise_oserror)
+
+    # the ensure_mirror clone path (no mirror exists yet) does not go through _git
+    with pytest.raises(GitError):
+        ensure_mirror(origin, tmp_path / "m2.git")
+
+    # every other function goes through _git
+    with pytest.raises(GitError):
+        changed_files(mirror, "HEAD", "HEAD")
