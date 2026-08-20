@@ -48,20 +48,37 @@ def ensure_mirror(origin: Path | str, mirror_path: Path) -> Path:
 
 
 def resolve_pull_request(mirror: Path, number: int) -> tuple[str, str, str]:
-    """Find a merged pull request's base and head from its merge commit.
+    """Find a merged pull request's base and head.
 
-    Offline by construction: `^1` is the base the request was merged onto and
-    `^2` is the head that was merged. No API call, no credential, no network.
+    Two shapes exist in the wild, both offline (`git log` against the bare
+    mirror, no API call, no credential, no network):
+
+    - merge commit: subject "Merge pull request #N from ...". `^1` is the
+      base it was merged onto, `^2` is the head that was merged. Tried
+      first — it names base and head unambiguously, where a squash subject
+      is just a number that happens to sit at the end of a string.
+    - squash commit: subject ending "(#N)". The commit itself *is* the head;
+      its sole parent is the base.
     """
-    pattern = f"^Merge pull request #{number} from "
+    merge_pattern = f"^Merge pull request #{number} from "
     merge = _git(
-        mirror, "log", "--merges", "--grep", pattern, "-E", "--format=%H", "-n", "1", "--all"
+        mirror, "log", "--merges", "--grep", merge_pattern, "-E", "--format=%H", "-n", "1", "--all"
     )
-    if not merge:
-        raise GitError(f"no merge commit for pull request #{number} in {mirror}")
+    if merge:
+        title = _git(mirror, "log", "--format=%s", "-n", "1", merge)
+        return _git(mirror, "rev-parse", f"{merge}^1"), _git(mirror, "rev-parse", f"{merge}^2"), title
 
-    title = _git(mirror, "log", "--format=%s", "-n", "1", merge)
-    return _git(mirror, "rev-parse", f"{merge}^1"), _git(mirror, "rev-parse", f"{merge}^2"), title
+    # Anchored in Python, not git's --grep, so "(#4)" can't match a subject
+    # ending "(#42)" and "(#42)" can't match one ending "(#142)" — a regex
+    # with $ inside a multi-line commit message is not worth trusting for this.
+    squash_suffix = f"(#{number})"
+    log = _git(mirror, "log", "--all", "--format=%H\x1f%s")
+    for line in log.splitlines():
+        sha, _, subject = line.partition("\x1f")
+        if subject.endswith(squash_suffix):
+            return _git(mirror, "rev-parse", f"{sha}^1"), sha, subject
+
+    raise GitError(f"no merge or squash commit for pull request #{number} in {mirror}")
 
 
 def add_worktree(mirror: Path, sha: str, dest: Path) -> Path:
