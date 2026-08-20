@@ -54,6 +54,31 @@ def subtract_baseline(
     return new
 
 
+def suite_drift(head: list[GateResult], base: list[GateResult]) -> list[str]:
+    """Differences between the two suites that make the subtraction untrustworthy.
+
+    The subtraction compares failures, and two suites can differ in ways that
+    produce no failures at all (§5.4): `tool` is what distinguishes "ran and
+    passed" from "didn't run", and a gate that passed at baseline and skipped at
+    head stopped running. Either is grounds to distrust the subtraction rather
+    than report it.
+
+    ponytail: compared in memory, over this run's two suites. `gate_results` has
+    no `tool` column, so a later reconstruction from the ledger cannot do it.
+    """
+    before = {result.gate: result for result in base}
+    drift = []
+    for result in head:
+        was = before.get(result.gate)
+        if was is None:
+            continue
+        if was.tool != result.tool:
+            drift.append(f"{result.gate}: tool {was.tool!r} -> {result.tool!r}")
+        elif was.status != "skip" and result.status == "skip":
+            drift.append(f"{result.gate}: {was.status} at baseline, skip at head")
+    return drift
+
+
 def is_no_progress(current: list[NewFailure], previous: list[NewFailure]) -> bool:
     """An identical new-failure set across two attempts: stop paying.
 
