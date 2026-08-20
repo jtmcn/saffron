@@ -13,8 +13,12 @@ DEFAULT_HOME = Path.home() / ".saffron"
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="saffron")
-    parser.add_argument("--home", type=Path, default=DEFAULT_HOME,
-                        help="ledger, mirrors and batch tree (default: ~/.saffron)")
+    parser.add_argument(
+        "--home",
+        type=Path,
+        default=DEFAULT_HOME,
+        help="ledger, mirrors and batch tree (default: ~/.saffron)",
+    )
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     replay_parser = subcommands.add_parser(
@@ -31,8 +35,12 @@ def main(argv: list[str] | None = None) -> int:
     ledger = Ledger(args.home / "ledger.db")
     try:
         line = replay(
-            args.repo, args.pr, ledger=ledger, out_dir=out_dir,
-            mirrors_dir=args.home / "mirrors", spec_path=args.spec,
+            args.repo,
+            args.pr,
+            ledger=ledger,
+            out_dir=out_dir,
+            mirrors_dir=args.home / "mirrors",
+            spec_path=args.spec,
             timeout_s=args.timeout,
         )
     finally:

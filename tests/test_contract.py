@@ -33,7 +33,9 @@ def test_a_passing_gate_needs_no_failures_key():
 
 
 def test_skip_is_a_first_class_status():
-    result = parse_gate_json('{"gate": "types", "status": "skip"}', expected_gate="types")
+    result = parse_gate_json(
+        '{"gate": "types", "status": "skip"}', expected_gate="types"
+    )
     assert result.status == "skip"
 
 

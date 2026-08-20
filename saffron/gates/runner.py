@@ -85,7 +85,9 @@ def run_gate(
         result = parse_gate_json(stdout, expected_gate=name)
     except Exception as exc:
         detail = (stderr or stdout or "").strip()[-_STDERR_TAIL:]
-        return _error(name, f"gate emitted no usable contract ({exc}): {detail}", started)
+        return _error(
+            name, f"gate emitted no usable contract ({exc}): {detail}", started
+        )
 
     result.duration_ms = _elapsed_ms(started)
     return result

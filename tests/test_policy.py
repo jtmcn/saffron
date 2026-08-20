@@ -25,8 +25,11 @@ thread_env:
 """
 
 
-def write_repo(tmp_path, policy_text=VALID, gates=("format", "lint", "types", "tests",
-                                                   "coverage", "shacl")):
+def write_repo(
+    tmp_path,
+    policy_text=VALID,
+    gates=("format", "lint", "types", "tests", "coverage", "shacl"),
+):
     saffron_dir = tmp_path / ".saffron"
     (saffron_dir / "gates").mkdir(parents=True)
     (saffron_dir / "policy.yaml").write_text(policy_text)
@@ -46,7 +49,14 @@ def test_reads_the_declared_gates(tmp_path):
 
 def test_declaration_order_is_preserved(tmp_path):
     policy, _ = load_policy(write_repo(tmp_path))
-    assert list(policy.gates) == ["format", "lint", "types", "tests", "coverage", "shacl"]
+    assert list(policy.gates) == [
+        "format",
+        "lint",
+        "types",
+        "tests",
+        "coverage",
+        "shacl",
+    ]
 
 
 def test_reads_the_integrity_vocabulary_even_though_v0_runs_no_integrity_gate(tmp_path):
@@ -118,7 +128,8 @@ def test_a_non_utf8_policy_file_is_a_policy_error(tmp_path):
 def test_a_gate_name_that_climbs_out_of_the_gates_dir_is_a_policy_error(tmp_path):
     """The name is joined to .saffron/gates and then executed."""
     repo = write_repo(
-        tmp_path, policy_text='gates:\n  "../../../../bin/echo": { blocking: true }\n',
+        tmp_path,
+        policy_text='gates:\n  "../../../../bin/echo": { blocking: true }\n',
         gates=(),
     )
     with pytest.raises(PolicyError, match="invalid"):

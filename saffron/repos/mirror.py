@@ -112,8 +112,14 @@ def changed_files(mirror: Path, base: str, head: str) -> list[str]:
     newline in a path from splitting into two entries.
     """
     output = _git(
-        mirror, "-c", "core.quotePath=false", "diff", "--name-only", "-z",
-        f"{base}..{head}", strip=False,
+        mirror,
+        "-c",
+        "core.quotePath=false",
+        "diff",
+        "--name-only",
+        "-z",
+        f"{base}..{head}",
+        strip=False,
     )
     return [path for path in output.split("\0") if path]
 

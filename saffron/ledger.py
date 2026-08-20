@@ -154,8 +154,14 @@ class Ledger:
             cursor = self._db.execute(
                 """INSERT INTO gate_results (attempt_id, run_id, gate, status, duration_ms, summary)
                    VALUES (?, ?, ?, ?, ?, ?)""",
-                (attempt_id, run_id, result.gate, result.status, result.duration_ms,
-                 result.summary),
+                (
+                    attempt_id,
+                    run_id,
+                    result.gate,
+                    result.status,
+                    result.duration_ms,
+                    result.summary,
+                ),
             )
             gate_result_id = int(cursor.lastrowid)
             self._db.executemany(

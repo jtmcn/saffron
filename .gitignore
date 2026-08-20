@@ -2,3 +2,6 @@
 .DS_Store
 .superpowers/
 __pycache__/
+.venv/
+.ruff_cache/
+.pytest_cache/
