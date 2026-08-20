@@ -1,2 +1,5 @@
 #!/bin/sh
-sleep 30
+# A gate is a script that launches a tool; the tool is what must not survive
+# a timeout. Backgrounded so it is a grandchild whatever /bin/sh is.
+sleep 31337 &
+wait

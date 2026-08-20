@@ -1,10 +1,16 @@
 import os
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 from saffron.gates.runner import run_gate, run_suite
 
 FIXTURES = Path(__file__).parent / "fixtures" / "gates"
+
+
+def _running(pattern: str) -> bool:
+    return subprocess.run(["pgrep", "-f", pattern], capture_output=True).returncode == 0
 
 
 def test_a_well_behaved_gate_is_parsed(tmp_path):
@@ -25,6 +31,13 @@ def test_a_timeout_is_error(tmp_path):
     result = run_gate("slow", FIXTURES / "hangs", cwd=tmp_path, timeout_s=0.5)
     assert result.status == "error"
     assert "timed out" in result.summary
+    # And nothing the gate launched outlives it — in production the survivor is
+    # pytest, still running inside a worktree the caller is about to delete.
+    for _ in range(40):
+        if not _running("sleep 31337"):
+            break
+        time.sleep(0.05)
+    assert not _running("sleep 31337")
 
 
 def test_a_missing_executable_is_error(tmp_path):

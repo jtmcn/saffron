@@ -7,7 +7,9 @@ all, and this module is what proves the contract survives real tool output.
 
 from __future__ import annotations
 
+import contextlib
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -55,25 +57,34 @@ def run_gate(
     argv = [str(executable), *(subset or [])]
     started = time.monotonic()
 
+    # start_new_session: the gate gets its own process group, so a timeout can
+    # kill the tool the script launched. subprocess's own timeout kill reaches
+    # only the shell, leaving pytest and its workers running inside a worktree
+    # the caller is about to remove.
     try:
-        completed = subprocess.run(
+        with subprocess.Popen(
             argv,
             cwd=cwd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout_s,
-            check=False,
+            start_new_session=True,
             env=_gate_env(),
-        )
-    except subprocess.TimeoutExpired:
-        return _error(name, f"gate timed out after {timeout_s}s", started)
+        ) as proc:
+            try:
+                stdout, stderr = proc.communicate(timeout=timeout_s)
+            except subprocess.TimeoutExpired:
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(proc.pid, signal.SIGKILL)
+                proc.communicate()
+                return _error(name, f"gate timed out after {timeout_s}s", started)
     except OSError as exc:
         return _error(name, f"gate could not be executed: {exc}", started)
 
     try:
-        result = parse_gate_json(completed.stdout, expected_gate=name)
+        result = parse_gate_json(stdout, expected_gate=name)
     except Exception as exc:
-        detail = (completed.stderr or completed.stdout or "").strip()[-_STDERR_TAIL:]
+        detail = (stderr or stdout or "").strip()[-_STDERR_TAIL:]
         return _error(name, f"gate emitted no usable contract ({exc}): {detail}", started)
 
     result.duration_ms = _elapsed_ms(started)
