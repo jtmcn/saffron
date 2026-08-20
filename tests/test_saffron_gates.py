@@ -34,11 +34,14 @@ def test_the_fast_gates_name_their_tool_and_pass_on_a_clean_tree(name):
     """The subject is the gate's own output, not how the host resolves a PATH.
 
     Invoked directly rather than through `run_gate`, whose `_gate_env` strips
-    Saffron's venv so a gate finds the *operator's* toolchain. That is right on
-    the host and wrong inside a cell, where `sys.prefix` IS the repo's declared
-    toolchain — so routing this test through it made it assert against whichever
-    ruff happened to be installed globally. `tests/test_runner.py` owns the
-    env-handling; this file owns the contract.
+    Saffron's venv so a gate finds the *operator's* toolchain rather than
+    Saffron's. That is right for every target repo and wrong when the target
+    repo is Saffron: the stripped venv is then also the repo's own declared
+    toolchain, so routing this test through `run_gate` made it assert against
+    whichever ruff happened to be on the operator's global PATH — or none.
+    (Cells are not involved: `_gate_env` reaches only `LocalExecutor`;
+    `CellExecutor` execs through `cell_runtime.exec_`, which takes no env.)
+    `tests/test_runner.py` owns the env-handling; this file owns the contract.
     """
     done = subprocess.run(
         [str(GATES / name)], cwd=REPO, capture_output=True, text=True, timeout=120
