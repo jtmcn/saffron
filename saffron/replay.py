@@ -7,13 +7,15 @@ which run real tasks; nothing else in the tree knows this module exists.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from saffron.gates.baseline import subtract_baseline
 from saffron.gates.core.scope import scope_gate
 from saffron.gates.contract import GateResult
 from saffron.gates.runner import run_suite
-from saffron.intake import Spec, load_spec
+from saffron.intake import load_spec
 from saffron.ledger import Ledger
 from saffron.repos import mirror as git_mirror
 from saffron.repos.policy import load_policy
@@ -136,7 +138,8 @@ def _dump(path: Path, results: list[GateResult]) -> None:
 def _write_index(out_dir: Path, line: QueueLine) -> None:
     """Rewrite the index from every pr_body on disk, so replays accumulate."""
     index_lines = _existing_lines(out_dir, exclude=line.spec_id) + [line]
-    (out_dir / "index.html").write_text(
+    _atomic_write(
+        out_dir / "index.html",
         render_index(
             index_lines,
             header={
@@ -144,19 +147,35 @@ def _write_index(out_dir: Path, line: QueueLine) -> None:
                 "spend": "—",
                 "trailing accept rate": "—",
             },
-        )
+        ),
     )
-    (out_dir / "lines.json").write_text(
-        json.dumps([vars(item) for item in index_lines], indent=2)
+    _atomic_write(
+        out_dir / "lines.json", json.dumps([vars(item) for item in index_lines], indent=2)
     )
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    """Write via a same-directory temp file + rename, so a crash mid-write
+    never leaves a truncated file for the next replay to trip over."""
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.replace(tmp_name, path)
+    except BaseException:
+        os.unlink(tmp_name)
+        raise
 
 
 def _existing_lines(out_dir: Path, exclude: str) -> list[QueueLine]:
+    """The index is a rendered convenience, not a system of record: an
+    unreadable or malformed lines.json is dropped, never fatal to a replay
+    whose gates and ledger writes already succeeded."""
     path = out_dir / "lines.json"
     if not path.is_file():
         return []
-    return [
-        QueueLine(**item)
-        for item in json.loads(path.read_text())
-        if item["spec_id"] != exclude
-    ]
+    try:
+        items = json.loads(path.read_text())
+        return [QueueLine(**item) for item in items if item["spec_id"] != exclude]
+    except (json.JSONDecodeError, OSError, TypeError, KeyError):
+        return []
