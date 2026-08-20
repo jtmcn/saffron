@@ -33,6 +33,7 @@ def test_a_worktree_is_cloned_into_a_volume_and_the_cell_can_commit(tmp_path):
 
     volume = "saffron-test-wt"
     runtime.remove_volume(volume)
+    runtime.remove_volume(f"{volume}-state")
     runtime.create_volume(volume)
     container = "saffron-test-cell"
     runtime.remove_container(container)
@@ -57,6 +58,7 @@ def test_a_worktree_is_cloned_into_a_volume_and_the_cell_can_commit(tmp_path):
     finally:
         runtime.remove_container(container)
         runtime.remove_volume(volume)
+        runtime.remove_volume(f"{volume}-state")
 
 
 @pytest.mark.cell
@@ -70,6 +72,7 @@ def test_the_cell_cannot_reach_the_real_remote(tmp_path):
     )
     volume, container = "saffron-test-wt2", "saffron-test-cell2"
     runtime.remove_volume(volume)
+    runtime.remove_volume(f"{volume}-state")
     runtime.create_volume(volume)
     runtime.remove_container(container)
     try:
@@ -86,3 +89,4 @@ def test_the_cell_cannot_reach_the_real_remote(tmp_path):
     finally:
         runtime.remove_container(container)
         runtime.remove_volume(volume)
+        runtime.remove_volume(f"{volume}-state")
