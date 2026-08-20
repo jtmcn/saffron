@@ -2,7 +2,7 @@
 
 An agentic software factory: spec files in, reviewed pull requests out, running unattended overnight on one Mac.
 
-**Status:** rev 10 — the cell runtime is `apple/container`, decided by spike rather than deferred (Appendix G). Prior: rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime named (Appendix G); rev 9 v0 built and replayed (Appendix H)
+**Status:** rev 11 — v0.5 built and reviewed; what building it found (Appendix I). Prior: rev 10 the cell runtime chosen by spike (Appendix G); rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime named (Appendix G); rev 9 v0 built and replayed (Appendix H)
 
 **Companion document:** `CONTEXT.md` — the controlled vocabulary. It is authoritative for what words mean; this document is authoritative for what the system does. Where they disagree, one of them has a bug.
 **Scope:** language- and stack-agnostic. Saffron develops *any* repo that can satisfy the gate contract (§5.4). First repo is Saffron itself; `thermal-edge` is the first external one.
@@ -144,7 +144,7 @@ The consequence is F11: **onboarding a repo touches zero lines of Saffron.** If 
 | Risk-elevation paths, protected paths, envelope defaults | **Repo** | `policy.yaml` |
 | Standing agent instructions | **Repo** | `CLAUDE.md` |
 
-Saffron ships thin base images (`saffron/cell-base:python`, `:node`, …) carrying the agent runtime, git, and the gate-runner shim — and nothing else. A repo's `.saffron/Dockerfile` starts `FROM` one of those and installs whatever it needs. Saffron never installs a toolchain on a repo's behalf.
+Saffron ships thin base images (`saffron/cell-base:python`, `:node`, …) carrying the agent runtime, git, and nothing else. **There is no gate-runner shim** — that phrase survived four revisions describing a component that was never built and turned out not to be needed: the host `exec`s the repo's gate executables directly through the runtime, so there is nothing for a shim to do (Appendix I). A repo's `.saffron/Dockerfile` starts `FROM` one of those and installs whatever it needs. Saffron never installs a toolchain on a repo's behalf.
 
 **The seam to watch.** Most core gates are core precisely because they read the diff rather than run the code. That is not a coincidence and it is worth protecting: every time a proposed core gate needs to *execute* something in the repo, it belongs on the repo side of the line.
 
@@ -471,10 +471,15 @@ container run --rm \
   saffron/cell:thermal-edge                       # built from .saffron/Dockerfile
 ```
 
+**Every flag in the per-task block is a requirement, and the wiring is the control.** v0.5 shipped a cell created without `--network` and without the proxy environment: the isolated network was created, the host-binding probe ran against it, the proxy started on it and printed its address, and none of it was passed to the container holding the agent. Every mechanism ran, every mechanism reported success, and all of it applied to a different container. So `network` and `env` are **required** arguments where a cell is created — omission is an error, not a default — and the test that proves isolation must start a cell *the way production starts one* and probe **from inside that container**, not from an ephemeral sibling (Appendix I).
+
+**Two measured prerequisites, neither obvious and both expensive to rediscover.** `container build` does not work on macOS without Rosetta installed (`softwareupdate --install-rosetta`). And `container volume create` pre-formats a volume with a `lost+found` directory, so `git clone` refuses the destination as non-empty — a worktree is seeded with `git init` + `remote add` + `fetch` + `checkout` + `remote remove`, chained under `sh -euc` so the remote removal cannot be skipped on a successful seed.
+
 **The runtime is `apple/container`,** decided in rev 10 against the four-assertion spike rather than left to taste (Appendix G). `no-new-privileges` and seccomp have no equivalent and are deliberately not replaced: the per-cell VM is the boundary offered instead, and §2's whole claim is that the structural controls are the ones that hold. Every remaining flag is load-bearing:
 
 - **No target-repo credentials — for any repo, ever, and exactly one credential of any kind.** No host `.env`, no cloud profile, no database URL, no third-party API key. Tests run against recorded fixtures. A task that genuinely needs live data is a task you run attended. This is a rule core enforces rather than one each repo is trusted to follow: the cell simply never receives them.
   **The exception is `ANTHROPIC_API_KEY`, and it is stated here because an unstated exception is an abandoned rule (Appendix F, principle 29).** The agent cannot run without it, so the cell holds one live billing credential and the blast radius of that is spend, not data — which is why it is tolerable and why §2's boundary claim is written in terms of *target-repo* credentials. But it does mean N2's ceilings are an accounting sum over numbers the cell reports, not a limit the cell is subject to: an agent that leaks or misuses the key spends outside the supervisor's view entirely. Two mitigations, neither of which needs building before v1: use a **separate key for the factory** so it can be revoked without touching your interactive work, and set a **provider-side monthly cap on that key** — the only ceiling in the whole design that holds without the cell's cooperation. Moving custody into the proxy is the principled fix and is not available: `CONNECT` tunnels are opaque, so the proxy cannot inject a header it cannot see.
+- **The proxy is dual-homed, and it drops privilege by starting without it.** An `--internal` network has **no route out at all**, not merely no DNS — so the proxy sits on both the internal network and an egress network, egress-first, because the runtime's default route follows the first `--network`. And squid cannot start under `--cap-drop ALL` as root, because dropping privilege needs `SETUID`/`SETGID`; rather than granting a capability, the proxy runs as `--user squid:squid` from launch so squid never calls `setuid()`. **No capability is granted to anything.** Both facts were measured, not reasoned (Appendix I).
 - **Egress via an allowlisting proxy, not iptables.** Two reasons the obvious version doesn't work: `--cap-drop ALL` removes `CAP_NET_ADMIN`, so a cell entrypoint cannot install firewall rules (and granting it that capability would let the untrusted cell rewrite its own firewall); and `api.anthropic.com` is behind a CDN, so an IP allowlist resolved at startup starts failing mid-batch. A sibling proxy on both the internal and external networks doing hostname-based `CONNECT` filtering solves both — hostnames not IPs, zero capabilities in the cell.
 - **`CLAUDE_CONFIG_DIR` on a separate volume, never under `/work`.** Session state and any OAuth credential file must not live in the tree the agent has write access to, that the `scope` gate walks, that the secret scanner scans, and that gets patch-exported. Putting them together means the agent can read its own credentials and the secret scan trips on a real token.
 - **A cell must see only the CPUs it has — not a quota, plus explicit thread caps.** Docker's `--cpus` is a CFS quota, not a core mask: Polars, pyarrow, and numpy's BLAS all size their thread pools from the *visible* core count and will each spawn ~10 threads inside a 2-CPU quota. The result is heavy throttling and wildly variable test timings — the exact flaky-gate failure mode §7 warns about, self-inflicted.
@@ -808,6 +813,9 @@ Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents
 | **The cell cannot resolve its own proxy** | Internal networks have no DNS | Pin the network subnet and address the proxy by IP (Appendix G) |
 | **A runtime flag silently means something else** | Container flags are interpreted inside a VM on macOS | State the requirement, not the flag; verify each control on the runtime actually chosen (Appendix G) |
 | **A gate that never ran reports `pass`** | An absent tool and a clean repo emit identical JSON | `tool`, obtained by executing the tool; non-zero exit with empty `failures[]` is `error` (§5.4, Appendix H) |
+| **Every control reports green and none is connected** | The controls and the cell are wired in different modules; no test crosses the seam | `network`/`env` required where a cell is created; the isolation test starts a cell the production way and probes from inside it (§5.1, Appendix I) |
+| **An image contains a tool it cannot run** | `which` prints a path for a console script whose shebang is stale | The image build asserts by *running* the toolchain, never by locating it (Appendix I) |
+| **Core demands a language of every target repo** | A core probe or check executes something only one ecosystem has | Core probes run in the base image core owns, never in a repo's cell image (§2.1, Appendix I) |
 | **A tool-output parser silently stops matching** | Gates regex an unversioned CLI string that a version bump rewords | Same two guards — the exit code disagrees with the empty parse, and `tool` records the bump (§5.4) |
 | **A crashed test worker reads as a code failure** | A lost worker's `code` field looks like an assertion failure's | Partial results are not results: the gate returns `error` for the whole run, charged to nobody (§5.4) |
 | **New failures cancelled by a pre-existing one** | Normalization collapses the digits that tell colliding failures apart | Baseline subtraction is a multiset operation — one baseline failure cancels one head failure (§5.4) |
@@ -891,6 +899,8 @@ Containerized cell with proxy egress, fixture-service image layer, volume worktr
 
 Success criterion: an agent fixes one real bug inside the cell, and the cell demonstrably cannot reach your DB, your keys, or your remote.
 
+**Built 2026-08-20, second half outstanding.** The harness is complete and reviewed: cell runtime seam, base and cell images, proxy, host-binding probe, volume worktree, the `tool` field and `error` rules, the executor seam, Saffron's own `.saffron/` onboarding, per-phase vocabulary injection, the plan checkpoint, and the session options. The **cell half of the criterion is met and measured** — a cell reaches `api.anthropic.com` through the proxy and nothing else, including by raw TCP to a bare IP, which is what proves the containment is the network rather than an environment variable an agent could unset. The **agent half is not**: `run_one_cell` stops at a marked seam and returns `NOT_IMPLEMENTED`, because the shape of that loop depends on what the message stream actually yields and writing it blind produces a step that reads as complete and is fiction. Appendix I is what building it found.
+
 ### v1 — the factory (2–3 weekends)
 
 - DIAGNOSE + `SCOPE_REVIEW`.
@@ -966,7 +976,7 @@ If it says otherwise, move `ontology/queries/` into `docs/` as worked examples a
     report/
       index.py  pr_body.py  templates/
   images/                  # not docker/ — the runtime is not the format (principle 32)
-    cell-base.python.Dockerfile    # agent runtime + git + gate shim. Nothing else.
+    cell-base.python.Dockerfile    # agent runtime + git. Nothing else, ever.
     cell-base.node.Dockerfile      # added only when a repo needs it
     proxy.Dockerfile
   spikes/
@@ -1395,3 +1405,142 @@ verdict at all. Which is the useful part of the story:
     it automatically from having been written by someone who had just fixed it
     elsewhere. A rule about verification is not self-applying. Ask, of any reporting
     harness: *what does this print when it does nothing at all?*
+
+---
+
+## Appendix I — rev 11: what building v0.5 found
+
+Appendix H ended by arguing the next artifact should be v0.5 rather than another
+document. It was. Eleven tasks, twenty-three commits, every task reviewed against
+its own brief and the whole branch reviewed at the end. What follows is what only
+building it could produce.
+
+### The headline: every control reported green and none was connected
+
+`prepare_worktree` created the long-lived cell with no `--network` and no proxy
+environment, so it joined the runtime's default network with full internet
+egress. Meanwhile the driver created the isolated network, ran the host-binding
+probe against it, started the proxy on it, printed `preflight: proxy at
+10.88.0.3` — and passed none of it to the container holding the agent. Measured
+before the fix, from a cell built exactly the way production built one:
+
+```
+$ container run --rm --cap-drop ALL saffron/cell-base:python \
+    python -c "...urlopen('https://example.com')..."
+REACHED 200
+```
+
+`proxy_env()` had been written, was never called, and had no test.
+
+This is §2's claim — *a cell is untrusted, and untrusted means every control that
+matters lives outside it* — satisfied in every part and false as a whole. The
+proxy was correct. The probe was correct. The network was correct. Nothing joined
+them, and the thing that would have caught it is the one test nobody wrote: start
+a cell **the way production starts one** and probe **from inside that container**.
+Every isolation test on the branch used an ephemeral sibling instead, which is a
+different container on a different network answering a different question.
+
+38. **A control and its subject are wired somewhere, and the wiring is the
+    control.** Verifying each mechanism in isolation verifies nothing about the
+    system, because a mechanism that reports on a thing it was never attached to
+    reports on nothing at all. Test the join, from the subject's side.
+
+The fix makes `network` and `env` **required** arguments where a cell is created,
+so omission is a `TypeError` rather than a silent unisolated cell — the guarantee
+moved from a call site's memory into the signature.
+
+### The same defect, five times, in five disguises
+
+Appendix H named principle 34: *a green result and an absent result are the same
+bytes.* v0.5 produced four more instances, and the fourth is the one worth
+keeping.
+
+- **A tool-output parser silently stopped matching.** The `format` gate was
+  written against ruff's `Would reformat: <path>`; installed ruff emits
+  `--> path:line:col`. It matched nothing. The gate reported `error` rather than
+  a false `pass` — not by luck, but because its `pass` branch is gated solely on
+  the exit code and is independent of the parse. Rule 2 working on first contact
+  with a real tool upgrade.
+- **A section slicer over-captured.** Vocabulary injection treated only `## N.`
+  headings as boundaries, so §10 — which every phase receives — ran to
+  end-of-file and swallowed `CONTEXT.md`'s two trailing unnumbered sections.
+  Roughly 700 characters of naming-decision history went into every prompt of
+  every attempt: precisely the cost §5.3 designed per-phase injection to avoid.
+  Nine tests passed because all nine ran against a synthetic fixture that happens
+  to end on a numbered section.
+- **A dead seam nearly returned an earned state.** The driver was written to
+  return `READY_FOR_REVIEW` at the point where the agent session would be driven.
+  It is a real terminal state elsewhere, so a task that ran nothing would have
+  reported as assessed. The implementer refused and invented `NOT_IMPLEMENTED`
+  instead — applying this document's founding principle to a state string,
+  unprompted, without having been told the v0 story.
+- **`which` is not a check.** The fix wave verified the cell image's toolchain
+  with `which uv pytest python git`. That prints a path. `pytest --version` exited
+  127, because the image built the venv at `/seed/.venv` and moved it to
+  `/opt/venv`, and a console script bakes its interpreter into its shebang.
+
+39. **Locating a tool proves a file exists; only running it proves a tool works.**
+    Every check of the form "is X present" is a check that reads identically when
+    X is present and broken. The image build now asserts by executing
+    (`RUN ruff --version && pytest --version`), the same shape as the base image's
+    bundled-binary assertion.
+
+### Seams between correct components
+
+Two independently-correct pieces disagreeing at their boundary was the branch's
+most common defect after the wiring one, and neither instance was reachable by
+any test that existed.
+
+- **Two glob matchers.** `saffron/gates/core/scope.py` already carried a
+  hand-rolled translator whose docstring states it exists *because* "fnmatch lets
+  `*` cross a `/`". The plan checkpoint then reached for `fnmatch` for the same
+  job on the same patterns. Nothing triggered it, because every declared pattern
+  uses `**`; the first bare `*` would have produced a plan that passes validation
+  and then fails the `scope` gate mechanically, reading as the agent wandering out
+  of scope. `scope.py` is now the single authority, imported by both — it is the
+  authority by construction, because it is what enforces the diff.
+- **`spec_sha` received `policy_sha`.** Same type, wrong value, right slot. The
+  `cell` path silently lacked the mid-run spec-edit invalidation that `replay`
+  has. Found by review; no test could have seen it.
+- **`CONTEXT.md` read from the target repo.** It is a *host* artifact — that is
+  the entire reason §5.3 injects it rather than referencing it. Reading it from
+  the repo under work happens to succeed when the repo is Saffron and fails for
+  every other repo.
+
+40. **A reviewer scoped to one task cannot see the seam between two.** Every
+    defect *inside* a task was caught by that task's own review. Both Criticals
+    lived in the wiring between tasks and were found only by the whole-branch
+    pass. Scope at least one review to the joins.
+
+### The boundary held, and that is the best news here
+
+§2.1 claims onboarding a repository touches zero lines of the orchestrator.
+Saffron was onboarded to itself and the claim was **measured, not asserted**:
+`git diff --stat -- saffron/` empty, the policy parser accepting the repo's
+`policy.yaml` unmodified, the whole toolchain in `.saffron/`. The one leak found
+— core hardcoding a Python base image as *the* cell image — was real and is
+fixed, and its inverse appeared immediately afterwards when a core probe started
+requiring a Python interpreter inside every repo's image. Both are the same
+mistake in opposite directions.
+
+41. **A boundary leaks in both directions, and the second is harder to see.**
+    Core learning a language is the obvious failure. Core *demanding* one of every
+    repo is the same failure wearing the opposite clothes, and it looks like
+    thoroughness — "probe what actually runs" is a better argument than the one it
+    replaced. Core's own checks run on artifacts core owns.
+
+### Method
+
+Rev 7 read the document and found nine defects. Rev 8 found that rev 7's central
+fix was not implementable on this machine. Rev 9 replayed real pull requests and
+found the contract could not tell a tool that ran from one that didn't. Rev 10
+ran a spike and measured a `--cpus` offset no document would have predicted. Rev
+11 built the thing, and found that the security architecture six revisions had
+argued for was, in the shipped code, applied to the wrong container.
+
+The trend is not that documents are useless — every one of those revisions was
+written against the previous document and could not have been written without it.
+It is that **the defects a document can find are a different class from the
+defects execution finds, and the second class is where the expensive ones live.**
+Nothing left in this document is worth another read-through. The next artifact is
+the agent session at §9's v0.5 seam, and after it, v1.
