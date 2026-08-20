@@ -20,3 +20,12 @@ packages = ["saffron"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+# ruff formats python blocks inside markdown; plan docs are a record, leave them.
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+# E501 is the formatter's job; what it can't wrap is long strings.
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["E501"]
