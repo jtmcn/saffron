@@ -220,3 +220,30 @@ def test_an_errored_gate_never_reaches_a_green_terminal_state(target, ledger, tm
 
     assert line.state == "EXHAUSTED"
     assert "errored: tests" in line.note
+
+
+def test_a_gate_that_errored_at_base_says_so_rather_than_blaming_the_task(
+    target, ledger, tmp_path
+):
+    """With no usable baseline, every head failure of that gate reads as new.
+    The state is EXHAUSTED either way, but EXHAUSTED also means "this task
+    broke things" — so the queue line has to name the missing baseline."""
+    (target / ".saffron" / "gates" / "tests").write_text(
+        '#!/bin/sh\n'
+        'if grep -q pad_0 src/a.py; then\n'
+        '  echo \'{"gate":"tests","status":"fail","summary":"1 failed",'
+        '"failures":[{"file":"t/x.py","line":3,"code":"assert","message":"boom"}]}\'\n'
+        'else\n'
+        '  echo "ModuleNotFoundError: No module named pytest" >&2\n'
+        '  exit 1\n'
+        'fi\n'
+    )
+    (target / ".saffron" / "gates" / "tests").chmod(0o755)
+    git(target, "add", "-A")
+    git(target, "commit", "-qm", "a gate whose toolchain is only there at head")
+
+    line = replay(target, 7, ledger=ledger, out_dir=tmp_path / "out",
+                  mirrors_dir=tmp_path / "mirrors")
+
+    assert line.state == "EXHAUSTED"
+    assert "errored at base: tests" in line.note

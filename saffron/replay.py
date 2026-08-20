@@ -86,7 +86,7 @@ def replay(
         repo=name, spec_id=spec.id, state=state, attempts=1, cost_usd_est=None,
         concerns=0, added=added, removed=removed,
         link=f"{spec.id}/pr_body.md", risk=spec.risk,
-        note=_note(head, new_failures),
+        note=_note(head, baseline, new_failures),
     )
     _write_index(out_dir, line)
     return line
@@ -125,10 +125,16 @@ def _sole_spec(repo_dir: Path) -> Path:
     return specs[0]
 
 
-def _note(results: list[GateResult], new_failures: list) -> str:
+def _note(results: list[GateResult], baseline: list[GateResult], new_failures: list) -> str:
     errored = [r.gate for r in results if r.status == "error"]
     if errored:
         return f"errored: {', '.join(errored)}"
+    # A gate that errored at base has no usable baseline, so its head failures
+    # are unattributable rather than new — and EXHAUSTED alone reads as "this
+    # task broke things", the opposite diagnosis.
+    base_errored = [r.gate for r in baseline if r.status == "error"]
+    if base_errored:
+        return f"errored at base: {', '.join(base_errored)}"
     if not new_failures:
         return "no new failures"
     gates = sorted({gate for gate, _ in new_failures})
