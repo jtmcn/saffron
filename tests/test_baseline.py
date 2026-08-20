@@ -214,3 +214,20 @@ def test_the_same_tool_and_status_is_not_drift():
 def test_a_gate_that_skipped_at_baseline_and_at_head_is_not_drift():
     skipped = _ran("types", status="skip", tool=None)
     assert suite_drift([skipped], [skipped]) == []
+
+
+def test_a_gate_that_started_running_because_the_task_created_its_subject():
+    """The common shape this check must not abort on: a gate exempt until its
+    subject exists, running once the task creates it. `tool: null -> 'alembic'`
+    is the task succeeding, not the suite drifting (§5.4)."""
+    started = _ran("migrations", tool="alembic 1.13")
+    exempt = _ran("migrations", status="skip", tool=None)
+    assert suite_drift([started], [exempt]) == []
+
+
+def test_a_gate_that_stopped_running_with_its_tool_unchanged_is_drift():
+    """Isolates the status branch: same `tool` on both sides, so only
+    `pass -> skip` can report it."""
+    assert suite_drift([_ran("lint", status="skip")], [_ran("lint")]) == [
+        "lint: pass at baseline, skip at head"
+    ]
