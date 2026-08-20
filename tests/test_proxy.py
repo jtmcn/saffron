@@ -9,6 +9,20 @@ from saffron.repos import image
 NETWORK = "saffron-test-cells"
 
 
+def reach(url: str) -> list[str]:
+    """Print STATUS on any HTTP answer, so a container that never started is
+    not mistaken for a successful fetch."""
+    return [
+        "python",
+        "-c",
+        "import urllib.request as u\n"
+        "try:\n"
+        f"    print('STATUS', u.urlopen({url!r}, timeout=20).status)\n"
+        "except u.HTTPError as e:\n"
+        "    print('STATUS', e.code)\n",
+    ]
+
+
 @pytest.fixture
 def network():
     runtime.remove_network(NETWORK)
@@ -24,33 +38,26 @@ def test_the_proxy_allows_anthropic_and_denies_everything_else(network):
         env = {"HTTPS_PROXY": f"http://{proxy_ip}:{proxy.PROXY_PORT}"}
         allowed = runtime.run_ephemeral(
             image.BASE_TAG,
-            [
-                "python",
-                "-c",
-                "import urllib.request as u;"
-                "u.urlopen('https://api.anthropic.com/v1/models', timeout=20)",
-            ],
+            reach("https://api.anthropic.com/v1/models"),
             network=network,
             env=env,
             timeout_s=60,
         )
         # 401 is a reachability success: the CONNECT tunnel opened and the API
         # answered. Only a proxy denial or a DNS failure raises URLError.
-        assert "URLError" not in allowed.stderr, allowed.stderr
+        assert "STATUS" in allowed.stdout, allowed.stderr
 
         denied = runtime.run_ephemeral(
             image.BASE_TAG,
-            [
-                "python",
-                "-c",
-                "import urllib.request as u;"
-                "u.urlopen('https://example.com', timeout=20)",
-            ],
+            reach("https://example.com"),
             network=network,
             env=env,
             timeout_s=60,
         )
+        # URLError, not merely nonzero: the container ran and the proxy refused
+        # it, rather than the container failing to start at all.
         assert denied.returncode != 0
+        assert "URLError" in denied.stderr, denied.stderr
     finally:
         proxy.stop_proxy()
 
@@ -59,16 +66,12 @@ def test_the_proxy_allows_anthropic_and_denies_everything_else(network):
 def test_a_cell_without_the_proxy_reaches_nothing(network):
     done = runtime.run_ephemeral(
         image.BASE_TAG,
-        [
-            "python",
-            "-c",
-            "import urllib.request as u;"
-            "u.urlopen('https://api.anthropic.com', timeout=10)",
-        ],
+        reach("https://api.anthropic.com"),
         network=network,
         timeout_s=60,
     )
     assert done.returncode != 0
+    assert "URLError" in done.stderr, done.stderr
 
 
 @pytest.mark.cell
