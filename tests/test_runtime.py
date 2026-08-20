@@ -68,3 +68,11 @@ def test_call_is_the_public_form_of_the_private_helper():
     done = runtime.call(["true"], timeout_s=10)
     assert done.returncode == 0
     assert done.timed_out is False
+
+
+def test_the_subnet_is_the_only_place_the_network_is_written():
+    """Derived, not re-typed: a stale second copy probes an address that no
+    longer exists and reports 'unreachable' having reached nothing."""
+    assert runtime.SUBNET_PREFIX == "10.88.0."
+    assert runtime.GATEWAY == "10.88.0.1"
+    assert runtime.GATEWAY.startswith(runtime.SUBNET_PREFIX)

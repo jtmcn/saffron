@@ -8,6 +8,7 @@ Nothing above this file changes if the answer changes.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 import subprocess
 from collections.abc import Mapping, Sequence
@@ -15,6 +16,12 @@ from dataclasses import dataclass
 
 RUNTIME = "container"
 DEFAULT_SUBNET = "10.88.0.0/24"
+
+# Derived, never re-typed: a second literal of the subnet is a probe that
+# silently covers nothing the day the subnet moves.
+_NETWORK = ipaddress.ip_network(DEFAULT_SUBNET)
+SUBNET_PREFIX = str(_NETWORK.network_address).rsplit(".", 1)[0] + "."
+GATEWAY = str(next(_NETWORK.hosts()))
 
 # apple/container 1.2.2 allocates one vCPU more than --cpus requests, measured
 # at 1->2, 2->3, 4->5, 6->7. The guest count is honest about the VM it is in;
@@ -224,7 +231,7 @@ def _first_address(inspected: str, subnet_prefix: str) -> str | None:
     return None
 
 
-def container_ip(name: str, subnet_prefix: str = "10.88.0.") -> str | None:
+def container_ip(name: str, subnet_prefix: str = SUBNET_PREFIX) -> str | None:
     done = _call([RUNTIME, "inspect", name], timeout_s=60)
     if done.returncode != 0:
         return None

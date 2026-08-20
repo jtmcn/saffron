@@ -7,7 +7,7 @@ without ever traversing the proxy. Measured, not assumed (Appendix G).
 
 from __future__ import annotations
 
-import subprocess
+import socket
 
 from saffron.cell import runtime
 
@@ -15,15 +15,27 @@ from saffron.cell import runtime
 PROBED_PORTS = (5432, 5433, 3306, 6379, 8000, 8080, 27017)
 
 
-def _lan_address() -> str | None:
-    out = subprocess.run(
-        ["ipconfig", "getifaddr", "en0"], capture_output=True, text=True
-    )
-    return out.stdout.strip() or None
+def _lan_address() -> str:
+    """The host's address on its own LAN, whichever interface carries it.
+
+    A UDP socket sends nothing; the kernel just picks the route. `ipconfig
+    getifaddr en0` guesses at the interface name and returns empty on a machine
+    where the guess is wrong — silently dropping half the probe.
+    """
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            return str(sock.getsockname()[0])
+    except OSError as exc:
+        raise runtime.CellRuntimeError(
+            f"the host's LAN address could not be determined ({exc}) — the probe "
+            "would then cover only the gateway, which is not a probe that passed."
+        ) from exc
 
 
-def _gateway(subnet_prefix: str = "10.88.0.") -> str:
-    return f"{subnet_prefix}1"
+def probe_addresses() -> list[str]:
+    """What the probe covers: the cell's gateway and the host on its LAN."""
+    return [runtime.GATEWAY, _lan_address()]
 
 
 def _probe_script(addresses: list[str]) -> str:
@@ -50,7 +62,7 @@ def probe_host_bindings(image_tag: str, network: str) -> list[str]:
     0.0.0.0 that a cell can reach, and the fix is on the host — bind it to
     127.0.0.1 — never in the cell.
     """
-    addresses = [a for a in (_gateway(), _lan_address()) if a]
+    addresses = probe_addresses()
     done = runtime.run_ephemeral(
         image_tag,
         ["python", "-c", _probe_script(addresses)],
