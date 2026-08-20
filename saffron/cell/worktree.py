@@ -8,6 +8,7 @@ collection, and the difference compounds across a four-attempt repair loop.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from saffron.cell import runtime
@@ -37,9 +38,15 @@ def prepare_worktree(
     branch: str,
     image: str,
     container: str,
+    network: str,
+    env: Mapping[str, str],
     state_volume: str | None = None,
 ) -> None:
     """Clone the mirror into the volume at `base_sha` on `branch`, cell running.
+
+    `network` and `env` are required, not defaulted: a cell started without them
+    joins the runtime's default network with full egress, and every containment
+    control the caller ran applies to some other container (§5.1).
 
     The mirror is bind-mounted read-only for the clone and is not among the
     mounts the cell keeps — a cell that could write the mirror could rewrite
@@ -80,6 +87,8 @@ def prepare_worktree(
         container,
         image,
         command=["sleep", "infinity"],
+        network=network,
+        env=env,
         mounts=mounts(volume, state),
         cpus=1,
         memory="4g",

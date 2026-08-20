@@ -83,8 +83,13 @@ def test_the_task_row_carries_the_specs_own_sha_not_the_policys(tmp_path, monkey
     def _stop(*_a, **_k):
         raise _StopHere
 
-    monkeypatch.setattr("saffron.preflight.assert_host_is_unreachable", _stop)
-    for name in ("remove_container", "remove_network", "create_network"):
+    monkeypatch.setattr("saffron.repos.image.build_cell_image", _stop)
+    for name in (
+        "remove_container",
+        "remove_network",
+        "create_network",
+        "remove_volume",
+    ):
         monkeypatch.setattr(f"saffron.cell.runtime.{name}", lambda *a, **k: None)
     monkeypatch.setattr("saffron.cell.proxy.stop_proxy", lambda *a, **k: None)
 
@@ -107,3 +112,17 @@ def test_the_task_row_carries_the_specs_own_sha_not_the_policys(tmp_path, monkey
         assert row["spec_sha"] != repo_row["policy_sha"]
     finally:
         ledger.close()
+
+
+def test_the_cell_env_carries_the_proxy_and_the_state_dir(monkeypatch):
+    """§5.1's per-task block: without these the cell has full egress and the
+    agent writes its session state into the tree the scope gate walks."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    env = session.cell_env("10.88.0.2", {"RAYON_NUM_THREADS": "2"})
+    assert env["HTTPS_PROXY"] == "http://10.88.0.2:3128"
+    assert env["CLAUDE_CONFIG_DIR"] == "/agent-state"
+    assert env["RAYON_NUM_THREADS"] == "2"
+    assert "ANTHROPIC_API_KEY" not in env
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    assert session.cell_env("10.88.0.2", {})["ANTHROPIC_API_KEY"] == "sk-test"

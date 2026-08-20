@@ -8,7 +8,8 @@ scheduler.py, and this file goes the way replay.py went.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Sequence
+import os
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -65,6 +66,22 @@ def repair_decision(
     return "repair"
 
 
+def cell_env(proxy_ip: str, thread_env: Mapping[str, str]) -> dict[str, str]:
+    """Everything §5.1's per-task block puts in the cell's environment.
+
+    The proxy is the cell's only route out, and `ANTHROPIC_API_KEY` is the one
+    credential a cell ever holds — the agent runs inside it.
+    """
+    from saffron.cell import proxy
+    from saffron.cell.worktree import STATE_MOUNT
+
+    env = proxy.proxy_env(proxy_ip) | dict(thread_env)
+    env["CLAUDE_CONFIG_DIR"] = STATE_MOUNT
+    if key := os.environ.get("ANTHROPIC_API_KEY"):
+        env["ANTHROPIC_API_KEY"] = key
+    return env
+
+
 def run_one_cell(
     spec: CellSpec,
     *,
@@ -84,12 +101,12 @@ def run_one_cell(
     prompt and the agent options and stops there. A later task adds the actual
     session drive and the GATE/REPAIR loop around `repair_decision` above.
     """
+    from saffron import preflight
     from saffron.agents import context
     from saffron.cell import proxy, runtime, worktree
     from saffron.gates.runner import CellExecutor, run_suite
     from saffron.phases import implement
-    from saffron.preflight import assert_host_is_unreachable
-    from saffron.repos.image import BASE_TAG
+    from saffron.repos import image
     from saffron.repos.policy import load_policy
 
     # R2: policy is read from the host repo to learn gate *names* and to keep
@@ -97,10 +114,7 @@ def run_one_cell(
     # The paths run_suite is given must be cell-side — CellExecutor always
     # execs at /work (Task 6) and a host path there resolves to nothing.
     policy, policy_sha = load_policy(repo)
-    gates = {
-        name: Path(worktree.WORKTREE_MOUNT) / ".saffron" / "gates" / name
-        for name in policy.gates
-    }
+    gates = policy.gate_executables(Path(worktree.WORKTREE_MOUNT))
 
     repo_id = ledger.upsert_repo(repo.name, str(repo), str(mirror), policy_sha)
     run_id = ledger.create_run(repo_id, spec.base_sha)
@@ -119,10 +133,17 @@ def run_one_cell(
 
     runtime.remove_container(container)
     runtime.remove_network(network)
+    runtime.remove_volume(volume)
+    runtime.remove_volume(state)
     runtime.create_network(network)
     try:
-        watch("preflight: probing host bindings")
-        assert_host_is_unreachable(BASE_TAG, network)
+        # The cell runs the repo's own image, never the base: the base carries
+        # no toolchain, so every gate would error before the agent is reached.
+        watch(f"preflight: building {image.cell_tag(repo)}")
+        cell_image = image.build_cell_image(repo)
+
+        watch(f"preflight: probing {', '.join(preflight.probe_addresses())}")
+        preflight.assert_host_is_unreachable(cell_image, network)
 
         watch("preflight: starting the proxy")
         proxy_ip = proxy.start_proxy(network)
@@ -134,8 +155,10 @@ def run_one_cell(
             volume=volume,
             base_sha=spec.base_sha,
             branch=spec.branch,
-            image=BASE_TAG,
+            image=cell_image,
             container=container,
+            network=network,
+            env=cell_env(proxy_ip, policy.thread_env),
             state_volume=state,
         )
         watch(f"cell: {container} up, worktree at {spec.base_sha[:8]}")
@@ -160,9 +183,7 @@ def run_one_cell(
             ledger.finish_run(run_id, "COMPLETE")
             return "PREFLIGHT_FAILED"
 
-        # The agent session runs on the host and acts on the cell. v0.5 keeps
-        # the SDK host-side so the operator can watch the stream; the agent's
-        # tools reach /work through the cell, never the host filesystem.
+        # The agent runs inside the cell, at /work, on the cell's own key (§5.1).
         context_md = (_SAFFRON_ROOT / "CONTEXT.md").read_text()
         template = (_SAFFRON_PKG / "agents" / "prompts" / "implement.md").read_text()
         system_prompt = context.build_system_prompt(
@@ -186,9 +207,14 @@ def run_one_cell(
         # resuming the same session, until green/no-progress/exhausted. Left
         # unimplemented on purpose (task scope): the loop's shape depends on
         # what the message stream actually yields.
+        ledger.finish_run(run_id, "COMPLETE")
         return "NOT_IMPLEMENTED"
     finally:
         watch("teardown")
         runtime.remove_container(container)
         proxy.stop_proxy()
         runtime.remove_network(network)
+        # Volumes go too, or the same spec_id cannot be re-run. Whoever adds
+        # patch export must export before this line, not after.
+        runtime.remove_volume(volume)
+        runtime.remove_volume(state)
