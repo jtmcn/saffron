@@ -150,22 +150,22 @@ class Ledger:
         run_id: int | None = None,
         attempt_id: int | None = None,
     ) -> int:
-        cursor = self._db.execute(
-            """INSERT INTO gate_results (attempt_id, run_id, gate, status, duration_ms, summary)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (attempt_id, run_id, result.gate, result.status, result.duration_ms,
-             result.summary),
-        )
-        gate_result_id = int(cursor.lastrowid)
-        self._db.executemany(
-            """INSERT INTO failures (gate_result_id, file, code, message, line)
-               VALUES (?, ?, ?, ?, ?)""",
-            [
-                (gate_result_id, f.file, f.code, f.message, f.line)
-                for f in result.failures
-            ],
-        )
-        self._db.commit()
+        with self._db:
+            cursor = self._db.execute(
+                """INSERT INTO gate_results (attempt_id, run_id, gate, status, duration_ms, summary)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (attempt_id, run_id, result.gate, result.status, result.duration_ms,
+                 result.summary),
+            )
+            gate_result_id = int(cursor.lastrowid)
+            self._db.executemany(
+                """INSERT INTO failures (gate_result_id, file, code, message, line)
+                   VALUES (?, ?, ?, ?, ?)""",
+                [
+                    (gate_result_id, f.file, f.code, f.message, f.line)
+                    for f in result.failures
+                ],
+            )
         return gate_result_id
 
     def baseline_results(self, run_id: int) -> list[GateResult]:

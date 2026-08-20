@@ -123,3 +123,29 @@ def test_the_ledger_survives_being_reopened(tmp_path):
     second = Ledger(path)
     assert [r.gate for r in second.baseline_results(run_id)] == ["lint"]
     second.close()
+
+
+def test_a_failed_write_leaves_no_partial_gate_result(ledger, task):
+    run_id, _ = task
+    # model_construct bypasses pydantic validation to force a NOT NULL
+    # violation on the second failure row, after the gate_results row exists.
+    broken = Failure.model_construct(file=None, line=1, code="E001", message="boom")
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.record_gate_result(
+            GateResult(gate="lint", status="fail",
+                       failures=[Failure(file="a.py", line=1, code="E001"), broken]),
+            run_id=run_id,
+        )
+    assert ledger._db.in_transaction is False
+
+    ledger.record_gate_result(GateResult(gate="types", status="pass"), run_id=run_id)
+    assert [r.gate for r in ledger.baseline_results(run_id)] == ["types"]
+
+
+def test_duration_ms_round_trips(ledger, task):
+    run_id, _ = task
+    ledger.record_gate_result(
+        GateResult(gate="lint", status="pass", duration_ms=1234), run_id=run_id
+    )
+    (result,) = ledger.baseline_results(run_id)
+    assert result.duration_ms == 1234
