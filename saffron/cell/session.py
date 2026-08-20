@@ -142,8 +142,13 @@ def run_one_cell(
         watch(f"preflight: building {image.cell_tag(repo)}")
         cell_image = image.build_cell_image(repo)
 
+        # Probed from the base image, not the repo's. The probe runs `python`,
+        # and core must not require an interpreter inside every target repo's
+        # image — a Rust repo could then never start a cell (§2.1). What the
+        # probe establishes is a property of the network, which both images
+        # join identically.
         watch(f"preflight: probing {', '.join(preflight.probe_addresses())}")
-        preflight.assert_host_is_unreachable(cell_image, network)
+        preflight.assert_host_is_unreachable(image.BASE_TAG, network)
 
         watch("preflight: starting the proxy")
         proxy_ip = proxy.start_proxy(network)
@@ -209,6 +214,12 @@ def run_one_cell(
         # what the message stream actually yields.
         ledger.finish_run(run_id, "COMPLETE")
         return "NOT_IMPLEMENTED"
+    except Exception:
+        # A run row left open is a run that reads as still going. Preflight
+        # raising is the path an operator hits first, so it is the one most
+        # worth closing honestly — ABORTED, not COMPLETE.
+        ledger.finish_run(run_id, "ABORTED")
+        raise
     finally:
         watch("teardown")
         runtime.remove_container(container)

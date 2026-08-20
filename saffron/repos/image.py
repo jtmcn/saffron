@@ -57,8 +57,3 @@ def build_cell_image(repo: Path) -> str:
     tag = cell_tag(repo)
     build_image(dockerfile, tag, repo)
     return tag
-
-
-def image_exists(tag: str) -> bool:
-    done = runtime.call([runtime.RUNTIME, "image", "inspect", tag], timeout_s=60)
-    return done.returncode == 0
