@@ -39,8 +39,15 @@ def origin(tmp_path):
     git(repo, "commit", "-qm", "the change")
 
     git(repo, "checkout", "-q", "main")
-    git(repo, "merge", "--no-ff", "-q", "feature", "-m",
-        "Merge pull request #42 from someone/feature")
+    git(
+        repo,
+        "merge",
+        "--no-ff",
+        "-q",
+        "feature",
+        "-m",
+        "Merge pull request #42 from someone/feature",
+    )
     return repo
 
 
@@ -263,12 +270,21 @@ def advanced_origin(tmp_path):
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "unrelated work on main")
 
-    git(repo, "merge", "--no-ff", "-q", "feature", "-m",
-        "Merge pull request #11 from someone/feature")
+    git(
+        repo,
+        "merge",
+        "--no-ff",
+        "-q",
+        "feature",
+        "-m",
+        "Merge pull request #11 from someone/feature",
+    )
     return repo, branch_point
 
 
-def test_the_base_is_where_the_branch_was_cut_not_main_at_merge_time(tmp_path, advanced_origin):
+def test_the_base_is_where_the_branch_was_cut_not_main_at_merge_time(
+    tmp_path, advanced_origin
+):
     origin, branch_point = advanced_origin
     mirror = ensure_mirror(origin, tmp_path / "adv.git")
     base, head, _ = resolve_pull_request(mirror, 11)
@@ -277,7 +293,9 @@ def test_the_base_is_where_the_branch_was_cut_not_main_at_merge_time(tmp_path, a
     assert head == git(origin, "rev-parse", "main^2")
 
 
-def test_an_advanced_main_does_not_leak_its_own_files_into_the_diff(tmp_path, advanced_origin):
+def test_an_advanced_main_does_not_leak_its_own_files_into_the_diff(
+    tmp_path, advanced_origin
+):
     origin, _ = advanced_origin
     mirror = ensure_mirror(origin, tmp_path / "adv.git")
     base, head, _ = resolve_pull_request(mirror, 11)
@@ -333,9 +351,16 @@ def test_a_merge_body_quoting_another_subject_is_not_taken_for_it(tmp_path):
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "the change")
     git(repo, "checkout", "-q", "main")
-    git(repo, "merge", "--no-ff", "-q", "feature", "-m",
+    git(
+        repo,
+        "merge",
+        "--no-ff",
+        "-q",
+        "feature",
+        "-m",
         "Merge pull request #9 from someone/feature\n\n"
-        "Reverts the merge of\nMerge pull request #42 from someone/other")
+        "Reverts the merge of\nMerge pull request #42 from someone/other",
+    )
 
     mirror = ensure_mirror(repo, tmp_path / "decoy.git")
     with pytest.raises(GitError, match="no merge or squash commit"):

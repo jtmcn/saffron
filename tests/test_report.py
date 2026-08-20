@@ -37,8 +37,12 @@ def body():
     return render_pr_body(
         SPEC,
         RESULTS,
-        [NewFailure("types", Failure(file="a.py", line=8, code="arg-type",
-                                     message="bad arg"))],
+        [
+            NewFailure(
+                "types",
+                Failure(file="a.py", line=8, code="arg-type", message="bad arg"),
+            )
+        ],
         base_sha="a" * 40,
         head_sha="b" * 40,
         added=180,
@@ -58,8 +62,12 @@ def test_acceptance_criteria_render_as_an_unchecked_checklist():
 
 def test_the_gate_table_holds_every_result_with_its_status_in_backticks():
     rendered = body()
-    for gate, status in [("format", "pass"), ("types", "fail"),
-                         ("coverage", "skip"), ("tests", "error")]:
+    for gate, status in [
+        ("format", "pass"),
+        ("types", "fail"),
+        ("coverage", "skip"),
+        ("tests", "error"),
+    ]:
         assert f"| `{gate}` | `{status}` |" in rendered
 
 
@@ -79,8 +87,14 @@ def test_an_errored_gate_is_called_errored_and_never_failed():
 
 def test_a_clean_run_says_so_rather_than_rendering_an_empty_section():
     rendered = render_pr_body(
-        SPEC, [GateResult(gate="lint", status="pass")], [],
-        base_sha="a", head_sha="b", added=1, removed=0, transcript_path="/t",
+        SPEC,
+        [GateResult(gate="lint", status="pass")],
+        [],
+        base_sha="a",
+        head_sha="b",
+        added=1,
+        removed=0,
+        transcript_path="/t",
     )
     assert "No new failures" in rendered
     assert "New failures" not in rendered
@@ -94,8 +108,16 @@ def test_the_diff_stat_and_shas_are_recorded():
 
 def line(**overrides):
     defaults = dict(
-        repo="thermal-edge", spec_id="TE-9001", state="READY_FOR_REVIEW", attempts=1,
-        cost_usd_est=None, concerns=0, added=180, removed=22, link="pr_body.md", note="",
+        repo="thermal-edge",
+        spec_id="TE-9001",
+        state="READY_FOR_REVIEW",
+        attempts=1,
+        cost_usd_est=None,
+        concerns=0,
+        added=180,
+        removed=22,
+        link="pr_body.md",
+        note="",
         risk="standard",
     )
     return QueueLine(**{**defaults, **overrides})
@@ -128,7 +150,10 @@ def test_scope_review_sorts_above_ready_for_review():
 
 
 def test_merge_failed_sorts_above_elevated_risk():
-    lines = [line(state="READY_FOR_REVIEW", risk="elevated"), line(state="MERGE_FAILED")]
+    lines = [
+        line(state="READY_FOR_REVIEW", risk="elevated"),
+        line(state="MERGE_FAILED"),
+    ]
     assert sorted(lines, key=sort_key)[0].state == "MERGE_FAILED"
 
 
@@ -155,10 +180,20 @@ def test_a_measured_zero_is_not_rendered_as_unmeasured():
     or a failure reported at line 0, measured something."""
     rendered = render_pr_body(
         SPEC,
-        [GateResult(gate="lint", status="fail", duration_ms=0,
-                    failures=[Failure(file="a.py", line=0, code="E501")])],
+        [
+            GateResult(
+                gate="lint",
+                status="fail",
+                duration_ms=0,
+                failures=[Failure(file="a.py", line=0, code="E501")],
+            )
+        ],
         [NewFailure("lint", Failure(file="a.py", line=0, code="E501"))],
-        base_sha="a", head_sha="b", added=1, removed=0, transcript_path="/t",
+        base_sha="a",
+        head_sha="b",
+        added=1,
+        removed=0,
+        transcript_path="/t",
     )
     assert "| 0.0s |" in rendered
     assert "a.py:0" in rendered
@@ -170,9 +205,18 @@ def test_a_pipe_in_a_gate_message_does_not_split_the_table_row():
     rendered = render_pr_body(
         SPEC,
         [GateResult(gate="lint", status="fail", summary="ran `grep x | wc -l`")],
-        [NewFailure("lint", Failure(file="a.py", line=1, code="E1",
-                                    message="grep -n x | cut -d: -f1"))],
-        base_sha="a" * 40, head_sha="b" * 40, added=1, removed=0,
+        [
+            NewFailure(
+                "lint",
+                Failure(
+                    file="a.py", line=1, code="E1", message="grep -n x | cut -d: -f1"
+                ),
+            )
+        ],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
         transcript_path="/t",
     )
     rows = [line for line in rendered.splitlines() if line.startswith("|")]

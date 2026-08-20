@@ -1,5 +1,6 @@
-import pytest
 import sqlite3
+
+import pytest
 
 from saffron.gates.contract import Failure, GateResult
 from saffron.ledger import Ledger
@@ -17,8 +18,12 @@ def task(ledger):
     repo_id = ledger.upsert_repo("thermal-edge", "/o", "/m.git", policy_sha="p" * 64)
     run_id = ledger.create_run(repo_id, base_sha="a" * 40)
     task_id = ledger.create_task(
-        run_id, spec_id="TE-9001", spec_sha="s" * 64, branch="saffron/TE-9001",
-        risk="standard", budget_usd=12,
+        run_id,
+        spec_id="TE-9001",
+        spec_sha="s" * 64,
+        branch="saffron/TE-9001",
+        risk="standard",
+        budget_usd=12,
     )
     return run_id, task_id
 
@@ -32,8 +37,11 @@ def test_upsert_repo_is_idempotent(ledger):
 def test_a_baseline_result_belongs_to_a_run(ledger, task):
     run_id, _ = task
     ledger.record_gate_result(
-        GateResult(gate="lint", status="fail",
-                   failures=[Failure(file="a.py", line=1, code="E501", message="long")]),
+        GateResult(
+            gate="lint",
+            status="fail",
+            failures=[Failure(file="a.py", line=1, code="E501", message="long")],
+        ),
         run_id=run_id,
     )
     results = ledger.baseline_results(run_id)
@@ -44,7 +52,9 @@ def test_a_baseline_result_belongs_to_a_run(ledger, task):
 
 def test_a_task_result_belongs_to_an_attempt(ledger, task):
     _, task_id = task
-    ledger.record_gate_result(GateResult(gate="types", status="pass"), attempt_id=task_id)
+    ledger.record_gate_result(
+        GateResult(gate="types", status="pass"), attempt_id=task_id
+    )
     assert [r.gate for r in ledger.task_results(task_id)] == ["types"]
 
 
@@ -86,8 +96,11 @@ def test_failures_round_trip_in_order(ledger, task):
 def test_a_failure_with_no_line_round_trips_as_none(ledger, task):
     run_id, _ = task
     ledger.record_gate_result(
-        GateResult(gate="format", status="fail",
-                   failures=[Failure(file="a.py", code="format", message="would reformat")]),
+        GateResult(
+            gate="format",
+            status="fail",
+            failures=[Failure(file="a.py", code="format", message="would reformat")],
+        ),
         run_id=run_id,
     )
     assert ledger.baseline_results(run_id)[0].failures[0].line is None
@@ -96,7 +109,8 @@ def test_a_failure_with_no_line_round_trips_as_none(ledger, task):
 def test_an_errored_gate_stores_its_summary(ledger, task):
     run_id, _ = task
     ledger.record_gate_result(
-        GateResult(gate="types", status="error", summary="toolchain missing"), run_id=run_id
+        GateResult(gate="types", status="error", summary="toolchain missing"),
+        run_id=run_id,
     )
     (result,) = ledger.baseline_results(run_id)
     assert result.status == "error"
@@ -132,8 +146,11 @@ def test_a_failed_write_leaves_no_partial_gate_result(ledger, task):
     broken = Failure.model_construct(file=None, line=1, code="E001", message="boom")
     with pytest.raises(sqlite3.IntegrityError):
         ledger.record_gate_result(
-            GateResult(gate="lint", status="fail",
-                       failures=[Failure(file="a.py", line=1, code="E001"), broken]),
+            GateResult(
+                gate="lint",
+                status="fail",
+                failures=[Failure(file="a.py", line=1, code="E001"), broken],
+            ),
             run_id=run_id,
         )
     assert ledger._db.in_transaction is False

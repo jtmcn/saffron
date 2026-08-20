@@ -32,7 +32,9 @@ def test_a_pre_existing_failure_that_moved_thirty_lines_is_not_new():
             Failure(file="a.py", line=40, code="arg-type", message="bad arg"),
             Failure(file="a.py", line=55, code="return-value", message="bad return"),
         ),
-        gate("lint", Failure(file="a.py", line=61, code="E501", message="line too long")),
+        gate(
+            "lint", Failure(file="a.py", line=61, code="E501", message="line too long")
+        ),
     ]
     head = [
         gate(
@@ -40,19 +42,30 @@ def test_a_pre_existing_failure_that_moved_thirty_lines_is_not_new():
             Failure(file="a.py", line=70, code="arg-type", message="bad arg"),
             Failure(file="a.py", line=85, code="return-value", message="bad return"),
         ),
-        gate("lint", Failure(file="a.py", line=91, code="E501", message="line too long")),
+        gate(
+            "lint", Failure(file="a.py", line=91, code="E501", message="line too long")
+        ),
     ]
     assert subtract_baseline(head, base) == []
 
 
 def test_a_message_carrying_its_own_line_number_still_matches():
-    base = [gate("types", Failure(file="a.py", line=40, code="X", message="see line 40"))]
-    head = [gate("types", Failure(file="a.py", line=70, code="X", message="see line 70"))]
+    base = [
+        gate("types", Failure(file="a.py", line=40, code="X", message="see line 40"))
+    ]
+    head = [
+        gate("types", Failure(file="a.py", line=70, code="X", message="see line 70"))
+    ]
     assert subtract_baseline(head, base) == []
 
 
 def test_the_same_code_twice_in_one_file_is_told_apart_by_message():
-    base = [gate("types", Failure(file="a.py", line=1, code="arg-type", message="expected str"))]
+    base = [
+        gate(
+            "types",
+            Failure(file="a.py", line=1, code="arg-type", message="expected str"),
+        )
+    ]
     head = [
         gate(
             "types",
@@ -71,16 +84,31 @@ def test_the_same_code_twice_in_one_file_is_told_apart_by_its_numbers():
     and only counting tells them apart.
     """
     base = [
-        gate("types", Failure(file="m.py", line=1, code="arg-type",
-                              message='Argument 1 to "f" has incompatible type "int"; expected "str"'))
+        gate(
+            "types",
+            Failure(
+                file="m.py",
+                line=1,
+                code="arg-type",
+                message='Argument 1 to "f" has incompatible type "int"; expected "str"',
+            ),
+        )
     ]
     head = [
         gate(
             "types",
-            Failure(file="m.py", line=1, code="arg-type",
-                    message='Argument 1 to "f" has incompatible type "int"; expected "str"'),
-            Failure(file="m.py", line=2, code="arg-type",
-                    message='Argument 2 to "f" has incompatible type "int"; expected "str"'),
+            Failure(
+                file="m.py",
+                line=1,
+                code="arg-type",
+                message='Argument 1 to "f" has incompatible type "int"; expected "str"',
+            ),
+            Failure(
+                file="m.py",
+                line=2,
+                code="arg-type",
+                message='Argument 2 to "f" has incompatible type "int"; expected "str"',
+            ),
         )
     ]
     assert len(subtract_baseline(head, base)) == 1
@@ -88,14 +116,26 @@ def test_the_same_code_twice_in_one_file_is_told_apart_by_its_numbers():
 
 def test_extra_failures_sharing_one_baseline_identity_are_new():
     """One pre-existing E501 cancels one E501, not every E501 in the file."""
-    base = [gate("lint", Failure(file="a.py", line=3, code="E501",
-                                 message="Line too long (105 > 88)"))]
+    base = [
+        gate(
+            "lint",
+            Failure(
+                file="a.py", line=3, code="E501", message="Line too long (105 > 88)"
+            ),
+        )
+    ]
     head = [
         gate(
             "lint",
-            Failure(file="a.py", line=3, code="E501", message="Line too long (105 > 88)"),
-            Failure(file="a.py", line=8, code="E501", message="Line too long (140 > 88)"),
-            Failure(file="a.py", line=9, code="E501", message="Line too long (99 > 88)"),
+            Failure(
+                file="a.py", line=3, code="E501", message="Line too long (105 > 88)"
+            ),
+            Failure(
+                file="a.py", line=8, code="E501", message="Line too long (140 > 88)"
+            ),
+            Failure(
+                file="a.py", line=9, code="E501", message="Line too long (99 > 88)"
+            ),
         )
     ]
     assert len(subtract_baseline(head, base)) == 2
@@ -112,7 +152,9 @@ def test_the_same_failure_in_two_gates_is_two_identities():
 
 
 def test_a_gate_with_no_baseline_entry_reports_everything_as_new():
-    head = [gate("shacl", Failure(file="s.ttl", line=2, code="shape", message="violated"))]
+    head = [
+        gate("shacl", Failure(file="s.ttl", line=2, code="shape", message="violated"))
+    ]
     assert len(subtract_baseline(head, base=[])) == 1
 
 

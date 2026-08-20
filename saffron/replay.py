@@ -13,15 +13,15 @@ import tempfile
 from pathlib import Path
 
 from saffron.gates.baseline import subtract_baseline
-from saffron.gates.core.scope import scope_gate
 from saffron.gates.contract import GateResult
+from saffron.gates.core.scope import scope_gate
 from saffron.gates.runner import run_suite
 from saffron.intake import load_spec
 from saffron.ledger import Ledger
-from saffron.repos import mirror as git_mirror
-from saffron.repos.policy import load_policy
 from saffron.report.index import QueueLine, render_index
 from saffron.report.pr_body import render_pr_body
+from saffron.repos import mirror as git_mirror
+from saffron.repos.policy import load_policy
 
 
 def replay(
@@ -55,15 +55,33 @@ def replay(
     repo_id = ledger.upsert_repo(name, str(repo_dir), str(mirror), policy_sha)
     run_id = ledger.create_run(repo_id, base_sha)
     task_id = ledger.create_task(
-        run_id, spec.id, spec_sha, branch=f"saffron/{spec.id}", risk=spec.risk,
+        run_id,
+        spec.id,
+        spec_sha,
+        branch=f"saffron/{spec.id}",
+        risk=spec.risk,
         budget_usd=spec.budget_usd,
     )
 
     gates = policy.gate_executables(repo_dir)
-    baseline = _suite(mirror, base_sha, mirrors_dir / f"wt-{digest}-{spec.id}-base",
-                      gates, changed_files=[], touches=spec.touches, timeout_s=timeout_s)
-    head = _suite(mirror, head_sha, mirrors_dir / f"wt-{digest}-{spec.id}-head",
-                  gates, changed_files=changed, touches=spec.touches, timeout_s=timeout_s)
+    baseline = _suite(
+        mirror,
+        base_sha,
+        mirrors_dir / f"wt-{digest}-{spec.id}-base",
+        gates,
+        changed_files=[],
+        touches=spec.touches,
+        timeout_s=timeout_s,
+    )
+    head = _suite(
+        mirror,
+        head_sha,
+        mirrors_dir / f"wt-{digest}-{spec.id}-head",
+        gates,
+        changed_files=changed,
+        touches=spec.touches,
+        timeout_s=timeout_s,
+    )
 
     for result in baseline:
         ledger.record_gate_result(result, run_id=run_id)
@@ -85,15 +103,28 @@ def replay(
     _dump(task_dir / "head.json", head)
     (task_dir / "pr_body.md").write_text(
         render_pr_body(
-            spec, head, new_failures, base_sha=base_sha, head_sha=head_sha,
-            added=added, removed=removed, transcript_path=str(task_dir),
+            spec,
+            head,
+            new_failures,
+            base_sha=base_sha,
+            head_sha=head_sha,
+            added=added,
+            removed=removed,
+            transcript_path=str(task_dir),
         )
     )
 
     line = QueueLine(
-        repo=name, spec_id=spec.id, state=state, attempts=1, cost_usd_est=None,
-        concerns=0, added=added, removed=removed,
-        link=f"{spec.id}/pr_body.md", risk=spec.risk,
+        repo=name,
+        spec_id=spec.id,
+        state=state,
+        attempts=1,
+        cost_usd_est=None,
+        concerns=0,
+        added=added,
+        removed=removed,
+        link=f"{spec.id}/pr_body.md",
+        risk=spec.risk,
         note=_note(head, baseline, new_failures),
     )
     _write_index(out_dir, line)
@@ -133,7 +164,9 @@ def _sole_spec(repo_dir: Path) -> Path:
     return specs[0]
 
 
-def _note(results: list[GateResult], baseline: list[GateResult], new_failures: list) -> str:
+def _note(
+    results: list[GateResult], baseline: list[GateResult], new_failures: list
+) -> str:
     errored = [r.gate for r in results if r.status == "error"]
     if errored:
         return f"errored: {', '.join(errored)}"
@@ -171,7 +204,8 @@ def _write_index(out_dir: Path, line: QueueLine) -> None:
         ),
     )
     _atomic_write(
-        out_dir / "lines.json", json.dumps([vars(item) for item in index_lines], indent=2)
+        out_dir / "lines.json",
+        json.dumps([vars(item) for item in index_lines], indent=2),
     )
 
 

@@ -57,10 +57,16 @@ def _new_failures(new_failures: list[NewFailure]) -> str:
     if not new_failures:
         return "### No new failures\n\nEvery failure at head was already present at base.\n"
 
-    lines = ["### New failures", "", "| gate | where | code | message |", "|---|---|---|---|"]
+    lines = [
+        "### New failures",
+        "",
+        "| gate | where | code | message |",
+        "|---|---|---|---|",
+    ]
     for gate, failure in new_failures:
         where = (
-            f"{failure.file}:{failure.line}" if failure.line is not None
+            f"{failure.file}:{failure.line}"
+            if failure.line is not None
             else failure.file
         )
         lines.append(
@@ -72,20 +78,30 @@ def _new_failures(new_failures: list[NewFailure]) -> str:
 
 
 def _gate_table(results: list[GateResult]) -> str:
-    lines = ["### Gates", "", "| gate | status | duration | summary |", "|---|---|---|---|"]
+    lines = [
+        "### Gates",
+        "",
+        "| gate | status | duration | summary |",
+        "|---|---|---|---|",
+    ]
     for result in results:
         # `is not None`: a measured 0 is a measurement, and "—" means the
         # opposite — that nothing was measured.
         duration = (
-            f"{result.duration_ms / 1000:.1f}s" if result.duration_ms is not None
+            f"{result.duration_ms / 1000:.1f}s"
+            if result.duration_ms is not None
             else "—"
         )
         lines.append(
             f"| `{_cell(result.gate)}` | `{result.status}` | {duration} "
             f"| {_cell(result.summary)} |"
         )
-    lines += ["", "`skip` means the repo declares no such gate. `error` means the gate "
-              "itself broke and is charged to nobody.", ""]
+    lines += [
+        "",
+        "`skip` means the repo declares no such gate. `error` means the gate "
+        "itself broke and is charged to nobody.",
+        "",
+    ]
     return "\n".join(lines)
 
 

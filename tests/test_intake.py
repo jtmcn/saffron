@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from saffron.intake import Spec, SpecError, load_spec, parse_spec
+from saffron.intake import SpecError, load_spec, parse_spec
 
 VALID = """---
 id: TE-9001

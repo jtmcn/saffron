@@ -84,5 +84,7 @@ def _row(line: QueueLine) -> str:
         f"+{line.added}/−{line.removed}",
         f'<a href="{html.escape(line.link)}">artifacts</a>' if line.link else "",
     ]
-    note = f'<td class="note">{html.escape(line.note)}</td>' if line.note else "<td></td>"
+    note = (
+        f'<td class="note">{html.escape(line.note)}</td>' if line.note else "<td></td>"
+    )
     return "  <tr>" + "".join(f"<td>{cell}</td>" for cell in cells) + note + "</tr>"
