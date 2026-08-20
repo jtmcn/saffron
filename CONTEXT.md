@@ -178,8 +178,14 @@ _Avoid_: "priority" (a separate field), "severity" (that is a finding property),
 ## 4. Verification
 
 **Gate contract**: The interface that makes Saffron repo-agnostic. A gate is an
-executable that emits one JSON object: `gate`, `status`, `failures[]`, `summary`.
-Nothing downstream sees tool output.
+executable that emits one JSON object: `gate`, `status`, `tool`, `failures[]`,
+`summary`. Nothing downstream sees tool output.
+
+**`tool`**: The identifier a gate obtains *by executing* its tool (`ruff 0.14.2`),
+and the only thing separating a gate that ran and passed from one that never ran
+(`DESIGN.md` §5.4, Appendix H).
+_Avoid_: "the version", "the tool name" — it is neither on its own, and a string
+literal in a gate script is not a `tool` value at all.
 
 **Gate role**: A name in the contract — `format`, `lint`, `types`, `tests`,
 `no-network`, `coverage`. The repo supplies the executable; core supplies the
@@ -220,8 +226,10 @@ _Avoid_: "soft fail", "warning", "non-fatal".
 Per repo; never compared across repos.
 
 **New failure**: A gate failure not present in the baseline, compared on
-`(gate, file, code)` — never on line number, which the diff moves. Only new
-failures are a task's problem.
+`(gate, file, code, normalized message)` — never on line number, which the diff
+moves. The comparison **counts**: identities collide legitimately, so one baseline
+failure cancels one head failure, not all of them. Only new failures are a task's
+problem.
 _Avoid_: "regression" *as a noun for a new failure*. ("Regression test" remains the
 ordinary term for a test and is fine.) _Avoid_ also "real failure".
 
@@ -233,7 +241,8 @@ The agent never runs the gates and never reports gate status.
 _Avoid_: "fix", "retry", "self-heal", "auto-fix".
 
 **No-progress**: An identical new-failure set across two consecutive attempts, on
-the same `(gate, file, code)` identity. The signal to stop paying.
+the same identity as a new failure and counted the same way. The signal to stop
+paying.
 _Avoid_: "byte-identical" — line numbers shift every attempt, so a byte comparison
 never fires.
 

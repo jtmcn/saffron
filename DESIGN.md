@@ -2,7 +2,7 @@
 
 An agentic software factory: spec files in, reviewed pull requests out, running unattended overnight on one Mac.
 
-**Status:** design, rev 7 — rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime (Appendix G)
+**Status:** rev 9 — v0 built and replayed against a real repo (Appendix H). Prior: rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime (Appendix G)
 
 **Companion document:** `CONTEXT.md` — the controlled vocabulary. It is authoritative for what words mean; this document is authoritative for what the system does. Where they disagree, one of them has a bug.
 **Scope:** language- and stack-agnostic. Saffron develops *any* repo that can satisfy the gate contract (§5.4). First repo is Saffron itself; `thermal-edge` is the first external one.
@@ -558,6 +558,7 @@ This is what makes Saffron repo-agnostic, and it is deliberately tiny. **A gate 
 ```json
 { "gate": "types",
   "status": "pass" | "fail" | "skip" | "error",
+  "tool": "mypy 1.18.2",
   "failures": [ { "file": "src/ingest.py", "line": 88,
                   "code": "arg-type", "message": "…" } ],
   "summary": "4 errors in 2 files" }
@@ -566,9 +567,16 @@ This is what makes Saffron repo-agnostic, and it is deliberately tiny. **A gate 
 Everything downstream is built on this and nothing else:
 
 - **The repair loop is language-agnostic** because it feeds `failures[]` back to the agent as structured text. It never parses compiler output; that translation is the gate's job, and it belongs in the repo where someone knows the tool.
-- **Baseline subtraction works** because failures are comparable by **`(gate, file, code)`** — deliberately *not* including `line`. A task that inserts thirty lines near the top of a file moves every pre-existing failure below it, so a line-keyed baseline entry stops matching and an untouched failure reads as new. The repair loop would then spend attempts on pre-existing code, which is the exact thing baselines exist to prevent: the countermeasure defeating itself on nearly every diff that is not append-only. `line` is carried for display and for anchoring (§5.5); it is never part of the identity. Where one file legitimately holds two failures with the same `code`, the normalized `message` breaks the tie. **An identity that includes a coordinate the change moves is not an identity.**
+- **Baseline subtraction works** because failures are comparable by **`(gate, file, code, normalized message)`** — deliberately *not* including `line`. A task that inserts thirty lines near the top of a file moves every pre-existing failure below it, so a line-keyed baseline entry stops matching and an untouched failure reads as new. The repair loop would then spend attempts on pre-existing code, which is the exact thing baselines exist to prevent: the countermeasure defeating itself on nearly every diff that is not append-only. `line` is carried for display and for anchoring (§5.5); it is never part of the identity. **An identity that includes a coordinate the change moves is not an identity.**
+- **The subtraction counts; it is not a set difference.** Normalizing the message means collapsing the digit runs that embed the coordinate — and in one file, two failures of one rule often differ *only* in those digits, so they normalize to one identity legitimately. Under set semantics a single pre-existing failure then cancels every head failure sharing that identity, and genuinely new ones vanish. Baseline subtraction is therefore a multiset operation: one baseline failure cancels one head failure. The known consequence is that where N of M colliding failures are new, the ones *reported* may name a pre-existing line — acceptable, because `line` was already display-only. Found by review after v0's replays, which happened not to contain the shape (Appendix H).
 - **`skip` is a first-class status**, so a repo simply omits gates it has no analogue for. A repo with no type system declares no `types` gate; nothing in core changes.
 - **`error` is distinct from `fail`** — the gate itself broke (toolchain missing, DB down). It never counts as a task failure, it aborts the attempt and surfaces as an infrastructure problem. Conflating these is how you get an agent spending four attempts "fixing" a crashed linter.
+- **`tool` is what distinguishes "ran and passed" from "didn't run",** and v0 shipped without it at the cost of a silently green replay (Appendix H). `{"status":"pass","failures":[]}` is bit-for-bit identical whether the linter found nothing or the linter was not on `PATH` and a shell script swallowed the error. So the contract requires an opaque tool identifier **obtained by executing the tool** — `ruff --version`, not a string literal. A gate that cannot run its tool cannot produce the field. The host stores it per gate result and treats a `tool` that differs between a run's baseline and its head as grounds to distrust the subtraction rather than report it.
+
+Two rules about `error` that the same replay forced, both stated because a gate author has to know them and neither is derivable from the schema:
+
+- **A non-zero exit with an empty `failures[]` is `error`, never `pass`.** It means the tool objected to something the gate's parser did not recognize — a reworded output line after a version bump is the ordinary cause, and it produces the identical false green as a missing binary, from a different direction. The gate knows its own exit code; nothing downstream does.
+- **Partial results are not results.** When a gate's execution mechanism breaks part-way — a lost test worker, a collection crash, a timeout on one shard — the gate returns `error` for the whole run rather than `fail` on whatever it managed to collect. There is deliberately no per-failure `error` vocabulary: a suite that lost a worker did not produce a trustworthy result, and the cost of that rule is one re-run charged to nobody, against the cost of an agent spending attempts "fixing" a test that a scheduler killed.
 
 Requiring gates to translate their own tool output is the price of admission, and it is the right price: it is ~20 lines of shell per gate, written once by the person who understands that tool, and it keeps every parser out of the orchestrator.
 
@@ -640,7 +648,7 @@ for n in 1..max_attempts:
 ```
 
 - **Only new failures count.** Failures on `base_sha` are pre-existing and not this task's problem. Otherwise every task inherits your flaky tests and burns its budget on them.
-- **No-progress detection.** The same new-failure set two attempts running — same `(gate, file, code)` identity as above, for the same reason — means the agent is stuck; stop paying. Comparing raw bytes instead would make this dead code, because every repair shifts line numbers, so a permanently stuck agent would look like it were making progress forever. Optionally escalate once to a fresh session rather than a resumed one — sometimes the accumulated context *is* the problem.
+- **No-progress detection.** The same new-failure set two attempts running — same identity as above, and counted the same way, for the same reason — means the agent is stuck; stop paying. Comparing raw bytes instead would make this dead code, because every repair shifts line numbers, so a permanently stuck agent would look like it were making progress forever. Counted rather than set-compared because fixing three of four colliding failures is progress and a set cannot see it. Optionally escalate once to a fresh session rather than a resumed one — sometimes the accumulated context *is* the problem.
 - **`EXHAUSTED` is a respectable outcome.** A task that can't pass its own gates in four tries is telling you the spec was underspecified or the codebase is hostile at that point. Both worth knowing.
 
 ### 5.5 Phase 4 — REVIEW (adversarial)
@@ -797,6 +805,11 @@ Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents
 | **Host services reachable from an isolated cell** | An `--internal` network still routes to the host gateway | Bind host services to `127.0.0.1`, never `0.0.0.0`; verified by a preflight probe, because N1 rests on it (Appendix G) |
 | **The cell cannot resolve its own proxy** | Internal networks have no DNS | Pin the network subnet and address the proxy by IP (Appendix G) |
 | **A runtime flag silently means something else** | Container flags are interpreted inside a VM on macOS | State the requirement, not the flag; verify each control on the runtime actually chosen (Appendix G) |
+| **A gate that never ran reports `pass`** | An absent tool and a clean repo emit identical JSON | `tool`, obtained by executing the tool; non-zero exit with empty `failures[]` is `error` (§5.4, Appendix H) |
+| **A tool-output parser silently stops matching** | Gates regex an unversioned CLI string that a version bump rewords | Same two guards — the exit code disagrees with the empty parse, and `tool` records the bump (§5.4) |
+| **A crashed test worker reads as a code failure** | A lost worker's `code` field looks like an assertion failure's | Partial results are not results: the gate returns `error` for the whole run, charged to nobody (§5.4) |
+| **New failures cancelled by a pre-existing one** | Normalization collapses the digits that tell colliding failures apart | Baseline subtraction is a multiset operation — one baseline failure cancels one head failure (§5.4) |
+| **A replayed PR drags `main` into its own diff** | `M^1` is `main` at merge time, not the branch point | Base is the merge base of the two parents; a squash's sole parent already is one (Appendix H) |
 
 ### 7.1 Cost model
 
@@ -865,6 +878,8 @@ No agent at all. Take three already-merged PRs from a real repo, write specs for
 Why this and not "one agent fixes one bug": that version proves an agent can edit a repo and run pytest, which you already know from using Claude Code interactively. It defers everything unproven — whether the gate runner's structured-result contract survives real tool output, whether the gate set catches what you care about, whether the artifact actually saves you review time — and it runs unattended with your `.env`, your real Postgres, your real `origin`, and open network, which is the highest-risk configuration in the whole design.
 
 Success criterion: replay a merged PR, and the gate table plus PR body tell you something you'd have had to read the diff to learn.
+
+**Shipped 2026-08-19, against `thermal-edge` PRs #172, #169 and #165. Criterion met; four contract defects returned. Appendix H.**
 
 ### v0.5 — one cell, attended (a weekend)
 
@@ -1015,6 +1030,7 @@ And the other half of the layout — the part that lives in every target repo, a
 - **K = 3 and the single machine.** The first real ceiling, and multi-repo brings it closer — three repos with healthy queues will saturate three cells long before one repo would. Revisit when a batch consistently fails to drain, not when it merely feels slow.
 - **The gate contract's shape.** It survives contact with two Python repos trivially. The interesting questions arrive with repo three: does `failures[]` with `file`/`line`/`code` fit a compiler that reports spans rather than lines, or a test runner that reports suites rather than files? Expect one field to be wrong. Change it then, with a real second opinion in hand, rather than speculatively widening it now.
 - **Refusing agent conflict resolution.** §5.7 sends every rebase conflict to `MERGE_FAILED`. Prior art (Appendix D) runs a better-shaped version: the host attempts `git merge` itself and only invokes an agent on genuine conflict, then verifies the result deterministically (`git diff --diff-filter=U` empty, HEAD actually moved) before allowing a push — with the agent explicitly told *"do not invent new behaviour; reconciliation is not feature work; if a sensible resolution requires logic that was on neither side, flag uncertainty rather than be creative."* Their version is weakly verified because they have no gates. **Saffron's would be gate-verified**, which is a materially different risk profile — a resolved conflict runs the full suite before it reaches you. Revisit once `MERGE_FAILED` volume is annoying enough to measure; the deterministic-first / LLM-as-fallback shape is the right one, and it should stay off until the gates have earned trust.
+- **`scope` having one severity for every kind of escape.** v0 put a new file the spec's own acceptance criteria required, three docs files, an adjacent source file and a dbt test into one `out-of-scope` bucket at identical weight (Appendix H). Not fixed, because the case that produced it — `touches` hand-written before anyone saw the diff — is the case §5.2 removes for bugs: in the real pipeline DIAGNOSE proposes and you ratify. If ratified `touches` still produces mixed-weight escapes once bugs run for real, that is the evidence to act on.
 - **Per-repo budgets.** Deliberately not built — you have no data to tune them with. Once you have three months of cost-per-accepted-PR *by repo*, a repo that reliably costs triple is an argument for its own ceiling.
 - **`revert` vs. mutation testing.** If gate wall-clock stops being the constraint (faster fixtures, more cores), mutation sampling on `risk: elevated` diffs becomes affordable and is strictly stronger.
 - **Conflict-set scheduling.** Limiting once you have many small tasks in one hot module. The principled upgrade is function-level conflict sets, which is a lot of work; the cheap alternative is batching hot-module specs into one task.
@@ -1218,3 +1234,103 @@ Three principles, and the first is the one that generalizes:
 31. **A resource control means whatever the kernel reading it can see.** `cpuset` pins host cores on Linux and virtual cores in a VM — same flag, same syntax, silently different guarantee. Every limit, mask, and quota needs verifying against the layer that actually enforces it, not the layer whose documentation you read.
 32. **A product name in a design is an unmade decision wearing a decision's clothes.** "Docker" appeared in six sections and was never chosen; it survived four revisions and an adversarial review because a proper noun reads as settled. §2.1 catches this for languages and toolchains and did not catch it one layer down, for the runtime the whole cell is built on.
 33. **A countermeasure written against an environment you have not run on is a hypothesis.** Rev 7's P-core enumeration was reasoned correctly from a false premise about where `cpuset` applies, and recorded as a fix. This is the third time an appendix has argued that the next artifact should be executable (§9); it is now also the reason.
+
+---
+
+## Appendix H — rev 9: what v0 found
+
+Every previous revision was a document reading a document. Appendices F and G each
+ended by arguing the next artifact should be executable; §9 made it a rule. v0 is
+the first revision that ran — three merged `thermal-edge` pull requests replayed
+through the agent-free harness (#172, #169, #165, as `TE-9001`–`TE-9003`) — and it
+is worth recording what that bought and what it did not.
+
+**The criterion was met, and by the intended mechanism.** `TE-9001`'s rendered PR
+body states that the settled-high defect understated 7 of 108 stored days, that two
+of the seven are invisible to the obvious METAR proxy check, and why — none of
+which is derivable from reading the diff, because it came from an audit against
+external settlement data. That is the artifact doing the job §0 claims for it.
+
+**The mechanism v0 existed to test held.** `(gate, file, code, normalized message)`
+with `line` excluded survived three real diffs, one of them +1905/−49. Two files
+already carrying `format` debt at base, still failing at head, correctly stayed off
+the new-failure table. That is §5.4's rev-7 fix confirmed against real tool output
+rather than reasoned about.
+
+### The headline finding: a green gate suite that never ran
+
+The first replay of `TE-9001` reported `format` and `lint` as `pass` in 0.3s each,
+with `types` clean — against a repository carrying 402 files needing reformatting
+and 57 type errors. Saffron's own process environment had leaked into the gates it
+shells out to, so every gate resolved a different Python environment than the one it
+was written for, and the shell scripts swallowed the resulting failures into an
+empty `failures[]`.
+
+The defect worth recording is not the leak. It is that **nothing in the gate
+contract could express the difference.** `{"status":"pass","failures":[]}` is
+bit-for-bit identical whether the tool ran and found nothing or never ran at all,
+and `duration_ms` is no help — genuine `ruff` against that whole repository also
+finishes in 0.3s. It was caught only because someone remembered a baseline figure
+from a week earlier and noticed 0 was not 396. An incidental catch, unattended, at
+03:00, is not a catch.
+
+Hence §5.4's `tool` field, obtained by executing the tool, and the two `error` rules
+beside it. Three of the four defects below collapse into one shape once stated that
+way, which is the argument for fixing it at the contract rather than in four gates.
+
+### The other three
+
+- **`tests` cannot say a worker crashed.** A lost `pytest-xdist` worker puts the
+  test's own name in `code`, exactly like a real assertion failure. A repair loop
+  consuming that JSON cannot tell "your change broke this" from "the runner lost a
+  process, re-run it" without pattern-matching free text. Resolved by rule rather
+  than by schema: partial results are not results, and the gate returns `error`
+  (§5.4).
+- **`format`'s parser is coupled to an unversioned CLI string.** A `ruff` release
+  rewording one line makes every match vanish and the gate reports a false `pass` —
+  the same failure shape as the environment leak, from a different cause. Covered by
+  the same two guards.
+- **`scope` has one severity for every kind of escape.** A new file the acceptance
+  criteria required and three unrelated docs files rendered identically. Recorded as
+  a thing to watch rather than fixed; §11 says why.
+
+### And two the replays did not find
+
+Both were found by review afterwards, and both are the more interesting half of this
+appendix, because they are the shapes three green runs happened not to contain:
+
+- **Baseline subtraction was a set difference.** `normalize_message` collapses digit
+  runs — correctly, since messages embed the coordinate the identity exists to
+  exclude — which means two failures of one rule in one file differing only in their
+  numbers share an identity legitimately. Under set semantics one pre-existing
+  failure then cancelled *every* head failure sharing it. The subtraction is now a
+  multiset operation (§5.4), and so is no-progress detection, for the same reason.
+- **`M^1` is not the branch point.** Resolving a merge commit's base as its first
+  parent takes `main` as of the merge, so where `main` advanced while the pull
+  request was open, commits the task never touched entered both the diff and the
+  baseline. The base is the merge base of the two parents.
+
+Three principles, and the first is the general one:
+
+34. **A green result and an absent result are the same bytes.** Any contract that
+    reports outcomes must carry evidence that the thing which produces outcomes ran.
+    Absence renders as success in every schema that does not ask, and the failure is
+    silent by construction — which makes it exactly the kind that survives an
+    unattended night.
+35. **When identities can legitimately collide, subtraction has to count.** A
+    normalization that erases a distinguishing field is usually right and always
+    turns set difference into cancellation. If two rows can be the same key on
+    purpose, the operation over them is arithmetic, not membership.
+36. **Partial results are not results.** A mechanism that broke half way through
+    produces output shaped exactly like output. Give the producer the vocabulary to
+    disown its own run, and prefer one re-run charged to nobody over a consumer
+    reasoning about a truncated set.
+
+**The method note, since three appendices in a row now predict it.** Rev 7 found
+nine defects by reading and said the next artifact should be executable. Rev 8 found
+that rev 7's central fix was not implementable on this machine and said it again,
+this time as principle 33. Rev 9 is the first one that ran, and the defect it found
+first — a whole gate suite reporting green while doing nothing — is not visible to
+any amount of rereading, because the document was never wrong about it. It simply
+never asked. **The next artifact should be v0.5**, and the four-assertion runtime
+spike is what it starts with.
