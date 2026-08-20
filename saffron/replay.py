@@ -63,7 +63,11 @@ def replay(
         ledger.record_gate_result(result, attempt_id=task_id)
 
     new_failures = subtract_baseline(head, baseline)
-    state = "READY_FOR_REVIEW" if not new_failures else "EXHAUSTED"
+    # An errored gate aborts the attempt (CONTEXT.md §4): it contributes no
+    # failures, so state read from new_failures alone calls a suite that never
+    # ran "no new failures".
+    errored = any(result.status == "error" for result in baseline + head)
+    state = "READY_FOR_REVIEW" if not new_failures and not errored else "EXHAUSTED"
     ledger.set_task_state(task_id, state)
     ledger.finish_run(run_id, "COMPLETE")
 

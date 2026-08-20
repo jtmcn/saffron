@@ -203,3 +203,20 @@ def test_a_lines_json_of_the_wrong_shape_does_not_wedge_the_replay(target, ledge
     assert "SY-9001" in (out_dir / "index.html").read_text()
     rewritten = json.loads((out_dir / "lines.json").read_text())
     assert [item["spec_id"] for item in rewritten] == ["SY-9001"]
+
+
+def test_an_errored_gate_never_reaches_a_green_terminal_state(target, ledger, tmp_path):
+    """An errored gate contributes no failures, so a state read from new
+    failures alone calls a suite that never ran `READY_FOR_REVIEW`."""
+    (target / ".saffron" / "gates" / "tests").write_text(
+        "#!/bin/sh\necho 'ModuleNotFoundError: No module named pytest' >&2\nexit 1\n"
+    )
+    (target / ".saffron" / "gates" / "tests").chmod(0o755)
+    git(target, "add", "-A")
+    git(target, "commit", "-qm", "a gate whose toolchain is gone")
+
+    line = replay(target, 7, ledger=ledger, out_dir=tmp_path / "out",
+                  mirrors_dir=tmp_path / "mirrors")
+
+    assert line.state == "EXHAUSTED"
+    assert "errored: tests" in line.note
