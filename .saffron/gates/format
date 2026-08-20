@@ -1,0 +1,25 @@
+#!/bin/sh
+# ruff format --check -> the gate contract. ~20 lines of shell, written once by
+# the person who understands the tool, keeping every parser out of the core.
+set -u
+tool="ruff $(ruff --version 2>/dev/null | awk '{print $2}')"
+case "$tool" in "ruff ") echo '{"gate":"format","status":"error","summary":"ruff not on PATH"}'; exit 0;; esac
+
+out=$(ruff format --check . 2>&1); rc=$?
+# ruff 0.16 reports each hunk as "  --> path:line:col"; a file may recur once
+# per hunk, so dedupe while preserving order.
+files=$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*--> \(.*\):[0-9][0-9]*:[0-9][0-9]*$/\1/p' | awk '!seen[$0]++')
+
+if [ "$rc" -eq 0 ]; then
+  printf '{"gate":"format","status":"pass","tool":"%s","failures":[],"summary":"formatted"}\n' "$tool"
+  exit 0
+fi
+if [ -z "$files" ]; then
+  # Non-zero exit and nothing parsed: the output shape changed. Not a pass.
+  printf '{"gate":"format","status":"error","tool":"%s","summary":"ruff exited %s, parsed no files"}\n' "$tool" "$rc"
+  exit 0
+fi
+printf '{"gate":"format","status":"fail","tool":"%s","failures":[' "$tool"
+printf '%s\n' "$files" | awk 'NR>1{printf ","} {printf "{\"file\":\"%s\",\"code\":\"format\",\"message\":\"would be reformatted\"}", $0}'
+printf '],"summary":"%s files would be reformatted"}\n' "$(printf '%s\n' "$files" | wc -l | tr -d ' ')"
+exit 1

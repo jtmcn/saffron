@@ -1,0 +1,26 @@
+# Saffron as a target repo. Everything here is repo-shaped; none of it is code.
+gates:
+  format: { blocking: true }
+  lint:   { blocking: true }
+  types:  { blocking: true }
+  tests:  { blocking: true }
+
+# Where a plausible-looking wrong change hurts most. Getting this right is most
+# of what onboarding actually means (DESIGN.md §5.6).
+elevate_on:
+  - saffron/gates/**
+  - saffron/cell/**
+  - saffron/ledger.py
+
+protected:
+  - DESIGN.md
+  - CONTEXT.md
+  - .saffron/**
+  - uv.lock
+
+integrity:
+  test_paths: ["tests/**"]
+  suppressions: ["@pytest.mark.skip", "xfail", "# type: ignore", "# noqa"]
+  gate_config: ["pyproject.toml", ".saffron/**"]
+
+thread_env: {}
