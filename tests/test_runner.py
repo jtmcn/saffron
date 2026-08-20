@@ -10,7 +10,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "gates"
 
 
 def _running(pattern: str) -> bool:
-    return subprocess.run(["pgrep", "-f", pattern], capture_output=True).returncode == 0
+    return subprocess.run(["pgrep", "-f", pattern], capture_output=True, check=False).returncode == 0
 
 
 def test_a_well_behaved_gate_is_parsed(tmp_path):

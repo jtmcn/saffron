@@ -53,7 +53,10 @@ def _new_failures(new_failures: list[NewFailure]) -> str:
 
     lines = ["### New failures", "", "| gate | where | code | message |", "|---|---|---|---|"]
     for gate, failure in new_failures:
-        where = f"{failure.file}:{failure.line}" if failure.line else failure.file
+        where = (
+            f"{failure.file}:{failure.line}" if failure.line is not None
+            else failure.file
+        )
         lines.append(f"| `{gate}` | {where} | `{failure.code}` | {failure.message} |")
     lines.append("")
     return "\n".join(lines)
@@ -62,7 +65,12 @@ def _new_failures(new_failures: list[NewFailure]) -> str:
 def _gate_table(results: list[GateResult]) -> str:
     lines = ["### Gates", "", "| gate | status | duration | summary |", "|---|---|---|---|"]
     for result in results:
-        duration = f"{result.duration_ms / 1000:.1f}s" if result.duration_ms else "—"
+        # `is not None`: a measured 0 is a measurement, and "—" means the
+        # opposite — that nothing was measured.
+        duration = (
+            f"{result.duration_ms / 1000:.1f}s" if result.duration_ms is not None
+            else "—"
+        )
         lines.append(
             f"| `{result.gate}` | `{result.status}` | {duration} | {result.summary} |"
         )

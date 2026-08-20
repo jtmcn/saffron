@@ -148,3 +148,17 @@ def test_a_queue_line_field_cannot_smuggle_markup_into_the_index():
     rendered = render_index([line(note="<script>alert(1)</script>")], header={})
     assert "<script>" not in rendered
     assert "&lt;script&gt;" in rendered
+
+
+def test_a_measured_zero_is_not_rendered_as_unmeasured():
+    """`—` means "not measured"; a gate that finished inside a millisecond,
+    or a failure reported at line 0, measured something."""
+    rendered = render_pr_body(
+        SPEC,
+        [GateResult(gate="lint", status="fail", duration_ms=0,
+                    failures=[Failure(file="a.py", line=0, code="E501")])],
+        [NewFailure("lint", Failure(file="a.py", line=0, code="E501"))],
+        base_sha="a", head_sha="b", added=1, removed=0, transcript_path="/t",
+    )
+    assert "| 0.0s |" in rendered
+    assert "a.py:0" in rendered

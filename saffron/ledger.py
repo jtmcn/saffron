@@ -168,6 +168,8 @@ class Ledger:
             )
         return gate_result_id
 
+    # baseline_results, task_results and queue_lines have no production caller
+    # in v0: they are v1's supervisor's read side, and the tests exercise them.
     def baseline_results(self, run_id: int) -> list[GateResult]:
         return self._results("run_id", run_id)
 
