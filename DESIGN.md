@@ -471,7 +471,7 @@ container run --rm \
   saffron/cell:thermal-edge                       # built from .saffron/Dockerfile
 ```
 
-**Every flag in the per-task block is a requirement, and the wiring is the control.** v0.5 shipped a cell created without `--network` and without the proxy environment: the isolated network was created, the host-binding probe ran against it, the proxy started on it and printed its address, and none of it was passed to the container holding the agent. Every mechanism ran, every mechanism reported success, and all of it applied to a different container. So `network` and `env` are **required** arguments where a cell is created — omission is an error, not a default — and the test that proves isolation must start a cell *the way production starts one* and probe **from inside that container**, not from an ephemeral sibling (Appendix I).
+**Every flag in the per-task block is a requirement, and the wiring is the control.** v0.5 shipped a cell created without `--network` and without the proxy environment: the isolated network was created, the host-binding probe ran against it, the proxy started on it and printed its address, and none of it was passed to the container holding the agent. Every mechanism ran, every mechanism reported success, and all of it applied to a different container. So `network` and `env` are **required** arguments where a cell is created — omission is an error, not a default — and the test that proves isolation must start a cell *the way production starts one* and probe **from inside that container**, not from an ephemeral sibling (Appendix I). **That rule is about a *container's* egress.** A preflight probe establishing a property of the *network* — N1's host-binding probe — necessarily runs in an ephemeral sibling on that same network, because it gates whether a cell is started at all and so cannot run inside one that does not exist yet.
 
 **Two measured prerequisites, neither obvious and both expensive to rediscover.** `container build` does not work on macOS without Rosetta installed (`softwareupdate --install-rosetta`). And `container volume create` pre-formats a volume with a `lost+found` directory, so `git clone` refuses the destination as non-empty — a worktree is seeded with `git init` + `remote add` + `fetch` + `checkout` + `remote remove`, chained under `sh -euc` so the remote removal cannot be skipped on a successful seed.
 
@@ -1438,7 +1438,11 @@ proxy was correct. The probe was correct. The network was correct. Nothing joine
 them, and the thing that would have caught it is the one test nobody wrote: start
 a cell **the way production starts one** and probe **from inside that container**.
 Every isolation test on the branch used an ephemeral sibling instead, which is a
-different container on a different network answering a different question.
+different container answering a different question. The distinction is what is
+being asserted, not what runs the assertion: a claim about *this container's*
+egress must be probed from inside the production-shaped cell, while a claim
+about the *network* — N1's host-binding probe, which runs before any cell
+exists — is properly made by a sibling on that same network.
 
 38. **A control and its subject are wired somewhere, and the wiring is the
     control.** Verifying each mechanism in isolation verifies nothing about the
