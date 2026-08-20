@@ -64,6 +64,43 @@ def test_the_same_code_twice_in_one_file_is_told_apart_by_message():
     assert [n.failure.message for n in new] == ["expected int"]
 
 
+def test_the_same_code_twice_in_one_file_is_told_apart_by_its_numbers():
+    """The numeric sibling of the test above.
+
+    `normalize_message` collapses digit runs, so these two share an identity
+    and only counting tells them apart.
+    """
+    base = [
+        gate("types", Failure(file="m.py", line=1, code="arg-type",
+                              message='Argument 1 to "f" has incompatible type "int"; expected "str"'))
+    ]
+    head = [
+        gate(
+            "types",
+            Failure(file="m.py", line=1, code="arg-type",
+                    message='Argument 1 to "f" has incompatible type "int"; expected "str"'),
+            Failure(file="m.py", line=2, code="arg-type",
+                    message='Argument 2 to "f" has incompatible type "int"; expected "str"'),
+        )
+    ]
+    assert len(subtract_baseline(head, base)) == 1
+
+
+def test_extra_failures_sharing_one_baseline_identity_are_new():
+    """One pre-existing E501 cancels one E501, not every E501 in the file."""
+    base = [gate("lint", Failure(file="a.py", line=3, code="E501",
+                                 message="Line too long (105 > 88)"))]
+    head = [
+        gate(
+            "lint",
+            Failure(file="a.py", line=3, code="E501", message="Line too long (105 > 88)"),
+            Failure(file="a.py", line=8, code="E501", message="Line too long (140 > 88)"),
+            Failure(file="a.py", line=9, code="E501", message="Line too long (99 > 88)"),
+        )
+    ]
+    assert len(subtract_baseline(head, base)) == 2
+
+
 def test_the_same_failure_in_two_gates_is_two_identities():
     base = [gate("lint", Failure(file="a.py", line=1, code="E501", message="long"))]
     head = [
@@ -103,3 +140,11 @@ def test_progress_is_a_different_identity_set():
         [gate("types", Failure(file="b.py", line=10, code="X", message="m"))], []
     )
     assert not is_no_progress(second, first)
+
+
+def test_fixing_some_of_several_identical_failures_is_progress():
+    """A set-keyed is_no_progress calls three-of-four fixed "no progress"."""
+    same = Failure(file="a.py", line=1, code="E501", message="Line too long (105 > 88)")
+    previous = subtract_baseline([gate("lint", same, same, same, same)], [])
+    current = subtract_baseline([gate("lint", same)], [])
+    assert not is_no_progress(current, previous)
