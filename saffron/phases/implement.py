@@ -6,13 +6,47 @@ and splitting them pays full context cost twice for the same file reads.
 
 from __future__ import annotations
 
+import json
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+from saffron.agents.artifacts import EXTRACTION_PROMPT
+from saffron.cell import runtime
 from saffron.cell.worktree import STATE_MOUNT, WORKTREE_MOUNT
+from saffron.gates.baseline import NewFailure
 
 # Explicit, and deliberately without the network tools. The cell has no route
 # to reach them anyway — this saves the turns spent discovering that.
 IMPLEMENT_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "TodoWrite"]
+
+# Installed by images/cell-base.python.Dockerfile. The agent runs inside the
+# cell; the host drives it from outside (§5.1).
+RUNNER = "/opt/saffron/agent_runner.py"
+
+PLAN_PROMPT = (
+    "Produce the plan for this task. Read whatever you need to; change no "
+    "file and make no commit — nothing you write now is kept. " + EXTRACTION_PROMPT
+)
+
+IMPLEMENT_PROMPT = (
+    "The plan is accepted. Implement it now and commit your work. An attempt "
+    "that produces no commits failed, whatever you say about it."
+)
+
+
+class AgentFailed(RuntimeError):
+    """The turn produced no result event, or one that reports an error.
+
+    An absent result and a clean result must never be the same value (§4.3) —
+    this is the exception that keeps them apart. Whoever catches it still has
+    to measure the worktree: a bound firing must not discard committed work.
+    """
+
+    def __init__(self, message: str, attempt: AttemptResult | None = None) -> None:
+        super().__init__(message)
+        # A failed turn still costs money. Dropping it here is how a budget
+        # silently stops counting (§4.3).
+        self.attempt = attempt
 
 
 @dataclass
@@ -22,6 +56,10 @@ class AttemptResult:
     terminal_reason: str | None
     num_turns: int
     cost_usd_est: float
+    # Every `text` event of the turn, in order. The <output> block is read from
+    # here and never from /work, which the agent can rewrite (§5.3).
+    text: str = ""
+    is_error: bool = False
 
 
 def agent_options(
@@ -62,13 +100,142 @@ def agent_options(
     return options
 
 
-def _reconcile_cost(*, reported: float, last_good: float, subtype: str) -> float:
+def repair_prompt(new_failures: Sequence[NewFailure]) -> str:
+    """The only way a gate result ever reaches the agent: as failures (§5.4).
+
+    No status, no gate verdict, no counts of what passed — the agent never runs
+    the gates and never learns whether it is green.
+    """
+    lines = [
+        f"- [{n.gate}] {n.failure.file}:{n.failure.line or '?'} "
+        f"{n.failure.code}: {n.failure.message}"
+        for n in new_failures
+    ]
+    return (
+        "These failures are new since the base commit. Failures already "
+        "present on the base commit are excluded and are not yours to fix. "
+        "Fix these and commit.\n\n" + "\n".join(lines)
+    )
+
+
+def _describe(event: dict) -> str:
+    """One line per event, for the operator watching v0.5 run."""
+    kind = event.get("type")
+    if kind == "text":
+        text = " ".join(str(event.get("text", "")).split())
+        return f"agent: {text[:160]}"
+    if kind == "tool_use":
+        return f"agent: {event.get('name')} {json.dumps(event.get('input'))[:120]}"
+    if kind == "tool_result":
+        return "agent: tool " + ("error" if event.get("is_error") else "ok")
+    if kind == "result":
+        return (
+            f"agent: {event.get('subtype')} in {event.get('num_turns')} turns, "
+            f"${event.get('total_cost_usd')} ({event.get('terminal_reason')})"
+        )
+    if kind == "error":
+        return f"agent: error {event.get('error')}"
+    return f"agent: {kind} {event.get('subtype') or event.get('kind') or ''}".rstrip()
+
+
+def run_agent(
+    container: str,
+    *,
+    prompt: str,
+    options: dict,
+    resume: str | None = None,
+    watch: Callable[[str], None] = print,
+    last_cost_usd: float = 0.0,
+    timeout_s: float = 3600,
+    exec_stream: Callable[..., runtime.Completed] = runtime.exec_stream,
+) -> AttemptResult:
+    """Drive one turn of the in-cell agent and return what it did.
+
+    The host reads Saffron's event schema, never the SDK's — `agent_runner.py`
+    inside the cell is the only place the SDK's types exist.
+    """
+    request = json.dumps({"prompt": prompt, "options": options, "resume": resume})
+    text: list[str] = []
+    errors: list[str] = []
+    result: dict = {}
+
+    def _on_line(line: str) -> None:
+        if not line.strip():
+            return
+        try:
+            event = json.loads(line)
+        except ValueError:
+            # Anything not an event came from a process sharing the runner's
+            # stdout. Show it to the operator; never try to read it as one.
+            watch(f"agent: (raw) {line[:160]}")
+            return
+        if not isinstance(event, dict):
+            watch(f"agent: (raw) {line[:160]}")
+            return
+        if event.get("type") == "text":
+            text.append(str(event.get("text", "")))
+        elif event.get("type") == "error":
+            errors.append(str(event.get("error", "")))
+        elif event.get("type") == "result":
+            result.update(event)
+        watch(_describe(event))
+
+    done = exec_stream(
+        container,
+        ["python", RUNNER],
+        stdin_data=request,
+        on_line=_on_line,
+        workdir=WORKTREE_MOUNT,
+        timeout_s=timeout_s,
+    )
+
+    detail = "; ".join(errors) or done.stderr.strip()[-800:] or "no output"
+    if not result:
+        raise AgentFailed(
+            f"the agent produced no result event (exit {done.returncode}"
+            f"{', timed out' if done.timed_out else ''}): {detail}"
+        )
+
+    subtype = str(result.get("subtype", "unknown"))
+    is_error = bool(result.get("is_error"))
+    attempt = AttemptResult(
+        session_id=result.get("session_id"),
+        subtype=subtype,
+        terminal_reason=result.get("terminal_reason"),
+        num_turns=int(result.get("num_turns") or 0),
+        cost_usd_est=_reconcile_cost(
+            reported=float(result.get("total_cost_usd") or 0.0),
+            last_good=last_cost_usd,
+            subtype=subtype,
+            is_error=is_error,
+        ),
+        text="".join(text),
+        is_error=is_error,
+    )
+    if is_error:
+        # Measured, not assumed: a cell with no credential returns
+        # `subtype="success"` with `is_error=true` and terminal_reason
+        # `api_error`. Keying on the subtype would call a session that did
+        # nothing at all a clean success.
+        raise AgentFailed(
+            f"the agent errored ({subtype}/{attempt.terminal_reason}): {detail}",
+            attempt,
+        )
+    return attempt
+
+
+def _reconcile_cost(
+    *, reported: float, last_good: float, subtype: str, is_error: bool = False
+) -> float:
     """A crashed session may report every cost field as zero (§4.1).
 
     An attempt that burned $4 and then crashed records $0 unless the supervisor
     falls back to the last good figure it saw. Unattended, this is the
     difference between a budget that holds and one that silently stops counting.
+
+    `is_error` and not the subtype alone: a session that could not authenticate
+    reports `subtype="success"` with `is_error=true` — measured, not assumed.
     """
-    if subtype != "success" and reported == 0.0 and last_good > 0.0:
+    if (is_error or subtype != "success") and reported == 0.0 and last_good > 0.0:
         return last_good
     return reported

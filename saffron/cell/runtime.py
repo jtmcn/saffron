@@ -11,7 +11,9 @@ from __future__ import annotations
 import ipaddress
 import re
 import subprocess
-from collections.abc import Mapping, Sequence
+import tempfile
+import threading
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 RUNTIME = "container"
@@ -214,6 +216,75 @@ def exec_(
     argv.append(container)
     argv += list(command)
     return _call(argv, timeout_s)
+
+
+def exec_stream(
+    container: str,
+    command: Sequence[str],
+    *,
+    stdin_data: str,
+    on_line: Callable[[str], None],
+    workdir: str | None = None,
+    timeout_s: float = 3600,
+) -> Completed:
+    """`exec_`, with stdin and with stdout delivered a line at a time.
+
+    The agent session is minutes long and the operator watches it, so its
+    output cannot be collected at exit the way a gate's is. The cell gains no
+    capability it lacked: this is the same `exec`, with `-i` so the request
+    reaches the process on stdin.
+
+    ponytail: one wall-clock bound, no idle bound. §4.3 wants both, and
+    splitting them needs a reader that can time out mid-line — v1's supervisor.
+    """
+    argv = [RUNTIME, "exec", "-i"]
+    if workdir:
+        argv += ["--cwd", workdir]
+    argv.append(container)
+    argv += list(command)
+
+    timed_out = False
+
+    # stderr to a file, not a second pipe: nothing drains it while stdout is
+    # being read, and a pipe that fills stops the process producing lines.
+    with tempfile.TemporaryFile("w+") as errors:
+        try:
+            proc = subprocess.Popen(  # noqa: SIM115 — closed by the with-block below
+                argv,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=errors,
+                text=True,
+            )
+        except OSError as exc:
+            raise CellRuntimeError(f"{RUNTIME} could not be executed: {exc}") from exc
+
+        def _kill() -> None:
+            nonlocal timed_out
+            timed_out = True
+            proc.kill()
+
+        watchdog = threading.Timer(timeout_s, _kill)
+        watchdog.start()
+        try:
+            with proc:
+                assert proc.stdin and proc.stdout
+                try:
+                    proc.stdin.write(stdin_data)
+                    proc.stdin.close()
+                except OSError:
+                    pass  # the process died early; its stderr says why
+                for line in proc.stdout:
+                    on_line(line.rstrip("\n"))
+        finally:
+            watchdog.cancel()
+        errors.seek(0)
+        return Completed(
+            returncode=124 if timed_out else proc.returncode,
+            stdout="",
+            stderr=errors.read(),
+            timed_out=timed_out,
+        )
 
 
 _IPV4 = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}")

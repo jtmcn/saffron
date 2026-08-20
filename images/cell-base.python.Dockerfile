@@ -28,4 +28,15 @@ print(found[0] if found else sys.exit('no bundled Claude Code binary in the whee
     "$bin" --version | grep -q . \
       || { echo "the bundled Claude Code binary reported no version" >&2; exit 1; }
 
+# The host drives the agent from outside; this is what it execs inside. It is
+# agent-runtime code, so it belongs to the base image and not to any repo's.
+COPY images/agent_runner.py /opt/saffron/agent_runner.py
+
+# Run it, do not merely copy it — a file that is present and unrunnable reads
+# identically to a working one (principle 39). Invalid JSON exercises the whole
+# path down to the error event without the SDK, a key, or a network.
+RUN echo 'not json' | python /opt/saffron/agent_runner.py \
+      | grep -q '"type": "error"' \
+      || { echo "agent_runner.py did not emit a Saffron event" >&2; exit 1; }
+
 WORKDIR /work
