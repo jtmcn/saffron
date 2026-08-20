@@ -20,6 +20,8 @@ packages = ["saffron"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["cell: needs a real cell runtime; excluded from the default run"]
+addopts = "-m 'not cell'"
 
 [tool.ruff]
 # ruff formats python blocks inside markdown; plan docs are a record, leave them.
