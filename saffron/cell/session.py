@@ -14,7 +14,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from saffron.gates.baseline import NewFailure, is_no_progress, subtract_baseline
+from saffron.gates.baseline import (
+    NewFailure,
+    is_no_progress,
+    subtract_baseline,
+    suite_drift,
+)
 from saffron.gates.contract import GateResult
 from saffron.phases import implement
 from saffron.phases.implement import AttemptResult
@@ -26,6 +31,10 @@ if TYPE_CHECKING:
 # the prompt templates — Saffron's own files, never the target repo's (§5.3).
 _SAFFRON_ROOT = Path(__file__).resolve().parents[2]
 _SAFFRON_PKG = Path(__file__).resolve().parents[1]
+
+
+class CellSessionError(RuntimeError):
+    """The session cannot go on — not the agent's failure, the driver's."""
 
 
 @dataclass
@@ -68,6 +77,18 @@ def repair_decision(
     return "repair"
 
 
+def require_session(session_id: str | None) -> str:
+    """Every turn after the first resumes, so a missing session_id is fatal.
+
+    `resume=None` starts a brand-new session with no memory of the plan or the
+    code it wrote, and the repair loop would then read the flailing as the
+    agent's fault (§5.3).
+    """
+    if not session_id:
+        raise CellSessionError("the turn returned no session_id; nothing to resume")
+    return session_id
+
+
 def plan_checkpoint(
     container: str,
     *,
@@ -76,18 +97,21 @@ def plan_checkpoint(
     protected: list[str],
     agent: Callable[..., AttemptResult],
     watch: Callable[[str], None] = print,
-) -> tuple[AttemptResult, str]:
+) -> tuple[AttemptResult, str, float]:
     """Turn one: the plan, validated before an implementation token is spent.
 
-    Returns the turn's result and the raw JSON of the accepted plan, or raises
-    `PlanRejected`. A shape failure gets exactly one re-prompt carrying the
-    validation error; anything else is a decision about content and is final.
+    Returns the turn's result, the raw JSON of the accepted plan, and what the
+    checkpoint spent in total — the re-prompted turn included, or a rejected
+    turn is a budget that quietly stops counting (§4.1). Raises `PlanRejected`.
+    A shape failure gets exactly one re-prompt carrying the validation error;
+    anything else is a decision about content and is final.
     """
     from saffron.agents import artifacts
 
     attempt = agent(
         container, prompt=implement.PLAN_PROMPT, options=options, watch=watch
     )
+    spent = attempt.cost_usd_est
     for reprompted in (False, True):
         try:
             artifacts.validate_plan(
@@ -105,12 +129,13 @@ def plan_checkpoint(
                 container,
                 prompt=f"{exc}\n\n{artifacts.EXTRACTION_PROMPT}",
                 options=options,
-                resume=attempt.session_id,
+                resume=require_session(attempt.session_id),
                 watch=watch,
                 last_cost_usd=attempt.cost_usd_est,
             )
+            spent += attempt.cost_usd_est
             continue
-        return attempt, artifacts.parse_output_block(attempt.text)
+        return attempt, artifacts.parse_output_block(attempt.text), spent
     raise AssertionError("unreachable: the loop returns or raises")
 
 
@@ -119,19 +144,26 @@ def repair_loop(
     run_gates: Callable[[], list[GateResult]],
     baseline: list[GateResult],
     max_attempts: int,
-    repair: Callable[[Sequence[NewFailure]], None],
+    repair: Callable[[Sequence[NewFailure]], str | None],
     watch: Callable[[str], None] = print,
 ) -> str:
     """GATE ⇄ REPAIR (§5.4), host-invoked. Returns a terminal state.
 
     The agent never runs the gates: `repair` receives new failures and nothing
-    else — no status, no verdict, no knowledge that it is being measured.
+    else — no status, no verdict, no knowledge that it is being measured. It
+    returns a terminal state to stop the loop early; the spend ceiling is the
+    only thing in v0.5 that does.
     """
     previous: list[NewFailure] = []
     for attempt in range(1, max_attempts + 1):
         results = run_gates()
         if aborted := aborted_gates(results):
             watch(f"gates: {aborted} errored — infrastructure, not the task")
+            return "GATE_ERROR"
+        if drift := suite_drift(results, baseline):
+            # The suites differ in a way no failure can express, so the
+            # subtraction is not to be trusted — let alone reported (§5.4).
+            watch(f"gates: {drift} — distrusting the subtraction")
             return "GATE_ERROR"
         new = subtract_baseline(results, baseline)
         decision = repair_decision(
@@ -146,8 +178,22 @@ def repair_loop(
             # the same either way.
             return "EXHAUSTED"
         previous = new
-        repair(new)
+        if stopped := repair(new):
+            return stopped
     raise AssertionError("unreachable: repair_decision exhausts at max_attempts")
+
+
+def _failed_turn(failed: implement.AgentFailed, session_id: str) -> AttemptResult:
+    """What a failed turn is worth: its cost. A bound firing, or a crash, must
+    never discard committed work (§4.3) — the caller measures the worktree."""
+    return failed.attempt or AttemptResult(
+        session_id=session_id,
+        subtype="error",
+        terminal_reason=None,
+        num_turns=0,
+        cost_usd_est=0.0,
+        is_error=True,
+    )
 
 
 def cell_env(proxy_ip: str, thread_env: Mapping[str, str]) -> dict[str, str]:
@@ -285,7 +331,7 @@ def run_one_cell(
         ledger.set_task_state(task_id, "IMPLEMENTING")
 
         try:
-            planned, raw_plan = plan_checkpoint(
+            planned, raw_plan, spent = plan_checkpoint(
                 container,
                 options=options,
                 spec=spec,
@@ -304,11 +350,31 @@ def run_one_cell(
         (task_dir / "plan.json").write_text(raw_plan)
         watch(f"PLAN: accepted, sha256 {artifacts.hash_artifact(raw_plan)[:12]}")
 
-        session_id = planned.session_id
-        spent = planned.cost_usd_est
+        # Doneness is measured from here, not from base_sha: the plan turn holds
+        # Write/Edit/Bash and only a prompt telling it not to commit, so a plan
+        # turn that commits would otherwise satisfy the implement turn (§4.3).
+        planned_sha = worktree.head_sha(container)
+
+        session_id = require_session(planned.session_id)
         # The *previous turn's* cost, not the running total: what a crashed
         # turn reporting zero falls back to is one turn's figure (§4.1).
+        # ponytail: per-turn costs are summed, which over-counts if the runtime
+        # reports whole-session cost instead. One live loop settles it.
         last_cost = planned.cost_usd_est
+
+        def _over_budget() -> bool:
+            """The host-side ceiling. `max_budget_usd` is per turn and is
+            evaluated inside the cell; this is the sum the supervisor holds
+            against the task's own budget (§4.3)."""
+            if spent < spec.budget_usd:
+                return False
+            watch(f"budget: ${spent:.2f} of ${spec.budget_usd:.2f} — stopping")
+            return True
+
+        if _over_budget():
+            ledger.set_task_state(task_id, "EXHAUSTED")
+            ledger.finish_run(run_id, "COMPLETE")
+            return "EXHAUSTED"
 
         try:
             implemented = implement.run_agent(
@@ -324,21 +390,14 @@ def run_one_cell(
             # (§4.3) — so the failure is recorded and the worktree is measured
             # below rather than the attempt being thrown away here.
             watch(f"IMPLEMENT: the session failed — {failed}")
-            implemented = failed.attempt or AttemptResult(
-                session_id=session_id,
-                subtype="error",
-                terminal_reason=None,
-                num_turns=0,
-                cost_usd_est=0.0,
-                is_error=True,
-            )
-        session_id = implemented.session_id or session_id
+            implemented = _failed_turn(failed, session_id)
+        session_id = require_session(implemented.session_id or session_id)
         spent += implemented.cost_usd_est
         last_cost = implemented.cost_usd_est
 
         # Doneness is measured, never reported (§4.3): an attempt that produced
         # no commits failed, whatever the transcript says.
-        commits = worktree.commits_ahead(container, spec.base_sha)
+        commits = worktree.commits_ahead(container, planned_sha)
         watch(f"IMPLEMENT: {commits} commit(s), ${spent:.2f} spent")
         if commits == 0:
             ledger.set_task_state(task_id, "NOT_IMPLEMENTED")
@@ -353,32 +412,42 @@ def run_one_cell(
                 ledger.record_gate_result(result, attempt_id=task_id)
             return results
 
-        def _repair(new: Sequence[NewFailure]) -> None:
+        def _repair(new: Sequence[NewFailure]) -> str | None:
             nonlocal session_id, spent, last_cost
+            if _over_budget():
+                return "EXHAUSTED"
             ledger.set_task_state(task_id, "REPAIRING")
-            repaired = implement.run_agent(
-                container,
-                prompt=implement.repair_prompt(new),
-                options=options,
-                resume=session_id,
-                watch=watch,
-                last_cost_usd=last_cost,
-            )
-            session_id = repaired.session_id or session_id
+            try:
+                repaired = implement.run_agent(
+                    container,
+                    prompt=implement.repair_prompt(new),
+                    options=options,
+                    resume=session_id,
+                    watch=watch,
+                    last_cost_usd=last_cost,
+                )
+            except implement.AgentFailed as failed:
+                # The same rule as the implement turn (§4.3): a bound firing
+                # mid-loop must not discard work that is already committed and
+                # a suite that may be nearly green. The next gate run measures.
+                watch(f"REPAIR: the session failed — {failed}")
+                repaired = _failed_turn(failed, session_id)
+            session_id = require_session(repaired.session_id or session_id)
             spent += repaired.cost_usd_est
             last_cost = repaired.cost_usd_est
+            return None
 
-        state = repair_loop(
+        outcome = repair_loop(
             run_gates=_run_gates,
             baseline=baseline,
             max_attempts=spec.max_attempts,
             repair=_repair,
             watch=watch,
         )
-        watch(f"{state}: ${spent:.2f} spent, session {session_id}")
-        ledger.set_task_state(task_id, state)
+        watch(f"{outcome}: ${spent:.2f} spent, session {session_id}")
+        ledger.set_task_state(task_id, outcome)
         ledger.finish_run(run_id, "COMPLETE")
-        return state
+        return outcome
     except BaseException:
         # A run row left open is a run that reads as still going. Preflight
         # raising is the path an operator hits first, so it is the one most
@@ -392,10 +461,16 @@ def run_one_cell(
         raise
     finally:
         watch("teardown")
-        runtime.remove_container(container)
+        removed = [("container", container, runtime.remove_container(container))]
         proxy.stop_proxy()
-        runtime.remove_network(network)
+        removed.append(("network", network, runtime.remove_network(network)))
         # Volumes go too, or the same spec_id cannot be re-run. Whoever adds
         # patch export must export before this line, not after.
-        runtime.remove_volume(volume)
-        runtime.remove_volume(state)
+        removed.append(("volume", volume, runtime.remove_volume(volume)))
+        removed.append(("volume", state, runtime.remove_volume(state)))
+        # Pre-cleaning tolerates absence; here a non-zero exit is a leak, and
+        # a silent one is what let the state volume survive teardown unnoticed.
+        # Reported, never raised: this is a `finally`.
+        for kind, name, done in removed:
+            if done.returncode != 0:
+                watch(f"teardown: {kind} {name} survived — {done.stderr.strip()[:160]}")

@@ -5,7 +5,7 @@ import json
 import pytest
 
 from saffron.agents import artifacts
-from saffron.cell import session
+from saffron.cell import runtime, session
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
 from saffron.ledger import Ledger
@@ -95,7 +95,7 @@ def _agent(*texts):
         _run.prompts.append(prompt)
         _run.resumes.append(resume)
         return implement.AttemptResult(
-            session_id="sess-1",
+            session_id=_run.session_id,
             subtype="success",
             terminal_reason="completed",
             num_turns=1,
@@ -105,6 +105,7 @@ def _agent(*texts):
 
     _run.prompts = []
     _run.resumes = []
+    _run.session_id = "sess-1"
     return _run
 
 
@@ -114,7 +115,7 @@ def _block(plan):
 
 def test_an_accepted_plan_costs_exactly_one_turn():
     agent = _agent(_block(_PLAN))
-    attempt, raw = session.plan_checkpoint(
+    attempt, raw, spent = session.plan_checkpoint(
         "cell",
         options={},
         spec=_spec(),
@@ -125,6 +126,7 @@ def test_an_accepted_plan_costs_exactly_one_turn():
     assert json.loads(raw) == _PLAN
     assert attempt.session_id == "sess-1"
     assert len(agent.prompts) == 1
+    assert spent == 0.1
 
 
 def test_a_plan_outside_touches_is_rejected_without_a_second_turn():
@@ -145,7 +147,7 @@ def test_a_plan_outside_touches_is_rejected_without_a_second_turn():
 
 def test_output_that_is_not_the_schema_is_re_prompted_exactly_once():
     agent = _agent("I'll get to it.", _block(_PLAN))
-    _attempt, raw = session.plan_checkpoint(
+    _attempt, raw, spent = session.plan_checkpoint(
         "cell",
         options={},
         spec=_spec(),
@@ -159,6 +161,24 @@ def test_output_that_is_not_the_schema_is_re_prompted_exactly_once():
     # resumes the same session rather than starting a new one.
     assert "not the schema" in agent.prompts[1]
     assert agent.resumes[1] == "sess-1"
+    # Both turns, or the turn that failed validation is a cost nobody counts.
+    assert spent == 0.2
+
+
+def test_a_turn_with_no_session_id_is_never_resumed():
+    """`resume=None` starts a fresh session with no memory of the plan, and the
+    repair loop would read the resulting flailing as the agent's fault."""
+    agent = _agent("not the schema", _block(_PLAN))
+    agent.session_id = None
+    with pytest.raises(session.CellSessionError):
+        session.plan_checkpoint(
+            "cell",
+            options={},
+            spec=_spec(),
+            protected=[],
+            agent=agent,
+            watch=lambda _line: None,
+        )
 
 
 def test_a_second_schema_failure_rejects_rather_than_asking_again():
@@ -237,6 +257,21 @@ def test_an_errored_gate_aborts_the_loop_without_charging_the_task():
     assert repairs == []
 
 
+def test_a_gate_that_stopped_running_between_the_suites_is_not_a_green():
+    """§5.4: gate-status or `tool` drift is grounds to distrust the subtraction
+    rather than report it — and both suites here carry zero failures."""
+    baseline = [GateResult(gate="tests", status="pass", tool="pytest 8.0")]
+    head = [GateResult(gate="tests", status="skip")]
+    state = session.repair_loop(
+        run_gates=lambda: head,
+        baseline=baseline,
+        max_attempts=4,
+        repair=lambda _new: None,
+        watch=lambda _line: None,
+    )
+    assert state == "GATE_ERROR"
+
+
 def test_a_baseline_failure_is_not_the_tasks_problem():
     """Only new failures count, or every task inherits the repo's flaky tests."""
     pre_existing = Failure(file="old.py", code="E501", message="too long")
@@ -248,6 +283,185 @@ def test_a_baseline_failure_is_not_the_tasks_problem():
         watch=lambda _line: None,
     )
     assert state == "READY_FOR_REVIEW"
+
+
+class _Cell:
+    """What the stubbed runtime was asked to do, so a test can assert on it."""
+
+    def __init__(self):
+        self.removed: list[tuple[str, str]] = []
+        self.turns: list[str] = []
+        self.measured_from: str | None = None
+        self.watched: list[str] = []
+
+
+def _stub_the_runtime(monkeypatch, *, commits=1, suites=()):
+    """Everything past the ledger writes, stubbed. No test reached here before,
+    which is why a shadowed volume name survived lint and 247 green tests."""
+    cell = _Cell()
+
+    def _remove(kind):
+        def _f(name):
+            cell.removed.append((kind, name))
+            return runtime.Completed(0, "", "")
+
+        return _f
+
+    monkeypatch.setattr("saffron.cell.runtime.remove_container", _remove("container"))
+    monkeypatch.setattr("saffron.cell.runtime.remove_network", _remove("network"))
+    monkeypatch.setattr("saffron.cell.runtime.remove_volume", _remove("volume"))
+    monkeypatch.setattr("saffron.cell.runtime.create_network", lambda *a, **k: None)
+    monkeypatch.setattr("saffron.cell.runtime.create_volume", lambda *a, **k: None)
+    monkeypatch.setattr("saffron.cell.proxy.start_proxy", lambda *a, **k: "10.88.0.2")
+    monkeypatch.setattr("saffron.cell.proxy.stop_proxy", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "saffron.preflight.assert_host_is_unreachable", lambda *a, **k: None
+    )
+    monkeypatch.setattr("saffron.repos.image.build_cell_image", lambda repo: "img")
+    monkeypatch.setattr("saffron.cell.worktree.prepare_worktree", lambda **k: None)
+    monkeypatch.setattr("saffron.cell.worktree.head_sha", lambda c: "c" * 40)
+
+    def _commits_ahead(_container, sha):
+        cell.measured_from = sha
+        return commits
+
+    monkeypatch.setattr("saffron.cell.worktree.commits_ahead", _commits_ahead)
+
+    scripted = iter(suites)
+    monkeypatch.setattr(
+        "saffron.gates.runner.run_suite", lambda *a, **k: next(scripted, [])
+    )
+    return cell
+
+
+def _turn(text="", cost=0.1):
+    return implement.AttemptResult(
+        session_id="sess-1",
+        subtype="success",
+        terminal_reason="completed",
+        num_turns=1,
+        cost_usd_est=cost,
+        text=text,
+    )
+
+
+def _drive(monkeypatch, tmp_path, *, cell, turns, spec=None):
+    """Run one whole cell against the stubbed runtime and return its state."""
+    repo = tmp_path / "repo"
+    (repo / ".saffron" / "gates").mkdir(parents=True)
+    (repo / ".saffron" / "policy.yaml").write_text("gates: {}\n")
+
+    scripted = iter(turns)
+
+    def _run_agent(container, *, prompt, options, resume=None, **kwargs):
+        cell.turns.append(prompt)
+        turn = next(scripted)
+        if isinstance(turn, BaseException):
+            raise turn
+        return turn
+
+    monkeypatch.setattr("saffron.phases.implement.run_agent", _run_agent)
+
+    # Left open: the caller reads its rows. tmp_path takes the file away.
+    ledger = Ledger(tmp_path / "ledger.db")
+    state = session.run_one_cell(
+        spec or _spec(),
+        repo=repo,
+        mirror=tmp_path / "m.git",
+        ledger=ledger,
+        out_dir=tmp_path / "out",
+        watch=cell.watched.append,
+    )
+    return state, ledger
+
+
+def test_teardown_removes_both_volumes_not_the_loops_result(monkeypatch, tmp_path):
+    """C1: `state` named the state volume *and* the repair loop's outcome, so
+    teardown ran `volume rm READY_FOR_REVIEW` — swallowed, and the volume
+    holding CLAUDE_CONFIG_DIR survived every run that reached the loop."""
+    cell = _stub_the_runtime(monkeypatch)
+    state, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+    )
+    assert state == "READY_FOR_REVIEW"
+    # The last two calls are teardown's; the earlier ones pre-cleaned.
+    assert cell.removed[-2:] == [
+        ("volume", "saffron-wt-SY-1"),
+        ("volume", "saffron-st-SY-1"),
+    ]
+
+
+def test_doneness_is_measured_from_after_the_plan_turn(monkeypatch, tmp_path):
+    """I7: the plan turn holds Write/Edit/Bash, so a commit it makes would
+    otherwise satisfy the implement turn's measurement."""
+    cell = _stub_the_runtime(monkeypatch)
+    _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
+    assert cell.measured_from == "c" * 40  # head_sha after the checkpoint
+
+
+def test_no_commit_is_not_implemented(monkeypatch, tmp_path):
+    cell = _stub_the_runtime(monkeypatch, commits=0)
+    state, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert state == "NOT_IMPLEMENTED"
+
+
+def test_a_repair_turn_that_fails_does_not_discard_committed_work(
+    monkeypatch, tmp_path
+):
+    """I1: a bound firing mid-loop escaped into `except BaseException` and
+    marked the run ABORTED — after the implement turn had committed (§4.3)."""
+    failing = Failure(file="a.py", code="E501", message="too long")
+    cell = _stub_the_runtime(monkeypatch, suites=([], _results(failing), []))
+    state, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            implement.AgentFailed("max turns", _turn(cost=0.4)),
+        ],
+    )
+    assert state == "READY_FOR_REVIEW"
+    (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
+    assert run_row["status"] == "COMPLETE"
+    assert any("$0.60 spent" in line for line in cell.watched)
+
+
+def test_the_host_stops_spending_at_the_tasks_budget(monkeypatch, tmp_path):
+    """I2: `max_budget_usd` is per turn and lives inside the cell. Without a
+    host-side sum, a $12 task can spend (2 + max_attempts) x $12."""
+    cell = _stub_the_runtime(monkeypatch)
+    state, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN), cost=0.5)],
+        spec=_spec(budget_usd=0.4),
+    )
+    assert state == "EXHAUSTED"
+    assert len(cell.turns) == 1  # the implement turn is never bought
+
+
+def test_the_ceiling_also_stops_the_repair_loop(monkeypatch, tmp_path):
+    failing = Failure(file="a.py", code="E501", message="too long")
+    cell = _stub_the_runtime(
+        monkeypatch, suites=([], _results(failing), _results(failing))
+    )
+    state, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn()],
+        spec=_spec(budget_usd=0.25),
+    )
+    assert state == "EXHAUSTED"
+    assert len(cell.turns) == 3
 
 
 def test_the_task_row_carries_the_specs_own_sha_not_the_policys(tmp_path, monkeypatch):
@@ -277,15 +491,8 @@ def test_the_task_row_carries_the_specs_own_sha_not_the_policys(tmp_path, monkey
     def _stop(*_a, **_k):
         raise _StopHere
 
+    _stub_the_runtime(monkeypatch)
     monkeypatch.setattr("saffron.repos.image.build_cell_image", _stop)
-    for name in (
-        "remove_container",
-        "remove_network",
-        "create_network",
-        "remove_volume",
-    ):
-        monkeypatch.setattr(f"saffron.cell.runtime.{name}", lambda *a, **k: None)
-    monkeypatch.setattr("saffron.cell.proxy.stop_proxy", lambda *a, **k: None)
 
     ledger = Ledger(tmp_path / "ledger.db")
     try:

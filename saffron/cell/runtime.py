@@ -131,20 +131,23 @@ def create_network(name: str, subnet: str = DEFAULT_SUBNET) -> None:
     _must([RUNTIME, "network", "create", "--internal", "--subnet", subnet, name])
 
 
-def remove_network(name: str) -> None:
-    _call([RUNTIME, "network", "rm", name], timeout_s=60)
+# The `remove_*` calls never raise: they also pre-clean, where "does not exist"
+# is the ordinary case. They return the outcome so a caller tearing down — where
+# a failure is a leak, not an expectation — can say so.
+def remove_network(name: str) -> Completed:
+    return _call([RUNTIME, "network", "rm", name], timeout_s=60)
 
 
 def create_volume(name: str) -> None:
     _must([RUNTIME, "volume", "create", name])
 
 
-def remove_volume(name: str) -> None:
-    _call([RUNTIME, "volume", "rm", name], timeout_s=60)
+def remove_volume(name: str) -> Completed:
+    return _call([RUNTIME, "volume", "rm", name], timeout_s=60)
 
 
-def remove_container(name: str) -> None:
-    _call([RUNTIME, "rm", "-f", name], timeout_s=60)
+def remove_container(name: str) -> Completed:
+    return _call([RUNTIME, "rm", "-f", name], timeout_s=60)
 
 
 def run_detached(
