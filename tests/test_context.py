@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from saffron.agents import context
+
+REAL_CONTEXT_MD = (Path(__file__).parent.parent / "CONTEXT.md").read_text()
 
 SAMPLE = """# Saffron — terminology
 
@@ -17,6 +23,10 @@ Preamble that belongs to nobody.
 ## 9. Flywheel
 
 **Bucket**: one of three.
+
+## Trailing notes
+
+Not a numbered section — a boundary, never a payload.
 """
 
 
@@ -90,3 +100,42 @@ def test_the_spec_body_with_a_vocabulary_literal_is_not_expanded():
         spec="Replace the {vocabulary} placeholder in our own templating code.",
     )
     assert "Replace the {vocabulary} placeholder in our own templating code." in out
+
+
+def test_a_trailing_non_numbered_heading_is_a_boundary_not_a_payload():
+    """The last numbered section must not swallow a trailing '## ...' heading."""
+    out = context.sections_for("IMPLEMENT", SAMPLE, sections=(9,))
+    assert "one of three" in out
+    assert "Not a numbered section" not in out
+
+
+def test_real_context_md_never_leaks_settled_or_open_naming_decisions():
+    """These trailing headings follow §10 and aren't numbered — regression for
+    the over-capture bug where the last matched section swallowed everything
+    to the end of the document."""
+    for phase in context.SECTIONS_BY_PHASE:
+        out = context.sections_for(phase, REAL_CONTEXT_MD)
+        assert "Settled naming decisions" not in out
+        assert "Open naming decisions" not in out
+
+
+def test_a_template_missing_the_spec_placeholder_raises():
+    """A prompt template with no {spec} is a bug in the template file, not a
+    prompt with nothing to say — it must not silently drop the spec."""
+    with pytest.raises(ValueError, match="spec"):
+        context.build_system_prompt(
+            "IMPLEMENT",
+            SAMPLE,
+            template="Vocabulary:\n{vocabulary}\n\nNo task placeholder here.",
+            spec="This text has nowhere to go.",
+        )
+
+
+def test_a_template_with_spec_twice_gets_the_same_literal_text_both_times():
+    out = context.build_system_prompt(
+        "IMPLEMENT",
+        SAMPLE,
+        template="First:\n{spec}\n\nSecond:\n{spec}",
+        spec="Use {{cookiecutter.name}} literally.",
+    )
+    assert out.count("Use {{cookiecutter.name}} literally.") == 2

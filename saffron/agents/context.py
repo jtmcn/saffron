@@ -20,7 +20,9 @@ SECTIONS_BY_PHASE: dict[str, tuple[int, ...]] = {
     "REVIEW": (1, 2, 3, 4, 5, 10),
 }
 
-_HEADING = re.compile(r"^## (\d+)\. ", re.MULTILINE)
+# Optional number group: a heading with no `N. ` is still a boundary (e.g.
+# CONTEXT.md's trailing "## Settled naming decisions"), just never selected.
+_HEADING = re.compile(r"^## (?:(\d+)\. )?", re.MULTILINE)
 
 
 def sections_for(
@@ -31,7 +33,8 @@ def sections_for(
     matches = list(_HEADING.finditer(context_md))
     chunks = []
     for index, match in enumerate(matches):
-        if int(match.group(1)) not in wanted:
+        number = match.group(1)
+        if number is None or int(number) not in wanted:
             continue
         end = (
             matches[index + 1].start() if index + 1 < len(matches) else len(context_md)
@@ -45,17 +48,23 @@ def build_system_prompt(
 ) -> str:
     """Assemble a prompt from a versioned template plus substituted values.
 
-    `str.format_map` over a defaulting dict, never a templating engine: the
-    spec body is a *substituted value*, and a spec that happens to contain
-    `{{`, backticks, or command syntax must pass through untouched. Specs are
-    markdown written by a human about code, so it will happen (§5.3).
+    `str.format` over the template's non-spec parts, never a templating
+    engine: the spec body is a *substituted value*, and a spec that happens
+    to contain `{{`, backticks, or command syntax must pass through
+    untouched. Specs are markdown written by a human about code, so it will
+    happen (§5.3).
+
+    A template with no `{spec}` is a bug in a versioned prompt file, not a
+    valid prompt with no task — it raises rather than silently dropping the
+    spec. A template with `{spec}` more than once gets the same literal spec
+    text at every occurrence.
     """
+    if "{spec}" not in template:
+        raise ValueError(f"prompt template for {phase!r} has no {{spec}} placeholder")
     vocabulary = sections_for(phase, context_md)
-    head, _, tail = template.partition("{spec}")
-    rendered_head = head.format(
-        vocabulary=vocabulary, **{k: v for k, v in values.items() if k != "spec"}
-    )
-    rendered_tail = tail.format(
-        vocabulary=vocabulary, **{k: v for k, v in values.items() if k != "spec"}
-    )
-    return rendered_head + values.get("spec", "") + rendered_tail
+    other_values = {k: v for k, v in values.items() if k != "spec"}
+    parts = [
+        part.format(vocabulary=vocabulary, **other_values)
+        for part in template.split("{spec}")
+    ]
+    return values.get("spec", "").join(parts)
