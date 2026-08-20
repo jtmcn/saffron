@@ -29,6 +29,14 @@ class PlanRejected(Exception):
     """The plan failed host-side validation. No implementation token is spent."""
 
 
+class PlanNotSchema(PlanRejected):
+    """The output was not the schema — a failure of *shape*, not of content.
+
+    The one rejection worth a single bounded re-prompt (§5.3). Every other
+    rejection is about what the plan says, and re-asking would be negotiating.
+    """
+
+
 class Plan(BaseModel):
     understanding: str
     approach: str
@@ -66,7 +74,7 @@ def validate_plan(
     try:
         plan = Plan.model_validate(json.loads(parse_output_block(raw)))
     except (ValueError, ValidationError) as exc:
-        raise PlanRejected(f"plan.json is not the schema: {exc}") from exc
+        raise PlanNotSchema(f"plan.json is not the schema: {exc}") from exc
 
     if plan.blocking_questions:
         raise PlanRejected(

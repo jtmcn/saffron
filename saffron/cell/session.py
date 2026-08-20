@@ -14,8 +14,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from saffron.gates.baseline import NewFailure, is_no_progress
+from saffron.gates.baseline import NewFailure, is_no_progress, subtract_baseline
 from saffron.gates.contract import GateResult
+from saffron.phases import implement
+from saffron.phases.implement import AttemptResult
 
 if TYPE_CHECKING:
     from saffron.ledger import Ledger
@@ -66,6 +68,88 @@ def repair_decision(
     return "repair"
 
 
+def plan_checkpoint(
+    container: str,
+    *,
+    options: dict,
+    spec: CellSpec,
+    protected: list[str],
+    agent: Callable[..., AttemptResult],
+    watch: Callable[[str], None] = print,
+) -> tuple[AttemptResult, str]:
+    """Turn one: the plan, validated before an implementation token is spent.
+
+    Returns the turn's result and the raw JSON of the accepted plan, or raises
+    `PlanRejected`. A shape failure gets exactly one re-prompt carrying the
+    validation error; anything else is a decision about content and is final.
+    """
+    from saffron.agents import artifacts
+
+    attempt = agent(
+        container, prompt=implement.PLAN_PROMPT, options=options, watch=watch
+    )
+    for reprompted in (False, True):
+        try:
+            artifacts.validate_plan(
+                attempt.text,
+                touches=spec.touches,
+                forbidden=spec.forbidden,
+                protected=protected,
+                spec_type=spec.spec_type,
+            )
+        except artifacts.PlanNotSchema as exc:
+            if reprompted:
+                raise
+            watch(f"PLAN: not the schema, re-prompting once — {exc}")
+            attempt = agent(
+                container,
+                prompt=f"{exc}\n\n{artifacts.EXTRACTION_PROMPT}",
+                options=options,
+                resume=attempt.session_id,
+                watch=watch,
+                last_cost_usd=attempt.cost_usd_est,
+            )
+            continue
+        return attempt, artifacts.parse_output_block(attempt.text)
+    raise AssertionError("unreachable: the loop returns or raises")
+
+
+def repair_loop(
+    *,
+    run_gates: Callable[[], list[GateResult]],
+    baseline: list[GateResult],
+    max_attempts: int,
+    repair: Callable[[Sequence[NewFailure]], None],
+    watch: Callable[[str], None] = print,
+) -> str:
+    """GATE ⇄ REPAIR (§5.4), host-invoked. Returns a terminal state.
+
+    The agent never runs the gates: `repair` receives new failures and nothing
+    else — no status, no verdict, no knowledge that it is being measured.
+    """
+    previous: list[NewFailure] = []
+    for attempt in range(1, max_attempts + 1):
+        results = run_gates()
+        if aborted := aborted_gates(results):
+            watch(f"gates: {aborted} errored — infrastructure, not the task")
+            return "GATE_ERROR"
+        new = subtract_baseline(results, baseline)
+        decision = repair_decision(
+            attempt=attempt, max_attempts=max_attempts, new=new, previous=previous
+        )
+        watch(f"gates: attempt {attempt}, {len(new)} new failures -> {decision}")
+        if decision == "green":
+            return "READY_FOR_REVIEW"
+        if decision in ("no-progress", "exhausted"):
+            # §3.3 has one state for both. Which one it was is on the watch line
+            # above; the task's outcome — it could not pass its own gates — is
+            # the same either way.
+            return "EXHAUSTED"
+        previous = new
+        repair(new)
+    raise AssertionError("unreachable: repair_decision exhausts at max_attempts")
+
+
 def cell_env(proxy_ip: str, thread_env: Mapping[str, str]) -> dict[str, str]:
     """Everything §5.1's per-task block puts in the cell's environment.
 
@@ -91,21 +175,15 @@ def run_one_cell(
     out_dir: Path,
     watch: Callable[[str], None] = print,
 ) -> str:
-    """Create a cell, run the baseline suite, and stop at the SDK seam.
+    """Create a cell, drive one IMPLEMENT session in it, and gate the result.
 
     Returns a terminal state. Every transition is printed, because v0.5's
     whole point is that the operator watches it.
-
-    Scope boundary (this task): this function does not drive the agent SDK —
-    no `query()`, no `ClaudeSDKClient`, no message stream. It builds the system
-    prompt and the agent options and stops there. A later task adds the actual
-    session drive and the GATE/REPAIR loop around `repair_decision` above.
     """
     from saffron import preflight
-    from saffron.agents import context
+    from saffron.agents import artifacts, context
     from saffron.cell import proxy, runtime, worktree
     from saffron.gates.runner import CellExecutor, run_suite
-    from saffron.phases import implement
     from saffron.repos import image
     from saffron.repos.policy import load_policy
 
@@ -204,19 +282,103 @@ def run_one_cell(
             budget_usd=spec.budget_usd,
         )
         watch(f"IMPLEMENT: system prompt {len(system_prompt)} chars")
-        watch(
-            f"IMPLEMENT: agent options built ({len(options['allowed_tools'])} "
-            "tools, dontAsk) — ready to drive the session"
+        ledger.set_task_state(task_id, "IMPLEMENTING")
+
+        try:
+            planned, raw_plan = plan_checkpoint(
+                container,
+                options=options,
+                spec=spec,
+                protected=policy.protected,
+                agent=implement.run_agent,
+                watch=watch,
+            )
+        except artifacts.PlanRejected as rejected:
+            watch(f"PLAN: rejected — {rejected}")
+            ledger.set_task_state(task_id, "PLAN_REJECTED")
+            ledger.finish_run(run_id, "COMPLETE")
+            return "PLAN_REJECTED"
+
+        # Extracted and hashed the moment it is produced, and never read from
+        # /work again: a plan the implementer can rewrite is a claim (§5.3).
+        (task_dir / "plan.json").write_text(raw_plan)
+        watch(f"PLAN: accepted, sha256 {artifacts.hash_artifact(raw_plan)[:12]}")
+
+        session_id = planned.session_id
+        spent = planned.cost_usd_est
+        # The *previous turn's* cost, not the running total: what a crashed
+        # turn reporting zero falls back to is one turn's figure (§4.1).
+        last_cost = planned.cost_usd_est
+
+        try:
+            implemented = implement.run_agent(
+                container,
+                prompt=implement.IMPLEMENT_PROMPT,
+                options=options,
+                resume=session_id,
+                watch=watch,
+                last_cost_usd=last_cost,
+            )
+        except implement.AgentFailed as failed:
+            # A bound firing, or a crash, must never discard committed work
+            # (§4.3) — so the failure is recorded and the worktree is measured
+            # below rather than the attempt being thrown away here.
+            watch(f"IMPLEMENT: the session failed — {failed}")
+            implemented = failed.attempt or AttemptResult(
+                session_id=session_id,
+                subtype="error",
+                terminal_reason=None,
+                num_turns=0,
+                cost_usd_est=0.0,
+                is_error=True,
+            )
+        session_id = implemented.session_id or session_id
+        spent += implemented.cost_usd_est
+        last_cost = implemented.cost_usd_est
+
+        # Doneness is measured, never reported (§4.3): an attempt that produced
+        # no commits failed, whatever the transcript says.
+        commits = worktree.commits_ahead(container, spec.base_sha)
+        watch(f"IMPLEMENT: {commits} commit(s), ${spent:.2f} spent")
+        if commits == 0:
+            ledger.set_task_state(task_id, "NOT_IMPLEMENTED")
+            ledger.finish_run(run_id, "COMPLETE")
+            return "NOT_IMPLEMENTED"
+
+        def _run_gates() -> list[GateResult]:
+            results = run_suite(gates, cwd=repo, executor=executor)
+            for result in results:
+                # No attempts table yet, so attempt_id carries the task_id —
+                # the convention the schema already documents (§4.1).
+                ledger.record_gate_result(result, attempt_id=task_id)
+            return results
+
+        def _repair(new: Sequence[NewFailure]) -> None:
+            nonlocal session_id, spent, last_cost
+            ledger.set_task_state(task_id, "REPAIRING")
+            repaired = implement.run_agent(
+                container,
+                prompt=implement.repair_prompt(new),
+                options=options,
+                resume=session_id,
+                watch=watch,
+                last_cost_usd=last_cost,
+            )
+            session_id = repaired.session_id or session_id
+            spent += repaired.cost_usd_est
+            last_cost = repaired.cost_usd_est
+
+        state = repair_loop(
+            run_gates=_run_gates,
+            baseline=baseline,
+            max_attempts=spec.max_attempts,
+            repair=_repair,
+            watch=watch,
         )
-        # SEAM: this is where a later task drives the SDK — open a
-        # ClaudeSDKClient with `options`, stream the IMPLEMENT turn, extract
-        # and validate plan.json (saffron.agents.artifacts.validate_plan),
-        # then loop GATE (run_suite again) -> repair_decision -> REPAIR,
-        # resuming the same session, until green/no-progress/exhausted. Left
-        # unimplemented on purpose (task scope): the loop's shape depends on
-        # what the message stream actually yields.
+        watch(f"{state}: ${spent:.2f} spent, session {session_id}")
+        ledger.set_task_state(task_id, state)
         ledger.finish_run(run_id, "COMPLETE")
-        return "NOT_IMPLEMENTED"
+        return state
     except BaseException:
         # A run row left open is a run that reads as still going. Preflight
         # raising is the path an operator hits first, so it is the one most
