@@ -7,7 +7,8 @@ import hashlib
 import subprocess
 from pathlib import Path
 
-from saffron.cell.session import CellSpec, run_one_cell
+from saffron.cell.runtime import CellRuntimeError
+from saffron.cell.session import CellSessionError, CellSpec, run_one_cell
 from saffron.intake import load_spec
 from saffron.ledger import Ledger
 from saffron.replay import replay
@@ -16,7 +17,9 @@ from saffron.repos import mirror as git_mirror
 DEFAULT_HOME = Path.home() / ".saffron"
 
 # The exit code is the only thing a script reads: 0 the task is reviewable,
-# 2 the infrastructure failed, 1 the task did not make it (§3.3).
+# 2 the infrastructure failed, 1 the task did not make it (§3.3). The map covers
+# states; a driver or runtime crash is the same class of failure and takes 2 by
+# the handler in `main`, or an abort would read as an ordinary task outcome.
 CELL_EXIT = {"READY_FOR_REVIEW": 0, "PREFLIGHT_FAILED": 2, "GATE_ERROR": 2}
 
 
@@ -64,6 +67,9 @@ def main(argv: list[str] | None = None) -> int:
             spec_path=args.spec,
             timeout_s=args.timeout,
         )
+    except (CellSessionError, CellRuntimeError) as broke:
+        print(f"saffron: {broke}")
+        return 2
     finally:
         ledger.close()
 

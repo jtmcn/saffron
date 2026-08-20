@@ -1,5 +1,6 @@
 """The operator's only entry point, so it gets at least one end-to-end test."""
 
+from saffron.cell import session
 from saffron.cli import main
 from tests.test_replay import target  # noqa: F401 — a pytest fixture, used by name
 
@@ -41,3 +42,12 @@ def test_the_exit_code_distinguishes_the_terminal_states(monkeypatch, tmp_path):
 
     argv = ["--home", str(tmp_path / "home"), "cell", str(spec)]
     assert [cli.main(argv), cli.main(argv), cli.main(argv)] == [0, 1, 2]
+
+    # A driver crash is an infrastructure abort too. Without a handler it exits
+    # 1 — the code that means "the task did not make it", i.e. the abort reading
+    # as an ordinary task outcome.
+    def _crash(*_a, **_k):
+        raise session.CellSessionError("the turn returned no session_id")
+
+    monkeypatch.setattr(cli, "run_one_cell", _crash)
+    assert cli.main(argv) == 2
