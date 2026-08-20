@@ -22,10 +22,13 @@ IMPLEMENT_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "TodoWrite"]
 # Installed by images/cell-base.python.Dockerfile. The agent runs inside the
 # cell; the host drives it from outside (§5.1).
 RUNNER = "/opt/saffron/agent_runner.py"
+# The base image's own interpreter, never PATH's: a repo image can put a venv
+# first, and the SDK is not installed in it (measured).
+PYTHON = "/opt/saffron/python"
 
 PLAN_PROMPT = (
     "Produce the plan for this task. Read whatever you need to; change no "
-    "file and make no commit — nothing you write now is kept. " + EXTRACTION_PROMPT
+    "file and make no commit. " + EXTRACTION_PROMPT
 )
 
 IMPLEMENT_PROMPT = (
@@ -35,7 +38,8 @@ IMPLEMENT_PROMPT = (
 
 
 class AgentFailed(RuntimeError):
-    """The turn produced no result event, or one that reports an error.
+    """The turn did not finish cleanly: no result event, an error, a non-success
+    subtype, a non-zero exit, or a timeout after the result was emitted.
 
     An absent result and a clean result must never be the same value (§4.3) —
     this is the exception that keeps them apart. Whoever catches it still has
@@ -68,7 +72,6 @@ def agent_options(
     cwd: str = WORKTREE_MOUNT,
     max_turns: int,
     budget_usd: float,
-    resume: str | None = None,
 ) -> dict:
     """ClaudeAgentOptions as a plain dict, so it is assertable without the SDK.
 
@@ -81,8 +84,9 @@ def agent_options(
         "permission_mode": "dontAsk",
         "cwd": cwd,
         "max_turns": max_turns,
-        # An in-cell ceiling, evaluated by a process inside the cell. It saves
-        # turns; it is not what N2 rests on. The supervisor's bound is (§4.3).
+        # In-cell and per *turn*, not per task: one options dict drives every
+        # turn of the session. The per-task ceiling is the host's sum in
+        # session.py; this one only cuts a runaway turn short (§4.3).
         "max_budget_usd": budget_usd,
         "env": {
             # The repair loop resumes the same session across a gate run, and a
@@ -93,10 +97,11 @@ def agent_options(
             # Never under /work: the agent must not be able to read its own
             # session state, and the secret scan must not trip on it (§5.1).
             "CLAUDE_CONFIG_DIR": STATE_MOUNT,
+            # The proxy allows api.anthropic.com and nothing else, so telemetry
+            # becomes denied CONNECTs and per-turn latency that reads as a hang.
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
         },
     }
-    if resume:
-        options["resume"] = resume
     return options
 
 
@@ -182,7 +187,7 @@ def run_agent(
 
     done = exec_stream(
         container,
-        ["python", RUNNER],
+        [PYTHON, RUNNER],
         stdin_data=request,
         on_line=_on_line,
         workdir=WORKTREE_MOUNT,
@@ -198,6 +203,12 @@ def run_agent(
 
     subtype = str(result.get("subtype", "unknown"))
     is_error = bool(result.get("is_error"))
+    # One predicate for the accounting and the control flow both: a turn the
+    # cost fallback treats as crashed must not also read as a clean return.
+    # `timed_out` is in it because a runner can emit its result and then be
+    # killed holding stdout open — §4.3's completion axis, which would
+    # otherwise produce an AttemptResult identical to a clean turn's.
+    failed = is_error or subtype != "success" or done.timed_out or done.returncode != 0
     attempt = AttemptResult(
         session_id=result.get("session_id"),
         subtype=subtype,
@@ -206,36 +217,40 @@ def run_agent(
         cost_usd_est=_reconcile_cost(
             reported=float(result.get("total_cost_usd") or 0.0),
             last_good=last_cost_usd,
-            subtype=subtype,
-            is_error=is_error,
+            failed=failed,
         ),
         text="".join(text),
         is_error=is_error,
     )
-    if is_error:
-        # Measured, not assumed: a cell with no credential returns
-        # `subtype="success"` with `is_error=true` and terminal_reason
-        # `api_error`. Keying on the subtype would call a session that did
-        # nothing at all a clean success.
+    if failed:
+        # `is_error`, measured and not assumed: a cell with no credential
+        # returns `subtype="success"` with `is_error=true` and terminal_reason
+        # `api_error`. Keying on the subtype alone would call a session that
+        # did nothing at all a clean success.
+        how = (
+            "timed out"
+            if done.timed_out
+            else f"exited {done.returncode}"
+            if done.returncode
+            else "errored"
+        )
         raise AgentFailed(
-            f"the agent errored ({subtype}/{attempt.terminal_reason}): {detail}",
+            f"the agent {how} ({subtype}/{attempt.terminal_reason}): {detail}",
             attempt,
         )
     return attempt
 
 
-def _reconcile_cost(
-    *, reported: float, last_good: float, subtype: str, is_error: bool = False
-) -> float:
+def _reconcile_cost(*, reported: float, last_good: float, failed: bool) -> float:
     """A crashed session may report every cost field as zero (§4.1).
 
     An attempt that burned $4 and then crashed records $0 unless the supervisor
     falls back to the last good figure it saw. Unattended, this is the
     difference between a budget that holds and one that silently stops counting.
 
-    `is_error` and not the subtype alone: a session that could not authenticate
-    reports `subtype="success"` with `is_error=true` — measured, not assumed.
+    `failed` is the caller's single predicate, so the figure charged and the
+    control flow can never disagree about whether the turn worked.
     """
-    if (is_error or subtype != "success") and reported == 0.0 and last_good > 0.0:
+    if failed and reported == 0.0 and last_good > 0.0:
         return last_good
     return reported

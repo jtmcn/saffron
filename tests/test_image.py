@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from saffron.cell import runtime
+from saffron.phases import implement
 from saffron.repos import image
 
 
@@ -20,6 +23,17 @@ def test_base_image_has_git_and_the_agent_runtime():
     assert done.returncode == 0, done.stderr
     done = runtime.run_ephemeral(
         image.BASE_TAG, ["python", "-c", "import claude_agent_sdk"]
+    )
+    assert done.returncode == 0, done.stderr
+
+
+@pytest.mark.cell
+def test_the_runner_has_an_interpreter_with_the_sdk_inside_a_repos_own_image():
+    """The trap the base image alone cannot show: a repo's image puts its venv
+    first on PATH, and `python` there has no claude_agent_sdk."""
+    tag = image.build_cell_image(Path(__file__).resolve().parents[1])
+    done = runtime.run_ephemeral(
+        tag, [implement.PYTHON, "-c", "import claude_agent_sdk"]
     )
     assert done.returncode == 0, done.stderr
 

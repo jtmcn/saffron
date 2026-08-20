@@ -60,16 +60,12 @@ def test_the_tool_list_is_explicit_and_excludes_the_network():
 
 def test_a_crashed_attempt_falls_back_to_the_last_good_cost():
     """The runtime may report every cost field as zero on crash (§4.1)."""
-    result = implement._reconcile_cost(
-        reported=0.0, last_good=4.12, subtype="error_during_execution"
-    )
+    result = implement._reconcile_cost(reported=0.0, last_good=4.12, failed=True)
     assert result == 4.12
 
 
 def test_a_clean_finish_keeps_its_reported_cost():
-    assert (
-        implement._reconcile_cost(reported=3.5, last_good=2.0, subtype="success") == 3.5
-    )
+    assert implement._reconcile_cost(reported=3.5, last_good=2.0, failed=False) == 3.5
 
 
 def _stream(*lines, returncode=0, stderr="", timed_out=False):
@@ -202,17 +198,20 @@ def test_a_line_that_is_not_an_event_is_shown_and_not_parsed():
 
 
 def test_a_crashed_attempt_keeps_the_last_good_cost():
-    result = implement.run_agent(
-        "cell",
-        prompt="p",
-        options={},
-        watch=lambda _line: None,
-        last_cost_usd=4.12,
-        exec_stream=_stream(
-            _result_line(subtype="error_during_execution", total_cost_usd=0)
-        ),
-    )
-    assert result.cost_usd_est == 4.12
+    """A non-success subtype raises and carries its cost: the accounting and the
+    control flow read one predicate, or a charged turn returns as a clean one."""
+    with pytest.raises(implement.AgentFailed) as raised:
+        implement.run_agent(
+            "cell",
+            prompt="p",
+            options={},
+            watch=lambda _line: None,
+            last_cost_usd=4.12,
+            exec_stream=_stream(
+                _result_line(subtype="error_during_execution", total_cost_usd=0)
+            ),
+        )
+    assert raised.value.attempt.cost_usd_est == 4.12
 
 
 def test_the_request_carries_the_prompt_the_options_and_the_resume():
@@ -230,7 +229,7 @@ def test_the_request_carries_the_prompt_the_options_and_the_resume():
         "options": {"max_turns": 3},
         "resume": "sess-1",
     }
-    assert stream.command == ["python", implement.RUNNER]
+    assert stream.command == [implement.PYTHON, implement.RUNNER]
 
 
 def test_repair_text_carries_failures_and_never_a_gate_status():
@@ -239,6 +238,21 @@ def test_repair_text_carries_failures_and_never_a_gate_status():
     new = [
         NewFailure("types", Failure(file="a.py", line=88, code="arg-type", message="x"))
     ]
-    text = implement.repair_prompt(new)
-    assert "a.py:88" in text and "arg-type" in text
-    assert "pass" not in text and "status" not in text
+    preamble, _, listed = implement.repair_prompt(new).partition("\n\n")
+    assert listed.splitlines() == ["- [types] a.py:88 arg-type: x"]
+    # The whole preamble, not substrings: hunting for "pass" or "status" runs
+    # over gate-supplied failure text, where "passed" fails for the wrong reason.
+    assert preamble == (
+        "These failures are new since the base commit. Failures already "
+        "present on the base commit are excluded and are not yours to fix. "
+        "Fix these and commit."
+    )
+
+
+def test_telemetry_is_off_because_the_proxy_would_deny_it_anyway():
+    """The allowlist permits api.anthropic.com and nothing else, so statsig
+    traffic becomes denied CONNECTs and startup latency that reads as a hang."""
+    options = implement.agent_options(
+        system_prompt="s", cwd="/work", max_turns=40, budget_usd=12.0
+    )
+    assert options["env"]["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1"

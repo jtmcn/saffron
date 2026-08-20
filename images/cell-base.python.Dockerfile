@@ -12,7 +12,10 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir claude-agent-sdk
+# Pinned: unpinned, the agent runtime drifts between rebuilds and the version
+# that ran a task is recorded nowhere. Bump deliberately.
+ARG SDK_VERSION=0.2.142
+RUN pip install --no-cache-dir "claude-agent-sdk==${SDK_VERSION}"
 
 # The bundled binary is the whole reason this image is Debian. If a source
 # distribution was installed instead, the agent has no runtime and every cell
@@ -32,10 +35,16 @@ print(found[0] if found else sys.exit('no bundled Claude Code binary in the whee
 # agent-runtime code, so it belongs to the base image and not to any repo's.
 COPY images/agent_runner.py /opt/saffron/agent_runner.py
 
+# And so is the interpreter that can import the SDK. A repo's image puts its own
+# venv first on PATH — Saffron's own does — and `python` there cannot import
+# claude_agent_sdk. Measured, after the host stopped declaring the SDK and the
+# repo venv stopped carrying it by accident.
+RUN ln -s "$(command -v python)" /opt/saffron/python
+
 # Run it, do not merely copy it — a file that is present and unrunnable reads
 # identically to a working one (principle 39). Invalid JSON exercises the whole
 # path down to the error event without the SDK, a key, or a network.
-RUN echo 'not json' | python /opt/saffron/agent_runner.py \
+RUN echo 'not json' | /opt/saffron/python /opt/saffron/agent_runner.py \
       | grep -q '"type": "error"' \
       || { echo "agent_runner.py did not emit a Saffron event" >&2; exit 1; }
 

@@ -3,8 +3,9 @@ name = "saffron"
 version = "0.0.0"
 description = "Turns specs into reviewable pull requests"
 requires-python = ">=3.12"
+# No claude-agent-sdk: the host is architecturally forbidden to import it
+# (§2.1), and images/cell-base.python.Dockerfile installs it where it is used.
 dependencies = [
-    "claude-agent-sdk>=0.2.142",
     "pydantic>=2",
     "pyyaml",
 ]
