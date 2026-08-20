@@ -8,7 +8,17 @@ from __future__ import annotations
 import html
 from dataclasses import dataclass
 
-_STATE_RANK = {"SKIPPED": 0, "SCOPE_REVIEW": 1, "MERGE_FAILED": 2, "PLAN_REJECTED": 2}
+_STATE_RANK = {
+    "SKIPPED": 0,
+    "SCOPE_REVIEW": 1,
+    "MERGE_FAILED": 2,
+    "PLAN_REJECTED": 2,
+    # The infrastructure broke, not the task. Ranked with the rest of what needs
+    # you rather than sorting in among ordinary outcomes (§3.3).
+    "PREFLIGHT_FAILED": 2,
+    "GATE_ERROR": 2,
+    "NOT_IMPLEMENTED": 2,
+}
 _ORDINARY = 4
 
 
@@ -32,9 +42,10 @@ class QueueLine:
 def sort_key(line: QueueLine) -> tuple[int, int, int, str]:
     """§6's order: dismiss in ten seconds, accept in two minutes.
 
-    Skipped repos, then `SCOPE_REVIEW`, then `MERGE_FAILED`/`PLAN_REJECTED`,
-    then elevated risk, then concern count descending. Sorted by state, never
-    grouped by repo.
+    Skipped repos, then `SCOPE_REVIEW`, then the states that need you —
+    `MERGE_FAILED`, `PLAN_REJECTED`, and the three infrastructure aborts — then
+    elevated risk, then concern count descending. Sorted by state, never grouped
+    by repo.
     """
     rank = _STATE_RANK.get(line.state, 3 if line.risk == "elevated" else _ORDINARY)
     return (rank, -line.concerns, -line.attempts, line.spec_id)

@@ -15,6 +15,10 @@ from saffron.repos import mirror as git_mirror
 
 DEFAULT_HOME = Path.home() / ".saffron"
 
+# The exit code is the only thing a script reads: 0 the task is reviewable,
+# 2 the infrastructure failed, 1 the task did not make it (§3.3).
+CELL_EXIT = {"READY_FOR_REVIEW": 0, "PREFLIGHT_FAILED": 2, "GATE_ERROR": 2}
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="saffron")
@@ -103,7 +107,7 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         cell_spec, repo=repo, mirror=mirror, ledger=ledger, out_dir=out_dir
     )
     print(f"{spec.id:<10} {state}")
-    return 0
+    return CELL_EXIT.get(state, 1)
 
 
 if __name__ == "__main__":

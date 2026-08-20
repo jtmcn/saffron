@@ -250,9 +250,16 @@ Design notes:
                    MERGED / MERGE_FAILED
 
   ORPHANED ◀── any state, on crash/kill; reclaimed by `saffron gc` (§4.5)
+
+  PREFLIGHT_FAILED ◀── the baseline suite errored: the toolchain is broken, not
+                       the code, and no model call has happened yet (§5.4)
+  NOT_IMPLEMENTED  ◀── IMPLEMENT produced no commit. Measured, never reported —
+                       a dead seam here would have returned an earned state
+  GATE_ERROR       ◀── a gate errored, or the two suites drifted: infrastructure,
+                       and never charged to the task (§5.4)
 ```
 
-Terminal states that reach you: `SCOPE_REVIEW`, `PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`. Everything else is internal.
+Terminal states that reach you: `SCOPE_REVIEW`, `PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`, `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`. Everything else is internal. The last three are named rather than folded into a neighbour because the alternative is an abort, or an attempt that produced nothing, reading as an ordinary task outcome — principle 34 wearing a state name.
 
 ---
 
