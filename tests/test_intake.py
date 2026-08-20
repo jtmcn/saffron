@@ -91,6 +91,18 @@ def test_malformed_yaml_is_rejected():
         parse_spec("---\nid: [unclosed\n---\n")
 
 
+def test_a_reserved_body_key_is_rejected():
+    with pytest.raises(SpecError, match="body"):
+        parse_spec("---\nid: TE-1\ntitle: t\ntype: bug\nbody: nope\n---\n")
+
+
+def test_a_reserved_acceptance_criteria_key_is_rejected():
+    with pytest.raises(SpecError, match="acceptance_criteria"):
+        parse_spec(
+            "---\nid: TE-1\ntitle: t\ntype: bug\nacceptance_criteria: [nope]\n---\n"
+        )
+
+
 def test_load_spec_returns_a_stable_content_sha(tmp_path):
     path = tmp_path / "TE-9001-gap.md"
     path.write_text(VALID)

@@ -66,10 +66,13 @@ def parse_spec(text: str) -> Spec:
     # declared", which is the documented shape for a bug awaiting DIAGNOSE.
     fields = {k: v for k, v in fields.items() if v is not None}
 
+    reserved = {"body": body, "acceptance_criteria": _acceptance_criteria(body)}
+    for key in reserved:
+        if key in fields:
+            raise SpecError(f"spec frontmatter may not set reserved key {key!r}")
+
     try:
-        return Spec(
-            **fields, body=body, acceptance_criteria=_acceptance_criteria(body)
-        )
+        return Spec(**fields, **reserved)
     except ValidationError as exc:
         raise SpecError(f"spec frontmatter is invalid: {exc}") from exc
 
