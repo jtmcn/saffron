@@ -1,4 +1,5 @@
-# saffron/cell-base:python — agent runtime, git, and the gate shim. Nothing else.
+# saffron/cell-base:python — agent runtime and git. Nothing else: the host execs
+# the repo's own gate executables, so there is no shim here to carry.
 # A toolchain here means §2.1's boundary has moved into Saffron. It belongs in
 # the target repo's .saffron/Dockerfile.
 #

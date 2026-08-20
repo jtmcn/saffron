@@ -34,13 +34,8 @@ def agent_options(
 ) -> dict:
     """ClaudeAgentOptions as a plain dict, so it is assertable without the SDK.
 
-    `permission_mode="dontAsk"` is the load-bearing one. The obvious mode
-    auto-accepts file *edits* — which covers Edit and Write and nothing else; a
-    shell command outside `allowed_tools` still raises a prompt, and at 03:00
-    inside a cell there is nobody to answer it. The attempt would burn its idle
-    timeout and read as a stall. `bypassPermissions` is the wrong fix: it removes
-    the wasted-turn saving along with the prompt and buys nothing safety-wise,
-    since the real controls are structural.
+    `permission_mode="dontAsk"` is load-bearing: unattended, a mode that asks on
+    an unapproved tool is a hang, not a fallback (§5.3).
     """
     options = {
         "system_prompt": system_prompt,

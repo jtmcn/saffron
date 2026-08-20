@@ -23,12 +23,8 @@ from saffron.gates.contract import GateResult, parse_gate_json
 
 _STDERR_TAIL = 800
 
-# Saffron runs under `uv run`, which exports VIRTUAL_ENV and puts its own
-# .venv/bin first on PATH. A gate resolving its toolchain (`poetry env info`,
-# a bare `python`) then finds Saffron's interpreter, where the repo's tools do
-# not exist — and a gate script that swallows "command not found" reports a
-# false `pass`. Language-agnostic: core un-declares its own activation, it does
-# not know what the gate will do with the environment.
+# Saffron's own `uv run` activation, un-declared: a gate resolving its toolchain
+# through VIRTUAL_ENV/PATH would find Saffron's interpreter, not the repo's.
 _LEAKED = ("VIRTUAL_ENV", "PYTHONHOME", "PYTHONPATH", "PYTHONSTARTUP")
 
 
@@ -121,6 +117,10 @@ def run_gate(
     code — a failing linter exits nonzero and is still reporting `fail`, not
     breaking. Anything else is `error`: the gate itself broke, which never
     counts as a task failure (DESIGN.md §5.4).
+
+    `skip` is the deliberate exemption from the error rules below — it names no
+    tool and carries no failures because it did not run, and it must exit 0. A
+    gate that used `skip` as its own failure path would read here as passing.
     """
     executor = executor or LocalExecutor()
     argv = [str(executable), *(subset or [])]

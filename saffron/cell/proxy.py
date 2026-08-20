@@ -23,10 +23,8 @@ def _ensure_egress_network() -> None:
 
     `--internal` networks have no route to the internet at all (measured) —
     the proxy needs one leg on such a network to reach api.anthropic.com.
-    `runtime.call` never raises, so an "already exists" from a prior run
-    is silently fine; only report a genuine failure to create it.
     """
-    runtime.call(
+    done = runtime.call(
         [
             runtime.RUNTIME,
             "network",
@@ -36,6 +34,12 @@ def _ensure_egress_network() -> None:
             EGRESS_NETWORK,
         ]
     )
+    # Left over from a prior run is the one tolerable failure; anything else
+    # means the proxy is about to start with no route out.
+    if done.returncode != 0 and "already exists" not in done.stderr:
+        raise runtime.CellRuntimeError(
+            f"creating {EGRESS_NETWORK} failed: {done.stderr.strip()}"
+        )
 
 
 def start_proxy(internal_network: str, *, timeout_s: float = 30) -> str:
