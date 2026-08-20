@@ -56,8 +56,17 @@ _Avoid_: "sandbox" — it implies the isolation boundary is the control, and in
 Saffron it is not (the controls are structural and live outside the cell).
 _Avoid_ also: "the container" when you mean the whole cell, "worker", "runner".
 
-**Container**: The Docker primitive specifically. Use only when the Docker object
-itself is the subject.
+**Container**: The runtime primitive specifically — the object the cell runtime
+creates and destroys. Use only when that object itself is the subject.
+
+**Cell runtime**: The program that creates cells. Undecided until v0.5, and the
+open question is an *architecture* — a shared VM behind a Docker socket
+(Docker Desktop or Colima, interchangeable) versus a VM per cell
+(`apple/container`). `DESIGN.md` Appendix G. Say "the cell runtime"; the seam is
+`saffron/cell/runtime.py` and it is the only module that knows the answer.
+_Avoid_: **"Docker"** as a generic term for it — that was a product name standing
+in for an unmade decision through seven revisions. _Avoid_ also "the container
+engine", "the VM", "the hypervisor".
 
 **Worktree**: The git working tree a task edits, on a volume mounted at `/work`.
 A cell contains a worktree; it is not one.
@@ -416,6 +425,13 @@ defects rather than word choices (`DESIGN.md` Appendix E).
    operator **adjudicates** it, the implementer **rebuts** it, and the morning
    index shows a **queue line**. The operator's judgement was previously folded
    into `decisions.reason`, which made the critic-ROI question unanswerable.
+
+3. **Docker vs. the cell runtime** — "Docker" was never a decision, only a
+   proper noun that read as one, and it survived seven revisions and an
+   adversarial review on that basis. The runtime is chosen at v0.5 against a
+   four-assertion spike; until then the word is **cell runtime**. Same shape as
+   the two above: a word hiding a design defect rather than a word choice
+   (`DESIGN.md` Appendix G, principle 32).
 
 ## Open naming decisions
 
