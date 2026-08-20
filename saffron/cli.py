@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     repo = args.repo.resolve()
-    spec, _ = load_spec(args.spec)
+    spec, spec_sha = load_spec(args.spec)
 
     digest = hashlib.sha256(str(repo).encode()).hexdigest()[:12]
     mirror = git_mirror.ensure_mirror(
@@ -89,6 +89,7 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
 
     cell_spec = CellSpec(
         spec_id=spec.id,
+        spec_sha=spec_sha,
         branch=f"saffron/{spec.id}",
         base_sha=base_sha,
         touches=spec.touches,

@@ -8,14 +8,13 @@ scheduler.py, and this file goes the way replay.py went.
 from __future__ import annotations
 
 import json
-from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from saffron.gates.baseline import NewFailure
-from saffron.gates.contract import GateResult, identity
+from saffron.gates.baseline import NewFailure, is_no_progress
+from saffron.gates.contract import GateResult
 
 if TYPE_CHECKING:
     from saffron.ledger import Ledger
@@ -29,6 +28,7 @@ _SAFFRON_PKG = Path(__file__).resolve().parents[1]
 @dataclass
 class CellSpec:
     spec_id: str
+    spec_sha: str
     branch: str
     base_sha: str
     touches: list[str]
@@ -46,10 +46,6 @@ def aborted_gates(results: Sequence[GateResult]) -> list[str]:
     return [r.gate for r in results if r.status == "error"]
 
 
-def _counted(failures: Sequence[NewFailure]) -> Counter:
-    return Counter(identity(f.gate, f.failure) for f in failures)
-
-
 def repair_decision(
     *,
     attempt: int,
@@ -60,9 +56,9 @@ def repair_decision(
     """What the loop does next: green | no-progress | exhausted | repair."""
     if not new:
         return "green"
-    if previous and _counted(new) == _counted(previous):
-        # The same new-failure set two attempts running, on the same counted
-        # identity as the subtraction. Stop paying (§5.4).
+    if previous and is_no_progress(new, previous):
+        # baseline.py owns the counted-identity comparison — it must not
+        # drift from subtract_baseline's own counting (§5.4).
         return "no-progress"
     if attempt >= max_attempts:
         return "exhausted"
@@ -111,7 +107,7 @@ def run_one_cell(
     task_id = ledger.create_task(
         run_id,
         spec.spec_id,
-        policy_sha,
+        spec.spec_sha,
         branch=spec.branch,
         budget_usd=spec.budget_usd,
     )
