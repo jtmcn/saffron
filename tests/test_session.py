@@ -76,8 +76,10 @@ def test_the_task_row_carries_the_specs_own_sha_not_the_policys(tmp_path, monkey
     )
 
     # Stop right after the ledger writes, before anything touches a real
-    # cell runtime — this test asserts the ledger row, nothing past it.
-    class _StopHere(Exception):
+    # cell runtime — this test asserts the ledger rows, nothing past it.
+    # KeyboardInterrupt, not Exception: the abort the attended driver actually
+    # sees is Ctrl-C, so this also pins the `except BaseException` clause.
+    class _StopHere(KeyboardInterrupt):
         pass
 
     def _stop(*_a, **_k):
@@ -110,6 +112,13 @@ def test_the_task_row_carries_the_specs_own_sha_not_the_policys(tmp_path, monkey
 
         assert row["spec_sha"] == spec.spec_sha
         assert row["spec_sha"] != repo_row["policy_sha"]
+
+        # An aborted run must not read as still going, and its task must not
+        # read as never started.
+        (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
+        assert run_row["status"] == "ABORTED"
+        (queued,) = ledger.queue_lines()
+        assert queued["state"] == "ORPHANED"
     finally:
         ledger.close()
 

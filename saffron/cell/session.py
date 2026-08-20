@@ -131,12 +131,15 @@ def run_one_cell(
     state = f"saffron-st-{spec.spec_id}"
     container = f"saffron-cell-{spec.spec_id}"
 
-    runtime.remove_container(container)
-    runtime.remove_network(network)
-    runtime.remove_volume(volume)
-    runtime.remove_volume(state)
-    runtime.create_network(network)
     try:
+        # Inside the guarantee, not above it: a leftover network from a SIGKILLed
+        # run makes `create_network` the first thing that raises on a re-run.
+        runtime.remove_container(container)
+        runtime.remove_network(network)
+        runtime.remove_volume(volume)
+        runtime.remove_volume(state)
+        runtime.create_network(network)
+
         # The cell runs the repo's own image, never the base: the base carries
         # no toolchain, so every gate would error before the agent is reached.
         watch(f"preflight: building {image.cell_tag(repo)}")
@@ -214,11 +217,16 @@ def run_one_cell(
         # what the message stream actually yields.
         ledger.finish_run(run_id, "COMPLETE")
         return "NOT_IMPLEMENTED"
-    except Exception:
+    except BaseException:
         # A run row left open is a run that reads as still going. Preflight
         # raising is the path an operator hits first, so it is the one most
-        # worth closing honestly — ABORTED, not COMPLETE.
+        # worth closing honestly — ABORTED, not COMPLETE. BaseException, not
+        # Exception: this is the attended driver, and Ctrl-C is the likeliest
+        # abort of all. The exception is re-raised untouched.
         ledger.finish_run(run_id, "ABORTED")
+        # The cell died, so the task is ORPHANED (§4.5) — left QUEUED it reads
+        # in `queue_lines` as never started, which is the founding defect.
+        ledger.set_task_state(task_id, "ORPHANED")
         raise
     finally:
         watch("teardown")
