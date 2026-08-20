@@ -141,3 +141,10 @@ def test_the_header_is_rendered():
     assert "trailing accept rate" in render_index(
         [line()], header={"trailing accept rate": "—"}
     )
+
+
+def test_a_queue_line_field_cannot_smuggle_markup_into_the_index():
+    """Every QueueLine field is rendered into HTML, so every one is escaped."""
+    rendered = render_index([line(note="<script>alert(1)</script>")], header={})
+    assert "<script>" not in rendered
+    assert "&lt;script&gt;" in rendered

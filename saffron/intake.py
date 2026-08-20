@@ -20,7 +20,8 @@ RiskTier = Literal["standard", "elevated"]
 _FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?(.*)\Z", re.DOTALL)
 _CRITERION = re.compile(r"^\s*-\s*\[[ xX]\]\s*(.+?)\s*$", re.MULTILINE)
 _CRITERIA_SECTION = re.compile(
-    r"^##\s*Acceptance criteria\s*$(.*?)(?=^##\s|\Z)", re.MULTILINE | re.DOTALL
+    r"^##\s*Acceptance criteria\s*$(.*?)(?=^##\s|\Z)",
+    re.MULTILINE | re.DOTALL | re.IGNORECASE,
 )
 
 
@@ -33,7 +34,9 @@ class Spec(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str
+    # Reaches a filesystem path (out_dir / spec.id) and an href in the index,
+    # so it is constrained to the shape CONTEXT.md §10 states.
+    id: str = Field(pattern=r"^[A-Za-z0-9]+-[0-9]+$")
     title: str
     type: SpecType
     priority: int = 3
@@ -83,7 +86,10 @@ def load_spec(path: Path) -> tuple[Spec, str]:
     The sha is over the file's bytes: edit a spec mid-batch and the task is
     invalidated rather than silently building the old thing (DESIGN.md §4.1).
     """
-    raw = path.read_bytes()
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise SpecError(f"spec at {path} could not be read: {exc}") from exc
     return parse_spec(raw.decode()), hashlib.sha256(raw).hexdigest()
 
 

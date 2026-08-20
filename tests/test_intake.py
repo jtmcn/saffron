@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from saffron.intake import Spec, SpecError, load_spec, parse_spec
@@ -119,3 +121,41 @@ def test_editing_a_spec_moves_its_sha(tmp_path):
     path.write_text(VALID + "\nAn added line.\n")
     _, after = load_spec(path)
     assert before != after
+
+
+def test_an_id_that_is_a_url_scheme_is_rejected():
+    """`id` reaches an href in the index; a javascript: id renders a live link."""
+    with pytest.raises(SpecError):
+        parse_spec("---\nid: 'javascript:alert(1)'\ntitle: t\ntype: bug\n---\n")
+
+
+def test_an_id_that_traverses_the_filesystem_is_rejected():
+    """`id` also reaches a path: out_dir / spec.id."""
+    with pytest.raises(SpecError):
+        parse_spec("---\nid: ../../etc/passwd\ntitle: t\ntype: bug\n---\n")
+
+
+def test_the_acceptance_criteria_heading_is_matched_whatever_its_case():
+    spec = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: bug\n---\n\n"
+        "## Acceptance Criteria\n- [ ] It holds\n"
+    )
+    assert spec.acceptance_criteria == ["It holds"]
+
+
+def test_a_missing_spec_path_is_a_specerror(tmp_path):
+    with pytest.raises(SpecError, match="could not be read"):
+        load_spec(tmp_path / "nope.md")
+
+
+def test_an_unreadable_spec_path_is_a_specerror(tmp_path):
+    if os.geteuid() == 0:
+        pytest.skip("root reads everything")
+    path = tmp_path / "TE-9001-gap.md"
+    path.write_text(VALID)
+    path.chmod(0o000)
+    try:
+        with pytest.raises(SpecError, match="could not be read"):
+            load_spec(path)
+    finally:
+        path.chmod(0o644)
