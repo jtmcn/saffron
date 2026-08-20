@@ -1,3 +1,3 @@
 #!/bin/sh
-echo '{"gate":"tests","status":"fail","failures":[{"file":"t.py","line":9,"code":"assert","message":"boom"}],"summary":"1 failed"}'
+echo '{"gate":"tests","status":"fail","tool":"fixture 1.0","failures":[{"file":"t.py","line":9,"code":"assert","message":"boom"}],"summary":"1 failed"}'
 exit 1

@@ -1,3 +1,3 @@
 #!/bin/sh
-printf '{"gate":"env","status":"pass","summary":"VIRTUAL_ENV=[%s] PYTHONPATH=[%s] PYTHONHOME=[%s] PYTHONSTARTUP=[%s] PATH=[%s]"}\n' \
+printf '{"gate":"env","status":"pass","tool":"fixture 1.0","summary":"VIRTUAL_ENV=[%s] PYTHONPATH=[%s] PYTHONHOME=[%s] PYTHONSTARTUP=[%s] PATH=[%s]"}\n' \
   "$VIRTUAL_ENV" "$PYTHONPATH" "$PYTHONHOME" "$PYTHONSTARTUP" "$PATH"

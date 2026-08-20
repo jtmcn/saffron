@@ -1,2 +1,2 @@
 #!/bin/sh
-echo '{"gate":"lint","status":"fail","failures":[{"file":"a.py","line":3,"code":"E501","message":"line too long"}],"summary":"1 error"}'
+echo '{"gate":"lint","status":"fail","tool":"fixture 1.0","failures":[{"file":"a.py","line":3,"code":"E501","message":"line too long"}],"summary":"1 error"}'

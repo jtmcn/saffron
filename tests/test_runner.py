@@ -56,9 +56,12 @@ def test_valid_json_is_believed_regardless_of_exit_code(tmp_path):
     assert result.failures[0].message == "boom"
 
 
-def test_a_crash_after_valid_output_is_still_believed(tmp_path):
+def test_a_crash_after_a_clean_pass_is_now_an_error(tmp_path):
+    """Pre-Task-5 this was believed as `pass`. A crash (nonzero exit) paired
+    with zero reported failures is now indistinguishable from the exact
+    false-green this contract exists to catch, so it is `error` instead."""
     result = run_gate("types", FIXTURES / "crashes", cwd=tmp_path)
-    assert result.status == "pass"
+    assert result.status == "error"
 
 
 def test_the_subset_argument_reaches_the_gate(tmp_path):
@@ -102,3 +105,57 @@ def test_saffrons_own_interpreter_activation_does_not_reach_the_gate(
         assert f"{name}=[]" in summary
     assert "/fake/venv/bin" not in summary
     assert "/usr/bin" in summary
+
+
+def _gate_script(tmp_path, name, body):
+    path = tmp_path / name
+    path.write_text("#!/bin/sh\n" + body)
+    path.chmod(0o755)
+    return path
+
+
+def test_a_gate_that_cannot_name_its_tool_is_an_error(tmp_path):
+    """A green result and an absent result are the same bytes (principle 34)."""
+    gate = _gate_script(
+        tmp_path,
+        "lint",
+        'echo \'{"gate":"lint","status":"pass","failures":[],"summary":"clean"}\'\n',
+    )
+    result = run_gate("lint", gate, tmp_path)
+    assert result.status == "error"
+    assert "tool" in result.summary
+
+
+def test_nonzero_exit_with_no_parsed_failures_is_an_error(tmp_path):
+    """A reworded tool output line makes every match vanish; the exit code is
+    the only thing that still disagrees."""
+    gate = _gate_script(
+        tmp_path,
+        "format",
+        'echo \'{"gate":"format","status":"pass","tool":"ruff 0.14.2",'
+        '"failures":[],"summary":"0 files"}\'\nexit 1\n',
+    )
+    result = run_gate("format", gate, tmp_path)
+    assert result.status == "error"
+    assert "exit" in result.summary
+
+
+def test_a_real_failure_with_a_nonzero_exit_is_still_fail(tmp_path):
+    gate = _gate_script(
+        tmp_path,
+        "lint",
+        'echo \'{"gate":"lint","status":"fail","tool":"ruff 0.14.2",'
+        '"failures":[{"file":"a.py","code":"E501","message":"long"}],'
+        '"summary":"1"}\'\nexit 1\n',
+    )
+    assert run_gate("lint", gate, tmp_path).status == "fail"
+
+
+def test_skip_needs_no_tool(tmp_path):
+    """A repo that declares no such gate has no tool to name."""
+    gate = _gate_script(
+        tmp_path,
+        "types",
+        'echo \'{"gate":"types","status":"skip","summary":"no type system"}\'\n',
+    )
+    assert run_gate("types", gate, tmp_path).status == "skip"

@@ -89,6 +89,23 @@ def run_gate(
             name, f"gate emitted no usable contract ({exc}): {detail}", started
         )
 
+    # Three ways a gate reports a result it did not produce. All are `error`:
+    # the gate itself broke, which is never charged to the task (§5.4).
+    if result.status in ("pass", "fail") and not result.tool:
+        return _error(
+            name,
+            "gate reported a result without naming its tool — cannot tell "
+            "'ran and passed' from 'did not run'",
+            started,
+        )
+    if proc.returncode != 0 and not result.failures:
+        return _error(
+            name,
+            f"gate exited {proc.returncode} but parsed no failures — its "
+            "output shape probably changed",
+            started,
+        )
+
     result.duration_ms = _elapsed_ms(started)
     return result
 

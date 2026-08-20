@@ -1,2 +1,2 @@
 #!/bin/sh
-echo "{\"gate\":\"tests\",\"status\":\"pass\",\"summary\":\"args: $*\"}"
+echo "{\"gate\":\"tests\",\"status\":\"pass\",\"tool\":\"fixture 1.0\",\"summary\":\"args: $*\"}"
