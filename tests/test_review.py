@@ -1,0 +1,231 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from saffron.gates.contract import GateResult
+from saffron.phases import implement, review
+
+PROMPTS = Path(review.__file__).resolve().parents[1] / "agents" / "prompts"
+CONTEXT_MD = (Path(review.__file__).resolve().parents[2] / "CONTEXT.md").read_text()
+
+DIFF = """diff --git a/src/gap.py b/src/gap.py
+--- a/src/gap.py
++++ b/src/gap.py
+@@ -1,2 +1,2 @@
+-def gap(series):
++def gap(series, tz="UTC"):
+     return series
+"""
+
+
+def _turn(text, cost=0.1):
+    return implement.AttemptResult(
+        session_id="lens-1",
+        subtype="success",
+        terminal_reason="completed",
+        num_turns=1,
+        cost_usd_est=cost,
+        text=text,
+    )
+
+
+def _block(findings):
+    return f"Here it is.\n<output>\n{json.dumps({'findings': findings})}\n</output>"
+
+
+def _finding(**kwargs):
+    base = {"file": "src/gap.py", "line": 1, "severity": "concern", "claim": "c"}
+    return base | kwargs
+
+
+def _agent(*texts, record=None):
+    scripted = iter(texts)
+
+    def run(container, *, prompt, options, **kwargs):
+        if record is not None:
+            record.append({"prompt": prompt, "options": options, "kwargs": kwargs})
+        text = next(scripted)
+        if isinstance(text, BaseException):
+            raise text
+        return _turn(text)
+
+    return run
+
+
+def _review(*texts, read_head=lambda _p: None, record=None):
+    return review.run_review(
+        "cell",
+        diff=DIFF,
+        read_head=read_head,
+        spec_body="fix the gap",
+        gates="- tests: pass (pytest 8.0)",
+        context_md=CONTEXT_MD,
+        prompts_dir=PROMPTS,
+        max_turns=20,
+        budget_usd=2.0,
+        agent=_agent(*texts, record=record),
+        watch=lambda _line: None,
+    )
+
+
+def test_the_critic_holds_no_tool_that_can_change_anything():
+    """The implementer gets Write/Edit/Bash; a critic that can run a command can
+    edit the thing it is judging, and `tools` is what withholds (§5.3)."""
+    options = implement.agent_options(
+        system_prompt="s", max_turns=5, budget_usd=1.0, tools=review.REVIEW_TOOLS
+    )
+    assert options["tools"] == ["Read", "Glob", "Grep"]
+    assert options["allowed_tools"] == options["tools"]
+    for tool in ("Bash", "Write", "Edit"):
+        assert tool not in options["tools"]
+
+
+def test_the_implementer_keeps_its_own_tools():
+    options = implement.agent_options(system_prompt="s", max_turns=5, budget_usd=1.0)
+    assert "Bash" in options["tools"]
+
+
+def test_every_declared_lens_runs_once_and_never_resumes():
+    """§5.5: the host drives the lens set, because a model asked to delegate
+    produces a set that varies by task with no error when a lens is skipped.
+    And a resumed session would carry the implementer's transcript."""
+    record: list[dict] = []
+    reviews = _review(_block([]), _block([]), record=record)
+    assert [r.lens for r in reviews] == list(review.LENSES)
+    assert len(record) == len(review.LENSES)
+    assert all(call["kwargs"].get("resume") is None for call in record)
+    # Different lenses, not the same one twice.
+    assert len({call["options"]["system_prompt"] for call in record}) == 2
+
+
+def test_a_lens_that_finds_nothing_is_a_clean_review():
+    reviews = _review(_block([]), _block([]))
+    assert [r.findings for r in reviews] == [[], []]
+    assert review.review_state(reviews)[0] == "READY_FOR_REVIEW"
+
+
+def test_findings_are_stamped_with_the_lens_that_filed_them():
+    """The critic never names its own lens: a lens that could would be able to
+    file inside another remit and still look clean."""
+    reviews = _review(_block([_finding()]), _block([]))
+    assert [f.lens for f in reviews[0].findings] == ["correctness"]
+
+
+def test_a_finding_the_host_cannot_anchor_is_kept_and_not_counted():
+    reviews = _review(
+        _block([_finding(severity="blocker"), _finding(file="ghost.py", line=9)]),
+        _block([]),
+    )
+    correctness = reviews[0]
+    assert [f.anchored for f in correctness.findings] == [True, False]
+    assert correctness.drop_rate == pytest.approx(0.5)
+
+
+def test_an_unanchored_blocker_routes_nowhere():
+    """A hallucinated blocker must not stop a task — the drop is the whole
+    point of reconciling findings against the diff (§5.5)."""
+    reviews = _review(
+        _block([_finding(file="ghost.py", line=9, severity="blocker")]), _block([])
+    )
+    state, why = review.review_state(reviews)
+    assert state == "READY_FOR_REVIEW"
+    assert "0 concern" in why
+
+
+def test_an_anchored_blocker_routes_to_rebut():
+    """Any single anchored blocker routes onward — no vote, because the lenses
+    are disjoint by construction (§5.5)."""
+    reviews = _review(_block([_finding(severity="blocker")]), _block([]))
+    state, why = review.review_state(reviews)
+    assert state == "REBUTTING"
+    assert "1 blocker" in why
+
+
+def test_notes_are_excluded_from_the_number_the_queue_sorts_on():
+    reviews = _review(
+        _block([_finding(severity="note"), _finding(severity="concern")]), _block([])
+    )
+    state, why = review.review_state(reviews)
+    assert state == "READY_FOR_REVIEW"
+    assert "1 concern" in why
+
+
+def test_output_that_is_not_the_schema_is_an_incomplete_review_not_a_clean_one():
+    """§4.3 again: a lens that produced nothing and a lens that found nothing
+    must never be the same value."""
+    reviews = _review("I could not find anything wrong.", _block([]))
+    assert reviews[0].error and reviews[0].error.startswith("not the schema")
+    assert reviews[0].cost_usd == 0.1  # a failed extraction still cost money
+    state, why = review.review_state(reviews)
+    assert state == "REVIEWING"
+    assert "correctness" in why
+
+
+def test_a_severity_the_vocabulary_does_not_have_is_not_the_schema():
+    reviews = _review(_block([_finding(severity="critical")]), _block([]))
+    assert reviews[0].error
+
+
+def test_a_lens_whose_session_failed_still_charges_what_it_spent():
+    failed = implement.AgentFailed("max turns", _turn("", cost=0.4))
+    reviews = _review(failed, _block([]))
+    assert reviews[0].cost_usd == 0.4
+    assert reviews[0].error
+    assert review.review_state(reviews)[0] == "REVIEWING"
+
+
+def test_the_blast_radius_lens_is_not_declared():
+    """§5.5 runs it at `risk: elevated` only, and nothing in v0.5 carries a
+    risk tier — a lens wired here would run on every task instead."""
+    assert set(review.LENSES) == {"correctness", "contract"}
+
+
+@pytest.mark.parametrize("lens", sorted(review.LENSES))
+def test_each_lens_prompt_carries_the_framing_that_makes_it_a_critic(lens):
+    prompt = review.lens_prompt(
+        lens,
+        context_md=CONTEXT_MD,
+        prompts_dir=PROMPTS,
+        spec_body="fix the gap",
+        diff=DIFF,
+        gates="- tests: pass (pytest 8.0)",
+    )
+    # Normalized: the prompt file is wrapped, and the clause spans two lines.
+    flat = " ".join(prompt.split())
+    assert "Find the reason this change should not be merged" in flat
+    assert "do not manufacture one" in flat
+    for severity in ("`blocker`", "`concern`", "`note`"):
+        assert severity in prompt
+    # A fresh session inherits nothing, so all four inputs are passed or absent.
+    assert "fix the gap" in prompt
+    assert "def gap(series, tz=" in prompt
+    assert "pytest 8.0" in prompt
+    assert "**Lens**:" in prompt  # CONTEXT.md §5's vocabulary
+
+
+def test_the_lenses_declare_disjoint_remits():
+    """Lenses are disjoint by construction — that is why one blocker routes
+    onward and why there is no vote. Each names the other's territory as not
+    its own rather than leaving the boundary to judgement."""
+    correctness = (PROMPTS / review.LENSES["correctness"]).read_text()
+    contract = (PROMPTS / review.LENSES["contract"]).read_text()
+    assert "migration reversibility" in correctness.split("Not yours.")[1]
+    assert "timezones" in contract.split("Not yours.")[1]
+    for text in (correctness, contract):
+        assert "blast-radius lens" in text.split("Not yours.")[1]
+
+
+def test_the_gate_results_reach_the_critic_with_the_tool_that_ran():
+    """ "Passed" and "never ran" are the same JSON without `tool` (§5.4), and a
+    critic told the gates passed is being told exactly that."""
+    summary = review.gate_summary(
+        [
+            GateResult(gate="tests", status="pass", tool="pytest 8.0", summary="31 ok"),
+            GateResult(gate="types", status="skip"),
+        ]
+    )
+    assert "tests: pass (pytest 8.0) — 31 ok" in summary
+    assert "types: skip (no tool reported)" in summary

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Saffron declares no type checker. `skip` is a first-class status and a repo
+# with no type system simply omits the gate — nothing in core changes (§5.4).
+echo '{"gate":"types","status":"skip","summary":"no type checker declared"}'

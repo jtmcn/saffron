@@ -8,7 +8,25 @@ from __future__ import annotations
 import html
 from dataclasses import dataclass
 
-_STATE_RANK = {"SKIPPED": 0, "SCOPE_REVIEW": 1, "MERGE_FAILED": 2, "PLAN_REJECTED": 2}
+_STATE_RANK = {
+    "SKIPPED": 0,
+    "SCOPE_REVIEW": 1,
+    "MERGE_FAILED": 2,
+    "PLAN_REJECTED": 2,
+    # Ranked with the rest of what needs you rather than sorting in among
+    # ordinary outcomes (§3.3): two infrastructure aborts, and an attempt that
+    # produced nothing — which is the task's own failure, and exits 1, not 2.
+    "PREFLIGHT_FAILED": 2,
+    "GATE_ERROR": 2,
+    "NOT_IMPLEMENTED": 2,
+    # The rest of what `run_one_cell` can return or stamp. Absent, they fell to
+    # `_ORDINARY` and sorted below elevated-risk green tasks: a task that could
+    # not pass its own gates, or one whose cell died, reading as reviewable.
+    "EXHAUSTED": 2,
+    "ORPHANED": 2,
+    "REVIEWING": 3,
+    "REBUTTING": 3,
+}
 _ORDINARY = 4
 
 
@@ -32,9 +50,10 @@ class QueueLine:
 def sort_key(line: QueueLine) -> tuple[int, int, int, str]:
     """§6's order: dismiss in ten seconds, accept in two minutes.
 
-    Skipped repos, then `SCOPE_REVIEW`, then `MERGE_FAILED`/`PLAN_REJECTED`,
-    then elevated risk, then concern count descending. Sorted by state, never
-    grouped by repo.
+    Skipped repos, then `SCOPE_REVIEW`, then the states that need you —
+    `MERGE_FAILED`, `PLAN_REJECTED`, `PREFLIGHT_FAILED`, `GATE_ERROR` and
+    `NOT_IMPLEMENTED` — then elevated risk, then concern count descending.
+    Sorted by state, never grouped by repo.
     """
     rank = _STATE_RANK.get(line.state, 3 if line.risk == "elevated" else _ORDINARY)
     return (rank, -line.concerns, -line.attempts, line.spec_id)

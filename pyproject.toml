@@ -3,13 +3,20 @@ name = "saffron"
 version = "0.0.0"
 description = "Turns specs into reviewable pull requests"
 requires-python = ">=3.12"
-dependencies = ["pydantic>=2", "pyyaml"]
+# No claude-agent-sdk: the host is architecturally forbidden to import it
+# (§2.1), and images/cell-base.python.Dockerfile installs it where it is used.
+dependencies = [
+    "pydantic>=2",
+    "pyyaml",
+]
 
 [project.scripts]
 saffron = "saffron.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+# ruff is declared, not assumed: the `format` and `lint` gates run it inside a
+# cell, where a globally-installed host binary does not exist.
+dev = ["pytest>=8", "ruff>=0.16.3"]
 
 [build-system]
 requires = ["hatchling"]
@@ -20,6 +27,8 @@ packages = ["saffron"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["cell: needs a real cell runtime; excluded from the default run"]
+addopts = "-m 'not cell'"
 
 [tool.ruff]
 # ruff formats python blocks inside markdown; plan docs are a record, leave them.

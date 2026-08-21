@@ -81,3 +81,14 @@ def test_normalize_message_collapses_whitespace():
 def test_gate_result_rejects_a_negative_duration():
     with pytest.raises(ValidationError):
         GateResult(gate="lint", status="pass", duration_ms=-1)
+
+
+def test_tool_is_carried_on_the_result():
+    raw = '{"gate":"lint","status":"pass","tool":"ruff 0.14.2","summary":"clean"}'
+    result = parse_gate_json(raw, expected_gate="lint")
+    assert result.tool == "ruff 0.14.2"
+
+
+def test_tool_is_absent_rather_than_invented():
+    raw = '{"gate":"lint","status":"pass","summary":"clean"}'
+    assert parse_gate_json(raw, expected_gate="lint").tool is None

@@ -1,4 +1,4 @@
-from saffron.gates.baseline import is_no_progress, subtract_baseline
+from saffron.gates.baseline import is_no_progress, subtract_baseline, suite_drift
 from saffron.gates.contract import Failure, GateResult
 
 
@@ -190,3 +190,44 @@ def test_fixing_some_of_several_identical_failures_is_progress():
     previous = subtract_baseline([gate("lint", same, same, same, same)], [])
     current = subtract_baseline([gate("lint", same)], [])
     assert not is_no_progress(current, previous)
+
+
+def _ran(name, *, status="pass", tool="ruff 1.0"):
+    return GateResult(gate=name, status=status, tool=tool)
+
+
+def test_a_gate_that_stopped_running_is_drift_not_a_green():
+    """Two clean-looking suites: the subtraction compares failures, and a gate
+    that passed at baseline and skipped at head has none either way (§5.4)."""
+    assert suite_drift([_ran("types", status="skip", tool=None)], [_ran("types")])
+
+
+def test_a_tool_that_changed_under_the_run_is_drift():
+    """`tool` is what distinguishes "ran and passed" from "didn't run"."""
+    assert suite_drift([_ran("lint", tool="ruff 2.0")], [_ran("lint")])
+
+
+def test_the_same_tool_and_status_is_not_drift():
+    assert suite_drift([_ran("lint")], [_ran("lint")]) == []
+
+
+def test_a_gate_that_skipped_at_baseline_and_at_head_is_not_drift():
+    skipped = _ran("types", status="skip", tool=None)
+    assert suite_drift([skipped], [skipped]) == []
+
+
+def test_a_gate_that_started_running_because_the_task_created_its_subject():
+    """The common shape this check must not abort on: a gate exempt until its
+    subject exists, running once the task creates it. `tool: null -> 'alembic'`
+    is the task succeeding, not the suite drifting (§5.4)."""
+    started = _ran("migrations", tool="alembic 1.13")
+    exempt = _ran("migrations", status="skip", tool=None)
+    assert suite_drift([started], [exempt]) == []
+
+
+def test_a_gate_that_stopped_running_with_its_tool_unchanged_is_drift():
+    """Isolates the status branch: same `tool` on both sides, so only
+    `pass -> skip` can report it."""
+    assert suite_drift([_ran("lint", status="skip")], [_ran("lint")]) == [
+        "lint: pass at baseline, skip at head"
+    ]

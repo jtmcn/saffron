@@ -343,8 +343,9 @@ _Avoid_: "config", "settings", "the manifest".
 image. Carries the toolchain, services, migrations, and seed data.
 _Avoid_: "the container image" when the distinction from a base image matters.
 
-**Base image**: `saffron/cell-base:<runtime>`. Agent runtime, git, and the gate
-shim. Nothing else, ever.
+**Base image**: `saffron/cell-base:<runtime>`. Agent runtime and git. Nothing
+else, ever — in particular no gate shim: the host `exec`s the repo's own gate
+executables through the runtime, so there is nothing for one to do (§2.1).
 
 **Fixture services**: Whatever a repo bakes into its cell image to make its tests
 meaningful — a database, a cache, nothing at all. Never anything the operator runs

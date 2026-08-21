@@ -27,11 +27,11 @@ touches:
 # in — and never cds anywhere. That is the contract every real gate follows.
 LINT_GATE = r"""#!/bin/sh
 LINE=$(grep -n too_long src/a.py | cut -d: -f1)
-printf '{"gate":"lint","status":"fail","summary":"1 error","failures":[{"file":"src/a.py","line":%s,"code":"E501","message":"line too long"}]}\n' "$LINE"
+printf '{"gate":"lint","status":"fail","tool":"fixture 1.0","summary":"1 error","failures":[{"file":"src/a.py","line":%s,"code":"E501","message":"line too long"}]}\n' "$LINE"
 """
 
 TESTS_GATE_PASSES = """#!/bin/sh
-echo '{"gate":"tests","status":"pass","summary":"12 passed"}'
+echo '{"gate":"tests","status":"pass","tool":"fixture 1.0","summary":"12 passed"}'
 """
 
 POLICY = """
@@ -182,10 +182,12 @@ def test_a_new_failure_at_head_is_reported(target, ledger, tmp_path):
     (target / ".saffron" / "gates" / "tests").write_text(
         "#!/bin/sh\n"
         "if [ -f src/a.py ] && grep -q pad_0 src/a.py; then\n"
-        '  echo \'{"gate":"tests","status":"fail","summary":"1 failed",'
+        '  echo \'{"gate":"tests","status":"fail","tool":"fixture 1.0",'
+        '"summary":"1 failed",'
         '"failures":[{"file":"t/x.py","line":3,"code":"assert","message":"boom"}]}\'\n'
         "else\n"
-        '  echo \'{"gate":"tests","status":"pass","summary":"12 passed"}\'\n'
+        '  echo \'{"gate":"tests","status":"pass","tool":"fixture 1.0",'
+        '"summary":"12 passed"}\'\n'
         "fi\n"
     )
     (target / ".saffron" / "gates" / "tests").chmod(0o755)
@@ -303,7 +305,8 @@ def test_a_gate_that_errored_at_base_says_so_rather_than_blaming_the_task(
     (target / ".saffron" / "gates" / "tests").write_text(
         "#!/bin/sh\n"
         "if grep -q pad_0 src/a.py; then\n"
-        '  echo \'{"gate":"tests","status":"fail","summary":"1 failed",'
+        '  echo \'{"gate":"tests","status":"fail","tool":"fixture 1.0",'
+        '"summary":"1 failed",'
         '"failures":[{"file":"t/x.py","line":3,"code":"assert","message":"boom"}]}\'\n'
         "else\n"
         '  echo "ModuleNotFoundError: No module named pytest" >&2\n'
@@ -363,7 +366,8 @@ def test_new_failures_survive_a_gate_that_errored_at_base(target, ledger, tmp_pa
     (target / ".saffron" / "gates" / "tests").write_text(
         "#!/bin/sh\n"
         "if grep -q pad_0 src/a.py; then\n"
-        '  echo \'{"gate":"tests","status":"pass","summary":"12 passed"}\'\n'
+        '  echo \'{"gate":"tests","status":"pass","tool":"fixture 1.0",'
+        '"summary":"12 passed"}\'\n'
         "else\n"
         '  echo "ModuleNotFoundError: No module named pytest" >&2\n'
         "  exit 1\n"
@@ -372,10 +376,12 @@ def test_new_failures_survive_a_gate_that_errored_at_base(target, ledger, tmp_pa
     (target / ".saffron" / "gates" / "lint").write_text(
         "#!/bin/sh\n"
         "if grep -q pad_0 src/a.py; then\n"
-        '  echo \'{"gate":"lint","status":"fail","summary":"1 error",'
+        '  echo \'{"gate":"lint","status":"fail","tool":"fixture 1.0",'
+        '"summary":"1 error",'
         '"failures":[{"file":"src/a.py","line":1,"code":"E999","message":"new"}]}\'\n'
         "else\n"
-        '  echo \'{"gate":"lint","status":"pass","summary":"clean"}\'\n'
+        '  echo \'{"gate":"lint","status":"pass","tool":"fixture 1.0",'
+        '"summary":"clean"}\'\n'
         "fi\n"
     )
     for name in ("lint", "tests"):

@@ -223,3 +223,12 @@ def test_a_pipe_in_a_gate_message_does_not_split_the_table_row():
     assert rows
     for row in rows:
         assert row.count("|") - row.count("\\|") == 5
+
+
+def test_every_state_the_driver_can_produce_ranks_above_ordinary():
+    """A task that could not pass its own gates, or one whose cell died, must
+    not sort in among reviewable outcomes (§3.3)."""
+    from saffron.report.index import _ORDINARY, _STATE_RANK
+
+    for state in ("EXHAUSTED", "ORPHANED", "NOT_IMPLEMENTED", "GATE_ERROR"):
+        assert _STATE_RANK[state] < _ORDINARY, state

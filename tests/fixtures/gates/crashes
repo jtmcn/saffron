@@ -1,3 +1,3 @@
 #!/bin/sh
-echo '{"gate":"types","status":"pass"}'
+echo '{"gate":"types","status":"pass","tool":"fixture 1.0"}'
 kill -SEGV $$

@@ -2,7 +2,7 @@
 
 An agentic software factory: spec files in, reviewed pull requests out, running unattended overnight on one Mac.
 
-**Status:** rev 10 — the cell runtime is `apple/container`, decided by spike rather than deferred (Appendix G). Prior: rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime named (Appendix G); rev 9 v0 built and replayed (Appendix H)
+**Status:** rev 14 — the critic built and measured against a known-bad diff (Appendix L). Prior: rev 13 three tasks run, one reviewed, and the review said no (Appendix K); rev 12 v0.5 run against a live model (Appendix J); rev 11 v0.5 built and reviewed (Appendix I); rev 10 the cell runtime chosen by spike (Appendix G); rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime named (Appendix G); rev 9 v0 built and replayed (Appendix H)
 
 **Companion document:** `CONTEXT.md` — the controlled vocabulary. It is authoritative for what words mean; this document is authoritative for what the system does. Where they disagree, one of them has a bug.
 **Scope:** language- and stack-agnostic. Saffron develops *any* repo that can satisfy the gate contract (§5.4). First repo is Saffron itself; `thermal-edge` is the first external one.
@@ -112,7 +112,7 @@ This list is a **living refusal record**, not a one-time scoping exercise. Each 
      │  agent proc     │       ▼             ▼
      │  no credentials │  ┌───────────────────────────┐
      │  no default rte ├─▶│  egress proxy (allowlist) │──▶ api.anthropic.com
-     └─────────────────┘  └───────────────────────────┘    package mirror
+     └─────────────────┘  └───────────────────────────┘    (and nothing else)
 ```
 
 Three planes, deliberately separated:
@@ -144,7 +144,7 @@ The consequence is F11: **onboarding a repo touches zero lines of Saffron.** If 
 | Risk-elevation paths, protected paths, envelope defaults | **Repo** | `policy.yaml` |
 | Standing agent instructions | **Repo** | `CLAUDE.md` |
 
-Saffron ships thin base images (`saffron/cell-base:python`, `:node`, …) carrying the agent runtime, git, and the gate-runner shim — and nothing else. A repo's `.saffron/Dockerfile` starts `FROM` one of those and installs whatever it needs. Saffron never installs a toolchain on a repo's behalf.
+Saffron ships thin base images (`saffron/cell-base:python`, `:node`, …) carrying the agent runtime, git, and nothing else. **There is no gate-runner shim** — that phrase survived four revisions describing a component that was never built and turned out not to be needed: the host `exec`s the repo's gate executables directly through the runtime, so there is nothing for a shim to do (Appendix I). A repo's `.saffron/Dockerfile` starts `FROM` one of those and installs whatever it needs. Saffron never installs a toolchain on a repo's behalf.
 
 **The seam to watch.** Most core gates are core precisely because they read the diff rather than run the code. That is not a coincidence and it is worth protecting: every time a proposed core gate needs to *execute* something in the repo, it belongs on the repo side of the line.
 
@@ -250,9 +250,19 @@ Design notes:
                    MERGED / MERGE_FAILED
 
   ORPHANED ◀── any state, on crash/kill; reclaimed by `saffron gc` (§4.5)
+
+  PREFLIGHT_FAILED ◀── the baseline suite errored: the toolchain is broken, not
+                       the code, and no model call has happened yet (§5.4)
+  NOT_IMPLEMENTED  ◀── IMPLEMENT produced no commit. Measured, never reported —
+                       a dead seam here would have returned an earned state
+  GATE_ERROR       ◀── a gate errored, or the two suites drifted: infrastructure,
+                       and never charged to the task (§5.4)
+  EXHAUSTED        ◀── also from IMPLEMENTING: the host-side spend ceiling stops
+                       a task before its next turn, and the budget stop and
+                       "four attempts, still red" share the state (§4.3)
 ```
 
-Terminal states that reach you: `SCOPE_REVIEW`, `PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`. Everything else is internal.
+Terminal states that reach you: `SCOPE_REVIEW`, `PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`, `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`. Everything else is internal. The last three are named rather than folded into a neighbour because the alternative is an abort, or an attempt that produced nothing, reading as an ordinary task outcome — principle 34 wearing a state name.
 
 ---
 
@@ -471,10 +481,15 @@ container run --rm \
   saffron/cell:thermal-edge                       # built from .saffron/Dockerfile
 ```
 
+**Every flag in the per-task block is a requirement, and the wiring is the control.** v0.5 shipped a cell created without `--network` and without the proxy environment: the isolated network was created, the host-binding probe ran against it, the proxy started on it and printed its address, and none of it was passed to the container holding the agent. Every mechanism ran, every mechanism reported success, and all of it applied to a different container. So `network` and `env` are **required** arguments where a cell is created — omission is an error, not a default — and the test that proves isolation must start a cell *the way production starts one* and probe **from inside that container**, not from an ephemeral sibling (Appendix I). **That rule is about a *container's* egress.** A preflight probe establishing a property of the *network* — N1's host-binding probe — necessarily runs in an ephemeral sibling on that same network, because it gates whether a cell is started at all and so cannot run inside one that does not exist yet.
+
+**Two measured prerequisites, neither obvious and both expensive to rediscover.** `container build` does not work on macOS without Rosetta installed (`softwareupdate --install-rosetta`). And `container volume create` pre-formats a volume with a `lost+found` directory, so `git clone` refuses the destination as non-empty — a worktree is seeded with `git init` + `remote add` + `fetch` + `checkout` + `remote remove`, chained under `sh -euc` so the remote removal cannot be skipped on a successful seed.
+
 **The runtime is `apple/container`,** decided in rev 10 against the four-assertion spike rather than left to taste (Appendix G). `no-new-privileges` and seccomp have no equivalent and are deliberately not replaced: the per-cell VM is the boundary offered instead, and §2's whole claim is that the structural controls are the ones that hold. Every remaining flag is load-bearing:
 
 - **No target-repo credentials — for any repo, ever, and exactly one credential of any kind.** No host `.env`, no cloud profile, no database URL, no third-party API key. Tests run against recorded fixtures. A task that genuinely needs live data is a task you run attended. This is a rule core enforces rather than one each repo is trusted to follow: the cell simply never receives them.
   **The exception is `ANTHROPIC_API_KEY`, and it is stated here because an unstated exception is an abandoned rule (Appendix F, principle 29).** The agent cannot run without it, so the cell holds one live billing credential and the blast radius of that is spend, not data — which is why it is tolerable and why §2's boundary claim is written in terms of *target-repo* credentials. But it does mean N2's ceilings are an accounting sum over numbers the cell reports, not a limit the cell is subject to: an agent that leaks or misuses the key spends outside the supervisor's view entirely. Two mitigations, neither of which needs building before v1: use a **separate key for the factory** so it can be revoked without touching your interactive work, and set a **provider-side monthly cap on that key** — the only ceiling in the whole design that holds without the cell's cooperation. Moving custody into the proxy is the principled fix and is not available: `CONNECT` tunnels are opaque, so the proxy cannot inject a header it cannot see.
+- **The proxy is dual-homed, and it drops privilege by starting without it.** An `--internal` network has **no route out at all**, not merely no DNS — so the proxy sits on both the internal network and an egress network, egress-first, because the runtime's default route follows the first `--network`. And squid cannot start under `--cap-drop ALL` as root, because dropping privilege needs `SETUID`/`SETGID`; rather than granting a capability, the proxy runs as `--user squid:squid` from launch so squid never calls `setuid()`. **No capability is granted to anything.** Both facts were measured, not reasoned (Appendix I).
 - **Egress via an allowlisting proxy, not iptables.** Two reasons the obvious version doesn't work: `--cap-drop ALL` removes `CAP_NET_ADMIN`, so a cell entrypoint cannot install firewall rules (and granting it that capability would let the untrusted cell rewrite its own firewall); and `api.anthropic.com` is behind a CDN, so an IP allowlist resolved at startup starts failing mid-batch. A sibling proxy on both the internal and external networks doing hostname-based `CONNECT` filtering solves both — hostnames not IPs, zero capabilities in the cell.
 - **`CLAUDE_CONFIG_DIR` on a separate volume, never under `/work`.** Session state and any OAuth credential file must not live in the tree the agent has write access to, that the `scope` gate walks, that the secret scanner scans, and that gets patch-exported. Putting them together means the agent can read its own credentials and the secret scan trips on a real token.
 - **A cell must see only the CPUs it has — not a quota, plus explicit thread caps.** Docker's `--cpus` is a CFS quota, not a core mask: Polars, pyarrow, and numpy's BLAS all size their thread pools from the *visible* core count and will each spawn ~10 threads inside a 2-CPU quota. The result is heavy throttling and wildly variable test timings — the exact flaky-gate failure mode §7 warns about, self-inflicted.
@@ -499,11 +514,15 @@ Cost: ~$0.30–1.00. Cheapest possible place to catch a misconceived task.
 
 ### 5.3 Phase 2 — IMPLEMENT (with a plan checkpoint)
 
-Full write tools inside `/work`, with an explicit `allowed_tools` list and a permission mode that **cannot prompt**.
+Full write tools inside `/work`, with an explicit list of the tools that **exist**, an explicit list of those callable without a prompt, and a permission mode that **cannot prompt**.
+
+**Those first two are different options and only one of them withholds anything.** `allowed_tools` governs auto-approval, not availability: measured live, a session that named six tools there was offered all twenty-one built-ins the runtime had — `Task`, `WebFetch`, `WebSearch`, `SendMessage`, `Workflow`, `Cron*`, `ScheduleWakeup`. `dontAsk` denied the ones outside the list, so the boundary held, but the model spent context seeing them and turns attempting them, which is the entire saving the list was written to produce. `tools` is the option that decides what exists, and it is a positive allowlist: a name the runtime does not recognise is dropped rather than granted, so the list can only fail closed. Restated generally, because it is the same shape as the hooks warning below: **a control that denies an action and a control that removes it are not interchangeable, and only the second one saves the turn.**
 
 That second requirement is easy to miss and fatal to get wrong. The obvious mode auto-accepts file *edits* — which covers Edit and Write and nothing else. A shell command outside `allowed_tools` still raises a permission prompt, and at 03:00 inside a container there is nobody to answer it: the attempt burns its idle timeout (§4.3) and reads as a stall. **Unattended operation requires a mode whose behaviour on an unapproved tool is to deny, not to ask.** The runtime offers one; it also offers a mode that skips permission checks entirely, which is the wrong fix — it removes the wasted-turn savings along with the prompt, and buys nothing safety-wise since the real controls are structural anyway (§2).
 
 The general form, because it will recur with every runtime option: **in an unattended system, "ask the operator" is not a fallback, it is a hang.** Any option whose failure mode is a prompt needs its non-interactive equivalent chosen deliberately.
+
+**Configuration is loaded from nowhere.** `setting_sources` is pinned to `[]`. Its default loads project settings from the working directory, and the working directory is `/work` — the target repo's checkout, a tree the task itself can edit. Measured with a planted `.claude/`: an agent definition and a skill in `/work` both reached the agent Saffron was running *on that repo*, which for self-hosting means Saffron's own `.claude/` configures its own factory. Every instruction the agent gets is composed host-side and injected (§5.3); nothing is read from the tree under work. The cost of the pin is that the repo's `CLAUDE.md` no longer loads either — that is the right trade and the right fix is the same one `CONTEXT.md` already uses: inject it host-side, read from the mirror at the base commit, never from the tree the agent can rewrite.
 
 #### Control artifacts never stay in the workspace
 
@@ -651,6 +670,7 @@ for n in 1..max_attempts:
 - **Only new failures count.** Failures on `base_sha` are pre-existing and not this task's problem. Otherwise every task inherits your flaky tests and burns its budget on them.
 - **No-progress detection.** The same new-failure set two attempts running — same identity as above, and counted the same way, for the same reason — means the agent is stuck; stop paying. Comparing raw bytes instead would make this dead code, because every repair shifts line numbers, so a permanently stuck agent would look like it were making progress forever. Counted rather than set-compared because fixing three of four colliding failures is progress and a set cannot see it. Optionally escalate once to a fresh session rather than a resumed one — sometimes the accumulated context *is* the problem.
 - **`EXHAUSTED` is a respectable outcome.** A task that can't pass its own gates in four tries is telling you the spec was underspecified or the codebase is hostile at that point. Both worth knowing.
+- **The budget stop shares it, deliberately.** A task the spend ceiling stops before its next turn is `EXHAUSTED` too, and in the ledger and the morning queue that is indistinguishable from four failed attempts — the distinction lives only on the watch line. Accepted for v0.5, which is attended: the operator is reading that line as it happens, and the `tasks` row carries the budget and the spend. It stops being acceptable when the queue is read the next morning instead of watched, so v1 splits it — the two have opposite remedies, raise the budget versus rewrite the spec.
 
 ### 5.5 Phase 4 — REVIEW (adversarial)
 
@@ -695,6 +715,8 @@ The implementer session resumes and gets the confirmed blockers. **One** attempt
 **If that re-run is red, the task is `EXHAUSTED` — REBUT does not re-enter the repair loop.** The rebuttal diff and the failing gate are both kept for you to read. Reopening repair here would let a task ping-pong between two phases on one budget, and it would be paying to paper over the most informative failure in the pipeline: a fix for a confirmed blocker that breaks something else is the clearest possible signal that the change and the finding both want your attention rather than another attempt.
 
 Why allow rebuttal rather than mandate a fix: sometimes the critic is wrong, and a recorded disagreement between two agents is a strong signal about *which part of the diff you should read carefully*. Unanimity is far less informative than a documented argument.
+
+**The order, settled.** "Confirmed blockers" here means *anchored* (§5.5) — the host has already established the finding points at real changed code, and that is the only confirmation available before a rebuttal exists. The critic's `verdict` (§4.1) comes **after** the argument: anchored blockers → the implementer rebuts → each lens that raised one confirms or withdraws it, in a fresh read-only session that sees the argument and never the transcript behind it. A critic verdicting first would be restating its finding rather than disagreeing with an answer, which is the one thing this phase exists to record. Three outcomes reach `READY_FOR_REVIEW` — every blocker withdrawn, a fix that commits and stays green, and a confirmed blocker the implementer argued against — because none of them is the machine's to settle: adjudication is yours, in the PR. A rebuttal that neither moved HEAD nor recorded an argument earns nothing and halts at `REBUTTING`; §3.3 has no state for it, and `NOT_IMPLEMENTED` would name the wrong phase.
 
 **Risk tiering.** `risk: elevated` — set explicitly in the spec, or auto-elevated when the diff touches any path in the repo's `policy.elevate_on` (a repo with migrations and an ontology might list `migrations/**`, `**/*.ttl`, `trading/**`; Saffron's own lists `saffron/gates/**` and `saffron/cell/**`) — adds the third lens, makes `size` blocking, and marks the queue entry so you read it cold rather than skim. **`coverage` does not become blocking** — not at `elevated`, not ever; see §5.4.
 
@@ -803,11 +825,14 @@ Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents
 | **Repair loop pays full input price every attempt** | 5-minute cache TTL is shorter than a gate run | One-hour cache TTL set on the cell (§7.1) |
 | **A critic lens silently doesn't run** | Lenses spawned as subagents are invoked at the model's discretion | Each lens is a separate host-invoked session (§5.5) |
 | **An estimate hardens into a billing fact** | Runtime-reported cost is a local approximation | `_est` suffix on every stored figure; reconcile against real billing (§4.1) |
-| **Host services reachable from an isolated cell** | An `--internal` network still routes to the host gateway — **confirmed by spike**, at the gateway *and* at the LAN address | Bind host services to `127.0.0.1`, never `0.0.0.0`; verified by a preflight probe, because N1 rests on it (Appendix G) |
+| **Host services reachable from an isolated cell** | An `--internal` network still routes to the host gateway — **confirmed by spike**, at the gateway *and* at the LAN address | Bind host services to `127.0.0.1`, never `0.0.0.0`; verified by a preflight probe over the host's *enumerated* non-loopback listeners, because N1 rests on it. A named process can be tolerated per invocation — empty by default, matched by name not port, and reported on every run, because an exception that goes quiet is this row's hazard again (Appendix G) |
 | **A cell gets more CPU than it was allocated** | The runtime allocates `--cpus + 1` vCPUs | Request `n − 1` and assert the result; re-measure the offset on every runtime upgrade (§5.1, Appendix G) |
 | **The cell cannot resolve its own proxy** | Internal networks have no DNS | Pin the network subnet and address the proxy by IP (Appendix G) |
 | **A runtime flag silently means something else** | Container flags are interpreted inside a VM on macOS | State the requirement, not the flag; verify each control on the runtime actually chosen (Appendix G) |
 | **A gate that never ran reports `pass`** | An absent tool and a clean repo emit identical JSON | `tool`, obtained by executing the tool; non-zero exit with empty `failures[]` is `error` (§5.4, Appendix H) |
+| **Every control reports green and none is connected** | The controls and the cell are wired in different modules; no test crosses the seam | `network`/`env` required where a cell is created; the isolation test starts a cell the production way and probes from inside it (§5.1, Appendix I) |
+| **An image contains a tool it cannot run** | `which` prints a path for a console script whose shebang is stale | The image build asserts by *running* the toolchain, never by locating it (Appendix I) |
+| **Core demands a language of every target repo** | A core probe or check executes something only one ecosystem has | Core probes run in the base image core owns, never in a repo's cell image (§2.1, Appendix I) |
 | **A tool-output parser silently stops matching** | Gates regex an unversioned CLI string that a version bump rewords | Same two guards — the exit code disagrees with the empty parse, and `tool` records the bump (§5.4) |
 | **A crashed test worker reads as a code failure** | A lost worker's `code` field looks like an assertion failure's | Partial results are not results: the gate returns `error` for the whole run, charged to nobody (§5.4) |
 | **New failures cancelled by a pre-existing one** | Normalization collapses the digits that tell colliding failures apart | Baseline subtraction is a multiset operation — one baseline failure cancels one head failure (§5.4) |
@@ -891,6 +916,8 @@ Containerized cell with proxy egress, fixture-service image layer, volume worktr
 
 Success criterion: an agent fixes one real bug inside the cell, and the cell demonstrably cannot reach your DB, your keys, or your remote.
 
+**Built 2026-08-20, second half outstanding.** The harness is complete and reviewed: cell runtime seam, base and cell images, proxy, host-binding probe, volume worktree, the `tool` field and `error` rules, the executor seam, Saffron's own `.saffron/` onboarding, per-phase vocabulary injection, the plan checkpoint, and the session options. The **cell half of the criterion is met and measured** — a cell reaches `api.anthropic.com` through the proxy and nothing else, including by raw TCP to a bare IP, which is what proves the containment is the network rather than an environment variable an agent could unset. The **agent half is not**: `run_one_cell` stops at a marked seam and returns `NOT_IMPLEMENTED`, because the shape of that loop depends on what the message stream actually yields and writing it blind produces a step that reads as complete and is fiction. Appendix I is what building it found.
+
 ### v1 — the factory (2–3 weekends)
 
 - DIAGNOSE + `SCOPE_REVIEW`.
@@ -966,7 +993,7 @@ If it says otherwise, move `ontology/queries/` into `docs/` as worked examples a
     report/
       index.py  pr_body.py  templates/
   images/                  # not docker/ — the runtime is not the format (principle 32)
-    cell-base.python.Dockerfile    # agent runtime + git + gate shim. Nothing else.
+    cell-base.python.Dockerfile    # agent runtime + git. Nothing else, ever.
     cell-base.node.Dockerfile      # added only when a repo needs it
     proxy.Dockerfile
   spikes/
@@ -1376,6 +1403,64 @@ Three things the run found that reading could not:
   machine's LAN address, never touching the proxy. The `127.0.0.1`-bound one is
   unreachable from both. N1 rests on a binding choice, and the preflight probe that
   checks it is not optional.
+- **What that probe covers is enumerated, not remembered** (added 2026-08-20). It
+  first shipped against seven ports somebody thought of, so its clean result meant
+  "no host service answered on seven ports" while the docstring and this page both
+  said "no host service is reachable" — and the v0.5 run that caught a service on
+  8000 had four more on 8001+ that no such list would have named. `lsof -nP -iTCP
+  -sTCP:LISTEN` now supplies the ports, every listener not bound to loopback, and
+  enumeration that cannot run raises rather than quietly narrowing the probe to
+  nothing — the `_lan_address` defect, one function over. An empty result is still
+  a real pass; it now means what it says. Measured on the machine v0.5 ran on: four
+  macOS services (ARD 3283, Control Centre 5000 and 7000, rapportd 49152) are
+  wildcard-bound and answer from inside a cell, and none is in the old seven.
+
+### One tolerated listener, and what it costs (2026-08-21)
+
+**This is an accepted risk, not a fix.** The operator turned Handoff off, which
+closed two of `rapportd`'s three sockets; `*:49152` stays up regardless, and
+AirDrop going back on will reopen the others. So the probe correctly refuses to
+start a cell, permanently, for a daemon the operator has decided to keep.
+
+**Tolerated:** the process `rapportd`, by the COMMAND `lsof` reports —
+`SAFFRON_ALLOW_HOST_PROCESS=rapportd saffron cell …`.
+
+**Why it is judged acceptable:** it is Apple's own Continuity daemon doing
+link-local discovery for Handoff, Universal Clipboard, Sidecar and AirDrop. It
+is not a general-purpose service surface, it holds no repo data, and it is not
+something a cell can be given credentials to.
+
+**What it costs, plainly:** an agent inside a cell can open a TCP connection to
+that socket, at the gateway and at the LAN address, without traversing the
+proxy. N1 is *not* satisfied on this machine; it is satisfied except for one
+named process, which is a weaker claim and should keep reading as one. A
+`rapportd` remote-reachable bug is a hole Saffron has chosen to live with, and
+revisiting it means turning Continuity off, not editing this paragraph.
+
+Three properties the mechanism has, and each is load-bearing:
+
+- **Nothing is tolerated unless it is named.** The default is empty and an
+  unnamed listener fails exactly as before — measured with a second wildcard
+  listener up: `rapportd` tolerated, the stranger still fails the probe.
+- **It is matched by process name, never by port.** `rapportd`'s ports are
+  dynamic — 49152, 60215 and 60216 have all been seen — so a port allowlist
+  would be wrong the next time it restarts. A port drops out of the probe only
+  when *every* listener on it is a tolerated process, so a second process
+  sharing the port is not tolerated by association.
+- **It is reported on every run, not the first.** §7's hazard row exists
+  because a host service reachable from a cell is invisible, and an exception
+  that goes quiet recreates that invisibility. The preflight line always ends
+  `; tolerating rapportd:49152` — or `; tolerating nothing`, so the absence of
+  a tolerance is stated rather than inferred.
+
+An environment variable rather than a CLI flag: the probe has two entrypoints —
+`saffron cell` and the `-m cell` suite — and one relaxation should not need two
+knobs. It does **not** belong in `policy.yaml`, which is the repo's; this is a
+property of the host. The cost of the env var over a flag is that it can be
+exported into a shell profile and forgotten, which is exactly what the
+every-run report is there to catch. Enumeration that cannot run still raises
+with a tolerance named: tolerating a *listener* must never become tolerating a
+probe that covered nothing.
 
 ### What the spike did to itself
 
@@ -1395,3 +1480,471 @@ verdict at all. Which is the useful part of the story:
     it automatically from having been written by someone who had just fixed it
     elsewhere. A rule about verification is not self-applying. Ask, of any reporting
     harness: *what does this print when it does nothing at all?*
+
+---
+
+## Appendix I — rev 11: what building v0.5 found
+
+Appendix H ended by arguing the next artifact should be v0.5 rather than another
+document. It was. Eleven tasks, twenty-three commits, every task reviewed against
+its own brief and the whole branch reviewed at the end. What follows is what only
+building it could produce.
+
+### The headline: every control reported green and none was connected
+
+`prepare_worktree` created the long-lived cell with no `--network` and no proxy
+environment, so it joined the runtime's default network with full internet
+egress. Meanwhile the driver created the isolated network, ran the host-binding
+probe against it, started the proxy on it, printed `preflight: proxy at
+10.88.0.3` — and passed none of it to the container holding the agent. Measured
+before the fix, from a cell built exactly the way production built one:
+
+```
+$ container run --rm --cap-drop ALL saffron/cell-base:python \
+    python -c "...urlopen('https://example.com')..."
+REACHED 200
+```
+
+`proxy_env()` had been written, was never called, and had no test.
+
+This is §2's claim — *a cell is untrusted, and untrusted means every control that
+matters lives outside it* — satisfied in every part and false as a whole. The
+proxy was correct. The probe was correct. The network was correct. Nothing joined
+them, and the thing that would have caught it is the one test nobody wrote: start
+a cell **the way production starts one** and probe **from inside that container**.
+Every isolation test on the branch used an ephemeral sibling instead, which is a
+different container answering a different question. The distinction is what is
+being asserted, not what runs the assertion: a claim about *this container's*
+egress must be probed from inside the production-shaped cell, while a claim
+about the *network* — N1's host-binding probe, which runs before any cell
+exists — is properly made by a sibling on that same network.
+
+38. **A control and its subject are wired somewhere, and the wiring is the
+    control.** Verifying each mechanism in isolation verifies nothing about the
+    system, because a mechanism that reports on a thing it was never attached to
+    reports on nothing at all. Test the join, from the subject's side.
+
+The fix makes `network` and `env` **required** arguments where a cell is created,
+so omission is a `TypeError` rather than a silent unisolated cell — the guarantee
+moved from a call site's memory into the signature.
+
+### The same defect, five times, in five disguises
+
+Appendix H named principle 34: *a green result and an absent result are the same
+bytes.* v0.5 produced four more instances, and the fourth is the one worth
+keeping.
+
+- **A tool-output parser silently stopped matching.** The `format` gate was
+  written against ruff's `Would reformat: <path>`; installed ruff emits
+  `--> path:line:col`. It matched nothing. The gate reported `error` rather than
+  a false `pass` — not by luck, but because its `pass` branch is gated solely on
+  the exit code and is independent of the parse. Rule 2 working on first contact
+  with a real tool upgrade.
+- **A section slicer over-captured.** Vocabulary injection treated only `## N.`
+  headings as boundaries, so §10 — which every phase receives — ran to
+  end-of-file and swallowed `CONTEXT.md`'s two trailing unnumbered sections.
+  Roughly 700 characters of naming-decision history went into every prompt of
+  every attempt: precisely the cost §5.3 designed per-phase injection to avoid.
+  Nine tests passed because all nine ran against a synthetic fixture that happens
+  to end on a numbered section.
+- **A dead seam nearly returned an earned state.** The driver was written to
+  return `READY_FOR_REVIEW` at the point where the agent session would be driven.
+  It is a real terminal state elsewhere, so a task that ran nothing would have
+  reported as assessed. The implementer refused and invented `NOT_IMPLEMENTED`
+  instead — applying this document's founding principle to a state string,
+  unprompted, without having been told the v0 story.
+- **`which` is not a check.** The fix wave verified the cell image's toolchain
+  with `which uv pytest python git`. That prints a path. `pytest --version` exited
+  127, because the image built the venv at `/seed/.venv` and moved it to
+  `/opt/venv`, and a console script bakes its interpreter into its shebang.
+
+39. **Locating a tool proves a file exists; only running it proves a tool works.**
+    Every check of the form "is X present" is a check that reads identically when
+    X is present and broken. The image build now asserts by executing
+    (`RUN ruff --version && pytest --version`), the same shape as the base image's
+    bundled-binary assertion.
+
+### Seams between correct components
+
+Two independently-correct pieces disagreeing at their boundary was the branch's
+most common defect after the wiring one, and neither instance was reachable by
+any test that existed.
+
+- **Two glob matchers.** `saffron/gates/core/scope.py` already carried a
+  hand-rolled translator whose docstring states it exists *because* "fnmatch lets
+  `*` cross a `/`". The plan checkpoint then reached for `fnmatch` for the same
+  job on the same patterns. Nothing triggered it, because every declared pattern
+  uses `**`; the first bare `*` would have produced a plan that passes validation
+  and then fails the `scope` gate mechanically, reading as the agent wandering out
+  of scope. `scope.py` is now the single authority, imported by both — it is the
+  authority by construction, because it is what enforces the diff.
+- **`spec_sha` received `policy_sha`.** Same type, wrong value, right slot. The
+  `cell` path silently lacked the mid-run spec-edit invalidation that `replay`
+  has. Found by review; no test could have seen it.
+- **`CONTEXT.md` read from the target repo.** It is a *host* artifact — that is
+  the entire reason §5.3 injects it rather than referencing it. Reading it from
+  the repo under work happens to succeed when the repo is Saffron and fails for
+  every other repo.
+
+40. **A reviewer scoped to one task cannot see the seam between two.** Every
+    defect *inside* a task was caught by that task's own review. Both Criticals
+    lived in the wiring between tasks and were found only by the whole-branch
+    pass. Scope at least one review to the joins.
+
+### The boundary held, and that is the best news here
+
+§2.1 claims onboarding a repository touches zero lines of the orchestrator.
+Saffron was onboarded to itself and the claim was **measured, not asserted**:
+`git diff --stat -- saffron/` empty, the policy parser accepting the repo's
+`policy.yaml` unmodified, the whole toolchain in `.saffron/`. The one leak found
+— core hardcoding a Python base image as *the* cell image — was real and is
+fixed, and its inverse appeared immediately afterwards when a core probe started
+requiring a Python interpreter inside every repo's image. Both are the same
+mistake in opposite directions.
+
+41. **A boundary leaks in both directions, and the second is harder to see.**
+    Core learning a language is the obvious failure. Core *demanding* one of every
+    repo is the same failure wearing the opposite clothes, and it looks like
+    thoroughness — "probe what actually runs" is a better argument than the one it
+    replaced. Core's own checks run on artifacts core owns.
+
+### Method
+
+Rev 7 read the document and found nine defects. Rev 8 found that rev 7's central
+fix was not implementable on this machine. Rev 9 replayed real pull requests and
+found the contract could not tell a tool that ran from one that didn't. Rev 10
+ran a spike and measured a `--cpus` offset no document would have predicted. Rev
+11 built the thing, and found that the security architecture six revisions had
+argued for was, in the shipped code, applied to the wrong container.
+
+The trend is not that documents are useless — every one of those revisions was
+written against the previous document and could not have been written without it.
+It is that **the defects a document can find are a different class from the
+defects execution finds, and the second class is where the expensive ones live.**
+Nothing left in this document is worth another read-through. The next artifact is
+the agent session at §9's v0.5 seam, and after it, v1.
+
+---
+
+## Appendix J — rev 12: what the first live runs found
+
+Appendix I recorded what building v0.5 found. This records what *running* it
+found — four live agent sessions inside real cells, $2.47 total. The pattern from
+rev 9 onward holds and sharpens: each artifact finds a class of defect the
+previous one structurally could not.
+
+### It works
+
+`SA-0002` — implement the `size` core gate — run end to end, twice. The agent,
+inside a cell with no target-repo credentials and no route but the proxy,
+produced a plan that passed `validate_plan` on the first attempt, wrote
+`saffron/gates/core/size.py` and `tests/test_size.py`, ran its own tests, watched
+them fail, fixed them, ran the formatter, and committed. `commits_ahead` measured
+the commit; the gate suite returned zero new failures against the baseline;
+the run ended `READY_FOR_REVIEW`.
+
+The code it wrote cites §2.1 and §5.4 for why `size` can be core, draws §5.6's
+advisory/blocking line in the right place, and — for the spec types §5.4 gives no
+ceiling for — defaults rather than returning `error`, reasoning that "`error`
+means the gate itself broke." That is this document's most load-bearing
+distinction, applied correctly by an agent that met it only through §5.3's
+per-phase vocabulary injection. The injection works.
+
+### The first run destroyed its own output
+
+Teardown removed the worktree volume, and the commit ceased to exist — the mirror
+had never heard of it, and the batch tree held only `plan.json` and
+`baseline.json`. `worktree.export_patch()` was already written, and had no caller.
+
+§0 says the product of this factory is **not code, it is a reviewable artifact**.
+The run satisfied §9's success criterion and produced nothing anybody could read.
+
+42. **A pipeline that verifies work and then discards it has not finished; it has
+    failed expensively.** The last step of any producing stage is the one that
+    makes the product outlive the machinery — and it is the step most easily
+    mistaken for cleanup. §4.3 already said a bound firing must never discard
+    committed work; teardown does the same thing on the *success* path, which is
+    where nobody thinks to look.
+
+The export now runs as the first statement of the `finally`, from every path that
+produced commits — green, `EXHAUSTED`, budget-stopped, or raised. A task that
+could not go green with commits in it is the most informative artifact the system
+makes; exporting only the green ones would discard exactly the runs worth reading.
+
+### Three things `allowed_tools` and its neighbours do not do
+
+- **`allowed_tools` governs auto-approval, not availability.** With it set to
+  `[]`, the live session offered the model all twenty-one built-in tools —
+  `Task`, `CronCreate`, `ScheduleWakeup`, `SendMessage`, `WebFetch` among them.
+  `dontAsk` denies the call, so the boundary holds, but §5.3's claim that omitting
+  a tool "saves the turns spent discovering that" was false. The fix is a positive
+  `tools` allowlist rather than a denylist: a denylist needs every name and stops
+  protecting the moment the runtime grows one more, while an unrecognised name in
+  an allowlist is dropped rather than granted. Twenty-one tools became six.
+- **A target repo configured the agent working on it.** A planted
+  `.claude/agents/` and `.claude/skills/` under `/work` both loaded into the
+  session. `/work` is the tree the task edits, so a repo — or a previous
+  attempt — could supply subagent definitions and skills to the agent reviewing
+  it. `setting_sources: []` closes it.
+- **The cost of that fix is §8's bucket 2.** Pinning `setting_sources` also stops
+  the repo's `CLAUDE.md` loading, and `CLAUDE.md` is the flywheel's middle bucket
+  and §2.1's named learning surface. It is inert until v1 injects it host-side
+  from the mirror, the way `CONTEXT.md` already is — which is the right shape
+  anyway, since a file under `/work` is rewritable mid-attempt.
+
+43. **A configuration surface is an input, and every input from the workspace is a
+    claim.** §5.3 established this for control artifacts the agent writes. The
+    runtime's own configuration search path is the same hole one level lower: it
+    is read before any of the harness's checks run, by machinery the harness does
+    not own.
+
+### A no-credential session reports `subtype: "success"`
+
+Measured on the no-key path, before any real run: a cell whose agent cannot
+authenticate returns `{"subtype": "success", "is_error": true,
+"total_cost_usd": 0.0}`. Code keying on `subtype` — which the cost reconciliation
+did, and which a review had approved — records a session that did nothing as a
+clean $0 run. Unattended, that is a budget that stops counting. Both now key on
+`is_error`.
+
+This is principle 34's seventh disguise, and the cheapest one to have found: it
+cost nothing, because it lives on the path you exercise when you have no money.
+
+### The proxy allowlist and the diagram disagree
+
+§2's diagram shows the egress proxy allowing `api.anthropic.com` **and a package
+mirror**. The implementation allows one host, so `uv run`, `pip install` and
+`npm install` all fail inside a cell. The implementation is the better answer —
+§5.1 already requires services, fixtures and dependencies to bake in at *image
+build* time, so a cell that needs a package index at run time is a repo that has
+not finished onboarding. The diagram's package mirror is vestigial, exactly as
+§2.1's "gate-runner shim" was: a component drawn in a design, never built, and
+unnecessary once the surrounding decisions were made. Struck.
+
+### The cost model was high
+
+| | §7.1 estimate | Measured |
+|---|---|---|
+| Plan turn | *(inside Implement)* | ~$0.44 |
+| Implement | $2–6 | $0.85 |
+| Plan + Implement, total | $2–6 | **$1.01–1.29** |
+
+Two runs of the same spec, one commit each, no repair attempts. Not enough data to
+rewrite §7.1 — a task needing four repair attempts is the row that matters and has
+not been run — but the first real numbers land under the estimate rather than over
+it, which is the direction that lets `--budget 50` buy more nights than it was
+sized for.
+
+### What is still unproven
+
+**The repair loop has never run.** Both live runs went green on attempt one, so
+GATE ⇄ REPAIR — resuming a session with structured failures — remains untested
+against a real model. So does no-progress detection, and so does the question of
+whether `total_cost_usd` on a resumed session reports that turn's cost or the
+whole session's, which decides whether the spend accounting over-counts. That is
+the next thing worth paying for.
+
+44. **The path that has never run is the one your estimate is about.** Two green
+    runs measured the cheap half of a loop whose expensive half is the reason the
+    loop exists. A cost model validated only on the happy path is a cost model of
+    something else.
+
+---
+
+## Appendix K — rev 13: the factory produced plausible, verified, broken code
+
+Three specs were run through v0.5 against a live model. All three went green on
+the first attempt, produced a patch, and ended `READY_FOR_REVIEW`. One was then
+applied and reviewed adversarially. The verdict was **do not merge**, on three
+Critical defects.
+
+This appendix is about that gap, because it is the whole argument of §0 and §5.5
+arriving as evidence rather than as a claim.
+
+### What passed
+
+`SA-0004` — the `integrity` gate, 371 lines plus 579 lines of its own tests. It
+passed `format`, `lint`, `types` and `tests`; its 31 new tests passed; the diff
+stayed inside `touches`; the formatter was clean. Applied to the repository it
+brought the suite from 281 to 312 green.
+
+The code was not slop. §2.1's split was clean — not one language token in a code
+path, `test_paths` consulted for every classification, the Go-vocabulary tests
+honest in both directions. `error` and `fail` were not blurred, and the test that
+proves it is the right test to have written. Hunk consumption was count-driven
+rather than marker-scanning, which is the non-obvious correct choice, with a
+fixture containing diff-shaped content inside a test file to prove it. The
+reviewer's own words: *"the code was close enough to correct that only actual git
+output separates it."*
+
+### What review found in under an hour
+
+- **A diff containing `\ No newline at end of file` aborts the task.** The author
+  knew about the marker — there is a branch for it — and put it in the one
+  position git does not use, then wrote no test. Every task whose diff touches a
+  file without a trailing newline dies as `GATE_ERROR`, unrepairable, with the
+  agent never told why.
+- **"An existing test was removed" was inferred from net line count.** Delete the
+  failing test, write a comment longer than the test, and the gate is green —
+  precisely the move §5.4 says this gate exists to stop, performed by the most
+  natural thing an agent does when removing a test.
+- **The same comparison fails a legitimate refactor.** Consolidating two tests
+  into one `parametrize` shrinks the file and trips the gate. Blocking, with no
+  override, so the loop's only repair is to pad the file — the gate teaching the
+  gaming it was built to prevent.
+- **The gate fails its own pull request**: sixteen violations on its own diff,
+  because §5.4's "unless `touches` explicitly includes it" exemption was omitted.
+- **The agent can disable the gate from inside the cell.** `export_patch` runs
+  bare `git diff`, inheriting worktree config the agent can write. One
+  `git config diff.srcPrefix x/` and a diff deleting the entire test suite reads
+  as `pass`.
+
+And of eleven mutants applied to the agent's own tests, **five survived**.
+
+### Why the gates could not have caught any of it
+
+Every one of those defects is invisible to `format`, `lint`, `types` and `tests`,
+because the tests were written by the same author, against the same model of the
+problem, carrying the same blind spots. The suite is not evidence about the
+behaviour anybody wanted; it is evidence that the code and its tests agree.
+
+45. **A test written by the author of the code certifies agreement, not
+    correctness.** Thirty-one passing tests and five surviving mutants are the
+    same artifact described two ways. Mutation is the cheapest thing that tells
+    them apart, and on agent-authored work it is not optional.
+
+46. **Over-built for the rare case, under-built for the common one.** The parser
+    handled quoted paths with spaces, binary bodies, octal escapes and mode
+    changes — and mishandled the line git appends to almost every hunk. Exotica
+    is visible and reads as rigour; the ordinary case is invisible because it is
+    assumed. Ask of any parser: what does the *usual* input look like, and is
+    there a test containing it?
+
+47. **A proxy measure is gameable in exactly the direction the adversary wants.**
+    Net lines removed stood in for "a test was removed". The adversary's move
+    defeats it and a legitimate refactor trips it — wrong in both directions on
+    one comparison, which is not a check but a biased coin. When a gate cannot
+    measure the thing, the honest output is that it cannot, not a heuristic that
+    resembles it.
+
+### What this settles
+
+§0 claims the product of this factory is not code but a reviewable artifact.
+Three green runs and one review is the smallest experiment that could test that,
+and the answer is unambiguous: **the gates were necessary and nowhere near
+sufficient.** A hard-gate loop with a capable model produces work that is
+plausible, internally consistent, self-tested, and wrong in ways only an
+adversary looking for the wrongness will find.
+
+§5.5's critic is therefore not a refinement to add once the loop is trustworthy.
+It is the component that makes the loop's output mean anything, and v0.5's
+success criterion — an agent fixing one real bug inside a cell — is met while the
+factory's actual purpose is not.
+
+48. **Gates verify what you thought to check; the critic exists for what you did
+    not.** They are not two grades of one mechanism. Everything on the first list
+    can be automated, and everything on the second is why the first is not enough.
+
+### The repair loop did not fire, three times out of three
+
+Across a new file, a schema change to code with existing tests, and a 371-line
+parser, GATE ⇄ REPAIR never ran. The reason is structural rather than accidental:
+**a capable agent with `Bash` runs every gate it can reach before committing.**
+It ran the tests, watched them fail, fixed them, ran the formatter, and only then
+committed — so the host's suite arrived after the agent had already done the
+host's job.
+
+The repair loop's real domain is therefore only the gates an agent *cannot*
+self-check: the core ones, which read the host's view of the diff. That makes the
+core gates the only gates that can ever fire, and it makes their absence from the
+v0.5 suite — `scope` ran in no cell at all until this revision, `integrity` still
+runs in none — the more serious gap of the two.
+
+49. **A verification an agent can run itself is a verification it will have
+    already passed.** Its value is not zero, but it is not caught-at-the-gate
+    value; it is turns-saved value. Anything you need to *catch* has to be
+    something the agent cannot see the answer to.
+
+### Two smaller findings
+
+**Patches perish.** `SA-0003`'s patch no longer applies: three hours of
+subsequent commits moved `session.py` underneath it. A verified-green change has
+a shelf life measured against the branch it was cut from, which is what §5.7's
+rebase-and-re-verify and §6.1's merge train exist for, and v0.5 has neither.
+
+**The measured cost model, three tasks in.** $1.29, $3.08 and $2.49 for plan plus
+implement — against §7.1's $2–6 for implement alone. All three without a repair
+attempt, so the row that matters remains unmeasured, and principle 44 still
+stands.
+
+---
+
+## Appendix L — rev 14: the critic, measured against a known-bad diff
+
+Appendix K argued from a single review that §5.5's critic is what makes the
+loop's output mean anything. Rev 14 builds it and measures it, and the test was
+available for free: `SA-0004`'s patch is a real agent-written change that passed
+every gate and its own thirty-one tests, and that adversarial review rejected on
+three Criticals — all written down before the critic existed.
+
+So the critic's first live run had a ground truth. Nothing was tuned after seeing
+its output.
+
+### What it found
+
+- **The net-line-count proxy, as a `blocker`** — the defect that defeats the
+  gate's entire purpose, and the most important of K's three.
+- **Two things K does not contain**, both true: the failure message hands the
+  agent the evasion recipe, and no fixture covers the mixed case. K found the
+  defect; the critic found why it stays exploitable.
+- **§5.4's omitted `touches` exemption, as a `concern`** — reached from §5.2's
+  ratified-spec commit rather than K's "the gate fails its own PR". Same defect,
+  independent route.
+- **Two more not in K at all**, correctly filed as `note`: an empty-file test
+  deletion passing the gate, and an assertion no implementation could fail.
+- **Missed**: the `\ No newline at end of file` abort, and the
+  `git config diff.srcPrefix` escape — the latter squarely blast-radius, the
+  third lens, deliberately not built because no risk tier is wired.
+
+**Drop rate: 0% on both lenses.** Every finding anchored to a real changed line.
+No hallucinations on the first honest run — which is the number §5.5's
+reconciliation exists to protect, and the one most likely to be bad.
+
+### What that settles, and what it does not
+
+§5.5's design works. A critic given a bounded remit, a fresh session, read-only
+tools and an instruction to find the reason a change should not merge produced
+findings a careful adversarial review had missed, and produced no invented ones.
+
+50. **A critic and a reviewer fail differently, and that is the argument for
+    having both.** The machine critic caught what the human-equivalent review
+    missed and missed what it caught. That is not redundancy with a weaker copy;
+    it is two different failure surfaces over one diff. §5.5's disjoint lenses
+    are the same idea one level down, and the same reasoning says a critic does
+    not replace the operator — §11's "human, always" stands.
+
+Two caveats, both volunteered by the implementation rather than found later:
+
+**The lenses are not disjoint enough.** Both filed the `touches` finding, which
+means their remits overlap on "code contradicts a written spec". §5.5's
+no-voting rule rests on disjointness by construction — *"the schema critic will
+never independently corroborate the correctness critic's timezone finding"* — so
+an overlap is not a duplicate to deduplicate, it is a prompt defect.
+
+51. **Two lenses reaching the same finding is a fact about the prompts, not about
+    the finding.** It reads as corroboration, which is exactly what makes it
+    dangerous: a system that treats agreement as evidence will be most confident
+    where its lenses are least independent.
+
+**The second lens ran on a smaller model** because $0.83 of budget remained. That
+is a confound in every comparison above and it is stated rather than smoothed.
+
+### Where a blocker goes
+
+To REBUT, which §5.6 now describes in the order that ambiguity is settled in:
+"confirmed" means anchored, and the critic's `verdict` answers the rebuttal
+rather than preceding it. The phase is built and tested against fakes, and
+**it has never run against a live model** — no rebuttal, no verdict, and no
+gate re-run after a rebuttal has been measured. Appendix J's rule applies to it
+exactly as it applied to the repair loop: the path that has never run is the one
+your estimate is about.
