@@ -231,16 +231,19 @@ def _failed_turn(failed: implement.AgentFailed, session_id: str) -> AttemptResul
 def cell_env(proxy_ip: str, thread_env: Mapping[str, str]) -> dict[str, str]:
     """Everything §5.1's per-task block puts in the cell's environment.
 
-    The proxy is the cell's only route out, and `ANTHROPIC_API_KEY` is the one
-    credential a cell ever holds — the agent runs inside it.
+    The proxy is the cell's only route out, and `CLAUDE_CODE_OAUTH_TOKEN` is
+    the one credential a cell ever holds — the agent runs inside it. A host
+    `ANTHROPIC_API_KEY` is deliberately not forwarded: a subscription token
+    from `claude setup-token` is separately revocable and its ceiling is
+    provider-side, which a key's spend is not (§5.1).
     """
     from saffron.cell import proxy
     from saffron.cell.worktree import STATE_MOUNT
 
     env = proxy.proxy_env(proxy_ip) | dict(thread_env)
     env["CLAUDE_CONFIG_DIR"] = STATE_MOUNT
-    if key := os.environ.get("ANTHROPIC_API_KEY"):
-        env["ANTHROPIC_API_KEY"] = key
+    if token := os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = token
     return env
 
 

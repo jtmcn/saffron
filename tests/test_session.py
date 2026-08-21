@@ -764,15 +764,30 @@ def test_the_task_row_carries_the_specs_own_sha_not_the_policys(tmp_path, monkey
 def test_the_cell_env_carries_the_proxy_and_the_state_dir(monkeypatch):
     """§5.1's per-task block: without these the cell has full egress and the
     agent writes its session state into the tree the scope gate walks."""
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     env = session.cell_env("10.88.0.2", {"RAYON_NUM_THREADS": "2"})
     assert env["HTTPS_PROXY"] == "http://10.88.0.2:3128"
     assert env["CLAUDE_CONFIG_DIR"] == "/agent-state"
     assert env["RAYON_NUM_THREADS"] == "2"
-    assert "ANTHROPIC_API_KEY" not in env
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
 
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-test")
+    assert (
+        session.cell_env("10.88.0.2", {})["CLAUDE_CODE_OAUTH_TOKEN"]
+        == "sk-ant-oat-test"
+    )
+
+
+def test_the_cell_env_never_carries_an_api_key(monkeypatch):
+    """The credential swap has to hold in the direction that can regress
+    silently. A host with a key exported must not put one in a cell: the
+    subscription token is separately revocable and its ceiling is
+    provider-side, which the key's is not (§5.1)."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    assert session.cell_env("10.88.0.2", {})["ANTHROPIC_API_KEY"] == "sk-test"
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-test")
+    env = session.cell_env("10.88.0.2", {})
+    assert "ANTHROPIC_API_KEY" not in env
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-ant-oat-test"
 
 
 _BLOCKER = {
