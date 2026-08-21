@@ -44,6 +44,9 @@ def test_a_file_outside_touches_fails_and_names_itself():
     assert [f.file for f in result.failures] == ["alembic/versions/0042_add.py"]
     assert result.failures[0].code == "out-of-scope"
     assert result.failures[0].line is None
+    # The failure line is all the agent gets, and `touches` is frontmatter it
+    # never sees — "not matched by touches" alone is not actionable.
+    assert result.failures[0].message == "outside touches: src/thermal_edge/weather/**"
 
 
 def test_the_summary_counts_what_escaped():

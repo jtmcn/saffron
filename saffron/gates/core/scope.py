@@ -52,11 +52,16 @@ def scope_gate(changed_files: list[str], touches: list[str]) -> GateResult:
             summary=f"{len(changed_files)} changed files within touches",
         )
 
+    # The failure line is the whole channel to the agent (§5.4), and `touches`
+    # lives in frontmatter the spec body never carries — so it names them.
+    declared = ", ".join(touches)
     return GateResult(
         gate="scope",
         status="fail",
         failures=[
-            Failure(file=path, code="out-of-scope", message="not matched by touches")
+            Failure(
+                file=path, code="out-of-scope", message=f"outside touches: {declared}"
+            )
             for path in escaped
         ],
         summary=f"{len(escaped)} of {len(changed_files)} changed files outside touches",
