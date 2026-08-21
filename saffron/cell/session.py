@@ -21,7 +21,7 @@ from saffron.gates.baseline import (
     suite_drift,
 )
 from saffron.gates.contract import GateResult
-from saffron.phases import implement
+from saffron.phases import implement, review
 from saffron.phases.implement import AttemptResult
 
 if TYPE_CHECKING:
@@ -486,8 +486,13 @@ def run_one_cell(
             ledger.finish_run(run_id, "COMPLETE")
             return "NOT_IMPLEMENTED"
 
+        # The suite that went green, kept for REVIEW: the critic is shown the
+        # gate results, and re-running the suite to fetch them costs a suite.
+        green: list[GateResult] = []
+
         def _run_gates() -> list[GateResult]:
             results = _suite()
+            green[:] = results
             for result in results:
                 # No attempts table yet, so attempt_id carries the task_id —
                 # the convention the schema already documents (§4.1).
@@ -526,6 +531,33 @@ def run_one_cell(
             repair=_repair,
             watch=watch,
         )
+
+        if outcome == "READY_FOR_REVIEW":
+            ledger.set_task_state(task_id, "REVIEWING")
+            reviews = review.run_review(
+                container,
+                # The critic sees the diff, not the cell's history: the same
+                # bytes the patch export leaves behind for the operator.
+                diff=worktree.export_patch(container, spec.base_sha),
+                read_head=lambda path: worktree.read_at_head(container, path),
+                spec_body=spec.body,
+                gates=review.gate_summary(green),
+                context_md=context_md,
+                prompts_dir=_SAFFRON_PKG / "agents" / "prompts",
+                max_turns=spec.max_turns,
+                budget_usd=spec.budget_usd,
+                agent=implement.run_agent,
+                watch=watch,
+            )
+            # Deliberately not gated on the host ceiling: a green diff nobody
+            # reviewed is exactly the product Appendix K says means nothing.
+            spent += sum(r.cost_usd for r in reviews)
+            (task_dir / "findings.json").write_text(
+                json.dumps([r.as_dict() for r in reviews], indent=2)
+            )
+            outcome, why = review.review_state(reviews)
+            watch(f"REVIEW: {why}")
+
         watch(f"{outcome}: ${spent:.2f} spent, session {session_id}")
         ledger.set_task_state(task_id, outcome)
         ledger.finish_run(run_id, "COMPLETE")

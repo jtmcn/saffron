@@ -294,6 +294,7 @@ class _Cell:
         self.system_prompts: list[str] = []
         self.measured_from: str | None = None
         self.watched: list[str] = []
+        self.exported = False
 
 
 _DIFF = """diff --git a/src/x.py b/src/x.py
@@ -373,7 +374,10 @@ def _drive(monkeypatch, tmp_path, *, cell, turns, spec=None, policy="gates: {}\n
     def _run_agent(container, *, prompt, options, resume=None, **kwargs):
         cell.turns.append(prompt)
         cell.system_prompts.append(options["system_prompt"])
-        turn = next(scripted)
+        # A default, not a scripted turn: REVIEW invokes one session per lens
+        # after a green loop, and every test predating it scripts the
+        # implementer's turns only. An empty findings block is a clean review.
+        turn = next(scripted, _turn(_block({"findings": []})))
         if isinstance(turn, BaseException):
             raise turn
         return turn
@@ -560,10 +564,15 @@ def test_a_dead_cell_reports_the_failed_export_rather_than_raising(
     """Teardown runs in a `finally`: an export that raises there would replace
     the run's own outcome with the export's failure."""
     cell = _stub_the_runtime(monkeypatch)
-    monkeypatch.setattr(
-        "saffron.cell.worktree.export_patch",
-        lambda c, sha: (_ for _ in ()).throw(runtime.CellRuntimeError("no such cell")),
-    )
+
+    def _dies_after_review(_container, _sha):
+        # REVIEW reads the diff first; the cell dies between it and teardown.
+        if cell.exported:
+            raise runtime.CellRuntimeError("no such cell")
+        cell.exported = True
+        return _DIFF
+
+    monkeypatch.setattr("saffron.cell.worktree.export_patch", _dies_after_review)
     state, _ledger = _drive(
         monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
     )
@@ -636,7 +645,9 @@ def test_a_repair_turn_that_fails_does_not_discard_committed_work(
     assert state == "READY_FOR_REVIEW"
     (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
     assert run_row["status"] == "COMPLETE"
-    assert any("$0.60 spent" in line for line in cell.watched)
+    # Plan, implement, the failed repair turn's $0.40, and REVIEW's two lenses:
+    # the critic is spend too, and a total that omits it stops being a total.
+    assert any("$0.80 spent" in line for line in cell.watched)
 
 
 def test_the_host_stops_spending_at_the_tasks_budget(monkeypatch, tmp_path):
