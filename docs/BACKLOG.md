@@ -164,6 +164,16 @@ was caught, while four more on 8001+ would have been invisible.
 **Done looks like:** enumerate the host's actual wildcard-bound listeners and
 probe those.
 
+**Done, 2026-08-20.** `preflight.host_listening_ports()` parses `lsof -nP -iTCP
+-sTCP:LISTEN` and probes every listener not bound to loopback — a superset of
+wildcard, because a service bound to the LAN address is reachable from a cell
+too. Enumeration that cannot run raises; only lsof's own listing counts as
+having run, so a listing with nothing but loopback rows is the real empty and a
+silent lsof is not. Measured consequence on the machine v0.5 ran on: four macOS
+services answer from inside a cell (ARD 3283, Control Centre 5000/7000, rapportd
+49152), none of them in the old seven, so `preflight` now fails there until they
+are turned off. That is the probe working.
+
 ## 9. Unverified against a live model
 
 Everything here is built and unit-tested and has never met a real session. On

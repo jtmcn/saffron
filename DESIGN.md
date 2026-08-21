@@ -825,7 +825,7 @@ Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents
 | **Repair loop pays full input price every attempt** | 5-minute cache TTL is shorter than a gate run | One-hour cache TTL set on the cell (§7.1) |
 | **A critic lens silently doesn't run** | Lenses spawned as subagents are invoked at the model's discretion | Each lens is a separate host-invoked session (§5.5) |
 | **An estimate hardens into a billing fact** | Runtime-reported cost is a local approximation | `_est` suffix on every stored figure; reconcile against real billing (§4.1) |
-| **Host services reachable from an isolated cell** | An `--internal` network still routes to the host gateway — **confirmed by spike**, at the gateway *and* at the LAN address | Bind host services to `127.0.0.1`, never `0.0.0.0`; verified by a preflight probe, because N1 rests on it (Appendix G) |
+| **Host services reachable from an isolated cell** | An `--internal` network still routes to the host gateway — **confirmed by spike**, at the gateway *and* at the LAN address | Bind host services to `127.0.0.1`, never `0.0.0.0`; verified by a preflight probe over the host's *enumerated* non-loopback listeners, because N1 rests on it (Appendix G) |
 | **A cell gets more CPU than it was allocated** | The runtime allocates `--cpus + 1` vCPUs | Request `n − 1` and assert the result; re-measure the offset on every runtime upgrade (§5.1, Appendix G) |
 | **The cell cannot resolve its own proxy** | Internal networks have no DNS | Pin the network subnet and address the proxy by IP (Appendix G) |
 | **A runtime flag silently means something else** | Container flags are interpreted inside a VM on macOS | State the requirement, not the flag; verify each control on the runtime actually chosen (Appendix G) |
@@ -1403,6 +1403,17 @@ Three things the run found that reading could not:
   machine's LAN address, never touching the proxy. The `127.0.0.1`-bound one is
   unreachable from both. N1 rests on a binding choice, and the preflight probe that
   checks it is not optional.
+- **What that probe covers is enumerated, not remembered** (added 2026-08-20). It
+  first shipped against seven ports somebody thought of, so its clean result meant
+  "no host service answered on seven ports" while the docstring and this page both
+  said "no host service is reachable" — and the v0.5 run that caught a service on
+  8000 had four more on 8001+ that no such list would have named. `lsof -nP -iTCP
+  -sTCP:LISTEN` now supplies the ports, every listener not bound to loopback, and
+  enumeration that cannot run raises rather than quietly narrowing the probe to
+  nothing — the `_lan_address` defect, one function over. An empty result is still
+  a real pass; it now means what it says. Measured on the machine v0.5 ran on: four
+  macOS services (ARD 3283, Control Centre 5000 and 7000, rapportd 49152) are
+  wildcard-bound and answer from inside a cell, and none is in the old seven.
 
 ### What the spike did to itself
 

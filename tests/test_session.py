@@ -327,6 +327,7 @@ def _stub_the_runtime(
     monkeypatch.setattr(
         "saffron.preflight.assert_host_is_unreachable", lambda *a, **k: None
     )
+    monkeypatch.setattr("saffron.preflight.host_listening_ports", lambda: [8000])
     monkeypatch.setattr("saffron.repos.image.build_cell_image", lambda repo: "img")
     monkeypatch.setattr("saffron.cell.worktree.prepare_worktree", lambda **k: None)
     monkeypatch.setattr("saffron.cell.worktree.head_sha", lambda c: "c" * 40)

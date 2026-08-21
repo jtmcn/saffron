@@ -8,11 +8,59 @@ without ever traversing the proxy. Measured, not assumed (Appendix G).
 from __future__ import annotations
 
 import socket
+import subprocess
 
 from saffron.cell import runtime
 
-# Ports worth asking about: the ones a developer machine actually listens on.
-PROBED_PORTS = (5432, 5433, 3306, 6379, 8000, 8080, 27017)
+_LSOF = ("lsof", "-nP", "-iTCP", "-sTCP:LISTEN")
+
+# Everything else a listener can be bound to is reachable from a cell, at the
+# gateway or at the LAN address.
+_LOOPBACK = ("127.", "[::1]", "localhost")
+
+
+def listening_ports(lsof_output: str) -> list[int]:
+    """The host's non-loopback TCP listeners, from `lsof -nP -iTCP -sTCP:LISTEN`.
+
+    The NAME column is the last field before `(LISTEN)`: `*:8000`,
+    `0.0.0.0:5432`, `[::]:631`, `127.0.0.1:6379`. COMMAND can hold spaces, so
+    the row is read from the right.
+    """
+    ports = set()
+    for line in lsof_output.splitlines():
+        fields = line.split()
+        if len(fields) < 2 or fields[-1] != "(LISTEN)":
+            continue
+        address, _, port = fields[-2].rpartition(":")
+        if port.isdigit() and not address.startswith(_LOOPBACK):
+            ports.add(int(port))
+    return sorted(ports)
+
+
+def host_listening_ports() -> list[int]:
+    """What the probe covers, enumerated rather than guessed.
+
+    Seven remembered ports is a spot-check whose result reads as a proof: the
+    v0.5 run that found a service on 8000 had four more on 8001+ that no list
+    would have named (Appendix L). Enumeration failing must never narrow the
+    probe to nothing, so anything short of lsof's own header — a missing lsof,
+    a permission problem, silence — raises. An empty *result* is different and
+    is a real pass: lsof reported, and every listener was loopback-bound.
+    """
+    try:
+        done = subprocess.run(_LSOF, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise runtime.CellRuntimeError(
+            f"the host's listening ports could not be enumerated ({exc}) — the "
+            "probe would then cover nothing, which is not a probe that passed."
+        ) from exc
+    if not done.stdout.startswith("COMMAND"):
+        raise runtime.CellRuntimeError(
+            f"{' '.join(_LSOF)} produced no listing (exit {done.returncode}): "
+            f"{(done.stderr or done.stdout).strip()[:200]!r}. A host with no TCP "
+            "listener at all is likelier to be lsof failing than to be true."
+        )
+    return listening_ports(done.stdout)
 
 
 def _lan_address() -> str:
@@ -38,11 +86,11 @@ def probe_addresses() -> list[str]:
     return [runtime.GATEWAY, _lan_address()]
 
 
-def _probe_script(addresses: list[str]) -> str:
+def _probe_script(addresses: list[str], ports: list[int]) -> str:
     return (
         "import socket,sys\n"
         f"addrs={addresses!r}\n"
-        f"ports={list(PROBED_PORTS)!r}\n"
+        f"ports={ports!r}\n"
         "hit=[]\n"
         "for a in addrs:\n"
         "    for p in ports:\n"
@@ -58,16 +106,18 @@ def _probe_script(addresses: list[str]) -> str:
 def probe_host_bindings(image_tag: str, network: str) -> list[str]:
     """Addresses at which a host service answered from inside a cell.
 
-    An empty list is the passing result. Anything else is a service bound to
-    0.0.0.0 that a cell can reach, and the fix is on the host — bind it to
-    127.0.0.1 — never in the cell.
+    Every port the host is listening on for anything but loopback, tried from
+    inside a cell at the gateway and at the LAN address. An empty list is the
+    passing result and means what it says: nothing the host had open answered.
+    Anything else is a service a cell can reach, and the fix is on the host —
+    bind it to 127.0.0.1, or stop it — never in the cell.
     """
     addresses = probe_addresses()
     done = runtime.run_ephemeral(
         image_tag,
-        ["python", "-c", _probe_script(addresses)],
+        ["python", "-c", _probe_script(addresses, host_listening_ports())],
         network=network,
-        timeout_s=180,
+        timeout_s=300,
     )
     if done.returncode != 0:
         raise runtime.CellRuntimeError(

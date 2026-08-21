@@ -78,9 +78,15 @@ def test_a_cell_without_the_proxy_reaches_nothing(network):
 def test_no_host_service_answers_from_inside_a_cell(network):
     """N1 rests on this. Appendix G's spike found a 0.0.0.0-bound service
     reachable at the gateway and the LAN address; the countermeasure is a host
-    binding choice, and this is what checks it."""
+    binding choice, and this is what checks it.
+
+    The ports come from the host's own listener table, so this test is a claim
+    about the machine it runs on, not about seven remembered ports. A macOS
+    default — Remote Management on 3283, AirPlay Receiver on 5000/7000,
+    rapportd on 49152 — fails it, and correctly: those answer from inside a
+    cell."""
     reachable = preflight.probe_host_bindings(image.BASE_TAG, network)
     assert reachable == [], (
         f"a host service answered from inside a cell at {reachable}; "
-        "bind it to 127.0.0.1"
+        "bind it to 127.0.0.1, or turn it off"
     )

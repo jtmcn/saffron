@@ -326,7 +326,13 @@ def run_one_cell(
         # image — a Rust repo could then never start a cell (§2.1). What the
         # probe establishes is a property of the network, which both images
         # join identically.
-        watch(f"preflight: probing {', '.join(preflight.probe_addresses())}")
+        # The port count is the operator's evidence that enumeration ran: a
+        # probe covering nothing is what a silent failure looks like.
+        ports = preflight.host_listening_ports()
+        watch(
+            f"preflight: probing {len(ports)} host ports at "
+            + ", ".join(preflight.probe_addresses())
+        )
         preflight.assert_host_is_unreachable(image.BASE_TAG, network)
 
         watch("preflight: starting the proxy")
