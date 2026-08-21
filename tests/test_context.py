@@ -102,6 +102,42 @@ def test_the_spec_body_with_a_vocabulary_literal_is_not_expanded():
     assert "Replace the {vocabulary} placeholder in our own templating code." in out
 
 
+def test_the_declared_paths_all_reach_the_prompt():
+    """The whole defect: the agent is judged against frontmatter it never saw."""
+    out = context.build_system_prompt(
+        "IMPLEMENT",
+        SAMPLE,
+        template="{vocabulary}\n\n{constraints}\n\n{spec}",
+        spec="do the thing",
+        constraints=context.constraints_block(
+            ["src/**"], ["alembic/versions/**"], ["DESIGN.md"]
+        ),
+    )
+    assert "- `src/**`" in out
+    assert "- `alembic/versions/**`" in out
+    assert "- `DESIGN.md`" in out
+
+
+def test_a_spec_declaring_no_forbidden_gets_no_forbidden_heading():
+    """An empty heading reads as withheld and invites an invented list."""
+    out = context.constraints_block(["src/**"], [], ["DESIGN.md"])
+    assert "forbidden" not in out
+    # No dangling blank section where the forbidden list would have gone.
+    assert out.endswith("- `DESIGN.md`")
+
+
+def test_a_declared_path_containing_a_brace_is_not_expanded():
+    """Same rule as the spec body: frontmatter is a value, never a template."""
+    out = context.build_system_prompt(
+        "IMPLEMENT",
+        SAMPLE,
+        template="{vocabulary}\n\n{constraints}\n\n{spec}",
+        spec="do the thing",
+        constraints=context.constraints_block(["src/{vocabulary}/**"], [], []),
+    )
+    assert "- `src/{vocabulary}/**`" in out
+
+
 def test_a_trailing_non_numbered_heading_is_a_boundary_not_a_payload():
     """The last numbered section must not swallow a trailing '## ...' heading."""
     out = context.sections_for("IMPLEMENT", SAMPLE, sections=(9,))

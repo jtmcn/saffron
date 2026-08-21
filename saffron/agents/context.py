@@ -43,6 +43,33 @@ def sections_for(
     return "\n\n".join(chunks)
 
 
+def constraints_block(
+    touches: list[str], forbidden: list[str], protected: list[str]
+) -> str:
+    """The path rules the host judges a plan and a diff against, as prompt text.
+
+    `touches` and `forbidden` come from the spec's frontmatter and `protected`
+    from `policy.yaml`, so none of the three reaches the prompt through the spec
+    body — and `validate_plan` rejects against all three with no model call.
+
+    Returned as a *substituted value*, like the spec body: the caller hands it to
+    `build_system_prompt`, which passes it to `.format` as an argument and never
+    as a format string (§5.3).
+    """
+    sections = [
+        ("`touches` — the only paths you may change:", touches),
+        ("`forbidden` — deny paths declared by this spec:", forbidden),
+        ("Protected paths — the repo's global deny paths:", protected),
+    ]
+    # An empty list is omitted rather than shown as a heading with nothing under
+    # it: a heading over nothing reads as withheld and invites an invented list.
+    return "\n\n".join(
+        lead + "\n\n" + "\n".join(f"- `{path}`" for path in paths)
+        for lead, paths in sections
+        if paths
+    )
+
+
 def build_system_prompt(
     phase: str, context_md: str, template: str, **values: str
 ) -> str:
