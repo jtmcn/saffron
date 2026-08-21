@@ -900,3 +900,79 @@ def test_every_turn_carries_the_drivers_wall_clock_not_the_librarys(
     _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
     assert session.TURN_TIMEOUT_S < 3600
     assert cell.timeouts == [session.TURN_TIMEOUT_S] * len(cell.turns)
+
+
+def test_a_crashed_plan_turn_keeps_its_own_exception_and_its_cost():
+    """A plan turn that crashed is neither a plan rejected on content nor a dead
+    cell (§4.5). It carries what the checkpoint already spent, or the re-prompt's
+    first half is a turn nobody charged for."""
+
+    def _crash(container, *, prompt, options, resume=None, watch=print, **kwargs):
+        if not _crash.called:
+            _crash.called = True
+            return implement.AttemptResult(
+                session_id="sess-1",
+                subtype="success",
+                terminal_reason="completed",
+                num_turns=1,
+                cost_usd_est=0.1,
+                text="not the schema",
+            )
+        raise implement.AgentFailed(
+            "cut by the wall bound",
+            implement.AttemptResult(
+                session_id="sess-1",
+                subtype="error",
+                terminal_reason=None,
+                num_turns=0,
+                cost_usd_est=3.0,
+                is_error=True,
+            ),
+        )
+
+    _crash.called = False
+    with pytest.raises(implement.AgentFailed) as raised:
+        session.plan_checkpoint(
+            "cell",
+            options={},
+            spec=_spec(),
+            protected=[],
+            agent=_crash,
+            watch=lambda _line: None,
+        )
+    # Both turns: the one that failed validation and the one that crashed.
+    assert raised.value.attempt.cost_usd_est == 3.1
+
+
+def test_a_critic_session_is_capped_at_what_is_left_not_at_the_whole_budget():
+    """REVIEW is deliberately not gated on the ceiling, so the cap is the only
+    thing standing between a $12 task and a $40 bill."""
+    assert session.critic_budget(12.0, 4.0) == 8.0
+    # The floor is what keeps "not gated" true: a lens with no room is a task
+    # that reaches the operator unreviewed.
+    assert session.critic_budget(12.0, 12.0) == session.REVIEW_FLOOR_USD
+    assert session.critic_budget(12.0, 99.0) == session.REVIEW_FLOOR_USD
+
+
+def test_a_volume_create_that_fails_reports_only_that_volume(monkeypatch, tmp_path):
+    """The other half of C1: recording all three names before the first create
+    reports the state volume and the container as survivors of a run that never
+    attempted either — the same false leak, one step further along."""
+    cell = _stub_the_runtime(monkeypatch)
+    _every_removal_fails(monkeypatch, cell)
+
+    def _boom(_name):
+        raise RuntimeError("no space left on device")
+
+    monkeypatch.setattr("saffron.cell.runtime.create_volume", _boom)
+    with pytest.raises(RuntimeError, match="no space left"):
+        _drive(monkeypatch, tmp_path, cell=cell, turns=[])
+
+    survived = [line for line in cell.watched if "survived" in line]
+    # The volume whose create was attempted, and the network this run made.
+    assert any("volume saffron-wt-SY-1 survived" in line for line in survived)
+    assert any("network saffron-cells survived" in line for line in survived)
+    assert not any("saffron-st-SY-1" in line for line in survived)
+    assert not any("saffron-cell-SY-1" in line for line in survived)
+    # And nothing execs a patch export into a container that was never created.
+    assert not any("patch export" in line for line in cell.watched)

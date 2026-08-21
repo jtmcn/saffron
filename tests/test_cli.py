@@ -1,5 +1,7 @@
 """The operator's only entry point, so it gets at least one end-to-end test."""
 
+import subprocess
+
 from saffron.cell import session
 from saffron.cli import main
 from tests.test_replay import target  # noqa: F401 — a pytest fixture, used by name
@@ -51,3 +53,40 @@ def test_the_exit_code_distinguishes_the_terminal_states(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli, "run_one_cell", _crash)
     assert cli.main(argv) == 2
+
+
+def test_a_setup_failure_before_the_cell_exits_two_as_well(monkeypatch, tmp_path):
+    """Everything the setup path raises — an unreadable spec or policy, a mirror
+    that will not clone, a repo with no HEAD — happens before a cell exists and
+    is the same infrastructure failure. Unhandled it is a traceback and a 1."""
+    from saffron import cli
+    from saffron.repos.mirror import GitError
+    from saffron.repos.policy import PolicyError
+
+    spec = tmp_path / "SY-2.md"
+    spec.write_text(
+        "---\nid: SY-2\ntitle: Two\ntype: feature\ntouches: ['src/**']\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    monkeypatch.setattr("saffron.repos.mirror.ensure_mirror", lambda repo, at: at)
+    monkeypatch.setattr(
+        "subprocess.run", lambda *a, **k: type("P", (), {"stdout": "a" * 40})()
+    )
+    argv = ["--home", str(tmp_path / "home"), "cell", str(spec)]
+
+    for broke in (
+        PolicyError("policy.yaml declares a gate that is not executable"),
+        GitError("the mirror could not be cloned"),
+        subprocess.CalledProcessError(128, "git rev-parse HEAD"),
+    ):
+
+        def _raise(*_a, _broke=broke, **_k):
+            raise _broke
+
+        monkeypatch.setattr(cli, "run_one_cell", _raise)
+        assert cli.main(argv) == 2
+
+    # And the spec itself, which is read before `run_one_cell` is ever called.
+    bad = tmp_path / "SY-3.md"
+    bad.write_text("no frontmatter here\n")
+    assert cli.main(["--home", str(tmp_path / "home"), "cell", str(bad)]) == 2

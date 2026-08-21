@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -39,6 +39,19 @@ _SAFFRON_PKG = Path(__file__).resolve().parents[1]
 # calls and short enough to watch; the idle bound (runtime.IDLE_TIMEOUT_S) is
 # what catches a stall sooner, and this only catches a turn that never stops.
 TURN_TIMEOUT_S = 900.0
+
+# REVIEW and REBUT are deliberately not gated on the spend ceiling — a task that
+# spent its budget implementing still has to be reviewed — so each critic
+# session is capped at what is left rather than at the whole task budget, which
+# is how a $12 task bills $40. The floor is what keeps "not gated" true when
+# nothing is left: below it, a lens would be refused for having no room and the
+# task would reach the operator unreviewed.
+REVIEW_FLOOR_USD = 2.0
+
+
+def critic_budget(budget_usd: float, spent: float) -> float:
+    """The per-session cap for one critic turn: the remainder, never zero."""
+    return max(budget_usd - spent, REVIEW_FLOOR_USD)
 
 
 class CellSessionError(RuntimeError):
@@ -116,34 +129,44 @@ def plan_checkpoint(
     """
     from saffron.agents import artifacts
 
-    attempt = agent(
-        container, prompt=implement.PLAN_PROMPT, options=options, watch=watch
-    )
-    spent = attempt.cost_usd_est
-    for reprompted in (False, True):
-        try:
-            artifacts.validate_plan(
-                attempt.text,
-                touches=spec.touches,
-                forbidden=spec.forbidden,
-                protected=protected,
-                spec_type=spec.spec_type,
-            )
-        except artifacts.PlanNotSchema as exc:
-            if reprompted:
-                raise
-            watch(f"PLAN: not the schema, re-prompting once — {exc}")
-            attempt = agent(
-                container,
-                prompt=f"{exc}\n\n{artifacts.EXTRACTION_PROMPT}",
-                options=options,
-                resume=require_session(attempt.session_id),
-                watch=watch,
-                last_cost_usd=attempt.cost_usd_est,
-            )
-            spent += attempt.cost_usd_est
-            continue
-        return attempt, artifacts.parse_output_block(attempt.text), spent
+    spent = 0.0
+    try:
+        attempt = agent(
+            container, prompt=implement.PLAN_PROMPT, options=options, watch=watch
+        )
+        spent = attempt.cost_usd_est
+        for reprompted in (False, True):
+            try:
+                artifacts.validate_plan(
+                    attempt.text,
+                    touches=spec.touches,
+                    forbidden=spec.forbidden,
+                    protected=protected,
+                    spec_type=spec.spec_type,
+                )
+            except artifacts.PlanNotSchema as exc:
+                if reprompted:
+                    raise
+                watch(f"PLAN: not the schema, re-prompting once — {exc}")
+                attempt = agent(
+                    container,
+                    prompt=f"{exc}\n\n{artifacts.EXTRACTION_PROMPT}",
+                    options=options,
+                    resume=require_session(attempt.session_id),
+                    watch=watch,
+                    last_cost_usd=attempt.cost_usd_est,
+                )
+                spent += attempt.cost_usd_est
+                continue
+            return attempt, artifacts.parse_output_block(attempt.text), spent
+    except implement.AgentFailed as failed:
+        # A crashed plan turn is not a plan rejected on content, and the cell is
+        # still alive, so it is not ORPHANED either (§4.5). The exception keeps
+        # its own identity and carries what the checkpoint already spent, or a
+        # re-prompted turn's first half stops counting (§4.1).
+        prior = failed.attempt or _failed_turn(failed, "")
+        failed.attempt = replace(prior, cost_usd_est=spent + prior.cost_usd_est)
+        raise
     raise AssertionError("unreachable: the loop returns or raises")
 
 
@@ -310,8 +333,10 @@ def run_one_cell(
     # Only what this run reached the creation of can leak. `volume rm` on a
     # name that never existed also exits non-zero, so reporting every failure
     # prints survivors for a run that aborted in preflight — absent reading as
-    # leaked, which trains the operator to ignore the line. Recorded before the
-    # call: a create that fails part-way can still have left the resource.
+    # leaked, which trains the operator to ignore the line. Each name is
+    # recorded immediately before its own create, never a batch before the
+    # first: a create that fails part-way can still have left its resource, but
+    # the two that were never attempted are not survivors of anything.
     created: set[str] = set()
 
     try:
@@ -351,9 +376,10 @@ def run_one_cell(
         proxy_ip = proxy.start_proxy(network)
         watch(f"preflight: proxy at {proxy_ip}")
 
-        # prepare_worktree creates the state volume and the container.
-        created.update((volume, state, container))
+        created.add(volume)
         runtime.create_volume(volume)
+        # prepare_worktree creates the state volume and the container.
+        created.update((state, container))
         worktree.prepare_worktree(
             mirror=mirror,
             volume=volume,
@@ -451,6 +477,14 @@ def run_one_cell(
             ledger.set_task_state(task_id, "PLAN_REJECTED")
             ledger.finish_run(run_id, "COMPLETE")
             return "PLAN_REJECTED"
+        except implement.AgentFailed as failed:
+            # No plan and no commits, but a live cell: the earned state, not the
+            # ORPHANED that a crash out of `run_one_cell` would stamp (§4.5).
+            plan_cost = failed.attempt.cost_usd_est if failed.attempt else 0.0
+            watch(f"PLAN: the session failed, ${plan_cost:.2f} spent — {failed}")
+            ledger.set_task_state(task_id, "NOT_IMPLEMENTED")
+            ledger.finish_run(run_id, "COMPLETE")
+            return "NOT_IMPLEMENTED"
 
         # Extracted and hashed the moment it is produced, and never read from
         # /work again: a plan the implementer can rewrite is a claim (§5.3).
@@ -573,7 +607,7 @@ def run_one_cell(
                 context_md=context_md,
                 prompts_dir=_SAFFRON_PKG / "agents" / "prompts",
                 max_turns=spec.max_turns,
-                budget_usd=spec.budget_usd,
+                budget_usd=critic_budget(spec.budget_usd, spent),
                 agent=agent,
                 watch=watch,
             )
@@ -625,7 +659,7 @@ def run_one_cell(
                     context_md=context_md,
                     prompts_dir=_SAFFRON_PKG / "agents" / "prompts",
                     max_turns=spec.max_turns,
-                    budget_usd=spec.budget_usd,
+                    budget_usd=critic_budget(spec.budget_usd, spent),
                     # Measured, never reported (§4.3): from the head the
                     # rebuttal started at, so the implement turn's own commits
                     # cannot satisfy it.
