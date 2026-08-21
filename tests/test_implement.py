@@ -101,7 +101,7 @@ def test_a_clean_finish_keeps_its_reported_cost():
     assert implement._reconcile_cost(reported=3.5, last_good=2.0, failed=False) == 3.5
 
 
-def _stream(*lines, returncode=0, stderr="", timed_out=False):
+def _stream(*lines, returncode=0, stderr="", timed_out=False, bound=""):
     """A fake in-cell runner: the lines it prints, and how it exited."""
 
     def _exec_stream(container, command, *, stdin_data, on_line, **kwargs):
@@ -109,7 +109,9 @@ def _stream(*lines, returncode=0, stderr="", timed_out=False):
         _exec_stream.command = list(command)
         for line in lines:
             on_line(line)
-        return runtime.Completed(returncode, "", stderr, timed_out=timed_out)
+        return runtime.Completed(
+            returncode, "", stderr, timed_out=timed_out, bound=bound
+        )
 
     return _exec_stream
 
@@ -316,3 +318,71 @@ def test_telemetry_is_off_because_the_proxy_would_deny_it_anyway():
         system_prompt="s", cwd="/work", max_turns=40, budget_usd=12.0
     )
     assert options["env"]["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1"
+
+
+def test_only_the_result_event_opens_the_completion_window():
+    """The runtime never parses Saffron's events. `run_agent` is what tells it
+    the payload signalled done, and nothing before the result does."""
+    signals: list[bool] = []
+
+    def _exec_stream(container, command, *, stdin_data, on_line, **kwargs):
+        for line in (
+            json.dumps({"type": "text", "text": "hi"}),
+            _result_line(),
+            "npm WARN a child of the runner, still talking",
+        ):
+            signals.append(bool(on_line(line)))
+        return runtime.Completed(0, "", "")
+
+    implement.run_agent(
+        "cell",
+        prompt="p",
+        options={},
+        watch=lambda _line: None,
+        exec_stream=_exec_stream,
+    )
+    assert signals == [False, True, True]
+
+
+def test_a_completion_window_close_is_a_finished_turn():
+    """§4.3's completion axis, and the mistake splitting it from idle prevents:
+    the runner emitted its result and a child held stdout open. That turn is
+    done, so it returns rather than raising — and says which bound ended it."""
+    watched: list[str] = []
+    result = implement.run_agent(
+        "cell",
+        prompt="p",
+        options={},
+        watch=watched.append,
+        exec_stream=_stream(_result_line(), bound="completion"),
+    )
+    assert result.bound == "completion"
+    assert result.cost_usd_est == 0.75
+    assert any("held stdout open" in line for line in watched)
+
+
+def test_an_idle_kill_is_a_failed_turn_that_names_the_bound():
+    """The other half: silence before the result is a stall, whatever the
+    runner already claimed, and it must not read like the window closing."""
+    with pytest.raises(implement.AgentFailed, match="idle bound") as raised:
+        implement.run_agent(
+            "cell",
+            prompt="p",
+            options={},
+            watch=lambda _line: None,
+            exec_stream=_stream(
+                _result_line(), returncode=124, timed_out=True, bound="idle"
+            ),
+        )
+    assert raised.value.attempt.bound == "idle"
+
+
+def test_a_wall_clock_kill_before_any_result_names_the_bound_too():
+    with pytest.raises(implement.AgentFailed, match="wall bound"):
+        implement.run_agent(
+            "cell",
+            prompt="p",
+            options={},
+            watch=lambda _line: None,
+            exec_stream=_stream(returncode=124, timed_out=True, bound="wall"),
+        )

@@ -43,7 +43,10 @@ IMPLEMENT_PROMPT = (
 
 class AgentFailed(RuntimeError):
     """The turn did not finish cleanly: no result event, an error, a non-success
-    subtype, a non-zero exit, or a timeout after the result was emitted.
+    subtype, a non-zero exit, or a kill by the idle or wall-clock bound.
+
+    Not raised when the completion window closes: the runner emitted its result
+    and only a child process was still holding stdout open (§4.3).
 
     An absent result and a clean result must never be the same value (§4.3) —
     this is the exception that keeps them apart. Whoever catches it still has
@@ -68,6 +71,10 @@ class AttemptResult:
     # here and never from /work, which the agent can rewrite (§5.3).
     text: str = ""
     is_error: bool = False
+    # Which §4.3 bound ended the turn, verbatim from the runtime: "" for a
+    # runner that exited on its own, "completion" for one whose child held the
+    # pipe. An idle or wall-clock kill raises instead of returning.
+    bound: str = ""
 
 
 def agent_options(
@@ -175,9 +182,15 @@ def run_agent(
     errors: list[str] = []
     result: dict = {}
 
-    def _on_line(line: str) -> None:
-        if not line.strip():
-            return
+    def _on_line(line: str) -> bool:
+        """True once the result event has been seen — §4.3's completion signal,
+        and the only thing that opens the completion window. Reading it here
+        keeps Saffron's event schema out of the runtime seam."""
+        if line.strip():
+            _consume(line)
+        return bool(result)
+
+    def _consume(line: str) -> None:
         try:
             event = json.loads(line)
         except ValueError:
@@ -206,19 +219,31 @@ def run_agent(
     )
 
     detail = "; ".join(errors) or done.stderr.strip()[-800:] or "no output"
+    # One phrasing for both failure paths, so "why did this turn end" reads the
+    # same whether or not a result event arrived first.
+    how = (
+        f"was cut by the {done.bound} bound"
+        if done.bound
+        else "timed out"
+        if done.timed_out
+        else f"exited {done.returncode}"
+        if done.returncode
+        else "errored"
+    )
     if not result:
-        raise AgentFailed(
-            f"the agent produced no result event (exit {done.returncode}"
-            f"{', timed out' if done.timed_out else ''}): {detail}"
-        )
+        raise AgentFailed(f"the agent produced no result event, {how}: {detail}")
 
     subtype = str(result.get("subtype", "unknown"))
     is_error = bool(result.get("is_error"))
+    if done.bound == "completion":
+        # Not a failure and not silent: the operator should know a child of the
+        # runner outlived it rather than wonder why the turn ended early.
+        watch("agent: result seen, then a child held stdout open — pipe closed")
     # One predicate for the accounting and the control flow both: a turn the
     # cost fallback treats as crashed must not also read as a clean return.
-    # `timed_out` is in it because a runner can emit its result and then be
-    # killed holding stdout open — §4.3's completion axis, which would
-    # otherwise produce an AttemptResult identical to a clean turn's.
+    # `timed_out` covers the idle and wall-clock kills only — a completion
+    # window closing is a finished turn, and §4.3 is explicit that treating it
+    # as a failure is the mistake splitting the two bounds exists to prevent.
     failed = is_error or subtype != "success" or done.timed_out or done.returncode != 0
     attempt = AttemptResult(
         session_id=result.get("session_id"),
@@ -232,19 +257,13 @@ def run_agent(
         ),
         text="".join(text),
         is_error=is_error,
+        bound=done.bound,
     )
     if failed:
         # `is_error`, measured and not assumed: a cell with no credential
         # returns `subtype="success"` with `is_error=true` and terminal_reason
         # `api_error`. Keying on the subtype alone would call a session that
         # did nothing at all a clean success.
-        how = (
-            "timed out"
-            if done.timed_out
-            else f"exited {done.returncode}"
-            if done.returncode
-            else "errored"
-        )
         raise AgentFailed(
             f"the agent {how} ({subtype}/{attempt.terminal_reason}): {detail}",
             attempt,
