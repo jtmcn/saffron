@@ -9,15 +9,25 @@ Nothing above this file changes if the answer changes.
 from __future__ import annotations
 
 import ipaddress
+import queue
 import re
 import subprocess
 import tempfile
 import threading
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 RUNTIME = "container"
 DEFAULT_SUBNET = "10.88.0.0/24"
+
+# §4.3's idle and completion bounds. Idle has to clear the longest single tool
+# call an agent makes — a gate suite runs minutes and emits nothing until it
+# returns — so it is the stall bound, not the impatience one. Completion is
+# silence *after* the payload said it was done, which is a child process
+# holding stdout open; a runner that is really finished exits at once.
+IDLE_TIMEOUT_S = 300.0
+COMPLETION_TIMEOUT_S = 10.0
 
 # Derived, never re-typed: a second literal of the subnet is a probe that
 # silently covers nothing the day the subnet moves.
@@ -42,6 +52,10 @@ class Completed:
     stdout: str
     stderr: str
     timed_out: bool = False
+    # Which of §4.3's time bounds ended this: "idle", "wall", "completion", or
+    # "" for a process that ended on its own. They mean different things to the
+    # caller, so one flag cannot carry them.
+    bound: str = ""
 
 
 @dataclass(frozen=True)
@@ -105,6 +119,7 @@ def _call(argv: Sequence[str], timeout_s: float) -> Completed:
             stdout=exc.stdout or "",
             stderr=exc.stderr or "",
             timed_out=True,
+            bound="wall",
         )
     except OSError as exc:
         raise CellRuntimeError(f"{RUNTIME} could not be executed: {exc}") from exc
@@ -226,9 +241,11 @@ def exec_stream(
     command: Sequence[str],
     *,
     stdin_data: str,
-    on_line: Callable[[str], None],
+    on_line: Callable[[str], bool | None],
     workdir: str | None = None,
     timeout_s: float = 3600,
+    idle_s: float = IDLE_TIMEOUT_S,
+    completion_s: float = COMPLETION_TIMEOUT_S,
 ) -> Completed:
     """`exec_`, with stdin and with stdout delivered a line at a time.
 
@@ -237,16 +254,21 @@ def exec_stream(
     capability it lacked: this is the same `exec`, with `-i` so the request
     reaches the process on stdin.
 
-    ponytail: one wall-clock bound, no idle bound. §4.3 wants both, and
-    splitting them needs a reader that can time out mid-line — v1's supervisor.
+    Three of §4.3's five bounds live here because all three are properties of
+    this one read loop. `on_line` returning true says the payload signalled it
+    is done: silence before that is a stalled agent, silence after it is a
+    child process holding stdout open. Once done is signalled the wall clock
+    stops applying — there is no work left to bound, only a pipe.
+
+    A reader thread and a queue, not `selectors`: readiness on the fd is not a
+    line, so a half-written one would still block `readline` and the fix would
+    be reimplementing line splitting over `os.read`.
     """
     argv = [RUNTIME, "exec", "-i"]
     if workdir:
         argv += ["--cwd", workdir]
     argv.append(container)
     argv += list(command)
-
-    timed_out = False
 
     # stderr to a file, not a second pipe: nothing drains it while stdout is
     # being read, and a pipe that fills stops the process producing lines.
@@ -262,31 +284,59 @@ def exec_stream(
         except OSError as exc:
             raise CellRuntimeError(f"{RUNTIME} could not be executed: {exc}") from exc
 
-        def _kill() -> None:
-            nonlocal timed_out
-            timed_out = True
-            proc.kill()
+        lines: queue.Queue[str | None] = queue.Queue()
 
-        watchdog = threading.Timer(timeout_s, _kill)
-        watchdog.start()
-        try:
-            with proc:
-                assert proc.stdin and proc.stdout
+        def _pump() -> None:
+            assert proc.stdout
+            for line in proc.stdout:
+                lines.put(line.rstrip("\n"))
+            lines.put(None)  # EOF, and the only clean end of the loop below
+
+        reader = threading.Thread(target=_pump, daemon=True)
+        # Names the bound the *current* wait is against; it survives the loop
+        # only if that wait is the one that times out.
+        bound = ""
+        with proc:
+            assert proc.stdin
+            reader.start()
+            try:
+                proc.stdin.write(stdin_data)
+                proc.stdin.close()
+            except OSError:
+                pass  # the process died early; its stderr says why
+            wall = time.monotonic() + timeout_s
+            signalled = False
+            while True:
+                now = time.monotonic()
+                if signalled:
+                    bound, until = "completion", now + completion_s
+                elif wall - now <= idle_s:
+                    bound, until = "wall", wall
+                else:
+                    bound, until = "idle", now + idle_s
                 try:
-                    proc.stdin.write(stdin_data)
-                    proc.stdin.close()
-                except OSError:
-                    pass  # the process died early; its stderr says why
-                for line in proc.stdout:
-                    on_line(line.rstrip("\n"))
-        finally:
-            watchdog.cancel()
+                    line = lines.get(timeout=max(0.0, until - now))
+                except queue.Empty:
+                    proc.kill()
+                    break
+                if line is None:
+                    bound = ""
+                    break
+                signalled = signalled or bool(on_line(line))
+            # Drain before the with-block closes stdout underneath the reader.
+            # The kill above, or EOF, has already ended it.
+            reader.join(timeout=5)
         errors.seek(0)
         return Completed(
-            returncode=124 if timed_out else proc.returncode,
+            # A finished turn whose child held the pipe is a finished turn: the
+            # exit status after our kill is ours, not the runner's (§4.3).
+            returncode=(
+                0 if bound == "completion" else 124 if bound else proc.returncode
+            ),
             stdout="",
             stderr=errors.read(),
-            timed_out=timed_out,
+            timed_out=bound in ("idle", "wall"),
+            bound=bound,
         )
 
 
