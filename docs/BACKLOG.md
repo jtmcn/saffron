@@ -175,6 +175,29 @@ Threads over `selectors`, measured against the alternative rather than
 preferred: readiness on the fd is not a line, so a half-written one still
 blocks `readline` and the fix is reimplementing line splitting over `os.read`.
 
+**Amended 2026-08-21: one of the five was not bounding, and a bound firing
+kills less than it looks like.** Two defects in the above, both measured.
+
+The completion window was recomputed as `now + completion_s` at the top of
+every loop iteration, and the `signalled` branch short-circuits the wall clock
+— so every line a child wrote pushed the deadline out again and nothing else
+applied. A child writing steadily after the result event held `exec_stream`
+open forever: an unbounded wait, inside the function whose five bounds exist so
+that no wait is unbounded. The window is now fixed once, when the result event
+lands, and a chatty child cannot move it.
+
+And the kill does not reach the cell. Measured against a real `container` — a
+detached container, a long `container exec`, `proc.kill()` on the host side,
+then a look at `/proc` from inside — the process is still there. Killing the
+exec client kills the client. So an idle or wall kill left the agent running in
+the cell while the driver went on to measure `commits_ahead`, run the whole
+gate suite and resume the session, all in that same container, with an
+abandoned agent still able to edit `/work` and commit underneath every one of
+them. `runtime.reap_cell` now kills everything but PID 1 on those two bounds —
+never on the completion window, which is a turn that finished. Measured again
+after: the abandoned process is gone, `sleep infinity` survives, and the cell
+still takes the next exec.
+
 ## 5. PACKAGE, and the fact that patches perish
 
 There is no PR, no push, no index. A green run leaves `patch.diff` and
@@ -259,6 +282,14 @@ reach that socket, and `DESIGN.md` Appendix G says so and says what it costs.
 Renamed with it: `host_listening_ports()` → `host_probe_ports()`, which now
 returns the ports probed *and* the listeners tolerated.
 
+**Also 2026-08-21.** The probe enumerated a second time inside
+`probe_host_bindings`, so the port list the operator was shown at the top of
+preflight was not necessarily the one checked; it now takes that list as an
+argument. It also connected serially at 1.5s per address-port pair, which puts
+roughly a hundred listeners over the 300s cap — preflight failing for having
+too much to check, and reporting it as a probe that did not run. The connects
+go through a thread pool now; the timeout stays generous.
+
 ## 9. Unverified against a live model
 
 Everything here is built and unit-tested and has never met a real session. On
@@ -277,7 +308,12 @@ this project's evidence that is exactly where the next defect is.
 
 ## 10. Small, measured, cheap
 
-- `rebut.py` numbers blockers from 0 in the prompt.
+- `rebut.py` numbers blockers from 0 in the prompt. **Done, 2026-08-21:**
+  numbered from 1 in both places they are produced. Not cosmetic —
+  `run_verdict` requires the verdict set to match the blockers exactly, so a
+  critic answering "1." for the first of one blocker failed the check, and
+  the phase discarded both lens sessions, both rebuttal turns and every
+  verdict session over the numbering.
 - `implement.md` is non-deterministic on the first turn — 2 of 3 live sessions
   emitted a plan block when told to implement. Harmless today because
   `session.py` always sends `PLAN_PROMPT` first, but the template is doing double
