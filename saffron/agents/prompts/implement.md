@@ -32,13 +32,21 @@ These terms have exactly one meaning here. Use them and no synonyms.
 
 ## Hard rules
 
-- Change only files inside the task's `touches`. Anything else fails the `scope`
-  gate mechanically.
 - Never delete or silence an existing test, and never add a suppression comment
   to make a check pass. That is the one failure mode this whole system is built
   to catch.
 - There is no network except the model API, and no credentials. Do not attempt
   to install anything or reach any service.
+
+## The paths you are judged against
+
+The host enforces these, not your judgement: `validate_plan` rejects your plan
+before you write any code if `files_to_change` names a path outside `touches` or
+inside either deny list, and the `scope` gate re-checks the finished diff against
+`touches`. Both decide host-side, with no model call — a boundary, not a
+preference.
+
+{constraints}
 
 ## The task
 

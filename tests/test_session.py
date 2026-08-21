@@ -291,6 +291,7 @@ class _Cell:
     def __init__(self):
         self.removed: list[tuple[str, str]] = []
         self.turns: list[str] = []
+        self.system_prompts: list[str] = []
         self.measured_from: str | None = None
         self.watched: list[str] = []
 
@@ -361,16 +362,17 @@ def _turn(text="", cost=0.1):
     )
 
 
-def _drive(monkeypatch, tmp_path, *, cell, turns, spec=None):
+def _drive(monkeypatch, tmp_path, *, cell, turns, spec=None, policy="gates: {}\n"):
     """Run one whole cell against the stubbed runtime and return its state."""
     repo = tmp_path / "repo"
     (repo / ".saffron" / "gates").mkdir(parents=True)
-    (repo / ".saffron" / "policy.yaml").write_text("gates: {}\n")
+    (repo / ".saffron" / "policy.yaml").write_text(policy)
 
     scripted = iter(turns)
 
     def _run_agent(container, *, prompt, options, resume=None, **kwargs):
         cell.turns.append(prompt)
+        cell.system_prompts.append(options["system_prompt"])
         turn = next(scripted)
         if isinstance(turn, BaseException):
             raise turn
@@ -466,6 +468,36 @@ def test_doneness_is_measured_from_after_the_plan_turn(monkeypatch, tmp_path):
     cell = _stub_the_runtime(monkeypatch)
     _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
     assert cell.measured_from == "c" * 40  # head_sha after the checkpoint
+
+
+def test_the_implement_prompt_names_the_paths_it_is_judged_against(
+    monkeypatch, tmp_path
+):
+    """`touches`, `forbidden` and protected paths live in frontmatter and
+    policy.yaml, never in the spec body — so the prompt told the agent to obey a
+    list it was auto-rejected against and never shown."""
+    cell = _stub_the_runtime(monkeypatch)
+    _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(forbidden=["alembic/versions/**"]),
+        policy="gates: {}\nprotected:\n  - DESIGN.md\n",
+    )
+    prompt = cell.system_prompts[0]
+    for path in ("src/**", "tests/**", "alembic/versions/**", "DESIGN.md"):
+        assert f"- `{path}`" in prompt
+
+
+def test_a_spec_with_no_forbidden_shows_no_forbidden_list(monkeypatch, tmp_path):
+    """CONTEXT.md defines the term either way; what must not appear is a heading
+    with nothing under it for the agent to fill in."""
+    cell = _stub_the_runtime(monkeypatch)
+    _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
+    prompt = cell.system_prompts[0]
+    assert "- `src/**`" in prompt
+    assert "`forbidden` — deny paths" not in prompt
 
 
 def test_no_commit_is_not_implemented(monkeypatch, tmp_path):

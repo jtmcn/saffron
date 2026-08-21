@@ -390,7 +390,15 @@ def run_one_cell(
         context_md = (_SAFFRON_ROOT / "CONTEXT.md").read_text()
         template = (_SAFFRON_PKG / "agents" / "prompts" / "implement.md").read_text()
         system_prompt = context.build_system_prompt(
-            "IMPLEMENT", context_md, template=template, spec=spec.body
+            "IMPLEMENT",
+            context_md,
+            template=template,
+            spec=spec.body,
+            # The body is prose; the paths the plan and the diff are judged
+            # against live in frontmatter and policy.yaml, so they are injected.
+            constraints=context.constraints_block(
+                spec.touches, spec.forbidden, policy.protected
+            ),
         )
         options = implement.agent_options(
             system_prompt=system_prompt,
