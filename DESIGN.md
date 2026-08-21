@@ -716,6 +716,8 @@ The implementer session resumes and gets the confirmed blockers. **One** attempt
 
 Why allow rebuttal rather than mandate a fix: sometimes the critic is wrong, and a recorded disagreement between two agents is a strong signal about *which part of the diff you should read carefully*. Unanimity is far less informative than a documented argument.
 
+**The order, settled.** "Confirmed blockers" here means *anchored* (§5.5) — the host has already established the finding points at real changed code, and that is the only confirmation available before a rebuttal exists. The critic's `verdict` (§4.1) comes **after** the argument: anchored blockers → the implementer rebuts → each lens that raised one confirms or withdraws it, in a fresh read-only session that sees the argument and never the transcript behind it. A critic verdicting first would be restating its finding rather than disagreeing with an answer, which is the one thing this phase exists to record. Three outcomes reach `READY_FOR_REVIEW` — every blocker withdrawn, a fix that commits and stays green, and a confirmed blocker the implementer argued against — because none of them is the machine's to settle: adjudication is yours, in the PR. A rebuttal that neither moved HEAD nor recorded an argument earns nothing and halts at `REBUTTING`; §3.3 has no state for it, and `NOT_IMPLEMENTED` would name the wrong phase.
+
 **Risk tiering.** `risk: elevated` — set explicitly in the spec, or auto-elevated when the diff touches any path in the repo's `policy.elevate_on` (a repo with migrations and an ontology might list `migrations/**`, `**/*.ttl`, `trading/**`; Saffron's own lists `saffron/gates/**` and `saffron/cell/**`) — adds the third lens, makes `size` blocking, and marks the queue entry so you read it cold rather than skim. **`coverage` does not become blocking** — not at `elevated`, not ever; see §5.4.
 
 Getting `elevate_on` right is most of what "onboarding a repo" actually means. It is the repo owner answering one question — *where in here does a plausible-looking wrong change hurt most?* — and it is worth more than any amount of gate configuration.
@@ -1881,12 +1883,10 @@ is a confound in every comparison above and it is stated rather than smoothed.
 
 ### Where a blocker goes
 
-Nowhere, currently. An anchored blocker stops the task at `REVIEWING`, because
-§5.6's REBUT does not exist. That is the next gap, and the design is ambiguous
-about one thing that has to be settled before it is built: §5.6 says the
-implementer "gets the confirmed blockers", while §4.1 and `CONTEXT.md` define
-`verdict` as the critic's confirm-or-withdraw *at* REBUT. Whether the critic
-verdicts before the implementer rebuts, or in response to it, changes what the
-recorded disagreement means — and §5.6's whole argument for allowing a rebuttal
-is that a documented disagreement between two agents is a strong signal about
-which part of the diff to read first.
+To REBUT, which §5.6 now describes in the order that ambiguity is settled in:
+"confirmed" means anchored, and the critic's `verdict` answers the rebuttal
+rather than preceding it. The phase is built and tested against fakes, and
+**it has never run against a live model** — no rebuttal, no verdict, and no
+gate re-run after a rebuttal has been measured. Appendix J's rule applies to it
+exactly as it applied to the repair loop: the path that has never run is the one
+your estimate is about.
