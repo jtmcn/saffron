@@ -7,14 +7,11 @@ import hashlib
 import subprocess
 from pathlib import Path
 
-from saffron.cell.runtime import CellRuntimeError
-from saffron.cell.session import CellSessionError, CellSpec, run_one_cell
-from saffron.intake import SpecError, load_spec
+from saffron.cell.session import CellSpec, run_one_cell
+from saffron.intake import load_spec
 from saffron.ledger import Ledger
 from saffron.replay import replay
 from saffron.repos import mirror as git_mirror
-from saffron.repos.mirror import GitError
-from saffron.repos.policy import PolicyError
 
 DEFAULT_HOME = Path.home() / ".saffron"
 
@@ -73,15 +70,13 @@ def main(argv: list[str] | None = None) -> int:
             spec_path=args.spec,
             timeout_s=args.timeout,
         )
-    except (
-        CellSessionError,
-        CellRuntimeError,
-        PolicyError,
-        SpecError,
-        GitError,
-        subprocess.CalledProcessError,
-    ) as broke:
-        print(f"saffron: {broke}")
+    except Exception as broke:
+        # Every one of them, not a named few: an OSError, a sqlite3.Error or a
+        # pydantic failure from an SDK shape change is as much an infrastructure
+        # abort as a CellRuntimeError, and exiting 1 with a traceback says "the
+        # task did not make it" about a task that never got to run. The
+        # exception path in `run_one_cell` has already closed the run ABORTED.
+        print(f"saffron: {type(broke).__name__}: {broke}")
         return 2
     finally:
         ledger.close()

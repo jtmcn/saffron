@@ -86,6 +86,16 @@ def test_a_setup_failure_before_the_cell_exits_two_as_well(monkeypatch, tmp_path
         monkeypatch.setattr(cli, "run_one_cell", _raise)
         assert cli.main(argv) == 2
 
+    # Including the ones no tuple would have named: an OSError, a sqlite3
+    # error, a pydantic failure from an SDK shape change.
+    for broke in (OSError("no such device"), ValueError("not the shape")):
+
+        def _raise_other(*_a, _broke=broke, **_k):
+            raise _broke
+
+        monkeypatch.setattr(cli, "run_one_cell", _raise_other)
+        assert cli.main(argv) == 2
+
     # And the spec itself, which is read before `run_one_cell` is ever called.
     bad = tmp_path / "SY-3.md"
     bad.write_text("no frontmatter here\n")

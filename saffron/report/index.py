@@ -19,6 +19,13 @@ _STATE_RANK = {
     "PREFLIGHT_FAILED": 2,
     "GATE_ERROR": 2,
     "NOT_IMPLEMENTED": 2,
+    # The rest of what `run_one_cell` can return or stamp. Absent, they fell to
+    # `_ORDINARY` and sorted below elevated-risk green tasks: a task that could
+    # not pass its own gates, or one whose cell died, reading as reviewable.
+    "EXHAUSTED": 2,
+    "ORPHANED": 2,
+    "REVIEWING": 3,
+    "REBUTTING": 3,
 }
 _ORDINARY = 4
 
