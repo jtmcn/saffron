@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from pathlib import PurePosixPath
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -64,6 +65,21 @@ def _matches_any(path: str, patterns: list[str]) -> bool:
     return any(matches(path, pattern) for pattern in patterns)
 
 
+def _names_a_test(path: str) -> bool:
+    """What a test runner would collect: pytest's `test_*.py` / `*_test.py`, and
+    the same stems for the other ecosystems a target repo might be (`.spec.ts`,
+    `Test.java`). Directory names do not count — a plan must name the file."""
+    name = PurePosixPath(path).name
+    stem = name.split(".")[0]
+    return (
+        stem.startswith("test_")
+        or stem.endswith("_test")
+        or stem.endswith("Test")
+        or ".test." in name
+        or ".spec." in name
+    )
+
+
 def validate_plan(
     raw: str,
     *,
@@ -98,8 +114,11 @@ def validate_plan(
         if _matches_any(path, protected):
             raise PlanRejected(f"{path} is a protected path")
 
+    # The collection convention, not a substring: `"test" in path` is satisfied
+    # by `latest_config.py` — and so is `"test" in name`, since "latest" itself
+    # contains it. A rule a plan satisfies by accident is not a rule.
     if spec_type in {"feature", "bug"} and not any(
-        "test" in path for path in plan.files_to_change
+        _names_a_test(path) for path in plan.files_to_change
     ):
         raise PlanRejected(
             f"a {spec_type} plan names no test file — "

@@ -129,3 +129,24 @@ def test_enumeration_that_cannot_run_still_raises_when_a_process_is_named(monkey
     )
     with pytest.raises(runtime.CellRuntimeError, match="produced no listing"):
         preflight.host_probe_ports()
+
+
+def test_the_probe_checks_the_ports_it_was_given(monkeypatch):
+    """One enumeration per run: probing a second, freshly-taken list means the
+    line the operator read is not the one that was checked."""
+    seen: dict = {}
+
+    def _run_ephemeral(image, command, **kwargs):
+        seen["script"] = command[-1]
+        return runtime.Completed(0, "", "")
+
+    monkeypatch.setattr("saffron.cell.runtime.run_ephemeral", _run_ephemeral)
+
+    def _boom():
+        raise AssertionError("the probe re-enumerated instead of using its argument")
+
+    monkeypatch.setattr("saffron.preflight.host_probe_ports", _boom)
+    preflight.probe_host_bindings("img", "net", [4242])
+    assert "ports=[4242]" in seen["script"]
+    # And the connects are concurrent, or ~100 listeners exhaust the 300s cap.
+    assert "ThreadPoolExecutor" in seen["script"]

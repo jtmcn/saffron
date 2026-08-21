@@ -131,22 +131,27 @@ def probe_addresses() -> list[str]:
 
 def _probe_script(addresses: list[str], ports: list[int]) -> str:
     return (
-        "import socket,sys\n"
+        "import socket\n"
+        "from concurrent.futures import ThreadPoolExecutor\n"
         f"addrs={addresses!r}\n"
         f"ports={ports!r}\n"
-        "hit=[]\n"
-        "for a in addrs:\n"
-        "    for p in ports:\n"
-        "        s=socket.socket(); s.settimeout(1.5)\n"
-        "        try:\n"
-        "            s.connect((a,p)); hit.append(f'{a}:{p}')\n"
-        "        except OSError: pass\n"
-        "        finally: s.close()\n"
+        "def probe(t):\n"
+        "    a,p=t\n"
+        "    s=socket.socket(); s.settimeout(1.5)\n"
+        "    try:\n"
+        "        s.connect((a,p)); return f'{a}:{p}'\n"
+        "    except OSError: return None\n"
+        "    finally: s.close()\n"
+        "targets=[(a,p) for a in addrs for p in ports]\n"
+        "with ThreadPoolExecutor(max_workers=32) as ex:\n"
+        "    hit=[h for h in ex.map(probe, targets) if h]\n"
         "print('|'.join(hit))\n"
     )
 
 
-def probe_host_bindings(image_tag: str, network: str) -> list[str]:
+def probe_host_bindings(
+    image_tag: str, network: str, ports: list[int] | None = None
+) -> list[str]:
     """Addresses at which a host service answered from inside a cell.
 
     Every port the host is listening on for anything but loopback and not held
@@ -157,9 +162,11 @@ def probe_host_bindings(image_tag: str, network: str) -> list[str]:
     bind it to 127.0.0.1, or stop it — never in the cell.
     """
     addresses = probe_addresses()
+    if ports is None:
+        ports = host_probe_ports()[0]
     done = runtime.run_ephemeral(
         image_tag,
-        ["python", "-c", _probe_script(addresses, host_probe_ports()[0])],
+        ["python", "-c", _probe_script(addresses, ports)],
         network=network,
         timeout_s=300,
     )
@@ -171,8 +178,10 @@ def probe_host_bindings(image_tag: str, network: str) -> list[str]:
     return [hit for hit in done.stdout.strip().split("|") if hit]
 
 
-def assert_host_is_unreachable(image_tag: str, network: str) -> None:
-    reachable = probe_host_bindings(image_tag, network)
+def assert_host_is_unreachable(
+    image_tag: str, network: str, ports: list[int] | None = None
+) -> None:
+    reachable = probe_host_bindings(image_tag, network, ports)
     if reachable:
         raise runtime.CellRuntimeError(
             "host services answered from inside a cell at "

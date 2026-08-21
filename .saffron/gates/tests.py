@@ -33,8 +33,10 @@ proc = subprocess.run(
 out = proc.stdout + proc.stderr
 
 # A lost worker is the gate's mechanism breaking, not the repo's code being
-# wrong. Partial results are not results (§5.4).
-if "worker" in out and "crashed" in out:
+# wrong. Partial results are not results (§5.4). Keyed on xdist's own wording:
+# `-q` echoes node ids, so "worker" and "crashed" anywhere in the output made
+# any repo with a `test_worker_crashed` abort on every red run.
+if "node down" in out or "replacing crashed worker" in out:
     emit(
         {
             "gate": "tests",

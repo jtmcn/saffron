@@ -194,3 +194,26 @@ def test_empty_touches_is_a_deliberate_rejection_not_a_mystery():
     but legibly, not as a false "outside touches" on the first file."""
     with pytest.raises(PlanRejected, match="no touches"):
         validate_plan(_plan(), touches=[], forbidden=[], protected=[], spec_type="docs")
+
+
+def test_a_path_that_merely_contains_test_does_not_name_a_test_file():
+    """`"test" in path` accepts `latest_config.py`, `contest.py`, `attest.py` —
+    a rule a plan satisfies by accident is not a rule."""
+    with pytest.raises(PlanRejected, match="names no test file"):
+        validate_plan(
+            _plan(files_to_change=["saffron/gates/latest_config.py"]),
+            touches=TOUCHES,
+            forbidden=[],
+            protected=[],
+            spec_type="feature",
+        )
+    # A real test file in the same plan still passes.
+    validate_plan(
+        _plan(
+            files_to_change=["saffron/gates/latest_config.py", "tests/test_latest.py"]
+        ),
+        touches=TOUCHES,
+        forbidden=[],
+        protected=[],
+        spec_type="feature",
+    )

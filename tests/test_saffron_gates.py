@@ -49,3 +49,23 @@ def test_the_fast_gates_name_their_tool_and_pass_on_a_clean_tree(name):
     result = parse_gate_json(done.stdout, expected_gate=name)
     assert result.status == "pass", result.summary
     assert result.tool and result.tool.startswith("ruff")
+
+
+def test_a_red_run_is_a_failure_even_when_a_test_is_named_for_a_crash(tmp_path):
+    """`-q` echoes node ids in its FAILED lines, so keying the worker-crash
+    check on "worker" and "crashed" anywhere in the output turned every red run
+    in such a repo into an aborted gate — and an aborted gate is never charged
+    to the task, so the failures it caused were never shown to it (§5.4)."""
+    (tmp_path / "test_worker_crashed.py").write_text(
+        "def test_worker_crashed():\n    assert False\n"
+    )
+    done = subprocess.run(
+        [str(GATES / "tests")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="tests")
+    assert result.status == "fail", result.summary
+    assert result.failures
