@@ -55,6 +55,20 @@ anything.
 recognise rather than silently passing. A test that sets the hostile config and
 asserts the gate does not report `pass`.
 
+**Done, 2026-08-20.** `worktree.DIFF_FLAGS` pins prefixes, `--no-ext-diff`,
+`--no-textconv` and `--no-renames` on every diff the host reads, and `_git` adds
+`-c core.quotePath=false`; a command-line flag beats repo-local `.git/config`,
+measured on git 2.50 (including config reached through `include.path`).
+`scope_gate` is handed that diff and reports `error` — infrastructure, charged to
+nobody — when the headers are not `a/ b/`. Two things the review's account got
+slightly wrong, both measured: `--name-only`, which is what `scope` actually
+consumed, was never bent by `diff.srcPrefix` (the `pass` was the rejected
+`integrity` gate's, which parses hunks); and `diff.external` and a textconv
+driver are the sharper knobs — either can empty a diff entirely. Still open: a
+`-diff` attribute renders a text file as `Binary files ... differ`, which hides
+*content* but never a path, so `scope` is unaffected and the future `integrity`
+gate must treat such a section as unreadable rather than as no change.
+
 ## 3. `findings` and `attempts` have no tables
 
 `DESIGN.md` §4.1 declares both. Neither exists, so:

@@ -362,7 +362,13 @@ def run_one_cell(
             """
             changed = worktree.changed_files(container, spec.base_sha)
             return [
-                scope_gate(changed, spec.touches),
+                # The diff goes with the paths: it is what proves the export the
+                # reviewer will read still has the shape the host pinned.
+                scope_gate(
+                    changed,
+                    spec.touches,
+                    diff=worktree.export_patch(container, spec.base_sha),
+                ),
                 *run_suite(gates, cwd=repo, executor=executor),
             ]
 

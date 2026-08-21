@@ -10,6 +10,10 @@ import re
 
 from saffron.gates.contract import Failure, GateResult
 
+# A header from a diff whose prefixes were pinned (`worktree.DIFF_FLAGS`); git
+# quotes both sides together when a path needs C-quoting.
+_HEADER = re.compile(r'^diff --git (?:a/.+ b/.+|"a/.+" "b/.+")$')
+
 _TOKENS = re.compile(r"\*\*/|\*\*|\*|\?")
 _TRANSLATIONS = {"**/": r"(?:[^/]+/)*", "**": r".*", "*": r"[^/]*", "?": r"[^/]"}
 
@@ -32,7 +36,25 @@ def matches(path: str, pattern: str) -> bool:
     return _to_regex(pattern).match(path) is not None
 
 
-def scope_gate(changed_files: list[str], touches: list[str]) -> GateResult:
+def scope_gate(
+    changed_files: list[str], touches: list[str], *, diff: str | None = None
+) -> GateResult:
+    """Changed files ⊆ touches, judged against the diff those paths came from.
+
+    `diff` is the export the reviewer reads. Its headers must carry the a/ b/
+    the host pinned; anything else means git did not honour the flags, and a
+    gate that cannot recognise its own input reports `error` — infrastructure,
+    charged to nobody (§5.4) — rather than a `pass` nobody checked.
+    """
+    if diff is not None:
+        for line in diff.splitlines():
+            if line.startswith("diff --git ") and not _HEADER.match(line):
+                return GateResult(
+                    gate="scope",
+                    status="error",
+                    summary=f"diff prefixes are not a/ b/, so paths are unreadable: {line[:120]}",
+                )
+
     if not touches:
         return GateResult(
             gate="scope",

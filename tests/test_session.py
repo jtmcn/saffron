@@ -565,14 +565,14 @@ def test_a_dead_cell_reports_the_failed_export_rather_than_raising(
     the run's own outcome with the export's failure."""
     cell = _stub_the_runtime(monkeypatch)
 
-    def _dies_after_review(_container, _sha):
-        # REVIEW reads the diff first; the cell dies between it and teardown.
-        if cell.exported:
+    def _dies_at_teardown(_container, _sha):
+        # The gates and REVIEW read the diff first; the cell dies once the
+        # outcome is decided, and teardown's export is what finds out.
+        if any(line.startswith("teardown") for line in cell.watched):
             raise runtime.CellRuntimeError("no such cell")
-        cell.exported = True
         return _DIFF
 
-    monkeypatch.setattr("saffron.cell.worktree.export_patch", _dies_after_review)
+    monkeypatch.setattr("saffron.cell.worktree.export_patch", _dies_at_teardown)
     state, _ledger = _drive(
         monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
     )

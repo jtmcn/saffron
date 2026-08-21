@@ -95,8 +95,32 @@ def prepare_worktree(
     )
 
 
+# The shape of every diff the host reads, pinned on the command line. Worktree
+# config is the agent's to write (§2), and a `-c` override or an explicit flag
+# beats `.git/config` — including config it pulls in via `include.path`,
+# measured on git 2.50.
+DIFF_FLAGS = (
+    # diff.srcPrefix/dstPrefix/noprefix/mnemonicPrefix all move the a/ b/ the
+    # host matches paths against; these flags win over every one of them.
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+    # diff.external replaces the diff with whatever program the agent names.
+    "--no-ext-diff",
+    # A textconv driver renders both sides through a program, so a real edit
+    # can come back as no diff at all.
+    "--no-textconv",
+    # A rename is git's guess at intent; the host needs both paths, or a test
+    # renamed into `touches` leaves scope nothing to object to.
+    "--no-renames",
+)
+
+
 def _git(container: str, *args: str) -> runtime.Completed:
-    return runtime.exec_(container, ["git", *args], workdir=WORKTREE_MOUNT)
+    # quotePath=false: a path outside ASCII comes back verbatim rather than
+    # octal-escaped, which is what `touches` globs are written against.
+    return runtime.exec_(
+        container, ["git", "-c", "core.quotePath=false", *args], workdir=WORKTREE_MOUNT
+    )
 
 
 def commits_ahead(container: str, base_sha: str) -> int:
@@ -115,7 +139,7 @@ def head_sha(container: str) -> str:
 
 
 def export_patch(container: str, base_sha: str) -> str:
-    done = _git(container, "diff", f"{base_sha}..HEAD")
+    done = _git(container, "diff", *DIFF_FLAGS, f"{base_sha}..HEAD")
     if done.returncode != 0:
         raise runtime.CellRuntimeError(f"diff failed: {done.stderr.strip()}")
     return done.stdout
@@ -131,7 +155,14 @@ def read_at_head(container: str, path: str) -> str | None:
 
 
 def changed_files(container: str, base_sha: str) -> list[str]:
-    done = _git(container, "diff", "--name-only", f"{base_sha}..HEAD")
+    """Changed paths, verbatim — they are matched against `touches`.
+
+    `-z` for the same reason `repos.mirror` uses it: a path holding a newline
+    would otherwise arrive as two paths.
+    """
+    done = _git(
+        container, "diff", *DIFF_FLAGS, "--name-only", "-z", f"{base_sha}..HEAD"
+    )
     if done.returncode != 0:
         raise runtime.CellRuntimeError(f"diff --name-only failed: {done.stderr}")
-    return [line for line in done.stdout.splitlines() if line.strip()]
+    return [path for path in done.stdout.split("\0") if path.strip()]
