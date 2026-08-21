@@ -437,8 +437,9 @@ def run_one_cell(
         session_id = require_session(planned.session_id)
         # The *previous turn's* cost, not the running total: what a crashed
         # turn reporting zero falls back to is one turn's figure (§4.1).
-        # ponytail: per-turn costs are summed, which over-counts if the runtime
-        # reports whole-session cost instead. One live loop settles it.
+        # Summing is correct — measured, not assumed: a resumed turn reports its
+        # own cost, not the session's ($0.00396 fresh, then $0.00199 on resume
+        # of the same session_id; cumulative would never fall).
         last_cost = planned.cost_usd_est
 
         def _over_budget() -> bool:
