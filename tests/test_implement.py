@@ -50,12 +50,35 @@ def test_agent_state_is_not_under_the_worktree():
     assert not options["env"]["CLAUDE_CONFIG_DIR"].startswith("/work")
 
 
-def test_the_tool_list_is_explicit_and_excludes_the_network():
-    assert "WebFetch" not in implement.IMPLEMENT_TOOLS
-    assert "WebSearch" not in implement.IMPLEMENT_TOOLS
-    assert {"Read", "Write", "Edit", "Bash", "Glob", "Grep"} <= set(
-        implement.IMPLEMENT_TOOLS
+def test_the_tools_are_withheld_and_not_merely_denied():
+    """`allowed_tools` auto-approves; only `tools` decides what exists.
+    Measured: with `allowed_tools` alone the model was offered every built-in."""
+    options = implement.agent_options(
+        system_prompt="s", cwd="/work", max_turns=40, budget_usd=12.0
     )
+    assert options["tools"] == ["Read", "Write", "Edit", "Glob", "Grep", "Bash"]
+    assert options["allowed_tools"] == options["tools"]
+
+
+def test_the_offered_set_excludes_the_network_and_the_fan_out():
+    """The offered set is what the model sees. Re-adding any of these puts it
+    back in context, whatever the permission mode then does about it."""
+    offered = set(
+        implement.agent_options(
+            system_prompt="s", cwd="/work", max_turns=40, budget_usd=12.0
+        )["tools"]
+    )
+    withheld = {
+        "WebFetch",
+        "WebSearch",
+        "Task",
+        "Skill",
+        "Workflow",
+        "CronCreate",
+        "ScheduleWakeup",
+        "SendMessage",
+    }
+    assert not offered & withheld
 
 
 def test_a_crashed_attempt_falls_back_to_the_last_good_cost():

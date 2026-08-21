@@ -15,9 +15,13 @@ from saffron.cell import runtime
 from saffron.cell.worktree import STATE_MOUNT, WORKTREE_MOUNT
 from saffron.gates.baseline import NewFailure
 
-# Explicit, and deliberately without the network tools. The cell has no route
-# to reach them anyway — this saves the turns spent discovering that.
-IMPLEMENT_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "TodoWrite"]
+# The whole set an implementer is offered, not merely the set it may call
+# unprompted. Measured: under `allowed_tools` alone the model still saw every
+# built-in, Task and WebFetch and Cron* included — that list only
+# auto-approves. `tools` is the one that withholds (§5.3).
+# No TodoWrite: this runtime does not have it, and naming a tool that does not
+# exist reads as a grant. An unknown name here is dropped, never granted.
+IMPLEMENT_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "Bash"]
 
 # Installed by images/cell-base.python.Dockerfile. The agent runs inside the
 # cell; the host drives it from outside (§5.1).
@@ -80,6 +84,9 @@ def agent_options(
     """
     options = {
         "system_prompt": system_prompt,
+        # `tools` withholds, `allowed_tools` auto-approves. Both, or the agent
+        # either sees tools it cannot call or stalls on the ones it can.
+        "tools": list(IMPLEMENT_TOOLS),
         "allowed_tools": list(IMPLEMENT_TOOLS),
         "permission_mode": "dontAsk",
         "cwd": cwd,

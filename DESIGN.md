@@ -514,7 +514,9 @@ Cost: ~$0.30–1.00. Cheapest possible place to catch a misconceived task.
 
 ### 5.3 Phase 2 — IMPLEMENT (with a plan checkpoint)
 
-Full write tools inside `/work`, with an explicit `allowed_tools` list and a permission mode that **cannot prompt**.
+Full write tools inside `/work`, with an explicit list of the tools that **exist**, an explicit list of those callable without a prompt, and a permission mode that **cannot prompt**.
+
+**Those first two are different options and only one of them withholds anything.** `allowed_tools` governs auto-approval, not availability: measured live, a session that named six tools there was offered all twenty-one built-ins the runtime had — `Task`, `WebFetch`, `WebSearch`, `SendMessage`, `Workflow`, `Cron*`, `ScheduleWakeup`. `dontAsk` denied the ones outside the list, so the boundary held, but the model spent context seeing them and turns attempting them, which is the entire saving the list was written to produce. `tools` is the option that decides what exists, and it is a positive allowlist: a name the runtime does not recognise is dropped rather than granted, so the list can only fail closed. Restated generally, because it is the same shape as the hooks warning below: **a control that denies an action and a control that removes it are not interchangeable, and only the second one saves the turn.**
 
 That second requirement is easy to miss and fatal to get wrong. The obvious mode auto-accepts file *edits* — which covers Edit and Write and nothing else. A shell command outside `allowed_tools` still raises a permission prompt, and at 03:00 inside a container there is nobody to answer it: the attempt burns its idle timeout (§4.3) and reads as a stall. **Unattended operation requires a mode whose behaviour on an unapproved tool is to deny, not to ask.** The runtime offers one; it also offers a mode that skips permission checks entirely, which is the wrong fix — it removes the wasted-turn savings along with the prompt, and buys nothing safety-wise since the real controls are structural anyway (§2).
 
