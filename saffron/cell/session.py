@@ -11,6 +11,7 @@ import json
 import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -31,6 +32,13 @@ if TYPE_CHECKING:
 # the prompt templates — Saffron's own files, never the target repo's (§5.3).
 _SAFFRON_ROOT = Path(__file__).resolve().parents[2]
 _SAFFRON_PKG = Path(__file__).resolve().parents[1]
+
+# §4.3's wall clock, per turn, set here rather than inherited: this is the bound
+# the operator sits through, so it belongs where the task is driven. Fifteen
+# minutes is long enough for a turn that runs a real gate suite between tool
+# calls and short enough to watch; the idle bound (runtime.IDLE_TIMEOUT_S) is
+# what catches a stall sooner, and this only catches a turn that never stops.
+TURN_TIMEOUT_S = 900.0
 
 
 class CellSessionError(RuntimeError):
@@ -421,13 +429,17 @@ def run_one_cell(
         watch(f"IMPLEMENT: system prompt {len(system_prompt)} chars")
         ledger.set_task_state(task_id, "IMPLEMENTING")
 
+        # Bound once, here, so no turn — plan, implement, repair, review or
+        # rebuttal — can quietly inherit the library's hour (§4.3).
+        agent = partial(implement.run_agent, timeout_s=TURN_TIMEOUT_S)
+
         try:
             planned, raw_plan, spent = plan_checkpoint(
                 container,
                 options=options,
                 spec=spec,
                 protected=policy.protected,
-                agent=implement.run_agent,
+                agent=agent,
                 watch=watch,
             )
         except artifacts.PlanRejected as rejected:
@@ -471,7 +483,7 @@ def run_one_cell(
             return "EXHAUSTED"
 
         try:
-            implemented = implement.run_agent(
+            implemented = agent(
                 container,
                 prompt=implement.IMPLEMENT_PROMPT,
                 options=options,
@@ -517,7 +529,7 @@ def run_one_cell(
                 return "EXHAUSTED"
             ledger.set_task_state(task_id, "REPAIRING")
             try:
-                repaired = implement.run_agent(
+                repaired = agent(
                     container,
                     prompt=implement.repair_prompt(new),
                     options=options,
@@ -558,7 +570,7 @@ def run_one_cell(
                 prompts_dir=_SAFFRON_PKG / "agents" / "prompts",
                 max_turns=spec.max_turns,
                 budget_usd=spec.budget_usd,
-                agent=implement.run_agent,
+                agent=agent,
                 watch=watch,
             )
             # Deliberately not gated on the host ceiling: a green diff nobody
@@ -616,7 +628,7 @@ def run_one_cell(
                     head_moved=lambda: worktree.commits_ahead(container, before) > 0,
                     rerun_gates=_rebut_gates,
                     diff=lambda: worktree.export_patch(container, spec.base_sha),
-                    agent=implement.run_agent,
+                    agent=agent,
                     watch=watch,
                     last_cost_usd=last_cost,
                 )

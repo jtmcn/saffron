@@ -295,6 +295,7 @@ class _Cell:
         self.measured_from: str | None = None
         self.watched: list[str] = []
         self.exported = False
+        self.timeouts: list[float | None] = []
 
 
 _DIFF = """diff --git a/src/x.py b/src/x.py
@@ -375,6 +376,7 @@ def _drive(monkeypatch, tmp_path, *, cell, turns, spec=None, policy="gates: {}\n
     def _run_agent(container, *, prompt, options, resume=None, **kwargs):
         cell.turns.append(prompt)
         cell.system_prompts.append(options["system_prompt"])
+        cell.timeouts.append(kwargs.get("timeout_s"))
         # A default, not a scripted turn: REVIEW invokes one session per lens
         # after a green loop, and every test predating it scripts the
         # implementer's turns only. An empty findings block is a clean review.
@@ -850,3 +852,39 @@ def test_gates_red_after_the_rebuttal_exhausts_and_keeps_the_diff(
     assert state == "EXHAUSTED"
     assert (tmp_path / "out" / "SY-1" / "patch.diff").read_text() == _ANCHORING_DIFF
     assert any("new failures after the rebuttal" in line for line in cell.watched)
+
+
+def test_a_bound_firing_on_the_implement_turn_still_measures_the_worktree(
+    monkeypatch, tmp_path
+):
+    """§4.3: a timeout must never discard committed work. The idle bound cuts
+    the turn mid-sentence; what decides the outcome is the commits already in
+    the worktree, not whether the process exited cleanly."""
+    cell = _stub_the_runtime(monkeypatch)
+    state, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed(
+                "the agent was cut by the idle bound", _turn(cost=0.4)
+            ),
+        ],
+    )
+    assert state == "READY_FOR_REVIEW"
+    assert cell.measured_from == "c" * 40  # commits_ahead ran anyway
+    (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
+    assert run_row["status"] == "COMPLETE"
+
+
+def test_every_turn_carries_the_drivers_wall_clock_not_the_librarys(
+    monkeypatch, tmp_path
+):
+    """3600s is the transport's ceiling; the bound an operator actually sits
+    through is set here, and a turn that inherits the default is an hour of
+    watching nothing happen."""
+    cell = _stub_the_runtime(monkeypatch)
+    _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
+    assert session.TURN_TIMEOUT_S < 3600
+    assert cell.timeouts == [session.TURN_TIMEOUT_S] * len(cell.turns)
