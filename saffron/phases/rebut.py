@@ -233,9 +233,14 @@ def verdict_prompt(
     does not reach it, and a session with no vocabulary would be verdicting
     against terms it was never given.
     """
+    # Filtered to this lens's own blockers: `run_verdict` requires the verdict
+    # set to match `blockers` exactly, so showing arguments it may not verdict
+    # on fails the phase on prompt shape rather than on disagreement.
+    mine = {n for n, _ in blockers}
     argued = "\n\n".join(
         f"On finding {r.finding}, the implementer {r.action}: {r.argument}"
         for r in rebuttal.rebuttals
+        if r.finding in mine
     )
     template = (prompts_dir / VERDICT_PROMPT_FILE).read_text()
     return context.build_system_prompt(

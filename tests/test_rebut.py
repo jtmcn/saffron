@@ -304,3 +304,26 @@ def test_the_verdict_prompt_carries_the_argument_the_finding_and_the_new_diff():
     assert "def gap(series, tz=" in prompt
     assert "fix the gap" in prompt
     assert "**Verdict**:" in prompt  # CONTEXT.md §5's vocabulary
+
+
+def test_a_verdict_session_is_shown_only_its_own_lens_arguments():
+    """`run_verdict` requires the verdict set to match the blockers exactly, so
+    an argument about another lens's finding invites a verdict it did not ask
+    for — and fails the whole phase on prompt shape, not on disagreement."""
+    turn = rebut.RebuttalTurn(
+        rebuttals=[
+            rebut.Rebuttal(finding=0, action="argued", argument="mine to answer"),
+            rebut.Rebuttal(finding=1, action="fixed", argument="the contract lens"),
+        ]
+    )
+    prompt = rebut.verdict_prompt(
+        "correctness",
+        blockers=[(0, _blocker())],
+        rebuttal=turn,
+        context_md=CONTEXT_MD,
+        prompts_dir=PROMPTS,
+        spec_body="fix the gap",
+        diff=DIFF,
+    )
+    assert "mine to answer" in prompt
+    assert "the contract lens" not in prompt
