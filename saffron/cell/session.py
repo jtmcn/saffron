@@ -55,6 +55,35 @@ def critic_budget(budget_usd: float, spent: float) -> float:
     return max(budget_usd - spent, REVIEW_FLOOR_USD)
 
 
+def _stop_on_rate_limit(
+    attempt: AttemptResult,
+    *,
+    ledger: Ledger,
+    task_id: int,
+    run_id: int,
+    watch: Callable[[str], None],
+) -> str | None:
+    """Record and report a rejected window, or None to carry on. Committed work
+    is not discarded — the patch export runs from `finally` either way (§4.3)."""
+    stopped = terminal_for_rate_limit(attempt.rate_limit_status)
+    if stopped is None:
+        return None
+    resets = attempt.rate_limit_resets_at
+    watch(
+        "rate limit: rejected — stopping, not exhausted"
+        + (f"; window reopens at {resets}" if resets else "")
+    )
+    ledger.set_task_state(task_id, stopped)
+    ledger.finish_run(run_id, "COMPLETE")
+    return stopped
+
+
+def terminal_for_rate_limit(status: str | None) -> str | None:
+    """The provider said no. That is not the task failing its own gates, and
+    reporting it as EXHAUSTED is how an operator retries a wall (§3.3)."""
+    return "RATE_LIMITED" if status == "rejected" else None
+
+
 class CellSessionError(RuntimeError):
     """The session cannot go on — not the agent's failure, the driver's."""
 
@@ -500,6 +529,11 @@ def run_one_cell(
         # Doneness is measured from here, not from base_sha: the plan turn holds
         # Write/Edit/Bash and only a prompt telling it not to commit, so a plan
         # turn that commits would otherwise satisfy the implement turn (§4.3).
+        if stopped := _stop_on_rate_limit(
+            planned, ledger=ledger, task_id=task_id, run_id=run_id, watch=watch
+        ):
+            return stopped
+
         planned_sha = worktree.head_sha(container)
 
         session_id = require_session(planned.session_id)
@@ -544,6 +578,10 @@ def run_one_cell(
         session_id = require_session(implemented.session_id or session_id)
         spent += implemented.cost_usd_est
         last_cost = implemented.cost_usd_est
+        if stopped := _stop_on_rate_limit(
+            implemented, ledger=ledger, task_id=task_id, run_id=run_id, watch=watch
+        ):
+            return stopped
 
         # Doneness is measured, never reported (§4.3): an attempt that produced
         # no commits failed, whatever the transcript says.
@@ -590,7 +628,11 @@ def run_one_cell(
             session_id = require_session(repaired.session_id or session_id)
             spent += repaired.cost_usd_est
             last_cost = repaired.cost_usd_est
-            return None
+            # Returning a state stops the loop: without this the remaining
+            # attempts run against a closed window and report EXHAUSTED.
+            return _stop_on_rate_limit(
+                repaired, ledger=ledger, task_id=task_id, run_id=run_id, watch=watch
+            )
 
         outcome = repair_loop(
             run_gates=_run_gates,

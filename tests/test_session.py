@@ -998,3 +998,13 @@ def test_a_volume_create_that_fails_reports_only_that_volume(monkeypatch, tmp_pa
     assert not any("saffron-cell-SY-1" in line for line in survived)
     # And nothing execs a patch export into a container that was never created.
     assert not any("patch export" in line for line in cell.watched)
+
+
+def test_a_rejected_window_is_not_exhaustion():
+    """§3.3: a provider limit and a task that could not pass its own gates are
+    different outcomes, and one state for both is how the operator is misled
+    into retrying a wall."""
+    assert session.terminal_for_rate_limit("rejected") == "RATE_LIMITED"
+    assert session.terminal_for_rate_limit("allowed_warning") is None
+    assert session.terminal_for_rate_limit("allowed") is None
+    assert session.terminal_for_rate_limit(None) is None

@@ -25,6 +25,10 @@ Consequences, before executing anything below:
 
 The §5.1 rewrite in Task 2 Step 3 remains correct as written: it argues from the rate limit, not from the dollar figure.
 
+**Executed 2026-08-21 on `joel/subscription-token`:** Task 1 (evidence note), Task 2 (credential swap + §5.1, N2 and the rev-15 marker), Task 4 (rate limit, `RATE_LIMITED`, the operator-facing reset time). Suite at 378 passing; `tests/test_saffron_gates.py::test_a_red_run_is_a_failure_even_when_a_test_is_named_for_a_crash` fails and failed identically on `main` before any of this.
+
+**Parked, not abandoned:** Tasks 3, 5, 6 and 8 stay written for the day turns start mattering more than the notional dollar figure — most plausibly when §5 fans out to parallel cells and rate-limit contention, not token volume, becomes the binding constraint. Task 7 stays parked permanently unless a future measurement shows `total_cost_usd` going dead.
+
 ---
 
 ## Global Constraints
