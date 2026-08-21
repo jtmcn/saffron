@@ -2,7 +2,7 @@
 
 An agentic software factory: spec files in, reviewed pull requests out, running unattended overnight on one Mac.
 
-**Status:** rev 13 — three tasks run through the factory, one reviewed, and the review said no (Appendix K). Prior: rev 12 v0.5 run against a live model (Appendix J); rev 11 v0.5 built and reviewed (Appendix I); rev 10 the cell runtime chosen by spike (Appendix G); rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime named (Appendix G); rev 9 v0 built and replayed (Appendix H)
+**Status:** rev 14 — the critic built and measured against a known-bad diff (Appendix L). Prior: rev 13 three tasks run, one reviewed, and the review said no (Appendix K); rev 12 v0.5 run against a live model (Appendix J); rev 11 v0.5 built and reviewed (Appendix I); rev 10 the cell runtime chosen by spike (Appendix G); rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime named (Appendix G); rev 9 v0 built and replayed (Appendix H)
 
 **Companion document:** `CONTEXT.md` — the controlled vocabulary. It is authoritative for what words mean; this document is authoritative for what the system does. Where they disagree, one of them has a bug.
 **Scope:** language- and stack-agnostic. Saffron develops *any* repo that can satisfy the gate contract (§5.4). First repo is Saffron itself; `thermal-edge` is the first external one.
@@ -1816,3 +1816,77 @@ rebase-and-re-verify and §6.1's merge train exist for, and v0.5 has neither.
 implement — against §7.1's $2–6 for implement alone. All three without a repair
 attempt, so the row that matters remains unmeasured, and principle 44 still
 stands.
+
+---
+
+## Appendix L — rev 14: the critic, measured against a known-bad diff
+
+Appendix K argued from a single review that §5.5's critic is what makes the
+loop's output mean anything. Rev 14 builds it and measures it, and the test was
+available for free: `SA-0004`'s patch is a real agent-written change that passed
+every gate and its own thirty-one tests, and that adversarial review rejected on
+three Criticals — all written down before the critic existed.
+
+So the critic's first live run had a ground truth. Nothing was tuned after seeing
+its output.
+
+### What it found
+
+- **The net-line-count proxy, as a `blocker`** — the defect that defeats the
+  gate's entire purpose, and the most important of K's three.
+- **Two things K does not contain**, both true: the failure message hands the
+  agent the evasion recipe, and no fixture covers the mixed case. K found the
+  defect; the critic found why it stays exploitable.
+- **§5.4's omitted `touches` exemption, as a `concern`** — reached from §5.2's
+  ratified-spec commit rather than K's "the gate fails its own PR". Same defect,
+  independent route.
+- **Two more not in K at all**, correctly filed as `note`: an empty-file test
+  deletion passing the gate, and an assertion no implementation could fail.
+- **Missed**: the `\ No newline at end of file` abort, and the
+  `git config diff.srcPrefix` escape — the latter squarely blast-radius, the
+  third lens, deliberately not built because no risk tier is wired.
+
+**Drop rate: 0% on both lenses.** Every finding anchored to a real changed line.
+No hallucinations on the first honest run — which is the number §5.5's
+reconciliation exists to protect, and the one most likely to be bad.
+
+### What that settles, and what it does not
+
+§5.5's design works. A critic given a bounded remit, a fresh session, read-only
+tools and an instruction to find the reason a change should not merge produced
+findings a careful adversarial review had missed, and produced no invented ones.
+
+50. **A critic and a reviewer fail differently, and that is the argument for
+    having both.** The machine critic caught what the human-equivalent review
+    missed and missed what it caught. That is not redundancy with a weaker copy;
+    it is two different failure surfaces over one diff. §5.5's disjoint lenses
+    are the same idea one level down, and the same reasoning says a critic does
+    not replace the operator — §11's "human, always" stands.
+
+Two caveats, both volunteered by the implementation rather than found later:
+
+**The lenses are not disjoint enough.** Both filed the `touches` finding, which
+means their remits overlap on "code contradicts a written spec". §5.5's
+no-voting rule rests on disjointness by construction — *"the schema critic will
+never independently corroborate the correctness critic's timezone finding"* — so
+an overlap is not a duplicate to deduplicate, it is a prompt defect.
+
+51. **Two lenses reaching the same finding is a fact about the prompts, not about
+    the finding.** It reads as corroboration, which is exactly what makes it
+    dangerous: a system that treats agreement as evidence will be most confident
+    where its lenses are least independent.
+
+**The second lens ran on a smaller model** because $0.83 of budget remained. That
+is a confound in every comparison above and it is stated rather than smoothed.
+
+### Where a blocker goes
+
+Nowhere, currently. An anchored blocker stops the task at `REVIEWING`, because
+§5.6's REBUT does not exist. That is the next gap, and the design is ambiguous
+about one thing that has to be settled before it is built: §5.6 says the
+implementer "gets the confirmed blockers", while §4.1 and `CONTEXT.md` define
+`verdict` as the critic's confirm-or-withdraw *at* REBUT. Whether the critic
+verdicts before the implementer rebuts, or in response to it, changes what the
+recorded disagreement means — and §5.6's whole argument for allowing a rebuttal
+is that a documented disagreement between two agents is a strong signal about
+which part of the diff to read first.
