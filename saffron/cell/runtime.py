@@ -236,6 +236,23 @@ def exec_(
     return _call(argv, timeout_s)
 
 
+# Everything but PID 1 and the reaper itself. Measured, not assumed: killing the
+# `container exec` client leaves the process it started running inside the cell,
+# so an idle or wall kill abandons an agent that goes on editing /work while the
+# driver measures commits and runs gates. The cell is single-purpose and its
+# turns are sequential, so "nothing from the last turn survives into the next"
+# is the whole rule. Shell-only: the image is python:slim and has no procps.
+_REAP = (
+    "for p in /proc/[0-9]*; do pid=${p#/proc/}; "
+    '[ "$pid" = 1 ] || [ "$pid" = "$$" ] || kill -9 "$pid" 2>/dev/null; done; :'
+)
+
+
+def reap_cell(container: str, timeout_s: float = 60) -> Completed:
+    """Kill whatever the last turn left running inside the cell."""
+    return _call([RUNTIME, "exec", container, "sh", "-c", _REAP], timeout_s)
+
+
 def exec_stream(
     container: str,
     command: Sequence[str],

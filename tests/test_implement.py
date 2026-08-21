@@ -404,3 +404,42 @@ def test_a_turn_killed_before_its_result_event_still_reports_what_it_spent():
     assert raised.value.attempt is not None
     assert raised.value.attempt.cost_usd_est == 4.0
     assert raised.value.attempt.bound == "wall"
+
+
+def test_a_killed_turn_reaps_the_cell_because_the_kill_does_not_reach_it():
+    """Measured against a real `container`: killing the host-side exec client
+    leaves the process it started running inside the cell. The driver then
+    measures commits, runs the suite and resumes the session in that same
+    container, so an abandoned agent would be editing /work underneath all
+    three."""
+    reaped: list[str] = []
+
+    def _reap(container, **_kwargs):
+        reaped.append(container)
+        return runtime.Completed(0, "", "")
+
+    with pytest.raises(implement.AgentFailed, match="idle bound"):
+        implement.run_agent(
+            "cell",
+            prompt="p",
+            options={},
+            watch=lambda _line: None,
+            exec_stream=_stream(returncode=124, timed_out=True, bound="idle"),
+            reap_cell=_reap,
+        )
+    assert reaped == ["cell"]
+
+
+def test_a_turn_that_ended_on_its_own_is_not_reaped():
+    """The completion window closing is a finished turn, not a kill (§4.3) —
+    and nothing is left behind to reap."""
+    reaped: list[str] = []
+    implement.run_agent(
+        "cell",
+        prompt="p",
+        options={},
+        watch=lambda _line: None,
+        exec_stream=_stream(_result_line(), bound="completion"),
+        reap_cell=lambda container, **_k: reaped.append(container),
+    )
+    assert reaped == []

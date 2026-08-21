@@ -171,6 +171,7 @@ def run_agent(
     last_cost_usd: float = 0.0,
     timeout_s: float = 3600,
     exec_stream: Callable[..., runtime.Completed] = runtime.exec_stream,
+    reap_cell: Callable[..., runtime.Completed] = runtime.reap_cell,
 ) -> AttemptResult:
     """Drive one turn of the in-cell agent and return what it did.
 
@@ -217,6 +218,18 @@ def run_agent(
         workdir=WORKTREE_MOUNT,
         timeout_s=timeout_s,
     )
+
+    if done.timed_out:
+        # `exec_stream` killed the host-side client; measured, that leaves the
+        # runner alive inside the cell. The driver goes on to measure commits,
+        # run the suite and resume the session in this same container, so an
+        # abandoned agent would still be editing /work underneath all three.
+        reaped = reap_cell(container)
+        watch(
+            "agent: reaped the cell after the kill"
+            if reaped.returncode == 0
+            else f"agent: the cell would not reap — {reaped.stderr.strip()[:200]}"
+        )
 
     detail = "; ".join(errors) or done.stderr.strip()[-800:] or "no output"
     # One phrasing for both failure paths, so "why did this turn end" reads the
