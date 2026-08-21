@@ -11,7 +11,7 @@ import json
 import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from functools import partial
+from functools import partial, wraps
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -53,6 +53,51 @@ REVIEW_FLOOR_USD = 2.0
 def critic_budget(budget_usd: float, spent: float) -> float:
     """The per-session cap for one critic turn: the remainder, never zero."""
     return max(budget_usd - spent, REVIEW_FLOOR_USD)
+
+
+class RateLimited(RuntimeError):
+    """The provider closed the window. Raised, never returned: every phase
+    catches `AgentFailed`, so a state handed back would be swallowed."""
+
+    def __init__(self, resets_at: int | None) -> None:
+        super().__init__("rate limit: rejected")
+        self.resets_at = resets_at
+
+
+def stop_on_rejected(
+    agent: Callable[..., AttemptResult],
+) -> Callable[..., AttemptResult]:
+    """The one place every turn goes through, so no turn — plan, implement,
+    repair, review or rebuttal — can run against a closed window (§4.3). A
+    guard per call site is a guard the next turn type forgets to add.
+
+    Committed work is not discarded: the patch export runs from `finally`."""
+
+    @wraps(agent)
+    def guarded(*args: object, **kwargs: object) -> AttemptResult:
+        try:
+            attempt = agent(*args, **kwargs)
+        except implement.AgentFailed as failed:
+            # A rejected window also comes back as a *failed* turn — `is_error`
+            # with terminal_reason `api_error` — carrying the same field. That
+            # path is how a provider wall was reported as NOT_IMPLEMENTED.
+            _raise_if_rejected(failed.attempt)
+            raise
+        _raise_if_rejected(attempt)
+        return attempt
+
+    return guarded
+
+
+def _raise_if_rejected(attempt: AttemptResult | None) -> None:
+    if attempt and terminal_for_rate_limit(attempt.rate_limit_status):
+        raise RateLimited(attempt.rate_limit_resets_at)
+
+
+def terminal_for_rate_limit(status: str | None) -> str | None:
+    """The provider said no. That is not the task failing its own gates, and
+    reporting it as EXHAUSTED is how an operator retries a wall (§3.3)."""
+    return "RATE_LIMITED" if status == "rejected" else None
 
 
 class CellSessionError(RuntimeError):
@@ -231,16 +276,19 @@ def _failed_turn(failed: implement.AgentFailed, session_id: str) -> AttemptResul
 def cell_env(proxy_ip: str, thread_env: Mapping[str, str]) -> dict[str, str]:
     """Everything §5.1's per-task block puts in the cell's environment.
 
-    The proxy is the cell's only route out, and `ANTHROPIC_API_KEY` is the one
-    credential a cell ever holds — the agent runs inside it.
+    The proxy is the cell's only route out, and `CLAUDE_CODE_OAUTH_TOKEN` is
+    the one credential a cell ever holds — the agent runs inside it. A host
+    `ANTHROPIC_API_KEY` is deliberately not forwarded: a subscription token
+    from `claude setup-token` is separately revocable and its ceiling is
+    provider-side, which a key's spend is not (§5.1).
     """
     from saffron.cell import proxy
     from saffron.cell.worktree import STATE_MOUNT
 
     env = proxy.proxy_env(proxy_ip) | dict(thread_env)
     env["CLAUDE_CONFIG_DIR"] = STATE_MOUNT
-    if key := os.environ.get("ANTHROPIC_API_KEY"):
-        env["ANTHROPIC_API_KEY"] = key
+    if token := os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = token
     return env
 
 
@@ -463,8 +511,9 @@ def run_one_cell(
         ledger.set_task_state(task_id, "IMPLEMENTING")
 
         # Bound once, here, so no turn — plan, implement, repair, review or
-        # rebuttal — can quietly inherit the library's hour (§4.3).
-        agent = partial(implement.run_agent, timeout_s=TURN_TIMEOUT_S)
+        # rebuttal — can quietly inherit the library's hour (§4.3), or run on
+        # against a window the provider already closed.
+        agent = stop_on_rejected(partial(implement.run_agent, timeout_s=TURN_TIMEOUT_S))
 
         try:
             planned, raw_plan, spent = plan_checkpoint(
@@ -685,6 +734,18 @@ def run_one_cell(
         ledger.set_task_state(task_id, outcome)
         ledger.finish_run(run_id, "COMPLETE")
         return outcome
+    except RateLimited as stopped:
+        watch(
+            "rate limit: rejected — stopping, not exhausted"
+            + (
+                f"; window reopens {implement.when(stopped.resets_at)}"
+                if stopped.resets_at
+                else ""
+            )
+        )
+        ledger.set_task_state(task_id, "RATE_LIMITED")
+        ledger.finish_run(run_id, "COMPLETE")
+        return "RATE_LIMITED"
     except BaseException:
         # A run row left open is a run that reads as still going. Preflight
         # raising is the path an operator hits first, so it is the one most
@@ -704,6 +765,9 @@ def run_one_cell(
         if container in created:
             export_patch(container, spec, task_dir, watch)
         removed = [("container", container, runtime.remove_container(container))]
+        # Before the proxy goes: its log goes with it.
+        for denied in proxy.denied_egress():
+            watch(f"teardown: proxy DENIED {denied}")
         proxy.stop_proxy()
         removed.append(("network", network, runtime.remove_network(network)))
         # Volumes go too, or the same spec_id cannot be re-run.

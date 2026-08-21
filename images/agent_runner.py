@@ -67,6 +67,19 @@ def _block_event(block: Any) -> dict[str, Any]:
 
 def events(message: Any) -> list[dict[str, Any]]:
     """Saffron events for one SDK message. Never raises on an unknown shape."""
+    # Before the result branch, which also keys on `session_id`: a rate limit
+    # event carries one and no `num_turns`. This is the provider's own ceiling,
+    # the only one the cell is subject to rather than merely reporting (§5.1) —
+    # as a passthrough it reaches the host as four failed repair attempts.
+    if (info := getattr(message, "rate_limit_info", None)) is not None:
+        return [
+            {
+                "type": "rate_limit",
+                "status": getattr(info, "status", None),
+                "utilization": getattr(info, "utilization", None),
+                "resets_at": getattr(info, "resets_at", None),
+            }
+        ]
     # Result first: it also carries `subtype`, which every system message has.
     if hasattr(message, "num_turns") and hasattr(message, "session_id"):
         return [

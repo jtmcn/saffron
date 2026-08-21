@@ -7,6 +7,7 @@ and splitting them pays full context cost twice for the same file reads.
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -75,6 +76,11 @@ class AttemptResult:
     # runner that exited on its own, "completion" for one whose child held the
     # pipe. An idle or wall-clock kill raises instead of returning.
     bound: str = ""
+    # The last rate-limit status the turn reported, and when its window
+    # reopens. Not a cost: a ceiling the provider enforces, not one the cell
+    # reports and the host sums (§5.1).
+    rate_limit_status: str | None = None
+    rate_limit_resets_at: int | None = None
 
 
 def agent_options(
@@ -141,6 +147,17 @@ def repair_prompt(new_failures: Sequence[NewFailure]) -> str:
     )
 
 
+def when(stamp: int | None) -> str:
+    """A unix timestamp is not something an operator watching a run can act on;
+    the question it answers is "when can I retry" (§0). The day goes with it
+    unless it is today: a seven-day window resets days out, and a bare clock
+    time reads as an hour away."""
+    local = time.localtime(stamp)
+    today = time.localtime()
+    same_day = (local.tm_year, local.tm_yday) == (today.tm_year, today.tm_yday)
+    return time.strftime("%H:%M local" if same_day else "%a %d %b %H:%M local", local)
+
+
 def _describe(event: dict) -> str:
     """One line per event, for the operator watching v0.5 run."""
     kind = event.get("type")
@@ -155,6 +172,17 @@ def _describe(event: dict) -> str:
         return (
             f"agent: {event.get('subtype')} in {event.get('num_turns')} turns, "
             f"${event.get('total_cost_usd')} ({event.get('terminal_reason')})"
+        )
+    if kind == "rate_limit":
+        used = event.get("utilization")
+        return (
+            f"agent: rate limit {event.get('status')}"
+            + (f", {used:.0%} used" if isinstance(used, int | float) else "")
+            + (
+                f", resets {when(event.get('resets_at'))}"
+                if event.get("resets_at")
+                else ""
+            )
         )
     if kind == "error":
         return f"agent: error {event.get('error')}"
@@ -182,6 +210,7 @@ def run_agent(
     text: list[str] = []
     errors: list[str] = []
     result: dict = {}
+    rate_limit: dict = {}
 
     def _on_line(line: str) -> bool:
         """True once the result event has been seen — §4.3's completion signal,
@@ -208,6 +237,10 @@ def run_agent(
             errors.append(str(event.get("error", "")))
         elif event.get("type") == "result":
             result.update(event)
+        elif event.get("type") == "rate_limit":
+            # Last one wins: the CLI emits on transition, so the final state is
+            # the one the next turn would start under.
+            rate_limit.update(event)
         watch(_describe(event))
 
     done = exec_stream(
@@ -258,6 +291,8 @@ def run_agent(
                 text="".join(text),
                 is_error=True,
                 bound=done.bound,
+                rate_limit_status=rate_limit.get("status"),
+                rate_limit_resets_at=rate_limit.get("resets_at"),
             ),
         )
 
@@ -286,6 +321,8 @@ def run_agent(
         text="".join(text),
         is_error=is_error,
         bound=done.bound,
+        rate_limit_status=rate_limit.get("status"),
+        rate_limit_resets_at=rate_limit.get("resets_at"),
     )
     if failed:
         # `is_error`, measured and not assumed: a cell with no credential

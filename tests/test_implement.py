@@ -443,3 +443,57 @@ def test_a_turn_that_ended_on_its_own_is_not_reaped():
         reap_cell=lambda container, **_k: reaped.append(container),
     )
     assert reaped == []
+
+
+def test_a_rate_limit_event_reaches_the_attempt_result():
+    """The host acts on this, so it has to survive the stream. Untested, the
+    supervisor's guard reads a field nothing ever populates."""
+    result = implement.run_agent(
+        "cell",
+        prompt="go",
+        options={"max_turns": 3},
+        watch=lambda line: None,
+        exec_stream=_stream(
+            json.dumps(
+                {
+                    "type": "rate_limit",
+                    "status": "rejected",
+                    "utilization": 1.0,
+                    "resets_at": 1755800000,
+                }
+            ),
+            _result_line(),
+        ),
+    )
+    assert result.rate_limit_status == "rejected"
+    assert result.rate_limit_resets_at == 1755800000
+
+
+def test_the_last_rate_limit_status_wins():
+    """The CLI emits on transition; the final state is the one the next turn
+    would start under, so a warning must not mask a later rejection."""
+    result = implement.run_agent(
+        "cell",
+        prompt="go",
+        options={"max_turns": 3},
+        watch=lambda line: None,
+        exec_stream=_stream(
+            json.dumps({"type": "rate_limit", "status": "allowed_warning"}),
+            json.dumps({"type": "rate_limit", "status": "rejected", "resets_at": 7}),
+            _result_line(),
+        ),
+    )
+    assert result.rate_limit_status == "rejected"
+    assert result.rate_limit_resets_at == 7
+
+
+def test_a_turn_with_no_rate_limit_event_carries_none():
+    result = implement.run_agent(
+        "cell",
+        prompt="go",
+        options={"max_turns": 3},
+        watch=lambda line: None,
+        exec_stream=_stream(_result_line()),
+    )
+    assert result.rate_limit_status is None
+    assert result.rate_limit_resets_at is None

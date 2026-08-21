@@ -71,6 +71,23 @@ def start_proxy(internal_network: str, *, timeout_s: float = 30) -> str:
     )
 
 
+def denied_egress(limit: int = 10) -> list[str]:
+    """What the proxy refused, read before `stop_proxy` or not at all: the log
+    is the container's stdout (squid.conf), so it dies with the container.
+
+    A denied CONNECT otherwise reaches the operator as an unexplained API
+    error — the allowlist is a hostname list, and the host it is missing is
+    exactly the one nobody thought to put there."""
+    try:
+        # Never raises, and never stalls teardown: this runs from a `finally`,
+        # and `call` raises when the runtime binary itself cannot be executed.
+        done = runtime.call([runtime.RUNTIME, "logs", PROXY_NAME], timeout_s=10)
+    except runtime.CellRuntimeError:
+        return []
+    lines = (done.stdout + done.stderr).splitlines()
+    return [line.strip() for line in lines if "TCP_DENIED" in line][:limit]
+
+
 def stop_proxy() -> None:
     runtime.remove_container(PROXY_NAME)
 

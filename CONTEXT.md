@@ -300,11 +300,16 @@ _Avoid_: "response", "appeal", "pushback".
 ## 6. Outcomes
 
 **Terminal state**: A state that reaches the operator — `SCOPE_REVIEW`,
-`PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`. Everything else is
-internal.
+`PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`, `RATE_LIMITED`.
+Everything else is internal.
 
 **`EXHAUSTED`**: A task that could not pass its own gates within `max_attempts`. An
 informative outcome about the spec or the codebase.
+
+**`RATE_LIMITED`**: The provider refused the turn — its ceiling, not the task's.
+Says nothing about the spec, and the only thing it asks for is a retry after the
+window reopens.
+_Avoid_: "exhausted", "out of budget".
 _Avoid_: "failed", "gave up", "errored". Reserve "failed" for gates and
 infrastructure, and "errored" for gate status `error`.
 

@@ -23,7 +23,13 @@ DEFAULT_HOME = Path.home() / ".saffron"
 # policy, a mirror that will not clone, a repo with no HEAD — is that same
 # infrastructure failure, and is caught there too rather than reaching the
 # operator as a traceback.
-CELL_EXIT = {"READY_FOR_REVIEW": 0, "PREFLIGHT_FAILED": 2, "GATE_ERROR": 2}
+CELL_EXIT = {
+    "READY_FOR_REVIEW": 0,
+    "PREFLIGHT_FAILED": 2,
+    "GATE_ERROR": 2,
+    # Neither the task's failure nor the operator's: retry after the window.
+    "RATE_LIMITED": 2,
+}
 
 
 def main(argv: list[str] | None = None) -> int:

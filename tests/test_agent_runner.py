@@ -182,3 +182,35 @@ def test_without_a_credential_the_agent_fails_rather_than_reporting_success():
     finally:
         runtime.remove_container(container)
         runtime.remove_network(network)
+
+
+def test_a_rate_limit_event_is_not_a_passthrough():
+    """The only ceiling the cell is subject to rather than reporting (§5.1).
+    Dropped, a rejected window reaches the host as four failed repair
+    attempts and reports EXHAUSTED — §3.3's one-state-for-two-causes."""
+    message = SimpleNamespace(
+        rate_limit_info=SimpleNamespace(
+            status="allowed_warning", utilization=0.82, resets_at=1755800000
+        ),
+        uuid="u",
+        session_id="s",
+    )
+    (event,) = runner.events(message)
+    assert event["type"] == "rate_limit"
+    assert event["status"] == "allowed_warning"
+    assert event["utilization"] == 0.82
+    assert event["resets_at"] == 1755800000
+
+
+def test_a_rate_limit_event_is_not_mistaken_for_a_result():
+    """It carries session_id, which the result branch also keys on. Only
+    num_turns tells them apart, so the ordering in events() is load-bearing."""
+    message = SimpleNamespace(
+        rate_limit_info=SimpleNamespace(
+            status="rejected", utilization=1.0, resets_at=1
+        ),
+        uuid="u",
+        session_id="s",
+    )
+    (event,) = runner.events(message)
+    assert event["type"] == "rate_limit"

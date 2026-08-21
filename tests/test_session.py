@@ -296,6 +296,7 @@ class _Cell:
         self.watched: list[str] = []
         self.exported = False
         self.timeouts: list[float | None] = []
+        self.denied: list[str] = []
 
 
 _DIFF = """diff --git a/src/x.py b/src/x.py
@@ -325,6 +326,7 @@ def _stub_the_runtime(
     monkeypatch.setattr("saffron.cell.runtime.create_volume", lambda *a, **k: None)
     monkeypatch.setattr("saffron.cell.proxy.start_proxy", lambda *a, **k: "10.88.0.2")
     monkeypatch.setattr("saffron.cell.proxy.stop_proxy", lambda *a, **k: None)
+    monkeypatch.setattr("saffron.cell.proxy.denied_egress", lambda *a, **k: cell.denied)
     monkeypatch.setattr(
         "saffron.preflight.assert_host_is_unreachable", lambda *a, **k: None
     )
@@ -764,15 +766,30 @@ def test_the_task_row_carries_the_specs_own_sha_not_the_policys(tmp_path, monkey
 def test_the_cell_env_carries_the_proxy_and_the_state_dir(monkeypatch):
     """§5.1's per-task block: without these the cell has full egress and the
     agent writes its session state into the tree the scope gate walks."""
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     env = session.cell_env("10.88.0.2", {"RAYON_NUM_THREADS": "2"})
     assert env["HTTPS_PROXY"] == "http://10.88.0.2:3128"
     assert env["CLAUDE_CONFIG_DIR"] == "/agent-state"
     assert env["RAYON_NUM_THREADS"] == "2"
-    assert "ANTHROPIC_API_KEY" not in env
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
 
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-test")
+    assert (
+        session.cell_env("10.88.0.2", {})["CLAUDE_CODE_OAUTH_TOKEN"]
+        == "sk-ant-oat-test"
+    )
+
+
+def test_the_cell_env_never_carries_an_api_key(monkeypatch):
+    """The credential swap has to hold in the direction that can regress
+    silently. A host with a key exported must not put one in a cell: the
+    subscription token is separately revocable and its ceiling is
+    provider-side, which the key's is not (§5.1)."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    assert session.cell_env("10.88.0.2", {})["ANTHROPIC_API_KEY"] == "sk-test"
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-test")
+    env = session.cell_env("10.88.0.2", {})
+    assert "ANTHROPIC_API_KEY" not in env
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-ant-oat-test"
 
 
 _BLOCKER = {
@@ -983,3 +1000,79 @@ def test_a_volume_create_that_fails_reports_only_that_volume(monkeypatch, tmp_pa
     assert not any("saffron-cell-SY-1" in line for line in survived)
     # And nothing execs a patch export into a container that was never created.
     assert not any("patch export" in line for line in cell.watched)
+
+
+def test_a_rejected_window_is_not_exhaustion():
+    """§3.3: a provider limit and a task that could not pass its own gates are
+    different outcomes, and one state for both is how the operator is misled
+    into retrying a wall."""
+    assert session.terminal_for_rate_limit("rejected") == "RATE_LIMITED"
+    assert session.terminal_for_rate_limit("allowed_warning") is None
+    assert session.terminal_for_rate_limit("allowed") is None
+    assert session.terminal_for_rate_limit(None) is None
+
+
+def _rejected(resets_at=1755800000):
+    """What a closed window actually looks like coming back: the CLI reports the
+    rejection and the turn errors."""
+    return implement.AttemptResult(
+        session_id="sess-1",
+        subtype="success",
+        terminal_reason="api_error",
+        num_turns=0,
+        cost_usd_est=0.0,
+        is_error=True,
+        rate_limit_status="rejected",
+        rate_limit_resets_at=resets_at,
+    )
+
+
+def test_a_wall_on_the_plan_turn_is_not_the_task_failing(monkeypatch, tmp_path):
+    """The plan turn comes back as `AgentFailed`, not as a result, so the guard
+    that read the returned attempt never ran and the provider's wall was stamped
+    NOT_IMPLEMENTED — the task blamed for the ceiling (§3.3)."""
+    cell = _stub_the_runtime(monkeypatch)
+    state, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[implement.AgentFailed("api_error", attempt=_rejected())],
+    )
+    assert state == "RATE_LIMITED"
+    (task_row,) = ledger._db.execute("SELECT state FROM tasks").fetchall()
+    assert task_row["state"] == "RATE_LIMITED"
+    (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
+    # COMPLETE, not the ABORTED a raise out of the cell would leave.
+    assert run_row["status"] == "COMPLETE"
+    # And it says when, in something the operator can act on.
+    assert any("window reopens" in line for line in cell.watched)
+    assert not any("1755800000" in line for line in cell.watched)
+
+
+def test_a_wall_after_the_gates_go_green_stops_the_lenses(monkeypatch, tmp_path):
+    """REVIEW had no guard of its own: every lens failed against the closed
+    window, `review_state` read the errors as an incomplete review, and the run
+    ended REVIEWING — not a terminal state, and two turns spent."""
+    cell = _stub_the_runtime(monkeypatch)
+    state, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _rejected()],
+    )
+    assert state == "RATE_LIMITED"
+    # The second lens is never asked: one closed window, one turn spent.
+    assert len([p for p in cell.turns if "REVIEW" in p.upper()]) <= 1
+
+
+def test_a_denied_connect_reaches_the_operator(monkeypatch, tmp_path):
+    """The proxy's log is its stdout, so it dies with the container: unread at
+    teardown, a blocked host reaches the operator as an unexplained API error
+    and the allowlist is the last place anyone looks."""
+    cell = _stub_the_runtime(monkeypatch)
+    cell.denied = ["TCP_DENIED/403 4 CONNECT platform.claude.com:443"]
+    _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
+    assert any(
+        "proxy DENIED" in line and "platform.claude.com" in line
+        for line in cell.watched
+    )

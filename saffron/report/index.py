@@ -24,6 +24,9 @@ _STATE_RANK = {
     # not pass its own gates, or one whose cell died, reading as reviewable.
     "EXHAUSTED": 2,
     "ORPHANED": 2,
+    # The provider's wall, not the task's: it needs you, and a retry is all it
+    # needs. Absent, it sorted below green reviewable tasks.
+    "RATE_LIMITED": 2,
     "REVIEWING": 3,
     "REBUTTING": 3,
 }
