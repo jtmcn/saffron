@@ -94,3 +94,22 @@ def test_no_host_service_answers_from_inside_a_cell(network):
         f"a host service answered from inside a cell at {reachable}; "
         "bind it to 127.0.0.1, or turn it off"
     )
+
+
+def test_only_the_denials_are_reported_and_only_before_teardown(monkeypatch):
+    """A denied CONNECT is the one proxy event an operator has to see: the
+    allowlist is a hostname list, and a missing host reads as an API error."""
+    log = "\n".join(
+        [
+            "1755800000.1 12 10.88.0.3 TCP_TUNNEL/200 5 CONNECT api.anthropic.com:443",
+            "1755800001.2 0 10.88.0.3 TCP_DENIED/403 4 CONNECT platform.claude.com:443",
+            "1755800002.3 0 10.88.0.3 TCP_DENIED/403 4 CONNECT pypi.org:443",
+        ]
+    )
+    monkeypatch.setattr(
+        proxy.runtime, "call", lambda *a, **k: runtime.Completed(0, log, "")
+    )
+    denied = proxy.denied_egress()
+    assert len(denied) == 2
+    assert "platform.claude.com:443" in denied[0]
+    assert not any("TCP_TUNNEL" in line for line in denied)

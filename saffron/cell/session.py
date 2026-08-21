@@ -765,6 +765,9 @@ def run_one_cell(
         if container in created:
             export_patch(container, spec, task_dir, watch)
         removed = [("container", container, runtime.remove_container(container))]
+        # Before the proxy goes: its log goes with it.
+        for denied in proxy.denied_egress():
+            watch(f"teardown: proxy DENIED {denied}")
         proxy.stop_proxy()
         removed.append(("network", network, runtime.remove_network(network)))
         # Volumes go too, or the same spec_id cannot be re-run.

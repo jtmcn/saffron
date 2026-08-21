@@ -296,6 +296,7 @@ class _Cell:
         self.watched: list[str] = []
         self.exported = False
         self.timeouts: list[float | None] = []
+        self.denied: list[str] = []
 
 
 _DIFF = """diff --git a/src/x.py b/src/x.py
@@ -325,6 +326,7 @@ def _stub_the_runtime(
     monkeypatch.setattr("saffron.cell.runtime.create_volume", lambda *a, **k: None)
     monkeypatch.setattr("saffron.cell.proxy.start_proxy", lambda *a, **k: "10.88.0.2")
     monkeypatch.setattr("saffron.cell.proxy.stop_proxy", lambda *a, **k: None)
+    monkeypatch.setattr("saffron.cell.proxy.denied_egress", lambda *a, **k: cell.denied)
     monkeypatch.setattr(
         "saffron.preflight.assert_host_is_unreachable", lambda *a, **k: None
     )
@@ -1061,3 +1063,16 @@ def test_a_wall_after_the_gates_go_green_stops_the_lenses(monkeypatch, tmp_path)
     assert state == "RATE_LIMITED"
     # The second lens is never asked: one closed window, one turn spent.
     assert len([p for p in cell.turns if "REVIEW" in p.upper()]) <= 1
+
+
+def test_a_denied_connect_reaches_the_operator(monkeypatch, tmp_path):
+    """The proxy's log is its stdout, so it dies with the container: unread at
+    teardown, a blocked host reaches the operator as an unexplained API error
+    and the allowlist is the last place anyone looks."""
+    cell = _stub_the_runtime(monkeypatch)
+    cell.denied = ["TCP_DENIED/403 4 CONNECT platform.claude.com:443"]
+    _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
+    assert any(
+        "proxy DENIED" in line and "platform.claude.com" in line
+        for line in cell.watched
+    )
