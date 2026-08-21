@@ -15,33 +15,83 @@ merge — anything from them worth keeping was moved into the appendices or into
 
 ---
 
-## 1. `integrity` must be rewritten, not merely wired
+## 1. `integrity` needs splitting, not rewriting — and half of it may not be a core gate
 
 **Status:** written by the factory, reviewed, **rejected**. The patch is in the
-batch tree, not in the repo.
+batch tree, not in the repo. Read it and the review before writing anything —
+most of its structure is sound and its §2.1 split is clean.
 
 `SA-0004` produced a 371-line `integrity` gate that passed every gate and its own
-31 tests, and adversarial review rejected it on three Criticals (Appendix K):
+31 tests, and adversarial review rejected it (Appendix K). The three Criticals
+collapse into **two defects**, and they want different treatment.
 
-- `\ No newline at end of file` handled only *inside* a hunk, while git emits it
-  after one — so any diff touching a file without a trailing newline returns
-  `error`, and §5.4 turns that into an aborted attempt the agent is never told
-  about.
-- "an existing test was removed" inferred from **net line count**: delete the
-  failing test, write a longer comment, and the gate is green. That is precisely
-  the evasion the gate exists to stop.
-- the same comparison fails a legitimate `parametrize` consolidation, so the only
-  repair is padding the file — the gate teaching the gaming.
+### Defect A — a positioning bug. Fix it.
 
-**Done looks like:** a gate that identifies removed *tests* rather than removed
-*lines*, handles the marker git actually emits, honours §5.4's "unless `touches`
-explicitly includes it" exemption, and is wired into `run_one_cell`'s suite
-beside `scope`. The rejected patch and the review are worth reading first — most
-of its structure is sound and the §2.1 split in it is clean.
+`\ No newline at end of file` is handled only *inside* a hunk, while git emits it
+after one. So any diff touching a file without a trailing newline returns
+`error`, which §5.4 turns into an aborted attempt the agent is never told about.
+The branch exists; it is in the wrong place and untested.
 
-**Why it is first:** principle 49 — a verification an agent can run itself is one
-it will have already passed. The core gates are the only gates that can ever
-fire, and this is the one that catches gaming.
+### Defect B — the central heuristic is the wrong shape. Replace it.
+
+"An existing test was removed" is inferred from **net line count**. Delete the
+failing test, write a comment longer than the test, and the gate is green — the
+exact evasion it exists to stop. The same comparison fails a legitimate
+`parametrize` consolidation, so the only repair is padding the file, which
+teaches the gaming. Wrong in both directions on one comparison is not a check.
+
+**And the obvious replacement may not be possible in a core gate.** "What is a
+test" beyond a path glob is language knowledge, and §2.1 keeps that out of core.
+A better-shaped answer already exists in the contract: §5.4 requires the `tests`
+gate to accept a **test-subset argument**, so the repo can already enumerate its
+tests. If it reported the *collected test names*, comparing the set at `base_sha`
+against the set at head answers the question **exactly** — no false positive on a
+consolidation, no evasion by padding, and it catches a test silenced by renaming
+out of collection, which the rejected gate blesses (verified in review).
+
+The cost is that this half stops being diff-only, so it needs the `revert`-shaped
+exception §2.1 already sanctions: *core invokes declared gates, never tools*.
+
+**This is a design decision and belongs in `DESIGN.md` before any code.** §5.4's
+`integrity` paragraph currently describes a single diff-reading gate; if test
+removal moves to set comparison, that paragraph and the gate-role table change,
+and the contract gains a requirement on what `tests` reports.
+
+### What to keep
+
+The review was explicit about what is good, and it is most of the file: the §2.1
+split (not one language token in a code path), `error` vs `fail` not blurred,
+count-driven hunk consumption with a fixture containing diff-shaped content,
+line numbers derived from the `@@` header, and **suppression detection that is
+correct** — added lines only, with the context-line and removed-line cases both
+tested and right. The `gate_config` check is right too.
+
+### Done looks like
+
+- Suppression and gate-config checks surviving as a diff-reading core gate,
+  with defect A fixed and §5.4's "unless `touches` explicitly includes it"
+  exemption honoured — the rejected gate omitted it and so failed its own PR
+  with sixteen violations.
+- Test removal answered by comparing collected test sets, with `DESIGN.md`
+  updated first to say so.
+- Both wired into `run_one_cell`'s suite beside `scope`.
+- A `-diff` gitattribute renders a text file as `Binary files ... differ`; that
+  hides content but not paths, so `scope` is safe and this gate must treat such
+  a section as unreadable rather than as no change (see item 2).
+
+### Why it is first
+
+Principle 49: a verification an agent can run itself is one it will have already
+passed, so the core gates are the only gates that can ever fire.
+
+Note the justification in §5.4 — that a hard-gate *repair loop* trains toward
+test destruction — is not the reason this matters here, because the repair loop
+has never fired (item 9). The reason is simpler and stronger: **`integrity` reads
+the diff and does not care why the diff looks that way.** An agent that runs its
+own tests, finds one hard to fix, and deletes it before ever committing produces
+exactly the same diff as one that deleted it under repair. The gaming pressure
+moved earlier in the process, not away — which makes this the only place that
+deletion is visible at all.
 
 ## 2. The agent can disable a core gate from inside the cell
 
