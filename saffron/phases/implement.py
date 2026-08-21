@@ -147,10 +147,15 @@ def repair_prompt(new_failures: Sequence[NewFailure]) -> str:
     )
 
 
-def _when(stamp: int | None) -> str:
+def when(stamp: int | None) -> str:
     """A unix timestamp is not something an operator watching a run can act on;
-    the question it answers is "when can I retry" (§0)."""
-    return time.strftime("%H:%M local", time.localtime(stamp))
+    the question it answers is "when can I retry" (§0). The day goes with it
+    unless it is today: a seven-day window resets days out, and a bare clock
+    time reads as an hour away."""
+    local = time.localtime(stamp)
+    today = time.localtime()
+    same_day = (local.tm_year, local.tm_yday) == (today.tm_year, today.tm_yday)
+    return time.strftime("%H:%M local" if same_day else "%a %d %b %H:%M local", local)
 
 
 def _describe(event: dict) -> str:
@@ -174,7 +179,7 @@ def _describe(event: dict) -> str:
             f"agent: rate limit {event.get('status')}"
             + (f", {used:.0%} used" if isinstance(used, int | float) else "")
             + (
-                f", resets {_when(event.get('resets_at'))}"
+                f", resets {when(event.get('resets_at'))}"
                 if event.get("resets_at")
                 else ""
             )

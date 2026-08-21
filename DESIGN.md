@@ -260,9 +260,12 @@ Design notes:
   EXHAUSTED        ◀── also from IMPLEMENTING: the host-side spend ceiling stops
                        a task before its next turn, and the budget stop and
                        "four attempts, still red" share the state (§4.3)
+  RATE_LIMITED     ◀── any turn, on a `rejected` window: the provider's ceiling,
+                       not the task's. Deliberately not EXHAUSTED — nothing was
+                       learned about the spec, and the retry is free (N2, §5.1)
 ```
 
-Terminal states that reach you: `SCOPE_REVIEW`, `PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`, `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`. Everything else is internal. The last three are named rather than folded into a neighbour because the alternative is an abort, or an attempt that produced nothing, reading as an ordinary task outcome — principle 34 wearing a state name.
+Terminal states that reach you: `SCOPE_REVIEW`, `PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`, `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`, `RATE_LIMITED`. Everything else is internal. The last three are named rather than folded into a neighbour because the alternative is an abort, or an attempt that produced nothing, reading as an ordinary task outcome — principle 34 wearing a state name.
 
 ---
 

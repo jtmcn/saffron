@@ -11,7 +11,7 @@ import json
 import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from functools import partial
+from functools import partial, wraps
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -55,27 +55,43 @@ def critic_budget(budget_usd: float, spent: float) -> float:
     return max(budget_usd - spent, REVIEW_FLOOR_USD)
 
 
-def _stop_on_rate_limit(
-    attempt: AttemptResult,
-    *,
-    ledger: Ledger,
-    task_id: int,
-    run_id: int,
-    watch: Callable[[str], None],
-) -> str | None:
-    """Record and report a rejected window, or None to carry on. Committed work
-    is not discarded — the patch export runs from `finally` either way (§4.3)."""
-    stopped = terminal_for_rate_limit(attempt.rate_limit_status)
-    if stopped is None:
-        return None
-    resets = attempt.rate_limit_resets_at
-    watch(
-        "rate limit: rejected — stopping, not exhausted"
-        + (f"; window reopens at {resets}" if resets else "")
-    )
-    ledger.set_task_state(task_id, stopped)
-    ledger.finish_run(run_id, "COMPLETE")
-    return stopped
+class RateLimited(RuntimeError):
+    """The provider closed the window. Raised, never returned: every phase
+    catches `AgentFailed`, so a state handed back would be swallowed."""
+
+    def __init__(self, resets_at: int | None) -> None:
+        super().__init__("rate limit: rejected")
+        self.resets_at = resets_at
+
+
+def stop_on_rejected(
+    agent: Callable[..., AttemptResult],
+) -> Callable[..., AttemptResult]:
+    """The one place every turn goes through, so no turn — plan, implement,
+    repair, review or rebuttal — can run against a closed window (§4.3). A
+    guard per call site is a guard the next turn type forgets to add.
+
+    Committed work is not discarded: the patch export runs from `finally`."""
+
+    @wraps(agent)
+    def guarded(*args: object, **kwargs: object) -> AttemptResult:
+        try:
+            attempt = agent(*args, **kwargs)
+        except implement.AgentFailed as failed:
+            # A rejected window also comes back as a *failed* turn — `is_error`
+            # with terminal_reason `api_error` — carrying the same field. That
+            # path is how a provider wall was reported as NOT_IMPLEMENTED.
+            _raise_if_rejected(failed.attempt)
+            raise
+        _raise_if_rejected(attempt)
+        return attempt
+
+    return guarded
+
+
+def _raise_if_rejected(attempt: AttemptResult | None) -> None:
+    if attempt and terminal_for_rate_limit(attempt.rate_limit_status):
+        raise RateLimited(attempt.rate_limit_resets_at)
 
 
 def terminal_for_rate_limit(status: str | None) -> str | None:
@@ -495,8 +511,9 @@ def run_one_cell(
         ledger.set_task_state(task_id, "IMPLEMENTING")
 
         # Bound once, here, so no turn — plan, implement, repair, review or
-        # rebuttal — can quietly inherit the library's hour (§4.3).
-        agent = partial(implement.run_agent, timeout_s=TURN_TIMEOUT_S)
+        # rebuttal — can quietly inherit the library's hour (§4.3), or run on
+        # against a window the provider already closed.
+        agent = stop_on_rejected(partial(implement.run_agent, timeout_s=TURN_TIMEOUT_S))
 
         try:
             planned, raw_plan, spent = plan_checkpoint(
@@ -529,11 +546,6 @@ def run_one_cell(
         # Doneness is measured from here, not from base_sha: the plan turn holds
         # Write/Edit/Bash and only a prompt telling it not to commit, so a plan
         # turn that commits would otherwise satisfy the implement turn (§4.3).
-        if stopped := _stop_on_rate_limit(
-            planned, ledger=ledger, task_id=task_id, run_id=run_id, watch=watch
-        ):
-            return stopped
-
         planned_sha = worktree.head_sha(container)
 
         session_id = require_session(planned.session_id)
@@ -578,10 +590,6 @@ def run_one_cell(
         session_id = require_session(implemented.session_id or session_id)
         spent += implemented.cost_usd_est
         last_cost = implemented.cost_usd_est
-        if stopped := _stop_on_rate_limit(
-            implemented, ledger=ledger, task_id=task_id, run_id=run_id, watch=watch
-        ):
-            return stopped
 
         # Doneness is measured, never reported (§4.3): an attempt that produced
         # no commits failed, whatever the transcript says.
@@ -628,11 +636,7 @@ def run_one_cell(
             session_id = require_session(repaired.session_id or session_id)
             spent += repaired.cost_usd_est
             last_cost = repaired.cost_usd_est
-            # Returning a state stops the loop: without this the remaining
-            # attempts run against a closed window and report EXHAUSTED.
-            return _stop_on_rate_limit(
-                repaired, ledger=ledger, task_id=task_id, run_id=run_id, watch=watch
-            )
+            return None
 
         outcome = repair_loop(
             run_gates=_run_gates,
@@ -730,6 +734,18 @@ def run_one_cell(
         ledger.set_task_state(task_id, outcome)
         ledger.finish_run(run_id, "COMPLETE")
         return outcome
+    except RateLimited as stopped:
+        watch(
+            "rate limit: rejected — stopping, not exhausted"
+            + (
+                f"; window reopens {implement.when(stopped.resets_at)}"
+                if stopped.resets_at
+                else ""
+            )
+        )
+        ledger.set_task_state(task_id, "RATE_LIMITED")
+        ledger.finish_run(run_id, "COMPLETE")
+        return "RATE_LIMITED"
     except BaseException:
         # A run row left open is a run that reads as still going. Preflight
         # raising is the path an operator hits first, so it is the one most

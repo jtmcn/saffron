@@ -1008,3 +1008,56 @@ def test_a_rejected_window_is_not_exhaustion():
     assert session.terminal_for_rate_limit("allowed_warning") is None
     assert session.terminal_for_rate_limit("allowed") is None
     assert session.terminal_for_rate_limit(None) is None
+
+
+def _rejected(resets_at=1755800000):
+    """What a closed window actually looks like coming back: the CLI reports the
+    rejection and the turn errors."""
+    return implement.AttemptResult(
+        session_id="sess-1",
+        subtype="success",
+        terminal_reason="api_error",
+        num_turns=0,
+        cost_usd_est=0.0,
+        is_error=True,
+        rate_limit_status="rejected",
+        rate_limit_resets_at=resets_at,
+    )
+
+
+def test_a_wall_on_the_plan_turn_is_not_the_task_failing(monkeypatch, tmp_path):
+    """The plan turn comes back as `AgentFailed`, not as a result, so the guard
+    that read the returned attempt never ran and the provider's wall was stamped
+    NOT_IMPLEMENTED — the task blamed for the ceiling (§3.3)."""
+    cell = _stub_the_runtime(monkeypatch)
+    state, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[implement.AgentFailed("api_error", attempt=_rejected())],
+    )
+    assert state == "RATE_LIMITED"
+    (task_row,) = ledger._db.execute("SELECT state FROM tasks").fetchall()
+    assert task_row["state"] == "RATE_LIMITED"
+    (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
+    # COMPLETE, not the ABORTED a raise out of the cell would leave.
+    assert run_row["status"] == "COMPLETE"
+    # And it says when, in something the operator can act on.
+    assert any("window reopens" in line for line in cell.watched)
+    assert not any("1755800000" in line for line in cell.watched)
+
+
+def test_a_wall_after_the_gates_go_green_stops_the_lenses(monkeypatch, tmp_path):
+    """REVIEW had no guard of its own: every lens failed against the closed
+    window, `review_state` read the errors as an incomplete review, and the run
+    ended REVIEWING — not a terminal state, and two turns spent."""
+    cell = _stub_the_runtime(monkeypatch)
+    state, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _rejected()],
+    )
+    assert state == "RATE_LIMITED"
+    # The second lens is never asked: one closed window, one turn spent.
+    assert len([p for p in cell.turns if "REVIEW" in p.upper()]) <= 1
