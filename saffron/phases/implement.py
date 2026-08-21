@@ -89,6 +89,9 @@ def agent_options(
         "tools": list(IMPLEMENT_TOOLS),
         "allowed_tools": list(IMPLEMENT_TOOLS),
         "permission_mode": "dontAsk",
+        # /work is the target repo's checkout and the task can edit it, so its
+        # .claude/ would configure the agent working on it (§2). Load nothing.
+        "setting_sources": [],
         "cwd": cwd,
         "max_turns": max_turns,
         # In-cell and per *turn*, not per task: one options dict drives every

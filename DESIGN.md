@@ -522,6 +522,8 @@ That second requirement is easy to miss and fatal to get wrong. The obvious mode
 
 The general form, because it will recur with every runtime option: **in an unattended system, "ask the operator" is not a fallback, it is a hang.** Any option whose failure mode is a prompt needs its non-interactive equivalent chosen deliberately.
 
+**Configuration is loaded from nowhere.** `setting_sources` is pinned to `[]`. Its default loads project settings from the working directory, and the working directory is `/work` — the target repo's checkout, a tree the task itself can edit. Measured with a planted `.claude/`: an agent definition and a skill in `/work` both reached the agent Saffron was running *on that repo*, which for self-hosting means Saffron's own `.claude/` configures its own factory. Every instruction the agent gets is composed host-side and injected (§5.3); nothing is read from the tree under work. The cost of the pin is that the repo's `CLAUDE.md` no longer loads either — that is the right trade and the right fix is the same one `CONTEXT.md` already uses: inject it host-side, read from the mirror at the base commit, never from the tree the agent can rewrite.
+
 #### Control artifacts never stay in the workspace
 
 `plan.json` and `scope.json` are written into `/work`, which is the one directory the agent has full write access to. So: **the host extracts them the moment they are produced, hashes them, and never reads them from `/work` again.** Nothing downstream trusts a file the agent could have rewritten after it was validated — and a validated plan that the implementer then quietly edits is exactly the kind of failure that leaves no trace in the diff.

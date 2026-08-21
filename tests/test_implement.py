@@ -81,6 +81,16 @@ def test_the_offered_set_excludes_the_network_and_the_fan_out():
     assert not offered & withheld
 
 
+def test_the_target_repo_cannot_configure_the_agent_working_on_it():
+    """/work is the checkout the task itself can edit, so a repo's
+    .claude/settings.json, agents and skills would reach its own reviewer (§2).
+    Measured: a planted agent and skill loaded until this was pinned."""
+    options = implement.agent_options(
+        system_prompt="s", cwd="/work", max_turns=40, budget_usd=12.0
+    )
+    assert options["setting_sources"] == []
+
+
 def test_a_crashed_attempt_falls_back_to_the_last_good_cost():
     """The runtime may report every cost field as zero on crash (§4.1)."""
     result = implement._reconcile_cost(reported=0.0, last_good=4.12, failed=True)
