@@ -84,7 +84,11 @@ def test_no_host_service_answers_from_inside_a_cell(network):
     about the machine it runs on, not about seven remembered ports. A macOS
     default — Remote Management on 3283, AirPlay Receiver on 5000/7000,
     rapportd on 49152 — fails it, and correctly: those answer from inside a
-    cell."""
+    cell.
+
+    `SAFFRON_ALLOW_HOST_PROCESS=rapportd` is the accepted risk this machine
+    runs with (Appendix G). Without it this test fails here, which is the
+    point: the exception is per-invocation and never a default."""
     reachable = preflight.probe_host_bindings(image.BASE_TAG, network)
     assert reachable == [], (
         f"a host service answered from inside a cell at {reachable}; "

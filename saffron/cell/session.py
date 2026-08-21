@@ -335,11 +335,15 @@ def run_one_cell(
         # probe establishes is a property of the network, which both images
         # join identically.
         # The port count is the operator's evidence that enumeration ran: a
-        # probe covering nothing is what a silent failure looks like.
-        ports = preflight.host_listening_ports()
+        # probe covering nothing is what a silent failure looks like. The
+        # tolerated listeners print every run, including when there are none —
+        # an exception that goes quiet is the invisibility it was granted around.
+        ports, tolerated = preflight.host_probe_ports()
         watch(
             f"preflight: probing {len(ports)} host ports at "
             + ", ".join(preflight.probe_addresses())
+            + "; tolerating "
+            + (", ".join(tolerated) or "nothing")
         )
         preflight.assert_host_is_unreachable(image.BASE_TAG, network)
 

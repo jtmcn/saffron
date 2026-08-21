@@ -3,10 +3,14 @@
 An `--internal` network still routes to the host gateway, so a host service
 bound to 0.0.0.0 — a Postgres, a dev server — is reachable from inside a cell
 without ever traversing the proxy. Measured, not assumed (Appendix G).
+
+A named host process can be tolerated per invocation — an accepted risk, not a
+fix, and reported on every run so it cannot go quiet (Appendix G).
 """
 
 from __future__ import annotations
 
+import os
 import socket
 import subprocess
 
@@ -19,33 +23,72 @@ _LSOF = ("lsof", "-nP", "-iTCP", "-sTCP:LISTEN")
 _LOOPBACK = ("127.", "[::1]", "localhost")
 
 
-def listening_ports(lsof_output: str) -> list[int]:
-    """The host's non-loopback TCP listeners, from `lsof -nP -iTCP -sTCP:LISTEN`.
+# A host listener the operator has decided to accept, named by the COMMAND lsof
+# reports, comma-separated. Empty by default: an unnamed listener still fails.
+_ALLOW_ENV = "SAFFRON_ALLOW_HOST_PROCESS"
+
+
+def tolerated_processes() -> frozenset[str]:
+    """Host processes this invocation accepts. Read per call, never a constant.
+
+    An environment variable rather than a flag because the probe has two
+    entrypoints — `saffron cell` and the `-m cell` suite — and one relaxation
+    should not need two knobs. What keeps it from going quiet in a shell
+    profile is that every run reports what it tolerated (Appendix G).
+    """
+    named = os.environ.get(_ALLOW_ENV, "").split(",")
+    return frozenset(name.strip() for name in named if name.strip())
+
+
+def listening_sockets(lsof_output: str) -> list[tuple[str, int]]:
+    """`(command, port)` per non-loopback TCP listener, from `lsof -nP -iTCP
+    -sTCP:LISTEN`.
 
     The NAME column is the last field before `(LISTEN)`: `*:8000`,
     `0.0.0.0:5432`, `[::]:631`, `127.0.0.1:6379`. COMMAND can hold spaces, so
-    the row is read from the right.
+    the row is read from the right and COMMAND is whatever sits left of the PID.
     """
-    ports = set()
+    found = set()
     for line in lsof_output.splitlines():
         fields = line.split()
-        if len(fields) < 2 or fields[-1] != "(LISTEN)":
+        if len(fields) < 3 or fields[-1] != "(LISTEN)":
             continue
         address, _, port = fields[-2].rpartition(":")
-        if port.isdigit() and not address.startswith(_LOOPBACK):
-            ports.add(int(port))
-    return sorted(ports)
+        if not port.isdigit() or address.startswith(_LOOPBACK):
+            continue
+        pid = next((i for i, field in enumerate(fields) if field.isdigit()), 1)
+        found.add((" ".join(fields[:pid]), int(port)))
+    return sorted(found, key=lambda listener: (listener[1], listener[0]))
 
 
-def host_listening_ports() -> list[int]:
-    """What the probe covers, enumerated rather than guessed.
+def probed_ports(
+    sockets: list[tuple[str, int]], tolerated: frozenset[str]
+) -> tuple[list[int], list[str]]:
+    """The ports the probe covers, and the tolerated listeners left out of them.
+
+    A port drops out only when *every* listener on it is a tolerated process:
+    a second process sharing the port is not tolerated by association. The
+    exception follows the name, not the number — rapportd's ports are dynamic,
+    so a port allowlist would be wrong the next time it restarts.
+    """
+    by_port: dict[int, set[str]] = {}
+    for command, port in sockets:
+        by_port.setdefault(port, set()).add(command)
+    ports = sorted(port for port, cmds in by_port.items() if not cmds <= tolerated)
+    return ports, [f"{c}:{p}" for c, p in sockets if p not in ports]
+
+
+def host_probe_ports() -> tuple[list[int], list[str]]:
+    """What the probe covers, enumerated rather than guessed — and what it does
+    not cover because the operator named it.
 
     Seven remembered ports is a spot-check whose result reads as a proof: the
     v0.5 run that found a service on 8000 had four more on 8001+ that no list
     would have named (Appendix L). Enumeration failing must never narrow the
     probe to nothing, so anything short of lsof's own header — a missing lsof,
-    a permission problem, silence — raises. An empty *result* is different and
-    is a real pass: lsof reported, and every listener was loopback-bound.
+    a permission problem, silence — raises, tolerance named or not. An empty
+    *result* is different and is a real pass: lsof reported, and every listener
+    was loopback-bound or accepted.
     """
     try:
         done = subprocess.run(_LSOF, capture_output=True, text=True, timeout=60)
@@ -60,7 +103,7 @@ def host_listening_ports() -> list[int]:
             f"{(done.stderr or done.stdout).strip()[:200]!r}. A host with no TCP "
             "listener at all is likelier to be lsof failing than to be true."
         )
-    return listening_ports(done.stdout)
+    return probed_ports(listening_sockets(done.stdout), tolerated_processes())
 
 
 def _lan_address() -> str:
@@ -106,16 +149,17 @@ def _probe_script(addresses: list[str], ports: list[int]) -> str:
 def probe_host_bindings(image_tag: str, network: str) -> list[str]:
     """Addresses at which a host service answered from inside a cell.
 
-    Every port the host is listening on for anything but loopback, tried from
-    inside a cell at the gateway and at the LAN address. An empty list is the
-    passing result and means what it says: nothing the host had open answered.
+    Every port the host is listening on for anything but loopback and not held
+    solely by a tolerated process, tried from inside a cell at the gateway and
+    at the LAN address. An empty list is the passing result and means what it
+    says: nothing the host had open, and was not accepted, answered.
     Anything else is a service a cell can reach, and the fix is on the host —
     bind it to 127.0.0.1, or stop it — never in the cell.
     """
     addresses = probe_addresses()
     done = runtime.run_ephemeral(
         image_tag,
-        ["python", "-c", _probe_script(addresses, host_listening_ports())],
+        ["python", "-c", _probe_script(addresses, host_probe_ports()[0])],
         network=network,
         timeout_s=300,
     )

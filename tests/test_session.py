@@ -328,7 +328,9 @@ def _stub_the_runtime(
     monkeypatch.setattr(
         "saffron.preflight.assert_host_is_unreachable", lambda *a, **k: None
     )
-    monkeypatch.setattr("saffron.preflight.host_listening_ports", lambda: [8000])
+    monkeypatch.setattr(
+        "saffron.preflight.host_probe_ports", lambda: ([8000], ["rapportd:49152"])
+    )
     monkeypatch.setattr("saffron.repos.image.build_cell_image", lambda repo: "img")
     monkeypatch.setattr("saffron.cell.worktree.prepare_worktree", lambda **k: None)
     monkeypatch.setattr("saffron.cell.worktree.head_sha", lambda c: "c" * 40)
@@ -398,6 +400,16 @@ def _drive(monkeypatch, tmp_path, *, cell, turns, spec=None, policy="gates: {}\n
         watch=cell.watched.append,
     )
     return state, ledger
+
+
+def test_the_preflight_line_reports_what_was_tolerated(monkeypatch, tmp_path):
+    """Every run, not the first: an exception that goes quiet recreates the
+    invisibility §7's hazard row exists for."""
+    cell = _stub_the_runtime(monkeypatch)
+    _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
+    (probing,) = [x for x in cell.watched if x.startswith("preflight: probing")]
+    assert probing.startswith("preflight: probing 1 host ports at 10.88.0.1")
+    assert probing.endswith("; tolerating rapportd:49152")
 
 
 def test_teardown_removes_both_volumes_not_the_loops_result(monkeypatch, tmp_path):
