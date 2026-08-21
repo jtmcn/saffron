@@ -295,7 +295,13 @@ class _Cell:
         self.watched: list[str] = []
 
 
-def _stub_the_runtime(monkeypatch, *, commits=1, suites=()):
+_DIFF = """diff --git a/src/x.py b/src/x.py
++++ b/src/x.py
++def x(): ...
+"""
+
+
+def _stub_the_runtime(monkeypatch, *, commits=1, suites=(), patch=_DIFF):
     """Everything past the ledger writes, stubbed. No test reached here before,
     which is why a shadowed volume name survived lint and 247 green tests."""
     cell = _Cell()
@@ -320,6 +326,10 @@ def _stub_the_runtime(monkeypatch, *, commits=1, suites=()):
     monkeypatch.setattr("saffron.repos.image.build_cell_image", lambda repo: "img")
     monkeypatch.setattr("saffron.cell.worktree.prepare_worktree", lambda **k: None)
     monkeypatch.setattr("saffron.cell.worktree.head_sha", lambda c: "c" * 40)
+    monkeypatch.setattr("saffron.cell.worktree.export_patch", lambda c, sha: patch)
+    monkeypatch.setattr(
+        "saffron.cell.worktree.changed_files", lambda c, sha: ["src/x.py"]
+    )
 
     def _commits_ahead(_container, sha):
         cell.measured_from = sha
@@ -458,6 +468,69 @@ def test_no_commit_is_not_implemented(monkeypatch, tmp_path):
         monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
     )
     assert state == "NOT_IMPLEMENTED"
+
+
+def test_a_green_run_leaves_the_patch_behind(monkeypatch, tmp_path):
+    """The first live green run committed, then teardown removed the volume and
+    the commit ceased to exist. §0: the product is a reviewable artifact."""
+    cell = _stub_the_runtime(monkeypatch)
+    state, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert state == "READY_FOR_REVIEW"
+    task_dir = tmp_path / "out" / "SY-1"
+    assert (task_dir / "patch.diff").read_text() == _DIFF
+    assert json.loads((task_dir / "patch.json").read_text()) == {
+        "base_sha": "b" * 40,
+        "head_sha": "c" * 40,
+        "files": ["src/x.py"],
+    }
+
+
+def test_a_run_that_never_went_green_still_exports_its_commits(monkeypatch, tmp_path):
+    """§5.4 calls EXHAUSTED a respectable outcome — green-only export would
+    throw away exactly the runs worth reading."""
+    failing = Failure(file="a.py", code="E501", message="too long")
+    cell = _stub_the_runtime(
+        monkeypatch, suites=([], _results(failing), _results(failing))
+    )
+    state, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn()],
+    )
+    assert state == "EXHAUSTED"
+    assert (tmp_path / "out" / "SY-1" / "patch.diff").read_text() == _DIFF
+
+
+def test_no_commits_writes_no_patch_at_all(monkeypatch, tmp_path):
+    """Absence and emptiness must not look alike: an empty patch.diff reads as
+    a run whose work was lost."""
+    cell = _stub_the_runtime(monkeypatch, commits=0, patch="")
+    state, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert state == "NOT_IMPLEMENTED"
+    assert not (tmp_path / "out" / "SY-1" / "patch.diff").exists()
+    assert any("nothing to export" in line for line in cell.watched)
+
+
+def test_a_dead_cell_reports_the_failed_export_rather_than_raising(
+    monkeypatch, tmp_path
+):
+    """Teardown runs in a `finally`: an export that raises there would replace
+    the run's own outcome with the export's failure."""
+    cell = _stub_the_runtime(monkeypatch)
+    monkeypatch.setattr(
+        "saffron.cell.worktree.export_patch",
+        lambda c, sha: (_ for _ in ()).throw(runtime.CellRuntimeError("no such cell")),
+    )
+    state, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert state == "READY_FOR_REVIEW"
+    assert any("export FAILED — no such cell" in line for line in cell.watched)
 
 
 def test_a_repair_turn_that_fails_does_not_discard_committed_work(

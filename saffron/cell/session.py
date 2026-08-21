@@ -212,6 +212,45 @@ def cell_env(proxy_ip: str, thread_env: Mapping[str, str]) -> dict[str, str]:
     return env
 
 
+def export_patch(
+    container: str,
+    spec: CellSpec,
+    task_dir: Path,
+    watch: Callable[[str], None],
+) -> None:
+    """The run's durable product (§0). The commits live only on the worktree
+    volume, so a patch not exported ceases to exist at teardown.
+
+    Never raises: this runs from a `finally`. A cell that died, or never
+    started, makes the exec fail — reported, not swallowed.
+    """
+    from saffron.cell import worktree
+
+    try:
+        patch = worktree.export_patch(container, spec.base_sha)
+        if not patch:
+            # Absence and emptiness must not look alike: no commits, no file.
+            watch("teardown: no commits, nothing to export")
+            return
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / "patch.diff").write_text(patch)
+        (task_dir / "patch.json").write_text(
+            json.dumps(
+                {
+                    "base_sha": spec.base_sha,
+                    # The only surviving name for the commit once the volume is
+                    # gone — the diff itself does not carry it.
+                    "head_sha": worktree.head_sha(container),
+                    "files": worktree.changed_files(container, spec.base_sha),
+                },
+                indent=2,
+            )
+        )
+        watch(f"teardown: exported {len(patch)} bytes to {task_dir / 'patch.diff'}")
+    except Exception as exc:
+        watch(f"teardown: patch export FAILED — {exc}")
+
+
 def run_one_cell(
     spec: CellSpec,
     *,
@@ -249,6 +288,10 @@ def run_one_cell(
         branch=spec.branch,
         budget_usd=spec.budget_usd,
     )
+
+    # Hoisted above the try: teardown exports here too, including on paths that
+    # never reached the baseline write below.
+    task_dir = out_dir / spec.spec_id
 
     network = "saffron-cells"
     volume = f"saffron-wt-{spec.spec_id}"
@@ -311,7 +354,6 @@ def run_one_cell(
         for result in baseline:
             ledger.record_gate_result(result, run_id=run_id)
 
-        task_dir = out_dir / spec.spec_id
         task_dir.mkdir(parents=True, exist_ok=True)
         (task_dir / "baseline.json").write_text(
             json.dumps([r.model_dump() for r in baseline], indent=2)
@@ -473,11 +515,15 @@ def run_one_cell(
         raise
     finally:
         watch("teardown")
+        # First, and on every path the exception one included: the export execs
+        # inside the cell, so it must precede the container's removal as well as
+        # the volume's. An EXHAUSTED run with commits is worth reading too.
+        if container in created:
+            export_patch(container, spec, task_dir, watch)
         removed = [("container", container, runtime.remove_container(container))]
         proxy.stop_proxy()
         removed.append(("network", network, runtime.remove_network(network)))
-        # Volumes go too, or the same spec_id cannot be re-run. Whoever adds
-        # patch export must export before this line, not after.
+        # Volumes go too, or the same spec_id cannot be re-run.
         removed.append(("volume", volume, runtime.remove_volume(volume)))
         removed.append(("volume", state, runtime.remove_volume(state)))
         # Pre-cleaning tolerates absence; here a non-zero exit is a leak, and
