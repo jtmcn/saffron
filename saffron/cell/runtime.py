@@ -305,11 +305,16 @@ def exec_stream(
             except OSError:
                 pass  # the process died early; its stderr says why
             wall = time.monotonic() + timeout_s
+            # Fixed the moment the result event lands, never recomputed: a
+            # window that restarts on every line is a child writing steadily
+            # enough to hold the loop open forever, which is the unbounded
+            # wait §4.3's five bounds exist to prevent.
+            completion_until = 0.0
             signalled = False
             while True:
                 now = time.monotonic()
                 if signalled:
-                    bound, until = "completion", now + completion_s
+                    bound, until = "completion", completion_until
                 elif wall - now <= idle_s:
                     bound, until = "wall", wall
                 else:
@@ -322,7 +327,8 @@ def exec_stream(
                 if line is None:
                     bound = ""
                     break
-                signalled = signalled or bool(on_line(line))
+                if not signalled and on_line(line):
+                    signalled, completion_until = True, time.monotonic() + completion_s
             # Drain before the with-block closes stdout underneath the reader.
             # The kill above, or EOF, has already ended it.
             reader.join(timeout=5)
@@ -350,7 +356,10 @@ def _first_address(inspected: str, subnet_prefix: str) -> str | None:
     always `<prefix>1` and is the one address in range that is not the cell's.
     """
     for candidate in _IPV4.findall(inspected):
-        if candidate.startswith(subnet_prefix) and not candidate.endswith(".1"):
+        # `.0` as well as `.1`: a subnet printed before the address field
+        # (`10.88.0.0/24`) would otherwise be handed out as the cell's own,
+        # and every proxied call would fail looking like an upstream outage.
+        if candidate.startswith(subnet_prefix) and not candidate.endswith((".0", ".1")):
             return candidate
     return None
 

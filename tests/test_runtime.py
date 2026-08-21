@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 
 from saffron.cell import runtime
 
@@ -176,3 +177,37 @@ def test_a_productive_but_endless_stream_still_hits_the_wall_clock(monkeypatch):
     assert done.bound == "wall"
     assert done.timed_out is True
     assert done.returncode == 124
+
+
+def test_the_completion_window_does_not_restart_on_every_line(monkeypatch):
+    """The window is fixed when the result event lands. Recomputed per line, a
+    child writing steadily holds the loop open past every bound there is —
+    the unbounded wait §4.3's five bounds exist to prevent."""
+    _script(
+        monkeypatch,
+        "import sys, time\nprint('done')\nsys.stdout.flush()\n"
+        "for _ in range(250):\n    print('tick')\n"
+        "    sys.stdout.flush()\n    time.sleep(0.02)\n",
+    )
+    lines: list[str] = []
+    started = time.monotonic()
+    done = runtime.exec_stream(
+        "cell",
+        ["runner"],
+        stdin_data="{}",
+        on_line=lambda line: bool(lines.append(line)) or line == "done",
+        timeout_s=30,
+        idle_s=10,
+        completion_s=0.3,
+    )
+    # The child writes for five seconds; the window closes after a third of one.
+    assert time.monotonic() - started < 3
+    assert done.bound == "completion"
+    assert done.timed_out is False
+
+
+def test_the_network_address_is_not_mistaken_for_the_cell(monkeypatch):
+    """`inspect` printing the subnet first would otherwise hand out 10.88.0.0 as
+    the cell's own, and every proxied call would fail as an upstream outage."""
+    inspected = '{"network":"10.88.0.0/24","gateway":"10.88.0.1","address":"10.88.0.4"}'
+    assert runtime._first_address(inspected, "10.88.0.") == "10.88.0.4"
