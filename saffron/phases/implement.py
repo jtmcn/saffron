@@ -76,6 +76,7 @@ def agent_options(
     cwd: str = WORKTREE_MOUNT,
     max_turns: int,
     budget_usd: float,
+    tools: Sequence[str] = IMPLEMENT_TOOLS,
 ) -> dict:
     """ClaudeAgentOptions as a plain dict, so it is assertable without the SDK.
 
@@ -86,8 +87,8 @@ def agent_options(
         "system_prompt": system_prompt,
         # `tools` withholds, `allowed_tools` auto-approves. Both, or the agent
         # either sees tools it cannot call or stalls on the ones it can.
-        "tools": list(IMPLEMENT_TOOLS),
-        "allowed_tools": list(IMPLEMENT_TOOLS),
+        "tools": list(tools),
+        "allowed_tools": list(tools),
         "permission_mode": "dontAsk",
         # /work is the target repo's checkout and the task can edit it, so its
         # .claude/ would configure the agent working on it (§2). Load nothing.

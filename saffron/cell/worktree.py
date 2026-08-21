@@ -121,6 +121,15 @@ def export_patch(container: str, base_sha: str) -> str:
     return done.stdout
 
 
+def read_at_head(container: str, path: str) -> str | None:
+    """A file's content at HEAD, or None if there is no such file — what
+    anchoring a finding outside a hunk needs (§5.5). Read from git rather than
+    the worktree: the agent may have left the tree dirty after its last commit.
+    """
+    done = _git(container, "show", f"HEAD:{path}")
+    return done.stdout if done.returncode == 0 else None
+
+
 def changed_files(container: str, base_sha: str) -> list[str]:
     done = _git(container, "diff", "--name-only", f"{base_sha}..HEAD")
     if done.returncode != 0:
