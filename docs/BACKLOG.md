@@ -194,6 +194,21 @@ services answer from inside a cell (ARD 3283, Control Centre 5000/7000, rapportd
 49152), none of them in the old seven, so `preflight` now fails there until they
 are turned off. That is the probe working.
 
+**Amended 2026-08-21: one of the four is now tolerated, by name.** Three of
+those services were turned off; `rapportd` remains, holding `*:49152` whatever
+Continuity's settings say, and AirDrop going back on will reopen the two ports
+it closed. So the probe was refusing to start a cell, permanently, for a daemon
+the operator has accepted. `SAFFRON_ALLOW_HOST_PROCESS=rapportd` tolerates it
+for that invocation: empty by default, matched by the COMMAND `lsof` reports
+rather than by port (rapportd's ports are dynamic — 49152, 60215, 60216 all
+seen), and a port drops out only when every listener on it is tolerated. The
+preflight line names what was tolerated on every run, because an exception that
+goes quiet is the hazard the probe exists for. Enumeration that cannot run
+still raises. **This is an accepted risk, not a fix** — an agent in a cell can
+reach that socket, and `DESIGN.md` Appendix G says so and says what it costs.
+Renamed with it: `host_listening_ports()` → `host_probe_ports()`, which now
+returns the ports probed *and* the listeners tolerated.
+
 ## 9. Unverified against a live model
 
 Everything here is built and unit-tested and has never met a real session. On
