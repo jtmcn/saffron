@@ -58,15 +58,15 @@ def _verdicts(*entries):
     return _block({"verdicts": list(entries)})
 
 
-def _fixed(finding=0, argument="committed the fix"):
+def _fixed(finding=1, argument="committed the fix"):
     return {"finding": finding, "action": "fixed", "argument": argument}
 
 
-def _argued(finding=0, argument="the default is set by the caller"):
+def _argued(finding=1, argument="the default is set by the caller"):
     return {"finding": finding, "action": "argued", "argument": argument}
 
 
-def _verdict(finding=0, verdict="withdrawn", reason="r"):
+def _verdict(finding=1, verdict="withdrawn", reason="r"):
     return {"finding": finding, "verdict": verdict, "reason": "r" + reason}
 
 
@@ -195,15 +195,15 @@ def test_each_lens_verdicts_its_own_blockers_and_never_resumes():
     record: list[dict] = []
     result = _run(
         "Fixed both.",
-        _rebuttals(_fixed(0), _fixed(1)),
-        _verdicts(_verdict(0)),
+        _rebuttals(_fixed(1), _fixed(2)),
         _verdicts(_verdict(1)),
+        _verdicts(_verdict(2)),
         blockers=[_blocker(), _blocker(lens="contract")],
         record=record,
     )
     assert result.state == "READY_FOR_REVIEW"
     assert [v.lens for v in result.verdicts] == ["correctness", "contract"]
-    assert [v.verdicts[0].finding for v in result.verdicts] == [0, 1]
+    assert [v.verdicts[0].finding for v in result.verdicts] == [1, 2]
     # The implementer resumes; both verdict sessions are fresh and read-only.
     assert record[0]["kwargs"]["resume"] == "sess-1"
     for call in record[2:]:
@@ -217,12 +217,12 @@ def test_a_lens_that_leaves_a_blocker_unverdicted_has_not_withdrawn_it():
     missing answer, not a withdrawal."""
     result = _run(
         "Fixed both.",
-        _rebuttals(_fixed(0), _fixed(1)),
-        _verdicts(_verdict(0)),
+        _rebuttals(_fixed(1), _fixed(2)),
+        _verdicts(_verdict(1)),
         blockers=[_blocker(), _blocker(line=2)],
     )
     assert result.state == "REBUTTING"
-    assert "asked about [0, 1]" in result.verdicts[0].error
+    assert "asked about [1, 2]" in result.verdicts[0].error
     assert "unjudged" in result.why
 
 
@@ -287,19 +287,19 @@ def test_the_verdict_prompt_carries_the_argument_the_finding_and_the_new_diff():
     would already hold and this session does not."""
     turn = rebut.RebuttalTurn(
         rebuttals=[
-            rebut.Rebuttal(finding=0, action="argued", argument="the caller sets it")
+            rebut.Rebuttal(finding=1, action="argued", argument="the caller sets it")
         ]
     )
     prompt = rebut.verdict_prompt(
         "correctness",
-        blockers=[(0, _blocker())],
+        blockers=[(1, _blocker())],
         rebuttal=turn,
         context_md=CONTEXT_MD,
         prompts_dir=PROMPTS,
         spec_body="fix the gap",
         diff=DIFF,
     )
-    assert "0. [correctness] src/gap.py:1 — the tz default is wrong" in prompt
+    assert "1. [correctness] src/gap.py:1 — the tz default is wrong" in prompt
     assert "the caller sets it" in prompt
     assert "def gap(series, tz=" in prompt
     assert "fix the gap" in prompt
@@ -312,13 +312,13 @@ def test_a_verdict_session_is_shown_only_its_own_lens_arguments():
     for — and fails the whole phase on prompt shape, not on disagreement."""
     turn = rebut.RebuttalTurn(
         rebuttals=[
-            rebut.Rebuttal(finding=0, action="argued", argument="mine to answer"),
-            rebut.Rebuttal(finding=1, action="fixed", argument="the contract lens"),
+            rebut.Rebuttal(finding=1, action="argued", argument="mine to answer"),
+            rebut.Rebuttal(finding=2, action="fixed", argument="the contract lens"),
         ]
     )
     prompt = rebut.verdict_prompt(
         "correctness",
-        blockers=[(0, _blocker())],
+        blockers=[(1, _blocker())],
         rebuttal=turn,
         context_md=CONTEXT_MD,
         prompts_dir=PROMPTS,
@@ -327,3 +327,16 @@ def test_a_verdict_session_is_shown_only_its_own_lens_arguments():
     )
     assert "mine to answer" in prompt
     assert "the contract lens" not in prompt
+
+
+def test_the_rebuttal_turns_are_capped_at_the_critic_budget_not_the_task_one():
+    """These two turns resume the IMPLEMENT session, whose `max_budget_usd` is
+    the whole task budget. Uncapped, REBUT re-spends it after REVIEW already
+    has — the overrun the critic cap was introduced to close."""
+    record: list[dict] = []
+    _run("Fixed.", _rebuttals(_fixed()), _verdicts(_verdict()), record=record)
+    assert OPTIONS["max_budget_usd"] == 1.0  # what IMPLEMENT was given
+    # The rebuttal turn and its extraction turn, both under `budget_usd=2.0`.
+    assert [call["options"]["max_budget_usd"] for call in record[:2]] == [2.0, 2.0]
+    # And the implementer's tools are untouched by the override.
+    assert "Bash" in record[0]["options"]["tools"]

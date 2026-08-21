@@ -123,7 +123,7 @@ class RebutResult:
             "head_moved": self.moved,
             "cost_usd": self.cost_usd,
             "blockers": [
-                {"finding": n, **f.model_dump()} for n, f in enumerate(blockers)
+                {"finding": n, **f.model_dump()} for n, f in enumerate(blockers, 1)
             ],
             "rebuttal": {
                 "error": self.rebuttal.error,
@@ -368,11 +368,17 @@ def run_rebut(
     `None` when it is. It runs before the verdicts because it costs no tokens
     and because a red re-run ends the task either way (§5.6).
     """
-    numbered = list(enumerate(blockers))
+    # Numbered from 1: answering "1." for the first of one blocker is the
+    # conventional reading, and `run_verdict` requires the verdict set to match
+    # exactly — a renumbering model would cost the whole phase's spend.
+    numbered = list(enumerate(blockers, 1))
     turn = run_rebuttal(
         container,
         blockers=numbered,
-        options=options,
+        # The implementer's own options, but never its budget: these two turns
+        # resume the IMPLEMENT session, whose `max_budget_usd` is the whole task
+        # budget. Uncapped here, REBUT re-spends it after REVIEW already has.
+        options=options | {"max_budget_usd": budget_usd},
         session_id=session_id,
         agent=agent,
         watch=watch,
