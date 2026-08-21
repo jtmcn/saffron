@@ -332,7 +332,14 @@ def _stub_the_runtime(
         "saffron.preflight.host_probe_ports", lambda: ([8000], ["rapportd:49152"])
     )
     monkeypatch.setattr("saffron.repos.image.build_cell_image", lambda repo: "img")
-    monkeypatch.setattr("saffron.cell.worktree.prepare_worktree", lambda **k: None)
+
+    def _prepare_worktree(**k):
+        # The real one records each name against its own create; a stub that
+        # does not is a stub whose teardown ledger is always empty.
+        if k.get("created") is not None:
+            k["created"].update((k["state_volume"], k["container"]))
+
+    monkeypatch.setattr("saffron.cell.worktree.prepare_worktree", _prepare_worktree)
     monkeypatch.setattr("saffron.cell.worktree.head_sha", lambda c: "c" * 40)
     monkeypatch.setattr("saffron.cell.worktree.export_patch", lambda c, sha: patch)
 

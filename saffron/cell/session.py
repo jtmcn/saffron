@@ -40,12 +40,13 @@ _SAFFRON_PKG = Path(__file__).resolve().parents[1]
 # what catches a stall sooner, and this only catches a turn that never stops.
 TURN_TIMEOUT_S = 900.0
 
-# REVIEW and REBUT are deliberately not gated on the spend ceiling — a task that
-# spent its budget implementing still has to be reviewed — so each critic
-# session is capped at what is left rather than at the whole task budget, which
-# is how a $12 task bills $40. The floor is what keeps "not gated" true when
-# nothing is left: below it, a lens would be refused for having no room and the
-# task would reach the operator unreviewed.
+# REVIEW is deliberately not gated on the spend ceiling — a green diff nobody
+# reviewed is not a product — so its sessions are capped at what is left rather
+# than at the whole task budget, which is how a $12 task bills $40. The floor is
+# what keeps "not gated" true when nothing is left: below it a lens would be
+# refused for having no room, and the task would reach the operator unreviewed.
+# REBUT *is* gated (`_over_budget` before the rebuttal turn): by then the
+# findings are written and the operator has something to read either way.
 REVIEW_FLOOR_USD = 2.0
 
 
@@ -370,7 +371,8 @@ def run_one_cell(
             + "; tolerating "
             + (", ".join(tolerated) or "nothing")
         )
-        preflight.assert_host_is_unreachable(image.BASE_TAG, network)
+        # The list the operator was just shown, not a second one taken now.
+        preflight.assert_host_is_unreachable(image.BASE_TAG, network, ports)
 
         watch("preflight: starting the proxy")
         proxy_ip = proxy.start_proxy(network)
@@ -378,9 +380,10 @@ def run_one_cell(
 
         created.add(volume)
         runtime.create_volume(volume)
-        # prepare_worktree creates the state volume and the container.
-        created.update((state, container))
+        # The state volume and the container are recorded inside, each against
+        # its own create: an ephemeral seed container runs between them.
         worktree.prepare_worktree(
+            created=created,
             mirror=mirror,
             volume=volume,
             base_sha=spec.base_sha,

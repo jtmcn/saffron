@@ -148,3 +148,67 @@ def test_the_cell_reaches_nothing_but_the_api(tmp_path, network):
         proxy.stop_proxy()
         runtime.remove_volume(volume)
         runtime.remove_volume(f"{volume}-state")
+
+
+def test_a_failed_seed_leaves_no_container_in_the_leak_ledger(monkeypatch, tmp_path):
+    """The seed is an *ephemeral* container between the two creates. Recording
+    the cell's name before it reports a container nothing ever created, and
+    teardown then execs a patch export into it — the false leak the ledger
+    exists to prevent, one step further along than where it was fixed."""
+    monkeypatch.setattr(runtime, "create_volume", lambda name: None)
+    monkeypatch.setattr(
+        runtime, "run_ephemeral", lambda *a, **k: runtime.Completed(1, "", "bad sha")
+    )
+
+    def _never(*_a, **_k):
+        raise AssertionError("run_detached must not be reached")
+
+    monkeypatch.setattr(runtime, "run_detached", _never)
+
+    created: set[str] = set()
+    with pytest.raises(runtime.CellRuntimeError, match="seeding the worktree"):
+        worktree.prepare_worktree(
+            mirror=tmp_path / "m.git",
+            volume="vol",
+            base_sha="a" * 40,
+            branch="saffron/SY-1",
+            image="img",
+            container="saffron-cell-SY-1",
+            network="net",
+            env={},
+            state_volume="st",
+            created=created,
+        )
+    assert created == {"st"}
+
+
+def test_the_container_is_recorded_before_the_run_that_creates_it(
+    monkeypatch, tmp_path
+):
+    """The other direction: `run_detached` failing part-way can still have left
+    the container, so the name goes in before the call and not after."""
+    monkeypatch.setattr(runtime, "create_volume", lambda name: None)
+    monkeypatch.setattr(
+        runtime, "run_ephemeral", lambda *a, **k: runtime.Completed(0, "", "")
+    )
+
+    def _half_dead(*_a, **_k):
+        raise runtime.CellRuntimeError("the container died starting up")
+
+    monkeypatch.setattr(runtime, "run_detached", _half_dead)
+
+    created: set[str] = set()
+    with pytest.raises(runtime.CellRuntimeError, match="died starting up"):
+        worktree.prepare_worktree(
+            mirror=tmp_path / "m.git",
+            volume="vol",
+            base_sha="a" * 40,
+            branch="saffron/SY-1",
+            image="img",
+            container="saffron-cell-SY-1",
+            network="net",
+            env={},
+            state_volume="st",
+            created=created,
+        )
+    assert created == {"st", "saffron-cell-SY-1"}

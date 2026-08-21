@@ -41,12 +41,17 @@ def prepare_worktree(
     network: str,
     env: Mapping[str, str],
     state_volume: str | None = None,
+    created: set[str] | None = None,
 ) -> None:
     """Clone the mirror into the volume at `base_sha` on `branch`, cell running.
 
     `network` and `env` are required, not defaulted: a cell started without them
     joins the runtime's default network with full egress, and every containment
     control the caller ran applies to some other container (§5.1).
+
+    `created` is the caller's leak ledger: each name is added immediately before
+    the call that creates it, so a failure part-way reports what may survive and
+    nothing that was never attempted.
 
     The mirror is bind-mounted read-only for the clone and is not among the
     mounts the cell keeps — a cell that could write the mirror could rewrite
@@ -56,6 +61,8 @@ def prepare_worktree(
     volume already has a `lost+found` — init/fetch/checkout in place instead.
     """
     state = state_volume or f"{volume}-state"
+    if created is not None:
+        created.add(state)
     runtime.create_volume(state)
 
     seed = runtime.run_ephemeral(
@@ -83,6 +90,11 @@ def prepare_worktree(
             f"seeding the worktree failed: {seed.stderr.strip()}"
         )
 
+    # Here and not at the call site: the seed above is an *ephemeral* container
+    # that can fail on a bad base_sha or an unreadable mirror, and recording the
+    # cell's name before that reports a container nothing ever created.
+    if created is not None:
+        created.add(container)
     runtime.run_detached(
         container,
         image,
