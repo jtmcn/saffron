@@ -105,6 +105,26 @@ read as a failure.
 **Done looks like:** all five, and a default wall clock an operator would
 actually sit through.
 
+**Done, 2026-08-20.** All five. `exec_stream` reads through a queue fed by a
+reader thread, so every wait carries a deadline: `idle_s` (300s) before the
+payload signals done, `completion_s` (10s) after it, and `timeout_s` for a turn
+that keeps producing and never stops. `session.TURN_TIMEOUT_S` is 900s and is
+bound onto the agent callable once, so plan, implement, repair, review and
+rebuttal all carry it rather than inheriting the library's hour.
+
+The split is load-bearing and is what the returned value now records.
+`Completed.bound` names which bound fired; an idle or wall-clock expiry kills
+and reports 124, a **completion window close reports 0 and is a success** — the
+runner emitted its result and only a child was holding stdout open. `run_agent`
+propagates it as `AttemptResult.bound` and its failure message names the bound
+instead of saying "timed out" for all three. The done signal comes from
+`run_agent` returning true out of `on_line`, not from the runtime parsing
+events: the container seam does not know Saffron's schema.
+
+Threads over `selectors`, measured against the alternative rather than
+preferred: readiness on the fd is not a line, so a half-written one still
+blocks `readline` and the fix is reimplementing line splitting over `os.read`.
+
 ## 5. PACKAGE, and the fact that patches perish
 
 There is no PR, no push, no index. A green run leaves `patch.diff` and
