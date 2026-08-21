@@ -386,3 +386,21 @@ def test_a_wall_clock_kill_before_any_result_names_the_bound_too():
             watch=lambda _line: None,
             exec_stream=_stream(returncode=124, timed_out=True, bound="wall"),
         )
+
+
+def test_a_turn_killed_before_its_result_event_still_reports_what_it_spent():
+    """The costliest failure of all: an idle or wall kill takes the runner
+    mid-stream, so no result event ever carries the cost fields. Charging it
+    zero is a ceiling that stops counting while the repair loop keeps going."""
+    with pytest.raises(implement.AgentFailed, match="no result event") as raised:
+        implement.run_agent(
+            "cell",
+            prompt="p",
+            options={},
+            watch=lambda _line: None,
+            last_cost_usd=4.0,
+            exec_stream=_stream(returncode=124, timed_out=True, bound="wall"),
+        )
+    assert raised.value.attempt is not None
+    assert raised.value.attempt.cost_usd_est == 4.0
+    assert raised.value.attempt.bound == "wall"

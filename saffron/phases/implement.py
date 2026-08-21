@@ -231,7 +231,22 @@ def run_agent(
         else "errored"
     )
     if not result:
-        raise AgentFailed(f"the agent produced no result event, {how}: {detail}")
+        # An idle or wall kill takes the runner mid-stream, so no result event
+        # ever carries the cost fields. The turn still spent what the last good
+        # figure saw, and dropping it is how the ceiling stops counting (§4.1).
+        raise AgentFailed(
+            f"the agent produced no result event, {how}: {detail}",
+            AttemptResult(
+                session_id=None,
+                subtype="error",
+                terminal_reason=None,
+                num_turns=0,
+                cost_usd_est=last_cost_usd,
+                text="".join(text),
+                is_error=True,
+                bound=done.bound,
+            ),
+        )
 
     subtype = str(result.get("subtype", "unknown"))
     is_error = bool(result.get("is_error"))
