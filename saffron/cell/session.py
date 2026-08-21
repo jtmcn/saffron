@@ -21,7 +21,7 @@ from saffron.gates.baseline import (
     suite_drift,
 )
 from saffron.gates.contract import GateResult
-from saffron.phases import implement, review
+from saffron.phases import implement, rebut, review
 from saffron.phases.implement import AttemptResult
 
 if TYPE_CHECKING:
@@ -557,6 +557,64 @@ def run_one_cell(
             )
             outcome, why = review.review_state(reviews)
             watch(f"REVIEW: {why}")
+
+        if outcome == "REBUTTING":
+            ledger.set_task_state(task_id, "REBUTTING")
+            blockers = [
+                f
+                for r in reviews
+                for f in r.findings
+                if f.anchored and f.severity == "blocker"
+            ]
+            if _over_budget():
+                outcome = "EXHAUSTED"
+            else:
+                before = worktree.head_sha(container)
+
+                def _rebut_gates() -> str | None:
+                    """§5.6: red after the rebuttal is EXHAUSTED, and REBUT does
+                    not re-enter the repair loop. An errored gate is still
+                    infrastructure and still not charged to the task (§5.4)."""
+                    results = _run_gates()
+                    if aborted := aborted_gates(results):
+                        watch(
+                            f"gates: {aborted} errored — infrastructure, not the task"
+                        )
+                        return "GATE_ERROR"
+                    if drift := suite_drift(results, baseline):
+                        watch(f"gates: {drift} — distrusting the subtraction")
+                        return "GATE_ERROR"
+                    new = subtract_baseline(results, baseline)
+                    watch(f"gates: {len(new)} new failures after the rebuttal")
+                    return "EXHAUSTED" if new else None
+
+                result = rebut.run_rebut(
+                    container,
+                    blockers=blockers,
+                    options=options,
+                    session_id=session_id,
+                    spec_body=spec.body,
+                    context_md=context_md,
+                    prompts_dir=_SAFFRON_PKG / "agents" / "prompts",
+                    max_turns=spec.max_turns,
+                    budget_usd=spec.budget_usd,
+                    # Measured, never reported (§4.3): from the head the
+                    # rebuttal started at, so the implement turn's own commits
+                    # cannot satisfy it.
+                    head_moved=lambda: worktree.commits_ahead(container, before) > 0,
+                    rerun_gates=_rebut_gates,
+                    diff=lambda: worktree.export_patch(container, spec.base_sha),
+                    agent=implement.run_agent,
+                    watch=watch,
+                    last_cost_usd=last_cost,
+                )
+                spent += result.cost_usd
+                session_id = result.rebuttal.session_id or session_id
+                (task_dir / "rebuttal.json").write_text(
+                    json.dumps(result.as_dict(blockers), indent=2)
+                )
+                outcome, why = result.state, result.why
+                watch(f"REBUT: {why}")
 
         watch(f"{outcome}: ${spent:.2f} spent, session {session_id}")
         ledger.set_task_state(task_id, outcome)

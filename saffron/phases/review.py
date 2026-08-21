@@ -222,12 +222,10 @@ def _describe(review: LensReview) -> str:
 def review_state(reviews: Sequence[LensReview]) -> tuple[str, str]:
     """The task's state after REVIEW, and the one line that says why.
 
-    Two states, not three. A blocker routes to REBUT in §5.5 and REBUT does not
-    exist, so the task stops at `REVIEWING`: the pipeline halted mid-machine and
-    saying so is honest, where returning READY_FOR_REVIEW would report an
-    outcome the task has not earned (principle 34). A lens that errored lands
-    there too — an unrun lens must not read as a clean review — and the reason
-    string is what keeps the two apart on the watch line.
+    Any single anchored blocker routes to REBUT (§5.5), so `REBUTTING` here is
+    a phase to run, not a stop. A lens that errored *is* a stop, at `REVIEWING`:
+    an unrun lens must not read as a clean review, and there is no finding set
+    to rebut against.
     """
     if errored := [r.lens for r in reviews if r.error]:
         return "REVIEWING", f"{errored} produced no findings — the review is incomplete"
@@ -235,10 +233,7 @@ def review_state(reviews: Sequence[LensReview]) -> tuple[str, str]:
         f for r in reviews for f in r.findings if f.anchored and f.severity == "blocker"
     ]
     if blockers:
-        return "REVIEWING", (
-            f"{len(blockers)} blocker(s) — REBUT does not exist yet, so the task "
-            "stops here rather than claiming READY_FOR_REVIEW"
-        )
+        return "REBUTTING", f"{len(blockers)} blocker(s) — the implementer rebuts"
     concerns = sum(
         f.anchored and f.severity == "concern" for r in reviews for f in r.findings
     )

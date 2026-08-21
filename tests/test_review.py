@@ -135,13 +135,13 @@ def test_an_unanchored_blocker_routes_nowhere():
     assert "0 concern" in why
 
 
-def test_an_anchored_blocker_stops_the_task_short_of_ready():
-    """REBUT does not exist, so the task stops at REVIEWING rather than
-    claiming an outcome it has not earned."""
+def test_an_anchored_blocker_routes_to_rebut():
+    """Any single anchored blocker routes onward — no vote, because the lenses
+    are disjoint by construction (§5.5)."""
     reviews = _review(_block([_finding(severity="blocker")]), _block([]))
     state, why = review.review_state(reviews)
-    assert state == "REVIEWING"
-    assert "REBUT" in why
+    assert state == "REBUTTING"
+    assert "1 blocker" in why
 
 
 def test_notes_are_excluded_from_the_number_the_queue_sorts_on():

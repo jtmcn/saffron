@@ -751,3 +751,101 @@ def test_the_cell_env_carries_the_proxy_and_the_state_dir(monkeypatch):
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     assert session.cell_env("10.88.0.2", {})["ANTHROPIC_API_KEY"] == "sk-test"
+
+
+_BLOCKER = {
+    "findings": [
+        {
+            "file": "src/x.py",
+            "line": 1,
+            "severity": "blocker",
+            "claim": "x returns nothing",
+        }
+    ]
+}
+
+# _DIFF carries no `@@`, so nothing in it anchors; a blocker has to point at a
+# real changed line to route anywhere (§5.5).
+_ANCHORING_DIFF = """diff --git a/src/x.py b/src/x.py
+--- a/src/x.py
++++ b/src/x.py
+@@ -1 +1 @@
+-def x(): pass
++def x(): ...
+"""
+
+_CLAIMED_FIX = {"rebuttals": [{"finding": 0, "action": "fixed", "argument": "done"}]}
+
+
+def _rebuttable(monkeypatch, cell, *, rebut_commits):
+    """A cell whose review anchors one blocker, and whose HEAD after the
+    rebuttal is the caller's to decide. The stub's `commits_ahead` is constant,
+    so IMPLEMENT's measurement and REBUT's are told apart by call order — the
+    order run_one_cell makes them in."""
+    monkeypatch.setattr(
+        "saffron.cell.worktree.read_at_head", lambda _c, _p: "def x(): ...\n"
+    )
+    measured: list[str] = []
+
+    def _commits_ahead(_container, sha):
+        cell.measured_from = sha
+        measured.append(sha)
+        return 1 if len(measured) == 1 else rebut_commits
+
+    monkeypatch.setattr("saffron.cell.worktree.commits_ahead", _commits_ahead)
+
+
+def _through_rebut(*rebut_turns):
+    """Plan, implement, one lens filing a blocker, one filing nothing, then the
+    rebuttal's own turns."""
+    return [
+        _turn(_block(_PLAN)),
+        _turn(),
+        _turn(_block(_BLOCKER)),
+        _turn(_block({"findings": []})),
+        *rebut_turns,
+    ]
+
+
+def test_a_rebuttal_that_claims_a_fix_and_commits_nothing_stops_at_rebutting(
+    monkeypatch, tmp_path
+):
+    """§4.3's REBUT row, end to end: "I have addressed the findings" with no
+    commit and no argument is not doneness, and the task must not advance."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    state, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_through_rebut(
+            _turn("I have addressed the findings."), _turn(_block(_CLAIMED_FIX))
+        ),
+    )
+    assert state == "REBUTTING"
+    (queued,) = ledger.queue_lines()
+    assert queued["state"] == "REBUTTING"
+    record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
+    assert record["head_moved"] is False
+    assert record["verdicts"] == []
+
+
+def test_gates_red_after_the_rebuttal_exhausts_and_keeps_the_diff(
+    monkeypatch, tmp_path
+):
+    """§5.6: the rebuttal diff and the failing gate are both kept, and the
+    repair loop does not reopen."""
+    failing = Failure(file="a.py", code="E501", message="too long")
+    cell = _stub_the_runtime(
+        monkeypatch, suites=([], [], _results(failing)), patch=_ANCHORING_DIFF
+    )
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    state, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_through_rebut(_turn("Fixed it."), _turn(_block(_CLAIMED_FIX))),
+    )
+    assert state == "EXHAUSTED"
+    assert (tmp_path / "out" / "SY-1" / "patch.diff").read_text() == _ANCHORING_DIFF
+    assert any("new failures after the rebuttal" in line for line in cell.watched)
