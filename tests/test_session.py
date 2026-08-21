@@ -301,7 +301,9 @@ _DIFF = """diff --git a/src/x.py b/src/x.py
 """
 
 
-def _stub_the_runtime(monkeypatch, *, commits=1, suites=(), patch=_DIFF):
+def _stub_the_runtime(
+    monkeypatch, *, commits=1, suites=(), patch=_DIFF, changed=("src/x.py",)
+):
     """Everything past the ledger writes, stubbed. No test reached here before,
     which is why a shadowed volume name survived lint and 247 green tests."""
     cell = _Cell()
@@ -327,9 +329,13 @@ def _stub_the_runtime(monkeypatch, *, commits=1, suites=(), patch=_DIFF):
     monkeypatch.setattr("saffron.cell.worktree.prepare_worktree", lambda **k: None)
     monkeypatch.setattr("saffron.cell.worktree.head_sha", lambda c: "c" * 40)
     monkeypatch.setattr("saffron.cell.worktree.export_patch", lambda c, sha: patch)
-    monkeypatch.setattr(
-        "saffron.cell.worktree.changed_files", lambda c, sha: ["src/x.py"]
-    )
+
+    def _changed_files(_container, _sha):
+        # Empty until the agent has taken a turn: the baseline suite runs at
+        # base_sha, on a worktree nothing has committed to yet.
+        return list(changed) if cell.turns else []
+
+    monkeypatch.setattr("saffron.cell.worktree.changed_files", _changed_files)
 
     def _commits_ahead(_container, sha):
         cell.measured_from = sha
@@ -531,6 +537,51 @@ def test_a_dead_cell_reports_the_failed_export_rather_than_raising(
     )
     assert state == "READY_FOR_REVIEW"
     assert any("export FAILED — no such cell" in line for line in cell.watched)
+
+
+def test_a_diff_outside_touches_fails_the_suite(monkeypatch, tmp_path):
+    """§3.2 promises `touches` is enforced mechanically, but only the *plan*
+    was checked against it. Both live runs committed with `git add -A`."""
+    cell = _stub_the_runtime(
+        monkeypatch, changed=("infra/deploy.tf",), suites=([], [], [])
+    )
+    state, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn()],
+    )
+    assert state == "EXHAUSTED"
+    # The repair prompt is the whole of what the agent receives about a gate.
+    assert (
+        "- [scope] infra/deploy.tf:? out-of-scope: outside touches: src/**, tests/**"
+        in cell.turns[2]
+    )
+
+
+def test_the_baseline_scope_neither_invents_nor_cancels_an_escape(
+    monkeypatch, tmp_path
+):
+    """The baseline is measured at base_sha, where the diff is empty: `scope`
+    passes carrying no failures, so no task inherits one and none is subtracted
+    away from head."""
+    cell = _stub_the_runtime(monkeypatch)
+    state, ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert state == "READY_FOR_REVIEW"
+
+    (scope,) = json.loads((tmp_path / "out" / "SY-1" / "baseline.json").read_text())
+    assert (scope["status"], scope["failures"]) == ("pass", [])
+    assert scope["summary"] == "0 changed files within touches"
+
+    # And at head it measured the real diff rather than nothing.
+    assert [
+        row["summary"]
+        for row in ledger._db.execute(
+            "SELECT summary FROM gate_results WHERE gate = 'scope' AND run_id IS NULL"
+        )
+    ] == ["1 changed files within touches"]
 
 
 def test_a_repair_turn_that_fails_does_not_discard_committed_work(

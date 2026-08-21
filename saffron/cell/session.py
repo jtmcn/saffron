@@ -268,6 +268,7 @@ def run_one_cell(
     from saffron import preflight
     from saffron.agents import artifacts, context
     from saffron.cell import proxy, runtime, worktree
+    from saffron.gates.core.scope import scope_gate
     from saffron.gates.runner import CellExecutor, run_suite
     from saffron.repos import image
     from saffron.repos.policy import load_policy
@@ -349,7 +350,25 @@ def run_one_cell(
         watch(f"cell: {container} up, worktree at {spec.base_sha[:8]}")
 
         executor = CellExecutor(container)
-        baseline = run_suite(gates, cwd=repo, executor=executor)
+
+        def _suite() -> list[GateResult]:
+            """The repo's declared gates plus the one core gate v0.5 runs.
+
+            `scope` reads the diff on the host, so it is prepended here rather
+            than declared in `.saffron/gates` — first because it is the only
+            gate that cannot break on the repo's toolchain (§5.4). Measured
+            from `base_sha`, unlike doneness: what it judges is the whole task
+            diff a reviewer reads, the plan turn's commits included.
+            """
+            changed = worktree.changed_files(container, spec.base_sha)
+            return [
+                scope_gate(changed, spec.touches),
+                *run_suite(gates, cwd=repo, executor=executor),
+            ]
+
+        # At base_sha the diff is empty, so `scope` passes with no failures —
+        # nothing for the subtraction to cancel a real escape against.
+        baseline = _suite()
         watch("baseline: " + ", ".join(f"{r.gate}={r.status}" for r in baseline))
         for result in baseline:
             ledger.record_gate_result(result, run_id=run_id)
@@ -459,7 +478,7 @@ def run_one_cell(
             return "NOT_IMPLEMENTED"
 
         def _run_gates() -> list[GateResult]:
-            results = run_suite(gates, cwd=repo, executor=executor)
+            results = _suite()
             for result in results:
                 # No attempts table yet, so attempt_id carries the task_id —
                 # the convention the schema already documents (§4.1).
