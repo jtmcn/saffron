@@ -487,8 +487,15 @@ def package(
     worktree_path = mirror_ops.add_worktree(mirror, fetch_head, scratch)
     try:
         # -B, not -b: -b fails when the ref exists, which is the second-package
-        # path exactly.
-        _run(worktree_path, "checkout", "-B", branch)
+        # path exactly. Checked like every other git call here: an existing
+        # `refs/heads/saffron` blocks the `saffron/SA-xxxx` path, and an
+        # unchecked failure commits onto a detached HEAD that no `refs/heads/*`
+        # reaches — which `reverify`'s fetch then cannot check out.
+        checked = _run(worktree_path, "checkout", "-B", branch)
+        if checked.returncode != 0:
+            raise PackageError(
+                f"cannot create {branch}: {checked.stderr.strip()[:200]}"
+            )
 
         if apply_patch(worktree_path, patch) == APPLY_CONFLICT:
             watch(f"PACKAGE: {branch} conflicts with {default}")

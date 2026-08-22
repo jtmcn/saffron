@@ -988,3 +988,18 @@ def test_an_added_line_shaped_like_a_header_does_not_re_point_the_path():
     found = find_credentials(patch, token=None)
     assert found and "real.py" in " ".join(found)
     assert "decoy.py" not in " ".join(found)
+
+
+def test_a_branch_that_cannot_be_created_is_infrastructure(packageable):
+    """The one git call here that went unchecked. A `refs/heads/saffron` blocks
+    the `saffron/SA-0005` path; unchecked, the squash lands on a detached HEAD
+    that no `refs/heads/*` reaches — and `reverify`'s fetch cannot check out."""
+    git(packageable.mirror, "branch", "saffron", "main")
+
+    with pytest.raises(PackageError, match="cannot create saffron/SA-0005"):
+        package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+
+    assert (
+        remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=packageable.work)
+        == ""
+    )
