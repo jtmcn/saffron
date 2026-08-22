@@ -296,6 +296,12 @@ findings     (finding_id, task_id, lens, severity, file, line, claim, anchored,
 decisions    (decision_id, task_id, actor, action, reason, created_at)
 ```
 
+`repos.origin` is the **real remote** — the URL a PR is opened against.
+`repos.mirror_path` is the local bare mirror, which is the only remote a cell
+ever reads (§5.1). v0 and v0.5 stored the mirror's *source* in both, so nothing
+downstream knew where the real remote was; PACKAGE is the first component that
+needs the distinction and the first that enforces it.
+
 **A batch is not a run.** A **batch** is one night: one budget, one concurrency pool, one `--until`, spanning every selected repo. A **run** is one repo's slice of that batch, owning its own `base_sha`, its own preflight outcome, and its own baseline. Rev 4 made these genuinely different and left them sharing a table; a multi-repo night had no identity you could query. Budget lives on the batch, because that is the level it is actually enforced at.
 
 `gate_results`, not `gate_runs` — "run" was doing three jobs (the nightly event, a repo's slice, one gate execution) and this is the one that had a better name available. It also matches what the gate contract emits (§5.4).
@@ -734,6 +740,62 @@ Host-side, deterministic:
    Branch mutation is also serialized: one writer per branch, ever, held across package and merge-train operations. A `CHANGES_REQUESTED` task that gets re-queued must not race the merge train rebasing the same branch.
 3. Open the PR. Body generated from the ledger: spec, root cause (if diagnosed), acceptance-criteria checklist with the critic's assessment of each, gate table, findings with rebuttals, attempt count, cost, transcript path.
 4. Append the verdict line to the batch index.
+
+#### v1: one squashed commit, a draft PR, and re-verification only when the base moved
+
+v1 packages **one squashed commit**, not the agent's own. The cell's commits
+live on the worktree volume and die with it, so `patch.diff` — a squashed
+`git diff` — is the only thing that survives teardown (§5.1). The consequence
+is a provenance seam and the body states both halves: **the pushed sha is not
+the cell's head sha**, and the cell's head names an object no longer reachable
+anywhere. The agent's own commit subjects are captured before teardown and
+carried in the commit body, which is the record they would otherwise only have
+in a transcript.
+
+The PR opens as a **draft**. Real enough to exercise the path nightly, without
+pinging reviewers while v1 settles.
+
+**Re-verification runs when, and only when, the base moved.** If the default
+branch head still equals `base_sha`, the merged tree is byte-identical to the
+one the suite already ran on and re-running it is provably redundant; the body
+says it was skipped and why. Otherwise the suite re-runs — **inside a cell,
+never host-side**, because the applied tree carries `.saffron/gates/*` exactly
+as the patch left them, and exec'ing those on the host is the control plane
+executing model-authored code (§2). The base having moved also invalidates the
+baseline, so the gate-only cell runs the suite twice — at the new default-branch
+head for a fresh baseline, and at the packaged commit — and subtracts as always.
+New failures are `MERGE_FAILED`: the change did not survive contact with today's
+main.
+
+**Two measured `git apply --3way` hazards** (git 2.50.1), both of which break
+the obvious implementation:
+
+- A **conflicting** apply exits 1 **and still writes the file**, with `<<<<<<<`
+  markers and a staged `U` entry. "The apply failed" and "nothing happened" are
+  not the same state.
+- A **degraded** apply exits **0**. With the preimage blob absent and the hunk's
+  context matching, git prints `error: repository lacks the necessary blob to
+  perform 3-way merge. / Falling back to direct application...` to stderr and
+  succeeds. Conflict detection silently becomes a context match.
+
+So the exit code alone decides nothing: a non-zero exit is `MERGE_FAILED`, and a
+zero exit whose stderr names the missing blob is an `error`.
+
+**PACKAGE refuses to push a patch carrying the cell's credential.** It is the
+first component that moves cell-authored bytes off the host, and the cell holds
+`CLAUDE_CODE_OAUTH_TOKEN` (§5.1). A token pushed to a real remote is effectively
+undeletable. This is a refusal, not the `secrets` gate — that gate is still v1's
+to build, and until it exists **the residual risk is every credential shape the
+refusal does not know**, stated here rather than left to be discovered.
+
+Model-authored text is neutralized before it enters a commit body or a PR body:
+GitHub acts on `Fixes #12` and `@name` in both, so a cell can close an issue or
+notify a person without executing anything.
+
+Two deviations from the list above, each waiting on a named sub-project: the
+acceptance-criteria checklist ships **unchecked**, because no lens produces a
+per-criterion assessment; and there is no root-cause section, because DIAGNOSE
+does not exist.
 
 ---
 
