@@ -7,6 +7,7 @@ from saffron.phases.package import (
     APPLY_OK,
     PackageError,
     apply_patch,
+    assert_base_objects,
     default_branch,
     github_slug,
     real_remote,
@@ -172,3 +173,42 @@ def test_a_binary_patch_is_an_error_not_a_conflict(tmp_path):
     git(repo, "checkout", "-q", base)
     with pytest.raises(PackageError, match="binary"):
         apply_patch(repo, patch)
+
+
+def test_assert_base_objects_passes_when_the_mirror_has_the_base(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "config", "user.email", "t@example.com")
+    git(repo, "config", "user.name", "Test")
+    (repo / "f.txt").write_text("a\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "base")
+    base = git(repo, "rev-parse", "HEAD")
+    assert assert_base_objects(repo, base) is None
+
+
+def test_assert_base_objects_names_the_missing_base(tmp_path):
+    """Disjoint repos, not a diverged branch — a diverged branch can still
+    have the base reachable. Two separate `git init`s guarantee it is absent."""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    git(elsewhere, "init", "-q", "-b", "main")
+    git(elsewhere, "config", "user.email", "t@example.com")
+    git(elsewhere, "config", "user.name", "Test")
+    (elsewhere / "f.txt").write_text("a\n")
+    git(elsewhere, "add", "-A")
+    git(elsewhere, "commit", "-qm", "base")
+    missing_base = git(elsewhere, "rev-parse", "HEAD")
+
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+    git(mirror, "init", "-q", "-b", "main")
+    git(mirror, "config", "user.email", "t@example.com")
+    git(mirror, "config", "user.name", "Test")
+    (mirror / "g.txt").write_text("b\n")
+    git(mirror, "add", "-A")
+    git(mirror, "commit", "-qm", "unrelated")
+
+    with pytest.raises(PackageError, match=missing_base[:12]):
+        assert_base_objects(mirror, missing_base)
