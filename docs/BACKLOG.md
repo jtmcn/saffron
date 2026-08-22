@@ -213,6 +213,27 @@ suite on the merged result, push with `--force-with-lease` pinned to the checked
 SHA, open the PR with the body §5.7 describes — and §6's index. Until then a
 patch older than its base is a patch nobody can use.
 
+**Done, 2026-08-22** (PR #5). All of it, and the re-run is conditional: if the
+fetched default-branch head still equals `base_sha` the packaged tree is
+byte-identical to the one the suite already ran on, so re-verification is
+*provably* redundant and the body says it was skipped and why. Otherwise the
+suite re-runs in a gate-only cell — never host-side, because the applied tree
+carries `.saffron/gates/*` exactly as the patch left them (§2). The base having
+moved also invalidates the old baseline, so that cell runs the suite twice and
+subtracts, which is §4.4 steps 2-3 applied to one commit.
+
+Three things the build measured rather than reasoned, all now in §5.7. A
+conflicting `git apply --3way` exits 1 **and still writes the file**, markers
+staged — "apply failed" and "nothing happened" are different states. A degraded
+apply exits **0**: preimage blob absent, context matching, and git falls back to
+direct application, so conflict detection silently becomes a context match. And
+`git commit` in a `--mirror` clone with no identity does not abort — it
+auto-detects from the OS and attributes machine-written commits to the operator,
+so `commit_squash` passes `-c user.email=saffron@localhost` on the command line.
+
+`repos.origin` now holds the real remote; since v0 it held the mirror's *source*,
+a local path, so nothing downstream knew where a pull request would go (§4.1).
+
 ## 6. The critic's lenses overlap, and the third does not exist
 
 Measured on the critic's first live run (Appendix L): **both lenses filed the
@@ -323,6 +344,91 @@ this project's evidence that is exactly where the next defect is.
   host. Agents work around it with `python -m`, at the cost of a turn.
 - `image_exists` was deleted as dead; if PACKAGE wants a stale-image check it
   comes back.
+
+---
+
+## 11. What PACKAGE left, and the one design question it raised
+
+Written at the close of sub-project A (PR #5). Every item was found by review or
+by measurement during that build; none is speculation. The first is a design
+decision, the rest are small.
+
+### The base a task is cut from is the working copy's `HEAD`, not the default branch
+
+`cli.py` sets `base_sha` from `git rev-parse HEAD` in the repo you invoked it in.
+Run from a feature branch, `base_sha` is that branch's tip, so the fetched
+default-branch head never equals it: re-verification fires on **every** package,
+starting two containers and running two full suites, and the "provably redundant
+skip" is only reachable from a checkout sitting exactly on an up-to-date default
+branch. Worse, the patch is cut against a tree the default branch has never seen,
+so `--3way` merges onto a base missing every commit the feature branch carries,
+and a task touching a file the branch also touched conflicts — a `MERGE_FAILED`
+that is an artifact of where the operator was standing.
+
+**This is a design question, not a defect.** §5.7 is silent on where `base_sha`
+comes from, and the scheduler (§4.2) will need an answer before it can start
+tasks unattended. **Done looks like:** §5.7 saying whether a task's base is the
+invoking checkout's `HEAD` or the remote's default branch, and the code agreeing.
+
+### `github_slug` fails quiet on anything that is not a two-segment GitHub URL
+
+Measured: `/Users/joel/Code/saffron` returns `Code/saffron`, and a GitLab-style
+`group/owner/repo` returns `owner/repo` — the leading segment is dropped rather
+than refused. Harmless for `github.com`, which is always two segments, but a
+local-path origin is exactly what `session.py` falls back to, and a wrong slug
+reaches `gh` as a repo that does not exist. **Done looks like:** a URL that is not
+a recognisable forge remote raises rather than guessing.
+
+### A pushed branch whose `gh pr create` failed is recorded nowhere but stdout
+
+`_finish` runs after `open_draft_pr`, so a `gh` that is missing, unauthenticated,
+or refused leaves the branch pushed and the ledger still reading
+`READY_FOR_REVIEW` with no `branch` and no `pushed_sha`. A re-run self-heals — the
+lease matches the branch it pushed — but the operator has to know that. **Done
+looks like:** branch and pushed sha recorded before the pull request is opened,
+and only the URL after.
+
+### The queue appends where it should upsert
+
+`append_queue_line` has no notion of replacing a row for a `spec_id` it already
+holds, so a re-packaged or re-queued task renders twice. When the two rows carry
+different states they sort into different bands, and a stale `MERGE_FAILED`
+(rank 2) sorts *above* the fresh `READY_FOR_REVIEW` (rank 4) — the morning page
+showing a spec the operator already resolved as still needing them. One line, and
+it fixes both callers. §6's whole design is that the page is dismissible in ten
+seconds.
+
+### `reverify`'s cell does not get the repo's `thread_env`
+
+The in-cell suite runs under `cell_env(proxy_ip, policy.thread_env)`; the
+re-verification cell gets `env={}`. Empty for Saffron, so it changes nothing
+today — but the two suites being subtracted are run under different environments
+by construction, which is a suite-drift vector for the second repo onboarded
+(§9's v2 is where that bites).
+
+### Three test gaps, each one assertion
+
+The pipe-escaping test covers only `_new_failures`, not the two tables added for
+findings and disagreements — and a `|` is likelier in a model-authored `claim`
+than in a gate message. `test_an_unanchored_finding_still_appears` checks the
+claim renders but never that the row is marked `no`, which is the half that makes
+drop rate visible (§5.5). And no test exercises `attempts`, `new_failures`,
+`reviews` or `rebut_result` on `CellOutcome`'s success path.
+
+### §5.7 says "rebase" and means `git apply --3way`
+
+Step 1 says *rebase onto current `main`*; the v1 subsection describes applying one
+squashed patch. Both are true — step 1 is the intent, the subsection is the
+mechanism — but the document never says so, and a reader meeting them in order
+will think one contradicts the other. One sentence, no renumbering.
+
+### And one accepted risk, restated so it does not go quiet
+
+The credential refusal keeps a secret off the *remote*, not off the *host*:
+`patch.diff` and `pr_body.md` still sit in the batch tree with it in them.
+`_CREDENTIAL_SHAPES` is a partial list under a `ponytail:` comment naming that
+ceiling, and the real answer is §5.4's `secrets` gate, which is still v1's to
+build.
 
 ---
 
