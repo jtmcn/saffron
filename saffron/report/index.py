@@ -153,38 +153,39 @@ def append_queue_line(
 
 
 def _existing_queue_rows(path: Path) -> list[QueueLine]:
-    """Read and validate existing queue.json, tolerating absence and corruption.
+    """Read existing queue.json, tolerating absence, corruption and hand edits.
 
-    A row is usable IF AND ONLY IF it can be rendered. After constructing
-    QueueLine, attempt to render it; drop rows that raise. Catch all exceptions
-    here — the validation criterion is "does rendering survive", not
-    "does structural validation pass", and those differ (plain dataclass has no
-    type checking). The queue is a rendered convenience, not a system of record;
-    an unrenderable row is silently dropped, and the ledger is the source of
-    truth. ponytail: validates by rendering (reuses _row, not duplicating rules);
-    per-row drop not whole-file; duplication dies with replay.py (v1 deletes it).
+    A row is usable iff the rendering *entry point* can consume it, so the
+    validator calls `render_index` rather than one of its parts: `sort_key`
+    runs before `_row` and negates `concerns`/`attempts`, so an `_row`-only
+    check passed rows that then wedged the render. `except Exception` is the
+    right net for a validator whose whole job is "does this survive rendering".
+
+    ponytail: per-row drop, deliberately unlike replay.py's whole-file discard —
+    one hand-edited row should not cost the queue its good rows. The drop is
+    silent because the queue is a rendered convenience and the ledger is the
+    system of record; log the dropped rows if anyone needs to ask why one
+    vanished.
     """
     if not path.is_file():
         return []
     try:
         items = json.loads(path.read_text())
-        if not isinstance(items, list):
-            return []
-        lines = []
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            try:
-                line = QueueLine(**item)
-                # Validate by rendering; if rendering fails, drop the row.
-                _row(line)
-                lines.append(line)
-            except Exception:
-                # Unrenderable row (structural or semantic failure) — silently drop
-                continue
-        return lines
     except (json.JSONDecodeError, OSError):
         return []
+    if not isinstance(items, list):
+        return []
+    lines = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            line = QueueLine(**item)
+            render_index([line], header={})
+        except Exception:
+            continue
+        lines.append(line)
+    return lines
 
 
 def _atomic_write(path: Path, text: str) -> None:
