@@ -374,6 +374,34 @@ def test_the_test_file_diff_is_shown_separately():
     assert "def test_x" in body
 
 
+def test_a_triple_backtick_in_the_diff_cannot_close_the_block():
+    """A git context line for a pre-existing fence renders as one space plus
+    three backticks, and CommonMark closes a three-backtick block on that. The
+    agent cannot author the context line, only edit next to one."""
+    diff = (
+        "diff --git a/tests/test_x.py b/tests/test_x.py\n"
+        "--- a/tests/test_x.py\n+++ b/tests/test_x.py\n"
+        "@@ -1,3 +1,3 @@\n"
+        ' """\n'
+        " ```\n"
+        "+@everyone Fixes #12\n"
+    )
+    body = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        test_paths=["tests/**"],
+        diff=diff,
+    )
+    fenced = body.split("````diff\n", 1)[1].split("\n````", 1)[0]
+    assert "+@everyone Fixes #12" in fenced
+
+
 def test_the_body_says_which_tree_the_gates_ran_on():
     skipped = render_pr_body(
         SPEC,

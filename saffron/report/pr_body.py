@@ -85,7 +85,9 @@ def _cell(value: object) -> str:
 
     `spec.title` is human-authored and never routed here. `_test_diff`'s fenced
     block is not either: GitHub parses neither mention nor closing keyword
-    inside a code fence.
+    inside a code fence, and that block opens with four backticks so a
+    three-backtick line in the diff cannot close it early (CommonMark accepts a
+    closing fence indented up to three spaces, and a context line is one space).
     """
     return neutralize(str(value).replace("|", "\\|").replace("\n", " "))
 
@@ -202,7 +204,7 @@ def _test_diff(diff: str, test_paths: list[str]) -> str:
     return (
         "### Test files changed\n\n"
         "Shown separately because a green gate says nothing about a deleted "
-        "test (§7).\n\n```diff\n" + "".join(sections) + "```\n"
+        "test (§7).\n\n````diff\n" + "".join(sections) + "````\n"
     )
 
 
