@@ -819,3 +819,62 @@ def test_a_queue_json_row_that_breaks_the_sort_does_not_wedge_the_append(tmp_pat
     append_queue_line(tmp_path, second, header={})
     stored = json.loads((tmp_path / "queue.json").read_text())
     assert [row["spec_id"] for row in stored] == ["SA-0005", "SA-0006"]
+
+
+def _diff_of(lines: list[str]) -> str:
+    return (
+        "diff --git a/tests/test_x.py b/tests/test_x.py\n"
+        "--- a/tests/test_x.py\n"
+        "+++ b/tests/test_x.py\n"
+        f"@@ -1,1 +1,{len(lines)} @@\n"
+    ) + "".join(f"{line}\n" for line in lines)
+
+
+def test_a_huge_test_diff_does_not_push_the_body_past_githubs_limit():
+    """GitHub rejects a body over 65,536 characters, and `gh pr create` then
+    fails *after* the push — a branch with no pull request and no queue line.
+    The diff is the section that grows with the change, so it is the one that
+    gives way; provenance and the gate table must survive."""
+    rendered = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=9000,
+        removed=0,
+        transcript_path="~/.saffron/batches/1",
+        test_paths=["tests/**"],
+        diff=_diff_of([f"+assert x == {n}" for n in range(9000)]),
+    )
+    assert len(rendered) <= 65_536
+    assert "truncated" in rendered
+    assert "### Provenance" in rendered and "### Gates" in rendered
+    # A cut mid-block must still close its fence, or every section after it
+    # renders as code.
+    assert rendered.count("````") % 2 == 0
+
+
+def test_a_four_backtick_context_line_cannot_escape_the_fence():
+    """A context line carries one leading space and CommonMark closes a fence
+    indented up to three, so four backticks in a test file closed the block —
+    and the rest of the diff left the fence and stopped being inert."""
+    rendered = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="~/.saffron/batches/1",
+        test_paths=["tests/**"],
+        diff=_diff_of([" ````", "+# ping @someone, Fixes #12"]),
+    )
+    fence = rendered.split("diff\n", 1)[0].rsplit("\n", 1)[-1]
+    assert set(fence) == {"`"} and len(fence) > 4
+    # Both the line that used to close the block and everything after it are
+    # still inside it. GitHub parses neither a mention nor a closing keyword
+    # in a fence, so nothing here needs rewriting — the fence is the control.
+    fenced = rendered.split(fence + "diff\n", 1)[1].split("\n" + fence, 1)[0]
+    assert " ````" in fenced and "@someone" in fenced and "Fixes #12" in fenced

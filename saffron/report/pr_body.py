@@ -27,6 +27,15 @@ _CLOSES = re.compile(
 )
 _MENTION = re.compile(r"(?<![\w/])@(?=\w)")
 
+# GitHub rejects a pull request body over 65,536 characters. Left uncapped,
+# `gh pr create` fails *after* the push and the run exits 2 with no `pr_url`
+# and no queue line — the state `_finish` exists to avoid. A margin, because
+# the limit is on what GitHub receives, not on what we counted.
+_BODY_LIMIT = 64_000
+_TRUNCATED = (
+    "\n… truncated to fit GitHub's body limit; the full diff is on the branch.\n"
+)
+
 
 def neutralize(text: str) -> str:
     """Defang model-authored text before it reaches GitHub.
@@ -68,13 +77,20 @@ def render_pr_body(
         _criteria(spec),
         _new_failures(new_failures),
         _disagreements(reviews, rebut_result),
-        _test_diff(diff, test_paths),
+        None,  # _test_diff, sized last: it is the only unbounded section.
         _verification(verified_on),
         _gate_table(results),
         _findings(reviews),
         _provenance(spec, base_sha, head_sha, transcript_path),
     ]
-    return "\n".join(section for section in sections if section) + "\n"
+    slot = sections.index(None)
+    spent = sum(len(section) + 1 for section in sections if section)
+    sections[slot] = _test_diff(diff, test_paths, budget=_BODY_LIMIT - spent)
+    body = "\n".join(section for section in sections if section) + "\n"
+    # Last resort: the tables are unbounded too — a lens with a hundred
+    # findings outruns the limit on its own. A trimmed body still opens the
+    # pull request, and every artifact it names is on disk regardless.
+    return body if len(body) <= _BODY_LIMIT else body[:_BODY_LIMIT] + "\n"
 
 
 def _cell(value: object) -> str:
@@ -85,9 +101,8 @@ def _cell(value: object) -> str:
 
     `spec.title` is human-authored and never routed here. `_test_diff`'s fenced
     block is not either: GitHub parses neither mention nor closing keyword
-    inside a code fence, and that block opens with four backticks so a
-    three-backtick line in the diff cannot close it early (CommonMark accepts a
-    closing fence indented up to three spaces, and a context line is one space).
+    inside a code fence, and `_fence` sizes that block's fence to outrun the
+    longest backtick run inside it, so no line of the diff can close it early.
     """
     return neutralize(str(value).replace("|", "\\|").replace("\n", " "))
 
@@ -181,10 +196,28 @@ def _findings(reviews: list[LensReview]) -> str:
     return "\n".join(lines)
 
 
-def _test_diff(diff: str, test_paths: list[str]) -> str:
+def _fence(text: str) -> str:
+    """A fence longer than the longest backtick run it has to contain.
+
+    Four was not enough. A diff *context* line carries one leading space, and
+    CommonMark closes a fence indented up to three — so an unchanged line of
+    four backticks in a test file closed the block, and everything after it
+    left the fence and stopped being inert: `@org` and `Fixes #N` in the rest
+    of the diff would be live on GitHub.
+    """
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    return "`" * max(4, longest + 1)
+
+
+def _test_diff(diff: str, test_paths: list[str], *, budget: int = _BODY_LIMIT) -> str:
     """§7's second countermeasure. `test_paths` is the repo's declaration
     (`policy.integrity.test_paths`); core supplies the question, never the
-    answer (§2.1)."""
+    answer (§2.1).
+
+    `budget` is what is left of `_BODY_LIMIT` after every other section: this
+    is the one section that grows with the change, and a body GitHub refuses
+    costs the whole pull request rather than the part that did not fit.
+    """
     if not diff or not test_paths:
         return ""
     sections, current, keep = [], [], False
@@ -201,11 +234,22 @@ def _test_diff(diff: str, test_paths: list[str]) -> str:
         sections.append("".join(current))
     if not sections:
         return ""
-    return (
+    head = (
         "### Test files changed\n\n"
         "Shown separately because a green gate says nothing about a deleted "
-        "test (§7).\n\n````diff\n" + "".join(sections) + "````\n"
+        "test (§7).\n\n"
     )
+    body, note = "".join(sections), ""
+    # 64 for the two fences; a budget that cannot hold the prose plus a usable
+    # amount of diff drops the section rather than emitting a stub.
+    room = budget - len(head) - len(_TRUNCATED) - 64
+    if room < 200:
+        return ""
+    if len(body) > room:
+        # Cut at a line boundary: the closing fence has to start a line.
+        body, note = body[:room].rsplit("\n", 1)[0] + "\n", _TRUNCATED
+    fence = _fence(body)
+    return f"{head}{fence}diff\n{body}{fence}\n{note}"
 
 
 def _verification(verified_on: str) -> str:
