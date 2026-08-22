@@ -5,6 +5,7 @@ import pytest
 from saffron.phases.package import (
     APPLY_CONFLICT,
     APPLY_OK,
+    LeaseRejected,
     PackageError,
     apply_patch,
     assert_base_objects,
@@ -315,7 +316,28 @@ def test_a_branch_that_moved_underneath_is_rejected(tmp_path, bare_remote, cell_
     (repo / "ours.txt").write_text("ours\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "ours")
-    with pytest.raises(PackageError, match="moved underneath|stale"):
+    with pytest.raises(LeaseRejected, match="moved underneath|stale"):
         push_with_lease(
             repo, url=str(bare_remote), branch="saffron/SA-0005", expect=stale
         )
+
+
+def test_a_non_lease_push_failure_is_not_a_lease_rejection(tmp_path, cell_patch):
+    """auth/host/refspec failures are infrastructure (error), not the task's
+    problem (fail) — collapsing them would send an operator to read a diff
+    that was never the cause. A bad local path is the no-network way to make
+    git fail for a reason that is not `stale info`."""
+    repo, base, patch = cell_patch
+    git(repo, "checkout", "-q", "-b", "saffron/SA-0005", base)
+    bad_url = str(tmp_path / "does-not-exist.git")
+    with pytest.raises(PackageError) as excinfo:
+        push_with_lease(repo, url=bad_url, branch="saffron/SA-0005", expect="")
+    assert not isinstance(excinfo.value, LeaseRejected)
+
+
+def test_remote_sha_raises_rather_than_reporting_absent(tmp_path):
+    """An unreachable remote returning "" would be read as "branch absent" by
+    push_with_lease's empty lease, and push over a branch that does exist."""
+    bad_url = str(tmp_path / "does-not-exist.git")
+    with pytest.raises(PackageError, match="cannot reach"):
+        remote_sha(bad_url, "saffron/SA-0005", cwd=tmp_path)

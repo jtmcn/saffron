@@ -52,6 +52,10 @@ class PackageError(RuntimeError):
     """Infrastructure. Raised, caught by `cli.main`, exits 2 (§3.3)."""
 
 
+class LeaseRejected(PackageError):
+    """The branch moved underneath us — the task's problem, not the toolchain's."""
+
+
 def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Every git call here inspects `returncode` *and* `stderr` — see
     `apply_patch`, where a zero exit does not mean what it looks like."""
@@ -241,6 +245,11 @@ def push_with_lease(worktree: Path, *, url: str, branch: str, expect: str) -> No
         f"HEAD:refs/heads/{branch}",
     )
     if done.returncode != 0:
-        raise PackageError(
-            f"the branch moved underneath us: {done.stderr.strip()[:300]}"
-        )
+        stderr = done.stderr.strip()[:300]
+        # "stale info" is git's own wording for a force-with-lease rejection,
+        # for both a stale non-empty expect and an empty one that pushed too
+        # late. Force always wins once the lease passes, so no other rejection
+        # shape reaches here as a lease failure.
+        if "stale info" in stderr:
+            raise LeaseRejected(f"the branch moved underneath us: {stderr}")
+        raise PackageError(f"push failed: {stderr}")
