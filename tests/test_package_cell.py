@@ -25,7 +25,7 @@ def test_reverification_runs_the_suite_inside_a_cell(tmp_path):
     empty-diff assertion below is not vacuous: `reverify` raises
     `PackageError` if either suite has an errored gate (`aborted_gates`), so
     two silently-broken suites cannot net to `new_failures == []` here — only
-    two suites that both actually ran and passed can.
+    two suites that both actually ran can produce this result.
     """
     mirror = mirror_ops.ensure_mirror(SAFFRON_ROOT, tmp_path / "m.git")
     head = mirror_ops._git(mirror, "rev-parse", "HEAD")

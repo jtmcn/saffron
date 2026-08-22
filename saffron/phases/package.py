@@ -355,14 +355,9 @@ def reverify(
 
     results = {}
     for label, sha in (("baseline", new_base_sha), ("head", packaged_sha)):
-        # Keyed on packaged_sha, not the loop's `sha`: new_base_sha is the
-        # current default-branch head, identical for every task packaging in
-        # this window (DESIGN.md N4, up to 3 concurrent), so keying the
-        # baseline suite on it would let two tasks compute the same
-        # container/volume/network and one's `finally` tear down the other's
-        # still-running cell. packaged_sha is a freshly made commit, unique
-        # per task, so it separates tasks; `label` still separates baseline
-        # from head within one task.
+        # packaged_sha, not the loop's `sha`: new_base_sha is today's default-branch
+        # head, identical for every concurrent task (DESIGN.md N4) — keying on it
+        # would let two tasks collide and tear down each other's live cell.
         volume = f"saffron-pkg-{label}-{packaged_sha[:12]}"
         container = f"saffron-pkg-{label}-{packaged_sha[:12]}"
         network = f"{container}-net"
