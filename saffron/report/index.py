@@ -135,26 +135,34 @@ def append_queue_line(
 
     Appending rather than rewriting is what lets a second task join a first
     without the batch orchestrator that does not exist yet (sub-project C).
-    Validation precedes all writes to prevent bad rows being persisted.
+    The rendered output is computed before any write, so a render failure
+    cannot leave persisted rows.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     store = out_dir / "queue.json"
-    # Validate all rows before writing anything; malformed rows are dropped.
+    # Validate all rows before computing output; unrenderable rows are dropped.
     lines = _existing_queue_rows(store)
     lines.append(line)
-    _atomic_write(store, json.dumps([asdict(ln) for ln in lines], indent=2))
+    # Compute all outputs before any write, so render failures leave nothing behind.
+    queue_json = json.dumps([asdict(ln) for ln in lines], indent=2)
+    index_html = render_index(lines, header=header)
+    _atomic_write(store, queue_json)
     index = out_dir / "index.html"
-    _atomic_write(index, render_index(lines, header=header))
+    _atomic_write(index, index_html)
     return index
 
 
 def _existing_queue_rows(path: Path) -> list[QueueLine]:
     """Read and validate existing queue.json, tolerating absence and corruption.
 
-    Malformed rows (missing keys, wrong types) are silently dropped before any
-    write occurs. This matches replay.py's validation approach: JSON errors
-    discard the whole file, schema errors discard per-row. Validation always
-    precedes writes, so bad rows never get durably persisted.
+    A row is usable IF AND ONLY IF it can be rendered. After constructing
+    QueueLine, attempt to render it; drop rows that raise. Catch all exceptions
+    here — the validation criterion is "does rendering survive", not
+    "does structural validation pass", and those differ (plain dataclass has no
+    type checking). The queue is a rendered convenience, not a system of record;
+    an unrenderable row is silently dropped, and the ledger is the source of
+    truth. ponytail: validates by rendering (reuses _row, not duplicating rules);
+    per-row drop not whole-file; duplication dies with replay.py (v1 deletes it).
     """
     if not path.is_file():
         return []
@@ -167,9 +175,12 @@ def _existing_queue_rows(path: Path) -> list[QueueLine]:
             if not isinstance(item, dict):
                 continue
             try:
-                lines.append(QueueLine(**item))
-            except (TypeError, KeyError):
-                # Malformed row (missing field, wrong type) — silently drop
+                line = QueueLine(**item)
+                # Validate by rendering; if rendering fails, drop the row.
+                _row(line)
+                lines.append(line)
+            except Exception:
+                # Unrenderable row (structural or semantic failure) — silently drop
                 continue
         return lines
     except (json.JSONDecodeError, OSError):
