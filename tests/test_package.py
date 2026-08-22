@@ -9,7 +9,9 @@ from saffron.phases.package import (
     apply_patch,
     assert_base_objects,
     default_branch,
+    find_credentials,
     github_slug,
+    neutralize,
     real_remote,
 )
 
@@ -212,3 +214,44 @@ def test_assert_base_objects_names_the_missing_base(tmp_path):
 
     with pytest.raises(PackageError, match=missing_base[:12]):
         assert_base_objects(mirror, missing_base)
+
+
+def test_the_cells_own_token_is_found_and_never_echoed():
+    """The cell carries CLAUDE_CODE_OAUTH_TOKEN — the one sanctioned in-cell
+    credential. Pushed to a real remote it is effectively undeletable."""
+    token = "sk-ant-oat01-EXAMPLE-NOT-REAL-0000"
+    patch = f'+++ b/config.py\n+TOKEN = "{token}"\n'
+    found = find_credentials(patch, token=token)
+    assert found
+    assert token not in " ".join(found)  # naming it must not reprint it
+    assert "config.py" in " ".join(found)
+
+
+def test_a_clean_patch_finds_nothing():
+    assert find_credentials("+++ b/a.py\n+x = 1\n", token="sk-ant-oat01-XYZ") == []
+
+
+def test_no_token_in_the_environment_still_scans_known_shapes():
+    patch = "+++ b/a.py\n+key = 'sk-ant-api03-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'\n"
+    assert find_credentials(patch, token=None)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Fixes #12", "closes #45", "Resolved #7", "ping @someone"],
+)
+def test_github_acts_on_model_authored_text_so_it_is_defanged(text):
+    """GitHub closes issues named in a commit body AND a PR body, and notifies
+    @accounts. A cell causing that is a side effect on a real repository from
+    inside the boundary, even though no code executes."""
+    out = neutralize(text)
+    assert "#" not in out or not any(
+        w in out.lower() for w in ("fixes", "closes", "resolved")
+    )
+    assert "@someone" not in out
+
+
+def test_neutralize_leaves_ordinary_prose_alone():
+    assert neutralize("the tz default is wrong in parse()") == (
+        "the tz default is wrong in parse()"
+    )

@@ -26,6 +26,23 @@ APPLY_CONFLICT = "conflict"
 _NO_BLOB = "lacks the necessary blob"
 _NO_FULL_INDEX = "without full index line"
 
+# ponytail: a refusal, not the `secrets` gate (§5.4) — that is v1's to build.
+# The ceiling is named in DESIGN.md §5.7: every credential shape not listed here
+# still reaches the remote, and the upgrade path is the gate, not more regexes.
+_CREDENTIAL_SHAPES = (
+    ("an Anthropic API key", re.compile(r"sk-ant-api\d{2}-[A-Za-z0-9_\-]{16,}")),
+    ("an Anthropic OAuth token", re.compile(r"sk-ant-oat\d{2}-[A-Za-z0-9_\-]{8,}")),
+    ("a GitHub token", re.compile(r"gh[pousr]_[A-Za-z0-9]{16,}")),
+    ("an AWS access key id", re.compile(r"AKIA[0-9A-Z]{16}")),
+    ("a private key block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+)
+
+_CLOSES = re.compile(
+    r"\b(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed))\b(?=\s*:?\s*#\d)",
+    re.IGNORECASE,
+)
+_MENTION = re.compile(r"(?<![\w/])@(?=\w)")
+
 
 class PackageError(RuntimeError):
     """Infrastructure. Raised, caught by `cli.main`, exits 2 (§3.3)."""
@@ -115,3 +132,45 @@ def apply_patch(worktree: Path, patch: Path) -> str:
             "that the context matched"
         )
     return APPLY_OK if done.returncode == 0 else APPLY_CONFLICT
+
+
+def _added_lines(patch_text: str) -> list[tuple[str, str]]:
+    """(path, added line) for every `+` line. A credential removed by the patch
+    is already in history and is not this push's doing."""
+    path, out = "?", []
+    for line in patch_text.splitlines():
+        if line.startswith("+++ b/"):
+            path = line.removeprefix("+++ b/")
+        elif line.startswith("+") and not line.startswith("+++"):
+            out.append((path, line[1:]))
+    return out
+
+
+def find_credentials(patch_text: str, *, token: str | None) -> list[str]:
+    """Describe every credential the patch would push. Never returns the value.
+
+    The literal token is checked first and separately: it is the one secret we
+    know is in the cell, so a miss there is not a heuristic failure.
+    """
+    found = []
+    for path, line in _added_lines(patch_text):
+        if token and len(token) > 8 and token in line:
+            found.append(f"{path}: the cell's own CLAUDE_CODE_OAUTH_TOKEN")
+            continue
+        for what, pattern in _CREDENTIAL_SHAPES:
+            if pattern.search(line):
+                found.append(f"{path}: {what}")
+                break
+    return found
+
+
+def neutralize(text: str) -> str:
+    """Defang model-authored text before it reaches GitHub.
+
+    GitHub closes an issue named by `Fixes #12` in a commit body *and* in a pull
+    request body, and `@name` notifies a real account. This is the one place a
+    cell's output causes an effect outside the boundary without executing (§2).
+    """
+    return _MENTION.sub(
+        "@​", _CLOSES.sub(lambda m: m.group(0)[:1] + "​" + m.group(0)[1:], text)
+    )
