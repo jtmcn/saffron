@@ -713,6 +713,8 @@ def test_a_gate_that_errored_while_re_verifying_aborts_the_package(
         remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=packageable.work)
         == ""
     )
+    # The `finally` runs on a raise path too, not only on the conflict return.
+    assert not (packageable.out_dir / "package" / "SA-0005").exists()
 
 
 def test_new_failures_after_the_rebase_are_the_tasks_failure(monkeypatch, packageable):
@@ -792,3 +794,42 @@ def test_the_squash_commits_with_no_git_identity_anywhere(tmp_path, monkeypatch)
         ).returncode
         == 1
     )
+
+
+# Obviously fake, and never a real token: the shape is what the scan matches.
+FAKE_KEY = "sk-ant-api03-" + "0123456789abcdef" * 2
+
+
+def test_a_credential_in_the_patch_is_refused_before_anything_is_pushed(packageable):
+    """The one guard between a model-authored patch and a secret on a public
+    remote, where it is effectively undeletable. Every other e2e test passes
+    `token=None` over a clean patch, so without this the block could be deleted
+    and the suite would stay green."""
+    work = packageable.work
+    git(work, "checkout", "-q", "cell")
+    (work / "config.py").write_text(f'ANTHROPIC_API_KEY = "{FAKE_KEY}"\n')
+    git(work, "add", "-A")
+    git(work, "commit", "-qm", "the agent hardcoded a key")
+    patch = packageable.outcome.task_dir / "patch.diff"
+    patch.write_text(git(work, "diff", *DIFF_FLAGS, f"{packageable.base}..HEAD") + "\n")
+    git(work, "checkout", "-q", "main")
+
+    result = package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+
+    assert result.state == "MERGE_FAILED"
+    assert "credential in the patch" in result.note
+    assert "config.py" in result.note  # it says where, so it can be fixed
+    # Load-bearing: the refusal is worth nothing if the push happened first.
+    assert remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work) == ""
+
+    # Naming a leak must never reprint it — not in the note, the ledger, or the
+    # rendered queue.
+    row = _state(packageable.ledger, packageable.task_id)
+    assert row["state"] == "MERGE_FAILED"
+    artifacts = [
+        result.note,
+        str(dict(row)),
+        (packageable.out_dir / "index.html").read_text(),
+        (packageable.out_dir / "queue.json").read_text(),
+    ]
+    assert not any(FAKE_KEY in text for text in artifacts)

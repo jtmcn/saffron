@@ -492,14 +492,18 @@ def test_a_second_task_joins_the_first_without_an_orchestrator(tmp_path):
         link="",
         note="conflicts with #7",
     )
+    # What `package()` passes: one task's spend, both times.
     append_queue_line(tmp_path, first, header={"spend": "$6.40"})
-    append_queue_line(tmp_path, second, header={"spend": "$9.50"})
+    append_queue_line(tmp_path, second, header={"spend": "$3.10"})
 
     stored = json.loads((tmp_path / "queue.json").read_text())
     assert [row["spec_id"] for row in stored] == ["SA-0005", "SA-0006"]
     html = (tmp_path / "index.html").read_text()
     # MERGE_FAILED ranks above an ordinary green task (§6's sort order)
     assert html.index("SA-0006") < html.index("SA-0005")
+    # The header is the batch's spend, not the last caller's: two rows of $6.40
+    # and $3.10 read $9.50, or the morning surface understates the night.
+    assert "spend <strong>$9.50</strong>" in html
 
 
 def test_a_pull_request_link_is_not_labelled_artifacts(tmp_path):

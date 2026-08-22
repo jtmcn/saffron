@@ -598,6 +598,8 @@ def package(
                     state="MERGE_FAILED",
                     branch=branch,
                     note=f"{branch} moved underneath us",
+                    added=added,
+                    removed=removed,
                 ),
             )
 
@@ -628,7 +630,12 @@ def package(
     finally:
         # The worktree otherwise leaks on every raise path, including the
         # missing-`gh` case this module deliberately creates.
-        mirror_ops.remove_worktree(mirror, scratch)
+        try:
+            mirror_ops.remove_worktree(mirror, scratch)
+        except mirror_ops.GitError as stuck:
+            # Never let cleanup replace the outcome: it would turn a recorded
+            # MERGE_FAILED into an exit 2. `add_worktree` self-heals anyway.
+            watch(f"PACKAGE: could not remove {scratch}: {stuck}")
 
 
 def _finish(ledger, outcome, out_dir: Path, spec, repo_name: str, result):

@@ -143,6 +143,9 @@ def append_queue_line(
     # Validate all rows before computing output; unrenderable rows are dropped.
     lines = _existing_queue_rows(store)
     lines.append(line)
+    # The header is the batch's, not this task's: `out_dir` is shared and rows
+    # accumulate, so a caller's one-task spend would report only the last one.
+    header = {**header, "spend": f"${sum(ln.cost_usd_est or 0 for ln in lines):.2f}"}
     # Compute all outputs before any write, so render failures leave nothing behind.
     queue_json = json.dumps([asdict(ln) for ln in lines], indent=2)
     index_html = render_index(lines, header=header)
