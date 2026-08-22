@@ -40,7 +40,13 @@ def test_the_exit_code_distinguishes_the_terminal_states(monkeypatch, tmp_path):
     )
 
     states = iter(["READY_FOR_REVIEW", "EXHAUSTED", "PREFLIGHT_FAILED"])
-    monkeypatch.setattr(cli, "run_one_cell", lambda *a, **k: next(states))
+    monkeypatch.setattr(
+        cli,
+        "run_one_cell",
+        lambda *a, **k: session.CellOutcome(
+            state=next(states), task_id=1, run_id=1, task_dir=tmp_path
+        ),
+    )
 
     argv = ["--home", str(tmp_path / "home"), "cell", str(spec)]
     assert [cli.main(argv), cli.main(argv), cli.main(argv)] == [0, 1, 2]

@@ -62,6 +62,22 @@ def test_no_errored_gate_means_no_abort():
     assert session.aborted_gates(results) == []
 
 
+def test_an_early_return_still_produces_a_complete_outcome(tmp_path, monkeypatch):
+    """PREFLIGHT_FAILED returns before `spent` and `reviews` are bound.
+
+    Defaults on CellOutcome are not tidiness: constructing one at that return
+    without them raises UnboundLocalError on the failure path that matters most.
+    """
+    outcome = session.CellOutcome(
+        state="PREFLIGHT_FAILED", task_id=1, run_id=1, task_dir=tmp_path
+    )
+    assert outcome.spent_usd == 0.0
+    assert outcome.attempts == 0
+    assert outcome.reviews == []
+    assert outcome.rebut_result is None
+    assert outcome.agent_subjects == []
+
+
 def _spec(**overrides):
     fields = dict(
         spec_id="SY-1",
@@ -210,7 +226,7 @@ def _loop(*rounds, max_attempts=4):
     """Drive the loop over a scripted sequence of gate suites."""
     suites = iter(rounds)
     repairs = []
-    state = session.repair_loop(
+    state, _attempts, _new = session.repair_loop(
         run_gates=lambda: next(suites),
         baseline=[],
         max_attempts=max_attempts,
@@ -262,7 +278,7 @@ def test_a_gate_that_stopped_running_between_the_suites_is_not_a_green():
     rather than report it — and both suites here carry zero failures."""
     baseline = [GateResult(gate="tests", status="pass", tool="pytest 8.0")]
     head = [GateResult(gate="tests", status="skip")]
-    state = session.repair_loop(
+    state, _attempts, _new = session.repair_loop(
         run_gates=lambda: head,
         baseline=baseline,
         max_attempts=4,
@@ -275,7 +291,7 @@ def test_a_gate_that_stopped_running_between_the_suites_is_not_a_green():
 def test_a_baseline_failure_is_not_the_tasks_problem():
     """Only new failures count, or every task inherits the repo's flaky tests."""
     pre_existing = Failure(file="old.py", code="E501", message="too long")
-    state = session.repair_loop(
+    state, _attempts, _new = session.repair_loop(
         run_gates=lambda: _results(pre_existing),
         baseline=_results(pre_existing),
         max_attempts=4,
@@ -400,7 +416,7 @@ def _drive(monkeypatch, tmp_path, *, cell, turns, spec=None, policy="gates: {}\n
 
     # Left open: the caller reads its rows. tmp_path takes the file away.
     ledger = Ledger(tmp_path / "ledger.db")
-    state = session.run_one_cell(
+    outcome = session.run_one_cell(
         spec or _spec(),
         repo=repo,
         mirror=tmp_path / "m.git",
@@ -408,7 +424,7 @@ def _drive(monkeypatch, tmp_path, *, cell, turns, spec=None, policy="gates: {}\n
         out_dir=tmp_path / "out",
         watch=cell.watched.append,
     )
-    return state, ledger
+    return outcome.state, ledger
 
 
 def test_the_preflight_line_reports_what_was_tolerated(monkeypatch, tmp_path):

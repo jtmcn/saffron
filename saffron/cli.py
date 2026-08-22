@@ -123,11 +123,11 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         budget_usd=args.budget,
         max_attempts=args.max_attempts,
     )
-    state = run_one_cell(
+    outcome = run_one_cell(
         cell_spec, repo=repo, mirror=mirror, ledger=ledger, out_dir=out_dir
     )
-    print(f"{spec.id:<10} {state}")
-    return CELL_EXIT.get(state, 1)
+    print(f"{spec.id:<10} {outcome.state}")
+    return CELL_EXIT.get(outcome.state, 1)
 
 
 if __name__ == "__main__":
