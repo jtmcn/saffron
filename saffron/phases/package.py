@@ -12,12 +12,17 @@ a branch this module just created.
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from saffron.gates.baseline import NewFailure
+from saffron.report import index as index_report
+from saffron.report import pr_body
+from saffron.repos import mirror as mirror_ops
 
 _SLUG = re.compile(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$")
 
@@ -405,3 +410,235 @@ def reverify(
             runtime.remove_network(network)
 
     return subtract_baseline(results["head"], results["baseline"])
+
+
+@dataclass
+class PackageResult:
+    state: str
+    pr_url: str = ""
+    pushed_sha: str = ""
+    branch: str = ""
+    note: str = ""
+
+
+def package(
+    outcome,
+    *,
+    spec,
+    repo: Path,
+    mirror: Path,
+    policy,
+    image: str,
+    ledger,
+    out_dir: Path,
+    token: str | None,
+    gh: GhRunner = run_gh,
+    watch=print,
+) -> PackageResult:
+    """§5.7, host-side, after the cell is gone.
+
+    Every `PackageError` this raises is infrastructure and reaches `cli.main`,
+    which exits 2 without a queue line. Only the task's own failures —
+    a conflict, a leaked credential, new failures after the rebase, a branch
+    that moved — become `MERGE_FAILED`.
+    """
+    branch = f"saffron/{spec.id}"
+    patch = outcome.task_dir / "patch.diff"
+    base_sha = json.loads((outcome.task_dir / "patch.json").read_text())["base_sha"]
+    url = real_remote(repo)
+    slug = github_slug(url)
+    default = default_branch(url, cwd=mirror)
+
+    assert_base_objects(mirror, base_sha)
+    fetched = _run(mirror, "fetch", url, f"refs/heads/{default}")
+    if fetched.returncode != 0:
+        raise PackageError(f"cannot fetch {default} from {url}: {fetched.stderr[:200]}")
+    fetch_head = _run(mirror, "rev-parse", "FETCH_HEAD").stdout.strip()
+
+    scratch = out_dir / "package" / spec.id
+    worktree_path = mirror_ops.add_worktree(mirror, fetch_head, scratch)
+    try:
+        # -B, not -b: -b fails when the ref exists, which is the second-package
+        # path exactly.
+        _run(worktree_path, "checkout", "-B", branch)
+
+        if apply_patch(worktree_path, patch) == APPLY_CONFLICT:
+            watch(f"PACKAGE: {branch} conflicts with {default}")
+            return _finish(
+                ledger,
+                outcome,
+                out_dir,
+                spec,
+                repo.name,
+                PackageResult(
+                    state="MERGE_FAILED",
+                    branch=branch,
+                    note=f"conflicts with {default}",
+                ),
+            )
+
+        if leaked := find_credentials(patch.read_text(), token=token):
+            watch(f"PACKAGE: refusing to push — {'; '.join(leaked)}")
+            return _finish(
+                ledger,
+                outcome,
+                out_dir,
+                spec,
+                repo.name,
+                PackageResult(
+                    state="MERGE_FAILED",
+                    branch=branch,
+                    note=f"credential in the patch: {'; '.join(leaked)}",
+                ),
+            )
+
+        pushed = commit_squash(
+            worktree_path,
+            spec_id=spec.id,
+            title=spec.title,
+            base_sha=base_sha,
+            cell_head=outcome.cell_head_sha,
+            attempts=outcome.attempts,
+            spent_usd=outcome.spent_usd,
+            agent_subjects=outcome.agent_subjects,
+        )
+
+        verified_on = "base"
+        if needs_reverification(fetch_head, base_sha):
+            # A gate that errored raises out of `reverify`: infrastructure, and
+            # never this task's MERGE_FAILED.
+            new = reverify(
+                mirror=mirror,
+                packaged_sha=pushed,
+                new_base_sha=fetch_head,
+                policy=policy,
+                image=image,
+                watch=watch,
+            )
+            verified_on = "packaged"
+            if new:
+                watch(f"PACKAGE: {len(new)} new failures against {default}")
+                return _finish(
+                    ledger,
+                    outcome,
+                    out_dir,
+                    spec,
+                    repo.name,
+                    PackageResult(
+                        state="MERGE_FAILED",
+                        branch=branch,
+                        # Not `pushed`: this returns before the push, and a
+                        # `pushed_sha` no remote has is a claim, not a record.
+                        note=f"{len(new)} new failures after rebase "
+                        f"({pushed[:12]} in the mirror)",
+                    ),
+                )
+
+        diff = _run(worktree_path, "diff", f"{fetch_head}..HEAD").stdout
+        body_path = outcome.task_dir / "pr_body.md"
+        body_path.write_text(
+            pr_body.render_pr_body(
+                spec,
+                outcome.gates,
+                outcome.new_failures,
+                base_sha=base_sha,
+                head_sha=pushed,
+                added=0,
+                removed=0,
+                transcript_path=str(outcome.task_dir),
+                reviews=outcome.reviews,
+                rebut_result=outcome.rebut_result,
+                attempts=outcome.attempts,
+                spent_usd=outcome.spent_usd,
+                test_paths=policy.integrity.test_paths,
+                diff=diff,
+                verified_on=verified_on,
+            )
+        )
+
+        try:
+            push_with_lease(
+                worktree_path,
+                url=url,
+                branch=branch,
+                expect=remote_sha(url, branch, cwd=mirror),
+            )
+        except LeaseRejected as moved:
+            # Only this: a plain PackageError here is an auth or transport
+            # failure, and recording MERGE_FAILED would send the operator to
+            # read a diff that was never the cause (§5.4, error != fail).
+            watch(f"PACKAGE: {moved}")
+            return _finish(
+                ledger,
+                outcome,
+                out_dir,
+                spec,
+                repo.name,
+                PackageResult(
+                    state="MERGE_FAILED",
+                    branch=branch,
+                    note=f"{branch} moved underneath us",
+                ),
+            )
+
+        pr_url = open_draft_pr(
+            slug=slug,
+            branch=branch,
+            base=default,
+            title=f"{spec.id} — {neutralize(spec.title)}",
+            body_path=body_path,
+            gh=gh,
+        )
+        watch(f"PACKAGE: {pr_url}")
+        return _finish(
+            ledger,
+            outcome,
+            out_dir,
+            spec,
+            repo.name,
+            PackageResult(
+                state="READY_FOR_REVIEW",
+                pr_url=pr_url,
+                pushed_sha=pushed,
+                branch=branch,
+            ),
+        )
+    finally:
+        # The worktree otherwise leaks on every raise path, including the
+        # missing-`gh` case this module deliberately creates.
+        mirror_ops.remove_worktree(mirror, scratch)
+
+
+def _finish(ledger, outcome, out_dir: Path, spec, repo_name: str, result):
+    """Persist and append. A PACKAGE that *raises* reaches neither, and that is
+    deliberate: an index line whose link points at a pull request that was
+    never opened is worse than no line."""
+    ledger.set_task_package(
+        outcome.task_id,
+        result.state,
+        result.branch,
+        result.pushed_sha,
+        result.pr_url,
+    )
+    index_report.append_queue_line(
+        out_dir,
+        index_report.QueueLine(
+            repo=repo_name,
+            spec_id=spec.id,
+            state=result.state,
+            attempts=outcome.attempts,
+            cost_usd_est=outcome.spent_usd,
+            concerns=sum(
+                f.anchored and f.severity == "concern"
+                for r in outcome.reviews
+                for f in r.findings
+            ),
+            added=0,
+            removed=0,
+            link=result.pr_url,
+            note=result.note,
+            risk=spec.risk,
+        ),
+        header={"spend": f"${outcome.spent_usd:.2f}"},
+    )
+    return result

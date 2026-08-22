@@ -4,6 +4,7 @@ import subprocess
 
 from saffron.cell import session
 from saffron.cli import main
+from saffron.phases import package
 from tests.test_replay import target  # noqa: F401 — a pytest fixture, used by name
 
 
@@ -37,6 +38,16 @@ def test_the_exit_code_distinguishes_the_terminal_states(monkeypatch, tmp_path):
     monkeypatch.setattr("saffron.repos.mirror.ensure_mirror", lambda repo, at: at)
     monkeypatch.setattr(
         "subprocess.run", lambda *a, **k: type("P", (), {"stdout": "a" * 40})()
+    )
+
+    # PACKAGE is wired in behind READY_FOR_REVIEW and has its own tests; what
+    # this one asserts is the exit code the wiring produces.
+    monkeypatch.setattr(
+        cli.package_phase,
+        "package",
+        lambda outcome, **kwargs: package.PackageResult(
+            state="READY_FOR_REVIEW", pr_url="https://github.com/o/r/pull/1"
+        ),
     )
 
     states = iter(["READY_FOR_REVIEW", "EXHAUSTED", "PREFLIGHT_FAILED"])
@@ -106,3 +117,45 @@ def test_a_setup_failure_before_the_cell_exits_two_as_well(monkeypatch, tmp_path
     bad = tmp_path / "SY-3.md"
     bad.write_text("no frontmatter here\n")
     assert cli.main(["--home", str(tmp_path / "home"), "cell", str(bad)]) == 2
+
+
+def test_a_package_that_fails_and_one_that_breaks_exit_differently(
+    monkeypatch, tmp_path
+):
+    """MERGE_FAILED is the task's problem (1); a PackageError is the
+    toolchain's (2). Collapsing them would send an operator to read a diff
+    when the real failure was their credentials."""
+    from saffron import cli
+
+    spec = tmp_path / "SY-3.md"
+    spec.write_text(
+        "---\nid: SY-3\ntitle: Three\ntype: feature\ntouches: ['src/**']\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    monkeypatch.setattr("saffron.repos.mirror.ensure_mirror", lambda repo, at: at)
+    monkeypatch.setattr(
+        "subprocess.run", lambda *a, **k: type("P", (), {"stdout": "a" * 40})()
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_one_cell",
+        lambda *a, **k: session.CellOutcome(
+            state="READY_FOR_REVIEW", task_id=1, run_id=1, task_dir=tmp_path
+        ),
+    )
+    argv = ["--home", str(tmp_path / "home"), "cell", str(spec)]
+
+    monkeypatch.setattr(
+        cli.package_phase,
+        "package",
+        lambda outcome, **kwargs: package.PackageResult(
+            state="MERGE_FAILED", note="conflicts with main"
+        ),
+    )
+    assert cli.main(argv) == 1
+
+    def _broke(outcome, **kwargs):
+        raise package.PackageError("gh is unavailable")
+
+    monkeypatch.setattr(cli.package_phase, "package", _broke)
+    assert cli.main(argv) == 2

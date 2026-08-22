@@ -3,7 +3,7 @@ import sqlite3
 import pytest
 
 from saffron.gates.contract import Failure, GateResult
-from saffron.ledger import Ledger
+from saffron.ledger import SCHEMA, Ledger
 
 
 @pytest.fixture
@@ -173,3 +173,57 @@ def test_two_repos_of_the_same_name_are_two_rows(ledger):
     first = ledger.upsert_repo("service", "/a/service", "/m/a.git", policy_sha="p")
     second = ledger.upsert_repo("service", "/b/service", "/m/b.git", policy_sha="p")
     assert first != second
+
+
+def test_package_writes_back_a_state_the_run_had_already_closed(tmp_path):
+    """run_one_cell has already set READY_FOR_REVIEW and finished the run
+    COMPLETE before PACKAGE runs (session.py:734-735). Left alone, a
+    MERGE_FAILED task reads READY_FOR_REVIEW forever and the failure exists
+    nowhere but stdout."""
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = ledger.upsert_repo("r", "git@github.com:o/r.git", "/m", "sha")
+    run_id = ledger.create_run(repo_id, "a" * 40)
+    task_id = ledger.create_task(run_id, "SA-0005", "s" * 40, branch="saffron/SA-0005")
+    ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+    ledger.finish_run(run_id, "COMPLETE")
+
+    ledger.set_task_package(
+        task_id,
+        "MERGE_FAILED",
+        "saffron/SA-0005",
+        "c" * 40,
+        "https://github.com/o/r/pull/7",
+    )
+    row = next(r for r in ledger.queue_lines() if r["task_id"] == task_id)
+    assert row["state"] == "MERGE_FAILED"
+    assert row["pushed_sha"] == "c" * 40
+    assert row["pr_url"] == "https://github.com/o/r/pull/7"
+    ledger.close()
+
+
+def test_a_ledger_that_predates_the_package_columns_keeps_its_rows(tmp_path):
+    """`CREATE TABLE IF NOT EXISTS` does not alter, so an existing
+    ~/.saffron/ledger.db has neither column. The migration is additive: the
+    rows that were already there must still be there, and readable."""
+    path = tmp_path / "old.db"
+    before = SCHEMA.replace("    pushed_sha TEXT,\n    pr_url     TEXT,\n", "")
+    assert "pushed_sha" not in before  # otherwise this test proves nothing
+    old = sqlite3.connect(path)
+    old.executescript(before)
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.execute(
+        """INSERT INTO tasks (run_id, spec_id, spec_sha, state, branch)
+           VALUES (1, 'SA-0001', 's', 'READY_FOR_REVIEW', 'saffron/SA-0001')"""
+    )
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    (row,) = ledger.queue_lines()
+    assert row["spec_id"] == "SA-0001"
+    assert row["pushed_sha"] is None and row["pr_url"] is None
+    ledger.set_task_package(row["task_id"], "MERGE_FAILED", "b", "c" * 40, "")
+    (row,) = ledger.queue_lines()
+    assert (row["state"], row["pushed_sha"]) == ("MERGE_FAILED", "c" * 40)
+    ledger.close()

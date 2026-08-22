@@ -1,8 +1,13 @@
+import json
 import subprocess
 import subprocess as sp
+from types import SimpleNamespace
 
 import pytest
 
+from saffron.gates.baseline import NewFailure
+from saffron.gates.contract import Failure
+from saffron.ledger import Ledger
 from saffron.phases.package import (
     APPLY_CONFLICT,
     APPLY_OK,
@@ -17,6 +22,7 @@ from saffron.phases.package import (
     needs_reverification,
     neutralize,
     open_draft_pr,
+    package,
     push_with_lease,
     real_remote,
     remote_sha,
@@ -423,3 +429,309 @@ def test_a_moved_base_requires_reverification():
     against base_sha's tree, on a commit whose tree is today's main plus the
     patch — the tool-field defect of §5.4 in a new costume."""
     assert needs_reverification("b" * 40, "a" * 40)
+
+
+def _cell_outcome(task_dir, task_id, run_id):
+    return SimpleNamespace(
+        state="READY_FOR_REVIEW",
+        task_id=task_id,
+        run_id=run_id,
+        task_dir=task_dir,
+        spent_usd=6.4,
+        attempts=1,
+        cell_head_sha="c" * 40,
+        gates=[],
+        new_failures=[],
+        reviews=[],
+        rebut_result=None,
+        agent_subjects=[],
+    )
+
+
+def test_a_conflict_persists_merge_failed_and_pushes_nothing(tmp_path):
+    """Asserting the state alone would pass against an implementation that
+    pushed conflict markers first, so this asserts the remote too."""
+    # A "real remote", and a local repo whose origin points at it.
+    remote = tmp_path / "remote.git"
+    git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
+    work = tmp_path / "work"
+    work.mkdir()
+    git(work, "init", "-q", "-b", "main")
+    git(work, "config", "user.email", "t@example.com")
+    git(work, "config", "user.name", "Test")
+    (work / "f.txt").write_text("a\nb\nc\nd\ne\n")
+    git(work, "add", "-A")
+    git(work, "commit", "-qm", "base")
+    base = git(work, "rev-parse", "HEAD")
+    git(work, "remote", "add", "origin", str(remote))
+    git(work, "push", "-q", "origin", "main")
+
+    # The cell's patch touches line 3. Exported the way `worktree.export_patch`
+    # does — a hand-written hunk carries no index line, and --3way then has no
+    # blob to merge against.
+    git(work, "checkout", "-q", "-b", "cell")
+    (work / "f.txt").write_text("a\nb\nCELL\nd\ne\n")
+    git(work, "commit", "-qam", "the agent's work")
+    patch_text = git(work, "diff", *DIFF_FLAGS, f"{base}..HEAD") + "\n"
+    git(work, "checkout", "-q", "main")
+
+    # ... and main moves into the same line.
+    (work / "f.txt").write_text("a\nb\nMAIN_TOOK_IT\nd\ne\n")
+    git(work, "commit", "-qam", "main moved")
+    git(work, "push", "-q", "origin", "main")
+
+    mirror = tmp_path / "m.git"
+    git(tmp_path, "clone", "-q", "--mirror", str(work), str(mirror))
+
+    task_dir = tmp_path / "batch" / "SA-0005"
+    task_dir.mkdir(parents=True)
+    (task_dir / "patch.diff").write_text(patch_text)
+    (task_dir / "patch.json").write_text(json.dumps({"base_sha": base}))
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = ledger.upsert_repo("work", str(remote), str(mirror), "sha")
+    run_id = ledger.create_run(repo_id, base)
+    task_id = ledger.create_task(run_id, "SA-0005", "s" * 40, branch="saffron/SA-0005")
+    ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+    ledger.finish_run(run_id, "COMPLETE")
+
+    outcome = _cell_outcome(task_dir, task_id, run_id)
+    spec = SimpleNamespace(
+        id="SA-0005",
+        title="package a green cell",
+        risk="standard",
+        touches=[],
+        acceptance_criteria=[],
+        type="feature",
+    )
+    policy = SimpleNamespace(integrity=SimpleNamespace(test_paths=["tests/**"]))
+
+    def never_called(argv):
+        raise AssertionError("gh must not be reached on a conflict")
+
+    result = package(
+        outcome,
+        spec=spec,
+        repo=work,
+        mirror=mirror,
+        policy=policy,
+        image="unused",
+        ledger=ledger,
+        out_dir=tmp_path / "batch",
+        token=None,
+        gh=never_called,
+        watch=lambda _: None,
+    )
+
+    assert result.state == "MERGE_FAILED"
+    row = next(r for r in ledger.queue_lines() if r["task_id"] == task_id)
+    assert row["state"] == "MERGE_FAILED"
+    # The remote must be untouched — the assertion the state alone cannot make.
+    assert remote_sha(str(remote), "saffron/SA-0005", cwd=tmp_path) == ""
+    # And the scratch worktree is gone, on this path as on every other.
+    assert not (tmp_path / "batch" / "package" / "SA-0005").exists()
+    assert (tmp_path / "batch" / "index.html").is_file()
+    ledger.close()
+
+
+@pytest.fixture
+def packageable(tmp_path):
+    """A green cell's patch, a mirror, and a remote whose default branch has
+    not moved — so PACKAGE runs its whole path and re-verification is provably
+    redundant (no cell, no container, anywhere in these tests)."""
+    remote = tmp_path / "remote.git"
+    git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
+    work = tmp_path / "work"
+    work.mkdir()
+    git(work, "init", "-q", "-b", "main")
+    git(work, "config", "user.email", "t@example.com")
+    git(work, "config", "user.name", "Test")
+    (work / "f.txt").write_text("a\nb\nc\nd\ne\n")
+    git(work, "add", "-A")
+    git(work, "commit", "-qm", "base")
+    base = git(work, "rev-parse", "HEAD")
+    git(work, "remote", "add", "origin", str(remote))
+    git(work, "push", "-q", "origin", "main")
+
+    git(work, "checkout", "-q", "-b", "cell")
+    (work / "f.txt").write_text("a\nb\nCELL\nd\ne\n")
+    git(work, "commit", "-qam", "the agent's work")
+    patch_text = git(work, "diff", *DIFF_FLAGS, f"{base}..HEAD") + "\n"
+    git(work, "checkout", "-q", "main")
+
+    mirror = tmp_path / "m.git"
+    git(tmp_path, "clone", "-q", "--mirror", str(work), str(mirror))
+    # A mirror inherits no identity, and `commit_squash` runs in its worktree.
+    git(mirror, "config", "user.email", "t@example.com")
+    git(mirror, "config", "user.name", "Test")
+
+    task_dir = tmp_path / "batch" / "SA-0005"
+    task_dir.mkdir(parents=True)
+    (task_dir / "patch.diff").write_text(patch_text)
+    (task_dir / "patch.json").write_text(json.dumps({"base_sha": base}))
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = ledger.upsert_repo("work", str(remote), str(mirror), "sha")
+    run_id = ledger.create_run(repo_id, base)
+    task_id = ledger.create_task(run_id, "SA-0005", "s" * 40, branch="saffron/SA-0005")
+    ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+    ledger.finish_run(run_id, "COMPLETE")
+
+    yield SimpleNamespace(
+        work=work,
+        remote=remote,
+        mirror=mirror,
+        base=base,
+        ledger=ledger,
+        task_id=task_id,
+        out_dir=tmp_path / "batch",
+        kwargs=dict(
+            spec=SimpleNamespace(
+                id="SA-0005",
+                title="package a green cell",
+                risk="standard",
+                touches=["f.txt"],
+                acceptance_criteria=["it works"],
+                type="feature",
+            ),
+            repo=work,
+            mirror=mirror,
+            policy=SimpleNamespace(integrity=SimpleNamespace(test_paths=["tests/**"])),
+            image="unused",
+            ledger=ledger,
+            out_dir=tmp_path / "batch",
+            token=None,
+            watch=lambda _: None,
+        ),
+        outcome=_cell_outcome(task_dir, task_id, run_id),
+    )
+    ledger.close()
+
+
+def _state(ledger, task_id):
+    return next(r for r in ledger.queue_lines() if r["task_id"] == task_id)
+
+
+def test_a_green_cell_becomes_a_branch_a_draft_pr_and_a_queue_line(packageable):
+    """§5.7 end to end, with the remote a bare repo and `gh` injected."""
+    seen = []
+
+    def fake_gh(argv):
+        seen.append(argv)
+        return sp.CompletedProcess(argv, 0, stdout="https://github.com/o/r/pull/1\n")
+
+    result = package(packageable.outcome, gh=fake_gh, **packageable.kwargs)
+
+    assert result.state == "READY_FOR_REVIEW"
+    assert result.pr_url == "https://github.com/o/r/pull/1"
+    pushed = remote_sha(
+        str(packageable.remote), "saffron/SA-0005", cwd=packageable.work
+    )
+    assert pushed == result.pushed_sha
+    assert "--draft" in seen[0]
+
+    row = _state(packageable.ledger, packageable.task_id)
+    assert (row["state"], row["pushed_sha"], row["pr_url"]) == (
+        "READY_FOR_REVIEW",
+        pushed,
+        "https://github.com/o/r/pull/1",
+    )
+    assert "SA-0005" in (packageable.out_dir / "index.html").read_text()
+    assert (packageable.outcome.task_dir / "pr_body.md").is_file()
+
+
+def test_a_branch_that_moved_is_the_tasks_failure(monkeypatch, packageable):
+    """LeaseRejected only: the branch really did move, so MERGE_FAILED (1)."""
+    git(
+        packageable.work,
+        "push",
+        "-q",
+        str(packageable.remote),
+        "cell:refs/heads/saffron/SA-0005",
+    )
+    # An empty lease against a branch that exists is git's own `stale info`.
+    monkeypatch.setattr("saffron.phases.package.remote_sha", lambda *a, **k: "")
+
+    result = package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+
+    assert result.state == "MERGE_FAILED" and result.pushed_sha == ""
+    assert _state(packageable.ledger, packageable.task_id)["state"] == "MERGE_FAILED"
+
+
+def test_a_push_that_broke_is_infrastructure_and_records_nothing(
+    monkeypatch, packageable
+):
+    """An auth or transport failure is `error`, not `fail`. Recorded as
+    MERGE_FAILED it would tell the operator their change conflicts with main
+    when the real problem is their credentials."""
+
+    def _broke(*_a, **_k):
+        raise PackageError("Permission denied (publickey)")
+
+    monkeypatch.setattr("saffron.phases.package.push_with_lease", _broke)
+
+    with pytest.raises(PackageError, match="publickey"):
+        package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+
+    # Neither the state nor the queue moved: the run's own word still stands.
+    assert (
+        _state(packageable.ledger, packageable.task_id)["state"] == "READY_FOR_REVIEW"
+    )
+    assert not (packageable.out_dir / "index.html").exists()
+
+
+def test_a_gate_that_errored_while_re_verifying_aborts_the_package(
+    monkeypatch, packageable
+):
+    """`reverify` raises on an errored gate. A broken gate is not a merge
+    conflict, and netting it to MERGE_FAILED would charge the task for the
+    toolchain (§5.4)."""
+    # Move the default branch, so re-verification is not redundant.
+    (packageable.work / "other.txt").write_text("main moved\n")
+    git(packageable.work, "add", "-A")
+    git(packageable.work, "commit", "-qm", "main moved")
+    git(packageable.work, "push", "-q", "origin", "main")
+
+    def _errored(**_k):
+        raise PackageError("baseline suite: types errored rather than ran")
+
+    monkeypatch.setattr("saffron.phases.package.reverify", _errored)
+
+    with pytest.raises(PackageError, match="errored rather than ran"):
+        package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+
+    assert (
+        _state(packageable.ledger, packageable.task_id)["state"] == "READY_FOR_REVIEW"
+    )
+    assert (
+        remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=packageable.work)
+        == ""
+    )
+
+
+def test_new_failures_after_the_rebase_are_the_tasks_failure(monkeypatch, packageable):
+    """The base moved and the packaged tree fails on it: MERGE_FAILED, and
+    nothing reaches the remote — there is no `pushed_sha` to record."""
+    (packageable.work / "other.txt").write_text("main moved\n")
+    git(packageable.work, "add", "-A")
+    git(packageable.work, "commit", "-qm", "main moved")
+    git(packageable.work, "push", "-q", "origin", "main")
+
+    monkeypatch.setattr(
+        "saffron.phases.package.reverify",
+        lambda **_k: [NewFailure(gate="tests", failure=Failure(file="f.py", code="E"))],
+    )
+
+    result = package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+
+    assert result.state == "MERGE_FAILED" and result.pushed_sha == ""
+    assert "1 new failures after rebase" in result.note
+    assert _state(packageable.ledger, packageable.task_id)["pushed_sha"] == ""
+    assert (
+        remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=packageable.work)
+        == ""
+    )
+
+
+def _no_gh(argv):
+    raise AssertionError("gh must not be reached")

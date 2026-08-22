@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import subprocess
 from pathlib import Path
 
 from saffron.cell.session import CellSpec, run_one_cell
 from saffron.intake import load_spec
 from saffron.ledger import Ledger
+from saffron.phases import package as package_phase
 from saffron.replay import replay
+from saffron.repos import image as repo_image
 from saffron.repos import mirror as git_mirror
+from saffron.repos import policy as repo_policy
 
 DEFAULT_HOME = Path.home() / ".saffron"
 
@@ -25,6 +29,9 @@ DEFAULT_HOME = Path.home() / ".saffron"
 # operator as a traceback.
 CELL_EXIT = {
     "READY_FOR_REVIEW": 0,
+    # Already the default for an unnamed state; named because PACKAGE returns it
+    # and it is the task's failure, not the operator's.
+    "MERGE_FAILED": 1,
     "PREFLIGHT_FAILED": 2,
     "GATE_ERROR": 2,
     # Neither the task's failure nor the operator's: retry after the window.
@@ -126,6 +133,23 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     outcome = run_one_cell(
         cell_spec, repo=repo, mirror=mirror, ledger=ledger, out_dir=out_dir
     )
+    if outcome.state == "READY_FOR_REVIEW":
+        policy, _ = repo_policy.load_policy(repo)
+        result = package_phase.package(
+            outcome,
+            spec=spec,
+            repo=repo,
+            mirror=mirror,
+            policy=policy,
+            # Derived, not rebuilt: preflight already built this tag.
+            image=repo_image.cell_tag(repo),
+            ledger=ledger,
+            out_dir=out_dir,
+            token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+        )
+        print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
+        return CELL_EXIT.get(result.state, 1)
+
     print(f"{spec.id:<10} {outcome.state}")
     return CELL_EXIT.get(outcome.state, 1)
 
