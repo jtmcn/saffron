@@ -388,16 +388,6 @@ lease matches the branch it pushed — but the operator has to know that. **Done
 looks like:** branch and pushed sha recorded before the pull request is opened,
 and only the URL after.
 
-### The queue appends where it should upsert
-
-`append_queue_line` has no notion of replacing a row for a `spec_id` it already
-holds, so a re-packaged or re-queued task renders twice. When the two rows carry
-different states they sort into different bands, and a stale `MERGE_FAILED`
-(rank 2) sorts *above* the fresh `READY_FOR_REVIEW` (rank 4) — the morning page
-showing a spec the operator already resolved as still needing them. One line, and
-it fixes both callers. §6's whole design is that the page is dismissible in ten
-seconds.
-
 ### `reverify`'s cell does not get the repo's `thread_env`
 
 The in-cell suite runs under `cell_env(proxy_ip, policy.thread_env)`; the

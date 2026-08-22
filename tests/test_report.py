@@ -1,4 +1,7 @@
+import fcntl
 import json
+from dataclasses import asdict
+from unittest import mock
 
 from saffron.agents.findings import Finding
 from saffron.gates.baseline import NewFailure
@@ -878,3 +881,128 @@ def test_a_four_backtick_context_line_cannot_escape_the_fence():
     # in a fence, so nothing here needs rewriting — the fence is the control.
     fenced = rendered.split(fence + "diff\n", 1)[1].split("\n" + fence, 1)[0]
     assert " ````" in fenced and "@someone" in fenced and "Fixes #12" in fenced
+
+
+def test_re_running_a_spec_replaces_its_row_rather_than_doubling_it(tmp_path):
+    """The operator's normal response to MERGE_FAILED is to run the spec again.
+    Two rows sort into different bands, and the stale MERGE_FAILED (rank 2)
+    lands *above* the fresh READY_FOR_REVIEW — the morning page showing a spec
+    they already resolved as still needing them (§6)."""
+    failed = QueueLine(
+        repo="saffron",
+        spec_id="SA-0005",
+        state="MERGE_FAILED",
+        attempts=2,
+        cost_usd_est=6.4,
+        concerns=0,
+        added=0,
+        removed=0,
+        link="",
+    )
+    fresh = QueueLine(
+        repo="saffron",
+        spec_id="SA-0005",
+        state="READY_FOR_REVIEW",
+        attempts=1,
+        cost_usd_est=3.1,
+        concerns=0,
+        added=4,
+        removed=0,
+        link="",
+    )
+    # Same spec id, a different repo: the batch tree holds several, and ids are
+    # unique only within one.
+    elsewhere = QueueLine(**{**asdict(fresh), "repo": "thermal-edge"})
+
+    append_queue_line(tmp_path, failed, header={})
+    append_queue_line(tmp_path, elsewhere, header={})
+    index = append_queue_line(tmp_path, fresh, header={})
+
+    stored = json.loads((tmp_path / "queue.json").read_text())
+    assert [(row["repo"], row["state"]) for row in stored] == [
+        ("thermal-edge", "READY_FOR_REVIEW"),
+        ("saffron", "READY_FOR_REVIEW"),
+    ]
+    assert "MERGE_FAILED" not in index.read_text()
+    # The header counts the rows that survived, not every append.
+    assert "tasks <strong>2</strong>" in index.read_text()
+    assert "spend <strong>$6.20</strong>" in index.read_text()
+
+
+def test_the_append_holds_a_lock_for_the_whole_read_modify_write(tmp_path):
+    """Two tasks appending at once otherwise lose whichever row was read first.
+    Probed from inside the critical section, because a lock taken and released
+    around only the write reads identically from outside."""
+    held = []
+
+    def _probe(path):
+        # A second open() is a distinct file description, so `flock` treats it
+        # as another holder even in this process.
+        with (tmp_path / ".queue.lock").open("w") as other:
+            try:
+                fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                held.append(False)
+            except BlockingIOError:
+                held.append(True)
+        return []
+
+    with mock.patch("saffron.report.index._existing_queue_rows", _probe):
+        append_queue_line(
+            tmp_path,
+            QueueLine(
+                repo="saffron",
+                spec_id="SA-0005",
+                state="READY_FOR_REVIEW",
+                attempts=1,
+                cost_usd_est=1.0,
+                concerns=0,
+                added=1,
+                removed=0,
+                link="",
+            ),
+            header={},
+        )
+    assert held == [True]
+
+
+def test_a_v0_batch_tree_keeps_its_rows_across_the_store_rename(tmp_path):
+    """v0 wrote `lines.json`. Renamed with no migration, every prior task
+    vanishes from `index.html` and the old file is left with no reader."""
+    (tmp_path / "lines.json").write_text(
+        json.dumps(
+            [
+                asdict(
+                    QueueLine(
+                        repo="saffron",
+                        spec_id="SA-0001",
+                        state="READY_FOR_REVIEW",
+                        attempts=1,
+                        cost_usd_est=2.0,
+                        concerns=0,
+                        added=1,
+                        removed=0,
+                        link="",
+                    )
+                )
+            ]
+        )
+    )
+    index = append_queue_line(
+        tmp_path,
+        QueueLine(
+            repo="saffron",
+            spec_id="SA-0002",
+            state="READY_FOR_REVIEW",
+            attempts=1,
+            cost_usd_est=1.0,
+            concerns=0,
+            added=1,
+            removed=0,
+            link="",
+        ),
+        header={},
+    )
+    stored = json.loads((tmp_path / "queue.json").read_text())
+    assert [row["spec_id"] for row in stored] == ["SA-0001", "SA-0002"]
+    assert "SA-0001" in index.read_text()
+    assert not (tmp_path / "lines.json").exists()

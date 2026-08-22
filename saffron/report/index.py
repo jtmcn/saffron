@@ -5,10 +5,12 @@ ponytail: f-strings, not Jinja; see report/pr_body.py.
 
 from __future__ import annotations
 
+import fcntl
 import html
 import json
 import os
 import tempfile
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -137,26 +139,64 @@ def append_queue_line(
     without the batch orchestrator that does not exist yet (sub-project C).
     The rendered output is computed before any write, so a render failure
     cannot leave persisted rows.
+
+    An upsert, not a bare append: re-running a spec after a `MERGE_FAILED` is
+    the operator's normal response, and two rows for it render twice — the
+    stale `MERGE_FAILED` (rank 2) sorting *above* the fresh `READY_FOR_REVIEW`
+    (rank 4), showing a spec they already resolved as still needing them. The
+    header's counts double with it. Keyed on repo *and* spec: one batch tree
+    holds several repos, and spec ids are only unique within one.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     store = out_dir / "queue.json"
-    # Validate all rows before computing output; unrenderable rows are dropped.
-    lines = _existing_queue_rows(store)
-    lines.append(line)
-    # Counted here, and a caller cannot override either: `out_dir` is shared and
-    # rows accumulate, so a caller's one-task spend would report only the last one.
-    counted = {
-        "tasks": str(len(lines)),
-        "spend": f"${sum(ln.cost_usd_est or 0 for ln in lines):.2f}",
-    }
-    header = counted | {k: v for k, v in (header or {}).items() if k not in counted}
-    # Compute all outputs before any write, so render failures leave nothing behind.
-    queue_json = json.dumps([asdict(ln) for ln in lines], indent=2)
-    index_html = render_index(lines, header=header)
-    _atomic_write(store, queue_json)
-    index = out_dir / "index.html"
-    _atomic_write(index, index_html)
+    with _locked(out_dir):
+        _migrate_v0_store(store)
+        # Validate all rows before computing output; unrenderable rows are dropped.
+        lines = [
+            row
+            for row in _existing_queue_rows(store)
+            if (row.repo, row.spec_id) != (line.repo, line.spec_id)
+        ]
+        lines.append(line)
+        # Counted here, and a caller cannot override either: `out_dir` is shared
+        # and rows accumulate, so a caller's one-task spend would report only the
+        # last one.
+        counted = {
+            "tasks": str(len(lines)),
+            "spend": f"${sum(ln.cost_usd_est or 0 for ln in lines):.2f}",
+        }
+        header = counted | {k: v for k, v in (header or {}).items() if k not in counted}
+        # Compute all outputs before any write, so render failures leave nothing
+        # behind.
+        queue_json = json.dumps([asdict(ln) for ln in lines], indent=2)
+        index_html = render_index(lines, header=header)
+        _atomic_write(store, queue_json)
+        index = out_dir / "index.html"
+        _atomic_write(index, index_html)
     return index
+
+
+@contextmanager
+def _locked(out_dir: Path):
+    """Serialise the read-modify-write. Two tasks appending at once otherwise
+    lose whichever row was read first — the defect one store was meant to end.
+
+    A sibling lock file, not `queue.json` itself: `_atomic_write` renames a new
+    inode over it, so a lock held on the store would guard a file that no
+    longer exists. `flock` releases on close, including on a raise.
+    """
+    with (out_dir / ".queue.lock").open("w") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
+
+
+def _migrate_v0_store(store: Path) -> None:
+    """v0 named this file `lines.json`. Renamed with no migration, an existing
+    `~/.saffron/batches/v0` starts from zero rows: every prior task vanishes
+    from `index.html` and the old file is left with no reader."""
+    legacy = store.with_name("lines.json")
+    if not store.exists() and legacy.is_file():
+        legacy.rename(store)
 
 
 def _existing_queue_rows(path: Path) -> list[QueueLine]:
