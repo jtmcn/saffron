@@ -1161,3 +1161,19 @@ def test_a_denied_connect_reaches_the_operator(monkeypatch, tmp_path):
         "proxy DENIED" in line and "platform.claude.com" in line
         for line in cell.watched
     )
+
+
+def test_a_plan_turn_that_failed_reports_what_it_spent(monkeypatch, tmp_path):
+    """The cost is measured — it is on the watch line — and then dropped from
+    the outcome. `CellOutcome` is the seam v1's supervisor inherits, and one
+    summing `spent_usd` across tasks would book every plan failure at zero."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[implement.AgentFailed("max turns", _turn(cost=0.4))],
+    )
+    assert outcome.state == "NOT_IMPLEMENTED"
+    assert outcome.spent_usd == 0.4
+    assert any("$0.40 spent" in line for line in cell.watched)

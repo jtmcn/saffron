@@ -633,6 +633,9 @@ def _drive_cell(
                 task_id=task_id,
                 run_id=run_id,
                 task_dir=task_dir,
+                # Measured, so it is reported: a supervisor summing `spent_usd`
+                # across tasks otherwise books every plan failure at zero.
+                spent_usd=plan_cost,
             )
 
         # Extracted and hashed the moment it is produced, and never read from
