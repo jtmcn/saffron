@@ -257,6 +257,42 @@ def _finding(**kw):
     return Finding(**{**base, **kw})
 
 
+def test_a_finding_cannot_close_an_issue_or_notify_an_account():
+    """§5.7's other half. `Fixes #1` in a PR *body* closes issue 1 on merge and
+    `@someone` notifies a real account — and a correctness lens quoting
+    `@pytest.mark.skip` is the ordinary case, not a contrived one."""
+    body = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        reviews=[
+            LensReview(
+                lens="correctness",
+                findings=[
+                    _finding(
+                        claim="Fixes #1 by skipping it; ask @someone about @pytest"
+                    )
+                ],
+            )
+        ],
+    )
+
+    # The triggers are broken...
+    assert "Fixes #1" not in body
+    assert "@someone" not in body
+    assert "@pytest" not in body
+    # ...and the sentence around them still reads.
+    assert "by skipping it; ask" in body
+    assert "someone" in body
+    # The human-authored title is not model-authored text and is left alone.
+    assert SPEC.title in body
+
+
 def test_disagreements_sort_above_the_gate_table():
     """§6: disagreements first, because that is where your judgment is worth
     the most."""

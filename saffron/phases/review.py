@@ -229,6 +229,15 @@ def anchored_blockers(reviews: Sequence[LensReview]) -> list[Finding]:
     ]
 
 
+def anchored_concerns(reviews: Sequence[LensReview]) -> int:
+    """How many anchored concerns the review left. One rule, two callers:
+    `review_state` and the queue line the operator sorts on (§6) — a second
+    hand-written copy silently reorders the morning page."""
+    return sum(
+        f.anchored and f.severity == "concern" for r in reviews for f in r.findings
+    )
+
+
 def review_state(reviews: Sequence[LensReview]) -> tuple[str, str]:
     """The task's state after REVIEW, and the one line that says why.
 
@@ -242,7 +251,5 @@ def review_state(reviews: Sequence[LensReview]) -> tuple[str, str]:
     blockers = anchored_blockers(reviews)
     if blockers:
         return "REBUTTING", f"{len(blockers)} blocker(s) — the implementer rebuts"
-    concerns = sum(
-        f.anchored and f.severity == "concern" for r in reviews for f in r.findings
-    )
+    concerns = anchored_concerns(reviews)
     return "READY_FOR_REVIEW", f"no blockers, {concerns} concern(s)"

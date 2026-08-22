@@ -19,9 +19,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from saffron.cell.worktree import DIFF_FLAGS
 from saffron.gates.baseline import NewFailure
+from saffron.phases.review import anchored_concerns
 from saffron.report import index as index_report
 from saffron.report import pr_body
+from saffron.report.pr_body import neutralize
 from saffron.repos import mirror as mirror_ops
 
 _SLUG = re.compile(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$")
@@ -44,16 +47,6 @@ _CREDENTIAL_SHAPES = (
     ("an AWS access key id", re.compile(r"AKIA[0-9A-Z]{16}")),
     ("a private key block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
 )
-
-# ponytail: covers #N, GH-N, and owner/repo#N — not the full issue-URL form
-# (`https://github.com/o/r/issues/12`), which GitHub also closes on. The
-# upgrade path is matching that URL shape, not more keyword lookaheads.
-_CLOSES = re.compile(
-    r"\b(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed))\b"
-    r"(?=\s*:?\s*(?:[\w.-]+/[\w.-]+)?(?:#|GH-)\d)",
-    re.IGNORECASE,
-)
-_MENTION = re.compile(r"(?<![\w/])@(?=\w)")
 
 
 class PackageError(RuntimeError):
@@ -163,13 +156,22 @@ def _added_lines(patch_text: str) -> list[tuple[str, str]]:
 
 
 def find_credentials(patch_text: str, *, token: str | None) -> list[str]:
-    """Describe every credential the patch would push. Never returns the value.
+    """Describe every credential the patch would push. Never returns the value."""
+    return _scan(_added_lines(patch_text), token)
 
-    The literal token is checked first and separately: it is the one secret we
+
+def find_credentials_in_text(text: str, *, token: str | None, where: str) -> list[str]:
+    """The same scan over prose. A claim, a rebuttal argument and a verdict
+    reason are cell-authored too, and the body carries them to the remote."""
+    return _scan([(where, line) for line in text.splitlines()], token)
+
+
+def _scan(lines: list[tuple[str, str]], token: str | None) -> list[str]:
+    """The literal token is checked first and separately: it is the one secret we
     know is in the cell, so a miss there is not a heuristic failure.
     """
     found = []
-    for path, line in _added_lines(patch_text):
+    for path, line in lines:
         # length guard: a short/empty token would substring-match unrelated lines.
         if token and len(token) > 8 and token in line:
             found.append(f"{path}: the cell's own CLAUDE_CODE_OAUTH_TOKEN")
@@ -179,18 +181,6 @@ def find_credentials(patch_text: str, *, token: str | None) -> list[str]:
                 found.append(f"{path}: {what}")
                 break
     return found
-
-
-def neutralize(text: str) -> str:
-    """Defang model-authored text before it reaches GitHub.
-
-    GitHub closes an issue named by `Fixes #12` in a commit body *and* in a pull
-    request body, and `@name` notifies a real account. This is the one place a
-    cell's output causes an effect outside the boundary without executing (§2).
-    """
-    return _MENTION.sub(
-        "@​", _CLOSES.sub(lambda m: m.group(0)[:1] + "​" + m.group(0)[1:], text)
-    )
 
 
 def commit_squash(
@@ -323,7 +313,12 @@ def open_draft_pr(
             "the pull request can be opened by hand"
         ) from exc
     if done.returncode == 0:
-        return done.stdout.strip().splitlines()[-1]
+        if printed := done.stdout.strip().splitlines():
+            return printed[-1]
+        raise PackageError(
+            f"gh created the pull request for {branch} but printed no URL; the "
+            "branch is already pushed, so the pull request can be found by hand"
+        )
 
     view = gh(
         ["gh", "pr", "view", branch, "--repo", slug, "--json", "url", "--jq", ".url"]
@@ -458,6 +453,10 @@ def package(
     """
     branch = f"saffron/{spec.id}"
     patch = outcome.task_dir / "patch.diff"
+    # Before the sidecar is read: an empty diff writes neither file, and
+    # `patch.json` missing surfaces as a traceback rather than this sentence.
+    if not patch.is_file():
+        raise PackageError(f"no patch at {patch}: there is nothing to package")
     base_sha = json.loads((outcome.task_dir / "patch.json").read_text())["base_sha"]
     url = real_remote(repo)
     slug = github_slug(url)
@@ -491,7 +490,8 @@ def package(
                 ),
             )
 
-        if leaked := find_credentials(patch.read_text(), token=token):
+        def _refuse(leaked: list[str], where: str, **counts) -> PackageResult:
+            """One refusal for both channels a cell has to the remote."""
             watch(f"PACKAGE: refusing to push — {'; '.join(leaked)}")
             return _finish(
                 ledger,
@@ -502,9 +502,13 @@ def package(
                 PackageResult(
                     state="MERGE_FAILED",
                     branch=branch,
-                    note=f"credential in the patch: {'; '.join(leaked)}",
+                    note=f"credential in {where}: {'; '.join(leaked)}",
+                    **counts,
                 ),
             )
+
+        if leaked := find_credentials(patch.read_text(), token=token):
+            return _refuse(leaked, "the patch")
 
         pushed = commit_squash(
             worktree_path,
@@ -554,27 +558,32 @@ def package(
                     ),
                 )
 
-        diff = _run(worktree_path, "diff", f"{fetch_head}..HEAD").stdout
+        # DIFF_FLAGS, not a bare diff: `diff.noprefix` in the operator's global
+        # gitconfig makes every ` b/` path parse as garbage in `_test_diff`.
+        diff = _run(worktree_path, "diff", *DIFF_FLAGS, f"{fetch_head}..HEAD").stdout
         body_path = outcome.task_dir / "pr_body.md"
-        body_path.write_text(
-            pr_body.render_pr_body(
-                spec,
-                outcome.gates,
-                outcome.new_failures,
-                base_sha=base_sha,
-                head_sha=pushed,
-                added=added,
-                removed=removed,
-                transcript_path=str(outcome.task_dir),
-                reviews=outcome.reviews,
-                rebut_result=outcome.rebut_result,
-                attempts=outcome.attempts,
-                spent_usd=outcome.spent_usd,
-                test_paths=policy.integrity.test_paths,
-                diff=diff,
-                verified_on=verified_on,
-            )
+        body = pr_body.render_pr_body(
+            spec,
+            outcome.gates,
+            outcome.new_failures,
+            base_sha=base_sha,
+            head_sha=pushed,
+            added=added,
+            removed=removed,
+            transcript_path=str(outcome.task_dir),
+            reviews=outcome.reviews,
+            rebut_result=outcome.rebut_result,
+            attempts=outcome.attempts,
+            spent_usd=outcome.spent_usd,
+            test_paths=policy.integrity.test_paths,
+            diff=diff,
+            verified_on=verified_on,
         )
+        body_path.write_text(body)
+        # The body is the second cell-authored channel out: a claim or a
+        # rebuttal argument reaches the remote without ever being in the diff.
+        if leaked := find_credentials_in_text(body, token=token, where="pr_body.md"):
+            return _refuse(leaked, "the body", added=added, removed=removed)
 
         try:
             push_with_lease(
@@ -657,17 +666,12 @@ def _finish(ledger, outcome, out_dir: Path, spec, repo_name: str, result):
             state=result.state,
             attempts=outcome.attempts,
             cost_usd_est=outcome.spent_usd,
-            concerns=sum(
-                f.anchored and f.severity == "concern"
-                for r in outcome.reviews
-                for f in r.findings
-            ),
+            concerns=anchored_concerns(outcome.reviews),
             added=result.added,
             removed=result.removed,
             link=result.pr_url,
             note=result.note,
             risk=spec.risk,
         ),
-        header={"spend": f"${outcome.spent_usd:.2f}"},
     )
     return result

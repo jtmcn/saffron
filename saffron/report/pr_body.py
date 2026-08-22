@@ -8,11 +8,37 @@ structurally blocked. Revisit only if a template needs inheritance.
 
 from __future__ import annotations
 
+import fnmatch
+import re
+
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import GateResult
 from saffron.intake import Spec
 from saffron.phases.rebut import RebutResult
 from saffron.phases.review import LensReview, anchored_blockers
+
+# ponytail: covers #N, GH-N, and owner/repo#N — not the full issue-URL form
+# (`https://github.com/o/r/issues/12`), which GitHub also closes on. The
+# upgrade path is matching that URL shape, not more keyword lookaheads.
+_CLOSES = re.compile(
+    r"\b(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed))\b"
+    r"(?=\s*:?\s*(?:[\w.-]+/[\w.-]+)?(?:#|GH-)\d)",
+    re.IGNORECASE,
+)
+_MENTION = re.compile(r"(?<![\w/])@(?=\w)")
+
+
+def neutralize(text: str) -> str:
+    """Defang model-authored text before it reaches GitHub.
+
+    GitHub closes an issue named by `Fixes #12` in a commit body *and* in a pull
+    request body, and `@name` notifies a real account. This is the one place a
+    cell's output causes an effect outside the boundary without executing (§2).
+    Lives here, with the other renderer, because both consumers are renderers.
+    """
+    return _MENTION.sub(
+        "@​", _CLOSES.sub(lambda m: m.group(0)[:1] + "​" + m.group(0)[1:], text)
+    )
 
 
 def render_pr_body(
@@ -52,9 +78,16 @@ def render_pr_body(
 
 
 def _cell(value: object) -> str:
-    """One table cell. A gate message routinely carries a pipe (a shell echo, a
-    ruff rule, an assertion diff), and an unescaped one splits the row."""
-    return str(value).replace("|", "\\|").replace("\n", " ")
+    """One table cell, and the body's single choke point for model-authored
+    text. A gate message routinely carries a pipe (a shell echo, a ruff rule,
+    an assertion diff), and an unescaped one splits the row; a finding's claim
+    routinely quotes `@pytest.mark.skip`, which notifies a real GitHub org.
+
+    `spec.title` is human-authored and never routed here. `_test_diff`'s fenced
+    block is not either: GitHub parses neither mention nor closing keyword
+    inside a code fence.
+    """
+    return neutralize(str(value).replace("|", "\\|").replace("\n", " "))
 
 
 def _criteria(spec: Spec) -> str:
@@ -150,8 +183,6 @@ def _test_diff(diff: str, test_paths: list[str]) -> str:
     """§7's second countermeasure. `test_paths` is the repo's declaration
     (`policy.integrity.test_paths`); core supplies the question, never the
     answer (§2.1)."""
-    import fnmatch
-
     if not diff or not test_paths:
         return ""
     sections, current, keep = [], [], False

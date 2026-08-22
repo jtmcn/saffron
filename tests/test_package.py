@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from saffron.agents.findings import Finding
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure
 from saffron.ledger import Ledger
@@ -27,6 +28,7 @@ from saffron.phases.package import (
     real_remote,
     remote_sha,
 )
+from saffron.phases.review import LensReview
 
 
 def git(repo, *args):
@@ -417,6 +419,23 @@ def test_a_missing_gh_is_infrastructure_and_says_the_branch_is_pushed(tmp_path):
         )
 
 
+def test_a_silent_gh_is_infrastructure_and_says_the_branch_is_pushed(tmp_path):
+    """Exit 0 with nothing on stdout: a bare IndexError at the one moment the
+    branch is pushed and nothing about it is recorded."""
+    body = tmp_path / "body.md"
+    body.write_text("## body\n")
+
+    with pytest.raises(PackageError, match="already pushed"):
+        open_draft_pr(
+            slug="o/r",
+            branch="saffron/SA-0005",
+            base="main",
+            title="t",
+            body_path=body,
+            gh=lambda argv: sp.CompletedProcess(argv, 0, "  \n", ""),
+        )
+
+
 def test_an_unmoved_base_makes_reverification_provably_redundant():
     """If the default branch head still equals base_sha, the packaged tree is
     byte-identical to the one the suite already ran on. Skipping is not a
@@ -646,6 +665,29 @@ def test_a_green_cell_becomes_a_branch_a_draft_pr_and_a_queue_line(packageable):
     assert "SA-0005" in index
 
 
+def test_the_bodys_diff_is_pinned_against_the_operators_gitconfig(packageable):
+    """`diff.noprefix` is a global anyone may set, and it rewrites every path
+    the host parses out of the diff. Without `DIFF_FLAGS`, §7's gate-gaming
+    countermeasure renders an empty section and says nothing about why."""
+    git(packageable.mirror, "config", "diff.noprefix", "true")
+    # The one file this patch touches, declared as a test path, so the section
+    # has something to render.
+    packageable.kwargs["policy"] = SimpleNamespace(
+        integrity=SimpleNamespace(test_paths=["f.txt"])
+    )
+
+    result = package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **packageable.kwargs,
+    )
+
+    assert result.state == "READY_FOR_REVIEW"
+    body = (packageable.outcome.task_dir / "pr_body.md").read_text()
+    assert "### Test files changed" in body
+    assert "diff --git a/f.txt b/f.txt" in body
+
+
 def test_a_branch_that_moved_is_the_tasks_failure(monkeypatch, packageable):
     """LeaseRejected only: the branch really did move, so MERGE_FAILED (1)."""
     git(
@@ -833,3 +875,52 @@ def test_a_credential_in_the_patch_is_refused_before_anything_is_pushed(packagea
         (packageable.out_dir / "queue.json").read_text(),
     ]
     assert not any(FAKE_KEY in text for text in artifacts)
+
+
+def test_an_empty_diff_is_named_rather_than_a_traceback(packageable):
+    """An agent that committed nothing exports neither file (§5.7). Reading
+    `patch.json` first turned the named outcome into a FileNotFoundError."""
+    (packageable.outcome.task_dir / "patch.diff").unlink()
+    (packageable.outcome.task_dir / "patch.json").unlink()
+
+    with pytest.raises(PackageError, match="nothing to package"):
+        package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+
+
+def test_a_credential_in_a_finding_is_refused_before_anything_is_pushed(packageable):
+    """The body is the cell's second channel to the remote: a claim, a rebuttal
+    argument and a verdict reason all reach GitHub without ever being in the
+    diff, and the diff is all `find_credentials` used to see."""
+    packageable.outcome.reviews = [
+        LensReview(
+            lens="correctness",
+            findings=[
+                Finding(
+                    lens="correctness",
+                    severity="concern",
+                    file="f.txt",
+                    line=3,
+                    claim=f"the key {FAKE_KEY} is hardcoded here",
+                    anchored=True,
+                )
+            ],
+        )
+    ]
+
+    result = package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+
+    assert result.state == "MERGE_FAILED"
+    assert "credential in the body" in result.note
+    # The same refusal, so the push never happened.
+    assert (
+        remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=packageable.work)
+        == ""
+    )
+    assert not any(
+        FAKE_KEY in text
+        for text in (
+            result.note,
+            str(dict(_state(packageable.ledger, packageable.task_id))),
+            (packageable.out_dir / "index.html").read_text(),
+        )
+    )
