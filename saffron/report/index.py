@@ -135,27 +135,26 @@ def append_queue_line(
 
     Appending rather than rewriting is what lets a second task join a first
     without the batch orchestrator that does not exist yet (sub-project C).
+    Validation precedes all writes to prevent bad rows being persisted.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     store = out_dir / "queue.json"
-    rows = _existing_queue_rows(store)
-    rows.append(asdict(line))
-    _atomic_write(store, json.dumps(rows, indent=2))
+    # Validate all rows before writing anything; malformed rows are dropped.
+    lines = _existing_queue_rows(store)
+    lines.append(line)
+    _atomic_write(store, json.dumps([asdict(ln) for ln in lines], indent=2))
     index = out_dir / "index.html"
-    _atomic_write(
-        index, render_index([QueueLine(**row) for row in rows], header=header)
-    )
+    _atomic_write(index, render_index(lines, header=header))
     return index
 
 
-def _existing_queue_rows(path: Path) -> list[dict]:
-    """Read existing queue.json, tolerating absence and corruption.
+def _existing_queue_rows(path: Path) -> list[QueueLine]:
+    """Read and validate existing queue.json, tolerating absence and corruption.
 
-    The queue is a rendered convenience, not a system of record: an
-    unreadable or malformed queue.json is dropped, never fatal to an append
-    whose prior rows and new row both succeed. ponytail: equivalent logic
-    lives in replay.py:_existing_lines and dies with replay.py (v1 deletes
-    it); upgrade path is one shared helper if a third caller ever appears.
+    Malformed rows (missing keys, wrong types) are silently dropped before any
+    write occurs. This matches replay.py's validation approach: JSON errors
+    discard the whole file, schema errors discard per-row. Validation always
+    precedes writes, so bad rows never get durably persisted.
     """
     if not path.is_file():
         return []
@@ -163,7 +162,16 @@ def _existing_queue_rows(path: Path) -> list[dict]:
         items = json.loads(path.read_text())
         if not isinstance(items, list):
             return []
-        return [item for item in items if isinstance(item, dict)]
+        lines = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            try:
+                lines.append(QueueLine(**item))
+            except (TypeError, KeyError):
+                # Malformed row (missing field, wrong type) — silently drop
+                continue
+        return lines
     except (json.JSONDecodeError, OSError):
         return []
 
