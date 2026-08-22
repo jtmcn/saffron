@@ -129,7 +129,7 @@ def _link(url: str) -> str:
 
 
 def append_queue_line(
-    out_dir: Path, line: QueueLine, *, header: dict[str, str]
+    out_dir: Path, line: QueueLine, *, header: dict[str, str] | None = None
 ) -> Path:
     """§5.7 step 4. Append, then re-render from the whole list.
 
@@ -143,9 +143,13 @@ def append_queue_line(
     # Validate all rows before computing output; unrenderable rows are dropped.
     lines = _existing_queue_rows(store)
     lines.append(line)
-    # The header is the batch's, not this task's: `out_dir` is shared and rows
-    # accumulate, so a caller's one-task spend would report only the last one.
-    header = {**header, "spend": f"${sum(ln.cost_usd_est or 0 for ln in lines):.2f}"}
+    # Counted here, and a caller cannot override either: `out_dir` is shared and
+    # rows accumulate, so a caller's one-task spend would report only the last one.
+    counted = {
+        "tasks": str(len(lines)),
+        "spend": f"${sum(ln.cost_usd_est or 0 for ln in lines):.2f}",
+    }
+    header = counted | {k: v for k, v in (header or {}).items() if k not in counted}
     # Compute all outputs before any write, so render failures leave nothing behind.
     queue_json = json.dumps([asdict(ln) for ln in lines], indent=2)
     index_html = render_index(lines, header=header)
@@ -164,11 +168,10 @@ def _existing_queue_rows(path: Path) -> list[QueueLine]:
     check passed rows that then wedged the render. `except Exception` is the
     right net for a validator whose whole job is "does this survive rendering".
 
-    ponytail: per-row drop, deliberately unlike replay.py's whole-file discard —
-    one hand-edited row should not cost the queue its good rows. The drop is
-    silent because the queue is a rendered convenience and the ledger is the
-    system of record; log the dropped rows if anyone needs to ask why one
-    vanished.
+    ponytail: per-row drop, not a whole-file discard — one hand-edited row
+    should not cost the queue its good rows. The drop is silent because the
+    queue is a rendered convenience and the ledger is the system of record; log
+    the dropped rows if anyone needs to ask why one vanished.
     """
     if not path.is_file():
         return []

@@ -241,10 +241,10 @@ def test_the_gate_results_are_kept_as_json_in_the_batch_tree(target, ledger, tmp
     assert {r["gate"] for r in recorded} == {"lint", "tests", "scope"}
 
 
-def test_a_corrupt_lines_json_does_not_wedge_the_replay(target, ledger, tmp_path):
+def test_a_corrupt_queue_json_does_not_wedge_the_replay(target, ledger, tmp_path):
     out_dir = tmp_path / "out"
     out_dir.mkdir()
-    (out_dir / "lines.json").write_text("{not valid json")
+    (out_dir / "queue.json").write_text("{not valid json")
 
     line = replay(
         target, 7, ledger=ledger, out_dir=out_dir, mirrors_dir=tmp_path / "mirrors"
@@ -252,17 +252,17 @@ def test_a_corrupt_lines_json_does_not_wedge_the_replay(target, ledger, tmp_path
 
     assert line.spec_id == "SY-9001"
     assert "SY-9001" in (out_dir / "index.html").read_text()
-    rewritten = json.loads((out_dir / "lines.json").read_text())
+    rewritten = json.loads((out_dir / "queue.json").read_text())
     assert [item["spec_id"] for item in rewritten] == ["SY-9001"]
 
 
-def test_a_lines_json_of_the_wrong_shape_does_not_wedge_the_replay(
+def test_a_queue_json_of_the_wrong_shape_does_not_wedge_the_replay(
     target, ledger, tmp_path
 ):
     out_dir = tmp_path / "out"
     out_dir.mkdir()
     # Well-formed JSON, but not a list of QueueLine-shaped objects.
-    (out_dir / "lines.json").write_text(json.dumps({"unexpected": "shape"}))
+    (out_dir / "queue.json").write_text(json.dumps({"unexpected": "shape"}))
 
     line = replay(
         target, 7, ledger=ledger, out_dir=out_dir, mirrors_dir=tmp_path / "mirrors"
@@ -270,7 +270,7 @@ def test_a_lines_json_of_the_wrong_shape_does_not_wedge_the_replay(
 
     assert line.spec_id == "SY-9001"
     assert "SY-9001" in (out_dir / "index.html").read_text()
-    rewritten = json.loads((out_dir / "lines.json").read_text())
+    rewritten = json.loads((out_dir / "queue.json").read_text())
     assert [item["spec_id"] for item in rewritten] == ["SY-9001"]
 
 
