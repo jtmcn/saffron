@@ -1,6 +1,8 @@
+from saffron.agents.findings import Finding
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
 from saffron.intake import parse_spec
+from saffron.phases.review import LensReview
 from saffron.report.index import QueueLine, render_index, sort_key
 from saffron.report.pr_body import render_pr_body
 
@@ -232,3 +234,123 @@ def test_every_state_the_driver_can_produce_ranks_above_ordinary():
 
     for state in ("EXHAUSTED", "ORPHANED", "NOT_IMPLEMENTED", "GATE_ERROR"):
         assert _STATE_RANK[state] < _ORDINARY, state
+
+
+def _finding(**kw):
+    base = dict(
+        lens="correctness",
+        severity="blocker",
+        file="a.py",
+        line=3,
+        claim="the tz default is wrong",
+        anchored=True,
+    )
+    return Finding(**{**base, **kw})
+
+
+def test_disagreements_sort_above_the_gate_table():
+    """§6: disagreements first, because that is where your judgment is worth
+    the most."""
+    body = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        reviews=[LensReview(lens="correctness", findings=[_finding()])],
+    )
+    assert body.index("Disagreements") < body.index("### Gates")
+
+
+def test_the_body_renders_two_columns_never_adjudication():
+    """rebut.py keeps `verdict` and `rebuttal`; `adjudication` is the
+    operator's, and it happens in GitHub against the PR this phase creates.
+    test_rebut.py asserts it is absent from the record — rendering it here is
+    chronologically impossible."""
+    body = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        reviews=[LensReview(lens="correctness", findings=[_finding()])],
+    )
+    assert "adjudication" not in body.lower()
+
+
+def test_an_unanchored_finding_still_appears():
+    """`anchored = False` is kept, never dropped: drop rate per lens is the
+    signal that a lens is badly prompted (§5.5)."""
+    body = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        reviews=[LensReview(lens="schema", findings=[_finding(anchored=False)])],
+    )
+    assert "the tz default is wrong" in body
+
+
+def test_the_test_file_diff_is_shown_separately():
+    """§7's second countermeasure for gate gaming. Filtered by the repo's
+    declared `integrity.test_paths` — not one line of language knowledge in
+    core (§2.1)."""
+    diff = (
+        "diff --git a/tests/test_x.py b/tests/test_x.py\n"
+        "--- a/tests/test_x.py\n+++ b/tests/test_x.py\n"
+        "@@ -1,3 +0,0 @@\n-def test_x():\n-    assert thing()\n"
+        "diff --git a/saffron/x.py b/saffron/x.py\n"
+        "--- a/saffron/x.py\n+++ b/saffron/x.py\n@@ -1 +1 @@\n-a\n+b\n"
+    )
+    body = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=2,
+        transcript_path="/t",
+        test_paths=["tests/**"],
+        diff=diff,
+    )
+    assert "Test files changed" in body
+    assert body.index("Test files changed") < body.index("### Gates")
+    assert "def test_x" in body
+
+
+def test_the_body_says_which_tree_the_gates_ran_on():
+    skipped = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        verified_on="base",
+    )
+    assert "base had not moved" in skipped
+    rerun = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        verified_on="packaged",
+    )
+    assert "packaged commit" in rerun
