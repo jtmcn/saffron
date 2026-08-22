@@ -948,3 +948,43 @@ def test_a_credential_in_a_finding_is_refused_before_anything_is_pushed(packagea
             (packageable.out_dir / "index.html").read_text(),
         )
     )
+
+
+def test_an_added_line_that_starts_with_a_plus_is_still_scanned():
+    """`+++` is a file header only outside a hunk. An added `++counter` reaches
+    the scanner as `+++counter`, and a patch quoted in a test fixture makes
+    every line it carries one — recognising the prefix alone hid all of them
+    from §5.7's refusal, which is the only thing keeping the cell's token off
+    the real remote."""
+    token = "sk-ant-oat01-EXAMPLE-NOT-REAL-0000"
+    patch = (
+        "diff --git a/tests/fixtures.py b/tests/fixtures.py\n"
+        "--- a/tests/fixtures.py\n"
+        "+++ b/tests/fixtures.py\n"
+        "@@ -1,1 +1,3 @@\n"
+        " PATCH = '''\n"
+        # Three `+`: the added-line marker, and content that is itself a
+        # patch line. `+++counter` is the added line `++counter`.
+        f'+++TOKEN = "{token}"\n'
+        "+++counter\n"
+    )
+    found = find_credentials(patch, token=token)
+    assert found
+    assert token not in " ".join(found)
+    assert "tests/fixtures.py" in " ".join(found)
+
+
+def test_an_added_line_shaped_like_a_header_does_not_re_point_the_path():
+    """An added `++ b/decoy.py` renders as `+++ b/decoy.py`. Read as a header it
+    renamed the file every later hit was attributed to."""
+    patch = (
+        "diff --git a/real.py b/real.py\n"
+        "+++ b/real.py\n"
+        "@@ -1,1 +1,2 @@\n"
+        # The added line `++ b/decoy.py`, not a file header.
+        "+++ b/decoy.py\n"
+        "+key = 'AKIAAAAAAAAAAAAAAAAA'\n"
+    )
+    found = find_credentials(patch, token=None)
+    assert found and "real.py" in " ".join(found)
+    assert "decoy.py" not in " ".join(found)

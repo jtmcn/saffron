@@ -145,12 +145,27 @@ def apply_patch(worktree: Path, patch: Path) -> str:
 
 def _added_lines(patch_text: str) -> list[tuple[str, str]]:
     """(path, added line) for every `+` line. A credential removed by the patch
-    is already in history and is not this push's doing."""
-    path, out = "?", []
+    is already in history and is not this push's doing.
+
+    `+++` is a file header only *outside* a hunk. Inside one it is the added
+    line `++...` — which a patch quoted in a test fixture produces for every
+    line it carries, and which C-style `++x` produces on its own. Recognising
+    it by prefix alone dropped those from the scan, and read an added `++ b/x`
+    as a header that re-pointed `path` for every later hit. `diff --git` needs
+    no such care: a context line is space-prefixed, so a bare one at column 0
+    is always a real stanza header.
+    """
+    path, out, in_hunk = "?", [], False
     for line in patch_text.splitlines():
-        if line.startswith("+++ b/"):
-            path = line.removeprefix("+++ b/")
-        elif line.startswith("+") and not line.startswith("+++"):
+        if line.startswith("@@"):
+            in_hunk = True
+        elif line.startswith("diff --git "):
+            in_hunk = False
+        if not in_hunk and line.startswith("+++ "):
+            if line.startswith("+++ b/"):
+                path = line.removeprefix("+++ b/")
+            continue
+        if line.startswith("+"):
             out.append((path, line[1:]))
     return out
 
