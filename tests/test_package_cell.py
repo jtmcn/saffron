@@ -36,7 +36,7 @@ def test_reverification_runs_the_suite_inside_a_cell(tmp_path):
     # Same sha for both suites: the subtraction must then be empty, which is
     # the invariant worth pinning — a non-empty result here would mean the
     # gates are not deterministic, not that the packaged commit is bad.
-    new_failures = reverify(
+    new_failures, head_results = reverify(
         mirror=mirror,
         packaged_sha=head,
         new_base_sha=head,
@@ -45,6 +45,9 @@ def test_reverification_runs_the_suite_inside_a_cell(tmp_path):
         watch=seen.append,
     )
     assert new_failures == []
+    # The head results are returned, not just the subtraction: the body's gate
+    # table has to show the run its own sentence claims.
+    assert head_results and all(r.status != "error" for r in head_results)
     assert any("baseline suite" in line for line in seen)
     assert any("head suite" in line for line in seen)
 

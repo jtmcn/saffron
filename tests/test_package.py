@@ -7,7 +7,7 @@ import pytest
 
 from saffron.agents.findings import Finding
 from saffron.gates.baseline import NewFailure
-from saffron.gates.contract import Failure
+from saffron.gates.contract import Failure, GateResult
 from saffron.ledger import Ledger
 from saffron.phases.package import (
     APPLY_CONFLICT,
@@ -769,7 +769,10 @@ def test_new_failures_after_the_rebase_are_the_tasks_failure(monkeypatch, packag
 
     monkeypatch.setattr(
         "saffron.phases.package.reverify",
-        lambda **_k: [NewFailure(gate="tests", failure=Failure(file="f.py", code="E"))],
+        lambda **_k: (
+            [NewFailure(gate="tests", failure=Failure(file="f.py", code="E"))],
+            [],
+        ),
     )
 
     result = package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
@@ -1003,3 +1006,36 @@ def test_a_branch_that_cannot_be_created_is_infrastructure(packageable):
         remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=packageable.work)
         == ""
     )
+
+
+def test_a_re_verified_body_shows_the_gates_that_re_ran(monkeypatch, packageable):
+    """`_verification` says the gates ran on the packaged commit, so the table
+    below it must be that run — not the cell's results at `base_sha`."""
+    (packageable.work / "other.txt").write_text("main moved\n")
+    git(packageable.work, "add", "-A")
+    git(packageable.work, "commit", "-qm", "main moved")
+    git(packageable.work, "push", "-q", "origin", "main")
+
+    packageable.outcome.gates = [
+        GateResult(
+            gate="tests", status="pass", tool="pytest 1.0", summary="ran at base"
+        )
+    ]
+    repackaged = GateResult(
+        gate="tests", status="pass", tool="pytest 9.9.9", summary="ran on the package"
+    )
+    monkeypatch.setattr(
+        "saffron.phases.package.reverify", lambda **_k: ([], [repackaged])
+    )
+
+    package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **packageable.kwargs,
+    )
+
+    body = (packageable.outcome.task_dir / "pr_body.md").read_text()
+    assert "packaged commit" in body
+    assert "ran on the package" in body
+    # The cell's run at `base_sha` must not be the one shown.
+    assert "ran at base" not in body

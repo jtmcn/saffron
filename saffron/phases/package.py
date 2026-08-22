@@ -21,6 +21,7 @@ from pathlib import Path
 
 from saffron.cell.worktree import DIFF_FLAGS
 from saffron.gates.baseline import NewFailure
+from saffron.gates.contract import GateResult
 from saffron.phases.review import anchored_concerns
 from saffron.report import index as index_report
 from saffron.report import pr_body
@@ -363,8 +364,12 @@ def reverify(
     policy,
     image: str,
     watch,
-) -> list[NewFailure]:
-    """Run the suite on the packaged commit, in a cell.
+) -> tuple[list[NewFailure], list[GateResult]]:
+    """Run the suite on the packaged commit, in a cell. Returns the new
+    failures *and* the head results, because the body's gate table has to show
+    the run its own sentence claims: `_verification` says "re-run on the
+    packaged commit", and rendering `outcome.gates` there would print durations
+    and summaries from the cell's run at `base_sha`.
 
     **Never host-side.** The applied tree carries `.saffron/gates/*` exactly as
     the patch left them, and exec'ing those on the host is the control plane
@@ -431,7 +436,7 @@ def reverify(
             runtime.remove_volume(f"{volume}-state")
             runtime.remove_network(network)
 
-    return subtract_baseline(results["head"], results["baseline"])
+    return subtract_baseline(results["head"], results["baseline"]), results["head"]
 
 
 @dataclass
@@ -554,11 +559,11 @@ def package(
         # reviewer sees on the pull request.
         added, removed = mirror_ops.diff_stat(mirror, fetch_head, pushed)
 
-        verified_on = "base"
+        verified_on, gates = "base", outcome.gates
         if needs_reverification(fetch_head, base_sha):
             # A gate that errored raises out of `reverify`: infrastructure, and
             # never this task's MERGE_FAILED.
-            new = reverify(
+            new, gates = reverify(
                 mirror=mirror,
                 packaged_sha=pushed,
                 new_base_sha=fetch_head,
@@ -593,7 +598,7 @@ def package(
         body_path = outcome.task_dir / "pr_body.md"
         body = pr_body.render_pr_body(
             spec,
-            outcome.gates,
+            gates,
             outcome.new_failures,
             base_sha=base_sha,
             head_sha=pushed,
