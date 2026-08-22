@@ -1,3 +1,5 @@
+import json
+
 from saffron.agents.findings import Finding
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
@@ -10,7 +12,7 @@ from saffron.phases.rebut import (
     Verdict,
 )
 from saffron.phases.review import LensReview
-from saffron.report.index import QueueLine, render_index, sort_key
+from saffron.report.index import QueueLine, append_queue_line, render_index, sort_key
 from saffron.report.pr_body import render_pr_body
 
 SPEC = parse_spec(
@@ -463,3 +465,58 @@ def test_disagreement_rows_attribute_the_right_rebuttal_to_the_right_blocker():
     assert "rebuttal two text" in row2
     assert "verdict two text" in row2
     assert "blocker one claim" not in row2
+
+
+def test_a_second_task_joins_the_first_without_an_orchestrator(tmp_path):
+    """Appending rather than rewriting is what lets sub-project C arrive later."""
+    first = QueueLine(
+        repo="saffron",
+        spec_id="SA-0005",
+        state="READY_FOR_REVIEW",
+        attempts=1,
+        cost_usd_est=6.4,
+        concerns=0,
+        added=10,
+        removed=2,
+        link="https://github.com/o/r/pull/7",
+    )
+    second = QueueLine(
+        repo="saffron",
+        spec_id="SA-0006",
+        state="MERGE_FAILED",
+        attempts=2,
+        cost_usd_est=3.1,
+        concerns=1,
+        added=4,
+        removed=0,
+        link="",
+        note="conflicts with #7",
+    )
+    append_queue_line(tmp_path, first, header={"spend": "$6.40"})
+    append_queue_line(tmp_path, second, header={"spend": "$9.50"})
+
+    stored = json.loads((tmp_path / "queue.json").read_text())
+    assert [row["spec_id"] for row in stored] == ["SA-0005", "SA-0006"]
+    html = (tmp_path / "index.html").read_text()
+    # MERGE_FAILED ranks above an ordinary green task (§6's sort order)
+    assert html.index("SA-0006") < html.index("SA-0005")
+
+
+def test_a_pull_request_link_is_not_labelled_artifacts(tmp_path):
+    """index.py:113 captioned every link `artifacts`; §6's own mock shows
+    `→ PR #211`. Repointing `link` at a PR without relabelling mislabels it."""
+    line = QueueLine(
+        repo="saffron",
+        spec_id="SA-0005",
+        state="READY_FOR_REVIEW",
+        attempts=1,
+        cost_usd_est=6.4,
+        concerns=0,
+        added=10,
+        removed=2,
+        link="https://github.com/o/r/pull/7",
+    )
+    append_queue_line(tmp_path, line, header={})
+    html = (tmp_path / "index.html").read_text()
+    assert "PR #7" in html
+    assert ">artifacts<" not in html

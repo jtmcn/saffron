@@ -6,7 +6,9 @@ ponytail: f-strings, not Jinja; see report/pr_body.py.
 from __future__ import annotations
 
 import html
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
 _STATE_RANK = {
     "SKIPPED": 0,
@@ -104,9 +106,39 @@ def _row(line: QueueLine) -> str:
         cost,
         concerns,
         f"+{line.added}/−{line.removed}",
-        f'<a href="{html.escape(line.link)}">artifacts</a>' if line.link else "",
+        _link(line.link),
     ]
     note = (
         f'<td class="note">{html.escape(line.note)}</td>' if line.note else "<td></td>"
     )
     return "  <tr>" + "".join(f"<td>{cell}</td>" for cell in cells) + note + "</tr>"
+
+
+def _link(url: str) -> str:
+    """A pull request is not an artifact directory. §6's own mock reads
+    `→ PR #211`, and a link captioned `artifacts` sends you to the wrong
+    mental model of the page."""
+    if not url:
+        return ""
+    label = (
+        f"PR #{url.rstrip('/').rsplit('/', 1)[-1]}" if "/pull/" in url else "artifacts"
+    )
+    return f'<a href="{html.escape(url)}">{html.escape(label)}</a>'
+
+
+def append_queue_line(
+    out_dir: Path, line: QueueLine, *, header: dict[str, str]
+) -> Path:
+    """§5.7 step 4. Append, then re-render from the whole list.
+
+    Appending rather than rewriting is what lets a second task join a first
+    without the batch orchestrator that does not exist yet (sub-project C).
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    store = out_dir / "queue.json"
+    rows = json.loads(store.read_text()) if store.is_file() else []
+    rows.append(asdict(line))
+    store.write_text(json.dumps(rows, indent=2))
+    index = out_dir / "index.html"
+    index.write_text(render_index([QueueLine(**row) for row in rows], header=header))
+    return index
