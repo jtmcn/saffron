@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 _SLUG = re.compile(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$")
@@ -253,3 +254,64 @@ def push_with_lease(worktree: Path, *, url: str, branch: str, expect: str) -> No
         if "stale info" in stderr:
             raise LeaseRejected(f"the branch moved underneath us: {stderr}")
         raise PackageError(f"push failed: {stderr}")
+
+
+GhRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
+
+
+def run_gh(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(argv, capture_output=True, text=True, check=False)
+
+
+def open_draft_pr(
+    *,
+    slug: str,
+    branch: str,
+    base: str,
+    title: str,
+    body_path: Path,
+    gh: GhRunner = run_gh,
+) -> str:
+    """Open the pull request as a draft, or report the one already there.
+
+    Called *after* the push, deliberately: a missing or unauthenticated `gh`
+    then leaves a branch you can open by hand, where the other order loses the
+    work to a CLI.
+    """
+    create = [
+        "gh",
+        "pr",
+        "create",
+        "--repo",
+        slug,
+        "--draft",
+        "--base",
+        base,
+        "--head",
+        branch,
+        # Not optional: without it and without --fill, gh prompts, and a prompt
+        # in an unattended batch is a hang.
+        "--title",
+        title,
+        "--body-file",
+        str(body_path),
+    ]
+    try:
+        done = gh(create)
+    except OSError as exc:
+        raise PackageError(
+            f"gh is unavailable ({exc}); branch {branch} is already pushed, so "
+            "the pull request can be opened by hand"
+        ) from exc
+    if done.returncode == 0:
+        return done.stdout.strip().splitlines()[-1]
+
+    view = gh(
+        ["gh", "pr", "view", branch, "--repo", slug, "--json", "url", "--jq", ".url"]
+    )
+    if view.returncode == 0 and view.stdout.strip():
+        return view.stdout.strip()
+    raise PackageError(
+        f"gh could not open or find a pull request for {branch} "
+        f"(it is already pushed): {done.stderr.strip()[:200]}"
+    )

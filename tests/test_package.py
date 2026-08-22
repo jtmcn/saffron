@@ -1,4 +1,5 @@
 import subprocess
+import subprocess as sp
 
 import pytest
 
@@ -14,6 +15,7 @@ from saffron.phases.package import (
     find_credentials,
     github_slug,
     neutralize,
+    open_draft_pr,
     push_with_lease,
     real_remote,
     remote_sha,
@@ -341,3 +343,68 @@ def test_remote_sha_raises_rather_than_reporting_absent(tmp_path):
     bad_url = str(tmp_path / "does-not-exist.git")
     with pytest.raises(PackageError, match="cannot reach"):
         remote_sha(bad_url, "saffron/SA-0005", cwd=tmp_path)
+
+
+def fake_gh(calls, *, create_rc=0, url="https://github.com/o/r/pull/7", view_url=""):
+    def run(argv):
+        calls.append(argv)
+        if argv[1] == "pr" and argv[2] == "create":
+            return sp.CompletedProcess(argv, create_rc, url + "\n", "already exists")
+        return sp.CompletedProcess(argv, 0, view_url + "\n", "")
+
+    return run
+
+
+def test_the_pr_is_a_draft_and_always_carries_a_title(tmp_path):
+    """Without --title and without --fill, `gh` prompts — unattended that hangs."""
+    body = tmp_path / "body.md"
+    body.write_text("## body\n")
+    calls = []
+    url = open_draft_pr(
+        slug="o/r",
+        branch="saffron/SA-0005",
+        base="main",
+        title="SA-0005 package",
+        body_path=body,
+        gh=fake_gh(calls),
+    )
+    assert url == "https://github.com/o/r/pull/7"
+    argv = calls[0]
+    assert "--draft" in argv
+    assert "--title" in argv
+    assert "--body-file" in argv
+
+
+def test_a_second_package_reports_the_existing_pr(tmp_path):
+    """§4.2's CHANGES_REQUESTED re-queue path: the push already updated it."""
+    body = tmp_path / "body.md"
+    body.write_text("## body\n")
+    calls = []
+    url = open_draft_pr(
+        slug="o/r",
+        branch="saffron/SA-0005",
+        base="main",
+        title="SA-0005 package",
+        body_path=body,
+        gh=fake_gh(calls, create_rc=1, view_url="https://github.com/o/r/pull/3"),
+    )
+    assert url == "https://github.com/o/r/pull/3"
+    assert calls[1][2] == "view"
+
+
+def test_a_missing_gh_is_infrastructure_and_says_the_branch_is_pushed(tmp_path):
+    body = tmp_path / "body.md"
+    body.write_text("## body\n")
+
+    def missing(argv):
+        raise FileNotFoundError("gh")
+
+    with pytest.raises(PackageError, match="already pushed"):
+        open_draft_pr(
+            slug="o/r",
+            branch="saffron/SA-0005",
+            base="main",
+            title="t",
+            body_path=body,
+            gh=missing,
+        )
