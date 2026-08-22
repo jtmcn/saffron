@@ -230,6 +230,12 @@ def plan_checkpoint(
                 spent += attempt.cost_usd_est
                 continue
             return attempt, artifacts.parse_output_block(attempt.text), spent
+    except artifacts.PlanRejected as rejected:
+        # The same accounting the crash path gets, for the same reason: two
+        # turns can run before a shape rejection is final, and a checkpoint
+        # that rejects is still a checkpoint that spent (§4.1).
+        rejected.spent_usd = spent
+        raise
     except implement.AgentFailed as failed:
         # A crashed plan turn is not a plan rejected on content, and the cell is
         # still alive, so it is not ORPHANED either (§4.5). The exception keeps
@@ -612,7 +618,7 @@ def _drive_cell(
                 watch=watch,
             )
         except artifacts.PlanRejected as rejected:
-            watch(f"PLAN: rejected — {rejected}")
+            watch(f"PLAN: rejected, ${rejected.spent_usd:.2f} spent — {rejected}")
             ledger.set_task_state(task_id, "PLAN_REJECTED")
             ledger.finish_run(run_id, "COMPLETE")
             return CellOutcome(
@@ -620,6 +626,7 @@ def _drive_cell(
                 task_id=task_id,
                 run_id=run_id,
                 task_dir=task_dir,
+                spent_usd=rejected.spent_usd,
             )
         except implement.AgentFailed as failed:
             # No plan and no commits, but a live cell: the earned state, not the

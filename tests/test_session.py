@@ -1177,3 +1177,22 @@ def test_a_plan_turn_that_failed_reports_what_it_spent(monkeypatch, tmp_path):
     assert outcome.state == "NOT_IMPLEMENTED"
     assert outcome.spent_usd == 0.4
     assert any("$0.40 spent" in line for line in cell.watched)
+
+
+def test_a_plan_rejected_on_shape_reports_both_turns_it_spent(monkeypatch, tmp_path):
+    """The checkpoint's other exit. A shape rejection is final only after the
+    one re-prompt has also run, so two turns are paid for before the plan is
+    refused — and `PlanRejected`'s "no implementation token is spent" is about
+    implementation, not about the checkpoint."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        # Neither turn returns the schema: the first is re-prompted, the second
+        # is final.
+        turns=[_turn("not a plan", cost=0.4), _turn("still not a plan", cost=0.4)],
+    )
+    assert outcome.state == "PLAN_REJECTED"
+    assert outcome.spent_usd == 0.8
+    assert any("$0.80 spent" in line for line in cell.watched)

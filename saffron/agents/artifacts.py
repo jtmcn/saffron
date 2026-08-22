@@ -27,7 +27,11 @@ _BLOCK = re.compile(r"<output>(.*?)</output>", re.DOTALL)
 
 
 class PlanRejected(Exception):
-    """The plan failed host-side validation. No implementation token is spent."""
+    """The plan failed host-side validation. No *implementation* token is spent
+    — but the checkpoint's own turns were, and a shape rejection is final only
+    after a second one has run. `plan_checkpoint` sets `spent_usd`."""
+
+    spent_usd: float = 0.0
 
 
 class PlanNotSchema(PlanRejected):
