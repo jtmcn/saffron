@@ -18,6 +18,14 @@ from pathlib import Path
 
 _SLUG = re.compile(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$")
 
+APPLY_OK = "ok"
+APPLY_CONFLICT = "conflict"
+
+# Measured on git 2.50.1 (Apple Git-155). Both of these appear on stderr while
+# git exits 0, which is why neither the exit code nor the output alone decides.
+_NO_BLOB = "lacks the necessary blob"
+_NO_FULL_INDEX = "without full index line"
+
 
 class PackageError(RuntimeError):
     """Infrastructure. Raised, caught by `cli.main`, exits 2 (§3.3)."""
@@ -63,3 +71,47 @@ def default_branch(url: str, *, cwd: Path) -> str:
         if line.startswith("ref: "):
             return line.removeprefix("ref: ").split("\t")[0].removeprefix("refs/heads/")
     raise PackageError(f"{url} reported no symbolic HEAD")
+
+
+def assert_base_objects(mirror: Path, base_sha: str) -> None:
+    """Refuse to apply against a mirror missing the patch's preimage.
+
+    Without this, `--3way` degrades to a context match and reports success —
+    see `apply_patch`. Checked up front so the failure names its cause.
+    """
+    done = _run(mirror, "cat-file", "-e", f"{base_sha}^{{tree}}")
+    if done.returncode != 0:
+        raise PackageError(
+            f"mirror {mirror} lacks the objects for base {base_sha[:12]}, so a "
+            "three-way merge cannot be performed"
+        )
+
+
+def apply_patch(worktree: Path, patch: Path) -> str:
+    """Apply the cell's squashed patch. §5.7's rebase, one commit long.
+
+    Two measured hazards, and the exit code alone catches neither:
+
+    - A **conflicting** apply exits 1 *and writes the file*, with `<<<<<<<`
+      markers and a staged `U` entry. Non-zero is APPLY_CONFLICT and the
+      worktree must be discarded unread — never committed.
+    - A **degraded** apply exits **0**: with the preimage blob absent and the
+      hunk's context matching, git falls back to direct application and
+      succeeds. That is `error`, not `pass` — the toolchain, charged to nobody.
+    """
+    if not patch.is_file():
+        raise PackageError(f"no patch at {patch}: there is nothing to package")
+    done = _run(worktree, "apply", "--3way", "--index", str(patch))
+    stderr = done.stderr
+    if _NO_FULL_INDEX in stderr:
+        raise PackageError(
+            "the patch carries a binary change with no full index line, so it "
+            "was never appliable — not a conflict"
+        )
+    if _NO_BLOB in stderr:
+        raise PackageError(
+            "git fell back to direct application: the preimage blob is absent, "
+            "so no three-way merge happened and a clean exit would mean only "
+            "that the context matched"
+        )
+    return APPLY_OK if done.returncode == 0 else APPLY_CONFLICT
