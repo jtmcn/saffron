@@ -414,6 +414,11 @@ def run_one_cell(
     # the two that were never attempted are not survivors of anything.
     created: set[str] = set()
 
+    # Bound before the try, not by plan_checkpoint's assignment: RateLimited can
+    # unwind from anywhere in the body, and the accumulated total must survive
+    # even when it fires before that assignment runs.
+    spent = 0.0
+
     try:
         # Inside the guarantee, not above it: a leftover network from a SIGKILLed
         # run makes `create_network` the first thing that raises on a re-run.
@@ -819,10 +824,14 @@ def run_one_cell(
         )
         ledger.set_task_state(task_id, "RATE_LIMITED")
         ledger.finish_run(run_id, "COMPLETE")
-        # `spent` is not safe to read here: the window can close mid-plan, before
-        # `plan_checkpoint`'s assignment ever completes (§4.1's binding trap).
+        # Accurate for a window closed during repair/review/rebut; still 0.00 if
+        # it closed inside plan_checkpoint — that tally is lost with its frame.
         return CellOutcome(
-            state="RATE_LIMITED", task_id=task_id, run_id=run_id, task_dir=task_dir
+            state="RATE_LIMITED",
+            task_id=task_id,
+            run_id=run_id,
+            task_dir=task_dir,
+            spent_usd=spent,
         )
     except BaseException:
         # A run row left open is a run that reads as still going. Preflight
