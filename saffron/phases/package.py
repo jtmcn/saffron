@@ -17,6 +17,8 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+from saffron.gates.baseline import NewFailure
+
 _SLUG = re.compile(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$")
 
 APPLY_OK = "ok"
@@ -315,3 +317,83 @@ def open_draft_pr(
         f"gh could not open or find a pull request for {branch} "
         f"(it is already pushed): {done.stderr.strip()[:200]}"
     )
+
+
+def needs_reverification(fetch_head: str, base_sha: str) -> bool:
+    """Re-run only when the base moved (§5.7).
+
+    Equal shas mean the packaged tree is the tree the suite already ran on, so
+    a re-run is provably redundant rather than merely expensive.
+    """
+    return fetch_head != base_sha
+
+
+def reverify(
+    *,
+    mirror: Path,
+    packaged_sha: str,
+    new_base_sha: str,
+    policy,
+    image: str,
+    watch,
+) -> list[NewFailure]:
+    """Run the suite on the packaged commit, in a cell.
+
+    **Never host-side.** The applied tree carries `.saffron/gates/*` exactly as
+    the patch left them, and exec'ing those on the host is the control plane
+    executing model-authored code — the one thing §2 says it never does.
+
+    Twice, because the base moved: the old baseline describes a tree that no
+    longer exists, and comparing against it would charge this task with the
+    default branch's own drift. So a fresh baseline at `new_base_sha`, the head
+    suite at `packaged_sha`, and the usual subtraction (§4.4 steps 2-3).
+    """
+    from saffron.cell import runtime, worktree
+    from saffron.gates import runner
+    from saffron.gates.baseline import subtract_baseline
+
+    results = {}
+    for label, sha in (("baseline", new_base_sha), ("head", packaged_sha)):
+        volume = f"saffron-pkg-{label}-{sha[:12]}"
+        container = f"saffron-pkg-{label}-{sha[:12]}"
+        network = f"{container}-net"
+        created: set[str] = set()
+        try:
+            # `create_network` hardcodes --internal (runtime.py:146) and
+            # returns None, so the name is ours to hold. Passed explicitly to
+            # `prepare_worktree` because a cell created without a network joins
+            # the runtime's default one with full egress, and every control the
+            # caller ran then applies to some other container (Appendix I).
+            runtime.create_network(network)
+            runtime.create_volume(volume)
+            created.add(volume)
+            worktree.prepare_worktree(
+                mirror=mirror,
+                volume=volume,
+                base_sha=sha,
+                branch=f"pkg-{label}",
+                image=image,
+                container=container,
+                # No agent, no credential, and no route out: this cell only
+                # runs gates.
+                network=network,
+                env={},
+                created=created,
+            )
+            watch(f"re-verify: {label} suite at {sha[:12]}")
+            # Gate paths are cell-side (`/work/.saffron/gates/...`); `cwd` is
+            # a host path that `CellExecutor` ignores. Same shape as
+            # `session.py:387` and `:508` — matched deliberately, so the two
+            # suites cannot drift in how they name a gate.
+            results[label] = runner.run_suite(
+                policy.gate_executables(Path(worktree.WORKTREE_MOUNT)),
+                cwd=mirror,
+                executor=runner.CellExecutor(container),
+            )
+        finally:
+            runtime.remove_container(container)
+            runtime.remove_volume(volume)
+            runtime.remove_volume(f"{volume}-state")
+            runtime.remove_network(network)
+
+    return subtract_baseline(results["head"], results["baseline"])

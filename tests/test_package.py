@@ -14,6 +14,7 @@ from saffron.phases.package import (
     default_branch,
     find_credentials,
     github_slug,
+    needs_reverification,
     neutralize,
     open_draft_pr,
     push_with_lease,
@@ -408,3 +409,17 @@ def test_a_missing_gh_is_infrastructure_and_says_the_branch_is_pushed(tmp_path):
             body_path=body,
             gh=missing,
         )
+
+
+def test_an_unmoved_base_makes_reverification_provably_redundant():
+    """If the default branch head still equals base_sha, the packaged tree is
+    byte-identical to the one the suite already ran on. Skipping is not a
+    shortcut — re-running could not produce a different answer."""
+    assert not needs_reverification("a" * 40, "a" * 40)
+
+
+def test_a_moved_base_requires_reverification():
+    """Otherwise the gate table would publish `pass` for a suite that ran
+    against base_sha's tree, on a commit whose tree is today's main plus the
+    patch — the tool-field defect of §5.4 in a new costume."""
+    assert needs_reverification("b" * 40, "a" * 40)
