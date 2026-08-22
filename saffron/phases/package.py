@@ -349,15 +349,23 @@ def reverify(
     suite at `packaged_sha`, and the usual subtraction (§4.4 steps 2-3).
     """
     from saffron.cell import runtime, worktree
+    from saffron.cell.session import aborted_gates
     from saffron.gates import runner
     from saffron.gates.baseline import subtract_baseline
 
     results = {}
     for label, sha in (("baseline", new_base_sha), ("head", packaged_sha)):
-        volume = f"saffron-pkg-{label}-{sha[:12]}"
-        container = f"saffron-pkg-{label}-{sha[:12]}"
+        # Keyed on packaged_sha, not the loop's `sha`: new_base_sha is the
+        # current default-branch head, identical for every task packaging in
+        # this window (DESIGN.md N4, up to 3 concurrent), so keying the
+        # baseline suite on it would let two tasks compute the same
+        # container/volume/network and one's `finally` tear down the other's
+        # still-running cell. packaged_sha is a freshly made commit, unique
+        # per task, so it separates tasks; `label` still separates baseline
+        # from head within one task.
+        volume = f"saffron-pkg-{label}-{packaged_sha[:12]}"
+        container = f"saffron-pkg-{label}-{packaged_sha[:12]}"
         network = f"{container}-net"
-        created: set[str] = set()
         try:
             # `create_network` hardcodes --internal (runtime.py:146) and
             # returns None, so the name is ours to hold. Passed explicitly to
@@ -366,7 +374,6 @@ def reverify(
             # caller ran then applies to some other container (Appendix I).
             runtime.create_network(network)
             runtime.create_volume(volume)
-            created.add(volume)
             worktree.prepare_worktree(
                 mirror=mirror,
                 volume=volume,
@@ -378,7 +385,6 @@ def reverify(
                 # runs gates.
                 network=network,
                 env={},
-                created=created,
             )
             watch(f"re-verify: {label} suite at {sha[:12]}")
             # Gate paths are cell-side (`/work/.saffron/gates/...`); `cwd` is
@@ -390,6 +396,13 @@ def reverify(
                 cwd=mirror,
                 executor=runner.CellExecutor(container),
             )
+            # error != fail (§5.4): a gate that broke must abort the package,
+            # not net to an empty diff against an equally-broken baseline.
+            if broken := aborted_gates(results[label]):
+                raise PackageError(
+                    f"{label} suite at {sha[:12]}: {', '.join(broken)} errored "
+                    "rather than ran — infrastructure, not a task defect"
+                )
         finally:
             runtime.remove_container(container)
             runtime.remove_volume(volume)

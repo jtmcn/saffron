@@ -21,9 +21,11 @@ def test_reverification_runs_the_suite_inside_a_cell(tmp_path):
     """The applied tree carries the repo's own `.saffron/gates/*`; running them
     on the host would be the control plane executing model-authored code (§2).
 
-    Asserts they ran *and* that every result carries a `tool` — a gate that
-    never ran reads identically otherwise (§5.4, Appendix H). This is the
-    "run the tool, don't merely locate it" rule as a test.
+    Asserts `reverify` completes and reports both suites via `watch`. The
+    empty-diff assertion below is not vacuous: `reverify` raises
+    `PackageError` if either suite has an errored gate (`aborted_gates`), so
+    two silently-broken suites cannot net to `new_failures == []` here — only
+    two suites that both actually ran and passed can.
     """
     mirror = mirror_ops.ensure_mirror(SAFFRON_ROOT, tmp_path / "m.git")
     head = mirror_ops._git(mirror, "rev-parse", "HEAD")
