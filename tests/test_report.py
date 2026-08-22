@@ -1006,3 +1006,31 @@ def test_a_v0_batch_tree_keeps_its_rows_across_the_store_rename(tmp_path):
     assert [row["spec_id"] for row in stored] == ["SA-0001", "SA-0002"]
     assert "SA-0001" in index.read_text()
     assert not (tmp_path / "lines.json").exists()
+
+
+def test_a_long_backtick_run_cannot_evict_the_gate_table(tmp_path):
+    """The fence is cell-authored and unbounded — a context line of 5,000
+    backticks needs a 5,001-character fence at each end. Sized against a fixed
+    reserve, the diff overshot its budget and the body's last-resort clamp paid
+    for it out of the *end*: the gate table, the findings and the provenance,
+    which are the sections that must survive (§5.7)."""
+    for run in (0, 33, 5_000, 20_000):
+        lines = [f"+assert x == {n}" for n in range(9000)]
+        lines[5] = " " + "`" * run  # a context line, one leading space
+        rendered = render_pr_body(
+            SPEC,
+            RESULTS,
+            [],
+            base_sha="a" * 40,
+            head_sha="b" * 40,
+            added=9000,
+            removed=0,
+            transcript_path="~/.saffron/batches/1",
+            test_paths=["tests/**"],
+            diff=_diff_of(lines),
+        )
+        assert len(rendered) <= 65_536, run
+        assert "### Gates" in rendered and "### Provenance" in rendered, run
+        fence = rendered.split("diff\n", 1)[0].rsplit("\n", 1)[-1]
+        assert len(fence) > run, run
+        assert rendered.count(fence + "\n") == 1, run  # opened and closed

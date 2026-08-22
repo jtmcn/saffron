@@ -90,7 +90,7 @@ def render_pr_body(
     # Last resort: the tables are unbounded too — a lens with a hundred
     # findings outruns the limit on its own. A trimmed body still opens the
     # pull request, and every artifact it names is on disk regardless.
-    return body if len(body) <= _BODY_LIMIT else body[:_BODY_LIMIT] + "\n"
+    return body if len(body) <= _BODY_LIMIT else body[:_BODY_LIMIT]
 
 
 def _cell(value: object) -> str:
@@ -240,15 +240,20 @@ def _test_diff(diff: str, test_paths: list[str], *, budget: int = _BODY_LIMIT) -
         "test (§7).\n\n"
     )
     body, note = "".join(sections), ""
-    # 64 for the two fences; a budget that cannot hold the prose plus a usable
-    # amount of diff drops the section rather than emitting a stub.
-    room = budget - len(head) - len(_TRUNCATED) - 64
+    # The fence is measured before the room it has to fit in, and on the whole
+    # diff: it is cell-authored and unbounded — a context line of 5,000
+    # backticks costs 10,000 of the budget — and a fixed reserve let the
+    # section overshoot, which the last-resort clamp then paid for out of the
+    # *end* of the body, cutting the gate table and the findings. Truncating
+    # can only shorten a backtick run, so this is a safe upper bound.
+    # 6: `diff\n` and the closing fence's own newline.
+    fence = _fence(body)
+    room = budget - len(head) - len(_TRUNCATED) - 2 * len(fence) - 6
     if room < 200:
         return ""
     if len(body) > room:
         # Cut at a line boundary: the closing fence has to start a line.
         body, note = body[:room].rsplit("\n", 1)[0] + "\n", _TRUNCATED
-    fence = _fence(body)
     return f"{head}{fence}diff\n{body}{fence}\n{note}"
 
 
