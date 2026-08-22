@@ -386,7 +386,17 @@ def run_one_cell(
     policy, policy_sha = load_policy(repo)
     gates = policy.gate_executables(Path(worktree.WORKTREE_MOUNT))
 
-    repo_id = ledger.upsert_repo(repo.name, str(repo), str(mirror), policy_sha)
+    # §4.1: `origin` is the real remote, `mirror_path` the local mirror. v0
+    # stored the mirror's source in both, so nothing downstream knew where a
+    # pull request would go. A repo with no origin is still runnable — it just
+    # cannot be packaged, and PACKAGE is what says so.
+    from saffron.phases import package
+
+    try:
+        origin_url = package.real_remote(repo)
+    except package.PackageError:
+        origin_url = str(repo)
+    repo_id = ledger.upsert_repo(repo.name, origin_url, str(mirror), policy_sha)
     run_id = ledger.create_run(repo_id, spec.base_sha)
     task_id = ledger.create_task(
         run_id,
