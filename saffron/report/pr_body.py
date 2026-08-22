@@ -12,7 +12,7 @@ from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import GateResult
 from saffron.intake import Spec
 from saffron.phases.rebut import RebutResult
-from saffron.phases.review import LensReview
+from saffron.phases.review import LensReview, anchored_blockers
 
 
 def render_pr_body(
@@ -36,7 +36,8 @@ def render_pr_body(
     sections = [
         f"## {spec.id} — {spec.title}",
         "",
-        f"`{spec.type}` · risk `{spec.risk}` · +{added}/−{removed}",
+        f"`{spec.type}` · risk `{spec.risk}` · +{added}/−{removed} · "
+        f"{attempts} attempt{'' if attempts == 1 else 's'} · ${spent_usd:.2f}",
         "",
         _criteria(spec),
         _new_failures(new_failures),
@@ -95,9 +96,7 @@ def _disagreements(reviews: list[LensReview], rebut_result: RebutResult | None) 
     """§6: disagreements first. Two columns — the implementer's rebuttal and
     the critic's verdict. Never `adjudication`: that is the operator's, and it
     happens in GitHub against the pull request this phase is creating."""
-    anchored = [
-        f for r in reviews for f in r.findings if f.anchored and f.severity == "blocker"
-    ]
+    anchored = anchored_blockers(reviews)
     if not anchored:
         return ""
     rebuttals = {}

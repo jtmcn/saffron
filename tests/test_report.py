@@ -2,6 +2,13 @@ from saffron.agents.findings import Finding
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
 from saffron.intake import parse_spec
+from saffron.phases.rebut import (
+    LensVerdicts,
+    RebutResult,
+    Rebuttal,
+    RebuttalTurn,
+    Verdict,
+)
 from saffron.phases.review import LensReview
 from saffron.report.index import QueueLine, render_index, sort_key
 from saffron.report.pr_body import render_pr_body
@@ -354,3 +361,105 @@ def test_the_body_says_which_tree_the_gates_ran_on():
         verified_on="packaged",
     )
     assert "packaged commit" in rerun
+
+
+def test_the_header_line_carries_attempt_count_and_cost():
+    singular = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        attempts=1,
+        spent_usd=2.5,
+    )
+    assert "1 attempt " in singular
+    assert "$2.50" in singular
+    plural = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        attempts=3,
+        spent_usd=0,
+    )
+    assert "3 attempts" in plural
+
+
+def test_disagreement_rows_attribute_the_right_rebuttal_to_the_right_blocker():
+    """Row N must carry blocker N's own rebuttal and verdict, not just any
+    row and any rebuttal. `_disagreements` numbers `anchored_blockers(reviews)`
+    from 1 and looks up `RebutResult` by that same number — if the selection
+    rule ever drifts from the one `rebut.py` numbered against, this catches
+    the silent mis-attribution rather than just noticing rows exist."""
+    reviews = [
+        LensReview(
+            lens="correctness",
+            findings=[_finding(claim="blocker one claim", file="a.py", line=1)],
+        ),
+        LensReview(
+            lens="contract",
+            findings=[_finding(claim="blocker two claim", file="b.py", line=2)],
+        ),
+    ]
+    rebut_result = RebutResult(
+        state="READY_FOR_REVIEW",
+        why="test",
+        rebuttal=RebuttalTurn(
+            rebuttals=[
+                Rebuttal(finding=1, action="argued", argument="rebuttal one text"),
+                Rebuttal(finding=2, action="fixed", argument="rebuttal two text"),
+            ]
+        ),
+        verdicts=[
+            LensVerdicts(
+                lens="correctness",
+                verdicts=[
+                    Verdict(finding=1, verdict="confirmed", reason="verdict one text")
+                ],
+            ),
+            LensVerdicts(
+                lens="contract",
+                verdicts=[
+                    Verdict(finding=2, verdict="withdrawn", reason="verdict two text")
+                ],
+            ),
+        ],
+        moved=True,
+        cost_usd=0.0,
+    )
+    body = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        reviews=reviews,
+        rebut_result=rebut_result,
+    )
+    rows = [
+        line
+        for line in body.splitlines()
+        if line.startswith("| 1 ") or line.startswith("| 2 ")
+    ]
+    row1 = next(r for r in rows if r.startswith("| 1 "))
+    row2 = next(r for r in rows if r.startswith("| 2 "))
+    assert "blocker one claim" in row1
+    assert "rebuttal one text" in row1
+    assert "verdict one text" in row1
+    assert "blocker two claim" not in row1
+    assert "rebuttal two text" not in row1
+    assert "blocker two claim" in row2
+    assert "rebuttal two text" in row2
+    assert "verdict two text" in row2
+    assert "blocker one claim" not in row2

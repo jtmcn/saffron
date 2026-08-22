@@ -751,12 +751,7 @@ def run_one_cell(
 
         if outcome == "REBUTTING":
             ledger.set_task_state(task_id, "REBUTTING")
-            blockers = [
-                f
-                for r in reviews
-                for f in r.findings
-                if f.anchored and f.severity == "blocker"
-            ]
+            blockers = review.anchored_blockers(reviews)
             if _over_budget():
                 outcome = "EXHAUSTED"
             else:

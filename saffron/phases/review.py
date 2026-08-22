@@ -219,6 +219,16 @@ def _describe(review: LensReview) -> str:
     )
 
 
+def anchored_blockers(reviews: Sequence[LensReview]) -> list[Finding]:
+    """Anchored blockers, in order. ORDER IS LOAD-BEARING: `rebut.py` numbers
+    this result from 1, and the pull-request body renders `_disagreements`
+    against those same numbers — the single selection rule every caller of
+    REBUT's blocker list must share."""
+    return [
+        f for r in reviews for f in r.findings if f.anchored and f.severity == "blocker"
+    ]
+
+
 def review_state(reviews: Sequence[LensReview]) -> tuple[str, str]:
     """The task's state after REVIEW, and the one line that says why.
 
@@ -229,9 +239,7 @@ def review_state(reviews: Sequence[LensReview]) -> tuple[str, str]:
     """
     if errored := [r.lens for r in reviews if r.error]:
         return "REVIEWING", f"{errored} produced no findings — the review is incomplete"
-    blockers = [
-        f for r in reviews for f in r.findings if f.anchored and f.severity == "blocker"
-    ]
+    blockers = anchored_blockers(reviews)
     if blockers:
         return "REBUTTING", f"{len(blockers)} blocker(s) — the implementer rebuts"
     concerns = sum(
