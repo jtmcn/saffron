@@ -238,7 +238,14 @@ def test_no_token_in_the_environment_still_scans_known_shapes():
 
 @pytest.mark.parametrize(
     "text",
-    ["Fixes #12", "closes #45", "Resolved #7", "ping @someone"],
+    [
+        "Fixes #12",
+        "closes #45",
+        "Resolved #7",
+        "ping @someone",
+        "Fixes GH-12",
+        "Fixes owner/repo#12",
+    ],
 )
 def test_github_acts_on_model_authored_text_so_it_is_defanged(text):
     """GitHub closes issues named in a commit body AND a PR body, and notifies

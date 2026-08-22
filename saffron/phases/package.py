@@ -37,8 +37,12 @@ _CREDENTIAL_SHAPES = (
     ("a private key block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
 )
 
+# ponytail: covers #N, GH-N, and owner/repo#N — not the full issue-URL form
+# (`https://github.com/o/r/issues/12`), which GitHub also closes on. The
+# upgrade path is matching that URL shape, not more keyword lookaheads.
 _CLOSES = re.compile(
-    r"\b(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed))\b(?=\s*:?\s*#\d)",
+    r"\b(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed))\b"
+    r"(?=\s*:?\s*(?:[\w.-]+/[\w.-]+)?(?:#|GH-)\d)",
     re.IGNORECASE,
 )
 _MENTION = re.compile(r"(?<![\w/])@(?=\w)")
@@ -154,6 +158,7 @@ def find_credentials(patch_text: str, *, token: str | None) -> list[str]:
     """
     found = []
     for path, line in _added_lines(patch_text):
+        # length guard: a short/empty token would substring-match unrelated lines.
         if token and len(token) > 8 and token in line:
             found.append(f"{path}: the cell's own CLAUDE_CODE_OAUTH_TOKEN")
             continue
