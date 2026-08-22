@@ -68,6 +68,8 @@ def test_a_worktree_is_cloned_into_a_volume_and_the_cell_can_commit(tmp_path, ne
         assert worktree.commits_ahead(container, base) == 1
         patch = worktree.export_patch(container, base)
         assert "two" in patch
+        # The squash body's only record of what the agent actually committed.
+        assert worktree.commit_subjects(container, base) == ["second"]
     finally:
         runtime.remove_container(container)
         runtime.remove_volume(volume)

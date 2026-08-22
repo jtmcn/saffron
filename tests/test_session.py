@@ -62,6 +62,22 @@ def test_no_errored_gate_means_no_abort():
     assert session.aborted_gates(results) == []
 
 
+def test_an_early_return_still_produces_a_complete_outcome(tmp_path, monkeypatch):
+    """PREFLIGHT_FAILED returns before `spent` and `reviews` are bound.
+
+    Defaults on CellOutcome are not tidiness: constructing one at that return
+    without them raises UnboundLocalError on the failure path that matters most.
+    """
+    outcome = session.CellOutcome(
+        state="PREFLIGHT_FAILED", task_id=1, run_id=1, task_dir=tmp_path
+    )
+    assert outcome.spent_usd == 0.0
+    assert outcome.attempts == 0
+    assert outcome.reviews == []
+    assert outcome.rebut_result is None
+    assert outcome.agent_subjects == []
+
+
 def _spec(**overrides):
     fields = dict(
         spec_id="SY-1",
@@ -210,7 +226,7 @@ def _loop(*rounds, max_attempts=4):
     """Drive the loop over a scripted sequence of gate suites."""
     suites = iter(rounds)
     repairs = []
-    state = session.repair_loop(
+    state, _attempts, _new = session.repair_loop(
         run_gates=lambda: next(suites),
         baseline=[],
         max_attempts=max_attempts,
@@ -262,7 +278,7 @@ def test_a_gate_that_stopped_running_between_the_suites_is_not_a_green():
     rather than report it — and both suites here carry zero failures."""
     baseline = [GateResult(gate="tests", status="pass", tool="pytest 8.0")]
     head = [GateResult(gate="tests", status="skip")]
-    state = session.repair_loop(
+    state, _attempts, _new = session.repair_loop(
         run_gates=lambda: head,
         baseline=baseline,
         max_attempts=4,
@@ -275,7 +291,7 @@ def test_a_gate_that_stopped_running_between_the_suites_is_not_a_green():
 def test_a_baseline_failure_is_not_the_tasks_problem():
     """Only new failures count, or every task inherits the repo's flaky tests."""
     pre_existing = Failure(file="old.py", code="E501", message="too long")
-    state = session.repair_loop(
+    state, _attempts, _new = session.repair_loop(
         run_gates=lambda: _results(pre_existing),
         baseline=_results(pre_existing),
         max_attempts=4,
@@ -295,6 +311,7 @@ class _Cell:
         self.measured_from: str | None = None
         self.watched: list[str] = []
         self.exported = False
+        self.subjects_from: str | None = None
         self.timeouts: list[float | None] = []
         self.denied: list[str] = []
 
@@ -306,7 +323,13 @@ _DIFF = """diff --git a/src/x.py b/src/x.py
 
 
 def _stub_the_runtime(
-    monkeypatch, *, commits=1, suites=(), patch=_DIFF, changed=("src/x.py",)
+    monkeypatch,
+    *,
+    commits=1,
+    suites=(),
+    patch=_DIFF,
+    changed=("src/x.py",),
+    subjects=("the agent's work",),
 ):
     """Everything past the ledger writes, stubbed. No test reached here before,
     which is why a shadowed volume name survived lint and 247 green tests."""
@@ -345,6 +368,12 @@ def _stub_the_runtime(
     monkeypatch.setattr("saffron.cell.worktree.head_sha", lambda c: "c" * 40)
     monkeypatch.setattr("saffron.cell.worktree.export_patch", lambda c, sha: patch)
 
+    def _commit_subjects(_container, sha):
+        cell.subjects_from = sha
+        return list(subjects)
+
+    monkeypatch.setattr("saffron.cell.worktree.commit_subjects", _commit_subjects)
+
     def _changed_files(_container, _sha):
         # Empty until the agent has taken a turn: the baseline suite runs at
         # base_sha, on a worktree nothing has committed to yet.
@@ -377,7 +406,7 @@ def _turn(text="", cost=0.1):
 
 
 def _drive(monkeypatch, tmp_path, *, cell, turns, spec=None, policy="gates: {}\n"):
-    """Run one whole cell against the stubbed runtime and return its state."""
+    """Run one whole cell against the stubbed runtime and return its outcome."""
     repo = tmp_path / "repo"
     (repo / ".saffron" / "gates").mkdir(parents=True)
     (repo / ".saffron" / "policy.yaml").write_text(policy)
@@ -400,7 +429,7 @@ def _drive(monkeypatch, tmp_path, *, cell, turns, spec=None, policy="gates: {}\n
 
     # Left open: the caller reads its rows. tmp_path takes the file away.
     ledger = Ledger(tmp_path / "ledger.db")
-    state = session.run_one_cell(
+    outcome = session.run_one_cell(
         spec or _spec(),
         repo=repo,
         mirror=tmp_path / "m.git",
@@ -408,7 +437,7 @@ def _drive(monkeypatch, tmp_path, *, cell, turns, spec=None, policy="gates: {}\n
         out_dir=tmp_path / "out",
         watch=cell.watched.append,
     )
-    return state, ledger
+    return outcome, ledger
 
 
 def test_the_preflight_line_reports_what_was_tolerated(monkeypatch, tmp_path):
@@ -426,13 +455,13 @@ def test_teardown_removes_both_volumes_not_the_loops_result(monkeypatch, tmp_pat
     teardown ran `volume rm READY_FOR_REVIEW` — swallowed, and the volume
     holding CLAUDE_CONFIG_DIR survived every run that reached the loop."""
     cell = _stub_the_runtime(monkeypatch)
-    state, _ledger = _drive(
+    outcome, _ledger = _drive(
         monkeypatch,
         tmp_path,
         cell=cell,
         turns=[_turn(_block(_PLAN)), _turn()],
     )
-    assert state == "READY_FOR_REVIEW"
+    assert outcome.state == "READY_FOR_REVIEW"
     # The last two calls are teardown's; the earlier ones pre-cleaned.
     assert cell.removed[-2:] == [
         ("volume", "saffron-wt-SY-1"),
@@ -481,10 +510,10 @@ def test_a_volume_this_run_created_and_could_not_remove_is_reported(
     survive every run unnoticed."""
     cell = _stub_the_runtime(monkeypatch)
     _every_removal_fails(monkeypatch, cell)
-    state, _ledger = _drive(
+    outcome, _ledger = _drive(
         monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
     )
-    assert state == "READY_FOR_REVIEW"
+    assert outcome.state == "READY_FOR_REVIEW"
     survived = [line for line in cell.watched if "survived" in line]
     assert any("volume saffron-wt-SY-1 survived" in line for line in survived)
     assert any("volume saffron-st-SY-1 survived" in line for line in survived)
@@ -530,20 +559,20 @@ def test_a_spec_with_no_forbidden_shows_no_forbidden_list(monkeypatch, tmp_path)
 
 def test_no_commit_is_not_implemented(monkeypatch, tmp_path):
     cell = _stub_the_runtime(monkeypatch, commits=0)
-    state, _ledger = _drive(
+    outcome, _ledger = _drive(
         monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
     )
-    assert state == "NOT_IMPLEMENTED"
+    assert outcome.state == "NOT_IMPLEMENTED"
 
 
 def test_a_green_run_leaves_the_patch_behind(monkeypatch, tmp_path):
     """The first live green run committed, then teardown removed the volume and
     the commit ceased to exist. §0: the product is a reviewable artifact."""
     cell = _stub_the_runtime(monkeypatch)
-    state, _ledger = _drive(
+    outcome, _ledger = _drive(
         monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
     )
-    assert state == "READY_FOR_REVIEW"
+    assert outcome.state == "READY_FOR_REVIEW"
     task_dir = tmp_path / "out" / "SY-1"
     assert (task_dir / "patch.diff").read_text() == _DIFF
     assert json.loads((task_dir / "patch.json").read_text()) == {
@@ -560,13 +589,13 @@ def test_a_run_that_never_went_green_still_exports_its_commits(monkeypatch, tmp_
     cell = _stub_the_runtime(
         monkeypatch, suites=([], _results(failing), _results(failing))
     )
-    state, _ledger = _drive(
+    outcome, _ledger = _drive(
         monkeypatch,
         tmp_path,
         cell=cell,
         turns=[_turn(_block(_PLAN)), _turn(), _turn()],
     )
-    assert state == "EXHAUSTED"
+    assert outcome.state == "EXHAUSTED"
     assert (tmp_path / "out" / "SY-1" / "patch.diff").read_text() == _DIFF
 
 
@@ -574,10 +603,10 @@ def test_no_commits_writes_no_patch_at_all(monkeypatch, tmp_path):
     """Absence and emptiness must not look alike: an empty patch.diff reads as
     a run whose work was lost."""
     cell = _stub_the_runtime(monkeypatch, commits=0, patch="")
-    state, _ledger = _drive(
+    outcome, _ledger = _drive(
         monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
     )
-    assert state == "NOT_IMPLEMENTED"
+    assert outcome.state == "NOT_IMPLEMENTED"
     assert not (tmp_path / "out" / "SY-1" / "patch.diff").exists()
     assert any("nothing to export" in line for line in cell.watched)
 
@@ -597,11 +626,49 @@ def test_a_dead_cell_reports_the_failed_export_rather_than_raising(
         return _DIFF
 
     monkeypatch.setattr("saffron.cell.worktree.export_patch", _dies_at_teardown)
-    state, _ledger = _drive(
+    outcome, _ledger = _drive(
         monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
     )
-    assert state == "READY_FOR_REVIEW"
+    assert outcome.state == "READY_FOR_REVIEW"
     assert any("export FAILED — no such cell" in line for line in cell.watched)
+
+
+def test_the_outcome_carries_what_only_teardown_can_learn(monkeypatch, tmp_path):
+    """Both fields are read after the cell is dead and after every `return`
+    inside the driver. Unset, every squashed commit body reads `cell head
+    (unknown)` and lists no agent commits (§5.7)."""
+    cell = _stub_the_runtime(monkeypatch, subjects=["fix the tz default", "add a test"])
+
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+
+    assert outcome.cell_head_sha == "c" * 40
+    assert outcome.agent_subjects == ["fix the tz default", "add a test"]
+    # From the spec's base, or the list is every commit in the repo's history.
+    assert cell.subjects_from == "b" * 40
+
+
+def test_the_agents_subjects_survive_an_export_that_dies(monkeypatch, tmp_path):
+    """A missing subject list is not worth losing a package over, and neither
+    half of teardown may take the other down with it."""
+    cell = _stub_the_runtime(monkeypatch, subjects=["fix the tz default"])
+
+    def _dies(_container, _sha):
+        # The gates read the diff first; the cell dies once the outcome is
+        # decided, exactly as in the export-failure test above.
+        if any(line.startswith("teardown") for line in cell.watched):
+            raise runtime.CellRuntimeError("no such cell")
+        return _DIFF
+
+    monkeypatch.setattr("saffron.cell.worktree.export_patch", _dies)
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+
+    assert outcome.agent_subjects == ["fix the tz default"]
+    assert outcome.cell_head_sha is None
+    assert any("export FAILED" in line for line in cell.watched)
 
 
 def test_a_diff_outside_touches_fails_the_suite(monkeypatch, tmp_path):
@@ -610,13 +677,13 @@ def test_a_diff_outside_touches_fails_the_suite(monkeypatch, tmp_path):
     cell = _stub_the_runtime(
         monkeypatch, changed=("infra/deploy.tf",), suites=([], [], [])
     )
-    state, _ledger = _drive(
+    outcome, _ledger = _drive(
         monkeypatch,
         tmp_path,
         cell=cell,
         turns=[_turn(_block(_PLAN)), _turn(), _turn()],
     )
-    assert state == "EXHAUSTED"
+    assert outcome.state == "EXHAUSTED"
     # The repair prompt is the whole of what the agent receives about a gate.
     assert (
         "- [scope] infra/deploy.tf:? out-of-scope: outside touches: src/**, tests/**"
@@ -631,10 +698,10 @@ def test_the_baseline_scope_neither_invents_nor_cancels_an_escape(
     passes carrying no failures, so no task inherits one and none is subtracted
     away from head."""
     cell = _stub_the_runtime(monkeypatch)
-    state, ledger = _drive(
+    outcome, ledger = _drive(
         monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
     )
-    assert state == "READY_FOR_REVIEW"
+    assert outcome.state == "READY_FOR_REVIEW"
 
     (scope,) = json.loads((tmp_path / "out" / "SY-1" / "baseline.json").read_text())
     assert (scope["status"], scope["failures"]) == ("pass", [])
@@ -656,7 +723,7 @@ def test_a_repair_turn_that_fails_does_not_discard_committed_work(
     marked the run ABORTED — after the implement turn had committed (§4.3)."""
     failing = Failure(file="a.py", code="E501", message="too long")
     cell = _stub_the_runtime(monkeypatch, suites=([], _results(failing), []))
-    state, ledger = _drive(
+    outcome, ledger = _drive(
         monkeypatch,
         tmp_path,
         cell=cell,
@@ -666,7 +733,7 @@ def test_a_repair_turn_that_fails_does_not_discard_committed_work(
             implement.AgentFailed("max turns", _turn(cost=0.4)),
         ],
     )
-    assert state == "READY_FOR_REVIEW"
+    assert outcome.state == "READY_FOR_REVIEW"
     (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
     assert run_row["status"] == "COMPLETE"
     # Plan, implement, the failed repair turn's $0.40, and REVIEW's two lenses:
@@ -678,14 +745,14 @@ def test_the_host_stops_spending_at_the_tasks_budget(monkeypatch, tmp_path):
     """I2: `max_budget_usd` is per turn and lives inside the cell. Without a
     host-side sum, a $12 task can spend (2 + max_attempts) x $12."""
     cell = _stub_the_runtime(monkeypatch)
-    state, _ledger = _drive(
+    outcome, _ledger = _drive(
         monkeypatch,
         tmp_path,
         cell=cell,
         turns=[_turn(_block(_PLAN), cost=0.5)],
         spec=_spec(budget_usd=0.4),
     )
-    assert state == "EXHAUSTED"
+    assert outcome.state == "EXHAUSTED"
     assert len(cell.turns) == 1  # the implement turn is never bought
 
 
@@ -694,14 +761,14 @@ def test_the_ceiling_also_stops_the_repair_loop(monkeypatch, tmp_path):
     cell = _stub_the_runtime(
         monkeypatch, suites=([], _results(failing), _results(failing))
     )
-    state, _ledger = _drive(
+    outcome, _ledger = _drive(
         monkeypatch,
         tmp_path,
         cell=cell,
         turns=[_turn(_block(_PLAN)), _turn(), _turn()],
         spec=_spec(budget_usd=0.25),
     )
-    assert state == "EXHAUSTED"
+    assert outcome.state == "EXHAUSTED"
     assert len(cell.turns) == 3
 
 
@@ -853,7 +920,7 @@ def test_a_rebuttal_that_claims_a_fix_and_commits_nothing_stops_at_rebutting(
     commit and no argument is not doneness, and the task must not advance."""
     cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
     _rebuttable(monkeypatch, cell, rebut_commits=0)
-    state, ledger = _drive(
+    outcome, ledger = _drive(
         monkeypatch,
         tmp_path,
         cell=cell,
@@ -861,7 +928,7 @@ def test_a_rebuttal_that_claims_a_fix_and_commits_nothing_stops_at_rebutting(
             _turn("I have addressed the findings."), _turn(_block(_CLAIMED_FIX))
         ),
     )
-    assert state == "REBUTTING"
+    assert outcome.state == "REBUTTING"
     (queued,) = ledger.queue_lines()
     assert queued["state"] == "REBUTTING"
     record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
@@ -879,13 +946,13 @@ def test_gates_red_after_the_rebuttal_exhausts_and_keeps_the_diff(
         monkeypatch, suites=([], [], _results(failing)), patch=_ANCHORING_DIFF
     )
     _rebuttable(monkeypatch, cell, rebut_commits=1)
-    state, _ledger = _drive(
+    outcome, _ledger = _drive(
         monkeypatch,
         tmp_path,
         cell=cell,
         turns=_through_rebut(_turn("Fixed it."), _turn(_block(_CLAIMED_FIX))),
     )
-    assert state == "EXHAUSTED"
+    assert outcome.state == "EXHAUSTED"
     assert (tmp_path / "out" / "SY-1" / "patch.diff").read_text() == _ANCHORING_DIFF
     assert any("new failures after the rebuttal" in line for line in cell.watched)
 
@@ -897,7 +964,7 @@ def test_a_bound_firing_on_the_implement_turn_still_measures_the_worktree(
     the turn mid-sentence; what decides the outcome is the commits already in
     the worktree, not whether the process exited cleanly."""
     cell = _stub_the_runtime(monkeypatch)
-    state, ledger = _drive(
+    outcome, ledger = _drive(
         monkeypatch,
         tmp_path,
         cell=cell,
@@ -908,7 +975,7 @@ def test_a_bound_firing_on_the_implement_turn_still_measures_the_worktree(
             ),
         ],
     )
-    assert state == "READY_FOR_REVIEW"
+    assert outcome.state == "READY_FOR_REVIEW"
     assert cell.measured_from == "c" * 40  # commits_ahead ran anyway
     (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
     assert run_row["status"] == "COMPLETE"
@@ -1032,13 +1099,13 @@ def test_a_wall_on_the_plan_turn_is_not_the_task_failing(monkeypatch, tmp_path):
     that read the returned attempt never ran and the provider's wall was stamped
     NOT_IMPLEMENTED — the task blamed for the ceiling (§3.3)."""
     cell = _stub_the_runtime(monkeypatch)
-    state, ledger = _drive(
+    outcome, ledger = _drive(
         monkeypatch,
         tmp_path,
         cell=cell,
         turns=[implement.AgentFailed("api_error", attempt=_rejected())],
     )
-    assert state == "RATE_LIMITED"
+    assert outcome.state == "RATE_LIMITED"
     (task_row,) = ledger._db.execute("SELECT state FROM tasks").fetchall()
     assert task_row["state"] == "RATE_LIMITED"
     (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
@@ -1054,15 +1121,33 @@ def test_a_wall_after_the_gates_go_green_stops_the_lenses(monkeypatch, tmp_path)
     window, `review_state` read the errors as an incomplete review, and the run
     ended REVIEWING — not a terminal state, and two turns spent."""
     cell = _stub_the_runtime(monkeypatch)
-    state, _ledger = _drive(
+    outcome, _ledger = _drive(
         monkeypatch,
         tmp_path,
         cell=cell,
         turns=[_turn(_block(_PLAN)), _turn(), _rejected()],
     )
-    assert state == "RATE_LIMITED"
+    assert outcome.state == "RATE_LIMITED"
     # The second lens is never asked: one closed window, one turn spent.
     assert len([p for p in cell.turns if "REVIEW" in p.upper()]) <= 1
+
+
+def test_a_wall_after_the_gates_go_green_reports_what_was_spent(monkeypatch, tmp_path):
+    """A window closed during REVIEW arrives long after `spent` holds a real
+    total, unlike a window closed on the plan turn: the RATE_LIMITED outcome
+    must carry it rather than fall back to the zero meant for that earlier
+    case."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _rejected()],
+    )
+    assert outcome.state == "RATE_LIMITED"
+    # Plan and implement, each the default turn cost — REVIEW's own turn is
+    # never credited, since the window closed before its cost was added.
+    assert outcome.spent_usd == 0.2
 
 
 def test_a_denied_connect_reaches_the_operator(monkeypatch, tmp_path):
@@ -1076,3 +1161,38 @@ def test_a_denied_connect_reaches_the_operator(monkeypatch, tmp_path):
         "proxy DENIED" in line and "platform.claude.com" in line
         for line in cell.watched
     )
+
+
+def test_a_plan_turn_that_failed_reports_what_it_spent(monkeypatch, tmp_path):
+    """The cost is measured — it is on the watch line — and then dropped from
+    the outcome. `CellOutcome` is the seam v1's supervisor inherits, and one
+    summing `spent_usd` across tasks would book every plan failure at zero."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[implement.AgentFailed("max turns", _turn(cost=0.4))],
+    )
+    assert outcome.state == "NOT_IMPLEMENTED"
+    assert outcome.spent_usd == 0.4
+    assert any("$0.40 spent" in line for line in cell.watched)
+
+
+def test_a_plan_rejected_on_shape_reports_both_turns_it_spent(monkeypatch, tmp_path):
+    """The checkpoint's other exit. A shape rejection is final only after the
+    one re-prompt has also run, so two turns are paid for before the plan is
+    refused — and `PlanRejected`'s "no implementation token is spent" is about
+    implementation, not about the checkpoint."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        # Neither turn returns the schema: the first is re-prompted, the second
+        # is final.
+        turns=[_turn("not a plan", cost=0.4), _turn("still not a plan", cost=0.4)],
+    )
+    assert outcome.state == "PLAN_REJECTED"
+    assert outcome.spent_usd == 0.8
+    assert any("$0.80 spent" in line for line in cell.watched)

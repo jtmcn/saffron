@@ -119,6 +119,31 @@ class CellSpec:
     max_turns: int = 60
 
 
+@dataclass
+class CellOutcome:
+    """What one cell produced. Every field defaulted, because `session.py`'s
+    early returns precede the bindings: `spent` is first bound by
+    `plan_checkpoint` while PREFLIGHT_FAILED and PLAN_REJECTED return before it,
+    and `reviews` is unbound on every path that skipped REVIEW.
+
+    ponytail: this is the seam v1's supervisor.py inherits — a supervisor that
+    returns a bare string cannot be given a caller.
+    """
+
+    state: str
+    task_id: int
+    run_id: int
+    task_dir: Path
+    spent_usd: float = 0.0
+    attempts: int = 0
+    cell_head_sha: str | None = None
+    gates: list[GateResult] = field(default_factory=list)
+    new_failures: list[NewFailure] = field(default_factory=list)
+    reviews: list[review.LensReview] = field(default_factory=list)
+    rebut_result: rebut.RebutResult | None = None
+    agent_subjects: list[str] = field(default_factory=list)
+
+
 def aborted_gates(results: Sequence[GateResult]) -> list[str]:
     """Gates that errored. The gate itself broke — the attempt aborts and
     nothing here is charged to the task (§5.4)."""
@@ -205,6 +230,12 @@ def plan_checkpoint(
                 spent += attempt.cost_usd_est
                 continue
             return attempt, artifacts.parse_output_block(attempt.text), spent
+    except artifacts.PlanRejected as rejected:
+        # The same accounting the crash path gets, for the same reason: two
+        # turns can run before a shape rejection is final, and a checkpoint
+        # that rejects is still a checkpoint that spent (§4.1).
+        rejected.spent_usd = spent
+        raise
     except implement.AgentFailed as failed:
         # A crashed plan turn is not a plan rejected on content, and the cell is
         # still alive, so it is not ORPHANED either (§4.5). The exception keeps
@@ -223,8 +254,9 @@ def repair_loop(
     max_attempts: int,
     repair: Callable[[Sequence[NewFailure]], str | None],
     watch: Callable[[str], None] = print,
-) -> str:
-    """GATE ⇄ REPAIR (§5.4), host-invoked. Returns a terminal state.
+) -> tuple[str, int, list[NewFailure]]:
+    """GATE ⇄ REPAIR (§5.4), host-invoked. Returns the terminal state, the
+    attempt count reached, and the last new-failure list.
 
     The agent never runs the gates: `repair` receives new failures and nothing
     else — no status, no verdict, no knowledge that it is being measured. It
@@ -236,27 +268,27 @@ def repair_loop(
         results = run_gates()
         if aborted := aborted_gates(results):
             watch(f"gates: {aborted} errored — infrastructure, not the task")
-            return "GATE_ERROR"
+            return "GATE_ERROR", attempt, []
         if drift := suite_drift(results, baseline):
             # The suites differ in a way no failure can express, so the
             # subtraction is not to be trusted — let alone reported (§5.4).
             watch(f"gates: {drift} — distrusting the subtraction")
-            return "GATE_ERROR"
+            return "GATE_ERROR", attempt, []
         new = subtract_baseline(results, baseline)
         decision = repair_decision(
             attempt=attempt, max_attempts=max_attempts, new=new, previous=previous
         )
         watch(f"gates: attempt {attempt}, {len(new)} new failures -> {decision}")
         if decision == "green":
-            return "READY_FOR_REVIEW"
+            return "READY_FOR_REVIEW", attempt, new
         if decision in ("no-progress", "exhausted"):
             # §3.3 has one state for both. Which one it was is on the watch line
             # above; the task's outcome — it could not pass its own gates — is
             # the same either way.
-            return "EXHAUSTED"
+            return "EXHAUSTED", attempt, new
         previous = new
         if stopped := repair(new):
-            return stopped
+            return stopped, attempt, new
     raise AssertionError("unreachable: repair_decision exhausts at max_attempts")
 
 
@@ -297,30 +329,39 @@ def export_patch(
     spec: CellSpec,
     task_dir: Path,
     watch: Callable[[str], None],
-) -> None:
-    """The run's durable product (§0). The commits live only on the worktree
-    volume, so a patch not exported ceases to exist at teardown.
+) -> tuple[str | None, list[str]]:
+    """The run's durable product (§0), plus the two facts PACKAGE needs about a
+    cell that no longer exists. The commits live only on the worktree volume,
+    so a patch not exported ceases to exist at teardown.
 
     Never raises: this runs from a `finally`. A cell that died, or never
-    started, makes the exec fail — reported, not swallowed.
+    started, makes the exec fail — reported, not swallowed. The subjects are
+    read in their own `try` because a missing subject list is not worth losing
+    a package over, and vice versa.
     """
     from saffron.cell import worktree
 
+    head_sha, subjects = None, []
+    try:
+        subjects = worktree.commit_subjects(container, spec.base_sha)
+    except Exception as exc:
+        watch(f"teardown: the agent's commit subjects are unreadable — {exc}")
     try:
         patch = worktree.export_patch(container, spec.base_sha)
         if not patch:
             # Absence and emptiness must not look alike: no commits, no file.
             watch("teardown: no commits, nothing to export")
-            return
+            return head_sha, subjects
+        # The only surviving name for the commit once the volume is gone — the
+        # diff itself does not carry it.
+        head_sha = worktree.head_sha(container)
         task_dir.mkdir(parents=True, exist_ok=True)
         (task_dir / "patch.diff").write_text(patch)
         (task_dir / "patch.json").write_text(
             json.dumps(
                 {
                     "base_sha": spec.base_sha,
-                    # The only surviving name for the commit once the volume is
-                    # gone — the diff itself does not carry it.
-                    "head_sha": worktree.head_sha(container),
+                    "head_sha": head_sha,
                     "files": worktree.changed_files(container, spec.base_sha),
                 },
                 indent=2,
@@ -329,6 +370,7 @@ def export_patch(
         watch(f"teardown: exported {len(patch)} bytes to {task_dir / 'patch.diff'}")
     except Exception as exc:
         watch(f"teardown: patch export FAILED — {exc}")
+    return head_sha, subjects
 
 
 def run_one_cell(
@@ -339,12 +381,43 @@ def run_one_cell(
     ledger: Ledger,
     out_dir: Path,
     watch: Callable[[str], None] = print,
-) -> str:
+) -> CellOutcome:
     """Create a cell, drive one IMPLEMENT session in it, and gate the result.
 
-    Returns a terminal state. Every transition is printed, because v0.5's
-    whole point is that the operator watches it.
+    Returns what the cell produced, terminal state included. Every transition
+    is printed, because v0.5's whole point is that the operator watches it.
+
+    Thin, because teardown learns two of the outcome's fields *after* every
+    `return` inside `_drive_cell`: a `finally` cannot reach a value already
+    returned, so the export hands them back through `exported` and they are
+    stamped here.
     """
+    exported: dict = {}
+    outcome = _drive_cell(
+        spec,
+        repo=repo,
+        mirror=mirror,
+        ledger=ledger,
+        out_dir=out_dir,
+        watch=watch,
+        exported=exported,
+    )
+    outcome.cell_head_sha = exported.get("head_sha")
+    outcome.agent_subjects = exported.get("subjects", [])
+    return outcome
+
+
+def _drive_cell(
+    spec: CellSpec,
+    *,
+    repo: Path,
+    mirror: Path,
+    ledger: Ledger,
+    out_dir: Path,
+    watch: Callable[[str], None],
+    exported: dict,
+) -> CellOutcome:
+    """`run_one_cell`'s whole body. `exported` is teardown's way out."""
     from saffron import preflight
     from saffron.agents import artifacts, context
     from saffron.cell import proxy, runtime, worktree
@@ -360,7 +433,17 @@ def run_one_cell(
     policy, policy_sha = load_policy(repo)
     gates = policy.gate_executables(Path(worktree.WORKTREE_MOUNT))
 
-    repo_id = ledger.upsert_repo(repo.name, str(repo), str(mirror), policy_sha)
+    # §4.1: `origin` is the real remote, `mirror_path` the local mirror. v0
+    # stored the mirror's source in both, so nothing downstream knew where a
+    # pull request would go. A repo with no origin is still runnable — it just
+    # cannot be packaged, and PACKAGE is what says so.
+    from saffron.phases import package
+
+    try:
+        origin_url = package.real_remote(repo)
+    except package.PackageError:
+        origin_url = str(repo)
+    repo_id = ledger.upsert_repo(repo.name, origin_url, str(mirror), policy_sha)
     run_id = ledger.create_run(repo_id, spec.base_sha)
     task_id = ledger.create_task(
         run_id,
@@ -387,6 +470,11 @@ def run_one_cell(
     # first: a create that fails part-way can still have left its resource, but
     # the two that were never attempted are not survivors of anything.
     created: set[str] = set()
+
+    # Bound before the try, not by plan_checkpoint's assignment: RateLimited can
+    # unwind from anywhere in the body, and the accumulated total must survive
+    # even when it fires before that assignment runs.
+    spent = 0.0
 
     try:
         # Inside the guarantee, not above it: a leftover network from a SIGKILLed
@@ -485,7 +573,12 @@ def run_one_cell(
             )
             ledger.set_task_state(task_id, "PREFLIGHT_FAILED")
             ledger.finish_run(run_id, "COMPLETE")
-            return "PREFLIGHT_FAILED"
+            return CellOutcome(
+                state="PREFLIGHT_FAILED",
+                task_id=task_id,
+                run_id=run_id,
+                task_dir=task_dir,
+            )
 
         # The agent runs inside the cell, at /work, on the cell's own key (§5.1).
         context_md = (_SAFFRON_ROOT / "CONTEXT.md").read_text()
@@ -525,10 +618,16 @@ def run_one_cell(
                 watch=watch,
             )
         except artifacts.PlanRejected as rejected:
-            watch(f"PLAN: rejected — {rejected}")
+            watch(f"PLAN: rejected, ${rejected.spent_usd:.2f} spent — {rejected}")
             ledger.set_task_state(task_id, "PLAN_REJECTED")
             ledger.finish_run(run_id, "COMPLETE")
-            return "PLAN_REJECTED"
+            return CellOutcome(
+                state="PLAN_REJECTED",
+                task_id=task_id,
+                run_id=run_id,
+                task_dir=task_dir,
+                spent_usd=rejected.spent_usd,
+            )
         except implement.AgentFailed as failed:
             # No plan and no commits, but a live cell: the earned state, not the
             # ORPHANED that a crash out of `run_one_cell` would stamp (§4.5).
@@ -536,7 +635,15 @@ def run_one_cell(
             watch(f"PLAN: the session failed, ${plan_cost:.2f} spent — {failed}")
             ledger.set_task_state(task_id, "NOT_IMPLEMENTED")
             ledger.finish_run(run_id, "COMPLETE")
-            return "NOT_IMPLEMENTED"
+            return CellOutcome(
+                state="NOT_IMPLEMENTED",
+                task_id=task_id,
+                run_id=run_id,
+                task_dir=task_dir,
+                # Measured, so it is reported: a supervisor summing `spent_usd`
+                # across tasks otherwise books every plan failure at zero.
+                spent_usd=plan_cost,
+            )
 
         # Extracted and hashed the moment it is produced, and never read from
         # /work again: a plan the implementer can rewrite is a claim (§5.3).
@@ -570,7 +677,13 @@ def run_one_cell(
             # tells them apart — acceptable while v0.5 is attended (§3.3).
             ledger.set_task_state(task_id, "EXHAUSTED")
             ledger.finish_run(run_id, "COMPLETE")
-            return "EXHAUSTED"
+            return CellOutcome(
+                state="EXHAUSTED",
+                task_id=task_id,
+                run_id=run_id,
+                task_dir=task_dir,
+                spent_usd=spent,
+            )
 
         try:
             implemented = agent(
@@ -598,7 +711,13 @@ def run_one_cell(
         if commits == 0:
             ledger.set_task_state(task_id, "NOT_IMPLEMENTED")
             ledger.finish_run(run_id, "COMPLETE")
-            return "NOT_IMPLEMENTED"
+            return CellOutcome(
+                state="NOT_IMPLEMENTED",
+                task_id=task_id,
+                run_id=run_id,
+                task_dir=task_dir,
+                spent_usd=spent,
+            )
 
         # The suite that went green, kept for REVIEW: the critic is shown the
         # gate results, and re-running the suite to fetch them costs a suite.
@@ -638,13 +757,18 @@ def run_one_cell(
             last_cost = repaired.cost_usd_est
             return None
 
-        outcome = repair_loop(
+        outcome, attempts, new_failures = repair_loop(
             run_gates=_run_gates,
             baseline=baseline,
             max_attempts=spec.max_attempts,
             repair=_repair,
             watch=watch,
         )
+
+        # Pre-bound, not left to the branch below: repair_loop can hand back
+        # EXHAUSTED or GATE_ERROR directly, skipping REVIEW entirely, and the
+        # outcome at the bottom of this function must still be constructible.
+        reviews: list[review.LensReview] = []
 
         if outcome == "READY_FOR_REVIEW":
             ledger.set_task_state(task_id, "REVIEWING")
@@ -672,14 +796,13 @@ def run_one_cell(
             outcome, why = review.review_state(reviews)
             watch(f"REVIEW: {why}")
 
+        # Same reasoning as `reviews` above: bound only inside the REBUTTING
+        # branch below, and READY_FOR_REVIEW's own outcomes skip it entirely.
+        rebut_result: rebut.RebutResult | None = None
+
         if outcome == "REBUTTING":
             ledger.set_task_state(task_id, "REBUTTING")
-            blockers = [
-                f
-                for r in reviews
-                for f in r.findings
-                if f.anchored and f.severity == "blocker"
-            ]
+            blockers = review.anchored_blockers(reviews)
             if _over_budget():
                 outcome = "EXHAUSTED"
             else:
@@ -722,6 +845,7 @@ def run_one_cell(
                     watch=watch,
                     last_cost_usd=last_cost,
                 )
+                rebut_result = result
                 spent += result.cost_usd
                 session_id = result.rebuttal.session_id or session_id
                 (task_dir / "rebuttal.json").write_text(
@@ -733,7 +857,18 @@ def run_one_cell(
         watch(f"{outcome}: ${spent:.2f} spent, session {session_id}")
         ledger.set_task_state(task_id, outcome)
         ledger.finish_run(run_id, "COMPLETE")
-        return outcome
+        return CellOutcome(
+            state=outcome,
+            task_id=task_id,
+            run_id=run_id,
+            task_dir=task_dir,
+            spent_usd=spent,
+            attempts=attempts,
+            gates=green,
+            new_failures=new_failures,
+            reviews=reviews,
+            rebut_result=rebut_result,
+        )
     except RateLimited as stopped:
         watch(
             "rate limit: rejected — stopping, not exhausted"
@@ -745,7 +880,15 @@ def run_one_cell(
         )
         ledger.set_task_state(task_id, "RATE_LIMITED")
         ledger.finish_run(run_id, "COMPLETE")
-        return "RATE_LIMITED"
+        # Accurate for a window closed during repair/review/rebut; still 0.00 if
+        # it closed inside plan_checkpoint — that tally is lost with its frame.
+        return CellOutcome(
+            state="RATE_LIMITED",
+            task_id=task_id,
+            run_id=run_id,
+            task_dir=task_dir,
+            spent_usd=spent,
+        )
     except BaseException:
         # A run row left open is a run that reads as still going. Preflight
         # raising is the path an operator hits first, so it is the one most
@@ -763,7 +906,9 @@ def run_one_cell(
         # inside the cell, so it must precede the container's removal as well as
         # the volume's. An EXHAUSTED run with commits is worth reading too.
         if container in created:
-            export_patch(container, spec, task_dir, watch)
+            exported["head_sha"], exported["subjects"] = export_patch(
+                container, spec, task_dir, watch
+            )
         removed = [("container", container, runtime.remove_container(container))]
         # Before the proxy goes: its log goes with it.
         for denied in proxy.denied_egress():

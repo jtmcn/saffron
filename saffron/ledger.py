@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     risk       TEXT NOT NULL DEFAULT 'standard',
     branch     TEXT,
     budget_usd REAL,
+    pushed_sha TEXT,
+    pr_url     TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -81,6 +83,15 @@ class Ledger:
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA foreign_keys=ON")
         self._db.executescript(SCHEMA)
+        # An existing ledger predates these columns, and `IF NOT EXISTS` does
+        # not alter. Additive only — never a migration that can lose a row.
+        existing = {
+            row["name"]
+            for row in self._db.execute("PRAGMA table_info(tasks)").fetchall()
+        }
+        for column in ("pushed_sha", "pr_url"):
+            if column not in existing:
+                self._db.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
         self._db.commit()
 
     def close(self) -> None:
@@ -143,6 +154,25 @@ class Ledger:
         )
         self._db.commit()
 
+    def set_task_package(
+        self,
+        task_id: int,
+        state: str,
+        branch: str,
+        pushed_sha: str,
+        pr_url: str,
+    ) -> None:
+        """PACKAGE's own write-back. It runs after `finish_run`, so the state it
+        sets is the last word on the task (§5.7)."""
+        self._db.execute(
+            """UPDATE tasks
+                  SET state = ?, branch = ?, pushed_sha = ?, pr_url = ?,
+                      updated_at = datetime('now')
+                WHERE task_id = ?""",
+            (state, branch, pushed_sha, pr_url, task_id),
+        )
+        self._db.commit()
+
     def record_gate_result(
         self,
         result: GateResult,
@@ -186,7 +216,7 @@ class Ledger:
         return list(
             self._db.execute(
                 """SELECT r.name AS repo, t.spec_id, t.state, t.risk, t.task_id,
-                          t.branch, t.budget_usd
+                          t.branch, t.budget_usd, t.pushed_sha, t.pr_url
                    FROM tasks t
                    JOIN runs  ON runs.run_id = t.run_id
                    JOIN repos r ON r.repo_id = runs.repo_id
