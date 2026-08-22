@@ -520,3 +520,77 @@ def test_a_pull_request_link_is_not_labelled_artifacts(tmp_path):
     html = (tmp_path / "index.html").read_text()
     assert "PR #7" in html
     assert ">artifacts<" not in html
+
+
+def test_a_corrupt_queue_json_does_not_wedge_the_append(tmp_path):
+    """Invalid JSON in queue.json is dropped; the new line still lands."""
+    store = tmp_path / "queue.json"
+    store.write_text("{this is not valid json")
+    line = QueueLine(
+        repo="saffron",
+        spec_id="SA-0005",
+        state="READY_FOR_REVIEW",
+        attempts=1,
+        cost_usd_est=6.4,
+        concerns=0,
+        added=10,
+        removed=2,
+        link="",
+    )
+    append_queue_line(tmp_path, line, header={})
+    stored = json.loads((tmp_path / "queue.json").read_text())
+    assert len(stored) == 1
+    assert stored[0]["spec_id"] == "SA-0005"
+    assert "SA-0005" in (tmp_path / "index.html").read_text()
+
+
+def test_a_queue_json_of_the_wrong_shape_does_not_wedge_the_append(tmp_path):
+    """Valid JSON but not a list is dropped; the new line still lands."""
+    store = tmp_path / "queue.json"
+    store.write_text('{"not": "a list"}')
+    line = QueueLine(
+        repo="saffron",
+        spec_id="SA-0005",
+        state="READY_FOR_REVIEW",
+        attempts=1,
+        cost_usd_est=6.4,
+        concerns=0,
+        added=10,
+        removed=2,
+        link="",
+    )
+    append_queue_line(tmp_path, line, header={})
+    stored = json.loads((tmp_path / "queue.json").read_text())
+    assert len(stored) == 1
+    assert stored[0]["spec_id"] == "SA-0005"
+
+
+def test_prior_rows_survive_an_append(tmp_path):
+    """The tolerance read cannot silently become "always start empty" —
+    that would pass both corruption tests while destroying the feature."""
+    first = QueueLine(
+        repo="saffron",
+        spec_id="SA-0005",
+        state="READY_FOR_REVIEW",
+        attempts=1,
+        cost_usd_est=6.4,
+        concerns=0,
+        added=10,
+        removed=2,
+        link="",
+    )
+    second = QueueLine(
+        repo="saffron",
+        spec_id="SA-0006",
+        state="READY_FOR_REVIEW",
+        attempts=1,
+        cost_usd_est=3.1,
+        concerns=0,
+        added=4,
+        removed=0,
+        link="",
+    )
+    append_queue_line(tmp_path, first, header={})
+    append_queue_line(tmp_path, second, header={})
+    stored = json.loads((tmp_path / "queue.json").read_text())
+    assert [row["spec_id"] for row in stored] == ["SA-0005", "SA-0006"]

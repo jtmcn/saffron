@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import html
 import json
+import os
+import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -136,9 +138,44 @@ def append_queue_line(
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     store = out_dir / "queue.json"
-    rows = json.loads(store.read_text()) if store.is_file() else []
+    rows = _existing_queue_rows(store)
     rows.append(asdict(line))
-    store.write_text(json.dumps(rows, indent=2))
+    _atomic_write(store, json.dumps(rows, indent=2))
     index = out_dir / "index.html"
-    index.write_text(render_index([QueueLine(**row) for row in rows], header=header))
+    _atomic_write(
+        index, render_index([QueueLine(**row) for row in rows], header=header)
+    )
     return index
+
+
+def _existing_queue_rows(path: Path) -> list[dict]:
+    """Read existing queue.json, tolerating absence and corruption.
+
+    The queue is a rendered convenience, not a system of record: an
+    unreadable or malformed queue.json is dropped, never fatal to an append
+    whose prior rows and new row both succeed. ponytail: equivalent logic
+    lives in replay.py:_existing_lines and dies with replay.py (v1 deletes
+    it); upgrade path is one shared helper if a third caller ever appears.
+    """
+    if not path.is_file():
+        return []
+    try:
+        items = json.loads(path.read_text())
+        if not isinstance(items, list):
+            return []
+        return [item for item in items if isinstance(item, dict)]
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    """Write via a same-directory temp file + rename, so a crash mid-write
+    never leaves a truncated file for the next append to trip over."""
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.replace(tmp_name, path)
+    except BaseException:
+        os.unlink(tmp_name)
+        raise
