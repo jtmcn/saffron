@@ -323,30 +323,39 @@ def export_patch(
     spec: CellSpec,
     task_dir: Path,
     watch: Callable[[str], None],
-) -> None:
-    """The run's durable product (§0). The commits live only on the worktree
-    volume, so a patch not exported ceases to exist at teardown.
+) -> tuple[str | None, list[str]]:
+    """The run's durable product (§0), plus the two facts PACKAGE needs about a
+    cell that no longer exists. The commits live only on the worktree volume,
+    so a patch not exported ceases to exist at teardown.
 
     Never raises: this runs from a `finally`. A cell that died, or never
-    started, makes the exec fail — reported, not swallowed.
+    started, makes the exec fail — reported, not swallowed. The subjects are
+    read in their own `try` because a missing subject list is not worth losing
+    a package over, and vice versa.
     """
     from saffron.cell import worktree
 
+    head_sha, subjects = None, []
+    try:
+        subjects = worktree.commit_subjects(container, spec.base_sha)
+    except Exception as exc:
+        watch(f"teardown: the agent's commit subjects are unreadable — {exc}")
     try:
         patch = worktree.export_patch(container, spec.base_sha)
         if not patch:
             # Absence and emptiness must not look alike: no commits, no file.
             watch("teardown: no commits, nothing to export")
-            return
+            return head_sha, subjects
+        # The only surviving name for the commit once the volume is gone — the
+        # diff itself does not carry it.
+        head_sha = worktree.head_sha(container)
         task_dir.mkdir(parents=True, exist_ok=True)
         (task_dir / "patch.diff").write_text(patch)
         (task_dir / "patch.json").write_text(
             json.dumps(
                 {
                     "base_sha": spec.base_sha,
-                    # The only surviving name for the commit once the volume is
-                    # gone — the diff itself does not carry it.
-                    "head_sha": worktree.head_sha(container),
+                    "head_sha": head_sha,
                     "files": worktree.changed_files(container, spec.base_sha),
                 },
                 indent=2,
@@ -355,6 +364,7 @@ def export_patch(
         watch(f"teardown: exported {len(patch)} bytes to {task_dir / 'patch.diff'}")
     except Exception as exc:
         watch(f"teardown: patch export FAILED — {exc}")
+    return head_sha, subjects
 
 
 def run_one_cell(
@@ -370,7 +380,38 @@ def run_one_cell(
 
     Returns what the cell produced, terminal state included. Every transition
     is printed, because v0.5's whole point is that the operator watches it.
+
+    Thin, because teardown learns two of the outcome's fields *after* every
+    `return` inside `_drive_cell`: a `finally` cannot reach a value already
+    returned, so the export hands them back through `exported` and they are
+    stamped here.
     """
+    exported: dict = {}
+    outcome = _drive_cell(
+        spec,
+        repo=repo,
+        mirror=mirror,
+        ledger=ledger,
+        out_dir=out_dir,
+        watch=watch,
+        exported=exported,
+    )
+    outcome.cell_head_sha = exported.get("head_sha")
+    outcome.agent_subjects = exported.get("subjects", [])
+    return outcome
+
+
+def _drive_cell(
+    spec: CellSpec,
+    *,
+    repo: Path,
+    mirror: Path,
+    ledger: Ledger,
+    out_dir: Path,
+    watch: Callable[[str], None],
+    exported: dict,
+) -> CellOutcome:
+    """`run_one_cell`'s whole body. `exported` is teardown's way out."""
     from saffron import preflight
     from saffron.agents import artifacts, context
     from saffron.cell import proxy, runtime, worktree
@@ -855,7 +896,9 @@ def run_one_cell(
         # inside the cell, so it must precede the container's removal as well as
         # the volume's. An EXHAUSTED run with commits is worth reading too.
         if container in created:
-            export_patch(container, spec, task_dir, watch)
+            exported["head_sha"], exported["subjects"] = export_patch(
+                container, spec, task_dir, watch
+            )
         removed = [("container", container, runtime.remove_container(container))]
         # Before the proxy goes: its log goes with it.
         for denied in proxy.denied_egress():

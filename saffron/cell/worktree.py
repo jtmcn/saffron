@@ -150,6 +150,15 @@ def head_sha(container: str) -> str:
     return done.stdout.strip().splitlines()[-1]
 
 
+def commit_subjects(container: str, base_sha: str) -> list[str]:
+    """The agent's own commit subjects, newest first — the only surviving trace
+    of them once the squash lands (§5.7)."""
+    done = _git(container, "log", "--format=%s", f"{base_sha}..HEAD")
+    if done.returncode != 0:
+        raise runtime.CellRuntimeError(f"log failed: {done.stderr.strip()}")
+    return [line for line in done.stdout.splitlines() if line.strip()]
+
+
 def export_patch(container: str, base_sha: str) -> str:
     done = _git(container, "diff", *DIFF_FLAGS, f"{base_sha}..HEAD")
     if done.returncode != 0:

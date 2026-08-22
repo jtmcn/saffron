@@ -311,6 +311,7 @@ class _Cell:
         self.measured_from: str | None = None
         self.watched: list[str] = []
         self.exported = False
+        self.subjects_from: str | None = None
         self.timeouts: list[float | None] = []
         self.denied: list[str] = []
 
@@ -322,7 +323,13 @@ _DIFF = """diff --git a/src/x.py b/src/x.py
 
 
 def _stub_the_runtime(
-    monkeypatch, *, commits=1, suites=(), patch=_DIFF, changed=("src/x.py",)
+    monkeypatch,
+    *,
+    commits=1,
+    suites=(),
+    patch=_DIFF,
+    changed=("src/x.py",),
+    subjects=("the agent's work",),
 ):
     """Everything past the ledger writes, stubbed. No test reached here before,
     which is why a shadowed volume name survived lint and 247 green tests."""
@@ -360,6 +367,12 @@ def _stub_the_runtime(
     monkeypatch.setattr("saffron.cell.worktree.prepare_worktree", _prepare_worktree)
     monkeypatch.setattr("saffron.cell.worktree.head_sha", lambda c: "c" * 40)
     monkeypatch.setattr("saffron.cell.worktree.export_patch", lambda c, sha: patch)
+
+    def _commit_subjects(_container, sha):
+        cell.subjects_from = sha
+        return list(subjects)
+
+    monkeypatch.setattr("saffron.cell.worktree.commit_subjects", _commit_subjects)
 
     def _changed_files(_container, _sha):
         # Empty until the agent has taken a turn: the baseline suite runs at
@@ -618,6 +631,44 @@ def test_a_dead_cell_reports_the_failed_export_rather_than_raising(
     )
     assert outcome.state == "READY_FOR_REVIEW"
     assert any("export FAILED — no such cell" in line for line in cell.watched)
+
+
+def test_the_outcome_carries_what_only_teardown_can_learn(monkeypatch, tmp_path):
+    """Both fields are read after the cell is dead and after every `return`
+    inside the driver. Unset, every squashed commit body reads `cell head
+    (unknown)` and lists no agent commits (§5.7)."""
+    cell = _stub_the_runtime(monkeypatch, subjects=["fix the tz default", "add a test"])
+
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+
+    assert outcome.cell_head_sha == "c" * 40
+    assert outcome.agent_subjects == ["fix the tz default", "add a test"]
+    # From the spec's base, or the list is every commit in the repo's history.
+    assert cell.subjects_from == "b" * 40
+
+
+def test_the_agents_subjects_survive_an_export_that_dies(monkeypatch, tmp_path):
+    """A missing subject list is not worth losing a package over, and neither
+    half of teardown may take the other down with it."""
+    cell = _stub_the_runtime(monkeypatch, subjects=["fix the tz default"])
+
+    def _dies(_container, _sha):
+        # The gates read the diff first; the cell dies once the outcome is
+        # decided, exactly as in the export-failure test above.
+        if any(line.startswith("teardown") for line in cell.watched):
+            raise runtime.CellRuntimeError("no such cell")
+        return _DIFF
+
+    monkeypatch.setattr("saffron.cell.worktree.export_patch", _dies)
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+
+    assert outcome.agent_subjects == ["fix the tz default"]
+    assert outcome.cell_head_sha is None
+    assert any("export FAILED" in line for line in cell.watched)
 
 
 def test_a_diff_outside_touches_fails_the_suite(monkeypatch, tmp_path):
