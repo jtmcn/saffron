@@ -510,6 +510,13 @@ def package(
         if leaked := find_credentials(patch.read_text(), token=token):
             return _refuse(leaked, "the patch")
 
+        # The third channel out: `commit_squash` renders the agent's own
+        # subjects into the commit body, where a push survives in the reflog.
+        if leaked := find_credentials_in_text(
+            "\n".join(outcome.agent_subjects), token=token, where="agent commit subject"
+        ):
+            return _refuse(leaked, "the commit subjects")
+
         pushed = commit_squash(
             worktree_path,
             spec_id=spec.id,

@@ -887,6 +887,30 @@ def test_an_empty_diff_is_named_rather_than_a_traceback(packageable):
         package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
 
 
+def test_a_credential_in_an_agent_commit_subject_is_refused(packageable):
+    """The third channel: `commit_squash` renders the agent's own subjects into
+    the squashed body, and no PR-body section shows them — so neither the patch
+    scan nor the body scan sees one."""
+    packageable.outcome.agent_subjects = [f"fix: use {FAKE_KEY}"]
+
+    result = package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+
+    assert result.state == "MERGE_FAILED"
+    assert "credential in the commit subjects" in result.note
+    assert (
+        remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=packageable.work)
+        == ""
+    )
+    assert not any(
+        FAKE_KEY in text
+        for text in (
+            result.note,
+            str(dict(_state(packageable.ledger, packageable.task_id))),
+            (packageable.out_dir / "index.html").read_text(),
+        )
+    )
+
+
 def test_a_credential_in_a_finding_is_refused_before_anything_is_pushed(packageable):
     """The body is the cell's second channel to the remote: a claim, a rebuttal
     argument and a verdict reason all reach GitHub without ever being in the
