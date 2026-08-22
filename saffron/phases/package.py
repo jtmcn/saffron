@@ -223,7 +223,19 @@ def commit_squash(
     if agent_subjects:
         lines += ["", "The agent's own commits, squashed into this one:"]
         lines += [f"  * {neutralize(s)}" for s in agent_subjects]
-    done = _run(worktree, "commit", "-q", "-m", "\n".join(lines))
+    # On the command, not `git config`: a --mirror clone inherits no identity,
+    # and nothing is left behind in a worktree that is about to be removed.
+    done = _run(
+        worktree,
+        "-c",
+        "user.email=saffron@localhost",
+        "-c",
+        "user.name=Saffron",
+        "commit",
+        "-q",
+        "-m",
+        "\n".join(lines),
+    )
     if done.returncode != 0:
         raise PackageError(f"commit failed: {done.stderr.strip()[:200]}")
     return _run(worktree, "rev-parse", "HEAD").stdout.strip()
@@ -419,6 +431,8 @@ class PackageResult:
     pushed_sha: str = ""
     branch: str = ""
     note: str = ""
+    added: int = 0
+    removed: int = 0
 
 
 def package(
@@ -503,6 +517,10 @@ def package(
             agent_subjects=outcome.agent_subjects,
         )
 
+        # Against the fetched default-branch head, because that is the diff a
+        # reviewer sees on the pull request.
+        added, removed = mirror_ops.diff_stat(mirror, fetch_head, pushed)
+
         verified_on = "base"
         if needs_reverification(fetch_head, base_sha):
             # A gate that errored raises out of `reverify`: infrastructure, and
@@ -531,6 +549,8 @@ def package(
                         # `pushed_sha` no remote has is a claim, not a record.
                         note=f"{len(new)} new failures after rebase "
                         f"({pushed[:12]} in the mirror)",
+                        added=added,
+                        removed=removed,
                     ),
                 )
 
@@ -543,8 +563,8 @@ def package(
                 outcome.new_failures,
                 base_sha=base_sha,
                 head_sha=pushed,
-                added=0,
-                removed=0,
+                added=added,
+                removed=removed,
                 transcript_path=str(outcome.task_dir),
                 reviews=outcome.reviews,
                 rebut_result=outcome.rebut_result,
@@ -601,6 +621,8 @@ def package(
                 pr_url=pr_url,
                 pushed_sha=pushed,
                 branch=branch,
+                added=added,
+                removed=removed,
             ),
         )
     finally:
@@ -633,8 +655,8 @@ def _finish(ledger, outcome, out_dir: Path, spec, repo_name: str, result):
                 for r in outcome.reviews
                 for f in r.findings
             ),
-            added=0,
-            removed=0,
+            added=result.added,
+            removed=result.removed,
             link=result.pr_url,
             note=result.note,
             risk=spec.risk,

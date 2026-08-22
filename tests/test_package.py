@@ -554,7 +554,8 @@ def packageable(tmp_path):
     git(work, "push", "-q", "origin", "main")
 
     git(work, "checkout", "-q", "-b", "cell")
-    (work / "f.txt").write_text("a\nb\nCELL\nd\ne\n")
+    # One line out, two in: +2/−1 tells a swapped pair of counts from a right one.
+    (work / "f.txt").write_text("a\nb\nCELL\nMORE\nd\ne\n")
     git(work, "commit", "-qam", "the agent's work")
     patch_text = git(work, "diff", *DIFF_FLAGS, f"{base}..HEAD") + "\n"
     git(work, "checkout", "-q", "main")
@@ -636,8 +637,13 @@ def test_a_green_cell_becomes_a_branch_a_draft_pr_and_a_queue_line(packageable):
         pushed,
         "https://github.com/o/r/pull/1",
     )
-    assert "SA-0005" in (packageable.out_dir / "index.html").read_text()
-    assert (packageable.outcome.task_dir / "pr_body.md").is_file()
+    # The counts are measured, not zero: the PR header and the queue line are
+    # the two artifacts this phase exists to produce.
+    assert (result.added, result.removed) == (2, 1)
+    body = (packageable.outcome.task_dir / "pr_body.md").read_text()
+    index = (packageable.out_dir / "index.html").read_text()
+    assert "+2/−1" in body and "+2/−1" in index
+    assert "SA-0005" in index
 
 
 def test_a_branch_that_moved_is_the_tasks_failure(monkeypatch, packageable):
@@ -735,3 +741,54 @@ def test_new_failures_after_the_rebase_are_the_tasks_failure(monkeypatch, packag
 
 def _no_gh(argv):
     raise AssertionError("gh must not be reached")
+
+
+def test_the_squash_commits_with_no_git_identity_anywhere(tmp_path, monkeypatch):
+    """A --mirror clone inherits no identity, so an unattended batch on a fresh
+    host would fail every package after doing all the work. Proven with every
+    config file git could read pointed at nothing."""
+    empty = tmp_path / "empty-home"
+    empty.mkdir()
+    monkeypatch.setenv("HOME", str(empty))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(empty))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+
+    repo = tmp_path / "no-identity"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    (repo / "f.txt").write_text("x\n")
+    git(repo, "add", "-A")
+    # Even the seed commit has to bring its own; nothing is written to config.
+    git(repo, "-c", "user.email=s@x", "-c", "user.name=S", "commit", "-qm", "base")
+    base = git(repo, "rev-parse", "HEAD")
+    (repo / "f.txt").write_text("y\n")
+    git(repo, "add", "-A")
+
+    sha = commit_squash(
+        repo,
+        spec_id="SA-0005",
+        title="package a green cell",
+        base_sha=base,
+        cell_head=None,
+        attempts=1,
+        spent_usd=1.0,
+        agent_subjects=[],
+    )
+
+    # The cell commits as this identity too (`worktree.prepare_worktree`), so
+    # host-side and cell-side agree on who Saffron is.
+    assert (
+        git(repo, "log", "-1", "--format=%an <%ae>", sha)
+        == "Saffron <saffron@localhost>"
+    )
+    # Still unset: the identity was passed, never written down.
+    assert (
+        subprocess.run(
+            ["git", "-C", str(repo), "config", "--get", "user.email"],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).returncode
+        == 1
+    )
