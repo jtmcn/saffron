@@ -8,11 +8,14 @@ from saffron.phases.package import (
     PackageError,
     apply_patch,
     assert_base_objects,
+    commit_squash,
     default_branch,
     find_credentials,
     github_slug,
     neutralize,
+    push_with_lease,
     real_remote,
+    remote_sha,
 )
 
 
@@ -262,3 +265,57 @@ def test_neutralize_leaves_ordinary_prose_alone():
     assert neutralize("the tz default is wrong in parse()") == (
         "the tz default is wrong in parse()"
     )
+
+
+def test_the_squash_body_carries_provenance_and_defanged_subjects(tmp_path, cell_patch):
+    repo, base, patch = cell_patch
+    git(repo, "checkout", "-q", "-b", "pkg", base)
+    apply_patch(repo, patch)
+    sha = commit_squash(
+        repo,
+        spec_id="SA-0005",
+        title="package a green cell",
+        base_sha=base,
+        cell_head="deadbeefdeadbeef",
+        attempts=2,
+        spent_usd=6.4,
+        agent_subjects=["fix the thing", "Fixes #12"],
+    )
+    body = git(repo, "log", "-1", "--format=%B", sha)
+    assert body.splitlines()[0] == "saffron SA-0005: package a green cell"
+    assert base[:12] in body and "deadbeefdead" in body
+    assert "2 attempts" in body and "$6.40" in body
+    assert "Fixes #12" not in body  # defanged; the digits survive, the trigger does not
+    assert "#12" in body
+
+
+def test_an_absent_branch_takes_an_empty_lease(tmp_path, bare_remote, cell_patch):
+    """Measured, git 2.50.1: --force-with-lease=<ref>: with an empty expectation
+    pushes a branch that does not exist. Not a special case to write around."""
+    repo, base, patch = cell_patch
+    git(repo, "checkout", "-q", "-b", "saffron/SA-0005", base)
+    assert remote_sha(str(bare_remote), "saffron/SA-0005", cwd=tmp_path) == ""
+    push_with_lease(repo, url=str(bare_remote), branch="saffron/SA-0005", expect="")
+    assert remote_sha(str(bare_remote), "saffron/SA-0005", cwd=tmp_path) != ""
+
+
+def test_a_branch_that_moved_underneath_is_rejected(tmp_path, bare_remote, cell_patch):
+    """§5.7: turning a race into an error costs one flag. Measured: `stale info`."""
+    repo, base, patch = cell_patch
+    git(repo, "checkout", "-q", "-b", "saffron/SA-0005", base)
+    push_with_lease(repo, url=str(bare_remote), branch="saffron/SA-0005", expect="")
+    stale = remote_sha(str(bare_remote), "saffron/SA-0005", cwd=tmp_path)
+
+    # somebody else pushes
+    (repo / "other.txt").write_text("theirs\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "theirs")
+    git(repo, "push", "-q", str(bare_remote), "HEAD:refs/heads/saffron/SA-0005")
+
+    (repo / "ours.txt").write_text("ours\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "ours")
+    with pytest.raises(PackageError, match="moved underneath|stale"):
+        push_with_lease(
+            repo, url=str(bare_remote), branch="saffron/SA-0005", expect=stale
+        )

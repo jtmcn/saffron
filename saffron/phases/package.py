@@ -179,3 +179,68 @@ def neutralize(text: str) -> str:
     return _MENTION.sub(
         "@​", _CLOSES.sub(lambda m: m.group(0)[:1] + "​" + m.group(0)[1:], text)
     )
+
+
+def commit_squash(
+    worktree: Path,
+    *,
+    spec_id: str,
+    title: str,
+    base_sha: str,
+    cell_head: str | None,
+    attempts: int,
+    spent_usd: float,
+    agent_subjects: list[str],
+) -> str:
+    """One commit. Not the repo's `type(scope):` convention — that describes a
+    commit a person wrote about a defect they understood, and this one is
+    generated; a subject mimicking it would claim a judgement nothing made.
+
+    `cell_head` names an object that no longer exists anywhere: the cell's
+    commits died with the volume. It is recorded because it is the only name
+    the transcript and the batch tree share.
+    """
+    lines = [
+        f"saffron {spec_id}: {neutralize(title)}",
+        "",
+        f"base {base_sha[:12]}",
+        f"cell head {cell_head[:12] if cell_head else '(unknown)'} "
+        "(unreachable: the cell's commits died with its volume)",
+        f"{attempts} attempts, ${spent_usd:.2f}",
+    ]
+    if agent_subjects:
+        lines += ["", "The agent's own commits, squashed into this one:"]
+        lines += [f"  * {neutralize(s)}" for s in agent_subjects]
+    done = _run(worktree, "commit", "-q", "-m", "\n".join(lines))
+    if done.returncode != 0:
+        raise PackageError(f"commit failed: {done.stderr.strip()[:200]}")
+    return _run(worktree, "rev-parse", "HEAD").stdout.strip()
+
+
+def remote_sha(url: str, branch: str, *, cwd: Path) -> str:
+    """What the remote has for this branch right now — "" if it has nothing.
+
+    Read rather than assumed: this is the lease, and a guessed lease protects
+    nothing.
+    """
+    done = _run(cwd, "ls-remote", url, f"refs/heads/{branch}")
+    if done.returncode != 0:
+        raise PackageError(f"cannot reach {url}: {done.stderr.strip()[:200]}")
+    return done.stdout.split("\t")[0].strip() if done.stdout.strip() else ""
+
+
+def push_with_lease(worktree: Path, *, url: str, branch: str, expect: str) -> None:
+    """Push, pinned to what the remote said. An empty `expect` means the branch
+    is not there — measured: git treats that as "expect it to be absent" and
+    rejects with `stale info` if it appeared."""
+    done = _run(
+        worktree,
+        "push",
+        f"--force-with-lease=refs/heads/{branch}:{expect}",
+        url,
+        f"HEAD:refs/heads/{branch}",
+    )
+    if done.returncode != 0:
+        raise PackageError(
+            f"the branch moved underneath us: {done.stderr.strip()[:300]}"
+        )
