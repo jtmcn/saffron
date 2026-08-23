@@ -253,10 +253,16 @@ at all*.
 right shape for it. A spec whose `touches` names `pyproject.toml` has authorized
 the edit and the gate has nothing left to say. The honest consequence, worth
 stating because it makes the check nearly redundant: exempt, it fires only where
-`scope` would already have failed. What is left over is the narrow case where
-`touches` is *broader* than the gate-config pattern — `touches: [".saffron/**"]`
-on a task that also edits `.saffron/policy.yaml` — and that is the case it earns
-its place on.
+`scope` would already have failed.
+
+**Correction (fix wave).** This section originally said what is left over is the
+narrow case where `touches` is *broader* than the gate-config pattern —
+`touches: [".saffron/**"]` on a task that also edits `.saffron/policy.yaml`.
+That is wrong, measured: `matches(".saffron/policy.yaml", ".saffron/**")` is
+`True`, so `declared` is `True` and the check is exempt in exactly that case.
+The only live case is an **empty `touches`**: `scope` skips, `integrity` still
+fires. Semantics unchanged — narrowing the exemption is a design change, and the
+prose was what was wrong.
 
 **Suppressions: never exempt.** The prose false positive from correction 3
 therefore returns: a docstring quoting a token fails, and `d1141d0` fails. That

@@ -127,6 +127,17 @@ check without nullifying it. The cost of not exempting suppressions is that pros
 quoting a token fails; that is accepted, because a `fail` reaches the repair loop
 naming file, line and token, while a gate that never fires reports nothing.
 
+**The cost is measured, not estimated.** Against this branch's own diff
+(`d1141d0..HEAD`) with the real `.saffron/policy.yaml`, `integrity` reports **65**
+failures — 64 `added-suppression` across 9 files plus one `gate-config-changed` —
+where `d1141d0` itself produced 2. Almost all of it is this work's own prose about
+suppression tokens: 23 in the plan, 17 in `tests/test_integrity.py`, 7 in
+`DESIGN.md`, 6 in the spec, the rest in the backlog and the evidence files. A task
+whose `touches` names those paths is exempt, so this bites only a task editing a
+prose file it did not declare. If it starts biting, the relief is a `prose_paths`
+key in `integrity` — paths whose *added lines* are not scanned, distinct from
+`touches`, which exempts the whole file — not a weaker token list.
+
 **Three defects found by executing the work rather than reading it**, each closed:
 
 - **One byte hid a suppression.** Git splits diff lines only on `\n`; Python's
@@ -150,7 +161,15 @@ naming file, line and token, while a gate that never fires reports nothing.
 Still open, deliberately: a task that *legitimately* removes a test cannot pass,
 since no exemption binds `census`. The upgrade path is a spec field, left unbuilt
 until a task needs it. A genuine binary fixture inside `touches` trips
-`integrity`'s unreadable-section rule. And `exec_stream`, `LocalExecutor` and
+`integrity`'s unreadable-section rule — and the same rule is a **deterministic
+route out of a red run**: committing a `.gitattributes` carrying `*.py -diff`
+renders every Python file as `Binary files ... differ`, so a file inside `touches`
+turns `integrity` into `error`, which `aborted_gates` reports as `GATE_ERROR` —
+infrastructure, charged to nobody. An agent facing a failing run can reach that
+on purpose. The vector is new to this split; the pre-split gate had no binary
+handling at all. Closing it is a `--numstat` cross-check (a file git reports
+non-zero added lines for cannot legitimately be unreadable), which is a design
+change and not this branch's. And `exec_stream`, `LocalExecutor` and
 `package.py` still capture with `text=True` — harmless today, since none of them
 reads a diff that a gate judges, but they are the remaining siblings of the
 boundary this work fixed. All carry `ponytail:` comments or a line here.
@@ -481,6 +500,46 @@ The credential refusal keeps a secret off the *remote*, not off the *host*:
 `_CREDENTIAL_SHAPES` is a partial list under a `ponytail:` comment naming that
 ceiling, and the real answer is §5.4's `secrets` gate, which is still v1's to
 build.
+
+---
+
+## 12. `census` trusts the gate runner, and the gate runner is in the cell
+
+Promised by the split's spec (part 2.3) and not written until the fix wave.
+`census`'s subtraction is exact about the two lists it is handed, and both lists
+are produced inside the untrusted cell — by `/work/.saffron/gates/tests.py` and a
+second pytest process. CLAUDE.md's founding line is that every control that
+matters lives outside the cell; this one does not. Two routes, both measured:
+
+- **A `conftest.py` that lies to `--collect-only`.** A
+  `pytest_collection_modifyitems` that drops a test only when
+  `config.option.collectonly` is false makes enumeration report a name the run
+  never executes. `census` passes because the name is still collected; `tests`
+  passes because the test never ran. The removal is invisible to both.
+- **Uncommitted edits are invisible to every diff-reading gate and fully
+  effective on every gate result.** `worktree.export_patch` and
+  `worktree.changed_files` both diff `base_sha..HEAD`, while `CellExecutor` execs
+  gates against `/work` — the worktree. So **any** uncommitted change is absent
+  from `scope`, from `integrity` and from the packaged patch, while being live
+  for the suite. The spec names `/work/.saffron/gates/tests.py`, and the
+  `.saffron/**` `gate_config` pattern closes only the committed case — but the
+  hole is wider than one file: an uncommitted edit to any source file changes
+  what the suite is measuring, and the reviewer reads a patch that does not
+  contain it.
+
+Neither route argues for the diff-shaped removal check this branch rejected: that
+one was evadable by a single adjacent added line and needed no `conftest.py` at
+all. The honest statement of what shipped is that **`census` buys exactness
+against an honest suite, not integrity against a hostile one.**
+
+**Done looks like:** a decision on the gate-runner trust boundary, which §5.4's
+`no-network` gate and the gate contract both currently assume is cooperative. The
+two candidate halves are independent: (a) gates run from a host-supplied copy of
+`.saffron/gates/` rather than the one in `/work`, so an in-cell edit — committed
+or not — cannot reach the runner; (b) the host refuses a dirty worktree at gate
+time, or diffs `base_sha..worktree` so that an uncommitted edit is at least
+*visible* to `scope` and `integrity`. Neither is v0.5's to build, and this item
+exists so the choice is made deliberately rather than inherited.
 
 ---
 

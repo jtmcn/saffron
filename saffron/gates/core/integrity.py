@@ -213,9 +213,14 @@ def integrity_gate(
         # subtraction, so erroring here would replace that repairable failure
         # with an abandoned task.
         #
-        # ponytail: a genuine binary fixture inside `touches` still aborts the
-        # attempt. The upgrade path is `policy.yaml` declaring binary paths, or
-        # a `--numstat` cross-check; not worth building before a repo has one.
+        # ponytail: two ceilings, one rule. A genuine binary fixture inside
+        # `touches` aborts the attempt — the false positive. And an agent can
+        # reach `error` *on purpose*: a committed `.gitattributes` with
+        # `*.py -diff` renders every Python file this way, and `error` is
+        # `GATE_ERROR`, charged to nobody. The upgrade path closes both: a
+        # `--numstat` cross-check, since git still reports added lines for a
+        # file it renders as binary. Not built here — it is a design change
+        # (BACKLOG item 1, "Still open, deliberately").
         if file_diff.unreadable:
             if not declared:
                 continue
