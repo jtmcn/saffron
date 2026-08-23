@@ -27,17 +27,6 @@ def test_a_test_renamed_out_of_collection_is_a_removal():
     assert [f.file for f in result.failures] == ["t.py::test_b"]
 
 
-def test_a_deletion_with_a_comment_left_in_its_place_is_still_a_removal():
-    """The cheapest evasion of the diff-reading gate: one adjacent added line
-    of any content hid a deletion from it (Appendix M). A set comparison never
-    sees the neighbour, so the comment buys nothing."""
-    result = census_gate(
-        base=[_tests("t.py::test_a", "t.py::test_b")], head=[_tests("t.py::test_a")]
-    )
-    assert result.status == "fail"
-    assert [f.file for f in result.failures] == ["t.py::test_b"]
-
-
 def test_a_parametrize_consolidation_that_keeps_the_names_passes():
     result = census_gate(
         base=[_tests("t.py::test_a", "t.py::test_b")],

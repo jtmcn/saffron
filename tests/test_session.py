@@ -691,6 +691,64 @@ def test_a_diff_outside_touches_fails_the_suite(monkeypatch, tmp_path):
     )
 
 
+def test_a_test_missing_at_head_reaches_the_agent_as_a_census_failure(
+    monkeypatch, tmp_path
+):
+    """The head-side wiring, through `_drive_cell` rather than around it.
+
+    Both tests below call `census_gate` directly, so both stayed green under
+    two mutations that make the branch's whole purpose vanish: `_suite([])` at
+    the head call (census becomes a permanent `skip`) and `census_gate` with
+    its two sides swapped (nothing is ever reported removed). This one runs
+    the real suite closure, so it is the one that goes red.
+    """
+
+    def _tests(*names):
+        return [
+            GateResult(
+                gate="tests",
+                status="pass",
+                tool="pytest 8.3.2",
+                collected=list(names),
+            )
+        ]
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        suites=(
+            _tests("t.py::test_a", "t.py::test_b"),
+            _tests("t.py::test_a"),
+            _tests("t.py::test_a"),
+        ),
+    )
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn()],
+    )
+
+    # `fail`, not `error`: the code is wrong, and the agent is asked to fix it.
+    assert outcome.state == "EXHAUSTED"
+    assert (
+        "- [census] t.py::test_b:? removed-test: collected at base_sha, absent at head"
+        in cell.turns[2]
+    )
+    # And the baseline it was measured against is the one with both names.
+    assert (
+        json.loads((tmp_path / "out" / "SY-1" / "baseline.json").read_text())[-1][
+            "status"
+        ]
+        == "skip"
+    )
+    assert [
+        row["status"]
+        for row in ledger._db.execute(
+            "SELECT status FROM gate_results WHERE gate = 'census' AND run_id IS NULL"
+        )
+    ] == ["fail", "fail"]
+
+
 def test_the_baseline_suite_skips_census_because_there_is_no_base_yet():
     """`_suite([])` is the baseline call. A census with nothing to compare is
     a skip, not a report that every test was removed."""
