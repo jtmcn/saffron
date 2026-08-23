@@ -19,6 +19,7 @@ from saffron.phases.package import (
     commit_squash,
     default_branch,
     find_credentials,
+    find_credentials_in_text,
     github_slug,
     needs_reverification,
     neutralize,
@@ -991,6 +992,59 @@ def test_an_added_line_shaped_like_a_header_does_not_re_point_the_path():
     found = find_credentials(patch, token=None)
     assert found and "real.py" in " ".join(found)
     assert "decoy.py" not in " ".join(found)
+
+
+# Every character `str.splitlines()` breaks on and git does not. Any one of
+# them inside an added line shatters it, and the fragment carrying the secret
+# loses its `+` — dropping out of the scan that is the last check before a
+# cell-authored patch reaches a real remote.
+_NOT_A_LINE_TERMINATOR = [
+    pytest.param("\x0b", id="VT"),
+    pytest.param("\x0c", id="FF"),
+    pytest.param("\x1c", id="FS"),
+    pytest.param("\x1d", id="GS"),
+    pytest.param("\x1e", id="RS"),
+    pytest.param("\x85", id="NEL"),
+    pytest.param("\u2028", id="LS"),
+    pytest.param("\u2029", id="PS"),
+    pytest.param("\r", id="CR"),
+]
+
+
+@pytest.mark.parametrize("separator", _NOT_A_LINE_TERMINATOR)
+def test_a_byte_inside_an_added_line_cannot_hide_the_token_from_the_patch_scan(
+    separator,
+):
+    """Measured: with `splitlines()` every one of these returned `leaked=[]`
+    for a patch that pushes the cell's own OAuth token."""
+    token = "sk-ant-oat01-EXAMPLE-NOT-REAL-0000"
+    patch = (
+        "diff --git a/cfg.py b/cfg.py\n"
+        "--- a/cfg.py\n"
+        "+++ b/cfg.py\n"
+        "@@ -1,1 +1,2 @@\n"
+        f'+TOKEN = "{separator}{token}"\n'
+    )
+    found = find_credentials(patch, token=token)
+    assert found
+    assert token not in " ".join(found)
+    assert "cfg.py" in " ".join(found)
+
+
+@pytest.mark.parametrize("separator", _NOT_A_LINE_TERMINATOR)
+def test_prose_is_split_the_way_git_wrote_it_so_the_token_stays_whole(separator):
+    """A claim, a rebuttal and a verdict reason are cell-authored, and the PR
+    body carries them to the remote.
+
+    The shaped-credential regexes cannot match across a separator either way,
+    so the difference here is narrower than `_added_lines`': the literal-token
+    check is a *substring* test, and a splitter that shatters the line first
+    hands it two halves of the one secret the host knows is in the cell.
+    """
+    token = f"sk-ant-oat01-EXAMPLE{separator}NOT-REAL-0000"
+    text = f"I set the header to {token} and it worked."
+    found = find_credentials_in_text(text, token=token, where="claim")
+    assert found == ["claim: the cell's own CLAUDE_CODE_OAUTH_TOKEN"]
 
 
 def test_a_branch_that_cannot_be_created_is_infrastructure(packageable):

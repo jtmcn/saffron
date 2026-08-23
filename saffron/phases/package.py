@@ -21,7 +21,7 @@ from pathlib import Path
 
 from saffron.cell.worktree import DIFF_FLAGS
 from saffron.gates.baseline import NewFailure
-from saffron.gates.contract import GateResult
+from saffron.gates.contract import GateResult, split_lines
 from saffron.phases.review import anchored_concerns
 from saffron.report import index as index_report
 from saffron.report import pr_body
@@ -157,7 +157,9 @@ def _added_lines(patch_text: str) -> list[tuple[str, str]]:
     is always a real stanza header.
     """
     path, out, in_hunk = "?", [], False
-    for line in patch_text.splitlines():
+    # split_lines, not splitlines(): one \x0c inside an added line shatters it,
+    # and the fragment carrying the secret is dropped from the scan.
+    for line in split_lines(patch_text):
         if line.startswith("@@"):
             in_hunk = True
         elif line.startswith("diff --git "):
@@ -179,7 +181,7 @@ def find_credentials(patch_text: str, *, token: str | None) -> list[str]:
 def find_credentials_in_text(text: str, *, token: str | None, where: str) -> list[str]:
     """The same scan over prose. A claim, a rebuttal argument and a verdict
     reason are cell-authored too, and the body carries them to the remote."""
-    return _scan([(where, line) for line in text.splitlines()], token)
+    return _scan([(where, line) for line in split_lines(text)], token)
 
 
 def _scan(lines: list[tuple[str, str]], token: str | None) -> list[str]:

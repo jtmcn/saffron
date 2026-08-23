@@ -18,6 +18,27 @@ _DIGITS = re.compile(r"\d+")
 _WHITESPACE = re.compile(r"\s+")
 
 
+def split_lines(text: str) -> list[str]:
+    """Split on `"\\n"` only — git's own separator, and the shell's.
+
+    `str.splitlines()` also splits on `\\r`, `\\x0b`, `\\x0c`, `\\x1c`-`\\x1e`,
+    `\\x85`, `U+2028` and `U+2029`, none of which git treats as a line
+    terminator: it emits them raw inside a line's content. Splitting on them
+    shatters one line into fragments, and a fragment starting with a space is
+    then read as a context line — a byte hides a suppression from `integrity`
+    that ruff still honours, and hides a credential from the push-time scan
+    that the remote would still receive.
+
+    Here rather than beside any one caller: `integrity`, `scope`, the
+    credential scan and finding-anchoring all read the same git output, and a
+    splitter that is right in three of four places is the defect itself.
+    """
+    lines = text.split("\n")
+    if text.endswith("\n"):
+        lines.pop()  # split("\n") artifact splitlines() never produced
+    return [line[:-1] if line.endswith("\r") else line for line in lines]
+
+
 class Failure(BaseModel):
     """One failure reported by one gate.
 
