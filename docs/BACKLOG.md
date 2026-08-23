@@ -17,9 +17,11 @@ merge — anything from them worth keeping was moved into the appendices or into
 
 ## 1. `integrity` needs splitting, not rewriting — and half of it may not be a core gate
 
-**Status:** written by the factory, reviewed, **rejected**. The patch is in the
-batch tree, not in the repo. Read it and the review before writing anything —
-most of its structure is sound and its §2.1 split is clean.
+**Status:** **done**, by hand, in PR #6 (merge `596f96f`) — not by the factory
+patch this item was written about. That patch was reviewed and **rejected**, and
+stayed in the batch tree; what shipped keeps its §2.1 split and its suppression
+detection and replaces the rest. Nothing below needs picking up. Read it for
+what the shipped gate is answering and why, not as work outstanding.
 
 `SA-0004` produced a 371-line `integrity` gate that passed every gate and its own
 31 tests, and adversarial review rejected it (Appendix K). The three Criticals
