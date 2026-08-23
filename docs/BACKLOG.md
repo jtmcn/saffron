@@ -227,6 +227,49 @@ its patch no longer applies (see item 9).
 **Done looks like:** both tables, the drop-rate-per-lens query answerable in SQL,
 and cost on the task row.
 
+**Done, 2026-08-23.** All three, by hand; `SA-0003`'s stale patch was not
+reopened. Four things worth carrying forward.
+
+**The column had no `REFERENCES`, and that is what made the convention
+possible.** `gate_results.attempt_id` was a bare `INTEGER`, so holding a
+`task_id` in it was not a shortcut the schema tolerated — it was one the schema
+could not see. It points at `attempts(attempt_id)` now, and the old convention
+is unrepresentable rather than merely discouraged. Two existing ledger tests
+asserted it directly and had to change; `SA-0003`'s "every existing test still
+passes unchanged" was written before it was clear that two of them encoded the
+defect.
+
+**Attempts are opened by wrapping the agent callable, not at the call sites.**
+`record_attempts` sits inside `stop_on_rejected`, so a turn the provider walled
+records its cost before the rate limit is raised. The consequence is the reason
+for the shape: the lens sessions inside `review.run_review` and the rebuttal and
+verdict turns inside `rebut.run_rebut` all get rows without either phase
+learning what a ledger is — they still take an `agent` and nothing else. A
+turn that fails is still recorded; one that raises something neither layer
+expects leaves its row open, which is an honest reading of what happened.
+
+**`phase` is the state the task is in, and `spent_usd_est` is derived.**
+`open_attempt` reads `tasks.state` rather than taking a phase, because the
+caller already sets it at every phase boundary and tracking it twice is how the
+two drift. `set_task_state` rolls the spend up from `attempts` in the same
+statement, so the figure cannot disagree with the rows it is made of and no
+terminal path can forget it — there are seven of them. The equality between
+`tasks.spent_usd_est` and `CellOutcome.spent_usd` is asserted, because it is
+what proves no spending turn is missing a row.
+
+**`SA-0003` deferred `spent_usd_est` on a question that was already answered.**
+It said the sum depends on "whether a resumed session reports per-turn or
+whole-session cost, which is not yet known". `session.py` had since measured it
+— $0.00396 fresh, $0.00199 on resume of the same `session_id`, so summing is
+correct and cumulative would never fall. The deferral outlived its reason.
+
+Still open, by choice: `findings.adjudication` has no producer — it is the
+operator's, and the morning queue (§6) is where it comes from. `attempts.model`
+is declared and never written: the runner's `result` event does not carry it and
+only assistant messages do, so recording it means changing the event schema.
+`batches` and `decisions` remain the two tables of the ten with nothing to put
+in them.
+
 ## 4. Three of five supervisor bounds are missing
 
 §4.3 wants turns, spend, idle, completion and wall clock. v0.5 has turns, spend
