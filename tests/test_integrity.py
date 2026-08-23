@@ -303,3 +303,35 @@ def test_a_blank_context_line_without_its_marker_still_parses(tmp_path):
     result = integrity_gate(diff, PATTERNS, touches=[])
     assert result.status == "fail"
     assert result.failures[0].code == "added-suppression"
+
+
+def test_a_mode_only_change_to_gate_config_is_seen(tmp_path):
+    """git emits neither path header nor hunk for a mode-only change, so the
+    `diff --git` line is the only place the path appears. Making a gate script
+    non-executable is about the most direct gate-disabling edit there is."""
+    run = _repo(tmp_path, {"pyproject.toml": "[tool]\n"})
+    (tmp_path / "pyproject.toml").chmod(0o755)
+    run("git", "add", "-A")
+    diff = subprocess.run(
+        ["git", "diff", "--cached", *worktree.DIFF_FLAGS],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "@@" not in diff
+    result = integrity_gate(diff, PATTERNS, touches=[])
+    assert result.status == "fail"
+    assert result.failures[0].code == "gate-config-changed"
+    assert result.failures[0].file == "pyproject.toml"
+
+
+def test_an_added_empty_gate_config_file_is_seen(tmp_path):
+    """The other headerless, hunkless block: an empty file. `touches` is empty
+    here, the case where `scope` skips and this gate is the only defence."""
+    run = _repo(tmp_path, {"src/a.py": "x = 1\n"})
+    diff = _diff(tmp_path, run, {"pyproject.toml": ""})
+    result = integrity_gate(diff, PATTERNS, touches=[])
+    assert result.status == "fail"
+    assert result.failures[0].code == "gate-config-changed"
+    assert result.failures[0].file == "pyproject.toml"

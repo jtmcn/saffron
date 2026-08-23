@@ -30,7 +30,11 @@ from saffron.repos.policy import IntegrityPatterns
 # `worktree.DIFF_FLAGS`, so every file header must be exactly this shape.
 # Anything else means git did not honour the flags, and a gate that cannot
 # recognise its own input reports `error` rather than a `pass` nobody checked.
-_FILE_HEADER = re.compile(r'^diff --git (?:a/.+ b/.+|"a/.+" "b/.+")$')
+# Splitting `a/X b/X` is ambiguous in general — `a/my file b/my file` has no
+# unique split point. `--no-renames` is what makes it parseable: both sides
+# always name the same path, so the backreference picks the only split that
+# makes them equal.
+_FILE_HEADER = re.compile(r'^diff --git (?:a/(.+) b/\1|"a/(.+)" "b/\2")$')
 
 # `--- a/path` / `--- /dev/null` and `+++ b/path` / `+++ /dev/null`, quoted or
 # not. Only trusted before the first hunk of a block — after that an
@@ -101,7 +105,8 @@ def _split_blocks(diff: str) -> list[str]:
         if line.startswith("diff --git "):
             if not _FILE_HEADER.match(line):
                 raise _DiffError(
-                    f"diff prefixes are not a/ b/, so paths are unreadable: {line[:120]}"
+                    f"not the a/X b/X header --no-renames guarantees, so paths "
+                    f"are unreadable: {line[:120]}"
                 )
             starts.append(index)
     blocks = []
@@ -128,7 +133,14 @@ def _parse_block(block: str) -> _FileDiff:
                 file_diff = _FileDiff(binary.group(1), binary.group(2))
                 file_diff.unreadable = True
                 return file_diff
-            if line.startswith("--- ") and old_path is None:
+            if header_paths := _FILE_HEADER.match(line):
+                # A mode-only change and an empty-file add/delete carry neither
+                # path header nor hunk, so this is the only place their path
+                # appears — and `gate_config` is a question about the path
+                # alone. `---`/`+++` below refine it, including to None.
+                old_path = new_path = header_paths.group(1) or header_paths.group(2)
+                continue
+            if line.startswith("--- "):
                 header = _OLD_PATH.match(line)
                 if header is None:
                     raise _DiffError(f"unreadable old-file header: {line[:120]}")
@@ -138,7 +150,7 @@ def _parse_block(block: str) -> _FileDiff:
                 if old_path is not None:
                     old_path = old_path.removesuffix("\t")
                 continue
-            if line.startswith("+++ ") and new_path is None:
+            if line.startswith("+++ "):
                 header = _NEW_PATH.match(line)
                 if header is None:
                     raise _DiffError(f"unreadable new-file header: {line[:120]}")
