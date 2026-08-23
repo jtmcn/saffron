@@ -83,8 +83,11 @@ def replay(
 
     for result in baseline:
         ledger.record_gate_result(result, run_id=run_id)
+    # v0 has no agent, so it has no turn — but a gate result still belongs to
+    # an attempt, and `attempt_id` is a reference now rather than a convention.
+    attempt_id = ledger.open_attempt(task_id, phase="REPLAY")
     for result in head:
-        ledger.record_gate_result(result, attempt_id=task_id)
+        ledger.record_gate_result(result, attempt_id=attempt_id)
 
     new_failures = subtract_baseline(head, baseline)
     # An errored gate aborts the attempt (CONTEXT.md §4): it contributes no

@@ -89,6 +89,48 @@ def stop_on_rejected(
     return guarded
 
 
+def record_attempts(
+    agent: Callable[..., AttemptResult], *, ledger: Ledger, task_id: int
+) -> Callable[..., AttemptResult]:
+    """One `attempts` row per agent turn (§4.1), opened here rather than at each
+    call site: the lens sessions and the rebuttal turns run inside their phases,
+    which take an `agent` and know nothing of the ledger.
+
+    Wrapped *inside* `stop_on_rejected`, so a turn the provider walled has its
+    cost recorded before the rate limit is raised. A turn that fails is still a
+    turn that spent; a turn that raises something neither of them expects leaves
+    its row open, which is what it is.
+    """
+
+    @wraps(agent)
+    def recorded(*args: object, **kwargs: object) -> AttemptResult:
+        attempt_id = ledger.open_attempt(task_id)
+        try:
+            attempt = agent(*args, **kwargs)
+        except implement.AgentFailed as failed:
+            _close_attempt(ledger, attempt_id, failed.attempt)
+            raise
+        _close_attempt(ledger, attempt_id, attempt)
+        return attempt
+
+    return recorded
+
+
+def _close_attempt(
+    ledger: Ledger, attempt_id: int, attempt: AttemptResult | None
+) -> None:
+    ledger.close_attempt(
+        attempt_id,
+        session_id=attempt.session_id if attempt else None,
+        # A turn that produced no result at all is not a turn that succeeded,
+        # and $0.00 here is measured absence, not a crash's zeroed fields.
+        subtype=attempt.subtype if attempt else "error",
+        terminal_reason=attempt.terminal_reason if attempt else None,
+        num_turns=attempt.num_turns if attempt else 0,
+        cost_usd_est=attempt.cost_usd_est if attempt else 0.0,
+    )
+
+
 def _raise_if_rejected(attempt: AttemptResult | None) -> None:
     if attempt and terminal_for_rate_limit(attempt.rate_limit_status):
         raise RateLimited(attempt.rate_limit_resets_at)
@@ -611,7 +653,13 @@ def _drive_cell(
         # Bound once, here, so no turn — plan, implement, repair, review or
         # rebuttal — can quietly inherit the library's hour (§4.3), or run on
         # against a window the provider already closed.
-        agent = stop_on_rejected(partial(implement.run_agent, timeout_s=TURN_TIMEOUT_S))
+        agent = stop_on_rejected(
+            record_attempts(
+                partial(implement.run_agent, timeout_s=TURN_TIMEOUT_S),
+                ledger=ledger,
+                task_id=task_id,
+            )
+        )
 
         try:
             planned, raw_plan, spent = plan_checkpoint(
@@ -731,10 +779,12 @@ def _drive_cell(
         def _run_gates() -> list[GateResult]:
             results = _suite(baseline)
             green[:] = results
+            # The turn the gates are measuring is the one that just closed:
+            # a repair turn's results belong to that repair turn, not to the
+            # task every attempt used to collapse onto (§5.4, §8).
+            attempt_id = ledger.attempts(task_id)[-1]["attempt_id"]
             for result in results:
-                # No attempts table yet, so attempt_id carries the task_id —
-                # the convention the schema already documents (§4.1).
-                ledger.record_gate_result(result, attempt_id=task_id)
+                ledger.record_gate_result(result, attempt_id=attempt_id)
             return results
 
         def _repair(new: Sequence[NewFailure]) -> str | None:
@@ -774,6 +824,9 @@ def _drive_cell(
         # EXHAUSTED or GATE_ERROR directly, skipping REVIEW entirely, and the
         # outcome at the bottom of this function must still be constructible.
         reviews: list[review.LensReview] = []
+        # Same reason: REBUT reads this to attach a verdict to the row REVIEW
+        # wrote, and the branch that fills it is the branch above.
+        recorded: dict[int, int] = {}
 
         if outcome == "READY_FOR_REVIEW":
             ledger.set_task_state(task_id, "REVIEWING")
@@ -797,6 +850,17 @@ def _drive_cell(
             spent += sum(r.cost_usd for r in reviews)
             (task_dir / "findings.json").write_text(
                 json.dumps([r.as_dict() for r in reviews], indent=2)
+            )
+            # Keyed by identity rather than re-filtered: `anchored_blockers` is
+            # the single selection rule REBUT's callers share, and a second copy
+            # of it here would silently renumber the blockers (§5.5).
+            reported = [f for r in reviews for f in r.findings]
+            recorded = dict(
+                zip(
+                    map(id, reported),
+                    ledger.record_findings(task_id, reported),
+                    strict=True,
+                )
             )
             outcome, why = review.review_state(reviews)
             watch(f"REVIEW: {why}")
@@ -856,6 +920,21 @@ def _drive_cell(
                 (task_dir / "rebuttal.json").write_text(
                     json.dumps(result.as_dict(blockers), indent=2)
                 )
+                # The critic's verdict and the implementer's argument, onto the
+                # rows REVIEW wrote. Both are keyed by the blocker's number,
+                # which is its position in `blockers` counted from 1 (§5.6).
+                argued = {r.finding: r.argument for r in result.rebuttal.rebuttals}
+                judged = {
+                    v.finding: v.verdict
+                    for lens in result.verdicts
+                    for v in lens.verdicts
+                }
+                for n, finding in enumerate(blockers, 1):
+                    ledger.record_rebuttal(
+                        recorded[id(finding)],
+                        verdict=judged.get(n),
+                        rebuttal=argued.get(n),
+                    )
                 outcome, why = result.state, result.why
                 watch(f"REBUT: {why}")
 

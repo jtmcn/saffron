@@ -1296,3 +1296,87 @@ def test_a_plan_rejected_on_shape_reports_both_turns_it_spent(monkeypatch, tmp_p
     assert outcome.state == "PLAN_REJECTED"
     assert outcome.spent_usd == 0.8
     assert any("$0.80 spent" in line for line in cell.watched)
+
+
+def test_a_review_records_the_findings_it_dropped_as_well_as_the_ones_it_kept(
+    monkeypatch, tmp_path
+):
+    """§4.1: dropped findings are kept, because the drop rate is the signal that
+    a lens is badly prompted — and it is a SQL question, not a JSON one."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    _outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_through_rebut(
+            _turn("I have addressed the findings."), _turn(_block(_CLAIMED_FIX))
+        ),
+    )
+    (task_id,) = [row["task_id"] for row in ledger.queue_lines()]
+    rows = ledger.findings(task_id)
+    assert [(r["lens"], r["claim"], r["anchored"]) for r in rows] == [
+        ("correctness", "x returns nothing", 1)
+    ]
+
+
+def test_a_verdict_lands_on_the_finding_the_review_recorded(monkeypatch, tmp_path):
+    """`verdict` and `rebuttal` had nowhere to go but `rebuttal.json` (§4.1)."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    _outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_through_rebut(
+            _turn("It is intentional."),
+            _turn(
+                _block(
+                    {
+                        "rebuttals": [
+                            {"finding": 1, "action": "argued", "argument": "by design"}
+                        ]
+                    }
+                )
+            ),
+            _turn(
+                _block(
+                    {
+                        "verdicts": [
+                            {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                        ]
+                    }
+                )
+            ),
+        ),
+    )
+    (task_id,) = [row["task_id"] for row in ledger.queue_lines()]
+    (row,) = ledger.findings(task_id)
+    assert (row["verdict"], row["rebuttal"]) == ("withdrawn", "by design")
+
+
+def test_what_the_task_spent_is_the_sum_of_the_turns_it_ran(monkeypatch, tmp_path):
+    """The equality is the point: `spent_usd_est` is derived from `attempts`, so
+    a turn that spends without opening a row makes the two disagree. Every
+    phase's turns are counted here — plan, implement, both lenses, rebuttal."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_through_rebut(
+            _turn("I have addressed the findings."), _turn(_block(_CLAIMED_FIX))
+        ),
+    )
+    (line,) = ledger.queue_lines()
+    assert line["spent_usd_est"] == pytest.approx(outcome.spent_usd)
+    assert line["spent_usd_est"] > 0
+    assert [row["phase"] for row in ledger.attempts(outcome.task_id)] == [
+        "IMPLEMENTING",
+        "IMPLEMENTING",
+        "REVIEWING",
+        "REVIEWING",
+        "REBUTTING",
+        "REBUTTING",
+    ]
