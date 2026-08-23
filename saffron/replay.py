@@ -88,6 +88,16 @@ def replay(
     attempt_id = ledger.open_attempt(task_id, phase="REPLAY")
     for result in head:
         ledger.record_gate_result(result, attempt_id=attempt_id)
+    # Closed immediately, and the zeros are measured rather than missing: an
+    # attempt left open reads as one still in flight.
+    ledger.close_attempt(
+        attempt_id,
+        session_id=None,
+        subtype="replay",
+        terminal_reason=None,
+        num_turns=0,
+        cost_usd_est=0.0,
+    )
 
     new_failures = subtract_baseline(head, baseline)
     # An errored gate aborts the attempt (CONTEXT.md §4): it contributes no

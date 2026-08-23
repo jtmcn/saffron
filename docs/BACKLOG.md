@@ -263,6 +263,27 @@ whole-session cost, which is not yet known". `session.py` had since measured it
 — $0.00396 fresh, $0.00199 on resume of the same `session_id`, so summing is
 correct and cumulative would never fall. The deferral outlived its reason.
 
+**Review found the migration, and the obvious repair is illegal.** A ledger
+written before `attempts` existed holds a *task_id* in `gate_results.attempt_id`
+— and a new attempt's id starts at 1 in that same integer namespace, so task 1's
+v0.5 results reattach to whichever attempt draws id 1. Reproduced on a copy of
+this machine's own `~/.saffron/ledger.db`, which is exactly such a ledger.
+Nulling the legacy values out is not available: the `CHECK` that keeps exactly
+one of `attempt_id` and `run_id` set rejects a row with neither, on `UPDATE` as
+much as on insert. What ships is the backfill the old schema comment promised —
+one attempt row per legacy value, carrying that value as its own id, so the ids
+stay taken and nothing is lost or moved. Measured on that copy: five backfilled,
+zero dangling, every task still holding its own results.
+
+Two smaller ones from the same review. `open_attempt` against a task that does
+not exist selected nothing and still returned `lastrowid` — an id that exists,
+belongs to another attempt, and satisfies the foreign key; silent
+misattribution, which is the failure this item exists to end. And `RATE_LIMITED`
+was the one exit where the ledger and `CellOutcome` disagreed: the raise comes
+from outside the turn, so it lands past the `spent +=`. The outcome reads the
+roll-up now, which also closes the older gap where a window closing inside
+`plan_checkpoint` lost the whole tally with its frame.
+
 Still open, by choice: `findings.adjudication` has no producer — it is the
 operator's, and the morning queue (§6) is where it comes from. `attempts.model`
 is declared and never written: the runner's `result` event does not carry it and

@@ -138,6 +138,22 @@ class Ledger:
             self._db.execute(
                 "ALTER TABLE tasks ADD COLUMN spent_usd_est REAL NOT NULL DEFAULT 0.0"
             )
+        # The backfill the old schema comment promised. A ledger written before
+        # `attempts` existed holds a *task_id* in `gate_results.attempt_id`, and
+        # a new attempt's id starts at 1 in that same integer namespace — so
+        # without this, task 1's v0.5 results reattach to whichever attempt
+        # draws id 1. Nulling them is not available: the CHECK rejects a row
+        # with neither id. One row per legacy value, carrying that value as its
+        # own id, so the ids stay taken and nothing is lost or moved.
+        self._db.execute(
+            """INSERT INTO attempts (attempt_id, task_id, phase, n)
+               SELECT DISTINCT g.attempt_id, g.attempt_id, 'v0.5', 1
+                 FROM gate_results g
+                WHERE g.attempt_id IS NOT NULL
+                  AND EXISTS (SELECT 1 FROM tasks t WHERE t.task_id = g.attempt_id)
+                  AND NOT EXISTS (SELECT 1 FROM attempts a
+                                   WHERE a.attempt_id = g.attempt_id)"""
+        )
         self._db.commit()
 
     def close(self) -> None:
@@ -221,6 +237,11 @@ class Ledger:
                  FROM tasks t WHERE t.task_id = ?""",
             (task_id, phase, phase, task_id),
         )
+        # A task_id matching nothing selects nothing, and `lastrowid` still
+        # reports the connection's previous insert — an id that exists, belongs
+        # to another attempt, and satisfies the foreign key.
+        if cursor.rowcount != 1:
+            raise ValueError(f"no task {task_id} to open an attempt against")
         self._db.commit()
         return int(cursor.lastrowid)
 
@@ -242,6 +263,15 @@ class Ledger:
             (session_id, subtype, terminal_reason, num_turns, cost_usd_est, attempt_id),
         )
         self._db.commit()
+
+    def task_spend(self, task_id: int) -> float:
+        """What the task's attempts add up to. `set_task_state` has already
+        rolled this onto the row; a caller whose own tally lost a frame reads
+        it back rather than reporting the gap."""
+        row = self._db.execute(
+            "SELECT spent_usd_est FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        return float(row["spent_usd_est"]) if row else 0.0
 
     def attempts(self, task_id: int) -> list[sqlite3.Row]:
         return list(

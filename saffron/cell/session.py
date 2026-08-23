@@ -779,9 +779,12 @@ def _drive_cell(
         def _run_gates() -> list[GateResult]:
             results = _suite(baseline)
             green[:] = results
-            # The turn the gates are measuring is the one that just closed:
-            # a repair turn's results belong to that repair turn, not to the
-            # task every attempt used to collapse onto (§5.4, §8).
+            # The turn that just closed, which is the repair turn under §5.4's
+            # loop — the join the no-progress rule and §8 need, and the whole
+            # point of not collapsing every attempt onto the task. Under §5.6
+            # it is the rebuttal's *extraction* turn rather than the turn that
+            # moved HEAD, because `run_rebuttal` buys two; that re-run decides
+            # EXHAUSTED-or-not and is not a term in either query.
             attempt_id = ledger.attempts(task_id)[-1]["attempt_id"]
             for result in results:
                 ledger.record_gate_result(result, attempt_id=attempt_id)
@@ -964,14 +967,17 @@ def _drive_cell(
         )
         ledger.set_task_state(task_id, "RATE_LIMITED")
         ledger.finish_run(run_id, "COMPLETE")
-        # Accurate for a window closed during repair/review/rebut; still 0.00 if
-        # it closed inside plan_checkpoint — that tally is lost with its frame.
+        # Read back, not reported: `spent` loses the walled turn — the raise
+        # comes from outside it, past the `spent +=` — and loses the whole
+        # tally when the window closed inside plan_checkpoint's frame. Every
+        # turn recorded its own attempt before the rate limit was raised, so
+        # the roll-up above is the figure that survived both.
         return CellOutcome(
             state="RATE_LIMITED",
             task_id=task_id,
             run_id=run_id,
             task_dir=task_dir,
-            spent_usd=spent,
+            spent_usd=ledger.task_spend(task_id),
         )
     except BaseException:
         # A run row left open is a run that reads as still going. Preflight

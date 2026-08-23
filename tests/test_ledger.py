@@ -447,3 +447,53 @@ def test_a_ledger_that_predates_spent_usd_est_keeps_its_rows(tmp_path):
     (row,) = ledger.queue_lines()
     assert row["spec_id"] == "SA-0001" and row["spent_usd_est"] == 0.0
     ledger.close()
+
+
+def test_a_ledger_that_predates_attempts_does_not_reattach_its_results(tmp_path):
+    """The collision this backfill exists for: `attempt_id` held a *task_id*,
+    and a new attempt's id starts at 1 in that same namespace. Left alone,
+    task 1's v0.5 results read as belonging to whoever draws attempt 1."""
+    path = tmp_path / "old.db"
+    before = SCHEMA.replace(
+        "attempt_id     INTEGER REFERENCES attempts(attempt_id),",
+        "attempt_id     INTEGER,",
+    )
+    assert "REFERENCES attempts" not in before  # otherwise this proves nothing
+    old = sqlite3.connect(path)
+    old.executescript(before)
+    old.execute("DROP TABLE attempts")
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r','o','/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.execute(
+        """INSERT INTO tasks (run_id, spec_id, spec_sha, state, branch)
+           VALUES (1, 'SA-0001', 's', 'READY_FOR_REVIEW', 'saffron/SA-0001')"""
+    )
+    old.execute(
+        "INSERT INTO gate_results (attempt_id, gate, status) VALUES (1, 'tests', 'pass')"
+    )
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    run_id = ledger.create_run(1, "b" * 40)
+    fresh = ledger.create_task(run_id, "SA-0009", "s", branch="saffron/SA-0009")
+    ledger.set_task_state(fresh, "IMPLEMENTING")
+    ledger.record_gate_result(
+        GateResult(gate="lint", status="pass"), attempt_id=ledger.open_attempt(fresh)
+    )
+    # The old result stays with the task it was always about, and the new task
+    # sees only its own — nothing lost, nothing moved.
+    assert [r.gate for r in ledger.task_results(1)] == ["tests"]
+    assert [r.gate for r in ledger.task_results(fresh)] == ["lint"]
+    ledger.close()
+
+
+def test_an_attempt_against_no_task_raises_rather_than_naming_another(ledger, task):
+    """`lastrowid` reports the connection's previous insert, so a select that
+    matched nothing still hands back an id — one that exists, belongs to another
+    attempt, and satisfies the foreign key."""
+    _, task_id = task
+    real = ledger.open_attempt(task_id)
+    with pytest.raises(ValueError):
+        ledger.open_attempt(90210)
+    assert [row["attempt_id"] for row in ledger.attempts(task_id)] == [real]
