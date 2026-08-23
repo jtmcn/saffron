@@ -310,13 +310,16 @@ class Ledger:
         self._db.commit()
 
     def task_spend(self, task_id: int) -> float:
-        """What the task's attempts add up to. `set_task_state` has already
-        rolled this onto the row; a caller whose own tally lost a frame reads
-        it back rather than reporting the gap."""
+        """What the task's attempts add up to — a caller whose own tally lost a
+        frame reads it back rather than reporting the gap. Summed, not read off
+        `tasks.spent_usd_est`, which is only as fresh as the last
+        `set_task_state` and would silently omit the turn that just closed."""
         row = self._db.execute(
-            "SELECT spent_usd_est FROM tasks WHERE task_id = ?", (task_id,)
+            "SELECT COALESCE(SUM(cost_usd_est), 0.0) AS spent"
+            "  FROM attempts WHERE task_id = ?",
+            (task_id,),
         ).fetchone()
-        return float(row["spent_usd_est"]) if row else 0.0
+        return float(row["spent"])
 
     def attempts(self, task_id: int) -> list[sqlite3.Row]:
         return list(
