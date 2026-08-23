@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-from saffron.gates.contract import Failure, GateResult
+from saffron.gates.contract import Failure, GateResult, split_lines
 
 # A header from a diff whose prefixes were pinned (`worktree.DIFF_FLAGS`); git
 # quotes both sides together when a path needs C-quoting.
@@ -47,7 +47,10 @@ def scope_gate(
     charged to nobody (§5.4) — rather than a `pass` nobody checked.
     """
     if diff is not None:
-        for line in diff.splitlines():
+        # split_lines, not splitlines(): \r, \x0c and friends appear raw inside
+        # a line git emits, and splitting on them could shatter one line into a
+        # fragment that starts with "diff --git ".
+        for line in split_lines(diff):
             if line.startswith("diff --git ") and not _HEADER.match(line):
                 return GateResult(
                     gate="scope",

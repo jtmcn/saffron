@@ -12,7 +12,7 @@ import fnmatch
 import re
 
 from saffron.gates.baseline import NewFailure
-from saffron.gates.contract import GateResult
+from saffron.gates.contract import GateResult, split_lines
 from saffron.intake import Spec
 from saffron.phases.rebut import RebutResult
 from saffron.phases.review import LensReview, anchored_blockers
@@ -221,7 +221,12 @@ def _test_diff(diff: str, test_paths: list[str], *, budget: int = _BODY_LIMIT) -
     if not diff or not test_paths:
         return ""
     sections, current, keep = [], [], False
-    for line in diff.splitlines(keepends=True):
+    # `split_lines`, not `splitlines()`: the loop recomputes the stanza
+    # boundary from any line starting a header, and one raw separator byte in a
+    # `+` line shattered it into a fragment that could be one — ending the
+    # section early and hiding the deletions below it from the human reader.
+    for line in split_lines(diff):
+        line += "\n"
         if line.startswith("diff --git "):
             if keep and current:
                 sections.append("".join(current))

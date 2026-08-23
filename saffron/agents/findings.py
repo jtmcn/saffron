@@ -16,6 +16,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from saffron.gates.contract import split_lines
+
 Severity = Literal["blocker", "concern", "note"]
 
 _HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
@@ -53,7 +55,9 @@ class DiffFacts:
 
 def parse_diff(diff: str) -> DiffFacts:
     """Parse unified `git diff` output into the two facts anchoring needs."""
-    lines = diff.splitlines()
+    # split_lines, not splitlines(): a line shattered on a raw \x0c inside its
+    # content desynchronises the @@-count walk below.
+    lines = split_lines(diff)
     hunk_lines: dict[str, set[int]] = {}
     tokens: set[str] = set()
     path = ""
@@ -139,7 +143,9 @@ def _is_anchored(
     content = read_head(finding.file)
     if content is None:
         return False
-    lines = content.splitlines()
+    # Same splitter as the diff walk: a finding's line number is git's, and git
+    # counts "\n". splitlines() renumbers every line after a raw \x0c.
+    lines = split_lines(content)
     if not 1 <= finding.line <= len(lines):
         return False
     return bool(facts.tokens & set(_WORD.findall(lines[finding.line - 1])))

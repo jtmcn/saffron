@@ -1034,3 +1034,31 @@ def test_a_long_backtick_run_cannot_evict_the_gate_table(tmp_path):
         fence = rendered.split("diff\n", 1)[0].rsplit("\n", 1)[-1]
         assert len(fence) > run, run
         assert rendered.count(fence + "\n") == 1, run  # opened and closed
+
+
+def test_a_byte_inside_an_added_line_cannot_end_the_test_stanza_early():
+    """One raw separator byte in a `+` line used to shatter it, and the
+    fragment after the byte read as a stanza header — so the section stopped
+    there and the deletion below it never reached the body a human reads."""
+    diff = (
+        "diff --git a/tests/test_x.py b/tests/test_x.py\n"
+        "--- a/tests/test_x.py\n+++ b/tests/test_x.py\n"
+        "@@ -1,3 +1,2 @@\n"
+        "+x = 1\x0cdiff --git a/src/decoy.py b/src/decoy.py\n"
+        "-def test_kept_me_honest():\n"
+        "-    assert thing()\n"
+    )
+    body = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=2,
+        transcript_path="/t",
+        test_paths=["tests/**"],
+        diff=diff,
+    )
+    assert "-def test_kept_me_honest():" in body
+    assert "-    assert thing()" in body

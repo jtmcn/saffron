@@ -20,7 +20,15 @@ protected:
 
 integrity:
   test_paths: ["tests/**"]
-  suppressions: ["@pytest.mark.skip", "xfail", "# type: ignore", "# noqa"]
+  # The call form of pytest's skip, not just its decorator: as a test's first
+  # statement it left `tests`, `census` and `integrity` all green. Not free, as
+  # an earlier note here claimed: the tokens this list declares are themselves
+  # scanned, so the list below accounts for 5 of the 70 `added-suppression`
+  # failures this branch's diff reports. Describe a token, never quote one.
+  # pytest's expected-failure marker needs one entry, not two: the bare form
+  # in the list already matches the call form as well.
+  suppressions:
+    ["@pytest.mark.skip", "pytest.skip(", "xfail", "# type: ignore", "# noqa"]
   gate_config: ["pyproject.toml", ".saffron/**"]
 
 thread_env: {}

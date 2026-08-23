@@ -25,6 +25,28 @@ if version.returncode != 0:
 tool = version.stdout.strip().splitlines()[0]
 
 subset = sys.argv[1:]
+
+# §5.4's `census` compares the names collected before the task against the
+# names collected after. `-q --collect-only` prints one node id per line;
+# 0.38s against this suite, measured, against a full run of ~36s.
+#
+# Same argv as the run below, so both see the same selection — pyproject's
+# `-m "not cell"` deselects thirteen tests, and a census comparing a
+# deselected list against a full one would report every cell test removed.
+collect = subprocess.run(
+    ["pytest", "-q", "--collect-only", "-p", "no:cacheprovider", *subset],
+    capture_output=True,
+    text=True,
+)
+# A collection that failed reports no names at all rather than a short list:
+# a partial census is a mass deletion (§5.4, "partial results are not
+# results"). `census` turns names-at-base and none-at-head into `error`.
+collected = (
+    [line for line in collect.stdout.splitlines() if "::" in line]
+    if collect.returncode == 0
+    else None
+)
+
 proc = subprocess.run(
     ["pytest", "-q", "--no-header", "-p", "no:cacheprovider", *subset],
     capture_output=True,
@@ -94,6 +116,7 @@ emit(
         "gate": "tests",
         "status": "fail" if failures else "pass",
         "tool": tool,
+        "collected": collected,
         "failures": failures,
         "summary": summary or f"exit {proc.returncode}",
     }

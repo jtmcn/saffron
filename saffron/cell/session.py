@@ -421,6 +421,8 @@ def _drive_cell(
     from saffron import preflight
     from saffron.agents import artifacts, context
     from saffron.cell import proxy, runtime, worktree
+    from saffron.gates.core.census import census_gate
+    from saffron.gates.core.integrity import integrity_gate
     from saffron.gates.core.scope import scope_gate
     from saffron.gates.runner import CellExecutor, run_suite
     from saffron.repos import image
@@ -534,8 +536,8 @@ def _drive_cell(
 
         executor = CellExecutor(container)
 
-        def _suite() -> list[GateResult]:
-            """The repo's declared gates plus the one core gate v0.5 runs.
+        def _suite(prior: list[GateResult]) -> list[GateResult]:
+            """The repo's declared gates plus the core gates the host runs.
 
             `scope` reads the diff on the host, so it is prepended here rather
             than declared in `.saffron/gates` — first because it is the only
@@ -544,20 +546,23 @@ def _drive_cell(
             diff a reviewer reads, the plan turn's commits included.
             """
             changed = worktree.changed_files(container, spec.base_sha)
-            return [
+            diff = worktree.export_patch(container, spec.base_sha)
+            results = [
                 # The diff goes with the paths: it is what proves the export the
                 # reviewer will read still has the shape the host pinned.
-                scope_gate(
-                    changed,
-                    spec.touches,
-                    diff=worktree.export_patch(container, spec.base_sha),
-                ),
+                scope_gate(changed, spec.touches, diff=diff),
+                integrity_gate(diff, policy.integrity, spec.touches),
                 *run_suite(gates, cwd=repo, executor=executor),
             ]
+            # Last, and given the whole suite: it reads `collected` off whatever
+            # gate reported it, which means it has to run after them (§5.4).
+            # `prior` is empty on the baseline call, and census skips.
+            return [*results, census_gate(prior, results)]
 
-        # At base_sha the diff is empty, so `scope` passes with no failures —
-        # nothing for the subtraction to cancel a real escape against.
-        baseline = _suite()
+        # At base_sha the diff is empty, so `scope` and `integrity` pass with no
+        # failures, and `census` has no prior to compare and skips — nothing for
+        # the subtraction to cancel a real escape against.
+        baseline = _suite([])
         watch("baseline: " + ", ".join(f"{r.gate}={r.status}" for r in baseline))
         for result in baseline:
             ledger.record_gate_result(result, run_id=run_id)
@@ -724,7 +729,7 @@ def _drive_cell(
         green: list[GateResult] = []
 
         def _run_gates() -> list[GateResult]:
-            results = _suite()
+            results = _suite(baseline)
             green[:] = results
             for result in results:
                 # No attempts table yet, so attempt_id carries the task_id —

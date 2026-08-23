@@ -137,7 +137,8 @@ The consequence is F11: **onboarding a repo touches zero lines of Saffron.** If 
 | Worktree, bare mirror, branch/PR mechanics | **Core** | git is git |
 | Cell lifecycle, network policy, resource limits | **Core** | Containers are containers; the runtime hides behind one module (Appendix G) |
 | `scope`, `size`, `secrets` gates | **Core** | Operate on the diff as text and paths — no language knowledge needed |
-| `integrity` gate logic | **Core**, patterns from repo | "Was a test deleted or suppressed?" is universal; *what a test file looks like* and *what a suppression comment looks like* are not |
+| `integrity` gate logic | **Core**, patterns from repo | "Was a suppression added, or gate config edited?" is universal; *what a suppression comment looks like* is not |
+| `census` gate | **Core** | Subtracts two lists of names the repo's `tests` gate already reported — reads a gate result, invokes nothing |
 | `revert` gate | **Core** logic, the repo's `tests` gate as runner | The sanctioned exception below: core re-invokes a declared gate, it does not run a tool |
 | `format`, `lint`, `types`, `tests`, `no-network` | **Repo** | Executables satisfying the gate contract |
 | Cell image, services (DB, cache, …), fixtures | **Repo** | `.saffron/Dockerfile` and a declared service list |
@@ -146,7 +147,7 @@ The consequence is F11: **onboarding a repo touches zero lines of Saffron.** If 
 
 Saffron ships thin base images (`saffron/cell-base:python`, `:node`, …) carrying the agent runtime, git, and nothing else. **There is no gate-runner shim** — that phrase survived four revisions describing a component that was never built and turned out not to be needed: the host `exec`s the repo's gate executables directly through the runtime, so there is nothing for a shim to do (Appendix I). A repo's `.saffron/Dockerfile` starts `FROM` one of those and installs whatever it needs. Saffron never installs a toolchain on a repo's behalf.
 
-**The seam to watch.** Most core gates are core precisely because they read the diff rather than run the code. That is not a coincidence and it is worth protecting: every time a proposed core gate needs to *execute* something in the repo, it belongs on the repo side of the line.
+**The seam to watch.** Most core gates are core precisely because they read the diff rather than run the code. That is not a coincidence and it is worth protecting: every time a proposed core gate needs to *execute* something in the repo, it belongs on the repo side of the line. And before reaching for `revert`'s exception, ask the cheaper question first: *does a gate the repo already declares produce this data?* `census` needed collected test names and got them by adding a field to a result that was already being returned, which is not an exception to the boundary at all.
 
 **The one sanctioned exception is `revert` (§5.4), and the shape of the exception is the real rule.** `revert` does run something — but what it runs is a gate the repo already declared, invoked through the same JSON contract as every other gate, with one extra argument. Core still knows nothing about the toolchain: it knows only that a `tests` gate exists and that the contract obliges it to accept a test subset. So the rule is not "core never executes"; it is **core invokes declared gates, never tools.** Any future core gate that wants to run something must fit that shape or move to the repo side. Stated positively because the absolute version was false the moment `revert` was added — and a rule with an unstated exception is a rule that has quietly been abandoned.
 
@@ -602,6 +603,8 @@ Everything downstream is built on this and nothing else:
 - **`error` is distinct from `fail`** — the gate itself broke (toolchain missing, DB down). It never counts as a task failure, it aborts the attempt and surfaces as an infrastructure problem. Conflating these is how you get an agent spending four attempts "fixing" a crashed linter.
 - **`tool` is what distinguishes "ran and passed" from "didn't run",** and v0 shipped without it at the cost of a silently green replay (Appendix H). `{"status":"pass","failures":[]}` is bit-for-bit identical whether the linter found nothing or the linter was not on `PATH` and a shell script swallowed the error. So the contract requires an opaque tool identifier **obtained by executing the tool** — `ruff --version`, not a string literal. A gate that cannot run its tool cannot produce the field. The host stores it per gate result and treats a `tool` that differs between a run's baseline and its head as grounds to distrust the subtraction rather than report it.
 
+**`collected` is optional, and only `census` reads it.** A gate may report the identifiers it enumerated — for a test runner, its node ids. Core treats them as opaque strings: it never splits one, never assumes a separator, never infers a path from one. Absence is not a failure; it means the runner does not enumerate, and `census` reports `skip`. Unlike `tool`, this field is not a trust signal — it is data one core gate subtracts, and it is transient: `gate_results` has no column for it, so the comparison happens in memory within a run.
+
 Two rules about `error` that the same replay forced, both stated because a gate author has to know them and neither is derivable from the schema:
 
 - **A non-zero exit with an empty `failures[]` is `error`, never `pass`.** It means the tool objected to something the gate's parser did not recognize — a reworded output line after a version bump is the ordinary cause, and it produces the identical false green as a missing binary, from a different direction. The gate knows its own exit code; nothing downstream does.
@@ -619,6 +622,7 @@ Requiring gates to translate their own tool output is the price of admission, an
 | `size` | **core** | at `elevated` | diff lines ≤ type ceiling (bug 300 / feature 600 / refactor 1000) |
 | `secrets` | **core** | yes | credential scan over the diff |
 | `integrity` | **core**, repo patterns | yes | test-tampering check (below) |
+| `census` | **core** | yes | collected test names at `base_sha` vs head (below) |
 | `revert` | core logic, repo runner | yes | new tests must fail without the source hunks (below) |
 | `format` | repo | yes | |
 | `lint` | repo | yes | |
@@ -642,7 +646,15 @@ Core sees three more entries in a list. **The best gates are always the domain-s
 
 Four roles carry most of the weight.
 
-**`integrity` — the anti-gaming gate.** The dominant failure mode of a hard-gate self-repair loop is not the agent giving up; it is the agent *making the gate pass*. Deleting a failing test, adding `@pytest.mark.skip` or `xfail`, sprinkling `# type: ignore`, loosening `==` to `is not None`, lowering a threshold in config. So: diff test files separately from source files, and fail on any deletion of an existing test, any newly added suppression, and any edit to gate configuration, unless `touches` explicitly includes it. Without this gate, hard gates actively *train the loop toward test destruction*, because that's the cheapest path to green.
+**`integrity` — the anti-gaming gate.** The dominant failure mode of a hard-gate self-repair loop is not the agent giving up; it is the agent *making the gate pass*. Deleting a failing test, adding `@pytest.mark.skip` or `xfail`, sprinkling `# type: ignore`, loosening `==` to `is not None`, lowering a threshold in config. Two of those are visible in the diff and one is not, so the work is split across two gates: `integrity` fails on any newly added suppression, and on any edit to gate configuration **unless `touches` explicitly includes the file**; `census` (below) answers deletion, which a diff cannot. Without the pair, hard gates actively *train the loop toward test destruction*, because that's the cheapest path to green.
+
+**The exemption binds `gate_config` alone, and the reason is a rule worth carrying.** `touches` is a **file-level** authorization, and `scope` already requires every changed file to be inside it — so in any diff that can reach green, a per-file exemption fires on *every* file. A file-level key cannot exempt a **line-level** check without nullifying it. "Was gate configuration edited?" is file-level and the exemption fits it. "Was a suppression added on this line?" is not, and exempting it produced a measured green run on the move this paragraph names first: `touches: ["tests/test_a.py"]`, a failing test, and `@pytest.mark.skip` added to it — `scope`, `integrity`, `census` and `tests` all passing.
+
+**What the exempted check is left covering, measured.** Exempt, `gate_config` fires only where `scope` has already failed — with one exception, and it is not the one it is tempting to name. A `touches` *broader* than the gate-config pattern does **not** leave a gap: `touches: [".saffron/**"]` against an edit to `.saffron/policy.yaml` matches, so `declared` is true and the check is exempt. The only live case is an **empty `touches`**, where `scope` skips outright and `integrity` still fires — the check's whole remaining value. That is thin, and it is stated rather than fixed: narrowing the exemption is a design change, and a check that fires in one case is not a check that fires in none.
+
+The cost of not exempting suppressions is prose: a docstring quoting a token fails, and this repository's own merge of PR #5 does. That is accepted, because the failure is a `fail` and not an `error` — it reaches the agent with the file, the line and the token named, and the repair is to reword a docstring. A gate that never fires cannot be repaired, because nothing reports it.
+
+Deletion is exempt from nothing. `touches: tests/test_session.py` authorizes *editing* that file; it does not authorize deleting three unrelated tests inside it to reach green. Exempting deletion would silence `census` on nearly every real task, since almost every spec names a test file.
 
 The *logic* is core — "was a test removed or silenced?" is a question about a diff, and it is identical in every language. The *vocabulary* is not, so the repo declares it:
 
@@ -654,6 +666,16 @@ integrity:
 ```
 
 This split is the boundary of §2.1 in miniature, and it is the pattern to reach for whenever a check feels language-specific: usually the *question* is universal and only the *tokens* are local. Pushing the tokens into `policy.yaml` keeps the check in core where it gets maintained.
+
+**`census` — which tests existed, and which exist now.** The set of test names collected at `base_sha`, minus the set collected at head. A name that was there and is not is a removed test, one failure each.
+
+This is the same question `integrity` used to ask of the diff, asked where the answer actually lives. Three diff-shaped versions of it were written and all three were wrong, in three different ways: net line count is defeated by a comment longer than the test, run adjacency by *any* adjacent added line, and neither sees a test renamed out of collection — where nothing is removed, nothing is suppressed, the body survives intact, and the test never runs again. A set comparison has no false positive on a `parametrize` consolidation, because consolidation keeps the names.
+
+**It executes nothing, and needs no exception to §2.1.** The repo's `tests` gate already runs at `base_sha` to build the baseline and again at head on every attempt. The names do not have to be fetched, only *reported*: the contract gains an optional `collected` field, the `tests` gate fills it, and core subtracts two lists it is already holding. Unlike `revert`, core invokes nothing here — it reads a field of a gate result, which is §2.1's original sentence rather than the exception to it. A repo whose runner cannot enumerate omits the field and `census` reports `skip`.
+
+The two sides are not symmetric. No names at base is `skip` — nothing to compare. Names at base and none at head is `error`: a suite that enumerated before the task and stopped after it is grounds to distrust the comparison, not to report every test as deleted. A head `tests` that errored has already aborted the attempt before `census` is consulted, so a truncated collection can never be read as a mass deletion.
+
+**A skipped test is still a collected test.** Measured: `pytest -q --collect-only` lists a `@pytest.mark.skip` or `xfail` test and the run exits `0`, so `census` does not see marker-based silencing and is not the gate that covers it — `integrity` is. Only `-m` deselection removes a name, and that is an edit to gate configuration rather than a marker. What `census` catches is removal and rename-out-of-collection; a test still collected but silenced belongs to `integrity`, and a test still collected but gutted belongs to `revert`, which is not built yet.
 
 **`revert` — the anti-theater gate, and the best cost/value ratio in the system.** Stash the source hunks of the diff, keep the test hunks, run only the new and changed tests, and require them to **fail**. One extra test run. This is the one place core reaches into the repo's toolchain, and it is why the contract requires the `tests` gate to accept a **test-subset argument** — the single most constraining line in the whole contract, and worth the constraint: every serious test runner supports it, and without it this gate degrades to a full-suite run per attempt. It mechanically answers the question critic lens #3 would otherwise be asked to reason about: does this test actually detect the thing it claims to? It catches deleted assertions, `assert result is not None`, and tests that pass identically on `main`.
 
@@ -2013,3 +2035,19 @@ rather than preceding it. The phase is built and tested against fakes, and
 gate re-run after a rebuttal has been measured. Appendix J's rule applies to it
 exactly as it applied to the repair loop: the path that has never run is the one
 your estimate is about.
+
+---
+
+## Appendix M — rev 15: what running the rejected gate found
+
+Backlog item 1 said to read `SA-0004`'s rejected patch and its review before writing anything. Executing it as well took twenty minutes and returned three corrections, one of which nothing had recorded. Full record in `docs/evidence/2026-08-22-integrity-rejected-gate-measured.md`.
+
+**The batch tree holds a later patch than the one Appendix K reviewed.** `rebuttal.json` records `head_moved: true`: the implementer changed the removal check during REBUT and the lens withdrew its blocker. Appendix K describes the code as applied and reviewed; the export is one fix past it. Both are honest about different artifacts, which is the shelf-life problem of Appendix K's own "patches perish" note arriving in a second form.
+
+- **The `\ No newline at end of file` defect is already fixed.** All four positions git emits the marker parse cleanly. The backlog line claiming a branch sits in the wrong place is struck.
+- **The removal check is run adjacency, not net line count.** So the `parametrize` false positive is gone — and the evasion is *cheaper* than Appendix K says, not harder. Not a comment longer than the test: one adjacent added line of any content, because the gate never asks what the added line says.
+- **The suppression scan fails this repository's own merges.** Substring matching over every added line in every file means prose containing a token fails. `d1141d0`, the merge of PR #5, returns `fail` on two docstrings that quote `@pytest.mark.skip` while explaining that a critic's claim routinely quotes it. This is also what the "sixteen violations on its own pull request" were.
+
+52. **When a check keeps needing a better heuristic, the question is in the wrong coordinate system.** Three rewrites of "was a test removed?" against diff text produced three different wrong answers, because the diff does not contain the answer — it contains a shadow of it. The set of collected tests contains it exactly, and comparing two sets needs no heuristic at all. The tell is not that a heuristic is imperfect; it is that each repair moves the failure somewhere else rather than shrinking it.
+
+The corollary is the cheaper half: **the data a core gate needs may already be in a result it is holding.** Item 1 assumed test-set comparison required `revert`'s §2.1 exception — core invoking the repo's `tests` gate twice more. It did not. The baseline and head suites already run `tests`; the names needed reporting, not fetching, and the whole exception dissolved into one optional field.
