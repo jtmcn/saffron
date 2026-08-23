@@ -691,6 +691,39 @@ def test_a_diff_outside_touches_fails_the_suite(monkeypatch, tmp_path):
     )
 
 
+def test_the_baseline_suite_skips_census_because_there_is_no_base_yet():
+    """`_suite([])` is the baseline call. A census with nothing to compare is
+    a skip, not a report that every test was removed."""
+    from saffron.gates.core.census import census_gate
+
+    assert census_gate(base=[], head=[]).status == "skip"
+
+
+def test_a_census_that_skips_at_baseline_and_fails_at_head_is_not_suite_drift():
+    """The shape production actually produces. `_suite` appends `census`
+    unconditionally, so the baseline holds a `census` `skip` — not a missing
+    gate. The branch that protects the wiring is therefore `suite_drift`'s
+    `was.status != "skip"` guard, not its `was is None` one, and a fixture
+    built head-only would pin a branch the real suite never reaches."""
+    from saffron.gates.baseline import subtract_baseline, suite_drift
+    from saffron.gates.contract import Failure, GateResult
+
+    baseline = [
+        GateResult(gate="tests", status="pass", tool="pytest 8.3.2"),
+        GateResult(gate="census", status="skip"),
+    ]
+    head = [
+        GateResult(gate="tests", status="pass", tool="pytest 8.3.2"),
+        GateResult(
+            gate="census",
+            status="fail",
+            failures=[Failure(file="t.py::test_a", code="removed-test")],
+        ),
+    ]
+    assert suite_drift(head, baseline) == []
+    assert [n.gate for n in subtract_baseline(head, baseline)] == ["census"]
+
+
 def test_the_baseline_scope_neither_invents_nor_cancels_an_escape(
     monkeypatch, tmp_path
 ):
@@ -703,9 +736,18 @@ def test_the_baseline_scope_neither_invents_nor_cancels_an_escape(
     )
     assert outcome.state == "READY_FOR_REVIEW"
 
-    (scope,) = json.loads((tmp_path / "out" / "SY-1" / "baseline.json").read_text())
-    assert (scope["status"], scope["failures"]) == ("pass", [])
-    assert scope["summary"] == "0 changed files within touches"
+    results = {
+        r["gate"]: r
+        for r in json.loads((tmp_path / "out" / "SY-1" / "baseline.json").read_text())
+    }
+    assert results["scope"]["status"] == "pass"
+    assert results["scope"]["failures"] == []
+    assert results["scope"]["summary"] == "0 changed files within touches"
+    # The default test policy ("gates: {}") declares no integrity patterns,
+    # so integrity has nothing to check and skips — same as census, nothing
+    # for the subtraction to cancel a real escape against.
+    assert results["integrity"]["status"] == "skip"
+    assert results["census"]["status"] == "skip"
 
     # And at head it measured the real diff rather than nothing.
     assert [
