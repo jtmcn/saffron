@@ -107,6 +107,15 @@ is unaffected because it reads paths. `integrity` must treat such a section as
 file whose suppressions cannot be counted. That is `error`, charged to nobody,
 never `pass`.
 
+Two details measured while planning it, both of which change the code. The
+`Binary files` line *replaces* the `---`/`+++` headers rather than joining them,
+so the path has to be taken from that line or it never arrives — and without a
+path the exemption cannot be applied. And the check belongs **after** the
+`touches` exemption, not during the parse: a committed binary fixture the spec
+declared is not a gate that cannot read its input, and erroring on it would abort
+the attempt over a PNG. What remains after the exemption is content hidden in a
+file nobody authorized changing, which is the case the rule exists for.
+
 ## 2. `census` — the new core role
 
 Names collected at `base_sha`, minus names collected at head. Present at base and
@@ -213,9 +222,15 @@ in `gate_results`, in the PR body's gate table, and in the subtraction without a
 second mechanism for any of them.
 
 The suite closure gains the prior results as an argument — `[]` for the baseline
-call, `baseline` for every head call — and `repair_loop`'s `run_gates` callable
-changes shape to match. `census` returns `skip` when handed an empty prior, which
-is what makes the baseline call correct rather than special-cased.
+call, `baseline` for every head call. `census` returns `skip` when handed an empty
+prior, which is what makes the baseline call correct rather than special-cased.
+
+**`repair_loop`'s signature does not change.** An earlier draft said it would.
+It does not: `_run_gates` is defined at `session.py:726`, after `baseline` is
+bound at 560, so it closes over the baseline directly and
+`run_gates: Callable[[], list[GateResult]]` stands as it is. The host-side loop
+stays ignorant of which gates the suite contains, which is the property worth
+keeping.
 
 Three existing mechanisms then behave correctly with no change, and each was
 checked against its code rather than assumed:
