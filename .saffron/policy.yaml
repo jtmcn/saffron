@@ -20,7 +20,13 @@ protected:
 
 integrity:
   test_paths: ["tests/**"]
-  suppressions: ["@pytest.mark.skip", "xfail", "# type: ignore", "# noqa"]
+  # The call form, not just the decorator: `pytest.skip("x")` as a test's first
+  # statement left `tests`, `census` and `integrity` all green. Measured: it
+  # costs zero extra failures against this branch's own diff, where the
+  # decorator tokens already cost 64. `pytest.xfail(` needs no entry — the bare
+  # `xfail` token already matches it.
+  suppressions:
+    ["@pytest.mark.skip", "pytest.skip(", "xfail", "# type: ignore", "# noqa"]
   gate_config: ["pyproject.toml", ".saffron/**"]
 
 thread_env: {}
