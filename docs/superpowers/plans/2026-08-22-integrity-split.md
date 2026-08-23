@@ -4,7 +4,7 @@
 
 **Goal:** `integrity` keeps only the two questions a diff can answer, and "was an existing test removed?" moves to a new core gate that compares the set of collected test names at `base_sha` against the set at head.
 
-**Architecture:** `GateResult` gains one optional field, `collected`. The repo's `tests` gate populates it. A new host-side core gate, `census`, subtracts the two lists the host already holds — the baseline suite and the head suite both run `tests` today, so nothing extra is executed and no §2.1 exception is needed. `integrity` loses `_runs`/`_unreplaced_removals` and gains the `touches` exemption on its two surviving checks.
+**Architecture:** `GateResult` gains one optional field, `collected`. The repo's `tests` gate populates it. A new host-side core gate, `census`, subtracts the two lists the host already holds — the baseline suite and the head suite both run `tests` today, so nothing extra is executed and no §2.1 exception is needed. `integrity` loses `_runs`/`_unreplaced_removals`, and gains the `touches` exemption on its `gate_config` check **only** — a file-level key cannot exempt a line-level check without nullifying it (Task 1 Step 1).
 
 **Tech Stack:** Python 3.12, pydantic v2, pytest, `git` (2.50.1 measured). **No new dependencies.**
 
@@ -31,7 +31,7 @@
 |---|---|
 | `saffron/gates/contract.py` | **Modify.** `GateResult.collected` — the one contract change. |
 | `saffron/gates/core/census.py` | **Create.** Set subtraction over two gate-result lists. No I/O, no diff, no execution. |
-| `saffron/gates/core/integrity.py` | **Create.** Diff-only: added suppressions, gate-config edits. Both honour `touches`. |
+| `saffron/gates/core/integrity.py` | **Create.** Diff-only: added suppressions (never exempt), gate-config edits (exempt under `touches`). |
 | `saffron/cell/session.py` | **Modify.** `_suite` takes the prior results; `census` and `integrity` join the suite. |
 | `.saffron/gates/tests.py` | **Modify.** Repo-side: report the collected node ids. |
 | `tests/test_census.py` | **Create.** |
@@ -59,9 +59,13 @@ The spec's part 5. Written first because §5.4 currently describes a three-check
 Find the paragraph beginning `**`integrity` — the anti-gaming gate.**` (line ~645). Replace its first paragraph (up to and including "...cheapest path to green.") with:
 
 ```markdown
-**`integrity` — the anti-gaming gate.** The dominant failure mode of a hard-gate self-repair loop is not the agent giving up; it is the agent *making the gate pass*. Deleting a failing test, adding `@pytest.mark.skip` or `xfail`, sprinkling `# type: ignore`, loosening `==` to `is not None`, lowering a threshold in config. Two of those are visible in the diff and one is not, so the work is split across two gates: `integrity` fails on any newly added suppression and any edit to gate configuration, **unless `touches` explicitly includes the file**; `census` (below) answers deletion, which a diff cannot. Without the pair, hard gates actively *train the loop toward test destruction*, because that's the cheapest path to green.
+**`integrity` — the anti-gaming gate.** The dominant failure mode of a hard-gate self-repair loop is not the agent giving up; it is the agent *making the gate pass*. Deleting a failing test, adding `@pytest.mark.skip` or `xfail`, sprinkling `# type: ignore`, loosening `==` to `is not None`, lowering a threshold in config. Two of those are visible in the diff and one is not, so the work is split across two gates: `integrity` fails on any newly added suppression, and on any edit to gate configuration **unless `touches` explicitly includes the file**; `census` (below) answers deletion, which a diff cannot. Without the pair, hard gates actively *train the loop toward test destruction*, because that's the cheapest path to green.
 
-**The exemption binds `integrity`'s two checks and not `census`.** For a suppression or a gate-config edit the signal is *this file changed at all*, and a spec whose `touches` names the file has authorized exactly that. It is also the only defence a substring scan has against prose: a docstring quoting `@pytest.mark.skip` is a use of the token to core, and the file is in `touches` by construction or `scope` would have failed first. Deletion is the opposite case. `touches: tests/test_session.py` authorizes *editing* that file; it does not authorize deleting three unrelated tests inside it to reach green, which is the precise act being defended against. Exempting deletion would silence `census` on nearly every real task, since almost every spec names a test file.
+**The exemption binds `gate_config` alone, and the reason is a rule worth carrying.** `touches` is a **file-level** authorization, and `scope` already requires every changed file to be inside it — so in any diff that can reach green, a per-file exemption fires on *every* file. A file-level key cannot exempt a **line-level** check without nullifying it. "Was gate configuration edited?" is file-level and the exemption fits it. "Was a suppression added on this line?" is not, and exempting it produced a measured green run on the move this paragraph names first: `touches: ["tests/test_a.py"]`, a failing test, and `@pytest.mark.skip` added to it — `scope`, `integrity`, `census` and `tests` all passing.
+
+The cost of not exempting suppressions is prose: a docstring quoting a token fails, and this repository's own merge of PR #5 does. That is accepted, because the failure is a `fail` and not an `error` — it reaches the agent with the file, the line and the token named, and the repair is to reword a docstring. A gate that never fires cannot be repaired, because nothing reports it.
+
+Deletion is exempt from nothing. `touches: tests/test_session.py` authorizes *editing* that file; it does not authorize deleting three unrelated tests inside it to reach green. Exempting deletion would silence `census` on nearly every real task, since almost every spec names a test file.
 ```
 
 - [ ] **Step 2: Add the `census` paragraph after `integrity`'s vocabulary block**
@@ -77,7 +81,7 @@ This is the same question `integrity` used to ask of the diff, asked where the a
 
 The two sides are not symmetric. No names at base is `skip` — nothing to compare. Names at base and none at head is `error`: a suite that enumerated before the task and stopped after it is grounds to distrust the comparison, not to report every test as deleted. A head `tests` that errored has already aborted the attempt before `census` is consulted, so a truncated collection can never be read as a mass deletion.
 
-A test that leaves collection by any route is caught, including one moved behind a marker the run deselects. That is deliberate: silencing and deleting have the same effect on the suite, and `census` measures the suite.
+**A skipped test is still a collected test.** Measured: `pytest -q --collect-only` lists a `@pytest.mark.skip` or `xfail` test and the run exits `0`, so `census` does not see marker-based silencing and is not the gate that covers it — `integrity` is. Only `-m` deselection removes a name, and that is an edit to gate configuration rather than a marker. What `census` catches is removal and rename-out-of-collection; a test still collected but silenced belongs to `integrity`, and a test still collected but gutted belongs to `revert`, which is not built yet.
 ```
 
 - [ ] **Step 3: Add the `census` row to the gate-role table**
@@ -349,8 +353,17 @@ def test_a_name_that_disappeared_fails_and_names_itself():
 def test_a_test_renamed_out_of_collection_is_a_removal():
     """The case no diff-reading version could see: the body survives, nothing
     is deleted, and the test never runs again (Appendix M)."""
+    result = census_gate(base=[_tests("t.py::test_b")], head=[_tests("t.py::check_b")])
+    assert result.status == "fail"
+    assert [f.file for f in result.failures] == ["t.py::test_b"]
+
+
+def test_a_deletion_with_a_comment_left_in_its_place_is_still_a_removal():
+    """The cheapest evasion of the diff-reading gate: one adjacent added line
+    of any content hid a deletion from it (Appendix M). A set comparison never
+    sees the neighbour, so the comment buys nothing."""
     result = census_gate(
-        base=[_tests("t.py::test_b")], head=[_tests("t.py::check_b")]
+        base=[_tests("t.py::test_a", "t.py::test_b")], head=[_tests("t.py::test_a")]
     )
     assert result.status == "fail"
     assert [f.file for f in result.failures] == ["t.py::test_b"]
@@ -359,7 +372,14 @@ def test_a_test_renamed_out_of_collection_is_a_removal():
 def test_a_parametrize_consolidation_that_keeps_the_names_passes():
     result = census_gate(
         base=[_tests("t.py::test_a", "t.py::test_b")],
-        head=[_tests("t.py::test_ab[1]", "t.py::test_ab[2]", "t.py::test_a", "t.py::test_b")],
+        head=[
+            _tests(
+                "t.py::test_ab[1]",
+                "t.py::test_ab[2]",
+                "t.py::test_a",
+                "t.py::test_b",
+            )
+        ],
     )
     assert result.status == "pass"
 
@@ -392,7 +412,9 @@ def test_an_empty_collection_at_head_is_a_removal_not_an_error():
     """`[]` and `None` are different facts: the runner ran and found nothing."""
     result = census_gate(
         base=[_tests("t.py::test_a")],
-        head=[GateResult(gate="tests", status="pass", tool="pytest 8.3.2", collected=[])],
+        head=[
+            GateResult(gate="tests", status="pass", tool="pytest 8.3.2", collected=[])
+        ],
     )
     assert result.status == "fail"
     assert [f.file for f in result.failures] == ["t.py::test_a"]
@@ -527,7 +549,7 @@ def census_gate(base: list[GateResult], head: list[GateResult]) -> GateResult:
 - [ ] **Step 4: Run to verify they pass**
 
 Run: `uv run pytest tests/test_census.py -v`
-Expected: PASS, 10 tests.
+Expected: PASS, 11 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -614,13 +636,30 @@ def test_an_added_suppression_fails_and_names_the_token(tmp_path):
     assert "# type: ignore" in result.failures[0].message
 
 
-def test_a_suppression_in_a_file_the_spec_declared_is_exempt(tmp_path):
-    """The only defence a substring scan has against prose: a docstring that
-    quotes a token is a use of it to core, and the file is in `touches` by
-    construction or `scope` would have failed first (Appendix M)."""
+def test_a_suppression_is_not_exempt_when_the_spec_declared_the_file(tmp_path):
+    """The finding that sank the first draft. `scope` already requires every
+    changed file to be inside `touches`, so exempting a line-level check by a
+    file-level key nullifies it: every scope-passing diff would be exempt."""
+    run = _repo(tmp_path, {"tests/test_a.py": TESTS})
+    diff = _diff(
+        tmp_path,
+        run,
+        {"tests/test_a.py": "import pytest\n\n\n@pytest.mark.skip\n" + TESTS},
+    )
+    result = integrity_gate(diff, PATTERNS, touches=["tests/test_a.py"])
+    assert result.status == "fail"
+    assert result.failures[0].code == "added-suppression"
+
+
+def test_prose_quoting_a_token_fails_and_that_is_the_accepted_cost(tmp_path):
+    """Correction 3's false positive, kept deliberately. A `fail` reaches the
+    repair loop naming the file, line and token; a gate that never fires does
+    not (§5.4). The repair is to reword the docstring."""
     run = _repo(tmp_path, {"src/a.py": "x = 1\n"})
     diff = _diff(tmp_path, run, {"src/a.py": 'x = 1\n"""quotes # type: ignore"""\n'})
-    assert integrity_gate(diff, PATTERNS, touches=["src/a.py"]).status == "pass"
+    result = integrity_gate(diff, PATTERNS, touches=["src/a.py"])
+    assert result.status == "fail"
+    assert result.failures[0].line is not None
 
 
 def test_a_gate_config_edit_fails(tmp_path):
@@ -657,19 +696,38 @@ def test_a_suppression_on_a_context_line_does_not_count(tmp_path):
     assert integrity_gate(diff, PATTERNS, touches=["src/b.py"]).status == "pass"
 
 
-def test_a_file_with_no_trailing_newline_parses(tmp_path):
+def test_the_marker_after_both_sides_parses(tmp_path):
     """Four positions git emits `\\ No newline at end of file`; the reviewed
-    patch died on one and had no test (Appendix K). Characterization."""
+    patch died on one and had no test (Appendix K). Characterization, one per
+    position, each asserting the marker is actually in the fixture — a test
+    that does not check for it proves nothing about the marker."""
     run = _repo(tmp_path, {"src/a.py": "x = 1"})
     diff = _diff(tmp_path, run, {"src/a.py": "x = 2"})
-    assert "\\ No newline" in diff
-    assert integrity_gate(diff, PATTERNS, touches=["src/b.py"]).status == "pass"
+    assert diff.count("\\ No newline") == 2
+    assert integrity_gate(diff, PATTERNS, touches=[]).status == "pass"
 
 
-def test_a_marker_between_a_removal_and_an_addition_parses(tmp_path):
+def test_the_marker_after_a_removal_only_parses(tmp_path):
     run = _repo(tmp_path, {"src/a.py": "x = 1"})
     diff = _diff(tmp_path, run, {"src/a.py": "x = 1\n"})
-    assert integrity_gate(diff, PATTERNS, touches=["src/b.py"]).status != "error"
+    assert diff.count("\\ No newline") == 1
+    assert integrity_gate(diff, PATTERNS, touches=[]).status == "pass"
+
+
+def test_the_marker_after_an_addition_only_parses(tmp_path):
+    run = _repo(tmp_path, {"src/a.py": "x = 1\n"})
+    diff = _diff(tmp_path, run, {"src/a.py": "x = 1"})
+    assert diff.count("\\ No newline") == 1
+    assert integrity_gate(diff, PATTERNS, touches=[]).status == "pass"
+
+
+def test_the_marker_after_a_context_line_parses(tmp_path):
+    """The last line is unchanged and has no newline, so the marker follows a
+    context line rather than a `+` or `-` one."""
+    run = _repo(tmp_path, {"src/a.py": "x = 1\ny = 2"})
+    diff = _diff(tmp_path, run, {"src/a.py": "x = 9\ny = 2"})
+    assert "\\ No newline" in diff
+    assert integrity_gate(diff, PATTERNS, touches=[]).status == "pass"
 
 
 def test_a_bent_prefix_errors_rather_than_passing(tmp_path):
@@ -692,19 +750,21 @@ def test_a_binary_section_is_unreadable_not_unchanged(tmp_path):
     run = _repo(tmp_path, {"src/a.py": "x = 1\n", ".gitattributes": "*.py -diff\n"})
     diff = _diff(tmp_path, run, {"src/a.py": "x = 1  # type: ignore\n"})
     assert "Binary files" in diff
-    result = integrity_gate(diff, PATTERNS, touches=[])
+    result = integrity_gate(diff, PATTERNS, touches=["src/a.py"])
     assert result.status == "error"
+    # Proves the path survived: `Binary files ...` replaces the `---`/`+++`
+    # headers, so a gate reading paths only from those would have none here.
     assert "src/a.py" in result.summary
 
 
-def test_a_declared_binary_file_is_exempt_rather_than_an_abort(tmp_path):
-    """The exemption is applied before the unreadable check, so a committed
-    binary fixture the spec named does not abort the attempt. It also proves
-    the path survives: `Binary files ...` replaces the `---`/`+++` headers, so
-    a gate reading paths only from those would exempt nothing."""
+def test_a_binary_section_outside_touches_leaves_the_report_to_scope(tmp_path):
+    """A file nobody authorized has already failed `scope`, which is a `fail`
+    the agent can repair by deleting it. `repair_loop` checks `aborted_gates`
+    before the subtraction, so erroring here would replace that repairable
+    failure with an abandoned task charged to nobody."""
     run = _repo(tmp_path, {"src/a.py": "x = 1\n", ".gitattributes": "*.py -diff\n"})
     diff = _diff(tmp_path, run, {"src/a.py": "x = 1  # type: ignore\n"})
-    assert integrity_gate(diff, PATTERNS, touches=["src/a.py"]).status == "pass"
+    assert integrity_gate(diff, PATTERNS, touches=[]).status != "error"
 
 
 def test_an_empty_diff_passes():
@@ -927,21 +987,20 @@ def integrity_gate(
     failures: list[Failure] = []
 
     for file_diff in files:
-        # The spec authorized this file, and both checks below ask only
-        # whether the file changed. Removal is `census`'s, and `census` is
-        # deliberately not exempt (§5.4).
-        if any(matches(file_diff.path, pattern) for pattern in touches):
-            continue
+        declared = any(matches(file_diff.path, pattern) for pattern in touches)
 
-        # Checked after the exemption, deliberately: a committed binary fixture
-        # the spec declared is not a gate that cannot read its input. What is
-        # left here is content hidden in a file nobody authorized changing, and
-        # unreadable is not the same fact as unchanged (BACKLOG item 2).
+        # Only reported for a file the spec authorized. A file outside `touches`
+        # has already failed `scope`, which is a `fail` the agent can repair by
+        # deleting it — and `repair_loop` checks `aborted_gates` before the
+        # subtraction, so erroring here would replace that repairable failure
+        # with an abandoned task.
         #
-        # ponytail: a genuine binary outside `touches` still aborts the attempt.
-        # The upgrade path is `policy.yaml` declaring binary paths, or a
-        # `--numstat` cross-check; not worth building before a repo has one.
+        # ponytail: a genuine binary fixture inside `touches` still aborts the
+        # attempt. The upgrade path is `policy.yaml` declaring binary paths, or
+        # a `--numstat` cross-check; not worth building before a repo has one.
         if file_diff.unreadable:
+            if not declared:
+                continue
             return GateResult(
                 gate="integrity",
                 status="error",
@@ -951,7 +1010,15 @@ def integrity_gate(
                 ),
             )
 
-        if patterns.gate_config and file_diff.matches_any(patterns.gate_config):
+        # The exemption binds this check and nothing else. It is file-level, and
+        # so is the question — whereas exempting the line-level suppression scan
+        # by the same key nullifies it, because `scope` already guarantees every
+        # changed file is inside `touches` (§5.4).
+        if (
+            patterns.gate_config
+            and not declared
+            and file_diff.matches_any(patterns.gate_config)
+        ):
             failures.append(
                 Failure(
                     file=file_diff.path,
@@ -996,11 +1063,11 @@ Note `IntegrityPatterns.test_paths` is now unread by this module. Leave the fiel
 - [ ] **Step 4: Run to verify they pass**
 
 Run: `uv run pytest tests/test_integrity.py -v`
-Expected: PASS, 14 tests.
+Expected: PASS, 17 tests.
 
-- [ ] **Step 5: Verify the gate passes this repository's own merge**
+- [ ] **Step 5: Confirm the accepted cost is exactly what was accepted**
 
-The measured defect from Appendix M. Run:
+Not a regression check — a check that the known false positive is still the *only* thing firing here, and that it is repairable rather than fatal. Run:
 
 ```bash
 uv run python -c "
@@ -1012,10 +1079,48 @@ policy, _ = load_policy(pathlib.Path('.'))
 diff = subprocess.run(['git','diff',*DIFF_FLAGS,'d1141d0^','d1141d0'],
                       capture_output=True, text=True).stdout
 r = integrity_gate(diff, policy.integrity, touches=['saffron/report/pr_body.py','tests/test_report.py'])
-print(r.status, [f.code for f in r.failures])
+print(r.status, [(f.file, f.line, f.code) for f in r.failures])
 "
 ```
-Expected: `pass []`. The rejected gate returns `fail ['added-suppression','added-suppression']` on this diff.
+Expected: `fail` with exactly the two `added-suppression` rows in `saffron/report/pr_body.py` and `tests/test_report.py`, each carrying a line number. **`fail`, not `error`** — that is what makes it repairable, and it is the whole argument for not exempting suppressions (part 3).
+
+If more than two failures appear, or any `gate-config-changed`, stop: the patterns or the exemption are not behaving as designed.
+
+- [ ] **Step 5b: Verify the case that sank the first draft**
+
+The end-to-end sequence. In a throwaway directory, a failing test silenced by a marker, with the spec's `touches` naming that very file:
+
+```bash
+uv run python - <<'PY'
+import pathlib, subprocess, tempfile
+from saffron.gates.core.integrity import integrity_gate
+from saffron.gates.core.scope import scope_gate
+from saffron.cell.worktree import DIFF_FLAGS
+from saffron.repos.policy import IntegrityPatterns
+
+d = tempfile.mkdtemp()
+g = lambda *a: subprocess.run(a, cwd=d, check=True, capture_output=True)
+g("git", "init", "-q", "-b", "main", ".")
+g("git", "config", "user.email", "t@e.c"); g("git", "config", "user.name", "t")
+t = pathlib.Path(d, "tests"); t.mkdir()
+(t / "test_a.py").write_text("def test_one():\n    assert 1\n\n\ndef test_two():\n    assert 0\n")
+g("git", "add", "-A"); g("git", "commit", "-qm", "base")
+(t / "test_a.py").write_text(
+    "import pytest\n\n\ndef test_one():\n    assert 1\n\n\n"
+    "@pytest.mark.skip\ndef test_two():\n    assert 0\n"
+)
+g("git", "add", "-A")
+diff = subprocess.run(["git", "diff", "--cached", *DIFF_FLAGS], cwd=d,
+                      capture_output=True, text=True).stdout
+changed = subprocess.run(["git", "diff", "--cached", "--name-only", *DIFF_FLAGS], cwd=d,
+                         capture_output=True, text=True).stdout.split()
+touches = ["tests/test_a.py"]
+patterns = IntegrityPatterns(test_paths=["tests/**"], suppressions=["@pytest.mark.skip"], gate_config=[])
+print("scope    ", scope_gate(changed, touches, diff=diff).status)
+print("integrity", integrity_gate(diff, patterns, touches).status)
+PY
+```
+Expected: `scope pass`, `integrity fail`. Under the first draft of this plan both were `pass`, and the task reached `READY_FOR_REVIEW` having silenced a failing test.
 
 - [ ] **Step 6: Commit**
 
@@ -1050,14 +1155,19 @@ def test_the_baseline_suite_skips_census_because_there_is_no_base_yet():
     assert census_gate(base=[], head=[]).status == "skip"
 
 
-def test_census_joins_the_head_suite_and_not_the_baseline():
-    """A head-only gate: `suite_drift` ignores it (baseline.py's `was is None`
-    branch) and `subtract_baseline` counts its failures as new, both without
-    changes."""
+def test_a_census_that_skips_at_baseline_and_fails_at_head_is_not_suite_drift():
+    """The shape production actually produces. `_suite` appends `census`
+    unconditionally, so the baseline holds a `census` `skip` — not a missing
+    gate. The branch that protects the wiring is therefore `suite_drift`'s
+    `was.status != "skip"` guard, not its `was is None` one, and a fixture
+    built head-only would pin a branch the real suite never reaches."""
     from saffron.gates.baseline import subtract_baseline, suite_drift
     from saffron.gates.contract import Failure, GateResult
 
-    baseline = [GateResult(gate="tests", status="pass", tool="pytest 8.3.2")]
+    baseline = [
+        GateResult(gate="tests", status="pass", tool="pytest 8.3.2"),
+        GateResult(gate="census", status="skip"),
+    ]
     head = [
         GateResult(gate="tests", status="pass", tool="pytest 8.3.2"),
         GateResult(
@@ -1073,7 +1183,7 @@ def test_census_joins_the_head_suite_and_not_the_baseline():
 - [ ] **Step 2: Run to verify**
 
 Run: `uv run pytest tests/test_session.py -k "census" -v`
-Expected: the first FAILs on `ModuleNotFoundError` only if Task 4 was skipped; otherwise both PASS immediately. They are characterization tests over Tasks 4's gate and existing `baseline.py` behaviour — they pin the three claims Task 6's wiring rests on so a later change to `suite_drift` cannot silently break the census. If both pass on first run, that is correct; do not manufacture a failure.
+Expected: both PASS immediately (they fail with `ModuleNotFoundError` only if Task 4 was skipped). These are characterization tests over Task 4's gate and existing `baseline.py` behaviour — they pin the claims Task 6's wiring rests on, so a later change to `suite_drift` cannot silently break the census. **Passing on the first run is the correct outcome here; do not manufacture a failure to satisfy the red-green habit.**
 
 - [ ] **Step 3: Give `_suite` the prior results**
 
@@ -1136,7 +1246,28 @@ The comment at line ~558 reads "At base_sha the diff is empty, so `scope` passes
 - [ ] **Step 7: Run the full suite**
 
 Run: `make check`
-Expected: PASS. If `tests/test_session.py` has fixtures that call `_suite()` or stub `run_gates`, they need the new argument — fix them rather than reverting the signature.
+
+**One existing test breaks, and it is meant to.** Confirmed by applying this plan to a scratch copy of the repo:
+
+```
+FAILED tests/test_session.py::test_the_baseline_scope_neither_invents_nor_cancels_an_escape
+E   ValueError: too many values to unpack (expected 1)
+tests/test_session.py:706:  (scope,) = json.loads((tmp_path/"out"/"SY-1"/"baseline.json").read_text())
+```
+
+The baseline now holds three core results, not one. Rewrite that unpack to assert the property the test's docstring is actually about — that at `base_sha` nothing is invented for the subtraction to cancel:
+
+```python
+    results = {
+        r["gate"]: r for r in json.loads((tmp_path / "out" / "SY-1" / "baseline.json").read_text())
+    }
+    assert results["scope"]["status"] == "pass"
+    assert results["scope"]["failures"] == []
+    assert results["integrity"]["status"] == "pass"
+    assert results["census"]["status"] == "skip"
+```
+
+Any other failure is a real one. If a fixture calls `_suite()` or stubs `run_gates`, give it the new argument rather than reverting the signature.
 
 - [ ] **Step 8: Commit**
 
@@ -1228,9 +1359,9 @@ git commit -m "docs(backlog): item 1 closed, and three of its own claims correct
 ## Final verification
 
 - [ ] `make check` passes.
-- [ ] `uv run pytest tests/test_census.py tests/test_integrity.py -v` — 24 tests.
+- [ ] `uv run pytest tests/test_census.py tests/test_integrity.py -v` — 28 tests, `ruff format --check` clean.
 - [ ] `git diff main --stat -- saffron/replay.py` is empty: this sub-project touches no v0 code.
 - [ ] `grep -rn "removed-test" saffron/gates/core/integrity.py` is empty — removal left this gate.
-- [ ] `grep -rn "def test_\|::" saffron/gates/core/census.py` finds nothing outside docstrings — no language knowledge, no node-id parsing.
+- [ ] `grep -n 'split\|partition\|rsplit' saffron/gates/core/census.py` is empty — a collected name is never taken apart, which is the property "no language knowledge" actually reduces to here. (An earlier draft grepped for `::`, which matches the module's own docstring and cannot express "outside a comment".)
 - [ ] `grep -c "" DESIGN.md` and confirm §5.4's numbered subsections are unchanged: `grep -n "^### 5\." DESIGN.md`.
-- [ ] The success criterion from the spec's part 7, checked by hand: `census` fails a diff that renames `test_b` to `check_b`; `integrity` passes `d1141d0`; and `saffron/gates/core/integrity.py` is shorter than the 305-line file it replaces.
+- [ ] The success criterion from the spec's part 7, checked by hand: `census` fails a diff that renames `test_b` to `check_b`; `integrity` passes `d1141d0`; and `saffron/gates/core/integrity.py` is 270 lines against the rejected 305.

@@ -94,8 +94,9 @@ suppression scan and the `gate_config` check all survive, because review was
 explicit that they are correct and measurement agrees.
 
 What is kept is worth naming, since deleting a third of a file invites deleting
-more: count-driven hunk consumption with a fixture containing diff-shaped
-content; line numbers derived from the `@@` header rather than counted; `error`
+more: hunk boundaries taken from `@@` lines with content classified by prefix,
+proved against a fixture containing diff-shaped content inside a test file;
+line numbers derived from the `@@` header rather than counted; `error`
 distinct from `fail`; the `a/ b/` prefix refusal that backlog item 2's close
 installed in `scope`; and suppression detection over added lines only, with the
 context-line and removed-line cases both tested and both right.
@@ -133,6 +134,42 @@ source hunks, run the new and changed tests, require them to fail. A test gutted
 to `pass` passes against reverted source and `revert` catches it for exactly that
 reason. The rejected gate's rebuttal argued this boundary and the lens accepted
 it; it is restated here so it does not read as an oversight in a second gate.
+**`revert` is not built yet**, so that boundary is currently uncovered by
+anything — worth saying plainly rather than pointing at a gate that does not
+exist.
+
+**A skipped test is still a collected test.** Measured: `pytest -q
+--collect-only` lists a `@pytest.mark.skip` or `xfail` test, and the run exits
+`0`. So `census` does not see marker-based silencing, and must not be described
+as catching a test that "leaves collection by any route" — only `-m` deselection,
+which is an addopts edit rather than a marker, removes a name. Silencing by
+marker is `integrity`'s, which is the second reason part 3's exemption had to
+stop covering suppressions: with both wrong, nothing in the suite saw a skip
+marker at all.
+
+### 2.3 The comparison is exact; its inputs are cell-authored
+
+Worth stating because the rest of this section reads as though `census` were
+unspoofable, and it is not. The subtraction is exact about the two lists it is
+handed. Those lists are produced by `/work/.saffron/gates/tests.py` and a second
+pytest process, both inside the untrusted cell — and CLAUDE.md's founding line is
+that every control that matters lives outside it.
+
+Two measured routes, recorded rather than fixed:
+
+- A `conftest.py` whose `pytest_collection_modifyitems` drops a test only when
+  `config.option.collectonly` is false makes `--collect-only` report a name the
+  run does not execute. `census` passes, `tests` passes.
+- `worktree.export_patch` diffs `base_sha..HEAD`, so an **uncommitted** edit to
+  `/work/.saffron/gates/tests.py` is invisible to `scope` and to `integrity`'s
+  `gate_config` check while being fully effective on the gate run. The
+  `.saffron/**` pattern closes the committed case only.
+
+Neither is a reason to prefer the diff-shaped check, which was evadable by a
+single adjacent line and did not need a conftest. But `census` buys exactness
+against an honest suite, not integrity against a hostile one, and the gate-runner
+trust boundary is a v1+ question (§5.4's `no-network` and the gate contract both
+assume a cooperative runner). It goes in the backlog rather than in this gate.
 
 ### 2.1 It needs no §2.1 exception
 
@@ -187,20 +224,47 @@ A head `tests` that errored aborts the attempt before `census` is consulted
 a mass deletion. That is §5.4's "partial results are not results" already doing
 the work; this spec adds no second mechanism for it.
 
-## 3. The `touches` exemption binds two checks, not three
+## 3. The `touches` exemption binds `gate_config` alone
 
 §5.4 reads *"fail on any deletion of an existing test, any newly added
 suppression, and any edit to gate configuration, unless `touches` explicitly
 includes it."* The rejected gate omitted the clause entirely and failed its own
-pull request sixteen times. Restoring it verbatim across all three checks is the
-obvious repair and it is wrong.
+pull request sixteen times. Restoring it verbatim is the obvious repair and it is
+wrong — and so was this spec's first attempt at splitting it.
 
-**Suppressions and `gate_config`: exempt.** The signal there is *this file
-changed at all*. A spec whose `touches` names `pyproject.toml` has authorized the
-edit, and the gate has nothing left to say. This is also the only defence a
-substring scan has against prose (correction 3): a task quoting a token in a
-docstring has that file in `touches` by construction, because `scope` would
-otherwise have failed it first.
+> **Revised after review.** The first version of this section exempted
+> suppressions as well as `gate_config`, on the argument that the exemption is a
+> substring scan's only defence against prose. Review showed that argument
+> destroys the check, using this spec's own premise against it. Measured, in a
+> throwaway repo: `touches: ["tests/test_a.py"]`, base with `test_two` failing,
+> head adding `@pytest.mark.skip` to it — `scope: pass`, `integrity: pass`,
+> `census: pass`, `tests: pass`. Fully green, on the move §5.4 names *first*.
+> The rejected gate caught it. That is a worse gate than the one being replaced.
+
+**The rule the failure teaches.** `touches` is a **file-level** authorization,
+and `scope` already enforces that every changed file is inside it. So in any diff
+that can reach green, a per-file exemption fires on *every* file. A file-level
+key therefore cannot exempt a **line-level** check without nullifying it
+entirely — and "was a suppression added on this line" is line-level. The
+exemption is only meaningful for a check whose whole signal is *this file changed
+at all*.
+
+**`gate_config`: exempt.** That check is file-level, so the exemption is the
+right shape for it. A spec whose `touches` names `pyproject.toml` has authorized
+the edit and the gate has nothing left to say. The honest consequence, worth
+stating because it makes the check nearly redundant: exempt, it fires only where
+`scope` would already have failed. What is left over is the narrow case where
+`touches` is *broader* than the gate-config pattern — `touches: [".saffron/**"]`
+on a task that also edits `.saffron/policy.yaml` — and that is the case it earns
+its place on.
+
+**Suppressions: never exempt.** The prose false positive from correction 3
+therefore returns: a docstring quoting a token fails, and `d1141d0` fails. That
+is the accepted cost, and it is the cheaper one in both directions. A prose
+failure is a `fail`, not an `error` — it enters the repair loop with a message
+naming the file, the line and the token, and the repair is to reword a docstring.
+A gate that never fires cannot be repaired, because nothing reports it. Noise the
+operator can see beats silence they cannot.
 
 **Removal: not exempt.** `touches: tests/test_session.py` authorizes *editing*
 that file. It does not authorize deleting three unrelated tests inside it to get
@@ -276,11 +340,15 @@ and *rename `test_b` → `check_b`*. Both are `census` cases; both assert a `fai
 that no version of the diff-reading gate produces, so both are red against
 today's code and green after — which is what makes them the tests worth having.
 
-Plus: the four `\ No newline` positions, as characterization tests, so correction
-1 cannot silently regress; a `-diff` gitattribute section reported `error` and not
-`pass`; `collected` absent → `skip`; present at base and absent at head →
-`error`; the `touches` split, one test per side; and `d1141d0`'s own diff passing
-`integrity` once the exemption binds suppressions.
+Plus: the four `\ No newline` positions — after `-` alone, after `+` alone, after
+both, and after a context line — each asserting the marker is actually present in
+the fixture, so correction 1 cannot silently regress; a `-diff` gitattribute
+section reported `error` and not `pass`, and its exempt sibling; `collected`
+absent → `skip`; present at base and absent at head → `error`; `gate_config`
+exempt under `touches` and a suppression *not* exempt under the same `touches`,
+which is the pair that pins part 3's revision; and the end-to-end skip-marker
+case — base red, head adding `@pytest.mark.skip`, every gate consulted — because
+that is the sequence that went green under the first draft.
 
 Mutation testing is not planned. Principle 45 scopes it to agent-authored work —
 *a test written by the author of the code certifies agreement, not correctness* —
@@ -291,6 +359,11 @@ that fail before the change are the cheaper form of the same evidence here.
 ## 7. Success criterion
 
 `census` fails a diff that renames `test_b` to `check_b`, which no version of the
-diff-reading gate could see; `integrity` passes `d1141d0`, which the rejected
-gate fails; and `saffron/gates/core/integrity.py` is shorter than the file it
-replaces.
+diff-reading gate could see; `integrity` fails a diff that adds
+`@pytest.mark.skip` to a failing test **even when the spec's `touches` names that
+file**, which is the case the first draft of this spec let through; and
+`saffron/gates/core/integrity.py` is shorter than the 305-line file it replaces.
+
+`integrity` also fails `d1141d0` on two docstrings, and that is the accepted cost
+rather than a defect — part 3. An earlier version of this criterion had it
+passing, which was the bug wearing a success criterion.
