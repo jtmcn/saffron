@@ -127,14 +127,18 @@ check without nullifying it. The cost of not exempting suppressions is that pros
 quoting a token fails; that is accepted, because a `fail` reaches the repair loop
 naming file, line and token, while a gate that never fires reports nothing.
 
-**The cost is measured, not estimated.** Against this branch's own diff
-(`d1141d0..HEAD`) with the real `.saffron/policy.yaml`, `integrity` reports **65**
-failures — 64 `added-suppression` across 9 files plus one `gate-config-changed` —
-where `d1141d0` itself produced 2. Almost all of it is this work's own prose about
-suppression tokens: 23 in the plan, 17 in `tests/test_integrity.py`, 7 in
-`DESIGN.md`, 6 in the spec, the rest in the backlog and the evidence files. A task
-whose `touches` names those paths is exempt, so this bites only a task editing a
-prose file it did not declare. If it starts biting, the relief is a `prose_paths`
+**The cost is measured, not estimated — and re-measured whenever this paragraph
+changes.** Against this branch's own diff (`d1141d0..HEAD`) with the real
+`.saffron/policy.yaml`, `integrity` reports **71** failures across **11** files —
+69 `added-suppression` plus 2 `gate-config-changed` — where
+`d1141d0` itself produced 2. Almost all of it is this work's own prose about the
+tokens the policy declares: 23 in the plan, 17 in `tests/test_integrity.py`, 7 in
+`DESIGN.md`, 6 in the spec, 5 in the policy file, the rest in this file and the
+evidence files. **The count is self-referential** — prose quoting a token is
+counted, so the first two recordings of it went stale in the commit that made
+them, by quoting the tokens they were counting. Describe them, never reproduce
+them. A task whose `touches` names those paths is exempt, so this bites only a
+task editing a prose file it did not declare. If it starts biting, the relief is a `prose_paths`
 key in `integrity` — paths whose *added lines* are not scanned, distinct from
 `touches`, which exempts the whole file — not a weaker token list.
 
