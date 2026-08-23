@@ -108,22 +108,30 @@ def _run_argv(
     return argv
 
 
+def _decode(data: bytes | None) -> str:
+    # errors="replace" so a cell emitting invalid UTF-8 cannot raise out of
+    # this function — a broken byte becomes U+FFFD, never an exception.
+    return "" if data is None else data.decode("utf-8", errors="replace")
+
+
 def _call(argv: Sequence[str], timeout_s: float) -> Completed:
+    # Bytes, not text=True: Python's universal-newline translation silently
+    # rewrites a bare "\r" a cell emits (e.g. inside a diff) into "\n" before
+    # any caller sees it, and a gate reading that diff must see what git
+    # actually wrote.
     try:
-        proc = subprocess.run(
-            list(argv), capture_output=True, text=True, timeout=timeout_s
-        )
+        proc = subprocess.run(list(argv), capture_output=True, timeout=timeout_s)
     except subprocess.TimeoutExpired as exc:
         return Completed(
             returncode=124,
-            stdout=exc.stdout or "",
-            stderr=exc.stderr or "",
+            stdout=_decode(exc.stdout),
+            stderr=_decode(exc.stderr),
             timed_out=True,
             bound="wall",
         )
     except OSError as exc:
         raise CellRuntimeError(f"{RUNTIME} could not be executed: {exc}") from exc
-    return Completed(proc.returncode, proc.stdout, proc.stderr)
+    return Completed(proc.returncode, _decode(proc.stdout), _decode(proc.stderr))
 
 
 def call(argv: Sequence[str], timeout_s: float = 120) -> Completed:

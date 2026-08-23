@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import subprocess
 
-from saffron.cell import worktree
+from saffron.cell import runtime, worktree
 from saffron.gates.core.integrity import integrity_gate
 from saffron.repos.policy import IntegrityPatterns
 
@@ -211,22 +211,23 @@ def test_a_form_feed_inside_an_added_line_does_not_hide_a_suppression(tmp_path):
 def test_a_bare_carriage_return_inside_an_added_line_does_not_hide_a_suppression(
     tmp_path,
 ):
-    """`_diff`'s `text=True` capture applies universal-newlines translation
-    and would itself turn a bare `\\r` into a `\\n` before this gate ever saw
-    it, masking the parser bug rather than exercising it — so this reads the
-    diff as bytes, the same way `worktree.export_patch` reads it in the cell,
-    to keep the `\\r` intact end to end."""
+    """A bare `\\r` is ordinary content to git but, until `runtime._call`
+    stopped using `subprocess.run(text=True)`, was silently rewritten to
+    `\\n` by Python's universal-newline translation before this gate ever
+    saw the diff — a fix in this module's own parsing could not close that;
+    the capture boundary had to. This drives the diff through
+    `runtime.call`, the same `_call` that `worktree.export_patch` uses to
+    read a diff out of a cell, so it exercises the production capture shape
+    rather than a string this gate could never actually be handed."""
     run = _repo(tmp_path, {"src/a.py": "x = 1\n"})
     (tmp_path / "src" / "a.py").write_bytes(b"x = 1\r  # type: ignore\n")
     run("git", "add", "-A")
-    diff = subprocess.run(
-        ["git", "diff", "--cached", *worktree.DIFF_FLAGS],
-        cwd=tmp_path,
-        capture_output=True,
-        check=True,
-    ).stdout.decode()
-    assert "\r" in diff
-    result = integrity_gate(diff, PATTERNS, touches=["src/b.py"])
+    done = runtime.call(
+        ["git", "-C", str(tmp_path), "diff", "--cached", *worktree.DIFF_FLAGS],
+        timeout_s=10,
+    )
+    assert "\r" in done.stdout
+    result = integrity_gate(done.stdout, PATTERNS, touches=["src/b.py"])
     assert result.status == "fail"
     assert result.failures[0].code == "added-suppression"
 
@@ -249,9 +250,11 @@ def test_a_forged_diff_header_inside_an_added_line_does_not_split_the_block(
 
 
 def test_a_crlf_file_still_parses_and_reports_its_suppression(tmp_path):
-    """`subprocess.run(..., text=True)` applies universal-newlines translation
-    and would silently eat the `\\r` before it ever reached git's output, so
-    this reads the diff as bytes to keep CRLF intact end to end."""
+    """A CRLF file's `\\r` is harmless either way — `_split_lines` strips one
+    trailing `\\r` per line whether or not it survived capture — but this
+    still pins that a whole-file CRLF diff parses and reports its
+    suppression. Reads the diff as bytes directly rather than through
+    `runtime.call`, since nothing here depends on the capture boundary."""
     run = _repo(tmp_path, {"src/a.py": "placeholder\n"})
     (tmp_path / "src" / "a.py").write_bytes(b"x = 1\r\ny = 2\r\n")
     run("git", "add", "-A")

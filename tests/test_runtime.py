@@ -74,6 +74,17 @@ def test_call_is_the_public_form_of_the_private_helper():
     assert done.timed_out is False
 
 
+def test_a_bare_carriage_return_in_stdout_survives_the_call():
+    """`text=True` applies universal-newline translation and would silently
+    rewrite a bare "\\r" into "\\n" before any caller saw it — the mechanism
+    that let a suppression hide inside a diff `integrity_gate` was handed."""
+    done = runtime.call(
+        [sys.executable, "-c", "import sys; sys.stdout.write('a\\rb\\n')"],
+        timeout_s=10,
+    )
+    assert done.stdout == "a\rb\n"
+
+
 def test_the_subnet_is_the_only_place_the_network_is_written():
     """Derived, not re-typed: a stale second copy probes an address that no
     longer exists and reports 'unreachable' having reached nothing."""
