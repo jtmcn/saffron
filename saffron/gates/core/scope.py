@@ -47,7 +47,11 @@ def scope_gate(
     charged to nobody (§5.4) — rather than a `pass` nobody checked.
     """
     if diff is not None:
-        for line in diff.splitlines():
+        # Split on "\n" only, not the wider splitlines() set (\r, \x0c, ...) —
+        # those bytes appear raw inside a line git emits, and splitting on them
+        # could shatter one line into a fragment that starts with "diff --git ".
+        for line in diff.split("\n"):
+            line = line[:-1] if line.endswith("\r") else line
             if line.startswith("diff --git ") and not _HEADER.match(line):
                 return GateResult(
                     gate="scope",

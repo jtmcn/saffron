@@ -64,6 +64,21 @@ class _DiffError(Exception):
         self.summary = summary
 
 
+def _split_lines(text: str) -> list[str]:
+    """Split on `"\\n"` only — git's own separator.
+
+    `str.splitlines()` also splits on `\\r`, `\\x0b`, `\\x0c`, `\\x1c`-`\\x1e`
+    and `\\x85`, which git emits raw inside a line's content. Splitting on
+    those shatters one added line into fragments, and a fragment starting
+    with a space is then read as a context line the suppression scan skips —
+    a byte hides a suppression from this gate that ruff still honours.
+    """
+    lines = text.split("\n")
+    if text.endswith("\n"):
+        lines.pop()  # split("\n") artifact splitlines() never produced
+    return [line[:-1] if line.endswith("\r") else line for line in lines]
+
+
 class _FileDiff:
     __slots__ = ("old_path", "new_path", "hunks", "unreadable")
 
@@ -95,7 +110,7 @@ class _FileDiff:
 
 def _split_blocks(diff: str) -> list[str]:
     """Split on `diff --git` header lines, validating each as we go."""
-    lines = diff.splitlines()
+    lines = _split_lines(diff)
     starts = []
     for index, line in enumerate(lines):
         if line.startswith("diff --git "):
@@ -112,7 +127,7 @@ def _split_blocks(diff: str) -> list[str]:
 
 
 def _parse_block(block: str) -> _FileDiff:
-    lines = block.splitlines()
+    lines = _split_lines(block)
     old_path: str | None = None
     new_path: str | None = None
     saw_hunk = False
@@ -133,12 +148,18 @@ def _parse_block(block: str) -> _FileDiff:
                 if header is None:
                     raise _DiffError(f"unreadable old-file header: {line[:120]}")
                 old_path = header.group(1)
+                # git appends a TAB after a path containing whitespace; the
+                # capture group swallows it, so strip the one it would add.
+                if old_path is not None:
+                    old_path = old_path.removesuffix("\t")
                 continue
             if line.startswith("+++ ") and new_path is None:
                 header = _NEW_PATH.match(line)
                 if header is None:
                     raise _DiffError(f"unreadable new-file header: {line[:120]}")
                 new_path = header.group(1)
+                if new_path is not None:
+                    new_path = new_path.removesuffix("\t")
                 continue
 
         if line.startswith("@@"):

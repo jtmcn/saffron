@@ -79,7 +79,7 @@ def test_prose_quoting_a_token_fails_and_that_is_the_accepted_cost(tmp_path):
     diff = _diff(tmp_path, run, {"src/a.py": 'x = 1\n"""quotes # type: ignore"""\n'})
     result = integrity_gate(diff, PATTERNS, touches=["src/a.py"])
     assert result.status == "fail"
-    assert result.failures[0].line is not None
+    assert result.failures[0].line == 2
 
 
 def test_a_gate_config_edit_fails(tmp_path):
@@ -194,3 +194,96 @@ def test_an_empty_diff_passes():
 def test_no_declared_patterns_skips():
     empty = IntegrityPatterns(test_paths=[], suppressions=[], gate_config=[])
     assert integrity_gate("", empty, touches=[]).status == "skip"
+
+
+def test_a_form_feed_inside_an_added_line_does_not_hide_a_suppression(tmp_path):
+    """`str.splitlines()` also splits on `\\x0c`, `\\r` and friends, which git
+    treats as ordinary content. Splitting on them shatters one added line
+    into fragments, and a fragment beginning with a space then reads as a
+    context line — hiding a suppression the diff actually contains."""
+    run = _repo(tmp_path, {"src/a.py": "x = 1\n"})
+    diff = _diff(tmp_path, run, {"src/a.py": "x = 1\x0c  # type: ignore\n"})
+    result = integrity_gate(diff, PATTERNS, touches=["src/b.py"])
+    assert result.status == "fail"
+    assert result.failures[0].code == "added-suppression"
+
+
+def test_a_bare_carriage_return_inside_an_added_line_does_not_hide_a_suppression(
+    tmp_path,
+):
+    """`_diff`'s `text=True` capture applies universal-newlines translation
+    and would itself turn a bare `\\r` into a `\\n` before this gate ever saw
+    it, masking the parser bug rather than exercising it — so this reads the
+    diff as bytes, the same way `worktree.export_patch` reads it in the cell,
+    to keep the `\\r` intact end to end."""
+    run = _repo(tmp_path, {"src/a.py": "x = 1\n"})
+    (tmp_path / "src" / "a.py").write_bytes(b"x = 1\r  # type: ignore\n")
+    run("git", "add", "-A")
+    diff = subprocess.run(
+        ["git", "diff", "--cached", *worktree.DIFF_FLAGS],
+        cwd=tmp_path,
+        capture_output=True,
+        check=True,
+    ).stdout.decode()
+    assert "\r" in diff
+    result = integrity_gate(diff, PATTERNS, touches=["src/b.py"])
+    assert result.status == "fail"
+    assert result.failures[0].code == "added-suppression"
+
+
+def test_a_forged_diff_header_inside_an_added_line_does_not_split_the_block(
+    tmp_path,
+):
+    """An added line containing `\\x0c` followed by `diff --git a/x b/x` must
+    not be split into a fragment that `_split_blocks` mistakes for the start
+    of a new file block — losing the real suppression later in the hunk."""
+    run = _repo(tmp_path, {"src/a.py": "one\ntwo\nthree\n"})
+    diff = _diff(
+        tmp_path,
+        run,
+        {"src/a.py": "one\x0cdiff --git a/z b/z\ntwo  # type: ignore\nthree\n"},
+    )
+    result = integrity_gate(diff, PATTERNS, touches=["src/b.py"])
+    assert result.status == "fail"
+    assert result.failures[0].code == "added-suppression"
+
+
+def test_a_crlf_file_still_parses_and_reports_its_suppression(tmp_path):
+    """`subprocess.run(..., text=True)` applies universal-newlines translation
+    and would silently eat the `\\r` before it ever reached git's output, so
+    this reads the diff as bytes to keep CRLF intact end to end."""
+    run = _repo(tmp_path, {"src/a.py": "placeholder\n"})
+    (tmp_path / "src" / "a.py").write_bytes(b"x = 1\r\ny = 2\r\n")
+    run("git", "add", "-A")
+    run("git", "commit", "-qm", "crlf base")
+    (tmp_path / "src" / "a.py").write_bytes(b"x = 1  # type: ignore\r\ny = 2\r\n")
+    run("git", "add", "-A")
+    diff = subprocess.run(
+        ["git", "diff", "--cached", *worktree.DIFF_FLAGS],
+        cwd=tmp_path,
+        capture_output=True,
+        check=True,
+    ).stdout.decode()
+    assert "\r\n" in diff
+    result = integrity_gate(diff, PATTERNS, touches=["src/b.py"])
+    assert result.status == "fail"
+    assert result.failures[0].code == "added-suppression"
+
+
+def test_a_path_containing_a_space_matches_touches_and_carries_no_tab(tmp_path):
+    """Git appends a TAB after a `---`/`+++` path that contains whitespace.
+    An exact `touches` entry must still match it, and no reported `Failure`
+    should carry that tab into `file`."""
+    run = _repo(tmp_path, {".saffron/my spec.yaml": "a: 1\n"})
+    diff = _diff(tmp_path, run, {".saffron/my spec.yaml": "a: 1\nb: 2\n"})
+    patterns = IntegrityPatterns(
+        test_paths=[], suppressions=[], gate_config=[".saffron/my spec.yaml"]
+    )
+
+    exempt = integrity_gate(diff, patterns, touches=[".saffron/my spec.yaml"])
+    assert exempt.status == "pass"
+
+    flagged = integrity_gate(diff, patterns, touches=[])
+    assert flagged.status == "fail"
+    assert flagged.failures[0].file == ".saffron/my spec.yaml"
+    assert not flagged.failures[0].file.endswith("\t")

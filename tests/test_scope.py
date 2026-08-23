@@ -156,3 +156,29 @@ def test_a_quoted_path_is_still_a_recognised_header():
     assert (
         scope_gate(["src/tab\tname.py"], touches=["src/**"], diff=diff).status == "pass"
     )
+
+
+def test_an_injected_separator_in_an_added_line_cannot_forge_a_bad_header(tmp_path):
+    """`str.splitlines()` splits on `\\x0c` and friends, not just `\\n`. An
+    added line embedding one of those bytes followed by header-shaped text
+    must not be sliced into a fragment the header check reads as its own
+    line — misreading a genuinely well-formed diff as `error`."""
+    run = lambda *a: subprocess.run(a, cwd=tmp_path, check=True, capture_output=True)  # noqa: E731
+    run("git", "init", "-q", "-b", "main")
+    run("git", "config", "user.email", "t@example.com")
+    run("git", "config", "user.name", "t")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a.py").write_text("one\n")
+    run("git", "add", "-A")
+    run("git", "commit", "-qm", "base")
+    (tmp_path / "src" / "a.py").write_text("one\x0cdiff --git bad header shape\n")
+    run("git", "add", "-A")
+    diff = subprocess.run(
+        ["git", "diff", "--cached", *worktree.DIFF_FLAGS],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    result = scope_gate(["src/a.py"], touches=["src/**"], diff=diff)
+    assert result.status == "pass"
