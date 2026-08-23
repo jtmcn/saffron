@@ -75,7 +75,8 @@ exception has a shape worth memorising: **core invokes declared gates, never too
   `worktree.py`, `proxy.py`.
 - `saffron/gates/` — `contract.py` is the gate JSON schema and the whole repo-agnostic
   surface; `runner.py` execs gates host-side (`LocalExecutor` / `CellExecutor`);
-  `baseline.py` subtracts pre-existing failures; `core/` holds diff-only gates.
+  `baseline.py` subtracts pre-existing failures; `core/` holds the host-side gates
+  (`scope`, `integrity` read the diff; `census` reads other gates' results).
 - `saffron/phases/` — `implement.py` (plan checkpoint + repair turns), `review.py` (lenses),
   `rebut.py`.
 - `saffron/agents/` — `context.py` injects `CONTEXT.md` sections per phase; `artifacts.py`
@@ -93,6 +94,10 @@ exception has a shape worth memorising: **core invokes declared gates, never too
   aborts the attempt, and is charged to nobody. Never collapse them.
 - **Baseline subtraction counts.** Identities collide legitimately — one baseline failure
   cancels one head failure, not all of them. Never compare on line number.
+- **`census` compares sets; the baseline subtraction counts.** They sit beside each
+  other and the rule is opposite, for a reason: failure identities collide
+  legitimately, so one baseline failure cancels one head failure — but a test name
+  is unique in a suite, so removal is a set difference. Do not make them match.
 - **Control artifacts are extracted and hashed the moment they are produced**, never re-read
   from `/work`. A file left in the workspace is a claim, not a record.
 - **Lenses are host-invoked fresh sessions, never subagents.** A lens that runs only when the

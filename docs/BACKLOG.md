@@ -93,6 +93,68 @@ exactly the same diff as one that deleted it under repair. The gaming pressure
 moved earlier in the process, not away — which makes this the only place that
 deletion is visible at all.
 
+**Done, 2026-08-22.** Split, and three of this item's own claims were wrong —
+measured, not re-reasoned (`docs/evidence/2026-08-22-integrity-rejected-gate-measured.md`,
+Appendix M). The batch tree holds a **post-rebuttal** patch, one fix past the one
+Appendix K reviewed. Defect A was already fixed in it: all four positions git
+emits `\ No newline at end of file` parse cleanly, so there was nothing to move
+and nothing to test. The removal check was run adjacency, not net line count, so
+the `parametrize` false positive was already gone — while the evasion was
+*cheaper* than this item says, taking one adjacent added line of any content
+rather than a comment longer than the test. And a defect nothing had recorded:
+the suppression scan substring-matches every added line in every file, so
+`d1141d0` — this repository's own merge of PR #5 — fails `integrity` on two
+docstrings that quote `@pytest.mark.skip` while explaining that a critic's claim
+quotes it.
+
+What shipped: `integrity` keeps the two checks a diff can answer — added
+suppressions, and gate-config edits — and treats a `Binary files ... differ`
+section as unreadable rather than unchanged. Test removal became `census`, a set
+comparison of collected test names, which also catches a test renamed out of
+collection: the case every diff-shaped version blessed. **It needed no §2.1
+exception.** This item assumed core would have to invoke the `tests` gate the way
+`revert` does; it does not, because the baseline and head suites already run
+`tests`, so the names needed reporting rather than fetching. The contract gained
+one optional field, `collected`, and core subtracts two lists it already holds.
+
+**The `touches` exemption binds `gate_config` alone.** The first design exempted
+suppressions too, and review killed it: `scope` already requires every changed
+file to be inside `touches`, so a per-file exemption fires on every file of any
+diff that can reach green. Measured — a failing test silenced with
+`@pytest.mark.skip`, its file named in `touches`, went green on `scope`,
+`integrity`, `census` and `tests`. A file-level key cannot exempt a line-level
+check without nullifying it. The cost of not exempting suppressions is that prose
+quoting a token fails; that is accepted, because a `fail` reaches the repair loop
+naming file, line and token, while a gate that never fires reports nothing.
+
+**Three defects found by executing the work rather than reading it**, each closed:
+
+- **One byte hid a suppression.** Git splits diff lines only on `\n`; Python's
+  `str.splitlines()` splits on nine more characters. Git emits them raw inside a
+  `+` line, so one added line shattered into fragments and a fragment beginning
+  with a space was filed as a *context* line, which the suppression scan skips.
+  Measured end to end: `import os\x0c  # noqa: F401` parses as valid Python,
+  `ruff` honours the `noqa`, and `integrity` returned `pass`. The repo's lint gate
+  obeyed a suppression the anti-gaming gate could not see.
+- **The same line lived in `scope`.** `scope_gate` read the diff with
+  `splitlines()` too, so the same injection reached it. Fixed with `integrity`
+  rather than left one file away.
+- **The evasion also lived one layer up, at the capture boundary.** `runtime._call`
+  captured with `subprocess.run(text=True)`, whose universal-newline translation
+  rewrites a bare `\r` to `\n` *before any gate runs* — so the line arrived
+  already shattered and no parser fix could undo it. It now captures bytes and
+  decodes explicitly. That also removed a latent crash: the old text mode decoded
+  with the **host locale** under `errors="strict"`, so a non-UTF-8 byte from a
+  cell could raise `UnicodeDecodeError` out of `_call`.
+
+Still open, deliberately: a task that *legitimately* removes a test cannot pass,
+since no exemption binds `census`. The upgrade path is a spec field, left unbuilt
+until a task needs it. A genuine binary fixture inside `touches` trips
+`integrity`'s unreadable-section rule. And `exec_stream`, `LocalExecutor` and
+`package.py` still capture with `text=True` — harmless today, since none of them
+reads a diff that a gate judges, but they are the remaining siblings of the
+boundary this work fixed. All carry `ponytail:` comments or a line here.
+
 ## 2. The agent can disable a core gate from inside the cell
 
 `worktree.export_patch` runs bare `git diff`, inheriting worktree config the
