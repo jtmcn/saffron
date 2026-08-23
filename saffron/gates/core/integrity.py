@@ -11,11 +11,14 @@ diff-shaped versions of the check were written and all three were wrong, in
 three different ways (Appendix M, principle 52). `census` answers it exactly,
 by subtracting two sets of collected names.
 
-The `touches` exemption binds both surviving checks. For a suppression or a
-gate-config edit the signal is *this file changed at all*, and a spec whose
-`touches` names the file has authorized exactly that. It is also the only
-defence a substring scan has against prose: a docstring quoting a token is a
-use of it to core.
+The `touches` exemption binds the gate-config check alone. There the signal is
+*this file changed at all*, and a spec whose `touches` names the file has
+authorized exactly that — whereas the suppression scan is line-level and
+exempting it by the same key would nullify it, since `scope` already guarantees
+every changed file is inside `touches` (§5.4). The scan is therefore a bare
+substring match with no defence against prose: a docstring quoting a token
+reads as a use of it, an accepted false positive `.saffron/policy.yaml`
+records the cost of.
 """
 
 from __future__ import annotations
@@ -75,8 +78,8 @@ class _FileDiff:
         self.old_path = old_path
         self.new_path = new_path
         # Content hidden as binary. Recorded rather than raised, so that a file
-        # the spec declared in `touches` can be exempted before it is judged —
-        # a committed PNG fixture must not abort the attempt.
+        # the spec never declared can be dropped before it is judged — it has
+        # already failed `scope`, and that report is `scope`'s to make.
         self.unreadable = False
         # Each hunk: a list of (kind, content, new_line) where kind is one of
         # "+"/"-"/" ", and new_line is the line's number in the post-image —
