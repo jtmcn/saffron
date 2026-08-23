@@ -130,8 +130,20 @@ DIFF_FLAGS = (
 def _git(container: str, *args: str) -> runtime.Completed:
     # quotePath=false: a path outside ASCII comes back verbatim rather than
     # octal-escaped, which is what `touches` globs are written against.
+    # suppressBlankEmpty=false: it strips the leading space from a blank context
+    # line, and a diff the host cannot parse is an `error` the agent can set with
+    # one uncommitted `git config` (§5.4).
     return runtime.exec_(
-        container, ["git", "-c", "core.quotePath=false", *args], workdir=WORKTREE_MOUNT
+        container,
+        [
+            "git",
+            "-c",
+            "core.quotePath=false",
+            "-c",
+            "diff.suppressBlankEmpty=false",
+            *args,
+        ],
+        workdir=WORKTREE_MOUNT,
     )
 
 

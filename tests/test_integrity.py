@@ -290,3 +290,16 @@ def test_a_path_containing_a_space_matches_touches_and_carries_no_tab(tmp_path):
     assert flagged.status == "fail"
     assert flagged.failures[0].file == ".saffron/my spec.yaml"
     assert not flagged.failures[0].file.endswith("\t")
+
+
+def test_a_blank_context_line_without_its_marker_still_parses(tmp_path):
+    """`diff.suppressBlankEmpty` writes a blank context line as `""`, not `" "`.
+    `worktree._git` pins it off, but a parser that errors on one hands the agent
+    a `GATE_ERROR` — charged to nobody — for one uncommitted `git config`."""
+    run = _repo(tmp_path, {"src/a.py": "x = 1\n\ny = 2\n"})
+    run("git", "config", "diff.suppressBlankEmpty", "true")
+    diff = _diff(tmp_path, run, {"src/a.py": "x = 1\n\ny = 2  # type: ignore\n"})
+    assert "\n\n" in diff  # the blank context line arrived bare
+    result = integrity_gate(diff, PATTERNS, touches=[])
+    assert result.status == "fail"
+    assert result.failures[0].code == "added-suppression"

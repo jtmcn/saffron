@@ -167,7 +167,10 @@ def _parse_block(block: str) -> _FileDiff:
             new_line += 1
         elif line.startswith("-"):
             current.append(("-", line[1:], None))
-        elif line.startswith(" "):
+        elif line.startswith(" ") or line == "":
+            # `diff.suppressBlankEmpty` drops the leading space from a blank
+            # context line. `worktree` pins it off, but a diff read from
+            # anywhere else must not abort the attempt over one.
             current.append((" ", line[1:], new_line))
             new_line += 1
         elif line.startswith("\\"):
