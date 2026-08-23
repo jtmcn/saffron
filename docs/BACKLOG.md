@@ -227,6 +227,70 @@ its patch no longer applies (see item 9).
 **Done looks like:** both tables, the drop-rate-per-lens query answerable in SQL,
 and cost on the task row.
 
+**Done, 2026-08-23.** All three, by hand; `SA-0003`'s stale patch was not
+reopened. Four things worth carrying forward.
+
+**The column had no `REFERENCES`, and that is what made the convention
+possible.** `gate_results.attempt_id` was a bare `INTEGER`, so holding a
+`task_id` in it was not a shortcut the schema tolerated — it was one the schema
+could not see. It points at `attempts(attempt_id)` now, and the old convention
+is unrepresentable rather than merely discouraged. Two existing ledger tests
+asserted it directly and had to change; `SA-0003`'s "every existing test still
+passes unchanged" was written before it was clear that two of them encoded the
+defect.
+
+**Attempts are opened by wrapping the agent callable, not at the call sites.**
+`record_attempts` sits inside `stop_on_rejected`, so a turn the provider walled
+records its cost before the rate limit is raised. The consequence is the reason
+for the shape: the lens sessions inside `review.run_review` and the rebuttal and
+verdict turns inside `rebut.run_rebut` all get rows without either phase
+learning what a ledger is — they still take an `agent` and nothing else. A
+turn that fails is still recorded; one that raises something neither layer
+expects leaves its row open, which is an honest reading of what happened.
+
+**`phase` is the state the task is in, and `spent_usd_est` is derived.**
+`open_attempt` reads `tasks.state` rather than taking a phase, because the
+caller already sets it at every phase boundary and tracking it twice is how the
+two drift. `set_task_state` rolls the spend up from `attempts` in the same
+statement, so the figure cannot disagree with the rows it is made of and no
+terminal path can forget it — there are seven of them. The equality between
+`tasks.spent_usd_est` and `CellOutcome.spent_usd` is asserted, because it is
+what proves no spending turn is missing a row.
+
+**`SA-0003` deferred `spent_usd_est` on a question that was already answered.**
+It said the sum depends on "whether a resumed session reports per-turn or
+whole-session cost, which is not yet known". `session.py` had since measured it
+— $0.00396 fresh, $0.00199 on resume of the same `session_id`, so summing is
+correct and cumulative would never fall. The deferral outlived its reason.
+
+**Review found the migration, and the obvious repair is illegal.** A ledger
+written before `attempts` existed holds a *task_id* in `gate_results.attempt_id`
+— and a new attempt's id starts at 1 in that same integer namespace, so task 1's
+v0.5 results reattach to whichever attempt draws id 1. Reproduced on a copy of
+this machine's own `~/.saffron/ledger.db`, which is exactly such a ledger.
+Nulling the legacy values out is not available: the `CHECK` that keeps exactly
+one of `attempt_id` and `run_id` set rejects a row with neither, on `UPDATE` as
+much as on insert. What ships is the backfill the old schema comment promised —
+one attempt row per legacy value, carrying that value as its own id, so the ids
+stay taken and nothing is lost or moved. Measured on that copy: five backfilled,
+zero dangling, every task still holding its own results.
+
+Two smaller ones from the same review. `open_attempt` against a task that does
+not exist selected nothing and still returned `lastrowid` — an id that exists,
+belongs to another attempt, and satisfies the foreign key; silent
+misattribution, which is the failure this item exists to end. And `RATE_LIMITED`
+was the one exit where the ledger and `CellOutcome` disagreed: the raise comes
+from outside the turn, so it lands past the `spent +=`. The outcome reads the
+roll-up now, which also closes the older gap where a window closing inside
+`plan_checkpoint` lost the whole tally with its frame.
+
+Still open, by choice: `findings.adjudication` has no producer — it is the
+operator's, and the morning queue (§6) is where it comes from. `attempts.model`
+is declared and never written: the runner's `result` event does not carry it and
+only assistant messages do, so recording it means changing the event schema.
+`batches` and `decisions` remain the two tables of the ten with nothing to put
+in them.
+
 ## 4. Three of five supervisor bounds are missing
 
 §4.3 wants turns, spend, idle, completion and wall clock. v0.5 has turns, spend

@@ -2,6 +2,7 @@ import sqlite3
 
 import pytest
 
+from saffron.agents.findings import Finding
 from saffron.gates.contract import Failure, GateResult
 from saffron.ledger import SCHEMA, Ledger
 
@@ -53,7 +54,8 @@ def test_a_baseline_result_belongs_to_a_run(ledger, task):
 def test_a_task_result_belongs_to_an_attempt(ledger, task):
     _, task_id = task
     ledger.record_gate_result(
-        GateResult(gate="types", status="pass"), attempt_id=task_id
+        GateResult(gate="types", status="pass"),
+        attempt_id=ledger.open_attempt(task_id),
     )
     assert [r.gate for r in ledger.task_results(task_id)] == ["types"]
 
@@ -68,7 +70,9 @@ def test_a_gate_result_must_belong_to_exactly_one_of_them(ledger, task):
     run_id, task_id = task
     with pytest.raises(sqlite3.IntegrityError):
         ledger.record_gate_result(
-            GateResult(gate="lint", status="pass"), run_id=run_id, attempt_id=task_id
+            GateResult(gate="lint", status="pass"),
+            run_id=run_id,
+            attempt_id=ledger.open_attempt(task_id),
         )
     with pytest.raises(sqlite3.IntegrityError):
         ledger.record_gate_result(GateResult(gate="lint", status="pass"))
@@ -227,3 +231,308 @@ def test_a_ledger_that_predates_the_package_columns_keeps_its_rows(tmp_path):
     (row,) = ledger.queue_lines()
     assert (row["state"], row["pushed_sha"]) == ("MERGE_FAILED", "c" * 40)
     ledger.close()
+
+
+def test_an_attempt_records_what_the_turn_was(ledger, task):
+    _, task_id = task
+    ledger.set_task_state(task_id, "IMPLEMENTING")
+    attempt_id = ledger.open_attempt(task_id)
+    ledger.close_attempt(
+        attempt_id,
+        session_id="s-1",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=4,
+        cost_usd_est=0.31,
+    )
+    (row,) = ledger.attempts(task_id)
+    assert (row["phase"], row["n"], row["session_id"]) == ("IMPLEMENTING", 1, "s-1")
+    assert (row["subtype"], row["num_turns"], row["cost_usd_est"]) == (
+        "success",
+        4,
+        0.31,
+    )
+    assert row["ended_at"] is not None
+
+
+def test_the_phase_an_attempt_belongs_to_is_the_state_the_task_is_in(ledger, task):
+    """`n` is numbered within a phase, so the two repair turns are 1 and 2
+    while the implement turn before them is its own 1 (§4.1)."""
+    _, task_id = task
+    ledger.set_task_state(task_id, "IMPLEMENTING")
+    ledger.open_attempt(task_id)
+    ledger.set_task_state(task_id, "REPAIRING")
+    ledger.open_attempt(task_id)
+    ledger.open_attempt(task_id)
+    assert [(r["phase"], r["n"]) for r in ledger.attempts(task_id)] == [
+        ("IMPLEMENTING", 1),
+        ("REPAIRING", 1),
+        ("REPAIRING", 2),
+    ]
+
+
+def test_a_gate_result_belongs_to_the_attempt_that_produced_it(ledger, task):
+    """Every attempt's results shared one id while `attempt_id` held the task's
+    own — the join §5.4's no-progress rule and §8 both assume."""
+    _, task_id = task
+    ledger.set_task_state(task_id, "REPAIRING")
+    first = ledger.open_attempt(task_id)
+    ledger.record_gate_result(GateResult(gate="tests", status="fail"), attempt_id=first)
+    second = ledger.open_attempt(task_id)
+    ledger.record_gate_result(
+        GateResult(gate="tests", status="pass"), attempt_id=second
+    )
+
+    assert [r.status for r in ledger.attempt_results(first)] == ["fail"]
+    assert [r.status for r in ledger.attempt_results(second)] == ["pass"]
+    assert [r.status for r in ledger.task_results(task_id)] == ["fail", "pass"]
+
+
+def test_a_gate_result_cannot_name_an_attempt_that_does_not_exist(ledger, task):
+    """What made `attempt_id = task_id` possible: the column had no reference."""
+    _, task_id = task
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.record_gate_result(
+            GateResult(gate="lint", status="pass"), attempt_id=90210
+        )
+
+
+def test_a_task_spends_the_sum_of_its_attempts(ledger, task):
+    _, task_id = task
+    ledger.set_task_state(task_id, "IMPLEMENTING")
+    for cost in (0.25, 0.50):
+        attempt_id = ledger.open_attempt(task_id)
+        ledger.close_attempt(
+            attempt_id,
+            session_id="s-1",
+            subtype="success",
+            terminal_reason=None,
+            num_turns=1,
+            cost_usd_est=cost,
+        )
+    ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+    (line,) = ledger.queue_lines()
+    assert line["spent_usd_est"] == 0.75
+
+
+def test_a_task_whose_attempts_all_crashed_spends_zero_not_null(ledger, task):
+    """A crashed session may report every cost field as zero (§4.1); a run that
+    ends with no persisted figure at all is the defect this column closes."""
+    _, task_id = task
+    ledger.set_task_state(task_id, "NOT_IMPLEMENTED")
+    (line,) = ledger.queue_lines()
+    assert line["spent_usd_est"] == 0.0
+
+
+def test_a_dropped_finding_is_kept_and_marked(ledger, task):
+    """Dropped findings are kept, not deleted: the drop rate is the signal that
+    a lens is badly prompted (§4.1, §5.5)."""
+    _, task_id = task
+    ledger.record_findings(
+        task_id,
+        [
+            Finding(
+                lens="correctness",
+                severity="blocker",
+                file="a.py",
+                line=3,
+                claim="off by one",
+                anchored=True,
+            ),
+            Finding(
+                lens="correctness",
+                severity="concern",
+                file="ghost.py",
+                line=9,
+                claim="not in the diff",
+                anchored=False,
+            ),
+        ],
+    )
+    rows = ledger.findings(task_id)
+    assert [(r["claim"], r["anchored"]) for r in rows] == [
+        ("off by one", 1),
+        ("not in the diff", 0),
+    ]
+    assert rows[0]["verdict"] is None and rows[0]["adjudication"] is None
+
+
+def test_a_verdict_and_a_rebuttal_land_on_the_finding_review_inserted(ledger, task):
+    """Three distinct judgements that must not collapse into one column (§4.1):
+    the critic's verdict, the implementer's rebuttal, and the operator's
+    adjudication — which has no producer yet and stays null."""
+    _, task_id = task
+    (finding_id,) = ledger.record_findings(
+        task_id,
+        [
+            Finding(
+                lens="schema",
+                severity="blocker",
+                file="m.py",
+                line=1,
+                claim="drops a column",
+                anchored=True,
+            )
+        ],
+    )
+    ledger.record_rebuttal(
+        finding_id, verdict="withdrawn", rebuttal="the column is added in the migration"
+    )
+    (row,) = ledger.findings(task_id)
+    assert row["verdict"] == "withdrawn"
+    assert row["rebuttal"] == "the column is added in the migration"
+    assert row["adjudication"] is None
+
+
+def test_the_drop_rate_per_lens_is_one_query(ledger, task):
+    """§5.5's signal, and item 3's own acceptance criterion."""
+    _, task_id = task
+    ledger.record_findings(
+        task_id,
+        [
+            Finding(
+                lens="correctness",
+                severity="blocker",
+                file="a.py",
+                line=1,
+                claim="one",
+                anchored=True,
+            ),
+            Finding(
+                lens="correctness",
+                severity="note",
+                file="b.py",
+                line=2,
+                claim="two",
+                anchored=False,
+            ),
+            Finding(
+                lens="schema",
+                severity="blocker",
+                file="c.py",
+                line=3,
+                claim="three",
+                anchored=False,
+            ),
+        ],
+    )
+    rows = ledger._db.execute(
+        """SELECT lens, AVG(1 - anchored) AS drop_rate
+             FROM findings GROUP BY lens ORDER BY lens"""
+    ).fetchall()
+    assert [(r["lens"], r["drop_rate"]) for r in rows] == [
+        ("correctness", 0.5),
+        ("schema", 1.0),
+    ]
+
+
+def test_a_ledger_that_predates_spent_usd_est_keeps_its_rows(tmp_path):
+    """The same additive rule the package columns follow: `CREATE TABLE IF NOT
+    EXISTS` does not alter, and no migration may lose a row."""
+    path = tmp_path / "old.db"
+    before = SCHEMA.replace("    spent_usd_est REAL NOT NULL DEFAULT 0.0,\n", "")
+    assert "spent_usd_est" not in before  # otherwise this test proves nothing
+    old = sqlite3.connect(path)
+    old.executescript(before)
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.execute(
+        """INSERT INTO tasks (run_id, spec_id, spec_sha, state, branch)
+           VALUES (1, 'SA-0001', 's', 'READY_FOR_REVIEW', 'saffron/SA-0001')"""
+    )
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    (row,) = ledger.queue_lines()
+    assert row["spec_id"] == "SA-0001" and row["spent_usd_est"] == 0.0
+    ledger.close()
+
+
+def test_a_ledger_that_predates_attempts_does_not_reattach_its_results(tmp_path):
+    """The collision this backfill exists for: `attempt_id` held a *task_id*,
+    and a new attempt's id starts at 1 in that same namespace. Left alone,
+    task 1's v0.5 results read as belonging to whoever draws attempt 1."""
+    path = tmp_path / "old.db"
+    before = SCHEMA.replace(
+        "attempt_id     INTEGER REFERENCES attempts(attempt_id),",
+        "attempt_id     INTEGER,",
+    )
+    assert "REFERENCES attempts" not in before  # otherwise this proves nothing
+    old = sqlite3.connect(path)
+    old.executescript(before)
+    old.execute("DROP TABLE attempts")
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r','o','/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.execute(
+        """INSERT INTO tasks (run_id, spec_id, spec_sha, state, branch)
+           VALUES (1, 'SA-0001', 's', 'READY_FOR_REVIEW', 'saffron/SA-0001')"""
+    )
+    old.execute(
+        "INSERT INTO gate_results (attempt_id, gate, status) VALUES (1, 'tests', 'pass')"
+    )
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    run_id = ledger.create_run(1, "b" * 40)
+    fresh = ledger.create_task(run_id, "SA-0009", "s", branch="saffron/SA-0009")
+    ledger.set_task_state(fresh, "IMPLEMENTING")
+    ledger.record_gate_result(
+        GateResult(gate="lint", status="pass"), attempt_id=ledger.open_attempt(fresh)
+    )
+    # The old result stays with the task it was always about, and the new task
+    # sees only its own — nothing lost, nothing moved.
+    assert [r.gate for r in ledger.task_results(1)] == ["tests"]
+    assert [r.gate for r in ledger.task_results(fresh)] == ["lint"]
+    ledger.close()
+
+
+def test_a_ledger_that_predates_attempts_gains_the_reference(tmp_path):
+    """The backfill protects the data; it does not deliver the constraint.
+    `CREATE TABLE IF NOT EXISTS` is a no-op on a v0.5 `gate_results`, so without
+    the rebuild the old convention stays representable on the one ledger that
+    actually exists — and the test above passes only because it starts fresh."""
+    path = tmp_path / "old.db"
+    before = SCHEMA.replace(
+        "attempt_id     INTEGER REFERENCES attempts(attempt_id),",
+        "attempt_id     INTEGER,",
+    )
+    assert "REFERENCES attempts" not in before  # otherwise this proves nothing
+    old = sqlite3.connect(path)
+    old.executescript(before)
+    old.execute("DROP TABLE attempts")
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r','o','/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.execute(
+        """INSERT INTO tasks (run_id, spec_id, spec_sha, state, branch)
+           VALUES (1, 'SA-0001', 's', 'READY_FOR_REVIEW', 'saffron/SA-0001')"""
+    )
+    old.execute(
+        "INSERT INTO gate_results (attempt_id, gate, status) VALUES (1, 'tests', 'pass')"
+    )
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.record_gate_result(
+            GateResult(gate="lint", status="pass"), attempt_id=90210
+        )
+    # The rebuild copied, it did not lose — and the index the DROP took is back.
+    assert [r.gate for r in ledger.task_results(1)] == ["tests"]
+    assert ledger._db.execute(
+        "SELECT 1 FROM sqlite_master WHERE name = 'gate_results_by_attempt'"
+    ).fetchone()
+    ledger.close()
+
+
+def test_an_attempt_against_no_task_raises_rather_than_naming_another(ledger, task):
+    """`lastrowid` reports the connection's previous insert, so a select that
+    matched nothing still hands back an id — one that exists, belongs to another
+    attempt, and satisfies the foreign key."""
+    _, task_id = task
+    real = ledger.open_attempt(task_id)
+    with pytest.raises(ValueError):
+        ledger.open_attempt(90210)
+    assert [row["attempt_id"] for row in ledger.attempts(task_id)] == [real]

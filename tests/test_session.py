@@ -1179,7 +1179,7 @@ def test_a_rejected_window_is_not_exhaustion():
     assert session.terminal_for_rate_limit(None) is None
 
 
-def _rejected(resets_at=1755800000):
+def _rejected(resets_at=1755800000, cost=0.0):
     """What a closed window actually looks like coming back: the CLI reports the
     rejection and the turn errors."""
     return implement.AttemptResult(
@@ -1187,7 +1187,7 @@ def _rejected(resets_at=1755800000):
         subtype="success",
         terminal_reason="api_error",
         num_turns=0,
-        cost_usd_est=0.0,
+        cost_usd_est=cost,
         is_error=True,
         rate_limit_status="rejected",
         rate_limit_resets_at=resets_at,
@@ -1296,3 +1296,170 @@ def test_a_plan_rejected_on_shape_reports_both_turns_it_spent(monkeypatch, tmp_p
     assert outcome.state == "PLAN_REJECTED"
     assert outcome.spent_usd == 0.8
     assert any("$0.80 spent" in line for line in cell.watched)
+
+
+# Not a path _ANCHORING_DIFF touches, so it cannot anchor however real it reads.
+_UNANCHORABLE = {
+    "findings": [
+        {
+            "file": "src/never-touched.py",
+            "line": 4,
+            "severity": "concern",
+            "claim": "a claim about a file the diff does not contain",
+        }
+    ]
+}
+
+
+def test_a_review_records_the_findings_it_dropped_as_well_as_the_ones_it_kept(
+    monkeypatch, tmp_path
+):
+    """§4.1: dropped findings are kept, because the drop rate is the signal that
+    a lens is badly prompted — and it is a SQL question, not a JSON one."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    _outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            _turn(_block(_BLOCKER)),
+            _turn(_block(_UNANCHORABLE)),
+            _turn("I have addressed the findings."),
+            _turn(_block(_CLAIMED_FIX)),
+        ],
+    )
+    (task_id,) = [row["task_id"] for row in ledger.queue_lines()]
+    rows = ledger.findings(task_id)
+    assert [(r["lens"], r["claim"], r["anchored"]) for r in rows] == [
+        ("correctness", "x returns nothing", 1),
+        ("contract", "a claim about a file the diff does not contain", 0),
+    ]
+
+
+def test_a_verdict_lands_on_the_finding_the_review_recorded(monkeypatch, tmp_path):
+    """`verdict` and `rebuttal` had nowhere to go but `rebuttal.json` (§4.1)."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    _outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_through_rebut(
+            _turn("It is intentional."),
+            _turn(
+                _block(
+                    {
+                        "rebuttals": [
+                            {"finding": 1, "action": "argued", "argument": "by design"}
+                        ]
+                    }
+                )
+            ),
+            _turn(
+                _block(
+                    {
+                        "verdicts": [
+                            {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                        ]
+                    }
+                )
+            ),
+        ),
+    )
+    (task_id,) = [row["task_id"] for row in ledger.queue_lines()]
+    (row,) = ledger.findings(task_id)
+    # The action rides along: "fixed" and "argued" are the difference §4.6 asks
+    # about, and the column is the only place left holding it.
+    assert (row["verdict"], row["rebuttal"]) == ("withdrawn", "argued: by design")
+
+
+def test_a_rebuttal_numbered_badly_records_the_answer_that_was_asked_for(
+    monkeypatch, tmp_path
+):
+    """Nothing validates the rebuttal turn's numbering the way `run_verdict`
+    validates a verdict set, so the write does: the first answer to a blocker
+    stands, and a number nobody asked about is dropped. Letting a duplicate
+    overwrite is how a *later* blocker ends up reading as unanswered when the
+    implementer's own `rebuttal.json` says otherwise."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    _outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_through_rebut(
+            _turn("It is intentional."),
+            _turn(
+                _block(
+                    {
+                        "rebuttals": [
+                            {"finding": 1, "action": "argued", "argument": "first"},
+                            {"finding": 1, "action": "fixed", "argument": "second"},
+                            {"finding": 7, "action": "fixed", "argument": "nobody"},
+                        ]
+                    }
+                )
+            ),
+            _turn(
+                _block(
+                    {
+                        "verdicts": [
+                            {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                        ]
+                    }
+                )
+            ),
+        ),
+    )
+    (task_id,) = [row["task_id"] for row in ledger.queue_lines()]
+    (row,) = ledger.findings(task_id)
+    assert row["rebuttal"] == "argued: first"
+
+
+def test_what_the_task_spent_is_the_sum_of_the_turns_it_ran(monkeypatch, tmp_path):
+    """The equality is the point: `spent_usd_est` is derived from `attempts`, so
+    a turn that spends without opening a row makes the two disagree. Every
+    phase's turns are counted here — plan, implement, both lenses, rebuttal."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_through_rebut(
+            _turn("I have addressed the findings."), _turn(_block(_CLAIMED_FIX))
+        ),
+    )
+    (line,) = ledger.queue_lines()
+    assert line["spent_usd_est"] == pytest.approx(outcome.spent_usd)
+    assert line["spent_usd_est"] > 0
+    assert [row["phase"] for row in ledger.attempts(outcome.task_id)] == [
+        "IMPLEMENTING",
+        "IMPLEMENTING",
+        "REVIEWING",
+        "REVIEWING",
+        "REBUTTING",
+        "REBUTTING",
+    ]
+
+
+def test_a_walled_turn_that_spent_is_still_charged(monkeypatch, tmp_path):
+    """The raise comes from outside the turn — `stop_on_rejected` wraps
+    `record_attempts` — so it lands past the `spent +=` and the in-frame tally
+    loses the walled turn. The attempt was written before the raise, so the
+    outcome reads the roll-up rather than reporting the gap."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _rejected(cost=0.07)],
+    )
+    assert outcome.state == "RATE_LIMITED"
+    # Plan, implement, and the lens turn the provider walled.
+    assert outcome.spent_usd == pytest.approx(0.27)
+    (line,) = ledger.queue_lines()
+    assert line["spent_usd_est"] == pytest.approx(outcome.spent_usd)

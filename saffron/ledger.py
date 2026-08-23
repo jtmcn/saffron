@@ -1,14 +1,16 @@
 """The ledger — SQLite, one file, WAL, authoritative for state (DESIGN.md §4.1).
 
-Five of the ten tables. The rest wait for an agent to have something to put in
-them.
+Seven of the ten tables. `batches` and `decisions` wait for a scheduler and an
+operator to have something to put in them.
 """
 
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Sequence
 from pathlib import Path
 
+from saffron.agents.findings import Finding
 from saffron.gates.contract import Failure, GateResult
 
 SCHEMA = """
@@ -42,16 +44,34 @@ CREATE TABLE IF NOT EXISTS tasks (
     budget_usd REAL,
     pushed_sha TEXT,
     pr_url     TEXT,
+    spent_usd_est REAL NOT NULL DEFAULT 0.0,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- `phase` is the state the task was in when the turn started, and `n` numbers
+-- within it (§4.1). `model` is declared and not written: the runner's result
+-- event does not carry it, and only assistant messages do (agent_runner.py).
+CREATE TABLE IF NOT EXISTS attempts (
+    attempt_id      INTEGER PRIMARY KEY,
+    task_id         INTEGER NOT NULL REFERENCES tasks(task_id),
+    phase           TEXT NOT NULL,
+    n               INTEGER NOT NULL,
+    session_id      TEXT,
+    model           TEXT,
+    started_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at        TEXT,
+    subtype         TEXT,
+    terminal_reason TEXT,
+    num_turns       INTEGER,
+    cost_usd_est    REAL
 );
 
 -- Exactly one of attempt_id and run_id is set, and the null is the point: a
 -- gate result belongs to an attempt, except the baseline suite, which runs
 -- against a run's base_sha with no agent, no session and no cost (§4.1).
--- v0 has no attempts table; attempt_id holds a task_id until v1 backfills it.
 CREATE TABLE IF NOT EXISTS gate_results (
     gate_result_id INTEGER PRIMARY KEY,
-    attempt_id     INTEGER,
+    attempt_id     INTEGER REFERENCES attempts(attempt_id),
     run_id         INTEGER REFERENCES runs(run_id),
     gate           TEXT NOT NULL,
     status         TEXT NOT NULL,
@@ -69,9 +89,31 @@ CREATE TABLE IF NOT EXISTS failures (
     line           INTEGER
 );
 
+-- `anchored` records whether the finding survived reconciliation against the
+-- diff (§5.5); a dropped one is kept, because the drop rate is the signal that
+-- a lens is badly prompted. `verdict` is the critic's confirm-or-withdraw,
+-- `rebuttal` the implementer's argument, `adjudication` the operator's — three
+-- judgements that must not collapse into one column (§4.1). Nothing produces
+-- an adjudication yet; the morning queue is where it will come from (§6).
+CREATE TABLE IF NOT EXISTS findings (
+    finding_id   INTEGER PRIMARY KEY,
+    task_id      INTEGER NOT NULL REFERENCES tasks(task_id),
+    lens         TEXT NOT NULL,
+    severity     TEXT NOT NULL,
+    file         TEXT NOT NULL,
+    line         INTEGER,
+    claim        TEXT NOT NULL,
+    anchored     INTEGER NOT NULL,
+    verdict      TEXT,
+    adjudication TEXT,
+    rebuttal     TEXT
+);
+
 CREATE INDEX IF NOT EXISTS failures_by_result ON failures(gate_result_id);
 CREATE INDEX IF NOT EXISTS gate_results_by_run ON gate_results(run_id);
 CREATE INDEX IF NOT EXISTS gate_results_by_attempt ON gate_results(attempt_id);
+CREATE INDEX IF NOT EXISTS attempts_by_task ON attempts(task_id);
+CREATE INDEX IF NOT EXISTS findings_by_task ON findings(task_id);
 """
 
 
@@ -92,6 +134,71 @@ class Ledger:
         for column in ("pushed_sha", "pr_url"):
             if column not in existing:
                 self._db.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
+        if "spent_usd_est" not in existing:
+            self._db.execute(
+                "ALTER TABLE tasks ADD COLUMN spent_usd_est REAL NOT NULL DEFAULT 0.0"
+            )
+        # The backfill the old schema comment promised. A ledger written before
+        # `attempts` existed holds a *task_id* in `gate_results.attempt_id`, and
+        # a new attempt's id starts at 1 in that same integer namespace — so
+        # without this, task 1's v0.5 results reattach to whichever attempt
+        # draws id 1. Nulling them is not available: the CHECK rejects a row
+        # with neither id. One row per legacy value, carrying that value as its
+        # own id, so the ids stay taken and nothing is lost or moved.
+        self._db.execute(
+            """INSERT INTO attempts (attempt_id, task_id, phase, n)
+               SELECT DISTINCT g.attempt_id, g.attempt_id, 'v0.5', 1
+                 FROM gate_results g
+                WHERE g.attempt_id IS NOT NULL
+                  AND EXISTS (SELECT 1 FROM tasks t WHERE t.task_id = g.attempt_id)
+                  AND NOT EXISTS (SELECT 1 FROM attempts a
+                                   WHERE a.attempt_id = g.attempt_id)"""
+        )
+        self._db.commit()
+        self._add_gate_result_reference()
+
+    def _add_gate_result_reference(self) -> None:
+        """`IF NOT EXISTS` cannot add the reference to a table that already
+        exists, and there is no ADD CONSTRAINT — so a v0.5 ledger kept the old
+        convention perfectly representable while the test said otherwise. The
+        rebuild is SQLite's documented 12-step, and it runs *after* the backfill
+        above, so every row it copies already has an attempt to point at."""
+        sql = self._db.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'gate_results'"
+        ).fetchone()["sql"]
+        if "REFERENCES attempts" in sql:
+            return
+        # Outside any transaction, and off for the drop: `failures` references
+        # `gate_results`, which is gone between the DROP and the RENAME.
+        self._db.execute("PRAGMA foreign_keys=OFF")
+        self._db.executescript(
+            """BEGIN;
+               CREATE TABLE gate_results_new (
+                   gate_result_id INTEGER PRIMARY KEY,
+                   attempt_id     INTEGER REFERENCES attempts(attempt_id),
+                   run_id         INTEGER REFERENCES runs(run_id),
+                   gate           TEXT NOT NULL,
+                   status         TEXT NOT NULL,
+                   duration_ms    INTEGER,
+                   summary        TEXT,
+                   CHECK ((attempt_id IS NULL) <> (run_id IS NULL))
+               );
+               INSERT INTO gate_results_new
+                   SELECT gate_result_id, attempt_id, run_id, gate, status,
+                          duration_ms, summary FROM gate_results;
+               DROP TABLE gate_results;
+               ALTER TABLE gate_results_new RENAME TO gate_results;
+               COMMIT;"""
+        )
+        self._db.execute("PRAGMA foreign_keys=ON")
+        # Every row is copied, including one the backfill could not account for:
+        # SQLite checks a reference when a row is written, not when it is
+        # rebuilt, and refusing to open a ledger over data that is already
+        # written loses more than it protects. The constraint is about what can
+        # be recorded from here on, which is what made the collision possible.
+        # The DROP took the table's indexes with it; every statement is
+        # `IF NOT EXISTS`, so this recreates those and touches nothing else.
+        self._db.executescript(SCHEMA)
         self._db.commit()
 
     def close(self) -> None:
@@ -148,11 +255,79 @@ class Ledger:
         return int(cursor.lastrowid)
 
     def set_task_state(self, task_id: int, state: str) -> None:
+        """Also rolls the task's spend up from its attempts. Derived rather than
+        passed, so the figure can never disagree with the rows it is made of —
+        and every terminal path already calls this, so none can forget it."""
         self._db.execute(
-            "UPDATE tasks SET state = ?, updated_at = datetime('now') WHERE task_id = ?",
-            (state, task_id),
+            """UPDATE tasks
+                  SET state = ?, updated_at = datetime('now'),
+                      spent_usd_est = (SELECT COALESCE(SUM(cost_usd_est), 0.0)
+                                         FROM attempts WHERE task_id = ?)
+                WHERE task_id = ?""",
+            (state, task_id, task_id),
         )
         self._db.commit()
+
+    def open_attempt(self, task_id: int, phase: str | None = None) -> int:
+        """One agent turn. The phase defaults to the state the task is in — the
+        caller sets that at each phase boundary and would otherwise have to
+        track it again at every turn (§4.1). Only `replay`, which has no agent
+        and no phase to be in, passes one."""
+        cursor = self._db.execute(
+            """INSERT INTO attempts (task_id, phase, n)
+               SELECT ?, COALESCE(?, t.state),
+                      1 + COALESCE((SELECT MAX(a.n) FROM attempts a
+                                     WHERE a.task_id = t.task_id
+                                       AND a.phase = COALESCE(?, t.state)), 0)
+                 FROM tasks t WHERE t.task_id = ?""",
+            (task_id, phase, phase, task_id),
+        )
+        # A task_id matching nothing selects nothing, and `lastrowid` still
+        # reports the connection's previous insert — an id that exists, belongs
+        # to another attempt, and satisfies the foreign key.
+        if cursor.rowcount != 1:
+            raise ValueError(f"no task {task_id} to open an attempt against")
+        self._db.commit()
+        return int(cursor.lastrowid)
+
+    def close_attempt(
+        self,
+        attempt_id: int,
+        *,
+        session_id: str | None,
+        subtype: str,
+        terminal_reason: str | None,
+        num_turns: int,
+        cost_usd_est: float,
+    ) -> None:
+        self._db.execute(
+            """UPDATE attempts
+                  SET ended_at = datetime('now'), session_id = ?, subtype = ?,
+                      terminal_reason = ?, num_turns = ?, cost_usd_est = ?
+                WHERE attempt_id = ?""",
+            (session_id, subtype, terminal_reason, num_turns, cost_usd_est, attempt_id),
+        )
+        self._db.commit()
+
+    def task_spend(self, task_id: int) -> float:
+        """What the task's attempts add up to — a caller whose own tally lost a
+        frame reads it back rather than reporting the gap. Summed, not read off
+        `tasks.spent_usd_est`, which is only as fresh as the last
+        `set_task_state` and would silently omit the turn that just closed."""
+        row = self._db.execute(
+            "SELECT COALESCE(SUM(cost_usd_est), 0.0) AS spent"
+            "  FROM attempts WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()
+        return float(row["spent"])
+
+    def attempts(self, task_id: int) -> list[sqlite3.Row]:
+        return list(
+            self._db.execute(
+                "SELECT * FROM attempts WHERE task_id = ? ORDER BY attempt_id",
+                (task_id,),
+            )
+        )
 
     def set_task_package(
         self,
@@ -172,6 +347,48 @@ class Ledger:
             (state, branch, pushed_sha, pr_url, task_id),
         )
         self._db.commit()
+
+    def record_findings(self, task_id: int, findings: Sequence[Finding]) -> list[int]:
+        """Every finding the review produced, anchored or not, in the order the
+        lenses reported them. Returns the ids in that same order — REBUT names
+        a finding by its position in it (`review.anchored_blockers`)."""
+        with self._db:
+            return [
+                int(
+                    self._db.execute(
+                        """INSERT INTO findings
+                               (task_id, lens, severity, file, line, claim, anchored)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            task_id,
+                            f.lens,
+                            f.severity,
+                            f.file,
+                            f.line,
+                            f.claim,
+                            int(f.anchored),
+                        ),
+                    ).lastrowid
+                )
+                for f in findings
+            ]
+
+    def record_rebuttal(
+        self, finding_id: int, *, verdict: str | None, rebuttal: str | None
+    ) -> None:
+        self._db.execute(
+            "UPDATE findings SET verdict = ?, rebuttal = ? WHERE finding_id = ?",
+            (verdict, rebuttal, finding_id),
+        )
+        self._db.commit()
+
+    def findings(self, task_id: int) -> list[sqlite3.Row]:
+        return list(
+            self._db.execute(
+                "SELECT * FROM findings WHERE task_id = ? ORDER BY finding_id",
+                (task_id,),
+            )
+        )
 
     def record_gate_result(
         self,
@@ -209,14 +426,22 @@ class Ledger:
     def baseline_results(self, run_id: int) -> list[GateResult]:
         return self._results("run_id", run_id)
 
+    def attempt_results(self, attempt_id: int) -> list[GateResult]:
+        return self._results("attempt_id", attempt_id)
+
     def task_results(self, task_id: int) -> list[GateResult]:
-        return self._results("attempt_id", task_id)
+        rows = self._db.execute(
+            "SELECT attempt_id FROM attempts WHERE task_id = ? ORDER BY attempt_id",
+            (task_id,),
+        ).fetchall()
+        return [r for row in rows for r in self._results("attempt_id", row[0])]
 
     def queue_lines(self) -> list[sqlite3.Row]:
         return list(
             self._db.execute(
                 """SELECT r.name AS repo, t.spec_id, t.state, t.risk, t.task_id,
-                          t.branch, t.budget_usd, t.pushed_sha, t.pr_url
+                          t.branch, t.budget_usd, t.pushed_sha, t.pr_url,
+                          t.spent_usd_est
                    FROM tasks t
                    JOIN runs  ON runs.run_id = t.run_id
                    JOIN repos r ON r.repo_id = runs.repo_id
