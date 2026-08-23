@@ -1371,7 +1371,52 @@ def test_a_verdict_lands_on_the_finding_the_review_recorded(monkeypatch, tmp_pat
     )
     (task_id,) = [row["task_id"] for row in ledger.queue_lines()]
     (row,) = ledger.findings(task_id)
-    assert (row["verdict"], row["rebuttal"]) == ("withdrawn", "by design")
+    # The action rides along: "fixed" and "argued" are the difference §4.6 asks
+    # about, and the column is the only place left holding it.
+    assert (row["verdict"], row["rebuttal"]) == ("withdrawn", "argued: by design")
+
+
+def test_a_rebuttal_numbered_badly_records_the_answer_that_was_asked_for(
+    monkeypatch, tmp_path
+):
+    """Nothing validates the rebuttal turn's numbering the way `run_verdict`
+    validates a verdict set, so the write does: the first answer to a blocker
+    stands, and a number nobody asked about is dropped. Letting a duplicate
+    overwrite is how a *later* blocker ends up reading as unanswered when the
+    implementer's own `rebuttal.json` says otherwise."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    _outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_through_rebut(
+            _turn("It is intentional."),
+            _turn(
+                _block(
+                    {
+                        "rebuttals": [
+                            {"finding": 1, "action": "argued", "argument": "first"},
+                            {"finding": 1, "action": "fixed", "argument": "second"},
+                            {"finding": 7, "action": "fixed", "argument": "nobody"},
+                        ]
+                    }
+                )
+            ),
+            _turn(
+                _block(
+                    {
+                        "verdicts": [
+                            {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                        ]
+                    }
+                )
+            ),
+        ),
+    )
+    (task_id,) = [row["task_id"] for row in ledger.queue_lines()]
+    (row,) = ledger.findings(task_id)
+    assert row["rebuttal"] == "argued: first"
 
 
 def test_what_the_task_spent_is_the_sum_of_the_turns_it_ran(monkeypatch, tmp_path):
