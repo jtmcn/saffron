@@ -488,6 +488,45 @@ def test_a_ledger_that_predates_attempts_does_not_reattach_its_results(tmp_path)
     ledger.close()
 
 
+def test_a_ledger_that_predates_attempts_gains_the_reference(tmp_path):
+    """The backfill protects the data; it does not deliver the constraint.
+    `CREATE TABLE IF NOT EXISTS` is a no-op on a v0.5 `gate_results`, so without
+    the rebuild the old convention stays representable on the one ledger that
+    actually exists — and the test above passes only because it starts fresh."""
+    path = tmp_path / "old.db"
+    before = SCHEMA.replace(
+        "attempt_id     INTEGER REFERENCES attempts(attempt_id),",
+        "attempt_id     INTEGER,",
+    )
+    assert "REFERENCES attempts" not in before  # otherwise this proves nothing
+    old = sqlite3.connect(path)
+    old.executescript(before)
+    old.execute("DROP TABLE attempts")
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r','o','/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.execute(
+        """INSERT INTO tasks (run_id, spec_id, spec_sha, state, branch)
+           VALUES (1, 'SA-0001', 's', 'READY_FOR_REVIEW', 'saffron/SA-0001')"""
+    )
+    old.execute(
+        "INSERT INTO gate_results (attempt_id, gate, status) VALUES (1, 'tests', 'pass')"
+    )
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.record_gate_result(
+            GateResult(gate="lint", status="pass"), attempt_id=90210
+        )
+    # The rebuild copied, it did not lose — and the index the DROP took is back.
+    assert [r.gate for r in ledger.task_results(1)] == ["tests"]
+    assert ledger._db.execute(
+        "SELECT 1 FROM sqlite_master WHERE name = 'gate_results_by_attempt'"
+    ).fetchone()
+    ledger.close()
+
+
 def test_an_attempt_against_no_task_raises_rather_than_naming_another(ledger, task):
     """`lastrowid` reports the connection's previous insert, so a select that
     matched nothing still hands back an id — one that exists, belongs to another

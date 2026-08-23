@@ -155,6 +155,51 @@ class Ledger:
                                    WHERE a.attempt_id = g.attempt_id)"""
         )
         self._db.commit()
+        self._add_gate_result_reference()
+
+    def _add_gate_result_reference(self) -> None:
+        """`IF NOT EXISTS` cannot add the reference to a table that already
+        exists, and there is no ADD CONSTRAINT — so a v0.5 ledger kept the old
+        convention perfectly representable while the test said otherwise. The
+        rebuild is SQLite's documented 12-step, and it runs *after* the backfill
+        above, so every row it copies already has an attempt to point at."""
+        sql = self._db.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'gate_results'"
+        ).fetchone()["sql"]
+        if "REFERENCES attempts" in sql:
+            return
+        # Outside any transaction, and off for the drop: `failures` references
+        # `gate_results`, which is gone between the DROP and the RENAME.
+        self._db.execute("PRAGMA foreign_keys=OFF")
+        self._db.executescript(
+            """BEGIN;
+               CREATE TABLE gate_results_new (
+                   gate_result_id INTEGER PRIMARY KEY,
+                   attempt_id     INTEGER REFERENCES attempts(attempt_id),
+                   run_id         INTEGER REFERENCES runs(run_id),
+                   gate           TEXT NOT NULL,
+                   status         TEXT NOT NULL,
+                   duration_ms    INTEGER,
+                   summary        TEXT,
+                   CHECK ((attempt_id IS NULL) <> (run_id IS NULL))
+               );
+               INSERT INTO gate_results_new
+                   SELECT gate_result_id, attempt_id, run_id, gate, status,
+                          duration_ms, summary FROM gate_results;
+               DROP TABLE gate_results;
+               ALTER TABLE gate_results_new RENAME TO gate_results;
+               COMMIT;"""
+        )
+        self._db.execute("PRAGMA foreign_keys=ON")
+        # Every row is copied, including one the backfill could not account for:
+        # SQLite checks a reference when a row is written, not when it is
+        # rebuilt, and refusing to open a ledger over data that is already
+        # written loses more than it protects. The constraint is about what can
+        # be recorded from here on, which is what made the collision possible.
+        # The DROP took the table's indexes with it; every statement is
+        # `IF NOT EXISTS`, so this recreates those and touches nothing else.
+        self._db.executescript(SCHEMA)
+        self._db.commit()
 
     def close(self) -> None:
         self._db.close()
