@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -92,3 +94,27 @@ def test_tool_is_carried_on_the_result():
 def test_tool_is_absent_rather_than_invented():
     raw = '{"gate":"lint","status":"pass","summary":"clean"}'
     assert parse_gate_json(raw, expected_gate="lint").tool is None
+
+
+def test_a_gate_may_report_the_names_it_collected():
+    raw = json.dumps(
+        {
+            "gate": "tests",
+            "status": "pass",
+            "tool": "pytest 8.3.2",
+            "collected": ["tests/test_a.py::test_one", "tests/test_a.py::test_two"],
+        }
+    )
+    result = parse_gate_json(raw, "tests")
+    assert result.collected == [
+        "tests/test_a.py::test_one",
+        "tests/test_a.py::test_two",
+    ]
+
+
+def test_a_gate_that_reports_no_names_is_not_a_gate_that_collected_none():
+    """`None` and `[]` are different facts: a runner that does not enumerate,
+    versus a suite that is genuinely empty. `census` skips on the first and
+    would report every base name removed on the second."""
+    result = parse_gate_json(json.dumps({"gate": "lint", "status": "pass"}), "lint")
+    assert result.collected is None
