@@ -7,6 +7,7 @@ import pytest
 
 from saffron.cell import proxy, runtime, worktree
 from saffron.gates.runner import CellExecutor, run_gate
+from saffron.phases import package as package_phase
 from saffron.repos import image
 from saffron.repos import mirror as mirror_ops
 from tests.test_proxy import reach
@@ -338,6 +339,103 @@ def test_dirty_paths_sees_an_uncommitted_edit(tmp_path, network):
         assert "renamed.txt" in dirty
         assert "a.txt" not in dirty
         assert sorted(dirty) == ["brand-new.py", "renamed.txt"]
+    finally:
+        runtime.remove_container(container)
+        runtime.remove_volume(volume)
+        runtime.remove_volume(f"{volume}-state")
+
+
+@pytest.mark.cell
+def test_a_cell_starts_from_a_base_the_mirror_only_learns_by_fetching(
+    tmp_path, network
+):
+    """The end-to-end claim `test_fetch_default_branch_reaches_from_a_mirror_ref_when_local_is_behind`
+    (tests/test_package.py) can't make: that the mirror ref moves. This proves
+    a cell can actually seed from what it moved to."""
+    origin = tmp_path / "origin"
+    first = _seed_repo(origin)
+    (origin / "a.txt").write_text("two\n")
+    subprocess.run(["git", "add", "a.txt"], cwd=origin, check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-qm",
+            "second",
+        ],
+        cwd=origin,
+        check=True,
+        capture_output=True,
+    )
+    second = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=origin, capture_output=True, text=True
+    ).stdout.strip()
+
+    local = tmp_path / "local"
+    subprocess.run(["git", "clone", "-q", str(origin), str(local)], check=True)
+    subprocess.run(["git", "reset", "-q", "--hard", first], cwd=local, check=True)
+    (local / "b.txt").write_text("local only\n")
+    subprocess.run(["git", "add", "b.txt"], cwd=local, check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-qm",
+            "diverged",
+        ],
+        cwd=local,
+        check=True,
+        capture_output=True,
+    )
+    diverged = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=local, capture_output=True, text=True
+    ).stdout.strip()
+
+    mirror = mirror_ops.ensure_mirror(local, tmp_path / "m.git")
+    # Precondition: without this, a bug that stopped moving the ref would
+    # pass silently.
+    assert (
+        subprocess.run(
+            ["git", "-C", str(mirror), "rev-parse", "refs/heads/main"],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        == diverged
+    )
+
+    branch, fetched = package_phase.fetch_default_branch(mirror, str(origin))
+    assert fetched == second
+
+    volume, container = "saffron-test-wt6", "saffron-test-cell6"
+    runtime.remove_volume(volume)
+    runtime.remove_volume(f"{volume}-state")
+    runtime.create_volume(volume)
+    runtime.remove_container(container)
+    try:
+        worktree.prepare_worktree(
+            mirror=mirror,
+            volume=volume,
+            base_sha=fetched,
+            branch=f"saffron/test-{branch}",
+            image=image.BASE_TAG,
+            container=container,
+            network=network,
+            env={},
+            gates_dir=_gates_dir(tmp_path),
+        )
+        assert worktree.head_sha(container) == fetched
+        # The sha check alone would pass on an empty tree; the content read
+        # is what proves the objects the fetch moved actually arrived.
+        content = runtime.exec_(container, ["cat", "/work/a.txt"])
+        assert content.stdout.strip() == "two"
     finally:
         runtime.remove_container(container)
         runtime.remove_volume(volume)
