@@ -326,6 +326,18 @@ def test_dirty_paths_sees_an_uncommitted_edit(tmp_path, network):
         assert "a.txt" in worktree.dirty_paths(container)
         runtime.exec_(container, ["sh", "-c", "cd /work && touch brand-new.py"])
         assert "brand-new.py" in worktree.dirty_paths(container)
+
+        # A staged rename ("R  new\0old\0") is the tricky chunk: the skip must
+        # consume exactly the source field so it neither leaks nor swallows a
+        # neighbour. a.txt's prior edit rides along with the rename.
+        renamed = runtime.exec_(
+            container, ["git", "mv", "a.txt", "renamed.txt"], workdir="/work"
+        )
+        assert renamed.returncode == 0, renamed.stderr
+        dirty = worktree.dirty_paths(container)
+        assert "renamed.txt" in dirty
+        assert "a.txt" not in dirty
+        assert sorted(dirty) == ["brand-new.py", "renamed.txt"]
     finally:
         runtime.remove_container(container)
         runtime.remove_volume(volume)
