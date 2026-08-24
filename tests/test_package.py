@@ -77,6 +77,8 @@ def bare_remote(tmp_path):
         ("https://github.com/jtmcn/saffron.git", "jtmcn/saffron"),
         ("https://github.com/jtmcn/saffron", "jtmcn/saffron"),
         ("ssh://git@github.com/jtmcn/saffron.git", "jtmcn/saffron"),
+        ("git://github.com/jtmcn/saffron.git", "jtmcn/saffron"),
+        ("https://github.com/jtmcn/saffron/", "jtmcn/saffron"),
     ],
 )
 def test_both_url_shapes_yield_the_same_slug(url, slug):
@@ -89,6 +91,8 @@ def test_both_url_shapes_yield_the_same_slug(url, slug):
         "/Users/joel/Code/saffron",  # measured: -> "Code/saffron"
         "git@gitlab.com:group/owner/repo.git",  # measured: -> "owner/repo"
         "https://example.com/repo",  # measured: -> "example.com/repo"
+        "/Users/joel/go/src/github.com/owner/repo",  # GOPATH checkout
+        "https://notgithub.com/a/b.git",  # host boundary, not a substring
     ],
 )
 def test_github_slug_refuses_what_is_not_a_forge_remote(url):
@@ -524,12 +528,13 @@ def _cell_outcome(task_dir, task_id, run_id):
     )
 
 
-def test_a_conflict_persists_merge_failed_and_pushes_nothing(tmp_path):
+def test_a_conflict_persists_merge_failed_and_pushes_nothing(monkeypatch, tmp_path):
     """Asserting the state alone would pass against an implementation that
     pushed conflict markers first, so this asserts the remote too."""
-    # A "real remote", and a local repo whose origin points at it. Nested
-    # under github.com/o/r.git so the tightened github_slug still reads it.
-    remote = tmp_path / "github.com" / "o" / "r.git"
+    # A "real remote", and a local repo whose origin points at it — a plain
+    # local path, not shaped like a forge remote, so github_slug is faked.
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    remote = tmp_path / "remote.git"
     git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
     work = tmp_path / "work"
     work.mkdir()
@@ -612,12 +617,14 @@ def test_a_conflict_persists_merge_failed_and_pushes_nothing(tmp_path):
 
 
 @pytest.fixture
-def packageable(tmp_path):
+def packageable(monkeypatch, tmp_path):
     """A green cell's patch, a mirror, and a remote whose default branch has
     not moved — so PACKAGE runs its whole path and re-verification is provably
     redundant (no cell, no container, anywhere in these tests)."""
-    # Nested under github.com/o/r.git so the tightened github_slug reads it.
-    remote = tmp_path / "github.com" / "o" / "r.git"
+    # A plain local path stands in for the remote; it is not shaped like a
+    # forge remote, so github_slug is faked rather than the path contorted.
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    remote = tmp_path / "remote.git"
     git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
     work = tmp_path / "work"
     work.mkdir()

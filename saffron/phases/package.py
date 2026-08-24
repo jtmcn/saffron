@@ -28,9 +28,13 @@ from saffron.report import pr_body
 from saffron.report.pr_body import neutralize
 from saffron.repos import mirror as mirror_ops
 
-# Anchored on the forge host, not on "the last two segments": the old pattern
-# read a local path as `Code/saffron` and a one-segment URL as `host/repo`.
-_SLUG = re.compile(r"(?:^|[@/.])github\.com[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$")
+# Anchored on a real remote URL — a scheme or the SCP-like `user@host:` form.
+# A filesystem path that merely contains github.com (a GOPATH checkout, a
+# pytest tmp_path) is not a forge remote and must be refused.
+_SLUG = re.compile(
+    r"^(?:(?:https?|ssh|git)://(?:[^@/]+@)?github\.com/|(?:[^@/]+@)?github\.com:)"
+    r"([^/]+)/([^/]+?)(?:\.git)?/?$"
+)
 
 APPLY_OK = "ok"
 APPLY_CONFLICT = "conflict"
