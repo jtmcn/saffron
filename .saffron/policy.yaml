@@ -29,6 +29,20 @@ integrity:
   # in the list already matches the call form as well.
   suppressions:
     ["@pytest.mark.skip", "pytest.skip(", "xfail", "# type: ignore", "# noqa"]
-  gate_config: ["pyproject.toml", ".saffron/**"]
+  # Collection runs in the repo's own Python, so `census` cannot see a conftest
+  # that hides a test from the runner. This routes the edit to a person.
+  # ruff.toml/.ruff.toml take precedence over pyproject.toml's [tool.ruff] and
+  # can silence lint/format outright — same family, routed the same way.
+  # `**/pyproject.toml`, not the bare name: measured, a *nested* pyproject.toml
+  # carrying [tool.ruff] exclude silences ruff over that subtree exactly as a
+  # dropped ruff.toml does. `**/` matches zero directories, so root is covered.
+  gate_config:
+    [
+      "**/pyproject.toml",
+      ".saffron/**",
+      "**/conftest.py",
+      "**/ruff.toml",
+      "**/.ruff.toml",
+    ]
 
 thread_env: {}

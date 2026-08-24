@@ -332,6 +332,33 @@ def test_the_body_renders_two_columns_never_adjudication():
     assert "adjudication" not in body.lower()
 
 
+def test_a_pipe_in_a_finding_claim_does_not_break_the_table():
+    """`|` is likelier in a model-authored claim than in a gate message, and
+    the findings and disagreements tables were never covered."""
+    rendered = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        reviews=[
+            LensReview(
+                lens="correctness",
+                findings=[_finding(claim="a | b splits the row")],
+            )
+        ],
+    )
+    for section_header in ("### Disagreements", "### Findings"):
+        lines = rendered.split(section_header, 1)[1].splitlines()
+        header = next(line for line in lines if line.startswith("|"))
+        columns = header.count("|") - header.count("\\|")
+        row = next(line for line in lines if "splits the row" in line)
+        assert row.count("|") - row.count("\\|") == columns
+
+
 def test_an_unanchored_finding_still_appears():
     """`anchored = False` is kept, never dropped: drop rate per lens is the
     signal that a lens is badly prompted (§5.5)."""
@@ -347,6 +374,8 @@ def test_an_unanchored_finding_still_appears():
         reviews=[LensReview(lens="schema", findings=[_finding(anchored=False)])],
     )
     assert "the tz default is wrong" in body
+    row = next(line for line in body.splitlines() if "the tz default is wrong" in line)
+    assert row.rstrip().endswith("| no |")
 
 
 def test_the_test_file_diff_is_shown_separately():

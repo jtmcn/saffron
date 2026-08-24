@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import subprocess
 
+import pytest
+
 from saffron.cell import runtime, worktree
 from saffron.gates.core.integrity import integrity_gate
 from saffron.repos.policy import IntegrityPatterns
@@ -94,6 +96,43 @@ def test_a_gate_config_edit_the_spec_declared_is_exempt(tmp_path):
     run = _repo(tmp_path, {"pyproject.toml": "[tool.x]\n"})
     diff = _diff(tmp_path, run, {"pyproject.toml": "[tool.x]\ny = 1\n"})
     assert integrity_gate(diff, PATTERNS, touches=["pyproject.toml"]).status == "pass"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "tests/conftest.py",
+        "conftest.py",
+        "ruff.toml",
+        "sub/ruff.toml",
+        ".ruff.toml",
+        "sub/.ruff.toml",
+        "pyproject.toml",
+        # Measured: a nested pyproject.toml carrying `[tool.ruff] exclude`
+        # takes `ruff check .` from an error to "All checks passed!" at exit 0,
+        # the same silencing a dropped ruff.toml buys. The bare `pyproject.toml`
+        # pattern this list used to carry never reached it.
+        "sub/pyproject.toml",
+    ],
+)
+def test_an_untracked_gate_config_edit_is_gate_config(tmp_path, path):
+    """`census` cannot see a conftest that lies to `--collect-only`, and
+    ruff.toml/.ruff.toml/pyproject.toml silence `lint`/`format` outright —
+    `integrity` routes them, at root or any depth, to a person."""
+    patterns = IntegrityPatterns(
+        gate_config=[
+            "**/pyproject.toml",
+            ".saffron/**",
+            "**/conftest.py",
+            "**/ruff.toml",
+            "**/.ruff.toml",
+        ]
+    )
+    run = _repo(tmp_path, {path: "x = 1\n"})
+    diff = _diff(tmp_path, run, {path: "x = 1\ny = 2\n"})
+    result = integrity_gate(diff, patterns, touches=[])
+    assert result.status == "fail"
+    assert any(f.code == "gate-config-changed" for f in result.failures)
 
 
 def test_a_deleted_test_is_not_this_gate_s_business(tmp_path):

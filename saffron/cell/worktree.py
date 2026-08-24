@@ -15,18 +15,22 @@ from saffron.cell import runtime
 
 WORKTREE_MOUNT = "/work"
 STATE_MOUNT = "/agent-state"
+GATES_MOUNT = "/gates"
 _MIRROR_MOUNT = "/mirror"
 
 
-def mounts(volume: str, state_volume: str) -> list[runtime.Mount]:
-    """The two volumes every cell gets, and why they are two.
+def mounts(volume: str, state_volume: str, gates_dir: Path) -> list[runtime.Mount]:
+    """The mounts every cell gets, and why they are separate.
 
     Session state and any credential file must not live in the tree the agent
-    can write, that the scope gate walks, and that gets patch-exported.
+    can write, that the scope gate walks, and that gets patch-exported. The
+    gates are read-only and come from a sha the cell never wrote: the
+    executables that judge a task are not the ones the task can edit (§5.4).
     """
     return [
         runtime.Mount("volume", volume, WORKTREE_MOUNT),
         runtime.Mount("volume", state_volume, STATE_MOUNT),
+        runtime.Mount("bind", str(gates_dir), GATES_MOUNT, readonly=True),
     ]
 
 
@@ -40,14 +44,16 @@ def prepare_worktree(
     container: str,
     network: str,
     env: Mapping[str, str],
+    gates_dir: Path,
     state_volume: str | None = None,
     created: set[str] | None = None,
 ) -> None:
     """Clone the mirror into the volume at `base_sha` on `branch`, cell running.
 
-    `network` and `env` are required, not defaulted: a cell started without them
-    joins the runtime's default network with full egress, and every containment
-    control the caller ran applies to some other container (§5.1).
+    `network`, `env` and `gates_dir` are required, not defaulted: a cell started
+    without them joins the runtime's default network with full egress, or falls
+    back to the gates in `/work` that the agent can rewrite, and every
+    containment control the caller ran applies to some other container (§5.1).
 
     `created` is the caller's leak ledger: each name is added immediately before
     the call that creates it, so a failure part-way reports what may survive and
@@ -101,7 +107,7 @@ def prepare_worktree(
         command=["sleep", "infinity"],
         network=network,
         env=env,
-        mounts=mounts(volume, state),
+        mounts=mounts(volume, state, gates_dir),
         cpus=1,
         memory="4g",
     )
@@ -185,6 +191,25 @@ def read_at_head(container: str, path: str) -> str | None:
     """
     done = _git(container, "show", f"HEAD:{path}")
     return done.stdout if done.returncode == 0 else None
+
+
+def dirty_paths(container: str) -> list[str]:
+    """Paths with uncommitted changes, verbatim, untracked files included."""
+    done = _git(container, "status", "--porcelain", "-z", "--untracked-files=all")
+    if done.returncode != 0:
+        raise runtime.CellRuntimeError(f"status failed: {done.stderr.strip()}")
+    chunks = [chunk for chunk in done.stdout.split("\0") if chunk]
+    paths: list[str] = []
+    index = 0
+    while index < len(chunks):
+        entry = chunks[index]
+        index += 1
+        # A rename or copy emits a second NUL-terminated field — the source
+        # path — which is not itself an entry.
+        if "R" in entry[:2] or "C" in entry[:2]:
+            index += 1
+        paths.append(entry[3:])
+    return sorted(paths)
 
 
 def changed_files(container: str, base_sha: str) -> list[str]:

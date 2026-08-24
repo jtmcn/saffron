@@ -18,6 +18,8 @@ from saffron.phases.package import (
     assert_base_objects,
     commit_squash,
     default_branch,
+    export_gates_for,
+    fetch_default_branch,
     find_credentials,
     find_credentials_in_text,
     github_slug,
@@ -28,14 +30,29 @@ from saffron.phases.package import (
     push_with_lease,
     real_remote,
     remote_sha,
+    reverify,
 )
 from saffron.phases.review import LensReview
+from saffron.repos.mirror import ensure_mirror
 
 
 def git(repo, *args):
     return subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
     ).stdout.strip()
+
+
+def _repo_with_commit(path):
+    path.mkdir()
+    git(path, "init", "-q")
+    (path / "f.txt").write_text("a\n")
+    git(path, "add", "-A")
+    git(path, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "first")
+    return path
+
+
+def _rev_parse(repo, ref):
+    return git(repo, "rev-parse", ref)
 
 
 @pytest.fixture
@@ -62,10 +79,36 @@ def bare_remote(tmp_path):
         ("https://github.com/jtmcn/saffron.git", "jtmcn/saffron"),
         ("https://github.com/jtmcn/saffron", "jtmcn/saffron"),
         ("ssh://git@github.com/jtmcn/saffron.git", "jtmcn/saffron"),
+        ("git://github.com/jtmcn/saffron.git", "jtmcn/saffron"),
+        ("https://github.com/jtmcn/saffron/", "jtmcn/saffron"),
+        ("ssh://git@github.com:22/owner/repo.git", "owner/repo"),
+        # git stores the URL as typed and a host is case-insensitive; the
+        # owner/repo handed to `gh` keeps its case.
+        ("https://GitHub.com/Owner/Repo.git", "Owner/Repo"),
+        ("git@GITHUB.COM:jtmcn/saffron.git", "jtmcn/saffron"),
     ],
 )
 def test_both_url_shapes_yield_the_same_slug(url, slug):
     assert github_slug(url) == slug
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "/Users/joel/Code/saffron",  # measured: -> "Code/saffron"
+        "git@gitlab.com:group/owner/repo.git",  # measured: -> "owner/repo"
+        "https://example.com/repo",  # measured: -> "example.com/repo"
+        "/Users/joel/go/src/github.com/owner/repo",  # GOPATH checkout
+        "/tmp/pytest-x/github.com/o/r.git",  # pytest tmp_path checkout
+        "https://notgithub.com/a/b.git",  # host boundary, not a substring
+        "https://github.com.evil.com/a/b",  # host boundary, suffix match
+    ],
+)
+def test_github_slug_refuses_what_is_not_a_forge_remote(url):
+    """A wrong slug reaches `gh` as a repository that cannot exist, and a
+    local-path origin is exactly what session.py falls back to."""
+    with pytest.raises(PackageError):
+        github_slug(url)
 
 
 def test_a_repo_with_no_origin_fails_clearly(tmp_path):
@@ -80,6 +123,147 @@ def test_a_repo_with_no_origin_fails_clearly(tmp_path):
 def test_the_default_branch_is_read_not_assumed(tmp_path, bare_remote):
     """Not hardcoded `main`: repo two need not resemble repo one (§9)."""
     assert default_branch(str(bare_remote), cwd=tmp_path) == "trunk"
+
+
+def test_fetch_default_branch_reports_the_remote_head(tmp_path):
+    """The head the mirror now holds, not the one the caller happened to have."""
+    origin = _repo_with_commit(tmp_path / "origin")
+    head = _rev_parse(origin, "HEAD")
+
+    mirror = ensure_mirror(origin, tmp_path / "mirror.git")
+    branch, fetched = fetch_default_branch(mirror, str(origin))
+
+    assert fetched == head
+    assert branch in ("main", "master")
+    # The object is in the mirror, which is what prepare_worktree needs.
+    assert (
+        subprocess.run(
+            ["git", "-C", str(mirror), "cat-file", "-e", f"{fetched}^{{tree}}"]
+        ).returncode
+        == 0
+    )
+
+
+def test_fetch_default_branch_reaches_from_a_mirror_ref_when_local_is_behind(tmp_path):
+    """The exact case this exists for: the operator has not pulled, so the
+    mirror's own `refs/heads/*` (from `ensure_mirror`'s local source) is
+    behind origin. `FETCH_HEAD` alone lands the object in the store but on no
+    ref — `worktree.py`'s seed fetches with the default refspec, which only
+    walks `refs/heads/*`, and dies trying to check the head out. The
+    assertion below is the one that discriminates: `cat-file -e` on the
+    returned sha passes even pre-fix, since the object reaches the store
+    either way."""
+    origin = _repo_with_commit(tmp_path / "origin")
+    branch = git(origin, "symbolic-ref", "--short", "HEAD")
+    first = _rev_parse(origin, "HEAD")
+    (origin / "f.txt").write_text("b\n")
+    git(origin, "add", "-A")
+    git(origin, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "second")
+    second = _rev_parse(origin, "HEAD")
+
+    local = tmp_path / "local"
+    git(tmp_path, "clone", "-q", str(origin), str(local))
+    git(local, "reset", "-q", "--hard", first)
+
+    mirror = ensure_mirror(local, tmp_path / "mirror.git")
+    assert _rev_parse(mirror, f"refs/heads/{branch}") == first  # genuinely behind
+
+    _, fetched = fetch_default_branch(mirror, str(origin))
+
+    assert fetched == second
+    assert _rev_parse(mirror, f"refs/heads/{branch}") == second
+
+
+def test_export_gates_for_skips_the_export_when_no_gates_are_declared(tmp_path):
+    """`gates: {}` is a valid policy.yaml, and a repo onboarding incrementally
+    may not have `.saffron/gates` at all yet — `git archive` would fail on
+    the unmatched pathspec. `prepare_worktree` still needs a real directory
+    to mount, so `dest` must exist even though nothing was exported.
+
+    And it is cleared, not merely created: `reverify`'s dest is keyed by
+    `spec.id` and outlives a run, so a repo that drops its last gate must not
+    keep mounting the previous run's executables at `/gates`."""
+    dest = tmp_path / "gates-out"
+    stale = dest / ".saffron" / "gates" / "tests"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("#!/bin/sh\necho lying\n")
+
+    result = export_gates_for(
+        tmp_path / "mirror.git", "deadbeef", dest, SimpleNamespace(gates={})
+    )
+    assert result == dest
+    assert dest.is_dir()
+    assert not stale.exists()
+
+
+def test_export_gates_for_still_exports_a_declared_gate(monkeypatch, tmp_path):
+    """A declared gate missing from the export must stay a hard error — the
+    guard only skips the call, never loosens `export_gates` itself."""
+    calls = []
+    monkeypatch.setattr(
+        "saffron.phases.package.mirror_ops.export_gates",
+        lambda mirror, sha, dest: calls.append((mirror, sha, dest)) or dest,
+    )
+    mirror, dest = tmp_path / "mirror.git", tmp_path / "gates-out"
+    result = export_gates_for(
+        mirror, "deadbeef", dest, SimpleNamespace(gates={"tests": None})
+    )
+    assert calls == [(mirror, "deadbeef", dest)]
+    assert result == dest
+
+
+def test_reverify_execs_the_gates_from_the_mount_never_the_applied_tree(
+    monkeypatch, tmp_path
+):
+    """The twin of the session's wiring, and the one §5.7 already flags for
+    drift: `reverify` is a second copy of the whole seam.
+
+    Its own cell tests hand `gates_dir` in and assert it arrives, which proves
+    the mount is plumbed but not that the runner is pointed at it. Both suites
+    must exec from `/gates`; the applied tree carries the patch's own
+    `.saffron/gates/*` at `/work` and they are never run (§5.4).
+    """
+    from saffron.repos.policy import GateDeclaration, Policy
+
+    for name in (
+        "create_network",
+        "create_volume",
+        "remove_container",
+        "remove_volume",
+        "remove_network",
+    ):
+        monkeypatch.setattr(f"saffron.cell.runtime.{name}", lambda *a, **k: None)
+    monkeypatch.setattr("saffron.cell.worktree.prepare_worktree", lambda **k: None)
+    monkeypatch.setattr(
+        "saffron.gates.runner.CellExecutor", lambda container: container
+    )
+
+    asked = []
+    monkeypatch.setattr(
+        "saffron.gates.runner.run_suite",
+        lambda gates, **k: asked.append([str(p) for p in gates.values()]) or [],
+    )
+
+    new, head = reverify(
+        mirror=tmp_path / "m.git",
+        packaged_sha="a" * 40,
+        new_base_sha="b" * 40,
+        # A real Policy, not a stand-in: `gate_executables` is the call under
+        # test, so stubbing it would pin nothing.
+        policy=Policy(gates={"tests": GateDeclaration()}),
+        gates_dir=tmp_path / "gates",
+        image="img",
+        watch=lambda _line: None,
+    )
+    assert (new, head) == ([], [])
+    assert asked == [["/gates/.saffron/gates/tests"]] * 2
+
+
+def test_fetch_default_branch_refuses_an_unreachable_remote(tmp_path):
+    origin = _repo_with_commit(tmp_path / "origin")
+    mirror = ensure_mirror(origin, tmp_path / "mirror.git")
+    with pytest.raises(PackageError):
+        fetch_default_branch(mirror, str(tmp_path / "nowhere"))
 
 
 DIFF_FLAGS = [
@@ -468,10 +652,12 @@ def _cell_outcome(task_dir, task_id, run_id):
     )
 
 
-def test_a_conflict_persists_merge_failed_and_pushes_nothing(tmp_path):
+def test_a_conflict_persists_merge_failed_and_pushes_nothing(monkeypatch, tmp_path):
     """Asserting the state alone would pass against an implementation that
     pushed conflict markers first, so this asserts the remote too."""
-    # A "real remote", and a local repo whose origin points at it.
+    # A "real remote", and a local repo whose origin points at it — a plain
+    # local path, not shaped like a forge remote, so github_slug is faked.
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
     remote = tmp_path / "remote.git"
     git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
     work = tmp_path / "work"
@@ -555,10 +741,13 @@ def test_a_conflict_persists_merge_failed_and_pushes_nothing(tmp_path):
 
 
 @pytest.fixture
-def packageable(tmp_path):
+def packageable(monkeypatch, tmp_path):
     """A green cell's patch, a mirror, and a remote whose default branch has
     not moved — so PACKAGE runs its whole path and re-verification is provably
     redundant (no cell, no container, anywhere in these tests)."""
+    # A plain local path stands in for the remote; it is not shaped like a
+    # forge remote, so github_slug is faked rather than the path contorted.
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
     remote = tmp_path / "remote.git"
     git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
     work = tmp_path / "work"
@@ -567,6 +756,11 @@ def packageable(tmp_path):
     git(work, "config", "user.email", "t@example.com")
     git(work, "config", "user.name", "Test")
     (work / "f.txt").write_text("a\nb\nc\nd\ne\n")
+    # Committed at the base: PACKAGE exports the gates it re-verifies with.
+    gates = work / ".saffron" / "gates"
+    gates.mkdir(parents=True)
+    (gates / "tests").write_text("#!/bin/sh\nexit 0\n")
+    (gates / "tests").chmod(0o755)
     git(work, "add", "-A")
     git(work, "commit", "-qm", "base")
     base = git(work, "rev-parse", "HEAD")
@@ -617,7 +811,10 @@ def packageable(tmp_path):
             ),
             repo=work,
             mirror=mirror,
-            policy=SimpleNamespace(integrity=SimpleNamespace(test_paths=["tests/**"])),
+            policy=SimpleNamespace(
+                integrity=SimpleNamespace(test_paths=["tests/**"]),
+                gates={"tests": None},
+            ),
             image="unused",
             ledger=ledger,
             out_dir=tmp_path / "batch",
@@ -727,6 +924,21 @@ def test_a_push_that_broke_is_infrastructure_and_records_nothing(
         _state(packageable.ledger, packageable.task_id)["state"] == "READY_FOR_REVIEW"
     )
     assert not (packageable.out_dir / "index.html").exists()
+
+
+def test_a_push_that_lands_is_recorded_even_when_gh_fails(monkeypatch, packageable):
+    """A `gh` that is missing, unauthenticated or refused leaves the branch
+    pushed; the ledger must still have a sha for it."""
+    monkeypatch.setattr(
+        "saffron.phases.package.open_draft_pr",
+        lambda *a, **k: (_ for _ in ()).throw(PackageError("gh: not authenticated")),
+    )
+
+    with pytest.raises(PackageError, match="not authenticated"):
+        package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+
+    row = _state(packageable.ledger, packageable.task_id)
+    assert row["pushed_sha"]
 
 
 def test_a_gate_that_errored_while_re_verifying_aborts_the_package(

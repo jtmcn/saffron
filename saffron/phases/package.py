@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -28,7 +29,18 @@ from saffron.report import pr_body
 from saffron.report.pr_body import neutralize
 from saffron.repos import mirror as mirror_ops
 
-_SLUG = re.compile(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$")
+# Anchored on a real remote URL — a scheme or the SCP-like `user@host:` form.
+# A filesystem path that merely contains github.com (a GOPATH checkout, a
+# pytest tmp_path) is not a forge remote and must be refused. The optional
+# `:port` sits only in the scheme branch — in the SCP-like branch a colon
+# always introduces the path, never a port. `(?i:` covers the scheme and host
+# only: git stores the URL as typed, and a host is case-insensitive, but the
+# owner/repo it hands `gh` is not.
+_SLUG = re.compile(
+    r"^(?i:(?:https?|ssh|git)://(?:[^@/]+@)?github\.com(?::\d+)?/|"
+    r"(?:[^@/]+@)?github\.com:)"
+    r"([^/]+)/([^/]+?)(?:\.git)?/?$"
+)
 
 APPLY_OK = "ok"
 APPLY_CONFLICT = "conflict"
@@ -83,7 +95,11 @@ def real_remote(repo: Path) -> str:
 
 
 def github_slug(url: str) -> str:
-    """`owner/repo`, from either URL shape git writes."""
+    """`owner/repo`, from either URL shape git writes — or a refusal.
+
+    Guessing is worse than failing: the slug reaches `gh`, and a plausible
+    wrong one names a repository that does not exist.
+    """
     if not (found := _SLUG.search(url)):
         raise PackageError(f"cannot read owner/repo out of {url!r}")
     return f"{found.group(1)}/{found.group(2)}"
@@ -100,6 +116,30 @@ def default_branch(url: str, *, cwd: Path) -> str:
     raise PackageError(f"{url} reported no symbolic HEAD")
 
 
+def fetch_default_branch(mirror: Path, url: str) -> tuple[str, str]:
+    """The remote's default branch and its head, fetched into the mirror.
+
+    Both ends of §5.7 read this now, closing the asymmetry backlog item 11
+    named: the invoking checkout's HEAD at task start vs. the remote at
+    package time.
+    """
+    default = default_branch(url, cwd=mirror)
+    # Into refs/heads/<default>, not the default refspec: FETCH_HEAD alone
+    # updates nothing under refs/*, so worktree.py's `git fetch origin` seed
+    # (default refspec, mirror-local) never sees a base the operator has not
+    # pulled. --force: the base is defined as the remote's head, so a local
+    # ref that disagrees is stale by definition.
+    fetched = _run(
+        mirror, "fetch", "--force", url, f"+refs/heads/{default}:refs/heads/{default}"
+    )
+    if fetched.returncode != 0:
+        raise PackageError(f"cannot fetch {default} from {url}: {fetched.stderr[:200]}")
+    head = _run(mirror, "rev-parse", f"refs/heads/{default}").stdout.strip()
+    if not head:
+        raise PackageError(f"{url} reported no head for {default}")
+    return default, head
+
+
 def assert_base_objects(mirror: Path, base_sha: str) -> None:
     """Refuse to apply against a mirror missing the patch's preimage.
 
@@ -112,6 +152,26 @@ def assert_base_objects(mirror: Path, base_sha: str) -> None:
             f"mirror {mirror} lacks the objects for base {base_sha[:12]}, so a "
             "three-way merge cannot be performed"
         )
+
+
+def export_gates_for(mirror: Path, sha: str, dest: Path, policy) -> Path:
+    """`mirror_ops.export_gates`, skipped when the policy declares no gates.
+
+    `git archive <sha> .saffron/gates` fails on the unmatched pathspec when a
+    repo has not added the directory yet — an incremental onboarding, not an
+    infrastructure fault. `prepare_worktree` still needs a real directory to
+    mount, empty or not, so the guard is here rather than in `export_gates`
+    itself: a *declared* gate missing from the export must stay a hard error.
+
+    Cleared first, exactly as `export_gates` does: `reverify`'s dest is keyed by
+    `spec.id` and outlives one run, so a repo that drops its last gate would
+    otherwise keep mounting the previous run's executables at `/gates`.
+    """
+    if not policy.gates:
+        shutil.rmtree(dest, ignore_errors=True)
+        dest.mkdir(parents=True, exist_ok=True)
+        return dest
+    return mirror_ops.export_gates(mirror, sha, dest)
 
 
 def apply_patch(worktree: Path, patch: Path) -> str:
@@ -364,6 +424,7 @@ def reverify(
     packaged_sha: str,
     new_base_sha: str,
     policy,
+    gates_dir: Path,
     image: str,
     watch,
 ) -> tuple[list[NewFailure], list[GateResult]]:
@@ -373,9 +434,11 @@ def reverify(
     packaged commit", and rendering `outcome.gates` there would print durations
     and summaries from the cell's run at `base_sha`.
 
-    **Never host-side.** The applied tree carries `.saffron/gates/*` exactly as
-    the patch left them, and exec'ing those on the host is the control plane
-    executing model-authored code — the one thing §2 says it never does.
+    **Never host-side.** Exec'ing a gate on the host is the control plane
+    executing model-authored code — the one thing §2 says it never does. Both
+    runs read their gates from `gates_dir`, exported from `new_base_sha`: the
+    two suites subtracted below come from one set of executables, and the
+    patch's own `.saffron/gates/*` are never run.
 
     Twice, because the base moved: the old baseline describes a tree that no
     longer exists, and comparing against it would charge this task with the
@@ -410,18 +473,19 @@ def reverify(
                 branch=f"pkg-{label}",
                 image=image,
                 container=container,
-                # No agent, no credential, and no route out: this cell only
-                # runs gates.
+                # The repo's declared gate env, and nothing else: no agent, no
+                # credential and no route out — this cell only runs gates.
                 network=network,
-                env={},
+                env=dict(policy.thread_env),
+                gates_dir=gates_dir,
             )
             watch(f"re-verify: {label} suite at {sha[:12]}")
-            # Gate paths are cell-side (`/work/.saffron/gates/...`); `cwd` is
-            # a host path that `CellExecutor` ignores. Same shape as
-            # `session.py:387` and `:508` — matched deliberately, so the two
-            # suites cannot drift in how they name a gate.
+            # Gate paths are cell-side (`/gates/.saffron/gates/...`); `cwd` is
+            # a host path that `CellExecutor` ignores. Same shape as the
+            # session's suite — matched deliberately, so the two cannot drift
+            # in how they name a gate.
             results[label] = runner.run_suite(
-                policy.gate_executables(Path(worktree.WORKTREE_MOUNT)),
+                policy.gate_executables(Path(worktree.GATES_MOUNT)),
                 cwd=mirror,
                 executor=runner.CellExecutor(container),
             )
@@ -482,13 +546,10 @@ def package(
     base_sha = json.loads((outcome.task_dir / "patch.json").read_text())["base_sha"]
     url = real_remote(repo)
     slug = github_slug(url)
-    default = default_branch(url, cwd=mirror)
-
+    # Stays ahead of the fetch: the fetch writes the object store this reads,
+    # and would otherwise supply the very objects it is checking for.
     assert_base_objects(mirror, base_sha)
-    fetched = _run(mirror, "fetch", url, f"refs/heads/{default}")
-    if fetched.returncode != 0:
-        raise PackageError(f"cannot fetch {default} from {url}: {fetched.stderr[:200]}")
-    fetch_head = _run(mirror, "rev-parse", "FETCH_HEAD").stdout.strip()
+    default, fetch_head = fetch_default_branch(mirror, url)
 
     scratch = out_dir / "package" / spec.id
     worktree_path = mirror_ops.add_worktree(mirror, fetch_head, scratch)
@@ -565,11 +626,18 @@ def package(
         if needs_reverification(fetch_head, base_sha):
             # A gate that errored raises out of `reverify`: infrastructure, and
             # never this task's MERGE_FAILED.
+            # A sibling of `scratch`, not a child: `scratch` is a git worktree
+            # the `finally` hands to `remove_worktree`, and the export must not
+            # have the worktree's lifetime.
+            gates_dir = export_gates_for(
+                mirror, fetch_head, out_dir / "package" / f"{spec.id}-gates", policy
+            )
             new, gates = reverify(
                 mirror=mirror,
                 packaged_sha=pushed,
                 new_base_sha=fetch_head,
                 policy=policy,
+                gates_dir=gates_dir,
                 image=image,
                 watch=watch,
             )
@@ -647,6 +715,10 @@ def package(
                     removed=removed,
                 ),
             )
+
+        # Before open_draft_pr: the push already landed, and a gh failure
+        # below must not leave the ledger without a sha for it.
+        ledger.record_push(outcome.task_id, pushed)
 
         pr_url = open_draft_pr(
             slug=slug,

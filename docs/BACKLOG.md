@@ -609,6 +609,36 @@ The credential refusal keeps a secret off the *remote*, not off the *host*:
 ceiling, and the real answer is §5.4's `secrets` gate, which is still v1's to
 build.
 
+**Done, 2026-08-23.** All six, and the design decision the first one asked for
+is written down: `DESIGN.md` rev 16 — §5.1 for the fetch, §5.4 for the gate
+source, §5.7 for the base, Appendix N for what building it found. A task's base
+is now the head of the remote's default branch as of task start, so both ends of
+the comparison read one source and the redundant-suite skip is reachable by
+construction rather than from a checkout that happened to be standing in the
+right place. Two things this item got wrong, both measured rather than
+re-reasoned:
+
+**`github_slug` was wrong on three of five real inputs, not on GitLab alone.** A
+one-segment URL — `https://example.com/repo` — takes the **host** as the owner,
+which this item does not name and which is the case where a wrong slug looks most
+plausible. And the first fix was itself wrong, caught in review: a pattern
+matching `github.com` after any of `^ @ / .` let `/Users/joel/go/src/github.com/owner/repo`
+through, and twelve fixtures had by then been moved to a path shape that
+satisfied it. Appendix N carries the 14-case table the shipped pattern is
+measured against.
+
+**The ledger defect is one column, not two.** `branch` was already written at
+insert time by `create_task`, from `spec.branch`; only `pushed_sha` was missing,
+written solely by `set_task_package` after `open_draft_pr`. What ships records
+the pushed sha before the pull request is opened and the URL after.
+
+`reverify` takes `dict(policy.thread_env)` rather than `cell_env(...)`: the
+obvious route would have put `CLAUDE_CODE_OAUTH_TOKEN` into a gate-only cell with
+no proxy and no egress. The three test gaps are closed, and §5.7 now says in one
+sentence that step 1's "rebase" is the intent and `git apply --3way` the
+mechanism. The accepted credential risk above is unchanged and still §5.4's
+`secrets` gate to close.
+
 ---
 
 ## 12. `census` trusts the gate runner, and the gate runner is in the cell
@@ -648,6 +678,97 @@ or not — cannot reach the runner; (b) the host refuses a dirty worktree at gat
 time, or diffs `base_sha..worktree` so that an uncommitted edit is at least
 *visible* to `scope` and `integrity`. Neither is v0.5's to build, and this item
 exists so the choice is made deliberately rather than inherited.
+
+**Done, 2026-08-23.** Both halves, which this item leaves as alternatives.
+`.saffron/gates/` is exported from the mirror at `base_sha` and mounted read-only
+at `/gates`, and the runner execs from there; a new core gate, `committed`, fails
+the attempt when `git status` is not clean at gate time, one failure per path.
+`DESIGN.md` rev 16 states the invariant both serve — anything that changes what
+the suite measures must appear in the patch a human reads — and restates the
+residual unchanged: a committed `conftest.py` still defeats `census`, and
+`**/conftest.py` in this repo's `gate_config` routes that edit to a person rather
+than failing it.
+
+Two things this item does not contain, both worth more than the routes it names:
+
+**Pinning the gates closes a baseline drift nothing had recorded, and that is the
+stronger reason for doing it.** The baseline suite runs in the same cell and the
+same worktree as head, before the agent starts, so the baseline ran the base
+tree's gates and head ran whatever gates were in `/work` by then — a task editing
+its own `tests` gate changed what the two subtracted sides mean. Suite drift by
+construction, the same shape item 11 flags for `reverify`'s missing `thread_env`.
+
+**`reverify` was a second copy of the same seam.** Its own cell, its own
+`prepare_worktree`, its own `gate_executables(WORKTREE_MOUNT)`. Changing only
+`session.py` would have left the two suites `reverify` subtracts coming from
+different executables, and a required `gates_dir` would have broken PACKAGE at
+runtime — invisible to `make check`, because the tests covering that path are
+cell-marked and excluded by default. Found by review, not by running.
+
+The dirty-tree half needed no new control flow: `committed` is a gate, so a dirty
+tree gets the repair turn the loop already gives every `fail`, and a second
+identical look ends the attempt on the no-progress rule.
+
+---
+
+## 13. Gate executables come from `base_sha`; the policy declaring them still comes from the working copy
+
+The same asymmetry item 11 raised for a task's base, in a second place, left
+half-closed by the fix that closed the first. `session.py` calls
+`load_policy(repo)` — reading and validating `.saffron/policy.yaml` and the
+gate executables in the operator's working copy — then resolves
+`gate_executables(Path("/gates"))` against `export_gates`'s archive of
+`base_sha`, the remote's default-branch head. Before this branch those were
+the same tree; now they can diverge on any branch that touches `.saffron/`.
+
+Two concrete consequences. An operator on a branch that adds a gate role gets
+a `PREFLIGHT_FAILED` whose watch line reads *"the toolchain is broken, not the
+code"* — a wrong diagnosis for a policy/export mismatch, not an infrastructure
+failure. And `policy_sha` in the ledger names the working-copy policy rather
+than the one that actually governed the exported gates, so the ledger's record
+of what ran is not the record of what was declared.
+
+This is the ordinary workflow, not an edge case: writing or renaming a gate
+means being on a branch that adds it, and running `saffron cell` from that
+branch is how you would test it. The run reaches `PREFLIGHT_FAILED` before the
+agent starts, so it costs nothing but the wrong diagnosis. Until it is closed,
+the workaround is to land the gate on the default branch first — `base_sha` is
+the remote's head, so the export sees a gate only once it is pushed there.
+
+**Done looks like:** `load_policy` reading from the same export
+`gate_executables` already resolves against, rather than from `repo`.
+`export_gates` already archives a subtree with `git archive <sha> .saffron`;
+loading policy from that archive — `git archive <sha> .saffron` plus
+`load_policy` pointed at the export instead of the working copy — is the shape
+of the fix, not a new mechanism.
+
+---
+
+## 14. `committed` fails on build artifacts a repo does not gitignore
+
+`dirty_paths` is read after the declared suite on both calls so that an artifact
+a gate writes lands on baseline and head alike and `subtract_baseline` cancels it
+(§5.4). The cancellation is by identity — `(gate, file, code, message)` — so it
+only reaches artifacts whose **paths** match on both sides.
+
+A head-only path has nothing to cancel against. The task adds `src/newmod.py`; the
+head `tests` gate compiles it and leaves `src/__pycache__/newmod.cpython-312.pyc`,
+which the baseline never had. `committed` fails, the repair turn says *changed but
+not committed — fix these and commit*, the agent commits the artifact, and `scope`
+then fails it as a path outside `touches`. The attempts burn out and the run ends
+`EXHAUSTED` on a diff that was green. `.coverage.<host>.<pid>.<rand>` and
+`.mypy_cache/<module>.meta.json` are the same shape.
+
+Saffron's own `.gitignore` covers all three, which is why nothing here caught it;
+an onboarded repo whose ignores are looser is not covered.
+
+**Done looks like:** the repo declaring its build output, since which paths are
+artifacts is language knowledge §2.1 keeps out of core — `.gitignore` is already
+that declaration and `git status --porcelain` already honours it, so onboarding
+documentation stating the requirement may be the whole fix. If it is not, the
+narrower mechanism is `committed` ignoring untracked paths that the baseline call
+also produced *by directory* rather than by path — which is a second identity rule
+sitting next to the subtraction's, and CLAUDE.md warns against making those match.
 
 ---
 

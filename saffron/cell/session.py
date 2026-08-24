@@ -464,6 +464,7 @@ def _drive_cell(
     from saffron.agents import artifacts, context
     from saffron.cell import proxy, runtime, worktree
     from saffron.gates.core.census import census_gate
+    from saffron.gates.core.committed import committed_gate
     from saffron.gates.core.integrity import integrity_gate
     from saffron.gates.core.scope import scope_gate
     from saffron.gates.runner import CellExecutor, run_suite
@@ -475,12 +476,17 @@ def _drive_cell(
     # The paths run_suite is given must be cell-side — CellExecutor always
     # execs at /work (Task 6) and a host path there resolves to nothing.
     policy, policy_sha = load_policy(repo)
-    gates = policy.gate_executables(Path(worktree.WORKTREE_MOUNT))
+    # Cell-side, and from the read-only mount rather than /work: an in-cell
+    # edit to a gate — committed or not — never reaches the runner (§5.4).
+    gates = policy.gate_executables(Path(worktree.GATES_MOUNT))
 
     # §4.1: `origin` is the real remote, `mirror_path` the local mirror. v0
     # stored the mirror's source in both, so nothing downstream knew where a
-    # pull request would go. A repo with no origin is still runnable — it just
-    # cannot be packaged, and PACKAGE is what says so.
+    # pull request would go. `cli._run_cell` now calls `real_remote` itself to
+    # get `base_sha`, before a `CellSpec` exists, so a repo with no origin
+    # exits 2 there rather than reaching this cell. The fallback stays for a
+    # caller of `run_one_cell` that skips that path — it should still get a
+    # runnable, unpackageable cell rather than a crash.
     from saffron.phases import package
 
     try:
@@ -560,6 +566,12 @@ def _drive_cell(
 
         created.add(volume)
         runtime.create_volume(volume)
+        # Exported before the cell exists: the mount source has to be there when
+        # the container is created.
+        task_dir.mkdir(parents=True, exist_ok=True)
+        gates_dir = package.export_gates_for(
+            mirror, spec.base_sha, task_dir / "gates", policy
+        )
         # The state volume and the container are recorded inside, each against
         # its own create: an ephemeral seed container runs between them.
         worktree.prepare_worktree(
@@ -572,6 +584,7 @@ def _drive_cell(
             container=container,
             network=network,
             env=cell_env(proxy_ip, policy.thread_env),
+            gates_dir=gates_dir,
             state_volume=state,
         )
         watch(f"cell: {container} up, worktree at {spec.base_sha[:8]}")
@@ -589,12 +602,20 @@ def _drive_cell(
             """
             changed = worktree.changed_files(container, spec.base_sha)
             diff = worktree.export_patch(container, spec.base_sha)
+            # Declared gates run before dirty_paths is read, on both calls: an
+            # artifact a gate writes (.coverage, a build dir) then shows up on
+            # baseline and head alike, and the subtraction cancels it.
+            # ponytail: cancelled by identity, so a head-only artifact (a .pyc
+            # for a file the task added) needs the repo's .gitignore — item 14.
+            declared = run_suite(gates, cwd=repo, executor=executor)
+            committed = committed_gate(worktree.dirty_paths(container))
             results = [
                 # The diff goes with the paths: it is what proves the export the
                 # reviewer will read still has the shape the host pinned.
                 scope_gate(changed, spec.touches, diff=diff),
                 integrity_gate(diff, policy.integrity, spec.touches),
-                *run_suite(gates, cwd=repo, executor=executor),
+                *declared,
+                committed,
             ]
             # Last, and given the whole suite: it reads `collected` off whatever
             # gate reported it, which means it has to run after them (§5.4).
@@ -609,7 +630,6 @@ def _drive_cell(
         for result in baseline:
             ledger.record_gate_result(result, run_id=run_id)
 
-        task_dir.mkdir(parents=True, exist_ok=True)
         (task_dir / "baseline.json").write_text(
             json.dumps([r.model_dump() for r in baseline], indent=2)
         )

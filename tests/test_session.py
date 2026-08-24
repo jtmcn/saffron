@@ -8,6 +8,7 @@ from saffron.agents import artifacts
 from saffron.cell import runtime, session
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
+from saffron.gates.core.committed import committed_gate
 from saffron.ledger import Ledger
 from saffron.phases import implement
 
@@ -273,6 +274,43 @@ def test_an_errored_gate_aborts_the_loop_without_charging_the_task():
     assert repairs == []
 
 
+def _dirty_suite(paths):
+    return [committed_gate(paths)]
+
+
+def test_a_dirty_tree_buys_one_repair_turn():
+    """Attempt 1 repairs, attempt 2 is clean."""
+    calls: list[str] = []
+    trees = iter([["a.py"], []])
+
+    state, attempts, _ = session.repair_loop(
+        run_gates=lambda: _dirty_suite(next(trees)),
+        baseline=_dirty_suite([]),
+        max_attempts=4,
+        repair=lambda new: calls.append("repair"),
+        watch=lambda _: None,
+    )
+    assert calls == ["repair"]
+    assert state == "READY_FOR_REVIEW"
+    assert attempts == 2
+
+
+def test_a_tree_still_dirty_after_the_repair_turn_ends_the_attempt():
+    calls: list[str] = []
+
+    state, attempts, new = session.repair_loop(
+        run_gates=lambda: _dirty_suite(["a.py"]),
+        baseline=_dirty_suite([]),
+        max_attempts=4,
+        repair=lambda _: calls.append("repair"),
+        watch=lambda _: None,
+    )
+    assert calls == ["repair"]  # exactly one, not four
+    assert state == "EXHAUSTED"
+    assert attempts == 2
+    assert [n.failure.file for n in new] == ["a.py"]
+
+
 def test_a_gate_that_stopped_running_between_the_suites_is_not_a_green():
     """§5.4: gate-status or `tool` drift is grounds to distrust the subtraction
     rather than report it — and both suites here carry zero failures."""
@@ -314,6 +352,7 @@ class _Cell:
         self.subjects_from: str | None = None
         self.timeouts: list[float | None] = []
         self.denied: list[str] = []
+        self.gate_paths: list[list[str]] = []
 
 
 _DIFF = """diff --git a/src/x.py b/src/x.py
@@ -365,6 +404,10 @@ def _stub_the_runtime(
             k["created"].update((k["state_volume"], k["container"]))
 
     monkeypatch.setattr("saffron.cell.worktree.prepare_worktree", _prepare_worktree)
+    # No mirror to `git archive` from under tmp_path; the dest is the mount source.
+    monkeypatch.setattr(
+        "saffron.repos.mirror.export_gates", lambda mirror, sha, dest: dest
+    )
     monkeypatch.setattr("saffron.cell.worktree.head_sha", lambda c: "c" * 40)
     monkeypatch.setattr("saffron.cell.worktree.export_patch", lambda c, sha: patch)
 
@@ -380,6 +423,7 @@ def _stub_the_runtime(
         return list(changed) if cell.turns else []
 
     monkeypatch.setattr("saffron.cell.worktree.changed_files", _changed_files)
+    monkeypatch.setattr("saffron.cell.worktree.dirty_paths", lambda container: [])
 
     def _commits_ahead(_container, sha):
         cell.measured_from = sha
@@ -388,9 +432,15 @@ def _stub_the_runtime(
     monkeypatch.setattr("saffron.cell.worktree.commits_ahead", _commits_ahead)
 
     scripted = iter(suites)
-    monkeypatch.setattr(
-        "saffron.gates.runner.run_suite", lambda *a, **k: next(scripted, [])
-    )
+
+    def _run_suite(gates, **_kwargs):
+        # The paths the session actually hands the runner. Captured because
+        # the cell tests name `GATES_MOUNT` themselves and so cannot tell
+        # whether `_drive_cell` asked for the mount or for `/work` (§5.4).
+        cell.gate_paths.append([str(path) for path in gates.values()])
+        return next(scripted, [])
+
+    monkeypatch.setattr("saffron.gates.runner.run_suite", _run_suite)
     return cell
 
 
@@ -405,10 +455,25 @@ def _turn(text="", cost=0.1):
     )
 
 
-def _drive(monkeypatch, tmp_path, *, cell, turns, spec=None, policy="gates: {}\n"):
+def _drive(
+    monkeypatch,
+    tmp_path,
+    *,
+    cell,
+    turns,
+    spec=None,
+    policy="gates: {}\n",
+    gates=(),
+):
     """Run one whole cell against the stubbed runtime and return its outcome."""
     repo = tmp_path / "repo"
     (repo / ".saffron" / "gates").mkdir(parents=True)
+    for name in gates:
+        # `load_policy` refuses a declared gate whose executable is missing
+        # or not +x, so a policy naming one needs a real file behind it.
+        executable = repo / ".saffron" / "gates" / name
+        executable.write_text("#!/bin/sh\nexit 0\n")
+        executable.chmod(0o755)
     (repo / ".saffron" / "policy.yaml").write_text(policy)
 
     scripted = iter(turns)
@@ -580,6 +645,59 @@ def test_a_green_run_leaves_the_patch_behind(monkeypatch, tmp_path):
         "head_sha": "c" * 40,
         "files": ["src/x.py"],
     }
+
+
+def test_dirty_paths_is_read_after_run_suite_on_both_calls(monkeypatch, tmp_path):
+    """A gate that writes an uncommitted artifact (`.coverage`, a build dir)
+    must show up on baseline and head alike, or `committed` reports it only at
+    head with nothing on the other side for the subtraction to cancel (§5.4)."""
+    cell = _stub_the_runtime(monkeypatch)
+    order: list[str] = []
+
+    def _run_suite(*_a, **_k):
+        order.append("run_suite")
+        return []
+
+    def _dirty_paths(_container):
+        order.append("dirty_paths")
+        return []
+
+    monkeypatch.setattr("saffron.gates.runner.run_suite", _run_suite)
+    monkeypatch.setattr("saffron.cell.worktree.dirty_paths", _dirty_paths)
+
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    # One suite call apiece for the baseline and the (green) first attempt.
+    assert order == ["run_suite", "dirty_paths", "run_suite", "dirty_paths"]
+
+
+def test_the_suite_execs_the_gates_from_the_mount_never_the_worktree(
+    monkeypatch, tmp_path
+):
+    """Both suites take their executables from `/gates` — the host's read-only
+    export at `base_sha` — and never from `/work`, which the agent can rewrite
+    and commit (§5.4).
+
+    `tests/test_worktree.py` proves the mount is read-only and that a gate run
+    from it beats the lying one in `/work`, but it names `GATES_MOUNT` itself,
+    so it cannot tell whether `_drive_cell` asked for the mount. This pins the
+    call: repointing it at `WORKTREE_MOUNT` is otherwise green.
+    """
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        policy="gates:\n  tests: {}\n",
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    # Baseline and head alike, and the whole path — not just its prefix: the
+    # mount holds the exported tree, so the gate sits under its own .saffron/.
+    assert cell.gate_paths == [["/gates/.saffron/gates/tests"]] * 2
 
 
 def test_a_run_that_never_went_green_still_exports_its_commits(monkeypatch, tmp_path):
@@ -1374,6 +1492,45 @@ def test_a_verdict_lands_on_the_finding_the_review_recorded(monkeypatch, tmp_pat
     # The action rides along: "fixed" and "argued" are the difference §4.6 asks
     # about, and the column is the only place left holding it.
     assert (row["verdict"], row["rebuttal"]) == ("withdrawn", "argued: by design")
+
+
+def test_a_successful_outcome_carries_its_attempts_failures_reviews_and_rebuttal(
+    monkeypatch, tmp_path
+):
+    """No test exercises these four on `CellOutcome`'s success path."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_through_rebut(
+            _turn("It is intentional."),
+            _turn(
+                _block(
+                    {
+                        "rebuttals": [
+                            {"finding": 1, "action": "argued", "argument": "by design"}
+                        ]
+                    }
+                )
+            ),
+            _turn(
+                _block(
+                    {
+                        "verdicts": [
+                            {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                        ]
+                    }
+                )
+            ),
+        ),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert outcome.attempts >= 1
+    assert outcome.new_failures == []
+    assert outcome.reviews
+    assert outcome.rebut_result is not None
 
 
 def test_a_rebuttal_numbered_badly_records_the_answer_that_was_asked_for(

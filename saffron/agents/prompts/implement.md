@@ -24,7 +24,9 @@ These terms have exactly one meaning here. Use them and no synonyms.
    - `blocking_questions` (array of strings) — a non-empty list rejects the plan
      as underspecified, so use it only when the task genuinely cannot proceed.
 2. Then implement. Commit your work — an attempt that produces no commits
-   failed, whatever you say about it.
+   failed, whatever you say about it. Leave the worktree clean: the gates
+   measure the committed tree, so a stray edit or an untracked file left
+   behind fails `committed` and costs an attempt.
 3. You do not run the gates and you never report gate status. The host runs
    them and gives you `failures[]`. If you find yourself about to run the test
    suite to check your work, that is fine as ordinary development, but it is not
