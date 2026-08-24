@@ -728,6 +728,13 @@ failure. And `policy_sha` in the ledger names the working-copy policy rather
 than the one that actually governed the exported gates, so the ledger's record
 of what ran is not the record of what was declared.
 
+This is the ordinary workflow, not an edge case: writing or renaming a gate
+means being on a branch that adds it, and running `saffron cell` from that
+branch is how you would test it. The run reaches `PREFLIGHT_FAILED` before the
+agent starts, so it costs nothing but the wrong diagnosis. Until it is closed,
+the workaround is to land the gate on the default branch first — `base_sha` is
+the remote's head, so the export sees a gate only once it is pushed there.
+
 **Done looks like:** `load_policy` reading from the same export
 `gate_executables` already resolves against, rather than from `repo`.
 `export_gates` already archives a subtree with `git archive <sha> .saffron`;
