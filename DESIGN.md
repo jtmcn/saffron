@@ -2,7 +2,7 @@
 
 An agentic software factory: spec files in, reviewed pull requests out, running unattended overnight on one Mac.
 
-**Status:** rev 15 — the cell moved off the API key onto a Claude Code subscription token, and the ceiling reasoning corrected against a measured run (`docs/evidence/2026-08-21-subscription-turn-accounting.md`). Prior: rev 14 the critic built and measured against a known-bad diff (Appendix L). Prior: rev 13 three tasks run, one reviewed, and the review said no (Appendix K); rev 12 v0.5 run against a live model (Appendix J); rev 11 v0.5 built and reviewed (Appendix I); rev 10 the cell runtime chosen by spike (Appendix G); rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime named (Appendix G); rev 9 v0 built and replayed (Appendix H)
+**Status:** rev 16 — the tree a task is cut from and the executables that judge it are both host-supplied, closing the two trust boundaries backlog items 11 and 12 left open (Appendix N). Prior: rev 15 the cell moved off the API key onto a Claude Code subscription token, and the ceiling reasoning corrected against a measured run (`docs/evidence/2026-08-21-subscription-turn-accounting.md`, Appendix M); rev 14 the critic built and measured against a known-bad diff (Appendix L); rev 13 three tasks run, one reviewed, and the review said no (Appendix K); rev 12 v0.5 run against a live model (Appendix J); rev 11 v0.5 built and reviewed (Appendix I); rev 10 the cell runtime chosen by spike (Appendix G); rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime named (Appendix G); rev 9 v0 built and replayed (Appendix H)
 
 **Companion document:** `CONTEXT.md` — the controlled vocabulary. It is authoritative for what words mean; this document is authoritative for what the system does. Where they disagree, one of them has a bug.
 **Scope:** language- and stack-agnostic. Saffron develops *any* repo that can satisfy the gate contract (§5.4). First repo is Saffron itself; `thermal-edge` is the first external one.
@@ -148,6 +148,8 @@ The consequence is F11: **onboarding a repo touches zero lines of Saffron.** If 
 Saffron ships thin base images (`saffron/cell-base:python`, `:node`, …) carrying the agent runtime, git, and nothing else. **There is no gate-runner shim** — that phrase survived four revisions describing a component that was never built and turned out not to be needed: the host `exec`s the repo's gate executables directly through the runtime, so there is nothing for a shim to do (Appendix I). A repo's `.saffron/Dockerfile` starts `FROM` one of those and installs whatever it needs. Saffron never installs a toolchain on a repo's behalf.
 
 **The seam to watch.** Most core gates are core precisely because they read the diff rather than run the code. That is not a coincidence and it is worth protecting: every time a proposed core gate needs to *execute* something in the repo, it belongs on the repo side of the line. And before reaching for `revert`'s exception, ask the cheaper question first: *does a gate the repo already declares produce this data?* `census` needed collected test names and got them by adding a field to a result that was already being returned, which is not an exception to the boundary at all.
+
+`committed` (§5.4) is the nearest thing to a counter-example so far: reading `git status` inside the cell widens core's in-cell git surface past the `git diff` it already ran. The boundary holds only because the gate itself stays a pure function over a list of paths — the host runs a git command it already knows how to run, and nothing in the check knows or asks what any of those paths contain.
 
 **The one sanctioned exception is `revert` (§5.4), and the shape of the exception is the real rule.** `revert` does run something — but what it runs is a gate the repo already declared, invoked through the same JSON contract as every other gate, with one extra argument. Core still knows nothing about the toolchain: it knows only that a `tests` gate exists and that the contract obliges it to accept a test subset. So the rule is not "core never executes"; it is **core invokes declared gates, never tools.** Any future core gate that wants to run something must fit that shape or move to the repo side. Stated positively because the absolute version was false the moment `revert` was added — and a rule with an unstated exception is a rule that has quietly been abandoned.
 
@@ -488,10 +490,18 @@ container run --rm \
   --cap-drop ALL \
   --mount type=volume,source=saffron-wt-TE0142,target=/work \
   --mount type=volume,source=saffron-st-TE0142,target=/agent-state \
+  --mount type=bind,source=<task-dir>/gates,target=/gates,readonly \   # gates at base_sha
   saffron/cell:thermal-edge                       # built from .saffron/Dockerfile
 ```
 
 **Every flag in the per-task block is a requirement, and the wiring is the control.** v0.5 shipped a cell created without `--network` and without the proxy environment: the isolated network was created, the host-binding probe ran against it, the proxy started on it and printed its address, and none of it was passed to the container holding the agent. Every mechanism ran, every mechanism reported success, and all of it applied to a different container. So `network` and `env` are **required** arguments where a cell is created — omission is an error, not a default — and the test that proves isolation must start a cell *the way production starts one* and probe **from inside that container**, not from an ephemeral sibling (Appendix I). **That rule is about a *container's* egress.** A preflight probe establishing a property of the *network* — N1's host-binding probe — necessarily runs in an ephemeral sibling on that same network, because it gates whether a cell is started at all and so cannot run inside one that does not exist yet.
+
+**Two of the arguments above are read before the cell exists, and neither comes from the invoking checkout.**
+
+- **`base_sha` is the head of the remote's default branch,** fetched into the mirror at task start (§5.7). `ensure_mirror` clones from the *local working copy*, so the remote's head is not an object the mirror holds until that fetch lands — which is why the fetch is part of cell construction rather than the PACKAGE-time step it used to be. The rule that the mirror is the only remote anything downstream reads is unchanged: the mirror is where the fetch lands.
+- **`/gates` is `.saffron/gates/` as it stood at `base_sha`,** exported out of the mirror onto the host and mounted **read-only**. The runner execs from there and never from `/work`, so an in-cell edit to a gate — committed or not — cannot reach the thing that judges the task (§5.4). It is the one bind mount in the block, and the bullet below arguing against bind mounts does not reach it: a handful of small files read once per gate is not pytest collection.
+
+**The consequence, stated because it changes who can run.** A repo with no reachable `origin` can no longer start a cell. Previously the supervisor caught that and ran anyway, on the reasoning that such a repo simply could not be *packaged* — which spent a whole attempt before saying so. Network at task start was already required (`ensure_mirror`, the proxy), so this moves *when* an unreachable remote fails, not whether, and failing before the cell starts is the better end.
 
 **Two measured prerequisites, neither obvious and both expensive to rediscover.** `container build` does not work on macOS without Rosetta installed (`softwareupdate --install-rosetta`). And `container volume create` pre-formats a volume with a `lost+found` directory, so `git clone` refuses the destination as non-empty — a worktree is seeded with `git init` + `remote add` + `fetch` + `checkout` + `remote remove`, chained under `sh -euc` so the remote removal cannot be skipped on a successful seed.
 
@@ -612,6 +622,20 @@ Two rules about `error` that the same replay forced, both stated because a gate 
 
 Requiring gates to translate their own tool output is the price of admission, and it is the right price: it is ~20 lines of shell per gate, written once by the person who understands that tool, and it keeps every parser out of the orchestrator.
 
+#### Where the gates come from, and what they measure
+
+**One invariant, which both halves of the gate boundary serve:**
+
+> **Anything that changes what the suite measures must appear in the patch a human reads.**
+
+Not *the cell cannot lie*. It can, and a design that assumes otherwise is how v0.5 shipped a cell where every control reported green and none was connected (Appendix I). The achievable property is weaker and worth more: a lie has to be **visible in the diff**, where the operator and `integrity` both already look.
+
+**Gates are executed from a host-supplied copy, never from `/work`.** `.saffron/gates/` is exported out of the mirror at `base_sha` and mounted read-only at `/gates` (§5.1), and the runner execs from there. An in-cell edit to a gate — committed or not — no longer reaches the runner. `reverify` (§5.7) does the same at `new_base_sha`, because it subtracts two suites of its own and they have to come from one set of executables.
+
+**It also closes a drift nothing had recorded, and that is the stronger of the two reasons for doing it.** The baseline suite runs in the same cell and the same worktree as head, before the agent starts. Read from `/work`, the baseline ran the base tree's gates and head ran whatever gates were in `/work` by then — so a task that edits its repo's `tests` gate changes what the two subtracted sides *mean*. That is suite drift by construction. Pinning makes both sides provably the same executable, which is the question `tool` (above) was already asking between a run's baseline and its head and could only answer after the fact.
+
+**A task whose job is to change a gate is judged by the pre-change gate**, and the new gate takes effect for the next task. Written down because it reads as a bug the first time someone's new gate does not fire on its own patch. The edit still lands in the patch, and `integrity`'s `gate_config` check still routes it to a person.
+
 #### Gate roles
 
 `policy.yaml` declares which roles the repo implements and their blocking level. Core supplies three; the repo supplies the rest.
@@ -623,6 +647,7 @@ Requiring gates to translate their own tool output is the price of admission, an
 | `secrets` | **core** | yes | credential scan over the diff |
 | `integrity` | **core**, repo patterns | yes | test-tampering check (below) |
 | `census` | **core** | yes | collected test names at `base_sha` vs head (below) |
+| `committed` | **core** | yes | the worktree is clean at gate time (below) |
 | `revert` | core logic, repo runner | yes | new tests must fail without the source hunks (below) |
 | `format` | repo | yes | |
 | `lint` | repo | yes | |
@@ -644,7 +669,7 @@ gates:
 
 Core sees three more entries in a list. **The best gates are always the domain-specific ones** — a migration round-trip, a schema conformance check, an invariant only this codebase can state — because they are the ones an agent cannot satisfy by writing plausible-looking code. Onboarding a repo well means asking: *what is expensive to fake here?*
 
-Four roles carry most of the weight.
+Five roles carry most of the weight.
 
 **`integrity` — the anti-gaming gate.** The dominant failure mode of a hard-gate self-repair loop is not the agent giving up; it is the agent *making the gate pass*. Deleting a failing test, adding `@pytest.mark.skip` or `xfail`, sprinkling `# type: ignore`, loosening `==` to `is not None`, lowering a threshold in config. Two of those are visible in the diff and one is not, so the work is split across two gates: `integrity` fails on any newly added suppression, and on any edit to gate configuration **unless `touches` explicitly includes the file**; `census` (below) answers deletion, which a diff cannot. Without the pair, hard gates actively *train the loop toward test destruction*, because that's the cheapest path to green.
 
@@ -676,6 +701,12 @@ This is the same question `integrity` used to ask of the diff, asked where the a
 The two sides are not symmetric. No names at base is `skip` — nothing to compare. Names at base and none at head is `error`: a suite that enumerated before the task and stopped after it is grounds to distrust the comparison, not to report every test as deleted. A head `tests` that errored has already aborted the attempt before `census` is consulted, so a truncated collection can never be read as a mass deletion.
 
 **A skipped test is still a collected test.** Measured: `pytest -q --collect-only` lists a `@pytest.mark.skip` or `xfail` test and the run exits `0`, so `census` does not see marker-based silencing and is not the gate that covers it — `integrity` is. Only `-m` deselection removes a name, and that is an edit to gate configuration rather than a marker. What `census` catches is removal and rename-out-of-collection; a test still collected but silenced belongs to `integrity`, and a test still collected but gutted belongs to `revert`, which is not built yet.
+
+**`committed` — the tree the gates measure is the tree the patch contains.** `git status --porcelain` inside the cell, before the suite. The gates exec against `/work` while `export_patch` diffs `base_sha..HEAD`, so **any** uncommitted change is absent from `scope`, from `integrity` and from the packaged patch while being fully live for every gate result. An uncommitted edit to the gate itself is only the sharpest instance; an uncommitted edit to any source file changes what the suite measures while the patch a human reads does not contain it. Non-empty status is `fail`, one failure per path — never `error`: a dirty tree is the attempt's problem, not infrastructure's, and an `error` would abort the attempt and be charged to nobody.
+
+**It needed no new control flow, which is the argument for it being a gate rather than a check.** A `fail` gets the repair turn the loop already gives every failing gate — commit your work — and a second identical look is the no-progress rule (below) ending the attempt. One turn is worth its cost because this is an honest mistake a capable agent will make at least once before the prompt is tuned, and burning an attempt on it teaches nothing. Low disruption otherwise: §4.3 already measures doneness from commits, so an uncommitted tree at gate time was already a mistake.
+
+**What none of this buys, stated so it is not discovered.** A **committed** `conftest.py` whose `pytest_collection_modifyitems` drops a test only when `config.option.collectonly` is false still defeats `census`: enumeration reports a name the run never executes, `census` passes because the name is collected, `tests` passes because the test never ran. Core cannot catch it — collection happens inside the repo's own Python, and "what is a collection hook" is language knowledge §2.1 keeps out. The narrowing is repo-shaped and costs one line of YAML: `**/conftest.py` in `gate_config` makes `integrity` fail any diff touching that file unless `touches` declares it. It does not stop the lie; it routes the lie to a person, which is all a diff-shaped layer was ever going to do. **`census` buys exactness against an honest suite; the gate source and `committed` buy visibility against a dishonest one. Neither buys integrity, and no diff-shaped check will.**
 
 **`revert` — the anti-theater gate, and the best cost/value ratio in the system.** Stash the source hunks of the diff, keep the test hunks, run only the new and changed tests, and require them to **fail**. One extra test run. This is the one place core reaches into the repo's toolchain, and it is why the contract requires the `tests` gate to accept a **test-subset argument** — the single most constraining line in the whole contract, and worth the constraint: every serious test runner supports it, and without it this gate degrades to a full-suite run per attempt. It mechanically answers the question critic lens #3 would otherwise be asked to reason about: does this test actually detect the thing it claims to? It catches deleted assertions, `assert result is not None`, and tests that pass identically on `main`.
 
@@ -757,11 +788,13 @@ Getting `elevate_on` right is most of what "onboarding a repo" actually means. I
 
 Host-side, deterministic:
 
-1. Rebase onto current `main` (or onto the parent branch, if stacked). Conflicts → `MERGE_FAILED`. Never ask an agent to resolve conflicts unattended; a plausible-looking wrong answer there is very expensive. (Prior art suggests a middle path — see §11, "what I'd revisit".)
+1. Rebase onto current `main` (or onto the parent branch, if stacked). Conflicts → `MERGE_FAILED`. Never ask an agent to resolve conflicts unattended; a plausible-looking wrong answer there is very expensive. (Prior art suggests a middle path — see §11, "what I'd revisit".) **"Rebase" is the intent — the change lands on today's default branch — and `git apply --3way` of one squashed patch (below) is the mechanism.** Both are true; the document never said so, and a reader meeting them in order takes one for a contradiction.
 2. Push `saffron/TE-0142-forecast-gap` to the real remote **with `--force-with-lease` pinned to the SHA the packager checked out.** If the branch moved underneath — a re-queued task, a second run, you pushing a fixup by hand — the push fails loudly instead of silently clobbering. Turning a race into an error costs one flag.
    Branch mutation is also serialized: one writer per branch, ever, held across package and merge-train operations. A `CHANGES_REQUESTED` task that gets re-queued must not race the merge train rebasing the same branch.
 3. Open the PR. Body generated from the ledger: spec, root cause (if diagnosed), acceptance-criteria checklist with the critic's assessment of each, gate table, findings with rebuttals, attempt count, cost, transcript path.
 4. Append the verdict line to the batch index.
+
+**The base a task is cut from is the head of the remote's default branch as of task start**, not the invoking checkout's `HEAD`. It is fetched into the mirror before the cell is built (§5.1), so both ends of the comparison below read one source rather than two. Two consequences, both intended. Uncommitted and unpushed local work leaves a task's base — running from a dirty feature branch used to include it silently, and this is the change most likely to surprise an operator standing at a terminal. And the re-verification skip below becomes reachable by construction rather than by accident, because in the common case nothing has moved. The rejected alternative — keep `HEAD` and have PACKAGE compare against it too — is symmetric and needs no network; it loses because it makes a task's base unreproducible from the ledger, and §4.2 cannot start tasks unattended if two of them queued the same night are cut from different trees for no recorded reason.
 
 #### v1: one squashed commit, a draft PR, and re-verification only when the base moved
 
@@ -783,7 +816,10 @@ one the suite already ran on and re-running it is provably redundant; the body
 says it was skipped and why. Otherwise the suite re-runs — **inside a cell,
 never host-side**, because the applied tree carries `.saffron/gates/*` exactly
 as the patch left them, and exec'ing those on the host is the control plane
-executing model-authored code (§2). The base having moved also invalidates the
+executing model-authored code (§2). Both of its runs read their gates from a
+host-supplied export at the new default-branch head (§5.4), so the patch's own
+`.saffron/gates/*` are never executed anywhere and the two suites it subtracts
+come from one set of executables. The base having moved also invalidates the
 baseline, so the gate-only cell runs the suite twice — at the new default-branch
 head for a fresh baseline, and at the packaged commit — and subtracts as always.
 New failures are `MERGE_FAILED`: the change did not survive contact with today's
@@ -2051,3 +2087,127 @@ Backlog item 1 said to read `SA-0004`'s rejected patch and its review before wri
 52. **When a check keeps needing a better heuristic, the question is in the wrong coordinate system.** Three rewrites of "was a test removed?" against diff text produced three different wrong answers, because the diff does not contain the answer — it contains a shadow of it. The set of collected tests contains it exactly, and comparing two sets needs no heuristic at all. The tell is not that a heuristic is imperfect; it is that each repair moves the failure somewhere else rather than shrinking it.
 
 The corollary is the cheaper half: **the data a core gate needs may already be in a result it is holding.** Item 1 assumed test-set comparison required `revert`'s §2.1 exception — core invoking the repo's `tests` gate twice more. It did not. The baseline and head suites already run `tests`; the names needed reporting, not fetching, and the whole exception dissolved into one optional field.
+
+---
+
+## Appendix N — rev 16: what pinning the base and the gate runner found
+
+Backlog items 11 and 12 are the same question asked twice — what tree is a task
+about, and who is allowed to have written the thing that judges it. Twelve tasks
+closed both. Most of what follows is in neither item, and the three sharpest
+findings were reached by reading rather than by running.
+
+### `github_slug` was wrong in more ways than item 11 says, twice over
+
+Item 11 describes a two-segment-GitHub-URL problem. Measured before any code was
+written, three of five real inputs returned a wrong answer rather than refusing:
+
+| Input | Old result |
+|---|---|
+| `/Users/joel/Code/saffron` | `Code/saffron` |
+| `git@gitlab.com:group/owner/repo.git` | `owner/repo` — leading segment dropped |
+| `https://example.com/repo` | `example.com/repo` — the **host** as the owner |
+
+The last shape is not in the backlog at all. With one path segment the pattern
+takes the host as the owner, so a remote that is not a forge still yields a
+plausible `owner/repo` and `gh` is handed a repository that cannot exist.
+
+**Then the first fix was still wrong, and review caught it.** The tightened
+pattern matched `github.com` preceded by any of `^ @ / .`, which does not
+distinguish a URL scheme from a filesystem path separator. Measured:
+`slug('/Users/joel/go/src/github.com/owner/repo')` returned `owner/repo` — a
+GOPATH-style checkout walking straight through the refusal the change existed to
+add. Worse, twelve fixtures had by then been relocated to
+`tmp_path/github.com/o/r.git` to satisfy that same pattern, so the suite had come
+to depend on the loophole. The shipped pattern anchors on a real remote URL — a
+scheme, or the SCP-like `user@host:` form — and is measured against 14 cases: six
+accept, eight refuse, including `https://github.com.evil.com/a/b`, which nobody
+had considered. Two shapes are refused and stay refused, stated so they are not
+discovered: GitHub Enterprise hostnames, and any URL carrying an explicit port.
+Both were refused before this change too.
+
+53. **A refusal that is loosened to make tests pass is a refusal that no longer
+    exists.** The tell is not that the pattern is imperfect — it is that the
+    repair reshapes a *fixture* rather than a caller. Twelve fixtures moved to a
+    path shape no real checkout has, and after that the suite was evidence for
+    the loophole rather than against it.
+
+### The baseline and head suites could run different gate executables
+
+The baseline suite runs in the same cell and the same worktree as head, before
+the agent starts. So the baseline ran the base tree's gates and head ran whatever
+gates were in `/work` by then, and a task editing its own `tests` gate changed
+what the two subtracted sides mean. That is suite drift by construction — the
+identical shape item 11 flags for `reverify`'s missing `thread_env` — and pinning
+gates to `base_sha` closes it as a side effect. **This is the stronger of the two
+reasons for pinning, and it is not why item 12 was written.** Nothing had
+recorded it; §5.4's `tool` field would have reported it after the fact, on a task
+that had already spent its attempts.
+
+### `reverify` was a second copy of the whole seam
+
+It has its own cell, its own `prepare_worktree` call, and its own
+`gate_executables(WORKTREE_MOUNT)`. Updating only the supervisor would have left
+the two suites `reverify` subtracts coming from different executables —
+reintroducing the finding above in the one place §5.7 already flags for drift —
+and a required `gates_dir` argument would have broken PACKAGE at runtime.
+Invisible to `make check`, because the tests covering that path are cell-marked
+and excluded by default. Found by reading, not by running.
+
+54. **A control applied at one call site is not applied; it is applied at one
+    call site.** The question a boundary change has to answer is not "does the
+    new path use it" but "how many paths are there" — and where the second path
+    is exercised only by tests the default run excludes, green is not evidence.
+
+### Item 11 overstated the ledger defect by half
+
+`branch` was already written at insert time by `create_task`, fed from
+`spec.branch`. Only `pushed_sha` was missing, written solely by
+`set_task_package` after `open_draft_pr`. One column, not two — and the fix is
+correspondingly smaller than the item's account of it.
+
+### Three smaller ones
+
+- **A path-lifetime hazard the plan walked into.** The first draft put
+  `reverify`'s exported gates under the package scratch directory — which
+  `add_worktree` hands to `shutil.rmtree` and which the `finally` hands to
+  `remove_worktree`. Gates written there have the worktree's lifetime. The
+  shipped path is a sibling, and `Spec.id`'s `^[A-Za-z0-9]+-[0-9]+$` pattern is
+  what makes `<id>-gates` unable to collide with another spec's scratch dir.
+- **`git status --porcelain -z` emits `RM`, not `R `, for a staged rename that
+  was also modified**, so the rename skip tests `"R" in entry[:2]` rather than
+  `entry[:1] == "R"`. Mutation-checked: removing the skip leaks `"xt"` — the tail
+  of `a.txt`, sliced by `entry[3:]` — into the dirty-path list, which would then
+  be reported to the agent as a path to commit.
+- **`cell_env` would have put a credential in a gate-only cell.** The obvious way
+  to give `reverify` its `thread_env` is the call the session cell uses, and that
+  call injects `CLAUDE_CODE_OAUTH_TOKEN`. `reverify` has no proxy and an
+  `--internal` network with no egress; it takes `dict(policy.thread_env)`
+  instead. §5.1's one-credential exception is narrow enough that a convenience
+  helper can widen it without anybody deciding to.
+
+### The dirty-tree rule needed no new control flow, and the terminal state does not prove it
+
+`committed` is a gate, so a dirty tree gets the repair turn the loop already
+gives every `fail`, and a second identical look is the no-progress rule. Verified
+by mutation: dropping the no-progress branch yields three repair turns and four
+attempts instead of one and two — but `state` is `EXHAUSTED` either way, because
+§3.3 deliberately maps no-progress and exhausted to one state. Only the call
+count and the attempt count discriminate.
+
+55. **Where two outcomes deliberately share a state, that state cannot be the
+    assertion.** A test asserting the terminal state alone passes against the
+    regression it was written to catch, and reads as coverage while providing
+    none. The collapse is usually correct — the operator does not need the
+    distinction — which is exactly why the test has to look somewhere else.
+
+### Deferred, for the record
+
+`out_dir/package/<id>-gates` and `task_dir/gates` are new batch-tree artifacts
+with no manifest entry and no cleanup; nothing enumerates those directories
+today, and `saffron gc` (§4.5) is v1 work. The `real_remote` → `github_slug`
+composition inside `package()` is no longer covered end to end — both fixture
+sites monkeypatch the slug — against a regex that is far better covered in
+isolation. And the empty-head guard in the default-branch fetch is untested:
+constructing a successful fetch with an empty `FETCH_HEAD` against real git is
+harder than the guard is worth.
