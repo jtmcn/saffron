@@ -352,6 +352,7 @@ class _Cell:
         self.subjects_from: str | None = None
         self.timeouts: list[float | None] = []
         self.denied: list[str] = []
+        self.gate_paths: list[list[str]] = []
 
 
 _DIFF = """diff --git a/src/x.py b/src/x.py
@@ -431,9 +432,15 @@ def _stub_the_runtime(
     monkeypatch.setattr("saffron.cell.worktree.commits_ahead", _commits_ahead)
 
     scripted = iter(suites)
-    monkeypatch.setattr(
-        "saffron.gates.runner.run_suite", lambda *a, **k: next(scripted, [])
-    )
+
+    def _run_suite(gates, **_kwargs):
+        # The paths the session actually hands the runner. Captured because
+        # the cell tests name `GATES_MOUNT` themselves and so cannot tell
+        # whether `_drive_cell` asked for the mount or for `/work` (§5.4).
+        cell.gate_paths.append([str(path) for path in gates.values()])
+        return next(scripted, [])
+
+    monkeypatch.setattr("saffron.gates.runner.run_suite", _run_suite)
     return cell
 
 
@@ -448,10 +455,25 @@ def _turn(text="", cost=0.1):
     )
 
 
-def _drive(monkeypatch, tmp_path, *, cell, turns, spec=None, policy="gates: {}\n"):
+def _drive(
+    monkeypatch,
+    tmp_path,
+    *,
+    cell,
+    turns,
+    spec=None,
+    policy="gates: {}\n",
+    gates=(),
+):
     """Run one whole cell against the stubbed runtime and return its outcome."""
     repo = tmp_path / "repo"
     (repo / ".saffron" / "gates").mkdir(parents=True)
+    for name in gates:
+        # `load_policy` refuses a declared gate whose executable is missing
+        # or not +x, so a policy naming one needs a real file behind it.
+        executable = repo / ".saffron" / "gates" / name
+        executable.write_text("#!/bin/sh\nexit 0\n")
+        executable.chmod(0o755)
     (repo / ".saffron" / "policy.yaml").write_text(policy)
 
     scripted = iter(turns)
@@ -649,6 +671,33 @@ def test_dirty_paths_is_read_after_run_suite_on_both_calls(monkeypatch, tmp_path
     assert outcome.state == "READY_FOR_REVIEW"
     # One suite call apiece for the baseline and the (green) first attempt.
     assert order == ["run_suite", "dirty_paths", "run_suite", "dirty_paths"]
+
+
+def test_the_suite_execs_the_gates_from_the_mount_never_the_worktree(
+    monkeypatch, tmp_path
+):
+    """Both suites take their executables from `/gates` — the host's read-only
+    export at `base_sha` — and never from `/work`, which the agent can rewrite
+    and commit (§5.4).
+
+    `tests/test_worktree.py` proves the mount is read-only and that a gate run
+    from it beats the lying one in `/work`, but it names `GATES_MOUNT` itself,
+    so it cannot tell whether `_drive_cell` asked for the mount. This pins the
+    call: repointing it at `WORKTREE_MOUNT` is otherwise green.
+    """
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        policy="gates:\n  tests: {}\n",
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    # Baseline and head alike, and the whole path — not just its prefix: the
+    # mount holds the exported tree, so the gate sits under its own .saffron/.
+    assert cell.gate_paths == [["/gates/.saffron/gates/tests"]] * 2
 
 
 def test_a_run_that_never_went_green_still_exports_its_commits(monkeypatch, tmp_path):

@@ -30,6 +30,7 @@ from saffron.phases.package import (
     push_with_lease,
     real_remote,
     remote_sha,
+    reverify,
 )
 from saffron.phases.review import LensReview
 from saffron.repos.mirror import ensure_mirror
@@ -209,6 +210,53 @@ def test_export_gates_for_still_exports_a_declared_gate(monkeypatch, tmp_path):
     )
     assert calls == [(mirror, "deadbeef", dest)]
     assert result == dest
+
+
+def test_reverify_execs_the_gates_from_the_mount_never_the_applied_tree(
+    monkeypatch, tmp_path
+):
+    """The twin of the session's wiring, and the one §5.7 already flags for
+    drift: `reverify` is a second copy of the whole seam.
+
+    Its own cell tests hand `gates_dir` in and assert it arrives, which proves
+    the mount is plumbed but not that the runner is pointed at it. Both suites
+    must exec from `/gates`; the applied tree carries the patch's own
+    `.saffron/gates/*` at `/work` and they are never run (§5.4).
+    """
+    from saffron.repos.policy import GateDeclaration, Policy
+
+    for name in (
+        "create_network",
+        "create_volume",
+        "remove_container",
+        "remove_volume",
+        "remove_network",
+    ):
+        monkeypatch.setattr(f"saffron.cell.runtime.{name}", lambda *a, **k: None)
+    monkeypatch.setattr("saffron.cell.worktree.prepare_worktree", lambda **k: None)
+    monkeypatch.setattr(
+        "saffron.gates.runner.CellExecutor", lambda container: container
+    )
+
+    asked = []
+    monkeypatch.setattr(
+        "saffron.gates.runner.run_suite",
+        lambda gates, **k: asked.append([str(p) for p in gates.values()]) or [],
+    )
+
+    new, head = reverify(
+        mirror=tmp_path / "m.git",
+        packaged_sha="a" * 40,
+        new_base_sha="b" * 40,
+        # A real Policy, not a stand-in: `gate_executables` is the call under
+        # test, so stubbing it would pin nothing.
+        policy=Policy(gates={"tests": GateDeclaration()}),
+        gates_dir=tmp_path / "gates",
+        image="img",
+        watch=lambda _line: None,
+    )
+    assert (new, head) == ([], [])
+    assert asked == [["/gates/.saffron/gates/tests"]] * 2
 
 
 def test_fetch_default_branch_refuses_an_unreachable_remote(tmp_path):
