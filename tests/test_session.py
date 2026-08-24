@@ -8,6 +8,7 @@ from saffron.agents import artifacts
 from saffron.cell import runtime, session
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
+from saffron.gates.core.committed import committed_gate
 from saffron.ledger import Ledger
 from saffron.phases import implement
 
@@ -271,6 +272,43 @@ def test_an_errored_gate_aborts_the_loop_without_charging_the_task():
     state, repairs = _loop(errored)
     assert state == "GATE_ERROR"
     assert repairs == []
+
+
+def _dirty_suite(paths):
+    return [committed_gate(paths)]
+
+
+def test_a_dirty_tree_buys_one_repair_turn():
+    """Attempt 1 repairs, attempt 2 is clean."""
+    calls: list[str] = []
+    trees = iter([["a.py"], []])
+
+    state, attempts, _ = session.repair_loop(
+        run_gates=lambda: _dirty_suite(next(trees)),
+        baseline=_dirty_suite([]),
+        max_attempts=4,
+        repair=lambda new: calls.append("repair"),
+        watch=lambda _: None,
+    )
+    assert calls == ["repair"]
+    assert state == "READY_FOR_REVIEW"
+    assert attempts == 2
+
+
+def test_a_tree_still_dirty_after_the_repair_turn_ends_the_attempt():
+    calls: list[str] = []
+
+    state, attempts, new = session.repair_loop(
+        run_gates=lambda: _dirty_suite(["a.py"]),
+        baseline=_dirty_suite([]),
+        max_attempts=4,
+        repair=lambda _: calls.append("repair"),
+        watch=lambda _: None,
+    )
+    assert calls == ["repair"]  # exactly one, not four
+    assert state == "EXHAUSTED"
+    assert attempts == 2
+    assert [n.failure.file for n in new] == ["a.py"]
 
 
 def test_a_gate_that_stopped_running_between_the_suites_is_not_a_green():
