@@ -24,30 +24,38 @@
 
 ---
 
+
+> **Revision 2.** A plan review against the tree at `3d4df2c` found twelve
+> defects in revision 1, three of them blocking. Every one is applied below.
+> The three that would have shipped green: `reverify` has its own
+> `prepare_worktree` call (`package.py:406`) that revision 1 never mentioned;
+> `tests/test_cli.py` stubs `subprocess.run` globally, so Task 2's replacement
+> reaches a fake with no `returncode`; and `_stub_the_runtime`
+> (`tests/test_session.py:325`) does not cover the two new runtime calls, so
+> ~30 tests would shell out to a container that does not exist.
+
 ### Task 1: `fetch_default_branch` — one source for both ends
 
 **Files:**
-- Modify: `saffron/phases/package.py:92-101` (after `default_branch`), `saffron/phases/package.py:485-491`
+- Modify: `saffron/phases/package.py` (add after `default_branch`, `package.py:92-101`), `saffron/phases/package.py:485-491`
 - Test: `tests/test_package.py`
 
 **Interfaces:**
-- Consumes: `default_branch(url, *, cwd) -> str`, `_run(cwd, *args)`, `PackageError` — all already in `package.py`.
+- Consumes: `default_branch(url, *, cwd) -> str` (`package.py:92`), `_run(cwd, *args)` (`package.py:61`), `PackageError`.
 - Produces: `fetch_default_branch(mirror: Path, url: str) -> tuple[str, str]` returning `(branch_name, head_sha)`. Task 2 calls it from `cli.py`.
 
-Pure refactor — `package()` must behave identically. Item 11 is an asymmetry, not a missing feature: this is the function both ends will read.
+**Not a pure refactor, despite appearances.** Two behaviour changes, both deliberate, both stated here because revision 1 claimed there were none:
+
+1. `assert_base_objects` (`package.py:103`) *reads* the mirror's object store and the fetch *writes* it. If `base_sha` is reachable from the remote's default branch but missing from the mirror, running the fetch first would supply the objects and turn today's `PackageError` into a pass. So in `package()` the assert moves **above** the new call — `default_branch` is an `ls-remote` that writes nothing, so nothing else shifts.
+2. The new function raises when the remote reports no head. Today `package.py:491` would carry an empty string forward.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 def test_fetch_default_branch_reports_the_remote_head(tmp_path):
     """The head the mirror now holds, not the one the caller happened to have."""
-    origin = tmp_path / "origin"
-    origin.mkdir()
-    _git_init_with_commit(origin, "first")
-    head = subprocess.run(
-        ["git", "-C", str(origin), "rev-parse", "HEAD"],
-        capture_output=True, text=True, check=True,
-    ).stdout.strip()
+    origin = _repo_with_commit(tmp_path / "origin")
+    head = _rev_parse(origin, "HEAD")
 
     mirror = ensure_mirror(origin, tmp_path / "mirror.git")
     branch, fetched = fetch_default_branch(mirror, str(origin))
@@ -61,12 +69,13 @@ def test_fetch_default_branch_reports_the_remote_head(tmp_path):
 
 
 def test_fetch_default_branch_refuses_an_unreachable_remote(tmp_path):
-    mirror = ensure_mirror(_repo_with_commit(tmp_path), tmp_path / "mirror.git")
+    origin = _repo_with_commit(tmp_path / "origin")
+    mirror = ensure_mirror(origin, tmp_path / "mirror.git")
     with pytest.raises(PackageError):
         fetch_default_branch(mirror, str(tmp_path / "nowhere"))
 ```
 
-Add `fetch_default_branch` to the `saffron.phases.package` import block at the top of `tests/test_package.py:23`, and `from saffron.repos.mirror import ensure_mirror`. If `_git_init_with_commit` / `_repo_with_commit` helpers do not already exist in this file, write one that runs `git init -q`, writes a file, `git add -A`, and `git -c user.email=t@t -c user.name=T commit -qm first`.
+`tests/test_package.py` has no `_repo_with_commit` or `_rev_parse` helper — write them at the top of the file. `_repo_with_commit(path)` should `mkdir`, `git init -q`, write a file, `git add -A`, and `git -c user.email=t@t -c user.name=T commit -qm first`, returning the path. `_rev_parse(repo, ref)` returns the stripped stdout of `git -C repo rev-parse <ref>`. Add `fetch_default_branch` to the `saffron.phases.package` import block at `tests/test_package.py:23` and `from saffron.repos.mirror import ensure_mirror`.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -107,19 +116,19 @@ Then replace `package.py:485-491`. Before:
     fetch_head = _run(mirror, "rev-parse", "FETCH_HEAD").stdout.strip()
 ```
 
-After:
+After — note the assert is now **first**, which is what keeps its meaning:
 
 ```python
-    default, fetch_head = fetch_default_branch(mirror, url)
+    # Before the fetch, not after: the fetch writes the object store this
+    # reads, and would otherwise supply the very objects it is checking for.
     assert_base_objects(mirror, base_sha)
+    default, fetch_head = fetch_default_branch(mirror, url)
 ```
-
-The fetch now happens one line before `assert_base_objects` instead of one line after. Nothing reads the mirror in between, so the order does not matter — noted because a reviewer will see the move.
 
 - [ ] **Step 4: Run the tests**
 
 Run: `uv run pytest tests/test_package.py -v`
-Expected: PASS, including every pre-existing `package()` test — this task changes no behaviour.
+Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -133,14 +142,38 @@ git commit -m "refactor(package): the two ends of the base comparison read one s
 ### Task 2: the base is the remote's default-branch head
 
 **Files:**
-- Modify: `saffron/cli.py:114-119`
-- Test: `tests/test_cli.py`
+- Modify: `saffron/cli.py:114-119`, and the import at `saffron/cli.py:8`
+- Test: `tests/test_cli.py:40`, `:90`, `:137`, plus one new case
 
 **Interfaces:**
-- Consumes: `fetch_default_branch(mirror, url) -> tuple[str, str]` (Task 1), `package_phase.real_remote(repo) -> str`.
+- Consumes: `fetch_default_branch(mirror, url) -> tuple[str, str]` (Task 1), `package_phase.real_remote(repo) -> str` (`package.py:75`). `package_phase` is already imported at `cli.py:14`.
 - Produces: nothing new. `CellSpec.base_sha` now holds the remote's default-branch head.
 
-- [ ] **Step 1: Write the failing test**
+**Three existing tests break, and the fix is not to restore the old code.** `tests/test_cli.py:40`, `:90` and `:137` each do:
+
+```python
+monkeypatch.setattr("subprocess.run", lambda *a, **k: type("P", (), {"stdout": "a" * 40})())
+```
+
+stubbing the `git rev-parse HEAD` this task deletes. `package._run` (`package.py:64`) also calls `subprocess.run`, so the replacement hits the same fake — which has no `returncode`, so `real_remote` (`package.py:77`) raises `AttributeError`, `cli.main`'s handler (`cli.py:86`) turns it into exit 2, and the exit-code assertions read `[2, 2, 2]`. Replace that global stub in all three with the narrower one below.
+
+**One unstated behaviour change, now stated.** `real_remote` raises `PackageError` on a repo with no `origin`. Today `saffron cell` runs fine against one — `session.py:487-490` catches exactly that and comments *"A repo with no origin is still runnable — it just cannot be packaged."* After this task it exits 2 before the cell starts. That is the right trade (a task with no reachable default branch has no base), and Task 12 records it in §5.1.
+
+- [ ] **Step 1: Repoint the three existing stubs**
+
+In each of the three tests, replace the `subprocess.run` line with:
+
+```python
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda repo: "https://github.com/o/r.git")
+    monkeypatch.setattr(
+        "saffron.phases.package.fetch_default_branch", lambda mirror, url: ("main", "a" * 40)
+    )
+```
+
+Run: `uv run pytest tests/test_cli.py -v`
+Expected: PASS — these stubs satisfy the *current* code too (it still calls `subprocess.run` for `rev-parse`, which is now unstubbed but harmless: the test repos are real git repos). If any test now fails because `rev-parse` returns a real sha where it expected `"a" * 40`, assert on the shape rather than the literal.
+
+- [ ] **Step 2: Write the failing test**
 
 ```python
 def test_the_base_is_the_remote_default_branch_not_the_checkout(tmp_path, monkeypatch):
@@ -149,35 +182,41 @@ def test_the_base_is_the_remote_default_branch_not_the_checkout(tmp_path, monkey
     The property §4.2 needs: a task's base must not depend on where the
     operator was standing.
     """
-    repo = _repo_with_commit(tmp_path)
+    repo = _repo_with_commit(tmp_path / "repo")
     default_head = _rev_parse(repo, "HEAD")
-    _run_git(repo, "checkout", "-q", "-b", "joel/feature")
-    (repo / "extra.txt").write_text("uncommitted-and-local\n")
-    _run_git(repo, "add", "-A")
-    _run_git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "local only")
+    # The bare clone MUST be taken before the branch switch: `git clone --bare`
+    # copies the source's HEAD, and `default_branch` reads that symref.
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(repo), str(remote)], check=True)
+    _git(repo, "remote", "add", "origin", str(remote))
+
+    _git(repo, "checkout", "-q", "-b", "joel/feature")
+    (repo / "extra.txt").write_text("local only\n")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "local only")
     assert _rev_parse(repo, "HEAD") != default_head
 
     captured: dict[str, str] = {}
 
-    def _fake_run_one_cell(cell_spec, **kwargs):
+    def _capture(cell_spec, **kwargs):
         captured["base_sha"] = cell_spec.base_sha
         raise SystemExit(0)
 
-    monkeypatch.setattr("saffron.cli.run_one_cell", _fake_run_one_cell)
+    monkeypatch.setattr("saffron.cli.run_one_cell", _capture)
     with pytest.raises(SystemExit):
-        _invoke_run_cell(repo, tmp_path)
+        cli._run_cell(_namespace(repo, tmp_path), Ledger(tmp_path / "l.db"), tmp_path / "out")
 
     assert captured["base_sha"] == default_head
 ```
 
-`_invoke_run_cell` builds the `argparse.Namespace` that `_run_cell` takes (`repo`, `spec`, `home`, `budget`, `max_attempts`) and calls `saffron.cli._run_cell` with a `Ledger` on a `tmp_path` database and an `out_dir` under `tmp_path`. Follow whatever construction `tests/test_cli.py` already uses for its existing cases; if it has no `_run_cell` case yet, build the namespace inline. The repo needs an `origin` remote pointing at a second bare clone for `real_remote` to succeed — create it with `git clone --bare` and `git remote add origin`.
+`_namespace(repo, tmp_path)` builds the `argparse.Namespace` `_run_cell` reads: `repo`, `spec`, `home`, `budget`, `max_attempts`. `_run_cell` calls `load_spec(args.spec)` at `cli.py:108`, so `spec` must be a real spec file on disk — write a minimal one with valid frontmatter (see `tests/test_intake.py` for the shape). `tests/test_cli.py` has no `_run_cell`-level case to model on; this is the first.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 3: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_cli.py -k default_branch -v`
-Expected: FAIL — `base_sha` equals the feature branch tip, not `default_head`.
+Run: `uv run pytest tests/test_cli.py -k default_branch_not_the_checkout -v`
+Expected: FAIL — `base_sha` is the feature-branch tip.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 4: Write minimal implementation**
 
 In `saffron/cli.py:_run_cell`, replace:
 
@@ -200,14 +239,14 @@ with:
     )
 ```
 
-`package_phase` is already imported at `cli.py:15`. Run `uv run ruff check saffron/cli.py` afterwards — if `subprocess` is now unused, ruff reports `F401` and the import comes out.
+Then `uv run ruff check saffron/cli.py` — `subprocess` is used only at `cli.py:8` and `:114`, so it becomes unused and ruff reports `F401`. Remove the import.
 
-- [ ] **Step 4: Run the tests**
+- [ ] **Step 5: Run the tests**
 
 Run: `uv run pytest tests/test_cli.py -v && uv run ruff check saffron/`
 Expected: PASS, clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add saffron/cli.py tests/test_cli.py
@@ -219,29 +258,40 @@ git commit -m "fix(cli): a task's base was whatever branch the operator was stan
 ### Task 3: `export_gates` — the base tree's gates, on the host
 
 **Files:**
-- Modify: `saffron/repos/mirror.py` (add at end)
+- Modify: `saffron/repos/mirror.py` (add `import tarfile`, then the function at the end)
 - Test: `tests/test_mirror.py`
 
 **Interfaces:**
-- Consumes: `GitError`, `_run` — already in `mirror.py`.
-- Produces: `export_gates(mirror: Path, sha: str, dest: Path) -> Path`. Returns `dest`, whose only content is `.saffron/gates/`. Task 4 mounts `dest` at `/gates`, so `policy.gate_executables(Path("/gates"))` resolves to `/gates/.saffron/gates/<name>` with no change to `policy.py`.
+- Consumes: `GitError` (`mirror.py:19`), `shutil` and `subprocess` (already imported at `mirror.py:11-12`).
+- Produces: `export_gates(mirror: Path, sha: str, dest: Path) -> Path`. Returns `dest`, whose only content is `.saffron/gates/`. Tasks 4 mounts `dest` at `/gates`, so `policy.gate_executables(Path("/gates"))` resolves to `/gates/.saffron/gates/<name>` with no change to `policy.py`.
+
+It calls `subprocess.run` directly rather than the module's `_run`, because it needs to redirect stdout to a file. Consequence, accepted: a missing `git` binary raises `OSError` here instead of the `GitError` the rest of the module raises (`tests/test_mirror.py:125` covers that case for `_run`). Mark it with a one-line comment.
+
+**Measured before this plan was written** (against a real bare mirror, git 2.50.1, Python 3.12.12 — `pyproject.toml:5` pins `>=3.12`, so `filter=` is safe):
+
+- `git -C <bare> archive --format=tar <sha> .saffron/gates` → rc 0, member `.saffron/gates/tests` mode `-rwxrwxr-x`.
+- A tree with no `.saffron/gates` → rc 128, so the refusal case fires on the returncode branch.
+- `tarfile.extractall(..., filter="data")` → `0o100755`, `os.access(..., X_OK)` true. The exec bit survives.
 
 - [ ] **Step 1: Write the failing test**
 
+`tests/test_mirror.py` has `git(repo, *args)` at `:16` and an `origin` fixture at `:23`; it has no `_repo_with_commit`, `_commit_all` or `_rev_parse`. Use the existing `git` helper and add `import os`.
+
 ```python
-def test_export_gates_takes_the_tree_at_the_sha(tmp_path):
-    repo = _repo_with_commit(tmp_path)
-    gates = repo / ".saffron" / "gates"
+def test_export_gates_takes_the_tree_at_the_sha(tmp_path, origin):
+    gates = origin / ".saffron" / "gates"
     gates.mkdir(parents=True)
     (gates / "tests").write_text("#!/bin/sh\necho honest\n")
     (gates / "tests").chmod(0o755)
-    _commit_all(repo, "gates")
-    base = _rev_parse(repo, "HEAD")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-qm", "gates")
+    base = git(origin, "rev-parse", "HEAD").strip()
 
     (gates / "tests").write_text("#!/bin/sh\necho lying\n")
-    _commit_all(repo, "a gate that lies")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-qm", "a gate that lies")
 
-    mirror = ensure_mirror(repo, tmp_path / "mirror.git")
+    mirror = ensure_mirror(origin, tmp_path / "mirror.git")
     dest = export_gates(mirror, base, tmp_path / "gates-out")
 
     exported = dest / ".saffron" / "gates" / "tests"
@@ -251,12 +301,13 @@ def test_export_gates_takes_the_tree_at_the_sha(tmp_path):
     assert os.access(exported, os.X_OK)
 
 
-def test_export_gates_refuses_a_tree_with_no_gates(tmp_path):
-    repo = _repo_with_commit(tmp_path)
-    mirror = ensure_mirror(repo, tmp_path / "mirror.git")
+def test_export_gates_refuses_a_tree_with_no_gates(tmp_path, origin):
+    mirror = ensure_mirror(origin, tmp_path / "mirror.git")
     with pytest.raises(GitError):
-        export_gates(mirror, _rev_parse(repo, "HEAD"), tmp_path / "gates-out")
+        export_gates(mirror, git(origin, "rev-parse", "HEAD").strip(), tmp_path / "out")
 ```
+
+Check the `origin` fixture's actual return type and whether `git()` returns stdout before using it this way; adapt rather than assume.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -264,8 +315,6 @@ Run: `uv run pytest tests/test_mirror.py -k export_gates -v`
 Expected: FAIL with `ImportError: cannot import name 'export_gates'`
 
 - [ ] **Step 3: Write minimal implementation**
-
-Add `import shutil` (already present) and `import tarfile` to `saffron/repos/mirror.py`, then:
 
 ```python
 def export_gates(mirror: Path, sha: str, dest: Path) -> Path:
@@ -279,6 +328,7 @@ def export_gates(mirror: Path, sha: str, dest: Path) -> Path:
     shutil.rmtree(dest, ignore_errors=True)
     dest.mkdir(parents=True)
     archive = dest / "gates.tar"
+    # subprocess.run, not _run: stdout goes to a file rather than a pipe.
     with archive.open("wb") as sink:
         done = subprocess.run(
             ["git", "-C", str(mirror), "archive", "--format=tar", sha, ".saffron/gates"],
@@ -314,18 +364,23 @@ git commit -m "feat(mirror): the gates that judge a task came from the tree the 
 
 ---
 
-### Task 4: mount the gates read-only, and run them from there
+### Task 4: mount the gates read-only, in both cells that run a suite
 
 **Files:**
-- Modify: `saffron/cell/worktree.py:17-31` (`GATES_MOUNT`, `mounts`), `saffron/cell/worktree.py:33-50` (`prepare_worktree` signature), `saffron/cell/worktree.py:96-105` (the `mounts(...)` call)
-- Modify: `saffron/cell/session.py:478`, and the `prepare_worktree(...)` call at `saffron/cell/session.py:563-575`
-- Test: `tests/test_worktree.py`
+- Modify: `saffron/cell/worktree.py:17` (`GATES_MOUNT`), `:21-31` (`mounts`), `:33-50` (`prepare_worktree` signature), `:96-105` (the `mounts(...)` call)
+- Modify: `saffron/cell/session.py:478`, `:565-575`, and the `task_dir.mkdir` at `:612`
+- Modify: `saffron/phases/package.py:361-368` (`reverify` signature), `:406-417` (its `prepare_worktree`), `:424` (its gate paths), `:374-377` (its docstring)
+- Test: `tests/test_worktree.py:52`, `:94`, `:129`, `:172`, `:204`; `tests/test_session.py:325` (`_stub_the_runtime`); `tests/test_package.py`
 
 **Interfaces:**
-- Consumes: `export_gates(mirror, sha, dest) -> Path` (Task 3), `runtime.Mount(kind, source, target, readonly)`.
-- Produces: `worktree.GATES_MOUNT = "/gates"`; `mounts(volume, state_volume, gates_dir)`; `prepare_worktree(..., gates_dir: Path)`.
+- Consumes: `export_gates(mirror, sha, dest) -> Path` (Task 3), `runtime.Mount(kind, source, target, readonly)` (`runtime.py:62`).
+- Produces: `worktree.GATES_MOUNT = "/gates"`; `mounts(volume, state_volume, gates_dir)`; `prepare_worktree(..., gates_dir: Path)`; `reverify(..., gates_dir: Path)`.
 
 `gates_dir` is a **required** argument, like `network` and `env` before it. v0.5 shipped a cell where an omitted argument meant every containment control applied to a different container (Appendix I); a defaulted `gates_dir` would mean a cell silently falling back to `/work`'s gates with nothing to notice it.
+
+**`reverify` is in scope and cannot be deferred.** There are two production `prepare_worktree` call sites — `session.py:565` and `package.py:406` — and a required argument breaks the second the moment it is added. Worse, `package.py:424` builds its gate paths from `WORKTREE_MOUNT`, so leaving it alone would have `reverify` running the **patch's own** gates while the in-cell suite runs host-pinned ones: the two suites `package.py:440` subtracts would come from different executables, which is precisely the drift the spec's part 2.1 exists to close. `reverify` exports gates at `new_base_sha` — the new default-branch head, a tree the cell never wrote — and uses them for both of its runs.
+
+Its docstring at `package.py:374-377` currently says the applied tree carries `.saffron/gates/*` *"exactly as the patch left them"*. That stops being true and must be rewritten.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -355,15 +410,13 @@ def test_prepare_worktree_requires_a_gates_dir():
 Run: `uv run pytest tests/test_worktree.py -k "gates" -v`
 Expected: FAIL — `AttributeError: module 'saffron.cell.worktree' has no attribute 'GATES_MOUNT'`
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 3: `worktree.py`**
 
-In `saffron/cell/worktree.py`, beside `WORKTREE_MOUNT`:
+Beside `WORKTREE_MOUNT`:
 
 ```python
 GATES_MOUNT = "/gates"
 ```
-
-Then `mounts`:
 
 ```python
 def mounts(volume: str, state_volume: str, gates_dir: Path) -> list[runtime.Mount]:
@@ -371,8 +424,8 @@ def mounts(volume: str, state_volume: str, gates_dir: Path) -> list[runtime.Moun
 
     Session state and any credential file must not live in the tree the agent
     can write, that the scope gate walks, and that gets patch-exported. The
-    gates are read-only and come from `base_sha`: the executables that judge a
-    task are not the ones the task can edit (§5.4).
+    gates are read-only and come from a sha the cell never wrote: the
+    executables that judge a task are not the ones the task can edit (§5.4).
     """
     return [
         runtime.Mount("volume", volume, WORKTREE_MOUNT),
@@ -381,15 +434,11 @@ def mounts(volume: str, state_volume: str, gates_dir: Path) -> list[runtime.Moun
     ]
 ```
 
-Add `gates_dir: Path` to `prepare_worktree`'s keyword-only parameters (no default, placed beside `network` and `env`), and pass it through at the `run_detached` call: `mounts=mounts(volume, state, gates_dir)`.
+Add `gates_dir: Path` to `prepare_worktree`'s keyword-only parameters, no default, beside `network` and `env`. Pass it at the `run_detached` call: `mounts=mounts(volume, state, gates_dir)`.
 
-In `saffron/cell/session.py:478`, replace:
+- [ ] **Step 4: `session.py`**
 
-```python
-    gates = policy.gate_executables(Path(worktree.WORKTREE_MOUNT))
-```
-
-with:
+At `:478`:
 
 ```python
     # Cell-side, and from the read-only mount rather than /work: an in-cell
@@ -397,26 +446,46 @@ with:
     gates = policy.gate_executables(Path(worktree.GATES_MOUNT))
 ```
 
-Then, before the `prepare_worktree` call in `run_one_cell`, extract the gates and pass the directory:
+Move the `task_dir.mkdir(parents=True, exist_ok=True)` from `:612` up to just before the `prepare_worktree` call at `:565` — the gates must exist before the container is created. Nothing between `:502` (where `task_dir` is bound) and `:612` touches the directory. Then:
 
 ```python
         task_dir.mkdir(parents=True, exist_ok=True)
         gates_dir = mirror_ops.export_gates(mirror, spec.base_sha, task_dir / "gates")
 ```
 
-and add `gates_dir=gates_dir,` to the `prepare_worktree(...)` keyword arguments.
+and add `gates_dir=gates_dir,` to `prepare_worktree(...)`. `_drive_cell` (`session.py:452`, **not** `run_one_cell`, which is the nine-line wrapper at `:418`) uses **function-local** imports at `:462-471` — deliberately. Add `from saffron.repos import mirror as mirror_ops` there, in the same style, not at module level.
 
-`task_dir.mkdir` currently happens *after* the baseline suite. Move that one line up to here and delete the later one — the gates must exist before the container is created. Import `export_gates` the way `session.py` already reaches `saffron.repos.mirror`; if it has no alias yet, add `from saffron.repos import mirror as mirror_ops` beside the other imports.
+- [ ] **Step 5: `package.py`'s `reverify`**
 
-- [ ] **Step 4: Run the tests**
+Add `gates_dir: Path` to `reverify`'s keyword-only parameters. In `package()`, build it before the call:
 
-Run: `uv run pytest tests/test_worktree.py tests/test_session.py -v`
-Expected: PASS. Any `prepare_worktree` or `mounts` call in an existing test now needs `gates_dir` — that is the required argument doing its job; fix each call site rather than restoring a default.
+```python
+            gates_dir = mirror_ops.export_gates(
+                mirror, fetch_head, out_dir / "package" / spec.id / "gates"
+            )
+```
 
-- [ ] **Step 5: Commit**
+Pass `gates_dir=gates_dir` to `prepare_worktree` at `:406`, and change `:424` to `policy.gate_executables(Path(worktree.GATES_MOUNT))`. Rewrite the docstring at `:374-377`: both of `reverify`'s runs use gates exported from `new_base_sha`, so the two suites it subtracts come from one set of executables and the patch's own `.saffron/gates/*` are never executed.
+
+- [ ] **Step 6: Fix every existing call site**
+
+Five non-cell and cell `prepare_worktree` calls in `tests/test_worktree.py` — `:52`, `:94`, `:129`, `:172`, `:204` — each needs `gates_dir`. Build a real directory with an empty `.saffron/gates/` under `tmp_path`; the mount source must exist.
+
+And `_stub_the_runtime` (`tests/test_session.py:325`) must gain the new call, or ~30 `_drive` tests run `git archive` against `tmp_path / "m.git"`, which is never created:
+
+```python
+    monkeypatch.setattr("saffron.repos.mirror.export_gates", lambda mirror, sha, dest: dest)
+```
+
+- [ ] **Step 7: Run the tests**
+
+Run: `make check`
+Expected: PASS. Then `uv run pytest -m cell -v` — expected PASS.
+
+- [ ] **Step 8: Commit**
 
 ```bash
-git add saffron/cell/worktree.py saffron/cell/session.py tests/test_worktree.py tests/test_session.py
+git add saffron/cell/worktree.py saffron/cell/session.py saffron/phases/package.py tests/
 git commit -m "fix(cell): the gate runner lived in the tree the cell could rewrite"
 ```
 
@@ -425,69 +494,70 @@ git commit -m "fix(cell): the gate runner lived in the tree the cell could rewri
 ### Task 5: prove it from inside a cell
 
 **Files:**
-- Test: `tests/test_package_cell.py` (or a new `tests/test_gates_cell.py` — put it beside the other `@pytest.mark.cell` cases)
+- Test: `tests/test_worktree.py` (it already holds the cell-marked worktree cases and the `network` fixture)
 
 **Interfaces:**
 - Consumes: everything from Tasks 3 and 4.
 - Produces: nothing.
 
-Appendix I's rule binds here: **start the cell the way production does and probe from inside it.** A test that asserts the mount list is a test of a list. This one commits a lying gate inside the cell and asserts the honest one ran anyway.
+Appendix I's rule binds here: **start the cell the way production does and probe from inside it.** A test that asserts the mount list is a test of a list.
+
+Two corrections to revision 1, both from the review. There is no `_unique_names`, `_teardown`, `CELL_IMAGE` or `_repo_with_gate` in any test file — model the setup on `_seed_repo` and the `network` fixture (`tests/test_worktree.py:15`). And use that real `network` fixture rather than `network="none"`: every existing cell test starts a real network, and nothing establishes the runtime accepts `none`.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 @pytest.mark.cell
-def test_a_gate_edited_inside_the_cell_never_runs(tmp_path):
-    """The in-cell edit is committed, and still does not reach the runner."""
-    repo = _repo_with_gate(tmp_path, body='#!/bin/sh\necho \'{"gate":"demo","status":"pass","tool":"honest 1.0"}\'\n')
-    mirror = ensure_mirror(repo, tmp_path / "mirror.git")
-    base = _rev_parse(repo, "HEAD")
+def test_a_gate_edited_inside_the_cell_never_runs(tmp_path, network):
+    repo = _seed_repo(tmp_path)          # then add .saffron/gates/demo and commit
+    ...
     gates_dir = export_gates(mirror, base, tmp_path / "gates-out")
+    worktree.prepare_worktree(..., network=network, env={}, gates_dir=gates_dir)
 
-    volume, state, container = _unique_names()
-    try:
-        worktree.prepare_worktree(
-            mirror=mirror, volume=volume, base_sha=base, branch="saffron/T-0001",
-            image=CELL_IMAGE, container=container, network="none", env={},
-            state_volume=state, gates_dir=gates_dir,
-        )
-        # The agent's move: rewrite the gate and commit, so no diff-reading
-        # gate can tell it from ordinary work.
-        runtime.exec_(container, [
-            "sh", "-euc",
-            "cd /work && printf '#!/bin/sh\\necho \\'{\"gate\":\"demo\",\"status\":\"pass\",\"tool\":\"lying 9.9\"}\\'\\n' "
-            "> .saffron/gates/demo && chmod +x .saffron/gates/demo && "
-            "git add -A && git commit -qm 'tune the gate'",
-        ])
+    # The agent's move: rewrite the gate and commit, so no diff-reading gate
+    # can tell it from ordinary work. Heredoc, not nested quotes: POSIX sh has
+    # no backslash escape inside single quotes, and revision 1's one-liner
+    # silently failed — which would have passed this test for the wrong reason.
+    runtime.exec_(container, ["sh", "-euc", """
+cd /work
+cat > .saffron/gates/demo <<'GATE'
+#!/bin/sh
+printf '{"gate":"demo","status":"pass","tool":"lying 9.9"}\\n'
+GATE
+chmod +x .saffron/gates/demo
+git add -A && git commit -qm 'tune the gate'
+"""])
+    # The edit must have landed, or the assertion below proves nothing.
+    assert "lying" in runtime.exec_(
+        container, ["cat", "/work/.saffron/gates/demo"]
+    ).stdout
 
-        result = run_gate(
-            "demo",
-            Path(worktree.GATES_MOUNT) / ".saffron" / "gates" / "demo",
-            cwd=repo,
-            executor=CellExecutor(container),
-        )
-        assert result.tool == "honest 1.0"
-        assert result.status == "pass"
+    result = run_gate(
+        "demo",
+        Path(worktree.GATES_MOUNT) / ".saffron" / "gates" / "demo",
+        cwd=repo,
+        executor=CellExecutor(container),
+    )
+    assert result.tool == "honest 1.0"
+    assert result.status == "pass"
 
-        # And the mount is read-only, so the direct route fails too.
-        written = runtime.exec_(container, ["sh", "-c", "echo x > /gates/.saffron/gates/demo"])
-        assert written.returncode != 0
-    finally:
-        _teardown(container, volume, state)
+    # And the mount is read-only, so the direct route fails too.
+    written = runtime.exec_(container, ["sh", "-c", "echo x > /gates/.saffron/gates/demo"])
+    assert written.returncode != 0
 ```
 
-Reuse whatever `_unique_names` / `_teardown` / `CELL_IMAGE` helpers `tests/test_package_cell.py` and `tests/test_worktree.py` already use for their cell-marked cases rather than writing new ones.
+The honest gate written into the repo before the mirror is made should `printf '{"gate":"demo","status":"pass","tool":"honest 1.0"}\n'`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run it**
 
-Build the images first if they are not present:
+Build the images first if absent:
 
 ```bash
 container build -t saffron/cell-base:python -f images/cell-base.python.Dockerfile .
 ```
 
 Run: `uv run pytest -m cell -k gate_edited_inside -v`
-Expected: FAIL before Task 4's change is in place; with it, PASS. If it passes for the wrong reason — the cell never wrote the gate at all — assert the in-cell commit landed before asserting the tool.
+Expected: PASS. Confirm the `"lying" in ...` assertion is what proves the setup worked — if that one fails, the test is broken, not the code.
 
 - [ ] **Step 3: Run the whole cell suite**
 
@@ -497,7 +567,7 @@ Expected: PASS
 - [ ] **Step 4: Commit**
 
 ```bash
-git add tests/test_package_cell.py
+git add tests/test_worktree.py
 git commit -m "test(cell): the gate-source claim had no test that could go red"
 ```
 
@@ -507,16 +577,18 @@ git commit -m "test(cell): the gate-source claim had no test that could go red"
 
 **Files:**
 - Create: `saffron/gates/core/committed.py`
-- Modify: `saffron/cell/worktree.py` (add `dirty_paths`), `saffron/cell/session.py:591-603` (`_suite`)
+- Modify: `saffron/cell/worktree.py` (add `dirty_paths`), `saffron/cell/session.py:591-603` (`_suite`), `tests/test_session.py:325` (`_stub_the_runtime`)
 - Test: `tests/test_committed.py` (new), `tests/test_worktree.py`
 
 **Interfaces:**
-- Consumes: `GateResult`, `Failure` from `saffron.gates.contract`; `runtime.exec_`.
+- Consumes: `GateResult`, `Failure` (`contract.py:42-74`); `runtime.CellRuntimeError` (`runtime.py:45`); `_git(container, *args)` (`worktree.py:130`).
 - Produces: `worktree.dirty_paths(container: str) -> list[str]`; `committed.committed_gate(dirty: list[str]) -> GateResult`.
 
-Shaped like `scope`: `session.py` reads the cell, the gate itself is a pure function that executes nothing. No `tool` field — core gates are constructed directly and never claim to have run one.
+Shaped like `scope`: `session.py` reads the cell, the gate is a pure function that executes nothing. No `tool` field — core gates are constructed directly and never claim to have run one, and `run_gate`'s pass/fail-without-tool rule (`runner.py:146-152`) applies only to executed gates.
 
-The "one repair turn, then abort" behaviour needs **no new control flow**. A dirty tree produces a `fail` with one failure per path; `subtract_baseline` cancels nothing (the baseline tree is freshly cloned and clean); `repair_decision` returns `repair` on attempt 1 and, on identical failures at attempt 2, `no-progress` → `EXHAUSTED` (`session.py:195-211`).
+**"One repair turn, then abort" needs no new control flow, and the review confirmed the trace.** A dirty tree produces `fail` with one failure per path; the baseline tree is freshly cloned so `subtract_baseline` cancels nothing; `previous = new` is assigned at `session.py:331` after the decision and before `repair(new)`; `repair_decision` returns `repair` on attempt 1 and `no-progress` → `EXHAUSTED` on identical failures at attempt 2. `suite_drift` sees `tool=None` on both sides and reports nothing.
+
+`git status --porcelain -z` parsing was measured: `' M keep.txt\x00R  new.txt\x00old.txt\x00?? untracked.py\x00'`. The rename entry carries the **new** path at `entry[3:]` and the source follows as the next NUL field, so the skip drops exactly the right chunk. Consequence worth knowing: a rename's source deletion never appears in the failure list.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -545,12 +617,12 @@ def test_it_never_reports_error():
     assert committed_gate(["x.py"]).status == "fail"
 ```
 
-And in `tests/test_worktree.py`, a cell-marked case:
+And in `tests/test_worktree.py`, cell-marked:
 
 ```python
 @pytest.mark.cell
-def test_dirty_paths_sees_an_uncommitted_edit(tmp_path):
-    ...  # prepare_worktree as in Task 5, then:
+def test_dirty_paths_sees_an_uncommitted_edit(tmp_path, network):
+    ...  # prepare_worktree as in Task 5
     assert worktree.dirty_paths(container) == []
     runtime.exec_(container, ["sh", "-c", "echo x >> /work/README.md"])
     assert "README.md" in worktree.dirty_paths(container)
@@ -628,7 +700,7 @@ def dirty_paths(container: str) -> list[str]:
     return sorted(paths)
 ```
 
-In `session.py`'s `_suite`, beside the other host-side core gates:
+In `session.py`'s `_suite`, beside the other host-side core gates. Left-to-right evaluation matters: `dirty_paths` is read before `run_suite` can leave test artifacts in `/work`.
 
 ```python
             results = [
@@ -639,17 +711,25 @@ In `session.py`'s `_suite`, beside the other host-side core gates:
             ]
 ```
 
-Import `committed_gate` beside the other core-gate imports at the top of `session.py`.
+Import `committed_gate` beside the other core-gate imports.
 
-- [ ] **Step 4: Run the tests**
+- [ ] **Step 4: Extend the runtime stub**
 
-Run: `uv run pytest tests/test_committed.py tests/test_session.py -v`
-Expected: PASS. Existing `session.py` tests that assert on the gate list will need `committed` added — check that each expects `pass` at baseline, which is what a freshly cloned worktree gives.
+`_stub_the_runtime` (`tests/test_session.py:325`) does not cover `dirty_paths`, so ~30 `_drive` tests would exec against a container that does not exist. Add:
 
-- [ ] **Step 5: Commit**
+```python
+    monkeypatch.setattr("saffron.cell.worktree.dirty_paths", lambda container: [])
+```
+
+- [ ] **Step 5: Run the tests**
+
+Run: `make check`
+Expected: PASS. Existing `session.py` tests that assert on the gate list need `committed` added; it is `pass` at baseline, which a freshly cloned worktree gives.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add saffron/gates/core/committed.py saffron/cell/worktree.py saffron/cell/session.py tests/test_committed.py tests/test_worktree.py
+git add saffron/gates/core/committed.py saffron/cell/worktree.py saffron/cell/session.py tests/
 git commit -m "fix(gates): an uncommitted edit was live for the suite and absent from the patch"
 ```
 
@@ -661,35 +741,28 @@ git commit -m "fix(gates): an uncommitted edit was live for the suite and absent
 - Test: `tests/test_session.py`
 
 **Interfaces:**
-- Consumes: `repair_loop`, `repair_decision` (`session.py:292`, `session.py:195`), `committed_gate` (Task 6).
+- Consumes: `session.repair_loop` (`session.py:292`), `committed_gate` (Task 6). `tests/test_session.py` imports `session` as a module and calls `session.repair_loop` (`:229`) — follow that, and import `committed_gate` at the top.
 - Produces: nothing.
 
-Task 6 claims the existing loop already gives "one repair turn, then abort". A claim with no test that can go red is exactly what this repo keeps finding, so this task tests the claim rather than the code.
+Task 6 claims the existing loop already gives "one repair turn, then abort". The review traced it and it holds; this task is the test that keeps it holding.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the test**
 
 ```python
 def _dirty_suite(paths):
     return [committed_gate(paths)]
 
 
-def test_a_dirty_tree_buys_one_repair_turn(monkeypatch):
-    """Attempt 1 repairs, attempt 2 with the same paths is no-progress."""
+def test_a_dirty_tree_buys_one_repair_turn():
+    """Attempt 1 repairs, attempt 2 is clean."""
     calls: list[str] = []
     trees = iter([["a.py"], []])
 
-    def _run_gates():
-        return _dirty_suite(next(trees))
-
-    def _repair(new):
-        calls.append("repair")
-        return None
-
-    state, attempts, _ = repair_loop(
-        run_gates=_run_gates,
+    state, attempts, _ = session.repair_loop(
+        run_gates=lambda: _dirty_suite(next(trees)),
         baseline=_dirty_suite([]),
         max_attempts=4,
-        repair=_repair,
+        repair=lambda new: calls.append("repair"),
         watch=lambda _: None,
     )
     assert calls == ["repair"]
@@ -700,7 +773,7 @@ def test_a_dirty_tree_buys_one_repair_turn(monkeypatch):
 def test_a_tree_still_dirty_after_the_repair_turn_ends_the_attempt():
     calls: list[str] = []
 
-    state, attempts, new = repair_loop(
+    state, attempts, new = session.repair_loop(
         run_gates=lambda: _dirty_suite(["a.py"]),
         baseline=_dirty_suite([]),
         max_attempts=4,
@@ -713,10 +786,12 @@ def test_a_tree_still_dirty_after_the_repair_turn_ends_the_attempt():
     assert [n.failure.file for n in new] == ["a.py"]
 ```
 
+`list.append` returns `None`, so the lambda does not stop the loop early — that is load-bearing, not incidental.
+
 - [ ] **Step 2: Run the tests**
 
 Run: `uv run pytest tests/test_session.py -k dirty -v`
-Expected: PASS if Task 6's reasoning holds. **If it does not** — if `repair` is called more than once, or the state is not `EXHAUSTED` — stop and say so rather than changing the test to match: the design chose one repair turn, and a loop that gives four is a finding about `repair_decision`, not about this plan.
+Expected: PASS. **If not** — if `repair` is called more than once, or the state is not `EXHAUSTED` — stop and say so rather than changing the test: the design chose one repair turn, and a loop that gives four is a finding about `repair_decision`.
 
 - [ ] **Step 3: Commit**
 
@@ -730,8 +805,8 @@ git commit -m "test(session): the one-repair-turn claim rested on a rule nothing
 ### Task 8: `github_slug` refuses instead of guessing
 
 **Files:**
-- Modify: `saffron/phases/package.py:31` (`_SLUG`), `saffron/phases/package.py:85-90`
-- Test: `tests/test_package.py:68`
+- Modify: `saffron/phases/package.py:31` (`_SLUG`), `:85-90`
+- Test: `tests/test_package.py:59-68`
 
 **Interfaces:**
 - Consumes: `PackageError`.
@@ -739,13 +814,15 @@ git commit -m "test(session): the one-repair-turn claim rested on a rule nothing
 
 Measured, this tree: three of five real inputs return a wrong answer. `https://example.com/repo` → `example.com/repo` takes the **host** as the owner, a case the backlog does not name.
 
+`tests/test_package.py:59-68` **already parametrizes the four accepting shapes** — extend that test rather than duplicating it. Only the refusal cases are new.
+
 - [ ] **Step 1: Write the failing test**
 
 ```python
 @pytest.mark.parametrize(
     "url",
     [
-        "/Users/joel/Code/saffron",            # measured: -> "Code/saffron"
+        "/Users/joel/Code/saffron",             # measured: -> "Code/saffron"
         "git@gitlab.com:group/owner/repo.git",  # measured: -> "owner/repo"
         "https://example.com/repo",             # measured: -> "example.com/repo"
     ],
@@ -755,53 +832,40 @@ def test_github_slug_refuses_what_is_not_a_forge_remote(url):
     local-path origin is exactly what session.py falls back to."""
     with pytest.raises(PackageError):
         github_slug(url)
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "https://github.com/jtmcn/saffron.git",
-        "git@github.com:jtmcn/saffron.git",
-        "https://github.com/jtmcn/saffron",
-        "ssh://git@github.com/jtmcn/saffron.git",
-    ],
-)
-def test_github_slug_reads_every_shape_git_writes(url):
-    assert github_slug(url) == "jtmcn/saffron"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/test_package.py -k github_slug -v`
-Expected: FAIL — the three refusal cases return a slug instead of raising.
+Expected: FAIL — all three return a slug instead of raising.
 
 - [ ] **Step 3: Write minimal implementation**
-
-Replace `_SLUG` at `package.py:31`:
 
 ```python
 # Anchored on the forge host, not on "the last two segments": the old pattern
 # read a local path as `Code/saffron` and a one-segment URL as `host/repo`.
-_SLUG = re.compile(r"github\.com[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$")
+_SLUG = re.compile(r"(?:^|[@/.])github\.com[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$")
 ```
 
-The docstring on `github_slug` becomes:
+The `[@/.]` boundary is deliberate — without it `https://notgithub.com/a/b.git` still matches. Verify all four accepting shapes in the existing parametrize still pass, `ssh://git@github.com/jtmcn/saffron.git` included.
+
+Update the docstring:
 
 ```python
 def github_slug(url: str) -> str:
     """`owner/repo`, from either URL shape git writes — or a refusal.
 
-    Guessing is worse than failing here: the slug reaches `gh`, and a plausible
+    Guessing is worse than failing: the slug reaches `gh`, and a plausible
     wrong one names a repository that does not exist.
     """
 ```
 
-The `raise PackageError(f"cannot read owner/repo out of {url!r}")` below it already does the right thing and needs no change.
+The existing `raise PackageError(...)` below needs no change.
 
 - [ ] **Step 4: Run the tests**
 
 Run: `uv run pytest tests/test_package.py -v`
-Expected: PASS. `session.py:487-490` already catches `PackageError` from `real_remote` and falls back to `str(repo)`; confirm nothing else calls `github_slug` outside `package()`.
+Expected: PASS. `github_slug` has one caller, `package.py:484`.
 
 - [ ] **Step 5: Commit**
 
@@ -812,142 +876,136 @@ git commit -m "fix(package): a local path read as a slug that named a repo nobod
 
 ---
 
-### Task 9: record the branch before the pull request, not after
+### Task 9: record the pushed sha before the pull request, not after
 
 **Files:**
-- Modify: `saffron/phases/package.py:565-610` (the `open_draft_pr` call site in `package()`)
-- Test: `tests/test_package.py`
+- Modify: `saffron/ledger.py` (add beside `set_task_package`, `:332`), `saffron/phases/package.py` (the `open_draft_pr` call site)
+- Test: `tests/test_package.py`, `tests/test_ledger.py`
 
 **Interfaces:**
-- Consumes: `_finish(ledger, outcome, out_dir, spec, repo_name, result)`, `PackageResult`.
-- Produces: nothing new.
+- Consumes: `Ledger.queue_lines()` (`ledger.py:439`) — it already exposes `pushed_sha`, so no read accessor is needed.
+- Produces: `Ledger.record_push(task_id: int, pushed_sha: str) -> None`.
+
+**Half of item 11's claim is already true.** `branch` is written at insert time by `create_task` (`ledger.py:249-253`) from `spec.branch` (`session.py:497`, set in `cli.py:124`). Only `pushed_sha` is genuinely absent — it is written solely by `set_task_package` (`ledger.py:332-348`), which runs after `open_draft_pr`. So the fix is one column, not two, and the task shrinks accordingly. There is no `Ledger.task()` accessor and none is needed.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 def test_a_push_that_lands_is_recorded_even_when_gh_fails(tmp_path, monkeypatch):
     """A `gh` that is missing, unauthenticated or refused leaves the branch
-    pushed; today the ledger reads READY_FOR_REVIEW with no branch at all."""
+    pushed; today the ledger has no sha for it."""
     monkeypatch.setattr(
         "saffron.phases.package.open_draft_pr",
         lambda *a, **k: (_ for _ in ()).throw(PackageError("gh: not authenticated")),
     )
-    ledger, outcome, spec = _packaged_task(tmp_path)   # existing helper shape
-
-    with pytest.raises(PackageError):
-        package(...)
-
-    row = ledger.task(outcome.task_id)
-    assert row["branch"] == f"saffron/{spec.id}"
+    ...  # drive package() with the existing fixture
+    row = next(r for r in ledger.queue_lines() if r["task_id"] == task_id)
     assert row["pushed_sha"]
 ```
 
-Follow whatever fixture `tests/test_package.py` already uses to drive `package()` with a fake remote; if the ledger accessor is named differently, use the existing one.
+Model the driving on whatever fixture `tests/test_package.py` already uses for `package()` with a fake remote, and the `queue_lines` read on `tests/test_ledger.py:201-203`.
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/test_package.py -k gh_fails -v`
-Expected: FAIL — `branch` is `None`.
+Expected: FAIL — `pushed_sha` is `None`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `package()`, immediately after `push_with_lease` returns and **before** `open_draft_pr` is called, record what is already true:
+In `saffron/ledger.py`, beside `set_task_package`:
 
 ```python
-        # Recorded before the pull request, because the push already happened:
-        # a `gh` that fails otherwise leaves a pushed branch the ledger cannot
-        # name, and the operator has to know a re-run self-heals.
-        ledger.record_push(outcome.task_id, branch=branch, pushed_sha=pushed)
+    def record_push(self, task_id: int, pushed_sha: str) -> None:
+        """The push already happened, so it is recorded before the pull request
+        is opened: a `gh` that fails otherwise leaves a pushed branch the
+        ledger cannot name (§5.7)."""
+        self._db.execute(
+            "UPDATE tasks SET pushed_sha = ?, updated_at = datetime('now') "
+            "WHERE task_id = ?",
+            (pushed_sha, task_id),
+        )
+        self._db.commit()
 ```
 
-If `Ledger` has no such method, add the narrowest one that writes those two columns on the task row, beside the existing task writers in `saffron/ledger.py`. The pull request URL keeps being written where it is written today, after `open_draft_pr` returns.
+In `package()`, immediately after `push_with_lease` returns and **before** `open_draft_pr`:
+
+```python
+        ledger.record_push(outcome.task_id, pushed)
+```
+
+`set_task_package` keeps writing all four columns at the end; this is an earlier, narrower write of one of them.
 
 - [ ] **Step 4: Run the tests**
 
-Run: `uv run pytest tests/test_package.py tests/test_ledger.py -v`
+Run: `make check`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add saffron/phases/package.py saffron/ledger.py tests/test_package.py
-git commit -m "fix(package): a pushed branch whose gh call failed was recorded nowhere but stdout"
+git add saffron/ledger.py saffron/phases/package.py tests/
+git commit -m "fix(package): a pushed branch whose gh call failed had no sha in the ledger"
 ```
 
 ---
 
-### Task 10: `reverify` runs under the repo's `thread_env`, and `conftest.py` is gate config
+### Task 10: `conftest.py` is gate config
 
 **Files:**
-- Modify: `saffron/phases/package.py:361-410` (`reverify`)
 - Modify: `.saffron/policy.yaml`
-- Test: `tests/test_package.py`, `tests/test_integrity.py`
+- Test: `tests/test_integrity.py`
 
 **Interfaces:**
-- Consumes: `policy.thread_env`, `cell_env(proxy_ip, thread_env)` as `session.py` uses it.
-- Produces: nothing new.
+- Consumes: `IntegrityPatterns(gate_config=[...])` (`policy.py:44`), `integrity_gate(diff, patterns, touches)` (`integrity.py:201`).
+- Produces: nothing.
 
-Two unrelated one-liners, together because each is smaller than its own commit cycle deserves and both are about the same residual.
+`reverify`'s `thread_env` moved into Task 4 — it is one line of the same call `gates_dir` changes, and splitting them would leave that cell half-updated across a commit.
 
-`reverify`'s cell gets `env={}` while the in-cell suite gets `cell_env(proxy_ip, policy.thread_env)`. Empty for Saffron, so no behaviour changes here — it removes a suite-drift vector by construction, the same argument as Task 4.
+Collection runs inside the repo's own Python, so `census` cannot see a `conftest.py` that drops a test only when `collectonly` is false. This does not stop that; it routes it to a person. There is **no `conftest.py` anywhere in this repo today**, so the change is inert here — which is the design intent, not an oversight.
 
-- [ ] **Step 1: Write the failing tests**
+The failure code is `gate-config-changed` (`integrity.py:266`), not `gate-config`.
+
+- [ ] **Step 1: Write the failing test**
 
 ```python
-def test_reverify_starts_its_cell_with_the_repo_thread_env(monkeypatch):
-    """The two suites being subtracted must not run under different
-    environments by construction (§5.7)."""
-    seen: dict[str, dict] = {}
-    monkeypatch.setattr(
-        "saffron.cell.worktree.prepare_worktree",
-        lambda **kwargs: seen.update(kwargs),
+def test_a_conftest_edit_is_gate_config():
+    """`census` cannot see a conftest that lies to --collect-only; `integrity`
+    routes it to a person."""
+    patterns = IntegrityPatterns(
+        gate_config=["pyproject.toml", ".saffron/**", "**/conftest.py"]
     )
-    policy = Policy(thread_env={"TZ": "UTC"})
-    ...  # drive reverify with the existing fake-cell fixture
-    assert seen["env"]["TZ"] == "UTC"
-```
-
-```python
-# tests/test_integrity.py
-def test_a_conftest_edit_is_gate_config(...):
-    """Collection happens inside the repo's own Python, so `census` cannot see
-    a conftest that lies to --collect-only. `integrity` routes it to a person."""
-    patterns = IntegrityPatterns(gate_config=["pyproject.toml", ".saffron/**", "**/conftest.py"])
-    result = integrity_gate(_diff_touching("tests/conftest.py"), patterns, touches=[])
+    result = integrity_gate(_diff_touching("tests/conftest.py"), patterns, [])
     assert result.status == "fail"
-    assert any(f.code == "gate-config" for f in result.failures)
+    assert any(f.code == "gate-config-changed" for f in result.failures)
 ```
 
-Use whatever the existing `integrity` tests name that failure code; do not invent one.
+Use whatever diff-building helper `tests/test_integrity.py` already has rather than writing `_diff_touching` fresh.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_package.py -k thread_env tests/test_integrity.py -k conftest -v`
+Run: `uv run pytest tests/test_integrity.py -k conftest -v`
 Expected: FAIL
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `reverify`, thread `policy.thread_env` into the cell exactly as `run_one_cell` does — `env=cell_env(proxy_ip, policy.thread_env)` — rather than `env={}`.
-
-In `.saffron/policy.yaml`, extend `gate_config`:
+In `.saffron/policy.yaml` — two comment lines, not three (`CLAUDE.md` caps YAML comments at 1–2):
 
 ```yaml
-  # Collection runs inside the repo's own Python, so `census` cannot see a
-  # conftest that drops a test only when --collect-only is false. This does not
-  # stop that; it routes it to a person.
+  # Collection runs in the repo's own Python, so `census` cannot see a conftest
+  # that hides a test from the runner. This routes the edit to a person.
   gate_config: ["pyproject.toml", ".saffron/**", "**/conftest.py"]
 ```
 
 - [ ] **Step 4: Run the tests**
 
 Run: `make check`
-Expected: PASS. If this repo has a `conftest.py` under `tests/`, confirm the branch's own diff does not touch it — if it does, the spec's `touches` must declare it, which is the exemption working as designed.
+Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add saffron/phases/package.py .saffron/policy.yaml tests/test_package.py tests/test_integrity.py
-git commit -m "fix(package): the two subtracted suites ran under different environments"
+git add .saffron/policy.yaml tests/test_integrity.py
+git commit -m "fix(policy): a conftest could hide a test from the runner and from every gate"
 ```
 
 ---
@@ -955,13 +1013,15 @@ git commit -m "fix(package): the two subtracted suites ran under different envir
 ### Task 11: the three test gaps
 
 **Files:**
-- Test: `tests/test_report.py`, `tests/test_session.py`
+- Test: `tests/test_report.py:335`, plus new cases; `tests/test_session.py`
 
 **Interfaces:**
-- Consumes: `saffron/report/pr_body.py`, `CellOutcome`.
+- Consumes: `render_pr_body(spec, gates, new_failures, *, base_sha, head_sha, added, removed, transcript_path, reviews=..., rebut_result=..., ...)` (`pr_body.py:53`) — **not** `pr_body(outcome)`; it does not take a `CellOutcome`. The file's existing helpers are `SPEC` (`:20`), `RESULTS` (`:35`), `body()` (`:50`) and `_finding(**kw)` (`:251`). Use them.
 - Produces: nothing.
 
-All three from backlog item 11, each one assertion.
+Three corrections from the review. `CellOutcome` really does have `attempts`, `new_failures`, `reviews`, `rebut_result` (`session.py:180-185`) — the plan's earlier hedge was wrong. `_findings` already routes `claim` through `_cell` (`pr_body.py:191`), so the pipe test should pass on the first run; keep it, because the gap was the coverage. And `test_an_unanchored_finding_still_appears` **already exists** at `tests/test_report.py:335` — amend it rather than adding a second test beside it.
+
+**The pipe assertion must discount escapes.** `_cell` escapes as `\|` (`pr_body.py:107`), so a raw `count("|")` counts the escaped one. The correct idiom is already in the file at `tests/test_report.py:239`: `row.count("|") - row.count("\\|") == 5`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -970,40 +1030,34 @@ All three from backlog item 11, each one assertion.
 def test_a_pipe_in_a_finding_claim_does_not_break_the_table():
     """`|` is likelier in a model-authored claim than in a gate message, and the
     findings and disagreements tables were never covered."""
-    body = pr_body(_outcome_with_finding(claim="a | b splits the row"))
-    rendered = [line for line in body.splitlines() if "splits the row" in line]
-    assert rendered and rendered[0].count("|") == _expected_columns
-
-
-def test_an_unanchored_finding_is_marked_not_anchored():
-    """The half that makes drop rate visible (§5.5) — the existing test checks
-    only that the claim renders."""
-    body = pr_body(_outcome_with_finding(anchored=False))
-    row = next(line for line in body.splitlines() if "unanchorable" in line)
-    assert "| no |" in row
+    rendered = body(reviews=[_review(_finding(claim="a | b splits the row"))])
+    row = next(line for line in rendered.splitlines() if "splits the row" in line)
+    assert row.count("|") - row.count("\\|") == _columns_in_the_findings_table
 ```
+
+Read the real column count off the header row rather than hardcoding a guess, and do the same for the disagreements table in a second case.
+
+Then amend the existing `test_an_unanchored_finding_still_appears` (`:335`) with the assertion it lacks — that the row is marked `no`, which is the half that makes drop rate visible (§5.5).
 
 ```python
 # tests/test_session.py
 def test_a_successful_outcome_carries_its_attempts_failures_reviews_and_rebuttal():
     """No test exercises these four on CellOutcome's success path."""
-    outcome = _successful_outcome()
+    outcome = ...  # drive a green run with the existing _drive helper
     assert outcome.attempts >= 1
     assert outcome.new_failures == []
     assert outcome.reviews
     assert outcome.rebut_result is not None
 ```
 
-Read the real field names off `CellOutcome` and `pr_body` before writing these — the names above are from the backlog's prose, and the code is authoritative.
-
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_report.py tests/test_session.py -v`
-Expected: FAIL on the new cases.
+Expected: the amended anchoring assertion and the `CellOutcome` case FAIL; the pipe cases may pass immediately, which is fine — the gap was coverage, not necessarily a defect.
 
 - [ ] **Step 3: Fix whatever they catch**
 
-If the pipe-escaping helper already covers these tables, the first test passes immediately — keep it anyway; the gap was the coverage, not necessarily a defect. If it does not, apply the same escaping `_new_failures` uses.
+If a table does not escape, apply the same `_cell` treatment `_new_failures` uses.
 
 - [ ] **Step 4: Run the tests**
 
@@ -1022,39 +1076,43 @@ git commit -m "test(report): the escaping test covered one table and a claim is 
 ### Task 12: `DESIGN.md`, and closing items 11 and 12
 
 **Files:**
-- Modify: `DESIGN.md` (§5.1, §5.4, §5.7, the status line at `DESIGN.md:5`, and a new Appendix N)
-- Modify: `docs/BACKLOG.md` (items 11 and 12)
+- Modify: `DESIGN.md:5` (the status line, currently rev 15), §5.1, §5.4 (the gate-role table is at `:621-632`), §5.7, and a new **Appendix N** (the last is M at `:2041`)
+- Modify: `docs/BACKLOG.md:539` (item 11), `:614` (item 12)
 
 **Interfaces:**
 - Consumes: everything above.
 - Produces: the record.
 
-Add subsections; **never renumber**. Section numbers are an API and specs cite them.
+Add subsections; **never renumber**.
 
 - [ ] **Step 1: §5.1 — cell construction**
 
-Add the default-branch fetch and the `/gates` mount to the per-task listing. Two lines: the fetch that sets `base_sha`, and the read-only bind mount at `/gates` extracted from the mirror at `base_sha`.
+The default-branch fetch that sets `base_sha`, and the read-only `/gates` mount extracted from the mirror at `base_sha`. Plus the consequence Task 2 introduced: a repo with no reachable `origin` can no longer start a cell, where `session.py:487-490` previously allowed one that simply could not be packaged.
 
 - [ ] **Step 2: §5.4 — the invariant, the gate source, the dirty-tree rule**
 
-Add a subsection stating, in this order:
-
 1. **The invariant:** anything that changes what the suite measures must appear in the patch a human reads. Not "the cell cannot lie" — a lie has to be *visible in the diff*.
-2. **Gates are executed from a host-supplied copy at `base_sha`**, not from `/work`. Consequence, stated so it does not read as a bug: a task whose job is to change a gate is judged by the pre-change gate, and the new gate takes effect for the next task.
-3. **The `committed` gate**, in the gate-role table beside `scope`, `integrity` and `census`: it fails an attempt whose worktree is dirty, because the gates measure `/work` and the patch is `base_sha..HEAD`.
-4. **The residual, stated rather than left to be discovered:** a committed `conftest.py` that drops a test only when `collectonly` is false still defeats `census`. `census` buys exactness against an honest suite; the two changes above buy visibility against a dishonest one. Neither buys integrity, and no diff-shaped check will.
+2. **Gates are executed from a host-supplied copy**, at `base_sha` for a task's cell and at `new_base_sha` for `reverify`'s, never from `/work`. Consequence, stated so it does not read as a bug: a task whose job is to change a gate is judged by the pre-change gate, and the new gate takes effect for the next task.
+3. **`committed`**, in the gate-role table at `:621-632` beside `scope`, `integrity` and `census`.
+4. **The residual:** a committed `conftest.py` that drops a test only when `collectonly` is false still defeats `census`. `census` buys exactness against an honest suite; the gate source and the dirty-tree rule buy visibility against a dishonest one. Neither buys integrity, and no diff-shaped check will.
+5. **One sentence on §2.1's "seam to watch" (`DESIGN.md:150`)**: `dirty_paths` widens core's in-cell git surface, and the boundary holds only because the gate itself stays a pure function over a list of paths.
 
 - [ ] **Step 3: §5.7 — the base, and the rebase wording**
 
-The base is the head of the remote's default branch as of task start. And one sentence saying step 1's "rebase" is the intent while the v1 subsection's `git apply --3way` is the mechanism — the document never says so, and a reader meeting them in order thinks one contradicts the other.
+The base is the head of the remote's default branch as of task start. And one sentence saying step 1's "rebase" is the intent while the v1 subsection's `git apply --3way` is the mechanism.
 
 - [ ] **Step 4: Appendix N, and the status line**
 
-Bump the rev on `DESIGN.md:5` following the existing format, and write the appendix narrating what building this found. The convention every prior rev follows: what was measured, what it corrected, and any numbered principle it earned. At minimum it records the two things the spec found that the backlog did not — `github_slug` taking the host as the owner on a one-segment URL, and the baseline/head gate drift at `session.py:607` that pinning gates closes as a side effect.
+Bump `DESIGN.md:5` following the existing format. The appendix records what building this found, at minimum:
+
+- `github_slug` takes the **host** as the owner on a one-segment URL — three of five real inputs wrong, not the two item 11 names.
+- The baseline/head gate drift at `session.py:607`, which pinning gates closes as a side effect and which is the stronger of the two reasons for doing it.
+- `reverify` had its own cell, its own `prepare_worktree`, and its own `WORKTREE_MOUNT` gate paths — a second copy of the same seam, found by review rather than by running.
+- `branch` was already recorded at insert time; only `pushed_sha` was missing. Item 11 overstated it.
 
 - [ ] **Step 5: Close items 11 and 12**
 
-Mark both **done** in `docs/BACKLOG.md` the way items 1 and 3 are: what shipped, and what turned out to be wrong about the item itself — measured, not re-reasoned. Item 11's "two-segment GitHub URL" description undercounts the failure, and item 12's framing of the two halves as independent is right but omits the baseline drift, which is the stronger reason for half (a).
+Mark both **done** in `docs/BACKLOG.md` the way items 1 and 3 are: what shipped, and what turned out to be wrong about the item itself — measured, not re-reasoned. Item 11's "two-segment GitHub URL" undercounts the failure and its branch/`pushed_sha` claim is half true; item 12's two halves are right but omit both the baseline drift and `reverify`'s second copy of the seam.
 
 - [ ] **Step 6: Verify and commit**
 
@@ -1068,10 +1126,12 @@ git commit -m "docs(design): the base and the gate runner are now stated, not in
 
 ---
 
-## Self-Review
+## Self-Review (revision 2)
 
-**Spec coverage.** Spec part 1 → Tasks 1, 2. Part 2 → Tasks 3, 4, 5. Part 2.1's baseline drift → closed by Task 4, recorded in Task 12. Part 3 → Tasks 6, 7. Part 4's residual → Task 10's `conftest.py` line and Task 12's §5.4 text. Part 5's four smalls → Tasks 8, 9, 10, and Task 12 step 3 for the rebase wording. Part 5's three test gaps → Task 11. Part 6 → Task 12. Part 7's three named tests → Tasks 5, 7, and Task 2's `needs_reverification` case, which is covered by Task 2's test asserting the base equals the remote head; if `package()` has no direct assertion that re-verification is skipped when nothing moved, add it to Task 9's file while it is open.
+**Spec coverage.** Part 1 → Tasks 1, 2. Part 2 → Tasks 3, 4, 5. Part 2.1's baseline drift → Task 4, recorded in Task 12. Part 3 → Tasks 6, 7. Part 4's residual → Task 10 and Task 12 step 2. Part 5's four smalls → Task 8, Task 9, Task 4 (`reverify`'s `thread_env`), Task 12 step 3 (the rebase wording). Part 5's three test gaps → Task 11. Part 6 → Task 12. Part 7's three named tests → Tasks 5, 7, and Task 2.
 
-**Type consistency.** `export_gates` returns `dest` (the directory holding `.saffron/gates/`) in Task 3 and is mounted as `gates_dir` in Task 4, so `policy.gate_executables(Path("/gates"))` resolves to `/gates/.saffron/gates/<name>` — `policy.py` is untouched. `dirty_paths` returns `list[str]` in Task 6 and is consumed as `list[str]` by `committed_gate`. `fetch_default_branch` returns `(branch, head)` in Task 1 and is unpacked as `_, base_sha` in Task 2.
+**Where `make check` is green at each commit.** Task 2 repoints the three `test_cli.py` stubs *before* changing `cli.py`, so its own step 1 is green. Task 4 fixes all seven `prepare_worktree` call sites and extends `_stub_the_runtime` in the same commit as the required argument. Task 6 extends the stub again for `dirty_paths`. No task is left red.
 
-**Known soft spots, flagged rather than papered over.** Task 9's ledger accessor and Task 11's field names are written from the backlog's prose; the code is authoritative and the steps say so. Task 7 tests a claim rather than new code — if it fails, that is a finding about `repair_decision`, not a test to adjust.
+**Type consistency.** `export_gates` returns `dest` (the directory holding `.saffron/gates/`) in Task 3, mounted as `gates_dir` in Task 4, so `gate_executables(Path("/gates"))` gives `/gates/.saffron/gates/<name>` — `policy.py` untouched. `dirty_paths -> list[str]` feeds `committed_gate(dirty: list[str])`. `fetch_default_branch -> (branch, head)` is unpacked as `_, base_sha`. `record_push(task_id, pushed_sha)` writes the column `queue_lines()` already reads.
+
+**Soft spots that remain, flagged rather than papered over.** Task 9's `package()` fixture shape and Task 11's exact column counts are to be read off the test files at execution time, not guessed. Task 5's cell test needs helpers that do not exist yet and must be written against `_seed_repo` and the `network` fixture. Task 7 tests a claim rather than new code — if it fails, that is a finding about `repair_decision`.
