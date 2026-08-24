@@ -469,7 +469,6 @@ def _drive_cell(
     from saffron.gates.core.scope import scope_gate
     from saffron.gates.runner import CellExecutor, run_suite
     from saffron.repos import image
-    from saffron.repos import mirror as mirror_ops
     from saffron.repos.policy import load_policy
 
     # R2: policy is read from the host repo to learn gate *names* and to keep
@@ -567,7 +566,9 @@ def _drive_cell(
         # Exported before the cell exists: the mount source has to be there when
         # the container is created.
         task_dir.mkdir(parents=True, exist_ok=True)
-        gates_dir = mirror_ops.export_gates(mirror, spec.base_sha, task_dir / "gates")
+        gates_dir = package.export_gates_for(
+            mirror, spec.base_sha, task_dir / "gates", policy
+        )
         # The state volume and the container are recorded inside, each against
         # its own create: an ephemeral seed container runs between them.
         worktree.prepare_worktree(
