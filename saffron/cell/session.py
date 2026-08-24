@@ -598,15 +598,18 @@ def _drive_cell(
             """
             changed = worktree.changed_files(container, spec.base_sha)
             diff = worktree.export_patch(container, spec.base_sha)
+            # Declared gates run before dirty_paths is read, on both calls: an
+            # artifact a gate writes (.coverage, a build dir) then shows up on
+            # baseline and head alike, and the subtraction cancels it.
+            declared = run_suite(gates, cwd=repo, executor=executor)
+            committed = committed_gate(worktree.dirty_paths(container))
             results = [
                 # The diff goes with the paths: it is what proves the export the
                 # reviewer will read still has the shape the host pinned.
                 scope_gate(changed, spec.touches, diff=diff),
                 integrity_gate(diff, policy.integrity, spec.touches),
-                # Read before run_suite, so only this call's artifacts are safe:
-                # baseline's own leftovers persist into head's committed_gate.
-                committed_gate(worktree.dirty_paths(container)),
-                *run_suite(gates, cwd=repo, executor=executor),
+                *declared,
+                committed,
             ]
             # Last, and given the whole suite: it reads `collected` off whatever
             # gate reported it, which means it has to run after them (§5.4).

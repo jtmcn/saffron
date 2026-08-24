@@ -625,6 +625,32 @@ def test_a_green_run_leaves_the_patch_behind(monkeypatch, tmp_path):
     }
 
 
+def test_dirty_paths_is_read_after_run_suite_on_both_calls(monkeypatch, tmp_path):
+    """A gate that writes an uncommitted artifact (`.coverage`, a build dir)
+    must show up on baseline and head alike, or `committed` reports it only at
+    head with nothing on the other side for the subtraction to cancel (§5.4)."""
+    cell = _stub_the_runtime(monkeypatch)
+    order: list[str] = []
+
+    def _run_suite(*_a, **_k):
+        order.append("run_suite")
+        return []
+
+    def _dirty_paths(_container):
+        order.append("dirty_paths")
+        return []
+
+    monkeypatch.setattr("saffron.gates.runner.run_suite", _run_suite)
+    monkeypatch.setattr("saffron.cell.worktree.dirty_paths", _dirty_paths)
+
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    # One suite call apiece for the baseline and the (green) first attempt.
+    assert order == ["run_suite", "dirty_paths", "run_suite", "dirty_paths"]
+
+
 def test_a_run_that_never_went_green_still_exports_its_commits(monkeypatch, tmp_path):
     """§5.4 calls EXHAUSTED a respectable outcome — green-only export would
     throw away exactly the runs worth reading."""
