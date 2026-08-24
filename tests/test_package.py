@@ -177,13 +177,22 @@ def test_export_gates_for_skips_the_export_when_no_gates_are_declared(tmp_path):
     """`gates: {}` is a valid policy.yaml, and a repo onboarding incrementally
     may not have `.saffron/gates` at all yet — `git archive` would fail on
     the unmatched pathspec. `prepare_worktree` still needs a real directory
-    to mount, so `dest` must exist even though nothing was exported."""
+    to mount, so `dest` must exist even though nothing was exported.
+
+    And it is cleared, not merely created: `reverify`'s dest is keyed by
+    `spec.id` and outlives a run, so a repo that drops its last gate must not
+    keep mounting the previous run's executables at `/gates`."""
     dest = tmp_path / "gates-out"
+    stale = dest / ".saffron" / "gates" / "tests"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("#!/bin/sh\necho lying\n")
+
     result = export_gates_for(
         tmp_path / "mirror.git", "deadbeef", dest, SimpleNamespace(gates={})
     )
     assert result == dest
     assert dest.is_dir()
+    assert not stale.exists()
 
 
 def test_export_gates_for_still_exports_a_declared_gate(monkeypatch, tmp_path):

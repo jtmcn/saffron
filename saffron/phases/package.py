@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -161,8 +162,13 @@ def export_gates_for(mirror: Path, sha: str, dest: Path, policy) -> Path:
     infrastructure fault. `prepare_worktree` still needs a real directory to
     mount, empty or not, so the guard is here rather than in `export_gates`
     itself: a *declared* gate missing from the export must stay a hard error.
+
+    Cleared first, exactly as `export_gates` does: `reverify`'s dest is keyed by
+    `spec.id` and outlives one run, so a repo that drops its last gate would
+    otherwise keep mounting the previous run's executables at `/gates`.
     """
     if not policy.gates:
+        shutil.rmtree(dest, ignore_errors=True)
         dest.mkdir(parents=True, exist_ok=True)
         return dest
     return mirror_ops.export_gates(mirror, sha, dest)
