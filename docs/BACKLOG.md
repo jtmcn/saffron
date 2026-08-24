@@ -737,6 +737,34 @@ of the fix, not a new mechanism.
 
 ---
 
+## 14. `committed` fails on build artifacts a repo does not gitignore
+
+`dirty_paths` is read after the declared suite on both calls so that an artifact
+a gate writes lands on baseline and head alike and `subtract_baseline` cancels it
+(§5.4). The cancellation is by identity — `(gate, file, code, message)` — so it
+only reaches artifacts whose **paths** match on both sides.
+
+A head-only path has nothing to cancel against. The task adds `src/newmod.py`; the
+head `tests` gate compiles it and leaves `src/__pycache__/newmod.cpython-312.pyc`,
+which the baseline never had. `committed` fails, the repair turn says *changed but
+not committed — fix these and commit*, the agent commits the artifact, and `scope`
+then fails it as a path outside `touches`. The attempts burn out and the run ends
+`EXHAUSTED` on a diff that was green. `.coverage.<host>.<pid>.<rand>` and
+`.mypy_cache/<module>.meta.json` are the same shape.
+
+Saffron's own `.gitignore` covers all three, which is why nothing here caught it;
+an onboarded repo whose ignores are looser is not covered.
+
+**Done looks like:** the repo declaring its build output, since which paths are
+artifacts is language knowledge §2.1 keeps out of core — `.gitignore` is already
+that declaration and `git status --porcelain` already honours it, so onboarding
+documentation stating the requirement may be the whole fix. If it is not, the
+narrower mechanism is `committed` ignoring untracked paths that the baseline call
+also produced *by directory* rather than by path — which is a second identity rule
+sitting next to the subtraction's, and CLAUDE.md warns against making those match.
+
+---
+
 ## What is *not* here, deliberately
 
 DIAGNOSE and `SCOPE_REVIEW`, the scheduler's conflict sets and stacking, `saffron

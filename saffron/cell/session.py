@@ -605,6 +605,8 @@ def _drive_cell(
             # Declared gates run before dirty_paths is read, on both calls: an
             # artifact a gate writes (.coverage, a build dir) then shows up on
             # baseline and head alike, and the subtraction cancels it.
+            # ponytail: cancelled by identity, so a head-only artifact (a .pyc
+            # for a file the task added) needs the repo's .gitignore — item 14.
             declared = run_suite(gates, cwd=repo, executor=executor)
             committed = committed_gate(worktree.dirty_paths(container))
             results = [
