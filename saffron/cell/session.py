@@ -482,8 +482,11 @@ def _drive_cell(
 
     # §4.1: `origin` is the real remote, `mirror_path` the local mirror. v0
     # stored the mirror's source in both, so nothing downstream knew where a
-    # pull request would go. A repo with no origin is still runnable — it just
-    # cannot be packaged, and PACKAGE is what says so.
+    # pull request would go. `cli._run_cell` now calls `real_remote` itself to
+    # get `base_sha`, before a `CellSpec` exists, so a repo with no origin
+    # exits 2 there rather than reaching this cell. The fallback stays for a
+    # caller of `run_one_cell` that skips that path — it should still get a
+    # runnable, unpackageable cell rather than a crash.
     from saffron.phases import package
 
     try:
