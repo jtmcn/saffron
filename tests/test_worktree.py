@@ -6,7 +6,9 @@ from pathlib import Path
 import pytest
 
 from saffron.cell import proxy, runtime, worktree
+from saffron.gates.runner import CellExecutor, run_gate
 from saffron.repos import image
+from saffron.repos import mirror as mirror_ops
 from tests.test_proxy import reach
 
 NETWORK = "saffron-test-wt-cells"
@@ -123,6 +125,93 @@ def test_a_worktree_is_cloned_into_a_volume_and_the_cell_can_commit(tmp_path, ne
             assert refused.returncode != 0, f"{target} accepted a write"
             assert "read-only" in refused.stderr.lower(), refused.stderr
         assert runtime.exec_(container, ["cat", gate]).stdout == readable.stdout
+    finally:
+        runtime.remove_container(container)
+        runtime.remove_volume(volume)
+        runtime.remove_volume(f"{volume}-state")
+
+
+@pytest.mark.cell
+def test_a_gate_edited_inside_the_cell_never_runs(tmp_path, network):
+    """The read-only mount (above) is only half the claim. The other half is
+    that `run_gate` actually executes the host-exported gate rather than
+    whatever the worktree now holds, even after the cell commits a lying one
+    at the identical path (§5.4)."""
+    origin = tmp_path / "origin"
+    base = _seed_repo(origin)
+    gates = origin / ".saffron" / "gates"
+    gates.mkdir(parents=True)
+    (gates / "demo").write_text(
+        '#!/bin/sh\nprintf \'{"gate":"demo","status":"pass","tool":"honest 1.0"}\\n\'\n'
+    )
+    (gates / "demo").chmod(0o755)
+    subprocess.run(["git", "add", "-A"], cwd=origin, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "add demo gate"],
+        cwd=origin,
+        check=True,
+        capture_output=True,
+    )
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=origin, capture_output=True, text=True
+    ).stdout.strip()
+
+    mirror = tmp_path / "m.git"
+    subprocess.run(
+        ["git", "clone", "--bare", "-q", str(origin), str(mirror)], check=True
+    )
+    gates_dir = mirror_ops.export_gates(mirror, base, tmp_path / "gates-out")
+
+    volume, container = "saffron-test-wt4", "saffron-test-cell4"
+    runtime.remove_volume(volume)
+    runtime.remove_volume(f"{volume}-state")
+    runtime.create_volume(volume)
+    runtime.remove_container(container)
+    try:
+        worktree.prepare_worktree(
+            mirror=mirror,
+            volume=volume,
+            base_sha=base,
+            branch="saffron/test",
+            image=image.BASE_TAG,
+            container=container,
+            network=network,
+            env={},
+            gates_dir=gates_dir,
+        )
+
+        # The agent's move: rewrite the gate in the worktree and commit, so no
+        # diff-reading gate can tell it from ordinary work. Heredoc, not a
+        # nested-quote one-liner: POSIX sh has no backslash escape inside
+        # single quotes.
+        runtime.exec_(
+            container,
+            [
+                "sh",
+                "-euc",
+                """
+cd /work
+cat > .saffron/gates/demo <<'GATE'
+#!/bin/sh
+printf '{"gate":"demo","status":"pass","tool":"lying 9.9"}\\n'
+GATE
+chmod +x .saffron/gates/demo
+git add -A && git commit -qm 'tune the gate'
+""",
+            ],
+        )
+        # The edit must have landed, or the assertion below proves nothing.
+        landed = runtime.exec_(container, ["cat", "/work/.saffron/gates/demo"])
+        assert "lying" in landed.stdout, landed.stdout
+
+        result = run_gate(
+            "demo",
+            Path(worktree.GATES_MOUNT) / ".saffron" / "gates" / "demo",
+            cwd=tmp_path,
+            executor=CellExecutor(container),
+        )
+        assert result.tool == "honest 1.0"
+        assert result.status == "pass"
     finally:
         runtime.remove_container(container)
         runtime.remove_volume(volume)
