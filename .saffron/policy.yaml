@@ -31,6 +31,15 @@ integrity:
     ["@pytest.mark.skip", "pytest.skip(", "xfail", "# type: ignore", "# noqa"]
   # Collection runs in the repo's own Python, so `census` cannot see a conftest
   # that hides a test from the runner. This routes the edit to a person.
-  gate_config: ["pyproject.toml", ".saffron/**", "**/conftest.py"]
+  # ruff.toml/.ruff.toml take precedence over pyproject.toml's [tool.ruff] and
+  # can silence lint/format outright — same family, routed the same way.
+  gate_config:
+    [
+      "pyproject.toml",
+      ".saffron/**",
+      "**/conftest.py",
+      "**/ruff.toml",
+      "**/.ruff.toml",
+    ]
 
 thread_env: {}

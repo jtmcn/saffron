@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import subprocess
 
+import pytest
+
 from saffron.cell import runtime, worktree
 from saffron.gates.core.integrity import integrity_gate
 from saffron.repos.policy import IntegrityPatterns
@@ -96,14 +98,32 @@ def test_a_gate_config_edit_the_spec_declared_is_exempt(tmp_path):
     assert integrity_gate(diff, PATTERNS, touches=["pyproject.toml"]).status == "pass"
 
 
-def test_a_conftest_edit_is_gate_config(tmp_path):
-    """`census` cannot see a conftest that lies to `--collect-only`; `integrity`
-    routes it to a person."""
+@pytest.mark.parametrize(
+    "path",
+    [
+        "tests/conftest.py",
+        "conftest.py",
+        "ruff.toml",
+        "sub/ruff.toml",
+        ".ruff.toml",
+        "sub/.ruff.toml",
+    ],
+)
+def test_an_untracked_gate_config_edit_is_gate_config(tmp_path, path):
+    """`census` cannot see a conftest that lies to `--collect-only`, and
+    ruff.toml/.ruff.toml silence `lint`/`format` outright — `integrity` routes
+    both, at root or any depth, to a person."""
     patterns = IntegrityPatterns(
-        gate_config=["pyproject.toml", ".saffron/**", "**/conftest.py"]
+        gate_config=[
+            "pyproject.toml",
+            ".saffron/**",
+            "**/conftest.py",
+            "**/ruff.toml",
+            "**/.ruff.toml",
+        ]
     )
-    run = _repo(tmp_path, {"tests/conftest.py": "x = 1\n"})
-    diff = _diff(tmp_path, run, {"tests/conftest.py": "x = 1\ny = 2\n"})
+    run = _repo(tmp_path, {path: "x = 1\n"})
+    diff = _diff(tmp_path, run, {path: "x = 1\ny = 2\n"})
     result = integrity_gate(diff, patterns, touches=[])
     assert result.status == "fail"
     assert any(f.code == "gate-config-changed" for f in result.failures)
