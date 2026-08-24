@@ -107,15 +107,21 @@ def test_a_gate_config_edit_the_spec_declared_is_exempt(tmp_path):
         "sub/ruff.toml",
         ".ruff.toml",
         "sub/.ruff.toml",
+        "pyproject.toml",
+        # Measured: a nested pyproject.toml carrying `[tool.ruff] exclude`
+        # takes `ruff check .` from an error to "All checks passed!" at exit 0,
+        # the same silencing a dropped ruff.toml buys. The bare `pyproject.toml`
+        # pattern this list used to carry never reached it.
+        "sub/pyproject.toml",
     ],
 )
 def test_an_untracked_gate_config_edit_is_gate_config(tmp_path, path):
     """`census` cannot see a conftest that lies to `--collect-only`, and
-    ruff.toml/.ruff.toml silence `lint`/`format` outright — `integrity` routes
-    both, at root or any depth, to a person."""
+    ruff.toml/.ruff.toml/pyproject.toml silence `lint`/`format` outright —
+    `integrity` routes them, at root or any depth, to a person."""
     patterns = IntegrityPatterns(
         gate_config=[
-            "pyproject.toml",
+            "**/pyproject.toml",
             ".saffron/**",
             "**/conftest.py",
             "**/ruff.toml",
