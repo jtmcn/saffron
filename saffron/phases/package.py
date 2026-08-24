@@ -546,8 +546,8 @@ def package(
     base_sha = json.loads((outcome.task_dir / "patch.json").read_text())["base_sha"]
     url = real_remote(repo)
     slug = github_slug(url)
-    # Before the fetch, not after: the fetch writes the object store this
-    # reads, and would otherwise supply the very objects it is checking for.
+    # Stays ahead of the fetch: the fetch writes the object store this reads,
+    # and would otherwise supply the very objects it is checking for.
     assert_base_objects(mirror, base_sha)
     default, fetch_head = fetch_default_branch(mirror, url)
 
