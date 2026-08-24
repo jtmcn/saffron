@@ -711,6 +711,32 @@ identical look ends the attempt on the no-progress rule.
 
 ---
 
+## 13. Gate executables come from `base_sha`; the policy declaring them still comes from the working copy
+
+The same asymmetry item 11 raised for a task's base, in a second place, left
+half-closed by the fix that closed the first. `session.py` calls
+`load_policy(repo)` — reading and validating `.saffron/policy.yaml` and the
+gate executables in the operator's working copy — then resolves
+`gate_executables(Path("/gates"))` against `export_gates`'s archive of
+`base_sha`, the remote's default-branch head. Before this branch those were
+the same tree; now they can diverge on any branch that touches `.saffron/`.
+
+Two concrete consequences. An operator on a branch that adds a gate role gets
+a `PREFLIGHT_FAILED` whose watch line reads *"the toolchain is broken, not the
+code"* — a wrong diagnosis for a policy/export mismatch, not an infrastructure
+failure. And `policy_sha` in the ledger names the working-copy policy rather
+than the one that actually governed the exported gates, so the ledger's record
+of what ran is not the record of what was declared.
+
+**Done looks like:** `load_policy` reading from the same export
+`gate_executables` already resolves against, rather than from `repo`.
+`export_gates` already archives a subtree with `git archive <sha> .saffron`;
+loading policy from that archive — `git archive <sha> .saffron` plus
+`load_policy` pointed at the export instead of the working copy — is the shape
+of the fix, not a new mechanism.
+
+---
+
 ## What is *not* here, deliberately
 
 DIAGNOSE and `SCOPE_REVIEW`, the scheduler's conflict sets and stacking, `saffron
