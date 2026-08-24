@@ -96,6 +96,19 @@ def test_a_gate_config_edit_the_spec_declared_is_exempt(tmp_path):
     assert integrity_gate(diff, PATTERNS, touches=["pyproject.toml"]).status == "pass"
 
 
+def test_a_conftest_edit_is_gate_config(tmp_path):
+    """`census` cannot see a conftest that lies to `--collect-only`; `integrity`
+    routes it to a person."""
+    patterns = IntegrityPatterns(
+        gate_config=["pyproject.toml", ".saffron/**", "**/conftest.py"]
+    )
+    run = _repo(tmp_path, {"tests/conftest.py": "x = 1\n"})
+    diff = _diff(tmp_path, run, {"tests/conftest.py": "x = 1\ny = 2\n"})
+    result = integrity_gate(diff, patterns, touches=[])
+    assert result.status == "fail"
+    assert any(f.code == "gate-config-changed" for f in result.failures)
+
+
 def test_a_deleted_test_is_not_this_gate_s_business(tmp_path):
     """`census` owns removal. A diff-reading gate answering it was wrong three
     times in three different ways (Appendix M, principle 52)."""
