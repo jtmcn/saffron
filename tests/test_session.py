@@ -1419,6 +1419,45 @@ def test_a_verdict_lands_on_the_finding_the_review_recorded(monkeypatch, tmp_pat
     assert (row["verdict"], row["rebuttal"]) == ("withdrawn", "argued: by design")
 
 
+def test_a_successful_outcome_carries_its_attempts_failures_reviews_and_rebuttal(
+    monkeypatch, tmp_path
+):
+    """No test exercises these four on `CellOutcome`'s success path."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_through_rebut(
+            _turn("It is intentional."),
+            _turn(
+                _block(
+                    {
+                        "rebuttals": [
+                            {"finding": 1, "action": "argued", "argument": "by design"}
+                        ]
+                    }
+                )
+            ),
+            _turn(
+                _block(
+                    {
+                        "verdicts": [
+                            {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                        ]
+                    }
+                )
+            ),
+        ),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert outcome.attempts >= 1
+    assert outcome.new_failures == []
+    assert outcome.reviews
+    assert outcome.rebut_result is not None
+
+
 def test_a_rebuttal_numbered_badly_records_the_answer_that_was_asked_for(
     monkeypatch, tmp_path
 ):
