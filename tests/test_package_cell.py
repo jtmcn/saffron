@@ -72,7 +72,11 @@ def test_the_reverification_cell_carries_no_credential(tmp_path, monkeypatch):
 
     monkeypatch.setattr("saffron.cell.worktree.prepare_worktree", spy)
     mirror = mirror_ops.ensure_mirror(SAFFRON_ROOT, tmp_path / "m.git")
-    policy, _ = load_policy(SAFFRON_ROOT)
+    # Marked, because this repo's own `thread_env` is empty: against `{}` the
+    # equality below passes whether the declared env was forwarded or dropped,
+    # and would not notice `cell_env` being wired in here by mistake.
+    loaded, _ = load_policy(SAFFRON_ROOT)
+    policy = loaded.model_copy(update={"thread_env": {"SAFFRON_GATE_ENV": "1"}})
     with pytest.raises(RuntimeError):
         reverify(
             mirror=mirror,
@@ -83,7 +87,9 @@ def test_the_reverification_cell_carries_no_credential(tmp_path, monkeypatch):
             image="unused",
             watch=lambda _: None,
         )
-    assert seen["env"] == dict(policy.thread_env)
+    # Exact: the declared gate env and nothing else. `cell_env` would add
+    # CLAUDE_CONFIG_DIR and the proxy variables, and fail here.
+    assert seen["env"] == {"SAFFRON_GATE_ENV": "1"}
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in seen["env"]
     assert seen["network"]
     # The gates the cell runs are the host's export, never the applied tree's.
