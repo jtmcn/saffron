@@ -603,8 +603,8 @@ def _drive_cell(
                 # reviewer will read still has the shape the host pinned.
                 scope_gate(changed, spec.touches, diff=diff),
                 integrity_gate(diff, policy.integrity, spec.touches),
-                # Read before run_suite: a test runner can leave artifacts in
-                # /work that would then read as an uncommitted change.
+                # Read before run_suite, so only this call's artifacts are safe:
+                # baseline's own leftovers persist into head's committed_gate.
                 committed_gate(worktree.dirty_paths(container)),
                 *run_suite(gates, cwd=repo, executor=executor),
             ]
