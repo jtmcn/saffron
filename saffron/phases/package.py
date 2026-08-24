@@ -28,7 +28,9 @@ from saffron.report import pr_body
 from saffron.report.pr_body import neutralize
 from saffron.repos import mirror as mirror_ops
 
-_SLUG = re.compile(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$")
+# Anchored on the forge host, not on "the last two segments": the old pattern
+# read a local path as `Code/saffron` and a one-segment URL as `host/repo`.
+_SLUG = re.compile(r"(?:^|[@/.])github\.com[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$")
 
 APPLY_OK = "ok"
 APPLY_CONFLICT = "conflict"
@@ -83,7 +85,11 @@ def real_remote(repo: Path) -> str:
 
 
 def github_slug(url: str) -> str:
-    """`owner/repo`, from either URL shape git writes."""
+    """`owner/repo`, from either URL shape git writes — or a refusal.
+
+    Guessing is worse than failing: the slug reaches `gh`, and a plausible
+    wrong one names a repository that does not exist.
+    """
     if not (found := _SLUG.search(url)):
         raise PackageError(f"cannot read owner/repo out of {url!r}")
     return f"{found.group(1)}/{found.group(2)}"

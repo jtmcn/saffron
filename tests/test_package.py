@@ -83,6 +83,21 @@ def test_both_url_shapes_yield_the_same_slug(url, slug):
     assert github_slug(url) == slug
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "/Users/joel/Code/saffron",  # measured: -> "Code/saffron"
+        "git@gitlab.com:group/owner/repo.git",  # measured: -> "owner/repo"
+        "https://example.com/repo",  # measured: -> "example.com/repo"
+    ],
+)
+def test_github_slug_refuses_what_is_not_a_forge_remote(url):
+    """A wrong slug reaches `gh` as a repository that cannot exist, and a
+    local-path origin is exactly what session.py falls back to."""
+    with pytest.raises(PackageError):
+        github_slug(url)
+
+
 def test_a_repo_with_no_origin_fails_clearly(tmp_path):
     """Every fresh `git init` and every test fixture is this case."""
     repo = tmp_path / "lonely"
@@ -512,8 +527,9 @@ def _cell_outcome(task_dir, task_id, run_id):
 def test_a_conflict_persists_merge_failed_and_pushes_nothing(tmp_path):
     """Asserting the state alone would pass against an implementation that
     pushed conflict markers first, so this asserts the remote too."""
-    # A "real remote", and a local repo whose origin points at it.
-    remote = tmp_path / "remote.git"
+    # A "real remote", and a local repo whose origin points at it. Nested
+    # under github.com/o/r.git so the tightened github_slug still reads it.
+    remote = tmp_path / "github.com" / "o" / "r.git"
     git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
     work = tmp_path / "work"
     work.mkdir()
@@ -600,7 +616,8 @@ def packageable(tmp_path):
     """A green cell's patch, a mirror, and a remote whose default branch has
     not moved — so PACKAGE runs its whole path and re-verification is provably
     redundant (no cell, no container, anywhere in these tests)."""
-    remote = tmp_path / "remote.git"
+    # Nested under github.com/o/r.git so the tightened github_slug reads it.
+    remote = tmp_path / "github.com" / "o" / "r.git"
     git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
     work = tmp_path / "work"
     work.mkdir()
