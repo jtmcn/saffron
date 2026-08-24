@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
-import subprocess
 from pathlib import Path
 
 from saffron.cell.session import CellSpec, run_one_cell
@@ -111,12 +110,11 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     mirror = git_mirror.ensure_mirror(
         repo, args.home / "mirrors" / f"{repo.name}-{digest}.git"
     )
-    base_sha = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
+    # The remote's default-branch head, not the invoking checkout's: a task's
+    # base must not depend on where the operator was standing (§5.7).
+    _, base_sha = package_phase.fetch_default_branch(
+        mirror, package_phase.real_remote(repo)
+    )
 
     cell_spec = CellSpec(
         spec_id=spec.id,

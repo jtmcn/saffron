@@ -1,11 +1,50 @@
 """The operator's only entry point, so it gets at least one end-to-end test."""
 
+import argparse
 import subprocess
 
+import pytest
+
+from saffron import cli
 from saffron.cell import session
 from saffron.cli import main
+from saffron.ledger import Ledger
 from saffron.phases import package
 from tests.test_replay import target  # noqa: F401 — a pytest fixture, used by name
+
+
+def _git(repo, *args):
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def _repo_with_commit(path):
+    path.mkdir()
+    _git(path, "init", "-q")
+    (path / "f.txt").write_text("a\n")
+    _git(path, "add", "-A")
+    _git(path, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "first")
+    return path
+
+
+def _rev_parse(repo, ref):
+    return _git(repo, "rev-parse", ref)
+
+
+def _namespace(repo, tmp_path):
+    spec = tmp_path / "SY-1.md"
+    spec.write_text(
+        "---\nid: SY-1\ntitle: One\ntype: feature\ntouches: ['src/**']\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    return argparse.Namespace(
+        repo=repo,
+        spec=spec,
+        home=tmp_path / "home",
+        budget=12.0,
+        max_attempts=4,
+    )
 
 
 def test_replay_from_the_command_line_lands_everything_under_home(
@@ -37,7 +76,11 @@ def test_the_exit_code_distinguishes_the_terminal_states(monkeypatch, tmp_path):
     )
     monkeypatch.setattr("saffron.repos.mirror.ensure_mirror", lambda repo, at: at)
     monkeypatch.setattr(
-        "subprocess.run", lambda *a, **k: type("P", (), {"stdout": "a" * 40})()
+        "saffron.phases.package.real_remote", lambda repo: "https://github.com/o/r.git"
+    )
+    monkeypatch.setattr(
+        "saffron.phases.package.fetch_default_branch",
+        lambda mirror, url: ("main", "a" * 40),
     )
 
     # PACKAGE is wired in behind READY_FOR_REVIEW and has its own tests; what
@@ -87,7 +130,11 @@ def test_a_setup_failure_before_the_cell_exits_two_as_well(monkeypatch, tmp_path
     )
     monkeypatch.setattr("saffron.repos.mirror.ensure_mirror", lambda repo, at: at)
     monkeypatch.setattr(
-        "subprocess.run", lambda *a, **k: type("P", (), {"stdout": "a" * 40})()
+        "saffron.phases.package.real_remote", lambda repo: "https://github.com/o/r.git"
+    )
+    monkeypatch.setattr(
+        "saffron.phases.package.fetch_default_branch",
+        lambda mirror, url: ("main", "a" * 40),
     )
     argv = ["--home", str(tmp_path / "home"), "cell", str(spec)]
 
@@ -134,7 +181,11 @@ def test_a_package_that_fails_and_one_that_breaks_exit_differently(
     )
     monkeypatch.setattr("saffron.repos.mirror.ensure_mirror", lambda repo, at: at)
     monkeypatch.setattr(
-        "subprocess.run", lambda *a, **k: type("P", (), {"stdout": "a" * 40})()
+        "saffron.phases.package.real_remote", lambda repo: "https://github.com/o/r.git"
+    )
+    monkeypatch.setattr(
+        "saffron.phases.package.fetch_default_branch",
+        lambda mirror, url: ("main", "a" * 40),
     )
     monkeypatch.setattr(
         cli,
@@ -159,3 +210,40 @@ def test_a_package_that_fails_and_one_that_breaks_exit_differently(
 
     monkeypatch.setattr(cli.package_phase, "package", _broke)
     assert cli.main(argv) == 2
+
+
+def test_the_base_is_the_remote_default_branch_not_the_checkout(tmp_path, monkeypatch):
+    """A task started from a feature branch is still cut from the default branch.
+
+    The property §4.2 needs: a task's base must not depend on where the
+    operator was standing.
+    """
+    repo = _repo_with_commit(tmp_path / "repo")
+    default_head = _rev_parse(repo, "HEAD")
+    # The bare clone MUST be taken before the branch switch: `git clone --bare`
+    # copies the source's HEAD, and `default_branch` reads that symref.
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(repo), str(remote)], check=True)
+    _git(repo, "remote", "add", "origin", str(remote))
+
+    _git(repo, "checkout", "-q", "-b", "joel/feature")
+    (repo / "extra.txt").write_text("local only\n")
+    _git(repo, "add", "-A")
+    _git(
+        repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "local only"
+    )
+    assert _rev_parse(repo, "HEAD") != default_head
+
+    captured: dict[str, str] = {}
+
+    def _capture(cell_spec, **kwargs):
+        captured["base_sha"] = cell_spec.base_sha
+        raise SystemExit(0)
+
+    monkeypatch.setattr("saffron.cli.run_one_cell", _capture)
+    with pytest.raises(SystemExit):
+        cli._run_cell(
+            _namespace(repo, tmp_path), Ledger(tmp_path / "l.db"), tmp_path / "out"
+        )
+
+    assert captured["base_sha"] == default_head
