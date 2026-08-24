@@ -228,16 +228,18 @@ its patch no longer applies (see item 9).
 and cost on the task row.
 
 **Done, 2026-08-23.** All three, by hand; `SA-0003`'s stale patch was not
-reopened. Four things worth carrying forward.
+reopened, and two review rounds followed. What is worth carrying forward, in the
+order it was learned:
 
 **The column had no `REFERENCES`, and that is what made the convention
 possible.** `gate_results.attempt_id` was a bare `INTEGER`, so holding a
 `task_id` in it was not a shortcut the schema tolerated — it was one the schema
 could not see. It points at `attempts(attempt_id)` now, and the old convention
-is unrepresentable rather than merely discouraged. Two existing ledger tests
-asserted it directly and had to change; `SA-0003`'s "every existing test still
-passes unchanged" was written before it was clear that two of them encoded the
-defect.
+is unrepresentable rather than merely discouraged — though that took two more
+commits than the schema line, and this paragraph claimed it a round early
+(below). Two existing ledger tests asserted it directly and had to change;
+`SA-0003`'s "every existing test still passes unchanged" was written before it
+was clear that two of them encoded the defect.
 
 **Attempts are opened by wrapping the agent callable, not at the call sites.**
 `record_attempts` sits inside `stop_on_rejected`, so a turn the provider walled
@@ -270,10 +272,46 @@ v0.5 results reattach to whichever attempt draws id 1. Reproduced on a copy of
 this machine's own `~/.saffron/ledger.db`, which is exactly such a ledger.
 Nulling the legacy values out is not available: the `CHECK` that keeps exactly
 one of `attempt_id` and `run_id` set rejects a row with neither, on `UPDATE` as
-much as on insert. What ships is the backfill the old schema comment promised —
-one attempt row per legacy value, carrying that value as its own id, so the ids
-stay taken and nothing is lost or moved. Measured on that copy: five backfilled,
-zero dangling, every task still holding its own results.
+much as on insert. What shipped was the backfill the old schema comment promised
+— one attempt row per legacy value, carrying that value as its own id, so the
+ids stay taken and nothing is lost or moved. Measured on that copy: five
+backfilled, zero dangling, every task still holding its own results.
+
+**And the backfill protected the data without delivering the constraint.** A
+second review round found the paragraph above true only of a ledger created from
+scratch: `CREATE TABLE IF NOT EXISTS` is a no-op on an existing `gate_results`,
+and SQLite has no `ADD CONSTRAINT`, so on an upgraded ledger the column still
+read `attempt_id INTEGER` and a dangling `attempt_id` inserted silently. The
+test that was supposed to prove otherwise passed because its fixture builds a
+fresh file — the same shape of gap as the one this item exists to end, one level
+up: a check that reads as enforcement and is a convention. What ships now is
+SQLite's documented 12-step rebuild, after the backfill so every copied row
+already has an attempt to point at, `foreign_keys` off across it because
+`failures` references `gate_results`, which does not exist between the DROP and
+the RENAME.
+
+Dangling rows are copied in rather than refused. SQLite checks a reference when
+a row is written, not when it is rebuilt, so a `PRAGMA foreign_key_check` gate
+here is theatre: the rebuild has already committed by the time it runs, and the
+next open takes the early-return path and lets the row through anyway. The
+constraint governs what can be recorded from here on, which is what made the
+collision possible. Measured on the copy again: 49 gate results, 12 failures,
+5 tasks and 5 runs identical across the migration, a dangling write rejected.
+The rewrite happens on first open, so the ledger is worth copying aside before
+the next run.
+
+**Two more from that round, both in what the ledger is told.** `task_spend`
+selected `tasks.spent_usd_est`, which only `set_task_state` refreshes — correct
+only when a state change happened to precede it, which today's one caller
+arranges and a read from inside the repair loop would not. It sums `attempts`
+now; the column stays, because it is what `queue_lines` reports without a join.
+And the rebuttal write was lossy twice: `run_verdict` rejects a verdict set that
+is not exactly its own blockers, but nothing validates the *rebuttal* turn's
+numbering, so two entries for blocker 1 and none for blocker 2 left blocker 2
+reading as unanswered against an artifact that says otherwise. Validated at the
+write now. `Rebuttal.action` was dropped outright, which made a claimed fix and
+an argument indistinguishable in `findings.rebuttal` — the distinction §4.6's
+critic-ROI query is the whole reason for the column.
 
 Two smaller ones from the same review. `open_attempt` against a task that does
 not exist selected nothing and still returned `lastrowid` — an id that exists,
@@ -281,7 +319,7 @@ belongs to another attempt, and satisfies the foreign key; silent
 misattribution, which is the failure this item exists to end. And `RATE_LIMITED`
 was the one exit where the ledger and `CellOutcome` disagreed: the raise comes
 from outside the turn, so it lands past the `spent +=`. The outcome reads the
-roll-up now, which also closes the older gap where a window closing inside
+attempts back now, which also closes the older gap where a window closing inside
 `plan_checkpoint` lost the whole tally with its frame.
 
 Still open, by choice: `findings.adjudication` has no producer — it is the
