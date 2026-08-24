@@ -100,6 +100,23 @@ def default_branch(url: str, *, cwd: Path) -> str:
     raise PackageError(f"{url} reported no symbolic HEAD")
 
 
+def fetch_default_branch(mirror: Path, url: str) -> tuple[str, str]:
+    """The remote's default branch and its head, fetched into the mirror.
+
+    Both ends of §5.7 read this now, closing the asymmetry backlog item 11
+    named: the invoking checkout's HEAD at task start vs. the remote at
+    package time.
+    """
+    default = default_branch(url, cwd=mirror)
+    fetched = _run(mirror, "fetch", url, f"refs/heads/{default}")
+    if fetched.returncode != 0:
+        raise PackageError(f"cannot fetch {default} from {url}: {fetched.stderr[:200]}")
+    head = _run(mirror, "rev-parse", "FETCH_HEAD").stdout.strip()
+    if not head:
+        raise PackageError(f"{url} reported no head for {default}")
+    return default, head
+
+
 def assert_base_objects(mirror: Path, base_sha: str) -> None:
     """Refuse to apply against a mirror missing the patch's preimage.
 
@@ -482,13 +499,10 @@ def package(
     base_sha = json.loads((outcome.task_dir / "patch.json").read_text())["base_sha"]
     url = real_remote(repo)
     slug = github_slug(url)
-    default = default_branch(url, cwd=mirror)
-
+    # Before the fetch, not after: the fetch writes the object store this
+    # reads, and would otherwise supply the very objects it is checking for.
     assert_base_objects(mirror, base_sha)
-    fetched = _run(mirror, "fetch", url, f"refs/heads/{default}")
-    if fetched.returncode != 0:
-        raise PackageError(f"cannot fetch {default} from {url}: {fetched.stderr[:200]}")
-    fetch_head = _run(mirror, "rev-parse", "FETCH_HEAD").stdout.strip()
+    default, fetch_head = fetch_default_branch(mirror, url)
 
     scratch = out_dir / "package" / spec.id
     worktree_path = mirror_ops.add_worktree(mirror, fetch_head, scratch)

@@ -18,6 +18,7 @@ from saffron.phases.package import (
     assert_base_objects,
     commit_squash,
     default_branch,
+    fetch_default_branch,
     find_credentials,
     find_credentials_in_text,
     github_slug,
@@ -30,12 +31,26 @@ from saffron.phases.package import (
     remote_sha,
 )
 from saffron.phases.review import LensReview
+from saffron.repos.mirror import ensure_mirror
 
 
 def git(repo, *args):
     return subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
     ).stdout.strip()
+
+
+def _repo_with_commit(path):
+    path.mkdir()
+    git(path, "init", "-q")
+    (path / "f.txt").write_text("a\n")
+    git(path, "add", "-A")
+    git(path, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "first")
+    return path
+
+
+def _rev_parse(repo, ref):
+    return git(repo, "rev-parse", ref)
 
 
 @pytest.fixture
@@ -80,6 +95,32 @@ def test_a_repo_with_no_origin_fails_clearly(tmp_path):
 def test_the_default_branch_is_read_not_assumed(tmp_path, bare_remote):
     """Not hardcoded `main`: repo two need not resemble repo one (§9)."""
     assert default_branch(str(bare_remote), cwd=tmp_path) == "trunk"
+
+
+def test_fetch_default_branch_reports_the_remote_head(tmp_path):
+    """The head the mirror now holds, not the one the caller happened to have."""
+    origin = _repo_with_commit(tmp_path / "origin")
+    head = _rev_parse(origin, "HEAD")
+
+    mirror = ensure_mirror(origin, tmp_path / "mirror.git")
+    branch, fetched = fetch_default_branch(mirror, str(origin))
+
+    assert fetched == head
+    assert branch in ("main", "master")
+    # The object is in the mirror, which is what prepare_worktree needs.
+    assert (
+        subprocess.run(
+            ["git", "-C", str(mirror), "cat-file", "-e", f"{fetched}^{{tree}}"]
+        ).returncode
+        == 0
+    )
+
+
+def test_fetch_default_branch_refuses_an_unreachable_remote(tmp_path):
+    origin = _repo_with_commit(tmp_path / "origin")
+    mirror = ensure_mirror(origin, tmp_path / "mirror.git")
+    with pytest.raises(PackageError):
+        fetch_default_branch(mirror, str(tmp_path / "nowhere"))
 
 
 DIFF_FLAGS = [
