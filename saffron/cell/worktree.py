@@ -193,6 +193,25 @@ def read_at_head(container: str, path: str) -> str | None:
     return done.stdout if done.returncode == 0 else None
 
 
+def dirty_paths(container: str) -> list[str]:
+    """Paths with uncommitted changes, verbatim, untracked files included."""
+    done = _git(container, "status", "--porcelain", "-z", "--untracked-files=all")
+    if done.returncode != 0:
+        raise runtime.CellRuntimeError(f"status failed: {done.stderr.strip()}")
+    chunks = [chunk for chunk in done.stdout.split("\0") if chunk]
+    paths: list[str] = []
+    index = 0
+    while index < len(chunks):
+        entry = chunks[index]
+        index += 1
+        # A rename or copy emits a second NUL-terminated field — the source
+        # path — which is not itself an entry.
+        if "R" in entry[:2] or "C" in entry[:2]:
+            index += 1
+        paths.append(entry[3:])
+    return sorted(paths)
+
+
 def changed_files(container: str, base_sha: str) -> list[str]:
     """Changed paths, verbatim — they are matched against `touches`.
 

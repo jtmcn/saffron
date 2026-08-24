@@ -296,6 +296,42 @@ def test_the_cell_reaches_nothing_but_the_api(tmp_path, network):
         runtime.remove_volume(f"{volume}-state")
 
 
+@pytest.mark.cell
+def test_dirty_paths_sees_an_uncommitted_edit(tmp_path, network):
+    origin = tmp_path / "origin"
+    base = _seed_repo(origin)
+    mirror = tmp_path / "m.git"
+    subprocess.run(
+        ["git", "clone", "--bare", "-q", str(origin), str(mirror)], check=True
+    )
+    volume, container = "saffron-test-wt5", "saffron-test-cell5"
+    runtime.remove_volume(volume)
+    runtime.remove_volume(f"{volume}-state")
+    runtime.create_volume(volume)
+    runtime.remove_container(container)
+    try:
+        worktree.prepare_worktree(
+            mirror=mirror,
+            volume=volume,
+            base_sha=base,
+            branch="saffron/test",
+            image=image.BASE_TAG,
+            container=container,
+            network=network,
+            env={},
+            gates_dir=_gates_dir(tmp_path),
+        )
+        assert worktree.dirty_paths(container) == []
+        runtime.exec_(container, ["sh", "-c", "echo x >> /work/a.txt"])
+        assert "a.txt" in worktree.dirty_paths(container)
+        runtime.exec_(container, ["sh", "-c", "cd /work && touch brand-new.py"])
+        assert "brand-new.py" in worktree.dirty_paths(container)
+    finally:
+        runtime.remove_container(container)
+        runtime.remove_volume(volume)
+        runtime.remove_volume(f"{volume}-state")
+
+
 def test_a_failed_seed_leaves_no_container_in_the_leak_ledger(monkeypatch, tmp_path):
     """The seed is an *ephemeral* container between the two creates. Recording
     the cell's name before it reports a container nothing ever created, and

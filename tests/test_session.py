@@ -384,6 +384,7 @@ def _stub_the_runtime(
         return list(changed) if cell.turns else []
 
     monkeypatch.setattr("saffron.cell.worktree.changed_files", _changed_files)
+    monkeypatch.setattr("saffron.cell.worktree.dirty_paths", lambda container: [])
 
     def _commits_ahead(_container, sha):
         cell.measured_from = sha

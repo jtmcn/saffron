@@ -464,6 +464,7 @@ def _drive_cell(
     from saffron.agents import artifacts, context
     from saffron.cell import proxy, runtime, worktree
     from saffron.gates.core.census import census_gate
+    from saffron.gates.core.committed import committed_gate
     from saffron.gates.core.integrity import integrity_gate
     from saffron.gates.core.scope import scope_gate
     from saffron.gates.runner import CellExecutor, run_suite
@@ -602,6 +603,9 @@ def _drive_cell(
                 # reviewer will read still has the shape the host pinned.
                 scope_gate(changed, spec.touches, diff=diff),
                 integrity_gate(diff, policy.integrity, spec.touches),
+                # Read before run_suite: a test runner can leave artifacts in
+                # /work that would then read as an uncommitted change.
+                committed_gate(worktree.dirty_paths(container)),
                 *run_suite(gates, cwd=repo, executor=executor),
             ]
             # Last, and given the whole suite: it reads `collected` off whatever
