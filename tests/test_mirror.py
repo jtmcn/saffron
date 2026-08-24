@@ -1,3 +1,4 @@
+import os
 import subprocess
 
 import pytest
@@ -8,6 +9,7 @@ from saffron.repos.mirror import (
     changed_files,
     diff_stat,
     ensure_mirror,
+    export_gates,
     remove_worktree,
     resolve_pull_request,
 )
@@ -137,6 +139,35 @@ def test_a_missing_git_binary_surfaces_as_giterror(tmp_path, origin, monkeypatch
     # every other function goes through _git
     with pytest.raises(GitError):
         changed_files(mirror, "HEAD", "HEAD")
+
+
+def test_export_gates_takes_the_tree_at_the_sha(tmp_path, origin):
+    gates = origin / ".saffron" / "gates"
+    gates.mkdir(parents=True)
+    (gates / "tests").write_text("#!/bin/sh\necho honest\n")
+    (gates / "tests").chmod(0o755)
+    git(origin, "add", "-A")
+    git(origin, "commit", "-qm", "gates")
+    base = git(origin, "rev-parse", "HEAD")
+
+    (gates / "tests").write_text("#!/bin/sh\necho lying\n")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-qm", "a gate that lies")
+
+    mirror = ensure_mirror(origin, tmp_path / "mirror.git")
+    dest = export_gates(mirror, base, tmp_path / "gates-out")
+
+    exported = dest / ".saffron" / "gates" / "tests"
+    assert "honest" in exported.read_text()
+    assert "lying" not in exported.read_text()
+    # A gate that is not executable reads identically to one that is missing.
+    assert os.access(exported, os.X_OK)
+
+
+def test_export_gates_refuses_a_tree_with_no_gates(tmp_path, origin):
+    mirror = ensure_mirror(origin, tmp_path / "mirror.git")
+    with pytest.raises(GitError):
+        export_gates(mirror, git(origin, "rev-parse", "HEAD"), tmp_path / "out")
 
 
 def _squash_repo(tmp_path, name, subject):

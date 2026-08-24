@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import tarfile
 from pathlib import Path
 
 _ADDED = re.compile(r"(\d+) insertions?\(\+\)")
@@ -138,3 +139,45 @@ def diff_stat(mirror: Path, base: str, head: str) -> tuple[int, int]:
         int(added.group(1)) if added else 0,
         int(removed.group(1)) if removed else 0,
     )
+
+
+def export_gates(mirror: Path, sha: str, dest: Path) -> Path:
+    """`.saffron/gates/` as it stood at `sha`, on the host.
+
+    The cell reads its gates from here rather than from `/work`, so an in-cell
+    edit — committed or not — cannot reach the runner (§5.4). `git archive`
+    carries the mode bits, and a gate that is not executable reads identically
+    to one that was never declared.
+    """
+    shutil.rmtree(dest, ignore_errors=True)
+    dest.mkdir(parents=True)
+    archive = dest / "gates.tar"
+    # subprocess.run, not _run: stdout goes to a file rather than a pipe, so a
+    # missing git binary raises OSError here rather than the module's GitError.
+    with archive.open("wb") as sink:
+        done = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(mirror),
+                "archive",
+                "--format=tar",
+                sha,
+                ".saffron/gates",
+            ],
+            stdout=sink,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    if done.returncode != 0:
+        detail = done.stderr.decode(errors="replace").strip()
+        raise GitError(f"git archive {sha[:12]} .saffron/gates: {detail}")
+    with tarfile.open(archive) as tar:
+        # filter="data" clears setuid/setgid/sticky and group-and-other write,
+        # and keeps the execute bit the gate needs.
+        tar.extractall(dest, filter="data")
+    archive.unlink()
+
+    if not (dest / ".saffron" / "gates").is_dir():
+        raise GitError(f"{sha[:12]} has no .saffron/gates for the cell to run")
+    return dest
