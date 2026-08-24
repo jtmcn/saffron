@@ -132,7 +132,7 @@ exception has a shape worth memorising: **core invokes declared gates, never too
 
 This project is indexed by GitNexus as **saffron**. Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
-> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
+> Index stale? Run `node .gitnexus/run.cjs analyze --embeddings` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939). `--embeddings` because a plain `analyze` preserves existing embeddings but does not generate them for new nodes, and `query`'s ranking is BM25-only without them. PDG is pinned in `.gitnexusrc`, which `explain` needs.
 
 ## Always Do
 
