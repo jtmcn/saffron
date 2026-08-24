@@ -80,6 +80,7 @@ def bare_remote(tmp_path):
         ("ssh://git@github.com/jtmcn/saffron.git", "jtmcn/saffron"),
         ("git://github.com/jtmcn/saffron.git", "jtmcn/saffron"),
         ("https://github.com/jtmcn/saffron/", "jtmcn/saffron"),
+        ("ssh://git@github.com:22/owner/repo.git", "owner/repo"),
     ],
 )
 def test_both_url_shapes_yield_the_same_slug(url, slug):
@@ -93,7 +94,9 @@ def test_both_url_shapes_yield_the_same_slug(url, slug):
         "git@gitlab.com:group/owner/repo.git",  # measured: -> "owner/repo"
         "https://example.com/repo",  # measured: -> "example.com/repo"
         "/Users/joel/go/src/github.com/owner/repo",  # GOPATH checkout
+        "/tmp/pytest-x/github.com/o/r.git",  # pytest tmp_path checkout
         "https://notgithub.com/a/b.git",  # host boundary, not a substring
+        "https://github.com.evil.com/a/b",  # host boundary, suffix match
     ],
 )
 def test_github_slug_refuses_what_is_not_a_forge_remote(url):

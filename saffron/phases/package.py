@@ -30,9 +30,12 @@ from saffron.repos import mirror as mirror_ops
 
 # Anchored on a real remote URL — a scheme or the SCP-like `user@host:` form.
 # A filesystem path that merely contains github.com (a GOPATH checkout, a
-# pytest tmp_path) is not a forge remote and must be refused.
+# pytest tmp_path) is not a forge remote and must be refused. The optional
+# `:port` sits only in the scheme branch — in the SCP-like branch a colon
+# always introduces the path, never a port.
 _SLUG = re.compile(
-    r"^(?:(?:https?|ssh|git)://(?:[^@/]+@)?github\.com/|(?:[^@/]+@)?github\.com:)"
+    r"^(?:(?:https?|ssh|git)://(?:[^@/]+@)?github\.com(?::\d+)?/|"
+    r"(?:[^@/]+@)?github\.com:)"
     r"([^/]+)/([^/]+?)(?:\.git)?/?$"
 )
 
