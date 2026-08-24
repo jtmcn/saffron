@@ -608,6 +608,11 @@ def packageable(tmp_path):
     git(work, "config", "user.email", "t@example.com")
     git(work, "config", "user.name", "Test")
     (work / "f.txt").write_text("a\nb\nc\nd\ne\n")
+    # Committed at the base: PACKAGE exports the gates it re-verifies with.
+    gates = work / ".saffron" / "gates"
+    gates.mkdir(parents=True)
+    (gates / "tests").write_text("#!/bin/sh\nexit 0\n")
+    (gates / "tests").chmod(0o755)
     git(work, "add", "-A")
     git(work, "commit", "-qm", "base")
     base = git(work, "rev-parse", "HEAD")

@@ -381,6 +381,7 @@ def reverify(
     packaged_sha: str,
     new_base_sha: str,
     policy,
+    gates_dir: Path,
     image: str,
     watch,
 ) -> tuple[list[NewFailure], list[GateResult]]:
@@ -390,9 +391,11 @@ def reverify(
     packaged commit", and rendering `outcome.gates` there would print durations
     and summaries from the cell's run at `base_sha`.
 
-    **Never host-side.** The applied tree carries `.saffron/gates/*` exactly as
-    the patch left them, and exec'ing those on the host is the control plane
-    executing model-authored code — the one thing §2 says it never does.
+    **Never host-side.** Exec'ing a gate on the host is the control plane
+    executing model-authored code — the one thing §2 says it never does. Both
+    runs read their gates from `gates_dir`, exported from `new_base_sha`: the
+    two suites subtracted below come from one set of executables, and the
+    patch's own `.saffron/gates/*` are never run.
 
     Twice, because the base moved: the old baseline describes a tree that no
     longer exists, and comparing against it would charge this task with the
@@ -427,18 +430,19 @@ def reverify(
                 branch=f"pkg-{label}",
                 image=image,
                 container=container,
-                # No agent, no credential, and no route out: this cell only
-                # runs gates.
+                # The repo's declared gate env, and nothing else: no agent, no
+                # credential and no route out — this cell only runs gates.
                 network=network,
-                env={},
+                env=dict(policy.thread_env),
+                gates_dir=gates_dir,
             )
             watch(f"re-verify: {label} suite at {sha[:12]}")
-            # Gate paths are cell-side (`/work/.saffron/gates/...`); `cwd` is
-            # a host path that `CellExecutor` ignores. Same shape as
-            # `session.py:387` and `:508` — matched deliberately, so the two
-            # suites cannot drift in how they name a gate.
+            # Gate paths are cell-side (`/gates/.saffron/gates/...`); `cwd` is
+            # a host path that `CellExecutor` ignores. Same shape as the
+            # session's suite — matched deliberately, so the two cannot drift
+            # in how they name a gate.
             results[label] = runner.run_suite(
-                policy.gate_executables(Path(worktree.WORKTREE_MOUNT)),
+                policy.gate_executables(Path(worktree.GATES_MOUNT)),
                 cwd=mirror,
                 executor=runner.CellExecutor(container),
             )
@@ -579,11 +583,17 @@ def package(
         if needs_reverification(fetch_head, base_sha):
             # A gate that errored raises out of `reverify`: infrastructure, and
             # never this task's MERGE_FAILED.
+            # A sibling of `scratch`, not a child: `add_worktree` rmtree's
+            # `scratch` before the cell starts.
+            gates_dir = mirror_ops.export_gates(
+                mirror, fetch_head, out_dir / "package" / f"{spec.id}-gates"
+            )
             new, gates = reverify(
                 mirror=mirror,
                 packaged_sha=pushed,
                 new_base_sha=fetch_head,
                 policy=policy,
+                gates_dir=gates_dir,
                 image=image,
                 watch=watch,
             )

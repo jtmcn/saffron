@@ -18,7 +18,7 @@ SAFFRON_ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_reverification_runs_the_suite_inside_a_cell(tmp_path):
-    """The applied tree carries the repo's own `.saffron/gates/*`; running them
+    """The gates come from the host-side export, mounted read-only; running them
     on the host would be the control plane executing model-authored code (§2).
 
     Asserts `reverify` completes and reports both suites via `watch`. The
@@ -41,6 +41,7 @@ def test_reverification_runs_the_suite_inside_a_cell(tmp_path):
         packaged_sha=head,
         new_base_sha=head,
         policy=policy,
+        gates_dir=mirror_ops.export_gates(mirror, head, tmp_path / "gates"),
         image=tag,
         watch=seen.append,
     )
@@ -59,8 +60,9 @@ def test_the_reverification_cell_carries_no_credential(tmp_path, monkeypatch):
     explicit network joins the runtime's default one with full egress, and
     every control the caller ran then applies to some other container
     (Appendix I). `runtime.create_network` hardcodes --internal, so what is
-    worth pinning here is that a network is passed at all and that `env` is
-    empty — CLAUDE_CODE_OAUTH_TOKEN must not reach a cell that only runs gates.
+    worth pinning here is that a network is passed at all and that `env` holds
+    the repo's declared gate env and nothing more — CLAUDE_CODE_OAUTH_TOKEN
+    must not reach a cell that only runs gates.
     """
     seen = {}
 
@@ -77,8 +79,12 @@ def test_the_reverification_cell_carries_no_credential(tmp_path, monkeypatch):
             packaged_sha="a" * 40,
             new_base_sha="a" * 40,
             policy=policy,
+            gates_dir=tmp_path / "gates",
             image="unused",
             watch=lambda _: None,
         )
-    assert seen["env"] == {}
+    assert seen["env"] == dict(policy.thread_env)
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in seen["env"]
     assert seen["network"]
+    # The gates the cell runs are the host's export, never the applied tree's.
+    assert seen["gates_dir"] == tmp_path / "gates"

@@ -468,6 +468,7 @@ def _drive_cell(
     from saffron.gates.core.scope import scope_gate
     from saffron.gates.runner import CellExecutor, run_suite
     from saffron.repos import image
+    from saffron.repos import mirror as mirror_ops
     from saffron.repos.policy import load_policy
 
     # R2: policy is read from the host repo to learn gate *names* and to keep
@@ -475,7 +476,9 @@ def _drive_cell(
     # The paths run_suite is given must be cell-side — CellExecutor always
     # execs at /work (Task 6) and a host path there resolves to nothing.
     policy, policy_sha = load_policy(repo)
-    gates = policy.gate_executables(Path(worktree.WORKTREE_MOUNT))
+    # Cell-side, and from the read-only mount rather than /work: an in-cell
+    # edit to a gate — committed or not — never reaches the runner (§5.4).
+    gates = policy.gate_executables(Path(worktree.GATES_MOUNT))
 
     # §4.1: `origin` is the real remote, `mirror_path` the local mirror. v0
     # stored the mirror's source in both, so nothing downstream knew where a
@@ -560,6 +563,10 @@ def _drive_cell(
 
         created.add(volume)
         runtime.create_volume(volume)
+        # Exported before the cell exists: the mount source has to be there when
+        # the container is created.
+        task_dir.mkdir(parents=True, exist_ok=True)
+        gates_dir = mirror_ops.export_gates(mirror, spec.base_sha, task_dir / "gates")
         # The state volume and the container are recorded inside, each against
         # its own create: an ephemeral seed container runs between them.
         worktree.prepare_worktree(
@@ -572,6 +579,7 @@ def _drive_cell(
             container=container,
             network=network,
             env=cell_env(proxy_ip, policy.thread_env),
+            gates_dir=gates_dir,
             state_volume=state,
         )
         watch(f"cell: {container} up, worktree at {spec.base_sha[:8]}")
@@ -609,7 +617,6 @@ def _drive_cell(
         for result in baseline:
             ledger.record_gate_result(result, run_id=run_id)
 
-        task_dir.mkdir(parents=True, exist_ok=True)
         (task_dir / "baseline.json").write_text(
             json.dumps([r.model_dump() for r in baseline], indent=2)
         )

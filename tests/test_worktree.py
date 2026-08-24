@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -17,6 +18,39 @@ def network():
     runtime.create_network(NETWORK)
     yield NETWORK
     runtime.remove_network(NETWORK)
+
+
+def _gates_dir(tmp_path):
+    """A real export dir: the bind mount's source has to exist."""
+    dest = tmp_path / "gates-out"
+    (dest / ".saffron" / "gates").mkdir(parents=True, exist_ok=True)
+    return dest
+
+
+def test_mounts_carry_the_gates_read_only():
+    got = worktree.mounts("vol", "state-vol", Path("/host/gates-out"))
+    gates = [m for m in got if m.target == worktree.GATES_MOUNT]
+    assert len(gates) == 1
+    assert gates[0].kind == "bind"
+    assert gates[0].source == "/host/gates-out"
+    # A writable gate mount is the hole this whole task closes.
+    assert gates[0].readonly is True
+    assert "readonly" in gates[0].to_flag()
+
+
+def test_prepare_worktree_requires_a_gates_dir():
+    """Required, not defaulted — the Appendix I lesson, in a third place."""
+    with pytest.raises(TypeError):
+        worktree.prepare_worktree(
+            mirror=Path("/m"),
+            volume="v",
+            base_sha="abc",
+            branch="b",
+            image="i",
+            container="c",
+            network="none",
+            env={},
+        )
 
 
 def _seed_repo(path):
@@ -58,6 +92,7 @@ def test_a_worktree_is_cloned_into_a_volume_and_the_cell_can_commit(tmp_path, ne
             container=container,
             network=network,
             env={},
+            gates_dir=_gates_dir(tmp_path),
         )
         assert worktree.commits_ahead(container, base) == 0
 
@@ -100,6 +135,7 @@ def test_the_cell_cannot_reach_the_real_remote(tmp_path, network):
             container=container,
             network=network,
             env={},
+            gates_dir=_gates_dir(tmp_path),
         )
         remotes = runtime.exec_(container, ["git", "remote", "-v"], workdir="/work")
         assert "origin" not in remotes.stdout
@@ -135,6 +171,7 @@ def test_the_cell_reaches_nothing_but_the_api(tmp_path, network):
             container=container,
             network=network,
             env=proxy.proxy_env(proxy_ip),
+            gates_dir=_gates_dir(tmp_path),
         )
         denied = runtime.exec_(container, reach("https://example.com"), timeout_s=90)
         assert denied.returncode != 0, denied.stdout
@@ -178,6 +215,7 @@ def test_a_failed_seed_leaves_no_container_in_the_leak_ledger(monkeypatch, tmp_p
             container="saffron-cell-SY-1",
             network="net",
             env={},
+            gates_dir=_gates_dir(tmp_path),
             state_volume="st",
             created=created,
         )
@@ -210,6 +248,7 @@ def test_the_container_is_recorded_before_the_run_that_creates_it(
             container="saffron-cell-SY-1",
             network="net",
             env={},
+            gates_dir=_gates_dir(tmp_path),
             state_volume="st",
             created=created,
         )

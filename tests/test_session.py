@@ -365,6 +365,10 @@ def _stub_the_runtime(
             k["created"].update((k["state_volume"], k["container"]))
 
     monkeypatch.setattr("saffron.cell.worktree.prepare_worktree", _prepare_worktree)
+    # No mirror to `git archive` from under tmp_path; the dest is the mount source.
+    monkeypatch.setattr(
+        "saffron.repos.mirror.export_gates", lambda mirror, sha, dest: dest
+    )
     monkeypatch.setattr("saffron.cell.worktree.head_sha", lambda c: "c" * 40)
     monkeypatch.setattr("saffron.cell.worktree.export_patch", lambda c, sha: patch)
 
