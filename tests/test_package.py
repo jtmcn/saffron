@@ -792,6 +792,21 @@ def test_a_push_that_broke_is_infrastructure_and_records_nothing(
     assert not (packageable.out_dir / "index.html").exists()
 
 
+def test_a_push_that_lands_is_recorded_even_when_gh_fails(monkeypatch, packageable):
+    """A `gh` that is missing, unauthenticated or refused leaves the branch
+    pushed; the ledger must still have a sha for it."""
+    monkeypatch.setattr(
+        "saffron.phases.package.open_draft_pr",
+        lambda *a, **k: (_ for _ in ()).throw(PackageError("gh: not authenticated")),
+    )
+
+    with pytest.raises(PackageError, match="not authenticated"):
+        package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+
+    row = _state(packageable.ledger, packageable.task_id)
+    assert row["pushed_sha"]
+
+
 def test_a_gate_that_errored_while_re_verifying_aborts_the_package(
     monkeypatch, packageable
 ):

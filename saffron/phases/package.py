@@ -679,6 +679,10 @@ def package(
                 ),
             )
 
+        # Before open_draft_pr: the push already landed, and a gh failure
+        # below must not leave the ledger without a sha for it.
+        ledger.record_push(outcome.task_id, pushed)
+
         pr_url = open_draft_pr(
             slug=slug,
             branch=branch,

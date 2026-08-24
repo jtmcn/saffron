@@ -329,6 +329,17 @@ class Ledger:
             )
         )
 
+    def record_push(self, task_id: int, pushed_sha: str) -> None:
+        """The push already happened, so it is recorded before the pull request
+        is opened: a `gh` that fails otherwise leaves a pushed branch the
+        ledger cannot name (§5.7)."""
+        self._db.execute(
+            "UPDATE tasks SET pushed_sha = ?, updated_at = datetime('now') "
+            "WHERE task_id = ?",
+            (pushed_sha, task_id),
+        )
+        self._db.commit()
+
     def set_task_package(
         self,
         task_id: int,
