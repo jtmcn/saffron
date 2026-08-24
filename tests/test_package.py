@@ -135,6 +135,36 @@ def test_fetch_default_branch_reports_the_remote_head(tmp_path):
     )
 
 
+def test_fetch_default_branch_reaches_from_a_mirror_ref_when_local_is_behind(tmp_path):
+    """The exact case this exists for: the operator has not pulled, so the
+    mirror's own `refs/heads/*` (from `ensure_mirror`'s local source) is
+    behind origin. `FETCH_HEAD` alone lands the object in the store but on no
+    ref — `worktree.py`'s seed fetches with the default refspec, which only
+    walks `refs/heads/*`, and dies trying to check the head out. The
+    assertion below is the one that discriminates: `cat-file -e` on the
+    returned sha passes even pre-fix, since the object reaches the store
+    either way."""
+    origin = _repo_with_commit(tmp_path / "origin")
+    branch = git(origin, "symbolic-ref", "--short", "HEAD")
+    first = _rev_parse(origin, "HEAD")
+    (origin / "f.txt").write_text("b\n")
+    git(origin, "add", "-A")
+    git(origin, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "second")
+    second = _rev_parse(origin, "HEAD")
+
+    local = tmp_path / "local"
+    git(tmp_path, "clone", "-q", str(origin), str(local))
+    git(local, "reset", "-q", "--hard", first)
+
+    mirror = ensure_mirror(local, tmp_path / "mirror.git")
+    assert _rev_parse(mirror, f"refs/heads/{branch}") == first  # genuinely behind
+
+    _, fetched = fetch_default_branch(mirror, str(origin))
+
+    assert fetched == second
+    assert _rev_parse(mirror, f"refs/heads/{branch}") == second
+
+
 def test_fetch_default_branch_refuses_an_unreachable_remote(tmp_path):
     origin = _repo_with_commit(tmp_path / "origin")
     mirror = ensure_mirror(origin, tmp_path / "mirror.git")

@@ -118,10 +118,17 @@ def fetch_default_branch(mirror: Path, url: str) -> tuple[str, str]:
     package time.
     """
     default = default_branch(url, cwd=mirror)
-    fetched = _run(mirror, "fetch", url, f"refs/heads/{default}")
+    # Into refs/heads/<default>, not the default refspec: FETCH_HEAD alone
+    # updates nothing under refs/*, so worktree.py's `git fetch origin` seed
+    # (default refspec, mirror-local) never sees a base the operator has not
+    # pulled. --force: the base is defined as the remote's head, so a local
+    # ref that disagrees is stale by definition.
+    fetched = _run(
+        mirror, "fetch", "--force", url, f"+refs/heads/{default}:refs/heads/{default}"
+    )
     if fetched.returncode != 0:
         raise PackageError(f"cannot fetch {default} from {url}: {fetched.stderr[:200]}")
-    head = _run(mirror, "rev-parse", "FETCH_HEAD").stdout.strip()
+    head = _run(mirror, "rev-parse", f"refs/heads/{default}").stdout.strip()
     if not head:
         raise PackageError(f"{url} reported no head for {default}")
     return default, head
