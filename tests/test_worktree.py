@@ -21,9 +21,13 @@ def network():
 
 
 def _gates_dir(tmp_path):
-    """A real export dir: the bind mount's source has to exist."""
+    """A real export dir: the bind mount's source has to exist, and it holds a
+    real gate so a refused write is distinguishable from a missing path."""
     dest = tmp_path / "gates-out"
-    (dest / ".saffron" / "gates").mkdir(parents=True, exist_ok=True)
+    gates = dest / ".saffron" / "gates"
+    gates.mkdir(parents=True, exist_ok=True)
+    (gates / "tests").write_text("#!/bin/sh\nexit 0\n")
+    (gates / "tests").chmod(0o755)
     return dest
 
 
@@ -105,6 +109,20 @@ def test_a_worktree_is_cloned_into_a_volume_and_the_cell_can_commit(tmp_path, ne
         assert "two" in patch
         # The squash body's only record of what the agent actually committed.
         assert worktree.commit_subjects(container, base) == ["second"]
+
+        # Probed from inside the cell, not read off the mount flag (Appendix I).
+        # The gate the suite execs is at the second path; the baseline and every
+        # head suite run in this one cell, so a mount that ignored `readonly`
+        # would let the agent swap the judge between them.
+        gate = f"{worktree.GATES_MOUNT}/.saffron/gates/tests"
+        readable = runtime.exec_(container, ["cat", gate])
+        # First, so the refusals below are refusals and not a missing path.
+        assert readable.returncode == 0, readable.stderr
+        for target in (f"{worktree.GATES_MOUNT}/x", gate):
+            refused = runtime.exec_(container, ["sh", "-c", f"echo pwned > {target}"])
+            assert refused.returncode != 0, f"{target} accepted a write"
+            assert "read-only" in refused.stderr.lower(), refused.stderr
+        assert runtime.exec_(container, ["cat", gate]).stdout == readable.stdout
     finally:
         runtime.remove_container(container)
         runtime.remove_volume(volume)

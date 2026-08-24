@@ -583,8 +583,9 @@ def package(
         if needs_reverification(fetch_head, base_sha):
             # A gate that errored raises out of `reverify`: infrastructure, and
             # never this task's MERGE_FAILED.
-            # A sibling of `scratch`, not a child: `add_worktree` rmtree's
-            # `scratch` before the cell starts.
+            # A sibling of `scratch`, not a child: `scratch` is a git worktree
+            # the `finally` hands to `remove_worktree`, and the export must not
+            # have the worktree's lifetime.
             gates_dir = mirror_ops.export_gates(
                 mirror, fetch_head, out_dir / "package" / f"{spec.id}-gates"
             )
