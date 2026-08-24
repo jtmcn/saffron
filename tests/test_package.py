@@ -102,6 +102,13 @@ def test_both_url_shapes_yield_the_same_slug(url, slug):
         "/tmp/pytest-x/github.com/o/r.git",  # pytest tmp_path checkout
         "https://notgithub.com/a/b.git",  # host boundary, not a substring
         "https://github.com.evil.com/a/b",  # host boundary, suffix match
+        # These three yielded a *correct* slug under the old pattern. The slug
+        # reaches `gh --repo`, which resolves against gh's own default host, so
+        # a repo that is not on github.com cannot be packaged whatever the
+        # pattern says — and `cli._run_cell` refuses it before the cell starts.
+        "git@github.example.com:owner/repo.git",  # GHE, SCP-like form
+        "https://ghe.corp.example/owner/repo.git",  # GHE, scheme form
+        "git@github-work:owner/repo.git",  # ~/.ssh/config Host alias
     ],
 )
 def test_github_slug_refuses_what_is_not_a_forge_remote(url):

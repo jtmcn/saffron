@@ -728,6 +728,13 @@ failure. And `policy_sha` in the ledger names the working-copy policy rather
 than the one that actually governed the exported gates, so the ledger's record
 of what ran is not the record of what was declared.
 
+A repo adding its *first* gate lands somewhere else again, and worse. There is
+no `.saffron/gates` at `base_sha` at all, so `export_gates` raises on the
+unmatched pathspec at `session.py:572` — after the image build, the host probe
+and the proxy — and the run exits 2 as infrastructure rather than reaching
+`PREFLIGHT_FAILED`. `export_gates_for`'s guard covers the opposite case,
+`gates: {}`, where the policy declares nothing to export.
+
 This is the ordinary workflow, not an edge case: writing or renaming a gate
 means being on a branch that adds it, and running `saffron cell` from that
 branch is how you would test it. The run reaches `PREFLIGHT_FAILED` before the

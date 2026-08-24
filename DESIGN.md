@@ -2124,11 +2124,27 @@ GOPATH-style checkout walking straight through the refusal the change existed to
 add. Worse, twelve fixtures had by then been relocated to
 `tmp_path/github.com/o/r.git` to satisfy that same pattern, so the suite had come
 to depend on the loophole. The shipped pattern anchors on a real remote URL — a
-scheme, or the SCP-like `user@host:` form — and is measured against 14 cases: six
-accept, eight refuse, including `https://github.com.evil.com/a/b`, which nobody
-had considered. Two shapes are refused and stay refused, stated so they are not
-discovered: GitHub Enterprise hostnames, and any URL carrying an explicit port.
-Both were refused before this change too.
+scheme, or the SCP-like `user@host:` form — and is measured against 19 cases:
+nine accept, ten refuse, including `https://github.com.evil.com/a/b`, which
+nobody had considered.
+
+**A port is accepted, but only in the scheme form.** `ssh://git@github.com:22/o/r.git`
+is a real remote and the `:22` is a port; in `git@github.com:1234/repo.git` the
+colon introduces the path and `1234` is an owner. One pattern cannot read the
+colon both ways, so the branch it sits in decides.
+
+**The narrowing is real, and it is wider than "unreachable".** Measured against
+the old pattern, two shapes returned a *correct* slug before this change and are
+refused now: a GitHub Enterprise host (`git@github.example.com:owner/repo.git` →
+`owner/repo`), and an SSH `Host` alias standing in for github.com
+(`git@github-work:owner/repo.git` → `owner/repo`). Because `cli._run_cell` reads
+the slug for its refusal (§5.7), such a repo can no longer start a cell at all.
+Accepted rather than fixed: the slug is handed to `gh pr create --repo owner/repo`,
+which resolves against `gh`'s own default host, so accepting any host is worse than
+refusing — `git@gitlab.com:owner/repo.git` would open a pull request on the wrong
+forge. GHE is the one shape where the old behaviour was right, and carrying it
+properly means plumbing the host through to `GH_HOST`, which nothing here does.
+A repo on either shape must point `origin` at github.com to run.
 
 53. **A refusal that is loosened to make tests pass is a refusal that no longer
     exists.** The tell is not that the pattern is imperfect — it is that the
