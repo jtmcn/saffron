@@ -212,6 +212,29 @@ def test_a_package_that_fails_and_one_that_breaks_exit_differently(
     assert cli.main(argv) == 2
 
 
+def test_a_non_github_origin_fails_before_the_cell_starts(tmp_path, monkeypatch):
+    """`package` needs the slug and does not reach it until the budget is
+    spent, so the refusal belongs beside the unreachable-remote one (§5.1)."""
+    repo = _repo_with_commit(tmp_path / "repo")
+    _git(repo, "remote", "add", "origin", "git@gitlab.com:group/owner/repo.git")
+
+    started = False
+
+    def _started(*_a, **_k):
+        nonlocal started
+        started = True
+        raise SystemExit(0)
+
+    monkeypatch.setattr("saffron.cli.run_one_cell", _started)
+    # Matched, not merely typed: a `fetch_default_branch` that reached gitlab
+    # and failed raises the same class, and would pass a bare `raises`.
+    with pytest.raises(package.PackageError, match="cannot read owner/repo"):
+        cli._run_cell(
+            _namespace(repo, tmp_path), Ledger(tmp_path / "l.db"), tmp_path / "out"
+        )
+    assert not started
+
+
 def test_the_base_is_the_remote_default_branch_not_the_checkout(tmp_path, monkeypatch):
     """A task started from a feature branch is still cut from the default branch.
 
@@ -240,6 +263,9 @@ def test_the_base_is_the_remote_default_branch_not_the_checkout(tmp_path, monkey
         captured["base_sha"] = cell_spec.base_sha
         raise SystemExit(0)
 
+    # A local-path origin, not shaped like a forge remote, so the preflight
+    # slug is faked rather than the fixture contorted into a github.com URL.
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
     monkeypatch.setattr("saffron.cli.run_one_cell", _capture)
     with pytest.raises(SystemExit):
         cli._run_cell(
