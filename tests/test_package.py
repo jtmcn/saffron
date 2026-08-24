@@ -81,6 +81,10 @@ def bare_remote(tmp_path):
         ("git://github.com/jtmcn/saffron.git", "jtmcn/saffron"),
         ("https://github.com/jtmcn/saffron/", "jtmcn/saffron"),
         ("ssh://git@github.com:22/owner/repo.git", "owner/repo"),
+        # git stores the URL as typed and a host is case-insensitive; the
+        # owner/repo handed to `gh` keeps its case.
+        ("https://GitHub.com/Owner/Repo.git", "Owner/Repo"),
+        ("git@GITHUB.COM:jtmcn/saffron.git", "jtmcn/saffron"),
     ],
 )
 def test_both_url_shapes_yield_the_same_slug(url, slug):
