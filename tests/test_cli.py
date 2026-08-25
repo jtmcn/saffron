@@ -10,6 +10,7 @@ from saffron.cell import session
 from saffron.cli import main
 from saffron.ledger import Ledger
 from saffron.phases import package
+from saffron.repos import policy as repo_policy
 from tests.test_replay import target  # noqa: F401 — a pytest fixture, used by name
 
 
@@ -22,6 +23,10 @@ def _git(repo, *args):
 def _repo_with_commit(path):
     path.mkdir()
     _git(path, "init", "-q")
+    # Onboarded: `_run_cell` reads the checkout's policy for its refusal before
+    # it reads anything else, so a repo without one cannot start a cell.
+    (path / ".saffron").mkdir()
+    (path / ".saffron" / "policy.yaml").write_text("gates: {}\n")
     (path / "f.txt").write_text("a\n")
     _git(path, "add", "-A")
     _git(path, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "first")
@@ -273,3 +278,26 @@ def test_the_base_is_the_remote_default_branch_not_the_checkout(tmp_path, monkey
         )
 
     assert captured["base_sha"] == default_head
+
+
+def test_an_invalid_checkout_policy_fails_before_the_cell_starts(tmp_path, monkeypatch):
+    """PACKAGE reads the checkout's `policy.yaml` and does not reach it until
+    the budget is spent, so the refusal belongs beside the non-GitHub-origin
+    one (§5.1). The policy that *governs* the run comes from `base_sha` and is
+    read out of the export (§5.4); this read is for its refusal only."""
+    repo = _repo_with_commit(tmp_path / "repo")
+    (repo / ".saffron" / "policy.yaml").write_text("gates: [not, a, mapping]\n")
+
+    started = False
+
+    def _started(*_a, **_k):
+        nonlocal started
+        started = True
+        raise SystemExit(0)
+
+    monkeypatch.setattr("saffron.cli.run_one_cell", _started)
+    with pytest.raises(repo_policy.PolicyError, match="policy.yaml is invalid"):
+        cli._run_cell(
+            _namespace(repo, tmp_path), Ledger(tmp_path / "l.db"), tmp_path / "out"
+        )
+    assert not started

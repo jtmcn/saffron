@@ -41,7 +41,7 @@ def test_reverification_runs_the_suite_inside_a_cell(tmp_path):
         packaged_sha=head,
         new_base_sha=head,
         policy=policy,
-        gates_dir=mirror_ops.export_gates(mirror, head, tmp_path / "gates"),
+        gates_dir=mirror_ops.export_saffron_dir(mirror, head, tmp_path / "gates"),
         image=tag,
         watch=seen.append,
     )

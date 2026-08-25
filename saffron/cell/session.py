@@ -469,13 +469,40 @@ def _drive_cell(
     from saffron.gates.core.scope import scope_gate
     from saffron.gates.runner import CellExecutor, run_suite
     from saffron.repos import image
-    from saffron.repos.policy import load_policy
+    from saffron.repos import mirror as mirror_ops
+    from saffron.repos.policy import PolicyError, load_policy
 
-    # R2: policy is read from the host repo to learn gate *names* and to keep
-    # the existing on-host validation (declared gate exists, is executable).
-    # The paths run_suite is given must be cell-side — CellExecutor always
+    network = "saffron-cells"
+    volume = f"saffron-wt-{spec.spec_id}"
+    state = f"saffron-st-{spec.spec_id}"
+    container = f"saffron-cell-{spec.spec_id}"
+
+    # Hoisted above the try: teardown exports here too, including on paths that
+    # never reached the baseline write below.
+    task_dir = out_dir / spec.spec_id
+    # Ahead of its three siblings in the pre-clean below, because the export
+    # clears the bind-mount source and a SIGKILLed run of this spec can still
+    # have it live at /gates.
+    runtime.remove_container(container)
+    # Before the cell exists — the mount source has to be there when the
+    # container is created — and before the policy, which is read back out of
+    # it. Reading the policy from the operator's checkout while the gates it
+    # declares come from `base_sha` diverges the two on any branch that
+    # touches `.saffron/` (§5.4).
+    task_dir.mkdir(parents=True, exist_ok=True)
+    gates_dir = mirror_ops.export_saffron_dir(mirror, spec.base_sha, task_dir / "gates")
+
+    # R2: the on-host validation stays — a declared gate exists and is
+    # executable — but it now runs against the exported tree the cell mounts.
+    # The paths run_suite is given must be cell-side: CellExecutor always
     # execs at /work (Task 6) and a host path there resolves to nothing.
-    policy, policy_sha = load_policy(repo)
+    try:
+        policy, policy_sha = load_policy(gates_dir)
+    except PolicyError as exc:
+        # The path it reports is a batch-tree directory the operator has never
+        # opened. Unnamed, the base sends them to their own policy.yaml, which
+        # is correct — the wrong diagnosis this read exists to stop.
+        raise PolicyError(f"at base {spec.base_sha[:12]}: {exc}") from exc
     # Cell-side, and from the read-only mount rather than /work: an in-cell
     # edit to a gate — committed or not — never reaches the runner (§5.4).
     gates = policy.gate_executables(Path(worktree.GATES_MOUNT))
@@ -503,15 +530,6 @@ def _drive_cell(
         budget_usd=spec.budget_usd,
     )
 
-    # Hoisted above the try: teardown exports here too, including on paths that
-    # never reached the baseline write below.
-    task_dir = out_dir / spec.spec_id
-
-    network = "saffron-cells"
-    volume = f"saffron-wt-{spec.spec_id}"
-    state = f"saffron-st-{spec.spec_id}"
-    container = f"saffron-cell-{spec.spec_id}"
-
     # Only what this run reached the creation of can leak. `volume rm` on a
     # name that never existed also exits non-zero, so reporting every failure
     # prints survivors for a run that aborted in preflight — absent reading as
@@ -529,7 +547,6 @@ def _drive_cell(
     try:
         # Inside the guarantee, not above it: a leftover network from a SIGKILLed
         # run makes `create_network` the first thing that raises on a re-run.
-        runtime.remove_container(container)
         runtime.remove_network(network)
         runtime.remove_volume(volume)
         runtime.remove_volume(state)
@@ -566,12 +583,6 @@ def _drive_cell(
 
         created.add(volume)
         runtime.create_volume(volume)
-        # Exported before the cell exists: the mount source has to be there when
-        # the container is created.
-        task_dir.mkdir(parents=True, exist_ok=True)
-        gates_dir = package.export_gates_for(
-            mirror, spec.base_sha, task_dir / "gates", policy
-        )
         # The state volume and the container are recorded inside, each against
         # its own create: an ephemeral seed container runs between them.
         worktree.prepare_worktree(

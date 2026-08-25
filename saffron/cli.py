@@ -106,6 +106,12 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     repo = args.repo.resolve()
     spec, spec_sha = load_spec(args.spec)
 
+    # Read for its refusal, not its value: the policy that governs the run is
+    # the one at `base_sha`, read out of the export (§5.4), but PACKAGE still
+    # reads the checkout's and does not reach it until the budget is spent.
+    # Cheapest check there is, so it goes first.
+    repo_policy.load_policy(repo)
+
     digest = hashlib.sha256(str(repo).encode()).hexdigest()[:12]
     mirror = git_mirror.ensure_mirror(
         repo, args.home / "mirrors" / f"{repo.name}-{digest}.git"
