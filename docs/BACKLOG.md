@@ -821,6 +821,12 @@ under. **Done looks like:** `package()` loading its policy from the export it
 already makes at `fetch_head`, which means dropping the `policy` parameter
 rather than threading a second one.
 
+Until it lands, `cli._run_cell` reads the checkout's policy up front for its
+refusal alone — the `github_slug` idiom beside it — because item 13 moved the
+only other read of that file to after the budget is spent. **That read goes
+away with this item**, not before it: it exists to keep an invalid checkout
+policy from costing a run, and there is nothing else left for it to do.
+
 **The cell image is built from the working copy's `.saffron/Dockerfile`**
 (`image.build_cell_image(repo)`) while the gates, the policy and the base tree
 all come from `base_sha`. This one may be correct as it stands — the image is

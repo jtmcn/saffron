@@ -13,6 +13,8 @@ from saffron.gates.contract import Failure, GateResult
 from saffron.gates.core.committed import committed_gate
 from saffron.ledger import Ledger
 from saffron.phases import implement
+from saffron.repos import mirror
+from saffron.repos import policy as policy_mod
 
 
 def _failure(gate, file, code, message="m"):
@@ -453,13 +455,17 @@ def _turn(text="", cost=0.1):
     )
 
 
-def _stub_the_export(monkeypatch, repo, policy=None):
+def _stub_the_export(monkeypatch, repo, policy=None, recorded=None):
     """`export_saffron_dir` with no mirror to `git archive` from: the working copy
     stands in for `base_sha`'s tree — except where `policy` makes the two
     diverge, which is the only thing that can tell them apart. The dest is
     the mount source, and the session reads its policy back out of it."""
+    recorded = [] if recorded is None else recorded
 
     def _export(_mirror, _sha, dest):
+        # Recorded beside the removals: the export clears `dest`, which is the
+        # bind-mount source, so the order of the two is load-bearing.
+        recorded.append(("export", str(dest)))
         shutil.rmtree(dest, ignore_errors=True)
         shutil.copytree(repo / ".saffron", dest / ".saffron")
         if policy is not None:
@@ -491,7 +497,7 @@ def _drive(
         executable.chmod(0o755)
     (repo / ".saffron" / "policy.yaml").write_text(policy)
 
-    _stub_the_export(monkeypatch, repo, base_policy)
+    _stub_the_export(monkeypatch, repo, base_policy, cell.removed)
 
     scripted = iter(turns)
 
@@ -1678,3 +1684,75 @@ def test_policy_sha_records_the_policy_that_governed_not_the_one_on_disk(
     )
     (row,) = ledger._db.execute("SELECT policy_sha FROM repos").fetchall()
     assert row["policy_sha"] == hashlib.sha256(base_policy.encode()).hexdigest()
+
+
+def test_the_stale_container_is_gone_before_the_export_clears_its_mount_source(
+    monkeypatch, tmp_path
+):
+    """The export rmtrees `<task_dir>/gates`, which is the bind mount a
+    SIGKILLed run of the same spec can still have live at `/gates`. Deleting a
+    mount source out from under a running container is what the pre-clean
+    ordering exists to prevent, and position is the only thing enforcing it."""
+    cell = _stub_the_runtime(monkeypatch)
+    _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
+    kinds = [kind for kind, _name in cell.removed]
+    assert kinds.index("container") < kinds.index("export")
+
+
+def test_a_base_with_no_saffron_dir_never_reaches_the_image_build(
+    monkeypatch, tmp_path
+):
+    """The hoist's claim, which nothing else pins: the export runs before the
+    image build, the host probe and the proxy, and before the ledger has a run
+    to leave behind. Sunk back into the try and this goes red."""
+    repo = tmp_path / "repo"
+    (repo / ".saffron" / "gates").mkdir(parents=True)
+    (repo / ".saffron" / "policy.yaml").write_text("gates: {}\n")
+
+    built = []
+    cell = _stub_the_runtime(monkeypatch)
+    monkeypatch.setattr(
+        "saffron.repos.image.build_cell_image", lambda repo: built.append(repo)
+    )
+
+    def _unonboarded(*_args, **_kwargs):
+        raise mirror.GitError("deadbeefcafe has no .saffron for the cell to run")
+
+    monkeypatch.setattr("saffron.repos.mirror.export_saffron_dir", _unonboarded)
+
+    ledger = Ledger(tmp_path / "ledger.db")
+    with pytest.raises(mirror.GitError, match="has no .saffron"):
+        session.run_one_cell(
+            _spec(),
+            repo=repo,
+            mirror=tmp_path / "m.git",
+            ledger=ledger,
+            out_dir=tmp_path / "out",
+        )
+    assert built == []
+    assert ledger._db.execute("SELECT * FROM runs").fetchall() == []
+    # The stale-container pre-clean is the only thing that ran, and it creates
+    # nothing: no network, no volume, nothing for teardown to report.
+    assert cell.removed == [("container", "saffron-cell-SY-1")]
+
+
+def test_a_policy_fault_at_base_sha_names_base_sha(monkeypatch, tmp_path):
+    """`load_policy` reports the path it read, which is now a batch-tree
+    directory the operator has never opened. Left bare, the operator checks
+    their own `policy.yaml`, finds it correct, and is back to the wrong
+    diagnosis this whole change exists to remove."""
+    repo = tmp_path / "repo"
+    (repo / ".saffron" / "gates").mkdir(parents=True)
+    (repo / ".saffron" / "policy.yaml").write_text("gates: {}\n")
+
+    _stub_the_runtime(monkeypatch)
+    _stub_the_export(monkeypatch, repo, policy="gates: [not, a, mapping]\n")
+
+    with pytest.raises(policy_mod.PolicyError, match=r"at base b{12}: "):
+        session.run_one_cell(
+            _spec(),
+            repo=repo,
+            mirror=tmp_path / "m.git",
+            ledger=Ledger(tmp_path / "ledger.db"),
+            out_dir=tmp_path / "out",
+        )
