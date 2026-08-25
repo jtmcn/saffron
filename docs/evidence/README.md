@@ -23,3 +23,4 @@ Records written since, by the same rule — a measured fact beats a reasoned one
 |---|---|
 | `2026-08-21-subscription-turn-accounting.md` | What a turn costs on a subscription token, measured rather than inferred. |
 | `2026-08-22-integrity-rejected-gate-measured.md` | `SA-0004`'s rejected gate, executed against real `git diff` output rather than read. Three corrections to Appendix K, including one defect nothing recorded: the gate fails this repository's own merge commits. Scripts in `scripts/`. |
+| `2026-08-25-mutation-testing-vs-a-lens.md` | Issue #33: whether "would the tests catch this code being wrong" needs a mutation-testing tool. `SA-0002`'s untested header reset run against diff-scoped coverage, `cosmic-ray`, `mutmut` and a prompted lens. Coverage reports nothing and `cosmic-ray` misses it; `mutmut` finds it and will not run here; the lens named it 3/3. |
