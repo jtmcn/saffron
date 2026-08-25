@@ -1371,6 +1371,56 @@ def test_a_blocking_failure_after_the_rebase_still_fails_the_merge(
     assert result.state == "MERGE_FAILED"
 
 
+def test_the_pr_body_reports_the_effective_tier_not_the_specs_declared_one(
+    packageable,
+):
+    """SA-0005 computed `effective_risk` and left the spec's own `risk` field
+    for `render_pr_body` to read instead — an auto-elevated attempt then wrote
+    a pull request that said `standard`. The spec here stays `standard` while
+    the outcome's computed tier is `elevated`, so this only passes if PACKAGE
+    reads the outcome, not `spec.risk`."""
+    assert packageable.kwargs["spec"].risk == "standard"
+    packageable.outcome.effective_risk = "elevated"
+    packageable.outcome.gates = [
+        GateResult(gate="perf-smoke", status="fail", summary="12% slower")
+    ]
+    packageable.outcome.advisory_gates = ["perf-smoke"]
+
+    package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **packageable.kwargs,
+    )
+
+    body = (packageable.outcome.task_dir / "pr_body.md").read_text()
+    assert "risk `elevated`" in body
+    assert "risk `standard`" not in body
+    # `render_pr_body` marks an advisory `fail` so a red row does not read as
+    # a contradiction of a green pull request — only reachable if `PACKAGE`
+    # also threads `advisory_gates` through, not just `effective_risk`.
+    assert "(advisory) 12% slower" in body
+
+
+def test_the_queue_line_carries_the_effective_tier_not_the_specs_declared_one(
+    packageable,
+):
+    """`index.py`'s `sort_key` puts elevated risk ahead of ordinary tasks in
+    the 8am queue — but only if the row it sorts on is the computed tier, not
+    the field an auto-elevated spec never set."""
+    assert packageable.kwargs["spec"].risk == "standard"
+    packageable.outcome.effective_risk = "elevated"
+
+    package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **packageable.kwargs,
+    )
+
+    rows = json.loads((packageable.out_dir / "queue.json").read_text())
+    row = next(r for r in rows if r["spec_id"] == "SA-0005")
+    assert row["risk"] == "elevated"
+
+
 def test_reverify_is_handed_the_policy_from_the_commit_it_verifies_against(
     monkeypatch, packageable
 ):

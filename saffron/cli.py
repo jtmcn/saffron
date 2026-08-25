@@ -173,6 +173,7 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         spec_type=spec.type,
         body=spec.body,
         forbidden=spec.forbidden,
+        risk=spec.risk,
         **ceilings,
     )
     outcome = run_one_cell(
