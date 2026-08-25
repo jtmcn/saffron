@@ -120,6 +120,63 @@ def test_the_diff_stat_and_shas_are_recorded():
     assert "a" * 40 in rendered
 
 
+def test_the_header_reports_the_effective_risk_not_the_specs_declared_risk():
+    """§5.6: SPEC never declares `risk`, so it defaults to `standard` — the
+    header must still say `elevated` when that is what governed the run."""
+    assert SPEC.risk == "standard"
+    rendered = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        effective_risk="elevated",
+    )
+    assert "risk `elevated`" in rendered
+    assert "risk `standard`" not in rendered
+
+
+def test_omitting_the_effective_risk_falls_back_to_the_specs_own():
+    """Existing callers that have not computed a tier yet see no change."""
+    rendered = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+    )
+    assert "risk `standard`" in rendered
+
+
+def test_an_advisory_gate_is_marked_in_the_gate_table():
+    """A `size` fail at `standard` reads as a contradiction on an otherwise
+    green pull request unless its own row says it never blocked (§5.6)."""
+    rendered = render_pr_body(
+        SPEC,
+        [GateResult(gate="size", status="fail", summary="too big")],
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        advisory_gates=["size"],
+    )
+    assert "| `size` | `fail` |" in rendered
+    assert "(advisory) too big" in rendered
+
+
+def test_a_gate_absent_from_advisory_gates_is_not_marked():
+    rendered = body()
+    assert "(advisory)" not in rendered
+
+
 def line(**overrides):
     defaults = dict(
         repo="thermal-edge",

@@ -156,6 +156,10 @@ class CellSpec:
     spec_type: str
     body: str
     forbidden: list[str] = field(default_factory=list)
+    # Read by `_suite` to compute the effective tier (`policy.effective_risk`);
+    # `cli.py` does not populate this yet — a thin follow-on, same as
+    # `package.py`'s side of the wiring (§5.6, this module's own notes).
+    risk: str = "standard"
     # Kept in step with `intake.Spec`, which is where a run's ceilings are
     # declared and defaulted; `cli` passes all three, so these are reached only
     # by tests. Two defaults for one ceiling is a drift vector — they disagreed
@@ -188,6 +192,13 @@ class CellOutcome:
     reviews: list[review.LensReview] = field(default_factory=list)
     rebut_result: rebut.RebutResult | None = None
     agent_subjects: list[str] = field(default_factory=list)
+    # The last suite's own answer to §5.6's two questions — computed inside
+    # `_drive_cell`, from the same changed-file list every gate result here
+    # was judged against, and carried out rather than re-derived: a consumer
+    # re-computing it from `spec.risk` alone would silently drop the
+    # `elevate_on` half (§5.6, this module's own notes on `_suite`).
+    effective_risk: str = "standard"
+    advisory_gates: list[str] = field(default_factory=list)
 
 
 def aborted_gates(results: Sequence[GateResult]) -> list[str]:
@@ -300,6 +311,7 @@ def repair_loop(
     max_attempts: int,
     repair: Callable[[Sequence[NewFailure]], str | None],
     watch: Callable[[str], None] = print,
+    blocking: Callable[[NewFailure], bool] = lambda _nf: True,
 ) -> tuple[str, int, list[NewFailure]]:
     """GATE ⇄ REPAIR (§5.4), host-invoked. Returns the terminal state, the
     attempt count reached, and the last new-failure list.
@@ -308,6 +320,13 @@ def repair_loop(
     else — no status, no verdict, no knowledge that it is being measured. It
     returns a terminal state to stop the loop early; the spend ceiling is the
     only thing in v0.5 that does.
+
+    `blocking` is what keeps an advisory failure — `size` at `standard`, or a
+    declared gate the repo marked `blocking: false` — out of the loop
+    entirely: it decides the task's own state (green/no-progress/exhausted)
+    and what `repair` is handed, exactly as if the failure had never happened.
+    Defaulted to "everything is blocking" so every existing caller — none of
+    which knows about tiers or declarations — is unaffected (§5.6).
     """
     previous: list[NewFailure] = []
     for attempt in range(1, max_attempts + 1):
@@ -320,7 +339,7 @@ def repair_loop(
             # subtraction is not to be trusted — let alone reported (§5.4).
             watch(f"gates: {drift} — distrusting the subtraction")
             return "GATE_ERROR", attempt, []
-        new = subtract_baseline(results, baseline)
+        new = [nf for nf in subtract_baseline(results, baseline) if blocking(nf)]
         decision = repair_decision(
             attempt=attempt, max_attempts=max_attempts, new=new, previous=previous
         )
@@ -471,10 +490,11 @@ def _drive_cell(
     from saffron.gates.core.committed import committed_gate
     from saffron.gates.core.integrity import integrity_gate
     from saffron.gates.core.scope import scope_gate
+    from saffron.gates.core.size import size_gate
     from saffron.gates.runner import CellExecutor, run_suite
     from saffron.repos import image
     from saffron.repos import mirror as mirror_ops
-    from saffron.repos.policy import PolicyError, load_policy
+    from saffron.repos.policy import PolicyError, effective_risk, load_policy
 
     network = "saffron-cells"
     volume = f"saffron-wt-{spec.spec_id}"
@@ -532,6 +552,11 @@ def _drive_cell(
         spec.spec_sha,
         branch=spec.branch,
         budget_usd=spec.budget_usd,
+        # The spec-declared tier only: no diff exists yet for an `elevate_on`
+        # path to have matched, and there is no later write to correct it
+        # against (§5.6). `_suite` below computes the real, per-attempt
+        # effective tier from the diff it already has.
+        risk=spec.risk,
     )
 
     # Only what this run reached the creation of can leak. `volume rm` on a
@@ -606,6 +631,13 @@ def _drive_cell(
 
         executor = CellExecutor(container)
 
+        # `_suite` refreshes both every call — baseline included — so
+        # `_run_gates`/`_rebut_gates` always read this attempt's tier, never a
+        # stale one (§5.6). Seeded from the spec so an early PREFLIGHT-style
+        # failure that never calls `_suite` still leaves them meaningful.
+        current_tier = spec.risk
+        advisory_gates: set[str] = set()
+
         def _suite(prior: list[GateResult]) -> list[GateResult]:
             """The repo's declared gates plus the core gates the host runs.
 
@@ -615,8 +647,21 @@ def _drive_cell(
             from `base_sha`, unlike doneness: what it judges is the whole task
             diff a reviewer reads, the plan turn's commits included.
             """
+            nonlocal current_tier, advisory_gates
             changed = worktree.changed_files(container, spec.base_sha)
             diff = worktree.export_patch(container, spec.base_sha)
+            # §5.6: elevated when the spec says so, or when this attempt's own
+            # changed files cross an `elevate_on` path — from the list just
+            # built above, never a second read of the diff.
+            current_tier = effective_risk(spec.risk, changed, policy.elevate_on)
+            # `size` is advisory unless the tier is elevated (§5.4/§5.6); a
+            # declared `blocking: false` gate is advisory at every tier — that
+            # is what the declaration means, not a tier-dependent switch.
+            advisory_gates = {
+                name for name, decl in policy.gates.items() if not decl.blocking
+            }
+            if current_tier != "elevated":
+                advisory_gates.add("size")
             # Declared gates run before dirty_paths is read, on both calls: an
             # artifact a gate writes (.coverage, a build dir) then shows up on
             # baseline and head alike, and the subtraction cancels it.
@@ -629,6 +674,12 @@ def _drive_cell(
                 # reviewer will read still has the shape the host pinned.
                 scope_gate(changed, spec.touches, diff=diff),
                 integrity_gate(diff, policy.integrity, spec.touches),
+                # Host-side only, beside `scope`/`integrity`, for the same
+                # reason: never declared in `.saffron/gates` (`tool` would be
+                # unset and `run_gate` would turn it into `error`). Whether its
+                # failure *blocks* is `advisory_gates`' question, not this
+                # gate's — the result is unconditional (§5.4).
+                size_gate(diff, spec.spec_type),
                 *declared,
                 committed,
             ]
@@ -636,6 +687,12 @@ def _drive_cell(
             # gate reported it, which means it has to run after them (§5.4).
             # `prior` is empty on the baseline call, and census skips.
             return [*results, census_gate(prior, results)]
+
+        def _blocking(failure: NewFailure) -> bool:
+            """This attempt's advisory gates, read fresh: `_suite` always runs
+            immediately before this is consulted, so there is no staleness
+            window (§5.6)."""
+            return failure.gate not in advisory_gates
 
         # At base_sha the diff is empty, so `scope` and `integrity` pass with no
         # failures, and `census` has no prior to compare and skips — nothing for
@@ -660,6 +717,8 @@ def _drive_cell(
                 task_id=task_id,
                 run_id=run_id,
                 task_dir=task_dir,
+                effective_risk=current_tier,
+                advisory_gates=sorted(advisory_gates),
             )
 
         # The agent runs inside the cell, at /work, on the cell's own key (§5.1).
@@ -715,6 +774,8 @@ def _drive_cell(
                 run_id=run_id,
                 task_dir=task_dir,
                 spent_usd=rejected.spent_usd,
+                effective_risk=current_tier,
+                advisory_gates=sorted(advisory_gates),
             )
         except implement.AgentFailed as failed:
             # No plan and no commits, but a live cell: the earned state, not the
@@ -731,6 +792,8 @@ def _drive_cell(
                 # Measured, so it is reported: a supervisor summing `spent_usd`
                 # across tasks otherwise books every plan failure at zero.
                 spent_usd=plan_cost,
+                effective_risk=current_tier,
+                advisory_gates=sorted(advisory_gates),
             )
 
         # Extracted and hashed the moment it is produced, and never read from
@@ -771,6 +834,8 @@ def _drive_cell(
                 run_id=run_id,
                 task_dir=task_dir,
                 spent_usd=spent,
+                effective_risk=current_tier,
+                advisory_gates=sorted(advisory_gates),
             )
 
         try:
@@ -805,6 +870,8 @@ def _drive_cell(
                 run_id=run_id,
                 task_dir=task_dir,
                 spent_usd=spent,
+                effective_risk=current_tier,
+                advisory_gates=sorted(advisory_gates),
             )
 
         # The suite that went green, kept for REVIEW: the critic is shown the
@@ -856,6 +923,7 @@ def _drive_cell(
             max_attempts=spec.max_attempts,
             repair=_repair,
             watch=watch,
+            blocking=_blocking,
         )
 
         # Pre-bound, not left to the branch below: repair_loop can hand back
@@ -928,7 +996,14 @@ def _drive_cell(
                     if drift := suite_drift(results, baseline):
                         watch(f"gates: {drift} — distrusting the subtraction")
                         return "GATE_ERROR"
-                    new = subtract_baseline(results, baseline)
+                    # Same filter the repair loop applies: an advisory failure
+                    # surviving the rebuttal is still not the task's problem
+                    # (§5.6).
+                    new = [
+                        nf
+                        for nf in subtract_baseline(results, baseline)
+                        if _blocking(nf)
+                    ]
                     watch(f"gates: {len(new)} new failures after the rebuttal")
                     return "EXHAUSTED" if new else None
 
@@ -1000,6 +1075,8 @@ def _drive_cell(
             new_failures=new_failures,
             reviews=reviews,
             rebut_result=rebut_result,
+            effective_risk=current_tier,
+            advisory_gates=sorted(advisory_gates),
         )
     except RateLimited as stopped:
         watch(
@@ -1023,6 +1100,8 @@ def _drive_cell(
             run_id=run_id,
             task_dir=task_dir,
             spent_usd=ledger.task_spend(task_id),
+            effective_risk=current_tier,
+            advisory_gates=sorted(advisory_gates),
         )
     except BaseException:
         # A run row left open is a run that reads as still going. Preflight
