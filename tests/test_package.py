@@ -33,6 +33,7 @@ from saffron.phases.package import (
 )
 from saffron.phases.review import LensReview
 from saffron.repos.mirror import ensure_mirror
+from saffron.repos.policy import PolicyError
 
 
 def git(repo, *args):
@@ -1290,3 +1291,53 @@ def test_the_policy_package_verifies_under_comes_from_the_default_branch(package
     assert result.state == "READY_FOR_REVIEW"
     body = (packageable.out_dir / "SA-0005" / "pr_body.md").read_text()
     assert "### Test files changed" in body
+
+
+def test_a_policy_fault_at_the_default_branch_head_names_it(packageable):
+    """The twin of `_drive_cell`'s wrap. `load_policy` reports the path it
+    read, which is a batch-tree export the operator has never opened; unnamed,
+    it sends them to their own `policy.yaml`, which governs nothing."""
+    work = packageable.work
+    (work / ".saffron" / "policy.yaml").write_text("gates:\n  lint: {}\n")
+    git(work, "commit", "-qam", "declare a gate with no executable")
+    git(work, "push", "-q", "origin", "main")
+    fetch_head = git(work, "rev-parse", "HEAD")
+
+    with pytest.raises(PolicyError, match=rf"at main {fetch_head[:12]}: gate 'lint'"):
+        package(
+            packageable.outcome,
+            gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+            **packageable.kwargs,
+        )
+
+
+def test_reverify_is_handed_the_policy_from_the_commit_it_verifies_against(
+    monkeypatch, packageable
+):
+    """The half the body cannot show: a checkout declaring a role the export
+    does not carry made the re-verification gate *error* — infrastructure, at
+    the point the task is otherwise `READY_FOR_REVIEW`."""
+    (packageable.work / "other.txt").write_text("main moved\n")
+    git(packageable.work, "add", "-A")
+    git(packageable.work, "commit", "-qm", "main moved")
+    git(packageable.work, "push", "-q", "origin", "main")
+    # Uncommitted, so it reaches the export nowhere: the checkout declaring a
+    # role that no commit carries is the case that errored a gate.
+    (packageable.work / ".saffron" / "policy.yaml").write_text("gates:\n  lint: {}\n")
+
+    seen = {}
+
+    def _reverify(**kwargs):
+        seen.update(kwargs)
+        return [], []
+
+    monkeypatch.setattr("saffron.phases.package.reverify", _reverify)
+
+    package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **packageable.kwargs,
+    )
+
+    assert list(seen["policy"].gates) == ["tests"]
+    assert seen["gates_dir"].is_dir()

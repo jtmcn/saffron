@@ -852,6 +852,30 @@ written.
 
 ---
 
+## 16. No record says which policy PACKAGE verified under
+
+Found reviewing item 15's fix, which created the gap by closing a worse one.
+`policy_sha` on the `repos` row is written once, at cell start, from the export
+at `base_sha`. When the default branch has moved, PACKAGE re-verifies under
+`fetch_head`'s policy instead — a *different* declaration, correctly so — and
+nothing records that: not the ledger, not the pull request body, not a watch
+line. The body says the gates were re-run on the packaged commit "because the
+base moved" without naming what they were re-run under.
+
+This is item 13's own complaint one phase later — *the ledger's record of what
+ran is not the record of what was declared* — and the sha is already in hand at
+the call site, discarded as `policy, _`.
+
+**Done looks like:** a per-task record, which is the part that makes this an
+item rather than a one-line fix. `repos.policy_sha` is per repo and written
+before the task exists, so there is nowhere to put a second declaration without
+deciding where a task's own policy lineage lives. §4.1's invalidation rule
+(*change a repo's gate declarations mid-batch and its in-flight tasks are
+invalidated*) is the same question from the other end and should be answered
+with it.
+
+---
+
 ## What is *not* here, deliberately
 
 DIAGNOSE and `SCOPE_REVIEW`, the scheduler's conflict sets and stacking, `saffron

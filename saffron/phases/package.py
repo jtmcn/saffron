@@ -27,7 +27,7 @@ from saffron.report import index as index_report
 from saffron.report import pr_body
 from saffron.report.pr_body import neutralize
 from saffron.repos import mirror as mirror_ops
-from saffron.repos.policy import load_policy
+from saffron.repos.policy import PolicyError, load_policy
 
 # Anchored on a real remote URL — a scheme or the SCP-like `user@host:` form.
 # A filesystem path that merely contains github.com (a GOPATH checkout, a
@@ -541,7 +541,13 @@ def package(
     gates_dir = mirror_ops.export_saffron_dir(
         mirror, fetch_head, out_dir / "package" / f"{spec.id}-gates"
     )
-    policy, _ = load_policy(gates_dir)
+    try:
+        policy, _ = load_policy(gates_dir)
+    except PolicyError as exc:
+        # `_drive_cell`'s wrap, one phase later: the path it reports is a
+        # batch-tree export, and unnamed it sends the operator to their own
+        # policy.yaml — which by now governs nothing.
+        raise PolicyError(f"at {default} {fetch_head[:12]}: {exc}") from exc
 
     scratch = out_dir / "package" / spec.id
     worktree_path = mirror_ops.add_worktree(mirror, fetch_head, scratch)
