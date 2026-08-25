@@ -19,7 +19,10 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 # resolving on every task. No fixture services: Saffron's own suite needs none.
 COPY pyproject.toml uv.lock /seed/
 RUN cd /seed && uv sync --frozen --no-install-project && rm -rf /seed
-ENV VIRTUAL_ENV=/opt/venv PATH="/opt/venv/bin:$PATH"
+# `uv run` re-resolves the project on every invocation, and the proxy allows one
+# host — so an agent's habitual `uv run pytest` takes a 403 from pypi.org and
+# spends turns recovering. Measured on SA-0002. It runs out of the baked venv.
+ENV VIRTUAL_ENV=/opt/venv PATH="/opt/venv/bin:$PATH" UV_NO_SYNC=1
 
 # Run the toolchain, do not merely locate it. `which pytest` prints a path for a
 # console script whose shebang is broken, which is how the relocated venv above
