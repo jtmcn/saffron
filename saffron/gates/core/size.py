@@ -92,7 +92,9 @@ def _unreadable_declared_path(diff: str, touches: list[str]) -> str | None:
     return None
 
 
-def size_gate(diff: str, spec_type: str, touches: list[str]) -> GateResult:
+def size_gate(
+    diff: str, spec_type: str, touches: list[str], *, blocking: bool = True
+) -> GateResult:
     """Diff lines (added + removed) against the ceiling `spec_type` sets.
 
     `error` before anything else is measured: a file git renders as
@@ -106,13 +108,23 @@ def size_gate(diff: str, spec_type: str, touches: list[str]) -> GateResult:
     file, and erroring here too would make a genuine binary asset outside
     `touches` abort every task that happens to carry one.
 
+    **Only when this gate blocks.** `error` reaches `aborted_gates` before
+    `advisory_gates` is consulted, so it ends the attempt whatever the tier —
+    and at `standard`, where §5.6 says this gate stops nothing, aborting is the
+    opposite of nothing. It is also indistinguishable from the honest case: a
+    task legitimately adding a PNG inside `touches` renders the same way as the
+    `-diff` trick, and no diff can tell them apart. So the refusal is spent
+    where the verdict is load-bearing — at `elevated` — and below it the
+    readable lines are counted and the unreadable file is named in the summary.
+
     Past that check, `pass`/`fail` only: a diff this gate can read never
     produces `error` for size reasons — a large diff is the task's problem,
     not the gate's (§5.4). Ceiling lookup can't error either, since
     `_DEFAULT_CEILING` covers every spec type this function is not explicitly
     given a number for.
     """
-    if (unreadable := _unreadable_declared_path(diff, touches)) is not None:
+    unreadable = _unreadable_declared_path(diff, touches)
+    if unreadable is not None and blocking:
         return GateResult(
             gate="size",
             status="error",
@@ -124,12 +136,18 @@ def size_gate(diff: str, spec_type: str, touches: list[str]) -> GateResult:
 
     ceiling = _CEILINGS.get(spec_type, _DEFAULT_CEILING)
     lines = _changed_lines(diff)
+    # Named, never silent: an advisory count over a diff with a hidden file is
+    # a number with a hole in it, and the reader has to be told which.
+    caveat = f" ({unreadable} unreadable, not counted)" if unreadable else ""
 
     if lines <= ceiling:
         return GateResult(
             gate="size",
             status="pass",
-            summary=f"{lines} changed lines within the {spec_type} ceiling of {ceiling}",
+            summary=(
+                f"{lines} changed lines within the {spec_type} ceiling "
+                f"of {ceiling}{caveat}"
+            ),
         )
 
     return GateResult(
@@ -145,5 +163,8 @@ def size_gate(diff: str, spec_type: str, touches: list[str]) -> GateResult:
                 ),
             )
         ],
-        summary=f"{lines} changed lines exceeds the {spec_type} ceiling of {ceiling}",
+        summary=(
+            f"{lines} changed lines exceeds the {spec_type} ceiling "
+            f"of {ceiling}{caveat}"
+        ),
     )

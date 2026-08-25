@@ -248,3 +248,26 @@ def test_a_readable_change_still_counts_beside_an_undeclared_binary_block(tmp_pa
     result = size_gate(diff, "bug", touches=["b.py"])
     assert result.status == "pass"
     assert "1 changed lines" in result.summary
+
+
+def test_a_real_binary_inside_touches_is_refused_where_the_gate_blocks(tmp_path):
+    """Not a `-diff` gitattribute — actual bytes, which is the case the fix's
+    own tests never built. No diff can tell a genuine asset from a text file
+    hidden as one, so where the verdict blocks the gate refuses both, and the
+    accepted cost is that a task adding a PNG inside `touches` at `elevated`
+    aborts rather than passing unmeasured."""
+    run = _real_repo(tmp_path, {"src/a.py": "x = 1\n"})
+    (tmp_path / "src" / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n" + bytes(400))
+    run("git", "add", "-A")
+    diff = subprocess.run(
+        ["git", "diff", "--cached"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert "Binary files" in diff
+
+    blocked = size_gate(diff, "bug", ["src/**"], blocking=True)
+    assert blocked.status == "error"
+    assert "logo.png" in blocked.summary
+
+    advisory = size_gate(diff, "bug", ["src/**"], blocking=False)
+    assert advisory.status == "pass"
+    assert "logo.png" in advisory.summary

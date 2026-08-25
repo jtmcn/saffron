@@ -887,6 +887,57 @@ def test_a_size_failure_at_standard_does_not_enter_the_repair_loop(
     assert outcome.advisory_gates == ["size"]
 
 
+_HIDDEN_DIFF = (
+    "diff --git a/src/x.py b/src/x.py\n"
+    "index 1111111..2222222 100644\n"
+    "Binary files a/src/x.py and b/src/x.py differ\n"
+)
+
+
+def test_an_unreadable_file_does_not_abort_an_attempt_that_size_cannot_block(
+    monkeypatch, tmp_path
+):
+    """`size` refuses a diff it cannot measure with `error`, and `error` reaches
+    `aborted_gates` before any advisory filter — so at `standard`, where §5.6
+    says the gate stops nothing, the refusal would end the attempt instead.
+
+    A task legitimately adding a PNG inside `touches` renders identically to
+    the `-diff` trick, so this is the ordinary case, not the adversarial one.
+    """
+    cell = _stub_the_runtime(monkeypatch)
+    _grow_the_diff_after_the_first_turn(monkeypatch, cell, big=_HIDDEN_DIFF)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(spec_type="bug"),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    (size_result,) = [g for g in outcome.gates if g.gate == "size"]
+    assert size_result.status != "error"
+    # And it says what it could not read, so an advisory count with a hole in
+    # it is never reported as a plain number.
+    assert "unreadable" in size_result.summary
+
+
+def test_the_same_unreadable_file_aborts_the_attempt_at_elevated_risk(
+    monkeypatch, tmp_path
+):
+    """The other half: where the gate blocks, a diff it cannot measure must not
+    read as one it measured and passed."""
+    cell = _stub_the_runtime(monkeypatch)
+    _grow_the_diff_after_the_first_turn(monkeypatch, cell, big=_HIDDEN_DIFF)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(spec_type="bug", risk="elevated"),
+    )
+    assert outcome.state == "GATE_ERROR"
+
+
 def test_the_same_size_failure_repairs_at_elevated_risk(monkeypatch, tmp_path):
     """The identical diff, the identical ceiling — only the tier differs, and
     that is what decides whether the task has to answer for it (§5.6)."""
