@@ -6,25 +6,26 @@ priority: 1
 touches:
   - saffron/cell/session.py
   - saffron/repos/policy.py
-  - saffron/gates/core/size.py
   - saffron/report/pr_body.py
   - tests/test_session.py
   - tests/test_policy.py
-  - tests/test_size.py
   - tests/test_report.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md
   - .saffron/**
   - docs/**
+  - saffron/gates/core/size.py
 budget_usd: 12
 max_attempts: 4
+max_turns: 100
 risk: elevated
 ---
 
 ## Context
-`SA-0002` built the `size` gate and its spec put the consumer out of scope, so
-`saffron/gates/core/size.py` is present, tested, reviewed — and unreachable.
+`SA-0002` built the `size` gate and its spec put the consumer out of scope, on
+the correct reasoning that the risk tier has none until v1. So
+`saffron/gates/core/size.py` is present, tested, reviewed — and unreachable:
 `session.py`'s `_suite` builds its core-gate list from `scope`, `integrity`,
 `committed` and `census`.
 
@@ -61,20 +62,15 @@ in §5.4 and §5.6 disagreeing.
       so a red row on a green pull request is not read as a contradiction
 - [ ] The effective tier, not `spec.risk`, is what the PR body header and the
       queue line report
-- [ ] `size` returns `error` for a diff carrying a `Binary files ... differ`
-      section for a file inside `touches`, matching what `integrity` already
-      does with an unreadable section — a `-diff` gitattribute otherwise counts
-      0 lines and zeroes the gate at the one tier where it blocks
 - [ ] A test for each of: an `elevate_on` match elevating a `standard` spec, a
       `size` fail not repairing at `standard`, the same fail repairing at
       `elevated`, and a `blocking: false` declared gate not repairing
 
 ## Out of scope
-The third lens (blast radius or coverage) — it needs the tier this task
-delivers, and it is its own spec. The `--numstat` cross-check as a second
-opinion on the line count: the `touches` rule above closes the escape this
-gate can actually be gamed with, and numstat means a second git call in the
-cell for a diff the host already holds.
+`saffron/gates/core/size.py` is **forbidden**, deliberately: the cheapest way to
+make a blocking gate stop blocking is to weaken the gate, and this task is the
+wiring. The gate's own `-diff` hole is `SA-0006`. The third lens (blast radius
+or coverage) needs the tier this task delivers and is its own spec.
 
 ## Notes for the agent
 `scope.matches(path, pattern)` is this repo's glob matcher — `fnmatch` lets `*`
@@ -85,9 +81,10 @@ right for a gate that executes nothing, and `runner.run_gate` converts a
 declared gate's `pass`/`fail` with no `tool` into `error` — declaring it would
 error every task. Core gates are prepended host-side; that is what `_suite` is.
 
-`integrity` already carries the unreadable-section rule the last criterion
-asks for. Read it before writing a second one, and make the two agree.
-
 Advisory is a property of *this attempt's* gate, not of the failure: the same
 `size` failure is advisory at `standard` and blocking at `elevated`, so it does
 not belong in `Failure`. `subtract_baseline`'s counting is not yours to touch.
+
+Commit after each coherent step. A previous run of this spec did 61 turns of
+correct work and exported nothing, because it was holding all of it uncommitted
+when its turn ceiling fired.
