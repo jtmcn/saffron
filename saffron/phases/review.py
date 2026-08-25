@@ -94,17 +94,25 @@ class LensReview:
         }
 
 
-def gate_summary(results: Sequence[GateResult]) -> str:
+def gate_summary(results: Sequence[GateResult], advisory: Sequence[str] = ()) -> str:
     """The gate results as prompt text — status and tool, never a verdict.
 
     `tool` is in it because "passed" and "never ran" are otherwise identical
     (§5.4), and a critic told a gate passed should be able to see which did.
+
+    An advisory `fail` is marked, because an unmarked one reads as a defect the
+    host missed: a lens files a blocker on it, the implementer spends a REBUT
+    round arguing, and the budget goes on a failure the host already ruled is
+    not the task's problem.
     """
-    return "\n".join(
-        f"- {r.gate}: {r.status} ({r.tool or 'no tool reported'})"
-        + (f" — {r.summary}" if r.summary else "")
-        for r in results
-    )
+    lines = []
+    for r in results:
+        mark = " (advisory)" if r.gate in advisory and r.status == "fail" else ""
+        lines.append(
+            f"- {r.gate}: {r.status}{mark} ({r.tool or 'no tool reported'})"
+            + (f" — {r.summary}" if r.summary else "")
+        )
+    return "\n".join(lines)
 
 
 def lens_prompt(

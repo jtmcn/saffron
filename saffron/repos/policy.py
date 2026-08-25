@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import hashlib
 import os
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from saffron.gates.core.scope import matches
 
 # A gate name reaches a filesystem path and then an exec, so it is constrained
 # the way Spec.id is: no separator, nothing that climbs out of .saffron/gates.
@@ -58,6 +61,27 @@ class Policy(BaseModel):
         """Declared gates in declaration order, mapped to their executables."""
         gates_dir = repo_dir / ".saffron" / "gates"
         return {name: gates_dir / name for name in self.gates}
+
+
+def effective_risk(
+    spec_risk: str, changed_files: Sequence[str], elevate_on: Sequence[str]
+) -> str:
+    """§5.6: `elevated` when the spec says so, or when a changed path matches
+    an `elevate_on` pattern. Otherwise the spec's own tier, unchanged.
+
+    Pure, so the wiring spec's own rule — compute this once per attempt, from
+    the changed-file list `_suite` already built, never from a second read —
+    is the caller's to keep, not this function's. `matches` is `scope`'s own
+    glob (`*` stops at `/`, `**` doesn't) — `fnmatch` and `PurePath.full_match`
+    are both wrong here, for the reasons `scope.py` gives.
+    """
+    if spec_risk == "elevated":
+        return "elevated"
+    for path in changed_files:
+        for pattern in elevate_on:
+            if matches(path, pattern):
+                return "elevated"
+    return spec_risk
 
 
 def load_policy(repo_dir: Path) -> tuple[Policy, str]:

@@ -364,6 +364,30 @@ _DIFF = """diff --git a/src/x.py b/src/x.py
 +def x(): ...
 """
 
+# A diff `size` fails against a `bug` spec's 300-line ceiling. Built, not
+# hand-written: what matters is the count, not the content.
+_BIG_DIFF = (
+    "diff --git a/src/x.py b/src/x.py\n"
+    "--- a/src/x.py\n"
+    "+++ b/src/x.py\n"
+    "@@ -1,1 +1,310 @@\n" + "".join(f"+line {n}\n" for n in range(310))
+)
+
+
+def _grow_the_diff_after_the_first_turn(
+    monkeypatch, cell, *, small=_DIFF, big=_BIG_DIFF
+):
+    """The baseline suite runs before any turn, on a worktree at `base_sha`
+    where the real diff is empty. `_stub_the_runtime`'s `export_patch` stub is
+    constant, so a gate that reads the diff itself (`size`) would otherwise
+    see the same content on both sides of the subtraction and never produce a
+    new failure. This mirrors `_changed_files`' own `cell.turns` check: small
+    before the agent has moved, big once it has."""
+    monkeypatch.setattr(
+        "saffron.cell.worktree.export_patch",
+        lambda _c, _s: small if not cell.turns else big,
+    )
+
 
 def _stub_the_runtime(
     monkeypatch,
@@ -830,6 +854,128 @@ def test_a_diff_outside_touches_fails_the_suite(monkeypatch, tmp_path):
         "- [scope] infra/deploy.tf:? out-of-scope: outside touches: src/**, tests/**"
         in cell.turns[2]
     )
+
+
+def test_a_size_failure_at_standard_does_not_enter_the_repair_loop(
+    monkeypatch, tmp_path
+):
+    """§5.4/§5.6: `size` is advisory at `standard` — a task must not pay a
+    repair turn for it, and it must not be a task's problem."""
+    cell = _stub_the_runtime(monkeypatch)
+    _grow_the_diff_after_the_first_turn(monkeypatch, cell)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(spec_type="bug"),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    # No repair turn was bought — REVIEW's own lens turns are the only ones
+    # past IMPLEMENT, and none of them carry a repair prompt.
+    assert not any("These failures are new" in turn for turn in cell.turns)
+    assert not any(nf.gate == "size" for nf in outcome.new_failures)
+    # Still reported, host-side, beside `scope` and `integrity`: a gate
+    # nothing reads is not a gate, and neither is one whose result vanishes
+    # because it never blocked.
+    (size_result,) = [g for g in outcome.gates if g.gate == "size"]
+    assert size_result.status == "fail"
+    # Carried on the outcome, so a caller downstream of `_drive_cell` — the PR
+    # body, the queue line — has the effective tier and the advisory set to
+    # render, rather than re-deriving them from `spec.risk` alone.
+    assert outcome.effective_risk == "standard"
+    assert outcome.advisory_gates == ["size"]
+
+
+def test_the_same_size_failure_repairs_at_elevated_risk(monkeypatch, tmp_path):
+    """The identical diff, the identical ceiling — only the tier differs, and
+    that is what decides whether the task has to answer for it (§5.6)."""
+    cell = _stub_the_runtime(monkeypatch)
+    _grow_the_diff_after_the_first_turn(monkeypatch, cell)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn()],
+        spec=_spec(spec_type="bug", risk="elevated"),
+    )
+    assert outcome.state == "EXHAUSTED"
+    # A repair turn *was* bought this time, and it was told about `size`.
+    assert len(cell.turns) == 3
+    assert "- [size] diff-too-large:" in cell.turns[2]
+    assert any(nf.gate == "size" for nf in outcome.new_failures)
+    assert outcome.effective_risk == "elevated"
+    assert outcome.advisory_gates == []
+
+
+def test_an_elevate_on_match_elevates_a_standard_spec_for_the_suite(
+    monkeypatch, tmp_path
+):
+    """§5.6's second clause, wired rather than proved in isolation: a path the
+    repo names in `elevate_on` elevates the tier even though the spec itself
+    never asked to be `elevated`."""
+    cell = _stub_the_runtime(monkeypatch, changed=("src/x.py",))
+    _grow_the_diff_after_the_first_turn(monkeypatch, cell)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn()],
+        spec=_spec(spec_type="bug"),
+        policy="gates: {}\nelevate_on:\n  - src/**\n",
+    )
+    assert outcome.state == "EXHAUSTED"
+    assert len(cell.turns) == 3
+    assert any(nf.gate == "size" for nf in outcome.new_failures)
+    # The spec itself is still `standard` — it is the path match that elevated
+    # this attempt, and the outcome must carry *that*, not `spec.risk`.
+    assert outcome.effective_risk == "elevated"
+
+
+def test_a_declared_gate_with_blocking_false_does_not_repair(monkeypatch, tmp_path):
+    """A repo's own `blocking: false` behaves the same at every tier — reported,
+    never repaired — which is a different rule from `size`'s tier switch."""
+    failing_lint = [
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="ruff 1.0",
+            failures=[Failure(file="a.py", code="E501", message="too long")],
+        )
+    ]
+    cell = _stub_the_runtime(monkeypatch, suites=([], failing_lint, failing_lint))
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        policy="gates:\n  lint: { blocking: false }\n",
+        gates=("lint",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert not any("These failures are new" in turn for turn in cell.turns)
+    assert not any(nf.gate == "lint" for nf in outcome.new_failures)
+    (lint_result,) = [g for g in outcome.gates if g.gate == "lint"]
+    assert lint_result.status == "fail"
+    # `size` is also advisory here — the spec is `standard` and nothing
+    # declared an `elevate_on` match — beside `lint`'s own `blocking: false`.
+    assert outcome.advisory_gates == ["lint", "size"]
+
+
+def test_the_task_is_recorded_with_the_specs_declared_risk(monkeypatch, tmp_path):
+    """The best the ledger's `risk` column can carry (§5.6): no diff exists yet
+    at `create_task`, so an `elevate_on` match cannot be reflected here — only
+    what the spec itself declared."""
+    cell = _stub_the_runtime(monkeypatch)
+    _outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(risk="elevated"),
+    )
+    (line,) = ledger.queue_lines()
+    assert line["risk"] == "elevated"
 
 
 def test_a_test_missing_at_head_reaches_the_agent_as_a_census_failure(

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import fnmatch
 import re
+from collections.abc import Sequence
 
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import GateResult, split_lines
@@ -67,11 +68,24 @@ def render_pr_body(
     test_paths: list[str] = (),
     diff: str = "",
     verified_on: str = "base",
+    effective_risk: str | None = None,
+    advisory_gates: Sequence[str] = (),
 ) -> str:
+    """`effective_risk` is what the header reports — `elevated` when the spec
+    says so *or* the diff crossed a `policy.elevate_on` path — never bare
+    `spec.risk`, which only ever knows the first of those two (§5.6). Left
+    unset it falls back to `spec.risk`, so a caller that has not computed the
+    effective tier yet still gets the behaviour it always had.
+
+    `advisory_gates` names every gate result in `results` this attempt did not
+    hold blocking — `size` at `standard`, a declared `blocking: false` gate at
+    any tier — so its row can say so: a `fail` here is not a contradiction of
+    a green pull request, and unmarked it would read like one (§5.6)."""
+    risk = effective_risk if effective_risk is not None else spec.risk
     sections = [
         f"## {spec.id} — {spec.title}",
         "",
-        f"`{spec.type}` · risk `{spec.risk}` · +{added}/−{removed} · "
+        f"`{spec.type}` · risk `{risk}` · +{added}/−{removed} · "
         f"{attempts} attempt{'' if attempts == 1 else 's'} · ${spent_usd:.2f}",
         "",
         _criteria(spec),
@@ -79,7 +93,7 @@ def render_pr_body(
         _disagreements(reviews, rebut_result),
         None,  # _test_diff, sized last: it is the only unbounded section.
         _verification(verified_on),
-        _gate_table(results),
+        _gate_table(results, advisory_gates),
         _findings(reviews),
         _provenance(spec, base_sha, head_sha, transcript_path),
     ]
@@ -274,7 +288,7 @@ def _verification(verified_on: str) -> str:
     )
 
 
-def _gate_table(results: list[GateResult]) -> str:
+def _gate_table(results: list[GateResult], advisory_gates: Sequence[str] = ()) -> str:
     lines = [
         "### Gates",
         "",
@@ -289,9 +303,19 @@ def _gate_table(results: list[GateResult]) -> str:
             if result.duration_ms is not None
             else "—"
         )
+        # In the summary column, not between `gate` and `status`: those two
+        # cells are what a reader — and `test_the_gate_table_holds_every_
+        # result_with_its_status_in_backticks` — matches on verbatim, and an
+        # advisory `fail` still belongs beside its own gate and status.
+        summary = result.summary
+        # `fail` only: the marker exists to explain a red row on a green pull
+        # request, and `size` is advisory on every standard-tier attempt — so
+        # keying on the gate alone tags its `pass` rows too.
+        if result.gate in advisory_gates and result.status == "fail":
+            summary = f"(advisory) {summary}" if summary else "(advisory)"
         lines.append(
             f"| `{_cell(result.gate)}` | `{result.status}` | {duration} "
-            f"| {_cell(result.summary)} |"
+            f"| {_cell(summary)} |"
         )
     lines += [
         "",

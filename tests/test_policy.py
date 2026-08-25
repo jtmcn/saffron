@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from saffron.repos.policy import PolicyError, load_policy
+from saffron.repos.policy import PolicyError, effective_risk, load_policy
 
 VALID = """
 gates:
@@ -134,3 +134,29 @@ def test_a_gate_name_that_climbs_out_of_the_gates_dir_is_a_policy_error(tmp_path
     )
     with pytest.raises(PolicyError, match="invalid"):
         load_policy(repo)
+
+
+def test_a_spec_declared_elevated_risk_stays_elevated():
+    """§5.6's first clause: the spec's own word is enough, with no diff at all."""
+    assert effective_risk("elevated", [], []) == "elevated"
+
+
+def test_an_elevate_on_match_elevates_a_standard_spec():
+    """§5.6's second clause: a changed path crossing an `elevate_on` pattern
+    elevates a spec that never asked for it (the wiring's whole point)."""
+    assert (
+        effective_risk("standard", ["saffron/cell/session.py"], ["saffron/cell/**"])
+        == "elevated"
+    )
+
+
+def test_elevate_on_uses_scopes_own_glob_not_fnmatch():
+    """`*` stops at a slash — `fnmatch` would wrongly match this."""
+    assert effective_risk("standard", ["a/b/c.py"], ["a/*.py"]) == "standard"
+
+
+def test_no_match_and_no_declaration_leaves_the_tier_alone():
+    assert (
+        effective_risk("standard", ["docs/readme.md"], ["saffron/cell/**"])
+        == "standard"
+    )
