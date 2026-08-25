@@ -1025,6 +1025,28 @@ source on the way in, and a turn ceiling names itself in the failure instead of
 reading as `exited 1`. `implement.md` asks for a commit per coherent step and
 says why, with the measurement.
 
+**And a fifth, found the same day by `SA-0005` (#21).** `cli.py` never passed
+`risk=spec.risk` into `CellSpec`, and `package.py` never passed the effective
+tier or the advisory set to the PR body or the queue line — a value computed,
+carried out on `CellOutcome`, and read by nobody. `SA-0007` closes it.
+
+**What made it worth more than a sixth instance: the tests.** Every test of the
+new behaviour called the renderer directly with hand-supplied values, so the
+suite was green about a function that works and silent about whether anything
+calls it. That is the shape all five share — the declaration end is tested, the
+reading end does not exist, and no test spans the two. **A test that constructs
+the argument it then asserts on cannot detect a caller that never passes it.**
+
+**And the spec is what made it unfixable in place.** `SA-0005`'s `touches` did
+not include `cli.py` or `package.py`, so the implementer could not have closed
+the gap without failing `scope`, and one of the three findings was dropped as
+unanchorable for the same reason — it named a file the diff could not contain.
+Both lenses confirmed the blocker after the rebuttal, the first recorded
+disagreement this pipeline has produced (item 9), and the adjudication is on
+#21: **the fault was the spec's, not the implementer's.** A spec whose
+acceptance criteria reach outside its own `touches` is unsatisfiable by
+construction, and nothing in intake checks for it.
+
 **Still open, deliberately:** `error_max_turns` is not resumable. A bound that
 resumes is not a bound, and committing per step removes most of the loss — if a
 run exhausts turns *with* its commits landing, that is the evidence for
