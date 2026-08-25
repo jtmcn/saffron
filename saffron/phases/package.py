@@ -683,6 +683,8 @@ def package(
             test_paths=policy.integrity.test_paths,
             diff=diff,
             verified_on=verified_on,
+            effective_risk=outcome.effective_risk,
+            advisory_gates=outcome.advisory_gates,
         )
         body_path.write_text(body)
         # The body is the second cell-authored channel out: a claim or a
@@ -780,7 +782,7 @@ def _finish(ledger, outcome, out_dir: Path, spec, repo_name: str, result):
             removed=result.removed,
             link=result.pr_url,
             note=result.note,
-            risk=spec.risk,
+            risk=outcome.effective_risk,
         ),
     )
     return result

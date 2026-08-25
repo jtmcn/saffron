@@ -323,6 +323,21 @@ def test_a_flag_overrides_the_spec_and_says_which_it_was(tmp_path, monkeypatch, 
     assert "budget_usd=31.5 (spec)" in printed
 
 
+def test_a_specs_declared_risk_reaches_the_cell(tmp_path, monkeypatch, capsys):
+    """`SA-0005` computed `effective_risk` from `CellSpec.risk`, but nothing
+    ever set it, so `effective_risk`'s first clause — set explicitly in the
+    spec — could only ever see the pydantic default `standard`. The spec here
+    declares `elevated`; the cell must be handed exactly that, not the field's
+    default."""
+    repo = _local_origin(tmp_path)
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, risk="elevated")
+
+    cell_spec, _printed = _capture_cell_spec(monkeypatch, repo, tmp_path, args, capsys)
+
+    assert cell_spec.risk == "elevated"
+
+
 def test_the_base_is_the_remote_default_branch_not_the_checkout(tmp_path, monkeypatch):
     """A task started from a feature branch is still cut from the default branch.
 
