@@ -101,6 +101,15 @@ def test_a_clean_finish_keeps_its_reported_cost():
     assert implement._reconcile_cost(reported=3.5, last_good=2.0, failed=False) == 3.5
 
 
+def _no_reap(container, **_kwargs):
+    """These tests are about which bound ended the turn, not about the reap.
+
+    Injected rather than left to the default: `reap_cell` execs `container`,
+    which a unit test must not, and `tests/conftest.py` now refuses it.
+    """
+    return runtime.Completed(0, "", "")
+
+
 def _stream(*lines, returncode=0, stderr="", timed_out=False, bound=""):
     """A fake in-cell runner: the lines it prints, and how it exited."""
 
@@ -215,6 +224,7 @@ def test_a_runner_killed_after_emitting_its_result_is_not_a_clean_turn():
             options={},
             watch=lambda _line: None,
             exec_stream=_stream(_result_line(), timed_out=True),
+            reap_cell=_no_reap,
         )
 
 
@@ -373,6 +383,7 @@ def test_an_idle_kill_is_a_failed_turn_that_names_the_bound():
             exec_stream=_stream(
                 _result_line(), returncode=124, timed_out=True, bound="idle"
             ),
+            reap_cell=_no_reap,
         )
     assert raised.value.attempt.bound == "idle"
 
@@ -385,6 +396,7 @@ def test_a_wall_clock_kill_before_any_result_names_the_bound_too():
             options={},
             watch=lambda _line: None,
             exec_stream=_stream(returncode=124, timed_out=True, bound="wall"),
+            reap_cell=_no_reap,
         )
 
 
@@ -400,6 +412,7 @@ def test_a_turn_killed_before_its_result_event_still_reports_what_it_spent():
             watch=lambda _line: None,
             last_cost_usd=4.0,
             exec_stream=_stream(returncode=124, timed_out=True, bound="wall"),
+            reap_cell=_no_reap,
         )
     assert raised.value.attempt is not None
     assert raised.value.attempt.cost_usd_est == 4.0
