@@ -135,9 +135,14 @@ def test_an_empty_diff_passes():
     assert result.status == "pass"
 
 
-def test_every_result_names_its_tool():
-    assert size_gate(_diff(added=1, removed=0), "bug").tool
-    assert size_gate(_diff(added=10_000, removed=0), "bug").tool
+def test_no_result_names_a_tool():
+    """`tool` is obtained by executing the tool, never written down (§5.4,
+    Appendix H) — so a gate that executes nothing leaves it unset, as `scope`
+    and `integrity` do. A literal would also read identically forever and
+    silently defeat `baseline.suite_drift`, which watches `tool` to notice a
+    gate's implementation changing mid-run."""
+    assert size_gate(_diff(added=1, removed=0), "bug").tool is None
+    assert size_gate(_diff(added=10_000, removed=0), "bug").tool is None
 
 
 def test_the_summary_names_the_count_and_the_ceiling():

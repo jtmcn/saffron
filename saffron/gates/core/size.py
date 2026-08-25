@@ -21,11 +21,6 @@ _CEILINGS = {"bug": 300, "feature": 600, "refactor": 1000}
 # three declared values, and stands in as the default until a spec pins one.
 _DEFAULT_CEILING = _CEILINGS["feature"]
 
-# The gate has no external tool to interrogate — it is Saffron's own line
-# count — so `tool` names the gate itself rather than something obtained by
-# running a subprocess (per the notes on this spec).
-_TOOL = "saffron-size 1"
-
 
 def _changed_lines(diff: str) -> int:
     """Added lines plus removed lines, from hunk content only.
@@ -75,14 +70,12 @@ def size_gate(diff: str, spec_type: str) -> GateResult:
         return GateResult(
             gate="size",
             status="pass",
-            tool=_TOOL,
             summary=f"{lines} changed lines within the {spec_type} ceiling of {ceiling}",
         )
 
     return GateResult(
         gate="size",
         status="fail",
-        tool=_TOOL,
         failures=[
             Failure(
                 file="",
