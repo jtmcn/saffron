@@ -634,6 +634,8 @@ def test_a_conflict_persists_merge_failed_and_pushes_nothing(monkeypatch, tmp_pa
     git(work, "config", "user.email", "t@example.com")
     git(work, "config", "user.name", "Test")
     (work / "f.txt").write_text("a\nb\nc\nd\ne\n")
+    (work / ".saffron").mkdir()
+    (work / ".saffron" / "policy.yaml").write_text("gates: {}\n")
     git(work, "add", "-A")
     git(work, "commit", "-qm", "base")
     base = git(work, "rev-parse", "HEAD")
@@ -678,7 +680,6 @@ def test_a_conflict_persists_merge_failed_and_pushes_nothing(monkeypatch, tmp_pa
         acceptance_criteria=[],
         type="feature",
     )
-    policy = SimpleNamespace(integrity=SimpleNamespace(test_paths=["tests/**"]))
 
     def never_called(argv):
         raise AssertionError("gh must not be reached on a conflict")
@@ -688,7 +689,6 @@ def test_a_conflict_persists_merge_failed_and_pushes_nothing(monkeypatch, tmp_pa
         spec=spec,
         repo=work,
         mirror=mirror,
-        policy=policy,
         image="unused",
         ledger=ledger,
         out_dir=tmp_path / "batch",
@@ -724,11 +724,17 @@ def packageable(monkeypatch, tmp_path):
     git(work, "config", "user.email", "t@example.com")
     git(work, "config", "user.name", "Test")
     (work / "f.txt").write_text("a\nb\nc\nd\ne\n")
-    # Committed at the base: PACKAGE exports the gates it re-verifies with.
+    # Committed at the base: PACKAGE exports the gates it re-verifies with,
+    # and reads the policy declaring them out of the same export. `f.txt` is
+    # this repo's whole diff, so a `test_paths` naming it is the one visible
+    # difference between the committed policy and any other.
     gates = work / ".saffron" / "gates"
     gates.mkdir(parents=True)
     (gates / "tests").write_text("#!/bin/sh\nexit 0\n")
     (gates / "tests").chmod(0o755)
+    (work / ".saffron" / "policy.yaml").write_text(
+        "gates:\n  tests: {}\nintegrity:\n  test_paths:\n    - f.txt\n"
+    )
     git(work, "add", "-A")
     git(work, "commit", "-qm", "base")
     base = git(work, "rev-parse", "HEAD")
@@ -779,10 +785,6 @@ def packageable(monkeypatch, tmp_path):
             ),
             repo=work,
             mirror=mirror,
-            policy=SimpleNamespace(
-                integrity=SimpleNamespace(test_paths=["tests/**"]),
-                gates={"tests": None},
-            ),
             image="unused",
             ledger=ledger,
             out_dir=tmp_path / "batch",
@@ -836,11 +838,8 @@ def test_the_bodys_diff_is_pinned_against_the_operators_gitconfig(packageable):
     the host parses out of the diff. Without `DIFF_FLAGS`, §7's gate-gaming
     countermeasure renders an empty section and says nothing about why."""
     git(packageable.mirror, "config", "diff.noprefix", "true")
-    # The one file this patch touches, declared as a test path, so the section
-    # has something to render.
-    packageable.kwargs["policy"] = SimpleNamespace(
-        integrity=SimpleNamespace(test_paths=["f.txt"])
-    )
+    # The fixture's committed policy declares `f.txt` — the one file this patch
+    # touches — so the section has something to render.
 
     result = package(
         packageable.outcome,
@@ -1273,3 +1272,21 @@ def test_a_re_verified_body_shows_the_gates_that_re_ran(monkeypatch, packageable
     assert "ran on the package" in body
     # The cell's run at `base_sha` must not be the one shown.
     assert "ran at base" not in body
+
+
+def test_the_policy_package_verifies_under_comes_from_the_default_branch(packageable):
+    """The twin of the cell's rule (§5.4), which item 13 left half-closed:
+    the checkout's `policy.yaml` does not govern, and PACKAGE did not reach it
+    until the budget was spent. Only the committed policy names `f.txt`, so
+    only the committed policy can produce the section."""
+    (packageable.work / ".saffron" / "policy.yaml").write_text("gates:\n  tests: {}\n")
+
+    result = package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **packageable.kwargs,
+    )
+
+    assert result.state == "READY_FOR_REVIEW"
+    body = (packageable.out_dir / "SA-0005" / "pr_body.md").read_text()
+    assert "### Test files changed" in body

@@ -825,7 +825,11 @@ as the patch left them, and exec'ing those on the host is the control plane
 executing model-authored code (§2). Both of its runs read their gates from a
 host-supplied export at the new default-branch head (§5.4), so the patch's own
 `.saffron/gates/*` are never executed anywhere and the two suites it subtracts
-come from one set of executables. The base having moved also invalidates the
+come from one set of executables. **PACKAGE reads its whole policy out of that
+export**, unconditionally and whether or not the suite re-runs: the commit a
+package is verified against declares the gates it is verified with, exactly as
+`base_sha` does for the cell, and the pull request body then describes the
+change under the declaration it was actually measured with. The base having moved also invalidates the
 baseline, so the gate-only cell runs the suite twice — at the new default-branch
 head for a fresh baseline, and at the packaged commit — and subtracts as always.
 New failures are `MERGE_FAILED`: the change did not survive contact with today's

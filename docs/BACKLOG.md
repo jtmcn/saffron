@@ -821,11 +821,15 @@ under. **Done looks like:** `package()` loading its policy from the export it
 already makes at `fetch_head`, which means dropping the `policy` parameter
 rather than threading a second one.
 
-Until it lands, `cli._run_cell` reads the checkout's policy up front for its
-refusal alone — the `github_slug` idiom beside it — because item 13 moved the
-only other read of that file to after the budget is spent. **That read goes
-away with this item**, not before it: it exists to keep an invalid checkout
-policy from costing a run, and there is nothing else left for it to do.
+**Done, 2026-08-24.** `package()` exports `.saffron` at `fetch_head` and reads
+its policy from it, unconditionally rather than inside the re-verification
+branch — the body's `test_paths` is read on every path, so a policy loaded only
+when the base moved would have been half a fix. The `policy` parameter is gone
+and `cli` no longer reads `.saffron/policy.yaml` at all, which took the refusal
+read with it: it existed to keep an invalid checkout policy from costing a run,
+and the checkout's policy is now read nowhere on the cell path. One measured
+consequence for onboarding: a repo whose default branch carries no
+`.saffron/policy.yaml` cannot package, the same way it cannot start a cell.
 
 **The cell image is built from the working copy's `.saffron/Dockerfile`**
 (`image.build_cell_image(repo)`) while the gates, the policy and the base tree
