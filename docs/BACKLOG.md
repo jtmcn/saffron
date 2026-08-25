@@ -839,6 +839,17 @@ the branch's — but it is now the only member of the family that reads the
 checkout, and nothing says which way it is meant to go. **Done looks like:**
 §5.1 saying so either way.
 
+**Done, 2026-08-24: deliberate, and §5.1 says so.** The image stays the
+checkout's. The drift is real and now named rather than implied — this repo's
+own Dockerfile `COPY`s `pyproject.toml` and `uv.lock` out of the build context,
+so a branch that touches the lock bakes those dependencies into an image
+running `base_sha`'s code. It is accepted because the image is the toolchain
+and not the judgment. **The scheduler reopens it**: unattended there is no
+checkout for the phrase to mean anything, and the answer there is a build
+context exported from `base_sha` like every other input. That is v1+ work and
+is not filed as an item here, because §4.2 has to exist before it can be
+written.
+
 ---
 
 ## What is *not* here, deliberately
