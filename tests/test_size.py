@@ -33,6 +33,16 @@ def test_changed_lines_does_not_count_the_file_header():
     assert _changed_lines(diff) == 0
 
 
+def test_each_file_block_gets_its_own_headers_back():
+    """Every diff Saffron gates is multi-file, and nothing here was: deleting
+    the `in_headers` reset in `_changed_lines` left all sixteen tests passing
+    while a two-file diff counted 4 instead of 2 — the second block's
+    `--- a/x` / `+++ b/x` read as content, once per extra file."""
+    two = _diff(added=1, removed=0) + _diff(added=1, removed=0, path="src/b.py")
+    assert two.count("diff --git") == 2
+    assert _changed_lines(two) == 2
+
+
 def test_changed_lines_does_not_count_the_hunk_or_diff_headers():
     diff = _diff(added=1, removed=1)
     assert "diff --git" in diff

@@ -5,6 +5,12 @@ and never executes repo code — no language knowledge anywhere (§2.1). Advisor
 at `risk: standard` and blocking at `elevated` (§5.6); wiring that switch is a
 separate spec, so this module only ever produces the judgment, never enforces
 it.
+
+**Host-side only.** `tool` is left unset, which is right for a gate that
+executes nothing — but `runner.run_gate` turns a declared gate's `pass`/`fail`
+with no `tool` into `error`. So the wiring spec calls this from
+`session.py::_suite` beside `scope` and `integrity`; declaring it in a repo's
+`policy.yaml` would error every task.
 """
 
 from __future__ import annotations
@@ -17,9 +23,11 @@ _CEILINGS = {"bug": 300, "feature": 600, "refactor": 1000}
 # `test`, `docs` and `chore` specs have no ceiling in §5.4 — an omission, not a
 # signal that they are unbounded. Absence of a declared ceiling is not the gate
 # breaking, so it must not become `error` (§5.4's own rule: `error` is reserved
-# for the gate itself failing to run). `feature`'s ceiling is the middle of the
-# three declared values, and stands in as the default until a spec pins one.
-_DEFAULT_CEILING = _CEILINGS["feature"]
+# for the gate itself failing to run). The stand-in is the widest declared
+# ceiling, not the median: `chore` regenerating a lock file and `docs`
+# rewriting a §-section are where the largest legitimate diffs live, so a
+# median default is stricter than `refactor` for the types §5.4 never sized.
+_DEFAULT_CEILING = _CEILINGS["refactor"]
 
 
 def _changed_lines(diff: str) -> int:
@@ -39,6 +47,14 @@ def _changed_lines(diff: str) -> int:
     line after it is judged only by its single leading `+`/`-` marker, exactly
     as `integrity._parse_block` treats the same distinction (`saw_hunk`).
     """
+    # ponytail: a file git renders as `Binary files ... differ` has no `@@`, so
+    # it contributes 0 and a `-diff` gitattribute zeroes the gate on a rewrite
+    # of any size — BACKLOG item 2's residual, arriving here. The upgrade path
+    # is `git diff --numstat` as the cross-check (BACKLOG item 1); it is not
+    # taken here because the honest response is `error` only when the
+    # unreadable file is inside `touches`, as `integrity` already does, and
+    # this gate is handed neither `touches` nor a numstat. The wiring spec has
+    # both.
     count = 0
     in_headers = True  # before the current file block's first "@@" line
     for line in split_lines(diff):
