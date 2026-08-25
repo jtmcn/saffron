@@ -156,9 +156,11 @@ class CellSpec:
     spec_type: str
     body: str
     forbidden: list[str] = field(default_factory=list)
-    # Read by `_suite` to compute the effective tier (`policy.effective_risk`);
-    # `cli.py` does not populate this yet — a thin follow-on, same as
-    # `package.py`'s side of the wiring (§5.6, this module's own notes).
+    # The tier the spec declared, read by `_suite` as one half of the effective
+    # one (`policy.effective_risk`); `elevate_on` matching the diff is the
+    # other (§5.6). `cli` passes it, and `test_a_specs_declared_risk_reaches_
+    # the_cell` is what says so — it went unpassed for a whole task once,
+    # which made the declared half of §5.6 unreachable outside tests.
     risk: str = "standard"
     # Kept in step with `intake.Spec`, which is where a run's ceilings are
     # declared and defaulted; `cli` passes all three, so these are reached only
