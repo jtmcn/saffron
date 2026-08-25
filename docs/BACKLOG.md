@@ -749,6 +749,31 @@ loading policy from that archive — `git archive <sha> .saffron` plus
 `load_policy` pointed at the export instead of the working copy — is the shape
 of the fix, not a new mechanism.
 
+**Done, 2026-08-24.** The shape held: the pathspec widened from
+`.saffron/gates` to `.saffron`, and `_drive_cell` reads its policy back out of
+that export. Three things the item did not say.
+
+**The fix deleted a function rather than adding one.** `export_gates_for`'s
+`gates: {}` guard existed *only* because the narrow pathspec made `git archive`
+fail on a repo with no `gates/` — widening it removes the guard's reason, and
+`export_gates` already cleared its own dest, which is the half of that guard
+worth keeping (its staleness test moved onto `export_gates` with it). Renamed
+with it: `export_gates` → `export_saffron_dir`, because a function that now
+carries the policy the run is judged under cannot be named for the subdirectory
+it used to copy.
+
+**The export moved out of the try block, not just above `load_policy`.** It ran
+after the image build, the host probe and the proxy; it now runs before all
+three and before the ledger has a task row — so a `base_sha` carrying no
+`.saffron` at all costs nothing and leaves no run behind. That case is still an
+exit 2: a repo whose default branch is not onboarded cannot start a cell, which
+is what pinning the policy to `base_sha` means and is stated in §5.4.
+
+**`/gates` now also holds `specs/` and the `Dockerfile`** — everything under
+`.saffron/`, because one archive is one pathspec. They are read-only and the
+cell already has all of it at `/work`, so this leaks nothing; it is noted
+because a mount named `/gates` holding specs is otherwise a surprise.
+
 ---
 
 ## 14. `committed` fails on build artifacts a repo does not gitignore
@@ -776,6 +801,33 @@ documentation stating the requirement may be the whole fix. If it is not, the
 narrower mechanism is `committed` ignoring untracked paths that the baseline call
 also produced *by directory* rather than by path — which is a second identity rule
 sitting next to the subtraction's, and CLAUDE.md warns against making those match.
+
+---
+
+## 15. Two more reads of the working copy, one of them the same defect as item 13
+
+Found while closing item 13, measured, not reasoned — and left open because
+both sit in PACKAGE rather than in the cell.
+
+**`cli.py` loads the policy for PACKAGE from `repo`.** `package()` then hands
+it to `reverify`, which resolves `gate_executables` against gates exported from
+`fetch_head` — item 13's asymmetry exactly, one phase later and against a
+different sha. A working copy declaring a role `fetch_head` does not carry
+makes the re-verification gate error, which raises as infrastructure at the
+point the task is otherwise `READY_FOR_REVIEW`. It also feeds
+`policy.integrity.test_paths` into the pull request body, so the body describes
+the checkout's declaration rather than the one the packaged commit was verified
+under. **Done looks like:** `package()` loading its policy from the export it
+already makes at `fetch_head`, which means dropping the `policy` parameter
+rather than threading a second one.
+
+**The cell image is built from the working copy's `.saffron/Dockerfile`**
+(`image.build_cell_image(repo)`) while the gates, the policy and the base tree
+all come from `base_sha`. This one may be correct as it stands — the image is
+the toolchain, not the judgment, and an operator testing a new Dockerfile wants
+the branch's — but it is now the only member of the family that reads the
+checkout, and nothing says which way it is meant to go. **Done looks like:**
+§5.1 saying so either way.
 
 ---
 
