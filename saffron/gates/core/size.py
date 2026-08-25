@@ -16,6 +16,8 @@ with no `tool` into `error`. So the wiring spec calls this from
 from __future__ import annotations
 
 from saffron.gates.contract import Failure, GateResult, split_lines
+from saffron.gates.core.integrity import _BINARY
+from saffron.gates.core.scope import matches
 
 # bug / feature / refactor ceilings are DESIGN.md §5.4's table, verbatim.
 _CEILINGS = {"bug": 300, "feature": 600, "refactor": 1000}
@@ -47,14 +49,11 @@ def _changed_lines(diff: str) -> int:
     line after it is judged only by its single leading `+`/`-` marker, exactly
     as `integrity._parse_block` treats the same distinction (`saw_hunk`).
     """
-    # ponytail: a file git renders as `Binary files ... differ` has no `@@`, so
-    # it contributes 0 and a `-diff` gitattribute zeroes the gate on a rewrite
-    # of any size — BACKLOG item 2's residual, arriving here. The upgrade path
-    # is `git diff --numstat` as the cross-check (BACKLOG item 1); it is not
-    # taken here because the honest response is `error` only when the
-    # unreadable file is inside `touches`, as `integrity` already does, and
-    # this gate is handed neither `touches` nor a numstat. The wiring spec has
-    # both.
+    # A file git renders as `Binary files ... differ` has no `@@`, so it
+    # contributes 0 here — deliberately: `size_gate` screens for a declared-
+    # unreadable block *before* calling this, the same split `integrity` makes
+    # between "unreadable and inside touches" (`error`, handled there) and
+    # "unreadable and outside touches" (`scope`'s problem, left at 0 here).
     count = 0
     in_headers = True  # before the current file block's first "@@" line
     for line in split_lines(diff):
@@ -71,14 +70,58 @@ def _changed_lines(diff: str) -> int:
     return count
 
 
-def size_gate(diff: str, spec_type: str) -> GateResult:
+def _unreadable_declared_path(diff: str, touches: list[str]) -> str | None:
+    """The path of the first `Binary files ... differ` block whose path is
+    inside `touches`, or `None` if every such block (if any) is outside it.
+
+    Same regex `integrity._BINARY` matches, imported rather than re-derived:
+    a second, independently written pattern for the identical shape is how
+    the two gates drift apart (`integrity._parse_block`'s own note on this).
+    Reuses `scope.matches` for the same glob semantics `integrity` applies to
+    its `touches` exemption, so "declared" means the same thing in both gates.
+    """
+    for line in split_lines(diff):
+        binary = _BINARY.match(line)
+        if binary is None:
+            continue
+        # New side if renamed/added, old side if deleted — same preference as
+        # `integrity._FileDiff.path`.
+        path = binary.group(2) or binary.group(1) or ""
+        if any(matches(path, pattern) for pattern in touches):
+            return path
+    return None
+
+
+def size_gate(diff: str, spec_type: str, touches: list[str]) -> GateResult:
     """Diff lines (added + removed) against the ceiling `spec_type` sets.
 
-    `pass`/`fail` only: a diff this gate can read never produces `error` — a
-    large diff is the task's problem, not the gate's (§5.4). Ceiling lookup
-    can't error either, since `_DEFAULT_CEILING` covers every spec type this
-    function is not explicitly given a number for.
+    `error` before anything else is measured: a file git renders as
+    `Binary files ... differ` (a `-diff` gitattribute, say) hides its content,
+    so a hunk-counting gate cannot tell a genuine binary asset from 2000
+    rewritten lines routed past the ceiling. `integrity` answers the identical
+    shape by checking the file against the task's `touches`: unreadable and
+    declared is `error` — the gate saying it cannot measure, never a verdict
+    on the task, charged to nobody (§5.4). Unreadable and *not* declared is
+    left alone, because `scope` already fails a diff touching an undeclared
+    file, and erroring here too would make a genuine binary asset outside
+    `touches` abort every task that happens to carry one.
+
+    Past that check, `pass`/`fail` only: a diff this gate can read never
+    produces `error` for size reasons — a large diff is the task's problem,
+    not the gate's (§5.4). Ceiling lookup can't error either, since
+    `_DEFAULT_CEILING` covers every spec type this function is not explicitly
+    given a number for.
     """
+    if (unreadable := _unreadable_declared_path(diff, touches)) is not None:
+        return GateResult(
+            gate="size",
+            status="error",
+            summary=(
+                f"content hidden as binary, so changed lines are unreadable: "
+                f"{unreadable}"
+            ),
+        )
+
     ceiling = _CEILINGS.get(spec_type, _DEFAULT_CEILING)
     lines = _changed_lines(diff)
 

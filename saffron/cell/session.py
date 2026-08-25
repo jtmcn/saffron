@@ -686,7 +686,7 @@ def _drive_cell(
                 # unset and `run_gate` would turn it into `error`). Whether its
                 # failure *blocks* is `advisory_gates`' question, not this
                 # gate's — the result is unconditional (§5.4).
-                size_gate(diff, spec.spec_type),
+                size_gate(diff, spec.spec_type, spec.touches),
                 *declared,
                 committed,
             ]
