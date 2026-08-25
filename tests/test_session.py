@@ -894,16 +894,70 @@ _HIDDEN_DIFF = (
 )
 
 
-def test_an_unreadable_file_does_not_abort_an_attempt_that_size_cannot_block(
+_INTEGRITY_POLICY = 'gates: {}\nintegrity:\n  suppressions: ["# noqa"]\n'
+
+
+def test_size_does_not_refuse_an_unreadable_diff_at_a_tier_it_cannot_block(
     monkeypatch, tmp_path
 ):
     """`size` refuses a diff it cannot measure with `error`, and `error` reaches
     `aborted_gates` before any advisory filter — so at `standard`, where §5.6
     says the gate stops nothing, the refusal would end the attempt instead.
 
-    A task legitimately adding a PNG inside `touches` renders identically to
-    the `-diff` trick, so this is the ordinary case, not the adversarial one.
+    Driven under a policy that declares integrity patterns, because every real
+    repo does and the default `gates: {}` makes `integrity` *skip*: asserting
+    `READY_FOR_REVIEW` here would be green for a reason unrelated to `size`.
+    What this pins is `size`'s own result. The attempt still ends, and the next
+    test says which gate ends it — a distinction `outcome.state` alone cannot
+    make.
     """
+    cell = _stub_the_runtime(monkeypatch)
+    _grow_the_diff_after_the_first_turn(monkeypatch, cell, big=_HIDDEN_DIFF)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(spec_type="bug"),
+        policy=_INTEGRITY_POLICY,
+    )
+    (size_result,) = [g for g in outcome.gates if g.gate == "size"]
+    assert size_result.status != "error"
+    # And it says what it could not read, so an advisory count with a hole in
+    # it is never reported as a plain number.
+    assert "unreadable" in size_result.summary
+
+
+def test_integrity_still_refuses_that_diff_at_every_tier(monkeypatch, tmp_path):
+    """The ceiling on the test above, asserted rather than described: making
+    `size` quiet at `standard` does not make the attempt survive, because
+    `integrity` answers the identical shape with no tier awareness at all.
+
+    A repo declaring no integrity patterns is the only one that sees the
+    difference. If this ever goes green, `integrity`'s rule moved and `size`'s
+    `blocking` switch became load-bearing on its own.
+    """
+    cell = _stub_the_runtime(monkeypatch)
+    _grow_the_diff_after_the_first_turn(monkeypatch, cell, big=_HIDDEN_DIFF)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(spec_type="bug"),
+        policy=_INTEGRITY_POLICY,
+    )
+    assert outcome.state == "GATE_ERROR"
+    (integrity_result,) = [g for g in outcome.gates if g.gate == "integrity"]
+    assert integrity_result.status == "error"
+
+
+def test_without_integrity_patterns_the_standard_tier_attempt_survives(
+    monkeypatch, tmp_path
+):
+    """The case `size`'s switch is for: nothing else refuses the diff, so a
+    task adding a binary asset at `standard` reaches review instead of being
+    abandoned as infrastructure."""
     cell = _stub_the_runtime(monkeypatch)
     _grow_the_diff_after_the_first_turn(monkeypatch, cell, big=_HIDDEN_DIFF)
     outcome, _ledger = _drive(
@@ -914,11 +968,6 @@ def test_an_unreadable_file_does_not_abort_an_attempt_that_size_cannot_block(
         spec=_spec(spec_type="bug"),
     )
     assert outcome.state == "READY_FOR_REVIEW"
-    (size_result,) = [g for g in outcome.gates if g.gate == "size"]
-    assert size_result.status != "error"
-    # And it says what it could not read, so an advisory count with a hole in
-    # it is never reported as a plain number.
-    assert "unreadable" in size_result.summary
 
 
 def test_the_same_unreadable_file_aborts_the_attempt_at_elevated_risk(

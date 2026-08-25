@@ -230,8 +230,23 @@ def test_a_gitattributes_hidden_rewrite_outside_touches_is_not_this_gate_s_error
     diff = _real_diff(tmp_path, run, {"a.py": rewritten})
     assert "Binary files" in diff
 
-    result = size_gate(diff, "bug", touches=[])
+    # A real declaration that this file is not in — not `touches=[]`, which
+    # declares nothing and therefore constrains nothing: `scope` skips it, so
+    # an empty list is the one case where nothing else covers the file either.
+    result = size_gate(diff, "bug", touches=["src/**"])
     assert result.status != "error"
+
+
+def test_a_spec_declaring_no_touches_does_not_get_a_free_hidden_rewrite(tmp_path):
+    """`touches: []` is optional and `scope` skips it outright, so treating an
+    empty list as "nothing is declared" would leave the one spec shape where a
+    hidden rewrite is both unmeasurable and unremarked — the escape this gate
+    exists to close, reachable by omitting a frontmatter field."""
+    run = _real_repo(tmp_path, {"a.py": "x = 1\n", ".gitattributes": "*.py -diff\n"})
+    rewritten = "\n".join(f"y{i} = {i}" for i in range(2000)) + "\n"
+    diff = _real_diff(tmp_path, run, {"a.py": rewritten})
+
+    assert size_gate(diff, "bug", touches=[]).status == "error"
 
 
 def test_a_readable_change_still_counts_beside_an_undeclared_binary_block(tmp_path):
@@ -259,8 +274,15 @@ def test_a_real_binary_inside_touches_is_refused_where_the_gate_blocks(tmp_path)
     run = _real_repo(tmp_path, {"src/a.py": "x = 1\n"})
     (tmp_path / "src" / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n" + bytes(400))
     run("git", "add", "-A")
+    # `DIFF_FLAGS` and `check=True`, like `_real_diff`: a repo-local
+    # `diff.noprefix` or a failing git would otherwise empty this diff and the
+    # assertion below would read as a gate defect rather than a harness one.
     diff = subprocess.run(
-        ["git", "diff", "--cached"], cwd=tmp_path, capture_output=True, text=True
+        ["git", "diff", "--cached", *worktree.DIFF_FLAGS],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout
     assert "Binary files" in diff
 
