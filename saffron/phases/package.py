@@ -635,6 +635,14 @@ def package(
                 watch=watch,
             )
             verified_on = "packaged"
+            # The same advisory rule the repair loop applies, for the same
+            # reason: a `blocking: false` gate the loop was told to ignore must
+            # not come back as MERGE_FAILED one phase later. Unreachable until
+            # `blocking` gained a reader — before that the task went EXHAUSTED
+            # and never reached PACKAGE at all.
+            new = [
+                failure for failure in new if failure.gate not in outcome.advisory_gates
+            ]
             if new:
                 watch(f"PACKAGE: {len(new)} new failures against {default}")
                 return _finish(

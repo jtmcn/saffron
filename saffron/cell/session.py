@@ -633,8 +633,13 @@ def _drive_cell(
 
         # `_suite` refreshes both every call — baseline included — so
         # `_run_gates`/`_rebut_gates` always read this attempt's tier, never a
-        # stale one (§5.6). Seeded from the spec so an early PREFLIGHT-style
-        # failure that never calls `_suite` still leaves them meaningful.
+        # stale one (§5.6). `current_tier` is seeded from the spec so an early
+        # failure that never calls `_suite` still reports a real tier;
+        # `advisory_gates` cannot be seeded the same way — it is derived from
+        # the tier and the policy — and empty means "nothing is advisory",
+        # which is wrong for a standard-tier run. Unreachable today: the
+        # baseline `_suite` runs before any outcome is built, and a raise there
+        # re-raises rather than returning.
         current_tier = spec.risk
         advisory_gates: set[str] = set()
 
@@ -943,7 +948,7 @@ def _drive_cell(
                 diff=worktree.export_patch(container, spec.base_sha),
                 read_head=lambda path: worktree.read_at_head(container, path),
                 spec_body=spec.body,
-                gates=review.gate_summary(green),
+                gates=review.gate_summary(green, sorted(advisory_gates)),
                 context_md=context_md,
                 prompts_dir=_SAFFRON_PKG / "agents" / "prompts",
                 max_turns=spec.max_turns,

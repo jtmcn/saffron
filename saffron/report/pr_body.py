@@ -308,7 +308,10 @@ def _gate_table(results: list[GateResult], advisory_gates: Sequence[str] = ()) -
         # result_with_its_status_in_backticks` — matches on verbatim, and an
         # advisory `fail` still belongs beside its own gate and status.
         summary = result.summary
-        if result.gate in advisory_gates:
+        # `fail` only: the marker exists to explain a red row on a green pull
+        # request, and `size` is advisory on every standard-tier attempt — so
+        # keying on the gate alone tags its `pass` rows too.
+        if result.gate in advisory_gates and result.status == "fail":
             summary = f"(advisory) {summary}" if summary else "(advisory)"
         lines.append(
             f"| `{_cell(result.gate)}` | `{result.status}` | {duration} "

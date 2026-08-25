@@ -618,6 +618,8 @@ def _cell_outcome(task_dir, task_id, run_id):
         reviews=[],
         rebut_result=None,
         agent_subjects=[],
+        effective_risk="standard",
+        advisory_gates=[],
     )
 
 
@@ -1309,6 +1311,64 @@ def test_a_policy_fault_at_the_default_branch_head_names_it(packageable):
             gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
             **packageable.kwargs,
         )
+
+
+def test_an_advisory_failure_after_the_rebase_does_not_fail_the_merge(
+    monkeypatch, packageable
+):
+    """`blocking: false` gained a reader in the repair loop and not here, and
+    the two disagreeing turns a green task into `MERGE_FAILED` one phase later.
+
+    Before `blocking` was read anywhere this was unreachable — the task went
+    `EXHAUSTED` and never reached PACKAGE.
+    """
+    (packageable.work / "other.txt").write_text("main moved\n")
+    git(packageable.work, "add", "-A")
+    git(packageable.work, "commit", "-qm", "main moved")
+    git(packageable.work, "push", "-q", "origin", "main")
+
+    packageable.outcome.advisory_gates = ["perf-smoke"]
+    advisory = NewFailure(
+        "perf-smoke", Failure(file="src/a.py", code="slow", message="12% slower")
+    )
+    monkeypatch.setattr(
+        "saffron.phases.package.reverify", lambda **_kwargs: ([advisory], [])
+    )
+
+    result = package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **packageable.kwargs,
+    )
+
+    assert result.state == "READY_FOR_REVIEW"
+
+
+def test_a_blocking_failure_after_the_rebase_still_fails_the_merge(
+    monkeypatch, packageable
+):
+    """The other half, so the filter above cannot be a blanket pass: a gate
+    nobody declared advisory still stops the merge."""
+    (packageable.work / "other.txt").write_text("main moved\n")
+    git(packageable.work, "add", "-A")
+    git(packageable.work, "commit", "-qm", "main moved")
+    git(packageable.work, "push", "-q", "origin", "main")
+
+    packageable.outcome.advisory_gates = ["perf-smoke"]
+    blocking = NewFailure(
+        "tests", Failure(file="tests/test_a.py", code="failed", message="assert 1 == 2")
+    )
+    monkeypatch.setattr(
+        "saffron.phases.package.reverify", lambda **_kwargs: ([blocking], [])
+    )
+
+    result = package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **packageable.kwargs,
+    )
+
+    assert result.state == "MERGE_FAILED"
 
 
 def test_reverify_is_handed_the_policy_from_the_commit_it_verifies_against(
