@@ -961,9 +961,17 @@ present, unit-tested, adversarially reviewed — and unreachable: `session.py`'s
 no consumer produces a module, not a capability, and the gate loop cannot be
 handed one without a change it does not have: every `fail` today means repair,
 while §5.6 makes `size` **advisory at `standard` and blocking only at
-`elevated`**. There is no advisory result in the contract, and
-`policy.elevate_on` — which §5.6 names as what auto-elevates a task — does not
-exist either.
+`elevated`**. There is no advisory result the repair loop honours.
+
+**Corrected 2026-08-25, writing `SA-0005`:** the sentence here said
+`policy.elevate_on` "does not exist either", and it does — `Policy.elevate_on`
+(`saffron/repos/policy.py:51`), parsed, validated, tested, and already carrying
+three patterns in this repo's own `.saffron/policy.yaml`. So does
+`GateDeclaration.blocking` (`:29`), which is the advisory switch for *declared*
+gates. Both have **no reader anywhere downstream**. That makes this task
+smaller than the item claimed and its failure mode worse: a declaration a repo
+can set, that validates, and that changes nothing is indistinguishable from one
+that works until someone checks.
 
 **Done looks like:** an advisory status the repair loop does not act on,
 `policy.elevate_on` matched against the diff, `risk` reaching `run_one_cell`,
