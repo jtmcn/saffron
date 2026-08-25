@@ -29,9 +29,10 @@ These terms have exactly one meaning here. Use them and no synonyms.
    have not committed dies with the cell. This is measured, not cautionary: a
    task once spent 61 turns doing correct work, was cut mid-edit, and exported
    nothing. Uncommitted work is not work. An attempt that produces no commits
-   failed, whatever you say about it. Leave the worktree clean when you stop:
-   the gates measure the committed tree, so a stray edit or an untracked file
-   left behind fails `committed` and costs an attempt.
+   failed, whatever you say about it. Keep the worktree clean **as you go**,
+   not at the end — there is no "at the end" in a session that is cut. The
+   gates measure the committed tree, so a stray edit or an untracked file left
+   behind fails `committed` and costs an attempt.
 3. You do not run the gates and you never report gate status. The host runs
    them and gives you `failures[]`. If you find yourself about to run the test
    suite to check your work, that is fine as ordinary development, but it is not

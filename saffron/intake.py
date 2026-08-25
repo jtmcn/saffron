@@ -44,12 +44,19 @@ class Spec(BaseModel):
     envelope: list[str] = Field(default_factory=list)
     touches: list[str] = Field(default_factory=list)
     forbidden: list[str] = Field(default_factory=list)
-    budget_usd: float = 10.0
-    max_attempts: int = 4
-    # The third ceiling, and the one that has actually stopped a task: SA-0005
-    # died at turn 61 with 56% of its budget unspent, against a hardcoded 60 no
-    # spec could raise or see.
-    max_turns: int = 60
+    # The three ceilings, and this is now where their defaults live: `cli`
+    # discards nothing and `CellSpec`'s copies are only reached by tests.
+    # 12.0, not the 10.0 that stood here — nothing read this field until now,
+    # while `--budget`'s argparse default of 12.0 governed every run, and
+    # §3.2's worked example says 12. A silent 17% cut is not a refactor.
+    # `gt=0` because these are read now: `max_attempts: 0` reaches
+    # `repair_loop`, skips `range(1, 1)` entirely and raises the unreachable
+    # assertion — a spec typo surfacing as an infrastructure abort.
+    budget_usd: float = Field(default=12.0, gt=0)
+    max_attempts: int = Field(default=4, gt=0)
+    # The one that has actually stopped a task: SA-0005 died at turn 61 with
+    # 56% of its budget unspent, against a hardcoded 60 no spec could raise.
+    max_turns: int = Field(default=60, gt=0)
     risk: RiskTier = "standard"
 
     body: str = ""

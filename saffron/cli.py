@@ -126,10 +126,17 @@ def _ceilings(args: argparse.Namespace, spec: Spec) -> tuple[dict, str]:
         name: given[name] if given[name] is not None else declared[name]
         for name in declared
     }
-    line = ", ".join(
-        f"{name}={chosen[name]} ({'flag' if given[name] is not None else 'spec'})"
-        for name in declared
-    )
+
+    def _source(name: str) -> str:
+        # Three labels, not two. Calling a model default "(spec)" sends the
+        # operator to grep a spec file for a line that is not in it — the same
+        # not-given-is-given-the-default conflation this function exists to
+        # end, moved from argparse to pydantic.
+        if given[name] is not None:
+            return "flag"
+        return "spec" if name in spec.model_fields_set else "default"
+
+    line = ", ".join(f"{name}={chosen[name]} ({_source(name)})" for name in declared)
     return chosen, line
 
 

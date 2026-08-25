@@ -192,6 +192,7 @@ forbidden:                      # hard deny, beyond global protected paths
   - alembic/versions/**
 budget_usd: 12
 max_attempts: 4
+max_turns: 60                   # per-turn ceiling; the flags override all three
 risk: standard                  # standard | elevated (§5.6)
 ---
 

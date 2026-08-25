@@ -173,3 +173,15 @@ def test_a_non_utf8_spec_file_is_a_specerror(tmp_path):
     path.write_bytes(b"---\nid: TE-9002\ntitle: \xff\xfe\ntype: bug\n---\n")
     with pytest.raises(SpecError, match="could not be read"):
         load_spec(path)
+
+
+def test_a_ceiling_of_zero_is_refused_rather_than_reaching_the_loop():
+    """These are read now. `max_attempts: 0` reaches `repair_loop`, skips
+    `range(1, 1)` entirely and raises the unreachable assertion — a spec typo
+    surfacing to the operator as an infrastructure abort."""
+    for field in ("budget_usd", "max_attempts", "max_turns"):
+        with pytest.raises(SpecError):
+            parse_spec(
+                "---\nid: SY-1\ntitle: One\ntype: feature\n"
+                f"{field}: 0\n---\n\n## Acceptance criteria\n- [ ] it works\n"
+            )

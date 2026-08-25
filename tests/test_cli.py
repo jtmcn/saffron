@@ -290,6 +290,22 @@ def test_a_specs_own_ceilings_reach_the_cell(tmp_path, monkeypatch, capsys):
     assert "max_turns=120 (spec)" in printed
 
 
+def test_a_ceiling_the_spec_never_stated_is_not_labelled_as_the_specs(
+    tmp_path, monkeypatch, capsys
+):
+    """A pydantic default is not a declaration. Calling it `(spec)` sends the
+    operator to grep a spec file for a line that is not in it — the same
+    conflation, one layer down from the argparse one."""
+    repo = _local_origin(tmp_path)
+    args = _namespace(repo, tmp_path)  # its spec declares no ceiling at all
+
+    cell_spec, printed = _capture_cell_spec(monkeypatch, repo, tmp_path, args, capsys)
+
+    assert cell_spec.max_turns == 60
+    assert "max_turns=60 (default)" in printed
+    assert "(spec)" not in printed
+
+
 def test_a_flag_overrides_the_spec_and_says_which_it_was(tmp_path, monkeypatch, capsys):
     """The flag is how an operator re-runs a spec under a different ceiling, so
     it still wins — but which one is in force has to be visible on the way in,

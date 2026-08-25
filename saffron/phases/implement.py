@@ -337,7 +337,8 @@ def run_agent(
         # exit code cannot show: "exited 1" was the whole account of a session
         # that did correct work for 61 turns and was cut mid-edit.
         ended = (
-            f"reached its ceiling of {options.get('max_turns')} turns"
+            f"reached its ceiling of {options.get('max_turns')} turns "
+            f"after {attempt.num_turns}"
             if subtype == "error_max_turns"
             else how
         )

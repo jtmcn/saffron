@@ -1031,6 +1031,8 @@ run exhausts turns *with* its commits landing, that is the evidence for
 reopening this, and the honest shape then is a repair-loop state rather than a
 retry.
 
+---
+
 ## What is *not* here, deliberately
 
 DIAGNOSE and `SCOPE_REVIEW`, the scheduler's conflict sets and stacking, `saffron
