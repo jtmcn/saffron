@@ -190,15 +190,18 @@ def test_the_marker_after_a_context_line_parses(tmp_path):
 
 
 def test_a_bent_prefix_errors_rather_than_passing(tmp_path):
+    """`diff.noprefix`, not `diff.srcPrefix`: the latter landed in git 2.45,
+    and on the 2.39 the cell image carries it was ignored — so this asserted
+    the gate's answer to a diff that was never bent, and read `fail`. The
+    bentness is asserted before the gate is asked about it."""
     run = _repo(tmp_path, {"src/a.py": "x = 1\n"})
-    run("git", "config", "diff.srcPrefix", "x/")
-    run("git", "config", "diff.dstPrefix", "y/")
-    for name, content in {"src/a.py": "x = 1  # type: ignore\n"}.items():
-        (tmp_path / name).write_text(content)
+    run("git", "config", "diff.noprefix", "true")
+    (tmp_path / "src" / "a.py").write_text("x = 1  # type: ignore\n")
     run("git", "add", "-A")
     bent = subprocess.run(
         ["git", "diff", "--cached"], cwd=tmp_path, capture_output=True, text=True
     ).stdout
+    assert "diff --git src/a.py src/a.py" in bent
     assert integrity_gate(bent, PATTERNS, touches=[]).status == "error"
 
 
