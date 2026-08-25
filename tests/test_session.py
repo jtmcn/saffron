@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import shutil
 
 import pytest
 
@@ -404,10 +406,6 @@ def _stub_the_runtime(
             k["created"].update((k["state_volume"], k["container"]))
 
     monkeypatch.setattr("saffron.cell.worktree.prepare_worktree", _prepare_worktree)
-    # No mirror to `git archive` from under tmp_path; the dest is the mount source.
-    monkeypatch.setattr(
-        "saffron.repos.mirror.export_gates", lambda mirror, sha, dest: dest
-    )
     monkeypatch.setattr("saffron.cell.worktree.head_sha", lambda c: "c" * 40)
     monkeypatch.setattr("saffron.cell.worktree.export_patch", lambda c, sha: patch)
 
@@ -455,6 +453,22 @@ def _turn(text="", cost=0.1):
     )
 
 
+def _stub_the_export(monkeypatch, repo, policy=None):
+    """`export_saffron_dir` with no mirror to `git archive` from: the working copy
+    stands in for `base_sha`'s tree — except where `policy` makes the two
+    diverge, which is the only thing that can tell them apart. The dest is
+    the mount source, and the session reads its policy back out of it."""
+
+    def _export(_mirror, _sha, dest):
+        shutil.rmtree(dest, ignore_errors=True)
+        shutil.copytree(repo / ".saffron", dest / ".saffron")
+        if policy is not None:
+            (dest / ".saffron" / "policy.yaml").write_text(policy)
+        return dest
+
+    monkeypatch.setattr("saffron.repos.mirror.export_saffron_dir", _export)
+
+
 def _drive(
     monkeypatch,
     tmp_path,
@@ -463,6 +477,7 @@ def _drive(
     turns,
     spec=None,
     policy="gates: {}\n",
+    base_policy=None,
     gates=(),
 ):
     """Run one whole cell against the stubbed runtime and return its outcome."""
@@ -475,6 +490,8 @@ def _drive(
         executable.write_text("#!/bin/sh\nexit 0\n")
         executable.chmod(0o755)
     (repo / ".saffron" / "policy.yaml").write_text(policy)
+
+    _stub_the_export(monkeypatch, repo, base_policy)
 
     scripted = iter(turns)
 
@@ -1018,6 +1035,7 @@ def test_the_task_row_carries_the_specs_own_sha_not_the_policys(tmp_path, monkey
         raise _StopHere
 
     _stub_the_runtime(monkeypatch)
+    _stub_the_export(monkeypatch, repo)
     monkeypatch.setattr("saffron.repos.image.build_cell_image", _stop)
 
     ledger = Ledger(tmp_path / "ledger.db")
@@ -1620,3 +1638,43 @@ def test_a_walled_turn_that_spent_is_still_charged(monkeypatch, tmp_path):
     assert outcome.spent_usd == pytest.approx(0.27)
     (line,) = ledger.queue_lines()
     assert line["spent_usd_est"] == pytest.approx(outcome.spent_usd)
+
+
+def test_the_suite_runs_the_gates_base_sha_declares_not_the_working_copys(
+    monkeypatch, tmp_path
+):
+    """Item 13: the executables came from `base_sha` while the policy naming
+    them came from the operator's checkout, so the two diverged on any branch
+    touching `.saffron/`. Both trees hold both executables here — only the
+    declaration differs, so nothing but the policy's source can decide this."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        policy="gates:\n  lint: {}\n",
+        base_policy="gates:\n  tests: {}\n",
+        gates=("lint", "tests"),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert cell.gate_paths == [["/gates/.saffron/gates/tests"]] * 2
+
+
+def test_policy_sha_records_the_policy_that_governed_not_the_one_on_disk(
+    monkeypatch, tmp_path
+):
+    """The ledger's record of what ran has to be the record of what was
+    declared, or `policy_sha` names a file no gate was resolved against."""
+    base_policy = "gates: {}\nprotected:\n  - DESIGN.md\n"
+    cell = _stub_the_runtime(monkeypatch)
+    _outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        policy="gates: {}\n",
+        base_policy=base_policy,
+    )
+    (row,) = ledger._db.execute("SELECT policy_sha FROM repos").fetchall()
+    assert row["policy_sha"] == hashlib.sha256(base_policy.encode()).hexdigest()

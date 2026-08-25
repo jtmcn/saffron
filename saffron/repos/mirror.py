@@ -141,13 +141,19 @@ def diff_stat(mirror: Path, base: str, head: str) -> tuple[int, int]:
     )
 
 
-def export_gates(mirror: Path, sha: str, dest: Path) -> Path:
-    """`.saffron/gates/` as it stood at `sha`, on the host.
+def export_saffron_dir(mirror: Path, sha: str, dest: Path) -> Path:
+    """`.saffron/` as it stood at `sha`, on the host.
 
     The cell reads its gates from here rather than from `/work`, so an in-cell
     edit — committed or not — cannot reach the runner (§5.4). `git archive`
     carries the mode bits, and a gate that is not executable reads identically
     to one that was never declared.
+
+    The whole directory, not `gates/` alone: the policy *declaring* the gates
+    has to come from the same commit as the executables, or the two diverge on
+    any branch that touches `.saffron/`. It also lets a repo that has not added
+    `gates/` yet export at all — `git archive` fails on an unmatched pathspec,
+    which made adding a repo's first gate an exit-2 infrastructure failure.
     """
     shutil.rmtree(dest, ignore_errors=True)
     dest.mkdir(parents=True)
@@ -163,7 +169,7 @@ def export_gates(mirror: Path, sha: str, dest: Path) -> Path:
                 "archive",
                 "--format=tar",
                 sha,
-                ".saffron/gates",
+                ".saffron",
             ],
             stdout=sink,
             stderr=subprocess.PIPE,
@@ -171,13 +177,13 @@ def export_gates(mirror: Path, sha: str, dest: Path) -> Path:
         )
     if done.returncode != 0:
         detail = done.stderr.decode(errors="replace").strip()
-        raise GitError(f"git archive {sha[:12]} .saffron/gates: {detail}")
+        raise GitError(f"git archive {sha[:12]} .saffron: {detail}")
     with tarfile.open(archive) as tar:
         # filter="data" clears setuid/setgid/sticky and group-and-other write,
         # and keeps the execute bit the gate needs.
         tar.extractall(dest, filter="data")
     archive.unlink()
 
-    if not (dest / ".saffron" / "gates").is_dir():
-        raise GitError(f"{sha[:12]} has no .saffron/gates for the cell to run")
+    if not (dest / ".saffron").is_dir():
+        raise GitError(f"{sha[:12]} has no .saffron for the cell to run")
     return dest

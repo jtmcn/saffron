@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -152,26 +151,6 @@ def assert_base_objects(mirror: Path, base_sha: str) -> None:
             f"mirror {mirror} lacks the objects for base {base_sha[:12]}, so a "
             "three-way merge cannot be performed"
         )
-
-
-def export_gates_for(mirror: Path, sha: str, dest: Path, policy) -> Path:
-    """`mirror_ops.export_gates`, skipped when the policy declares no gates.
-
-    `git archive <sha> .saffron/gates` fails on the unmatched pathspec when a
-    repo has not added the directory yet — an incremental onboarding, not an
-    infrastructure fault. `prepare_worktree` still needs a real directory to
-    mount, empty or not, so the guard is here rather than in `export_gates`
-    itself: a *declared* gate missing from the export must stay a hard error.
-
-    Cleared first, exactly as `export_gates` does: `reverify`'s dest is keyed by
-    `spec.id` and outlives one run, so a repo that drops its last gate would
-    otherwise keep mounting the previous run's executables at `/gates`.
-    """
-    if not policy.gates:
-        shutil.rmtree(dest, ignore_errors=True)
-        dest.mkdir(parents=True, exist_ok=True)
-        return dest
-    return mirror_ops.export_gates(mirror, sha, dest)
 
 
 def apply_patch(worktree: Path, patch: Path) -> str:
@@ -629,8 +608,8 @@ def package(
             # A sibling of `scratch`, not a child: `scratch` is a git worktree
             # the `finally` hands to `remove_worktree`, and the export must not
             # have the worktree's lifetime.
-            gates_dir = export_gates_for(
-                mirror, fetch_head, out_dir / "package" / f"{spec.id}-gates", policy
+            gates_dir = mirror_ops.export_saffron_dir(
+                mirror, fetch_head, out_dir / "package" / f"{spec.id}-gates"
             )
             new, gates = reverify(
                 mirror=mirror,

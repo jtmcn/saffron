@@ -18,7 +18,6 @@ from saffron.phases.package import (
     assert_base_objects,
     commit_squash,
     default_branch,
-    export_gates_for,
     fetch_default_branch,
     find_credentials,
     find_credentials_in_text,
@@ -179,44 +178,6 @@ def test_fetch_default_branch_reaches_from_a_mirror_ref_when_local_is_behind(tmp
 
     assert fetched == second
     assert _rev_parse(mirror, f"refs/heads/{branch}") == second
-
-
-def test_export_gates_for_skips_the_export_when_no_gates_are_declared(tmp_path):
-    """`gates: {}` is a valid policy.yaml, and a repo onboarding incrementally
-    may not have `.saffron/gates` at all yet — `git archive` would fail on
-    the unmatched pathspec. `prepare_worktree` still needs a real directory
-    to mount, so `dest` must exist even though nothing was exported.
-
-    And it is cleared, not merely created: `reverify`'s dest is keyed by
-    `spec.id` and outlives a run, so a repo that drops its last gate must not
-    keep mounting the previous run's executables at `/gates`."""
-    dest = tmp_path / "gates-out"
-    stale = dest / ".saffron" / "gates" / "tests"
-    stale.parent.mkdir(parents=True)
-    stale.write_text("#!/bin/sh\necho lying\n")
-
-    result = export_gates_for(
-        tmp_path / "mirror.git", "deadbeef", dest, SimpleNamespace(gates={})
-    )
-    assert result == dest
-    assert dest.is_dir()
-    assert not stale.exists()
-
-
-def test_export_gates_for_still_exports_a_declared_gate(monkeypatch, tmp_path):
-    """A declared gate missing from the export must stay a hard error — the
-    guard only skips the call, never loosens `export_gates` itself."""
-    calls = []
-    monkeypatch.setattr(
-        "saffron.phases.package.mirror_ops.export_gates",
-        lambda mirror, sha, dest: calls.append((mirror, sha, dest)) or dest,
-    )
-    mirror, dest = tmp_path / "mirror.git", tmp_path / "gates-out"
-    result = export_gates_for(
-        mirror, "deadbeef", dest, SimpleNamespace(gates={"tests": None})
-    )
-    assert calls == [(mirror, "deadbeef", dest)]
-    assert result == dest
 
 
 def test_reverify_execs_the_gates_from_the_mount_never_the_applied_tree(

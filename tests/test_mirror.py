@@ -9,7 +9,7 @@ from saffron.repos.mirror import (
     changed_files,
     diff_stat,
     ensure_mirror,
-    export_gates,
+    export_saffron_dir,
     remove_worktree,
     resolve_pull_request,
 )
@@ -141,7 +141,7 @@ def test_a_missing_git_binary_surfaces_as_giterror(tmp_path, origin, monkeypatch
         changed_files(mirror, "HEAD", "HEAD")
 
 
-def test_export_gates_takes_the_tree_at_the_sha(tmp_path, origin):
+def test_export_saffron_dir_takes_the_tree_at_the_sha(tmp_path, origin):
     gates = origin / ".saffron" / "gates"
     gates.mkdir(parents=True)
     (gates / "tests").write_text("#!/bin/sh\necho honest\n")
@@ -155,7 +155,7 @@ def test_export_gates_takes_the_tree_at_the_sha(tmp_path, origin):
     git(origin, "commit", "-qm", "a gate that lies")
 
     mirror = ensure_mirror(origin, tmp_path / "mirror.git")
-    dest = export_gates(mirror, base, tmp_path / "gates-out")
+    dest = export_saffron_dir(mirror, base, tmp_path / "gates-out")
 
     exported = dest / ".saffron" / "gates" / "tests"
     assert "honest" in exported.read_text()
@@ -164,10 +164,33 @@ def test_export_gates_takes_the_tree_at_the_sha(tmp_path, origin):
     assert os.access(exported, os.X_OK)
 
 
-def test_export_gates_refuses_a_tree_with_no_gates(tmp_path, origin):
+def test_export_saffron_dir_clears_a_dest_a_previous_run_left(tmp_path, origin):
+    """`reverify`'s dest is keyed by `spec.id` and outlives one run, so a repo
+    that drops its last gate must not keep mounting the previous run's
+    executables at `/gates`."""
+    gates = origin / ".saffron" / "gates"
+    gates.mkdir(parents=True)
+    (gates / "tests").write_text("#!/bin/sh\nexit 0\n")
+    (gates / "tests").chmod(0o755)
+    git(origin, "add", "-A")
+    git(origin, "commit", "-qm", "gates")
+
+    dest = tmp_path / "gates-out"
+    stale = dest / ".saffron" / "gates" / "dropped"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("#!/bin/sh\necho lying\n")
+
+    mirror = ensure_mirror(origin, tmp_path / "mirror.git")
+    export_saffron_dir(mirror, git(origin, "rev-parse", "HEAD"), dest)
+
+    assert not stale.exists()
+    assert (dest / ".saffron" / "gates" / "tests").is_file()
+
+
+def test_export_saffron_dir_refuses_a_tree_with_no_saffron_dir(tmp_path, origin):
     mirror = ensure_mirror(origin, tmp_path / "mirror.git")
     with pytest.raises(GitError):
-        export_gates(mirror, git(origin, "rev-parse", "HEAD"), tmp_path / "out")
+        export_saffron_dir(mirror, git(origin, "rev-parse", "HEAD"), tmp_path / "out")
 
 
 def _squash_repo(tmp_path, name, subject):
@@ -396,3 +419,18 @@ def test_a_merge_body_quoting_another_subject_is_not_taken_for_it(tmp_path):
     mirror = ensure_mirror(repo, tmp_path / "decoy.git")
     with pytest.raises(GitError, match="no merge or squash commit"):
         resolve_pull_request(mirror, 42)
+
+
+def test_export_saffron_dir_takes_a_tree_with_a_policy_and_no_gates(tmp_path, origin):
+    """A repo adding its *first* gate has no `.saffron/gates` at `base_sha`,
+    and the policy governing the run still has to come out of that tree."""
+    (origin / ".saffron").mkdir()
+    (origin / ".saffron" / "policy.yaml").write_text("gates: {}\n")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-qm", "onboard")
+    sha = git(origin, "rev-parse", "HEAD")
+
+    mirror = ensure_mirror(origin, tmp_path / "mirror.git")
+    dest = export_saffron_dir(mirror, sha, tmp_path / "first-gate")
+
+    assert (dest / ".saffron" / "policy.yaml").read_text() == "gates: {}\n"

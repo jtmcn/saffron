@@ -161,7 +161,7 @@ def test_a_gate_edited_inside_the_cell_never_runs(tmp_path, network):
     subprocess.run(
         ["git", "clone", "--bare", "-q", str(origin), str(mirror)], check=True
     )
-    gates_dir = mirror_ops.export_gates(mirror, base, tmp_path / "gates-out")
+    gates_dir = mirror_ops.export_saffron_dir(mirror, base, tmp_path / "gates-out")
 
     volume, container = "saffron-test-wt4", "saffron-test-cell4"
     runtime.remove_volume(volume)
