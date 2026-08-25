@@ -992,6 +992,47 @@ and `size` in `_suite`. Two things it must carry, both found reviewing #15:
 The same wiring is what item 6's third lens needs, and the two should be built
 together or in that order.
 
+---
+
+## 18. A spec's ceilings were declarations with no reader, and turn exhaustion is total loss
+
+Found by running `SA-0005`, which is the only way it could have been found: it
+is invisible to every unit test and to four green live runs.
+
+**Two of three ceilings did nothing.** `cli.py` built `CellSpec` with
+`budget_usd=args.budget` and `max_attempts=args.max_attempts`, whose argparse
+defaults made *not given* and *given the default* the same value — so a spec's
+own `budget_usd` and `max_attempts` were parsed, validated, and discarded.
+`max_turns` was not on `Spec` at all: hardcoded 60, unsettable, unprintable.
+This is the third declaration-with-no-reader in two days, after
+`Policy.elevate_on` and `GateDeclaration.blocking` (item 17). **The pattern is
+worth more than any of the three instances**: a field that parses and validates
+and changes nothing is indistinguishable from one that works, and the repo has
+now produced four of them.
+
+**And the ceiling that fired was the one nobody could see.** `SA-0005` died at
+turn 61 with $5.34 of a declared $12 spent — stopped by the bound its author
+could not raise, holding more than half the budget it *could* declare.
+
+**Turn exhaustion discards everything.** An idle or wall kill leaves commits
+behind (item 4). `error_max_turns` fires with the worktree full, the cell is
+torn down, and the run exports nothing: 61 turns of correct work, $7.50, zero
+commits. `implement.md` said *"Commit your work"* — singular, at the end.
+
+**Closed, 2026-08-25.** The flags default to `None` and stay overrides, the
+spec governs otherwise, `max_turns` joins `Spec`, all three print with their
+source on the way in, and a turn ceiling names itself in the failure instead of
+reading as `exited 1`. `implement.md` asks for a commit per coherent step and
+says why, with the measurement.
+
+**Still open, deliberately:** `error_max_turns` is not resumable. A bound that
+resumes is not a bound, and committing per step removes most of the loss — if a
+run exhausts turns *with* its commits landing, that is the evidence for
+reopening this, and the honest shape then is a repair-loop state rather than a
+retry.
+
+---
+
 ## What is *not* here, deliberately
 
 DIAGNOSE and `SCOPE_REVIEW`, the scheduler's conflict sets and stacking, `saffron

@@ -42,8 +42,9 @@ def _namespace(repo, tmp_path):
         repo=repo,
         spec=spec,
         home=tmp_path / "home",
-        budget=12.0,
-        max_attempts=4,
+        budget=None,
+        max_attempts=None,
+        max_turns=None,
     )
 
 
@@ -233,6 +234,93 @@ def test_a_non_github_origin_fails_before_the_cell_starts(tmp_path, monkeypatch)
             _namespace(repo, tmp_path), Ledger(tmp_path / "l.db"), tmp_path / "out"
         )
     assert not started
+
+
+def _local_origin(tmp_path):
+    """A repo whose origin is a bare clone on disk. `_run_cell` fetches the
+    default branch for real, so a github.com URL would reach the network."""
+    repo = _repo_with_commit(tmp_path / "repo")
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(repo), str(remote)], check=True)
+    _git(repo, "remote", "add", "origin", str(remote))
+    return repo
+
+
+def _ceiling_spec(tmp_path, **frontmatter):
+    spec = tmp_path / "SY-2.md"
+    declared = "".join(f"{key}: {value}\n" for key, value in frontmatter.items())
+    spec.write_text(
+        "---\nid: SY-2\ntitle: Two\ntype: feature\ntouches: ['src/**']\n"
+        + declared
+        + "---\n\n## Acceptance criteria\n- [ ] it works\n"
+    )
+    return spec
+
+
+def _capture_cell_spec(monkeypatch, repo, tmp_path, namespace, capsys):
+    captured: dict = {}
+
+    def _capture(cell_spec, **_kwargs):
+        captured["spec"] = cell_spec
+        raise SystemExit(0)
+
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    monkeypatch.setattr("saffron.cli.run_one_cell", _capture)
+    with pytest.raises(SystemExit):
+        cli._run_cell(namespace, Ledger(tmp_path / "l.db"), tmp_path / "out")
+    return captured["spec"], capsys.readouterr().out
+
+
+def test_a_specs_own_ceilings_reach_the_cell(tmp_path, monkeypatch, capsys):
+    """All three were parsed and validated and then discarded for the flags'
+    defaults. `SA-0005` was stopped by the turn ceiling it could not raise,
+    with more than half of the budget it *had* declared unspent."""
+    repo = _local_origin(tmp_path)
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, budget_usd=31.5, max_attempts=7, max_turns=120)
+
+    cell_spec, printed = _capture_cell_spec(monkeypatch, repo, tmp_path, args, capsys)
+
+    assert (cell_spec.budget_usd, cell_spec.max_attempts, cell_spec.max_turns) == (
+        31.5,
+        7,
+        120,
+    )
+    assert "budget_usd=31.5 (spec)" in printed
+    assert "max_turns=120 (spec)" in printed
+
+
+def test_a_ceiling_the_spec_never_stated_is_not_labelled_as_the_specs(
+    tmp_path, monkeypatch, capsys
+):
+    """A pydantic default is not a declaration. Calling it `(spec)` sends the
+    operator to grep a spec file for a line that is not in it — the same
+    conflation, one layer down from the argparse one."""
+    repo = _local_origin(tmp_path)
+    args = _namespace(repo, tmp_path)  # its spec declares no ceiling at all
+
+    cell_spec, printed = _capture_cell_spec(monkeypatch, repo, tmp_path, args, capsys)
+
+    assert cell_spec.max_turns == 60
+    assert "max_turns=60 (default)" in printed
+    assert "(spec)" not in printed
+
+
+def test_a_flag_overrides_the_spec_and_says_which_it_was(tmp_path, monkeypatch, capsys):
+    """The flag is how an operator re-runs a spec under a different ceiling, so
+    it still wins — but which one is in force has to be visible on the way in,
+    not inferred from an exit code on the way out."""
+    repo = _local_origin(tmp_path)
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, budget_usd=31.5, max_attempts=7, max_turns=120)
+    args.max_turns = 40
+
+    cell_spec, printed = _capture_cell_spec(monkeypatch, repo, tmp_path, args, capsys)
+
+    assert cell_spec.max_turns == 40
+    assert cell_spec.budget_usd == 31.5  # untouched by the one flag given
+    assert "max_turns=40 (flag)" in printed
+    assert "budget_usd=31.5 (spec)" in printed
 
 
 def test_the_base_is_the_remote_default_branch_not_the_checkout(tmp_path, monkeypatch):

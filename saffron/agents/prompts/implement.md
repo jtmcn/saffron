@@ -23,9 +23,15 @@ These terms have exactly one meaning here. Use them and no synonyms.
    - `risks` (array of strings) — may be empty.
    - `blocking_questions` (array of strings) — a non-empty list rejects the plan
      as underspecified, so use it only when the task genuinely cannot proceed.
-2. Then implement. Commit your work — an attempt that produces no commits
-   failed, whatever you say about it. Leave the worktree clean: the gates
-   measure the committed tree, so a stray edit or an untracked file left
+2. Then implement, **committing after each coherent step** rather than once at
+   the end. Your session can stop where it stands — a turn ceiling or a
+   supervisor bound fires without warning and does not ask — and everything you
+   have not committed dies with the cell. This is measured, not cautionary: a
+   task once spent 61 turns doing correct work, was cut mid-edit, and exported
+   nothing. Uncommitted work is not work. An attempt that produces no commits
+   failed, whatever you say about it. Keep the worktree clean **as you go**,
+   not at the end — there is no "at the end" in a session that is cut. The
+   gates measure the committed tree, so a stray edit or an untracked file left
    behind fails `committed` and costs an attempt.
 3. You do not run the gates and you never report gate status. The host runs
    them and gives you `failures[]`. If you find yourself about to run the test

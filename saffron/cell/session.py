@@ -156,6 +156,10 @@ class CellSpec:
     spec_type: str
     body: str
     forbidden: list[str] = field(default_factory=list)
+    # Kept in step with `intake.Spec`, which is where a run's ceilings are
+    # declared and defaulted; `cli` passes all three, so these are reached only
+    # by tests. Two defaults for one ceiling is a drift vector — they disagreed
+    # once already, and the 12.0/10.0 split is what hid it.
     budget_usd: float = 12.0
     max_attempts: int = 4
     max_turns: int = 60
