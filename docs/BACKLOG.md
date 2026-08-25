@@ -206,6 +206,15 @@ driver are the sharper knobs — either can empty a diff entirely. Still open: a
 *content* but never a path, so `scope` is unaffected and the future `integrity`
 gate must treat such a section as unreadable rather than as no change.
 
+**And `size` inherits it, 2026-08-25.** Measured on `SA-0002`'s gate: a block
+with no `@@` contributes 0, so `*.py -diff` in `.gitattributes` makes a
+2000-line rewrite count as 1 and pass — at `elevated`, the one tier where
+`size` blocks. It carries a `ponytail:` comment naming the ceiling rather than
+a fix, because the honest response is `error` only when the unreadable file is
+inside `touches`, as `integrity` already does, and `size_gate` is handed
+neither `touches` nor a `--numstat` cross-check. **The wiring spec has both and
+should close it**, which makes that spec's second reason to exist.
+
 ## 3. `findings` and `attempts` have no tables
 
 `DESIGN.md` §4.1 declares both. Neither exists, so:
