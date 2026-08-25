@@ -650,7 +650,7 @@ Not *the cell cannot lie*. It can, and a design that assumes otherwise is how v0
 | Role | Owner | Blocking | Notes |
 |---|---|---|---|
 | `scope` | **core** | yes | changed files ⊆ `touches` |
-| `size` | **core** | at `elevated` | diff lines ≤ type ceiling (bug 300 / feature 600 / refactor 1000) |
+| `size` | **core** | at `elevated` | diff lines ≤ type ceiling (bug 300 / feature 600 / refactor 1000); `error` where it blocks and a file inside `touches` is hidden as binary — a `-diff` attribute otherwise counts 0 and passes any ceiling |
 | `secrets` | **core** | yes | credential scan over the diff |
 | `integrity` | **core**, repo patterns | yes | test-tampering check (below) |
 | `census` | **core** | yes | collected test names at `base_sha` vs head (below) |

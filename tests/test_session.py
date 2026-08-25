@@ -887,6 +887,106 @@ def test_a_size_failure_at_standard_does_not_enter_the_repair_loop(
     assert outcome.advisory_gates == ["size"]
 
 
+_HIDDEN_DIFF = (
+    "diff --git a/src/x.py b/src/x.py\n"
+    "index 1111111..2222222 100644\n"
+    "Binary files a/src/x.py and b/src/x.py differ\n"
+)
+
+
+_INTEGRITY_POLICY = 'gates: {}\nintegrity:\n  suppressions: ["# noqa"]\n'
+
+
+def test_size_does_not_refuse_an_unreadable_diff_at_a_tier_it_cannot_block(
+    monkeypatch, tmp_path
+):
+    """`size` refuses a diff it cannot measure with `error`, and `error` reaches
+    `aborted_gates` before any advisory filter — so at `standard`, where §5.6
+    says the gate stops nothing, the refusal would end the attempt instead.
+
+    Driven under a policy that declares integrity patterns, because every real
+    repo does and the default `gates: {}` makes `integrity` *skip*: asserting
+    `READY_FOR_REVIEW` here would be green for a reason unrelated to `size`.
+    What this pins is `size`'s own result. The attempt still ends, and the next
+    test says which gate ends it — a distinction `outcome.state` alone cannot
+    make.
+    """
+    cell = _stub_the_runtime(monkeypatch)
+    _grow_the_diff_after_the_first_turn(monkeypatch, cell, big=_HIDDEN_DIFF)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(spec_type="bug"),
+        policy=_INTEGRITY_POLICY,
+    )
+    (size_result,) = [g for g in outcome.gates if g.gate == "size"]
+    assert size_result.status != "error"
+    # And it says what it could not read, so an advisory count with a hole in
+    # it is never reported as a plain number.
+    assert "unreadable" in size_result.summary
+
+
+def test_integrity_still_refuses_that_diff_at_every_tier(monkeypatch, tmp_path):
+    """The ceiling on the test above, asserted rather than described: making
+    `size` quiet at `standard` does not make the attempt survive, because
+    `integrity` answers the identical shape with no tier awareness at all.
+
+    A repo declaring no integrity patterns is the only one that sees the
+    difference. If this ever goes green, `integrity`'s rule moved and `size`'s
+    `blocking` switch became load-bearing on its own.
+    """
+    cell = _stub_the_runtime(monkeypatch)
+    _grow_the_diff_after_the_first_turn(monkeypatch, cell, big=_HIDDEN_DIFF)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(spec_type="bug"),
+        policy=_INTEGRITY_POLICY,
+    )
+    assert outcome.state == "GATE_ERROR"
+    (integrity_result,) = [g for g in outcome.gates if g.gate == "integrity"]
+    assert integrity_result.status == "error"
+
+
+def test_without_integrity_patterns_the_standard_tier_attempt_survives(
+    monkeypatch, tmp_path
+):
+    """The case `size`'s switch is for: nothing else refuses the diff, so a
+    task adding a binary asset at `standard` reaches review instead of being
+    abandoned as infrastructure."""
+    cell = _stub_the_runtime(monkeypatch)
+    _grow_the_diff_after_the_first_turn(monkeypatch, cell, big=_HIDDEN_DIFF)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(spec_type="bug"),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+
+
+def test_the_same_unreadable_file_aborts_the_attempt_at_elevated_risk(
+    monkeypatch, tmp_path
+):
+    """The other half: where the gate blocks, a diff it cannot measure must not
+    read as one it measured and passed."""
+    cell = _stub_the_runtime(monkeypatch)
+    _grow_the_diff_after_the_first_turn(monkeypatch, cell, big=_HIDDEN_DIFF)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(spec_type="bug", risk="elevated"),
+    )
+    assert outcome.state == "GATE_ERROR"
+
+
 def test_the_same_size_failure_repairs_at_elevated_risk(monkeypatch, tmp_path):
     """The identical diff, the identical ceiling — only the tier differs, and
     that is what decides whether the task has to answer for it (§5.6)."""

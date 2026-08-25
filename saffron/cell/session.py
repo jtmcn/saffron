@@ -683,10 +683,17 @@ def _drive_cell(
                 integrity_gate(diff, policy.integrity, spec.touches),
                 # Host-side only, beside `scope`/`integrity`, for the same
                 # reason: never declared in `.saffron/gates` (`tool` would be
-                # unset and `run_gate` would turn it into `error`). Whether its
-                # failure *blocks* is `advisory_gates`' question, not this
-                # gate's — the result is unconditional (§5.4).
-                size_gate(diff, spec.spec_type),
+                # unset and `run_gate` would turn it into `error`).
+                # `blocking` is the one thing it does need: refusing an
+                # unreadable diff ends the attempt through `aborted_gates`,
+                # which no advisory filter downstream can soften, so a gate
+                # that stops nothing at this tier must not spend that refusal.
+                size_gate(
+                    diff,
+                    spec.spec_type,
+                    spec.touches,
+                    blocking="size" not in advisory_gates,
+                ),
                 *declared,
                 committed,
             ]
