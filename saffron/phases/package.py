@@ -27,6 +27,7 @@ from saffron.report import index as index_report
 from saffron.report import pr_body
 from saffron.report.pr_body import neutralize
 from saffron.repos import mirror as mirror_ops
+from saffron.repos.policy import PolicyError, load_policy
 
 # Anchored on a real remote URL — a scheme or the SCP-like `user@host:` form.
 # A filesystem path that merely contains github.com (a GOPATH checkout, a
@@ -501,7 +502,6 @@ def package(
     spec,
     repo: Path,
     mirror: Path,
-    policy,
     image: str,
     ledger,
     out_dir: Path,
@@ -529,6 +529,25 @@ def package(
     # and would otherwise supply the very objects it is checking for.
     assert_base_objects(mirror, base_sha)
     default, fetch_head = fetch_default_branch(mirror, url)
+
+    # The commit this package is verified against supplies its own policy, the
+    # way `base_sha` supplies the cell's (§5.4). Read from the checkout, it
+    # would name gate roles `fetch_head` does not carry — an errored gate at
+    # the point the task is otherwise `READY_FOR_REVIEW` — and describe the
+    # pull request under a declaration nothing was measured with.
+    # A sibling of `scratch`, not a child: `scratch` is a git worktree the
+    # `finally` hands to `remove_worktree`, and the export must not have the
+    # worktree's lifetime.
+    gates_dir = mirror_ops.export_saffron_dir(
+        mirror, fetch_head, out_dir / "package" / f"{spec.id}-gates"
+    )
+    try:
+        policy, _ = load_policy(gates_dir)
+    except PolicyError as exc:
+        # `_drive_cell`'s wrap, one phase later: the path it reports is a
+        # batch-tree export, and unnamed it sends the operator to their own
+        # policy.yaml — which by now governs nothing.
+        raise PolicyError(f"at {default} {fetch_head[:12]}: {exc}") from exc
 
     scratch = out_dir / "package" / spec.id
     worktree_path = mirror_ops.add_worktree(mirror, fetch_head, scratch)
@@ -604,13 +623,8 @@ def package(
         verified_on, gates = "base", outcome.gates
         if needs_reverification(fetch_head, base_sha):
             # A gate that errored raises out of `reverify`: infrastructure, and
-            # never this task's MERGE_FAILED.
-            # A sibling of `scratch`, not a child: `scratch` is a git worktree
-            # the `finally` hands to `remove_worktree`, and the export must not
-            # have the worktree's lifetime.
-            gates_dir = mirror_ops.export_saffron_dir(
-                mirror, fetch_head, out_dir / "package" / f"{spec.id}-gates"
-            )
+            # never this task's MERGE_FAILED. The gates are the export the
+            # policy above was read from — one commit, both halves.
             new, gates = reverify(
                 mirror=mirror,
                 packaged_sha=pushed,
