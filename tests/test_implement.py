@@ -321,6 +321,16 @@ def test_repair_text_carries_failures_and_never_a_gate_status():
     )
 
 
+def test_a_failure_with_no_path_does_not_render_an_empty_one():
+    """`size` fails the diff, not a file. The location is omitted rather than
+    rendered as `:?`, which reads as the gate itself having broken."""
+    new = [
+        NewFailure("size", Failure(file="", code="diff-too-large", message="601 > 600"))
+    ]
+    _, _, listed = implement.repair_prompt(new).partition("\n\n")
+    assert listed.splitlines() == ["- [size] diff-too-large: 601 > 600"]
+
+
 def test_telemetry_is_off_because_the_proxy_would_deny_it_anyway():
     """The allowlist permits api.anthropic.com and nothing else, so statsig
     traffic becomes denied CONNECTs and startup latency that reads as a hang."""

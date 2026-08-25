@@ -135,9 +135,13 @@ def repair_prompt(new_failures: Sequence[NewFailure]) -> str:
     No status, no gate verdict, no counts of what passed — the agent never runs
     the gates and never learns whether it is green.
     """
+    # A host-side gate can fail the diff as a whole rather than a path — `size`
+    # is the first — and "- [size] :? diff-too-large" reads as a broken gate to
+    # the one channel a gate result ever reaches the agent through.
     lines = [
-        f"- [{n.gate}] {n.failure.file}:{n.failure.line or '?'} "
-        f"{n.failure.code}: {n.failure.message}"
+        f"- [{n.gate}] "
+        + (f"{n.failure.file}:{n.failure.line or '?'} " if n.failure.file else "")
+        + f"{n.failure.code}: {n.failure.message}"
         for n in new_failures
     ]
     return (
