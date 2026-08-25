@@ -531,6 +531,14 @@ this project's evidence that is exactly where the next defect is.
 - `uv run` inside a cell rebuilds and reinstalls the project on every invocation,
   and would fail outright if it ever needed the network — the proxy allows one
   host. Agents work around it with `python -m`, at the cost of a turn.
+  **Done, 2026-08-24.** It does need the network, and the cost is three turns,
+  not one: `SA-0002`'s implementer took four `403`s from the proxy on
+  `pypi.org` before reaching `python3 -m pytest`. `UV_NO_SYNC=1` in
+  `.saffron/Dockerfile` runs it out of the venv the image already baked. The
+  general form is an onboarding requirement rather than a Saffron fix, and
+  §5.1 now carries it: a repo's image pins its runner to the baked
+  environment, because the workaround leaves the run green and bills the
+  difference to the task.
 - `image_exists` was deleted as dead; if PACKAGE wants a stale-image check it
   comes back.
 
