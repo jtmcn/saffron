@@ -441,6 +441,27 @@ rather than in the diff.
 **Done looks like:** remits that do not overlap, a risk tier on the task, and the
 third lens at `elevated`.
 
+**Amended 2026-08-25 by `SA-0002`, and the amendment changes what lens 3 should
+be.** The overlap did not recur: correctness filed the counting blocker,
+contract filed a `tool` concern, disjoint by construction on a second live diff.
+One run is not proof the prompts are fixed, but it is evidence the remits hold.
+
+The sharper finding is what *both* lenses missed. A later review of the same
+97-line diff found two mediums neither lens raised. One was a `-diff`
+gitattribute zeroing the count — the escape route item 2 leaves open, arriving
+in a new gate. The other was that the multi-file header reset had **no test**:
+deleting the line left all sixteen tests passing while a two-file diff
+overcounted by two lines per file. That second one is the same class as the
+blocker correctness *did* catch — a header-collision bug in `_changed_lines` —
+found one level up, in whether the suite would notice a regression.
+
+So the gap the third lens should close is not blast radius. **No lens asks
+whether the tests would catch the code being wrong**, and a critic that reads
+the diff without mutating it cannot: the implementer's own tests passed, the
+gates were green, and the uncovered line was invisible to every one of them.
+§5.5's disjointness argument still holds — this is a third remit, not a second
+opinion on the first two.
+
 ## 7. `CLAUDE.md` no longer reaches the agent, so the flywheel's middle bucket is inert
 
 `setting_sources: []` was set because a target repo's `.claude/` was configuring
@@ -515,6 +536,39 @@ this project's evidence that is exactly where the next defect is.
 - **The gate re-run after a rebuttal**, and `EXHAUSTED` when it is red.
 - **A rebuttal that claims a fix and does neither** — §4.3's doneness rule at the
   point an agent has the strongest incentive to claim it is done.
+
+**Half met, 2026-08-25**, by `SA-0002` — the first task to run the whole
+pipeline, spec to pull request (#15), $2.38 against an $8 budget, green on
+attempt one.
+
+**Two of the five fired, and the pair that fired is the pair that matters
+most.** The correctness lens filed a true blocker: `_changed_lines` dropped any
+hunk line *starting with* `---`/`+++`, so a SQL `-- comment` or a YAML `---`
+undercounted the diff. The implementer fixed it, committed, `head_moved` true;
+the gates re-ran clean on the new head; the lens withdrew its own finding on
+the evidence. That is REVIEW ⇄ REBUT closing the loop against a real defect
+rather than a planted one, which is what Appendix L could not show.
+
+**Three are still open** and they are the expensive three: `EXHAUSTED` when the
+post-rebuttal re-run is red, a rebuttal that claims a fix and does neither, and
+a critic *confirming* a plausible-but-wrong finding. All three are failure
+paths, and a green run cannot exercise them — which is the argument for a task
+chosen to fail rather than for waiting.
+
+**GATE ⇄ REPAIR did not fire, for the fourth time.** Four live tasks, four
+greens on attempt one. This is no longer an accident to be waited out: an agent
+with `Bash` runs every gate it can reach before committing, so the bullet above
+is the standing behaviour and not a sampling artifact. Repair's domain is the
+core gates the agent cannot run — `scope`, `committed`, `census` — and testing
+it means a task that trips one of those, not a fifth hope.
+
+**And the run measured two things nothing had.** The agent's `uv run pytest`
+took four `403`s from the proxy and cost three turns (item 10, closed). And
+five tests in this repo's own suite failed inside a cell while passing on the
+host, so the baseline every gate result is subtracted from was carrying five
+failures for reasons unrelated to any task (closed by PR #16). Both were
+invisible to every unit test and to three prior live runs; both cost money on
+the first task that reached PACKAGE.
 
 ## 10. Small, measured, cheap
 
@@ -884,10 +938,48 @@ with it.
 
 ---
 
+---
+
+## 17. `size` exists and nothing calls it
+
+`SA-0002` built the gate (#15) and its spec put the consumer out of scope, on
+the correct reasoning that the risk tier has none until v1. So the module is
+present, unit-tested, adversarially reviewed — and unreachable: `session.py`'s
+`_suite` builds its core-gate list from `scope`, `integrity`, `committed` and
+`census`, and `size` is not in it.
+
+**This is a spec-writing lesson before it is a task.** A spec whose output has
+no consumer produces a module, not a capability, and the gate loop cannot be
+handed one without a change it does not have: every `fail` today means repair,
+while §5.6 makes `size` **advisory at `standard` and blocking only at
+`elevated`**. There is no advisory result in the contract, and
+`policy.elevate_on` — which §5.6 names as what auto-elevates a task — does not
+exist either.
+
+**Done looks like:** an advisory status the repair loop does not act on,
+`policy.elevate_on` matched against the diff, `risk` reaching `run_one_cell`,
+and `size` in `_suite`. Two things it must carry, both found reviewing #15:
+
+- **Call it host-side, never declare it.** `size` leaves `tool` unset, which is
+  right for a gate that executes nothing — and `runner.run_gate` turns a
+  declared gate's `pass`/`fail` with no `tool` into `error`. Declaring it in a
+  `policy.yaml` errors every task.
+- **Close the binary hole with what this spec has.** A block git renders as
+  `Binary files ... differ` has no `@@`, so it counts 0 and a `-diff`
+  gitattribute zeroes the gate on a rewrite of any size — at `elevated`, the one
+  tier where it blocks. It carries a `ponytail:` comment rather than a fix
+  because the honest response is `error` only when the unreadable file is inside
+  `touches`, and `size_gate` is handed neither `touches` nor a `--numstat`
+  cross-check. This spec is handed both.
+
+The same wiring is what item 6's third lens needs, and the two should be built
+together or in that order.
+
 ## What is *not* here, deliberately
 
 DIAGNOSE and `SCOPE_REVIEW`, the scheduler's conflict sets and stacking, `saffron
-gc`, multi-repo, the merge train, and the `size`/`secrets`/`revert` gates. All are
+gc`, multi-repo, the merge train, and the `secrets`/`revert` gates. All are
 v1+ by `DESIGN.md` §9's own build order, and none of them is blocked by anything
-above. §4.2's own argument applies: at a two-deep queue they arbitrate contention
+above. `size` left this list on 2026-08-25: it is built and unwired, which is
+item 17. §4.2's own argument applies: at a two-deep queue they arbitrate contention
 that never arrives.
