@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 from saffron.cell.session import CellSpec, run_one_cell
-from saffron.intake import load_spec
+from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
 from saffron.replay import replay
@@ -61,8 +61,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     cell_parser.add_argument("spec", type=Path)
     cell_parser.add_argument("--repo", type=Path, default=Path.cwd())
-    cell_parser.add_argument("--budget", type=float, default=12.0)
-    cell_parser.add_argument("--max-attempts", type=int, default=4)
+    # `None`, not a number: an argparse default makes "not given" and "given
+    # the default" the same value, which is how the spec's own ceilings came to
+    # be parsed, validated and then discarded below.
+    cell_parser.add_argument("--budget", type=float, default=None)
+    cell_parser.add_argument("--max-attempts", type=int, default=None)
+    cell_parser.add_argument("--max-turns", type=int, default=None)
 
     args = parser.parse_args(argv)
     out_dir_arg = getattr(args, "out", None)
@@ -101,6 +105,34 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _ceilings(args: argparse.Namespace, spec: Spec) -> tuple[dict, str]:
+    """What bounds this run, and where each bound came from.
+
+    The flag wins when it is given; the spec governs otherwise. Both are real
+    inputs — the flag is how an operator overrides a spec they are re-running,
+    and the spec is how the author states what the task should cost.
+    """
+    declared = {
+        "budget_usd": spec.budget_usd,
+        "max_attempts": spec.max_attempts,
+        "max_turns": spec.max_turns,
+    }
+    given = {
+        "budget_usd": args.budget,
+        "max_attempts": args.max_attempts,
+        "max_turns": args.max_turns,
+    }
+    chosen = {
+        name: given[name] if given[name] is not None else declared[name]
+        for name in declared
+    }
+    line = ", ".join(
+        f"{name}={chosen[name]} ({'flag' if given[name] is not None else 'spec'})"
+        for name in declared
+    )
+    return chosen, line
+
+
 def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     repo = args.repo.resolve()
     spec, spec_sha = load_spec(args.spec)
@@ -118,6 +150,13 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # base must not depend on where the operator was standing (§5.7).
     _, base_sha = package_phase.fetch_default_branch(mirror, url)
 
+    # Printed, not merely applied: three ceilings govern a run and only one of
+    # them appears in the exit. SA-0005 was stopped by the turn ceiling with
+    # more than half its budget left, and nothing on the way in had said what
+    # any of the three were.
+    ceilings, in_force = _ceilings(args, spec)
+    print(f"ceilings: {in_force}")
+
     cell_spec = CellSpec(
         spec_id=spec.id,
         spec_sha=spec_sha,
@@ -127,8 +166,7 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         spec_type=spec.type,
         body=spec.body,
         forbidden=spec.forbidden,
-        budget_usd=args.budget,
-        max_attempts=args.max_attempts,
+        **ceilings,
     )
     outcome = run_one_cell(
         cell_spec, repo=repo, mirror=mirror, ledger=ledger, out_dir=out_dir

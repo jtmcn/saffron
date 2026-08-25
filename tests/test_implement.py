@@ -213,6 +213,22 @@ def test_a_failed_turn_still_reports_what_it_spent():
     assert raised.value.attempt.cost_usd_est == 2.0
 
 
+def test_a_turn_ceiling_is_named_rather_than_left_to_the_exit_code():
+    """Measured on `SA-0005`: the session did correct work for 61 turns, was
+    cut mid-edit, and the whole account of it was "exited 1". A turn ceiling is
+    a bound like the other three and the exit code cannot show it."""
+    with pytest.raises(implement.AgentFailed, match="ceiling of 60 turns"):
+        implement.run_agent(
+            "cell",
+            prompt="p",
+            options={"max_turns": 60},
+            watch=lambda _line: None,
+            exec_stream=_stream(
+                _result_line(subtype="error_max_turns", is_error=True), returncode=1
+            ),
+        )
+
+
 def test_a_runner_killed_after_emitting_its_result_is_not_a_clean_turn():
     """§4.3's completion axis: a runner can emit a clean result event and then
     be killed holding stdout open. `is_error` is False and the subtype says

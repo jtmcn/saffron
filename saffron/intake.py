@@ -46,6 +46,10 @@ class Spec(BaseModel):
     forbidden: list[str] = Field(default_factory=list)
     budget_usd: float = 10.0
     max_attempts: int = 4
+    # The third ceiling, and the one that has actually stopped a task: SA-0005
+    # died at turn 61 with 56% of its budget unspent, against a hardcoded 60 no
+    # spec could raise or see.
+    max_turns: int = 60
     risk: RiskTier = "standard"
 
     body: str = ""

@@ -333,8 +333,16 @@ def run_agent(
         # returns `subtype="success"` with `is_error=true` and terminal_reason
         # `api_error`. Keying on the subtype alone would call a session that
         # did nothing at all a clean success.
+        # A turn ceiling is a bound like the other three, and it is the one the
+        # exit code cannot show: "exited 1" was the whole account of a session
+        # that did correct work for 61 turns and was cut mid-edit.
+        ended = (
+            f"reached its ceiling of {options.get('max_turns')} turns"
+            if subtype == "error_max_turns"
+            else how
+        )
         raise AgentFailed(
-            f"the agent {how} ({subtype}/{attempt.terminal_reason}): {detail}",
+            f"the agent {ended} ({subtype}/{attempt.terminal_reason}): {detail}",
             attempt,
         )
     return attempt
