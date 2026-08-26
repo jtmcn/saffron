@@ -158,7 +158,7 @@ key in `integrity` — paths whose *added lines* are not scanned, distinct from
   rather than left one file away.
 - **The evasion also lived one layer up, at the capture boundary.** `runtime._call`
   captured with `subprocess.run(text=True)`, whose universal-newline translation
-  rewrites a bare `\r` to `\n` *before any gate runs* — so the line arrived
+  rewrites a bare `\r` to `\n` *before any gate executes* — so the line arrived
   already shattered and no parser fix could undo it. It now captures bytes and
   decodes explicitly. That also removed a latent crash: the old text mode decoded
   with the **host locale** under `errors="strict"`, so a non-UTF-8 byte from a

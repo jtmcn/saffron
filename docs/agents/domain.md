@@ -49,3 +49,25 @@ If the concept you need isn't in the glossary yet, that's a signal: either you'r
 If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
 
 > _Contradicts ADR-0007 (event-sourced orders), but worth reopening because…_
+
+## Keeping the model in sync
+
+`prek`'s `retired-vocabulary` hook enforces the only thing a grep can decide: a term
+a settled naming decision killed outright, where no context rescues it. It runs on
+every commit, which matters because `.saffron/policy.yaml` protects `CONTEXT.md` and
+`DESIGN.md` — no cell can edit them, so the two authoritative documents drift only
+from host-side edits, which no gate ever sees.
+
+Three kinds of drift stay outside it, and pretending otherwise is the trap:
+
+- Most `_Avoid_` entries are ordinary English elsewhere — `check`, `issue`, `note`,
+  `fix`. They are enforced the only way they can be: `DESIGN.md` §5.3 injects
+  `CONTEXT.md` per phase.
+- A stale *list* has no string to match. §4.6's `prov:Activity` types were written at
+  rev 3 and never gained `batch` when the ledger did.
+- A definition the schema contradicts is correct English in correct vocabulary.
+  `Gate result` read "against one attempt", which excluded every baseline result.
+
+So a domain pass re-reads `CONTEXT.md` §4 and §5 against `DESIGN.md` §4.1's schema and
+§4.6's type assignments. All three of the above were found that way, which is
+principle 25 — a vocabulary is a test suite for a design.

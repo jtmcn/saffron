@@ -43,7 +43,7 @@ is a design artifact validated against hand-authored fixtures, not a subsystem.
 Saffron has no shared vocabulary for its own run record. The ledger schema (§4.1)
 names seven tables in SQL; the run tree (§4.1) names artifacts by file path; the
 PR body (§5.7) renders both into prose. Nothing states what an *attempt* is in
-relation to a *gate run*, whether an `EXHAUSTED` task's artifacts are reachable
+relation to a *gate result*, whether an `EXHAUSTED` task's artifacts are reachable
 entities, or how a critic's assessment of an acceptance criterion differs in kind
 from a `mypy` failure. N5 ("any merged change reconstructible from stored
 artifacts alone") is a provenance requirement written in non-provenance words and
@@ -53,9 +53,10 @@ is currently unenforceable, because nothing says what "reconstructible" means.
 
 - [ ] `ontology/saffron.ttl` exists, is valid Turtle, and parses under `pyoxigraph`
       with no network access
-- [ ] Phases, attempts, and gate runs are modelled as `prov:Activity`; specs,
-      `plan.json`, `scope.json`, diffs, gate output, and PRs as `prov:Entity`;
-      implementer sessions, each critic lens, and the human as `prov:Agent`
+- [ ] Batches, runs, tasks, phases, attempts, and gate suites are modelled as
+      `prov:Activity`; specs, `plan.json`, `scope.json`, diffs, gate output, and
+      PRs as `prov:Entity`; implementer sessions, each critic lens, and the human
+      as `prov:Agent`
 - [ ] The implementer/critic disagreement of §5.6 is modelled as a
       `prov:qualifiedAssociation`, not as a bare string field
 - [ ] Gate results and critic findings are `earl:Assertion`s over an
@@ -97,7 +98,7 @@ is currently unenforceable, because nothing says what "reconstructible" means.
 | Q1 | For each rejected task, which acceptance criteria failed, and did any gate or lens assert on them? (bucket-triage evidence) | §8 |
 | Q2 | Blockers raised per critic lens, split by whether the human agreed — the critic layer's ROI | §11 |
 | Q3 | Gates ranked by how often they were the *sole* failure in an attempt, and gates that never fired at all | §8 |
-| Q4 | Given a merged PR, the full derivation chain: spec → scope → plan → diff → gate runs → findings → rebuttal → PR | N5 |
+| Q4 | Given a merged PR, the full derivation chain: spec → scope → plan → diff → gate suites → findings → rebuttal → PR | N5 |
 | Q5 | Cost per *accepted* PR, grouped by spec type and risk tier | §7.1 |
 
 ## Out of scope
@@ -118,8 +119,8 @@ dereferenced at parse or validation time. Vendored copies are expected at
 before this task is queued. If they are absent, stop and raise it as a
 `blocking_question` — do not fetch them, and do not stub them.
 
-**Granularity is a decision, not a default.** Model run / task / attempt / phase /
-gate-run as activities. Tool calls stay in the plain transcript; modelling
+**Granularity is a decision, not a default.** Model batch / run / task / phase /
+attempt / gate suite as activities. Tool calls stay in the plain transcript; modelling
 `PreToolUse` events is where the triple count explodes and the queries stop being
 fast. If a query below seems to need tool-call granularity, that is a finding worth
 reporting, not a licence to add it.

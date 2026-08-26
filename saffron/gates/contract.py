@@ -52,7 +52,7 @@ class Failure(BaseModel):
 
 
 class GateResult(BaseModel):
-    """One execution of one gate. Never called a "gate run" — CONTEXT.md §4."""
+    """One execution of one gate against one tree — CONTEXT.md §4."""
 
     gate: str
     status: GateStatus

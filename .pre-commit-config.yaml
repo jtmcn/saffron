@@ -5,3 +5,19 @@ repos:
       - id: ruff-check
         args: [--fix]
       - id: ruff-format
+
+  # A retired term, not the whole `_Avoid_` list: most of those words are ordinary
+  # English elsewhere. Only a word a settled decision killed outright is decidable
+  # by grep. The excluded paths all state the vocabulary rules and so must quote
+  # the word they forbid — the plans included, which open by listing them.
+  - repo: local
+    hooks:
+      - id: retired-vocabulary
+        name: retired vocabulary (CONTEXT.md § settled naming decisions)
+        language: pygrep
+        types: [text]
+        # The class is a space or a hyphen — both forms were live — and it is
+        # also what stops this line matching itself. `gate-runner` is safe: the
+        # boundary after `run` fails on the `n`.
+        entry: '(?i)gate[ -]runs?\b'
+        exclude: '^(CONTEXT\.md|CLAUDE\.md|docs/superpowers/|docs/evidence/)'

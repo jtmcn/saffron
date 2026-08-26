@@ -34,8 +34,8 @@ def test_every_host_side_bound_is_set():
     assert options["max_budget_usd"] == 12.0
 
 
-def test_the_cache_ttl_outlives_a_gate_run():
-    """The repair loop resumes across a gate run, and a gate run is minutes.
+def test_the_cache_ttl_outlives_a_gate_suite():
+    """The repair loop resumes across a gate suite, and a suite is minutes.
     The five-minute default expires every time (DESIGN.md §7.1)."""
     options = implement.agent_options(
         system_prompt="s", cwd="/work", max_turns=40, budget_usd=12.0

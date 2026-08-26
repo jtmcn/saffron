@@ -113,8 +113,8 @@ def agent_options(
         # session.py; this one only cuts a runaway turn short (§4.3).
         "max_budget_usd": budget_usd,
         "env": {
-            # The repair loop resumes the same session across a gate run, and a
-            # gate run is minutes. At the five-minute default the cache has
+            # The repair loop resumes the same session across a gate suite, and
+            # a suite is minutes. At the five-minute default the cache has
             # expired on every attempt and the whole accumulated context is
             # re-billed as fresh input (§7.1).
             "ENABLE_PROMPT_CACHING_1H": "1",
