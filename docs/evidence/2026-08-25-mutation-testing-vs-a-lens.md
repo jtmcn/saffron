@@ -356,7 +356,7 @@ that followed, `accd8eb`, is itself a test-adequacy defect on that same patch �
 which makes integrity skip: green for a reason unrelated to what it asserted" —
 which is the category the lens was pointing into.
 
-Worth putting beside §3.1: the `session.py` wiring line the lens flagged in that
+Worth putting beside section 3.1 above: the `session.py` wiring line the lens flagged in that
 control is the same line `cosmic-ray` could not generate a single mutant for.
 The two candidates disagreed about the most consequential line in that patch,
 and only one of them said anything.
@@ -461,7 +461,7 @@ a mechanism.
   watch both from the first live run. The prompt in the method section says
   nothing about severity, and a test-adequacy lens has more true-but-trivial
   findings available to it than either existing lens.
-- `revert` (§6) is still worth building and would not have caught this. The two
+- `revert` (§5.4) is still worth building and would not have caught this. The two
   are not substitutes: `revert` asks whether the new tests test *anything*, and
   this lens asks whether they test *each thing*.
 
