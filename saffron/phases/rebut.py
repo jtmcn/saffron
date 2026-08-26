@@ -393,6 +393,32 @@ def sustained_blockers(rebut_result: RebutResult | None) -> int:
     return len(argued & confirmed)
 
 
+def unkept_fixes(rebut_result: RebutResult | None) -> int:
+    """§6: a confirmed blocker whose only answer was a fix that never reached
+    HEAD — a promise nobody kept, ranked *with* `sustained_blockers` but
+    counted apart from it (`fixed & confirmed`, not `argued & confirmed`).
+
+    Zero for every shape `sustained_blockers` is zero for, plus one more:
+    ponytail: `moved` is one bit for the whole rebuttal, not per blocker, so
+    it cannot say which claimed fix a landed commit was for. §6 names this a
+    floor — `moved` True returns `0` even if a claimed fix never landed.
+    """
+    if rebut_result is None or rebut_result.rebuttal.error or rebut_result.moved:
+        return 0
+    fixed = {
+        finding
+        for finding, r in first_answers(rebut_result.rebuttal).items()
+        if r.action == "fixed"
+    }
+    confirmed = {
+        v.finding
+        for lens in rebut_result.verdicts
+        for v in lens.verdicts
+        if v.verdict == "confirmed"
+    }
+    return len(fixed & confirmed)
+
+
 def run_rebut(
     container: str,
     *,

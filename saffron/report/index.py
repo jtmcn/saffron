@@ -68,30 +68,45 @@ class QueueLine:
     # `QueueLine` from a fixed set of keys, and a field with no default here
     # would break every row it did not name.
     sustained: int = 0
+    # A blocker the critic confirmed and the implementer's only answer was a
+    # fix it never committed — §6's other level-3 count, ranked with
+    # `sustained` but never folded into it: an argument the critic defeated
+    # and a promise nobody kept are different failures and get different
+    # words. Placed beside `sustained`, for the same reason it is last.
+    unkept: int = 0
 
 
-def sort_key(line: QueueLine) -> tuple[int, int, int, int, str]:
+def sort_key(line: QueueLine) -> tuple[int, int, int, int, int, str]:
     """§6's order: dismiss in ten seconds, accept in two minutes.
 
     Skipped repos, then `SCOPE_REVIEW`, then the states that need you —
     `MERGE_FAILED`, `PLAN_REJECTED`, `PREFLIGHT_FAILED`, `GATE_ERROR` and
-    `NOT_IMPLEMENTED` — then sustained blockers descending, then elevated
-    risk, then concern count descending. Sorted by state, never grouped by
-    repo.
+    `NOT_IMPLEMENTED` — then level 3 descending, then elevated risk, then
+    concern count descending. Sorted by state, never grouped by repo.
 
-    Level 3, sustained blockers, is not a state: it pre-empts only the
-    elevated/ordinary fallback below, so a line already in `_STATE_RANK`
-    (`MERGE_FAILED` down through `REBUTTING`) keeps that rank regardless of
-    `sustained` — `REVIEWING`/`REBUTTING` keep sorting with elevated risk,
-    as they did before this level existed.
+    Level 3 is not a state: it pre-empts only the elevated/ordinary fallback
+    below, so a line already in `_STATE_RANK` (`MERGE_FAILED` down through
+    `REBUTTING`) keeps that rank regardless of `sustained` or `unkept` —
+    `REVIEWING`/`REBUTTING` keep sorting with elevated risk, as they did
+    before this level existed. `sustained` and `unkept` share the bucket —
+    a confirmed blocker answered with either an argument the critic rejected
+    or a fix nobody committed ranks with you either way (§6) — but `unkept`
+    never outranks `sustained` within it: it tiebreaks just below.
     """
     if line.state in _STATE_RANK:
         rank = _STATE_RANK[line.state]
-    elif line.sustained:
+    elif line.sustained or line.unkept:
         rank = _SUSTAINED
     else:
         rank = _ELEVATED if line.risk == "elevated" else _ORDINARY
-    return (rank, -line.sustained, -line.concerns, -line.attempts, line.spec_id)
+    return (
+        rank,
+        -line.sustained,
+        -line.unkept,
+        -line.concerns,
+        -line.attempts,
+        line.spec_id,
+    )
 
 
 def render_index(lines: list[QueueLine], *, header: dict[str, str]) -> str:
@@ -139,6 +154,15 @@ def _row(line: QueueLine) -> str:
         if line.sustained
         else ""
     )
+    # Worded distinctly from both `sustained` and `concerns`, deliberately
+    # (§6): an argument the critic rejected and a fix nobody committed are
+    # different failures, and a cell reading "sustained" for both would hide
+    # the one this level exists to surface. Empty at zero, like `sustained`.
+    unkept = (
+        f"{line.unkept} unkept fix{'es' if line.unkept > 1 else ''}"
+        if line.unkept
+        else ""
+    )
     cells = [
         html.escape(line.repo),
         html.escape(line.spec_id),
@@ -146,6 +170,7 @@ def _row(line: QueueLine) -> str:
         f"{line.attempts} att",
         cost,
         sustained,
+        unkept,
         concerns,
         f"+{line.added}/−{line.removed}",
         _link(line.link),
