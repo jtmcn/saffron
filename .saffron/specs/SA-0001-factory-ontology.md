@@ -119,8 +119,8 @@ dereferenced at parse or validation time. Vendored copies are expected at
 before this task is queued. If they are absent, stop and raise it as a
 `blocking_question` — do not fetch them, and do not stub them.
 
-**Granularity is a decision, not a default.** Model run / task / attempt / phase /
-gate-run as activities. Tool calls stay in the plain transcript; modelling
+**Granularity is a decision, not a default.** Model batch / run / task / phase /
+attempt / gate suite as activities. Tool calls stay in the plain transcript; modelling
 `PreToolUse` events is where the triple count explodes and the queries stop being
 fast. If a query below seems to need tool-call granularity, that is a finding worth
 reporting, not a licence to add it.

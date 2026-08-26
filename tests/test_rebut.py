@@ -90,11 +90,11 @@ def _run(
     moved=True,
     gates=None,
     record=None,
-    gate_runs=None,
+    gate_suites=None,
 ):
     def _rerun_gates():
-        if gate_runs is not None:
-            gate_runs.append(True)
+        if gate_suites is not None:
+            gate_suites.append(True)
         return gates
 
     return rebut.run_rebut(
@@ -119,19 +119,19 @@ def test_a_claimed_fix_with_no_commit_and_no_argument_does_not_advance():
     """§4.3 at the phase where an agent has the strongest incentive to claim it
     is done: HEAD moved, or an explicit recorded argument — and "I fixed it" is
     neither. Nothing is bought after the measurement fails."""
-    gate_runs: list[bool] = []
+    gate_suites: list[bool] = []
     record: list[dict] = []
     result = _run(
         "I have addressed the findings.",
         _rebuttals(_fixed()),
         moved=False,
         record=record,
-        gate_runs=gate_runs,
+        gate_suites=gate_suites,
     )
     assert result.state == "REBUTTING"
     assert "committed nothing" in result.why
     assert result.verdicts == []
-    assert gate_runs == []  # HEAD did not move; the suite would answer twice
+    assert gate_suites == []  # HEAD did not move; the suite would answer twice
     assert len(record) == 2  # the attempt and its extraction turn, no verdict
 
 

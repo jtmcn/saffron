@@ -434,7 +434,7 @@ The ledger is a good state store and a poor analytical surface. §8's flywheel i
 
 **1. Derived and one-way.** SQLite remains the system of record. The graph is a projection with no write path back. If it is stale, wrong, or absent, the factory still runs — which is the property (§4.1) that lets Saffron recover from Saffron. An authoritative graph store would trade that away for query convenience, and a dual-write arrangement would trade it away for nothing at all: divergence in an audit trail is worse than either store alone.
 
-**2. PROV-O and EARL, not a bespoke schema.** Batches, runs, tasks, attempts, phases and gate suites are `prov:Activity` — one activity per suite and not one per gate, because no per-gate execution is recorded anywhere: `gate_results` *is* the assertion; specs, `plan.json`, `scope.json`, diffs, gate output and PRs are `prov:Entity`; the implementer session, each critic lens and the human are `prov:Agent`. `wasGeneratedBy`, `used`, `wasDerivedFrom`, `wasRevisionOf` and `wasInvalidatedBy` (which is exactly what `spec_sha` invalidation is, §4.1) carry the backbone. Gate results and critic findings are both `earl:Assertion`s over an `earl:TestSubject`. The genuinely Saffron-specific terms — the only part that justifies a new namespace — are the gate taxonomy with its blocking/advisory split, `envelope` versus ratified `touches`, lens disjointness, and the terminal-versus-internal state distinction of §3.3.
+**2. PROV-O and EARL, not a bespoke schema.** Batches, runs, tasks, attempts, phases and gate suites are `prov:Activity` — one activity per suite and not one per gate, because a gate's own execution is already fully described by the assertion it produces: `gate_results` carries its status and its `duration_ms`, and a separate activity node would restate them; specs, `plan.json`, `scope.json`, diffs, gate output and PRs are `prov:Entity`; the implementer session, each critic lens and the human are `prov:Agent`. `wasGeneratedBy`, `used`, `wasDerivedFrom`, `wasRevisionOf` and `wasInvalidatedBy` (which is exactly what `spec_sha` invalidation is, §4.1) carry the backbone. Gate results and critic findings are both `earl:Assertion`s over an `earl:TestSubject`. The genuinely Saffron-specific terms — the only part that justifies a new namespace — are the gate taxonomy with its blocking/advisory split, `envelope` versus ratified `touches`, lens disjointness, and the terminal-versus-internal state distinction of §3.3.
 
 **2b. The cheap rival the RATIONALE must also beat: a glossary.** Prior art (Appendix D) reaches the same need — a shared vocabulary its agents must read before touching code — and answers it with a 200-line markdown glossary where every term carries an explicit ***Avoid:*** list of the words not to use for it, plus an instruction to *flag* a conflict with a recorded decision rather than silently override it. That is a weekend's less work than an ontology and it does the thing an ontology is usually reached for. So `RATIONALE.md` has a second bar to clear: not only "is SPARQL better than SQL here," but "**is any of this better than a disambiguating glossary the agents actually read?**" If the honest answer is that the vocabulary's value is agent-facing rather than query-facing, write `GLOSSARY.md` and stop — the queries were the justification, and without them the RDF is decoration. Worth noting that Saffron needs the glossary either way; the ontology has to earn the *delta*.
 
@@ -623,7 +623,7 @@ Everything downstream is built on this and nothing else:
 Two rules about `error` that the same replay forced, both stated because a gate author has to know them and neither is derivable from the schema:
 
 - **A non-zero exit with an empty `failures[]` is `error`, never `pass`.** It means the tool objected to something the gate's parser did not recognize — a reworded output line after a version bump is the ordinary cause, and it produces the identical false green as a missing binary, from a different direction. The gate knows its own exit code; nothing downstream does.
-- **Partial results are not results.** When a gate's execution mechanism breaks part-way — a lost test worker, a collection crash, a timeout on one shard — the gate returns `error` for the whole run rather than `fail` on whatever it managed to collect. There is deliberately no per-failure `error` vocabulary: a suite that lost a worker did not produce a trustworthy result, and the cost of that rule is one re-run charged to nobody, against the cost of an agent spending attempts "fixing" a test that a scheduler killed.
+- **Partial results are not results.** When a gate's execution mechanism breaks part-way — a lost test worker, a collection crash, a timeout on one shard — the gate returns `error` for the whole run rather than `fail` on whatever it managed to collect. There is deliberately no per-failure `error` vocabulary: a test suite that lost a worker did not produce a trustworthy result, and the cost of that rule is one re-run charged to nobody, against the cost of an agent spending attempts "fixing" a test that a scheduler killed.
 
 Requiring gates to translate their own tool output is the price of admission, and it is the right price: it is ~20 lines of shell per gate, written once by the person who understands that tool, and it keeps every parser out of the orchestrator.
 
@@ -705,7 +705,7 @@ This is the same question `integrity` used to ask of the diff, asked where the a
 
 **It executes nothing, and needs no exception to §2.1.** The repo's `tests` gate already runs at `base_sha` to build the baseline and again at head on every attempt. The names do not have to be fetched, only *reported*: the contract gains an optional `collected` field, the `tests` gate fills it, and core subtracts two lists it is already holding. Unlike `revert`, core invokes nothing here — it reads a field of a gate result, which is §2.1's original sentence rather than the exception to it. A repo whose runner cannot enumerate omits the field and `census` reports `skip`.
 
-The two sides are not symmetric. No names at base is `skip` — nothing to compare. Names at base and none at head is `error`: a suite that enumerated before the task and stopped after it is grounds to distrust the comparison, not to report every test as deleted. A head `tests` that errored has already aborted the attempt before `census` is consulted, so a truncated collection can never be read as a mass deletion.
+The two sides are not symmetric. No names at base is `skip` — nothing to compare. Names at base and none at head is `error`: a test suite that enumerated before the task and stopped after it is grounds to distrust the comparison, not to report every test as deleted. A head `tests` that errored has already aborted the attempt before `census` is consulted, so a truncated collection can never be read as a mass deletion.
 
 **A skipped test is still a collected test.** Measured: `pytest -q --collect-only` lists a `@pytest.mark.skip` or `xfail` test and the run exits `0`, so `census` does not see marker-based silencing and is not the gate that covers it — `integrity` is. Only `-m` deselection removes a name, and that is an edit to gate configuration rather than a marker. What `census` catches is removal and rename-out-of-collection; a test still collected but silenced belongs to `integrity`, and a test still collected but gutted belongs to `revert`, which is not built yet.
 
@@ -1201,7 +1201,7 @@ And the other half of the layout — the part that lives in every target repo, a
 - **Refusing agent conflict resolution.** §5.7 sends every rebase conflict to `MERGE_FAILED`. Prior art (Appendix D) runs a better-shaped version: the host attempts `git merge` itself and only invokes an agent on genuine conflict, then verifies the result deterministically (`git diff --diff-filter=U` empty, HEAD actually moved) before allowing a push — with the agent explicitly told *"do not invent new behaviour; reconciliation is not feature work; if a sensible resolution requires logic that was on neither side, flag uncertainty rather than be creative."* Their version is weakly verified because they have no gates. **Saffron's would be gate-verified**, which is a materially different risk profile — a resolved conflict runs the full suite before it reaches you. Revisit once `MERGE_FAILED` volume is annoying enough to measure; the deterministic-first / LLM-as-fallback shape is the right one, and it should stay off until the gates have earned trust.
 - **`scope` having one severity for every kind of escape.** v0 put a new file the spec's own acceptance criteria required, three docs files, an adjacent source file and a dbt test into one `out-of-scope` bucket at identical weight (Appendix H). Not fixed, because the case that produced it — `touches` hand-written before anyone saw the diff — is the case §5.2 removes for bugs: in the real pipeline DIAGNOSE proposes and you ratify. If ratified `touches` still produces mixed-weight escapes once bugs run for real, that is the evidence to act on.
 - **Per-repo budgets.** Deliberately not built — you have no data to tune them with. Once you have three months of cost-per-accepted-PR *by repo*, a repo that reliably costs triple is an argument for its own ceiling.
-- **`revert` vs. mutation testing.** If gate wall-clock stops being the constraint (faster fixtures, more cores), mutation sampling on `risk: elevated` diffs becomes affordable and is strictly stronger. **Measured 2026-08-25 (#33): wall-clock is no longer what binds.** `mutmut` 3 does not rerun the suite per mutant — 74s on the file, 274s on the module, both inside §7.1's window — so the cost clause above holds for `cosmic-ray` and not for `mutmut`. What binds now is that `mutmut` cannot scope below a function and cannot run over a suite that gates its own tree, while `cosmic-ray` scopes to a diff and lacks the string-literal operator the one real defect needed. Reach for `mutmut` if either constraint lifts, not `cosmic-ray`. This is not a recommendation to adopt it — #33 chose a prompted lens — only a correction to the stated reason. `docs/evidence/2026-08-25-mutation-testing-vs-a-lens.md`.
+- **`revert` vs. mutation testing.** If gate wall-clock stops being the constraint (faster fixtures, more cores), mutation sampling on `risk: elevated` diffs becomes affordable and is strictly stronger. **Measured 2026-08-25 (#33): wall-clock is no longer what binds.** `mutmut` 3 does not rerun the test suite per mutant — 74s on the file, 274s on the module, both inside §7.1's window — so the cost clause above holds for `cosmic-ray` and not for `mutmut`. What binds now is that `mutmut` cannot scope below a function and cannot run over a test suite that gates its own tree, while `cosmic-ray` scopes to a diff and lacks the string-literal operator the one real defect needed. Reach for `mutmut` if either constraint lifts, not `cosmic-ray`. This is not a recommendation to adopt it — #33 chose a prompted lens — only a correction to the stated reason. `docs/evidence/2026-08-25-mutation-testing-vs-a-lens.md`.
 - **Conflict-set scheduling.** Limiting once you have many small tasks in one hot module. The principled upgrade is function-level conflict sets, which is a lot of work; the cheap alternative is batching hot-module specs into one task.
 - **`SCOPE_REVIEW` as a human step.** If ratification becomes rubber-stamping — you approve 95% of proposed scopes without edits — auto-ratify when the proposal stays inside `envelope` and only surface the exceptions.
 - **Human-in-the-loop merge.** Keep it. But the *shape* of your review should shrink as gates absorb your rejection reasons. If in six months you're still reading full diffs line by line, the flywheel isn't turning — and that's the thing to fix, not the merge click.
@@ -1904,7 +1904,7 @@ arriving as evidence rather than as a claim.
 `SA-0004` — the `integrity` gate, 371 lines plus 579 lines of its own tests. It
 passed `format`, `lint`, `types` and `tests`; its 31 new tests passed; the diff
 stayed inside `touches`; the formatter was clean. Applied to the repository it
-brought the suite from 281 to 312 green.
+brought the test suite from 281 to 312 green.
 
 The code was not slop. §2.1's split was clean — not one language token in a code
 path, `test_paths` consulted for every classification, the Go-vocabulary tests
@@ -1943,7 +1943,7 @@ And of eleven mutants applied to the agent's own tests, **five survived**.
 
 Every one of those defects is invisible to `format`, `lint`, `types` and `tests`,
 because the tests were written by the same author, against the same model of the
-problem, carrying the same blind spots. The suite is not evidence about the
+problem, carrying the same blind spots. The test suite is not evidence about the
 behaviour anybody wanted; it is evidence that the code and its tests agree.
 
 45. **A test written by the author of the code certifies agreement, not
@@ -2133,7 +2133,7 @@ distinguish a URL scheme from a filesystem path separator. Measured:
 `slug('/Users/joel/go/src/github.com/owner/repo')` returned `owner/repo` — a
 GOPATH-style checkout walking straight through the refusal the change existed to
 add. Worse, twelve fixtures had by then been relocated to
-`tmp_path/github.com/o/r.git` to satisfy that same pattern, so the suite had come
+`tmp_path/github.com/o/r.git` to satisfy that same pattern, so the test suite had come
 to depend on the loophole. The shipped pattern anchors on a real remote URL — a
 scheme, or the SCP-like `user@host:` form — and is measured against 19 cases:
 nine accept, ten refuse, including `https://github.com.evil.com/a/b`, which
@@ -2160,7 +2160,7 @@ A repo on either shape must point `origin` at github.com to run.
 53. **A refusal that is loosened to make tests pass is a refusal that no longer
     exists.** The tell is not that the pattern is imperfect — it is that the
     repair reshapes a *fixture* rather than a caller. Twelve fixtures moved to a
-    path shape no real checkout has, and after that the suite was evidence for
+    path shape no real checkout has, and after that the test suite was evidence for
     the loophole rather than against it.
 
 ### The baseline and head suites could run different gate executables
