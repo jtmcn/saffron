@@ -356,6 +356,7 @@ dev = [
     { name = "pyoxigraph" },
     { name = "pyshacl" },
     { name = "pytest" },
+    { name = "rdflib" },
     { name = "ruff" },
 ]
 
@@ -370,6 +371,7 @@ dev = [
     { name = "pyoxigraph", specifier = ">=0.4" },
     { name = "pyshacl", specifier = ">=0.26" },
     { name = "pytest", specifier = ">=8" },
+    { name = "rdflib", specifier = ">=7" },
     { name = "ruff", specifier = ">=0.16.3" },
 ]
 

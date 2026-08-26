@@ -67,7 +67,7 @@ saffron:GateShape a sh:NodeShape ;
 # `policy.yaml` schema states.
 saffron:CoverageShape a sh:NodeShape ;
     sh:targetNode saffron:coverage ;
-    sh:property [ sh:path saffron:blockingAt ; sh:hasValue saffron:advisory ] .
+    sh:property [ sh:path saffron:blockingAt ; sh:in ( saffron:advisory ) ] .
 
 saffron:PolicyShape a sh:NodeShape ;
     sh:targetClass saffron:Policy ;
@@ -82,7 +82,8 @@ saffron:FindingShape a sh:NodeShape ;
         sh:in ( saffron:blocker saffron:concern saffron:note ) ] ;
     sh:property [ sh:path earl:assertedBy ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class saffron:CriticLens ] ;
-    sh:property [ sh:path earl:subject ; sh:minCount 1 ; sh:class earl:TestSubject ] .
+    sh:property [ sh:path earl:subject ; sh:minCount 1 ; sh:class earl:TestSubject ] ;
+    sh:property [ sh:path earl:mode ; sh:minCount 1 ; sh:maxCount 1 ] .
 
 # A gate result is asserted by a gate, automatically. The mode is the only real
 # difference between a gate result and a finding (§4.6), so it is stated rather

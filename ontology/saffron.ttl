@@ -38,7 +38,7 @@ saffron:AcceptanceCriterion a owl:Class ;
 saffron:Plan          a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "plan" .
 saffron:ScopeProposal a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "scope proposal" .
 saffron:Diff          a owl:Class ; rdfs:subClassOf prov:Entity, earl:TestSubject ; rdfs:label "diff" .
-saffron:PullRequest   a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "pull request" .
+saffron:PullRequest   a owl:Class ; rdfs:subClassOf prov:Entity, earl:TestSubject ; rdfs:label "pull request" .
 saffron:Policy        a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "policy" .
 
 # The envelope/touches split of §3: an envelope is a reading bound and is never

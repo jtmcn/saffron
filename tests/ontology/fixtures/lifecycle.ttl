@@ -7,7 +7,8 @@
 @prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
 
 :batch-1 a saffron:Batch ; saffron:budgetUsd 50.00 .
-:run-1 a saffron:Run ; prov:wasInformedBy :batch-1 ; saffron:baseSha "3f9c1a2" .
+:run-1 a saffron:Run ; prov:wasInformedBy :batch-1 ; prov:used :policy-1 ;
+    saffron:baseSha "3f9c1a2" .
 
 ## Agents
 :joel a saffron:Operator .

@@ -25,9 +25,15 @@ WHERE {
         saffron:riskTier ?riskTier ;
         prov:used ?spec .
   ?spec saffron:specType ?specType .
-  ?phase prov:wasInformedBy ?task .
-  ?attempt saffron:withinPhase ?phase ;
-           saffron:costUsdEst ?cost .
+  # optional: an attempt may conform without a cost estimate (a crashed session
+  # reports every cost field as zero, §4.1). A required join would drop the task
+  # out of ?accepted entirely — the denominator moving, not the numerator.
+  OPTIONAL {
+    ?phase prov:wasInformedBy ?task .
+    ?attempt saffron:withinPhase ?phase ;
+             saffron:costUsdEst ?estimate .
+  }
+  BIND(COALESCE(?estimate, 0.0) AS ?cost)
 }
 GROUP BY ?specType ?riskTier
 ORDER BY ?specType ?riskTier

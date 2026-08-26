@@ -14,7 +14,9 @@ PREFIX saffron: <https://saffron.dev/ns#>
 PREFIX prov:    <http://www.w3.org/ns/prov#>
 PREFIX earl:    <http://www.w3.org/ns/earl#>
 
-SELECT ?pr ?step ?kind
+# DISTINCT: an attempt generates several artifacts and the PR descends from
+# more than one of them, so the tie to the task multiplies otherwise equal rows.
+SELECT DISTINCT ?pr ?step ?kind
 WHERE {
   ?task a saffron:Task ;
         saffron:endedInState saffron:MERGED ;
@@ -22,6 +24,15 @@ WHERE {
   ?spec a saffron:Spec .
   ?pr a saffron:PullRequest ;
       (prov:wasDerivedFrom|prov:wasRevisionOf)+ ?spec .
+
+  # and the PR is packaged from a diff this task's own attempts produced.
+  # Reachability to a spec is not reachability to *this* change: a rejected retry
+  # shares the spec, and — through the plan — shares ancestors too, so the tie has
+  # to be the diff the PR was cut from, not a common ancestor of both.
+  ?phase prov:wasInformedBy ?task .
+  ?attempt saffron:withinPhase ?phase ;
+           prov:generated ?head .
+  ?pr prov:wasDerivedFrom ?head .
 
   {
     ?pr (prov:wasDerivedFrom|prov:wasRevisionOf)* ?step .

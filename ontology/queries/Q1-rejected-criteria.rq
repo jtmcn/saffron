@@ -37,9 +37,11 @@ WHERE {
   # did anything automatic reach the same criterion? unbound means nothing did
   OPTIONAL {
     ?other earl:test ?criterion ;
-           earl:assertedBy ?assertor ;
-           earl:mode ?mode .
+           earl:assertedBy ?assertor .
     FILTER(?assertor != ?operator)
+    # nested: a finding that records no mode still counts as having reached the
+    # criterion. Requiring it here would report the silence this query hunts for.
+    OPTIONAL { ?other earl:mode ?mode }
   }
 }
 ORDER BY ?task ?criterion

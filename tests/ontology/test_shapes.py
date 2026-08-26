@@ -44,8 +44,9 @@ def test_the_lifecycle_graph_conforms(shapes_graph):
 @pytest.mark.parametrize("fixture", NEGATIVE, ids=lambda p: p.stem)
 def test_each_shape_rejects_its_negative_fixture(fixture, shapes_graph):
     """A shape that no committed graph violates has not been shown to constrain
-    anything. Each fixture is self-contained, so nothing but the named shape's
-    own constraint can be what fired."""
+    anything. Each fixture is self-contained and the assertion is equality, not
+    membership: a fixture that also trips a second shape is not isolating the
+    constraint it claims to, and membership would hide that."""
     data = rdflib.Graph().parse(fixture, format="turtle")
     conforms, results, text = validate(data, shacl_graph=shapes_graph, advanced=True)
     assert not conforms, f"{fixture.name} was accepted"

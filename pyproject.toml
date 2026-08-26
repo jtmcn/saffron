@@ -18,7 +18,7 @@ saffron = "saffron.cli:main"
 # cell, where a globally-installed host binary does not exist.
 # pyoxigraph and pyshacl are test-only: SA-0001 validates the ontology, and
 # nothing under saffron/ imports either (the emitter is a later, conditional task).
-dev = ["pytest>=8", "ruff>=0.16.3", "pyoxigraph>=0.4", "pyshacl>=0.26"]
+dev = ["pytest>=8", "ruff>=0.16.3", "pyoxigraph>=0.4", "pyshacl>=0.26", "rdflib>=7"]
 
 [build-system]
 requires = ["hatchling"]
