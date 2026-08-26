@@ -127,6 +127,20 @@ exception has a shape worth memorising: **core invokes declared gates, never too
 - Commit subjects are lowercase `type(scope): what changed`, written as a sentence about the
   defect rather than the file — see `git log`.
 
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues in `jtmcn/saffron`, driven by the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` at the root, ADRs under `docs/adr/`. See `docs/agents/domain.md`.
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
