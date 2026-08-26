@@ -449,7 +449,7 @@ Two schema criticisms that stand whether or not a single triple is ever stored:
 - **`gate_results` and `findings` are the same thing wearing different table names.** A type error and a critic blocker against an acceptance criterion are both *an assertion, by an agent, about a subject, with an outcome*. EARL says that in one shape. The SQL schema splits them because gates are deterministic and critics are not — which is a fact about how the assertion was *produced*, not about what it *is*. The PR body already renders them into one table, which is the tell. Worth reconciling in §4.1.
 - **A rebuttal is not a string.** §5.6 records implementer/critic disagreement across `verdict`, `adjudication` and `rebuttal`. Modelled as a `prov:qualifiedAssociation` the disagreement becomes a node carrying role, plan and time — which is what makes "blockers per lens, split by whether the operator agreed" answerable at all. *(The typed `adjudication` field this originally argued for landed in rev 6; the qualified-association question remains open.)*
 
-That is the ontology earning its keep before it ships: writing down what an *attempt* is in relation to a *gate run* produced two design corrections, not two triples.
+That is the ontology earning its keep before it ships: writing down what an *attempt* is in relation to a *gate result* produced two design corrections, not two triples.
 
 #### The trap it must avoid
 
@@ -721,7 +721,7 @@ Three more routes reach the same place, each measured against real git with the 
 
 **`revert` — the anti-theater gate, and the best cost/value ratio in the system.** Stash the source hunks of the diff, keep the test hunks, run only the new and changed tests, and require them to **fail**. One extra test run. This is the one place core reaches into the repo's toolchain, and it is why the contract requires the `tests` gate to accept a **test-subset argument** — the single most constraining line in the whole contract, and worth the constraint: every serious test runner supports it, and without it this gate degrades to a full-suite run per attempt. It mechanically answers the question critic lens #3 would otherwise be asked to reason about: does this test actually detect the thing it claims to? It catches deleted assertions, `assert result is not None`, and tests that pass identically on `main`.
 
-This replaces mutation testing, which was the obvious choice and doesn't fit: `mutmut` reruns the suite per mutant, a Timescale-backed suite takes minutes per run, and 15 mutants is an hour inside a 2-core cell competing with two siblings inside an 8-hour window that also has to fit 10–15 tasks. It would break N3 outright.
+This replaces mutation testing, which was the obvious choice and doesn't fit: `mutmut` reruns the test suite per mutant, a Timescale-backed suite takes minutes per run, and 15 mutants is an hour inside a 2-core cell competing with two siblings inside an 8-hour window that also has to fit 10–15 tasks. It would break N3 outright.
 
 **`coverage` is advisory, deliberately — and at every risk tier.** Blocking on changed-line coverage generates exactly the behavior `integrity` exists to prevent: the cheapest way to satisfy it is a test that *executes* new lines without asserting on them. It also misfires structurally here — `except` branches for provider timeouts, `if TYPE_CHECKING`, defensive gap handling, and pure refactors where every changed line is a moved line. Report it in the PR body; block on `tests` and `revert`.
 
@@ -921,7 +921,7 @@ Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents
 | **Human does the diagnosis** | Hand-written `touches` on a bug spec | DIAGNOSE phase + `SCOPE_REVIEW` ratification (§5.2) |
 | **Dependencies never unblock** | `MERGED` unreachable within a batch | Dependency satisfied at `READY_FOR_REVIEW`; stacked branches |
 | **Runaway spend** | Repair loops are unbounded by nature | Per-attempt / task / batch ceilings, no-progress detection, wall clock |
-| **Chasing pre-existing failures** | Base was already red | Baseline gate run; only new failures count |
+| **Chasing pre-existing failures** | Base was already red | Baseline gate suite; only new failures count |
 | **Batch cancelled by one flaky test** | Abort-on-red policy | Abort only on infrastructure failure; red base is a header line |
 | **Parallel PRs that conflict** | Two agents edit the same files | Conflict-set scheduling + `scope` gate; merge train for semantic overlap |
 | **Scope creep** | Agents helpfully fix adjacent things | `touches` + `forbidden` + `scope` + `size` + "Out of scope" |
@@ -960,7 +960,7 @@ Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents
 | **Spend outside the supervisor's accounting** | The cell holds a live API key by necessity | Separate factory key, provider-side monthly cap — the one ceiling not dependent on the cell (§5.1) |
 | **Unattended agent hangs on a permission prompt** | Auto-accepting edits doesn't cover shell commands | A permission mode that denies rather than asks; prompts are a hang, not a fallback (§5.3) |
 | **A crashed attempt records $0** | The runtime zeroes cost fields on session crash | `terminal_reason` stored; supervisor falls back to the last good figure before the crash (§4.1) |
-| **Repair loop pays full input price every attempt** | 5-minute cache TTL is shorter than a gate run | One-hour cache TTL set on the cell (§7.1) |
+| **Repair loop pays full input price every attempt** | 5-minute cache TTL is shorter than a gate suite | One-hour cache TTL set on the cell (§7.1) |
 | **A critic lens silently doesn't run** | Lenses spawned as subagents are invoked at the model's discretion | Each lens is a separate host-invoked session (§5.5) |
 | **An estimate hardens into a billing fact** | Runtime-reported cost is a local approximation | `_est` suffix on every stored figure; reconcile against real billing (§4.1) |
 | **Host services reachable from an isolated cell** | An `--internal` network still routes to the host gateway — **confirmed by spike**, at the gateway *and* at the LAN address | Bind host services to `127.0.0.1`, never `0.0.0.0`; verified by a preflight probe over the host's *enumerated* non-loopback listeners, because N1 rests on it. A named process can be tolerated per invocation — empty by default, matched by name not port, and reported on every run, because an exception that goes quiet is this row's hazard again (Appendix G) |
@@ -987,7 +987,7 @@ Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents
 | Rebut | $0.50–1.50 |
 | **Total** | **$5–14** |
 
-**Extend the prompt-cache TTL, or the repair loop pays full price every attempt.** The default cache lifetime is five minutes. The repair loop resumes the same session *across a gate run*, and a gate run against real fixture services is minutes — so on most attempts the cache has expired and the entire accumulated context is re-billed as fresh input. The repair row above is the row this lands on, and it is the row that runs up to four times. The runtime exposes a one-hour TTL through an environment variable; set it on the cell. It trades a higher cache-write rate for reads that actually survive a gate run, and it is the single cheapest cost lever in the system — one env var against the most-repeated phase.
+**Extend the prompt-cache TTL, or the repair loop pays full price every attempt.** The default cache lifetime is five minutes. The repair loop resumes the same session *across a gate suite*, and a suite against real fixture services is minutes — so on most attempts the cache has expired and the entire accumulated context is re-billed as fresh input. The repair row above is the row this lands on, and it is the row that runs up to four times. The runtime exposes a one-hour TTL through an environment variable; set it on the cell. It trades a higher cache-write rate for reads that actually survive a suite, and it is the single cheapest cost lever in the system — one env var against the most-repeated phase.
 
 Worth stating as a general shape, because it is invisible until you look for it: **a cache TTL has to outlive the slowest thing between two uses of the cache.** Here that thing is not a model call, it is a test suite — which is why the default was never going to fit.
 
@@ -1233,7 +1233,7 @@ Rev 1 sections that survived unchanged: specs-in-target-repo, SQLite-for-recover
 `SA-0001` defines a PROV-O/EARL vocabulary for Saffron's own run record (§4.6). Two principles it contributes, both generalizable beyond ontologies:
 
 10. **A design artifact can succeed by concluding "don't build it."** The spec's deliverable includes a rationale that challenges every one of its queries against a SQL equivalent, and a verdict of "SQL is fine" is a pass. This is the cheapest possible form of that answer. The expensive form is an emitter you maintain for a year before noticing nobody reads it.
-11. **Modelling pays before it ships.** Writing down what an *attempt* is in relation to a *gate run* produced two schema criticisms (§4.6) that hold whether or not a triple is ever stored. The output of a modelling exercise is not only the model.
+11. **Modelling pays before it ships.** Writing down what an *attempt* is in relation to a *gate result* produced two schema criticisms (§4.6) that hold whether or not a triple is ever stored. The output of a modelling exercise is not only the model.
 
 **And one correction the spec forced on the design.** §5.4 listed `size` as always-blocking; §5.6 described it as *becoming* blocking at `risk: elevated`. Both couldn't be true. `SA-0001`, written against the document and reasoning about its own 600-line ceiling, tripped on the contradiction. Resolved in favour of §5.6: `size` is advisory at standard risk, blocking at `elevated`.
 

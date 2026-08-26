@@ -207,8 +207,21 @@ in backticks. Three kinds, and the distinction is the core/repo boundary:
 _Avoid_: "check", "validation", "CI" (there is no CI), "the linter" for the `lint`
 gate. _Avoid_ naming any repo-defined gate here as though it were universal.
 
-**Gate result**: One execution of one gate against one attempt.
+**Gate result**: One execution of one gate against one tree — an attempt's, or a
+run's `base_sha` for the baseline. Exactly one of `attempt_id` and `run_id` is set
+on the row, and the baseline is why (`DESIGN.md` §4.1).
 _Avoid_: "gate run" — "run" means a repo's slice of a batch.
+
+**Gate suite**: Every gate executed as one unit against one tree — the core gates
+plus the roles the repo declares. It has no identity of its own; name what it ran
+against ("the baseline suite", "attempt 3's suite"). Two suites are what the
+baseline subtracts and what `suite_drift` compares.
+> Bare "suite" means the **gate suite**. A repo's own tests are always "the test
+> suite", never bare, because the gate suite *contains* them — §7.1 times both two
+> lines apart, and a bare "the suite is minutes" names the wrong cost.
+
+_Avoid_: "gate run" for the suite either. One gate's execution is a **gate result**;
+every gate's is a **gate suite**; neither is a "run".
 
 **Status**: A gate result is `pass`, `fail`, `skip`, or `error`.
 - `skip` — the repo declares no such gate. Not a failure; nothing is wrong.

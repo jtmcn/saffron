@@ -923,7 +923,7 @@ def _drive_cell(
             except implement.AgentFailed as failed:
                 # The same rule as the implement turn (§4.3): a bound firing
                 # mid-loop must not discard work that is already committed and
-                # a suite that may be nearly green. The next gate run measures.
+                # a suite that may be nearly green. The next gate suite measures.
                 watch(f"REPAIR: the session failed — {failed}")
                 repaired = _failed_turn(failed, session_id)
             session_id = require_session(repaired.session_id or session_id)
