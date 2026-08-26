@@ -5,6 +5,7 @@
 
 # One finding, two lenses. Lenses are disjoint by construction (§5.5).
 :f a saffron:Finding ; saffron:severity saffron:blocker ;
-   earl:assertedBy :lens-a, :lens-b .
+   earl:assertedBy :lens-a, :lens-b ; earl:subject :d .
+:d a saffron:Diff, earl:TestSubject .
 :lens-a a saffron:CriticLens . :lens-b a saffron:CriticLens .
 saffron:blocker a saffron:Severity .

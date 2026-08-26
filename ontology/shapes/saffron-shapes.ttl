@@ -81,7 +81,8 @@ saffron:FindingShape a sh:NodeShape ;
         sh:class saffron:Severity ;
         sh:in ( saffron:blocker saffron:concern saffron:note ) ] ;
     sh:property [ sh:path earl:assertedBy ; sh:minCount 1 ; sh:maxCount 1 ;
-        sh:class saffron:CriticLens ] .
+        sh:class saffron:CriticLens ] ;
+    sh:property [ sh:path earl:subject ; sh:minCount 1 ; sh:class earl:TestSubject ] .
 
 # A gate result is asserted by a gate, automatically. The mode is the only real
 # difference between a gate result and a finding (§4.6), so it is stated rather
@@ -90,6 +91,7 @@ saffron:GateResultShape a sh:NodeShape ;
     sh:targetClass saffron:GateResult ;
     sh:property [ sh:path earl:assertedBy ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class saffron:Gate ] ;
+    sh:property [ sh:path earl:subject ; sh:minCount 1 ; sh:class earl:TestSubject ] ;
     sh:property [ sh:path earl:mode ; sh:minCount 1 ; sh:hasValue earl:automatic ] .
 
 # Three judgements, three agents, one claim (§5.6). A rebuttal that records the

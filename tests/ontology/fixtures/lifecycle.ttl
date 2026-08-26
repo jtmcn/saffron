@@ -60,7 +60,7 @@
     earl:assertedBy :g-lint ; earl:subject :diff-t1-1 ; earl:mode earl:automatic ;
     earl:result [ earl:outcome earl:failed ] .
 :gr-t1-1-scope a saffron:GateResult ; prov:wasGeneratedBy :suite-t1-1 ;
-    earl:assertedBy :g-scope ; earl:subject :touches-t1 ; earl:mode earl:automatic ;
+    earl:assertedBy :g-scope ; earl:subject :diff-t1-1 ; earl:mode earl:automatic ;
     earl:result [ earl:outcome earl:passed ] .
 :gr-t1-1-size a saffron:GateResult ; prov:wasGeneratedBy :suite-t1-1 ;
     earl:assertedBy :g-size ; earl:subject :diff-t1-1 ; earl:mode earl:automatic ;
