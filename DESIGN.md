@@ -936,13 +936,20 @@ Sort order, designed so you can dismiss in 10 seconds and accept in two minutes:
 
 0. Skipped repos — an entire repo produced nothing, which is the most expensive thing on the page
 1. `SCOPE_REVIEW` — one-click, and it unblocks the next night
-2. `MERGE_FAILED`, `PLAN_REJECTED` — fast to triage, unblocks the queue
-3. `risk: elevated`
-4. Everything else by concern count descending — concerns, not findings (`CONTEXT.md` §5): `note` is excluded by construction and `blocker` never reaches this page unrebutted
+2. **Every state that needs you and is not a reviewable diff**: `MERGE_FAILED`, `PLAN_REJECTED`, `PREFLIGHT_FAILED`, `GATE_ERROR`, `NOT_IMPLEMENTED`, `EXHAUSTED`, `ORPHANED`, `RATE_LIMITED`. Rev 17 widened this from the first two, against `_STATE_RANK` in `report/index.py`, which had already grown the other six with a reason recorded at each: absent them, a task that could not pass its own gates or whose cell died sorts *below* a green PR.
+3. **Sustained blockers, descending** — findings the critic confirmed at REBUT. See below; this level is why rev 17 exists, and it is **the one level `sort_key` does not yet implement** — levels 4 and 5 are its current 3 and 4.
+4. `risk: elevated`
+5. Everything else by concern count descending — concerns, not findings (`CONTEXT.md` §5): `note` is excluded by construction
+
+**Level 3 is the one a live ledger added, and it is the page's job rather than a refinement of it.** §6 used to rank on concern count alone, guarded by the claim that *"`blocker` never reaches this page unrebutted"*. That claim is true and it is not the property the page needed. A blocker that goes to REBUT and is **confirmed** has been rebutted — the rebuttal failed — and `anchored_concerns` sums `severity == "concern"`, so it contributes nothing to the number the page was ranking on. Measured on this repo's own ledger: `SA-0005` (PR #21) is the most expensive task Saffron has produced, went to REBUT with three blockers, had two sustained, and rendered as `0 concerns` on the bottom line of ten — wearing the same caption as four scaffolding rows. A page that exists so you can dismiss in ten seconds put the one row you must not accept last. `docs/evidence/2026-08-25-morning-queue-from-real-rows.md`.
+
+**The queue reads `queue.json`, not the ledger, and that is currently undecided rather than chosen.** PACKAGE appends a `QueueLine` per task to a store in the batch tree, and the page renders from it. The ledger cannot reproduce that store: `tasks.risk` was never written for tasks that ran before `SA-0007` closed item 18's fifth instance, and the diff stat this section's own mock shows (`+180/−22`) is stored in no column at all. So there are two records of a night and the authoritative one is the file, not the database. Either the ledger gains what it is missing, or this section stops implying the ledger is the source.
 
 **Sort by state, not by repo.** The temptation with multiple repos is to group them, and it is worth resisting: the most urgent item across all repos should be the top line, and grouping buries a skipped repo under another repo's routine PRs. Repo is a column you scan, not a heading you navigate.
 
 Batch header: counts by terminal state, total spend, wall clock, per-repo preflight and base-suite status, and the one number that says whether this is working — **trailing accept rate**.
+
+**Five of those six have no source yet, and the gap is not evenly distributed.** Measured against the real ledger (same record): wall clock arrives with the `batches` table §4.2.1 decides; `runs.preflight` is a column that exists and is never written; no baseline `gate_results` rows are recorded, so base-suite status has nothing to read; total spend renders but is `0.0` on every task that predates cost reconciliation; and nothing anywhere records whether a task was merged, which is the trailing accept rate's whole input. Only the terminal-state counts render today. **A header field with no source is not a smaller header — it is a field that renders a confident em-dash**, and the batch header is the part of this page an operator reads first.
 
 *Trailing*, and the qualifier is not pedantry. This batch's accept rate is unknowable when the batch ends: nothing has been merged yet, because merging is what you do next. The header can only show the rate over prior batches — a rolling window of about the last twenty completed tasks, which is also roughly the smallest n at which the number means anything (§8). A header field that claimed to score the night it was printed would be reporting on work that hadn't happened.
 
