@@ -35,10 +35,11 @@ LENSES = {
     "correctness": "review-correctness.md",
     "contract": "review-contract.md",
 }
-# ponytail: no blast-radius lens. §5.5 runs it at `risk: elevated` only, and
-# nothing in v0.5 carries a risk tier — wiring it here would run it always,
-# which is a different design than the one §5.6 describes. Add the lens when
-# the tier is read from the spec.
+# ponytail: two lenses. The tier this comment used to wait on now exists
+# (`session.py:663`), so the blocker is gone and the remit is the open question:
+# §5.5 says a third lens would be blast radius and that `revert` already answers
+# test quality "for free"; BACKLOG item 6 says the gap is test adequacy and that
+# no lens asks it. They contradict, `revert` is unbuilt, and #34 settles both.
 
 REVIEW_PROMPT = (
     "Review this change now. Read whatever you need to; you hold no tool that "

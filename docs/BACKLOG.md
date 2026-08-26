@@ -467,7 +467,26 @@ found one level up, in whether the suite would notice a regression.
 So the gap the third lens should close is not blast radius. **No lens asks
 whether the tests would catch the code being wrong**, and a critic that reads
 the diff without mutating it cannot: the implementer's own tests passed, the
-gates were green, and the uncovered line was invisible to every one of them.
+gates were green, and the line was invisible to every one of them.
+
+**Corrected 2026-08-25 by #33: the line is not uncovered, and the word mattered.**
+Measured twice independently — `saffron/gates/core/size.py` reports **100%
+statement and 100% branch coverage** from its own tests, and the reset line is
+executed by every one of them. The defect is an *executed line whose effect
+nothing observes*, which is the one class coverage cannot report by
+construction. The wrong word had a cost: it made diff-scoped coverage look like
+a cheap answer to this remit, and #33 was written to price an option that was
+never available. See `docs/evidence/2026-08-25-mutation-testing-vs-a-lens.md`.
+
+**And `DESIGN.md` §5.5 says the opposite of this item, which is #34's to
+settle.** `DESIGN.md:782`: *"lens #3 in a naive design would be 'test quality' —
+but the `revert` gate now answers that mechanically and for free."* Neither
+document cites the other. The displacement is also incomplete (reasoned, not
+measured): `revert` stashes the source hunks and requires the new tests to fail,
+but `SA-0002` landed source and tests together, so stashing the source fails all
+sixteen and `revert` reports green without ever asking whether the reset line
+specifically is tested. `revert` asks whether the new tests test *anything*;
+this remit asks whether they test *each thing*.
 §5.5's disjointness argument still holds — this is a third remit, not a second
 opinion on the first two.
 
@@ -865,6 +884,30 @@ then fails it as a path outside `touches`. The attempts burn out and the run end
 Saffron's own `.gitignore` covers all three, which is why nothing here caught it;
 an onboarded repo whose ignores are looser is not covered.
 
+**That sentence is false, measured 2026-08-25 (#30). It covers one of three.**
+`git check-ignore` against the shapes this item names: `__pycache__/*.pyc` is
+ignored; `.coverage`, `.coverage.<host>.<pid>.<rand>` and
+`.mypy_cache/<module>.meta.json` are **not**. The whole file is nine lines and
+has no coverage entry and no mypy entry. Found by accident — a `coverage` run
+during #33 left a `.coverage` that `git status` reported as untracked, which is
+the opening move of the sequence above.
+
+So the reason this has never fired here is not that the declaration is complete.
+It is that no declared gate has yet written one of the two unignored artifacts —
+**untested, and worth testing before this item is closed**, since if none of
+`format`/`lint`/`types`/`tests` writes either file then this item is right by
+accident and should say so for the right reason.
+
+The consequence for the decision: this item argues the repo-declaration route is
+free for Saffron and costly only at repo two. It is not free here, and under an
+unattended night the failure is silent, arrives at the worst hour, and presents
+as a task that could not pass its gates rather than as a misconfigured repo.
+`session.py:674` carries a `ponytail:` comment resting on the same assumption.
+
+Adding two lines to `.gitignore` closes this repo's instance and leaves the
+question — whose declaration is this? — exactly where it was. Worth doing; not a
+resolution.
+
 **Done looks like:** the repo declaring its build output, since which paths are
 artifacts is language knowledge §2.1 keeps out of core — `.gitignore` is already
 that declaration and `git status --porcelain` already honours it, so onboarding
@@ -991,6 +1034,34 @@ and `size` in `_suite`. Two things it must carry, both found reviewing #15:
 
 The same wiring is what item 6's third lens needs, and the two should be built
 together or in that order.
+
+**Done, 2026-08-25**, across three specs rather than one — which is the part
+worth carrying forward. `SA-0005` (#21) wired the tier and the advisory set,
+`SA-0007` (#23) closed the two call sites `SA-0005`'s `touches` could not reach,
+and `SA-0006` (#24) closed the binary hole. All four clauses of *done looks
+like* hold: `effective_risk(spec.risk, changed, policy.elevate_on)` matches the
+diff per attempt (`session.py:663`), `cli.py:176` passes `risk=spec.risk` into
+`CellSpec`, `advisory_gates` plus `_blocking` give the repair loop a status it
+does not act on, and `size` is in `_suite` (`session.py:691`).
+
+**The advisory switch is two rules, not one, and they are not the same rule.**
+`size` is advisory unless the tier is elevated; a declared gate the repo marked
+`blocking: false` is advisory at *every* tier, because that is what the
+declaration means rather than a tier-dependent switch. They sit in adjacent
+lines and reading them as one is the mistake available here.
+
+**And `size` still needs `blocking` even though it is host-side.** Refusing an
+unreadable diff ends the attempt through `aborted_gates`, which no advisory
+filter downstream can soften — so a gate that stops nothing at this tier must
+not spend that refusal. That is why the fix `SA-0006` shipped is a `blocking`
+argument and not an `error` return.
+
+**What this item taught, beyond the gate.** Item 18 files the general pattern —
+a declaration that parses, validates, and changes nothing. This is the instance
+that produced it, and the sequence is the evidence: `SA-0005` could not close
+its own gap because its `touches` did not reach `cli.py` and `package.py`, so a
+second spec existed only to finish the first. A spec whose acceptance criteria
+reach outside its own `touches` is unsatisfiable by construction.
 
 ---
 
