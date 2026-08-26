@@ -9,6 +9,7 @@ from saffron.agents.findings import Finding
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
 from saffron.ledger import Ledger
+from saffron.phases import rebut
 from saffron.phases.package import (
     APPLY_CONFLICT,
     APPLY_OK,
@@ -1419,6 +1420,50 @@ def test_the_queue_line_carries_the_effective_tier_not_the_specs_declared_one(
     rows = json.loads((packageable.out_dir / "queue.json").read_text())
     row = next(r for r in rows if r["spec_id"] == "SA-0005")
     assert row["risk"] == "elevated"
+
+
+def test_the_queue_line_carries_the_sustained_blocker_count(packageable):
+    """§6 level 3, on `SA-0005`'s own shape: a blocker argued and confirmed
+    (finding 1) and a blocker fixed, committed and confirmed (finding 2) — the
+    sustained count is 1, not 2. This asserts at `package.package`, not by
+    constructing a `QueueLine` and checking the value it was handed: the
+    defect this task exists to fix shipped green under exactly that shape of
+    test (`docs/BACKLOG.md` item 18)."""
+    packageable.outcome.rebut_result = rebut.RebutResult(
+        state="READY_FOR_REVIEW",
+        why="1 blocker(s) confirmed after the rebuttal, 1 argued",
+        rebuttal=rebut.RebuttalTurn(
+            rebuttals=[
+                rebut.Rebuttal(
+                    finding=1, action="argued", argument="the finding is wrong"
+                ),
+                rebut.Rebuttal(finding=2, action="fixed", argument="committed the fix"),
+            ]
+        ),
+        verdicts=[
+            rebut.LensVerdicts(
+                lens="correctness",
+                verdicts=[
+                    rebut.Verdict(finding=1, verdict="confirmed", reason="still wrong"),
+                    rebut.Verdict(
+                        finding=2, verdict="confirmed", reason="the fix is real"
+                    ),
+                ],
+            )
+        ],
+        moved=True,
+        cost_usd=0.4,
+    )
+
+    package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **packageable.kwargs,
+    )
+
+    rows = json.loads((packageable.out_dir / "queue.json").read_text())
+    row = next(r for r in rows if r["spec_id"] == "SA-0005")
+    assert row["sustained"] == 1
 
 
 def test_reverify_is_handed_the_policy_from_the_commit_it_verifies_against(

@@ -33,10 +33,18 @@ _STATE_RANK = {
     # The provider's wall, not the task's: it needs you, and a retry is all it
     # needs. Absent, it sorted below green reviewable tasks.
     "RATE_LIMITED": 2,
-    "REVIEWING": 3,
-    "REBUTTING": 3,
+    # A task the night left mid-phase, ranked with elevated risk (rev 17
+    # shifted these from 3 to 4 to make room for level 3, sustained blockers,
+    # below) rather than by omission.
+    "REVIEWING": 4,
+    "REBUTTING": 4,
 }
-_ORDINARY = 4
+# Level 3 (§6): a sustained blocker — `confirmed` **and** `argued`, never a
+# state in `_STATE_RANK`, so it only pre-empts the elevated/ordinary fallback
+# below and never the states above, which already need you more.
+_SUSTAINED = 3
+_ELEVATED = 4
+_ORDINARY = 5
 
 
 @dataclass
@@ -54,18 +62,36 @@ class QueueLine:
     link: str
     note: str = ""
     risk: str = "standard"
+    # A blocker the critic confirmed and the implementer only argued — the
+    # count `sort_key` ranks level 3 on (§6). Placed after every other
+    # defaulted field: the test factory in `tests/test_report.py` builds a
+    # `QueueLine` from a fixed set of keys, and a field with no default here
+    # would break every row it did not name.
+    sustained: int = 0
 
 
-def sort_key(line: QueueLine) -> tuple[int, int, int, str]:
+def sort_key(line: QueueLine) -> tuple[int, int, int, int, str]:
     """§6's order: dismiss in ten seconds, accept in two minutes.
 
     Skipped repos, then `SCOPE_REVIEW`, then the states that need you —
     `MERGE_FAILED`, `PLAN_REJECTED`, `PREFLIGHT_FAILED`, `GATE_ERROR` and
-    `NOT_IMPLEMENTED` — then elevated risk, then concern count descending.
-    Sorted by state, never grouped by repo.
+    `NOT_IMPLEMENTED` — then sustained blockers descending, then elevated
+    risk, then concern count descending. Sorted by state, never grouped by
+    repo.
+
+    Level 3, sustained blockers, is not a state: it pre-empts only the
+    elevated/ordinary fallback below, so a line already in `_STATE_RANK`
+    (`MERGE_FAILED` down through `REBUTTING`) keeps that rank regardless of
+    `sustained` — `REVIEWING`/`REBUTTING` keep sorting with elevated risk,
+    as they did before this level existed.
     """
-    rank = _STATE_RANK.get(line.state, 3 if line.risk == "elevated" else _ORDINARY)
-    return (rank, -line.concerns, -line.attempts, line.spec_id)
+    if line.state in _STATE_RANK:
+        rank = _STATE_RANK[line.state]
+    elif line.sustained:
+        rank = _SUSTAINED
+    else:
+        rank = _ELEVATED if line.risk == "elevated" else _ORDINARY
+    return (rank, -line.sustained, -line.concerns, -line.attempts, line.spec_id)
 
 
 def render_index(lines: list[QueueLine], *, header: dict[str, str]) -> str:
@@ -102,12 +128,19 @@ def render_index(lines: list[QueueLine], *, header: dict[str, str]) -> str:
 def _row(line: QueueLine) -> str:
     cost = f"${line.cost_usd_est:.2f}" if line.cost_usd_est is not None else "—"
     concerns = f"{line.concerns} concern" + ("s" if line.concerns != 1 else "")
+    # Worded distinctly from `concerns`, deliberately: the two are summed by
+    # different rules over different severities (§6), and a cell that merely
+    # repeated "concern" would read as the same number twice.
+    sustained = f"{line.sustained} sustained blocker" + (
+        "s" if line.sustained != 1 else ""
+    )
     cells = [
         html.escape(line.repo),
         html.escape(line.spec_id),
         f"<code>{html.escape(line.state)}</code>",
         f"{line.attempts} att",
         cost,
+        sustained,
         concerns,
         f"+{line.added}/−{line.removed}",
         _link(line.link),

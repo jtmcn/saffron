@@ -344,6 +344,37 @@ def rebut_state(
     return "READY_FOR_REVIEW", f"every blocker withdrawn by its own lens{unfixed}"
 
 
+def sustained_blockers(rebut_result: RebutResult | None) -> int:
+    """§6 level 3: how many blockers the rebuttal did **not** dispose of.
+
+    A blocker is sustained when the same finding number carries both an
+    `argued` rebuttal and a `confirmed` verdict. `confirmed` alone is not
+    enough — it also covers a blocker the implementer *fixed and committed*,
+    and counting that would rank a task by work already done, the mirror of
+    the defect this level exists to fix (`anchored_concerns` stays the count
+    below this one, not a component of it).
+
+    Zero for every shape that is not a settled disagreement: no `RebutResult`
+    (REBUT never ran), a rebuttal turn that errored (nothing to pair a
+    verdict against), and a blocker that was verdicted but never rebutted —
+    the last is not special-cased, it simply never enters the `argued` set
+    below. An unanchored blocker never reaches REBUT at all (§5.5) and so
+    never carries a finding number to collide with.
+    """
+    if rebut_result is None or rebut_result.rebuttal.error:
+        return 0
+    argued = {
+        r.finding for r in rebut_result.rebuttal.rebuttals if r.action == "argued"
+    }
+    confirmed = {
+        v.finding
+        for lens in rebut_result.verdicts
+        for v in lens.verdicts
+        if v.verdict == "confirmed"
+    }
+    return len(argued & confirmed)
+
+
 def run_rebut(
     container: str,
     *,

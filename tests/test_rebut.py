@@ -340,3 +340,84 @@ def test_the_rebuttal_turns_are_capped_at_the_critic_budget_not_the_task_one():
     assert [call["options"]["max_budget_usd"] for call in record[:2]] == [2.0, 2.0]
     # And the implementer's tools are untouched by the override.
     assert "Bash" in record[0]["options"]["tools"]
+
+
+def _result(*, rebuttal, verdicts):
+    return rebut.RebutResult(
+        state="READY_FOR_REVIEW",
+        why="",
+        rebuttal=rebuttal,
+        verdicts=verdicts,
+        moved=True,
+        cost_usd=0.0,
+    )
+
+
+def test_sustained_blockers_is_zero_when_rebut_never_ran():
+    """No `RebutResult` at all — REVIEW found no anchored blocker, or the task
+    stopped before REBUT. Nothing to sustain."""
+    assert rebut.sustained_blockers(None) == 0
+
+
+def test_sustained_blockers_is_zero_when_the_rebuttal_turn_errored():
+    """An errored rebuttal turn (§4.3) recorded no rebuttal at all, so there is
+    no `argued` half to pair a verdict against — even if a verdict exists."""
+    result = _result(
+        rebuttal=rebut.RebuttalTurn(error="the model errored"),
+        verdicts=[
+            rebut.LensVerdicts(
+                lens="correctness",
+                verdicts=[rebut.Verdict(finding=1, verdict="confirmed", reason="r")],
+            )
+        ],
+    )
+    assert rebut.sustained_blockers(result) == 0
+
+
+def test_sustained_blockers_is_zero_for_a_blocker_verdicted_but_never_rebutted():
+    """`run_verdict` requires a verdict for every blocker it is shown, but
+    nothing requires the implementer to have rebutted every one — the
+    rebuttal is the implementer's own JSON, unchecked for completeness. A
+    finding with no rebuttal entry has no `argued` half, so it must not count,
+    whatever the verdict says."""
+    result = _result(
+        rebuttal=rebut.RebuttalTurn(rebuttals=[]),
+        verdicts=[
+            rebut.LensVerdicts(
+                lens="correctness",
+                verdicts=[rebut.Verdict(finding=1, verdict="confirmed", reason="r")],
+            )
+        ],
+    )
+    assert rebut.sustained_blockers(result) == 0
+
+
+def test_sustained_blockers_on_sa_0005s_real_shape():
+    """`SA-0005`: three blockers filed, two anchored (so numbered 1 and 2 —
+    the third, unanchored, never reaches REBUT and carries no number). Both
+    anchored blockers were confirmed: finding 1 was argued, finding 2 was
+    fixed and committed. `anchored_concerns` reads `0` for this task; this
+    function must read `1`, not `2` — a confirmed *fix* is work already done,
+    not a sustained disagreement."""
+    result = _result(
+        rebuttal=rebut.RebuttalTurn(
+            rebuttals=[
+                rebut.Rebuttal(
+                    finding=1, action="argued", argument="the finding is wrong"
+                ),
+                rebut.Rebuttal(finding=2, action="fixed", argument="committed the fix"),
+            ]
+        ),
+        verdicts=[
+            rebut.LensVerdicts(
+                lens="correctness",
+                verdicts=[
+                    rebut.Verdict(finding=1, verdict="confirmed", reason="still wrong"),
+                    rebut.Verdict(
+                        finding=2, verdict="confirmed", reason="the fix is real"
+                    ),
+                ],
+            )
+        ],
+    )
+    assert rebut.sustained_blockers(result) == 1

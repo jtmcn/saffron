@@ -22,6 +22,7 @@ from pathlib import Path
 from saffron.cell.worktree import DIFF_FLAGS
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import GateResult, split_lines
+from saffron.phases.rebut import sustained_blockers
 from saffron.phases.review import anchored_concerns
 from saffron.report import index as index_report
 from saffron.report import pr_body
@@ -783,6 +784,7 @@ def _finish(ledger, outcome, out_dir: Path, spec, repo_name: str, result):
             link=result.pr_url,
             note=result.note,
             risk=outcome.effective_risk,
+            sustained=sustained_blockers(outcome.rebut_result),
         ),
     )
     return result
