@@ -141,6 +141,15 @@ def _ceilings(args: argparse.Namespace, spec: Spec) -> tuple[dict, str]:
 
 
 def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
+    # Checked before the image build, not at the cell door: `session` forwards
+    # this only if it is set, so a missing one reached the agent as "Not logged
+    # in" after a full preflight had already been paid for.
+    if not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip():
+        raise RuntimeError(
+            "CLAUDE_CODE_OAUTH_TOKEN is unset; the agent cannot authenticate "
+            "(`claude setup-token`)"
+        )
+
     repo = args.repo.resolve()
     spec, spec_sha = load_spec(args.spec)
 

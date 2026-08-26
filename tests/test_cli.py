@@ -13,6 +13,12 @@ from saffron.phases import package
 from tests.test_replay import target  # noqa: F401 — a pytest fixture, used by name
 
 
+@pytest.fixture(autouse=True)
+def a_token(monkeypatch):
+    """`_run_cell` refuses without one; only the guard's own test unsets it."""
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-test")
+
+
 def _git(repo, *args):
     return subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
@@ -376,3 +382,25 @@ def test_the_base_is_the_remote_default_branch_not_the_checkout(tmp_path, monkey
         )
 
     assert captured["base_sha"] == default_head
+
+
+def test_a_missing_token_fails_before_the_image_is_built(tmp_path, monkeypatch):
+    """`session` forwards the token only if it is set, so an unset one bought a
+    full preflight and then reached the agent as "Not logged in"."""
+    repo = _repo_with_commit(tmp_path / "repo")
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+
+    reached = False
+
+    def _reached(*_a, **_k):
+        nonlocal reached
+        reached = True
+        raise SystemExit(0)
+
+    # The mirror is the first thing `_run_cell` touches; nothing may run.
+    monkeypatch.setattr("saffron.cli.git_mirror.ensure_mirror", _reached)
+    with pytest.raises(RuntimeError, match="CLAUDE_CODE_OAUTH_TOKEN is unset"):
+        cli._run_cell(
+            _namespace(repo, tmp_path), Ledger(tmp_path / "l.db"), tmp_path / "out"
+        )
+    assert not reached
