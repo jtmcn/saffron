@@ -727,7 +727,7 @@ def test_the_suite_execs_the_gates_from_the_mount_never_the_worktree(
     export at `base_sha` — and never from `/work`, which the agent can rewrite
     and commit (§5.4).
 
-    `tests/test_worktree.py` proves the mount is read-only and that a gate run
+    `tests/test_worktree.py` proves the mount is read-only and that a gate suite
     from it beats the lying one in `/work`, but it names `GATES_MOUNT` itself,
     so it cannot tell whether `_drive_cell` asked for the mount. This pins the
     call: repointing it at `WORKTREE_MOUNT` is otherwise green.

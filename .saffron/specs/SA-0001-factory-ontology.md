@@ -43,7 +43,7 @@ is a design artifact validated against hand-authored fixtures, not a subsystem.
 Saffron has no shared vocabulary for its own run record. The ledger schema (§4.1)
 names seven tables in SQL; the run tree (§4.1) names artifacts by file path; the
 PR body (§5.7) renders both into prose. Nothing states what an *attempt* is in
-relation to a *gate run*, whether an `EXHAUSTED` task's artifacts are reachable
+relation to a *gate result*, whether an `EXHAUSTED` task's artifacts are reachable
 entities, or how a critic's assessment of an acceptance criterion differs in kind
 from a `mypy` failure. N5 ("any merged change reconstructible from stored
 artifacts alone") is a provenance requirement written in non-provenance words and

@@ -5,3 +5,18 @@ repos:
       - id: ruff-check
         args: [--fix]
       - id: ruff-format
+
+  # A retired term, not the whole `_Avoid_` list: most of those words are ordinary
+  # English elsewhere. Only a word a settled decision killed outright is decidable
+  # by grep. The three rule-stating files must quote it; dated records keep the
+  # words of their day.
+  - repo: local
+    hooks:
+      - id: retired-vocabulary
+        name: retired vocabulary (CONTEXT.md § settled naming decisions)
+        language: pygrep
+        types: [text]
+        # The class matches a plain space; it is there so this line does not
+        # match itself.
+        entry: '(?i)gate[ ]runs?\b'
+        exclude: '^(CONTEXT\.md|CLAUDE\.md|saffron/gates/contract\.py|docs/superpowers/|docs/evidence/)'
