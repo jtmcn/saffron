@@ -1,0 +1,13 @@
+pr,step,kind
+https://saffron.dev/data/pr-t1,https://saffron.dev/data/diff-t1-1,https://saffron.dev/ns#Diff
+https://saffron.dev/data/pr-t1,https://saffron.dev/data/diff-t1-2,https://saffron.dev/ns#Diff
+https://saffron.dev/data/pr-t1,https://saffron.dev/data/finding-t1-1,https://saffron.dev/ns#Finding
+https://saffron.dev/data/pr-t1,https://saffron.dev/data/finding-t1-2,https://saffron.dev/ns#Finding
+https://saffron.dev/data/pr-t1,https://saffron.dev/data/suite-t1-1,https://saffron.dev/ns#GateSuite
+https://saffron.dev/data/pr-t1,https://saffron.dev/data/suite-t1-2,https://saffron.dev/ns#GateSuite
+https://saffron.dev/data/pr-t1,https://saffron.dev/data/plan-t1,https://saffron.dev/ns#Plan
+https://saffron.dev/data/pr-t1,https://saffron.dev/data/pr-t1,https://saffron.dev/ns#PullRequest
+https://saffron.dev/data/pr-t1,https://saffron.dev/data/rebut-t1-1,https://saffron.dev/ns#Rebuttal
+https://saffron.dev/data/pr-t1,https://saffron.dev/data/scope-t1,https://saffron.dev/ns#ScopeProposal
+https://saffron.dev/data/pr-t1,https://saffron.dev/data/spec-t1,https://saffron.dev/ns#Spec
+https://saffron.dev/data/pr-t1,https://saffron.dev/data/touches-t1,https://saffron.dev/ns#TouchesSet

@@ -1,0 +1,46 @@
+# Q4 — Given a merged PR, the full derivation chain: spec → scope → plan → diff
+# → gate suites → findings → rebuttal → PR. This is N5 ("any merged change
+# reconstructible from stored artifacts alone") as a machine-checkable property:
+# a merged PR whose chain does not reach a spec does not appear in the result.
+#
+# SQL equivalent: (b) — no reasonable one exists. The chain is transitive and
+# heterogeneous: each hop lands in a different table (specs are files, scope and
+# plan are control artifacts on disk, diffs are paths in the batch tree, suites
+# and findings are two more tables), so a recursive CTE has no single edge
+# relation to recurse over. It would be one UNION arm per artifact kind, rewritten
+# every time a kind is added. Here every hop is prov:wasDerivedFrom or
+# prov:wasRevisionOf and the whole traversal is one property path.
+PREFIX saffron: <https://saffron.dev/ns#>
+PREFIX prov:    <http://www.w3.org/ns/prov#>
+PREFIX earl:    <http://www.w3.org/ns/earl#>
+
+SELECT ?pr ?step ?kind
+WHERE {
+  ?task a saffron:Task ;
+        saffron:endedInState saffron:MERGED ;
+        prov:used ?spec .
+  ?spec a saffron:Spec .
+  ?pr a saffron:PullRequest ;
+      (prov:wasDerivedFrom|prov:wasRevisionOf)+ ?spec .
+
+  {
+    ?pr (prov:wasDerivedFrom|prov:wasRevisionOf)* ?step .
+    ?step a ?kind .
+    FILTER(?kind IN (saffron:Spec, saffron:ScopeProposal, saffron:TouchesSet,
+                     saffron:Plan, saffron:Diff, saffron:PullRequest))
+  } UNION {
+    ?pr (prov:wasDerivedFrom|prov:wasRevisionOf)* ?artifact .
+    ?step a saffron:GateSuite ; prov:used ?artifact .
+    BIND(saffron:GateSuite AS ?kind)
+  } UNION {
+    ?pr (prov:wasDerivedFrom|prov:wasRevisionOf)* ?artifact .
+    ?step a saffron:Finding ; earl:subject ?artifact .
+    BIND(saffron:Finding AS ?kind)
+  } UNION {
+    ?pr (prov:wasDerivedFrom|prov:wasRevisionOf)* ?artifact .
+    ?finding a saffron:Finding ; earl:subject ?artifact .
+    ?step a saffron:Rebuttal ; prov:used ?finding .
+    BIND(saffron:Rebuttal AS ?kind)
+  }
+}
+ORDER BY ?pr ?kind ?step

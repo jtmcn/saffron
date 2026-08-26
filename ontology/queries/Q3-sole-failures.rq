@@ -1,0 +1,49 @@
+# Q3 — Gates ranked by how often they were the *sole* failure in an attempt, and
+# gates that never fired at all. (DESIGN.md §8)
+#
+# SQL equivalent: (a), and §4.1 was shaped to keep it that way — `failures` is a
+# table rather than a log line partly so this stays answerable:
+#
+#   SELECT gr.gate, COUNT(*) FROM gate_results gr
+#    WHERE gr.status = 'fail'
+#      AND NOT EXISTS (SELECT 1 FROM gate_results o
+#                       WHERE o.attempt_id = gr.attempt_id
+#                         AND o.gate <> gr.gate AND o.status = 'fail')
+#    GROUP BY gr.gate;
+#   -- and the second half against a gate list the schema does not have
+#
+# Why the SPARQL form is preferable: only for the second half. "Gates that never
+# fired" is set containment across two populations — declared and executed — and
+# §4.1 stores the declared set nowhere: it is `policy.yaml`, parsed at preflight
+# and dropped. In SQL the answer requires a table that does not exist; here the
+# policy is an entity and the gap is one NOT EXISTS. The sole-failure half is a
+# correlated subquery in both languages and SQL loses nothing.
+PREFIX saffron: <https://saffron.dev/ns#>
+PREFIX prov:    <http://www.w3.org/ns/prov#>
+PREFIX earl:    <http://www.w3.org/ns/earl#>
+
+SELECT ?gate ?everRan (COALESCE(?n, 0) AS ?soleFailures)
+WHERE {
+  ?policy a saffron:Policy ; saffron:declaresGate ?gate .
+  ?gate saffron:blockingAt ?level .
+  # an advisory gate is never the failure that stopped anything
+  FILTER(?level != saffron:advisory)
+  BIND(EXISTS { [] earl:assertedBy ?gate } AS ?everRan)
+
+  OPTIONAL {
+    SELECT ?gate (COUNT(DISTINCT ?suite) AS ?n)
+    WHERE {
+      ?result earl:assertedBy ?gate ;
+              prov:wasGeneratedBy ?suite ;
+              earl:result/earl:outcome earl:failed .
+      FILTER NOT EXISTS {
+        ?sibling prov:wasGeneratedBy ?suite ;
+                 earl:assertedBy ?other ;
+                 earl:result/earl:outcome earl:failed .
+        FILTER(?other != ?gate)
+      }
+    }
+    GROUP BY ?gate
+  }
+}
+ORDER BY DESC(?soleFailures) ?gate

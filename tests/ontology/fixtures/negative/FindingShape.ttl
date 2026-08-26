@@ -1,0 +1,10 @@
+@prefix saffron: <https://saffron.dev/ns#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix earl: <http://www.w3.org/ns/earl#> .
+@prefix : <https://saffron.dev/data/> .
+
+# One finding, two lenses. Lenses are disjoint by construction (§5.5).
+:f a saffron:Finding ; saffron:severity saffron:blocker ;
+   earl:assertedBy :lens-a, :lens-b .
+:lens-a a saffron:CriticLens . :lens-b a saffron:CriticLens .
+saffron:blocker a saffron:Severity .

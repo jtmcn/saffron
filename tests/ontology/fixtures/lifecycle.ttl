@@ -1,0 +1,165 @@
+# One night, hand-authored. Three tasks: a bug that was scope-reviewed, rebutted
+# and merged; a refactor that exhausted; a feature the operator rejected.
+@prefix saffron: <https://saffron.dev/ns#> .
+@prefix :        <https://saffron.dev/data/> .
+@prefix prov:    <http://www.w3.org/ns/prov#> .
+@prefix earl:    <http://www.w3.org/ns/earl#> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+
+:batch-1 a saffron:Batch ; saffron:budgetUsd 50.00 .
+:run-1 a saffron:Run ; prov:wasInformedBy :batch-1 ; saffron:baseSha "3f9c1a2" .
+
+## Agents
+:joel a saffron:Operator .
+:lens-correctness a saffron:CriticLens .
+:lens-contract    a saffron:CriticLens .
+:lens-blast       a saffron:CriticLens .
+:impl-t1 a saffron:ImplementerSession .
+
+## Gates, and the policy that declares them. `no-network` is declared and never
+## runs in this batch — the case Q3's second half exists to find.
+:g-scope a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
+:g-size  a saffron:CoreGate ; saffron:blockingAt saffron:blockingWhenElevated .
+:g-census a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
+:g-lint  a saffron:ContractGate ; saffron:blockingAt saffron:alwaysBlocking .
+:g-types a saffron:ContractGate ; saffron:blockingAt saffron:alwaysBlocking .
+:g-tests a saffron:ContractGate ; saffron:blockingAt saffron:alwaysBlocking .
+:g-nonet a saffron:ContractGate ; saffron:blockingAt saffron:alwaysBlocking .
+:policy-1 a saffron:Policy ;
+    saffron:declaresGate :g-scope, :g-size, :g-census, :g-lint, :g-types,
+                         :g-tests, :g-nonet, saffron:coverage .
+
+## ── t1: bug, elevated, SCOPE_REVIEW ratified, one blocker rebutted, merged ──
+:spec-t1 a saffron:Spec ; saffron:specType saffron:bug ;
+    saffron:hasCriterion :ac-t1-1, :ac-t1-2 .
+:ac-t1-1 a saffron:AcceptanceCriterion .
+:ac-t1-2 a saffron:AcceptanceCriterion .
+:env-t1 a saffron:Envelope .
+:scope-t1 a saffron:ScopeProposal ; prov:wasDerivedFrom :spec-t1 .
+:touches-t1 a saffron:TouchesSet ;
+    prov:wasDerivedFrom :scope-t1 ; saffron:ratifiedBy :joel .
+:plan-t1 a saffron:Plan ; prov:wasDerivedFrom :spec-t1, :touches-t1 .
+
+:task-t1 a saffron:Task ; prov:wasInformedBy :run-1 ; prov:used :spec-t1 ;
+    saffron:riskTier saffron:elevated ; saffron:endedInState saffron:MERGED .
+:ph-t1-diagnose a saffron:Phase ; prov:wasInformedBy :task-t1 .
+:ph-t1-implement a saffron:Phase ; prov:wasInformedBy :task-t1 .
+:at-t1-d1 a saffron:Attempt ; saffron:withinPhase :ph-t1-diagnose ; saffron:n 1 ;
+    saffron:costUsdEst 0.40 ; prov:generated :scope-t1 .
+:at-t1-i1 a saffron:Attempt ; saffron:withinPhase :ph-t1-implement ; saffron:n 1 ;
+    saffron:costUsdEst 3.20 ; prov:generated :plan-t1, :diff-t1-1 .
+:at-t1-i2 a saffron:Attempt ; saffron:withinPhase :ph-t1-implement ; saffron:n 2 ;
+    saffron:costUsdEst 1.10 ; prov:generated :diff-t1-2 .
+:diff-t1-1 a saffron:Diff ; prov:wasDerivedFrom :plan-t1 .
+:diff-t1-2 a saffron:Diff ; prov:wasRevisionOf :diff-t1-1 .
+
+# Attempt 1's suite: `lint` alone red. Attempt 2's: all green.
+:suite-t1-1 a saffron:GateSuite ; prov:wasInformedBy :at-t1-i1 ; prov:used :diff-t1-1 .
+:suite-t1-2 a saffron:GateSuite ; prov:wasInformedBy :at-t1-i2 ; prov:used :diff-t1-2 .
+:gr-t1-1-lint a saffron:GateResult ; prov:wasGeneratedBy :suite-t1-1 ;
+    earl:assertedBy :g-lint ; earl:subject :diff-t1-1 ; earl:mode earl:automatic ;
+    earl:result [ earl:outcome earl:failed ] .
+:gr-t1-1-scope a saffron:GateResult ; prov:wasGeneratedBy :suite-t1-1 ;
+    earl:assertedBy :g-scope ; earl:subject :touches-t1 ; earl:mode earl:automatic ;
+    earl:result [ earl:outcome earl:passed ] .
+:gr-t1-1-size a saffron:GateResult ; prov:wasGeneratedBy :suite-t1-1 ;
+    earl:assertedBy :g-size ; earl:subject :diff-t1-1 ; earl:mode earl:automatic ;
+    earl:result [ earl:outcome earl:passed ] .
+:gr-t1-2-lint a saffron:GateResult ; prov:wasGeneratedBy :suite-t1-2 ;
+    earl:assertedBy :g-lint ; earl:subject :diff-t1-2 ; earl:mode earl:automatic ;
+    earl:result [ earl:outcome earl:passed ] .
+:gr-t1-2-census a saffron:GateResult ; prov:wasGeneratedBy :suite-t1-2 ;
+    earl:assertedBy :g-census ; earl:subject :diff-t1-2 ; earl:mode earl:automatic ;
+    earl:result [ earl:outcome earl:passed ] .
+# `coverage` is advisory; it is red on a merged task and stopped nothing.
+:gr-t1-2-cov a saffron:GateResult ; prov:wasGeneratedBy :suite-t1-2 ;
+    earl:assertedBy saffron:coverage ; earl:subject :diff-t1-2 ; earl:mode earl:automatic ;
+    earl:result [ earl:outcome earl:failed ] .
+
+:finding-t1-1 a saffron:Finding ; saffron:severity saffron:blocker ;
+    earl:assertedBy :lens-correctness ; earl:subject :diff-t1-1 ;
+    earl:test :ac-t1-1 ; earl:mode earl:semiAuto ;
+    earl:result [ earl:outcome earl:failed ] .
+:finding-t1-2 a saffron:Finding ; saffron:severity saffron:concern ;
+    earl:assertedBy :lens-contract ; earl:subject :diff-t1-1 ; earl:mode earl:semiAuto ;
+    earl:result [ earl:outcome earl:cantTell ] .
+
+# The disagreement of §5.6 as three qualified associations, not three strings:
+# the implementer disputed, the lens confirmed anyway, the operator sided with
+# the implementer. A string column cannot say who held which position.
+:rebut-t1-1 a saffron:Rebuttal ; prov:used :finding-t1-1 ; prov:generated :diff-t1-2 ;
+    prov:qualifiedAssociation
+      [ a prov:Association ; prov:agent :impl-t1 ; prov:hadRole saffron:disputes ] ,
+      [ a prov:Association ; prov:agent :lens-correctness ; prov:hadRole saffron:confirms ] ,
+      [ a prov:Association ; prov:agent :joel ; prov:hadRole saffron:disagrees ] .
+
+:pr-t1 a saffron:PullRequest ; prov:wasDerivedFrom :diff-t1-2 .
+
+## ── t2: refactor, standard, EXHAUSTED — `types` red twice, alone the first time ──
+:spec-t2 a saffron:Spec ; saffron:specType saffron:refactor ; saffron:hasCriterion :ac-t2-1 .
+:ac-t2-1 a saffron:AcceptanceCriterion .
+:task-t2 a saffron:Task ; prov:wasInformedBy :run-1 ; prov:used :spec-t2 ;
+    saffron:riskTier saffron:standard ; saffron:endedInState saffron:EXHAUSTED .
+:ph-t2-implement a saffron:Phase ; prov:wasInformedBy :task-t2 .
+:at-t2-1 a saffron:Attempt ; saffron:withinPhase :ph-t2-implement ; saffron:n 1 ;
+    saffron:costUsdEst 2.80 ; prov:generated :diff-t2-1 .
+:at-t2-2 a saffron:Attempt ; saffron:withinPhase :ph-t2-implement ; saffron:n 2 ;
+    saffron:costUsdEst 2.10 ; prov:generated :diff-t2-2 .
+:diff-t2-1 a saffron:Diff . :diff-t2-2 a saffron:Diff ; prov:wasRevisionOf :diff-t2-1 .
+:suite-t2-1 a saffron:GateSuite ; prov:wasInformedBy :at-t2-1 ; prov:used :diff-t2-1 .
+:suite-t2-2 a saffron:GateSuite ; prov:wasInformedBy :at-t2-2 ; prov:used :diff-t2-2 .
+:gr-t2-1-types a saffron:GateResult ; prov:wasGeneratedBy :suite-t2-1 ;
+    earl:assertedBy :g-types ; earl:subject :diff-t2-1 ; earl:mode earl:automatic ;
+    earl:result [ earl:outcome earl:failed ] .
+:gr-t2-1-lint a saffron:GateResult ; prov:wasGeneratedBy :suite-t2-1 ;
+    earl:assertedBy :g-lint ; earl:subject :diff-t2-1 ; earl:mode earl:automatic ;
+    earl:result [ earl:outcome earl:passed ] .
+:gr-t2-2-types a saffron:GateResult ; prov:wasGeneratedBy :suite-t2-2 ;
+    earl:assertedBy :g-types ; earl:subject :diff-t2-2 ; earl:mode earl:automatic ;
+    earl:result [ earl:outcome earl:failed ] .
+:gr-t2-2-tests a saffron:GateResult ; prov:wasGeneratedBy :suite-t2-2 ;
+    earl:assertedBy :g-tests ; earl:subject :diff-t2-2 ; earl:mode earl:automatic ;
+    earl:result [ earl:outcome earl:failed ] .
+
+## ── t3: feature, standard, merged then rejected by the operator ──
+:spec-t3 a saffron:Spec ; saffron:specType saffron:feature ;
+    saffron:hasCriterion :ac-t3-1, :ac-t3-2 .
+:ac-t3-1 a saffron:AcceptanceCriterion .
+:ac-t3-2 a saffron:AcceptanceCriterion .
+:task-t3 a saffron:Task ; prov:wasInformedBy :run-1 ; prov:used :spec-t3 ;
+    saffron:riskTier saffron:standard ; saffron:endedInState saffron:REJECTED .
+:ph-t3-implement a saffron:Phase ; prov:wasInformedBy :task-t3 .
+:at-t3-1 a saffron:Attempt ; saffron:withinPhase :ph-t3-implement ; saffron:n 1 ;
+    saffron:costUsdEst 4.60 ; prov:generated :diff-t3-1 .
+:diff-t3-1 a saffron:Diff .
+:suite-t3-1 a saffron:GateSuite ; prov:wasInformedBy :at-t3-1 ; prov:used :diff-t3-1 .
+:gr-t3-1-tests a saffron:GateResult ; prov:wasGeneratedBy :suite-t3-1 ;
+    earl:assertedBy :g-tests ; earl:subject :diff-t3-1 ; earl:test :ac-t3-2 ;
+    earl:mode earl:automatic ; earl:result [ earl:outcome earl:passed ] .
+:finding-t3-1 a saffron:Finding ; saffron:severity saffron:blocker ;
+    earl:assertedBy :lens-blast ; earl:subject :diff-t3-1 ; earl:mode earl:semiAuto ;
+    earl:result [ earl:outcome earl:failed ] .
+:rebut-t3-1 a saffron:Rebuttal ; prov:used :finding-t3-1 ;
+    prov:qualifiedAssociation
+      [ a prov:Association ; prov:agent :impl-t1 ; prov:hadRole saffron:concedes ] ,
+      [ a prov:Association ; prov:agent :lens-blast ; prov:hadRole saffron:withdraws ] ,
+      [ a prov:Association ; prov:agent :joel ; prov:hadRole saffron:agrees ] .
+:pr-t3 a saffron:PullRequest ; prov:wasDerivedFrom :diff-t3-1 .
+
+# The operator's rejection, as an assertion in the same shape as a mypy failure:
+# ac-t3-1 failed, and nothing automatic had asserted on it. That gap is the
+# bucket-triage evidence Q1 exists to pull up.
+:adj-t3-1 a earl:Assertion ; earl:assertedBy :joel ; earl:subject :pr-t3 ;
+    earl:test :ac-t3-1 ; earl:mode earl:manual ;
+    earl:result [ earl:outcome earl:failed ] .
+
+## ── t4: feature, standard, merged — the second cost group for Q5 ──
+:spec-t4 a saffron:Spec ; saffron:specType saffron:feature ; saffron:hasCriterion :ac-t4-1 .
+:ac-t4-1 a saffron:AcceptanceCriterion .
+:task-t4 a saffron:Task ; prov:wasInformedBy :run-1 ; prov:used :spec-t4 ;
+    saffron:riskTier saffron:standard ; saffron:endedInState saffron:MERGED .
+:ph-t4-implement a saffron:Phase ; prov:wasInformedBy :task-t4 .
+:at-t4-1 a saffron:Attempt ; saffron:withinPhase :ph-t4-implement ; saffron:n 1 ;
+    saffron:costUsdEst 5.50 ; prov:generated :diff-t4-1 .
+:diff-t4-1 a saffron:Diff .
+:pr-t4 a saffron:PullRequest ; prov:wasDerivedFrom :diff-t4-1 .

@@ -1,0 +1,45 @@
+# Q1 — For each rejected task, which acceptance criteria failed, and did any
+# gate or lens assert on them? (DESIGN.md §8, bucket-triage evidence)
+#
+# SQL equivalent: (a) none over §4.1 as it stands. Acceptance criteria are not
+# in the schema at all — they live as markdown checkboxes in the spec file, so
+# the join's left-hand side does not exist as a row. Positing a criteria table
+# makes it easy in SQL, which by this spec's own rule counts as (a), not (b):
+#
+#   SELECT t.task_id, c.criterion_id, f.lens, g.gate
+#     FROM tasks t JOIN criteria c ON c.spec_id = t.spec_id
+#     JOIN adjudications adj ON adj.criterion_id = c.criterion_id AND adj.outcome = 'failed'
+#     LEFT JOIN findings f ON f.criterion_id = c.criterion_id
+#     LEFT JOIN gate_results g ON g.criterion_id = c.criterion_id
+#    WHERE t.state = 'REJECTED';
+#
+# Why the SPARQL form is preferable: the two LEFT JOINs are the schema split
+# §4.6 criticises — a gate and a lens asserting the same thing arrive from two
+# tables and must be UNIONed or coalesced by hand at every call site. Here both
+# are earl:Assertion and the join is one triple pattern.
+PREFIX saffron: <https://saffron.dev/ns#>
+PREFIX prov:    <http://www.w3.org/ns/prov#>
+PREFIX earl:    <http://www.w3.org/ns/earl#>
+
+SELECT ?task ?criterion ?assertor ?mode
+WHERE {
+  ?task a saffron:Task ;
+        saffron:endedInState saffron:REJECTED ;
+        prov:used ?spec .
+  ?spec saffron:hasCriterion ?criterion .
+
+  # the operator's rejection, in the same shape as any other assertion
+  ?rejection earl:test ?criterion ;
+             earl:assertedBy ?operator ;
+             earl:result/earl:outcome earl:failed .
+  ?operator a saffron:Operator .
+
+  # did anything automatic reach the same criterion? unbound means nothing did
+  OPTIONAL {
+    ?other earl:test ?criterion ;
+           earl:assertedBy ?assertor ;
+           earl:mode ?mode .
+    FILTER(?assertor != ?operator)
+  }
+}
+ORDER BY ?task ?criterion

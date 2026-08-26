@@ -1,0 +1,129 @@
+# Every shape here states something §4.1 cannot: an enumeration over a TEXT
+# column, a cardinality across a foreign key, or a disjointness between two
+# columns that a row carries side by side.
+@prefix sh:      <http://www.w3.org/ns/shacl#> .
+@prefix saffron: <https://saffron.dev/ns#> .
+@prefix prov:    <http://www.w3.org/ns/prov#> .
+@prefix earl:    <http://www.w3.org/ns/earl#> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+
+# A task ends in a state that reaches the operator. `tasks.state` is TEXT and
+# says neither which strings are legal nor which of them are terminal (§3.3).
+saffron:TaskShape a sh:NodeShape ;
+    sh:targetClass saffron:Task ;
+    sh:property [ sh:path saffron:endedInState ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:class saffron:TerminalState ;
+        sh:in ( saffron:SCOPE_REVIEW saffron:PLAN_REJECTED saffron:EXHAUSTED
+                saffron:READY_FOR_REVIEW saffron:MERGE_FAILED saffron:PREFLIGHT_FAILED
+                saffron:NOT_IMPLEMENTED saffron:GATE_ERROR saffron:RATE_LIMITED
+                saffron:MERGED saffron:REJECTED saffron:CHANGES_REQUESTED ) ] ;
+    sh:property [ sh:path saffron:riskTier ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:class saffron:RiskTier ; sh:in ( saffron:standard saffron:elevated ) ] .
+
+saffron:SpecShape a sh:NodeShape ;
+    sh:targetClass saffron:Spec ;
+    sh:property [ sh:path saffron:specType ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:class saffron:SpecType ;
+        sh:in ( saffron:feature saffron:bug saffron:refactor ) ] ;
+    sh:property [ sh:path saffron:hasCriterion ; sh:minCount 1 ;
+        sh:class saffron:AcceptanceCriterion ] .
+
+# "Attempt 3" without a phase is ambiguous — name both (CONTEXT.md §2). The
+# ledger's `attempts` row carries phase and n as two nullable columns.
+saffron:AttemptShape a sh:NodeShape ;
+    sh:targetClass saffron:Attempt ;
+    sh:property [ sh:path saffron:withinPhase ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:class saffron:Phase ] ;
+    sh:property [ sh:path saffron:n ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:datatype xsd:integer ; sh:minInclusive 1 ] ;
+    sh:property [ sh:path saffron:costUsdEst ; sh:maxCount 1 ; sh:datatype xsd:decimal ] .
+
+# A batch is not a run: budget is a batch property, base_sha is a run property.
+# Rev 4 left them sharing a table, which is the defect these two shapes forbid.
+saffron:BatchShape a sh:NodeShape ;
+    sh:targetClass saffron:Batch ;
+    sh:property [ sh:path saffron:budgetUsd ; sh:minCount 1 ; sh:maxCount 1 ] ;
+    sh:property [ sh:path saffron:baseSha ; sh:maxCount 0 ] .
+
+saffron:RunShape a sh:NodeShape ;
+    sh:targetClass saffron:Run ;
+    sh:property [ sh:path saffron:baseSha ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:datatype xsd:string ] ;
+    sh:property [ sh:path saffron:budgetUsd ; sh:maxCount 0 ] .
+
+# The core/repo boundary as an axiom: a gate is core, contract, or repo-defined,
+# and never two of them.
+saffron:GateShape a sh:NodeShape ;
+    sh:targetClass saffron:Gate ;
+    sh:xone ( [ sh:class saffron:CoreGate ]
+              [ sh:class saffron:ContractGate ]
+              [ sh:class saffron:RepoDefinedGate ] ) ;
+    sh:property [ sh:path saffron:blockingAt ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:class saffron:BlockingLevel ;
+        sh:in ( saffron:alwaysBlocking saffron:blockingWhenElevated saffron:advisory ) ] .
+
+# `coverage` is advisory at every tier — a design decision, not an oversight
+# (§5.4). No policy may declare otherwise, which is not a constraint any
+# `policy.yaml` schema states.
+saffron:CoverageShape a sh:NodeShape ;
+    sh:targetNode saffron:coverage ;
+    sh:property [ sh:path saffron:blockingAt ; sh:hasValue saffron:advisory ] .
+
+saffron:PolicyShape a sh:NodeShape ;
+    sh:targetClass saffron:Policy ;
+    sh:property [ sh:path saffron:declaresGate ; sh:minCount 1 ; sh:class saffron:Gate ] .
+
+# Lens disjointness (§5.5): one finding, one lens. It is why any single blocker
+# routes to REBUT and why there is no vote.
+saffron:FindingShape a sh:NodeShape ;
+    sh:targetClass saffron:Finding ;
+    sh:property [ sh:path saffron:severity ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:class saffron:Severity ;
+        sh:in ( saffron:blocker saffron:concern saffron:note ) ] ;
+    sh:property [ sh:path earl:assertedBy ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:class saffron:CriticLens ] .
+
+# A gate result is asserted by a gate, automatically. The mode is the only real
+# difference between a gate result and a finding (§4.6), so it is stated rather
+# than left to the table a row happens to sit in.
+saffron:GateResultShape a sh:NodeShape ;
+    sh:targetClass saffron:GateResult ;
+    sh:property [ sh:path earl:assertedBy ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:class saffron:Gate ] ;
+    sh:property [ sh:path earl:mode ; sh:minCount 1 ; sh:hasValue earl:automatic ] .
+
+# Three judgements, three agents, one claim (§5.6). A rebuttal that records the
+# implementer's position without the critic's is half of the disagreement.
+saffron:RebuttalShape a sh:NodeShape ;
+    sh:targetClass saffron:Rebuttal ;
+    sh:property [ sh:path prov:used ; sh:minCount 1 ; sh:class saffron:Finding ] ;
+    sh:property [ sh:path ( prov:qualifiedAssociation prov:hadRole ) ;
+        sh:class saffron:Role ] ;
+    sh:property [ sh:path prov:qualifiedAssociation ;
+        sh:qualifiedMinCount 1 ; sh:qualifiedMaxCount 1 ;
+        sh:qualifiedValueShape [
+            sh:property [ sh:path prov:hadRole ;
+                sh:in ( saffron:disputes saffron:concedes ) ; sh:minCount 1 ] ;
+            sh:property [ sh:path prov:agent ; sh:class saffron:ImplementerSession ] ] ] ;
+    sh:property [ sh:path prov:qualifiedAssociation ;
+        sh:qualifiedMinCount 1 ; sh:qualifiedMaxCount 1 ;
+        sh:qualifiedValueShape [
+            sh:property [ sh:path prov:hadRole ;
+                sh:in ( saffron:confirms saffron:withdraws ) ; sh:minCount 1 ] ;
+            sh:property [ sh:path prov:agent ; sh:class saffron:CriticLens ] ] ] .
+
+# Touches is ratified by the operator before it binds (§3). The proposal is not
+# the ratified set, and only the ratified set feeds the `scope` gate.
+saffron:TouchesShape a sh:NodeShape ;
+    sh:targetClass saffron:TouchesSet ;
+    sh:property [ sh:path saffron:ratifiedBy ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:class saffron:Operator ] .
+
+# An envelope is a reading bound and is never enforced against a diff (§3). It
+# may therefore never be a gate result's subject — the confusion the CONTEXT.md
+# rule against bare "scope" exists to prevent, stated where a machine can check.
+saffron:EnvelopeShape a sh:NodeShape ;
+    sh:targetClass saffron:Envelope ;
+    sh:property [ sh:path [ sh:inversePath earl:subject ] ;
+        sh:qualifiedValueShape [ sh:class saffron:GateResult ] ;
+        sh:qualifiedMaxCount 0 ] .

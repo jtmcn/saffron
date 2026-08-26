@@ -1,0 +1,33 @@
+# Q5 — Cost per *accepted* PR, grouped by spec type and risk tier. The number
+# that says whether the critic layer pays for itself. (DESIGN.md §7.1)
+#
+# SQL equivalent: (a), and an easy one. Every column it needs already exists:
+#
+#   SELECT s.type, t.risk, SUM(a.cost_usd_est) / COUNT(DISTINCT t.task_id)
+#     FROM tasks t JOIN attempts a ON a.task_id = t.task_id
+#    WHERE t.state = 'MERGED' GROUP BY s.type, t.risk;
+#   -- modulo spec type, which is frontmatter and not a column
+#
+# Why the SPARQL form is preferable: it is not. This query is here as the
+# control — a question the ledger answers well, included so the RATIONALE has
+# something to lose against. Its one contribution is that `saffron:costUsdEst`
+# carries the estimate's suffix into the vocabulary, where a column named `cost`
+# would have let the estimate quietly become a fact (§4.1).
+PREFIX saffron: <https://saffron.dev/ns#>
+PREFIX prov:    <http://www.w3.org/ns/prov#>
+
+SELECT ?specType ?riskTier
+       (COUNT(DISTINCT ?task) AS ?accepted)
+       (SUM(?cost) AS ?totalUsdEst)
+WHERE {
+  ?task a saffron:Task ;
+        saffron:endedInState saffron:MERGED ;
+        saffron:riskTier ?riskTier ;
+        prov:used ?spec .
+  ?spec saffron:specType ?specType .
+  ?phase prov:wasInformedBy ?task .
+  ?attempt saffron:withinPhase ?phase ;
+           saffron:costUsdEst ?cost .
+}
+GROUP BY ?specType ?riskTier
+ORDER BY ?specType ?riskTier

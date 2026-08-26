@@ -1,0 +1,9 @@
+@prefix saffron: <https://saffron.dev/ns#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix earl: <http://www.w3.org/ns/earl#> .
+@prefix : <https://saffron.dev/data/> .
+
+# A policy declaring coverage blocking. It is advisory at every tier.
+saffron:coverage a saffron:Gate, saffron:ContractGate ;
+   saffron:blockingAt saffron:alwaysBlocking .
+saffron:alwaysBlocking a saffron:BlockingLevel .
