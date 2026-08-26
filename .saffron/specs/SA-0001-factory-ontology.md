@@ -53,9 +53,10 @@ is currently unenforceable, because nothing says what "reconstructible" means.
 
 - [ ] `ontology/saffron.ttl` exists, is valid Turtle, and parses under `pyoxigraph`
       with no network access
-- [ ] Phases, attempts, and gate runs are modelled as `prov:Activity`; specs,
-      `plan.json`, `scope.json`, diffs, gate output, and PRs as `prov:Entity`;
-      implementer sessions, each critic lens, and the human as `prov:Agent`
+- [ ] Batches, runs, tasks, phases, attempts, and gate suites are modelled as
+      `prov:Activity`; specs, `plan.json`, `scope.json`, diffs, gate output, and
+      PRs as `prov:Entity`; implementer sessions, each critic lens, and the human
+      as `prov:Agent`
 - [ ] The implementer/critic disagreement of §5.6 is modelled as a
       `prov:qualifiedAssociation`, not as a bare string field
 - [ ] Gate results and critic findings are `earl:Assertion`s over an
@@ -97,7 +98,7 @@ is currently unenforceable, because nothing says what "reconstructible" means.
 | Q1 | For each rejected task, which acceptance criteria failed, and did any gate or lens assert on them? (bucket-triage evidence) | §8 |
 | Q2 | Blockers raised per critic lens, split by whether the human agreed — the critic layer's ROI | §11 |
 | Q3 | Gates ranked by how often they were the *sole* failure in an attempt, and gates that never fired at all | §8 |
-| Q4 | Given a merged PR, the full derivation chain: spec → scope → plan → diff → gate runs → findings → rebuttal → PR | N5 |
+| Q4 | Given a merged PR, the full derivation chain: spec → scope → plan → diff → gate suites → findings → rebuttal → PR | N5 |
 | Q5 | Cost per *accepted* PR, grouped by spec type and risk tier | §7.1 |
 
 ## Out of scope

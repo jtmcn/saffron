@@ -81,6 +81,7 @@ holds the specs, the policy, the cell image, and the repo's own gates.
 _Avoid_: "the project", "the codebase", "the client repo".
 
 **Agent**: Any model session inside a cell, when the specific role doesn't matter.
+The ontology's `prov:Agent` is wider — it includes the operator (`DESIGN.md` §4.6).
 _Avoid_: "the AI", "the bot", "the LLM". "Model" means a model identifier.
 
 ---
@@ -466,5 +467,14 @@ defects rather than word choices (`DESIGN.md` Appendix E).
 
 ## Open naming decisions
 
-None. Add here rather than resolving in prose elsewhere — an ambiguity that gets
-settled in a commit message is an ambiguity that comes back.
+Add here rather than resolving in prose elsewhere — an ambiguity that gets settled
+in a commit message is an ambiguity that comes back.
+
+1. **A word for what a gate result and a finding both are.** `DESIGN.md` §4.6 holds
+   that a `mypy` failure and a critic blocker are one shape — *an assertion, by an
+   agent, about a subject, with an outcome* — and calls the two-table split "worth
+   reconciling in §4.1". §4 and §5 here reproduce that split with no shared term, so
+   the sentence the ontology exists to make cannot be written in Saffron's own
+   vocabulary. Left open deliberately: coining a supertype before §4.1 reconciles
+   would put a word here that nothing says. Resolve when the schema does — or record
+   that it never will.
