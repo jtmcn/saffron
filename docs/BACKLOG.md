@@ -215,6 +215,13 @@ inside `touches`, as `integrity` already does, and `size_gate` is handed
 neither `touches` nor a `--numstat` cross-check. **The wiring spec has both and
 should close it**, which makes that spec's second reason to exist.
 
+**Closed by that spec; corrected 2026-08-25 (#27).** `size_gate` is handed
+`touches` and returns `error` when an unreadable block names a declared path
+(`_unreadable_declared_path`, `saffron/gates/core/size.py:161`) — the same
+`touches` exemption `integrity` uses, so "declared" means one thing in both.
+The paragraph above stood as outstanding work after the work had shipped, which
+is the shape #26 found on item 17: a stamp read as a plan.
+
 ## 3. `findings` and `attempts` have no tables
 
 `DESIGN.md` §4.1 declares both. Neither exists, so:
