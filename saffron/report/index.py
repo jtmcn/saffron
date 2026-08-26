@@ -131,8 +131,13 @@ def _row(line: QueueLine) -> str:
     # Worded distinctly from `concerns`, deliberately: the two are summed by
     # different rules over different severities (§6), and a cell that merely
     # repeated "concern" would read as the same number twice.
-    sustained = f"{line.sustained} sustained blocker" + (
-        "s" if line.sustained != 1 else ""
+    # Empty at zero, unlike `concerns`: measured on the real ledger, 11 of 12
+    # rows carry it, and a wide constant string on every row is what a page
+    # read in ten seconds can least afford (§6).
+    sustained = (
+        f"{line.sustained} sustained blocker{'s' if line.sustained > 1 else ''}"
+        if line.sustained
+        else ""
     )
     cells = [
         html.escape(line.repo),
