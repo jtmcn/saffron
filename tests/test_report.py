@@ -233,6 +233,47 @@ def test_within_a_state_more_concerns_sorts_higher():
     assert sorted(lines, key=sort_key)[0].spec_id == "B"
 
 
+def test_a_sustained_blocker_sorts_above_elevated_risk_and_concerns():
+    """§6 level 3: `SA-0005` — a sustained blocker and `0 concerns` — must not
+    sort behind a green `elevated` line just because it lost the concern
+    count. `anchored_concerns` would put it last; `sustained` must not."""
+    sustained = line(spec_id="A", concerns=0, sustained=1, risk="standard")
+    elevated = line(spec_id="B", concerns=2, sustained=0, risk="elevated")
+    assert sorted([elevated, sustained], key=sort_key)[0].spec_id == "A"
+
+
+def test_reviewing_and_rebutting_keep_sorting_with_elevated_risk():
+    """Rev 17 shifted `_STATE_RANK`'s mid-phase states from 3 to 4 to make
+    room for level 3 below them — they must land exactly where elevated risk
+    now does, not above it and not back among the states that need you."""
+    reviewing = line(state="REVIEWING", spec_id="A")
+    rebutting = line(state="REBUTTING", spec_id="B")
+    elevated = line(state="READY_FOR_REVIEW", spec_id="C", risk="elevated")
+    ordinary = line(state="READY_FOR_REVIEW", spec_id="D")
+    assert sort_key(reviewing)[0] == sort_key(rebutting)[0] == sort_key(elevated)[0]
+    assert sort_key(elevated)[0] < sort_key(ordinary)[0]
+
+
+def test_the_sustained_cell_is_visibly_distinct_from_the_concern_cell():
+    """`sustained` and `concerns` are two different sums over two different
+    severities (§6); a row that rendered both as "N concern(s)" would show
+    the same word twice and hide which count is which."""
+    rendered = render_index([line(sustained=1, concerns=2)], header={})
+    assert "1 sustained blocker" in rendered
+    assert "2 concerns" in rendered
+
+
+def test_the_sustained_cell_is_empty_rather_than_zero():
+    """The signal is the non-zero one. Measured on the real ledger, 11 of 12
+    rows have no sustained blocker, and `0 sustained blockers` is wider than
+    the `0 concerns` beside it — eleven copies of a constant on the page §6
+    wants dismissed in ten seconds. `concerns` still prints its zero: it is
+    the count level 5 ranks on, so its absence would read as missing."""
+    rendered = render_index([line(sustained=0, concerns=0)], header={})
+    assert "sustained" not in rendered
+    assert "0 concerns" in rendered
+
+
 def test_the_header_is_rendered():
     assert "trailing accept rate" in render_index(
         [line()], header={"trailing accept rate": "—"}
@@ -618,6 +659,54 @@ def test_disagreement_rows_attribute_the_right_rebuttal_to_the_right_blocker():
     assert "rebuttal two text" in row2
     assert "verdict two text" in row2
     assert "blocker one claim" not in row2
+
+
+def test_the_disagreements_table_shows_the_first_answer_to_a_duplicated_finding():
+    """The table was a `{r.finding: r}` comprehension — last wins — while the
+    ledger and the queue's counts both keep the first. On a duplicate the
+    operator read `argued` off the PR while the record said `fixed`. All three
+    go through `first_answers` now; this is the surface that disagreed."""
+    reviews = [
+        LensReview(
+            lens="correctness",
+            findings=[_finding(claim="blocker one claim", file="a.py", line=1)],
+        )
+    ]
+    rebut_result = RebutResult(
+        state="READY_FOR_REVIEW",
+        why="test",
+        rebuttal=RebuttalTurn(
+            rebuttals=[
+                Rebuttal(finding=1, action="fixed", argument="committed the fix"),
+                Rebuttal(finding=1, action="argued", argument="on reflection, no"),
+            ]
+        ),
+        verdicts=[
+            LensVerdicts(
+                lens="correctness",
+                verdicts=[
+                    Verdict(finding=1, verdict="confirmed", reason="the fix is real")
+                ],
+            )
+        ],
+        moved=True,
+        cost_usd=0.0,
+    )
+    body = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        reviews=reviews,
+        rebut_result=rebut_result,
+    )
+    row = next(line for line in body.splitlines() if line.startswith("| 1 "))
+    assert "committed the fix" in row
+    assert "on reflection, no" not in row
 
 
 def test_a_second_task_joins_the_first_without_an_orchestrator(tmp_path):
