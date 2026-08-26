@@ -242,6 +242,17 @@ def test_a_sustained_blocker_sorts_above_elevated_risk_and_concerns():
     assert sorted([elevated, sustained], key=sort_key)[0].spec_id == "A"
 
 
+def test_an_unkept_fix_sorts_above_elevated_risk_and_below_a_sustained_blocker():
+    """§6: an unkept fix ranks *with* a sustained blocker — pre-empting the
+    elevated/ordinary fallback the same way — but it is not counted *as*
+    one, so within level 3 it tiebreaks below a line that has one."""
+    unkept = line(spec_id="A", concerns=0, sustained=0, unkept=1, risk="standard")
+    elevated = line(spec_id="B", concerns=2, sustained=0, unkept=0, risk="elevated")
+    sustained = line(spec_id="C", concerns=0, sustained=1, unkept=0, risk="standard")
+    ordered = sorted([elevated, sustained, unkept], key=sort_key)
+    assert [ln.spec_id for ln in ordered] == ["C", "A", "B"]
+
+
 def test_reviewing_and_rebutting_keep_sorting_with_elevated_risk():
     """Rev 17 shifted `_STATE_RANK`'s mid-phase states from 3 to 4 to make
     room for level 3 below them — they must land exactly where elevated risk
@@ -261,6 +272,21 @@ def test_the_sustained_cell_is_visibly_distinct_from_the_concern_cell():
     rendered = render_index([line(sustained=1, concerns=2)], header={})
     assert "1 sustained blocker" in rendered
     assert "2 concerns" in rendered
+
+
+def test_the_unkept_cell_is_visibly_distinct_from_sustained_and_concerns():
+    """An argument the critic rejected and a fix nobody committed are
+    different failures (§6) and must not render the same word."""
+    rendered = render_index([line(sustained=1, unkept=1, concerns=2)], header={})
+    assert "1 sustained blocker" in rendered
+    assert "1 unkept fix" in rendered
+    assert "2 concerns" in rendered
+
+
+def test_the_unkept_cell_is_empty_rather_than_zero():
+    rendered = render_index([line(sustained=0, unkept=0, concerns=0)], header={})
+    assert "unkept" not in rendered
+    assert "0 concerns" in rendered
 
 
 def test_the_sustained_cell_is_empty_rather_than_zero():

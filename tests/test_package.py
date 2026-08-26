@@ -1466,6 +1466,51 @@ def test_the_queue_line_carries_the_sustained_blocker_count(packageable):
     assert row["sustained"] == 1
 
 
+def test_the_queue_line_carries_the_unkept_fix_count(packageable):
+    """§6's other level-3 count: a blocker the implementer claimed to fix
+    (finding 1, confirmed anyway, HEAD never moved) and a blocker it argued
+    and lost (finding 2) — the unkept count is 1, not 2, and stays out of
+    `sustained`. This asserts at `package.package`, not by constructing a
+    `QueueLine` and checking the value it was handed: the defect this task
+    exists to fix shipped green under exactly that shape of test
+    (`docs/BACKLOG.md` item 18)."""
+    packageable.outcome.rebut_result = rebut.RebutResult(
+        state="READY_FOR_REVIEW",
+        why="1 blocker(s) confirmed after the rebuttal, 1 argued "
+        "(a fix was claimed for some of them and no commit was made)",
+        rebuttal=rebut.RebuttalTurn(
+            rebuttals=[
+                rebut.Rebuttal(finding=1, action="fixed", argument="committed the fix"),
+                rebut.Rebuttal(
+                    finding=2, action="argued", argument="the finding is wrong"
+                ),
+            ]
+        ),
+        verdicts=[
+            rebut.LensVerdicts(
+                lens="correctness",
+                verdicts=[
+                    rebut.Verdict(finding=1, verdict="confirmed", reason="still wrong"),
+                    rebut.Verdict(finding=2, verdict="confirmed", reason="unpersuaded"),
+                ],
+            )
+        ],
+        moved=False,
+        cost_usd=0.4,
+    )
+
+    package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **packageable.kwargs,
+    )
+
+    rows = json.loads((packageable.out_dir / "queue.json").read_text())
+    row = next(r for r in rows if r["spec_id"] == "SA-0005")
+    assert row["unkept"] == 1
+    assert row["sustained"] == 1
+
+
 def test_reverify_is_handed_the_policy_from_the_commit_it_verifies_against(
     monkeypatch, packageable
 ):

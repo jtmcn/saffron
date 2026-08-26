@@ -360,6 +360,27 @@ def first_answers(rebuttal: RebuttalTurn) -> dict[int, Rebuttal]:
     return answered
 
 
+def _confirmed_with(rebut_result: RebutResult, action: str) -> int:
+    """Blockers whose first answer was `action` and whose verdict confirmed it.
+
+    One body for both counts below, which differ only in the action they pair.
+    Copied, they would be two rules for one queue row the first time somebody
+    tightened either — the divergence `first_answers` exists to end.
+    """
+    answered = {
+        finding
+        for finding, r in first_answers(rebut_result.rebuttal).items()
+        if r.action == action
+    }
+    confirmed = {
+        v.finding
+        for lens in rebut_result.verdicts
+        for v in lens.verdicts
+        if v.verdict == "confirmed"
+    }
+    return len(answered & confirmed)
+
+
 def sustained_blockers(rebut_result: RebutResult | None) -> int:
     """§6 level 3: how many blockers the rebuttal did **not** dispose of.
 
@@ -373,24 +394,36 @@ def sustained_blockers(rebut_result: RebutResult | None) -> int:
     Zero for every shape that is not a settled disagreement: no `RebutResult`
     (REBUT never ran), a rebuttal turn that errored (nothing to pair a
     verdict against), and a blocker that was verdicted but never rebutted —
-    the last is not special-cased, it simply never enters the `argued` set
-    below. An unanchored blocker never reaches REBUT at all (§5.5) and so
+    the last is not special-cased, it simply never enters the answered set
+    in `_confirmed_with`. An unanchored blocker never reaches REBUT at all (§5.5) and so
     never carries a finding number to collide with.
     """
     if rebut_result is None or rebut_result.rebuttal.error:
         return 0
-    argued = {
-        finding
-        for finding, r in first_answers(rebut_result.rebuttal).items()
-        if r.action == "argued"
-    }
-    confirmed = {
-        v.finding
-        for lens in rebut_result.verdicts
-        for v in lens.verdicts
-        if v.verdict == "confirmed"
-    }
-    return len(argued & confirmed)
+    return _confirmed_with(rebut_result, "argued")
+
+
+def unkept_fixes(rebut_result: RebutResult | None) -> int:
+    """§6: a confirmed blocker whose only answer was a fix that never reached
+    HEAD — a promise nobody kept, ranked *with* `sustained_blockers` but
+    counted apart from it (`fixed & confirmed`, not `argued & confirmed`).
+
+    Zero for every shape `sustained_blockers` is zero for, plus two more.
+    ponytail: `moved` is one bit for the whole rebuttal, not per blocker, so
+    it cannot say which claimed fix a landed commit was for. §6 names this a
+    floor — `moved` True returns `0` even if a claimed fix never landed.
+
+    The second is not this function's to fix: a rebuttal that answered every
+    blocker `fixed` and moved nothing returns at `run_rebut`'s early exit
+    below, so no verdict pass runs and there is nothing to confirm against —
+    the purest instance of §6's failure counts zero here. It still reaches the
+    queue, as state `REBUTTING`; note that ranks `_ELEVATED`, *below* the
+    level-3 bucket this count feeds, so the purest case sorts under the
+    mixed ones until that task lands.
+    """
+    if rebut_result is None or rebut_result.rebuttal.error or rebut_result.moved:
+        return 0
+    return _confirmed_with(rebut_result, "fixed")
 
 
 def run_rebut(

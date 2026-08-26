@@ -342,13 +342,13 @@ def test_the_rebuttal_turns_are_capped_at_the_critic_budget_not_the_task_one():
     assert "Bash" in record[0]["options"]["tools"]
 
 
-def _result(*, rebuttal, verdicts):
+def _result(*, rebuttal, verdicts, moved=True):
     return rebut.RebutResult(
         state="READY_FOR_REVIEW",
         why="",
         rebuttal=rebuttal,
         verdicts=verdicts,
-        moved=True,
+        moved=moved,
         cost_usd=0.0,
     )
 
@@ -450,3 +450,141 @@ def test_sustained_blockers_takes_the_first_answer_to_a_duplicated_finding():
         ],
     )
     assert rebut.sustained_blockers(result) == 0
+
+
+def test_unkept_fixes_is_zero_when_rebut_never_ran():
+    """No `RebutResult` at all — nothing to attribute an unkept fix to."""
+    assert rebut.unkept_fixes(None) == 0
+
+
+def test_unkept_fixes_is_zero_when_the_rebuttal_turn_errored():
+    """An errored rebuttal turn recorded no rebuttal at all, so there is no
+    `fixed` half to pair a verdict against — even if a verdict exists."""
+    result = _result(
+        rebuttal=rebut.RebuttalTurn(error="the model errored"),
+        verdicts=[
+            rebut.LensVerdicts(
+                lens="correctness",
+                verdicts=[rebut.Verdict(finding=1, verdict="confirmed", reason="r")],
+            )
+        ],
+        moved=False,
+    )
+    assert rebut.unkept_fixes(result) == 0
+
+
+def test_unkept_fixes_is_zero_for_a_blocker_verdicted_but_never_rebutted():
+    """No rebuttal entry for the finding means no `fixed` half to pair a
+    verdict against, whatever the verdict says."""
+    result = _result(
+        rebuttal=rebut.RebuttalTurn(rebuttals=[]),
+        verdicts=[
+            rebut.LensVerdicts(
+                lens="correctness",
+                verdicts=[rebut.Verdict(finding=1, verdict="confirmed", reason="r")],
+            )
+        ],
+        moved=False,
+    )
+    assert rebut.unkept_fixes(result) == 0
+
+
+def test_unkept_fixes_is_zero_when_head_moved():
+    """§6's floor: `moved` is one bit for the whole rebuttal, so a task whose
+    HEAD moved cannot be attributed to a single claimed fix, even when the
+    finding that claimed it was confirmed."""
+    result = _result(
+        rebuttal=rebut.RebuttalTurn(
+            rebuttals=[rebut.Rebuttal(finding=1, action="fixed", argument="committed")]
+        ),
+        verdicts=[
+            rebut.LensVerdicts(
+                lens="correctness",
+                verdicts=[
+                    rebut.Verdict(finding=1, verdict="confirmed", reason="still wrong")
+                ],
+            )
+        ],
+        moved=True,
+    )
+    assert rebut.unkept_fixes(result) == 0
+
+
+def test_unkept_fixes_on_a_confirmed_blocker_whose_fix_never_committed():
+    """A blocker the implementer claimed to fix, confirmed by the critic
+    anyway, with no commit landing — the shape §6 names: a promise nobody
+    kept, distinct from a sustained argument."""
+    result = _result(
+        rebuttal=rebut.RebuttalTurn(
+            rebuttals=[
+                rebut.Rebuttal(finding=1, action="fixed", argument="committed the fix"),
+                rebut.Rebuttal(
+                    finding=2, action="argued", argument="the finding is wrong"
+                ),
+            ]
+        ),
+        verdicts=[
+            rebut.LensVerdicts(
+                lens="correctness",
+                verdicts=[
+                    rebut.Verdict(finding=1, verdict="confirmed", reason="still wrong"),
+                    rebut.Verdict(finding=2, verdict="confirmed", reason="unpersuaded"),
+                ],
+            )
+        ],
+        moved=False,
+    )
+    assert rebut.unkept_fixes(result) == 1
+    assert rebut.sustained_blockers(result) == 1
+
+
+def test_unkept_fixes_takes_the_first_answer_to_a_duplicated_finding():
+    """`fixed` then a stray `argued` on the same finding: the first answer
+    was `fixed`, and it must count here — not last-wins, which would read it
+    as merely argued and drop it from this count."""
+    result = _result(
+        rebuttal=rebut.RebuttalTurn(
+            rebuttals=[
+                rebut.Rebuttal(finding=1, action="fixed", argument="committed the fix"),
+                rebut.Rebuttal(
+                    finding=1, action="argued", argument="on reflection, no"
+                ),
+            ]
+        ),
+        verdicts=[
+            rebut.LensVerdicts(
+                lens="correctness",
+                verdicts=[
+                    rebut.Verdict(finding=1, verdict="confirmed", reason="still wrong")
+                ],
+            )
+        ],
+        moved=False,
+    )
+    assert rebut.unkept_fixes(result) == 1
+
+
+def test_unkept_fixes_does_not_count_an_argued_first_answer_stray_fixed_later():
+    """The mirror duplicate: `argued` first, then a stray `fixed`. First
+    answer wins `argued`, so this must read `0` here — not membership over
+    every entry, which would see the trailing `fixed` and count it."""
+    result = _result(
+        rebuttal=rebut.RebuttalTurn(
+            rebuttals=[
+                rebut.Rebuttal(
+                    finding=1, action="argued", argument="the finding is wrong"
+                ),
+                rebut.Rebuttal(finding=1, action="fixed", argument="committed anyway"),
+            ]
+        ),
+        verdicts=[
+            rebut.LensVerdicts(
+                lens="correctness",
+                verdicts=[
+                    rebut.Verdict(finding=1, verdict="confirmed", reason="still wrong")
+                ],
+            )
+        ],
+        moved=False,
+    )
+    assert rebut.unkept_fixes(result) == 0
