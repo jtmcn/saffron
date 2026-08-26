@@ -44,23 +44,40 @@ levels did any work.
 ## The headline: the worst outcome in the ledger sorts last, captioned clean
 
 `SA-0005` (PR #21) is the most expensive task Saffron has produced — $10.07 over
-8 phase-sessions and 173 turns. It went to REBUT with three blockers and **the
-critic won**: two were adjudicated `confirmed`. It renders as `0 concerns` and
-sorts tenth of ten.
+8 phase-sessions and 173 turns. It drew **three blockers, two of them anchored**
+— and only anchored blockers route to REBUT (`review.py:231`, §5.5) — so two were
+put to the implementer. **The critic confirmed both.** One was answered with an
+argument and stands as a recorded disagreement; one was answered with a fix the
+implementer had already committed, and the critic confirmed the finding anyway.
+It renders as `0 concerns` and sorts tenth of ten.
+
+> **The two are not interchangeable, and the distinction sets level 3's
+> definition.** `rebut.py` records `action` as `fixed` or `argued` and verdicts
+> both, so ranking on `confirmed` alone would rank a task by work already
+> committed. Only `confirmed` **and** `argued` is a sustained blocker.
+> `SA-0005` has exactly one — which `rebut.py:341` itself hands the operator as
+> *"recorded disagreement, yours to adjudicate"*, and which the page never shows.
+
+> **Vocabulary, because this record got it wrong in its first draft.** The critic
+> **verdicts**; the operator **adjudicates**; the implementer **rebuts**
+> (`CONTEXT.md` §5). `findings.adjudication` is `NULL` on all nine rows — nothing
+> produces one yet — so nothing here has been adjudicated at all.
 
 Two mechanisms produce that, and both are §6's rather than the code's:
 
 - `anchored_concerns` (`phases/review.py:241`) sums `severity == "concern"`. A
   blocker is not a concern at any verdict, so a sustained blocker contributes
   nothing to the number the page ranks on.
-- §6's level 4 is *"everything else by concern count descending"*, and there is
-  no level above it for a blocker the rebuttal failed to remove.
+- §6's concern ranking (level 4 before rev 17, level 5 after) is *"everything
+  else by concern count descending"*, and before rev 17 no level sat above it for
+  a blocker the rebuttal failed to remove.
 
 §6's stated guarantee is *"`blocker` never reaches this page unrebutted."* That
 is true, and it is not the property that was needed. These were rebutted. The
-guarantee protects against an unadjudicated blocker and says nothing about an
-adjudicated one — and `CONTEXT.md`'s own distinction between a finding and a
-concern is what makes the omission invisible in the prose.
+guarantee protects against a blocker that never reached REBUT and says nothing
+about one the critic verdicted `confirmed` when it got there — and `CONTEXT.md`'s
+own distinction between a finding and a concern is what makes the omission
+invisible in the prose.
 
 **This is the page's whole job failing.** §6 exists so you can dismiss in ten
 seconds and accept in two minutes; on this data it puts the row you must not
@@ -72,9 +89,9 @@ accept at the bottom, wearing the same caption as four scaffolding rows.
 of these specs declare `risk: elevated` in frontmatter; the ledger records it for
 one. `SA-0005` and `SA-0007` both declare `elevated` and both persist `standard`
 — the scar left by `docs/BACKLOG.md` item 18's fifth instance, where `cli.py`
-never passed `risk=spec.risk` into `CellSpec`. Sort level 3 therefore sorts one
-task where it should sort six, and **the history cannot be corrected**: the
-declared value is only right for tasks run after the fix.
+never passed `risk=spec.risk` into `CellSpec`. The risk level — 3 before rev 17,
+4 after — therefore sorts one task where it should sort six, and **the history
+cannot be corrected**: the declared value is only right for tasks run after the fix.
 
 > #28 predicted this level would sort nothing *because every run declared
 > `elevated`*. It sorts nothing for the opposite reason. Both the ticket and
@@ -91,8 +108,10 @@ scan, not a heading you navigate"* — scan this one and you conclude two repos 
 `_STATE_RANK` adds `PREFLIGHT_FAILED`, `GATE_ERROR`, `NOT_IMPLEMENTED`,
 `EXHAUSTED`, `ORPHANED` and `RATE_LIMITED` to level 2, each with a comment
 explaining that without it a dead cell or a provider wall sorts below a green PR.
-§6 lists three states at that level. **The code is the better record and the prose
-is the authority**, which is the wrong way round for a document specs cite by number.
+§6 listed **two** at that level before rev 17, and did not mention that the code
+also ranks `REVIEWING` and `REBUTTING` there. **The code was the better record
+while the prose held the authority**, which is the wrong way round for a document
+specs cite by section number.
 
 **`N att` means something the `attempts` table does not store.** Rows there are
 one per phase-session (§4.1: *"`phase` is the state the task was in when the turn
@@ -101,22 +120,26 @@ wants repair-loop attempts. `1 + COUNT(phase = 'REPAIRING')` reproduces PACKAGE'
 number **exactly on all four packaged tasks**, so it is recoverable; but the same
 word means two things one join apart.
 
-## The batch header cannot be rendered at all
+## The batch header is half-sourced
 
 | §6 field | Source | Status |
 |---|---|---|
 | counts by terminal state | `tasks.state` | renders |
-| total spend | `tasks.spent_usd_est` | partial — 5 of 10 rows are `0.0` |
+| total spend | `tasks.spent_usd_est` | renders — `0.0` on the 5 tasks predating cost reconciliation, a true zero rather than a gap |
 | wall clock | `batches.started_at/ended_at` | no table (§4.2.1 decides it) |
 | per-repo preflight | `runs.preflight` | column exists, never written |
-| base-suite status | `gate_results.run_id` | no baseline rows recorded |
+| base-suite status | `gate_results.run_id` | renders — 64 baseline rows across 10 runs |
 | trailing accept rate | — | nothing records whether a task merged |
 
 ## And a question #28 did not ask
 
 **There are two stores, and the ledger is not the authoritative one.**
 `queue.json` is what PACKAGE appends to and what renders today. The ledger cannot
-reproduce it: `risk` disagrees on two of four packaged tasks, and the diff stat
+reproduce it: `risk` disagrees on three rows once the comparison is keyed the way
+the store's own upsert is (`(repo, spec_id)`, per `append_queue_line`) rather than
+on the pull request URL — keying on the URL silently skips any row whose link the
+two records disagree about, so the first count this record produced was a floor
+rather than a total. The diff stat
 (`+180/−22`, in §6's mock and in `QueueLine`) is stored in no column at all.
 Either the ledger gains what it is missing and becomes the source, or the page
 keeps reading the store and §6 should stop implying otherwise. Left as a decision

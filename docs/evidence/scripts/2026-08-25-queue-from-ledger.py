@@ -37,7 +37,14 @@ SELECT r.name AS repo, t.spec_id, t.state, t.risk, t.pr_url,
            AND f.anchored = 1) AS concerns,
        (SELECT COUNT(*) FROM findings f
          WHERE f.task_id = t.task_id AND f.severity = 'blocker'
-           AND f.anchored = 1 AND f.verdict = 'confirmed') AS confirmed_blockers
+           AND f.anchored = 1 AND f.verdict = 'confirmed'
+           AND f.rebuttal LIKE 'argued:%') AS sustained_blockers,
+       (SELECT COUNT(*) FROM findings f
+         WHERE f.task_id = t.task_id AND f.severity = 'blocker'
+           AND f.anchored = 1 AND f.verdict = 'confirmed'
+           AND f.rebuttal LIKE 'fixed:%') AS confirmed_then_fixed,
+       (SELECT COUNT(*) FROM gate_results g
+         WHERE g.run_id = runs.run_id) AS baseline_results
   FROM tasks t
   JOIN runs  ON runs.run_id = t.run_id
   JOIN repos r ON r.repo_id = runs.repo_id
@@ -62,7 +69,7 @@ def main() -> None:
             spec_id=r["spec_id"],
             state=r["state"],
             attempts=r["attempts"],
-            cost_usd_est=r["cost"] or None,
+            cost_usd_est=r["cost"],
             concerns=r["concerns"],
             # HOLE 1: the ledger records no diff stat. Only queue.json has it.
             added=0,
@@ -85,10 +92,10 @@ def main() -> None:
         },
     )
 
-    store = {(d["spec_id"], d["link"]): d for d in json.loads(STORE.read_text())}
+    store = {(d["repo"], d["spec_id"]): d for d in json.loads(STORE.read_text())}
     diffs = []
     for r, line in zip(rows, lines, strict=True):
-        was = store.get((r["spec_id"], r["pr_url"] or ""))
+        was = store.get((r["repo"], r["spec_id"]))
         if not was:
             continue
         for field, ledger_v in (
@@ -119,14 +126,23 @@ def main() -> None:
             for q in sorted(lines, key=sort_key)
         ),
         "</table>",
-        "<h2>Confirmed blockers the page has no column for</h2>",
+        "<h2>Blockers the page has no column for</h2>",
         "<table>",
         *(
             f"<tr><td>{html.escape(r['spec_id'])}</td>"
-            f"<td>{r['confirmed_blockers']} confirmed blocker(s)</td>"
+            f"<td>{r['sustained_blockers']} sustained (argued + confirmed)</td>"
+            f"<td>{r['confirmed_then_fixed']} confirmed after a fix</td>"
             f"<td>rendered as “{r['concerns']} concern(s)”</td></tr>"
             for r in rows
-            if r["confirmed_blockers"]
+            if r["sustained_blockers"] or r["confirmed_then_fixed"]
+        ),
+        "</table>",
+        "<h2>Baseline gate results per run</h2>",
+        "<table>",
+        *(
+            f"<tr><td>{html.escape(r['spec_id'])}</td>"
+            f"<td>{r['baseline_results']} rows with run_id</td></tr>"
+            for r in rows
         ),
         "</table>",
     ]
