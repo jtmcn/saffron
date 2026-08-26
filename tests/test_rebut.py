@@ -421,3 +421,32 @@ def test_sustained_blockers_on_sa_0005s_real_shape():
         ],
     )
     assert rebut.sustained_blockers(result) == 1
+
+
+def test_sustained_blockers_takes_the_first_answer_to_a_duplicated_finding():
+    """Nothing constrains the extracted rebuttals to one entry per finding, and
+    `session.py` records the first answer for exactly that reason. A `fixed`
+    followed by a stray `argued` is a fixed blocker in the ledger, so it must
+    not read as sustained here — otherwise the two disagree about the same
+    task and the queue ranks on the one nobody measured."""
+    result = _result(
+        rebuttal=rebut.RebuttalTurn(
+            rebuttals=[
+                rebut.Rebuttal(finding=1, action="fixed", argument="committed the fix"),
+                rebut.Rebuttal(
+                    finding=1, action="argued", argument="on reflection, no"
+                ),
+            ]
+        ),
+        verdicts=[
+            rebut.LensVerdicts(
+                lens="correctness",
+                verdicts=[
+                    rebut.Verdict(
+                        finding=1, verdict="confirmed", reason="the fix is real"
+                    )
+                ],
+            )
+        ],
+    )
+    assert rebut.sustained_blockers(result) == 0

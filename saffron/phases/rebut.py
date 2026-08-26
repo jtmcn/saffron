@@ -363,9 +363,14 @@ def sustained_blockers(rebut_result: RebutResult | None) -> int:
     """
     if rebut_result is None or rebut_result.rebuttal.error:
         return 0
-    argued = {
-        r.finding for r in rebut_result.rebuttal.rebuttals if r.action == "argued"
-    }
+    # First answer wins, matching the ledger: nothing constrains `rebuttals` to
+    # one entry per finding, and `session.py` de-dupes the same way before
+    # recording. Membership over every entry would let a stray `argued` after a
+    # `fixed` count as sustained while the ledger reads `fixed`.
+    answered: dict[int, str] = {}
+    for r in rebut_result.rebuttal.rebuttals:
+        answered.setdefault(r.finding, r.action)
+    argued = {finding for finding, action in answered.items() if action == "argued"}
     confirmed = {
         v.finding
         for lens in rebut_result.verdicts
