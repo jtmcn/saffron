@@ -215,6 +215,22 @@ inside `touches`, as `integrity` already does, and `size_gate` is handed
 neither `touches` nor a `--numstat` cross-check. **The wiring spec has both and
 should close it**, which makes that spec's second reason to exist.
 
+**Closed at the tier that blocks; corrected 2026-08-25 (#27).** `size_gate` is
+handed `touches` and returns `error` when an unreadable block names a declared
+path (`_unreadable_declared_path`, `saffron/gates/core/size.py:101`) — reusing
+`scope.matches`, so "declared" means one thing in every gate. The paragraph
+above stood as outstanding work after the work had shipped, which is the shape
+#26 found on item 17: a stamp read as a plan.
+
+**Two residuals, and the first was nearly lost to the correction above.** The
+guard is `if unreadable is not None and blocking` (`size.py:162`), so at
+`standard` an unreadable declared path still counts as zero lines silently.
+That is the right scope — the original complaint was about `elevated`, the one
+tier where `size` blocks — but it is a narrower closure than "closed", and an
+advisory gate that under-reports is still a gate reporting something false.
+The `--numstat` cross-check remains an upgrade path in the docstring rather
+than shipped code.
+
 ## 3. `findings` and `attempts` have no tables
 
 `DESIGN.md` §4.1 declares both. Neither exists, so:
