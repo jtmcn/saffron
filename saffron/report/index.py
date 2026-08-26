@@ -176,7 +176,7 @@ def append_queue_line(
     An upsert, not a bare append: re-running a spec after a `MERGE_FAILED` is
     the operator's normal response, and two rows for it render twice — the
     stale `MERGE_FAILED` (rank 2) sorting *above* the fresh `READY_FOR_REVIEW`
-    (rank 4), showing a spec they already resolved as still needing them. The
+    (rank 5), showing a spec they already resolved as still needing them. The
     header's counts double with it. Keyed on repo *and* spec: one batch tree
     holds several repos, and spec ids are only unique within one.
     """

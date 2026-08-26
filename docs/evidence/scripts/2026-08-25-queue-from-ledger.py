@@ -77,6 +77,10 @@ def main() -> None:
             link=r["pr_url"] or "",
             note="",
             risk=r["risk"],
+            # Selected at line 41 and unpassed until SA-0008 landed level 3:
+            # without it this script renders the pre-fix ordering forever and
+            # stops reproducing the defect it was written to measure.
+            sustained=r["sustained_blockers"],
         )
         for r in rows
     ]
