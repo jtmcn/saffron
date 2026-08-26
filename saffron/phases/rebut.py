@@ -344,6 +344,22 @@ def rebut_state(
     return "READY_FOR_REVIEW", f"every blocker withdrawn by its own lens{unfixed}"
 
 
+def first_answers(rebuttal: RebuttalTurn) -> dict[int, Rebuttal]:
+    """The rebuttal keyed by blocker number, first answer winning.
+
+    Nothing in `_Rebuttals` constrains the model to one entry per `finding`,
+    and three places read this field: the ledger, the queue's counts, and the
+    pull request's Disagreements table. They disagreed — two took the first
+    answer, one took the last — so the same duplicate rendered as `fixed` in
+    the record and `argued` to the operator reading the PR. The rule lives
+    here now; a caller that wants a different one is a caller with a bug.
+    """
+    answered: dict[int, Rebuttal] = {}
+    for r in rebuttal.rebuttals:
+        answered.setdefault(r.finding, r)
+    return answered
+
+
 def sustained_blockers(rebut_result: RebutResult | None) -> int:
     """§6 level 3: how many blockers the rebuttal did **not** dispose of.
 
@@ -363,14 +379,11 @@ def sustained_blockers(rebut_result: RebutResult | None) -> int:
     """
     if rebut_result is None or rebut_result.rebuttal.error:
         return 0
-    # First answer wins, matching the ledger: nothing constrains `rebuttals` to
-    # one entry per finding, and `session.py` de-dupes the same way before
-    # recording. Membership over every entry would let a stray `argued` after a
-    # `fixed` count as sustained while the ledger reads `fixed`.
-    answered: dict[int, str] = {}
-    for r in rebut_result.rebuttal.rebuttals:
-        answered.setdefault(r.finding, r.action)
-    argued = {finding for finding, action in answered.items() if action == "argued"}
+    argued = {
+        finding
+        for finding, r in first_answers(rebut_result.rebuttal).items()
+        if r.action == "argued"
+    }
     confirmed = {
         v.finding
         for lens in rebut_result.verdicts

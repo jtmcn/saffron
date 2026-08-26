@@ -1052,15 +1052,16 @@ def _drive_cell(
                 # which is its position in `blockers` counted from 1 (§5.6).
                 # Nothing validates the rebuttal turn's numbering the way
                 # `run_verdict` validates a verdict set, so it is validated
-                # here: a number nobody asked about is dropped, and the first
-                # answer to a blocker is the one that stands. Silently letting
+                # here: a number nobody asked about is dropped, and
+                # `first_answers` keeps the one that stands. Silently letting
                 # a duplicate win leaves another blocker reading as unanswered.
                 # `action` rides along because "fixed" and "argued" are the
                 # difference the critic-ROI query is asking about (§4.6).
-                argued: dict[int, str] = {}
-                for r in result.rebuttal.rebuttals:
-                    if 1 <= r.finding <= len(blockers):
-                        argued.setdefault(r.finding, f"{r.action}: {r.argument}")
+                argued = {
+                    n: f"{r.action}: {r.argument}"
+                    for n, r in rebut.first_answers(result.rebuttal).items()
+                    if 1 <= n <= len(blockers)
+                }
                 judged = {
                     v.finding: v.verdict
                     for lens in result.verdicts

@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import GateResult, split_lines
 from saffron.intake import Spec
-from saffron.phases.rebut import RebutResult
+from saffron.phases.rebut import RebutResult, first_answers
 from saffron.phases.review import LensReview, anchored_blockers
 
 # ponytail: covers #N, GH-N, and owner/repo#N — not the full issue-URL form
@@ -166,7 +166,7 @@ def _disagreements(reviews: list[LensReview], rebut_result: RebutResult | None) 
     rebuttals = {}
     verdicts = {}
     if rebut_result is not None:
-        rebuttals = {r.finding: r for r in rebut_result.rebuttal.rebuttals}
+        rebuttals = first_answers(rebut_result.rebuttal)
         verdicts = {
             v.finding: v for lens in rebut_result.verdicts for v in lens.verdicts
         }
