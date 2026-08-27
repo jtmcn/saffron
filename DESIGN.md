@@ -2,7 +2,7 @@
 
 An agentic software factory: spec files in, reviewed pull requests out, running unattended overnight on one Mac.
 
-**Status:** rev 17 — the first night's scheduler decided against the queue that exists rather than the deep one §4.2 is written for (§4.2.1), and §6's ranking corrected against the real ledger after it sorted a sustained blocker last (`docs/evidence/2026-08-25-morning-queue-from-real-rows.md`). Prior: rev 16 the tree a task is cut from and the executables that judge it are both host-supplied, closing the two trust boundaries backlog items 11 and 12 left open (Appendix N). Prior: rev 15 the cell moved off the API key onto a Claude Code subscription token, and the ceiling reasoning corrected against a measured run (`docs/evidence/2026-08-21-subscription-turn-accounting.md`, Appendix M); rev 14 the critic built and measured against a known-bad diff (Appendix L); rev 13 three tasks run, one reviewed, and the review said no (Appendix K); rev 12 v0.5 run against a live model (Appendix J); rev 11 v0.5 built and reviewed (Appendix I); rev 10 the cell runtime chosen by spike (Appendix G); rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime named (Appendix G); rev 9 v0 built and replayed (Appendix H)
+**Status:** rev 18 — `SA-0001` built and answered: five queries, five SQL equivalents, don't build the emitter (`ontology/RATIONALE.md`). The vocabulary is gated by `shacl` and cross-checked against `CONTEXT.md`'s closed sets; the *operational* question the RATIONALE never tested is stated in Appendix O and left to a spike, and §1.4's bullet stands until that spike runs. Prior: rev 17 the first night's scheduler decided against the queue that exists rather than the deep one §4.2 is written for (§4.2.1), and §6's ranking corrected against the real ledger after it sorted a sustained blocker last (`docs/evidence/2026-08-25-morning-queue-from-real-rows.md`). Prior: rev 16 the tree a task is cut from and the executables that judge it are both host-supplied, closing the two trust boundaries backlog items 11 and 12 left open (Appendix N). Prior: rev 15 the cell moved off the API key onto a Claude Code subscription token, and the ceiling reasoning corrected against a measured run (`docs/evidence/2026-08-21-subscription-turn-accounting.md`, Appendix M); rev 14 the critic built and measured against a known-bad diff (Appendix L); rev 13 three tasks run, one reviewed, and the review said no (Appendix K); rev 12 v0.5 run against a live model (Appendix J); rev 11 v0.5 built and reviewed (Appendix I); rev 10 the cell runtime chosen by spike (Appendix G); rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime named (Appendix G); rev 9 v0 built and replayed (Appendix H)
 
 **Companion document:** `CONTEXT.md` — the controlled vocabulary. It is authoritative for what words mean; this document is authoritative for what the system does. Where they disagree, one of them has a bug.
 **Scope:** language- and stack-agnostic. Saffron develops *any* repo that can satisfy the gate contract (§5.4). First repo is Saffron itself; `thermal-edge` is the first external one.
@@ -67,7 +67,7 @@ The important inversion: **the product of this factory is not code, it is a revi
 - Cloud runners. Local only until throughput actually binds.
 - Agents writing their own specs from a roadmap. That's v3 and it's the part most likely to waste money.
 - A bespoke diff viewer. GitHub already built the best one you'll ever have (§6).
-- An ontology-*driven* orchestrator. The factory ontology (§4.6) **describes** the run record; it never controls execution. SHACL shapes validate the projection; they do not gate state transitions, and no scheduling decision reads a triple.
+- An ontology-*driven* orchestrator. The factory ontology (§4.6) **describes** the run record; it never controls execution. SHACL shapes validate the projection; they do not gate state transitions, and no scheduling decision reads a triple. (Stands for v1. Appendix O states the operational question this bullet forecloses, and the spike that would reopen it.)
 - Publishing the vocabulary at a resolvable IRI, or `owl:imports` of external ontologies at run time. Cells have no network (§5.1); external vocabularies are vendored and committed.
 - **Language auto-detection, or a plugin system.** A repo declares what it is; Saffron does not sniff for a `package.json`. Declaration is one file the repo owner writes once; detection is a heuristic that fails silently on the tenth repo.
 - **A gate marketplace / shared gate library.** Gates are shell programs in the repo. Copy-paste between repos beats a dependency for the first ten repos, and probably forever at this scale.
@@ -1142,7 +1142,7 @@ Success criterion: a batch spans two repos, and the diff to Saffron's source req
 
 Only if `ontology/RATIONALE.md` says the queries are worth reading: ledger → RDF projection, pyoxigraph store, materialization at batch end, SHACL validation of the projection.
 
-If it says otherwise, move `ontology/queries/` into `docs/` as worked examples and keep the vocabulary as documentation. **That is a completed project, not an abandoned one** — you will have bought a precise answer to "is the relational model costing me anything?" for the price of a weekend, which is the cheapest that answer is ever available.
+It says otherwise (rev 18), so: move `ontology/queries/` into `docs/` as worked examples and keep the vocabulary as documentation — noting that the `shacl` gate and the `CONTEXT.md` cross-check are readers the queries are not, and that Appendix O's spike is the only thing that reopens an emitter. **That is a completed project, not an abandoned one** — you will have bought a precise answer to "is the relational model costing me anything?" for the price of a weekend, which is the cheapest that answer is ever available.
 
 ### v3 — the generality test, then only if v2 is earning its keep
 
@@ -2298,3 +2298,46 @@ sites monkeypatch the slug — against a regex that is far better covered in
 isolation. And the empty-head guard in the default-branch fetch is untested:
 constructing a successful fetch with an empty `FETCH_HEAD` against real git is
 harder than the guard is worth.
+
+---
+
+## Appendix O — rev 18: the operational question
+
+`SA-0001` shipped and answered the question it was asked. Five queries, five SQL wins, don't build the emitter (`ontology/RATIONALE.md`). That verdict stands, and Appendix B principle 10 is what it is an instance of.
+
+It also raised a different question, which the RATIONALE did not test and cannot settle: **the queries were the analytical case for the ontology. Is there an operational one?**
+
+### What makes it worth asking now
+
+Three things, none of which existed when §1.4 was written.
+
+- **The vocabulary found three defects in this document.** `size` blocking at the wrong tier (Appendix B), `gate_results` and `findings` being one assertion shape (§4.6), and — building it — that `CONTEXT.md` §6, §3.3 and `ledger.py` closed the terminal-state set three different ways while `attempts.phase` holds states rather than phases. A modelling exercise that keeps finding real defects is producing something, whatever the queries say.
+- **`ontology/` is now a gated surface.** The `shacl` gate makes the shapes operational *as a gate*, which is the weakest useful sense of the word and is already built. Nothing in §1.4 forbids it: the shapes validate an artifact, not a state transition.
+- **Prior art.** Zhang et al., *Toward Effective and Reliable LLM Agents via Dynamic Ontology* (arXiv 2608.22974), builds a task ontology as an executable kernel and reports gains on three agent benchmarks. Its load-bearing sentence is architecturally ours: *"Once frozen, the kernel is the only channel through which the agent reaches the data. It cannot name a concept or invoke a computation the kernel does not declare."* That is §2's line, reached from the effectiveness side rather than the isolation side.
+
+### The two positions
+
+**For.** The control plane's rules are currently Python that runs and prose that does not. A declarative form makes them inspectable, checkable against each other, and testable without executing a scheduler. The conflict set, `elevate_on`, the terminal-state distinction and the refusal predicate (§4.2.1) are all set containment, and set containment is what shapes are for.
+
+**Against, and it is the stronger half.** Saffron already has an enforceable contract between the model and what it may do, and it is not made of triples: the gate contract, `allowed_tools`, the proxy allowlist, `touches` and the `scope` gate. OaK's kernel is a *reimplementation* of that boundary for agents that lack one. Re-expressing controls that already work, in a language with no runtime here, buys inspectability and costs a second source of truth — and §4.6's first rule exists because divergence in an audit trail is worse than either store alone.
+
+There is also a cost that has to be stated rather than discovered: **an ontology that controls execution needs the emitter the RATIONALE said not to build.** That is not incoherent — it would be built for a reason the RATIONALE never tested — but the reason must be the new one, argued on its own evidence, and not the analytics case arriving through a side door.
+
+### What full SDLC coverage would take, measured
+
+Extending the vocabulary to the whole of `CONTEXT.md` means roughly thirty terms — cell, container, cell runtime, worktree, mirror, batch tree, index, queue line, conflict set, extraction turn, plan checkpoint, refusal, no-progress, anchored, merge train, preflight, bucket, promote — that no query or shape reads, and that no §4.1 table projects from. Under the dead-term test they are deleted; without it the ontology is the isomorphic re-encoding §4.6 exists to forbid, one level up, re-encoding a glossary rather than a schema. **Coverage is downstream of this decision, not independent of it.** Decided one way the terms acquire readers; decided the other they are decoration, and the dead-term test is right to say so.
+
+### The decision, and when it gets made
+
+Not by argument. §1.4's bullet **stands for v1**, and this appendix is what reopens it — the same shape as Appendix G, which named a product only after a spike returned four assertions.
+
+The cheap experiment is available and does not exist yet: §4.2.1's scheduler is decided in full and unbuilt, and its refusal predicate is pure set containment. Build it twice — once as the Python `intake` already needs, once as shapes over a hand-authored graph of in-flight tasks — and compare:
+
+1. Does the shape form state a refusal the Python form leaves implicit?
+2. Does either catch a case the other misses, on the same fixtures?
+3. What does the graph cost to keep current, per scheduled task?
+4. Can the shape form be read by someone who has not read the Python?
+
+A yes on 1 and 4 with an acceptable 3 reopens §1.4. Anything else closes it, and `ontology/` stays what §9's v2.5 already says it is: a completed project.
+
+56. **A negative result answers the question it tested, and no other.** `SA-0001` proved the queries were not worth an emitter. It proved nothing about whether the vocabulary is worth executing, because it never asked — and the honest response to "then let's make it operational" is a different experiment, not a re-reading of the first one.
