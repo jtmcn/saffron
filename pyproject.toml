@@ -32,6 +32,22 @@ testpaths = ["tests"]
 markers = ["cell: needs a real cell runtime; excluded from the default run"]
 addopts = "-m 'not cell'"
 
+[tool.pyright]
+# Wire pyright to the project venv: by default it resolves the pyenv global
+# interpreter (no pydantic/pytest), so every import failed and types degraded
+# to Unknown. `venvPath` is the dir containing the venv, `venv` its name.
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+# basic is the pyright default: reportArgType etc, but not the strict-only rules
+# (e.g. reportUnknownMemberType). Raise per-rule below instead of strict mode.
+typeCheckingMode = "basic"
+# docs are a record (ruff excludes them too); spikes are throwaway; .saffron is
+# this repo being its own target. `.venv` is excluded from *analysis* (type-
+# checking the installed packages is pure noise) but the venvPath/venv pair above
+# still resolves imports against it.
+exclude = ["docs", "spikes", ".saffron", ".venv"]
+
 [tool.ruff]
 # ruff formats python blocks inside markdown; plan docs are a record, leave them.
 extend-exclude = ["docs"]

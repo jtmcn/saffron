@@ -344,6 +344,30 @@ def test_a_specs_declared_risk_reaches_the_cell(tmp_path, monkeypatch, capsys):
     assert cell_spec.risk == "elevated"
 
 
+def test_a_specs_declared_witnesses_reach_the_cell(tmp_path, monkeypatch, capsys):
+    """`cli.load_spec` parses the operator's host-side copy before the cell
+    starts, so the witnesses the gate checks were never in `/work` — that, and
+    `.saffron/**` being outside `touches`, is what stops the cell relaxing one.
+    Parsed and then discarded would leave the gate with nothing to check."""
+    repo = _local_origin(tmp_path)
+    args = _namespace(repo, tmp_path)
+    spec = tmp_path / "SY-3.md"
+    spec.write_text(
+        "---\nid: SY-3\ntitle: Three\ntype: feature\ntouches: ['src/**']\n"
+        "acceptance:\n"
+        "  - claim: it works\n"
+        "    witness: tests/test_x.py::test_it_works\n"
+        "---\n\nbody\n"
+    )
+    args.spec = spec
+
+    cell_spec, _printed = _capture_cell_spec(monkeypatch, repo, tmp_path, args, capsys)
+
+    assert [c.witness for c in cell_spec.acceptance] == [
+        "tests/test_x.py::test_it_works"
+    ]
+
+
 def test_the_base_is_the_remote_default_branch_not_the_checkout(tmp_path, monkeypatch):
     """A task started from a feature branch is still cut from the default branch.
 

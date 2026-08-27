@@ -29,6 +29,25 @@ class SpecError(ValueError):
     """A spec that cannot be trusted to describe what it asks for."""
 
 
+class Criterion(BaseModel):
+    """One acceptance criterion and the witness the host checks it by.
+
+    `witness` is a test node id, opaque here as everywhere else: intake never
+    splits it and the gate never parses it (§5.4).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    claim: str
+    """The prose the PR body renders. Where `acceptance:` is declared it *is*
+    the acceptance criteria, and the markdown section is omitted."""
+    witness: str
+    preserves: bool = False
+    """The criterion claims the change did *not* break this, so its witness is
+    checked the opposite way — green at both sides. A new test can never
+    preserve: it did not pass at base."""
+
+
 class Spec(BaseModel):
     """The unit of work. Never a ticket, an issue, or a prompt."""
 
@@ -61,6 +80,7 @@ class Spec(BaseModel):
 
     body: str = ""
     acceptance_criteria: list[str] = Field(default_factory=list)
+    acceptance: list[Criterion] = Field(default_factory=list)
 
 
 def parse_spec(text: str) -> Spec:
@@ -84,6 +104,14 @@ def parse_spec(text: str) -> Spec:
     for key in reserved:
         if key in fields:
             raise SpecError(f"spec frontmatter may not set reserved key {key!r}")
+
+    # One list or the other. Both is two sets of criteria with nothing keeping
+    # them in sync, and no way for `pr_body` to say which one it ticks.
+    if fields.get("acceptance") and reserved["acceptance_criteria"]:
+        raise SpecError(
+            "spec declares both `acceptance:` and a `## Acceptance criteria` "
+            "section; where `acceptance:` is declared it is the criteria"
+        )
 
     # model_validate, not Spec(**fields): a non-string frontmatter key (`1:`,
     # or an unquoted `on:`) makes ** raise TypeError past this guard.

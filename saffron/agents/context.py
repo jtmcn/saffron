@@ -10,6 +10,9 @@ instructions that actually change behaviour.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
+
+from saffron.intake import Criterion
 
 # CONTEXT.md's own table, in code. REPAIR and REBUT are deliberately absent:
 # both resume a session that already carries the implementer's sections, and
@@ -67,6 +70,51 @@ def constraints_block(
         lead + "\n\n" + "\n".join(f"- `{path}`" for path in paths)
         for lead, paths in sections
         if paths
+    )
+
+
+def witnesses_block(acceptance: Sequence[Criterion]) -> str:
+    """The witnesses `criteria` checks, as prompt text.
+
+    Verbatim, because they are exact strings the implementer has to name its
+    tests. Returned as a substituted value, like `constraints_block` — the
+    caller hands it to `build_system_prompt`, which passes it to `.format` as an
+    argument and never as a format string (§5.3). Empty for a spec declaring
+    none: a heading over nothing invites an invented list.
+    """
+    if not acceptance:
+        return ""
+    lines = [
+        "## The witnesses you are judged against",
+        "",
+        "Each criterion names a test node id the host checks after you finish, "
+        "by reading what the suite collected and what it failed — at the base "
+        "commit and at head. Name your tests exactly these strings.",
+        "",
+        "A witness marked `preserves` must already pass at the base commit and "
+        "still pass. Every other witness must **not** pass at the base commit "
+        "and must pass when you are done: a test that was already green proves "
+        "nothing about this change.",
+        "",
+    ]
+    lines += [
+        f"- `{c.witness}`{' *(preserves)*' if c.preserves else ''} — {c.claim}"
+        for c in acceptance
+    ]
+    return "\n".join(lines)
+
+
+def criteria_section(acceptance: Sequence[Criterion]) -> str:
+    """The claims as prose, in the shape `intake._acceptance_criteria` parses
+    out of a markdown spec — so a witnessed spec's critic sees the same
+    acceptance criteria a markdown-declared one already gets, and not
+    `witnesses_block`'s witness names or naming instruction, which are aimed
+    at the implementer. Empty for a spec declaring none.
+    """
+    if not acceptance:
+        return ""
+    return "\n".join(
+        ["## Acceptance criteria", ""] + [f"- [ ] {c.claim}" for c in acceptance]
     )
 
 

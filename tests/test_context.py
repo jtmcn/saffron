@@ -175,3 +175,61 @@ def test_a_template_with_spec_twice_gets_the_same_literal_text_both_times():
         spec="Use {{cookiecutter.name}} literally.",
     )
     assert out.count("Use {{cookiecutter.name}} literally.") == 2
+
+
+def test_the_declared_witnesses_reach_the_prompt_verbatim():
+    """They are exact strings the implementer has to name its tests. A gate
+    that blocks on a target the agent was never shown burns every attempt for
+    a reason no repair turn can diagnose."""
+    from saffron.intake import Criterion
+
+    block = context.witnesses_block(
+        [
+            Criterion(claim="the box ticks", witness="tests/test_criteria.py::test_a"),
+            Criterion(
+                claim="nothing broke",
+                witness="tests/test_intake.py::test_b",
+                preserves=True,
+            ),
+        ]
+    )
+    assert "tests/test_criteria.py::test_a" in block
+    assert "tests/test_intake.py::test_b" in block
+    assert "the box ticks" in block
+    assert "preserves" in block
+
+
+def test_a_spec_declaring_no_witnesses_gets_no_witness_heading():
+    """A heading over nothing reads as withheld and invites an invented list —
+    `constraints_block`'s own rule, and a default witness is exactly the defect
+    SA-0011 exists to close."""
+    assert context.witnesses_block([]) == ""
+
+
+def test_criteria_section_round_trips_through_intakes_own_parser():
+    """Finding 1, PR #48 review: intake requires the markdown `## Acceptance
+    criteria` section absent when `acceptance:` is declared, so a witnessed
+    spec's claims live only in frontmatter, which only the IMPLEMENT prompt
+    reads. `criteria_section` restores what the critic loses — the same shape
+    `intake._acceptance_criteria` parses out of a markdown spec, pinned by
+    parsing this function's own output with it."""
+    from saffron import intake
+    from saffron.intake import Criterion
+
+    acceptance = [
+        Criterion(claim="the box ticks", witness="tests/test_criteria.py::test_a"),
+        Criterion(
+            claim="nothing broke",
+            witness="tests/test_intake.py::test_b",
+            preserves=True,
+        ),
+    ]
+    section = context.criteria_section(acceptance)
+    assert intake._acceptance_criteria(section) == ["the box ticks", "nothing broke"]
+    # Claims only — the witness name and the naming instruction are
+    # `witnesses_block`'s remit, aimed at the implementer, not the critic.
+    assert "tests/test_criteria.py::test_a" not in section
+
+
+def test_criteria_section_is_empty_for_no_acceptance():
+    assert context.criteria_section([]) == ""

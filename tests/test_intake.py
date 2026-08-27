@@ -185,3 +185,67 @@ def test_a_ceiling_of_zero_is_refused_rather_than_reaching_the_loop():
                 "---\nid: SY-1\ntitle: One\ntype: feature\n"
                 f"{field}: 0\n---\n\n## Acceptance criteria\n- [ ] it works\n"
             )
+
+
+def test_a_declared_acceptance_block_parses_into_structured_criteria():
+    spec = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: feature\n"
+        "acceptance:\n"
+        "  - claim: the gate reports skip with no witnesses\n"
+        "    witness: tests/test_criteria.py::test_no_witnesses_skips\n"
+        "  - claim: today's parse is unchanged\n"
+        "    witness: tests/test_intake.py::test_extracts_the_acceptance_criteria_as_a_checklist\n"
+        "    preserves: true\n"
+        "---\n\nbody only\n"
+    )
+    assert [c.claim for c in spec.acceptance] == [
+        "the gate reports skip with no witnesses",
+        "today's parse is unchanged",
+    ]
+    assert (
+        spec.acceptance[0].witness == "tests/test_criteria.py::test_no_witnesses_skips"
+    )
+    assert (spec.acceptance[0].preserves, spec.acceptance[1].preserves) == (False, True)
+
+
+def test_a_spec_with_no_acceptance_block_parses_exactly_as_it_does_today():
+    """Ten specs predate this key. Absent, nothing changes — and the markdown
+    section still populates `acceptance_criteria`."""
+    spec = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: bug\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    assert spec.acceptance == []
+    assert spec.acceptance_criteria == ["it works"]
+
+
+def test_a_spec_declaring_both_lists_is_refused_as_malformed():
+    """Two lists of criteria with nothing keeping them in sync, and no way for
+    `pr_body` to say which one it is ticking."""
+    with pytest.raises(SpecError, match="both"):
+        parse_spec(
+            "---\nid: TE-1\ntitle: t\ntype: feature\n"
+            "acceptance:\n"
+            "  - claim: c\n    witness: t.py::test_w\n"
+            "---\n\n## Acceptance criteria\n- [ ] it works\n"
+        )
+
+
+def test_an_unknown_key_inside_a_criterion_is_refused():
+    """A typo in a witness key is a validation error, not a silent mis-parse —
+    which is the whole reason the witness is not hung off the checklist line."""
+    with pytest.raises(SpecError):
+        parse_spec(
+            "---\nid: TE-1\ntitle: t\ntype: feature\n"
+            "acceptance:\n"
+            "  - claim: c\n    witness: t.py::test_w\n    preserve: true\n"
+            "---\n\nbody\n"
+        )
+
+
+def test_a_criterion_missing_its_witness_is_refused():
+    with pytest.raises(SpecError):
+        parse_spec(
+            "---\nid: TE-1\ntitle: t\ntype: feature\n"
+            "acceptance:\n  - claim: c\n---\n\nbody\n"
+        )

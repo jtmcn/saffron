@@ -1237,6 +1237,122 @@ def test_a_long_backtick_run_cannot_evict_the_gate_table(tmp_path):
         assert rendered.count(fence + "\n") == 1, run  # opened and closed
 
 
+def _witness_spec():
+    return parse_spec(
+        "---\nid: TE-11\ntitle: Witnessed\ntype: feature\n"
+        "acceptance:\n"
+        "  - claim: the first criterion\n"
+        "    witness: t.py::test_ticks\n"
+        "  - claim: the second criterion\n"
+        "    witness: t.py::test_missing\n"
+        "---\n\nbody\n"
+    )
+
+
+def _witness_body(*results):
+    return render_pr_body(
+        _witness_spec(),
+        list(results),
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=10,
+        removed=1,
+        transcript_path="~/.saffron/batches/1/r/1",
+    )
+
+
+def test_a_met_criterion_is_ticked_only_from_a_gate_result():
+    rendered = _witness_body(
+        GateResult(
+            gate="criteria", status="pass", summary="2 criteria witnessed at head"
+        )
+    )
+    assert "- [x] the first criterion" in rendered
+    assert "- [x] the second criterion" in rendered
+
+
+def test_an_unmet_criterion_is_unticked_and_carries_the_reason():
+    rendered = _witness_body(
+        GateResult(
+            gate="criteria",
+            status="fail",
+            failures=[
+                Failure(
+                    file="t.py::test_missing",
+                    code="witness-not-collected",
+                    message="names nothing the suite ran at head",
+                )
+            ],
+            summary="1 of 2 criteria have no passing witness",
+        )
+    )
+    assert "- [x] the first criterion" in rendered
+    assert "- [ ] the second criterion" in rendered
+    assert "witness-not-collected" in rendered
+
+
+def test_a_skipped_gate_never_ticks_a_declared_criterion():
+    """`skip` means nobody looked. A box ticked from it would be the defect
+    this spec exists to close, wearing the fix's clothes."""
+    rendered = _witness_body(
+        GateResult(
+            gate="criteria", status="skip", summary="no readable enumeration at head"
+        )
+    )
+    assert "- [x]" not in rendered
+    assert "not mechanically checked" in rendered.lower()
+
+
+def test_a_repo_declared_criteria_gate_cannot_tick_the_boxes():
+    """`_suite` appends the host-constructed `criteria` result after every
+    declared gate — a repo that declares its own gate named `criteria` must
+    not be able to shadow it and tick boxes it never earned."""
+    rendered = _witness_body(
+        GateResult(gate="criteria", status="pass", tool="echo 1"),
+        GateResult(
+            gate="criteria",
+            status="fail",
+            failures=[
+                Failure(
+                    file="t.py::test_missing",
+                    code="witness-not-collected",
+                    message="names nothing the suite ran at head",
+                )
+            ],
+            summary="1 of 2 criteria have no passing witness",
+        ),
+    )
+    assert "- [x] the first criterion" in rendered
+    assert "- [ ] the second criterion" in rendered
+    assert "witness-not-collected" in rendered
+
+
+def test_a_spec_predating_the_key_is_marked_not_mechanically_checked():
+    """The ten specs from SA-0001 to SA-0010 keep the markdown section and the
+    gate skips — an unticked box meaning *nobody looked* must not render
+    identically to one meaning *the witness failed*."""
+    rendered = body()
+    assert "- [ ] A regression test exists that fails on the current `main`" in rendered
+    assert "not mechanically checked" in rendered.lower()
+    assert "- [x]" not in rendered
+
+
+def test_a_spec_with_no_criteria_at_all_renders_no_section():
+    spec = parse_spec("---\nid: TE-0\ntitle: t\ntype: chore\n---\n\nbody\n")
+    rendered = render_pr_body(
+        spec,
+        [],
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/tmp/x",
+    )
+    assert "Acceptance criteria" not in rendered
+
+
 def test_a_byte_inside_an_added_line_cannot_end_the_test_stanza_early():
     """One raw separator byte in a `+` line used to shatter it, and the
     fragment after the byte read as a stanza header — so the section stopped

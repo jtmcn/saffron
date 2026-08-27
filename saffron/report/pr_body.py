@@ -36,6 +36,11 @@ _BODY_LIMIT = 64_000
 _TRUNCATED = (
     "\n… truncated to fit GitHub's body limit; the full diff is on the branch.\n"
 )
+_UNCHECKED = (
+    "> **Not mechanically checked.** No `criteria` gate result stands behind these "
+    "boxes: an unticked one means nobody looked, not that the criterion failed. A "
+    "spec declares witnesses with an `acceptance:` block."
+)
 
 
 def neutralize(text: str) -> str:
@@ -88,7 +93,7 @@ def render_pr_body(
         f"`{spec.type}` · risk `{risk}` · +{added}/−{removed} · "
         f"{attempts} attempt{'' if attempts == 1 else 's'} · ${spent_usd:.2f}",
         "",
-        _criteria(spec),
+        _criteria(spec, results),
         _new_failures(new_failures),
         _disagreements(reviews, rebut_result),
         None,  # _test_diff, sized last: it is the only unbounded section.
@@ -121,13 +126,37 @@ def _cell(value: object) -> str:
     return neutralize(str(value).replace("|", "\\|").replace("\n", " "))
 
 
-def _criteria(spec: Spec) -> str:
-    if not spec.acceptance_criteria:
+def _criteria(spec: Spec, results: Sequence[GateResult]) -> str:
+    """The checklist, and which kind of unticked each box is.
+
+    Every box was unticked always, for every criterion, with nothing host-side
+    that could ever tick one — a checklist that reads as evidence and is not
+    (§5.4's `tool` defect, one layer up). A box ticks only from a `criteria`
+    gate result; `skip` means nobody looked and must not render as a failure.
+    """
+    # Last, not first: `_suite` appends the host-constructed result after every
+    # declared gate, so a repo declaring its own gate named `criteria` cannot
+    # shadow it.
+    result = next((r for r in reversed(list(results)) if r.gate == "criteria"), None)
+    if spec.acceptance and result is not None and result.status in ("pass", "fail"):
+        unmet = {f.file: f for f in result.failures}
+        lines = ["### Acceptance criteria", ""]
+        for criterion in spec.acceptance:
+            failure = unmet.get(criterion.witness)
+            box = "- [ ]" if failure else "- [x]"
+            why = f": `{failure.code}`" if failure else ""
+            lines.append(f"{box} {criterion.claim} — `{criterion.witness}`{why}")
+        lines.append("")
+        return "\n".join(lines)
+
+    claims = [c.claim for c in spec.acceptance] or spec.acceptance_criteria
+    if not claims:
         return ""
-    lines = ["### Acceptance criteria", ""]
-    lines += [f"- [ ] {criterion}" for criterion in spec.acceptance_criteria]
-    lines.append("")
-    return "\n".join(lines)
+    return "\n".join(
+        ["### Acceptance criteria", "", _UNCHECKED, ""]
+        + [f"- [ ] {claim}" for claim in claims]
+        + [""]
+    )
 
 
 def _new_failures(new_failures: list[NewFailure]) -> str:

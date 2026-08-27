@@ -19,6 +19,10 @@ touches:
   - tests/test_session.py
   - tests/test_context.py
   - tests/test_report.py
+  # Two `SimpleNamespace` stand-ins for `Spec` live here and drift silently
+  # whenever `Spec` gains a field; `pr_body` reading `acceptance` is what breaks
+  # them. Declared, or `scope` fails the only diff that can fix them (item 21).
+  - tests/test_package.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md

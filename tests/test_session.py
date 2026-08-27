@@ -2002,3 +2002,109 @@ def test_a_policy_fault_at_base_sha_names_base_sha(monkeypatch, tmp_path):
             ledger=Ledger(tmp_path / "ledger.db"),
             out_dir=tmp_path / "out",
         )
+
+
+def test_the_criteria_gate_reads_both_suites_and_invokes_nothing(monkeypatch, tmp_path):
+    """`census_gate(base, head)` is the shape, not `scope_gate`'s single tree.
+    The baseline call hands `prior=[]`, so the gate skips there and no task
+    reaches `PREFLIGHT_FAILED` because of it."""
+    from saffron.intake import Criterion
+
+    base = [
+        GateResult(
+            gate="tests", status="pass", tool="pytest 8", collected=["t.py::test_a"]
+        )
+    ]
+    head = [
+        GateResult(
+            gate="tests",
+            status="pass",
+            tool="pytest 8",
+            collected=["t.py::test_a", "t.py::test_new"],
+        )
+    ]
+    cell = _stub_the_runtime(monkeypatch, suites=(base, head, head))
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(
+            acceptance=[
+                Criterion(claim="it works", witness="t.py::test_new"),
+            ]
+        ),
+    )
+    result = next(r for r in outcome.gates if r.gate == "criteria")
+    assert result.status == "pass"
+    assert result.tool is None
+
+
+def test_the_criteria_gate_skips_for_a_spec_that_declares_no_witnesses(
+    monkeypatch, tmp_path
+):
+    """Ten specs predate this key. `skip` is what they get, and every existing
+    behaviour is unchanged."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    result = next(r for r in outcome.gates if r.gate == "criteria")
+    assert result.status == "skip"
+
+
+def test_the_implement_prompt_names_the_witnesses_it_is_judged_against(
+    monkeypatch, tmp_path
+):
+    """Only `spec.body` — the markdown, not the frontmatter — was ever
+    substituted, and the witnesses live in frontmatter."""
+    from saffron.intake import Criterion
+
+    cell = _stub_the_runtime(monkeypatch)
+    _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(
+            acceptance=[
+                Criterion(claim="the box ticks", witness="tests/test_x.py::test_ticks")
+            ]
+        ),
+    )
+    prompt = cell.system_prompts[0]
+    assert "tests/test_x.py::test_ticks" in prompt
+    assert "the box ticks" in prompt
+
+
+def test_a_spec_with_no_witnesses_shows_no_witness_heading(monkeypatch, tmp_path):
+    cell = _stub_the_runtime(monkeypatch)
+    _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
+    assert "witnesses you are judged against" not in cell.system_prompts[0]
+
+
+def test_the_review_lens_prompt_carries_the_claim_for_a_witnessed_spec(
+    monkeypatch, tmp_path
+):
+    """Finding 1, PR #48 review: intake requires the markdown section absent
+    when `acceptance:` is declared, and both REVIEW and REBUT substituted only
+    `spec.body` — so a spec that opts into witnesses showed the critic no
+    acceptance criteria at all. The IMPLEMENT prompt is `system_prompts[0]`;
+    REVIEW invokes one session per lens straight after."""
+    from saffron.intake import Criterion
+
+    cell = _stub_the_runtime(monkeypatch)
+    _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(
+            acceptance=[
+                Criterion(claim="the box ticks", witness="tests/test_x.py::test_ticks")
+            ]
+        ),
+    )
+    review_prompts = cell.system_prompts[1:]
+    assert review_prompts
+    assert all("the box ticks" in p for p in review_prompts)

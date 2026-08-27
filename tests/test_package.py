@@ -682,6 +682,7 @@ def test_a_conflict_persists_merge_failed_and_pushes_nothing(monkeypatch, tmp_pa
         risk="standard",
         touches=[],
         acceptance_criteria=[],
+        acceptance=[],
         type="feature",
     )
 
@@ -785,6 +786,7 @@ def packageable(monkeypatch, tmp_path):
                 risk="standard",
                 touches=["f.txt"],
                 acceptance_criteria=["it works"],
+                acceptance=[],
                 type="feature",
             ),
             repo=work,
