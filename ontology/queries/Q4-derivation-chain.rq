@@ -1,0 +1,63 @@
+# Q4 — Given a merged PR, the full derivation chain: spec → scope → plan → diff
+# → gate suites → findings → rebuttal → PR. This is N5 ("any merged change
+# reconstructible from stored artifacts alone") as a machine-checkable property:
+# a merged PR whose chain does not reach a spec does not appear in the result.
+#
+# SQL equivalent: (a), awkward. The first draft of this header claimed (b) on the
+# grounds that SQL would need one UNION arm per artifact kind — which the query
+# below has four of, so the argument described this query and not its rival. The
+# honest version: §4.1's foreign keys already carry the chain's shape, which is
+# fixed and shallow (tasks.spec_id, attempts.task_id, gate_results.attempt_id,
+# findings.task_id), and no recursion is needed to walk it. What is genuinely
+# awkward is that scope, plan and diff are file paths rather than rows — the same
+# structural fact Q1 and Q3 score as (a), so this scores (a) too.
+#
+# Why the SPARQL form is preferable: the derivation edges are *stated* rather than
+# reconstructed from a path template, which is what lets a broken chain be absent
+# from the result instead of silently rendering as a missing file. That is worth
+# something for N5 and it is not worth an emitter.
+PREFIX saffron: <https://saffron.dev/ns#>
+PREFIX prov:    <http://www.w3.org/ns/prov#>
+PREFIX earl:    <http://www.w3.org/ns/earl#>
+
+# DISTINCT: an attempt generates several artifacts and the PR descends from
+# more than one of them, so the tie to the task multiplies otherwise equal rows.
+SELECT DISTINCT ?pr ?step ?kind
+WHERE {
+  ?task a saffron:Task ;
+        saffron:endedInState saffron:MERGED ;
+        prov:used ?spec .
+  ?spec a saffron:Spec .
+  ?pr a saffron:PullRequest ;
+      (prov:wasDerivedFrom|prov:wasRevisionOf)+ ?spec .
+
+  # and the PR is packaged from a diff this task's own attempts produced.
+  # Reachability to a spec is not reachability to *this* change: a rejected task
+  # reusing the spec shares it, and — through the plan — shares ancestors too, so
+  # the tie has to be the diff the PR was cut from, not a common ancestor of both.
+  ?phase prov:wasInformedBy ?task .
+  ?attempt saffron:withinPhase ?phase ;
+           prov:generated ?head .
+  ?pr prov:wasDerivedFrom ?head .
+
+  {
+    ?pr (prov:wasDerivedFrom|prov:wasRevisionOf)* ?step .
+    ?step a ?kind .
+    FILTER(?kind IN (saffron:Spec, saffron:ScopeProposal, saffron:TouchesSet,
+                     saffron:Plan, saffron:Diff, saffron:PullRequest))
+  } UNION {
+    ?pr (prov:wasDerivedFrom|prov:wasRevisionOf)* ?artifact .
+    ?step a saffron:GateSuite ; prov:used ?artifact .
+    BIND(saffron:GateSuite AS ?kind)
+  } UNION {
+    ?pr (prov:wasDerivedFrom|prov:wasRevisionOf)* ?artifact .
+    ?step a saffron:Finding ; earl:subject ?artifact .
+    BIND(saffron:Finding AS ?kind)
+  } UNION {
+    ?pr (prov:wasDerivedFrom|prov:wasRevisionOf)* ?artifact .
+    ?finding a saffron:Finding ; earl:subject ?artifact .
+    ?step a saffron:Rebuttal ; prov:used ?finding .
+    BIND(saffron:Rebuttal AS ?kind)
+  }
+}
+ORDER BY ?pr ?kind ?step

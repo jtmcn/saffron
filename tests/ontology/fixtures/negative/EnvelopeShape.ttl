@@ -1,0 +1,13 @@
+@prefix saffron: <https://saffron.dev/ns#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix earl: <http://www.w3.org/ns/earl#> .
+@prefix : <https://saffron.dev/data/> .
+
+# The scope gate asserting over an envelope. An envelope is a reading bound and
+# is never enforced against a diff.
+:env a saffron:Envelope, earl:TestSubject .
+:gr a saffron:GateResult ; earl:assertedBy :g ; earl:mode earl:automatic ; earl:subject :env .
+:g a saffron:Gate, saffron:ContractGate ; saffron:role saffron:lint ;
+   saffron:blockingAt saffron:alwaysBlocking .
+saffron:lint a saffron:GateRole .
+saffron:alwaysBlocking a saffron:BlockingLevel .

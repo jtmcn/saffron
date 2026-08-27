@@ -1,0 +1,8 @@
+@prefix saffron: <https://saffron.dev/ns#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix earl: <http://www.w3.org/ns/earl#> .
+@prefix : <https://saffron.dev/data/> .
+
+# "chore" is not one of the three spec types.
+:s a saffron:Spec ; saffron:specType :chore ; saffron:hasCriterion :ac .
+:ac a saffron:AcceptanceCriterion .

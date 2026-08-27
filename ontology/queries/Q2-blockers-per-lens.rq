@@ -1,0 +1,40 @@
+# Q2 — Blockers raised per critic lens, split by whether the operator agreed.
+# The critic layer's ROI. (DESIGN.md §11, §5.6)
+#
+# SQL equivalent: (a) awkward but real, because rev 6 landed a typed
+# `findings.adjudication` column precisely so this would be answerable:
+#
+#   SELECT lens, adjudication, COUNT(*) FROM findings
+#    WHERE severity = 'blocker' GROUP BY lens, adjudication;
+#
+# Why the SPARQL form is preferable: it is not, for this shape of the question —
+# and that is worth recording. What the column cannot do is carry *who* held
+# which position and when. `findings.adjudication` is the operator's; the
+# critic's `verdict` and the implementer's `rebuttal` are two more columns on
+# the same row, and nothing states that they are three agents' judgements of one
+# claim. Here they are three prov:Association nodes on one activity, which is
+# what makes "the implementer disputed and the operator sided with it" a query
+# rather than a manual read of two text columns.
+PREFIX saffron: <https://saffron.dev/ns#>
+PREFIX prov:    <http://www.w3.org/ns/prov#>
+PREFIX earl:    <http://www.w3.org/ns/earl#>
+
+SELECT ?lens ?adjudication (COUNT(DISTINCT ?finding) AS ?blockers)
+WHERE {
+  ?finding a saffron:Finding ;
+           saffron:severity saffron:blocker ;
+           earl:assertedBy ?lens .
+  ?lens a saffron:CriticLens .
+
+  OPTIONAL {
+    ?rebuttal a saffron:Rebuttal ;
+              prov:used ?finding ;
+              prov:qualifiedAssociation ?association .
+    ?association prov:agent ?operator ;
+                 prov:hadRole ?adjudication .
+    ?operator a saffron:Operator .
+    FILTER(?adjudication IN (saffron:agrees, saffron:disagrees))
+  }
+}
+GROUP BY ?lens ?adjudication
+ORDER BY ?lens

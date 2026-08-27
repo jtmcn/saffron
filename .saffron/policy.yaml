@@ -4,6 +4,12 @@ gates:
   lint:   { blocking: true }
   types:  { blocking: true }
   tests:  { blocking: true }
+  # Repo-defined, against a surface an agent cannot satisfy by writing plausible
+  # code: the shapes either accept the graph or they do not (§5.4). Declared
+  # unconditionally rather than `when: "**/*.ttl"` — `GateDeclaration.when` is
+  # parsed and nothing reads it, and a control that reads as present and is not
+  # is the founding defect of Appendix I. Validation is milliseconds.
+  shacl:  { blocking: true }
 
 # Where a plausible-looking wrong change hurts most. Getting this right is most
 # of what onboarding actually means (DESIGN.md §5.6).
@@ -36,8 +42,14 @@ integrity:
   # `**/pyproject.toml`, not the bare name: measured, a *nested* pyproject.toml
   # carrying [tool.ruff] exclude silences ruff over that subtree exactly as a
   # dropped ruff.toml does. `**/` matches zero directories, so root is covered.
+  # `ontology/shapes/**` is the `shacl` gate's whole constraint surface, and the
+  # gate is blocking: an agent that cannot satisfy a shape can otherwise relax an
+  # `sh:in`, drop an `sh:property`, or delete a shape and its paired fixture, and
+  # go green. Same argument as `conftest.py` two lines down — the rules a gate
+  # enforces have to be routed to a person, not just the gate's own executable.
   gate_config:
     [
+      "ontology/shapes/**",
       "**/pyproject.toml",
       ".saffron/**",
       "**/conftest.py",

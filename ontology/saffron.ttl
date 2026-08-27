@@ -1,0 +1,158 @@
+@prefix saffron: <https://saffron.dev/ns#> .
+@prefix prov:    <http://www.w3.org/ns/prov#> .
+@prefix earl:    <http://www.w3.org/ns/earl#> .
+@prefix owl:     <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+
+# The IRI is deliberately not resolvable: publishing the vocabulary is out of
+# scope (SA-0001), and PROV-O/EARL are vendored so nothing dereferences at all.
+saffron: a owl:Ontology ;
+    rdfs:label "Saffron factory ontology" ;
+    rdfs:comment "A PROV-O/EARL projection of the run record (DESIGN.md §4.6). Derived, one-way, provisional." .
+
+## Activities — DESIGN.md §4.6. One activity per gate suite, never per gate: a
+## gate's execution is fully described by the assertion it produces.
+
+saffron:Batch    a owl:Class ; rdfs:subClassOf prov:Activity ; rdfs:label "batch" .
+saffron:Run      a owl:Class ; rdfs:subClassOf prov:Activity ; rdfs:label "run" .
+saffron:Task     a owl:Class ; rdfs:subClassOf prov:Activity ; rdfs:label "task" .
+saffron:Phase    a owl:Class ; rdfs:subClassOf prov:Activity ; rdfs:label "phase" .
+saffron:Attempt  a owl:Class ; rdfs:subClassOf prov:Activity ; rdfs:label "attempt" .
+saffron:GateSuite a owl:Class ; rdfs:subClassOf prov:Activity ; rdfs:label "gate suite" .
+
+# One per contested finding. It is an activity so the three judgements of §5.6 —
+# critic verdict, operator adjudication, implementer rebuttal — hang off it as
+# qualified associations carrying role and time, rather than three string columns.
+saffron:Rebuttal a owl:Class ; rdfs:subClassOf prov:Activity ; rdfs:label "rebuttal" .
+
+saffron:Batch owl:disjointWith saffron:Run .
+
+## Entities
+
+saffron:Spec               a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "spec" .
+saffron:AcceptanceCriterion a owl:Class ;
+    rdfs:subClassOf prov:Entity, earl:TestCriterion ;
+    rdfs:label "acceptance criterion" ;
+    rdfs:comment "First-class, so a gate and a lens can assert on the same criterion via earl:test." .
+saffron:Plan          a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "plan" .
+saffron:ScopeProposal a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "scope proposal" .
+saffron:Diff          a owl:Class ; rdfs:subClassOf prov:Entity, earl:TestSubject ; rdfs:label "diff" .
+saffron:PullRequest   a owl:Class ; rdfs:subClassOf prov:Entity, earl:TestSubject ; rdfs:label "pull request" .
+saffron:Policy        a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "policy" .
+
+# The envelope/touches split of §3: an envelope is a reading bound and is never
+# enforced against a diff; a touches set is, once ratified. Disjoint because the
+# spec frontmatter carries both and nothing else says they are different kinds.
+saffron:Envelope   a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "envelope" .
+saffron:TouchesSet a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "touches" .
+saffron:Envelope owl:disjointWith saffron:TouchesSet .
+
+## Agents
+
+saffron:ImplementerSession a owl:Class ; rdfs:subClassOf prov:SoftwareAgent ; rdfs:label "implementer" .
+saffron:CriticLens a owl:Class ;
+    rdfs:subClassOf prov:SoftwareAgent, earl:Assertor ;
+    rdfs:label "lens" ;
+    rdfs:comment "Lenses are disjoint by construction (§5.5) — which is why one blocker routes to REBUT and there is no vote." .
+saffron:Operator a owl:Class ; rdfs:subClassOf prov:Person, earl:Assertor ; rdfs:label "operator" .
+
+saffron:Gate a owl:Class ; rdfs:subClassOf prov:SoftwareAgent, earl:Assertor ; rdfs:label "gate" .
+saffron:CoreGate        a owl:Class ; rdfs:subClassOf saffron:Gate ; rdfs:label "core gate" .
+saffron:ContractGate    a owl:Class ; rdfs:subClassOf saffron:Gate ; rdfs:label "contract gate" .
+saffron:RepoDefinedGate a owl:Class ; rdfs:subClassOf saffron:Gate ; rdfs:label "repo-defined gate" .
+[] a owl:AllDisjointClasses ;
+   owl:members ( saffron:CoreGate saffron:ContractGate saffron:RepoDefinedGate ) .
+
+# The core/repo boundary, as membership rather than prose. A core gate is
+# implemented in Saffron, so there is one of each and it is named here. A
+# contract gate is a repo's executable for a core-supplied *role*, so the role is
+# named here and the gate is not. A repo-defined gate is neither: CONTEXT.md §4
+# says its name is not vocabulary, so none appears below.
+# Their blocking levels are core-supplied too, and belong here rather than in a
+# repo's policy: §5.4 fixes them, and `size` at `elevated` is the only one a tier
+# moves. A `policy.yaml` that declared otherwise would not be a different repo,
+# it would be wrong.
+saffron:scope     a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
+saffron:size      a saffron:CoreGate ; saffron:blockingAt saffron:blockingWhenElevated .
+saffron:secrets   a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
+saffron:integrity a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
+saffron:census    a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
+saffron:committed a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
+
+saffron:GateRole a owl:Class ; rdfs:label "gate role" ;
+    rdfs:comment "A name in the contract. The repo supplies the executable; core supplies the meaning (§5.4)." .
+saffron:format a saffron:GateRole . saffron:lint a saffron:GateRole .
+saffron:types a saffron:GateRole . saffron:tests a saffron:GateRole .
+saffron:no-network a saffron:GateRole . saffron:coverage a saffron:GateRole .
+
+## Assertions — a mypy failure and a blocker on an acceptance criterion are one
+## shape: an assertion, by an assertor, about a subject, with an outcome (§4.6).
+## The SQL schema splits them across two tables; earl:mode carries the only real
+## difference, which is how the assertion was produced, not what it is.
+
+saffron:GateResult a owl:Class ; rdfs:subClassOf prov:Entity, earl:Assertion ; rdfs:label "gate result" .
+saffron:Finding    a owl:Class ; rdfs:subClassOf prov:Entity, earl:Assertion ; rdfs:label "finding" .
+
+## Properties
+
+saffron:hasCriterion a owl:ObjectProperty ; rdfs:domain saffron:Spec ; rdfs:range saffron:AcceptanceCriterion .
+saffron:withinPhase  a owl:ObjectProperty ; rdfs:domain saffron:Attempt ; rdfs:range saffron:Phase ;
+    rdfs:comment "\"Attempt 3\" without a phase is ambiguous — name both (CONTEXT.md §2)." .
+saffron:n            a owl:DatatypeProperty ; rdfs:domain saffron:Attempt ; rdfs:range xsd:integer .
+saffron:endedInState a owl:ObjectProperty ; rdfs:domain saffron:Task ; rdfs:range saffron:EndState .
+saffron:riskTier     a owl:ObjectProperty ; rdfs:domain saffron:Task ; rdfs:range saffron:RiskTier .
+saffron:specType     a owl:ObjectProperty ; rdfs:domain saffron:Spec ; rdfs:range saffron:SpecType .
+saffron:costUsdEst   a owl:DatatypeProperty ; rdfs:domain saffron:Attempt ; rdfs:range xsd:decimal ;
+    rdfs:comment "An estimate, and the suffix is not decoration (§4.1)." .
+saffron:budgetUsd    a owl:DatatypeProperty ; rdfs:domain saffron:Batch ; rdfs:range xsd:decimal .
+saffron:baseSha      a owl:DatatypeProperty ; rdfs:domain saffron:Run ; rdfs:range xsd:string .
+saffron:severity     a owl:ObjectProperty ; rdfs:domain saffron:Finding ; rdfs:range saffron:Severity .
+saffron:blockingAt   a owl:ObjectProperty ; rdfs:domain saffron:Gate ; rdfs:range saffron:BlockingLevel .
+saffron:declaresGate a owl:ObjectProperty ; rdfs:domain saffron:Policy ; rdfs:range saffron:Gate ;
+    rdfs:comment "Declared, not executed. The gap between this set and the gates a suite ran is what Q3 asks for." .
+saffron:ratifiedBy   a owl:ObjectProperty ; rdfs:domain saffron:TouchesSet ; rdfs:range saffron:Operator .
+saffron:role         a owl:ObjectProperty ; rdfs:domain saffron:ContractGate ; rdfs:range saffron:GateRole ;
+    rdfs:comment "Which contract role a repo's executable implements. A core gate has no role — it is the implementation." .
+
+## Enumerated values. Each set is an axiom the relational schema cannot state:
+## every one of these is a TEXT column in §4.1.
+
+saffron:EndState a owl:Class ; rdfs:label "end state" ;
+    rdfs:comment "A state a task can finish in. Wider than the terminal states: it also holds what the operator's own decision produces, and ORPHANED, which no one chose." .
+saffron:TerminalState a owl:Class ; rdfs:subClassOf saffron:EndState ;
+    rdfs:comment "A state that reaches the operator (§3.3). Everything else is internal. CONTEXT.md §6 lists six of these and DESIGN.md §3.3 lists nine; §3.3 governs, see RATIONALE.md." .
+
+saffron:SCOPE_REVIEW a saffron:TerminalState . saffron:PLAN_REJECTED a saffron:TerminalState .
+saffron:EXHAUSTED a saffron:TerminalState . saffron:READY_FOR_REVIEW a saffron:TerminalState .
+saffron:MERGE_FAILED a saffron:TerminalState . saffron:PREFLIGHT_FAILED a saffron:TerminalState .
+saffron:NOT_IMPLEMENTED a saffron:TerminalState . saffron:GATE_ERROR a saffron:TerminalState .
+saffron:RATE_LIMITED a saffron:TerminalState .
+
+# What the operator's decision produces, plus the state a crash produces. None of
+# these reaches the operator — they are downstream of a judgement they already made.
+saffron:APPROVED a saffron:EndState . saffron:CHANGES_REQUESTED a saffron:EndState .
+saffron:REJECTED a saffron:EndState . saffron:MERGED a saffron:EndState .
+saffron:ORPHANED a saffron:EndState .
+
+saffron:RiskTier a owl:Class .
+saffron:standard a saffron:RiskTier . saffron:elevated a saffron:RiskTier .
+
+saffron:SpecType a owl:Class .
+saffron:feature a saffron:SpecType . saffron:bug a saffron:SpecType . saffron:refactor a saffron:SpecType .
+
+saffron:Severity a owl:Class .
+saffron:blocker a saffron:Severity . saffron:concern a saffron:Severity . saffron:note a saffron:Severity .
+
+saffron:BlockingLevel a owl:Class .
+saffron:alwaysBlocking a saffron:BlockingLevel .
+saffron:blockingWhenElevated a saffron:BlockingLevel .
+saffron:advisory a saffron:BlockingLevel .
+
+## Roles on the qualified associations of a rebuttal (§5.6). Three judgements,
+## three vocabularies: the critic verdicts, the operator adjudicates, the
+## implementer rebuts. Never "the verdict" without saying whose.
+saffron:Role a owl:Class .
+saffron:confirms a saffron:Role . saffron:withdraws a saffron:Role .
+saffron:agrees   a saffron:Role . saffron:disagrees a saffron:Role .
+saffron:disputes a saffron:Role . saffron:concedes  a saffron:Role .

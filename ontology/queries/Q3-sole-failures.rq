@@ -1,0 +1,77 @@
+# Q3 — Per run: gates ranked by how often they were the *sole* blocking failure
+# in an attempt, and gates the run declared but never fired. (DESIGN.md §8)
+#
+# SQL equivalent: (a), and §4.1 was shaped to keep it that way — `failures` is a
+# table rather than a log line partly so this stays answerable:
+#
+#   SELECT gr.gate, COUNT(*) FROM gate_results gr
+#    WHERE gr.status = 'fail'
+#      AND NOT EXISTS (SELECT 1 FROM gate_results o
+#                       WHERE o.attempt_id = gr.attempt_id
+#                         AND o.gate <> gr.gate AND o.status = 'fail')
+#    GROUP BY gr.gate;
+#   -- and the second half against a gate list the schema does not have
+#
+# Why the SPARQL form is preferable: only for the second half. "Gates that never
+# fired" is set containment across two populations — declared and executed — and
+# §4.1 stores the declared set nowhere: it is `policy.yaml`, parsed at preflight
+# and dropped. In SQL the answer requires a table that does not exist; here the
+# policy is an entity and the gap is one EXISTS. The sole-failure half is a
+# correlated subquery in both languages and SQL loses nothing.
+#
+# Both halves are asked of one run, because both are run-scoped facts: a repo
+# declares its own gates, and "never fired" against an accumulating ledger is
+# permanently false the moment a gate fires once anywhere.
+#
+# "Blocking" is resolved per task, not per gate. `size` is advisory at standard
+# risk and blocking at `elevated` (§5.4, §5.6) — a correction `SA-0001` itself
+# forced on the design — so a three-valued level tested as `!= advisory` counts a
+# red `size` on a standard-risk task as a co-failure and unseats the gate that
+# actually stopped the task.
+PREFIX saffron: <https://saffron.dev/ns#>
+PREFIX prov:    <http://www.w3.org/ns/prov#>
+PREFIX earl:    <http://www.w3.org/ns/earl#>
+
+SELECT ?run ?gate ?everRan (COALESCE(?n, 0) AS ?soleFailures)
+WHERE {
+  ?run a saffron:Run ; prov:used ?policy .
+  ?policy saffron:declaresGate ?gate .
+  ?gate saffron:blockingAt ?level .
+  # a gate this run could never be stopped by is not in the ranking at all
+  FILTER(?level != saffron:advisory)
+
+  BIND(EXISTS {
+    [] earl:assertedBy ?gate ;
+       prov:wasGeneratedBy/prov:wasInformedBy/saffron:withinPhase/prov:wasInformedBy/prov:wasInformedBy ?run
+  } AS ?everRan)
+
+  OPTIONAL {
+    SELECT ?run ?gate ?level (COUNT(DISTINCT ?suite) AS ?n)
+    WHERE {
+      ?gate saffron:blockingAt ?level .
+      ?result earl:assertedBy ?gate ;
+              prov:wasGeneratedBy ?suite ;
+              earl:result/earl:outcome earl:failed .
+      ?suite prov:wasInformedBy/saffron:withinPhase/prov:wasInformedBy ?task .
+      ?task prov:wasInformedBy ?run ; saffron:riskTier ?tier .
+      # this gate has to be one that could stop *this* task, or it never was the
+      # failure that stopped it
+      FILTER(?level = saffron:alwaysBlocking
+             || (?level = saffron:blockingWhenElevated && ?tier = saffron:elevated))
+      # and a sibling only makes the failure non-sole on the same test: an
+      # advisory gate, or `size` at standard risk, leaves it still sole.
+      FILTER NOT EXISTS {
+        ?sibling prov:wasGeneratedBy ?suite ;
+                 earl:assertedBy ?other ;
+                 earl:result/earl:outcome earl:failed .
+        ?other saffron:blockingAt ?otherLevel .
+        FILTER(?other != ?gate
+               && (?otherLevel = saffron:alwaysBlocking
+                   || (?otherLevel = saffron:blockingWhenElevated
+                       && ?tier = saffron:elevated)))
+      }
+    }
+    GROUP BY ?run ?gate ?level
+  }
+}
+ORDER BY ?run DESC(?soleFailures) ?gate

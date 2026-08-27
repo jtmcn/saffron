@@ -1,0 +1,12 @@
+@prefix saffron: <https://saffron.dev/ns#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix earl: <http://www.w3.org/ns/earl#> .
+@prefix : <https://saffron.dev/data/> .
+
+# A gate result asserted semi-automatically. Gates are deterministic (§5.4).
+:gr a saffron:GateResult ; earl:assertedBy :g ; earl:mode earl:semiAuto ; earl:subject :d .
+:d a saffron:Diff, earl:TestSubject .
+:g a saffron:Gate, saffron:ContractGate ; saffron:role saffron:lint ;
+   saffron:blockingAt saffron:alwaysBlocking .
+saffron:lint a saffron:GateRole .
+saffron:alwaysBlocking a saffron:BlockingLevel .
