@@ -196,10 +196,10 @@ meaning.
 **Gate**: One named verification, host-invoked and deterministic. Written lowercase
 in backticks. Three kinds, and the distinction is the core/repo boundary:
 
-- **Core gates** — `scope`, `size`, `secrets`, `integrity`, `census`, `committed`.
-  Implemented in Saffron. They never execute repo code, which is why they can be
-  core; most read the diff, but `committed` reads the worktree's status instead
-  (`DESIGN.md` §2.1).
+- **Core gates** — `scope`, `size`, `secrets`, `integrity`, `census`, `committed`,
+  `criteria`. Implemented in Saffron. They never execute repo code, which is why
+  they can be core; most read the diff, but `committed` reads the worktree's status
+  instead, and `census` and `criteria` read other gates' results (`DESIGN.md` §2.1).
 - **Contract gates** — the gate roles above. Declared in `policy.yaml`, implemented
   in the repo's `.saffron/gates/`.
 - **Repo-defined gates** — anything a repo adds against its own hard-to-fake
