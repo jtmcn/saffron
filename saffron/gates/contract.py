@@ -48,6 +48,10 @@ class Failure(BaseModel):
     file: str
     line: int | None = None
     code: str
+    """The gate's own identifier for this failure — a rule id, an exception
+    type, or, for a gate that enumerates, the node id of the test that failed.
+    `criteria` can read a witness's outcome only where an enumerating gate keys
+    its failures that way; where it does not, `criteria` skips (§5.4)."""
     message: str = ""
 
 
