@@ -22,6 +22,7 @@ from saffron.gates.baseline import (
     suite_drift,
 )
 from saffron.gates.contract import GateResult
+from saffron.intake import Criterion
 from saffron.phases import implement, rebut, review
 from saffron.phases.implement import AttemptResult
 
@@ -156,6 +157,9 @@ class CellSpec:
     spec_type: str
     body: str
     forbidden: list[str] = field(default_factory=list)
+    # From the operator's host-side copy, parsed by `cli.load_spec` before the
+    # cell exists — so what `criteria` checks was never in /work (§5.4).
+    acceptance: list[Criterion] = field(default_factory=list)
     # The tier the spec declared, read by `_suite` as one half of the effective
     # one (`policy.effective_risk`); `elevate_on` matching the diff is the
     # other (§5.6). `cli` passes it, and `test_a_specs_declared_risk_reaches_
@@ -490,6 +494,7 @@ def _drive_cell(
     from saffron.cell import proxy, runtime, worktree
     from saffron.gates.core.census import census_gate
     from saffron.gates.core.committed import committed_gate
+    from saffron.gates.core.criteria import criteria_gate
     from saffron.gates.core.integrity import integrity_gate
     from saffron.gates.core.scope import scope_gate
     from saffron.gates.core.size import size_gate
@@ -699,8 +704,13 @@ def _drive_cell(
             ]
             # Last, and given the whole suite: it reads `collected` off whatever
             # gate reported it, which means it has to run after them (§5.4).
-            # `prior` is empty on the baseline call, and census skips.
-            return [*results, census_gate(prior, results)]
+            # `prior` is empty on the baseline call, so both skip there. Both
+            # read two suites and invoke nothing (§5.4).
+            return [
+                *results,
+                census_gate(prior, results),
+                criteria_gate(spec.acceptance, prior, results),
+            ]
 
         def _blocking(failure: NewFailure) -> bool:
             """This attempt's advisory gates, read fresh: `_suite` always runs

@@ -2002,3 +2002,52 @@ def test_a_policy_fault_at_base_sha_names_base_sha(monkeypatch, tmp_path):
             ledger=Ledger(tmp_path / "ledger.db"),
             out_dir=tmp_path / "out",
         )
+
+
+def test_the_criteria_gate_reads_both_suites_and_invokes_nothing(monkeypatch, tmp_path):
+    """`census_gate(base, head)` is the shape, not `scope_gate`'s single tree.
+    The baseline call hands `prior=[]`, so the gate skips there and no task
+    reaches `PREFLIGHT_FAILED` because of it."""
+    from saffron.intake import Criterion
+
+    base = [
+        GateResult(
+            gate="tests", status="pass", tool="pytest 8", collected=["t.py::test_a"]
+        )
+    ]
+    head = [
+        GateResult(
+            gate="tests",
+            status="pass",
+            tool="pytest 8",
+            collected=["t.py::test_a", "t.py::test_new"],
+        )
+    ]
+    cell = _stub_the_runtime(monkeypatch, suites=(base, head, head))
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(
+            acceptance=[
+                Criterion(claim="it works", witness="t.py::test_new"),
+            ]
+        ),
+    )
+    result = next(r for r in outcome.gates if r.gate == "criteria")
+    assert result.status == "pass"
+    assert result.tool is None
+
+
+def test_the_criteria_gate_skips_for_a_spec_that_declares_no_witnesses(
+    monkeypatch, tmp_path
+):
+    """Ten specs predate this key. `skip` is what they get, and every existing
+    behaviour is unchanged."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    result = next(r for r in outcome.gates if r.gate == "criteria")
+    assert result.status == "skip"

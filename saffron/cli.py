@@ -182,6 +182,7 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         spec_type=spec.type,
         body=spec.body,
         forbidden=spec.forbidden,
+        acceptance=spec.acceptance,
         risk=spec.risk,
         **ceilings,
     )
