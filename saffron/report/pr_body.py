@@ -134,7 +134,10 @@ def _criteria(spec: Spec, results: Sequence[GateResult]) -> str:
     (§5.4's `tool` defect, one layer up). A box ticks only from a `criteria`
     gate result; `skip` means nobody looked and must not render as a failure.
     """
-    result = next((r for r in results if r.gate == "criteria"), None)
+    # Last, not first: `_suite` appends the host-constructed result after every
+    # declared gate, so a repo declaring its own gate named `criteria` cannot
+    # shadow it.
+    result = next((r for r in reversed(list(results)) if r.gate == "criteria"), None)
     if spec.acceptance and result is not None and result.status in ("pass", "fail"):
         unmet = {f.file: f for f in result.failures}
         lines = ["### Acceptance criteria", ""]

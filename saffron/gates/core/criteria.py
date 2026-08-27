@@ -48,6 +48,10 @@ def _side(results: list[GateResult]) -> _Side | None:
         return None
     collected = {name for r in enumerating for name in r.collected}
     failed = {f.code for r in enumerating for f in r.failures}
+    # ponytail: "at least one overlap", not "every code is a node id" — a mixed
+    # side reads as fully readable, so a non-node-id-keyed failure on it stays
+    # invisible. Unreachable with this repo's own runner (all-or-nothing per
+    # run); upgrade path is per-failure membership, once a runner mixes them.
     if failed and not (failed & collected):
         return None
     return collected, failed

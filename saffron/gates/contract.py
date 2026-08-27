@@ -70,9 +70,9 @@ class GateResult(BaseModel):
     """Identifiers this gate enumerated — for a test runner, its node ids.
 
     Opaque to core: never split, never parsed, never assumed to contain a
-    path (§2.1). Only `census` reads it. `None` means the runner does not
-    enumerate, which is a `skip`; `[]` means it enumerated nothing, which is
-    not the same fact (§5.4)."""
+    path (§2.1). `census` and `criteria` read it. `None` means the runner
+    does not enumerate, which is a `skip`; `[]` means it enumerated nothing,
+    which is not the same fact (§5.4)."""
     failures: list[Failure] = Field(default_factory=list)
     summary: str = ""
     duration_ms: int | None = Field(default=None, ge=0)
