@@ -131,7 +131,7 @@ exception has a shape worth memorising: **core invokes declared gates, never too
 
 ### Issue tracker
 
-Issues live as GitHub issues in `jtmcn/saffron`, driven by the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Work is tracked as spec files in `.saffron/specs/SA-NNNN-*.md`, driven by `saffron cell`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
