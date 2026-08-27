@@ -3,13 +3,19 @@
 # reconstructible from stored artifacts alone") as a machine-checkable property:
 # a merged PR whose chain does not reach a spec does not appear in the result.
 #
-# SQL equivalent: (b) — no reasonable one exists. The chain is transitive and
-# heterogeneous: each hop lands in a different table (specs are files, scope and
-# plan are control artifacts on disk, diffs are paths in the batch tree, suites
-# and findings are two more tables), so a recursive CTE has no single edge
-# relation to recurse over. It would be one UNION arm per artifact kind, rewritten
-# every time a kind is added. Here every hop is prov:wasDerivedFrom or
-# prov:wasRevisionOf and the whole traversal is one property path.
+# SQL equivalent: (a), awkward. The first draft of this header claimed (b) on the
+# grounds that SQL would need one UNION arm per artifact kind — which the query
+# below has four of, so the argument described this query and not its rival. The
+# honest version: §4.1's foreign keys already carry the chain's shape, which is
+# fixed and shallow (tasks.spec_id, attempts.task_id, gate_results.attempt_id,
+# findings.task_id), and no recursion is needed to walk it. What is genuinely
+# awkward is that scope, plan and diff are file paths rather than rows — the same
+# structural fact Q1 and Q3 score as (a), so this scores (a) too.
+#
+# Why the SPARQL form is preferable: the derivation edges are *stated* rather than
+# reconstructed from a path template, which is what lets a broken chain be absent
+# from the result instead of silently rendering as a missing file. That is worth
+# something for N5 and it is not worth an emitter.
 PREFIX saffron: <https://saffron.dev/ns#>
 PREFIX prov:    <http://www.w3.org/ns/prov#>
 PREFIX earl:    <http://www.w3.org/ns/earl#>
@@ -26,9 +32,9 @@ WHERE {
       (prov:wasDerivedFrom|prov:wasRevisionOf)+ ?spec .
 
   # and the PR is packaged from a diff this task's own attempts produced.
-  # Reachability to a spec is not reachability to *this* change: a rejected retry
-  # shares the spec, and — through the plan — shares ancestors too, so the tie has
-  # to be the diff the PR was cut from, not a common ancestor of both.
+  # Reachability to a spec is not reachability to *this* change: a rejected task
+  # reusing the spec shares it, and — through the plan — shares ancestors too, so
+  # the tie has to be the diff the PR was cut from, not a common ancestor of both.
   ?phase prov:wasInformedBy ?task .
   ?attempt saffron:withinPhase ?phase ;
            prov:generated ?head .

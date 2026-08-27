@@ -59,3 +59,17 @@ def test_gate_result_and_finding_are_one_shape(store):
     )
     kinds = {str(r[0]) for r in rows}
     assert len(kinds) >= 2, "both kinds must occur in the fixture under one shape"
+
+
+def test_rationale_is_within_its_cap_and_covers_every_query():
+    """The artifact the whole spec exists to produce, and until now the only one
+    nothing checked — deleting it left the suite green. Its 40-line cap is an
+    acceptance criterion, and a table row per query is what makes it a challenge
+    rather than an opinion."""
+    from ontology_paths import ONTOLOGY, QUERIES
+
+    rationale = (ONTOLOGY / "RATIONALE.md").read_text()
+    assert len(rationale.splitlines()) <= 40
+    for query in QUERIES:
+        assert f"| {query.stem[:2]} " in rationale, f"no row for {query.stem}"
+    assert "Bottom line" in rationale

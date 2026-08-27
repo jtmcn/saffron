@@ -4,7 +4,7 @@
 @prefix : <https://saffron.dev/data/> .
 
 # The scope gate asserting over an envelope. An envelope is never enforced against a diff.
-:env a saffron:Envelope .
+:env a saffron:Envelope, earl:TestSubject .
 :gr a saffron:GateResult ; earl:assertedBy :g ; earl:mode earl:automatic ; earl:subject :env .
 :g a saffron:Gate, saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
 saffron:alwaysBlocking a saffron:BlockingLevel .

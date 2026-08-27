@@ -74,8 +74,8 @@ saffron:coverage a saffron:ContractGate ;
 ## The SQL schema splits them across two tables; earl:mode carries the only real
 ## difference, which is how the assertion was produced, not what it is.
 
-saffron:GateResult a owl:Class ; rdfs:subClassOf earl:Assertion ; rdfs:label "gate result" .
-saffron:Finding    a owl:Class ; rdfs:subClassOf earl:Assertion ; rdfs:label "finding" .
+saffron:GateResult a owl:Class ; rdfs:subClassOf prov:Entity, earl:Assertion ; rdfs:label "gate result" .
+saffron:Finding    a owl:Class ; rdfs:subClassOf prov:Entity, earl:Assertion ; rdfs:label "finding" .
 
 ## Properties
 
@@ -83,7 +83,7 @@ saffron:hasCriterion a owl:ObjectProperty ; rdfs:domain saffron:Spec ; rdfs:rang
 saffron:withinPhase  a owl:ObjectProperty ; rdfs:domain saffron:Attempt ; rdfs:range saffron:Phase ;
     rdfs:comment "\"Attempt 3\" without a phase is ambiguous — name both (CONTEXT.md §2)." .
 saffron:n            a owl:DatatypeProperty ; rdfs:domain saffron:Attempt ; rdfs:range xsd:integer .
-saffron:endedInState a owl:ObjectProperty ; rdfs:domain saffron:Task ; rdfs:range saffron:TerminalState .
+saffron:endedInState a owl:ObjectProperty ; rdfs:domain saffron:Task ; rdfs:range saffron:EndState .
 saffron:riskTier     a owl:ObjectProperty ; rdfs:domain saffron:Task ; rdfs:range saffron:RiskTier .
 saffron:specType     a owl:ObjectProperty ; rdfs:domain saffron:Spec ; rdfs:range saffron:SpecType .
 saffron:costUsdEst   a owl:DatatypeProperty ; rdfs:domain saffron:Attempt ; rdfs:range xsd:decimal ;
@@ -99,14 +99,22 @@ saffron:ratifiedBy   a owl:ObjectProperty ; rdfs:domain saffron:TouchesSet ; rdf
 ## Enumerated values. Each set is an axiom the relational schema cannot state:
 ## every one of these is a TEXT column in §4.1.
 
-saffron:TerminalState a owl:Class ; rdfs:label "terminal state" ;
-    rdfs:comment "A state that reaches the operator (§3.3). Everything else is internal." .
+saffron:EndState a owl:Class ; rdfs:label "end state" ;
+    rdfs:comment "A state a task can finish in. Wider than the terminal states: it also holds what the operator's own decision produces, and ORPHANED, which no one chose." .
+saffron:TerminalState a owl:Class ; rdfs:subClassOf saffron:EndState ;
+    rdfs:comment "A state that reaches the operator (§3.3). Everything else is internal. CONTEXT.md §6 lists six of these and DESIGN.md §3.3 lists nine; §3.3 governs, see RATIONALE.md." .
+
 saffron:SCOPE_REVIEW a saffron:TerminalState . saffron:PLAN_REJECTED a saffron:TerminalState .
 saffron:EXHAUSTED a saffron:TerminalState . saffron:READY_FOR_REVIEW a saffron:TerminalState .
 saffron:MERGE_FAILED a saffron:TerminalState . saffron:PREFLIGHT_FAILED a saffron:TerminalState .
 saffron:NOT_IMPLEMENTED a saffron:TerminalState . saffron:GATE_ERROR a saffron:TerminalState .
-saffron:RATE_LIMITED a saffron:TerminalState . saffron:MERGED a saffron:TerminalState .
-saffron:REJECTED a saffron:TerminalState . saffron:CHANGES_REQUESTED a saffron:TerminalState .
+saffron:RATE_LIMITED a saffron:TerminalState .
+
+# What the operator's decision produces, plus the state a crash produces. None of
+# these reaches the operator — they are downstream of a judgement they already made.
+saffron:APPROVED a saffron:EndState . saffron:CHANGES_REQUESTED a saffron:EndState .
+saffron:REJECTED a saffron:EndState . saffron:MERGED a saffron:EndState .
+saffron:ORPHANED a saffron:EndState .
 
 saffron:RiskTier a owl:Class .
 saffron:standard a saffron:RiskTier . saffron:elevated a saffron:RiskTier .

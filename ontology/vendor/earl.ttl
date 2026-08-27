@@ -1,3 +1,11 @@
+# EARL, vendored. See prov-o.ttl for why these are on disk rather than fetched.
+#
+# Source:    https://www.w3.org/ns/earl.rdf
+# Retrieved: 2026-08-26
+# Modified:  reserialized only. W3C publishes EARL as RDF/XML with an empty
+#            xml:base, so it was parsed with publicID http://www.w3.org/ns/earl#
+#            and written back as Turtle by rdflib. 162 triples, none added or
+#            dropped; the `owl1:` prefix is an rdflib naming artifact.
 @prefix dcterms: <http://purl.org/dc/terms/> .
 @prefix doap: <http://usefulinc.com/ns/doap#> .
 @prefix earl: <http://www.w3.org/ns/earl#> .

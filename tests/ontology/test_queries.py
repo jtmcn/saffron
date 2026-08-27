@@ -61,20 +61,25 @@ def test_q3_names_a_declared_gate_that_never_ran(store):
 
 def test_q4_reconstructs_a_merged_change_end_to_end(store):
     """N5 as a machine-checkable property: every artifact kind between spec and
-    PR is reachable from the PR by derivation alone."""
-    rows = list(store.query(query("Q4").read_text()))
-    kinds = {str(r["kind"]).removeprefix(f"<{NS}").removesuffix(">") for r in rows}
-    assert kinds == {
-        "Spec",
-        "ScopeProposal",
-        "TouchesSet",
-        "Plan",
-        "Diff",
-        "GateSuite",
-        "Finding",
-        "Rebuttal",
-        "PullRequest",
-    }
+    PR is reachable from the PR by derivation alone — asserted per PR, because a
+    union across PRs lets one complete chain cover for an incomplete one."""
+    chains: dict[str, set[str]] = {}
+    for row in store.query(query("Q4").read_text()):
+        kind = str(row["kind"]).removeprefix(f"<{NS}").removesuffix(">")
+        chains.setdefault(str(row["pr"]), set()).add(kind)
+    assert chains, "no merged PR reconstructed"
+    for pr, kinds in chains.items():
+        assert kinds == {
+            "Spec",
+            "ScopeProposal",
+            "TouchesSet",
+            "Plan",
+            "Diff",
+            "GateSuite",
+            "Finding",
+            "Rebuttal",
+            "PullRequest",
+        }, f"{pr} is in the result with an incomplete chain: {sorted(kinds)}"
 
 
 def test_q4_excludes_a_merged_pr_whose_chain_is_broken(store):
@@ -158,8 +163,8 @@ def test_q3_a_gate_that_fired_in_another_run_still_never_fired_in_this_one():
     ) in never_ran
 
 
-def test_q4_a_rejected_retry_sharing_a_spec_is_not_reconstructible():
-    """Spec reuse across retries is ordinary. Tied to the spec rather than the
+def test_q4_a_rejected_task_reusing_the_spec_is_not_reconstructible():
+    """One spec reaching two tasks is ordinary. Tied to the spec rather than the
     task, N5's check passes an unmerged change on the merge's own evidence."""
     store = mutated(
         PREAMBLE
@@ -215,3 +220,50 @@ def test_q1_a_finding_without_a_mode_is_not_reported_as_silence():
     )
     rows = list(store.query(query("Q1").read_text()))
     assert all(r["assertor"] is not None for r in rows)
+
+
+def test_q3_a_red_size_at_standard_risk_does_not_unseat_a_sole_blocking_failure():
+    """`size` is advisory at standard risk and blocking at `elevated` (§5.4, §5.6).
+    A level tested as `!= advisory` counts it as a co-failure at both tiers, which
+    is the same half-sentence that survived two revisions of DESIGN.md itself."""
+    store = mutated(
+        PREAMBLE
+        + """
+        :gr-t2-1-size a saffron:GateResult ; prov:wasGeneratedBy :suite-t2-1 ;
+            earl:assertedBy :g-size ; earl:subject :diff-t2-1 ;
+            earl:mode earl:automatic ; earl:result [ earl:outcome earl:failed ] .
+        """
+    )
+    rows = {
+        str(r["gate"]): r["soleFailures"].value
+        for r in store.query(query("Q3").read_text())
+    }
+    assert rows["<https://saffron.dev/data/g-types>"] == "1"
+
+
+def test_q3_a_red_size_at_elevated_risk_does_unseat_it():
+    """The other half of the same sentence — a tier-blind fix in either direction
+    is wrong, and only one of these two tests fails for each."""
+    store = mutated(
+        PREAMBLE
+        + """
+        :gr-t1-1-size-red a saffron:GateResult ; prov:wasGeneratedBy :suite-t1-1 ;
+            earl:assertedBy :g-size ; earl:subject :diff-t1-1 ;
+            earl:mode earl:automatic ; earl:result [ earl:outcome earl:failed ] .
+        """
+    )
+    rows = {
+        str(r["gate"]): r["soleFailures"].value
+        for r in store.query(query("Q3").read_text())
+    }
+    assert rows["<https://saffron.dev/data/g-lint>"] == "0"
+
+
+def test_q4_a_merged_pr_reaching_its_spec_by_a_shortcut_is_not_end_to_end():
+    """Reaching the spec is not reconstructing the change. The per-PR assertion
+    is what separates them; a union of kinds across PRs cannot."""
+    store = mutated(PREAMBLE + ":diff-t4-1 prov:wasDerivedFrom :spec-t4 .")
+    chains: dict[str, set[str]] = {}
+    for row in store.query(query("Q4").read_text()):
+        chains.setdefault(str(row["pr"]), set()).add(str(row["kind"]))
+    assert len(chains["<https://saffron.dev/data/pr-t4>"]) < 9

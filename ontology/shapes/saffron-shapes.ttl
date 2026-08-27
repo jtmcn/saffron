@@ -7,18 +7,31 @@
 @prefix earl:    <http://www.w3.org/ns/earl#> .
 @prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
 
-# A task ends in a state that reaches the operator. `tasks.state` is TEXT and
-# says neither which strings are legal nor which of them are terminal (§3.3).
+# A task ends in a state it can actually end in. `tasks.state` is TEXT and says
+# neither which strings are legal nor which of them reach the operator (§3.3).
 saffron:TaskShape a sh:NodeShape ;
     sh:targetClass saffron:Task ;
     sh:property [ sh:path saffron:endedInState ; sh:minCount 1 ; sh:maxCount 1 ;
-        sh:class saffron:TerminalState ;
+        sh:class saffron:EndState ;
         sh:in ( saffron:SCOPE_REVIEW saffron:PLAN_REJECTED saffron:EXHAUSTED
                 saffron:READY_FOR_REVIEW saffron:MERGE_FAILED saffron:PREFLIGHT_FAILED
                 saffron:NOT_IMPLEMENTED saffron:GATE_ERROR saffron:RATE_LIMITED
-                saffron:MERGED saffron:REJECTED saffron:CHANGES_REQUESTED ) ] ;
+                saffron:APPROVED saffron:CHANGES_REQUESTED saffron:REJECTED
+                saffron:MERGED saffron:ORPHANED ) ] ;
     sh:property [ sh:path saffron:riskTier ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class saffron:RiskTier ; sh:in ( saffron:standard saffron:elevated ) ] .
+
+# Nine states reach the operator and no others — set containment inside the end
+# states, which is the distinction §4.6 names as justifying the namespace. What
+# the operator's own decision produces is an end state and is not terminal: the
+# conflation is how MERGED read as reaching the operator and ORPHANED, which
+# `session.py` writes, read as illegal.
+saffron:TerminalStateShape a sh:NodeShape ;
+    sh:targetClass saffron:TerminalState ;
+    sh:class saffron:EndState ;
+    sh:in ( saffron:SCOPE_REVIEW saffron:PLAN_REJECTED saffron:EXHAUSTED
+            saffron:READY_FOR_REVIEW saffron:MERGE_FAILED saffron:PREFLIGHT_FAILED
+            saffron:NOT_IMPLEMENTED saffron:GATE_ERROR saffron:RATE_LIMITED ) .
 
 saffron:SpecShape a sh:NodeShape ;
     sh:targetClass saffron:Spec ;

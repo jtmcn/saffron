@@ -22,6 +22,12 @@
 # Both halves are asked of one run, because both are run-scoped facts: a repo
 # declares its own gates, and "never fired" against an accumulating ledger is
 # permanently false the moment a gate fires once anywhere.
+#
+# "Blocking" is resolved per task, not per gate. `size` is advisory at standard
+# risk and blocking at `elevated` (§5.4, §5.6) — a correction `SA-0001` itself
+# forced on the design — so a three-valued level tested as `!= advisory` counts a
+# red `size` on a standard-risk task as a co-failure and unseats the gate that
+# actually stopped the task.
 PREFIX saffron: <https://saffron.dev/ns#>
 PREFIX prov:    <http://www.w3.org/ns/prov#>
 PREFIX earl:    <http://www.w3.org/ns/earl#>
@@ -31,7 +37,7 @@ WHERE {
   ?run a saffron:Run ; prov:used ?policy .
   ?policy saffron:declaresGate ?gate .
   ?gate saffron:blockingAt ?level .
-  # an advisory gate is never the failure that stopped anything
+  # a gate this run could never be stopped by is not in the ranking at all
   FILTER(?level != saffron:advisory)
 
   BIND(EXISTS {
@@ -40,23 +46,32 @@ WHERE {
   } AS ?everRan)
 
   OPTIONAL {
-    SELECT ?run ?gate (COUNT(DISTINCT ?suite) AS ?n)
+    SELECT ?run ?gate ?level (COUNT(DISTINCT ?suite) AS ?n)
     WHERE {
+      ?gate saffron:blockingAt ?level .
       ?result earl:assertedBy ?gate ;
               prov:wasGeneratedBy ?suite ;
               earl:result/earl:outcome earl:failed .
-      ?suite prov:wasInformedBy/saffron:withinPhase/prov:wasInformedBy/prov:wasInformedBy ?run .
-      # a sibling only makes this failure non-sole if it could stop the task too;
-      # an advisory gate red beside it leaves the blocking failure still sole.
+      ?suite prov:wasInformedBy/saffron:withinPhase/prov:wasInformedBy ?task .
+      ?task prov:wasInformedBy ?run ; saffron:riskTier ?tier .
+      # this gate has to be one that could stop *this* task, or it never was the
+      # failure that stopped it
+      FILTER(?level = saffron:alwaysBlocking
+             || (?level = saffron:blockingWhenElevated && ?tier = saffron:elevated))
+      # and a sibling only makes the failure non-sole on the same test: an
+      # advisory gate, or `size` at standard risk, leaves it still sole.
       FILTER NOT EXISTS {
         ?sibling prov:wasGeneratedBy ?suite ;
                  earl:assertedBy ?other ;
                  earl:result/earl:outcome earl:failed .
         ?other saffron:blockingAt ?otherLevel .
-        FILTER(?other != ?gate && ?otherLevel != saffron:advisory)
+        FILTER(?other != ?gate
+               && (?otherLevel = saffron:alwaysBlocking
+                   || (?otherLevel = saffron:blockingWhenElevated
+                       && ?tier = saffron:elevated)))
       }
     }
-    GROUP BY ?run ?gate
+    GROUP BY ?run ?gate ?level
   }
 }
 ORDER BY ?run DESC(?soleFailures) ?gate

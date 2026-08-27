@@ -54,9 +54,7 @@ def test_each_shape_rejects_its_negative_fixture(fixture, shapes_graph):
     violated = set()
     for _, _, source in results.triples((None, SH.sourceShape, None)):
         violated |= _named_shape_of(shapes_graph, source)
-    assert f"{NS}{fixture.stem}" in violated, (
-        f"{fixture.name} fired {violated}, not itself"
-    )
+    assert violated == {f"{NS}{fixture.stem}"}, f"{fixture.name} fired {violated}"
 
 
 def test_every_shape_has_a_negative_fixture(shapes_graph):
