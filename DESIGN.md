@@ -719,6 +719,8 @@ gates:
   perf-smoke: { blocking: false }
 ```
 
+`when` is **declared and not yet read**: `repos/policy.py` parses it and `run_suite` runs every declared gate regardless, so a conditional gate today runs unconditionally. Saffron's own `shacl` gate is declared without it for that reason (`docs/BACKLOG.md`).
+
 Core sees three more entries in a list. **The best gates are always the domain-specific ones** — a migration round-trip, a schema conformance check, an invariant only this codebase can state — because they are the ones an agent cannot satisfy by writing plausible-looking code. Onboarding a repo well means asking: *what is expensive to fake here?*
 
 Five roles carry most of the weight.
@@ -1142,7 +1144,7 @@ Success criterion: a batch spans two repos, and the diff to Saffron's source req
 
 Only if `ontology/RATIONALE.md` says the queries are worth reading: ledger → RDF projection, pyoxigraph store, materialization at batch end, SHACL validation of the projection.
 
-It says otherwise (rev 18), so: move `ontology/queries/` into `docs/` as worked examples and keep the vocabulary as documentation — noting that the `shacl` gate and the `CONTEXT.md` cross-check are readers the queries are not, and that Appendix O's spike is the only thing that reopens an emitter. **That is a completed project, not an abandoned one** — you will have bought a precise answer to "is the relational model costing me anything?" for the price of a weekend, which is the cheapest that answer is ever available.
+It says otherwise (rev 18). `ontology/queries/` therefore stays where it is, as worked examples that `tests/ontology/` runs — moving them under `docs/` would cost the only thing keeping them honest. The vocabulary stays as documentation with two readers the queries are not: the `shacl` gate and the `CONTEXT.md` cross-check. Appendix O's spike is the only thing that reopens an emitter. **That is a completed project, not an abandoned one** — you will have bought a precise answer to "is the relational model costing me anything?" for the price of a weekend, which is the cheapest that answer is ever available.
 
 ### v3 — the generality test, then only if v2 is earning its keep
 
@@ -2311,9 +2313,9 @@ It also raised a different question, which the RATIONALE did not test and cannot
 
 Three things, none of which existed when §1.4 was written.
 
-- **The vocabulary found three defects in this document.** `size` blocking at the wrong tier (Appendix B), `gate_results` and `findings` being one assertion shape (§4.6), and — building it — that `CONTEXT.md` §6, §3.3 and `ledger.py` closed the terminal-state set three different ways while `attempts.phase` holds states rather than phases. A modelling exercise that keeps finding real defects is producing something, whatever the queries say.
+- **The vocabulary found three defects in this document.** `size` blocking at the wrong tier (Appendix B), `gate_results` and `findings` being one assertion shape (§4.6), and — building it — that `CONTEXT.md` §6 and §3.3 closed the terminal-state set two different ways while `session.py` wrote a tenth state neither called terminal, `tasks.state` closes nothing at all, and `attempts.phase` holds states rather than phases. A modelling exercise that keeps finding real defects is producing something, whatever the queries say.
 - **`ontology/` is now a gated surface.** The `shacl` gate makes the shapes operational *as a gate*, which is the weakest useful sense of the word and is already built. Nothing in §1.4 forbids it: the shapes validate an artifact, not a state transition.
-- **Prior art.** Zhang et al., *Toward Effective and Reliable LLM Agents via Dynamic Ontology* (arXiv 2608.22974), builds a task ontology as an executable kernel and reports gains on three agent benchmarks. Its load-bearing sentence is architecturally ours: *"Once frozen, the kernel is the only channel through which the agent reaches the data. It cannot name a concept or invoke a computation the kernel does not declare."* That is §2's line, reached from the effectiveness side rather than the isolation side.
+- **Prior art.** Zhang et al., *Toward Effective and Reliable LLM Agents via Dynamic Ontology* (arXiv 2608.22974), whose framework is called OaK — ontology-as-a-kernel — builds a task ontology as an executable kernel and reports gains on three agent benchmarks. Its load-bearing sentence is architecturally ours: *"Once frozen, the kernel is the only channel through which the agent reaches the data. It cannot name a concept or invoke a computation the kernel does not declare."* That is §2's line, reached from the effectiveness side rather than the isolation side.
 
 ### The two positions
 

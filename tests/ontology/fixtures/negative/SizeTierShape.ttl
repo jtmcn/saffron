@@ -1,0 +1,6 @@
+@prefix saffron: <https://saffron.dev/ns#> .
+@prefix : <https://saffron.dev/data/> .
+
+# `size` always-blocking is the rev-2 reading SA-0001 falsified: it is advisory
+# at standard risk and blocking at `elevated`.
+saffron:size saffron:blockingAt saffron:alwaysBlocking .

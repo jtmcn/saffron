@@ -1,0 +1,5 @@
+@prefix saffron: <https://saffron.dev/ns#> .
+@prefix : <https://saffron.dev/data/> .
+
+# A repo declaring a core gate advisory. Core fixes these, not policy.
+saffron:census saffron:blockingAt saffron:advisory .

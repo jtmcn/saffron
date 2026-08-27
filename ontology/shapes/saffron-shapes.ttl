@@ -88,12 +88,31 @@ saffron:GateRoleShape a sh:NodeShape ;
     sh:in ( saffron:format saffron:lint saffron:types
             saffron:tests saffron:no-network saffron:coverage ) .
 
-# A contract gate is a repo's executable for one core-supplied role. A core gate
-# has none: it *is* the implementation, which is the boundary in one cardinality.
+# A contract gate is a repo's executable for one core-supplied role. This states
+# the contract half only; nothing here forbids a role on a core gate, because
+# `rdfs:domain` is an OWL axiom and no reasoner runs.
 saffron:ContractGateShape a sh:NodeShape ;
     sh:targetClass saffron:ContractGate ;
     sh:property [ sh:path saffron:role ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class saffron:GateRole ] .
+
+# Core gates' blocking levels are core-supplied: §5.4 fixes them, and `size` at
+# `elevated` is the only one a tier moves. Stated as constraints rather than left
+# as triples in the vocabulary — an unenforced fact in this ontology is what the
+# dead-term test exists to delete, one level up. `sh:in` rather than
+# `sh:hasValue` because `sh:targetNode` targets its node in every graph including
+# the empty one, and only `sh:in` is vacuous when there are no values.
+saffron:CoreGateBlockingShape a sh:NodeShape ;
+    sh:targetNode saffron:scope, saffron:secrets, saffron:integrity,
+                  saffron:census, saffron:committed ;
+    sh:property [ sh:path saffron:blockingAt ; sh:in ( saffron:alwaysBlocking ) ] .
+
+# The one core gate a risk tier moves, and the correction `SA-0001` forced on the
+# design: §5.4 had it always-blocking and §5.6 had it becoming blocking at
+# `elevated`, and both could not be true (Appendix B).
+saffron:SizeTierShape a sh:NodeShape ;
+    sh:targetNode saffron:size ;
+    sh:property [ sh:path saffron:blockingAt ; sh:in ( saffron:blockingWhenElevated ) ] .
 
 # `coverage` is advisory at every tier — a design decision, not an oversight
 # (§5.4). Stated over the role rather than one named gate, so it binds every

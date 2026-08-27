@@ -6,6 +6,7 @@ imports nothing from saffron/ except the contract parser.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -135,3 +136,77 @@ def test_shacl_errors_rather_than_passes_when_a_graph_will_not_parse(tmp_path):
     )
     result = parse_gate_json(done.stdout, expected_gate="shacl")
     assert result.status == "error", result.summary
+
+
+def _stub_pyshacl(tmp_path, body: str) -> dict[str, str]:
+    """A `pyshacl` on PATH that this repo's own venv cannot supply."""
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    (stub / "pyshacl").write_text(f"#!/bin/sh\n{body}\n")
+    (stub / "pyshacl").chmod(0o755)
+    return {**os.environ, "PATH": f"{stub}:{os.environ['PATH']}"}
+
+
+def test_shacl_reports_the_version_the_tool_printed_not_a_literal(tmp_path):
+    """The invariant `tool` exists for: it must be obtained *by executing* the
+    tool (§5.4, Appendix H). Asserting that the string contains "PySHACL" cannot
+    tell an executed version from a string literal in the gate — replacing the
+    probe with a hardcoded identifier passed that test. This one puts a version
+    on PATH that no literal could have guessed."""
+    env = _stub_pyshacl(tmp_path, 'echo "PySHACL Version: 9.9.9-stub" >&2')
+    done = subprocess.run(
+        [str(GATES / "shacl")],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="shacl")
+    assert result.tool == "PySHACL Version: 9.9.9-stub"
+
+
+def test_shacl_errors_when_its_tool_runs_and_reports_no_version(tmp_path):
+    """A tool that runs and identifies nothing cannot produce the field that
+    separates a gate that ran from one that did not, so it is `error`. The guard
+    was unreachable as first written: an empty result indexed `splitlines()[0]`
+    and raised before the check it was written for."""
+    env = _stub_pyshacl(tmp_path, "exit 0")
+    done = subprocess.run(
+        [str(GATES / "shacl")],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="shacl")
+    assert result.status == "error"
+    assert "no version" in result.summary
+
+
+def test_shacl_errors_on_an_unparseable_data_graph_beside_valid_shapes(tmp_path):
+    """The realistic shape of the failure: the shapes are fine and one graph is
+    not. An earlier version of this test broke the *shapes* file, which is the
+    only case where a `NameError` from the same block would also read as
+    `error`."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "ontology" / "shapes").mkdir(parents=True)
+    (tmp_path / "ontology" / "shapes" / "s.ttl").write_text(
+        "@prefix sh: <http://www.w3.org/ns/shacl#> .\n"
+        "@prefix ex: <https://example.invalid/#> .\n"
+        "ex:Shape a sh:NodeShape ; sh:targetClass ex:Thing .\n"
+    )
+    (tmp_path / "ontology" / "torn.ttl").write_text("@prefix ex: <https://exa")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+
+    done = subprocess.run(
+        [str(GATES / "shacl")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="shacl")
+    assert result.status == "error", result.summary
+    assert result.tool, "a parse failure is not a reason to drop the tool identifier"

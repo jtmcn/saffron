@@ -152,6 +152,17 @@
       [ a prov:Association ; prov:agent :joel ; prov:hadRole saffron:agrees ] .
 :pr-t3 a saffron:PullRequest ; prov:wasDerivedFrom :diff-t3-1 .
 
+# All four gate statuses of CONTEXT.md §4 occur, because EARL's outcome values are
+# them: `skip` is inapplicable — the repo declares no such gate, nothing is wrong —
+# and `error` is cantTell, the gate itself breaking. Neither is `earl:failed`, which
+# is the distinction §4 calls the most important one in the section.
+:gr-t3-1-cov a saffron:GateResult ; prov:wasGeneratedBy :suite-t3-1 ;
+    earl:assertedBy :g-cov ; earl:subject :diff-t3-1 ; earl:mode earl:automatic ;
+    earl:result [ earl:outcome earl:inapplicable ] .
+:gr-t3-1-census a saffron:GateResult ; prov:wasGeneratedBy :suite-t3-1 ;
+    earl:assertedBy saffron:census ; earl:subject :diff-t3-1 ; earl:mode earl:automatic ;
+    earl:result [ earl:outcome earl:cantTell ] .
+
 # The operator's rejection, as an assertion in the same shape as a mypy failure:
 # ac-t3-1 failed, and nothing automatic had asserted on it. That gap is the
 # bucket-triage evidence Q1 exists to pull up.

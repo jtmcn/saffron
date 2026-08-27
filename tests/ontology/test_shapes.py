@@ -34,6 +34,10 @@ def _named_shape_of(shapes_graph: rdflib.Graph, node) -> set[str]:
 
 
 def test_the_lifecycle_graph_conforms(shapes_graph):
+    """The vendored vocabularies are loaded here and not by the `shacl` gate,
+    which validates only what this repo owns. Nothing in the shapes targets a
+    PROV or EARL class, so the two agree today; the gate is the blocking reader
+    and is authoritative if they ever stop agreeing."""
     data = rdflib.Graph()
     for path in [VOCABULARY, FIXTURES / "lifecycle.ttl", *VENDOR]:
         data.parse(path, format="turtle")

@@ -42,8 +42,14 @@ integrity:
   # `**/pyproject.toml`, not the bare name: measured, a *nested* pyproject.toml
   # carrying [tool.ruff] exclude silences ruff over that subtree exactly as a
   # dropped ruff.toml does. `**/` matches zero directories, so root is covered.
+  # `ontology/shapes/**` is the `shacl` gate's whole constraint surface, and the
+  # gate is blocking: an agent that cannot satisfy a shape can otherwise relax an
+  # `sh:in`, drop an `sh:property`, or delete a shape and its paired fixture, and
+  # go green. Same argument as `conftest.py` two lines down — the rules a gate
+  # enforces have to be routed to a person, not just the gate's own executable.
   gate_config:
     [
+      "ontology/shapes/**",
       "**/pyproject.toml",
       ".saffron/**",
       "**/conftest.py",

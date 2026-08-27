@@ -1142,6 +1142,51 @@ retry.
 
 ---
 
+## 19. `GateDeclaration.when` is parsed and read by nothing
+
+**Status:** open. Found while declaring Saffron's own `shacl` gate (PR #46).
+
+`repos/policy.py` accepts `when: "**/*.ttl"` on a gate declaration and stores it;
+`run_suite` runs every declared gate in declaration order and consults it nowhere.
+The only reader in the tree is an assertion in `tests/test_policy.py` that the
+field parses. `DESIGN.md` §5.4 illustrates the contract with a conditional gate
+and §10 calls repo-defined gates "conditional on touched paths", so a reader
+following the design writes a clause the loader accepts and nothing honours —
+backlog item 17's shape (`size` built and nothing calling it), one layer out.
+
+Saffron's own `shacl` gate is declared **without** `when` for exactly this reason:
+a control that reads as present and is not is Appendix I's founding defect, and
+validation is milliseconds so conditionality buys nothing here. That dodges the
+trap and leaves it armed for the second repo, which is why this is written down.
+
+**Done looks like** one of: `run_suite` filters on `when` against the diff's
+changed paths and a test proves a non-matching gate does not run; or `load_policy`
+rejects `when` outright until something reads it, and §5.4's illustration drops
+it. §5.4 now says the field is unread — that note comes out with the fix.
+
+## 20. No cell-marked test exercises the `shacl` gate
+
+**Status:** open. Same PR.
+
+`tests/test_saffron_gates.py` runs the gate through a bare `subprocess.run` that
+inherits pytest's environment, so it finds `pyshacl` in Saffron's own venv.
+Through the real `LocalExecutor` it reports `error: pyshacl not on PATH`, because
+`_gate_env` strips that venv — which is correct and is what `tests` already does,
+since gates target the cell. The in-cell evidence is one line in
+`.saffron/Dockerfile` asserting `pyshacl --version` at build time.
+
+That is the same class of gap Appendix I is about: every mechanism reported green
+and the thing under test was somewhere else. It is thinner here — the build-time
+assertion is real, and `python3` and the `pyshacl` console script both resolve to
+`/opt/venv` — but nothing proves the gate produces a contract-shaped result from
+inside a cell.
+
+**Done looks like** a `@pytest.mark.cell` test that starts a cell the way
+production does and runs `shacl` through `CellExecutor`, asserting `pass` and a
+`tool` obtained in the cell rather than on the host.
+
+---
+
 ## What is *not* here, deliberately
 
 DIAGNOSE and `SCOPE_REVIEW`, the scheduler's conflict sets and stacking, `saffron

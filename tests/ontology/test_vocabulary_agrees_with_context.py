@@ -12,7 +12,7 @@ import re
 
 import pytest
 import rdflib
-from ontology_paths import NS, ONTOLOGY, VOCABULARY
+from ontology_paths import FIXTURES, NS, ONTOLOGY, VOCABULARY
 
 CONTEXT = ONTOLOGY.parent / "CONTEXT.md"
 
@@ -73,8 +73,13 @@ def test_the_gate_statuses_are_earl_outcomes_rather_than_saffron_terms():
     the ontology deliberately declares none of them: EARL's outcome values *are*
     those four, and `skip` being `inapplicable` and `error` being `cantTell` is
     the alignment that states "`error` is not `fail`" in a vendored vocabulary
-    rather than in our own prose. The check is that the mapping stays total and
-    that nobody quietly adds a competing `saffron:` term for a status."""
+    rather than in our own prose.
+
+    The check is that each status has an outcome standing for it *in the fixture
+    graph*, not merely in this docstring — a mapping nothing exercises is the
+    part that is cheap to fake — and that nobody quietly adds a competing
+    `saffron:` term for a status.
+    """
     statuses = context_enumeration("Status")
     assert statuses == {"pass", "fail", "skip", "error"}
 
@@ -84,11 +89,16 @@ def test_the_gate_statuses_are_earl_outcomes_rather_than_saffron_terms():
             f"saffron:{status} duplicates an EARL outcome"
         )
 
-    earl = rdflib.Graph()
-    for vendored in (ONTOLOGY / "vendor").glob("*.ttl"):
-        earl.parse(vendored, format="turtle")
-    outcomes = set(earl.subjects(rdflib.RDF.type, None)) & {
-        rdflib.URIRef(f"http://www.w3.org/ns/earl#{o}")
-        for o in ("passed", "failed", "inapplicable", "cantTell")
-    }
-    assert len(outcomes) == len(statuses), "the mapping is no longer total"
+    earl = rdflib.Namespace("http://www.w3.org/ns/earl#")
+    graph = rdflib.Graph()
+    for path in [VOCABULARY, FIXTURES / "lifecycle.ttl"]:
+        graph.parse(path, format="turtle")
+    for status, outcome in (
+        ("pass", earl.passed),
+        ("fail", earl.failed),
+        ("skip", earl.inapplicable),
+        ("error", earl.cantTell),
+    ):
+        assert (None, earl.outcome, outcome) in graph, (
+            f"no assertion in the fixture stands for a `{status}` gate result"
+        )
