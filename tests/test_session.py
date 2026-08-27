@@ -2051,3 +2051,33 @@ def test_the_criteria_gate_skips_for_a_spec_that_declares_no_witnesses(
     )
     result = next(r for r in outcome.gates if r.gate == "criteria")
     assert result.status == "skip"
+
+
+def test_the_implement_prompt_names_the_witnesses_it_is_judged_against(
+    monkeypatch, tmp_path
+):
+    """Only `spec.body` — the markdown, not the frontmatter — was ever
+    substituted, and the witnesses live in frontmatter."""
+    from saffron.intake import Criterion
+
+    cell = _stub_the_runtime(monkeypatch)
+    _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(
+            acceptance=[
+                Criterion(claim="the box ticks", witness="tests/test_x.py::test_ticks")
+            ]
+        ),
+    )
+    prompt = cell.system_prompts[0]
+    assert "tests/test_x.py::test_ticks" in prompt
+    assert "the box ticks" in prompt
+
+
+def test_a_spec_with_no_witnesses_shows_no_witness_heading(monkeypatch, tmp_path):
+    cell = _stub_the_runtime(monkeypatch)
+    _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
+    assert "witnesses you are judged against" not in cell.system_prompts[0]

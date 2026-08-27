@@ -758,6 +758,7 @@ def _drive_cell(
             constraints=context.constraints_block(
                 spec.touches, spec.forbidden, policy.protected
             ),
+            witnesses=context.witnesses_block(spec.acceptance),
         )
         options = implement.agent_options(
             system_prompt=system_prompt,

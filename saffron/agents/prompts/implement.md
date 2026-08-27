@@ -56,6 +56,8 @@ preference.
 
 {constraints}
 
+{witnesses}
+
 ## The task
 
 {spec}
