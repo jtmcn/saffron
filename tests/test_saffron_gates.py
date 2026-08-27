@@ -21,7 +21,7 @@ GATES = REPO / ".saffron" / "gates"
 
 def test_the_policy_parses():
     policy, _ = load_policy(REPO)
-    assert set(policy.gates) == {"format", "lint", "types", "tests"}
+    assert set(policy.gates) == {"format", "lint", "types", "tests", "shacl"}
 
 
 def test_types_skips_because_saffron_declares_no_type_checker():
@@ -69,3 +69,69 @@ def test_a_red_run_is_a_failure_even_when_a_test_is_named_for_a_crash(tmp_path):
     result = parse_gate_json(done.stdout, expected_gate="tests")
     assert result.status == "fail", result.summary
     assert result.failures
+
+
+def test_shacl_names_its_tool_and_passes_on_this_repos_graphs():
+    """pyshacl prints its version on stderr, so reading stdout alone produced a
+    passing gate with `tool: ""` — a gate that ran and a gate that did not,
+    reported identically (§5.4, Appendix H)."""
+    done = subprocess.run(
+        [str(GATES / "shacl")], cwd=REPO, capture_output=True, text=True, timeout=120
+    )
+    result = parse_gate_json(done.stdout, expected_gate="shacl")
+    assert result.status == "pass", result.summary
+    assert result.tool and "PySHACL" in result.tool
+
+
+def test_shacl_fails_on_a_graph_its_shapes_reject(tmp_path):
+    """A gate that has only ever passed is not known to be a gate. The subject
+    is a repo of its own, because the gate reads `git ls-files` — validating the
+    working tree would have walked `.venv` and judged pyshacl's own asset graphs
+    as though this repo owned them, which a cell's venv at /opt/venv could not
+    reproduce."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "ontology" / "shapes").mkdir(parents=True)
+    (tmp_path / "ontology" / "shapes" / "s.ttl").write_text(
+        "@prefix sh: <http://www.w3.org/ns/shacl#> .\n"
+        "@prefix ex: <https://example.invalid/#> .\n"
+        "ex:Shape a sh:NodeShape ; sh:targetClass ex:Thing ;\n"
+        "    sh:property [ sh:path ex:name ; sh:minCount 1 ] .\n"
+    )
+    (tmp_path / "ontology" / "broken.ttl").write_text(
+        "@prefix ex: <https://example.invalid/#> .\nex:one a ex:Thing .\n"
+    )
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+
+    done = subprocess.run(
+        [str(GATES / "shacl")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="shacl")
+    assert result.status == "fail", result.summary
+    assert len(result.failures) == 1
+    assert result.failures[0].file == "ontology/broken.ttl"
+
+
+def test_shacl_errors_rather_than_passes_when_a_graph_will_not_parse(tmp_path):
+    """A graph that cannot be read produced no violations, and no violations is
+    bit-for-bit a pass. `error` is the gate itself breaking and is charged to
+    nobody (§5.4)."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "ontology" / "shapes").mkdir(parents=True)
+    (tmp_path / "ontology" / "shapes" / "s.ttl").write_text(
+        "@prefix sh: <http://www.w3.org/ns/shacl#> .\nex:Shape a sh:NodeShape .\n"
+    )
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+
+    done = subprocess.run(
+        [str(GATES / "shacl")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="shacl")
+    assert result.status == "error", result.summary
