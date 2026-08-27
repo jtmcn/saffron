@@ -204,3 +204,32 @@ def test_a_spec_declaring_no_witnesses_gets_no_witness_heading():
     `constraints_block`'s own rule, and a default witness is exactly the defect
     SA-0011 exists to close."""
     assert context.witnesses_block([]) == ""
+
+
+def test_criteria_section_round_trips_through_intakes_own_parser():
+    """Finding 1, PR #48 review: intake requires the markdown `## Acceptance
+    criteria` section absent when `acceptance:` is declared, so a witnessed
+    spec's claims live only in frontmatter, which only the IMPLEMENT prompt
+    reads. `criteria_section` restores what the critic loses — the same shape
+    `intake._acceptance_criteria` parses out of a markdown spec, pinned by
+    parsing this function's own output with it."""
+    from saffron import intake
+    from saffron.intake import Criterion
+
+    acceptance = [
+        Criterion(claim="the box ticks", witness="tests/test_criteria.py::test_a"),
+        Criterion(
+            claim="nothing broke",
+            witness="tests/test_intake.py::test_b",
+            preserves=True,
+        ),
+    ]
+    section = context.criteria_section(acceptance)
+    assert intake._acceptance_criteria(section) == ["the box ticks", "nothing broke"]
+    # Claims only — the witness name and the naming instruction are
+    # `witnesses_block`'s remit, aimed at the implementer, not the critic.
+    assert "tests/test_criteria.py::test_a" not in section
+
+
+def test_criteria_section_is_empty_for_no_acceptance():
+    assert context.criteria_section([]) == ""

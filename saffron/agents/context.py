@@ -104,6 +104,20 @@ def witnesses_block(acceptance: Sequence[Criterion]) -> str:
     return "\n".join(lines)
 
 
+def criteria_section(acceptance: Sequence[Criterion]) -> str:
+    """The claims as prose, in the shape `intake._acceptance_criteria` parses
+    out of a markdown spec — so a witnessed spec's critic sees the same
+    acceptance criteria a markdown-declared one already gets, and not
+    `witnesses_block`'s witness names or naming instruction, which are aimed
+    at the implementer. Empty for a spec declaring none.
+    """
+    if not acceptance:
+        return ""
+    return "\n".join(
+        ["## Acceptance criteria", ""] + [f"- [ ] {c.claim}" for c in acceptance]
+    )
+
+
 def build_system_prompt(
     phase: str, context_md: str, template: str, **values: str
 ) -> str:

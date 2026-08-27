@@ -967,7 +967,9 @@ def _drive_cell(
                 # bytes the patch export leaves behind for the operator.
                 diff=worktree.export_patch(container, spec.base_sha),
                 read_head=lambda path: worktree.read_at_head(container, path),
-                spec_body=spec.body,
+                # A witnessed spec's claims live only in frontmatter (§3.2);
+                # append them so the critic sees what a markdown spec already gives.
+                spec_body=spec.body + context.criteria_section(spec.acceptance),
                 gates=review.gate_summary(green, sorted(advisory_gates)),
                 context_md=context_md,
                 prompts_dir=_SAFFRON_PKG / "agents" / "prompts",
@@ -1037,7 +1039,7 @@ def _drive_cell(
                     blockers=blockers,
                     options=options,
                     session_id=session_id,
-                    spec_body=spec.body,
+                    spec_body=spec.body + context.criteria_section(spec.acceptance),
                     context_md=context_md,
                     prompts_dir=_SAFFRON_PKG / "agents" / "prompts",
                     max_turns=spec.max_turns,

@@ -1236,6 +1236,63 @@ because of this.
 
 ---
 
+## 22. Core gate names are not reserved, and `pr_body` is now a second consumer of that hole
+
+**Status:** open. Found by review of `SA-0011`.
+
+`GateName` at `saffron/repos/policy.py:53` accepts any string matching
+`^[A-Za-z0-9_-]+$`, so nothing stops a repo declaring `gates: {criteria: {...}}`.
+Three consequences, all verified against the running code:
+
+`saffron/phases/package.py:402`'s `reverify` runs only
+`policy.gate_executables(...)` (`:468-469`) — no core gates. On a rebase
+(`verified_on = "packaged"` at `:638`) the `gates` handed to `render_pr_body`
+(`:673`) therefore contain no core `criteria` result, so a repo-declared gate
+named `criteria` reporting `pass` is the one `pr_body._criteria` selects
+(`saffron/report/pr_body.py:140`) and it ticks every box it never earned. This
+is the defect `2c3b231` ("a repo-declared gate named criteria ticked every
+box") fixed on the session path — `_suite` appends the host-constructed result
+last, so it cannot be shadowed there — and it is still open on the reverify
+path, which never runs `_suite` at all.
+
+`_suite` also builds `advisory_gates` straight from `policy.gates`
+(`saffron/cell/session.py:672-674`), so `gates: {criteria: {blocking: false}}`
+makes the *core* `criteria` gate advisory — same hole for `census`. And
+`suite_drift` keys both suites by bare gate name (`saffron/gates/baseline.py:84`),
+so the same collision family reaches `scope`, `census` and `committed` there
+too.
+
+**Done looks like** a `frozenset` of core gate names and one `field_validator`
+on `Policy.gates` in `saffron/repos/policy.py` rejecting them, which closes all
+three call sites at once and gives the ontology's `CoreGateShape` an enforced
+counterpart in code.
+
+---
+
+## 23. A witness already green at `base_sha` makes a spec unsatisfiable, and nothing says so
+
+**Status:** open. Found by review of `SA-0011`.
+
+`saffron/gates/core/criteria.py` reports `witness-green-at-base` (`:100`) for a
+non-`preserves` witness that already passed at base. It is blocking, and no
+repair turn can fix it: the agent's only routes are renaming or deleting the
+pre-existing test, and `census` and `integrity` both block those. So an
+operator authoring error — naming a witness that already passes — burns
+`max_attempts × budget_usd` with nothing to show, the same corpse `DESIGN.md:379`
+records for item 18 (`SA-0005`, $5.34, dead at turn 61).
+
+It cannot be caught at intake, because it needs the suite. But the baseline
+suite already holds the answer: after `baseline = _suite([])`
+(`saffron/cell/session.py:724`), any non-`preserves` witness appearing in the
+baseline's `collected` union is a spec that cannot pass, before a single repair
+attempt is spent finding that out the expensive way.
+
+**Done looks like** one `watch()` line there naming those witnesses, turning
+four dead attempts into a legible operator message on the first unattended
+night.
+
+---
+
 ## What is *not* here, deliberately
 
 DIAGNOSE and `SCOPE_REVIEW`, the scheduler's conflict sets and stacking, `saffron

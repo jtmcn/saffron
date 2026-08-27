@@ -2081,3 +2081,30 @@ def test_a_spec_with_no_witnesses_shows_no_witness_heading(monkeypatch, tmp_path
     cell = _stub_the_runtime(monkeypatch)
     _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
     assert "witnesses you are judged against" not in cell.system_prompts[0]
+
+
+def test_the_review_lens_prompt_carries_the_claim_for_a_witnessed_spec(
+    monkeypatch, tmp_path
+):
+    """Finding 1, PR #48 review: intake requires the markdown section absent
+    when `acceptance:` is declared, and both REVIEW and REBUT substituted only
+    `spec.body` — so a spec that opts into witnesses showed the critic no
+    acceptance criteria at all. The IMPLEMENT prompt is `system_prompts[0]`;
+    REVIEW invokes one session per lens straight after."""
+    from saffron.intake import Criterion
+
+    cell = _stub_the_runtime(monkeypatch)
+    _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(
+            acceptance=[
+                Criterion(claim="the box ticks", witness="tests/test_x.py::test_ticks")
+            ]
+        ),
+    )
+    review_prompts = cell.system_prompts[1:]
+    assert review_prompts
+    assert all("the box ticks" in p for p in review_prompts)

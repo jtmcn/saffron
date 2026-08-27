@@ -670,7 +670,7 @@ Everything downstream is built on this and nothing else:
 - **`error` is distinct from `fail`** — the gate itself broke (toolchain missing, DB down). It never counts as a task failure, it aborts the attempt and surfaces as an infrastructure problem. Conflating these is how you get an agent spending four attempts "fixing" a crashed linter.
 - **`tool` is what distinguishes "ran and passed" from "didn't run",** and v0 shipped without it at the cost of a silently green replay (Appendix H). `{"status":"pass","failures":[]}` is bit-for-bit identical whether the linter found nothing or the linter was not on `PATH` and a shell script swallowed the error. So the contract requires an opaque tool identifier **obtained by executing the tool** — `ruff --version`, not a string literal. A gate that cannot run its tool cannot produce the field. The host stores it per gate result and treats a `tool` that differs between a run's baseline and its head as grounds to distrust the subtraction rather than report it.
 
-**`collected` is optional, and only `census` and `criteria` read it.** A gate may report the identifiers it enumerated — for a test runner, its node ids. Core treats them as opaque strings: it never splits one, never assumes a separator, never infers a path from one. Absence is not a failure; it means the runner does not enumerate, and both gates report `skip`. Unlike `tool`, this field is not a trust signal — it is data one core gate subtracts, and it is transient: `gate_results` has no column for it, so the comparison happens in memory within a run.
+**`collected` is optional, and only `census` and `criteria` read it.** A gate may report the identifiers it enumerated — for a test runner, its node ids. Core treats them as opaque strings: it never splits one, never assumes a separator, never infers a path from one. Absence is not a failure; it means the runner does not enumerate, and both gates report `skip`. Unlike `tool`, this field is not a trust signal — it is data core gates compare, and it is transient: `gate_results` has no column for it, so the comparison happens in memory within a run.
 
 Two rules about `error` that the same replay forced, both stated because a gate author has to know them and neither is derivable from the schema:
 
@@ -935,9 +935,10 @@ GitHub acts on `Fixes #12` and `@name` in both, so a cell can close an issue or
 notify a person without executing anything.
 
 Two deviations from the list above, each waiting on a named sub-project: the
-acceptance-criteria checklist ships **unchecked**, because no lens produces a
-per-criterion assessment; and there is no root-cause section, because DIAGNOSE
-does not exist.
+acceptance-criteria checklist ships **unchecked** only where no witness is
+declared — `criteria` judges a witness's name and outcome, never the claim
+itself, so no *lens* produces a per-criterion assessment; and there is no
+root-cause section, because DIAGNOSE does not exist.
 
 ---
 
@@ -1012,7 +1013,7 @@ Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents
 | **Disk exhaustion** | Killed cells leak volumes and worktrees | `ORPHANED` state + `saffron gc` at every batch start |
 | **Saffron breaks Saffron** | Self-hosting | Dependency-free SQLite ledger; self-tasks are `risk: elevated`, put `saffron/` in `forbidden`, and never auto-enter the train |
 | **Premature generality** | Two Python repos look like proof of language independence and are not | Keep the contract (it's cheap and it's a boundary, not an abstraction layer); refuse new abstraction until a genuinely different repo forces it (§9) |
-| **Language knowledge leaks into core** | One `if lang == …` is always easier than a contract change | The four core gates read diffs and never execute repo code; any core gate that wants to *run* something belongs on the repo side (§2.1) |
+| **Language knowledge leaks into core** | One `if lang == …` is always easier than a contract change | The seven core gates never execute repo code — most read the diff, but `census` and `criteria` read other gates' results instead; any core gate that wants to *run* something belongs on the repo side (§2.1) |
 | **One repo starves the others** | Priority ordering across a shared pool | Round-robin across repos in the scheduler; per-repo lines in the batch header |
 | **A broken `policy.yaml` costs the whole night** | Preflight treated as fatal | Per-repo preflight; a failing repo is skipped and surfaces at the top of the queue |
 | **Gate `error` mistaken for `fail`** | Crashed toolchain looks like a red test | `error` is a distinct contract status; aborts the attempt, never counts against the task |
