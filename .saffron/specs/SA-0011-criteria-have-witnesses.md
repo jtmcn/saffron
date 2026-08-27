@@ -79,7 +79,12 @@ Three consequences, all live today:
 ## The shape
 
 A criterion declares a **witness**: a test node id the host checks, not a claim the
-model makes.
+model makes. What a ticked box then means, exactly: *a test by this name ran at
+head and passed, and if it existed at base it was not green there*. It does not
+mean the criterion was met — the witness's body is out of reach here (`revert`,
+below, and the fourth soundness edge). That is a narrower claim than "criteria are
+checked", and it is still the whole distance from today's box, which means nothing
+at all.
 
 **`criteria` reads two gate results; it invokes nothing.** This repo has already
 decided this question once, for `census` (`docs/BACKLOG.md`): *"It needed no §2.1
@@ -107,6 +112,36 @@ The cost is one contract obligation, exactly parallel to the `collected` field
 does not, `criteria` reports `skip` — the same degradation `census` already makes
 when a runner does not enumerate.
 
+**How core knows the field carries node ids, without parsing one.** It cannot look
+for a separator: `census` is categorical that a collected name is opaque — *"never
+split, never parsed, never assumed to contain a path or a separator"* — and a gate
+that recognises `::` has learned a language. The whole test is set membership:
+**a side is readable iff its `failures` list is empty, or some `failures[].code`
+appears in that side's `collected`.** A code in the enumeration is a node id
+because the enumeration says so; nothing else is inspected. Failures present and
+disjoint from `collected` means the runner keys failures on something else, and
+that side is `skip`.
+
+This is not hypothetical, which is why it is a stated rule and not left to the
+implementer. Measured against this repo's own `tests` gate: node ids reach
+`failures[].code` only through a fallback (`.saffron/gates/tests.py:89`) that runs
+when a regex over the whole output matched nothing — and one printed line of the
+shape `path:N: word: message` inside a failing test satisfies that regex.
+
+```
+def test_tool_output():
+    print("saffron/gates/runner.py:147: error: gate reported no tool")
+    assert False
+→ failures[0].code == "error"
+```
+
+Every node id vanishes from the field for that whole run. Without the membership
+guard the naive rule reads *W was collected and `W ∉ {"error"}`* and reports
+**`pass` for a witness that failed**. Worse where the printing test is a
+pre-existing failure: the baseline subtracts it, `tests` blocks nothing, and the
+wrong `pass` is the only thing the operator sees. A ticked box over a red test is
+this spec's own defect, reintroduced by the gate that closes it.
+
 **The direction is the load-bearing part.** A criterion that claims the change
 *did* something must have a witness that **did not pass at `base_sha` and passes at
 head** — a witness that was already green proves nothing about this change. A
@@ -124,6 +159,14 @@ witnesses the gate checks were never in `/work`; and that `.saffron/**` is outsi
 this spec's `touches`, so `scope` fails any diff that edits it. The agent's only
 lever is the body of the witness test — which is what `revert` exists for, and is
 out of scope here.
+
+**The unticked box says which kind of unticked it is.** The gate is opt-in and ten
+specs predate it, so on the day this ships `criteria` reports `skip` for nearly
+every task. If `skip` renders the checklist exactly as today, the Problem section's
+defect is closed for opted-in specs and left standing everywhere else — the
+operator still cannot tell an unchecked criterion from a met one. Labelling the
+skip case is a line in `_criteria` (`pr_body.py:124`), needs no gate, and is the
+half of this spec that pays off before any spec declares a witness.
 
 **The witness node ids must reach the agent.** They are exact strings the
 implementer has to name its tests, and today only `spec.body` — the markdown, not
@@ -148,6 +191,17 @@ The second is a real `preserves` case and shows what the flag is for: an existin
 already-green test, named because the criterion is *"do not break this"*. A new
 test can never be `preserves`, because it did not pass at base.
 
+**One list or the other, never both.** `intake` already parses the markdown
+`## Acceptance criteria` section into `spec.acceptance_criteria`, so a spec
+carrying that section *and* `acceptance:` holds two lists of criteria with nothing
+keeping them in sync, and `pr_body` has no way to say which one it is ticking.
+Intake raises `SpecError` when both are present: where `acceptance:` is declared it
+**is** the acceptance criteria, `claim` is the prose the PR body renders, and the
+markdown section is omitted. (The alternative — hanging the witness off the
+existing checklist line, needing no new frontmatter key at all — was rejected
+because it puts an exact node id inside a regex-parsed prose line, where a typo is
+a silent mis-parse instead of a validation error.)
+
 **This spec does not use the key**, and §3.2 now says why: a spec cannot introduce
 the frontmatter it is written in, because `Spec` sets `extra="forbid"`
 (`intake.py:35`) and a spec declaring `acceptance:` today is refused at intake as
@@ -160,10 +214,16 @@ by one acceptance criterion — which is the last criterion below.
       `witness`, optional `preserves` — and a spec declaring only the markdown
       section parses exactly as it does today
 - [ ] `criteria` reports `skip` for a spec that declares no witnesses, and every
-      spec from `SA-0001` to `SA-0010` still runs unchanged
-- [ ] `criteria` reports `skip` when the head `tests` result carries no `collected`
-      list, or carries no node ids in `failures[].code` — a runner that does not
-      report them is not a repo doing something wrong
+      spec from `SA-0001` to `SA-0010` still parses and gates unchanged
+- [ ] `criteria` reports `skip` when either side carries no `collected` list, or
+      carries failures whose `code`s are **all** absent from that side's
+      `collected` — the membership guard, reached without inspecting a name; a
+      runner that keys failures on something else is not a repo doing something
+      wrong
+- [ ] A witness that is collected at head and failed at head is never reported
+      `pass` because the runner keyed that failure on something other than a node
+      id — the measured `path:N: word: message` case, with the failing test
+      pre-existing so the baseline subtracts it and `tests` blocks nothing
 - [ ] A witness absent from `collected` at head **fails**: it names nothing the
       suite ran, and a criterion nothing ran is the defect this gate exists for
 - [ ] **A witness that passed at `base_sha` and passes at head fails**, unless the
@@ -174,24 +234,34 @@ by one acceptance criterion — which is the last criterion below.
       at head, is the ordinary successful shape — and no `error` is produced
       anywhere, so the baseline suite (§4.4) is unaffected and no task reaches
       `PREFLIGHT_FAILED` because of this gate
-- [ ] The gate's `tool` is the one the head `tests` result reported, and is absent
-      only when the gate reports `error`
+- [ ] The gate reports no `tool` in any status, as every host-side core gate does,
+      and none of its results reach `run_gate`'s requirement (`runner.py:147`)
 - [ ] The declared witnesses reach the IMPLEMENT prompt verbatim, so the
       implementer can name its tests to match
+- [ ] A spec declaring both `acceptance:` and a markdown `## Acceptance criteria`
+      section is refused at intake as malformed — one list, never two
 - [ ] For a spec that declares `acceptance:`, `pr_body` ticks a criterion's box
-      only from a `criteria` gate result and an unticked box carries the reason;
-      for a spec that does not, the rendering is unchanged
+      only from a `criteria` gate result and an unticked box carries the reason
+- [ ] Where `criteria` reports `skip`, `pr_body` renders the checklist marked as
+      not mechanically checked — the ten specs predating this key included. An
+      unticked box meaning *nobody looked* must not render identically to one
+      meaning *the witness failed*
 - [ ] A fixture spec carrying the `acceptance:` block above parses and passes
-      `criteria` — the recursion the frontmatter cannot close
+      `criteria` — the recursion the frontmatter cannot close. The fixture is a
+      string literal in the test module, not a file: `touches` lists individual
+      test paths, so a new `tests/fixtures/*.md` falls outside it and `scope`
+      fails the diff that adds it
 
 ## Out of scope
 
 The `revert` gate. It is designed (§5.4), unbuilt (`review.py:42`), and answers the
 question this gate deliberately cannot: whether a witness *test body* still fails
 without the source hunks. `criteria` judges a witness by its name and its outcome
-on two sides; it cannot see that a test's assertions were weakened. That is the
-narrower claim, and it is stated here so the gate is not read as catching test
-theatre in general.
+on two sides; it cannot see that a test's assertions were weakened. `criteria` is
+the narrower claim, and it is stated here so the gate is not read as catching test
+theatre in general. `revert` is also what closes the vacuous-witness edge below: an
+`assert True` witness passes without the source hunks, which is precisely what
+`revert` fails and `criteria` cannot see.
 
 Amending `DESIGN.md` §5.4's role table and `CONTEXT.md` §4's core-gate enumeration
 for a seventh core gate. Both are `forbidden` here, as in every spec `SA-0001`
@@ -200,7 +270,8 @@ the operator writes it (PR #44's shape). §3.2 is already amended — it carries
 frontmatter-recursion rule this spec found.
 
 Migrating `SA-0001`–`SA-0010` to declared witnesses. They keep the markdown
-section and the gate reports `skip`, which is what `skip` is for.
+section and the gate reports `skip`, which is what `skip` is for — their PR bodies
+gain the not-mechanically-checked label, which is the whole benefit they get here.
 
 Any change to `ontology/`. The vocabulary already models a criterion as an
 `earl:TestCriterion` and a gate result as an `earl:Assertion` over it; this spec
@@ -231,12 +302,25 @@ this gate is reached; a runner that reports no node ids is `skip`, not `error`. 
 an implementation finds itself synthesising an `error`, it has probably reached for
 the invocation route.
 
-**`tool` comes from the result you read**, not from anything this gate executes.
-Do not synthesise one, and do not report `pass` with the field absent — that is the
-exact shape Appendix H is about.
+**`criteria` reports no `tool`, exactly like `census`.** An earlier draft said to
+copy the head `tests` result's identifier; that is wrong twice. It names a repo
+role core is blind to — `census` unions `collected` over *any* gate reporting it
+precisely so core never has to ask which gate is "the tests one" (§2.1) — and it
+stamps one execution's identifier onto a second result that executed nothing.
+Appendix H's concern does not arise: a host-side gate is constructed in `_suite`,
+so a `criteria` result that never ran does not exist to be misread, which is why
+`scope`, `integrity`, `size` and `census` all carry no `tool` and `run_gate`'s
+requirement never applies to them. What Appendix H does demand here is the
+membership guard: never report `pass` on the strength of a field you could not
+read.
 
-**Three soundness edges the direction rule does not close.** State them; do not try
-to fix them here. A **flaky** witness that happened to fail at base makes a no-op
+**Four soundness edges the direction rule does not close.** State them; do not try
+to fix them here. The largest is the **vacuous** witness: a new test is absent from
+`collected(base)`, so "did not pass at base" is free, and `def test_w(): assert
+True` satisfies every criterion this gate can express. The direction rule only
+bites where the agent points at a test that already existed and was already green —
+a real evasion, but the narrower one. `revert` closes the vacuous case; nothing
+here does. A **flaky** witness that happened to fail at base makes a no-op
 criterion read as met — the rule has no repetition or quarantine, unlike baseline
 subtraction, which tolerates flakes by cancelling them. A **refactor** spec has no
 behaviour change, so every criterion is `preserves` and the rule yields no signal
@@ -245,7 +329,12 @@ diff** is judged on its name, not its body.
 
 **Size.** `risk: elevated` makes `size` blocking at the 600-line feature ceiling,
 and this touches fourteen files. The reading route is what makes it plausible — the
-gate itself should be near `census`'s size. If it will not fit, the separable half
-is `pr_body` rendering and its tests; the prompt plumbing is not separable, because
+gate itself should be near `census`'s size. `pr_body` is no longer the separable
+half: the skip labelling pays off on every task from day one, while the gate pays
+off only on a spec that declares a witness. Nor is the prompt plumbing separable —
 a witness the implementer never sees makes the gate unbuildable rather than
-unpolished. If dropping `pr_body` is not enough, stop and raise it.
+unpolished. The separable half is **`preserves`**: a `preserves` witness that
+breaks is already a new failure from the `tests` gate, so the flag carries no
+independent signal and exists only to exempt its criterion from the direction rule.
+Dropping it costs its two criteria and nothing else. If that is not enough, stop
+and raise it.
