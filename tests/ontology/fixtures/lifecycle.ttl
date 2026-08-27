@@ -17,18 +17,23 @@
 :lens-blast       a saffron:CriticLens .
 :impl-t1 a saffron:ImplementerSession .
 
-## Gates, and the policy that declares them. `no-network` is declared and never
-## runs in this batch — the case Q3's second half exists to find.
-:g-scope a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
-:g-size  a saffron:CoreGate ; saffron:blockingAt saffron:blockingWhenElevated .
-:g-census a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
-:g-lint  a saffron:ContractGate ; saffron:blockingAt saffron:alwaysBlocking .
-:g-types a saffron:ContractGate ; saffron:blockingAt saffron:alwaysBlocking .
-:g-tests a saffron:ContractGate ; saffron:blockingAt saffron:alwaysBlocking .
-:g-nonet a saffron:ContractGate ; saffron:blockingAt saffron:alwaysBlocking .
+## Gates, and the policy that declares them. Core gates are the vocabulary's own
+## individuals — there is one implementation of each. Contract gates are this
+## repo's executables for a core-supplied role. `no-network` is declared and
+## never runs in this batch: the case Q3's second half exists to find.
+:g-lint  a saffron:ContractGate ; saffron:role saffron:lint ;
+    saffron:blockingAt saffron:alwaysBlocking .
+:g-types a saffron:ContractGate ; saffron:role saffron:types ;
+    saffron:blockingAt saffron:alwaysBlocking .
+:g-tests a saffron:ContractGate ; saffron:role saffron:tests ;
+    saffron:blockingAt saffron:alwaysBlocking .
+:g-nonet a saffron:ContractGate ; saffron:role saffron:no-network ;
+    saffron:blockingAt saffron:alwaysBlocking .
+:g-cov   a saffron:ContractGate ; saffron:role saffron:coverage ;
+    saffron:blockingAt saffron:advisory .
 :policy-1 a saffron:Policy ;
-    saffron:declaresGate :g-scope, :g-size, :g-census, :g-lint, :g-types,
-                         :g-tests, :g-nonet, saffron:coverage .
+    saffron:declaresGate saffron:scope, saffron:size, saffron:census,
+                         :g-lint, :g-types, :g-tests, :g-nonet, :g-cov .
 
 ## ── t1: bug, elevated, SCOPE_REVIEW ratified, one blocker rebutted, merged ──
 :spec-t1 a saffron:Spec ; saffron:specType saffron:bug ;
@@ -61,20 +66,20 @@
     earl:assertedBy :g-lint ; earl:subject :diff-t1-1 ; earl:mode earl:automatic ;
     earl:result [ earl:outcome earl:failed ] .
 :gr-t1-1-scope a saffron:GateResult ; prov:wasGeneratedBy :suite-t1-1 ;
-    earl:assertedBy :g-scope ; earl:subject :diff-t1-1 ; earl:mode earl:automatic ;
+    earl:assertedBy saffron:scope ; earl:subject :diff-t1-1 ; earl:mode earl:automatic ;
     earl:result [ earl:outcome earl:passed ] .
 :gr-t1-1-size a saffron:GateResult ; prov:wasGeneratedBy :suite-t1-1 ;
-    earl:assertedBy :g-size ; earl:subject :diff-t1-1 ; earl:mode earl:automatic ;
+    earl:assertedBy saffron:size ; earl:subject :diff-t1-1 ; earl:mode earl:automatic ;
     earl:result [ earl:outcome earl:passed ] .
 :gr-t1-2-lint a saffron:GateResult ; prov:wasGeneratedBy :suite-t1-2 ;
     earl:assertedBy :g-lint ; earl:subject :diff-t1-2 ; earl:mode earl:automatic ;
     earl:result [ earl:outcome earl:passed ] .
 :gr-t1-2-census a saffron:GateResult ; prov:wasGeneratedBy :suite-t1-2 ;
-    earl:assertedBy :g-census ; earl:subject :diff-t1-2 ; earl:mode earl:automatic ;
+    earl:assertedBy saffron:census ; earl:subject :diff-t1-2 ; earl:mode earl:automatic ;
     earl:result [ earl:outcome earl:passed ] .
 # `coverage` is advisory; it is red on a merged task and stopped nothing.
 :gr-t1-2-cov a saffron:GateResult ; prov:wasGeneratedBy :suite-t1-2 ;
-    earl:assertedBy saffron:coverage ; earl:subject :diff-t1-2 ; earl:mode earl:automatic ;
+    earl:assertedBy :g-cov ; earl:subject :diff-t1-2 ; earl:mode earl:automatic ;
     earl:result [ earl:outcome earl:failed ] .
 
 :finding-t1-1 a saffron:Finding ; saffron:severity saffron:blocker ;

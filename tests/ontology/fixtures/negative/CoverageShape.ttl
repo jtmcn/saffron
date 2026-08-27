@@ -3,7 +3,7 @@
 @prefix earl: <http://www.w3.org/ns/earl#> .
 @prefix : <https://saffron.dev/data/> .
 
-# A policy declaring coverage blocking. It is advisory at every tier.
-saffron:coverage a saffron:Gate, saffron:ContractGate ;
+# A policy declaring its coverage executable blocking. It is advisory at every tier.
+:g a saffron:Gate, saffron:ContractGate ; saffron:role saffron:coverage ;
    saffron:blockingAt saffron:alwaysBlocking .
-saffron:alwaysBlocking a saffron:BlockingLevel .
+saffron:coverage a saffron:GateRole . saffron:alwaysBlocking a saffron:BlockingLevel .

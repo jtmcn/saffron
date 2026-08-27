@@ -21,6 +21,8 @@ CLOSED_SETS = {
     "Terminal state": "TerminalState",
     "Severity": "Severity",
     "Risk tier": "RiskTier",
+    "Gate role": "GateRole",
+    "Core gates": "CoreGate",
 }
 
 
@@ -32,9 +34,11 @@ def context_enumeration(term: str) -> set[str]:
     about the set rather than members of it.
     """
     body = CONTEXT.read_text()
-    start = body.index(f"**{term}**:") + len(f"**{term}**:")
+    # The marker, not the marker plus a colon: `Core gates` is a bullet that
+    # introduces its members with an em dash instead.
+    start = body.index(f"**{term}**") + len(f"**{term}**")
     sentence = re.split(r"\.(?:\s|$)", body[start:], maxsplit=1)[0]
-    return set(re.findall(r"`([A-Za-z_][A-Za-z0-9_]*)`", sentence))
+    return set(re.findall(r"`([A-Za-z_][A-Za-z0-9_-]*)`", sentence))
 
 
 def ontology_members(class_name: str) -> set[str]:
@@ -62,3 +66,29 @@ def test_the_parser_would_notice_a_changed_set():
     Both halves are asserted non-empty; this pins the shape it reads."""
     assert context_enumeration("Risk tier") == {"standard", "elevated"}
     assert "elevate_on" not in context_enumeration("Risk tier")
+
+
+def test_the_gate_statuses_are_earl_outcomes_rather_than_saffron_terms():
+    """CONTEXT.md §4 closes a fourth set — `pass`, `fail`, `skip`, `error` — and
+    the ontology deliberately declares none of them: EARL's outcome values *are*
+    those four, and `skip` being `inapplicable` and `error` being `cantTell` is
+    the alignment that states "`error` is not `fail`" in a vendored vocabulary
+    rather than in our own prose. The check is that the mapping stays total and
+    that nobody quietly adds a competing `saffron:` term for a status."""
+    statuses = context_enumeration("Status")
+    assert statuses == {"pass", "fail", "skip", "error"}
+
+    vocabulary = rdflib.Graph().parse(VOCABULARY, format="turtle")
+    for status in statuses:
+        assert (rdflib.URIRef(f"{NS}{status}"), None, None) not in vocabulary, (
+            f"saffron:{status} duplicates an EARL outcome"
+        )
+
+    earl = rdflib.Graph()
+    for vendored in (ONTOLOGY / "vendor").glob("*.ttl"):
+        earl.parse(vendored, format="turtle")
+    outcomes = set(earl.subjects(rdflib.RDF.type, None)) & {
+        rdflib.URIRef(f"http://www.w3.org/ns/earl#{o}")
+        for o in ("passed", "failed", "inapplicable", "cantTell")
+    }
+    assert len(outcomes) == len(statuses), "the mapping is no longer total"

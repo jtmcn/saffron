@@ -230,7 +230,7 @@ def test_q3_a_red_size_at_standard_risk_does_not_unseat_a_sole_blocking_failure(
         PREAMBLE
         + """
         :gr-t2-1-size a saffron:GateResult ; prov:wasGeneratedBy :suite-t2-1 ;
-            earl:assertedBy :g-size ; earl:subject :diff-t2-1 ;
+            earl:assertedBy saffron:size ; earl:subject :diff-t2-1 ;
             earl:mode earl:automatic ; earl:result [ earl:outcome earl:failed ] .
         """
     )
@@ -248,7 +248,7 @@ def test_q3_a_red_size_at_elevated_risk_does_unseat_it():
         PREAMBLE
         + """
         :gr-t1-1-size-red a saffron:GateResult ; prov:wasGeneratedBy :suite-t1-1 ;
-            earl:assertedBy :g-size ; earl:subject :diff-t1-1 ;
+            earl:assertedBy saffron:size ; earl:subject :diff-t1-1 ;
             earl:mode earl:automatic ; earl:result [ earl:outcome earl:failed ] .
         """
     )

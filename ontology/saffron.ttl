@@ -64,10 +64,27 @@ saffron:RepoDefinedGate a owl:Class ; rdfs:subClassOf saffron:Gate ; rdfs:label 
 [] a owl:AllDisjointClasses ;
    owl:members ( saffron:CoreGate saffron:ContractGate saffron:RepoDefinedGate ) .
 
-saffron:coverage a saffron:ContractGate ;
-    saffron:blockingAt saffron:advisory ;
-    rdfs:label "coverage" ;
-    rdfs:comment "Named here, alone among gates, because its blocking level is fixed by design and not by policy (§5.4, §5.6)." .
+# The core/repo boundary, as membership rather than prose. A core gate is
+# implemented in Saffron, so there is one of each and it is named here. A
+# contract gate is a repo's executable for a core-supplied *role*, so the role is
+# named here and the gate is not. A repo-defined gate is neither: CONTEXT.md §4
+# says its name is not vocabulary, so none appears below.
+# Their blocking levels are core-supplied too, and belong here rather than in a
+# repo's policy: §5.4 fixes them, and `size` at `elevated` is the only one a tier
+# moves. A `policy.yaml` that declared otherwise would not be a different repo,
+# it would be wrong.
+saffron:scope     a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
+saffron:size      a saffron:CoreGate ; saffron:blockingAt saffron:blockingWhenElevated .
+saffron:secrets   a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
+saffron:integrity a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
+saffron:census    a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
+saffron:committed a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
+
+saffron:GateRole a owl:Class ; rdfs:label "gate role" ;
+    rdfs:comment "A name in the contract. The repo supplies the executable; core supplies the meaning (§5.4)." .
+saffron:format a saffron:GateRole . saffron:lint a saffron:GateRole .
+saffron:types a saffron:GateRole . saffron:tests a saffron:GateRole .
+saffron:no-network a saffron:GateRole . saffron:coverage a saffron:GateRole .
 
 ## Assertions — a mypy failure and a blocker on an acceptance criterion are one
 ## shape: an assertion, by an assertor, about a subject, with an outcome (§4.6).
@@ -95,6 +112,8 @@ saffron:blockingAt   a owl:ObjectProperty ; rdfs:domain saffron:Gate ; rdfs:rang
 saffron:declaresGate a owl:ObjectProperty ; rdfs:domain saffron:Policy ; rdfs:range saffron:Gate ;
     rdfs:comment "Declared, not executed. The gap between this set and the gates a suite ran is what Q3 asks for." .
 saffron:ratifiedBy   a owl:ObjectProperty ; rdfs:domain saffron:TouchesSet ; rdfs:range saffron:Operator .
+saffron:role         a owl:ObjectProperty ; rdfs:domain saffron:ContractGate ; rdfs:range saffron:GateRole ;
+    rdfs:comment "Which contract role a repo's executable implements. A core gate has no role — it is the implementation." .
 
 ## Enumerated values. Each set is an axiom the relational schema cannot state:
 ## every one of these is a TEXT column in §4.1.

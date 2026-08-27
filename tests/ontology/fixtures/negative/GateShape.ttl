@@ -3,7 +3,9 @@
 @prefix earl: <http://www.w3.org/ns/earl#> .
 @prefix : <https://saffron.dev/data/> .
 
-# Core and contract at once — the core/repo boundary collapsed.
-:g a saffron:Gate, saffron:CoreGate, saffron:ContractGate ;
-   saffron:blockingAt saffron:alwaysBlocking .
+# Core and contract at once — the core/repo boundary collapsed. Everything else
+# about the node is valid, so only the xone can be what fires.
+saffron:scope a saffron:Gate, saffron:CoreGate, saffron:ContractGate ;
+   saffron:role saffron:lint ; saffron:blockingAt saffron:alwaysBlocking .
+saffron:lint a saffron:GateRole .
 saffron:alwaysBlocking a saffron:BlockingLevel .

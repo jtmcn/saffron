@@ -75,12 +75,37 @@ saffron:GateShape a sh:NodeShape ;
         sh:class saffron:BlockingLevel ;
         sh:in ( saffron:alwaysBlocking saffron:blockingWhenElevated saffron:advisory ) ] .
 
+# Closed sets stated in CONTEXT.md §4, where the ledger has one TEXT column.
+# Repo-defined gate names are deliberately absent: §4 says they are not
+# vocabulary, so the ontology must not close a set over them.
+saffron:CoreGateShape a sh:NodeShape ;
+    sh:targetClass saffron:CoreGate ;
+    sh:in ( saffron:scope saffron:size saffron:secrets
+            saffron:integrity saffron:census saffron:committed ) .
+
+saffron:GateRoleShape a sh:NodeShape ;
+    sh:targetClass saffron:GateRole ;
+    sh:in ( saffron:format saffron:lint saffron:types
+            saffron:tests saffron:no-network saffron:coverage ) .
+
+# A contract gate is a repo's executable for one core-supplied role. A core gate
+# has none: it *is* the implementation, which is the boundary in one cardinality.
+saffron:ContractGateShape a sh:NodeShape ;
+    sh:targetClass saffron:ContractGate ;
+    sh:property [ sh:path saffron:role ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:class saffron:GateRole ] .
+
 # `coverage` is advisory at every tier — a design decision, not an oversight
-# (§5.4). No policy may declare otherwise, which is not a constraint any
-# `policy.yaml` schema states.
+# (§5.4). Stated over the role rather than one named gate, so it binds every
+# repo's coverage executable and not just Saffron's; no `policy.yaml` schema
+# says this, and blocking on changed-line coverage is what `integrity` exists
+# to prevent.
 saffron:CoverageShape a sh:NodeShape ;
-    sh:targetNode saffron:coverage ;
-    sh:property [ sh:path saffron:blockingAt ; sh:in ( saffron:advisory ) ] .
+    sh:targetClass saffron:Gate ;
+    sh:not [
+        sh:property [ sh:path saffron:role ; sh:hasValue saffron:coverage ; sh:minCount 1 ] ;
+        sh:property [ sh:path saffron:blockingAt ; sh:minCount 1 ;
+            sh:in ( saffron:alwaysBlocking saffron:blockingWhenElevated ) ] ] .
 
 saffron:PolicyShape a sh:NodeShape ;
     sh:targetClass saffron:Policy ;

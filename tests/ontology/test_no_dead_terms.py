@@ -12,7 +12,9 @@ import re
 import pyoxigraph as ox
 from ontology_paths import NS, QUERIES, SHAPES, VOCABULARY
 
-TERM = re.compile(r"saffron:([A-Za-z_][A-Za-z0-9_]*)")
+# The hyphen is load-bearing: `no-network` is a gate role, and a regex that
+# stopped at the hyphen read its shape reference as a mention of `no`.
+TERM = re.compile(r"saffron:([A-Za-z_][A-Za-z0-9_-]*)")
 
 
 def terms_in(text: str) -> set[str]:
