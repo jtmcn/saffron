@@ -148,12 +148,11 @@ The second is a real `preserves` case and shows what the flag is for: an existin
 already-green test, named because the criterion is *"do not break this"*. A new
 test can never be `preserves`, because it did not pass at base.
 
-**This spec does not use the key, and that is a finding rather than an oversight.**
-`Spec` sets `extra="forbid"` (`intake.py:35`), so a spec declaring `acceptance:`
-today is refused at intake as malformed — the first spec to declare witnesses
-cannot be the one that builds them. The recursion is closed by a fixture instead.
-Worth carrying into `DESIGN.md` §3.2: **a spec cannot introduce the frontmatter it
-is written in**, and the standing answer is a fixture in the same change.
+**This spec does not use the key**, and §3.2 now says why: a spec cannot introduce
+the frontmatter it is written in, because `Spec` sets `extra="forbid"`
+(`intake.py:35`) and a spec declaring `acceptance:` today is refused at intake as
+malformed. The standing answer §3.2 gives is a fixture in the same change, asserted
+by one acceptance criterion — which is the last criterion below.
 
 ## Acceptance criteria
 
@@ -194,10 +193,11 @@ on two sides; it cannot see that a test's assertions were weakened. That is the
 narrower claim, and it is stated here so the gate is not read as catching test
 theatre in general.
 
-Amending `DESIGN.md` §5.4's role table, §3.2's spec format and `CONTEXT.md` §4's
-core-gate enumeration for a seventh core gate. All three are `forbidden` here, as
-in every spec `SA-0001` onward: the document being amended is the specification,
-so the cell is barred and the operator writes it (PR #44's shape).
+Amending `DESIGN.md` §5.4's role table and `CONTEXT.md` §4's core-gate enumeration
+for a seventh core gate. Both are `forbidden` here, as in every spec `SA-0001`
+onward: the document being amended is the specification, so the cell is barred and
+the operator writes it (PR #44's shape). §3.2 is already amended — it carries the
+frontmatter-recursion rule this spec found.
 
 Migrating `SA-0001`–`SA-0010` to declared witnesses. They keep the markdown
 section and the gate reports `skip`, which is what `skip` is for.

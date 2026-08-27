@@ -188,13 +188,19 @@ envelope:                       # outer bound for DIAGNOSE; required for bugs
   - src/thermal_edge/**
   - tests/**
 touches:                        # optional for bugs — agent proposes, you ratify (§5.2)
-forbidden:                      # hard deny, beyond global protected paths
+forbidden:                      # denied at the plan checkpoint, not against the diff — below
   - alembic/versions/**
 budget_usd: 12
 max_attempts: 4
 max_turns: 60                   # per-turn ceiling; the flags override all three
 risk: standard                  # standard | elevated (§5.6)
 ---
+
+**`forbidden` and `protected` bind the plan, not the diff, and the wording here said otherwise until `SA-0011` leaned on it.** Both are read in exactly two places: `agents/artifacts.py` rejects a plan whose *declared* `files_to_change` matches one, and `agents/context.py` prints them into the prompt. No gate reads either against a diff. The only diff-time path control is `scope` — changed files ⊆ `touches` (§5.4) — and it is what actually stops a task editing a denied path, because a denied path is normally outside `touches` anyway.
+
+The gap that leaves is narrow and real: a `touches` broad enough to contain a `forbidden` path (`touches: ["saffron/**"]`, `forbidden: ["saffron/cell/**"]`) passes `scope`, and nothing else looks. A plan that declares the edit is caught; a plan that does not declare it is not. Stated rather than fixed, because narrowing it is a design change and `integrity`'s exemption paragraph (§5.4) reasons about the same shape: **a check that fires on a declaration is not a check that fires on a diff.**
+
+**A spec cannot introduce the frontmatter it is written in.** `Spec` sets `extra="forbid"`, so a spec declaring a key its own task adds is refused at intake as malformed — the first spec to use a field can never be the one that builds it. The standing answer is a fixture in the same change, asserted by one acceptance criterion. Found by `SA-0011`, whose first draft declared the key it was proposing and would have been refused by the factory it was written for.
 
 ## Context
 `forecast_raw` has received no rows from any of the three providers since
