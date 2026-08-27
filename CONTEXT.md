@@ -316,8 +316,14 @@ _Avoid_: "response", "appeal", "pushback".
 ## 6. Outcomes
 
 **Terminal state**: A state that reaches the operator — `SCOPE_REVIEW`,
-`PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`, `RATE_LIMITED`.
+`PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`,
+`PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`, `RATE_LIMITED`.
 Everything else is internal.
+> The last three named here were added to `DESIGN.md` §3.3 and not to this list,
+> which left three documents disagreeing about the set: six here, nine there, and
+> a tenth state (`ORPHANED`) that `saffron gc` reclaims and neither called
+> terminal. A state a task *ends in* is a wider set than the states that *reach
+> you* — `MERGED` ends a task and reaches nobody — and one column holds both.
 
 **`EXHAUSTED`**: A task that could not pass its own gates within `max_attempts`. An
 informative outcome about the spec or the codebase.
