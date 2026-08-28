@@ -8,6 +8,7 @@ import pytest
 from saffron.agents.findings import Finding
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
+from saffron.intake import Spec, parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import rebut
 from saffron.phases.package import (
@@ -41,6 +42,24 @@ def git(repo, *args):
     return subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
     ).stdout.strip()
+
+
+def _spec(*, touches=(), criteria=()):
+    """A real Spec, parsed like an operator's, not a SimpleNamespace guessing
+    at whatever attributes package() happened to read (see the fixture-fake
+    defect this replaces)."""
+    touches_yaml = (
+        f"touches:\n{''.join(f'  - {t}\n' for t in touches)}" if touches else ""
+    )
+    criteria_md = (
+        "\n## Acceptance criteria\n" + "".join(f"- [ ] {c}\n" for c in criteria)
+        if criteria
+        else ""
+    )
+    return parse_spec(
+        "---\nid: SA-0005\ntitle: package a green cell\ntype: feature\n"
+        f"risk: standard\n{touches_yaml}---\n{criteria_md}"
+    )
 
 
 def _repo_with_commit(path):
@@ -624,6 +643,14 @@ def _cell_outcome(task_dir, task_id, run_id):
     )
 
 
+def test_the_package_fixtures_build_a_real_spec():
+    """`_spec()` goes through `parse_spec`, not `Spec(...)` and not a
+    SimpleNamespace guessing at whichever attributes `package()` reads today
+    — the property the two fakes it replaces violated."""
+    assert isinstance(_spec(), Spec)
+    assert isinstance(_spec(touches=["f.txt"], criteria=["it works"]), Spec)
+
+
 def test_a_conflict_persists_merge_failed_and_pushes_nothing(monkeypatch, tmp_path):
     """Asserting the state alone would pass against an implementation that
     pushed conflict markers first, so this asserts the remote too."""
@@ -676,15 +703,7 @@ def test_a_conflict_persists_merge_failed_and_pushes_nothing(monkeypatch, tmp_pa
     ledger.finish_run(run_id, "COMPLETE")
 
     outcome = _cell_outcome(task_dir, task_id, run_id)
-    spec = SimpleNamespace(
-        id="SA-0005",
-        title="package a green cell",
-        risk="standard",
-        touches=[],
-        acceptance_criteria=[],
-        acceptance=[],
-        type="feature",
-    )
+    spec = _spec()
 
     def never_called(argv):
         raise AssertionError("gh must not be reached on a conflict")
@@ -780,15 +799,7 @@ def packageable(monkeypatch, tmp_path):
         task_id=task_id,
         out_dir=tmp_path / "batch",
         kwargs=dict(
-            spec=SimpleNamespace(
-                id="SA-0005",
-                title="package a green cell",
-                risk="standard",
-                touches=["f.txt"],
-                acceptance_criteria=["it works"],
-                acceptance=[],
-                type="feature",
-            ),
+            spec=_spec(touches=["f.txt"], criteria=["it works"]),
             repo=work,
             mirror=mirror,
             image="unused",
