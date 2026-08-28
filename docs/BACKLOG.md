@@ -1189,7 +1189,8 @@ production does and runs `shacl` through `CellExecutor`, asserting `pass` and a
 
 ## 21. Two `SimpleNamespace` fakes stand in for `Spec` and drift silently
 
-**Status:** open. Found by `SA-0011`, implemented by hand on
+**Status:** open, specced as `SA-0012` (`.saffron/specs/SA-0012-spec-doubles.md`),
+ready to drive. Found by `SA-0011`, implemented by hand on
 `joel/sa-0011-witnesses`; the two lines that unbreak it are in that branch, the
 fakes themselves are not fixed.
 
