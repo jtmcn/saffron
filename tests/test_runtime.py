@@ -222,3 +222,27 @@ def test_the_network_address_is_not_mistaken_for_the_cell(monkeypatch):
     the cell's own, and every proxied call would fail as an upstream outage."""
     inspected = '{"network":"10.88.0.0/24","gateway":"10.88.0.1","address":"10.88.0.4"}'
     assert runtime._first_address(inspected, "10.88.0.") == "10.88.0.4"
+
+
+def test_an_overlapping_network_names_the_one_already_holding_the_subnet(
+    monkeypatch,
+):
+    """A SIGKILLed run leaves a network behind, and the next create fails on
+    the subnet rather than the name. The runtime's own message says which
+    subnet and not which network, so the operator is told to go look."""
+    listing = "NETWORK         SUBNET\nsaffron-cells   10.88.0.0/24\n"
+
+    def fake_call(argv, timeout_s=120):
+        if "create" in argv:
+            return runtime.Completed(
+                1, "", "Error: IPv4 subnet 10.88.0.0/24 overlaps an existing network"
+            )
+        return runtime.Completed(0, listing, "")
+
+    monkeypatch.setattr(runtime, "_call", fake_call)
+    try:
+        runtime.create_network("saffron-test-cells")
+    except runtime.CellRuntimeError as exc:
+        assert "saffron-cells" in str(exc), exc
+    else:
+        raise AssertionError("an overlapping subnet must raise")

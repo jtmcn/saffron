@@ -151,7 +151,37 @@ def _must(argv: Sequence[str], timeout_s: float = 120) -> Completed:
 
 
 def create_network(name: str, subnet: str = DEFAULT_SUBNET) -> None:
-    _must([RUNTIME, "network", "create", "--internal", "--subnet", subnet, name])
+    done = _call(
+        [RUNTIME, "network", "create", "--internal", "--subnet", subnet, name], 120
+    )
+    if done.returncode == 0:
+        return
+    # The runtime names the subnet and not the network holding it, and the
+    # holder is what has to be removed. A SIGKILLed run leaves one behind
+    # under a name the next create does not pre-clean, because it is a
+    # different name.
+    detail = done.stderr.strip()
+    if "overlap" in detail:
+        holders = networks_on_subnet(subnet, exclude=name)
+        if holders:
+            detail += f" — held by {', '.join(holders)}; remove it and re-run"
+    raise CellRuntimeError(
+        f"{' '.join([RUNTIME, 'network', 'create', '--internal', '--subnet', subnet, name])} failed: {detail}"
+    )
+
+
+def networks_on_subnet(subnet: str, exclude: str = "") -> list[str]:
+    """Networks already holding a subnet, by name. Empty when the listing
+    itself fails: this only ever adds detail to an error already being raised."""
+    done = _call([RUNTIME, "network", "list"], 60)
+    if done.returncode != 0:
+        return []
+    found = []
+    for line in done.stdout.splitlines()[1:]:
+        fields = line.split()
+        if len(fields) >= 2 and fields[1] == subnet and fields[0] != exclude:
+            found.append(fields[0])
+    return found
 
 
 # The `remove_*` calls never raise: they also pre-clean, where "does not exist"

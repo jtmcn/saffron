@@ -142,3 +142,39 @@ def test_only_the_denials_are_reported_and_only_before_teardown(monkeypatch):
     assert len(denied) == 2
     assert "platform.claude.com:443" in denied[0]
     assert not any("TCP_TUNNEL" in line for line in denied)
+
+
+def test_a_tunnel_the_allowlist_permitted_but_squid_could_not_open_is_reported(
+    monkeypatch,
+):
+    """The failure this repo actually shipped: `TCP_TUNNEL/503` with
+    `HIER_NONE` is an allowed CONNECT squid could not complete, and it reaches
+    the operator as the same unexplained API error a denial would."""
+    log = "\n".join(
+        [
+            "1755800000.1 12 10.88.0.3 TCP_TUNNEL/200 5 CONNECT api.anthropic.com:443 - HIER_DIRECT/1.2.3.4 -",
+            "1755800001.2 35022 10.88.0.3 TCP_TUNNEL/503 0 CONNECT api.anthropic.com:443 - HIER_NONE/- -",
+            "1755800002.3 0 10.88.0.3 TCP_DENIED/403 4 CONNECT pypi.org:443 - HIER_NONE/- text/html",
+        ]
+    )
+    monkeypatch.setattr(
+        proxy.runtime, "call", lambda *a, **k: runtime.Completed(0, log, "")
+    )
+    failed = proxy.failed_egress()
+    assert len(failed) == 1
+    assert "TCP_TUNNEL/503" in failed[0]
+    # The denial is the other report's job, and the success is nobody's.
+    assert not any("TCP_DENIED" in line for line in failed)
+    assert not any("/200" in line for line in failed)
+
+
+def test_a_proxy_that_never_answered_reports_nothing_rather_than_raising(
+    monkeypatch,
+):
+    """`failed_egress` runs from the same `finally` as `denied_egress`."""
+
+    def boom(*a, **k):
+        raise runtime.CellRuntimeError("the runtime binary is gone")
+
+    monkeypatch.setattr(proxy.runtime, "call", boom)
+    assert proxy.failed_egress() == []

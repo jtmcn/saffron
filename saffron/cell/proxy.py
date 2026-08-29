@@ -88,6 +88,39 @@ def denied_egress(limit: int = 10) -> list[str]:
     return [line.strip() for line in lines if "TCP_DENIED" in line][:limit]
 
 
+def failed_egress(limit: int = 10) -> list[str]:
+    """What the proxy allowed and could not open, read on the same terms as
+    `denied_egress` and never merged into it.
+
+    Squid answers an allowed CONNECT it cannot complete with a 5xx and
+    `HIER_NONE` — a route out that is missing rather than a hostname that is —
+    and the operator meets it as the same unexplained API error. Kept apart
+    from the denials because the fix is not: one is a line in the allowlist,
+    the other is the network the proxy is on."""
+    try:
+        done = runtime.call([runtime.RUNTIME, "logs", PROXY_NAME], timeout_s=10)
+    except runtime.CellRuntimeError:
+        return []
+    lines = (done.stdout + done.stderr).splitlines()
+    return [line.strip() for line in lines if _is_failure(line)][:limit]
+
+
+def _is_failure(line: str) -> bool:
+    """A squid access-log row squid itself could not satisfy.
+
+    The status is read out of the `TAG/CODE` field rather than matched as a
+    literal, because the tags multiply — `TCP_TUNNEL`, `TCP_MISS`, `NONE` —
+    and the code is the part that says it failed. Denials carry their own
+    report and are left to it."""
+    if "TCP_DENIED" in line:
+        return False
+    for field in line.split():
+        tag, slash, code = field.partition("/")
+        if slash and tag.isupper() and code.isdigit() and int(code) >= 400:
+            return True
+    return False
+
+
 def stop_proxy() -> None:
     runtime.remove_container(PROXY_NAME)
 

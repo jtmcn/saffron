@@ -432,6 +432,9 @@ def _stub_the_runtime(
     monkeypatch.setattr("saffron.cell.proxy.stop_proxy", _ordered("stop", None))
     monkeypatch.setattr("saffron.cell.proxy.denied_egress", lambda *a, **k: cell.denied)
     monkeypatch.setattr(
+        "saffron.cell.proxy.failed_egress", lambda *a, **k: getattr(cell, "failed", [])
+    )
+    monkeypatch.setattr(
         "saffron.preflight.assert_host_is_unreachable", _ordered("probe", None)
     )
     monkeypatch.setattr(
@@ -1692,6 +1695,20 @@ def test_a_denied_connect_reaches_the_operator(monkeypatch, tmp_path):
     assert any(
         "proxy DENIED" in line and "platform.claude.com" in line
         for line in cell.watched
+    )
+
+
+def test_a_tunnel_the_proxy_could_not_open_reaches_the_operator(monkeypatch, tmp_path):
+    """The failure that shipped: nothing was denied, so the denial report was
+    correctly silent, and a proxy with no route out looked like an API outage
+    for a whole run."""
+    cell = _stub_the_runtime(monkeypatch)
+    cell.failed = [
+        "1755800001.2 35022 10.88.0.3 TCP_TUNNEL/503 0 CONNECT api.anthropic.com:443 - HIER_NONE/- -"
+    ]
+    _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
+    assert any(
+        "proxy FAILED" in line and "api.anthropic.com" in line for line in cell.watched
     )
 
 

@@ -1160,6 +1160,10 @@ def _drive_cell(
         # Before the proxy goes: its log goes with it.
         for denied in proxy.denied_egress():
             watch(f"teardown: proxy DENIED {denied}")
+        # Not a denial: an allowed CONNECT the proxy could not open. Reported
+        # apart because the fix is the network, not the allowlist.
+        for failed in proxy.failed_egress():
+            watch(f"teardown: proxy FAILED {failed}")
         proxy.stop_proxy()
         removed.append(("network", network, runtime.remove_network(network)))
         # Volumes go too, or the same spec_id cannot be re-run.
