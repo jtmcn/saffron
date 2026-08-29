@@ -346,6 +346,50 @@ def test_dirty_paths_sees_an_uncommitted_edit(tmp_path, network):
 
 
 @pytest.mark.cell
+def test_commit_dirty_commits_a_dirty_tree_and_no_ops_on_a_clean_one(tmp_path, network):
+    origin = tmp_path / "origin"
+    base = _seed_repo(origin)
+    mirror = tmp_path / "m.git"
+    subprocess.run(
+        ["git", "clone", "--bare", "-q", str(origin), str(mirror)], check=True
+    )
+    volume, container = "saffron-test-wt7", "saffron-test-cell7"
+    runtime.remove_volume(volume)
+    runtime.remove_volume(f"{volume}-state")
+    runtime.create_volume(volume)
+    runtime.remove_container(container)
+    try:
+        worktree.prepare_worktree(
+            mirror=mirror,
+            volume=volume,
+            base_sha=base,
+            branch="saffron/test",
+            image=image.BASE_TAG,
+            container=container,
+            network=network,
+            env={},
+            gates_dir=_gates_dir(tmp_path),
+        )
+        # A clean tree has nothing to checkpoint.
+        assert worktree.commit_dirty(container, "checkpoint: nothing") is False
+        assert worktree.commit_subjects(container, base) == []
+
+        runtime.exec_(container, ["sh", "-c", "echo x >> /work/a.txt"])
+        runtime.exec_(container, ["sh", "-c", "cd /work && touch brand-new.py"])
+        assert worktree.commit_dirty(container, "checkpoint: turn ceiling") is True
+        assert worktree.dirty_paths(container) == []
+        assert worktree.commit_subjects(container, base) == ["checkpoint: turn ceiling"]
+
+        # Idempotent: nothing left dirty, so calling again is a no-op.
+        assert worktree.commit_dirty(container, "checkpoint: again") is False
+        assert worktree.commit_subjects(container, base) == ["checkpoint: turn ceiling"]
+    finally:
+        runtime.remove_container(container)
+        runtime.remove_volume(volume)
+        runtime.remove_volume(f"{volume}-state")
+
+
+@pytest.mark.cell
 def test_a_cell_starts_from_a_base_the_mirror_only_learns_by_fetching(
     tmp_path, network
 ):

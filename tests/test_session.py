@@ -356,6 +356,7 @@ class _Cell:
         self.exported = False
         self.subjects_from: str | None = None
         self.timeouts: list[float | None] = []
+        self.checkpointed: list[str] = []
         self.denied: list[str] = []
         self.failed: list[str] = []
         self.preflight: list[str] = []
@@ -486,6 +487,12 @@ def _stub_the_runtime(
 
     monkeypatch.setattr("saffron.cell.worktree.changed_files", _changed_files)
     monkeypatch.setattr("saffron.cell.worktree.dirty_paths", lambda container: [])
+
+    def _commit_dirty(_container, message):
+        cell.checkpointed.append(message)
+        return True
+
+    monkeypatch.setattr("saffron.cell.worktree.commit_dirty", _commit_dirty)
 
     def _commits_ahead(_container, sha):
         cell.measured_from = sha
@@ -1330,6 +1337,45 @@ def test_a_repair_turn_that_fails_does_not_discard_committed_work(
     # Plan, implement, the failed repair turn's $0.40, and REVIEW's two lenses:
     # the critic is spend too, and a total that omits it stops being a total.
     assert any("$0.80 spent" in line for line in cell.watched)
+    # A clean tree has nothing to checkpoint — the host must not commit an
+    # empty no-op just because a turn was cut.
+    assert cell.checkpointed == []
+
+
+def test_a_repair_turn_cut_mid_edit_gets_a_host_checkpoint_commit(
+    monkeypatch, tmp_path
+):
+    """The agent's own "commit as you go" is a prompt, and a prompt is not the
+    boundary (§0). Real edits left dirty when a turn is cut are host-committed
+    so they survive into the next attempt's gate check instead of vanishing
+    with the container."""
+    failing = Failure(file="a.py", code="E501", message="too long")
+    cell = _stub_the_runtime(monkeypatch, suites=([], _results(failing), []))
+
+    def _dirty_paths(_container):
+        # Dirty exactly once: right after the repair turn is cut, before the
+        # host checkpoints it. Clean on the baseline and every other check —
+        # a mock that stayed dirty forever would fail `committed` on the
+        # *next* suite too and corrupt the scripted `suites=` sequence above.
+        return (
+            ["scheduler.py"] if len(cell.turns) == 3 and not cell.checkpointed else []
+        )
+
+    monkeypatch.setattr("saffron.cell.worktree.dirty_paths", _dirty_paths)
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            implement.AgentFailed("max turns", _turn(cost=0.4)),
+        ],
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert len(cell.checkpointed) == 1
+    assert "checkpoint" in cell.checkpointed[0]
 
 
 def test_the_host_stops_spending_at_the_tasks_budget(monkeypatch, tmp_path):

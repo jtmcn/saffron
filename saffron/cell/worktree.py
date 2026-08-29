@@ -193,6 +193,26 @@ def read_at_head(container: str, path: str) -> str | None:
     return done.stdout if done.returncode == 0 else None
 
 
+def commit_dirty(container: str, message: str) -> bool:
+    """A host-side checkpoint: stages and commits whatever is dirty, or
+    no-ops on a clean tree. `False` means there was nothing to commit — not
+    a failure.
+
+    Used when a turn ends abnormally (§4.3): the agent's own "commit as you
+    go" instruction is a prompt, and a prompt is not the boundary. Real edits
+    left uncommitted when a turn is cut do not survive teardown otherwise.
+    """
+    add = _git(container, "add", "-A")
+    if add.returncode != 0:
+        raise runtime.CellRuntimeError(f"add failed: {add.stderr.strip()}")
+    commit = _git(container, "commit", "-q", "-m", message)
+    if commit.returncode == 0:
+        return True
+    if "nothing to commit" in commit.stdout + commit.stderr:
+        return False
+    raise runtime.CellRuntimeError(f"commit failed: {commit.stderr.strip()}")
+
+
 def dirty_paths(container: str) -> list[str]:
     """Paths with uncommitted changes, verbatim, untracked files included."""
     done = _git(container, "status", "--porcelain", "-z", "--untracked-files=all")
