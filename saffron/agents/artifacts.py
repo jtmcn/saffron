@@ -16,6 +16,7 @@ from pathlib import PurePosixPath
 from pydantic import BaseModel, Field, ValidationError
 
 from saffron.gates.core.scope import matches
+from saffron.gates.core.size import _CEILINGS, _DEFAULT_CEILING
 
 EXTRACTION_PROMPT = (
     "Emit a single <output> block as the last thing in your response. "
@@ -49,6 +50,10 @@ class Plan(BaseModel):
     test_strategy: str
     risks: list[str] = Field(default_factory=list)
     blocking_questions: list[str] = Field(default_factory=list)
+    estimated_lines: int = Field(gt=0)
+    """Added + removed, the same count `size_gate` takes off the real diff.
+    Required, not defaulted: a ceiling nothing estimates against is not a
+    control (§5.3's plan checkpoint spends zero model calls to reject early)."""
 
 
 def parse_output_block(text: str) -> str:
@@ -127,6 +132,14 @@ def validate_plan(
         raise PlanRejected(
             f"a {spec_type} plan names no test file — "
             "acceptance criteria that cannot fail are prose"
+        )
+
+    ceiling = _CEILINGS.get(spec_type, _DEFAULT_CEILING)
+    if plan.estimated_lines > ceiling:
+        raise PlanRejected(
+            f"plan's own estimate of {plan.estimated_lines} changed lines "
+            f"exceeds the {spec_type} ceiling of {ceiling} — the diff `size` "
+            "gate will fail on before a single edit is made"
         )
 
     return plan

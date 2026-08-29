@@ -103,6 +103,7 @@ _PLAN = {
     "test_strategy": "t",
     "risks": [],
     "blocking_questions": [],
+    "estimated_lines": 10,
 }
 
 

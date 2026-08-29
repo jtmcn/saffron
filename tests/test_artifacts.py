@@ -22,6 +22,7 @@ def _plan(**overrides) -> str:
         "test_strategy": "t",
         "risks": [],
         "blocking_questions": [],
+        "estimated_lines": 10,
     }
     payload.update(overrides)
     import json
@@ -126,6 +127,68 @@ def test_schema_invalid_output_raises_plan_rejected():
             forbidden=[],
             protected=[],
             spec_type="feature",
+        )
+
+
+def test_a_plan_missing_estimated_lines_is_rejected():
+    """An estimate that can be omitted is not a control."""
+    payload = {
+        "understanding": "u",
+        "approach": "a",
+        "files_to_change": ["saffron/gates/core/size.py", "tests/test_size.py"],
+        "test_strategy": "t",
+        "risks": [],
+        "blocking_questions": [],
+    }
+    import json
+
+    with pytest.raises(PlanRejected):
+        validate_plan(
+            "<output>" + json.dumps(payload) + "</output>",
+            touches=TOUCHES,
+            forbidden=[],
+            protected=[],
+            spec_type="feature",
+        )
+
+
+def test_a_plan_estimating_over_the_ceiling_is_rejected():
+    with pytest.raises(PlanRejected, match="exceeds the feature ceiling of 600"):
+        validate_plan(
+            _plan(estimated_lines=601),
+            touches=TOUCHES,
+            forbidden=[],
+            protected=[],
+            spec_type="feature",
+        )
+
+
+def test_a_plan_estimating_at_the_ceiling_is_accepted():
+    plan = validate_plan(
+        _plan(estimated_lines=600),
+        touches=TOUCHES,
+        forbidden=[],
+        protected=[],
+        spec_type="feature",
+    )
+    assert plan.estimated_lines == 600
+
+
+def test_validate_plan_and_size_gate_agree_on_the_ceiling():
+    """The same table `size_gate` enforces the diff against — a plan cleared
+    here and then blown up by the agent's actual diff is a different bug, but
+    a plan checked against a *different* number than the gate uses is this one."""
+    from saffron.gates.core.size import _CEILINGS
+
+    with pytest.raises(
+        PlanRejected, match=f"exceeds the bug ceiling of {_CEILINGS['bug']}"
+    ):
+        validate_plan(
+            _plan(estimated_lines=_CEILINGS["bug"] + 1),
+            touches=TOUCHES,
+            forbidden=[],
+            protected=[],
+            spec_type="bug",
         )
 
 

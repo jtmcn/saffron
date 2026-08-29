@@ -23,6 +23,10 @@ These terms have exactly one meaning here. Use them and no synonyms.
    - `risks` (array of strings) — may be empty.
    - `blocking_questions` (array of strings) — a non-empty list rejects the plan
      as underspecified, so use it only when the task genuinely cannot proceed.
+   - `estimated_lines` (integer) — your best guess at added + removed lines
+     across the whole diff. Checked against this spec type's `size` ceiling
+     before you write anything; a plan over it is rejected so you can rescope
+     before spending a turn, rather than discovering it from the gate later.
 2. Then implement, **committing after each coherent step** rather than once at
    the end. Your session can stop where it stands — a turn ceiling or a
    supervisor bound fires without warning and does not ask — and everything you
