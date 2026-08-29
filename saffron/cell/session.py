@@ -594,6 +594,14 @@ def _drive_cell(
         watch(f"preflight: building {image.cell_tag(repo)}")
         cell_image = image.build_cell_image(repo)
 
+        # Before the probe enumerates anything: on apple/container 1.3.0 a
+        # container on the internal network first leaves the proxy no route out
+        # (evidence 2026-08-28), and starting it here also settles the host's
+        # own routes before the addresses below are read off them.
+        watch("preflight: starting the proxy")
+        proxy_ip = proxy.start_proxy(network)
+        watch(f"preflight: proxy at {proxy_ip}")
+
         # Probed from the base image, not the repo's. The probe runs `python`,
         # and core must not require an interpreter inside every target repo's
         # image — a Rust repo could then never start a cell (§2.1). What the
@@ -610,14 +618,8 @@ def _drive_cell(
             + "; tolerating "
             + (", ".join(tolerated) or "nothing")
         )
-        # Before the probe, not after: on apple/container 1.3.0 anything on the
-        # internal network first leaves the proxy no route out (evidence
-        # 2026-08-28). Cells still start only once the probe has passed.
-        watch("preflight: starting the proxy")
-        proxy_ip = proxy.start_proxy(network)
-        watch(f"preflight: proxy at {proxy_ip}")
-
-        # The list the operator was just shown, not a second one taken now.
+        # The list the operator was just shown, not a second one taken now. No
+        # cell exists yet, and none will until this returns.
         preflight.assert_host_is_unreachable(image.BASE_TAG, network, ports)
 
         created.add(volume)

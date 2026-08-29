@@ -356,6 +356,7 @@ class _Cell:
         self.subjects_from: str | None = None
         self.timeouts: list[float | None] = []
         self.denied: list[str] = []
+        self.preflight: list[str] = []
         self.gate_paths: list[list[str]] = []
 
 
@@ -414,14 +415,28 @@ def _stub_the_runtime(
     monkeypatch.setattr("saffron.cell.runtime.remove_volume", _remove("volume"))
     monkeypatch.setattr("saffron.cell.runtime.create_network", lambda *a, **k: None)
     monkeypatch.setattr("saffron.cell.runtime.create_volume", lambda *a, **k: None)
-    monkeypatch.setattr("saffron.cell.proxy.start_proxy", lambda *a, **k: "10.88.0.2")
-    monkeypatch.setattr("saffron.cell.proxy.stop_proxy", lambda *a, **k: None)
+
+    # The order these three run in is load-bearing, so it is recorded rather
+    # than described: the runtime's routing depends on it (§5.1, evidence
+    # 2026-08-28) and so does what the probe is told to look at.
+    def _ordered(name, result):
+        def _f(*a, **k):
+            cell.preflight.append(name)
+            return result
+
+        return _f
+
+    monkeypatch.setattr(
+        "saffron.cell.proxy.start_proxy", _ordered("proxy", "10.88.0.2")
+    )
+    monkeypatch.setattr("saffron.cell.proxy.stop_proxy", _ordered("stop", None))
     monkeypatch.setattr("saffron.cell.proxy.denied_egress", lambda *a, **k: cell.denied)
     monkeypatch.setattr(
-        "saffron.preflight.assert_host_is_unreachable", lambda *a, **k: None
+        "saffron.preflight.assert_host_is_unreachable", _ordered("probe", None)
     )
     monkeypatch.setattr(
-        "saffron.preflight.host_probe_ports", lambda: ([8000], ["rapportd:49152"])
+        "saffron.preflight.host_probe_ports",
+        _ordered("enumerate", ([8000], ["rapportd:49152"])),
     )
     monkeypatch.setattr("saffron.repos.image.build_cell_image", lambda repo: "img")
 
@@ -560,6 +575,35 @@ def test_the_preflight_line_reports_what_was_tolerated(monkeypatch, tmp_path):
     (probing,) = [x for x in cell.watched if x.startswith("preflight: probing")]
     assert probing.startswith("preflight: probing 1 host ports at 10.88.0.1")
     assert probing.endswith("; tolerating rapportd:49152")
+
+
+def test_the_proxy_starts_before_anything_the_probe_reads(monkeypatch, tmp_path):
+    """The ordering that cost a run: on apple/container 1.3.0 a container on the
+    internal network before the proxy leaves the proxy with no route out, and
+    `assert_host_is_unreachable` is such a container. Asserted rather than
+    described, because a comment is not a boundary."""
+    cell = _stub_the_runtime(monkeypatch)
+    _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
+    assert cell.preflight[:3] == ["proxy", "enumerate", "probe"]
+
+
+def test_no_cell_is_created_until_the_host_probe_has_passed(monkeypatch, tmp_path):
+    """N1's structural half, and the half the reorder could have cost: the probe
+    may now run with the proxy up, but never with a cell up."""
+    cell = _stub_the_runtime(monkeypatch)
+
+    def refuse(*a, **k):
+        cell.preflight.append("probe")
+        raise runtime.CellRuntimeError("host services answered from inside a cell")
+
+    monkeypatch.setattr("saffron.preflight.assert_host_is_unreachable", refuse)
+    with pytest.raises(runtime.CellRuntimeError):
+        _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn()])
+    # The proxy is a sibling and is allowed to exist; a cell is not.
+    assert cell.turns == []
+    assert not cell.exported
+    # And the sibling it did start does not survive the failure.
+    assert cell.preflight == ["proxy", "enumerate", "probe", "stop"]
 
 
 def test_teardown_removes_both_volumes_not_the_loops_result(monkeypatch, tmp_path):

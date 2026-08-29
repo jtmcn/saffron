@@ -17,8 +17,9 @@ nothing to report.
 
 ## What the proxy's own log said
 
-Captured with `container logs saffron-proxy` while the run was still up; the log
-dies with the container, so teardown is too late for anything but `TCP_DENIED`.
+Captured with `container logs saffron-proxy` while the run was still up. Teardown
+does read the log before removing the container (`session.py`), so timing is not
+what hid this — `denied_egress` greps `TCP_DENIED`, and none of these rows are.
 
 ```
 1787975617.589  35022 10.88.0.4 TCP_TUNNEL/503 0 CONNECT api.anthropic.com:443 - HIER_NONE/- -
@@ -54,9 +55,13 @@ network, not squid, not the proxy image, and not the allowlist.
 | create internal network → start proxy | **OK** |
 | create internal network → run one container on it → start proxy | **FAIL** |
 
-That is the entire difference. Any container on the `--internal` network before
+The script runs the pair in both sequences and the result does not move, so the
+difference is the order itself and not residue from whichever ran first. That is
+the entire difference. Any container on the `--internal` network before
 the dual-homed proxy starts, and the proxy comes up with a default route through
-the egress gateway that carries nothing. Nothing about Saffron is required to
+the egress gateway that carries nothing. What is measured is the route and the
+timeouts; which layer the runtime loses — NAT, the bridge, the gateway itself —
+is not, and the name of this file deliberately does not guess. Nothing about Saffron is required to
 reproduce it: `alpine:3` running `true` is enough.
 
 Two further measurements, same runtime:
@@ -80,6 +85,14 @@ only production was wrong.
 The fix is the order: the proxy starts before the probe. N1 is unchanged — the
 probe still runs before any cell does, and the proxy is a sibling that holds no
 credential and reaches nothing the allowlist does not name.
+
+## The loop, closed
+
+With the proxy started first, `saffron cell .saffron/specs/SA-0013-fixture-values-are-witnessed.md
+--repo .` ran to `READY_FOR_REVIEW` at exit 0 for $0.63 and opened
+[#51](https://github.com/jtmcn/saffron/pull/51) — the first cell this machine has
+completed. The symptom the record opens with is the same command, on the same
+machine, minutes earlier.
 
 ## Standing
 

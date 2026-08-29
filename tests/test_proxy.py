@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import socket
+
 import pytest
 
 from saffron import preflight
@@ -94,6 +96,33 @@ def test_no_host_service_answers_from_inside_a_cell(network):
         f"a host service answered from inside a cell at {reachable}; "
         "bind it to 127.0.0.1, or turn it off"
     )
+
+
+@pytest.mark.cell
+def test_the_probe_finds_a_host_service_that_is_actually_there(network):
+    """The positive half, and the one the suite was missing: an empty result is
+    the passing answer, so a probe that silently covers nothing reads exactly
+    like a machine that is clean.
+
+    A real listener is bound on 0.0.0.0 and the probe is pointed at its port.
+    The proxy is up first, as it now is in production (`session.py`), because
+    that is the topology the probe has to work in on this runtime."""
+    server = socket.socket()
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(("0.0.0.0", 0))
+    server.listen(8)
+    port = server.getsockname()[1]
+    proxy.start_proxy(network)
+    try:
+        reachable = preflight.probe_host_bindings(image.BASE_TAG, network, [port])
+    finally:
+        proxy.stop_proxy()
+        server.close()
+    assert reachable, (
+        f"a host service on 0.0.0.0:{port} was not seen from inside a cell — "
+        "the probe covers nothing, which is not a probe that passed"
+    )
+    assert all(hit.endswith(f":{port}") for hit in reachable), reachable
 
 
 def test_only_the_denials_are_reported_and_only_before_teardown(monkeypatch):
