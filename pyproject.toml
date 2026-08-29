@@ -49,8 +49,9 @@ typeCheckingMode = "basic"
 exclude = ["docs", "spikes", ".saffron", ".venv"]
 
 [tool.ruff]
-# ruff formats python blocks inside markdown; plan docs are a record, leave them.
-extend-exclude = ["docs"]
+# ruff formats python blocks inside markdown; plan docs and spec files are
+# records, leave them. `.saffron/gates/*.py` is real code and stays in scope.
+extend-exclude = ["docs", ".saffron/specs"]
 
 [tool.ruff.lint]
 # E501 is the formatter's job; what it can't wrap is long strings.

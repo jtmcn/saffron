@@ -83,6 +83,7 @@ One construction point, in the test module, going through the real parser:
 def _spec(*, touches=(), criteria=()):
     return parse_spec("---\n...\n---\n\n## Acceptance criteria\n...")
 
+
 # :679  spec = _spec()
 # :783  spec = _spec(touches=["f.txt"], criteria=["it works"])
 ```
