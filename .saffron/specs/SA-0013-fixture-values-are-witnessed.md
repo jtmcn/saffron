@@ -75,15 +75,15 @@ def test_the_spec_fixtures_arguments_reach_the_parsed_spec():
     assert spec.acceptance_criteria == ["it works"]
 ```
 
-Four lines. The file is in `touches`, so this is in scope in a way it was not
-when `SA-0012` was written.
+Two assertions over one construction. The file is in `touches`, so this is in
+scope in a way it was not when `SA-0012` was written.
 
 ## Out of scope
 
 **Anchoring the witness to the two call sites.** `SA-0012`'s first criterion
 claimed *"both `package()` call sites are handed a real `Spec`"*, and its witness
-checks the helper, not the sites — reintroduce a `SimpleNamespace` at `:706` or
-`:802` tomorrow and it stays green. That is a real gap, it is not this one, and
+checks the helper, not the sites — reintroduce a `SimpleNamespace` at either call
+site tomorrow and it stays green. That is a real gap, it is not this one, and
 it wants a different shape than an assertion (there is no cheap test that reads
 how a fixture was constructed). Left deliberately.
 
@@ -116,11 +116,11 @@ proves nothing about this change (`saffron/gates/core/criteria.py:100`). The
 existing witness is green at base. Leave it exactly as it is.
 
 **`_spec()`'s signature does not change.** `touches=()` and `criteria=()`
-defaults stay, and the two call sites at `:706` and `:802` stay exactly as they
-are. The diff adds one test function and changes nothing else.
+defaults stay, and both `_spec()` call sites stay exactly as they are. The diff
+adds one test function and changes nothing else.
 
-**Four lines of assertion, plus a docstring.** Materially larger means
-something has been misread.
+**Two assertions, plus a docstring** — the body shown above, nothing further.
+Materially larger means something has been misread.
 
 **`depends_on: SA-0012` is documentation, not a control** — nothing in the
 orchestrator reads it (`saffron/intake.py:62` declares the field and no caller
