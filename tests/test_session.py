@@ -625,7 +625,13 @@ def test_a_proxy_that_reaches_nothing_aborts_before_the_cell_is_built(
         _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn()])
     # Nothing was built and nothing was enumerated: the answer cost a container.
     assert cell.turns == []
-    assert cell.preflight == ["proxy", "egress", "stop"]
+    assert cell.preflight == [
+        "proxy",
+        "egress",
+        "read-denied",
+        "read-failed",
+        "stop",
+    ]
 
 
 def test_no_cell_is_created_until_the_host_probe_has_passed(monkeypatch, tmp_path):
