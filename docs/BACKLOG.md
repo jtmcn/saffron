@@ -1189,10 +1189,12 @@ production does and runs `shacl` through `CellExecutor`, asserting `pass` and a
 
 ## 21. Two `SimpleNamespace` fakes stand in for `Spec` and drift silently
 
-**Status:** open, specced as `SA-0012` (`.saffron/specs/SA-0012-spec-doubles.md`),
-ready to drive. Found by `SA-0011`, implemented by hand on
-`joel/sa-0011-witnesses`; the two lines that unbreak it are in that branch, the
-fakes themselves are not fixed.
+**Status:** **done**, driven from `SA-0012`
+(`.saffron/specs/SA-0012-spec-doubles.md`) in PR #49 (`f31550c`). Both call sites
+now build a real `Spec` through `parse_spec`. Found by `SA-0011`. Review of that
+diff found the defect had moved rather than died — value drift where this was
+shape drift — which is item 24. Read what follows for why the fakes cost what
+they did, not as work outstanding.
 
 `tests/test_package.py:679` and `:783` build a `Spec` out of `SimpleNamespace`,
 carrying whatever attributes `package()` happened to read when they were written.
@@ -1231,9 +1233,13 @@ test fake.
 **Done looks like** both call sites building a real `Spec` (via `parse_spec` on
 a string literal, as `tests/test_report.py` already does), so the next field
 `Spec` gains is a type error at construction rather than an `AttributeError` in
-an unrelated suite three tasks later. Roughly twenty lines. While there: drop
-`tests/test_package.py` from `SA-0011`'s `touches`, where it is declared only
-because of this.
+an unrelated suite three tasks later. Roughly twenty lines.
+
+**One thing it left.** `SA-0011`'s `touches` still names `tests/test_package.py`
+(`.saffron/specs/SA-0011-criteria-have-witnesses.md:24`), declared only because
+of these fakes. `SA-0012` and `SA-0013` both put it out of scope, and
+`.saffron/**` is `forbidden` in every spec — no cell can do it. It wants a
+human edit.
 
 ---
 
@@ -1291,6 +1297,37 @@ attempt is spent finding that out the expensive way.
 **Done looks like** one `watch()` line there naming those witnesses, turning
 four dead attempts into a legible operator message on the first unattended
 night.
+
+---
+
+## 24. The fixture item 21 built drifts in value, not shape
+
+**Status:** open, specced as `SA-0013`
+(`.saffron/specs/SA-0013-fixture-values-are-witnessed.md`), drivable once `#49`
+is on `main`. Found by review of `SA-0012` (PR #49).
+
+Item 21's fix replaced the two `SimpleNamespace` fakes with `_spec()`, which
+builds a real `Spec` by putting a string literal through `parse_spec`. Nothing
+asserts that the values handed to `_spec()` survive the trip. Measured, not
+reasoned: break the `## Acceptance criteria` header so `_CRITERIA_SECTION`
+misses, or corrupt the `touches` line to yield `["ZZZf.txt"]`, and the whole
+module still reports **97 passed**. `["f.txt"]` and `["it works"]` appear in
+`tests/test_package.py` only as arguments to the helper, and no assertion
+mentions either.
+
+So the `packageable` fixture that feeds most of PACKAGE's tests can start
+handing `package()` a spec with no criteria and a scope matching nothing, and
+every test stays green while exercising less than its name claims. `parse_spec`
+changing its criteria regex is enough to trigger it, and that regex has no test
+tying it to this fixture. It is item 21's own thesis — a fixture whose contents
+nothing checks — one level down.
+
+**Done looks like** one new test beside the existing one, asserting
+`spec.touches` and `spec.acceptance_criteria` against what `_spec()` was called
+with: two assertions, red under either mutation above. New rather than an
+extension of `test_the_package_fixtures_build_a_real_spec`, which is green at
+base and would fail `criteria`'s `witness-green-at-base` — item 23, met in the
+wild while authoring the spec.
 
 ---
 
