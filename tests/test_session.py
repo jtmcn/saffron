@@ -451,6 +451,9 @@ def _stub_the_runtime(
         "saffron.cell.proxy.failed_egress", _reads("read-failed", "failed")
     )
     monkeypatch.setattr(
+        "saffron.preflight.assert_proxy_reaches_upstream", _ordered("egress", None)
+    )
+    monkeypatch.setattr(
         "saffron.preflight.assert_host_is_unreachable", _ordered("probe", None)
     )
     monkeypatch.setattr(
@@ -603,7 +606,26 @@ def test_the_proxy_starts_before_anything_the_probe_reads(monkeypatch, tmp_path)
     described, because a comment is not a boundary."""
     cell = _stub_the_runtime(monkeypatch)
     _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
-    assert cell.preflight[:3] == ["proxy", "enumerate", "probe"]
+    assert cell.preflight[:4] == ["proxy", "egress", "enumerate", "probe"]
+
+
+def test_a_proxy_that_reaches_nothing_aborts_before_the_cell_is_built(
+    monkeypatch, tmp_path
+):
+    """§5.1.1. The run this exists for spent a whole attempt to learn it: every
+    layer reported success and the first use of the network was the agent's."""
+    cell = _stub_the_runtime(monkeypatch)
+
+    def refuse(*a, **k):
+        cell.preflight.append("egress")
+        raise runtime.CellRuntimeError("the proxy at 10.88.0.2 could not reach it")
+
+    monkeypatch.setattr("saffron.preflight.assert_proxy_reaches_upstream", refuse)
+    with pytest.raises(runtime.CellRuntimeError):
+        _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn()])
+    # Nothing was built and nothing was enumerated: the answer cost a container.
+    assert cell.turns == []
+    assert cell.preflight == ["proxy", "egress", "stop"]
 
 
 def test_no_cell_is_created_until_the_host_probe_has_passed(monkeypatch, tmp_path):
@@ -624,6 +646,7 @@ def test_no_cell_is_created_until_the_host_probe_has_passed(monkeypatch, tmp_pat
     # And the sibling it did start does not survive the failure.
     assert cell.preflight == [
         "proxy",
+        "egress",
         "enumerate",
         "probe",
         "read-denied",

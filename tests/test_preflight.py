@@ -150,3 +150,69 @@ def test_the_probe_checks_the_ports_it_was_given(monkeypatch):
     assert "ports=[4242]" in seen["script"]
     # And the connects are concurrent, or ~100 listeners exhaust the 300s cap.
     assert "ThreadPoolExecutor" in seen["script"]
+
+
+def test_any_http_status_from_the_upstream_is_reachability(monkeypatch):
+    """401 is the expected answer and it is a pass: what is established is the
+    route, and no credential is being tested (DESIGN.md §5.1.1)."""
+    seen = {}
+
+    def fake(image, command, *, network=None, env=None, timeout_s=120, **kw):
+        seen["env"] = env
+        seen["network"] = network
+        return runtime.Completed(0, "STATUS 401\n", "")
+
+    monkeypatch.setattr(preflight.runtime, "run_ephemeral", fake)
+    preflight.assert_proxy_reaches_upstream("img", "saffron-cells", "10.88.0.2")
+    # Through the proxy, by IP: an internal network has no DNS to resolve a name.
+    assert seen["env"]["HTTPS_PROXY"] == "http://10.88.0.2:3128"
+    assert seen["network"] == "saffron-cells"
+
+
+def test_a_proxy_that_cannot_reach_the_upstream_aborts_before_the_cell(monkeypatch):
+    """The failure that shipped: squid answered, and answered 503. An abort
+    here is `error` — the repo's code is not what is wrong."""
+    monkeypatch.setattr(
+        preflight.runtime,
+        "run_ephemeral",
+        lambda *a, **k: runtime.Completed(
+            1, "", "urllib.error.URLError: tunnel failed"
+        ),
+    )
+    with pytest.raises(runtime.CellRuntimeError, match="could not reach"):
+        preflight.assert_proxy_reaches_upstream("img", "saffron-cells", "10.88.0.2")
+
+
+def test_a_probe_that_printed_nothing_is_not_a_pass(monkeypatch):
+    """Exit 0 with no STATUS line is a container that started and did not run
+    the probe — the same shape as the vacuous pass Appendix H is about."""
+    monkeypatch.setattr(
+        preflight.runtime, "run_ephemeral", lambda *a, **k: runtime.Completed(0, "", "")
+    )
+    with pytest.raises(runtime.CellRuntimeError, match="could not reach"):
+        preflight.assert_proxy_reaches_upstream("img", "saffron-cells", "10.88.0.2")
+
+
+def test_the_abort_reports_the_exception_not_the_runtimes_progress_output(monkeypatch):
+    """`container run` prints image-pull progress to stderr before the container
+    says anything, so a head-truncated message reports the pull and not the
+    failure — which is the one line an operator needs."""
+    noise = "\n".join(
+        [
+            "[0/6] [0s]",
+            "[1/6] Fetching image [0s]",
+            "[6/6] Starting container [0s]",
+            "Traceback (most recent call last):",
+            '  File "<string>", line 3, in <module>',
+            "urllib.error.URLError: <urlopen error timed out>",
+        ]
+    )
+    monkeypatch.setattr(
+        preflight.runtime,
+        "run_ephemeral",
+        lambda *a, **k: runtime.Completed(1, "", noise),
+    )
+    with pytest.raises(runtime.CellRuntimeError) as raised:
+        preflight.assert_proxy_reaches_upstream("img", "saffron-cells", "10.88.0.2")
+    assert "urlopen error timed out" in str(raised.value)
+    assert "Fetching image" not in str(raised.value)

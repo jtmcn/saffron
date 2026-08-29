@@ -1,4 +1,9 @@
-"""Per-run readiness. In v0.5 it is one probe, and N1 rests on it.
+"""Per-run readiness: two probes, neither of which trusts a component that
+reported success.
+
+N1 rests on the first. The second rests on the fact that a proxy which started
+is not a proxy which works — one that came up with no route out cost a whole
+attempt before anything noticed (DESIGN.md §5.1.1).
 
 An `--internal` network still routes to the host gateway, so a host service
 bound to 0.0.0.0 — a Postgres, a dev server — is reachable from inside a cell
@@ -14,7 +19,7 @@ import os
 import socket
 import subprocess
 
-from saffron.cell import runtime
+from saffron.cell import proxy, runtime
 
 _LSOF = ("lsof", "-nP", "-iTCP", "-sTCP:LISTEN")
 
@@ -188,3 +193,57 @@ def assert_host_is_unreachable(
             + ", ".join(reachable)
             + " — bind them to 127.0.0.1. N1 is not satisfied until this is empty."
         )
+
+
+# The agent's own first request, made before the agent exists. `HTTPError` is
+# caught and its code printed because 401 is the expected answer and is a pass:
+# the route is what is being established, not a credential.
+_UPSTREAM_PROBE = (
+    "import urllib.request as u\n"
+    "try:\n"
+    "    print('STATUS', u.urlopen({url!r}, timeout=20).status)\n"
+    "except u.HTTPError as e:\n"
+    "    print('STATUS', e.code)\n"
+)
+
+
+def assert_proxy_reaches_upstream(
+    image_tag: str, network: str, proxy_ip: str, timeout_s: float = 120
+) -> None:
+    """The path, not the parts: through the proxy to the host the allowlist
+    names, from a sibling on the cells network (DESIGN.md §5.1.1).
+
+    `STATUS` on stdout is the whole pass condition, and it is printed only by a
+    request that got an answer — a probe that never ran exits without it, which
+    is why the check is for the line and not for the exit code. A failure is
+    `error` and not `fail`: it aborts before a cell exists and is charged to
+    nobody."""
+    url = f"https://{proxy.UPSTREAM_HOST}/v1/models"
+    done = runtime.run_ephemeral(
+        image_tag,
+        ["python", "-c", _UPSTREAM_PROBE.format(url=url)],
+        network=network,
+        env=proxy.proxy_env(proxy_ip),
+        timeout_s=timeout_s,
+    )
+    if "STATUS" not in done.stdout:
+        raise runtime.CellRuntimeError(
+            f"the proxy at {proxy_ip} could not reach {proxy.UPSTREAM_HOST}: "
+            f"{_last_line(done)}. The cell would meet this as an API error a "
+            "whole attempt later — check the proxy's own route out, not the "
+            "allowlist."
+        )
+
+
+def _last_line(done: runtime.Completed) -> str:
+    """The exception, not the runtime's throat-clearing.
+
+    `container run` prints its own image-pull progress to stderr ahead of
+    anything the container says, and a traceback's useful line is its last —
+    so the front of this stream is noise and a head-truncated message reports
+    it instead of the diagnosis."""
+    for stream in (done.stderr, done.stdout):
+        for line in reversed(stream.splitlines()):
+            if line.strip():
+                return line.strip()
+    return "the probe printed nothing"

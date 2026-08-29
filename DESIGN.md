@@ -579,6 +579,39 @@ container run --rm \
 
 - **Git remote is a local bare mirror.** The cell physically cannot reach your GitHub remote. The host pushes, after gates pass.
 
+### 5.1.1 The proxy's route out is asserted, never assumed
+
+**The proxy starting is not the proxy working.** A first install ran a whole
+attempt against a proxy that had come up, taken an address, and had no route
+out: `container` 1.3.0 leaves a dual-homed container's egress leg dead if
+anything joined the internal network before it, and the symptom reaches the
+operator as ten `api_retry` events and then an API error
+(`docs/evidence/2026-08-28-attach-order-takes-the-proxys-route.md`).
+
+Every layer reported success and none of them was the path. The network was
+created, the proxy was started, its address was printed, the image was built,
+the cell came up and its whole baseline suite passed. The first thing to use the
+network for what it is for was the agent, and by then the run was being paid
+for — the attempt ended `NOT_IMPLEMENTED`, having established nothing about the
+task.
+
+So the supervisor asserts the **path** rather than the parts: from an ephemeral
+sibling on the cells network, through the proxy, to the one host the allowlist
+names — the agent's own first request, made before the agent exists. Any HTTP
+status is a pass, **401 included**: what is being established is reachability,
+and no credential is being tested. It runs immediately after the proxy starts
+and before anything else is built, so the cost of the answer is one container
+start rather than an attempt.
+
+A failure here is `error`, never `fail` — the repo's code is not what is wrong.
+It raises before a cell exists, aborts the run, and is charged to nobody (§4.3).
+
+**This deliberately does not check the runtime's version, or the attach order
+that caused this one.** That ordering fix is a workaround for a defect in
+`container` 1.3.0 and will age with it; a proxy that cannot reach the upstream
+is wrong on every runtime, for every cause, including the ones this design has
+not met yet. It is §7's "money spent to learn something free" one layer down.
+
 ### 5.2 Phase 1 — DIAGNOSE (bugs only)
 
 Read-only tools, scoped to `envelope`. Output is `scope.json`: the proposed `touches` set, the identified root cause, and the evidence for it.
@@ -1023,6 +1056,7 @@ Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents
 | **Spec text breaks or hijacks prompt assembly** | Markdown containing template syntax | Spec body is a substituted value, never scanned as a template (§5.3) |
 | **Silent branch clobber** | Two writers on one branch | `--force-with-lease` pinned to the checked-out SHA; one writer per branch (§5.7) |
 | **Money spent to learn something free** | Refusable conditions discovered inside the cell | Refusal gate before any container starts (§4.2) |
+| **A proxy that started but reaches nothing** | Every layer reports success; the first real use of the network is the agent's, inside a paid attempt | Egress asserted through the proxy, before the cell is built (§5.1.1) |
 | **Ontology is a re-encoding of the schema** | Direct mapping passes every syntactic check and delivers nothing | Dead-term test; terms must earn alignment, qualification, or an unstatable axiom (§4.6) |
 | **Derived graph drifts from the ledger** | Two stores, one truth | Projection is one-way and disposable — rebuild it from the ledger, never reconcile into it |
 | **False new failures from line drift** | Baseline keyed on a coordinate the diff moves | Failure identity is `(gate, file, code)`; `line` is display-only (§5.4) |

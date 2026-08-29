@@ -14,6 +14,9 @@ from saffron.cell import runtime
 PROXY_TAG = "saffron/proxy"
 PROXY_NAME = "saffron-proxy"
 PROXY_PORT = 3128
+# The one host the allowlist admits. `images/squid.conf` has to agree and a test
+# asserts it: this is what preflight probes, that is what lets it through.
+UPSTREAM_HOST = "api.anthropic.com"
 EGRESS_NETWORK = "saffron-egress"
 EGRESS_SUBNET = "10.89.0.0/24"
 

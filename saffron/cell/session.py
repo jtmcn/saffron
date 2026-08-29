@@ -601,6 +601,10 @@ def _drive_cell(
         watch("preflight: starting the proxy")
         proxy_ip = proxy.start_proxy(network)
         watch(f"preflight: proxy at {proxy_ip}")
+        # Started is not working: the path is asserted here, at one container
+        # start, or the agent meets it as an API error an attempt later (§5.1.1).
+        preflight.assert_proxy_reaches_upstream(image.BASE_TAG, network, proxy_ip)
+        watch(f"preflight: proxy reaches {proxy.UPSTREAM_HOST}")
 
         # Probed from the base image, not the repo's. The probe runs `python`,
         # and core must not require an interpreter inside every target repo's

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import socket
+from pathlib import Path
 
 import pytest
 
@@ -129,6 +130,29 @@ def test_the_probe_finds_a_host_service_that_is_actually_there(network):
         "the probe covers nothing, which is not a probe that passed"
     )
     assert all(hit.endswith(f":{port}") for hit in reachable), reachable
+
+
+@pytest.mark.cell
+def test_preflight_confirms_the_real_proxy_reaches_the_upstream(network):
+    """The assertion against a real proxy, started the way production starts
+    one. This is the check that would have ended the 2026-08-28 run in seconds
+    (DESIGN.md §5.1.1)."""
+    proxy_ip = proxy.start_proxy(network)
+    try:
+        preflight.assert_proxy_reaches_upstream(image.BASE_TAG, network, proxy_ip)
+    finally:
+        proxy.stop_proxy()
+
+
+@pytest.mark.cell
+def test_preflight_fails_closed_when_nothing_is_listening(network):
+    """The positive half of the assertion itself: a probe that cannot tell a
+    reachable upstream from an unreachable one passes every run and is worth
+    nothing. No proxy is started, so the address answers nothing."""
+    with pytest.raises(runtime.CellRuntimeError, match="could not reach"):
+        preflight.assert_proxy_reaches_upstream(
+            image.BASE_TAG, network, "10.88.0.253", timeout_s=120
+        )
 
 
 def test_only_the_denials_are_reported_and_only_before_teardown(monkeypatch):
@@ -286,3 +310,12 @@ def test_a_proxy_that_never_answered_reports_nothing_rather_than_raising(
 
     monkeypatch.setattr(proxy.runtime, "call", boom)
     assert proxy.failed_egress() == []
+
+
+def test_the_allowlisted_host_and_the_squid_acl_agree():
+    """`UPSTREAM_HOST` is what preflight probes and `squid.conf` is what admits
+    it. Two copies of one decision, so the drift is worth a test: probing a host
+    the ACL does not name would fail every run, and probing one it no longer
+    names would pass while the agent is refused."""
+    acl = Path("images/squid.conf").read_text()
+    assert f"acl allowed_hosts dstdomain {proxy.UPSTREAM_HOST}" in acl, acl
