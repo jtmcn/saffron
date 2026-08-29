@@ -151,42 +151,49 @@ def _must(argv: Sequence[str], timeout_s: float = 120) -> Completed:
 
 
 def create_network(name: str, subnet: str = DEFAULT_SUBNET) -> None:
-    done = _call(
-        [RUNTIME, "network", "create", "--internal", "--subnet", subnet, name], 120
-    )
+    argv = [RUNTIME, "network", "create", "--internal", "--subnet", subnet, name]
+    done = _call(argv, 120)
     if done.returncode == 0:
         return
     # The runtime names the subnet and not the network holding it, and the
-    # holder is what has to be removed. A SIGKILLed run leaves one behind
-    # under a name the next create does not pre-clean, because it is a
-    # different name.
+    # holder is what has to go. A SIGKILLed run leaves one behind under a name
+    # the next create does not pre-clean, because it is a different name.
     detail = done.stderr.strip()
     if "overlap" in detail:
         holders = networks_on_subnet(subnet, exclude=name)
         if holders:
-            detail += f" — held by {', '.join(holders)}; remove it and re-run"
-    raise CellRuntimeError(
-        f"{' '.join([RUNTIME, 'network', 'create', '--internal', '--subnet', subnet, name])} failed: {detail}"
-    )
+            detail += f" — held by {', '.join(holders)}"
+    raise CellRuntimeError(f"{' '.join(argv)} failed: {detail}")
 
 
 def networks_on_subnet(subnet: str, exclude: str = "") -> list[str]:
-    """Networks already holding a subnet, by name. Empty when the listing
-    itself fails: this only ever adds detail to an error already being raised."""
+    """Networks whose subnet overlaps this one, by name.
+
+    Overlap and not equality, because that is the failure being explained: the
+    runtime rejects `10.89.0.128/25` against a holder on `10.89.0.0/24` with the
+    same wording, and an equality test names nobody in exactly the case an
+    operator cannot work out by eye. Empty when the listing itself fails — this
+    only ever adds detail to an error already being raised."""
     done = _call([RUNTIME, "network", "list"], 60)
     if done.returncode != 0:
         return []
+    try:
+        wanted = ipaddress.ip_network(subnet)
+    except ValueError:
+        return []
     found = []
-    for line in done.stdout.splitlines()[1:]:
+    for line in done.stdout.splitlines():
         fields = line.split()
-        if len(fields) >= 2 and fields[1] == subnet and fields[0] != exclude:
-            found.append(fields[0])
+        if len(fields) < 2 or fields[0] == exclude:
+            continue
+        try:
+            if ipaddress.ip_network(fields[1]).overlaps(wanted):
+                found.append(fields[0])
+        except ValueError:
+            continue  # the header row, and anything else that is not a subnet
     return found
 
 
-# The `remove_*` calls never raise: they also pre-clean, where "does not exist"
-# is the ordinary case. They return the outcome so a caller tearing down — where
-# a failure is a leak, not an expectation — can say so.
 def remove_network(name: str) -> Completed:
     return _call([RUNTIME, "network", "rm", name], timeout_s=60)
 

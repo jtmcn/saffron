@@ -246,3 +246,41 @@ def test_an_overlapping_network_names_the_one_already_holding_the_subnet(
         assert "saffron-cells" in str(exc), exc
     else:
         raise AssertionError("an overlapping subnet must raise")
+
+
+def test_a_partial_overlap_names_the_holder_too(monkeypatch):
+    """The runtime rejects `10.89.0.128/25` against a holder on `10.89.0.0/24`
+    with the same wording, and that is the case an operator cannot work out by
+    eye — an equality test would name nobody in exactly the one that needs it."""
+    listing = "NETWORK         SUBNET\nsaffron-egress  10.89.0.0/24\n"
+
+    def fake_call(argv, timeout_s=120):
+        if "create" in argv:
+            return runtime.Completed(
+                1, "", "Error: IPv4 subnet overlaps an existing network"
+            )
+        return runtime.Completed(0, listing, "")
+
+    monkeypatch.setattr(runtime, "_call", fake_call)
+    assert runtime.networks_on_subnet("10.89.0.128/25") == ["saffron-egress"]
+
+
+def test_a_listing_that_could_not_be_read_adds_no_detail_and_still_raises(monkeypatch):
+    """`networks_on_subnet` only ever decorates an error already being raised,
+    so a failed listing must not become a second failure."""
+
+    def fake_call(argv, timeout_s=120):
+        if "create" in argv:
+            return runtime.Completed(
+                1, "", "Error: IPv4 subnet overlaps an existing network"
+            )
+        return runtime.Completed(1, "", "Error: the daemon is not running")
+
+    monkeypatch.setattr(runtime, "_call", fake_call)
+    assert runtime.networks_on_subnet("10.88.0.0/24") == []
+    try:
+        runtime.create_network("saffron-test-cells")
+    except runtime.CellRuntimeError as exc:
+        assert "overlaps" in str(exc)
+    else:
+        raise AssertionError("an overlapping subnet must raise")

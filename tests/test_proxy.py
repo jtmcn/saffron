@@ -60,6 +60,12 @@ def test_the_proxy_allows_anthropic_and_denies_everything_else(network):
         # it, rather than the container failing to start at all.
         assert denied.returncode != 0
         assert "URLError" in denied.stderr, denied.stderr
+
+        # Read against a real log, holding a real tunnel, a real denial and
+        # squid's own startup chatter: the parser's quiet half, which no
+        # hand-written fixture can establish.
+        assert proxy.failed_egress() == [], "a working proxy reported a failure"
+        assert len(proxy.denied_egress()) == 1
     finally:
         proxy.stop_proxy()
 
@@ -147,14 +153,15 @@ def test_only_the_denials_are_reported_and_only_before_teardown(monkeypatch):
 def test_a_tunnel_the_allowlist_permitted_but_squid_could_not_open_is_reported(
     monkeypatch,
 ):
-    """The failure this repo actually shipped: `TCP_TUNNEL/503` with
-    `HIER_NONE` is an allowed CONNECT squid could not complete, and it reaches
-    the operator as the same unexplained API error a denial would."""
+    """The failure that shipped, verbatim from
+    `docs/evidence/2026-08-28-attach-order-takes-the-proxys-route.md`: an allowed
+    CONNECT squid could not complete, which reaches the operator as the same
+    unexplained API error a denial would."""
     log = "\n".join(
         [
-            "1755800000.1 12 10.88.0.3 TCP_TUNNEL/200 5 CONNECT api.anthropic.com:443 - HIER_DIRECT/1.2.3.4 -",
-            "1755800001.2 35022 10.88.0.3 TCP_TUNNEL/503 0 CONNECT api.anthropic.com:443 - HIER_NONE/- -",
-            "1755800002.3 0 10.88.0.3 TCP_DENIED/403 4 CONNECT pypi.org:443 - HIER_NONE/- text/html",
+            "1787975974.588     17 10.88.0.3 TCP_TUNNEL/200 39 CONNECT api.anthropic.com:443 - HIER_DIRECT/160.79.104.10 -",
+            "1787975617.589  35022 10.88.0.4 TCP_TUNNEL/503 0 CONNECT api.anthropic.com:443 - HIER_NONE/- -",
+            "1787975454.753      0 10.88.0.5 TCP_DENIED/403 3370 CONNECT pypi.org:443 - HIER_NONE/- text/html",
         ]
     )
     monkeypatch.setattr(
@@ -163,9 +170,110 @@ def test_a_tunnel_the_allowlist_permitted_but_squid_could_not_open_is_reported(
     failed = proxy.failed_egress()
     assert len(failed) == 1
     assert "TCP_TUNNEL/503" in failed[0]
-    # The denial is the other report's job, and the success is nobody's.
+    # The denial is the other report's job, and the answered tunnel is nobody's.
     assert not any("TCP_DENIED" in line for line in failed)
     assert not any("/200" in line for line in failed)
+
+
+# The column is field 3 of squid's default logformat. Every other field is a
+# candidate for a stray `WORD/NNN` — the hierarchy peer, and the request URL,
+# which the cell chooses.
+_ROWS = [
+    (
+        "the outage's own row",
+        "1787975617.589 35022 10.88.0.4 TCP_TUNNEL/503 0 CONNECT api.anthropic.com:443 - HIER_NONE/- -",
+        True,
+    ),
+    (
+        "an answered tunnel",
+        "1787975974.588 17 10.88.0.3 TCP_TUNNEL/200 39 CONNECT api.anthropic.com:443 - HIER_DIRECT/160.79.104.10 -",
+        False,
+    ),
+    (
+        "a denial",
+        "1787975454.753 0 10.88.0.5 TCP_DENIED/403 3370 CONNECT pypi.org:443 - HIER_NONE/- text/html",
+        False,
+    ),
+    # squid.conf allows plain HTTP to the allowlisted host, so a 4xx is the
+    # upstream answering: the proxy worked, and saying otherwise sends the
+    # operator to the network. 429 is the one CLAUDE.md singles out.
+    (
+        "the upstream said 404",
+        "1755800003.400 30 10.88.0.3 TCP_MISS/404 512 GET http://api.anthropic.com/v1/nope - HIER_DIRECT/160.79.104.10 text/html",
+        False,
+    ),
+    (
+        "the upstream said 429",
+        "1755800004.500 30 10.88.0.3 TCP_MISS/429 900 GET http://api.anthropic.com/v1/messages - HIER_DIRECT/160.79.104.10 application/json",
+        False,
+    ),
+    # squid wrote no reply at all, which is a route failure by any reading.
+    (
+        "squid answered nothing",
+        "1755800009.000 20 10.88.0.3 TCP_TUNNEL/000 0 CONNECT api.anthropic.com:443 - HIER_NONE/- -",
+        True,
+    ),
+    # The cell picks the URL. Scanning fields for a slash let it hide this.
+    (
+        "a URL naming TCP_DENIED",
+        "1755800008.900 10 10.88.0.3 TCP_MISS/503 4000 GET http://api.anthropic.com/TCP_DENIED - HIER_NONE/- text/html",
+        True,
+    ),
+    (
+        "squid's own cache.log",
+        "2026/08/29 10:00:00| ERROR: Connection to 160.79.104.10 failed; peer said HTTP/503",
+        False,
+    ),
+    ("a truncated row", "1755800009.000 20 10.88.0.3", False),
+]
+
+
+@pytest.mark.parametrize("name,line,expected", _ROWS, ids=[r[0] for r in _ROWS])
+def test_the_status_column_is_read_by_position_not_by_hunting_for_a_slash(
+    name, line, expected
+):
+    assert proxy._is_failure(line) is expected
+
+
+def test_a_cell_chosen_url_cannot_forge_a_denial(monkeypatch):
+    """`denied_egress` reads the same column. A cell fetching `/TCP_DENIED`
+    otherwise puts a denial that never happened in the operator's teardown."""
+    log = "1755800008.900 10 10.88.0.3 TCP_MISS/503 4000 GET http://api.anthropic.com/TCP_DENIED - HIER_NONE/- text/html"
+    monkeypatch.setattr(
+        proxy.runtime, "call", lambda *a, **k: runtime.Completed(0, log, "")
+    )
+    assert proxy.denied_egress() == []
+    assert len(proxy.failed_egress()) == 1
+
+
+def test_both_reports_are_capped_so_one_outage_cannot_fill_the_teardown(monkeypatch):
+    """The measured log held twenty near-identical rows and a real one holds
+    hundreds; teardown is a handful of lines, not a transcript."""
+    row = "1787975617.589 35022 10.88.0.4 TCP_TUNNEL/503 0 CONNECT api.anthropic.com:443 - HIER_NONE/- -"
+    denial = "1787975454.753 0 10.88.0.5 TCP_DENIED/403 3370 CONNECT pypi.org:443 - HIER_NONE/- text/html"
+    log = "\n".join([row] * 50 + [denial] * 50)
+    monkeypatch.setattr(
+        proxy.runtime, "call", lambda *a, **k: runtime.Completed(0, log, "")
+    )
+    assert len(proxy.failed_egress()) == 10
+    assert len(proxy.denied_egress()) == 10
+    assert len(proxy.failed_egress(limit=3)) == 3
+
+
+def test_a_proxy_that_is_already_gone_reports_nothing_rather_than_its_error(
+    monkeypatch,
+):
+    """`container logs` on a removed container exits nonzero with a message that
+    is not a log. Both readers run from teardown's `finally`."""
+    monkeypatch.setattr(
+        proxy.runtime,
+        "call",
+        lambda *a, **k: runtime.Completed(
+            1, "", "Error: failed to get logs (notFound)"
+        ),
+    )
+    assert proxy.failed_egress() == []
+    assert proxy.denied_egress() == []
 
 
 def test_a_proxy_that_never_answered_reports_nothing_rather_than_raising(

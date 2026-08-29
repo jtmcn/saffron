@@ -356,6 +356,7 @@ class _Cell:
         self.subjects_from: str | None = None
         self.timeouts: list[float | None] = []
         self.denied: list[str] = []
+        self.failed: list[str] = []
         self.preflight: list[str] = []
         self.gate_paths: list[list[str]] = []
 
@@ -430,9 +431,24 @@ def _stub_the_runtime(
         "saffron.cell.proxy.start_proxy", _ordered("proxy", "10.88.0.2")
     )
     monkeypatch.setattr("saffron.cell.proxy.stop_proxy", _ordered("stop", None))
-    monkeypatch.setattr("saffron.cell.proxy.denied_egress", lambda *a, **k: cell.denied)
+
+    # Recorded, not described: the proxy's log is its stdout and dies with the
+    # container, so a `stop_proxy` moved above these reads silences both reports
+    # and every other test still passes.
+    def _reads(name, attr):
+        # Read at call time, not at stub time: a test sets these after this
+        # fixture has run.
+        def _f(*a, **k):
+            cell.preflight.append(name)
+            return getattr(cell, attr)
+
+        return _f
+
     monkeypatch.setattr(
-        "saffron.cell.proxy.failed_egress", lambda *a, **k: getattr(cell, "failed", [])
+        "saffron.cell.proxy.denied_egress", _reads("read-denied", "denied")
+    )
+    monkeypatch.setattr(
+        "saffron.cell.proxy.failed_egress", _reads("read-failed", "failed")
     )
     monkeypatch.setattr(
         "saffron.preflight.assert_host_is_unreachable", _ordered("probe", None)
@@ -606,7 +622,14 @@ def test_no_cell_is_created_until_the_host_probe_has_passed(monkeypatch, tmp_pat
     assert cell.turns == []
     assert not cell.exported
     # And the sibling it did start does not survive the failure.
-    assert cell.preflight == ["proxy", "enumerate", "probe", "stop"]
+    assert cell.preflight == [
+        "proxy",
+        "enumerate",
+        "probe",
+        "read-denied",
+        "read-failed",
+        "stop",
+    ]
 
 
 def test_teardown_removes_both_volumes_not_the_loops_result(monkeypatch, tmp_path):
