@@ -599,9 +599,10 @@ So the supervisor asserts the **path** rather than the parts: from an ephemeral
 sibling on the cells network, through the proxy, to the one host the allowlist
 names — the agent's own first request, made before the agent exists. Any HTTP
 status is a pass, **401 included**: what is being established is reachability,
-and no credential is being tested. It runs immediately after the proxy starts
-and before anything else is built, so the cost of the answer is one container
-start rather than an attempt.
+and no credential is being tested. It runs immediately after the proxy starts and
+before the repo's image is built, so the cost of the answer is one container
+start rather than an image build and an attempt. The status it got goes on the
+operator's line — what answered, not merely that something did.
 
 A failure here is `error`, never `fail` — the repo's code is not what is wrong.
 It raises before a cell exists, aborts the run, and is charged to nobody (§4.3).

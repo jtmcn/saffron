@@ -589,22 +589,22 @@ def _drive_cell(
         created.add(network)
         runtime.create_network(network)
 
+        # First of everything: on apple/container 1.3.0 a container on the
+        # internal network before the proxy leaves it no route out (evidence
+        # 2026-08-28), and a dead route found here costs one container start
+        # rather than an image build and an attempt (§5.1.1).
+        watch("preflight: starting the proxy")
+        proxy_ip = proxy.start_proxy(network)
+        watch(f"preflight: proxy at {proxy_ip}")
+        answered = preflight.assert_proxy_reaches_upstream(
+            image.BASE_TAG, network, proxy_ip
+        )
+        watch(f"preflight: proxy reaches {proxy.UPSTREAM_HOST} ({answered})")
+
         # The cell runs the repo's own image, never the base: the base carries
         # no toolchain, so every gate would error before the agent is reached.
         watch(f"preflight: building {image.cell_tag(repo)}")
         cell_image = image.build_cell_image(repo)
-
-        # Before the probe enumerates anything: on apple/container 1.3.0 a
-        # container on the internal network first leaves the proxy no route out
-        # (evidence 2026-08-28), and starting it here also settles the host's
-        # own routes before the addresses below are read off them.
-        watch("preflight: starting the proxy")
-        proxy_ip = proxy.start_proxy(network)
-        watch(f"preflight: proxy at {proxy_ip}")
-        # Started is not working: the path is asserted here, at one container
-        # start, or the agent meets it as an API error an attempt later (§5.1.1).
-        preflight.assert_proxy_reaches_upstream(image.BASE_TAG, network, proxy_ip)
-        watch(f"preflight: proxy reaches {proxy.UPSTREAM_HOST}")
 
         # Probed from the base image, not the repo's. The probe runs `python`,
         # and core must not require an interpreter inside every target repo's

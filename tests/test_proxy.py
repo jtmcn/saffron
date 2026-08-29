@@ -317,5 +317,10 @@ def test_the_allowlisted_host_and_the_squid_acl_agree():
     it. Two copies of one decision, so the drift is worth a test: probing a host
     the ACL does not name would fail every run, and probing one it no longer
     names would pass while the agent is refused."""
-    acl = Path("images/squid.conf").read_text()
-    assert f"acl allowed_hosts dstdomain {proxy.UPSTREAM_HOST}" in acl, acl
+    conf = Path(__file__).resolve().parents[1] / "images" / "squid.conf"
+    admitted = [
+        line
+        for line in conf.read_text().splitlines()
+        if "dstdomain" in line.split("#")[0]
+    ]
+    assert any(proxy.UPSTREAM_HOST in line.split() for line in admitted), admitted

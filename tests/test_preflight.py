@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from saffron import preflight
-from saffron.cell import runtime
+from saffron.cell import proxy, runtime
 
 LSOF = (Path(__file__).parent / "fixtures" / "lsof-listen.txt").read_text()
 
@@ -160,10 +160,18 @@ def test_any_http_status_from_the_upstream_is_reachability(monkeypatch):
     def fake(image, command, *, network=None, env=None, timeout_s=120, **kw):
         seen["env"] = env
         seen["network"] = network
+        seen["command"] = command
         return runtime.Completed(0, "STATUS 401\n", "")
 
     monkeypatch.setattr(preflight.runtime, "run_ephemeral", fake)
-    preflight.assert_proxy_reaches_upstream("img", "saffron-cells", "10.88.0.2")
+    assert (
+        preflight.assert_proxy_reaches_upstream("img", "saffron-cells", "10.88.0.2")
+        == "401"
+    )
+    # The command is asserted, not just the answer: a probe pointed at the wrong
+    # host would pass every run and establish nothing.
+    assert proxy.UPSTREAM_HOST in seen["command"][-1]
+    assert "/v1/models" in seen["command"][-1]
     # Through the proxy, by IP: an internal network has no DNS to resolve a name.
     assert seen["env"]["HTTPS_PROXY"] == "http://10.88.0.2:3128"
     assert seen["network"] == "saffron-cells"
@@ -175,8 +183,14 @@ def test_a_proxy_that_cannot_reach_the_upstream_aborts_before_the_cell(monkeypat
     monkeypatch.setattr(
         preflight.runtime,
         "run_ephemeral",
+        # The measured shape: the probe ran, so there is a traceback, and its
+        # last line is the diagnosis.
         lambda *a, **k: runtime.Completed(
-            1, "", "urllib.error.URLError: tunnel failed"
+            1,
+            "",
+            "Traceback (most recent call last):\n"
+            '  File "<string>", line 3, in <module>\n'
+            "urllib.error.URLError: <urlopen error tunnel failed>",
         ),
     )
     with pytest.raises(runtime.CellRuntimeError, match="could not reach"):
@@ -189,7 +203,7 @@ def test_a_probe_that_printed_nothing_is_not_a_pass(monkeypatch):
     monkeypatch.setattr(
         preflight.runtime, "run_ephemeral", lambda *a, **k: runtime.Completed(0, "", "")
     )
-    with pytest.raises(runtime.CellRuntimeError, match="could not reach"):
+    with pytest.raises(runtime.CellRuntimeError, match="did not run"):
         preflight.assert_proxy_reaches_upstream("img", "saffron-cells", "10.88.0.2")
 
 
@@ -216,3 +230,68 @@ def test_the_abort_reports_the_exception_not_the_runtimes_progress_output(monkey
         preflight.assert_proxy_reaches_upstream("img", "saffron-cells", "10.88.0.2")
     assert "urlopen error timed out" in str(raised.value)
     assert "Fetching image" not in str(raised.value)
+
+
+def test_the_pass_token_is_anchored_because_it_is_inside_the_argv(monkeypatch):
+    """`STATUS` is a literal in the script this sends, so a runtime echoing its
+    own command back would read as a pass — Appendix H's vacuous pass, in the
+    check written against it."""
+    echoed = (
+        "Usage: container run [<options>] <image>\n"
+        "while applying: python -c import urllib.request as u\n"
+        "    print('STATUS', u.urlopen('https://api.anthropic.com/v1/models'))\n"
+    )
+    assert "STATUS" in echoed  # the substring a weaker check would have accepted
+    monkeypatch.setattr(
+        preflight.runtime,
+        "run_ephemeral",
+        lambda *a, **k: runtime.Completed(0, echoed, ""),
+    )
+    with pytest.raises(runtime.CellRuntimeError, match="did not run"):
+        preflight.assert_proxy_reaches_upstream("img", "saffron-cells", "10.88.0.2")
+
+
+def test_a_run_that_timed_out_is_a_probe_that_did_not_run(monkeypatch):
+    """A wall timeout is the runtime hanging, not the route being dead, and the
+    advice for the two differs. `probe_host_bindings` already draws this line."""
+    monkeypatch.setattr(
+        preflight.runtime,
+        "run_ephemeral",
+        lambda *a, **k: runtime.Completed(124, "STATUS 20", "", timed_out=True),
+    )
+    with pytest.raises(runtime.CellRuntimeError, match="did not run"):
+        preflight.assert_proxy_reaches_upstream("img", "saffron-cells", "10.88.0.2")
+
+
+def test_the_probe_script_itself_answers_a_401(tmp_path):
+    """The script, executed — not its output, fabricated. Every other test here
+    asserts the pass *condition*; this one runs `_UPSTREAM_PROBE` against a real
+    server so the `HTTPError` branch and `.status` are covered, which is the
+    behaviour the section's "401 is a pass" claim rests on."""
+    import subprocess
+    import sys
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Unauthorized(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(401)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Unauthorized)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/v1/models"
+        done = subprocess.run(
+            [sys.executable, "-c", preflight._UPSTREAM_PROBE.format(url=url)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    finally:
+        server.shutdown()
+    assert done.returncode == 0, done.stderr
+    assert preflight._STATUS.search(done.stdout).group(1) == "401"

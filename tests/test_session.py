@@ -417,9 +417,9 @@ def _stub_the_runtime(
     monkeypatch.setattr("saffron.cell.runtime.create_network", lambda *a, **k: None)
     monkeypatch.setattr("saffron.cell.runtime.create_volume", lambda *a, **k: None)
 
-    # The order these three run in is load-bearing, so it is recorded rather
-    # than described: the runtime's routing depends on it (§5.1, evidence
-    # 2026-08-28) and so does what the probe is told to look at.
+    # The order these run in is load-bearing, so it is recorded rather than
+    # described: the runtime's routing depends on it (§5.1.1, evidence
+    # 2026-08-28), and so does what the probe is told to look at.
     def _ordered(name, result):
         def _f(*a, **k):
             cell.preflight.append(name)
@@ -451,7 +451,7 @@ def _stub_the_runtime(
         "saffron.cell.proxy.failed_egress", _reads("read-failed", "failed")
     )
     monkeypatch.setattr(
-        "saffron.preflight.assert_proxy_reaches_upstream", _ordered("egress", None)
+        "saffron.preflight.assert_proxy_reaches_upstream", _ordered("egress", "401")
     )
     monkeypatch.setattr(
         "saffron.preflight.assert_host_is_unreachable", _ordered("probe", None)
@@ -607,6 +607,10 @@ def test_the_proxy_starts_before_anything_the_probe_reads(monkeypatch, tmp_path)
     cell = _stub_the_runtime(monkeypatch)
     _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
     assert cell.preflight[:4] == ["proxy", "egress", "enumerate", "probe"]
+    # What answered, not merely that something did — the same reason the port
+    # count is on the line beside it.
+    (reaches,) = [x for x in cell.watched if "proxy reaches" in x]
+    assert reaches == "preflight: proxy reaches api.anthropic.com (401)"
 
 
 def test_a_proxy_that_reaches_nothing_aborts_before_the_cell_is_built(
