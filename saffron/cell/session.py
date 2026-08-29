@@ -610,12 +610,15 @@ def _drive_cell(
             + "; tolerating "
             + (", ".join(tolerated) or "nothing")
         )
-        # The list the operator was just shown, not a second one taken now.
-        preflight.assert_host_is_unreachable(image.BASE_TAG, network, ports)
-
+        # Before the probe, not after: on apple/container 1.3.0 anything on the
+        # internal network first leaves the proxy no route out (evidence
+        # 2026-08-28). Cells still start only once the probe has passed.
         watch("preflight: starting the proxy")
         proxy_ip = proxy.start_proxy(network)
         watch(f"preflight: proxy at {proxy_ip}")
+
+        # The list the operator was just shown, not a second one taken now.
+        preflight.assert_host_is_unreachable(image.BASE_TAG, network, ports)
 
         created.add(volume)
         runtime.create_volume(volume)
