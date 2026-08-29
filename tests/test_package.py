@@ -651,6 +651,15 @@ def test_the_package_fixtures_build_a_real_spec():
     assert isinstance(_spec(touches=["f.txt"], criteria=["it works"]), Spec)
 
 
+def test_the_spec_fixtures_arguments_reach_the_parsed_spec():
+    """The values `_spec()` is called with reach the parsed `Spec`, so the
+    fixture cannot drift in value the way the two fakes it replaced drifted
+    in shape."""
+    spec = _spec(touches=["f.txt"], criteria=["it works"])
+    assert spec.touches == ["f.txt"]
+    assert spec.acceptance_criteria == ["it works"]
+
+
 def test_a_conflict_persists_merge_failed_and_pushes_nothing(monkeypatch, tmp_path):
     """Asserting the state alone would pass against an implementation that
     pushed conflict markers first, so this asserts the remote too."""
