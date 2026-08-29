@@ -1,4 +1,9 @@
-"""Per-run readiness. In v0.5 it is one probe, and N1 rests on it.
+"""Per-run readiness: two probes, neither of which trusts a component that
+reported success.
+
+N1 rests on the first. The second rests on the fact that a proxy which started
+is not a proxy which works — one that came up with no route out cost a whole
+attempt before anything noticed (DESIGN.md §5.1.1).
 
 An `--internal` network still routes to the host gateway, so a host service
 bound to 0.0.0.0 — a Postgres, a dev server — is reachable from inside a cell
@@ -11,10 +16,11 @@ fix, and reported on every run so it cannot go quiet (Appendix G).
 from __future__ import annotations
 
 import os
+import re
 import socket
 import subprocess
 
-from saffron.cell import runtime
+from saffron.cell import proxy, runtime
 
 _LSOF = ("lsof", "-nP", "-iTCP", "-sTCP:LISTEN")
 
@@ -188,3 +194,73 @@ def assert_host_is_unreachable(
             + ", ".join(reachable)
             + " — bind them to 127.0.0.1. N1 is not satisfied until this is empty."
         )
+
+
+# The agent's own first request, made before the agent exists. `HTTPError` is
+# caught and its code printed because 401 is the expected answer and is a pass:
+# the route is what is being established, not a credential.
+_UPSTREAM_PROBE = (
+    "import urllib.request as u\n"
+    "try:\n"
+    "    print('STATUS', u.urlopen({url!r}, timeout=20).status)\n"
+    "except u.HTTPError as e:\n"
+    "    print('STATUS', e.code)\n"
+)
+
+
+# Anchored, never a substring: `STATUS` is a literal inside the argv this sends,
+# so a runtime echoing its own command back — a usage dump on a flag it stopped
+# accepting, which 1.2.2 -> 1.3.0 already did once here — would read as a pass.
+# That is Appendix H's vacuous pass, inside the check written against it.
+_STATUS = re.compile(r"^STATUS (\d{3})$", re.M)
+
+
+def assert_proxy_reaches_upstream(
+    image_tag: str, network: str, proxy_ip: str, timeout_s: float = 120
+) -> str:
+    """The path, not the parts: through the proxy to the host the allowlist
+    names, from a sibling on the cells network (DESIGN.md §5.1.1). Returns the
+    status that answered, so the operator's line says what replied and not
+    merely that something did.
+
+    A failure is `error` and not `fail`: it aborts before a cell exists and is
+    charged to nobody."""
+    url = f"https://{proxy.UPSTREAM_HOST}/v1/models"
+    done = runtime.run_ephemeral(
+        image_tag,
+        ["python", "-c", _UPSTREAM_PROBE.format(url=url)],
+        network=network,
+        env=proxy.proxy_env(proxy_ip),
+        timeout_s=timeout_s,
+    )
+    if answered := _STATUS.search(done.stdout):
+        return answered.group(1)
+    # A probe that did not run is not a probe that failed, and the two want
+    # different fixes. A python traceback is the evidence that it ran at all.
+    if done.timed_out or "Traceback" not in done.stderr:
+        raise runtime.CellRuntimeError(
+            f"the upstream probe did not run ({'timed out' if done.timed_out else 'no output from the probe'}): "
+            f"{_last_line(done)}. A probe that did not run is not a probe that passed."
+        )
+    raise runtime.CellRuntimeError(
+        f"the proxy at {proxy_ip} could not reach {proxy.UPSTREAM_HOST}: "
+        f"{_last_line(done)}. The cell would meet this as an API error a whole "
+        "attempt later — check the proxy's own route out, and the allowlist if "
+        "the line above says the tunnel was refused."
+    )
+
+
+def _last_line(done: runtime.Completed) -> str:
+    """The exception, not the runtime's throat-clearing.
+
+    Measured: `container run` prints its own image-pull progress to stderr
+    ahead of anything the container says, and a traceback's useful line is its
+    last — so the front of this stream is noise and a head-truncated message
+    reports the pull instead of the diagnosis. stderr before stdout is a
+    decision, not an accident: this only runs on the abort path, where the
+    exception is what the operator needs."""
+    for stream in (done.stderr, done.stdout):
+        for line in reversed(stream.splitlines()):
+            if line.strip():
+                return line.strip()
+    return "the probe printed nothing"

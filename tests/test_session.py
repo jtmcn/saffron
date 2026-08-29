@@ -356,6 +356,8 @@ class _Cell:
         self.subjects_from: str | None = None
         self.timeouts: list[float | None] = []
         self.denied: list[str] = []
+        self.failed: list[str] = []
+        self.preflight: list[str] = []
         self.gate_paths: list[list[str]] = []
 
 
@@ -414,14 +416,49 @@ def _stub_the_runtime(
     monkeypatch.setattr("saffron.cell.runtime.remove_volume", _remove("volume"))
     monkeypatch.setattr("saffron.cell.runtime.create_network", lambda *a, **k: None)
     monkeypatch.setattr("saffron.cell.runtime.create_volume", lambda *a, **k: None)
-    monkeypatch.setattr("saffron.cell.proxy.start_proxy", lambda *a, **k: "10.88.0.2")
-    monkeypatch.setattr("saffron.cell.proxy.stop_proxy", lambda *a, **k: None)
-    monkeypatch.setattr("saffron.cell.proxy.denied_egress", lambda *a, **k: cell.denied)
+
+    # The order these run in is load-bearing, so it is recorded rather than
+    # described: the runtime's routing depends on it (§5.1.1, evidence
+    # 2026-08-28), and so does what the probe is told to look at.
+    def _ordered(name, result):
+        def _f(*a, **k):
+            cell.preflight.append(name)
+            return result
+
+        return _f
+
     monkeypatch.setattr(
-        "saffron.preflight.assert_host_is_unreachable", lambda *a, **k: None
+        "saffron.cell.proxy.start_proxy", _ordered("proxy", "10.88.0.2")
+    )
+    monkeypatch.setattr("saffron.cell.proxy.stop_proxy", _ordered("stop", None))
+
+    # Recorded, not described: the proxy's log is its stdout and dies with the
+    # container, so a `stop_proxy` moved above these reads silences both reports
+    # and every other test still passes.
+    def _reads(name, attr):
+        # Read at call time, not at stub time: a test sets these after this
+        # fixture has run.
+        def _f(*a, **k):
+            cell.preflight.append(name)
+            return getattr(cell, attr)
+
+        return _f
+
+    monkeypatch.setattr(
+        "saffron.cell.proxy.denied_egress", _reads("read-denied", "denied")
     )
     monkeypatch.setattr(
-        "saffron.preflight.host_probe_ports", lambda: ([8000], ["rapportd:49152"])
+        "saffron.cell.proxy.failed_egress", _reads("read-failed", "failed")
+    )
+    monkeypatch.setattr(
+        "saffron.preflight.assert_proxy_reaches_upstream", _ordered("egress", "401")
+    )
+    monkeypatch.setattr(
+        "saffron.preflight.assert_host_is_unreachable", _ordered("probe", None)
+    )
+    monkeypatch.setattr(
+        "saffron.preflight.host_probe_ports",
+        _ordered("enumerate", ([8000], ["rapportd:49152"])),
     )
     monkeypatch.setattr("saffron.repos.image.build_cell_image", lambda repo: "img")
 
@@ -560,6 +597,72 @@ def test_the_preflight_line_reports_what_was_tolerated(monkeypatch, tmp_path):
     (probing,) = [x for x in cell.watched if x.startswith("preflight: probing")]
     assert probing.startswith("preflight: probing 1 host ports at 10.88.0.1")
     assert probing.endswith("; tolerating rapportd:49152")
+
+
+def test_the_proxy_starts_before_anything_the_probe_reads(monkeypatch, tmp_path):
+    """The ordering that cost a run: on apple/container 1.3.0 a container on the
+    internal network before the proxy leaves the proxy with no route out, and
+    `assert_host_is_unreachable` is such a container. Asserted rather than
+    described, because a comment is not a boundary."""
+    cell = _stub_the_runtime(monkeypatch)
+    _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
+    assert cell.preflight[:4] == ["proxy", "egress", "enumerate", "probe"]
+    # What answered, not merely that something did — the same reason the port
+    # count is on the line beside it.
+    (reaches,) = [x for x in cell.watched if "proxy reaches" in x]
+    assert reaches == "preflight: proxy reaches api.anthropic.com (401)"
+
+
+def test_a_proxy_that_reaches_nothing_aborts_before_the_cell_is_built(
+    monkeypatch, tmp_path
+):
+    """§5.1.1. The run this exists for spent a whole attempt to learn it: every
+    layer reported success and the first use of the network was the agent's."""
+    cell = _stub_the_runtime(monkeypatch)
+
+    def refuse(*a, **k):
+        cell.preflight.append("egress")
+        raise runtime.CellRuntimeError("the proxy at 10.88.0.2 could not reach it")
+
+    monkeypatch.setattr("saffron.preflight.assert_proxy_reaches_upstream", refuse)
+    with pytest.raises(runtime.CellRuntimeError):
+        _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn()])
+    # Nothing was built and nothing was enumerated: the answer cost a container.
+    assert cell.turns == []
+    assert cell.preflight == [
+        "proxy",
+        "egress",
+        "read-denied",
+        "read-failed",
+        "stop",
+    ]
+
+
+def test_no_cell_is_created_until_the_host_probe_has_passed(monkeypatch, tmp_path):
+    """N1's structural half, and the half the reorder could have cost: the probe
+    may now run with the proxy up, but never with a cell up."""
+    cell = _stub_the_runtime(monkeypatch)
+
+    def refuse(*a, **k):
+        cell.preflight.append("probe")
+        raise runtime.CellRuntimeError("host services answered from inside a cell")
+
+    monkeypatch.setattr("saffron.preflight.assert_host_is_unreachable", refuse)
+    with pytest.raises(runtime.CellRuntimeError):
+        _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn()])
+    # The proxy is a sibling and is allowed to exist; a cell is not.
+    assert cell.turns == []
+    assert not cell.exported
+    # And the sibling it did start does not survive the failure.
+    assert cell.preflight == [
+        "proxy",
+        "egress",
+        "enumerate",
+        "probe",
+        "read-denied",
+        "read-failed",
+        "stop",
+    ]
 
 
 def test_teardown_removes_both_volumes_not_the_loops_result(monkeypatch, tmp_path):
@@ -1648,6 +1751,20 @@ def test_a_denied_connect_reaches_the_operator(monkeypatch, tmp_path):
     assert any(
         "proxy DENIED" in line and "platform.claude.com" in line
         for line in cell.watched
+    )
+
+
+def test_a_tunnel_the_proxy_could_not_open_reaches_the_operator(monkeypatch, tmp_path):
+    """The failure that shipped: nothing was denied, so the denial report was
+    correctly silent, and a proxy with no route out looked like an API outage
+    for a whole run."""
+    cell = _stub_the_runtime(monkeypatch)
+    cell.failed = [
+        "1755800001.2 35022 10.88.0.3 TCP_TUNNEL/503 0 CONNECT api.anthropic.com:443 - HIER_NONE/- -"
+    ]
+    _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
+    assert any(
+        "proxy FAILED" in line and "api.anthropic.com" in line for line in cell.watched
     )
 
 

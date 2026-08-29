@@ -589,6 +589,18 @@ def _drive_cell(
         created.add(network)
         runtime.create_network(network)
 
+        # First of everything: on apple/container 1.3.0 a container on the
+        # internal network before the proxy leaves it no route out (evidence
+        # 2026-08-28), and a dead route found here costs one container start
+        # rather than an image build and an attempt (§5.1.1).
+        watch("preflight: starting the proxy")
+        proxy_ip = proxy.start_proxy(network)
+        watch(f"preflight: proxy at {proxy_ip}")
+        answered = preflight.assert_proxy_reaches_upstream(
+            image.BASE_TAG, network, proxy_ip
+        )
+        watch(f"preflight: proxy reaches {proxy.UPSTREAM_HOST} ({answered})")
+
         # The cell runs the repo's own image, never the base: the base carries
         # no toolchain, so every gate would error before the agent is reached.
         watch(f"preflight: building {image.cell_tag(repo)}")
@@ -610,12 +622,9 @@ def _drive_cell(
             + "; tolerating "
             + (", ".join(tolerated) or "nothing")
         )
-        # The list the operator was just shown, not a second one taken now.
+        # The list the operator was just shown, not a second one taken now. No
+        # cell exists yet, and none will until this returns.
         preflight.assert_host_is_unreachable(image.BASE_TAG, network, ports)
-
-        watch("preflight: starting the proxy")
-        proxy_ip = proxy.start_proxy(network)
-        watch(f"preflight: proxy at {proxy_ip}")
 
         created.add(volume)
         runtime.create_volume(volume)
@@ -1155,6 +1164,10 @@ def _drive_cell(
         # Before the proxy goes: its log goes with it.
         for denied in proxy.denied_egress():
             watch(f"teardown: proxy DENIED {denied}")
+        # Not a denial: an allowed CONNECT the proxy could not open. Reported
+        # apart because the fix is the network, not the allowlist.
+        for failed in proxy.failed_egress():
+            watch(f"teardown: proxy FAILED {failed}")
         proxy.stop_proxy()
         removed.append(("network", network, runtime.remove_network(network)))
         # Volumes go too, or the same spec_id cannot be re-run.

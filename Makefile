@@ -9,8 +9,8 @@ lint:
 	prek run --all-files
 
 fmt:
-	ruff check --fix .
-	ruff format .
+	uv run ruff check --fix .
+	uv run ruff format .
 
 test:
 	uv run pytest
