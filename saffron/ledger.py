@@ -222,6 +222,39 @@ class Ledger:
         ).fetchone()
         return int(row["repo_id"])
 
+    def resolve_repo(self, origin: str) -> int | None:
+        """The scheduler's read of `upsert_repo` — a repo that has never run
+        has no row, and a scan must be able to ask that without creating one
+        just to answer it (`upsert_repo` always leaves a row behind, which is
+        right for preflight and wrong for a read)."""
+        row = self._db.execute(
+            "SELECT repo_id FROM repos WHERE origin = ?", (str(origin),)
+        ).fetchone()
+        return int(row["repo_id"]) if row is not None else None
+
+    def tasks_by_spec(self, repo_id: int) -> dict[tuple[str, str], sqlite3.Row]:
+        """Every task this repo has ever run, keyed by `(spec_id, spec_sha)` —
+        the shape `scheduler.build_queue` filters against, in one query rather
+        than one per spec. Spans every run the repo has had, not just the
+        latest, because a `spec_sha` a task was recorded against on an earlier
+        night is still the one a re-queue or a done-state check must find.
+
+        Ordinary operation never puts two tasks at the same key — a re-queue
+        resumes the existing row rather than minting another — but the fold
+        keeps the highest `task_id` per key regardless, so a caller reasons
+        about the most recent row if that invariant is ever violated rather
+        than about whichever happened to sort first.
+        """
+        rows = self._db.execute(
+            """SELECT t.task_id, t.spec_id, t.spec_sha, t.state
+                 FROM tasks t
+                 JOIN runs r ON r.run_id = t.run_id
+                WHERE r.repo_id = ?
+                ORDER BY t.task_id""",
+            (repo_id,),
+        ).fetchall()
+        return {(row["spec_id"], row["spec_sha"]): row for row in rows}
+
     def create_run(self, repo_id: int, base_sha: str) -> int:
         cursor = self._db.execute(
             "INSERT INTO runs (repo_id, base_sha, status) VALUES (?, ?, 'RUNNING')",
