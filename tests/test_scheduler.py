@@ -1,8 +1,12 @@
+import subprocess
+
 import pytest
 
+from saffron.cell import runtime
 from saffron.intake import load_spec
 from saffron.ledger import Ledger
 from saffron.scheduler import DONE_STATES, REQUEUE_STATES, build_queue
+from tests.conftest import HostToolExecInTest
 
 
 @pytest.fixture
@@ -226,9 +230,21 @@ def test_candidates_are_ordered_by_priority_then_filename(tmp_path, ledger):
 
 
 def test_build_queue_touches_no_network_and_no_cell(tmp_path, ledger):
-    """Sanity: nothing here reaches `gh` or a cell runtime — the autouse
-    fixture in conftest.py would fail this test outright if it did."""
+    """The scan is disk and ledger only. The guard is an exec tripwire, not a
+    socket one — it covers the two ways this codebase leaves the host, and the
+    second half of this test is what makes the first half's claim worth
+    anything, since a guard that no longer fires reads exactly like a scan that
+    never called out.
+    """
     directory = _spec_dir(tmp_path)
     _write(directory, "a.md", id="TE-1")
 
-    build_queue(directory, None, ledger)
+    candidates, refusals = build_queue(directory, None, ledger)
+
+    assert [c.spec.id for c in candidates] == ["TE-1"]
+    assert refusals == []
+
+    with pytest.raises(HostToolExecInTest):
+        subprocess.Popen(["gh", "pr", "list"])
+    with pytest.raises(HostToolExecInTest):
+        subprocess.Popen([runtime.RUNTIME, "run", "saffron/cell"])
