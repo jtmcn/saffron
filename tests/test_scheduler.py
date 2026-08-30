@@ -1,4 +1,7 @@
+import json
+import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -42,6 +45,46 @@ def _task_at(ledger, repo_id, *, spec_id, spec_sha, state):
 
 def _repo(ledger, origin="/o"):
     return ledger.upsert_repo("r", origin, "/m.git", policy_sha="p" * 64)
+
+
+def _write_spec(
+    directory,
+    name,
+    *,
+    id,
+    type="feature",
+    priority=3,
+    touches=None,
+    depends_on=None,
+    body="",
+):
+    """A spec with the frontmatter the refusal-gate tests need — `_write`
+    only carries id/type/priority, and these tests need `touches`,
+    `depends_on` and a body worth parsing acceptance criteria out of."""
+    lines = ["---", f"id: {id}", "title: t", f"type: {type}", f"priority: {priority}"]
+    if depends_on:
+        lines.append("depends_on:")
+        lines += [f"  - {d}" for d in depends_on]
+    if touches:
+        lines.append("touches:")
+        lines += [f"  - {t}" for t in touches]
+    lines.append("---")
+    lines.append("")
+    lines.append(body)
+    (directory / name).write_text("\n".join(lines) + "\n")
+
+
+def _fake_gh(prs):
+    """A `GhRunner` that never leaves the process — `prs` is the parsed JSON
+    `gh pr list --json ...` would have printed."""
+    payload = json.dumps(prs)
+
+    def gh(argv):
+        return subprocess.CompletedProcess(
+            argv, returncode=0, stdout=payload, stderr=""
+        )
+
+    return gh
 
 
 # ------------------------------------------------------------- resolve_repo_id
@@ -248,3 +291,240 @@ def test_build_queue_touches_no_network_and_no_cell(tmp_path, ledger):
         subprocess.Popen(["gh", "pr", "list"])
     with pytest.raises(HostToolExecInTest):
         subprocess.Popen([runtime.RUNTIME, "run", "saffron/cell"])
+
+
+# ---------------------------------------------------- refusal: open pull request
+
+
+def test_an_open_pr_from_another_task_refuses(tmp_path, ledger):
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"])
+    gh = _fake_gh(
+        [{"headRefName": "saffron/TE-1", "url": "https://example/pull/9", "files": []}]
+    )
+
+    candidates, refusals = build_queue(directory, None, ledger, repo_slug="o/r", gh=gh)
+
+    assert candidates == []
+    assert len(refusals) == 1
+    assert refusals[0].path.name == "a.md"
+    assert "another task" in refusals[0].reason
+    assert "https://example/pull/9" in refusals[0].reason
+
+
+def test_resuming_its_own_task_is_not_refused_by_its_own_open_pr(tmp_path, ledger):
+    """DESIGN.md §4.2's footnote: refusal is keyed on `task_id`, not the spec,
+    so a `CHANGES_REQUESTED` re-queue survives finding its own PR still open."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"])
+    repo_id = _repo(ledger)
+    _, spec_sha = load_spec(directory / "a.md")
+    task_id = _task_at(
+        ledger, repo_id, spec_id="TE-1", spec_sha=spec_sha, state="CHANGES_REQUESTED"
+    )
+    gh = _fake_gh(
+        [{"headRefName": "saffron/TE-1", "url": "https://example/pull/9", "files": []}]
+    )
+
+    candidates, refusals = build_queue(
+        directory, repo_id, ledger, repo_slug="o/r", gh=gh
+    )
+
+    assert refusals == []
+    assert [c.task_id for c in candidates] == [task_id]
+
+
+def test_no_repo_slug_skips_the_github_backed_refusals(tmp_path, ledger):
+    """The default before `SA-0017` wires the CLI: no slug, no `gh` call, and
+    the two GitHub-backed refusals are inert rather than erroring."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"])
+
+    def exploding_gh(argv):
+        raise AssertionError(f"gh should not have been called: {argv}")
+
+    candidates, refusals = build_queue(directory, None, ledger, gh=exploding_gh)
+
+    assert [c.spec.id for c in candidates] == ["TE-1"]
+    assert refusals == []
+
+
+# ------------------------------------------------------ refusal: touches overlap
+
+
+def test_a_touches_overlap_with_an_open_prs_files_refuses(tmp_path, ledger):
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"])
+    gh = _fake_gh(
+        [{"headRefName": "saffron/OTHER-1", "url": "u", "files": [{"path": "a.py"}]}]
+    )
+
+    candidates, refusals = build_queue(directory, None, ledger, repo_slug="o/r", gh=gh)
+
+    assert candidates == []
+    assert len(refusals) == 1
+    assert "touches overlaps" in refusals[0].reason
+    assert "a.py" in refusals[0].reason
+
+
+def test_no_touches_overlap_with_an_open_prs_files_is_not_refused(tmp_path, ledger):
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"])
+    gh = _fake_gh(
+        [{"headRefName": "saffron/OTHER-1", "url": "u", "files": [{"path": "b.py"}]}]
+    )
+
+    candidates, refusals = build_queue(directory, None, ledger, repo_slug="o/r", gh=gh)
+
+    assert [c.spec.id for c in candidates] == ["TE-1"]
+    assert refusals == []
+
+
+# ------------------------------------------- refusal: acceptance criteria path
+
+
+def test_a_wrapped_criterion_naming_a_path_outside_touches_refuses(tmp_path, ledger):
+    """Built on today's `spec.acceptance_criteria` — the fixture is `SA-0016`'s
+    own third criterion, wrapped across two continuation lines, the same one
+    `test_intake.py` uses for the truncation fix this refusal depends on. A
+    fixture whose criterion is a single line would prove nothing about the
+    bug `SA-0014` fixed, and this refusal would pass `SA-0005`-shaped input
+    clean if it were still truncating."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(
+        directory,
+        "a.md",
+        id="TE-1",
+        touches=["saffron/scheduler.py"],
+        body=(
+            "## Acceptance criteria\n"
+            "- [ ] The two refusals needing GitHub take an injected runner in the\n"
+            "      `GhRunner` shape `saffron/phases/package.py` already uses, and every\n"
+            "      test in `tests/test_scheduler.py` runs with no network and no cell\n"
+        ),
+    )
+
+    candidates, refusals = build_queue(directory, None, ledger)
+
+    assert candidates == []
+    assert len(refusals) == 1
+    assert "saffron/phases/package.py" in refusals[0].reason
+
+
+def test_a_wrapped_criterion_whose_paths_are_all_in_touches_is_not_refused(
+    tmp_path, ledger
+):
+    directory = _spec_dir(tmp_path)
+    _write_spec(
+        directory,
+        "a.md",
+        id="TE-1",
+        touches=[
+            "saffron/scheduler.py",
+            "saffron/phases/package.py",
+            "tests/test_scheduler.py",
+        ],
+        body=(
+            "## Acceptance criteria\n"
+            "- [ ] The two refusals needing GitHub take an injected runner in the\n"
+            "      `GhRunner` shape `saffron/phases/package.py` already uses, and every\n"
+            "      test in `tests/test_scheduler.py` runs with no network and no cell\n"
+        ),
+    )
+
+    candidates, refusals = build_queue(directory, None, ledger)
+
+    assert [c.spec.id for c in candidates] == ["TE-1"]
+    assert refusals == []
+
+
+def test_criterion_path_check_is_skipped_when_touches_is_empty(tmp_path, ledger):
+    """The documented shape for a bug awaiting DIAGNOSE (§5.2): every
+    criterion names a path outside an empty list, so the unguarded form would
+    refuse the entire bug class before DIAGNOSE could ever populate `touches`."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(
+        directory,
+        "a.md",
+        id="TE-1",
+        type="bug",
+        body="## Acceptance criteria\n- [ ] fixes `saffron/cli.py` for real\n",
+    )
+
+    candidates, refusals = build_queue(directory, None, ledger)
+
+    assert [c.spec.id for c in candidates] == ["TE-1"]
+    assert refusals == []
+
+
+def test_criterion_path_matching_is_exact_not_a_directory_insensitive_suffix(
+    tmp_path, ledger
+):
+    """`scope.matches("intake.py", "saffron/intake.py")` is `False` — the same
+    directory-sensitivity holds for a shortened multi-segment path. A gate
+    that quietly resolved a criterion's path token against `touches` by
+    suffix would treat `gates/core/scope.py` as declared here, because
+    `saffron/gates/core/scope.py` ends with it; `scope.matches` requires the
+    whole string, so it does not, and this must still refuse."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(
+        directory,
+        "a.md",
+        id="TE-1",
+        touches=["saffron/gates/core/scope.py"],
+        body="## Acceptance criteria\n- [ ] fixes `gates/core/scope.py` for real\n",
+    )
+
+    candidates, refusals = build_queue(directory, None, ledger)
+
+    assert candidates == []
+    assert len(refusals) == 1
+    assert "gates/core/scope.py" in refusals[0].reason
+
+
+# ------------------------------------------------------- refusal: depends_on
+
+
+def test_a_non_empty_depends_on_refuses(tmp_path, ledger):
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
+
+    candidates, refusals = build_queue(directory, None, ledger)
+
+    assert candidates == []
+    assert len(refusals) == 1
+    assert "TE-0" in refusals[0].reason
+
+
+# ---------------------------------------------------------------------- smoke
+
+
+def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
+    """Measured 2026-08-26 against `~/.saffron/ledger.db`: `SA-0001` and
+    `SA-0008` queued, everything else filtered out with a `READY_FOR_REVIEW`
+    task at the same `spec_sha`, and nothing refused. A smoke check, not proof
+    the refusals work on their own — those are the fixtures above."""
+    real_specs = Path(__file__).resolve().parent.parent / ".saffron" / "specs"
+    directory = tmp_path / "specs"
+    shutil.copytree(real_specs, directory)
+    repo_id = _repo(ledger)
+
+    still_open = {"SA-0001", "SA-0008"}
+    for path in sorted(directory.glob("*.md")):
+        spec, spec_sha = load_spec(path)
+        if spec.id in still_open:
+            continue
+        _task_at(
+            ledger,
+            repo_id,
+            spec_id=spec.id,
+            spec_sha=spec_sha,
+            state="READY_FOR_REVIEW",
+        )
+
+    candidates, refusals = build_queue(
+        directory, repo_id, ledger, repo_slug="joel/saffron", gh=_fake_gh([])
+    )
+
+    assert [c.spec.id for c in candidates] == ["SA-0008", "SA-0001"]
+    assert refusals == []
