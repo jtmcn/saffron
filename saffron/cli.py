@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import subprocess
+import tempfile
 from pathlib import Path
 
 from saffron.cell.session import CellSpec, run_one_cell
@@ -14,6 +16,7 @@ from saffron.phases import package as package_phase
 from saffron.replay import replay
 from saffron.repos import image as repo_image
 from saffron.repos import mirror as git_mirror
+from saffron.scheduler import Candidate, GhRunner, Refusal, build_queue, run_gh
 
 DEFAULT_HOME = Path.home() / ".saffron"
 
@@ -68,6 +71,11 @@ def main(argv: list[str] | None = None) -> int:
     cell_parser.add_argument("--max-attempts", type=int, default=None)
     cell_parser.add_argument("--max-turns", type=int, default=None)
 
+    queue_parser = subcommands.add_parser(
+        "queue", help="show what a batch would run tonight, agent-free"
+    )
+    queue_parser.add_argument("--repo", type=Path, default=Path.cwd())
+
     args = parser.parse_args(argv)
     out_dir_arg = getattr(args, "out", None)
     out_dir = out_dir_arg or (args.home / "batches" / "v0")
@@ -75,6 +83,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "cell":
             return _run_cell(args, ledger, out_dir)
+
+        if args.command == "queue":
+            return _queue(args, ledger)
 
         line = replay(
             args.repo,
@@ -206,6 +217,108 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
 
     print(f"{spec.id:<10} {outcome.state}")
     return CELL_EXIT.get(outcome.state, 1)
+
+
+def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
+    """`saffron queue --repo .` — the scan a batch would run tonight, without
+    starting a cell or writing anything to the ledger.
+
+    The mirror and `base_sha` are resolved exactly the way `_run_cell`
+    resolves them, because the specs a scan must read are the ones
+    `base_sha` pins (§4.2.1's own rule) — the working copy is not consulted.
+    `resolve_repo_id`, never `upsert_repo`: a repo this ledger has never run
+    gets `None`, which `build_queue` already treats as "no history to filter
+    against," and a read must not mint the row it is only asking about.
+    """
+    repo = args.repo.resolve()
+
+    digest = hashlib.sha256(str(repo).encode()).hexdigest()[:12]
+    mirror = git_mirror.ensure_mirror(
+        repo, args.home / "mirrors" / f"{repo.name}-{digest}.git"
+    )
+    url = package_phase.real_remote(repo)
+    _, base_sha = package_phase.fetch_default_branch(mirror, url)
+
+    repo_id = ledger.resolve_repo_id(url)
+
+    # Unlike `_run_cell`, a slug that cannot be read is not this command's
+    # failure — it just means two of `build_queue`'s refusals cannot run, and
+    # the printed output below says so on its own line rather than letting an
+    # empty refusal list stand in for "these were never checked."
+    try:
+        repo_slug = package_phase.github_slug(url)
+    except package_phase.PackageError:
+        repo_slug = None
+
+    gh_failures: list[str] = []
+    with tempfile.TemporaryDirectory() as scratch:
+        exported = git_mirror.export_saffron_dir(
+            mirror, base_sha, Path(scratch) / "at-base"
+        )
+        candidates, refusals = build_queue(
+            exported / ".saffron" / "specs",
+            repo_id,
+            ledger,
+            # The slug is what makes the open-pull-request and touches-overlap
+            # refusals run at all; the runner only decides how a `gh` that
+            # cannot start is reported.
+            repo_slug=repo_slug,
+            gh=_guarded_gh(gh_failures),
+        )
+
+    _print_queue(candidates, refusals, repo_slug, exported, gh_failures)
+    return 0
+
+
+def _guarded_gh(failures: list[str]) -> GhRunner:
+    """`run_gh`, but a `gh` that cannot start is recorded instead of raised.
+
+    A preview must not exit `2` on a machine with no `gh` (`package.py` guards
+    the same case), and a scan whose GitHub refusals never ran must not print
+    the same thing as one that ran them and found nothing (§5.4).
+    """
+
+    def gh(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        try:
+            return run_gh(argv)
+        except OSError as exc:
+            failures.append(str(exc))
+            return subprocess.CompletedProcess(argv, 127, "", str(exc))
+
+    return gh
+
+
+def _print_queue(
+    candidates: list[Candidate],
+    refusals: list[Refusal],
+    repo_slug: str | None,
+    root: Path,
+    gh_failures: list[str],
+) -> None:
+    # Paths are printed relative to the export root because the export is a
+    # temporary directory already deleted by the time this runs — an absolute
+    # one names a file the operator cannot open, and a refusal that failed to
+    # parse has no spec id to fall back on.
+    print(f"queue: {len(candidates)} candidate(s)")
+    for candidate in candidates:
+        print(
+            f"  {candidate.spec.id:<10} priority={candidate.spec.priority}  "
+            f"{candidate.path.relative_to(root)}"
+        )
+    print(f"refusals: {len(refusals)}")
+    for refusal in refusals:
+        print(f"  {refusal.path.relative_to(root)}: {refusal.reason}")
+    if repo_slug is None:
+        _print_skipped("no GitHub slug could be read from the remote")
+    elif gh_failures:
+        _print_skipped(f"gh could not be run ({gh_failures[0]})")
+
+
+def _print_skipped(because: str) -> None:
+    print(
+        f"note: {because} — the open-pull-request and touches-overlap "
+        "refusals did not run, so the refusal list above is incomplete"
+    )
 
 
 if __name__ == "__main__":
