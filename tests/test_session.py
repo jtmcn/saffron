@@ -217,6 +217,118 @@ def test_a_second_schema_failure_rejects_rather_than_asking_again():
     assert len(agent.prompts) == 2
 
 
+# --- proposing scope instead of a plan (SA-0018) ---
+
+_PROPOSAL = {
+    "kind": "scope_proposal",
+    "proposed_touches": ["infra/deploy.tf"],
+    "root_cause": "the criteria describe behaviour that lives in infra/deploy.tf",
+}
+
+
+def test_a_proposal_outside_touches_ends_the_checkpoint_in_one_turn():
+    """Accepted on the first turn: no plan, no diff, no further turns (§5.2's
+    door, reached from IMPLEMENT for the first time by SA-0018)."""
+    agent = _agent(_block(_PROPOSAL))
+    with pytest.raises(artifacts.ScopeProposed) as excinfo:
+        session.plan_checkpoint(
+            "cell",
+            options={},
+            spec=_spec(),
+            protected=[],
+            agent=agent,
+            watch=lambda _line: None,
+        )
+    assert excinfo.value.proposal.proposed_touches == ["infra/deploy.tf"]
+    assert excinfo.value.spent_usd == 0.1
+    assert len(agent.prompts) == 1
+
+
+def test_a_refused_proposal_is_reprompted_and_a_plan_can_follow():
+    """Refusal is not final: unlike an ordinary content `PlanRejected`, the
+    attempt continues — the escape hatch closes and the agent still has to do
+    the work, or name a path that genuinely escapes `touches`."""
+    inside = _PROPOSAL | {"proposed_touches": ["src/x.py"]}  # already in _spec()
+    agent = _agent(_block(inside), _block(_PLAN))
+    attempt, raw, spent = session.plan_checkpoint(
+        "cell",
+        options={},
+        spec=_spec(),
+        protected=[],
+        agent=agent,
+        watch=lambda _line: None,
+    )
+    assert json.loads(raw) == _PLAN
+    assert len(agent.prompts) == 2
+    assert "already inside touches" in agent.prompts[1]
+    assert spent == 0.2
+
+
+def test_a_proposal_refused_twice_ends_as_plan_rejected():
+    """Bounded exactly like a shape failure: one re-prompt, then final —
+    the escape hatch cannot be used to stall a checkpoint indefinitely."""
+    inside = _PROPOSAL | {"proposed_touches": ["src/x.py"]}
+    agent = _agent(_block(inside), _block(inside))
+    with pytest.raises(artifacts.PlanRejected):
+        session.plan_checkpoint(
+            "cell",
+            options={},
+            spec=_spec(),
+            protected=[],
+            agent=agent,
+            watch=lambda _line: None,
+        )
+    assert len(agent.prompts) == 2
+
+
+def test_sa_0005s_own_criteria_reach_scope_review_naming_cli_py():
+    """Item 18's own corpse, driven through the phase rather than handed a
+    fake proposal to a recorder: SA-0005's real spec, its real touches (which
+    do not include cli.py), and a stub agent proposing exactly the gap item 18
+    found unanchorable — `saffron/cli.py` never carrying `risk=spec.risk` and
+    the queue line never carrying the effective tier."""
+    from pathlib import Path
+
+    from saffron.intake import load_spec
+
+    spec_path = (
+        Path(__file__).resolve().parents[1]
+        / ".saffron"
+        / "specs"
+        / "SA-0005-size-wiring.md"
+    )
+    parsed, spec_sha = load_spec(spec_path)
+    assert "saffron/cli.py" not in parsed.touches
+
+    cell_spec = _spec(
+        spec_id=parsed.id,
+        spec_sha=spec_sha,
+        touches=parsed.touches,
+        spec_type=parsed.type,
+        body=parsed.body,
+        forbidden=parsed.forbidden,
+    )
+    proposal = {
+        "kind": "scope_proposal",
+        "proposed_touches": ["saffron/cli.py"],
+        "root_cause": (
+            "the effective tier the queue line and PR body header report is "
+            "computed in cli.py, which this spec's touches never named"
+        ),
+    }
+    agent = _agent(_block(proposal))
+    with pytest.raises(artifacts.ScopeProposed) as excinfo:
+        session.plan_checkpoint(
+            "cell",
+            options={},
+            spec=cell_spec,
+            protected=[],
+            agent=agent,
+            watch=lambda _line: None,
+        )
+    assert "saffron/cli.py" in excinfo.value.proposal.proposed_touches
+
+
 def _results(*failures):
     return [
         GateResult(
@@ -786,6 +898,36 @@ def test_no_commit_is_not_implemented(monkeypatch, tmp_path):
         monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
     )
     assert outcome.state == "NOT_IMPLEMENTED"
+
+
+def test_a_proposed_scope_reaches_scope_review_and_spends_no_further_turns(
+    monkeypatch, tmp_path
+):
+    """The whole cell, not just the checkpoint: a proposal accepted on turn one
+    ends the attempt there — no IMPLEMENT turn, no gate suite, no REVIEW. Only
+    one turn is scripted; a second would raise `StopIteration`'s default
+    (`_turn(_block({"findings": []}))`) if `_drive_cell` reached for it."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PROPOSAL))]
+    )
+    assert outcome.state == "SCOPE_REVIEW"
+    assert outcome.scope_root_cause == _PROPOSAL["root_cause"]
+    assert "infra/deploy.tf" in outcome.proposed_touches
+    # Host-added, never asked of the model (§5.2's writeback rule).
+    assert ".saffron/specs/SY-1-*.md" in outcome.proposed_touches
+    assert len(cell.turns) == 1
+    # One call: the baseline, taken before any agent turn (§5.4's own rule to
+    # catch PREFLIGHT_FAILED). No second suite ran after the proposal.
+    assert len(cell.gate_paths) == 1
+    task = ledger.queue_lines()[0]
+    assert task["state"] == "SCOPE_REVIEW"
+
+    task_dir = tmp_path / "out" / "SY-1"
+    recorded = json.loads((task_dir / "scope_proposal.json").read_text())
+    assert recorded["proposed_touches"] == outcome.proposed_touches
+    assert recorded["root_cause"] == _PROPOSAL["root_cause"]
+    assert json.loads(recorded["raw"]) == _PROPOSAL
 
 
 def test_a_green_run_leaves_the_patch_behind(monkeypatch, tmp_path):

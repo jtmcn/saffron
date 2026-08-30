@@ -12,6 +12,7 @@ import hashlib
 import json
 import re
 from pathlib import PurePosixPath
+from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -43,6 +44,25 @@ class PlanNotSchema(PlanRejected):
     """
 
 
+class ScopeProposed(Exception):
+    """The extraction turn proposed scope instead of a plan, and it was
+    accepted (SA-0018). Not a rejection: a valid way for an IMPLEMENT attempt
+    to end when its `touches` cannot satisfy its own acceptance criteria.
+
+    Carries the validated `proposal` and the exact `raw` `<output>` text it
+    came from — hashed by the caller the moment it is produced, the same rule
+    `plan.json` follows, and never re-read from `/work`. `plan_checkpoint`
+    sets `spent_usd`, mirroring `PlanRejected`.
+    """
+
+    spent_usd: float = 0.0
+
+    def __init__(self, proposal: ScopeProposal, raw: str) -> None:
+        super().__init__("scope proposed")
+        self.proposal = proposal
+        self.raw = raw
+
+
 class Plan(BaseModel):
     understanding: str
     approach: str
@@ -54,6 +74,85 @@ class Plan(BaseModel):
     """Added + removed, the same count `size_gate` takes off the real diff.
     Required, not defaulted: a ceiling nothing estimates against is not a
     control (§5.3's plan checkpoint spends zero model calls to reject early)."""
+
+
+class ScopeProposalNotSchema(PlanRejected):
+    """The output claimed `kind: scope_proposal` but was not that schema — a
+    shape failure, bounded to one re-prompt exactly like `PlanNotSchema`
+    (SA-0018)."""
+
+
+class ScopeProposalRefused(PlanRejected):
+    """Every proposed path already matches the spec's declared `touches` (or
+    the proposal named none, or gave no root cause) — refused, not recorded.
+
+    Deliberately re-promptable rather than final like an ordinary content
+    `PlanRejected`: a proposal is the door SA-0016's spec-shaped refusal has no
+    equivalent for, and treating a refused attempt at it as terminal would
+    make the door itself an escape hatch from any spec the agent finds hard.
+    The caller gives it exactly one more turn to produce a real plan (or a
+    proposal that actually escapes `touches`), the same one turn a shape
+    failure already gets.
+    """
+
+
+class ScopeProposal(BaseModel):
+    """Proposed scope from inside IMPLEMENT (§5.2's contract, reached from a
+    door §5.2 never opened for anything but a bug — SA-0018).
+
+    Not a plan and not `scope.json`'s fuller shape: no `evidence` field, only
+    what SA-0018's acceptance criteria ask for — a path list and a root cause.
+    """
+
+    kind: Literal["scope_proposal"]
+    proposed_touches: list[str]
+    root_cause: str
+
+
+def extraction_kind(raw: str) -> str:
+    """Which schema the extraction turn's `<output>` block is claiming.
+
+    Defaults to `"plan"` on anything that is not recognisably a scope
+    proposal — including a parse failure — so every existing plan-only path
+    (and every existing plan-only test) is completely unaffected; only an
+    explicit `"kind": "scope_proposal"` takes the other branch.
+    """
+    try:
+        parsed = json.loads(parse_output_block(raw))
+    except ValueError:
+        return "plan"
+    if isinstance(parsed, dict) and parsed.get("kind") == "scope_proposal":
+        return "scope_proposal"
+    return "plan"
+
+
+def validate_scope_proposal(raw: str, *, touches: list[str]) -> ScopeProposal:
+    """Validate a scope proposal, or raise a `PlanRejected` subclass.
+
+    A proposal that names nothing outside `touches` is refused rather than
+    recorded (SA-0018's acceptance criteria) — an empty `touches` (a bug
+    awaiting ratification) always escapes, since there is nothing yet to be
+    outside of.
+    """
+    try:
+        proposal = ScopeProposal.model_validate(json.loads(parse_output_block(raw)))
+    except (ValueError, ValidationError) as exc:
+        raise ScopeProposalNotSchema(
+            f"scope proposal is not the schema: {exc}"
+        ) from exc
+
+    if not proposal.proposed_touches:
+        raise ScopeProposalRefused("scope proposal names no paths")
+    if not proposal.root_cause.strip():
+        raise ScopeProposalRefused("scope proposal carries no root cause")
+    if touches and all(
+        _matches_any(path, touches) for path in proposal.proposed_touches
+    ):
+        raise ScopeProposalRefused(
+            "every proposed path is already inside touches — this spec's "
+            "touches already cover it, so write a plan instead"
+        )
+    return proposal
 
 
 def parse_output_block(text: str) -> str:

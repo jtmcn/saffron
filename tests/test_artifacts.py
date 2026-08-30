@@ -5,9 +5,13 @@ import pytest
 from saffron.agents.artifacts import (
     Plan,
     PlanRejected,
+    ScopeProposalNotSchema,
+    ScopeProposalRefused,
+    extraction_kind,
     hash_artifact,
     parse_output_block,
     validate_plan,
+    validate_scope_proposal,
 )
 from saffron.gates.core.scope import matches
 
@@ -280,3 +284,68 @@ def test_a_path_that_merely_contains_test_does_not_name_a_test_file():
         protected=[],
         spec_type="feature",
     )
+
+
+# --- scope proposal (SA-0018): an IMPLEMENT attempt's other door out ---
+
+
+def _proposal(**overrides) -> str:
+    payload = {
+        "kind": "scope_proposal",
+        "proposed_touches": ["saffron/cli.py"],
+        "root_cause": "the queue line lives outside touches",
+    }
+    payload.update(overrides)
+    import json
+
+    return "<output>" + json.dumps(payload) + "</output>"
+
+
+def test_extraction_kind_recognises_a_scope_proposal():
+    assert extraction_kind(_proposal()) == "scope_proposal"
+
+
+def test_extraction_kind_defaults_to_plan_for_anything_else():
+    """Every existing plan-only path is unaffected — no `kind` field, or JSON
+    that fails to parse at all, both read as a plan attempt."""
+    assert extraction_kind(_plan()) == "plan"
+    assert extraction_kind("not even json") == "plan"
+    assert extraction_kind("<output>{}</output>") == "plan"
+
+
+def test_a_proposal_naming_a_path_outside_touches_is_accepted():
+    proposal = validate_scope_proposal(_proposal(), touches=TOUCHES)
+    assert proposal.proposed_touches == ["saffron/cli.py"]
+    assert proposal.root_cause
+
+
+def test_a_proposal_naming_only_paths_already_inside_touches_is_refused():
+    """The escape-hatch guard: SA-0018's whole point is that this must not be
+    a free way out of a spec the agent finds hard."""
+    with pytest.raises(ScopeProposalRefused, match="already inside touches"):
+        validate_scope_proposal(
+            _proposal(proposed_touches=[TOUCHES[0]]), touches=TOUCHES
+        )
+
+
+def test_a_bugs_empty_touches_always_escapes():
+    """A bug with no ratified touches yet has nothing to be outside of."""
+    proposal = validate_scope_proposal(_proposal(proposed_touches=["a.py"]), touches=[])
+    assert proposal.proposed_touches == ["a.py"]
+
+
+def test_a_proposal_naming_no_paths_is_refused():
+    with pytest.raises(ScopeProposalRefused, match="no paths"):
+        validate_scope_proposal(_proposal(proposed_touches=[]), touches=TOUCHES)
+
+
+def test_a_proposal_with_no_root_cause_is_refused():
+    with pytest.raises(ScopeProposalRefused, match="no root cause"):
+        validate_scope_proposal(_proposal(root_cause="  "), touches=TOUCHES)
+
+
+def test_a_malformed_proposal_is_a_schema_failure():
+    with pytest.raises(ScopeProposalNotSchema, match="not the schema"):
+        validate_scope_proposal(
+            '<output>{"kind": "scope_proposal"}</output>', touches=TOUCHES
+        )

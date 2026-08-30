@@ -27,6 +27,26 @@ These terms have exactly one meaning here. Use them and no synonyms.
      across the whole diff. Checked against this spec type's `size` ceiling
      before you write anything; a plan over it is rejected so you can rescope
      before spending a turn, rather than discovering it from the gate later.
+
+   If, before writing any code, you determine that `touches` cannot satisfy
+   the acceptance criteria — because what a criterion asks for lives in a
+   file `touches` does not cover, not because the task is merely hard — do
+   not write a plan. Reply instead with a single `<output>` block containing
+   only this JSON:
+
+   - `kind` — the literal string `"scope_proposal"`.
+   - `proposed_touches` (array of strings) — every path, inside or outside
+     the declared `touches`, that the criteria actually need.
+   - `root_cause` (string) — one paragraph naming what you read that makes
+     `touches` insufficient, and where the missing behaviour actually lives.
+
+   This ends the attempt: no further turns, no diff, no commit. A proposal
+   naming nothing outside the declared `touches` is refused, not recorded —
+   you get one more turn to submit either a real plan or a proposal that
+   actually reaches outside `touches`; refusing a second time ends the
+   attempt as a rejected plan. This is not a way out of a task you find
+   difficult — only of one whose `touches` cannot, as declared, satisfy what
+   it asks for.
 2. Then implement, **committing after each coherent step** rather than once at
    the end. Your session can stop where it stands — a turn ceiling or a
    supervisor bound fires without warning and does not ask — and everything you

@@ -205,6 +205,11 @@ class CellOutcome:
     # `elevate_on` half (§5.6, this module's own notes on `_suite`).
     effective_risk: str = "standard"
     advisory_gates: list[str] = field(default_factory=list)
+    # Only bound on `state == "SCOPE_REVIEW"` (SA-0018): the final touches a
+    # future ratification would write back, spec path pattern included, and
+    # the root cause the proposal carried. Empty on every other path.
+    proposed_touches: list[str] = field(default_factory=list)
+    scope_root_cause: str = ""
 
 
 def aborted_gates(results: Sequence[GateResult]) -> list[str]:
@@ -244,6 +249,19 @@ def require_session(session_id: str | None) -> str:
     return session_id
 
 
+def _spec_path_pattern(spec_id: str) -> str:
+    """A `touches`-legal glob for the task's own spec file (§5.2's rule,
+    reached here from IMPLEMENT rather than DIAGNOSE — SA-0018).
+
+    `CellSpec` carries `spec_id`, never the file's actual path — the slug
+    after it is only known to the discovery scan that found the file, not to
+    this cell — so the pattern is what `matches()` can resolve without it:
+    `.saffron/specs/SA-0005-*.md` matches the one file `SA-0005` could ever
+    name, and nothing else, the same way any other glob `touches` entry does.
+    """
+    return f".saffron/specs/{spec_id}-*.md"
+
+
 def plan_checkpoint(
     container: str,
     *,
@@ -260,6 +278,12 @@ def plan_checkpoint(
     turn is a budget that quietly stops counting (§4.1). Raises `PlanRejected`.
     A shape failure gets exactly one re-prompt carrying the validation error;
     anything else is a decision about content and is final.
+
+    The same turn may instead propose scope (SA-0018, §5.2's door reached from
+    IMPLEMENT): raises `ScopeProposed` when the proposal escapes `touches`. A
+    proposal that does not is refused rather than recorded, and — unlike an
+    ordinary content rejection — gets the same one bounded re-prompt a shape
+    failure gets, so refusing it cannot itself become the plan's escape hatch.
     """
     from saffron.agents import artifacts
 
@@ -270,6 +294,32 @@ def plan_checkpoint(
         )
         spent = attempt.cost_usd_est
         for reprompted in (False, True):
+            if artifacts.extraction_kind(attempt.text) == "scope_proposal":
+                try:
+                    proposal = artifacts.validate_scope_proposal(
+                        attempt.text, touches=spec.touches
+                    )
+                except artifacts.PlanRejected as exc:
+                    # Covers both `ScopeProposalNotSchema` (shape) and
+                    # `ScopeProposalRefused` (content that did not escape
+                    # touches) — both re-promptable exactly once, unlike an
+                    # ordinary content `PlanRejected` from `validate_plan`.
+                    if reprompted:
+                        raise
+                    watch(f"SCOPE: proposal refused, re-prompting once — {exc}")
+                    attempt = agent(
+                        container,
+                        prompt=f"{exc}\n\n{artifacts.EXTRACTION_PROMPT}",
+                        options=options,
+                        resume=require_session(attempt.session_id),
+                        watch=watch,
+                        last_cost_usd=attempt.cost_usd_est,
+                    )
+                    spent += attempt.cost_usd_est
+                    continue
+                raise artifacts.ScopeProposed(
+                    proposal, artifacts.parse_output_block(attempt.text)
+                )
             try:
                 artifacts.validate_plan(
                     attempt.text,
@@ -293,6 +343,12 @@ def plan_checkpoint(
                 spent += attempt.cost_usd_est
                 continue
             return attempt, artifacts.parse_output_block(attempt.text), spent
+    except artifacts.ScopeProposed as proposed:
+        # Same accounting `PlanRejected` gets, for the same reason (§4.1): the
+        # checkpoint may have spent a re-prompted turn before the proposal
+        # that ends it was accepted.
+        proposed.spent_usd = spent
+        raise
     except artifacts.PlanRejected as rejected:
         # The same accounting the crash path gets, for the same reason: two
         # turns can run before a shape rejection is final, and a checkpoint
@@ -797,6 +853,45 @@ def _drive_cell(
                 protected=policy.protected,
                 agent=agent,
                 watch=watch,
+            )
+        except artifacts.ScopeProposed as proposed:
+            # The attempt ends here: no IMPLEMENT turn, no gate suite, no
+            # REVIEW — a proposal is the end of the attempt, not a note it
+            # carries while continuing (SA-0018).
+            proposal = proposed.proposal
+            # Host-added, never the model's: the writeback this touches set
+            # feeds is a commit to the spec file itself, and that commit would
+            # otherwise fail its own `scope` gate (§5.2, DESIGN.md:618).
+            final_touches = sorted(
+                {*proposal.proposed_touches, _spec_path_pattern(spec.spec_id)}
+            )
+            (task_dir / "scope_proposal.json").write_text(
+                json.dumps(
+                    {
+                        "proposed_touches": final_touches,
+                        "root_cause": proposal.root_cause,
+                        "raw": proposed.raw,
+                    },
+                    indent=2,
+                )
+            )
+            watch(
+                f"SCOPE_REVIEW: proposed {final_touches}, "
+                f"sha256 {artifacts.hash_artifact(proposed.raw)[:12]}, "
+                f"${proposed.spent_usd:.2f} spent"
+            )
+            ledger.set_task_state(task_id, "SCOPE_REVIEW")
+            ledger.finish_run(run_id, "COMPLETE")
+            return CellOutcome(
+                state="SCOPE_REVIEW",
+                task_id=task_id,
+                run_id=run_id,
+                task_dir=task_dir,
+                spent_usd=proposed.spent_usd,
+                effective_risk=current_tier,
+                advisory_gates=sorted(advisory_gates),
+                proposed_touches=final_touches,
+                scope_root_cause=proposal.root_cause,
             )
         except artifacts.PlanRejected as rejected:
             watch(f"PLAN: rejected, ${rejected.spent_usd:.2f} spent — {rejected}")
