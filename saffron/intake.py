@@ -19,12 +19,18 @@ SpecType = Literal["feature", "bug", "refactor", "test", "docs", "chore"]
 RiskTier = Literal["standard", "elevated"]
 
 _FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?(.*)\Z", re.DOTALL)
-# A criterion is its marker line plus the *indented* lines that follow it — a
-# wrapped criterion's continuation belongs to it. A blank line or a column-0
-# line ends it: `_CRITERIA_SECTION` stops only at `##`, so an `###` subsection
-# would otherwise be absorbed into the last criterion (measured: SA-0001's ran
-# to 758 chars, 640 of them a table). Whitespace is collapsed by the caller.
-_CRITERION = re.compile(r"^[ \t]*-\s*\[[ xX]\]\s*(.+(?:\n[ \t]+\S.*)*)", re.MULTILINE)
+# A criterion is its marker line plus the *indented, non-marker* lines that
+# follow it. A blank line or a column-0 line ends it: `_CRITERIA_SECTION` stops
+# only at `##`, so an `###` subsection would otherwise be absorbed into the last
+# criterion (measured: SA-0001's ran to 758 chars, 640 of them a table). The
+# lookahead keeps an indented or nested checklist from collapsing into one
+# criterion, and `[ \t]*` after the `]` keeps a text-less `- [ ]` from swallowing
+# the next marker. Whitespace inside the span is collapsed by the caller.
+# ponytail: "indented" is the whole rule, so an indented fenced block is
+# absorbed and an unindented lazy continuation is still dropped.
+_CRITERION = re.compile(
+    r"^[ \t]*-\s*\[[ xX]\][ \t]*(.+(?:\n[ \t]+(?!-\s*\[[ xX]\])\S.*)*)", re.MULTILINE
+)
 _CRITERIA_SECTION = re.compile(
     r"^##\s*Acceptance criteria\s*$(.*?)(?=^##\s|\Z)",
     re.MULTILINE | re.DOTALL | re.IGNORECASE,
@@ -183,10 +189,10 @@ def discover_specs(
     order by, and never by mtime, which is not stable across a checkout — so
     that a tie resolves the same way on every machine.
     """
-    # Sort on the name, not the `Path`: `PurePath.__lt__` compares
-    # `_str_normcase`, which case-folds on the Windows flavour and not on POSIX.
     specs: list[DiscoveredSpec] = []
     failures: list[DiscoveryFailure] = []
+    # Sort on the name, not the `Path`: `PurePath.__lt__` compares
+    # `_parts_normcase` (3.14), which case-folds on the Windows flavour, not POSIX.
     for path in sorted(directory.glob("*.md"), key=lambda p: p.name):
         try:
             spec, spec_sha = load_spec(path)

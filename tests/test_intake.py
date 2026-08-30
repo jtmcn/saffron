@@ -253,25 +253,51 @@ def test_a_criterion_missing_its_witness_is_refused():
 
 def test_a_wrapped_acceptance_criterion_keeps_its_continuation_lines():
     """`_CRITERION` used to be line-anchored under re.MULTILINE, so a wrapped
-    criterion kept only its first line — the exact shape that made SA-0005
-    unsatisfiable, because the paths that made it so sat on continuation
-    lines a refusal gate built on `acceptance_criteria` never saw."""
+    criterion kept only its first line. The fixture is SA-0016's third
+    criterion copied verbatim — the refusal gate's own spec — which the old
+    regex cut at "...an injected runner in the", dropping both path tokens
+    from the continuation lines that name them."""
     spec = parse_spec(
         "---\nid: TE-1\ntitle: t\ntype: feature\n---\n\n"
         "## Acceptance criteria\n"
-        "- [ ] An effective risk tier is computed once per attempt, derived\n"
-        "      from paths that include `saffron/cli.py` and\n"
-        "      `saffron/phases/package.py`, never from a second read\n"
+        "- [ ] The two refusals needing GitHub take an injected runner in the\n"
+        "      `GhRunner` shape `saffron/phases/package.py` already uses, and every\n"
+        "      test in `tests/test_scheduler.py` runs with no network and no cell\n"
         "- [ ] A second, unrelated criterion on one line\n"
     )
     assert spec.acceptance_criteria == [
-        "An effective risk tier is computed once per attempt, derived "
-        "from paths that include `saffron/cli.py` and "
-        "`saffron/phases/package.py`, never from a second read",
+        "The two refusals needing GitHub take an injected runner in the "
+        "`GhRunner` shape `saffron/phases/package.py` already uses, and every "
+        "test in `tests/test_scheduler.py` runs with no network and no cell",
         "A second, unrelated criterion on one line",
     ]
-    assert "saffron/cli.py" in spec.acceptance_criteria[0]
     assert "saffron/phases/package.py" in spec.acceptance_criteria[0]
+    assert "tests/test_scheduler.py" in spec.acceptance_criteria[0]
+
+
+def test_every_checklist_marker_is_its_own_criterion_however_indented():
+    """A continuation line must not itself be a marker. Every other test here
+    asserts a criterion's *text*; none asserted the count, which is how an
+    indented list collapsing into one criterion passed both the suite and a
+    review lens. A text-less `- [ ]` must not swallow the next marker either."""
+
+    def criteria(section: str) -> list[str]:
+        return parse_spec(
+            "---\nid: TE-1\ntitle: t\ntype: feature\n---\n\n"
+            "## Acceptance criteria\n" + section
+        ).acceptance_criteria
+
+    assert criteria("  - [ ] one\n  - [ ] two\n  - [ ] three\n") == [
+        "one",
+        "two",
+        "three",
+    ]
+    assert criteria("- [ ] parent\n  - [ ] nested child\n- [ ] second\n") == [
+        "parent",
+        "nested child",
+        "second",
+    ]
+    assert criteria("- [ ]\n- [ ] second\n") == ["second"]
 
 
 def test_discover_specs_orders_by_filename_not_by_priority(tmp_path):
