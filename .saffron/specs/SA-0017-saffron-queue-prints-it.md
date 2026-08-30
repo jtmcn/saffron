@@ -16,9 +16,9 @@ forbidden:
   - saffron/cell/**
   - saffron/phases/**
   - saffron/report/**
-budget_usd: 6
+budget_usd: 8
 max_attempts: 3
-max_turns: 60
+max_turns: 70
 risk: elevated
 ---
 
@@ -36,9 +36,20 @@ night to it."
 a whole batch would do. An operator who wants to know what tonight's run
 would attempt has no command to ask.
 
+And `build_queue` takes a GitHub slug and a `gh` runner it will not be
+given: two of `SA-0016`'s five refusals go quiet without them, and a scan
+that skipped them returns the same empty refusal list as one that ran them
+and found nothing.
+
 ## Acceptance criteria
 - [ ] `saffron queue --repo .` prints the queue and the refusals and exits
       `0`; `2` when the repo cannot be read
+- [ ] The command resolves the repo's GitHub slug and hands it to
+      `build_queue` with a runner that really invokes `gh`, so the two
+      refusals that need GitHub run rather than sitting inert
+- [ ] Where the slug cannot be resolved, the output says on its own line
+      which refusals did not run; an empty refusal list must not read the
+      same as two checks that never happened
 - [ ] A test asserts that `saffron queue` writes nothing at all — no
       `repos` row, no task row, no state change, no `ORPHANED` stamp —
       against a ledger the repo has never been seen in
@@ -58,6 +69,15 @@ then export `.saffron/specs` at that sha with
 arrives with the gates. Hand that directory to `SA-0014`'s
 `discover_specs`, and the repo id to `SA-0016`'s `build_queue` via
 `ledger.resolve_repo_id` — never `upsert_repo`.
+
+**A check that could not run must not render as a check that passed.** This
+is the `tool` field's distinction (§5.4) arriving at the scan: `build_queue`
+skips the open-PR and `touches`-overlap refusals when it has no slug, and
+returns exactly the shape of a clean scan. The slug comes from the pair
+`_run_cell` already uses two functions above — `real_remote`, then
+`github_slug`. Both live in a module this spec forbids, which means import
+it and read it, never edit it; `SA-0016` reached the `GhRunner` shape the
+same way.
 
 **A test that constructs the value it then asserts on proves nothing about
 the caller.** The `saffron queue` test belongs at the CLI, with the queue
