@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -18,7 +19,14 @@ SpecType = Literal["feature", "bug", "refactor", "test", "docs", "chore"]
 RiskTier = Literal["standard", "elevated"]
 
 _FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?(.*)\Z", re.DOTALL)
-_CRITERION = re.compile(r"^\s*-\s*\[[ xX]\]\s*(.+?)\s*$", re.MULTILINE)
+# Captures from one checklist marker up to the next (or the end of the
+# section), never stopping at a bare `$` — a wrapped criterion's continuation
+# lines belong to it, not to nothing. Whitespace inside the span, including
+# the newlines between wrapped lines, is collapsed by the caller.
+_CRITERION = re.compile(
+    r"^[ \t]*-\s*\[[ xX]\]\s*(.+?)(?=\n[ \t]*-\s*\[[ xX]\]|\Z)",
+    re.MULTILINE | re.DOTALL,
+)
 _CRITERIA_SECTION = re.compile(
     r"^##\s*Acceptance criteria\s*$(.*?)(?=^##\s|\Z)",
     re.MULTILINE | re.DOTALL | re.IGNORECASE,
@@ -137,4 +145,53 @@ def load_spec(path: Path) -> tuple[Spec, str]:
 
 def _acceptance_criteria(body: str) -> list[str]:
     section = _CRITERIA_SECTION.search(body)
-    return _CRITERION.findall(section.group(1)) if section else []
+    if section is None:
+        return []
+    # A wrapped criterion's continuation lines carry indentation and the
+    # newline itself; neither belongs in the claim the PR body renders.
+    return [" ".join(item.split()) for item in _CRITERION.findall(section.group(1))]
+
+
+@dataclass(frozen=True)
+class DiscoveredSpec:
+    """One spec `discover_specs` could parse, with the sha it was found at."""
+
+    path: Path
+    spec: Spec
+    spec_sha: str
+
+
+@dataclass(frozen=True)
+class DiscoveryFailure:
+    """One path `discover_specs` could not parse, and why.
+
+    A malformed spec is a refusal candidate downstream (`SA-0016`), never a
+    reason for the scan itself to raise.
+    """
+
+    path: Path
+    reason: str
+
+
+def discover_specs(
+    directory: Path,
+) -> tuple[list[DiscoveredSpec], list[DiscoveryFailure]]:
+    """Parse every spec in `directory`, letting no single file take down the scan.
+
+    Takes a directory, never a repo: resolving `base_sha` and exporting
+    `.saffron/specs/` from it is the caller's job, not this one's.
+
+    Ordered by filename — never by `priority`, which the caller may also
+    order by, and never by mtime, which is not stable across a checkout — so
+    that a tie resolves the same way on every machine.
+    """
+    specs: list[DiscoveredSpec] = []
+    failures: list[DiscoveryFailure] = []
+    for path in sorted(directory.glob("*.md")):
+        try:
+            spec, spec_sha = load_spec(path)
+        except SpecError as exc:
+            failures.append(DiscoveryFailure(path=path, reason=str(exc)))
+            continue
+        specs.append(DiscoveredSpec(path=path, spec=spec, spec_sha=spec_sha))
+    return specs, failures

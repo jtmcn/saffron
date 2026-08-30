@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from saffron.intake import SpecError, load_spec, parse_spec
+from saffron.intake import SpecError, discover_specs, load_spec, parse_spec
 
 VALID = """---
 id: TE-9001
@@ -249,3 +249,68 @@ def test_a_criterion_missing_its_witness_is_refused():
             "---\nid: TE-1\ntitle: t\ntype: feature\n"
             "acceptance:\n  - claim: c\n---\n\nbody\n"
         )
+
+
+def test_a_wrapped_acceptance_criterion_keeps_its_continuation_lines():
+    """`_CRITERION` used to be line-anchored under re.MULTILINE, so a wrapped
+    criterion kept only its first line — the exact shape that made SA-0005
+    unsatisfiable, because the paths that made it so sat on continuation
+    lines a refusal gate built on `acceptance_criteria` never saw."""
+    spec = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: feature\n---\n\n"
+        "## Acceptance criteria\n"
+        "- [ ] An effective risk tier is computed once per attempt, derived\n"
+        "      from paths that include `saffron/cli.py` and\n"
+        "      `saffron/phases/package.py`, never from a second read\n"
+        "- [ ] A second, unrelated criterion on one line\n"
+    )
+    assert spec.acceptance_criteria == [
+        "An effective risk tier is computed once per attempt, derived "
+        "from paths that include `saffron/cli.py` and "
+        "`saffron/phases/package.py`, never from a second read",
+        "A second, unrelated criterion on one line",
+    ]
+    assert "saffron/cli.py" in spec.acceptance_criteria[0]
+    assert "saffron/phases/package.py" in spec.acceptance_criteria[0]
+
+
+def test_discover_specs_orders_by_filename_not_by_priority(tmp_path):
+    """A tie in priority must resolve the same way on every machine — by the
+    scan's own order, which is filename, not directory-entry order."""
+    (tmp_path / "b-second.md").write_text(
+        "---\nid: TE-2\ntitle: t\ntype: chore\npriority: 1\n---\n"
+    )
+    (tmp_path / "a-first.md").write_text(
+        "---\nid: TE-1\ntitle: t\ntype: chore\npriority: 9\n---\n"
+    )
+    specs, failures = discover_specs(tmp_path)
+    assert failures == []
+    assert [d.spec.id for d in specs] == ["TE-1", "TE-2"]
+    assert [d.path.name for d in specs] == ["a-first.md", "b-second.md"]
+
+
+def test_discover_specs_reports_a_malformed_spec_without_raising(tmp_path):
+    (tmp_path / "a-good.md").write_text("---\nid: TE-1\ntitle: t\ntype: chore\n---\n")
+    (tmp_path / "b-broken.md").write_text("no frontmatter here\n")
+    (tmp_path / "c-good.md").write_text("---\nid: TE-3\ntitle: t\ntype: chore\n---\n")
+
+    specs, failures = discover_specs(tmp_path)
+
+    assert [d.spec.id for d in specs] == ["TE-1", "TE-3"]
+    assert len(failures) == 1
+    assert failures[0].path.name == "b-broken.md"
+    assert "frontmatter" in failures[0].reason
+
+
+def test_discover_specs_returns_the_spec_sha_alongside_each_spec(tmp_path):
+    path = tmp_path / "a.md"
+    path.write_text("---\nid: TE-1\ntitle: t\ntype: chore\n---\n")
+
+    specs, _ = discover_specs(tmp_path)
+    _, sha = load_spec(path)
+
+    assert specs[0].spec_sha == sha
+
+
+def test_discover_specs_on_an_empty_directory_returns_nothing(tmp_path):
+    assert discover_specs(tmp_path) == ([], [])
