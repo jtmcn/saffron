@@ -183,9 +183,11 @@ def discover_specs(
     order by, and never by mtime, which is not stable across a checkout — so
     that a tie resolves the same way on every machine.
     """
+    # Sort on the name, not the `Path`: `PurePath.__lt__` compares
+    # `_str_normcase`, which case-folds on the Windows flavour and not on POSIX.
     specs: list[DiscoveredSpec] = []
     failures: list[DiscoveryFailure] = []
-    for path in sorted(directory.glob("*.md")):
+    for path in sorted(directory.glob("*.md"), key=lambda p: p.name):
         try:
             spec, spec_sha = load_spec(path)
         except SpecError as exc:
