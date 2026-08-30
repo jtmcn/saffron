@@ -123,6 +123,9 @@ def _open_prs(repo_slug: str, gh: GhRunner) -> list[dict]:
     §4.2.1 gives a refusal defined handling where an exception has none — a
     `gh` whose output shape moves would take the whole night's scan with it.
     """
+    # ponytail: `gh pr list` orders newest first, so past 100 it is the oldest
+    # open pull requests that fall out of both GitHub-backed refusals — and a
+    # stale long-lived PR is the kind a refusal most wants to see.
     done = gh(
         [
             "gh",
@@ -135,8 +138,6 @@ def _open_prs(repo_slug: str, gh: GhRunner) -> list[dict]:
             "--json",
             "number,headRefName,url,files",
             "--limit",
-            # ponytail: open PR 101 and beyond is invisible to both
-            # GitHub-backed refusals.
             "100",
         ]
     )
@@ -230,10 +231,12 @@ def _unmatched_criterion_path(spec: Spec) -> str | None:
     copy while forbidding that directory, so the unguarded form refused this
     very spec.
 
-    ponytail: a spec that genuinely needs a forbidden path now runs to
-    `max_attempts` and ends `EXHAUSTED` instead — a whole task, not one
-    attempt. Measured, that trade is right (two of seventeen falsely
-    refused, and a false refusal costs a night), but it is a trade.
+    ponytail: a spec that genuinely needs a forbidden path now ends
+    `EXHAUSTED` instead — two attempts, since `session.py`'s no-progress rule
+    catches a `scope` failure that repeats with the same identity, and up to
+    `max_attempts` only if the repair turns keep moving the failure set. A
+    whole task either way, not one attempt. Measured, the trade is right (two
+    of seventeen falsely refused, and a false refusal costs a night).
     """
     if not spec.touches:
         return None
@@ -260,7 +263,9 @@ def _refuse(candidate: Candidate, *, open_prs: list[dict]) -> str | None:
     # one's PR rather than being refused on it. Recovering the owner needs the
     # ledger, which this function does not take.
     if same_spec_pr is not None and candidate.task_id is None:
-        url = same_spec_pr.get("url", own_branch)
+        # `or`, not a `.get` default: `_open_prs` filters shapes, not fields,
+        # so a present-but-null url would otherwise print "None" at an operator.
+        url = same_spec_pr.get("url") or own_branch
         return (
             f"an open pull request from another task already targets this spec: {url}"
         )
