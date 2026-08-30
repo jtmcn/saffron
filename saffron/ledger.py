@@ -222,7 +222,7 @@ class Ledger:
         ).fetchone()
         return int(row["repo_id"])
 
-    def resolve_repo(self, origin: str) -> int | None:
+    def resolve_repo_id(self, origin: str) -> int | None:
         """The scheduler's read of `upsert_repo` — a repo that has never run
         has no row, and a scan must be able to ask that without creating one
         just to answer it (`upsert_repo` always leaves a row behind, which is

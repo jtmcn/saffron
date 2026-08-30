@@ -40,18 +40,18 @@ def _repo(ledger, origin="/o"):
     return ledger.upsert_repo("r", origin, "/m.git", policy_sha="p" * 64)
 
 
-# ---------------------------------------------------------------- resolve_repo
+# ------------------------------------------------------------- resolve_repo_id
 
 
-def test_resolve_repo_returns_none_without_inserting(ledger):
-    assert ledger.resolve_repo("/never-seen") is None
+def test_resolve_repo_id_returns_none_without_inserting(ledger):
+    assert ledger.resolve_repo_id("/never-seen") is None
     # Still nothing there — the read must not have created a row.
-    assert ledger.resolve_repo("/never-seen") is None
+    assert ledger.resolve_repo_id("/never-seen") is None
 
 
-def test_resolve_repo_finds_what_upsert_repo_made(ledger):
+def test_resolve_repo_id_finds_what_upsert_repo_made(ledger):
     repo_id = _repo(ledger, "/o")
-    assert ledger.resolve_repo("/o") == repo_id
+    assert ledger.resolve_repo_id("/o") == repo_id
 
 
 # ---------------------------------------------------------------- tasks_by_spec

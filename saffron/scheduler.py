@@ -82,7 +82,7 @@ def build_queue(
     """Turn the specs `discover_specs` found in `directory` into an ordered
     queue and a list of refusals.
 
-    `repo_id` is `resolve_repo`'s answer, and `None` is a real case — a repo
+    `repo_id` is `resolve_repo_id`'s answer, and `None` is a real case — a repo
     with no ledger row has no history to filter against, so every parseable
     spec is a fresh candidate.
 
