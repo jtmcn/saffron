@@ -19,14 +19,12 @@ SpecType = Literal["feature", "bug", "refactor", "test", "docs", "chore"]
 RiskTier = Literal["standard", "elevated"]
 
 _FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?(.*)\Z", re.DOTALL)
-# Captures from one checklist marker up to the next (or the end of the
-# section), never stopping at a bare `$` — a wrapped criterion's continuation
-# lines belong to it, not to nothing. Whitespace inside the span, including
-# the newlines between wrapped lines, is collapsed by the caller.
-_CRITERION = re.compile(
-    r"^[ \t]*-\s*\[[ xX]\]\s*(.+?)(?=\n[ \t]*-\s*\[[ xX]\]|\Z)",
-    re.MULTILINE | re.DOTALL,
-)
+# A criterion is its marker line plus the *indented* lines that follow it — a
+# wrapped criterion's continuation belongs to it. A blank line or a column-0
+# line ends it: `_CRITERIA_SECTION` stops only at `##`, so an `###` subsection
+# would otherwise be absorbed into the last criterion (measured: SA-0001's ran
+# to 758 chars, 640 of them a table). Whitespace is collapsed by the caller.
+_CRITERION = re.compile(r"^[ \t]*-\s*\[[ xX]\]\s*(.+(?:\n[ \t]+\S.*)*)", re.MULTILINE)
 _CRITERIA_SECTION = re.compile(
     r"^##\s*Acceptance criteria\s*$(.*?)(?=^##\s|\Z)",
     re.MULTILINE | re.DOTALL | re.IGNORECASE,

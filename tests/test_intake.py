@@ -314,3 +314,37 @@ def test_discover_specs_returns_the_spec_sha_alongside_each_spec(tmp_path):
 
 def test_discover_specs_on_an_empty_directory_returns_nothing(tmp_path):
     assert discover_specs(tmp_path) == ([], [])
+
+
+def test_a_criterion_stops_at_prose_that_is_not_its_continuation():
+    """Joining continuation lines must not absorb whatever sits between two
+    checklist items. A criterion's text is what a refusal gate scans for path
+    tokens, so an over-greedy join injects tokens as readily as the old
+    line-anchored regex dropped them."""
+    spec = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: feature\n---\n\n"
+        "## Acceptance criteria\n"
+        "- [ ] first\n"
+        "\n"
+        "Note: commentary naming `saffron/cli.py`.\n"
+        "\n"
+        "- [ ] second\n"
+    )
+    assert spec.acceptance_criteria == ["first", "second"]
+
+
+def test_a_criterion_stops_at_a_subsection_of_its_own_section():
+    """`_CRITERIA_SECTION` ends only at `##`, so an `###` subsection and its
+    table sit inside the criteria span. Measured on SA-0001, whose last
+    criterion ran to 758 characters, 640 of them the table below."""
+    spec = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: feature\n---\n\n"
+        "## Acceptance criteria\n"
+        "- [ ] No file under `saffron/` is changed\n"
+        "\n"
+        "### The five queries\n"
+        "| | Question it answers |\n"
+        "|---|---|\n"
+        "| Q1 | which criteria failed |\n"
+    )
+    assert spec.acceptance_criteria == ["No file under `saffron/` is changed"]
