@@ -143,6 +143,9 @@ def _open_prs(repo_slug: str, gh: GhRunner) -> list[dict]:
 
 
 _BACKTICKED = re.compile(r"`([^`\n]+)`")
+# `ledger.py:225` and `ledger.py:225-233` are citations of a path, not paths.
+_LINE_SUFFIX = re.compile(r":\d+(?:-\d+)?$")
+_GLOB_CHARS = frozenset("*?[")
 
 
 def _criteria_texts(spec: Spec) -> list[str]:
@@ -175,12 +178,26 @@ def _path_tokens(text: str) -> list[str]:
     same reason: `SA-0001`'s own criteria say "no file under `` `saffron/` ``
     is changed" — a constraint on the diff, not a path the diff must reach —
     and `touches` names files and globs, never a bare directory to disprove.
+
+    A trailing `:123` is stripped: this repo cites files as `path.py:123`
+    throughout its prose, and `scope.matches` compares whole strings, so the
+    line number would make every citation unmatchable against a `touches`
+    entry that in fact covers it.
+
+    A token carrying a glob metacharacter is dropped rather than checked.
+    `SA-0011`'s criteria name `` `tests/fixtures/*.md` `` to say the fixture
+    is *not* a file — and a pattern is not a path `scope.matches` can answer
+    for, since it takes a concrete path on the left.
     """
     tokens = []
     for span in _BACKTICKED.findall(text):
         for word in span.split():
-            if "/" in word and not word.endswith("/"):
-                tokens.append(word)
+            word = _LINE_SUFFIX.sub("", word)
+            if "/" not in word or word.endswith("/"):
+                continue
+            if _GLOB_CHARS.intersection(word):
+                continue
+            tokens.append(word)
     return tokens
 
 
@@ -194,11 +211,22 @@ def _unmatched_criterion_path(spec: Spec) -> str | None:
     with `scope.matches`, the same function `scope`, `integrity` and `size`
     all reuse, so "declared" means one thing in every gate — never a second,
     more permissive rule invented here.
+
+    A token the spec's own `forbidden` covers is a citation, not a target.
+    `SA-0016`'s third criterion names `saffron/phases/package.py` for the
+    `GhRunner` shape to copy while forbidding itself that whole directory —
+    so the unguarded form refuses this very spec. Citing a path and touching
+    one are different acts, and `forbidden` is where an author says which.
+    A spec that genuinely needs a forbidden path is caught in the cell by
+    `scope` on its first commit, which costs one attempt; refusing here
+    costs a night in which nothing ran at all.
     """
     if not spec.touches:
         return None
     for text in _criteria_texts(spec):
         for token in _path_tokens(text):
+            if any(matches(token, pattern) for pattern in spec.forbidden):
+                continue
             if not any(matches(token, pattern) for pattern in spec.touches):
                 return token
     return None

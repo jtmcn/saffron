@@ -56,11 +56,13 @@ def _write_spec(
     priority=3,
     touches=None,
     depends_on=None,
+    forbidden=None,
     body="",
 ):
     """A spec with the frontmatter the refusal-gate tests need — `_write`
     only carries id/type/priority, and these tests need `touches`,
-    `depends_on` and a body worth parsing acceptance criteria out of."""
+    `forbidden`, `depends_on` and a body worth parsing acceptance criteria
+    out of."""
     lines = ["---", f"id: {id}", "title: t", f"type: {type}", f"priority: {priority}"]
     if depends_on:
         lines.append("depends_on:")
@@ -68,6 +70,9 @@ def _write_spec(
     if touches:
         lines.append("touches:")
         lines += [f"  - {t}" for t in touches]
+    if forbidden:
+        lines.append("forbidden:")
+        lines += [f"  - {f}" for f in forbidden]
     lines.append("---")
     lines.append("")
     lines.append(body)
@@ -389,7 +394,10 @@ def test_a_wrapped_criterion_naming_a_path_outside_touches_refuses(tmp_path, led
     `test_intake.py` uses for the truncation fix this refusal depends on. A
     fixture whose criterion is a single line would prove nothing about the
     bug `SA-0014` fixed, and this refusal would pass `SA-0005`-shaped input
-    clean if it were still truncating."""
+    clean if it were still truncating.
+
+    The fixture declares no `forbidden`, which is the whole difference between
+    it and the real `SA-0016` it is copied from — see the next test."""
     directory = _spec_dir(tmp_path)
     _write_spec(
         directory,
@@ -409,6 +417,85 @@ def test_a_wrapped_criterion_naming_a_path_outside_touches_refuses(tmp_path, led
     assert candidates == []
     assert len(refusals) == 1
     assert "saffron/phases/package.py" in refusals[0].reason
+
+
+def test_a_criterion_citing_a_path_the_spec_forbids_itself_is_not_refused(
+    tmp_path, ledger
+):
+    """`SA-0016` itself, frontmatter and all. Its third criterion names
+    `saffron/phases/package.py` for the `GhRunner` shape to copy, and its own
+    `forbidden` covers that directory — the spec's Notes say the file is "read
+    for its signature only". Refusing it costs a night in which nothing ran;
+    a spec that really does need a forbidden path is caught in the cell by
+    `scope` on its first commit, for one attempt."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(
+        directory,
+        "a.md",
+        id="TE-1",
+        touches=["saffron/scheduler.py", "tests/test_scheduler.py"],
+        forbidden=["saffron/phases/**", "docs/**"],
+        body=(
+            "## Acceptance criteria\n"
+            "- [ ] The two refusals needing GitHub take an injected runner in the\n"
+            "      `GhRunner` shape `saffron/phases/package.py` already uses, and every\n"
+            "      test in `tests/test_scheduler.py` runs with no network and no cell\n"
+        ),
+    )
+
+    candidates, refusals = build_queue(directory, None, ledger)
+
+    assert refusals == []
+    assert [c.spec.id for c in candidates] == ["TE-1"]
+
+
+def test_a_criterion_citing_a_path_with_a_line_number_is_not_refused(tmp_path, ledger):
+    """This repo cites files as `path.py:123` throughout its prose. Because
+    `scope.matches` compares whole strings, an unstripped citation never
+    matches the `touches` entry that in fact covers it — refusing a spec for
+    naming a file it is about to edit."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(
+        directory,
+        "a.md",
+        id="TE-1",
+        touches=["saffron/scheduler.py"],
+        body=(
+            "## Acceptance criteria\n"
+            "- [ ] the fold at `saffron/scheduler.py:98` reads every row, and\n"
+            "      `saffron/scheduler.py:114-120` keeps the tie-break stable\n"
+        ),
+    )
+
+    candidates, refusals = build_queue(directory, None, ledger)
+
+    assert refusals == []
+    assert [c.spec.id for c in candidates] == ["TE-1"]
+
+
+def test_a_criterion_naming_a_glob_is_not_refused(tmp_path, ledger):
+    """`SA-0011`'s shape: its criteria name `tests/fixtures/*.md` in the course
+    of saying the fixture is *not* a file. A pattern is not a concrete path,
+    and `scope.matches` takes one on the left — so there is nothing here it
+    could answer."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(
+        directory,
+        "a.md",
+        id="TE-1",
+        touches=["tests/test_criteria.py"],
+        body=(
+            "## Acceptance criteria\n"
+            "- [ ] the fixture is a string literal in the test module, not a file:\n"
+            "      a new `tests/fixtures/*.md` falls outside `touches` and `scope`\n"
+            "      fails the diff that adds it\n"
+        ),
+    )
+
+    candidates, refusals = build_queue(directory, None, ledger)
+
+    assert refusals == []
+    assert [c.spec.id for c in candidates] == ["TE-1"]
 
 
 def test_a_wrapped_criterion_whose_paths_are_all_in_touches_is_not_refused(
