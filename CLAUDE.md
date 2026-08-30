@@ -46,9 +46,17 @@ uv run saffron cell .saffron/specs/SA-0002-size-gate.md --repo .    # v0.5: one 
 uv run saffron queue --repo .              # v0.5: what a batch would run; writes nothing
 ```
 
-`saffron cell` needs `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) in the environment;
-this repo keeps it in a gitignored `.env` or `~/.secrets`, both loaded by the tracked
-`.envrc` (`direnv allow`); `source` it directly if direnv is not active.
+`saffron cell` needs `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) in the environment
+of the command itself, and nowhere else. `.envrc` deliberately does not load it: direnv would
+export it into every shell in this directory, and from there into any Claude Code session
+started in one. `.env` is no home for it either — `.envrc` loads that with
+`dotenv_if_exists`. Scope it to the invocation instead (fish):
+
+```
+env CLAUDE_CODE_OAUTH_TOKEN=(bash -c 'source ~/.secrets; printf %s $CLAUDE_CODE_OAUTH_TOKEN') \
+  uv run saffron cell <spec> --repo .
+```
+
 Exit codes are load-bearing: `0` reviewable, `1` the task did not make it, `2` infrastructure
 failed (`saffron/cli.py`).
 PACKAGE opens the PR as a draft (§5.7): ratifying one means `gh pr ready <n>` before `gh pr merge`.
