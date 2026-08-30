@@ -43,12 +43,15 @@ Running the CLI:
 ```
 uv run saffron replay <repo> <pr>          # v0: replay a merged PR, agent-free
 uv run saffron cell .saffron/specs/SA-0002-size-gate.md --repo .    # v0.5: one attended cell
+uv run saffron queue --repo .              # v0.5: what a batch would run; writes nothing
 ```
 
 `saffron cell` needs `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) in the environment;
-this repo keeps it in a gitignored `.env` (`source .env`, or `set -x` it in fish).
+this repo keeps it in a gitignored `.env` or `~/.secrets`, both loaded by the tracked
+`.envrc` (`direnv allow`); `source` it directly if direnv is not active.
 Exit codes are load-bearing: `0` reviewable, `1` the task did not make it, `2` infrastructure
 failed (`saffron/cli.py`).
+PACKAGE opens the PR as a draft (§5.7): ratifying one means `gh pr ready <n>` before `gh pr merge`.
 
 ## Architecture
 
@@ -122,6 +125,8 @@ exception has a shape worth memorising: **core invokes declared gates, never too
 - **Run the tool, don't merely locate it.** Image builds assert versions rather than paths,
   because a present-and-unrunnable binary reads identically to a working one.
 - `ponytail:` comments mark deliberate simplifications and name their ceiling; leave them.
+- A new test is not trusted until it has been run against the unfixed code — or, for one
+  guarding a property already true, against a mutant that breaks it.
 - Commit subjects are lowercase `type(scope): what changed`, written as a sentence about the
   defect rather than the file — see `git log`.
 
