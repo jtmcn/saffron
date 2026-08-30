@@ -92,6 +92,19 @@ def _fake_gh(prs):
     return gh
 
 
+def _raw_gh(stdout, returncode=0):
+    """A `GhRunner` returning bytes `gh` really can print — the failure and
+    malformed shapes `_fake_gh` cannot express, since it always serialises
+    well-formed JSON with a zero exit."""
+
+    def gh(argv):
+        return subprocess.CompletedProcess(
+            argv, returncode=returncode, stdout=stdout, stderr=""
+        )
+
+    return gh
+
+
 # ------------------------------------------------------------- resolve_repo_id
 
 
@@ -349,6 +362,37 @@ def test_no_repo_slug_skips_the_github_backed_refusals(tmp_path, ledger):
         raise AssertionError(f"gh should not have been called: {argv}")
 
     candidates, refusals = build_queue(directory, None, ledger, gh=exploding_gh)
+
+    assert [c.spec.id for c in candidates] == ["TE-1"]
+    assert refusals == []
+
+
+@pytest.mark.parametrize(
+    "stdout,returncode",
+    [
+        ("", 1),
+        ("gh: not authenticated\n", 1),
+        ("<html>rate limited</html>", 0),
+        ("[1, 2]", 0),
+        ('[{"headRefName":"other","files":null}]', 0),
+        ('[{"headRefName":"other","files":["a.py"]}]', 0),
+    ],
+    ids=["exit-1", "auth-error", "not-json", "int-elements", "files-null", "files-str"],
+)
+def test_a_broken_gh_queues_rather_than_aborting_the_scan(
+    tmp_path, ledger, stdout, returncode
+):
+    """`_open_prs` documents itself as best-effort, and these are the shapes
+    that reach it on an unauthenticated host or a `gh` whose JSON moved. Each
+    is valid enough to get past a top-level check and raise on `.get` instead
+    — and §4.2.1 gives a refusal defined handling where an exception has none,
+    so a scan that raises here loses the night rather than one candidate."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"])
+
+    candidates, refusals = build_queue(
+        directory, None, ledger, repo_slug="o/r", gh=_raw_gh(stdout, returncode)
+    )
 
     assert [c.spec.id for c in candidates] == ["TE-1"]
     assert refusals == []
@@ -615,3 +659,17 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     assert [c.spec.id for c in candidates] == ["SA-0008", "SA-0001"]
     assert refusals == []
+
+    # Again with no ledger, so nothing is filtered before `_refuse` runs. The
+    # pass above reaches the refusals for two of eighteen specs — the other
+    # sixteen are dropped as done first — so on its own it stays green while
+    # every one of them is falsely refused, which is how the criterion-path
+    # check shipped refusing SA-0011 and SA-0016 (this spec) on their own
+    # criteria. `depends_on` refusals are expected here and are the shape the
+    # Notes describe; a criterion-path refusal on a real spec is not.
+    _, unfiltered = build_queue(
+        directory, None, ledger, repo_slug="joel/saffron", gh=_fake_gh([])
+    )
+
+    assert [r for r in unfiltered if "acceptance criteria name" in r.reason] == []
+    assert all("depends_on" in r.reason for r in unfiltered)

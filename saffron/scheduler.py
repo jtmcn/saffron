@@ -117,6 +117,11 @@ def _open_prs(repo_slug: str, gh: GhRunner) -> list[dict]:
     prints something unparseable is treated the same as "nothing found" —
     the auth check that would turn a broken `gh` into a hard stop belongs to
     preflight (§4.2.1), not here.
+
+    Elements are filtered, not just the top level. `[1, 2]` and a `files` of
+    `null` are both valid JSON that reach `.get` and raise mid-scan, and
+    §4.2.1 gives a refusal defined handling where an exception has none — a
+    `gh` whose output shape moves would take the whole night's scan with it.
     """
     done = gh(
         [
@@ -139,12 +144,15 @@ def _open_prs(repo_slug: str, gh: GhRunner) -> list[dict]:
         parsed = json.loads(done.stdout)
     except (json.JSONDecodeError, TypeError):
         return []
-    return parsed if isinstance(parsed, list) else []
+    if not isinstance(parsed, list):
+        return []
+    return [pr for pr in parsed if isinstance(pr, dict)]
 
 
 _BACKTICKED = re.compile(r"`([^`\n]+)`")
-# `ledger.py:225` and `ledger.py:225-233` are citations of a path, not paths.
-_LINE_SUFFIX = re.compile(r":\d+(?:-\d+)?$")
+# `ledger.py:225`, `ledger.py:225-233` and an editor's `ledger.py:225:9` are
+# citations of a path, not paths. Repeated, or `:225:9` strips to `:225`.
+_LINE_SUFFIX = re.compile(r"(?::\d+(?:-\d+)?)+$")
 _GLOB_CHARS = frozenset("*?[")
 
 
@@ -217,9 +225,15 @@ def _unmatched_criterion_path(spec: Spec) -> str | None:
     `GhRunner` shape to copy while forbidding itself that whole directory —
     so the unguarded form refuses this very spec. Citing a path and touching
     one are different acts, and `forbidden` is where an author says which.
-    A spec that genuinely needs a forbidden path is caught in the cell by
-    `scope` on its first commit, which costs one attempt; refusing here
-    costs a night in which nothing ran at all.
+
+    ponytail: the skip is a real hole, and its ceiling is not one attempt.
+    A spec that genuinely needs a path its own `forbidden` covers fails
+    `scope` identically on every attempt — `session.py`'s loop runs to
+    `max_attempts` and ends `EXHAUSTED` having spent the budget, which is
+    SA-0005's shape exactly. It is still the better trade at seventeen specs
+    measured, two of them falsely refused, because a false refusal costs a
+    night in which nothing ran at all; but the cost of being wrong here is a
+    whole task, not one attempt.
     """
     if not spec.touches:
         return None
@@ -251,7 +265,10 @@ def _refuse(candidate: Candidate, *, open_prs: list[dict]) -> str | None:
     for pr in open_prs:
         if pr.get("headRefName") == own_branch:
             continue
-        changed = [f.get("path", "") for f in pr.get("files", [])]
+        # `or []`, not a `.get` default: a `files` of `null` stores None.
+        changed = [
+            f.get("path", "") for f in (pr.get("files") or []) if isinstance(f, dict)
+        ]
         overlap = [
             path
             for path in changed
