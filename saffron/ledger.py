@@ -222,6 +222,45 @@ class Ledger:
         ).fetchone()
         return int(row["repo_id"])
 
+    def resolve_repo_id(self, origin: str) -> int | None:
+        """The scheduler's read of `upsert_repo` — a repo that has never run
+        has no row, and a scan must be able to ask that without creating one
+        just to answer it (`upsert_repo` always leaves a row behind, which is
+        right for preflight and wrong for a read)."""
+        row = self._db.execute(
+            "SELECT repo_id FROM repos WHERE origin = ?", (str(origin),)
+        ).fetchone()
+        return int(row["repo_id"]) if row is not None else None
+
+    def tasks_by_spec(self, repo_id: int) -> dict[tuple[str, str], list[sqlite3.Row]]:
+        """Every task this repo has ever run, grouped by `(spec_id, spec_sha)`
+        and ordered oldest first — the shape `scheduler.build_queue` filters
+        against, in one query rather than one per spec. Spans every run the
+        repo has had, not just the latest, because a `spec_sha` a task was
+        recorded against on an earlier night is still the one a re-queue or a
+        done-state check must find.
+
+        Every task, not the newest one per key: `cell/session.py` mints a run
+        and a task on each invocation without consulting what exists, so one
+        key routinely holds many. This repo's own ledger carries ten tasks at
+        `SA-0013`/`ce08b1eb`, mixing `READY_FOR_REVIEW` with three `ORPHANED`.
+        §4.2.1 asks whether *a* task at this `spec_sha` is done with the spec,
+        and folding to the highest `task_id` answers a different question —
+        one an `ORPHANED` corpse from a later killed run silently wins.
+        """
+        rows = self._db.execute(
+            """SELECT t.task_id, t.spec_id, t.spec_sha, t.state
+                 FROM tasks t
+                 JOIN runs r ON r.run_id = t.run_id
+                WHERE r.repo_id = ?
+                ORDER BY t.task_id""",
+            (repo_id,),
+        ).fetchall()
+        grouped: dict[tuple[str, str], list[sqlite3.Row]] = {}
+        for row in rows:
+            grouped.setdefault((row["spec_id"], row["spec_sha"]), []).append(row)
+        return grouped
+
     def create_run(self, repo_id: int, base_sha: str) -> int:
         cursor = self._db.execute(
             "INSERT INTO runs (repo_id, base_sha, status) VALUES (?, ?, 'RUNNING')",
