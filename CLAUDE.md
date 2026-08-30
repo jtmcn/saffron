@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 Saffron is a Python orchestrator that turns spec files into reviewable pull requests: it runs
 an agent in an isolated cell, drives it through a hard gate loop, subjects the diff to an
 adversarial critic, and packages the result. `DESIGN.md` is authoritative for what the system
