@@ -2,6 +2,7 @@
 
 import argparse
 import subprocess
+import tempfile
 
 import pytest
 
@@ -431,7 +432,7 @@ def test_a_missing_token_fails_before_the_image_is_built(tmp_path, monkeypatch):
     assert not reached
 
 
-def _repo_with_spec(tmp_path, *, spec_text, dirname="repo"):
+def _repo_with_spec(tmp_path, *, spec_text, dirname="repo", extra_specs=None):
     """A repo whose `origin` is a local bare clone, cut *after* the spec is
     committed — so the remote's default-branch head, which is what `_queue`
     (like `_run_cell`) exports `.saffron/` from, actually contains it. A
@@ -444,6 +445,8 @@ def _repo_with_spec(tmp_path, *, spec_text, dirname="repo"):
     specs = repo / ".saffron" / "specs"
     specs.mkdir(parents=True)
     (specs / "SY-1.md").write_text(spec_text)
+    for name, text in (extra_specs or {}).items():
+        (specs / name).write_text(text)
     _git(repo, "add", "-A")
     _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "first")
     remote = tmp_path / f"{dirname}-remote.git"
@@ -525,3 +528,70 @@ def test_queue_exits_two_when_the_repo_cannot_be_read(tmp_path):
     home = tmp_path / "home"
 
     assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 2
+
+
+def test_queue_prints_paths_the_operator_can_open(tmp_path, capsys):
+    """`build_queue` reads the specs out of a temporary export that is deleted
+    before anything is printed, so an absolute path names a file that is
+    already gone — and a spec that failed to parse has no id to fall back on,
+    which leaves the path as the only thing identifying it."""
+    repo = _repo_with_spec(
+        tmp_path,
+        spec_text=_A_SPEC,
+        dirname="repo-paths",
+        extra_specs={"SY-3.md": "no frontmatter at all\n"},
+    )
+    home = tmp_path / "home"
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    out = capsys.readouterr().out
+    assert "refusals: 1" in out
+    assert ".saffron/specs/SY-3.md:" in out
+    assert ".saffron/specs/SY-1.md" in out
+    assert tempfile.gettempdir() not in out
+
+
+def test_queue_reads_the_specs_at_base_sha_not_the_working_copy(tmp_path, capsys):
+    """The fixture commits its spec before cutting the remote, so a `_queue`
+    that read `repo/.saffron/specs` straight from the working copy would pass
+    every other test here. A spec committed locally and never pushed is the
+    witness: `base_sha` is the remote's default-branch head, so it must not
+    reach the queue."""
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-basesha")
+    (repo / ".saffron" / "specs" / "SY-2.md").write_text(
+        _A_SPEC.replace("SY-1", "SY-2")
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "unpushed")
+    home = tmp_path / "home"
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    out = capsys.readouterr().out
+    assert "queue: 1 candidate(s)" in out
+    assert "SY-1" in out
+    assert "SY-2" not in out
+
+
+def test_queue_says_the_refusals_did_not_run_when_gh_is_not_installed(
+    tmp_path, monkeypatch, capsys
+):
+    """A machine with no `gh` binary must not turn a readable repo into exit 2.
+    And `_open_prs` treats a `gh` that failed as "nothing found" by design, so
+    without the guard the two GitHub refusals go quiet exactly the way an
+    unresolved slug would — with nothing on the output saying so."""
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-nogh")
+    home = tmp_path / "home"
+    monkeypatch.setattr("saffron.cli.package_phase.github_slug", lambda _url: "o/r")
+
+    def _no_gh(_argv):
+        raise FileNotFoundError("gh")
+
+    monkeypatch.setattr("saffron.cli.run_gh", _no_gh)
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    out = capsys.readouterr().out
+    assert "gh could not be run" in out
+    assert "did not run" in out

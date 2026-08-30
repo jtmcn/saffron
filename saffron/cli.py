@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -15,7 +16,7 @@ from saffron.phases import package as package_phase
 from saffron.replay import replay
 from saffron.repos import image as repo_image
 from saffron.repos import mirror as git_mirror
-from saffron.scheduler import Candidate, Refusal, build_queue, run_gh
+from saffron.scheduler import Candidate, GhRunner, Refusal, build_queue, run_gh
 
 DEFAULT_HOME = Path.home() / ".saffron"
 
@@ -249,6 +250,7 @@ def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
     except package_phase.PackageError:
         repo_slug = None
 
+    gh_failures: list[str] = []
     with tempfile.TemporaryDirectory() as scratch:
         exported = git_mirror.export_saffron_dir(
             mirror, base_sha, Path(scratch) / "at-base"
@@ -257,35 +259,66 @@ def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
             exported / ".saffron" / "specs",
             repo_id,
             ledger,
+            # The slug is what makes the open-pull-request and touches-overlap
+            # refusals run at all; the runner only decides how a `gh` that
+            # cannot start is reported.
             repo_slug=repo_slug,
-            # The real thing, not a stand-in: this is what makes the
-            # open-pull-request and touches-overlap refusals run instead of
-            # sitting inert.
-            gh=run_gh,
+            gh=_guarded_gh(gh_failures),
         )
 
-    _print_queue(candidates, refusals, repo_slug)
+    _print_queue(candidates, refusals, repo_slug, exported, gh_failures)
     return 0
 
 
+def _guarded_gh(failures: list[str]) -> GhRunner:
+    """`run_gh`, but a `gh` that cannot start is recorded instead of raised.
+
+    A preview must not exit `2` on a machine with no `gh` (`package.py` guards
+    the same case), and a scan whose GitHub refusals never ran must not print
+    the same thing as one that ran them and found nothing (§5.4).
+    """
+
+    def gh(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        try:
+            return run_gh(argv)
+        except OSError as exc:
+            failures.append(str(exc))
+            return subprocess.CompletedProcess(argv, 127, "", str(exc))
+
+    return gh
+
+
 def _print_queue(
-    candidates: list[Candidate], refusals: list[Refusal], repo_slug: str | None
+    candidates: list[Candidate],
+    refusals: list[Refusal],
+    repo_slug: str | None,
+    root: Path,
+    gh_failures: list[str],
 ) -> None:
+    # Paths are printed relative to the export root because the export is a
+    # temporary directory already deleted by the time this runs — an absolute
+    # one names a file the operator cannot open, and a refusal that failed to
+    # parse has no spec id to fall back on.
     print(f"queue: {len(candidates)} candidate(s)")
     for candidate in candidates:
         print(
             f"  {candidate.spec.id:<10} priority={candidate.spec.priority}  "
-            f"{candidate.path}"
+            f"{candidate.path.relative_to(root)}"
         )
     print(f"refusals: {len(refusals)}")
     for refusal in refusals:
-        print(f"  {refusal.path}: {refusal.reason}")
+        print(f"  {refusal.path.relative_to(root)}: {refusal.reason}")
     if repo_slug is None:
-        print(
-            "note: no GitHub slug could be read from the remote — the "
-            "open-pull-request and touches-overlap refusals did not run, "
-            "so an empty refusal list above does not mean a clean scan"
-        )
+        _print_skipped("no GitHub slug could be read from the remote")
+    elif gh_failures:
+        _print_skipped(f"gh could not be run ({gh_failures[0]})")
+
+
+def _print_skipped(because: str) -> None:
+    print(
+        f"note: {because} — the open-pull-request and touches-overlap "
+        "refusals did not run, so the refusal list above is incomplete"
+    )
 
 
 if __name__ == "__main__":
