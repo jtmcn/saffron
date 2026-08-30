@@ -53,10 +53,10 @@ class Candidate:
     """One spec worth running tonight.
 
     `task_id` is `None` when there is no existing task to resume — either
-    none was ever created at this `spec_sha`, or the one that exists is in an
-    in-flight state (a corpse this spec does not stamp `ORPHANED`; that write
-    belongs to the half of `SA-0009` that runs a cell). It is set only when a
-    task at this `spec_sha` is in a `REQUEUE_STATES` state, so the resumed
+    none was ever created at this `spec_sha`, or every one that exists is in
+    an in-flight state (a corpse this spec does not stamp `ORPHANED`; that
+    write belongs to the half of `SA-0009` that runs a cell). It is set only
+    when a task at this `spec_sha` is in a `REQUEUE_STATES` state, so the resumed
     work reattaches to the row it was sent back to fix rather than a fresh
     one gate 0 (`SA-0016`) would refuse on its own PR.
     """
@@ -95,14 +95,14 @@ def build_queue(
 
     candidates: list[Candidate] = []
     for discovered in specs:
-        row = existing.get((discovered.spec.id, discovered.spec_sha))
-        if row is not None and row["state"] in DONE_STATES:
+        rows = existing.get((discovered.spec.id, discovered.spec_sha), ())
+        # Existential, not last-row-wins: §4.2.1 asks whether the spec has *a*
+        # task that is done with it, and one key holds many (`tasks_by_spec`).
+        if any(row["state"] in DONE_STATES for row in rows):
             continue
-        task_id = (
-            int(row["task_id"])
-            if row is not None and row["state"] in REQUEUE_STATES
-            else None
-        )
+        resumable = [row for row in rows if row["state"] in REQUEUE_STATES]
+        # Oldest first out of the query, so the last is the newest send-back.
+        task_id = int(resumable[-1]["task_id"]) if resumable else None
         candidates.append(
             Candidate(
                 path=discovered.path,

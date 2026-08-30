@@ -68,7 +68,7 @@ def test_tasks_by_spec_is_scoped_to_one_repo(ledger):
     assert set(by_key) == {("TE-1", "s1")}
 
 
-def test_tasks_by_spec_keeps_the_highest_task_id_per_key(ledger):
+def test_tasks_by_spec_keeps_every_task_at_a_key_oldest_first(ledger):
     repo_id = _repo(ledger, "/o")
     first = _task_at(ledger, repo_id, spec_id="TE-1", spec_sha="s1", state="REJECTED")
     second = _task_at(
@@ -76,10 +76,12 @@ def test_tasks_by_spec_keeps_the_highest_task_id_per_key(ledger):
     )
     assert second > first
 
-    row = ledger.tasks_by_spec(repo_id)[("TE-1", "s1")]
+    rows = ledger.tasks_by_spec(repo_id)[("TE-1", "s1")]
 
-    assert row["task_id"] == second
-    assert row["state"] == "CHANGES_REQUESTED"
+    # Both, in task_id order: the done-state check reads all of them, and the
+    # live ledger really does hold ten at one key (SA-0013/ce08b1eb).
+    assert [row["task_id"] for row in rows] == [first, second]
+    assert [row["state"] for row in rows] == ["REJECTED", "CHANGES_REQUESTED"]
 
 
 # ---------------------------------------------------------------- build_queue
@@ -123,6 +125,48 @@ def test_a_spec_that_should_requeue_resumes_its_task_id(tmp_path, ledger, state)
 
     assert len(candidates) == 1
     assert candidates[0].task_id == task_id
+
+
+def test_a_done_task_wins_over_a_later_requeueing_one_at_the_same_sha(tmp_path, ledger):
+    """The shape the live ledger actually has. A `READY_FOR_REVIEW` task with
+    an open PR, then a later `saffron cell` on the same spec killed mid-flight
+    and stamped `ORPHANED`: §4.2.1 asks whether *a* task is done with the spec,
+    so the newer corpse must not re-queue work that is already up for review —
+    gate 0 (`SA-0016`) would only refuse it again on its own PR.
+    """
+    directory = _spec_dir(tmp_path)
+    _write(directory, "a.md", id="TE-1")
+    repo_id = _repo(ledger)
+    _, spec_sha = load_spec(directory / "a.md")
+    done = _task_at(
+        ledger, repo_id, spec_id="TE-1", spec_sha=spec_sha, state="READY_FOR_REVIEW"
+    )
+    corpse = _task_at(
+        ledger, repo_id, spec_id="TE-1", spec_sha=spec_sha, state="ORPHANED"
+    )
+    assert corpse > done
+
+    candidates, refusals = build_queue(directory, repo_id, ledger)
+
+    assert candidates == []
+    assert refusals == []
+
+
+def test_the_newest_send_back_is_the_one_resumed(tmp_path, ledger):
+    """Many re-queueing tasks and none done: the resumed row is the latest,
+    not whichever the query happened to reach first."""
+    directory = _spec_dir(tmp_path)
+    _write(directory, "a.md", id="TE-1")
+    repo_id = _repo(ledger)
+    _, spec_sha = load_spec(directory / "a.md")
+    _task_at(ledger, repo_id, spec_id="TE-1", spec_sha=spec_sha, state="GATE_ERROR")
+    latest = _task_at(
+        ledger, repo_id, spec_id="TE-1", spec_sha=spec_sha, state="CHANGES_REQUESTED"
+    )
+
+    candidates, _ = build_queue(directory, repo_id, ledger)
+
+    assert [c.task_id for c in candidates] == [latest]
 
 
 def test_an_edited_spec_is_queued_fresh_despite_a_done_task_at_the_old_sha(
