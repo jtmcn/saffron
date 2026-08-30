@@ -35,11 +35,13 @@ the one before it.
 
 ## Problem
 - **`_CRITERION` is line-anchored under `re.MULTILINE`**, so a wrapped
-  acceptance criterion keeps only its first line. Measured on `SA-0005`: none
-  of its seven parsed criteria contains a path token, because `saffron/cli.py`
-  and `saffron/phases/package.py` — the paths that made it unsatisfiable —
-  sit on continuation lines. A refusal gate built on this value is blind to
-  the case it exists for (`SA-0016` is that gate).
+  acceptance criterion keeps only its first line. Measured on `SA-0016`, the
+  refusal gate's own spec: its third criterion parses as *"The two refusals
+  needing GitHub take an injected runner in the"*, dropping
+  `saffron/phases/package.py` and `tests/test_scheduler.py` from the two
+  continuation lines that name them. A refusal gate built on this value is
+  blind to the case it exists for, starting with its own spec (`SA-0016` is
+  that gate).
 - **Nothing reads a directory of specs.** `saffron/intake.py` parses one path
   at a time; the scheduler needs every spec in `.saffron/specs/` at once,
   with one malformed file unable to take down the scan.
@@ -63,10 +65,15 @@ the caller's job (`SA-0017`), not this one's, which is what keeps every test
 here offline without a fixture repo.
 
 ## Notes for the agent
-**This is the corpse repair, and it is the whole reason `SA-0005` cost $5.34
-and died at turn 61**: built on today's `spec.acceptance_criteria`, a refusal
-gate passes `SA-0005` clean, because the truncation drops the lines the paths
-are on. Fix the regex first; a test whose fixture is a single-line criterion
-proves nothing about the bug this spec exists to fix.
+**This is the corpse repair — `SA-0005` cost $5.34 and died at turn 61 for
+want of it.** Built on today's `spec.acceptance_criteria`, a refusal gate
+passes `SA-0016` clean, because the truncation drops the two continuation
+lines its path tokens sit on. Fix the regex first; a test whose fixture is a
+single-line criterion proves nothing about the bug this spec exists to fix.
+
+Joining is not the whole job: the section ends only at `##`, so a `###`
+subsection belongs to no criterion. A join that runs to the next `- [ ]`
+swallows it — measured on `SA-0001`, whose last criterion then runs to 758
+characters, 640 of them a table.
 
 Commit after each coherent step. Uncommitted work dies with the cell.
