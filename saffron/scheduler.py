@@ -123,6 +123,9 @@ def _open_prs(repo_slug: str, gh: GhRunner) -> list[dict]:
     §4.2.1 gives a refusal defined handling where an exception has none — a
     `gh` whose output shape moves would take the whole night's scan with it.
     """
+    # ponytail: `gh pr list` orders newest first, so past 100 it is the oldest
+    # open pull requests that fall out of both GitHub-backed refusals — and a
+    # stale long-lived PR is the kind a refusal most wants to see.
     done = gh(
         [
             "gh",
@@ -196,6 +199,9 @@ def _path_tokens(text: str) -> list[str]:
     `SA-0011`'s criteria name `` `tests/fixtures/*.md` `` to say the fixture
     is *not* a file — and a pattern is not a path `scope.matches` can answer
     for, since it takes a concrete path on the left.
+
+    ponytail: dropped unconditionally, so a criterion naming a whole tree it
+    will not touch (`` `saffron/report/**` ``) is ignored rather than refused.
     """
     tokens = []
     for span in _BACKTICKED.findall(text):
@@ -220,20 +226,17 @@ def _unmatched_criterion_path(spec: Spec) -> str | None:
     all reuse, so "declared" means one thing in every gate — never a second,
     more permissive rule invented here.
 
-    A token the spec's own `forbidden` covers is a citation, not a target.
-    `SA-0016`'s third criterion names `saffron/phases/package.py` for the
-    `GhRunner` shape to copy while forbidding itself that whole directory —
-    so the unguarded form refuses this very spec. Citing a path and touching
-    one are different acts, and `forbidden` is where an author says which.
+    A token the spec's own `forbidden` covers is a citation, not a target —
+    `SA-0016`'s own criteria name `saffron/phases/package.py` for a shape to
+    copy while forbidding that directory, so the unguarded form refused this
+    very spec.
 
-    ponytail: the skip is a real hole, and its ceiling is not one attempt.
-    A spec that genuinely needs a path its own `forbidden` covers fails
-    `scope` identically on every attempt — `session.py`'s loop runs to
-    `max_attempts` and ends `EXHAUSTED` having spent the budget, which is
-    SA-0005's shape exactly. It is still the better trade at seventeen specs
-    measured, two of them falsely refused, because a false refusal costs a
-    night in which nothing ran at all; but the cost of being wrong here is a
-    whole task, not one attempt.
+    ponytail: a spec that genuinely needs a forbidden path now ends
+    `EXHAUSTED` instead — two attempts, since `session.py`'s no-progress rule
+    catches a `scope` failure that repeats with the same identity, and up to
+    `max_attempts` only if the repair turns keep moving the failure set. A
+    whole task either way, not one attempt. Measured, the trade is right (two
+    of seventeen falsely refused, and a false refusal costs a night).
     """
     if not spec.touches:
         return None
@@ -247,17 +250,22 @@ def _unmatched_criterion_path(spec: Spec) -> str | None:
 
 
 def _refuse(candidate: Candidate, *, open_prs: list[dict]) -> str | None:
-    """The first of §4.2's remaining refusals this candidate earns, or
+    """The first of §4.2.1's remaining refusals this candidate earns, or
     `None`. Order matches the acceptance criteria's own listing."""
     own_branch = _branch(candidate.spec.id)
     same_spec_pr = next(
         (pr for pr in open_prs if pr.get("headRefName") == own_branch), None
     )
-    # *Another* task: a candidate resuming its own `task_id` is allowed to
-    # have this PR open already — refusing it would refuse the very re-queue
-    # it exists to resume (DESIGN.md §4.2's footnote).
+    # *Another* task: a candidate resuming its own `task_id` keeps its open PR,
+    # or the refusal would refuse the re-queue it exists to resume (§4.2.1).
+    # ponytail: "is a resume" stands in for "owns that PR" — the branch is
+    # spec-keyed, so a second re-queueing task at this sha inherits the first
+    # one's PR rather than being refused on it. Recovering the owner needs the
+    # ledger, which this function does not take.
     if same_spec_pr is not None and candidate.task_id is None:
-        url = same_spec_pr.get("url", own_branch)
+        # `or`, not a `.get` default: `_open_prs` filters shapes, not fields,
+        # so a present-but-null url would otherwise print "None" at an operator.
+        url = same_spec_pr.get("url") or own_branch
         return (
             f"an open pull request from another task already targets this spec: {url}"
         )
@@ -275,9 +283,15 @@ def _refuse(candidate: Candidate, *, open_prs: list[dict]) -> str | None:
             if any(matches(path, pattern) for pattern in candidate.spec.touches)
         ]
         if overlap:
-            head = pr.get("headRefName", "")
+            # The url, like the sibling refusal above: two lines in one morning
+            # queue naming the same pull request two different ways is a reread.
+            where = pr.get("url") or pr.get("headRefName", "")
             files = ", ".join(overlap[:3])
-            return f"touches overlaps open pull request {head}'s changed files: {files}"
+            if len(overlap) > 3:
+                files += f", … ({len(overlap)} files)"
+            return (
+                f"touches overlaps open pull request {where}'s changed files: {files}"
+            )
 
     if (escaped := _unmatched_criterion_path(candidate.spec)) is not None:
         return f"acceptance criteria name {escaped!r}, which no touches pattern matches"

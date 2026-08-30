@@ -414,6 +414,49 @@ def test_a_touches_overlap_with_an_open_prs_files_refuses(tmp_path, ledger):
     assert len(refusals) == 1
     assert "touches overlaps" in refusals[0].reason
     assert "a.py" in refusals[0].reason
+    # The url, not the branch — the sibling refusal prints the url, and one
+    # morning queue naming the same pull request two ways is a reread.
+    assert "u" in refusals[0].reason
+    assert "saffron/OTHER-1" not in refusals[0].reason
+
+
+def test_an_overlap_past_three_files_says_how_many_it_did_not_print(tmp_path, ledger):
+    """`overlap[:3]` truncated silently, so a five-file overlap read as three
+    — an operator sizing the conflict off the line got the wrong number."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=[f"f{n}.py" for n in range(5)])
+    gh = _fake_gh(
+        [
+            {
+                "headRefName": "saffron/OTHER-1",
+                "url": "u",
+                "files": [{"path": f"f{n}.py"} for n in range(5)],
+            }
+        ]
+    )
+
+    _, refusals = build_queue(directory, None, ledger, repo_slug="o/r", gh=gh)
+
+    assert len(refusals) == 1
+    assert "f0.py, f1.py, f2.py" in refusals[0].reason
+    assert "(5 files)" in refusals[0].reason
+    assert "f3.py" not in refusals[0].reason
+
+
+def test_an_open_pr_with_a_null_url_names_the_branch_not_none(tmp_path, ledger):
+    """`_open_prs` filters shapes, not fields, so a null `url` reaches the
+    refusal. A `.get` default keeps the None; a line reading "already targets
+    this spec: None" tells the operator nothing."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"])
+    gh = _fake_gh([{"headRefName": "saffron/TE-1", "url": None, "files": []}])
+
+    candidates, refusals = build_queue(directory, None, ledger, repo_slug="o/r", gh=gh)
+
+    assert candidates == []
+    assert len(refusals) == 1
+    assert "None" not in refusals[0].reason
+    assert "saffron/TE-1" in refusals[0].reason
 
 
 def test_no_touches_overlap_with_an_open_prs_files_is_not_refused(tmp_path, ledger):
