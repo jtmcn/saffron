@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import tempfile
 from pathlib import Path
 
 from saffron.cell.session import CellSpec, run_one_cell
@@ -14,6 +15,7 @@ from saffron.phases import package as package_phase
 from saffron.replay import replay
 from saffron.repos import image as repo_image
 from saffron.repos import mirror as git_mirror
+from saffron.scheduler import Candidate, Refusal, build_queue, run_gh
 
 DEFAULT_HOME = Path.home() / ".saffron"
 
@@ -68,6 +70,11 @@ def main(argv: list[str] | None = None) -> int:
     cell_parser.add_argument("--max-attempts", type=int, default=None)
     cell_parser.add_argument("--max-turns", type=int, default=None)
 
+    queue_parser = subcommands.add_parser(
+        "queue", help="show what a batch would run tonight, agent-free"
+    )
+    queue_parser.add_argument("--repo", type=Path, default=Path.cwd())
+
     args = parser.parse_args(argv)
     out_dir_arg = getattr(args, "out", None)
     out_dir = out_dir_arg or (args.home / "batches" / "v0")
@@ -75,6 +82,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "cell":
             return _run_cell(args, ledger, out_dir)
+
+        if args.command == "queue":
+            return _queue(args, ledger)
 
         line = replay(
             args.repo,
@@ -206,6 +216,76 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
 
     print(f"{spec.id:<10} {outcome.state}")
     return CELL_EXIT.get(outcome.state, 1)
+
+
+def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
+    """`saffron queue --repo .` — the scan a batch would run tonight, without
+    starting a cell or writing anything to the ledger.
+
+    The mirror and `base_sha` are resolved exactly the way `_run_cell`
+    resolves them, because the specs a scan must read are the ones
+    `base_sha` pins (§4.2.1's own rule) — the working copy is not consulted.
+    `resolve_repo_id`, never `upsert_repo`: a repo this ledger has never run
+    gets `None`, which `build_queue` already treats as "no history to filter
+    against," and a read must not mint the row it is only asking about.
+    """
+    repo = args.repo.resolve()
+
+    digest = hashlib.sha256(str(repo).encode()).hexdigest()[:12]
+    mirror = git_mirror.ensure_mirror(
+        repo, args.home / "mirrors" / f"{repo.name}-{digest}.git"
+    )
+    url = package_phase.real_remote(repo)
+    _, base_sha = package_phase.fetch_default_branch(mirror, url)
+
+    repo_id = ledger.resolve_repo_id(url)
+
+    # Unlike `_run_cell`, a slug that cannot be read is not this command's
+    # failure — it just means two of `build_queue`'s refusals cannot run, and
+    # the printed output below says so on its own line rather than letting an
+    # empty refusal list stand in for "these were never checked."
+    try:
+        repo_slug = package_phase.github_slug(url)
+    except package_phase.PackageError:
+        repo_slug = None
+
+    with tempfile.TemporaryDirectory() as scratch:
+        exported = git_mirror.export_saffron_dir(
+            mirror, base_sha, Path(scratch) / "at-base"
+        )
+        candidates, refusals = build_queue(
+            exported / ".saffron" / "specs",
+            repo_id,
+            ledger,
+            repo_slug=repo_slug,
+            # The real thing, not a stand-in: this is what makes the
+            # open-pull-request and touches-overlap refusals run instead of
+            # sitting inert.
+            gh=run_gh,
+        )
+
+    _print_queue(candidates, refusals, repo_slug)
+    return 0
+
+
+def _print_queue(
+    candidates: list[Candidate], refusals: list[Refusal], repo_slug: str | None
+) -> None:
+    print(f"queue: {len(candidates)} candidate(s)")
+    for candidate in candidates:
+        print(
+            f"  {candidate.spec.id:<10} priority={candidate.spec.priority}  "
+            f"{candidate.path}"
+        )
+    print(f"refusals: {len(refusals)}")
+    for refusal in refusals:
+        print(f"  {refusal.path}: {refusal.reason}")
+    if repo_slug is None:
+        print(
+            "note: no GitHub slug could be read from the remote — the "
+            "open-pull-request and touches-overlap refusals did not run, "
+            "so an empty refusal list above does not mean a clean scan"
+        )
 
 
 if __name__ == "__main__":

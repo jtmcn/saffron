@@ -10,6 +10,7 @@ from saffron.cell import session
 from saffron.cli import main
 from saffron.ledger import Ledger
 from saffron.phases import package
+from tests.conftest import HostToolExecInTest
 from tests.test_replay import target  # noqa: F401 — a pytest fixture, used by name
 
 
@@ -428,3 +429,99 @@ def test_a_missing_token_fails_before_the_image_is_built(tmp_path, monkeypatch):
             _namespace(repo, tmp_path), Ledger(tmp_path / "l.db"), tmp_path / "out"
         )
     assert not reached
+
+
+def _repo_with_spec(tmp_path, *, spec_text, dirname="repo"):
+    """A repo whose `origin` is a local bare clone, cut *after* the spec is
+    committed — so the remote's default-branch head, which is what `_queue`
+    (like `_run_cell`) exports `.saffron/` from, actually contains it. A
+    local-path origin, not a forge remote, so `github_slug` genuinely fails on
+    it rather than needing to be faked."""
+    repo = tmp_path / dirname
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "f.txt").write_text("a\n")
+    specs = repo / ".saffron" / "specs"
+    specs.mkdir(parents=True)
+    (specs / "SY-1.md").write_text(spec_text)
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "first")
+    remote = tmp_path / f"{dirname}-remote.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(repo), str(remote)], check=True)
+    _git(repo, "remote", "add", "origin", str(remote))
+    return repo
+
+
+_A_SPEC = (
+    "---\nid: SY-1\ntitle: One\ntype: chore\n---\n\n"
+    "## Acceptance criteria\n- [ ] it works\n"
+)
+
+
+def test_queue_prints_the_real_scheduler_queue_and_writes_nothing_to_the_ledger(
+    tmp_path, capsys
+):
+    """The queue printed has to come from `saffron/scheduler.py`'s real
+    `build_queue` reading real files, not a value the test hands the CLI and
+    then asserts back — that defect shipped `SA-0005` green and was caught in
+    `SA-0007`'s review. And a repo this ledger has never seen must stay
+    unseen: `saffron queue` reads, it never writes."""
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC)
+    home = tmp_path / "home"
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    out = capsys.readouterr().out
+    assert "SY-1" in out
+    assert "queue: 1 candidate(s)" in out
+
+    ledger = Ledger(home / "ledger.db")
+    for table in ("repos", "runs", "tasks"):
+        count = ledger._db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        assert count == 0, f"{table} should be empty against an unseen repo"
+    ledger.close()
+
+
+def test_queue_says_which_refusals_did_not_run_when_no_slug_resolves(tmp_path, capsys):
+    """A local-path origin has no GitHub slug. The two refusals that need one
+    must not silently no-op — an empty refusal list from a scan that could not
+    check GitHub must not read the same as a clean one."""
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-noslug")
+    home = tmp_path / "home"
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    out = capsys.readouterr().out
+    assert "did not run" in out
+    assert "open-pull-request" in out
+    assert "touches-overlap" in out
+
+
+def test_queue_hands_build_queue_a_real_gh_invoking_runner_once_a_slug_resolves(
+    tmp_path, monkeypatch
+):
+    """The CLI, not a test double, has to hand `build_queue` a runner that
+    *really* invokes `gh` once a slug resolves — only `github_slug` is faked
+    here, exactly as `test_the_base_is_the_remote_default_branch_not_the_checkout`
+    fakes it, for the same reason (a local-path origin is not shaped like a
+    forge remote). Proof, the same way `test_build_queue_touches_no_network_and_no_cell`
+    proves the opposite case in `tests/test_scheduler.py`: `tests/conftest.py`'s
+    `no_host_tool_exec` guard raises the moment anything unmarked actually
+    execs `gh`, and it fires here — this repo has no `gh` binary to call for
+    real, so the guard firing is the only honest way to show the wiring reaches
+    it rather than a `gh=` mock that would prove nothing about `cli.py`."""
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-slug")
+    home = tmp_path / "home"
+    monkeypatch.setattr("saffron.cli.package_phase.github_slug", lambda _url: "o/r")
+
+    with pytest.raises(HostToolExecInTest):
+        cli.main(["--home", str(home), "queue", "--repo", str(repo)])
+
+
+def test_queue_exits_two_when_the_repo_cannot_be_read(tmp_path):
+    """No `origin` remote at all: the same infrastructure failure `_run_cell`
+    treats as exit 2, not the slug-unresolved case `queue` tolerates."""
+    repo = _repo_with_commit(tmp_path / "repo-no-origin")
+    home = tmp_path / "home"
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 2
