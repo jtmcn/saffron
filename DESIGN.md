@@ -268,6 +268,10 @@ Design notes:
                        a dead seam here would have returned an earned state
   GATE_ERROR       ◀── a gate errored, or the two suites drifted: infrastructure,
                        and never charged to the task (§5.4)
+  SCOPE_REVIEW     ◀── also from IMPLEMENTING: an implementer whose declared
+                       `touches` cannot satisfy the criteria proposes a set
+                       instead of writing a plan, and the proposal ends the
+                       attempt (§5.3.1)
   EXHAUSTED        ◀── also from IMPLEMENTING: the host-side spend ceiling stops
                        a task before its next turn, and the budget stop and
                        "four attempts, still red" share the state (§4.3)
@@ -613,13 +617,13 @@ that caused this one.** That ordering fix is a workaround for a defect in
 is wrong on every runtime, for every cause, including the ones this design has
 not met yet. It is §7's "money spent to learn something free" one layer down.
 
-### 5.2 Phase 1 — DIAGNOSE (bugs only)
+### 5.2 Phase 1 — DIAGNOSE (bug specs only; the scope proposal is not)
 
 Read-only tools, scoped to `envelope`. Output is `scope.json`: the proposed `touches` set, the identified root cause, and the evidence for it.
 
 This phase exists because of a specific trap. The obvious design — human declares `touches`, agent is confined to it — is sound for features and fatal for bugs. In the TE-0142 example, "no rows from any of three providers" most plausibly originates *outside* `ingest/nws/**`: a shared HTTP retry helper, a Polars schema change producing a silently empty frame, a continuous-aggregate refresh policy, a chunk-interval/retention interaction, a migration that changed a constraint. Several of those are in `forbidden` or outside a hand-written `touches`. The agent would correctly find the cause and then be auto-rejected for looking in the right place — and the rejection would read as "your spec needs work," which is both wrong and unactionable.
 
-So: the agent proposes scope, you ratify. `SCOPE_REVIEW` items appear at the top of the morning queue as a diff of proposed `touches` plus the one-paragraph root cause — a genuine 10-second decision, versus a rewrite-the-spec-and-lose-a-night loop. Ratified scope is recorded in the ledger, and written into the spec file **on the task's own branch, as its first commit** — so it reaches `main` through the task's normal PR and needs no exception to N1's rule that nothing unattended writes to a remote `main`. **The task's own spec path is added to the ratified `touches` when it is recorded**, or that first commit fails the `scope` gate on every bug task: the writeback changes `.saffron/specs/…`, which is not a path DIAGNOSE would ever propose. A control artifact that has to be committed has to be in scope to be committed. Two further things fall out, both load-bearing. The ledger is authoritative until that PR merges, so enforcement starts at turn one of IMPLEMENT rather than next batch. And `spec_sha` on `main` deliberately does *not* move while the task is in flight — writing the spec back to `main` directly would invalidate (§4.1) the very task that ratification just unblocked.
+So: the agent proposes scope, you ratify. **Everything from `SCOPE_REVIEW` onward is the phase-independent half of this contract** — §5.3.1 gives IMPLEMENT the same door on any spec type, and the ratification, the writeback and the rules below are identical whichever phase proposed. `SCOPE_REVIEW` items appear at the top of the morning queue as a diff of proposed `touches` plus the one-paragraph root cause — a genuine 10-second decision, versus a rewrite-the-spec-and-lose-a-night loop. Ratified scope is recorded in the ledger, and written into the spec file **on the task's own branch, as its first commit** — so it reaches `main` through the task's normal PR and needs no exception to N1's rule that nothing unattended writes to a remote `main`. **The task's own spec path is added to the ratified `touches` when it is recorded**, or that first commit fails the `scope` gate on every ratified task: the writeback changes `.saffron/specs/…`, which is not a path DIAGNOSE would ever propose. A control artifact that has to be committed has to be in scope to be committed. Two further things fall out, both load-bearing. The ledger is authoritative until that PR merges, so enforcement starts at turn one of IMPLEMENT rather than next batch. And `spec_sha` on `main` deliberately does *not* move while the task is in flight — writing the spec back to `main` directly would invalidate (§4.1) the very task that ratification just unblocked.
 
 Cost: ~$0.30–1.00. Cheapest possible place to catch a misconceived task.
 
@@ -677,6 +681,18 @@ Validated host-side with Pydantic. **Auto-rejected — no model call — if:** `
 2. **A path check on `Edit`/`Write`** — deny writes outside `/work` or into protected paths. Its value is *fewer wasted turns*, not safety; the real protection is that there's nothing outside `/work` worth writing to.
 
 Explicitly **not** doing: a regex denylist over Bash command strings. It's the same category error as a prompt, one level down. It fails open on `python -c`, `make`, `sh -c "$(…)"`, any Makefile target, any interpolation — and far more often it fails *closed*, because `curl` appears in fixtures, `rm -rf` on a tmpdir is legitimate, and `git push --dry-run` in a doc check is harmless. You'd spend week two loosening it until it protects nothing, and then keep counting it as protection. The controls that actually hold — no credentials, no route, mirror-only remote — hold whether the agent cooperates or not.
+
+### 5.3.1 The scope proposal — IMPLEMENT's door out of an impossible spec
+
+A non-bug spec's `touches` is declared by hand, and a hand-written set can be wrong in a way no amount of implementation effort repairs: a criterion asks for behaviour that lives in a file the set does not cover. The plan checkpoint above rejects that plan correctly and cheaply — but rejection is *all* it does, so each remaining attempt rediscovers the same wall and the task ends with a spend and no finding. The exact case §5.2 was built for on bugs, arriving one phase later on everything else. So the implementer gets the same door: **before writing a plan, it may reply with a scope proposal instead**, naming the paths the criteria actually need and the root cause that makes the declared set insufficient.
+
+Three rules keep it a door rather than an escape hatch:
+
+- **The proposal ends the attempt.** No plan, no diff, no commit — the task goes to `SCOPE_REVIEW` and waits for you. A proposal that left the session running would be a negotiation, and an agent that can negotiate its own scope mid-attempt will open one whenever the work turns hard.
+- **It must name a path outside the declared `touches`.** A proposal naming only paths already declared is refused rather than recorded: that is a restatement of the spec, not a finding about it. The implementer gets one further turn — exactly one — to submit either a real plan or a proposal that genuinely reaches outside; refusing twice ends the attempt as a rejected plan. An empty `touches` always escapes this check, since there is nothing yet to be outside of.
+- **The task's own spec path is added host-side**, exactly as in §5.2, and the ratified set is a **superset** of the declared `touches` rather than a replacement. The prompt asks for paths "inside or outside" the declared set, and a prompt is not the boundary — so the union is taken host-side where it is one.
+
+What follows the proposal is §5.2's contract unchanged: the same state, the same one-click ratification, the same writeback on the task's own branch. Only the producer differs, which is why the rules live there and only the door lives here.
 
 ### 5.4 Phase 3 — GATE ⇄ REPAIR
 
