@@ -1040,6 +1040,31 @@ def test_a_path_the_specs_own_forbidden_bars_is_not_a_collision(tmp_path, ledger
     assert "touches names" not in reason
 
 
+def test_a_spec_that_forbids_the_very_path_it_touches_is_still_refused(
+    tmp_path, ledger
+):
+    """The exemption is for a broad `touches` narrowed by a specific
+    `forbidden`. Naming the same path in both is a spec contradicting itself,
+    and that is worth a line in the morning queue rather than a silent
+    admission — the one route by which a protected path could otherwise reach
+    a cell's `touches` unremarked."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(
+        directory,
+        "a.md",
+        id="TE-1",
+        touches=["docs/DESIGN.md"],
+        forbidden=["docs/DESIGN.md"],
+    )
+
+    candidates, refusals = build_queue(
+        directory, None, ledger, protected=["docs/DESIGN.md"]
+    )
+
+    assert candidates == []
+    assert "touches names 'docs/DESIGN.md'" in refusals[0].reason
+
+
 def test_no_protected_declared_changes_nothing(tmp_path, ledger):
     """`protected`'s default is `()`, so every caller before `SA-0023`
     (every existing test in this file included) gets exactly the queue it

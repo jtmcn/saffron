@@ -191,6 +191,11 @@ def _protected_paths(exported: Path, unread: list[str] | None = None) -> list[st
     and found nothing prints (§5.4). The reason is appended to `unread` when
     the caller passes a list to collect it.
     """
+    if not (exported / ".saffron" / "policy.yaml").is_file():
+        # A repo that declares no policy declares no protected paths, which is
+        # the ordinary case for every repo not yet onboarded (§5.6). Absent is
+        # a different fact from unreadable and must not print a note.
+        return []
     try:
         policy, _policy_sha = load_policy(exported)
     except PolicyError as broke:
@@ -366,8 +371,19 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # `protected` list is refused for the price of a `git archive`, not a
     # cell, a turn and $0.82 (`SA-0021`, measured, docs/BACKLOG.md item 28).
     # No task row exists yet, so nothing is left in an in-flight state.
+    policy_unread: list[str] = []
     with tempfile.TemporaryDirectory() as scratch:
-        protected = _protected_paths_at(mirror, base_sha, Path(scratch) / "at-base")
+        protected = _protected_paths_at(
+            mirror, base_sha, Path(scratch) / "at-base", policy_unread
+        )
+    if policy_unread:
+        # This is the path that spends: an image build and a preflight suite
+        # follow. A check that did not run must say so before the money, which
+        # is the whole argument for running it here at all.
+        _print_skipped(
+            "policy.yaml at this base_sha could not be read",
+            "this spec was not checked against the protected list",
+        )
     collision = protected_touch_refusal(spec.touches, protected, spec.forbidden)
     if collision is not None:
         print(f"{spec.id:<10} refused  {collision}")
@@ -630,16 +646,26 @@ def _print_queue(
         # own path, which is a temp directory already deleted by the time this
         # prints — the same reason every path above is relativised.
         _print_skipped(
-            "policy.yaml at this base_sha could not be read, so no spec was "
-            "checked against the protected list"
+            "policy.yaml at this base_sha could not be read",
+            "no spec was checked against the protected list, so the refusal "
+            "list above is incomplete",
         )
 
 
-def _print_skipped(because: str) -> None:
-    print(
-        f"note: {because} — the open-pull-request and touches-overlap "
-        "refusals did not run, so the refusal list above is incomplete"
-    )
+_GH_REFUSALS_SKIPPED = (
+    "the open-pull-request and touches-overlap refusals did not run, so the "
+    "refusal list above is incomplete"
+)
+
+
+def _print_skipped(because: str, consequence: str = _GH_REFUSALS_SKIPPED) -> None:
+    """One line saying a refusal never ran, and which one.
+
+    The consequence is a parameter rather than a constant in the string: a
+    note that names the wrong refusals is the defect this whole gate exists
+    to remove, one level up (§5.4).
+    """
+    print(f"note: {because} — {consequence}")
 
 
 if __name__ == "__main__":
