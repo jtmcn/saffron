@@ -73,9 +73,10 @@ def scope_gate(
                 )
 
     if not touches:
-        # A diff whose scope has not yet been ratified is not checked against
-        # either deny list — that is the documented shape for a bug awaiting
-        # DIAGNOSE (CONTEXT.md §3), not an oversight.
+        # ponytail: a diff whose scope is unratified is checked against
+        # neither deny list. Unreachable from a cell only because
+        # `artifacts.validate_plan` rejects an empty `touches` first — a
+        # plan-time guard, the class of control this gate exists to not be.
         return GateResult(
             gate="scope",
             status="skip",
@@ -126,7 +127,7 @@ def scope_gate(
             Failure(
                 file=path,
                 code="forbidden",
-                message=f"forbidden by the spec: {declared_forbidden}",
+                message=f"denied by this spec's forbidden list: {declared_forbidden}",
             )
             for path in forbidden_hits
         ]
@@ -134,7 +135,7 @@ def scope_gate(
             Failure(
                 file=path,
                 code="protected",
-                message=f"protected by policy: {declared_protected}",
+                message=f"denied by the repo's protected list: {declared_protected}",
             )
             for path in protected_hits
         ]

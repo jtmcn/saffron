@@ -884,6 +884,10 @@ def _drive_cell(
             # Host-added, never the model's: the writeback this touches set
             # feeds is a commit to the spec file itself, and that commit would
             # otherwise fail its own `scope` gate (§5.2, DESIGN.md:618).
+            # ponytail: since SA-0024 this is no longer sufficient where the
+            # spec directory is `protected` — the deny lists do not consult
+            # `touches`, so widening it no longer clears the writeback
+            # (BACKLOG item 31). Latent: nothing writes it back yet.
             # A superset of the declared `touches`, never a replacement: the
             # prompt asks for paths "inside or outside" them, and a prompt is
             # not the boundary (SA-0018 review).

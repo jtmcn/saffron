@@ -1143,9 +1143,9 @@ def test_a_forbidden_path_inside_touches_fails_the_suite(monkeypatch, tmp_path):
     assert outcome.state == "EXHAUSTED"
     # The repair prompt is the whole of what the agent receives about a gate.
     assert (
-        "- [scope] src/secret.py:? forbidden: forbidden by the spec: src/secret.py"
-        in cell.turns[2]
-    )
+        "- [scope] src/secret.py:? forbidden: "
+        "denied by this spec's forbidden list: src/secret.py"
+    ) in cell.turns[2]
 
 
 def test_a_protected_path_inside_touches_fails_the_suite(monkeypatch, tmp_path):
@@ -1166,9 +1166,9 @@ def test_a_protected_path_inside_touches_fails_the_suite(monkeypatch, tmp_path):
     )
     assert outcome.state == "EXHAUSTED"
     assert (
-        "- [scope] src/secret.py:? protected: protected by policy: src/secret.py"
-        in cell.turns[2]
-    )
+        "- [scope] src/secret.py:? protected: "
+        "denied by the repo's protected list: src/secret.py"
+    ) in cell.turns[2]
 
 
 def test_a_size_failure_at_standard_does_not_enter_the_repair_loop(

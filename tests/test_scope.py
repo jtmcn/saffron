@@ -101,38 +101,33 @@ def test_a_file_outside_touches_and_denied_still_reports_out_of_scope_unchanged(
 
 
 def test_a_file_inside_touches_that_is_forbidden_fails_with_its_own_code():
+    # A glob, not a literal: `matches("docs/DESIGN.md", "docs/DESIGN.md")` is
+    # true with the arguments in either order, so a literal pins nothing.
     result = scope_gate(
         ["docs/DESIGN.md"],
         touches=["docs/**"],
-        forbidden=["docs/DESIGN.md"],
+        forbidden=["docs/*.md"],
     )
     assert result.status == "fail"
     assert [f.file for f in result.failures] == ["docs/DESIGN.md"]
     assert result.failures[0].code == "forbidden"
-    assert result.failures[0].message == "forbidden by the spec: docs/DESIGN.md"
+    assert (
+        result.failures[0].message == "denied by this spec's forbidden list: docs/*.md"
+    )
 
 
 def test_a_file_inside_touches_that_is_protected_fails_with_its_own_code():
     result = scope_gate(
         ["docs/DESIGN.md"],
         touches=["docs/**"],
-        protected=["docs/DESIGN.md"],
+        protected=["docs/*.md"],
     )
     assert result.status == "fail"
     assert [f.file for f in result.failures] == ["docs/DESIGN.md"]
     assert result.failures[0].code == "protected"
-    assert result.failures[0].message == "protected by policy: docs/DESIGN.md"
-
-
-def test_forbidden_and_protected_failures_are_never_error():
-    forbidden_result = scope_gate(
-        ["docs/DESIGN.md"], touches=["docs/**"], forbidden=["docs/DESIGN.md"]
+    assert (
+        result.failures[0].message == "denied by the repo's protected list: docs/*.md"
     )
-    protected_result = scope_gate(
-        ["docs/DESIGN.md"], touches=["docs/**"], protected=["docs/DESIGN.md"]
-    )
-    assert forbidden_result.status == "fail"
-    assert protected_result.status == "fail"
 
 
 def test_no_declared_touches_skips_before_either_deny_list_is_checked():
@@ -222,6 +217,25 @@ def test_a_gate_handed_a_bent_diff_errors_rather_than_passing(tmp_path):
 
     pinned = _diff(tmp_path / "repo", base, *worktree.DIFF_FLAGS)
     assert scope_gate(["src/a.py"], touches=["src/**"], diff=pinned).status == "pass"
+
+
+def test_a_denial_on_a_bent_diff_errors_rather_than_failing(tmp_path):
+    """`error` outranks a denial. A gate that cannot read its own input has
+    not established the denial it would otherwise report, and `error` is
+    charged to nobody while `fail` says the repo's code is wrong (§5.4)."""
+    base = _hostile_repo(tmp_path / "repo")
+    bent = _diff(tmp_path / "repo", base, "--no-ext-diff")
+
+    result = scope_gate(
+        ["src/a.py"],
+        touches=["src/**"],
+        forbidden=["src/**"],
+        protected=["src/**"],
+        diff=bent,
+    )
+
+    assert result.status == "error"
+    assert result.failures == []
 
 
 def test_a_quoted_path_is_still_a_recognised_header():
