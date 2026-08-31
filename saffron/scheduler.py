@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from saffron.gates.core.scope import matches
-from saffron.intake import Spec, discover_specs
+from saffron.intake import DiscoveryFailure, Spec, discover_specs
 from saffron.ledger import Ledger
 
 # Same shape `saffron/phases/package.py` already uses for the same reason —
@@ -124,7 +124,13 @@ class Refusal:
     task, a `touches` overlap with an open pull request's files, acceptance
     criteria naming a path outside `touches`, and a `depends_on` the ledger
     does not show merged (`SA-0016`, all four here). The sixth, a repo that failed preflight, is a
-    batch-level check outside `build_queue`."""
+    batch-level check outside `build_queue`.
+
+    A parse failure also reaches here from `specs/done/`, where the path is
+    not a candidate at all: that file is refused *credit* rather than refused
+    a cell. It is still a refusal row, because the alternative is a dependent
+    refused for a parent whose spec is sitting right where the operator put
+    it, with nothing anywhere saying why."""
 
     path: Path
     reason: str
@@ -313,11 +319,49 @@ def protected_touch_refusal(touches: list[str], protected: Sequence[str]) -> str
     return None
 
 
+RETIRED_DIRNAME = "done"
+
+
+def _retired_ids(directory: Path) -> tuple[frozenset[str], list[DiscoveryFailure]]:
+    """Spec ids the operator has retired to `specs/done/` as shipped.
+
+    That directory means one thing (`.saffron/specs/done/README.md`): the
+    spec's work is in the default branch. It is the same fact `MERGED`
+    establishes, and the only one this gate needs — a child is cut from that
+    branch, not stacked on its parent (§4.2). The ledger cannot always state
+    it: only a cell writes a task, so work done by hand leaves no row at all.
+
+    Read from frontmatter, never the filename — the id is declared, and a
+    file renamed on retirement would otherwise credit the wrong spec. A
+    retired spec that no longer parses is not credited: the refusal stands,
+    which is the direction that cannot admit a child whose parent is absent.
+
+    Its failures come back with the ids for that reason. Silently discarded,
+    an unparseable file here produces a refusal that contradicts the
+    filesystem — the child is told its parent is "not retired to `done/` as
+    shipped" while the spec sits in `done/` — and §4.2.1's rule is that every
+    branch names the state it actually read. `README.md` is not one of them:
+    the directory's own documentation is a resident, not a broken spec.
+    """
+    retired = directory / RETIRED_DIRNAME
+    if not retired.is_dir():
+        return frozenset(), []
+    # `discover_specs` globs non-recursively, so this reads `done/` alone and
+    # cannot turn it into a second scan directory.
+    shipped, unparseable = discover_specs(retired)
+    # `README.md` is a permanent resident, not a spec that stopped parsing —
+    # it is the file this directory's meaning is written in.
+    stopped = [f for f in unparseable if f.path.name != "README.md"]
+    return frozenset(discovered.spec.id for discovered in shipped), stopped
+
+
 def _dependency_refusal(
     dep: str,
     *,
     merged_anywhere: frozenset[str],
     states_oldest_first: dict[str, list[str]],
+    retired: frozenset[str],
+    unreadable_retired: int,
 ) -> str | None:
     """Why `dep` does not satisfy a dependency yet, or `None` if it does.
 
@@ -335,14 +379,29 @@ def _dependency_refusal(
     if dep in merged_anywhere:
         return None
 
+    # The operator's own assertion, where the ledger has no row to make it.
+    if dep in retired:
+        return None
+
     if dep not in states_oldest_first:
         # Not "no task at its current spec_sha" — it has no spec_sha here at
         # all. `discover_specs` globs `*.md` non-recursively, so a parent
         # retired to `specs/done/`, or an id that never existed, lands here.
         # Saying it had not run would name a check this scan cannot perform.
+        # A file in `done/` that does not parse declares no id, so this
+        # branch is reachable with the parent sitting in `done/`.
+        blind = ""
+        if unreadable_retired:
+            plural = "s" if unreadable_retired > 1 else ""
+            blind = (
+                f" — and {unreadable_retired} file{plural} in "
+                f"{RETIRED_DIRNAME}/ could not be read as a spec, so it "
+                "declares no id to credit"
+            )
         return (
-            f"depends_on {dep} is not among the specs in this directory, and "
-            "no task in the ledger says it merged"
+            f"depends_on {dep} is not among the specs in this directory, not "
+            f"retired to {RETIRED_DIRNAME}/ as shipped, and no task in the "
+            f"ledger says it merged{blind}"
         )
 
     states = states_oldest_first[dep]
@@ -379,6 +438,8 @@ def _refuse(
     open_prs: list[dict],
     merged_anywhere: frozenset[str],
     states_at_current_sha: dict[str, list[str]],
+    retired: frozenset[str],
+    unreadable_retired: int,
     protected: Sequence[str],
 ) -> str | None:
     """The first of §4.2.1's remaining refusals this candidate earns, or
@@ -440,6 +501,8 @@ def _refuse(
             dep,
             merged_anywhere=merged_anywhere,
             states_oldest_first=states_at_current_sha,
+            retired=retired,
+            unreadable_retired=unreadable_retired,
         )
         if reason is not None:
             unmet.append(reason)
@@ -467,8 +530,11 @@ def build_queue(
 
     `repo_id` is `resolve_repo_id`'s answer, and `None` is a real case — a repo
     with no ledger row has no history to filter against, so every parseable
-    spec is a fresh candidate — except one with a `depends_on`, which is
-    refused, because no row can say its parent merged.
+    spec is a fresh candidate — except one with a `depends_on` that only the
+    ledger could satisfy, which is refused, because no row can say its parent
+    merged. `specs/done/` is read either way, and `SA-0020` is why: retirement
+    is the operator's assertion, not the ledger's, and a repo with no rows at
+    all is exactly the repo whose work was done by hand.
 
     `repo_slug` is `owner/repo` for the two refusals that need GitHub's
     state. `None` — the default, and what every caller before `SA-0017`
@@ -525,9 +591,20 @@ def build_queue(
         for discovered in specs
     }
 
+    retired, retired_failures = _retired_ids(directory)
     open_prs = _open_prs(repo_slug, gh) if repo_slug is not None else []
 
     refusals = [Refusal(path=f.path, reason=f.reason) for f in failures]
+    refusals += [
+        Refusal(
+            path=f.path,
+            reason=(
+                f"retired to {RETIRED_DIRNAME}/ but does not parse, so it "
+                f"credits no dependency: {f.reason}"
+            ),
+        )
+        for f in retired_failures
+    ]
     kept: list[Candidate] = []
     for candidate in candidates:
         reason = _refuse(
@@ -535,6 +612,8 @@ def build_queue(
             open_prs=open_prs,
             merged_anywhere=merged_anywhere,
             states_at_current_sha=states_at_current_sha,
+            retired=retired,
+            unreadable_retired=len(retired_failures),
             protected=protected,
         )
         if reason is not None:

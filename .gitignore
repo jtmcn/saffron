@@ -1,4 +1,6 @@
 .claude/settings.local.json
+# `claude --worktree` checkouts; git reads one as an embedded repo otherwise.
+.claude/worktrees/
 .DS_Store
 .env
 .env.*
