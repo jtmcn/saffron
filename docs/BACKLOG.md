@@ -1431,6 +1431,73 @@ infrastructure fault (exit `2`), not an empty scan — the same call
 `PREFLIGHT_FAILED` makes. An existing but empty directory stays `([], [])`,
 which is a true statement about a repo with no specs.
 
+## 27. `SA-0018` built a door it could not document, and the prompt then contradicted it
+
+`SA-0018` added a second producer of `SCOPE_REVIEW`: an IMPLEMENT attempt whose
+declared `touches` cannot satisfy its criteria proposes a set instead of grinding
+to a ceiling. The code shipped and works. The documents that define what the words
+mean did not move, because **`DESIGN.md` and `CONTEXT.md` were both in `SA-0018`'s
+own `forbidden` list** — so the spec that created the affordance was structurally
+unable to describe it.
+
+The result was a prompt that contradicted itself. `CONTEXT.md` §3 is injected into
+the IMPLEMENT system prompt (`SECTIONS_BY_PHASE['IMPLEMENT']` is `(1, 2, 3, 4, 10)`),
+and its **Touches** entry read "proposed by DIAGNOSE and ratified by the operator on
+bug specs". So the same assembled prompt offered the implementer the door and told
+it, more specifically, that the door was DIAGNOSE's on bug specs. The specific
+sentence wins that argument.
+
+**This is the situation `SA-0018` exists to give an exit from, one spec later and
+one level up.** Its `touches` could not reach the files its own feature made wrong;
+by the feature's own logic the correct move was a scope proposal naming `DESIGN.md`
+and `CONTEXT.md`. It was found by review instead. Note that a *proposal* naming
+those paths would have been recorded — `validate_scope_proposal` checks only that a
+path escapes `touches`, not that it escapes the deny lists — so the door was open;
+nothing pointed the implementer at it.
+
+Closed by `SA-0021`, by hand on the host (see item 28), 2026-08-30: §3.3 draws
+`SCOPE_REVIEW` from IMPLEMENTING, §5.3.1 states the door's three rules, §5.2 no
+longer claims the contract as DIAGNOSE's alone, and `CONTEXT.md`'s **Touches**
+entry names both proposers. The witness reads the *assembled* prompt rather than
+`CONTEXT.md`'s text, because reasoning about which sentences reach the model is
+what failed here.
+
+---
+
+## 28. A spec whose `touches` are protected paths dies at the plan checkpoint with no exit
+
+`SA-0021` — the spec that closes item 27 — declared `DESIGN.md` and `CONTEXT.md`
+in `touches`, which is the only honest declaration it could make. Run as a cell on
+2026-08-30 (ledger task 18) it ended `PLAN_REJECTED` in 2m44s having spent $0.82:
+
+```
+PLAN: rejected, $0.82 spent — DESIGN.md is a protected path
+```
+
+`.saffron/policy.yaml` lists `DESIGN.md`, `CONTEXT.md`, `.saffron/**` and `uv.lock`
+under `protected:`, and `validate_plan` (`saffron/agents/artifacts.py`) rejects any
+plan naming a protected path — checked after `touches` and `forbidden`, with no
+exemption for a path the spec itself declares. The protection is right: those two
+documents are authoritative, and a cell rewriting the definition of its own
+constraints is exactly what a global deny list is for. What is missing is an exit.
+
+The scope-proposal door does not cover this. That door is for "the declared
+`touches` cannot satisfy the criteria"; here they can — it is policy, not scope,
+that bars them. So the implementer correctly wrote a plan, and the plan was
+correctly rejected, and the task is terminal at a state that means "your spec needs
+work" when the spec is as good as it can be. Every future attempt spends the same
+$0.82 to reach the same wall. This is item 18's shape — a declaration with no
+reader — inverted: a rejection with no route.
+
+**Done looks like** a plan naming a protected path inside the spec's own declared
+`touches` ending at `SCOPE_REVIEW` rather than `PLAN_REJECTED`, carrying the
+protected paths as the proposal and the rejection reason as the root cause, so the
+work reaches the operator as a one-click "do this by hand" rather than as a dead
+task. A plan naming a protected path *outside* `touches` stays a rejection: that is
+an agent reaching for something it was never given, which is the case the check was
+written for. Until then, a docs spec over protected paths must be run by hand and
+say so in its own notes.
+
 ---
 
 ## What is *not* here, deliberately
