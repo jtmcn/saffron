@@ -143,6 +143,11 @@ operator does to a PR).
 **Envelope**: The loose outer bound a DIAGNOSE phase may read within. Declared by
 the operator on bug specs; never enforced against a diff.
 
+**Retired spec**: A spec the operator has moved to `.saffron/specs/done/`, asserting
+that its work is in the default branch. Not offered to the scan, and admits a
+dependent the same way a `MERGED` task does — the assertion the ledger cannot
+make, because only a cell writes a task.
+
 **Touches**: The set of paths a task may change. Declared directly on non-bug specs.
 Proposed, then ratified by the operator, where the declaration cannot stand: by
 DIAGNOSE on a bug spec, which has none, and by IMPLEMENT on any spec whose declared

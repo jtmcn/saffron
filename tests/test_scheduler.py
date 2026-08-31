@@ -873,16 +873,16 @@ def test_a_dead_state_under_a_superseded_sha_does_not_speak_for_the_parent(
 def test_this_repos_own_specs_admit_a_merged_parent_and_name_a_retired_one(
     tmp_path, ledger
 ):
-    """Criterion 5's live witness, re-anchored a second time — 2026-08-31,
-    when `SA-0020` was retired to `specs/done/` as shipped, which is what the
-    criterion itself predicts happens to a witness built on a spec that is
-    about to finish. The shape is what survives, so it is the shape this
-    pins: one parent merged and on disk, one parent retired off it.
+    """Criterion 5's live witness, re-anchored a third time — 2026-08-31,
+    when retirement began satisfying a dependency. The shape survives each
+    time, so it is the shape this pins: one parent merged and on disk, one
+    parent retired off it, and both admitting their children.
 
-    `SA-0017`'s parent `SA-0016` is top-level and merged, so it is admitted —
-    the first thing this gate ever schedules. `SA-0022` and `SA-0023` depend
-    on `SA-0020`, which is no longer in the directory at all: a different fact
-    from having no task, and the reason has to say which one it read.
+    `SA-0017`'s parent `SA-0016` is top-level and merged — the first thing
+    this gate ever scheduled. `SA-0022` and `SA-0023` depend on `SA-0020`,
+    which is in `specs/done/` and has no task at all, because it was
+    implemented by hand: the case the ledger alone can never answer. A parent
+    that is genuinely absent still refuses, which the synthetic tests hold.
     """
     real_specs = Path(__file__).resolve().parent.parent / ".saffron" / "specs"
     directory = tmp_path / "specs"
@@ -898,12 +898,13 @@ def test_this_repos_own_specs_admit_a_merged_parent_and_name_a_retired_one(
 
     candidates, refusals = build_queue(directory, repo_id, ledger)
 
-    assert "SA-0017" in [c.spec.id for c in candidates]
+    scheduled = [c.spec.id for c in candidates]
+    assert "SA-0017" in scheduled
     for dependent in ("SA-0022", "SA-0023"):
-        reason = next(r.reason for r in refusals if r.path.name.startswith(dependent))
-        assert "SA-0020" in reason
-        assert "not among the specs in this directory" in reason
-        assert "spec_sha" not in reason
+        assert dependent in scheduled
+    # Not merely unrefused-for-some-other-reason: no line anywhere names the
+    # retired parent, which is the whole of what changed.
+    assert [r for r in refusals if "SA-0020" in r.reason] == []
 
 
 def test_waiting_and_dead_parents_do_not_get_the_same_reason(tmp_path, ledger):
@@ -967,10 +968,10 @@ def test_a_parent_in_any_other_state_is_named_by_that_state(tmp_path, ledger, st
 
 
 def test_a_parent_absent_from_the_scan_is_not_called_unrun(tmp_path, ledger):
-    """`discover_specs` globs `*.md` non-recursively, so a parent retired to
-    `specs/done/` — eleven were — is absent from the scan entirely. It has no
-    current `spec_sha` to have no task at, and saying it had not run names a
-    check this scan cannot perform, which is the defect this gate removed."""
+    """A parent that is nowhere — not on disk, not in `done/`, no task — has
+    no current `spec_sha` to have no task at, so saying it had not run names a
+    check this scan cannot perform, which is the defect this gate removed.
+    Retirement is the other case and is now admitted, not refused."""
     directory = _spec_dir(tmp_path)
     _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-GONE"])
     repo_id = _repo(ledger)
@@ -982,6 +983,56 @@ def test_a_parent_absent_from_the_scan_is_not_called_unrun(tmp_path, ledger):
     assert "not among the specs in this directory" in reason
     assert "spec_sha" not in reason
     assert "has not run" not in reason
+
+
+def test_a_parent_retired_as_shipped_satisfies_the_dependency(tmp_path, ledger):
+    """`specs/done/` is the operator asserting the parent's work is in `main`
+    — the same fact `MERGED` establishes, and the only one this gate needs,
+    because the child is cut from the default branch. Work done by hand
+    writes no task at all, so without this the ledger can never say it."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
+    (directory / "done").mkdir()
+    _write_spec(directory / "done", "b.md", id="TE-0", touches=["b.py"])
+    repo_id = _repo(ledger)
+
+    candidates, refusals = build_queue(directory, repo_id, ledger)
+
+    assert "TE-1" in [c.spec.id for c in candidates]
+    assert [r for r in refusals if r.path.name == "a.md"] == []
+
+
+def test_a_retired_parent_is_never_itself_offered_as_a_candidate(tmp_path, ledger):
+    """Reading `done/` for ids must not turn it into a second scan directory:
+    the whole point of the move is that the spec stops being offered."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
+    (directory / "done").mkdir()
+    _write_spec(directory / "done", "b.md", id="TE-0", touches=["b.py"])
+    repo_id = _repo(ledger)
+
+    candidates, refusals = build_queue(directory, repo_id, ledger)
+
+    assert "TE-0" not in [c.spec.id for c in candidates]
+    assert [r for r in refusals if r.path.name == "b.md"] == []
+
+
+def test_a_parent_that_is_neither_retired_nor_merged_names_both_checks(
+    tmp_path, ledger
+):
+    """The refusal names every check it performed and no check it did not —
+    an operator who reads it must know that `done/` was consulted too."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-GONE"])
+    (directory / "done").mkdir()
+    repo_id = _repo(ledger)
+
+    _, refusals = build_queue(directory, repo_id, ledger)
+    reason = next(r.reason for r in refusals if r.path.name == "a.md")
+
+    assert "TE-GONE" in reason
+    assert "done/" in reason
+    assert "no task in the ledger says it merged" in reason
 
 
 def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):

@@ -313,11 +313,38 @@ def protected_touch_refusal(touches: list[str], protected: Sequence[str]) -> str
     return None
 
 
+RETIRED_DIRNAME = "done"
+
+
+def _retired_ids(directory: Path) -> frozenset[str]:
+    """Spec ids the operator has retired to `specs/done/` as shipped.
+
+    That directory means one thing (`.saffron/specs/done/README.md`): the
+    spec's work is in the default branch. It is the same fact `MERGED`
+    establishes, and the only one this gate needs — a child is cut from that
+    branch, not stacked on its parent (§4.2). The ledger cannot always state
+    it: only a cell writes a task, so work done by hand leaves no row at all.
+
+    Read from frontmatter, never the filename — the id is declared, and a
+    file renamed on retirement would otherwise credit the wrong spec. A
+    retired spec that no longer parses is not credited: the refusal stands,
+    which is the direction that cannot admit a child whose parent is absent.
+    """
+    retired = directory / RETIRED_DIRNAME
+    if not retired.is_dir():
+        return frozenset()
+    # `discover_specs` globs non-recursively, so this reads `done/` alone and
+    # cannot turn it into a second scan directory.
+    shipped, _unparseable = discover_specs(retired)
+    return frozenset(discovered.spec.id for discovered in shipped)
+
+
 def _dependency_refusal(
     dep: str,
     *,
     merged_anywhere: frozenset[str],
     states_oldest_first: dict[str, list[str]],
+    retired: frozenset[str],
 ) -> str | None:
     """Why `dep` does not satisfy a dependency yet, or `None` if it does.
 
@@ -335,14 +362,19 @@ def _dependency_refusal(
     if dep in merged_anywhere:
         return None
 
+    # The operator's own assertion, where the ledger has no row to make it.
+    if dep in retired:
+        return None
+
     if dep not in states_oldest_first:
         # Not "no task at its current spec_sha" — it has no spec_sha here at
         # all. `discover_specs` globs `*.md` non-recursively, so a parent
         # retired to `specs/done/`, or an id that never existed, lands here.
         # Saying it had not run would name a check this scan cannot perform.
         return (
-            f"depends_on {dep} is not among the specs in this directory, and "
-            "no task in the ledger says it merged"
+            f"depends_on {dep} is not among the specs in this directory, not "
+            f"retired to {RETIRED_DIRNAME}/ as shipped, and no task in the "
+            "ledger says it merged"
         )
 
     states = states_oldest_first[dep]
@@ -379,6 +411,7 @@ def _refuse(
     open_prs: list[dict],
     merged_anywhere: frozenset[str],
     states_at_current_sha: dict[str, list[str]],
+    retired: frozenset[str],
     protected: Sequence[str],
 ) -> str | None:
     """The first of §4.2.1's remaining refusals this candidate earns, or
@@ -440,6 +473,7 @@ def _refuse(
             dep,
             merged_anywhere=merged_anywhere,
             states_oldest_first=states_at_current_sha,
+            retired=retired,
         )
         if reason is not None:
             unmet.append(reason)
@@ -525,6 +559,7 @@ def build_queue(
         for discovered in specs
     }
 
+    retired = _retired_ids(directory)
     open_prs = _open_prs(repo_slug, gh) if repo_slug is not None else []
 
     refusals = [Refusal(path=f.path, reason=f.reason) for f in failures]
@@ -535,6 +570,7 @@ def build_queue(
             open_prs=open_prs,
             merged_anywhere=merged_anywhere,
             states_at_current_sha=states_at_current_sha,
+            retired=retired,
             protected=protected,
         )
         if reason is not None:

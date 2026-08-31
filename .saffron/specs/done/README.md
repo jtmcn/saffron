@@ -53,10 +53,16 @@ so the scan does not offer it.
 **A third cause, found on 2026-08-31 when `SA-0020` shipped.** Work done *by
 hand* writes no task at all — cells are the only thing that creates one. So a
 spec a human implemented looks exactly like a spec nobody has run, and its
-dependents stay refused however plainly its code sits in `main`. The gate asks
-whether the parent's work is in the default branch and answers from a record of
+dependents stayed refused however plainly its code sat in `main`. The gate asked
+whether the parent's work is in the default branch and answered from a record of
 cell runs; for a repo where humans and cells both commit, those are different
 questions. Retiring the spec here says what the ledger cannot.
+
+**Closed 2026-08-31 (backlog item 32).** The dependency gate now reads this
+directory: a parent retired here admits its dependents exactly as a `MERGED`
+task does. Which makes the move above load-bearing rather than cosmetic —
+**retiring a spec whose work is not actually in `main` will schedule a child
+against code that does not exist.** The evidence column is the check.
 
 **Do not edit a spec in this directory.** An edit moves its `spec_sha`, and the
 sha is what the ledger's rows are keyed on.
