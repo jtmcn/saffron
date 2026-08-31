@@ -1513,6 +1513,44 @@ of that definition — not a quiet reuse.
 
 ---
 
+## 29. Nothing recorded that a task merged, measured against this repo's own ledger
+
+`SA-0019`. `set_task_state` is the only writer of `tasks.state`, and PACKAGE's
+last word is always `READY_FOR_REVIEW` — nothing asked GitHub what happened
+after, though §3.3 draws arrows onward to `MERGED`/`REJECTED`/
+`CHANGES_REQUESTED`/`APPROVED`, and a dead batch scan leaves `ORPHANED`.
+
+**Measured, 2026-08-30:** `select task_id,spec_id,state,pr_url from tasks
+where pr_url is not null` against this machine's ledger returned six rows,
+every one `READY_FOR_REVIEW`. Cross-referenced against this repo's own
+`git log --all --oneline --merges`:
+
+| spec | pull request | ledger said | `gh` says |
+|---|---|---|---|
+| `SA-0013`..`SA-0017` | #51, #56, #59, #60, #64 | `READY_FOR_REVIEW` | `MERGED` |
+| `SA-0018` | #65 | `READY_FOR_REVIEW` | still open |
+
+Five of six were wrong, with no mechanism that could make them right.
+
+**A corpse was never stamped either**, per §4.2.1's own premise: "in flight"
+and "dead" are synonyms only inside a batch scan, which v0.5 has none of —
+the only candidate caller is `saffron queue`, run at will, mid-phase
+included. A first attempt (`EXHAUSTED` at $12.12) stamped every in-flight
+row unconditionally and was correctly blocked: `ORPHANED` is in
+`scheduler.REQUEUE_STATES`, so a live row stamped that way is handed back
+out as resumable — a second cell on the same branch.
+
+**Done, 2026-08-31.** `saffron/reconcile.py`'s `reconcile()` — a writer
+inverting `scheduler._open_prs`'s best-effort shape (an untrustworthy `gh`
+answer counts as "could not be asked", never "not merged"; `MERGED` is never
+asked again) — wired into a new `saffron reconcile --repo .` and into
+`saffron queue` before it scans. Neither asserts §4.2.1's batch-scan premise,
+so `ORPHANED` still has no writer, the shape `depends_on` leaves the
+scheduler until `SA-0020`. Tested against this repo's own six rows above,
+plus the CLI witness that `IMPLEMENTING` survives `queue`/`reconcile`.
+
+---
+
 ## What is *not* here, deliberately
 
 DIAGNOSE and `SCOPE_REVIEW`, the scheduler's conflict sets and stacking, `saffron
