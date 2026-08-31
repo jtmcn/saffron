@@ -1589,6 +1589,90 @@ window, because `finish_run` precedes PACKAGE.
 
 ---
 
+## 30. A protected document's one-line definition of a gate drifts the moment the gate changes, and the fix is always by hand
+
+`SA-0024` widened `scope_gate` (`saffron/gates/core/scope.py`) to also fail a
+changed file matching a spec's `forbidden` list or the repo's `protected` list,
+not only a file outside `touches`. `CONTEXT.md` §3 still defines the gate in
+one line: *"The check that changed files are a subset of `touches`."* That
+sentence is now false — it describes half the gate — and nothing in this
+spec's `touches` can fix it: `CONTEXT.md` is `protected`, so no plan naming it
+can be validated (item 28's `SA-0023` refusal), and it is in this spec's own
+`forbidden` list besides. The correction is a by-hand follow-up, the same
+shape item 27 (`SA-0018`/`SA-0021`) and item 28 (`SA-0023`) already
+established for a protected document a spec cannot reach.
+
+**This is the second instance of that drift, not the first.** Item 27 is the
+first: `SA-0018` added a second producer of `SCOPE_REVIEW` and could not update
+`CONTEXT.md`'s **Touches** entry to say so, because `DESIGN.md` and
+`CONTEXT.md` were both in `SA-0018`'s own `forbidden` list — the same
+structural reason this item exists. `SA-0021` closed that one, by hand, one
+spec later. The pattern both instances share: a spec that changes what a core
+mechanism does can never be the spec that updates the one document defining it
+in prose, because that document is `protected` by the same policy the spec's
+own change makes more precise. A third instance should not need a third
+backlog item before it is treated as a rule of the process rather than a
+one-off gap: **any spec that changes core gate or phase behaviour should name,
+in its own notes, the `CONTEXT.md`/`DESIGN.md` sentence its change makes
+stale**, so the by-hand follow-up has a known list rather than a fresh reading
+of both documents each time.
+
+**Status:** **done** — by hand on the host, 2026-08-31, in `SA-0024`'s own
+pull request.
+
+**And the enumeration is what the item was actually for.** `CONTEXT.md` §3 was
+the sentence this item named, and it was the *least* load-bearing of the six.
+`DESIGN.md` — authoritative for what the system does, and cited by section
+number from specs — carried four more, one of which stated the shipped
+behaviour's exact opposite:
+
+- §3.1's frontmatter example: `forbidden: # denied at the plan checkpoint, not
+  against the diff`
+- §3.1's paragraph *"**`forbidden` and `protected` bind the plan, not the
+  diff** … No gate reads either against a diff."*
+- §3.1's next paragraph, describing the gap as *"Stated rather than fixed"*
+  after `SA-0024` fixed it
+- §5.4's gate table row: `| scope | core | yes | changed files ⊆ touches |`
+- §5.2's writeback rule, which item 31 covers separately
+
+The second of those already carried a scar — *"the wording here said otherwise
+until `SA-0011` leaned on it"* — so a spec that read it would have leaned on
+wording false in the opposite direction. The by-hand list this item asks specs
+to carry was written into `SA-0024` and still named only one of six documents,
+which is the argument for making it a check rather than a request: **the spec
+that proposed the rule did not follow it.** A plan-checkpoint or gate-0 check
+that a spec changing a core gate names the `DESIGN.md`/`CONTEXT.md` sentences
+its change makes stale is the shape; it is not written.
+
+## 31. `SA-0024` made `touches` unable to rescue the ratification writeback, in a repo whose spec directory is `protected`
+
+§5.2 requires the task's own spec path to be added to the ratified `touches`
+when a scope proposal is recorded, *"or that first commit fails the `scope`
+gate on every ratified task"* — the writeback commits to `.saffron/specs/…`,
+which DIAGNOSE would never propose. `saffron/cell/session.py` implements it,
+and its comment names the measurement.
+
+`SA-0024` made the deny lists independent of `touches`, which is the whole
+point of the change: widening `touches` must not clear a denied path. But
+this repo's `.saffron/policy.yaml` lists `.saffron/**` under `protected`, so
+the host-authored writeback commit is now exactly such a path. A ratified task
+would report `[scope] .saffron/specs/SA-XXXX-….md protected` — a blocking
+failure the agent cannot repair, because reverting it destroys the
+ratification the operator just granted.
+
+**Latent, not live.** Nothing in `saffron/` performs the writeback yet:
+`SCOPE_REVIEW` writes `scope_proposal.json` and stops for a human, and
+`base_sha` is the remote default-branch head, so a writeback merged by hand is
+already behind the base a cell diffs against. The mechanism is designed,
+documented and half-built, which is why this is an item rather than a note.
+
+**Done looks like** the recorded spec path exempted from the deny lists in the
+same place it joins `touches` — one exemption, host-added, never the model's —
+with a test that a ratified task's first commit passes `scope` in a repo whose
+spec directory is `protected`. Found by the review of `SA-0024`, not by a run.
+
+---
+
 ## What is *not* here, deliberately
 
 DIAGNOSE and `SCOPE_REVIEW`, the scheduler's conflict sets and stacking, `saffron

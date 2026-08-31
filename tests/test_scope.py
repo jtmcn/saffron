@@ -70,6 +70,75 @@ def test_no_declared_touches_skips_rather_than_failing_everything():
     assert "no touches declared" in result.summary
 
 
+def test_forbidden_and_protected_default_to_empty_and_change_nothing():
+    """Every caller and every test that predates the two new parameters is
+    unchanged: a call passing neither behaves exactly like one passing both
+    as empty lists."""
+    changed = ["src/a.py", "out/b.py"]
+    touches = ["src/**"]
+    implicit = scope_gate(changed, touches)
+    explicit = scope_gate(changed, touches, forbidden=[], protected=[])
+    assert implicit == explicit
+    assert implicit.status == "fail"
+    assert [f.code for f in implicit.failures] == ["out-of-scope"]
+
+
+def test_a_file_outside_touches_and_denied_still_reports_out_of_scope_unchanged():
+    """`forbidden`/`protected` are independent of the `touches` check: a file
+    can be both outside touches and denied by a list, and the pre-existing
+    out-of-scope failure for it is neither renamed nor dropped."""
+    result = scope_gate(
+        ["alembic/versions/0042_add.py"],
+        touches=["src/**"],
+        forbidden=["alembic/**"],
+        protected=["alembic/**"],
+    )
+    assert result.status == "fail"
+    codes = sorted(f.code for f in result.failures)
+    assert codes == ["forbidden", "out-of-scope", "protected"]
+    (out_of_scope,) = [f for f in result.failures if f.code == "out-of-scope"]
+    assert out_of_scope.message == "outside touches: src/**"
+
+
+def test_a_file_inside_touches_that_is_forbidden_fails_with_its_own_code():
+    # A glob, not a literal: `matches("docs/DESIGN.md", "docs/DESIGN.md")` is
+    # true with the arguments in either order, so a literal pins nothing.
+    result = scope_gate(
+        ["docs/DESIGN.md"],
+        touches=["docs/**"],
+        forbidden=["docs/*.md"],
+    )
+    assert result.status == "fail"
+    assert [f.file for f in result.failures] == ["docs/DESIGN.md"]
+    assert result.failures[0].code == "forbidden"
+    assert (
+        result.failures[0].message == "denied by this spec's forbidden list: docs/*.md"
+    )
+
+
+def test_a_file_inside_touches_that_is_protected_fails_with_its_own_code():
+    result = scope_gate(
+        ["docs/DESIGN.md"],
+        touches=["docs/**"],
+        protected=["docs/*.md"],
+    )
+    assert result.status == "fail"
+    assert [f.file for f in result.failures] == ["docs/DESIGN.md"]
+    assert result.failures[0].code == "protected"
+    assert (
+        result.failures[0].message == "denied by the repo's protected list: docs/*.md"
+    )
+
+
+def test_no_declared_touches_skips_before_either_deny_list_is_checked():
+    """A bug spec awaiting DIAGNOSE has no touches yet, so its diff is not
+    checked against forbidden or protected either — the ceiling stated where
+    the code is."""
+    result = scope_gate(["a.py"], touches=[], forbidden=["a.py"], protected=["a.py"])
+    assert result.status == "skip"
+    assert "no touches declared" in result.summary
+
+
 def _hostile_repo(path):
     """A real repo whose worktree config bends every diff knob an agent can set."""
     path.mkdir(parents=True, exist_ok=True)
@@ -148,6 +217,25 @@ def test_a_gate_handed_a_bent_diff_errors_rather_than_passing(tmp_path):
 
     pinned = _diff(tmp_path / "repo", base, *worktree.DIFF_FLAGS)
     assert scope_gate(["src/a.py"], touches=["src/**"], diff=pinned).status == "pass"
+
+
+def test_a_denial_on_a_bent_diff_errors_rather_than_failing(tmp_path):
+    """`error` outranks a denial. A gate that cannot read its own input has
+    not established the denial it would otherwise report, and `error` is
+    charged to nobody while `fail` says the repo's code is wrong (§5.4)."""
+    base = _hostile_repo(tmp_path / "repo")
+    bent = _diff(tmp_path / "repo", base, "--no-ext-diff")
+
+    result = scope_gate(
+        ["src/a.py"],
+        touches=["src/**"],
+        forbidden=["src/**"],
+        protected=["src/**"],
+        diff=bent,
+    )
+
+    assert result.status == "error"
+    assert result.failures == []
 
 
 def test_a_quoted_path_is_still_a_recognised_header():

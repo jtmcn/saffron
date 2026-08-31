@@ -149,7 +149,8 @@ DIAGNOSE on a bug spec, which has none, and by IMPLEMENT on any spec whose decla
 set cannot satisfy its acceptance criteria. Once fixed it feeds the conflict set
 and the `scope` gate.
 
-**`scope` gate**: The check that changed files are a subset of `touches`.
+**`scope` gate**: The check that changed files are a subset of `touches`, and
+match neither the spec's `forbidden` list nor the repo's `protected` list.
 
 > Never write bare "scope" as a noun. It reads as any of the three above and they
 > are enforced at different times by different things. Say "envelope", "touches",

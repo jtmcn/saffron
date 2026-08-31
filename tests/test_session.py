@@ -1121,6 +1121,56 @@ def test_a_diff_outside_touches_fails_the_suite(monkeypatch, tmp_path):
     )
 
 
+def test_a_forbidden_path_inside_touches_fails_the_suite(monkeypatch, tmp_path):
+    """`spec.forbidden` was read into the plan checkpoint (`validate_plan`)
+    and never against the diff (SA-0024's Context) — an agent that declares
+    one plan and commits another left it invisible. `src/secret.py` is inside
+    the default touches (`src/**`), is not named in the plan's
+    `files_to_change` (so `validate_plan` never sees it), and would pass
+    `scope` before this change; `spec.forbidden` denies it specifically,
+    driven through the real suite rather than by calling `scope_gate`
+    directly."""
+    cell = _stub_the_runtime(
+        monkeypatch, changed=("src/secret.py",), suites=([], [], [])
+    )
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn()],
+        spec=_spec(forbidden=["src/secret.py"]),
+    )
+    assert outcome.state == "EXHAUSTED"
+    # The repair prompt is the whole of what the agent receives about a gate.
+    assert (
+        "- [scope] src/secret.py:? forbidden: "
+        "denied by this spec's forbidden list: src/secret.py"
+    ) in cell.turns[2]
+
+
+def test_a_protected_path_inside_touches_fails_the_suite(monkeypatch, tmp_path):
+    """`policy.protected` reaches the same `scope_gate` call `spec.forbidden`
+    does, proven from the real policy YAML `_drive` writes to
+    `.saffron/policy.yaml` rather than a hand-built list. `src/secret.py` is
+    again absent from the plan's `files_to_change`, so `validate_plan` never
+    refuses it at the checkpoint."""
+    cell = _stub_the_runtime(
+        monkeypatch, changed=("src/secret.py",), suites=([], [], [])
+    )
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn()],
+        policy="gates: {}\nprotected:\n  - src/secret.py\n",
+    )
+    assert outcome.state == "EXHAUSTED"
+    assert (
+        "- [scope] src/secret.py:? protected: "
+        "denied by the repo's protected list: src/secret.py"
+    ) in cell.turns[2]
+
+
 def test_a_size_failure_at_standard_does_not_enter_the_repair_loop(
     monkeypatch, tmp_path
 ):
