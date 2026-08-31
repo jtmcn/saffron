@@ -349,3 +349,35 @@ def test_a_malformed_proposal_is_a_schema_failure():
         validate_scope_proposal(
             '<output>{"kind": "scope_proposal"}</output>', touches=TOUCHES
         )
+
+
+@pytest.mark.parametrize(
+    "path", ["", "   ", "..", "docs/../../etc/passwd", "/etc/passwd", "*", "**"]
+)
+def test_a_proposal_naming_a_malformed_path_is_refused(path):
+    """Path hygiene, which the inside-`touches` rule cannot supply: junk is
+    *outside* `touches`, so the escape-hatch guard reads it as a real escape and
+    any hard spec can be ended on turn one with `proposed_touches: [""]`.
+    `**` is the worst of them — a ratified `touches` of `**` makes the `scope`
+    gate vacuous for that task forever."""
+    with pytest.raises(ScopeProposalRefused, match="not a usable path"):
+        validate_scope_proposal(_proposal(proposed_touches=[path]), touches=TOUCHES)
+
+
+def test_a_malformed_path_refuses_the_whole_proposal():
+    """Refused, not filtered: a control artifact that is partly junk is not a
+    record to ratify, and silently dropping an entry would record a scope the
+    model never proposed."""
+    with pytest.raises(ScopeProposalRefused, match="not a usable path"):
+        validate_scope_proposal(
+            _proposal(proposed_touches=["saffron/cli.py", ""]), touches=TOUCHES
+        )
+
+
+def test_a_legitimate_glob_outside_touches_is_still_accepted():
+    """The hygiene rule must not cost the ordinary case: a proposal *is* a
+    `touches` set, and `touches` entries are globs."""
+    proposal = validate_scope_proposal(
+        _proposal(proposed_touches=["saffron/report/**"]), touches=TOUCHES
+    )
+    assert proposal.proposed_touches == ["saffron/report/**"]

@@ -126,6 +126,28 @@ def extraction_kind(raw: str) -> str:
     return "plan"
 
 
+# A proposal is refused for *not escaping* `touches`, which is the inverse of
+# `validate_plan`'s rule — and inverting it loses the hygiene that rule got for
+# free. Junk is outside `touches`, so without this every one of these reads as a
+# real escape (SA-0018 review).
+_WHOLE_REPO = {"*", "**", ".", "/", "./", "**/*"}
+
+
+def _unusable(path: str) -> str | None:
+    """Why `path` cannot be a `touches` entry, or `None` if it can."""
+    if not path.strip():
+        return "it is empty"
+    if path != path.strip():
+        return "it is padded with whitespace"
+    if path.startswith("/"):
+        return "it is absolute"
+    if ".." in PurePosixPath(path).parts:
+        return "it escapes the repository"
+    if path in _WHOLE_REPO:
+        return "it matches the whole repository, which would make `scope` vacuous"
+    return None
+
+
 def validate_scope_proposal(raw: str, *, touches: list[str]) -> ScopeProposal:
     """Validate a scope proposal, or raise a `PlanRejected` subclass.
 
@@ -145,6 +167,9 @@ def validate_scope_proposal(raw: str, *, touches: list[str]) -> ScopeProposal:
         raise ScopeProposalRefused("scope proposal names no paths")
     if not proposal.root_cause.strip():
         raise ScopeProposalRefused("scope proposal carries no root cause")
+    for path in proposal.proposed_touches:
+        if (why := _unusable(path)) is not None:
+            raise ScopeProposalRefused(f"{path!r} is not a usable path: {why}")
     if touches and all(
         _matches_any(path, touches) for path in proposal.proposed_touches
     ):
