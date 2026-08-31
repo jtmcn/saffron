@@ -2,6 +2,7 @@
 
 import argparse
 import hashlib
+import json
 import subprocess
 import tempfile
 
@@ -255,6 +256,22 @@ def _local_origin(tmp_path):
     return repo
 
 
+def _local_origin_with_policy(tmp_path, policy_yaml, *, dirname="repo-protected"):
+    """`_local_origin`, plus a real `.saffron/policy.yaml` committed *before*
+    the bare clone is cut — the same ordering `_repo_with_spec` uses, and for
+    the same reason: `base_sha` is the remote's head, so a file added after
+    the clone would never reach the export `_run_cell` reads it from."""
+    repo = _repo_with_commit(tmp_path / dirname)
+    (repo / ".saffron").mkdir()
+    (repo / ".saffron" / "policy.yaml").write_text(policy_yaml)
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "policy")
+    remote = tmp_path / f"{dirname}-remote.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(repo), str(remote)], check=True)
+    _git(repo, "remote", "add", "origin", str(remote))
+    return repo
+
+
 def _ceiling_spec(tmp_path, **frontmatter):
     spec = tmp_path / "SY-2.md"
     declared = "".join(f"{key}: {value}\n" for key, value in frontmatter.items())
@@ -433,12 +450,60 @@ def test_a_missing_token_fails_before_the_image_is_built(tmp_path, monkeypatch):
     assert not reached
 
 
-def _repo_with_spec(tmp_path, *, spec_text, dirname="repo", extra_specs=None):
+def test_a_spec_whose_touches_are_protected_refuses_before_the_cell_starts(
+    tmp_path, monkeypatch, capsys
+):
+    """`SA-0023`'s attended-path witness, end to end: a real `.saffron/
+    policy.yaml` at `base_sha`, a real spec whose `touches` collide with one
+    of its literal entries, driven through the real `cli._run_cell` — not a
+    refusal reason handed to an assertion. `SA-0021`'s own shape: `DESIGN.md`
+    declared in `touches`."""
+    repo = _local_origin_with_policy(
+        tmp_path, "protected:\n  - DESIGN.md\n  - CONTEXT.md\n"
+    )
+    args = _namespace(repo, tmp_path)
+    args.spec = tmp_path / "SY-9.md"
+    args.spec.write_text(
+        "---\nid: SY-9\ntitle: Nine\ntype: docs\ntouches: ['DESIGN.md']\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    started = False
+
+    def _started(*_a, **_k):
+        nonlocal started
+        started = True
+        raise SystemExit(0)
+
+    monkeypatch.setattr("saffron.cli.run_one_cell", _started)
+    ledger = Ledger(tmp_path / "l.db")
+
+    result = cli._run_cell(args, ledger, tmp_path / "out")
+
+    assert result == 1
+    assert not started  # no cell, no model call
+    out = capsys.readouterr().out
+    assert "DESIGN.md" in out
+    assert "protected" in out
+    assert "forbidden" in out
+    # No row left behind: the refusal happened before a task ever existed.
+    count = ledger._db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+    assert count == 0
+    ledger.close()
+
+
+def _repo_with_spec(
+    tmp_path, *, spec_text, dirname="repo", extra_specs=None, policy_yaml=None
+):
     """A repo whose `origin` is a local bare clone, cut *after* the spec is
     committed — so the remote's default-branch head, which is what `_queue`
     (like `_run_cell`) exports `.saffron/` from, actually contains it. A
     local-path origin, not a forge remote, so `github_slug` genuinely fails on
-    it rather than needing to be faked."""
+    it rather than needing to be faked.
+
+    `policy_yaml` is `None` by default — every caller before `SA-0023` gets a
+    repo with no `.saffron/policy.yaml` at all, exactly as before, since
+    `_protected_paths` is best-effort about that (`cli.py`)."""
     repo = tmp_path / dirname
     repo.mkdir()
     _git(repo, "init", "-q")
@@ -448,6 +513,8 @@ def _repo_with_spec(tmp_path, *, spec_text, dirname="repo", extra_specs=None):
     (specs / "SY-1.md").write_text(spec_text)
     for name, text in (extra_specs or {}).items():
         (specs / name).write_text(text)
+    if policy_yaml is not None:
+        (repo / ".saffron" / "policy.yaml").write_text(policy_yaml)
     _git(repo, "add", "-A")
     _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "first")
     remote = tmp_path / f"{dirname}-remote.git"
@@ -486,6 +553,34 @@ def test_queue_prints_the_real_scheduler_queue_and_writes_nothing_to_the_ledger(
         count = ledger._db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         assert count == 0, f"{table} should be empty against an unseen repo"
     ledger.close()
+
+
+def test_queue_refuses_a_spec_whose_touches_match_a_protected_path(tmp_path, capsys):
+    """`SA-0023`'s scan-side witness: a real `.saffron/policy.yaml` declaring
+    `protected:`, and a real spec whose `touches` collide with one of its
+    literal entries, driven through the real `saffron queue` — not a
+    refusal reason handed to an assertion."""
+    spec_text = (
+        "---\nid: SY-1\ntitle: One\ntype: docs\ntouches: ['DESIGN.md']\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    repo = _repo_with_spec(
+        tmp_path,
+        spec_text=spec_text,
+        dirname="repo-protected",
+        policy_yaml="protected:\n  - DESIGN.md\n  - CONTEXT.md\n",
+    )
+    home = tmp_path / "home"
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    out = capsys.readouterr().out
+    assert "queue: 0 candidate(s)" in out
+    assert "refusals: 1" in out
+    assert "SY-1.md" in out
+    assert "DESIGN.md" in out
+    assert "protected" in out
+    assert "forbidden" in out
 
 
 def test_queue_says_which_refusals_did_not_run_when_no_slug_resolves(tmp_path, capsys):
@@ -766,3 +861,43 @@ def test_queue_says_the_refusals_did_not_run_when_gh_is_not_installed(
     out = capsys.readouterr().out
     assert "gh could not be run" in out
     assert "did not run" in out
+
+
+def test_the_plan_checkpoint_still_rejects_what_the_refusal_could_not_decide(
+    tmp_path,
+):
+    """`SA-0023`'s fifth acceptance criterion: the plan checkpoint's own
+    protected-path rejection stays exactly as it is, and it is still the
+    backstop for the case `protected_touch_refusal` deliberately leaves
+    undecided (its own `ponytail:`) — a `protected` entry that is itself a
+    glob. `.saffron/**` is this repo's own such entry."""
+    from saffron.agents.artifacts import PlanRejected, validate_plan
+    from saffron.scheduler import protected_touch_refusal
+
+    touches = [".saffron/**"]
+    protected = [".saffron/**"]
+
+    # The refusal cannot decide a glob against a glob — this is the gap the
+    # plan checkpoint exists to close.
+    assert protected_touch_refusal(touches, protected) is None
+
+    raw = (
+        "<output>"
+        + json.dumps(
+            {
+                "understanding": "u",
+                "approach": "a",
+                "files_to_change": [".saffron/policy.yaml"],
+                "test_strategy": "t",
+                "risks": [],
+                "blocking_questions": [],
+                "estimated_lines": 5,
+            }
+        )
+        + "</output>"
+    )
+
+    with pytest.raises(PlanRejected, match="protected"):
+        validate_plan(
+            raw, touches=touches, forbidden=[], protected=protected, spec_type="docs"
+        )

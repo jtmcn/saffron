@@ -17,7 +17,15 @@ from saffron.reconcile import ReconcileResult, reconcile
 from saffron.replay import replay
 from saffron.repos import image as repo_image
 from saffron.repos import mirror as git_mirror
-from saffron.scheduler import Candidate, GhRunner, Refusal, build_queue, run_gh
+from saffron.repos.policy import PolicyError, load_policy
+from saffron.scheduler import (
+    Candidate,
+    GhRunner,
+    Refusal,
+    build_queue,
+    protected_touch_refusal,
+    run_gh,
+)
 
 DEFAULT_HOME = Path.home() / ".saffron"
 
@@ -166,6 +174,34 @@ def _ceilings(args: argparse.Namespace, spec: Spec) -> tuple[dict, str]:
     return chosen, line
 
 
+def _protected_paths(exported: Path) -> list[str]:
+    """`policy.protected` at an already-exported `.saffron` root — best
+    effort, the same shape `scheduler._open_prs` is best-effort for the same
+    reason (`SA-0016`): a `policy.yaml` that does not parse is a broken repo,
+    and diagnosing a broken repo is preflight's job (inside the cell this
+    refusal exists to let a task skip), not this cheap early read's. A repo
+    this cannot answer for reaches exactly as far as it did before `SA-0023`.
+    """
+    try:
+        policy, _policy_sha = load_policy(exported)
+    except PolicyError:
+        return []
+    return policy.protected
+
+
+def _protected_paths_at(mirror: Path, base_sha: str, scratch: Path) -> list[str]:
+    """`_protected_paths`, but for a caller (`_run_cell`) that has not
+    exported `.saffron` yet. A `base_sha` this repo has not onboarded — no
+    `.saffron` at all — is the same best-effort case: `session.py`'s own
+    `export_saffron_dir` call, deeper in preflight, is still there to say so
+    properly once a cell actually starts."""
+    try:
+        exported = git_mirror.export_saffron_dir(mirror, base_sha, scratch)
+    except git_mirror.GitError:
+        return []
+    return _protected_paths(exported)
+
+
 def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # Checked before the image build, not at the cell door: `session` forwards
     # this only if it is set, so a missing one reached the agent as "Not logged
@@ -191,6 +227,19 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # The remote's default-branch head, not the invoking checkout's: a task's
     # base must not depend on where the operator was standing (§5.7).
     _, base_sha = package_phase.fetch_default_branch(mirror, url)
+
+    # Read before an image is built or a container is started, from `base_sha`
+    # — never `repo`, the working copy (item 13, item 15 are both that
+    # mistake) — so a spec whose own `touches` collide with `policy.yaml`'s
+    # `protected` list is refused for the price of a `git archive`, not a
+    # cell, a turn and $0.82 (`SA-0021`, measured, docs/BACKLOG.md item 28).
+    # No task row exists yet, so nothing is left in an in-flight state.
+    with tempfile.TemporaryDirectory() as scratch:
+        protected = _protected_paths_at(mirror, base_sha, Path(scratch) / "at-base")
+    collision = protected_touch_refusal(spec.touches, protected)
+    if collision is not None:
+        print(f"{spec.id:<10} refused  {collision}")
+        return 1
 
     # Printed, not merely applied: three ceilings govern a run and only one of
     # them appears in the exit. SA-0005 was stopped by the turn ceiling with
@@ -280,6 +329,9 @@ def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
             # refusals run at all; the runner only decides how a `gh` that
             # cannot start is reported.
             repo_slug=repo_slug,
+            # `policy.yaml` sits right beside `specs/` in the same export —
+            # no second export, and never the working copy (`SA-0023`).
+            protected=_protected_paths(exported),
             gh=_guarded_gh(gh_failures),
         )
 

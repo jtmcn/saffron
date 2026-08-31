@@ -661,6 +661,80 @@ def test_criterion_path_matching_is_exact_not_a_directory_insensitive_suffix(
     assert "gates/core/scope.py" in refusals[0].reason
 
 
+# --------------------------------------------- refusal: touches vs protected
+
+
+def test_a_touches_entry_matching_a_protected_literal_path_is_refused(tmp_path, ledger):
+    """`SA-0021`'s own shape: `DESIGN.md` declared in `touches` is exactly
+    the collision that cost a cell, a turn and $0.82 before it reached
+    `validate_plan` (docs/BACKLOG.md item 28)."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["DESIGN.md", "saffron/x.py"])
+
+    candidates, refusals = build_queue(
+        directory,
+        None,
+        ledger,
+        protected=["DESIGN.md", "CONTEXT.md", ".saffron/**", "uv.lock"],
+    )
+
+    assert candidates == []
+    assert len(refusals) == 1
+    reason = refusals[0].reason
+    assert "DESIGN.md" in reason
+    assert "protected" in reason
+    assert "forbidden" in reason
+
+
+def test_protected_matching_uses_the_glob_matcher_not_a_string_compare(
+    tmp_path, ledger
+):
+    """Same mistake `SA-0016`'s fifth refusal already records
+    (`_path_tokens`'s own docstring): a nested path string-compares to no
+    match against a `**` pattern that plainly covers it. `docs/nested/x.md`
+    never appears verbatim in `touches` — only `docs/**` does."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["docs/**"])
+
+    candidates, refusals = build_queue(
+        directory, None, ledger, protected=["docs/nested/x.md"]
+    )
+
+    assert candidates == []
+    assert "docs/nested/x.md" in refusals[0].reason
+
+
+def test_a_glob_protected_entry_is_not_decided_here(tmp_path, ledger):
+    """`.saffron/**` is this repo's own fourth `protected` entry, and the one
+    that is not literal (docs/BACKLOG.md item 28, `SA-0023`'s own criteria).
+    Deciding whether it can ever intersect a `touches` glob needs the file
+    list at `base_sha`, which the scan does not have — `protected_touch_
+    refusal`'s own `ponytail:` — so this is left to `validate_plan`'s
+    backstop once a plan reaches a concrete file, not refused here."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=[".saffron/gates/lint"])
+
+    candidates, refusals = build_queue(
+        directory, None, ledger, protected=[".saffron/**"]
+    )
+
+    assert [c.spec.id for c in candidates] == ["TE-1"]
+    assert refusals == []
+
+
+def test_no_protected_declared_changes_nothing(tmp_path, ledger):
+    """`protected`'s default is `()`, so every caller before `SA-0023`
+    (every existing test in this file included) gets exactly the queue it
+    already had."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["DESIGN.md"])
+
+    candidates, refusals = build_queue(directory, None, ledger)
+
+    assert [c.spec.id for c in candidates] == ["TE-1"]
+    assert refusals == []
+
+
 # ------------------------------------------------------- refusal: depends_on
 
 
