@@ -1011,14 +1011,16 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     two ids are not arbitrary — they are the only top-level specs with an
     empty `depends_on`, and every other one would be refused by the dependency
     gate rather than queued, which would test the refusal instead of the
-    filter. A smoke check, not proof the refusals work on their own — those
-    are the fixtures above."""
+    filter. Re-anchored 2026-08-31, when `SA-0009` was retired to `specs/done/`
+    as shipped and `SA-0024` took its place as the second such spec. A smoke
+    check, not proof the refusals work on their own — those are the fixtures
+    above."""
     real_specs = Path(__file__).resolve().parent.parent / ".saffron" / "specs"
     directory = tmp_path / "specs"
     shutil.copytree(real_specs, directory)
     repo_id = _repo(ledger)
 
-    still_open = {"SA-0009", "SA-0019"}
+    still_open = {"SA-0019", "SA-0024"}
     for path in sorted(directory.glob("*.md")):
         spec, spec_sha = load_spec(path)
         if spec.id in still_open:
@@ -1035,11 +1037,11 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         directory, repo_id, ledger, repo_slug="joel/saffron", gh=_fake_gh([])
     )
 
-    assert [c.spec.id for c in candidates] == ["SA-0009", "SA-0019"]
+    assert [c.spec.id for c in candidates] == ["SA-0019", "SA-0024"]
     assert refusals == []
 
     # Again with no ledger, so nothing is filtered before `_refuse` runs. The
-    # pass above reaches the refusals for two of ten specs — the other eight
+    # pass above reaches the refusals for two of nine specs — the other seven
     # are dropped as done first — so on its own it stays green while
     # every one of them is falsely refused, which is how the criterion-path
     # check shipped refusing SA-0011 and SA-0016 (this spec) on their own
