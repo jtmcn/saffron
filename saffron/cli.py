@@ -8,7 +8,7 @@ import os
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from saffron.cell.session import _SHA as _RESOLVED_SHA
@@ -180,22 +180,29 @@ def _ceilings(args: argparse.Namespace, spec: Spec) -> tuple[dict, str]:
     return chosen, line
 
 
-def _protected_paths(exported: Path) -> list[str]:
-    """`policy.protected` at an already-exported `.saffron` root — best
-    effort, the same shape `scheduler._open_prs` is best-effort for the same
-    reason (`SA-0016`): a `policy.yaml` that does not parse is a broken repo,
-    and diagnosing a broken repo is preflight's job (inside the cell this
-    refusal exists to let a task skip), not this cheap early read's. A repo
-    this cannot answer for reaches exactly as far as it did before `SA-0023`.
+def _protected_paths(exported: Path, unread: list[str] | None = None) -> list[str]:
+    """`policy.protected` at an already-exported `.saffron` root.
+
+    Best effort about the *value* — a `policy.yaml` that does not parse is a
+    broken repo, and diagnosing one is preflight's job, not this cheap early
+    read's — but never silent about the *absence*. `_open_prs` is the
+    precedent for the shape and `_guarded_gh` is the precedent for this half:
+    a scan whose refusals never ran must not print what a scan that ran them
+    and found nothing prints (§5.4). The reason is appended to `unread` when
+    the caller passes a list to collect it.
     """
     try:
         policy, _policy_sha = load_policy(exported)
-    except PolicyError:
+    except PolicyError as broke:
+        if unread is not None:
+            unread.append(str(broke))
         return []
     return policy.protected
 
 
-def _protected_paths_at(mirror: Path, base_sha: str, scratch: Path) -> list[str]:
+def _protected_paths_at(
+    mirror: Path, base_sha: str, scratch: Path, unread: list[str] | None = None
+) -> list[str]:
     """`_protected_paths`, but for a caller (`_run_cell`) that has not
     exported `.saffron` yet. A `base_sha` this repo has not onboarded — no
     `.saffron` at all — is the same best-effort case: `session.py`'s own
@@ -203,9 +210,11 @@ def _protected_paths_at(mirror: Path, base_sha: str, scratch: Path) -> list[str]
     properly once a cell actually starts."""
     try:
         exported = git_mirror.export_saffron_dir(mirror, base_sha, scratch)
-    except git_mirror.GitError:
+    except git_mirror.GitError as broke:
+        if unread is not None:
+            unread.append(str(broke))
         return []
-    return _protected_paths(exported)
+    return _protected_paths(exported, unread)
 
 
 def _retirement_markers_at(mirror: Path, base_sha: str) -> list[tuple[str, str]]:
@@ -359,7 +368,7 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # No task row exists yet, so nothing is left in an in-flight state.
     with tempfile.TemporaryDirectory() as scratch:
         protected = _protected_paths_at(mirror, base_sha, Path(scratch) / "at-base")
-    collision = protected_touch_refusal(spec.touches, protected)
+    collision = protected_touch_refusal(spec.touches, protected, spec.forbidden)
     if collision is not None:
         print(f"{spec.id:<10} refused  {collision}")
         return 1
@@ -477,6 +486,7 @@ def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
     repo_id = ledger.resolve_repo_id(url)
 
     gh_failures: list[str] = []
+    policy_unread: list[str] = []
     reconciled = ReconcileResult()
     if repo_id is not None:
         reconciled = reconcile(ledger, repo_id, gh=_guarded_gh(gh_failures))
@@ -504,7 +514,7 @@ def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
             repo_slug=repo_slug,
             # `policy.yaml` sits right beside `specs/` in the same export —
             # no second export, and never the working copy (`SA-0023`).
-            protected=_protected_paths(exported),
+            protected=_protected_paths(exported, policy_unread),
             # Read from the mirror directly, not the export: a marker is a
             # comment anywhere in the tree, not something `.saffron/`'s own
             # archive carries (`SA-0027`).
@@ -513,7 +523,7 @@ def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
         )
 
     _print_reconcile_summary(reconciled)
-    _print_queue(candidates, refusals, repo_slug, exported, gh_failures)
+    _print_queue(candidates, refusals, repo_slug, exported, gh_failures, policy_unread)
     return 0
 
 
@@ -586,6 +596,7 @@ def _print_queue(
     repo_slug: str | None,
     root: Path,
     gh_failures: list[str],
+    policy_unread: Sequence[str] = (),
 ) -> None:
     # Paths are printed relative to the export root because the export is a
     # temporary directory already deleted by the time this runs — an absolute
@@ -612,6 +623,16 @@ def _print_queue(
         _print_skipped("no GitHub slug could be read from the remote")
     elif gh_failures:
         _print_skipped(f"gh could not be run ({gh_failures[0]})")
+    if policy_unread:
+        # Not a refusal that found nothing: one that never ran. The same
+        # distinction `_print_skipped` draws for a `gh` that could not start.
+        # The reason is deliberately not interpolated: it carries the export's
+        # own path, which is a temp directory already deleted by the time this
+        # prints — the same reason every path above is relativised.
+        _print_skipped(
+            "policy.yaml at this base_sha could not be read, so no spec was "
+            "checked against the protected list"
+        )
 
 
 def _print_skipped(because: str) -> None:

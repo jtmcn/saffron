@@ -2700,6 +2700,37 @@ rebuttal path carrying the attempt number it actually ran at. That needs
 `saffron/events.py`, which `SA-0041` and `SA-0042` both forbid — so it is
 either a spec of its own or the first thing part 3's first spec does.
 
+---
+
+## 48. §4.2.1's count of the refusal gate drifted the moment `SA-0023` added a seventh
+
+`SA-0023` added `protected_touch_refusal` (`saffron/scheduler.py`), so
+`DESIGN.md:383` — *"The refusal gate refuses six things, and the fifth is the
+only one with a corpse behind it"* — undercounts by one, and the enumeration
+that follows it does not mention the new one at all.
+
+The drift was designed in rather than overlooked: `DESIGN.md` is `protected`,
+so `SA-0023` could not touch it, and the module docstring is honest about the
+gap ("beyond §4.2.1's own six"). What makes it worth an item rather than a
+shrug is the circularity underneath. **The only spec that could repair a
+sentence in `DESIGN.md` is one whose `touches` names `DESIGN.md` — and that is
+now exactly what this refusal refuses.** `SA-0021` was the last such spec and
+it was run by hand for this reason; after `SA-0023` it does not even reach a
+cell. Every future correction to the two authoritative documents is a
+by-hand correction, permanently.
+
+That is the right trade — a cell rewriting the definition of its own
+constraints is what a global deny list is for — but it means the documents
+drift by default and nothing schedules the catch-up. §4.2.1's count is the
+first instance.
+
+**Status:** the count is **done** — `DESIGN.md:383` now reads *"The refusal
+gate refuses seven things"* and names `SA-0023`'s as the seventh, corrected by
+hand on the host. The reader is not: nothing checks that `DESIGN.md`'s stated
+count matches the refusals the code implements, so an eighth drifts the same
+way. Item 30 records the general practice this instance argues for — a spec
+that changes core behaviour naming the `CONTEXT.md`/`DESIGN.md` sentence it
+makes stale — and reached it from `SA-0024`'s side of the same wall.
 
 ---
 

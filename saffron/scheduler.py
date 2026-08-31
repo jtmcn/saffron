@@ -299,7 +299,9 @@ def _unmatched_criterion_path(spec: Spec) -> str | None:
     return None
 
 
-def protected_touch_refusal(touches: list[str], protected: Sequence[str]) -> str | None:
+def protected_touch_refusal(
+    touches: list[str], protected: Sequence[str], forbidden: Sequence[str] = ()
+) -> str | None:
     """Why this spec's own `touches` collides with the repo's global deny
     list, or `None`.
 
@@ -323,11 +325,31 @@ def protected_touch_refusal(touches: list[str], protected: Sequence[str]) -> str
     this refusal does not replace, only gets in front of.
     """
     for entry in protected:
+        # ponytail: `_GLOB_CHARS` includes `[`, which `scope._to_regex` does
+        # not tokenise — it escapes a bracket and matches it literally. So a
+        # `protected` entry containing one is skipped as undecidable when the
+        # matcher would in fact have decided it. Fails safe, and the backstop
+        # below still catches it.
         if _GLOB_CHARS.intersection(entry):
             continue
-        if any(matches(entry, pattern) for pattern in touches):
+        for pattern in touches:
+            if not matches(entry, pattern):
+                continue
+            # A path the spec's own `forbidden` already bars cannot be reached
+            # whatever `touches` covers — `validate_plan` rejects on
+            # `forbidden` before it ever consults `protected`. Refusing here
+            # would cost a night for a collision that cannot happen, which is
+            # why `_unmatched_criterion_path` above exempts the same list.
+            if any(matches(entry, denied) for denied in forbidden):
+                continue
+            if pattern == entry:
+                named = f"touches names {entry!r}"
+            else:
+                # Never "touches names X" for a glob: the operator greps the
+                # spec for a path that is not written in it.
+                named = f"touches pattern {pattern!r} covers {entry!r}"
             return (
-                f"touches names {entry!r}, which policy.yaml's protected list "
+                f"{named}, which policy.yaml's protected list "
                 "denies for every spec in this repo — not this spec's own "
                 "forbidden list"
             )
@@ -548,7 +570,9 @@ def _refuse(
     `SA-0023` check below, which runs first because it is the cheapest: no
     `gh`, no ledger, nothing but the spec and the policy already in hand."""
     if (
-        reason := protected_touch_refusal(candidate.spec.touches, protected)
+        reason := protected_touch_refusal(
+            candidate.spec.touches, protected, candidate.spec.forbidden
+        )
     ) is not None:
         return reason
 

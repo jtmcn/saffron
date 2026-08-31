@@ -998,6 +998,48 @@ def test_a_glob_protected_entry_is_not_decided_here(tmp_path, ledger):
     assert refusals == []
 
 
+def test_the_glob_guard_is_what_stops_a_false_refusal(tmp_path, ledger):
+    """The ceiling test above holds with or without the guard — `matches`
+    says False either way — so it does not witness the guard. This pair
+    does: without it, `matches("docs/*", "docs/**")` is True and a spec whose
+    `touches` cannot be shown to reach anything protected is refused for the
+    night. §4.2.1: a false refusal costs a whole spec overnight with nothing
+    to notice until morning."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["docs/**"])
+
+    candidates, refusals = build_queue(directory, None, ledger, protected=["docs/*"])
+
+    assert [c.spec.id for c in candidates] == ["TE-1"]
+    assert refusals == []
+
+
+def test_a_path_the_specs_own_forbidden_bars_is_not_a_collision(tmp_path, ledger):
+    """`validate_plan` rejects on `forbidden` before it ever consults
+    `protected`, so a spec that has denied itself the path cannot reach it
+    whatever `touches` covers. Refusing here would cost a night for a
+    collision that cannot happen — which is why `_unmatched_criterion_path`
+    exempts the same list twenty lines above."""
+    directory = _spec_dir(tmp_path)
+    # `docs/**` rather than a leading-`*` pattern: `_write_spec` emits touches
+    # unquoted and YAML reads a leading `*` as an alias.
+    _write_spec(
+        directory, "a.md", id="TE-1", touches=["docs/**"], forbidden=["docs/DESIGN.md"]
+    )
+    _write_spec(directory, "b.md", id="TE-2", touches=["docs/**"])
+
+    candidates, refusals = build_queue(
+        directory, None, ledger, protected=["docs/DESIGN.md"]
+    )
+
+    assert [c.spec.id for c in candidates] == ["TE-1"]
+    reason = next(r.reason for r in refusals if r.path.name == "b.md")
+    # And the one that is refused is told what actually matched: a pattern
+    # covering the path, not `touches` naming it.
+    assert "covers 'docs/DESIGN.md'" in reason
+    assert "touches names" not in reason
+
+
 def test_no_protected_declared_changes_nothing(tmp_path, ledger):
     """`protected`'s default is `()`, so every caller before `SA-0023`
     (every existing test in this file included) gets exactly the queue it

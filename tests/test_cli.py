@@ -411,6 +411,14 @@ def _local_origin_with_policy(tmp_path, policy_yaml, *, dirname="repo-protected"
     remote = tmp_path / f"{dirname}-remote.git"
     subprocess.run(["git", "clone", "-q", "--bare", str(repo), str(remote)], check=True)
     _git(repo, "remote", "add", "origin", str(remote))
+    # The working copy's policy is then made to disagree with the committed
+    # one. Without this the two reads are indistinguishable, and rewriting
+    # the export read to a working-copy read — backlog items 13 and 15, the
+    # exact mistake `SA-0023`'s own notes name twice — leaves the suite
+    # green. Measured: it did, until this line.
+    (repo / ".saffron" / "policy.yaml").write_text(
+        "gates: {}\nprotected: []\nintegrity:\n  test_paths: ['tests/**']\n"
+    )
     return repo
 
 
@@ -1183,6 +1191,11 @@ def _repo_with_spec(
     remote = tmp_path / f"{dirname}-remote.git"
     subprocess.run(["git", "clone", "-q", "--bare", str(repo), str(remote)], check=True)
     _git(repo, "remote", "add", "origin", str(remote))
+    if policy_yaml is not None:
+        # Same reason as `_local_origin_with_policy`: with the committed
+        # and working-copy policies identical, a read of either passes and
+        # the export-not-working-copy property has no witness.
+        (repo / ".saffron" / "policy.yaml").write_text("protected: []\n")
     return repo
 
 
