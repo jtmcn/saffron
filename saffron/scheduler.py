@@ -7,7 +7,7 @@ This is the second and third of `SA-0009`'s split. `SA-0015` built the
 §4.2.1's six refusals: an open pull request from another task already
 targeting this spec, a `touches` overlap with an open pull request's changed
 files, an acceptance criterion naming a path no `touches` pattern matches,
-and a non-empty `depends_on`. That is five of the six refusals gate 0
+and a `depends_on` no `MERGED` task satisfies. That is five of the six refusals gate 0
 describes — the sixth, a repo that failed preflight, is a batch-level check
 outside `build_queue`'s job.
 """
@@ -112,8 +112,8 @@ class Refusal:
     """One path refused before any cell starts — five of §4.2.1's six
     reasons: a parse failure (`SA-0015`), an open pull request from another
     task, a `touches` overlap with an open pull request's files, acceptance
-    criteria naming a path outside `touches`, and a non-empty `depends_on`
-    (`SA-0016`, all four here). The sixth, a repo that failed preflight, is a
+    criteria naming a path outside `touches`, and a `depends_on` the ledger
+    does not show merged (`SA-0016`, all four here). The sixth, a repo that failed preflight, is a
     batch-level check outside `build_queue`."""
 
     path: Path
@@ -270,10 +270,17 @@ def _unmatched_criterion_path(spec: Spec) -> str | None:
 
 def _dependency_refusal(
     dep: str,
+    *,
     merged_anywhere: frozenset[str],
-    states_at_current_sha: dict[str, list[str]],
+    states_oldest_first: dict[str, list[str]],
 ) -> str | None:
     """Why `dep` does not satisfy a dependency yet, or `None` if it does.
+
+    `states_oldest_first` maps a spec id to the states of its tasks *at the
+    sha that spec has on disk now*, oldest first — `tasks_by_spec` orders by
+    `task_id`, so `[-1]` is the newest. A spec id absent from it was not in
+    the scanned directory at all, which is a different fact from having no
+    task, and the two get different reasons.
 
     Every branch names the state it actually read. The old refusal said
     "depends_on is not scheduled" about a spec whose state it never looked up,
@@ -283,16 +290,26 @@ def _dependency_refusal(
     if dep in merged_anywhere:
         return None
 
-    states = states_at_current_sha.get(dep)
+    if dep not in states_oldest_first:
+        # Not "no task at its current spec_sha" — it has no spec_sha here at
+        # all. `discover_specs` globs `*.md` non-recursively, so a parent
+        # retired to `specs/done/`, or an id that never existed, lands here.
+        # Saying it had not run would name a check this scan cannot perform.
+        return (
+            f"depends_on {dep} is not among the specs in this directory, and "
+            "no task in the ledger says it merged"
+        )
+
+    states = states_oldest_first[dep]
     if not states:
-        # Two cases, one sentence, because the operator's next move is the same
-        # and the distinction is not one the scan can draw: the parent has never
-        # run, or it ran and its spec text has moved since.
         return (
             f"depends_on {dep} has no task at its current spec_sha, so nothing "
             "says it merged: it has not run, or not since it was last edited"
         )
 
+    # Waiting outranks dead whatever the row order: a live task at
+    # `READY_FOR_REVIEW` may still land, and a sibling row that did not is not
+    # a fact about the one that might.
     waiting = [s for s in states if s in DEPENDENCY_WAITING_STATES]
     if waiting:
         return (
@@ -364,10 +381,21 @@ def _refuse(
     if (escaped := _unmatched_criterion_path(candidate.spec)) is not None:
         return f"acceptance criteria name {escaped!r}, which no touches pattern matches"
 
+    unmet = []
     for dep in candidate.spec.depends_on:
-        reason = _dependency_refusal(dep, merged_anywhere, states_at_current_sha)
+        reason = _dependency_refusal(
+            dep,
+            merged_anywhere=merged_anywhere,
+            states_oldest_first=states_at_current_sha,
+        )
         if reason is not None:
-            return reason
+            unmet.append(reason)
+    if unmet:
+        # The count, not just the first reason: an operator who clears one
+        # dependency and rediscovers the next tomorrow has lost a night to a
+        # line that could have said there were two.
+        suffix = f" (+{len(unmet) - 1} more unmet)" if len(unmet) > 1 else ""
+        return unmet[0] + suffix
 
     return None
 
@@ -385,7 +413,8 @@ def build_queue(
 
     `repo_id` is `resolve_repo_id`'s answer, and `None` is a real case — a repo
     with no ledger row has no history to filter against, so every parseable
-    spec is a fresh candidate.
+    spec is a fresh candidate — except one with a `depends_on`, which is
+    refused, because no row can say its parent merged.
 
     `repo_slug` is `owner/repo` for the two refusals that need GitHub's
     state. `None` — the default, and what every caller before `SA-0017`

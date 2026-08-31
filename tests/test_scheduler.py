@@ -755,7 +755,10 @@ def test_a_parent_that_will_not_merge_reads_differently_from_one_unrun(
     reason = next(r.reason for r in refusals if r.path.name == "a.md")
 
     assert state in reason
-    assert "not run" not in reason and "no task" not in reason
+    # Not "no task": that is the unrun message, and criterion 3 asks for a
+    # reason distinct from it. Asserted on the distinctive phrase rather than
+    # on "not run", which the dead message itself ends with ("not yet run").
+    assert "no task" not in reason
 
 
 def test_a_parent_with_no_task_names_that_rather_than_a_state(tmp_path, ledger):
@@ -817,6 +820,100 @@ def test_this_repos_own_specs_schedule_sa_0020_and_refuse_its_dependents(
         reason = next(r.reason for r in refusals if r.path.name.startswith(dependent))
         assert "SA-0020" in reason
         assert "no task" in reason
+
+
+def test_waiting_and_dead_parents_do_not_get_the_same_reason(tmp_path, ledger):
+    """Criteria 1 and 3 buy a *distinction*, and asserting each reason names
+    its own state does not witness one — a single generic message satisfies
+    both. Measured: deleting the waiting and dead branches outright left all
+    59 tests green before this test existed.
+    """
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-8"])
+    _write_spec(directory, "b.md", id="TE-2", touches=["b.py"], depends_on=["TE-9"])
+    _write_spec(directory, "p8.md", id="TE-8", touches=["p8.py"])
+    _write_spec(directory, "p9.md", id="TE-9", touches=["p9.py"])
+    repo_id = _repo(ledger)
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-8",
+        spec_sha=_sha(directory / "p8.md"),
+        state="READY_FOR_REVIEW",
+    )
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-9",
+        spec_sha=_sha(directory / "p9.md"),
+        state="REJECTED",
+    )
+
+    _, refusals = build_queue(directory, repo_id, ledger)
+    waiting = next(r.reason for r in refusals if r.path.name == "a.md")
+    dead = next(r.reason for r in refusals if r.path.name == "b.md")
+
+    # Not merely different strings — they differ once the state name, the only
+    # part a generic message would also vary, is removed.
+    assert waiting.replace("READY_FOR_REVIEW", "") != dead.replace("REJECTED", "")
+    assert "waits for the parent to land" in waiting
+    assert "will not merge as it stands" in dead
+
+
+@pytest.mark.parametrize("state", ["CHANGES_REQUESTED", "IMPLEMENTING"])
+def test_a_parent_in_any_other_state_is_named_by_that_state(tmp_path, ledger, state):
+    """The fallthrough handles most of the state space — every in-flight state
+    and five terminal ones — and nothing exercised it: replacing it with a
+    raise left the whole suite green."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
+    _write_spec(directory, "b.md", id="TE-0", touches=["b.py"])
+    repo_id = _repo(ledger)
+    _task_at(
+        ledger, repo_id, spec_id="TE-0", spec_sha=_sha(directory / "b.md"), state=state
+    )
+
+    _, refusals = build_queue(directory, repo_id, ledger)
+    reason = next(r.reason for r in refusals if r.path.name == "a.md")
+
+    assert state in reason
+    # It names what it read and nothing it did not: no bucket's wording.
+    assert "waits for the parent" not in reason
+    assert "will not merge as it stands" not in reason
+
+
+def test_a_parent_absent_from_the_scan_is_not_called_unrun(tmp_path, ledger):
+    """`discover_specs` globs `*.md` non-recursively, so a parent retired to
+    `specs/done/` — eleven were — is absent from the scan entirely. It has no
+    current `spec_sha` to have no task at, and saying it had not run names a
+    check this scan cannot perform, which is the defect this gate removed."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-GONE"])
+    repo_id = _repo(ledger)
+
+    _, refusals = build_queue(directory, repo_id, ledger)
+    reason = next(r.reason for r in refusals if r.path.name == "a.md")
+
+    assert "TE-GONE" in reason
+    assert "not among the specs in this directory" in reason
+    assert "spec_sha" not in reason
+    assert "has not run" not in reason
+
+
+def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
+    """One line in a morning queue: an operator who clears the first and meets
+    the second tomorrow has lost a night the line could have saved."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(
+        directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-8", "TE-9"]
+    )
+    repo_id = _repo(ledger)
+
+    _, refusals = build_queue(directory, repo_id, ledger)
+    reason = next(r.reason for r in refusals if r.path.name == "a.md")
+
+    assert "TE-8" in reason
+    assert "+1 more unmet" in reason
 
 
 # ---------------------------------------------------------------------- smoke
