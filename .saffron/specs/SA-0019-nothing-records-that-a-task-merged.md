@@ -10,6 +10,7 @@ touches:
   - saffron/cli.py
   - tests/test_reconcile.py
   - tests/test_cli.py
+  - CLAUDE.md
   - docs/BACKLOG.md
 forbidden:
   - DESIGN.md
@@ -20,7 +21,7 @@ forbidden:
   - saffron/phases/**
   - saffron/gates/**
   - saffron/report/**
-budget_usd: 12
+budget_usd: 16
 max_attempts: 4
 max_turns: 120
 risk: elevated
@@ -66,6 +67,11 @@ six tasks, and it has no mechanism that could ever make it right.
   docstring defers that write to "the half of `SA-0009` that runs a cell", which
   does not exist. A host power cut leaves a task reading `IMPLEMENTING` forever,
   and `IMPLEMENTING` is on neither list.
+- **But "in flight" and "dead" are only synonyms inside a batch scan**, which is
+  where §4.2.1 says it and why: *one batch runs at a time*. v0.5 has no batch
+  command, and the caller this spec actually wires the stamp into is `saffron
+  queue` — a command an operator runs at will, documented as writing nothing.
+  Read the rule with its premise or it stamps the living.
 
 ## Acceptance criteria
 - [ ] A task whose pull request merged is recorded `MERGED`; one whose pull
@@ -78,11 +84,29 @@ six tasks, and it has no mechanism that could ever make it right.
       merged"
 - [ ] Reconciliation never moves a task backwards: a task already `MERGED` stays
       `MERGED` on every subsequent run
-- [ ] Every task in an in-flight state (`DRAFT`, `QUEUED`, `DIAGNOSING`,
-      `IMPLEMENTING`, `GATING`, `REPAIRING`, `REVIEWING`, `REBUTTING`) is
-      stamped `ORPHANED`
+- [ ] `reconcile` stamps `ORPHANED` only where §4.2.1's premise for it holds.
+      That premise is stated in the same breath as the rule — *one batch runs at
+      a time, so nothing is legitimately in flight when a scan happens* — and
+      `saffron queue` is not a batch scan: an operator runs it whenever they
+      like, including while a cell is mid-phase. An in-flight row (`DRAFT`,
+      `QUEUED`, `DIAGNOSING`, `IMPLEMENTING`, `GATING`, `REPAIRING`, `REVIEWING`,
+      `REBUTTING`) is stamped only when the caller asserts that premise, never as
+      a side effect of a command that reads
+- [ ] The witness for that is a task that survives being looked at: a row in
+      `IMPLEMENTING` still reads `IMPLEMENTING` after the command an operator
+      would actually run, driven through the CLI rather than by calling the
+      stamping function directly. `ORPHANED` is in `REQUEUE_STATES`, so a row
+      stamped while its cell is alive is handed straight back out as resumable
+      — a second cell writing to the same task and branch, which is worse than
+      the stale state this spec exists to fix
 - [ ] `saffron reconcile --repo .` runs it on demand, and `saffron queue`
-      reconciles before it scans, so the scan filters on current state
+      reconciles the pull-request half before it scans, so the scan filters on
+      current state. `CLAUDE.md` calls `saffron queue` a preview that "writes
+      nothing" and its own docstring says the same; after this spec it writes,
+      and both have to stop being wrong
+- [ ] `set_task_package`'s docstring no longer claims the state it sets is "the
+      last word on the task" — `reconcile` is what makes that false, so the
+      claim cannot survive the change that falsifies it
 - [ ] The fixture is this repository's own six recorded tasks and their real
       pull request states — five merged, one open — not a spec written to be
       obviously stale
@@ -131,5 +155,21 @@ while #65 does not move.
 **A test that constructs the value it then asserts on proves nothing about the
 caller.** Drive this through `reconcile`, not by handing a state string to
 `set_task_state`.
+
+**The asymmetry has a second half, and the first attempt was blocked on it.**
+That attempt (2026-08-30, `EXHAUSTED` at $12.12) stamped every in-flight row
+unconditionally, and the correctness lens called it a blocker before the budget
+ran out: `ORPHANED` is in `REQUEUE_STATES`, so a row stamped while its cell is
+alive is handed back out as resumable and a second cell writes to the same task
+and branch. Absence of an answer is not "not merged"; presence of an in-flight
+state is not "dead". The same rule, on the other column.
+
+**Do not plan a liveness signal you cannot build.** A heartbeat column needs a
+writer, and the only thing that could write it is the cell supervisor —
+`saffron/cell/**` is forbidden here. A container probe needs `runtime.py`, same
+list (and Appendix G reserves it besides). What is in reach is the *caller*:
+`saffron/cli.py` is yours, and which command asserts §4.2.1's premise is a
+decision made there, in one place, in the open. A signal that is out of reach is
+a plan that fails at the checkpoint.
 
 Commit after each coherent step. Uncommitted work dies with the cell.
