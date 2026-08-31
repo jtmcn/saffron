@@ -7,10 +7,8 @@ depends_on:
   - SA-0019
 touches:
   - saffron/scheduler.py
-  - saffron/cell/session.py
   - saffron/cli.py
   - tests/test_scheduler.py
-  - tests/test_session.py
   - tests/test_cli.py
   - docs/BACKLOG.md
 forbidden:
@@ -18,6 +16,7 @@ forbidden:
   - CONTEXT.md
   - .saffron/**
   - saffron/reconcile.py
+  - saffron/cell/**
   - saffron/gates/**
   - saffron/phases/**
   - saffron/report/**
@@ -66,31 +65,55 @@ and reads as a verdict about `SA-0016`.
   commit its parent made — it is built on sand by a different route than the one
   §4.2 names, and its gates would judge a tree that never existed. §4.2 pairs the
   gate and the stacking in one sentence, so they ship together or not at all.
+  **This spec therefore admits only a parent that is already in `base_sha`** —
+  `MERGED`, nothing earlier. That needs no stacking, because there is no gap
+  between the parent's commits and the tree the child is cut from; the sand is
+  gone rather than shored up. §4.2's actual rule is `READY_FOR_REVIEW`, and
+  `SA-0022` restores it together with the stacking it requires. Until then a
+  dependency costs a night, which §4.2.1's own argument tolerates at this depth:
+  *"at this depth there is none to arbitrate."*
 
 ## Acceptance criteria
-- [ ] A spec whose every `depends_on` id has a task at `READY_FOR_REVIEW`,
-      `APPROVED`, `MERGE_TRAIN` or `MERGED` is a candidate, not a refusal
+- [ ] A spec whose every `depends_on` id has a `MERGED` task is a candidate,
+      not a refusal — `MERGED` and nothing earlier, because a merged parent is
+      in the default branch the child is cut from and needs no stacking. A
+      parent at `READY_FOR_REVIEW`, `APPROVED` or `MERGE_TRAIN` is refused here
+      with a reason that says it is waiting to merge, not that it is unrun
 - [ ] A spec whose dependency has no task, or only a task that never reached
       `READY_FOR_REVIEW`, is still refused — and the refusal names the state it
       actually read, so no reason claims a check it did not perform
 - [ ] A spec with a dependency at `REJECTED` or `EXHAUSTED` is refused with a
       reason distinct from "not started yet": a parent that will not merge and a
       parent not yet run are different facts about the night
-- [ ] A dependent task's worktree is created from its parent's pushed branch
-      head, not from `base_sha`, and a test asserts the parent's commits are
-      present in the dependent's tree
 - [ ] The dependency lookup is keyed on spec id across every `spec_sha`, not on
-      the pair: a parent is satisfied by the task that reached review, whatever
-      sha it ran at
-- [ ] `SA-0018`, whose parent `SA-0016` reached `READY_FOR_REVIEW`, is a
-      candidate rather than a refusal when the scan is run against this
-      repository's own specs and ledger
+      the pair: a parent is satisfied by the task that merged, whatever sha it
+      ran at. But a *dead* state under a superseded `spec_sha` does not speak for
+      a parent that has since been edited and re-run — measured on the first
+      attempt (2026-08-30), `any(state in DEAD)` over every row reports "will not
+      reach `READY_FOR_REVIEW`" about a parent whose fresh task is in flight
+- [ ] `SA-0018`, whose parent `SA-0016` is `MERGED` in this machine's ledger
+      (recorded by `SA-0019`'s `reconcile`, 2026-08-31), is a candidate rather
+      than a refusal when the scan is run against this repository's own specs
+      and ledger. `SA-0006` and `SA-0007` stay refused: `SA-0005` has no task at
+      all, and the reason has to say that rather than name a state it never read
 - [ ] Every new test runs with no network and no cell
 
 ## Out of scope
 **Keeping the states this gate reads current.** That is `SA-0019`, which is why
 this spec depends on it; `saffron/reconcile.py` is forbidden. This gate reads
 `tasks.state` and trusts it.
+
+**Stacking, and admitting a parent that has not merged.** `SA-0022`, split
+out of this spec on 2026-08-30 after the first attempt measured why they cannot
+ship together here: a stacked worktree makes the child's exported patch — the
+task's only durable product — contain the parent's diff as well, because
+`export_patch` is computed from `base_sha`. `saffron/phases/package.py` then
+applies that combined patch to the current default branch, and re-verification
+re-applies the parent's hunks once the parent has merged separately. Fixing that
+needs PACKAGE, which is forbidden here and forbidden in the first attempt too —
+the criteria could not be satisfied inside the files the spec declared.
+`saffron/cell/**` joins the deny list so the boundary is a rule rather than an
+intention.
 
 **The merge train, and what happens when a stacked parent is rejected.** §4.2
 names that risk and assigns it to §6.1 — *"exactly the risk the merge train
@@ -121,8 +144,9 @@ that by exempting this spec inside the scan.
 things: `DONE_STATES` asks whether running the spec again would learn anything,
 and includes `EXHAUSTED`, `NOT_IMPLEMENTED` and `REJECTED` — none of which
 satisfies a dependency. Deriving one list from the other is the mistake this
-note exists to prevent; §4.2's rule is "reached `READY_FOR_REVIEW`", which is a
-different question from "done with the spec".
+note exists to prevent. Note the admitting state here is narrower than §4.2's
+own rule for a reason stated in **Problem**, and narrower still than
+`DONE_STATES`: `MERGED` alone.
 
 **`tasks_by_spec` is keyed `(spec_id, spec_sha)`** and returns a list per key,
 so a lookup across shas is a scan of its keys — no new query needed, and the
@@ -134,7 +158,13 @@ it uses for the same reason.
 the sentence — `scheduler.py` was forbidden to it. Correct it here.
 
 **A test that constructs the value it then asserts on proves nothing about the
-caller.** Drive the stacking assertion through a real worktree created from a
-real parent branch, not by asserting on the base sha the code was handed.
+caller.** Drive the gate through `build_queue` against real spec files and real
+ledger rows, not by handing `_refusal` a hand-built `Candidate`.
+
+**What the first attempt already established, so it is not re-derived.** It ran
+2026-08-30, passed every gate on attempt 1, and died only because its rebuttal
+edited code and REBUT has no repair loop (`EXHAUSTED`, $14.43). Its patch is at
+`~/.saffron/batches/v0/SA-0020/patch.diff`. The gate half of that diff is sound
+work; the stacking half is what opened the hole above. Read it before starting.
 
 Commit after each coherent step. Uncommitted work dies with the cell.
