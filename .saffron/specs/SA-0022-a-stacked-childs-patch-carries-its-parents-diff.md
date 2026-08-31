@@ -1,6 +1,6 @@
 ---
 id: SA-0022
-title: a stacked child's exported patch carries its parent's diff, and PACKAGE re-applies it
+title: a task has one word for two bases, so a patch exported from a stacked worktree carries its parent's diff
 type: feature
 priority: 2
 depends_on:
@@ -8,25 +8,23 @@ depends_on:
 touches:
   - saffron/cell/session.py
   - saffron/cell/worktree.py
-  - saffron/phases/package.py
-  - saffron/scheduler.py
   - saffron/cli.py
   - tests/test_session.py
   - tests/test_worktree.py
-  - tests/test_package.py
-  - tests/test_scheduler.py
   - tests/test_cli.py
   - docs/BACKLOG.md
 forbidden:
   - DESIGN.md
   - CONTEXT.md
   - .saffron/**
+  - saffron/phases/**
+  - saffron/scheduler.py
   - saffron/reconcile.py
   - saffron/gates/**
   - saffron/report/**
-budget_usd: 30
+budget_usd: 16
 max_attempts: 4
-max_turns: 140
+max_turns: 120
 risk: elevated
 ---
 
@@ -34,15 +32,12 @@ risk: elevated
 §4.2 states the dependency rule as one sentence with two halves: **all `depends_on`
 tasks have reached `READY_FOR_REVIEW`** — not `MERGED` — and *"a dependent task
 branches off its parent's branch rather than `base_sha` — stacked branches."*
-`SA-0020` ships the half that needs no stacking: it admits a dependent whose
-parent is already `MERGED`, so the parent's commits are in the default branch the
-child is cut from. This spec is the other half — admitting at `READY_FOR_REVIEW`,
-which requires stacking, and the reason the two were separated.
+`SA-0020` shipped the half that needs no stacking: a dependent whose parent is
+already in the default branch is admitted, because the child is cut from that
+branch and the parent's commits are in it.
 
-`SA-0020`'s first attempt built both together and was blocked on the seam.
-Measured 2026-08-30, ledger task 20, `EXHAUSTED` at $14.43 with its patch at
-`~/.saffron/batches/v0/SA-0020/patch.diff`. It passed every gate on attempt 1;
-the `contract` lens then found this:
+Stacking is the other half, and it was one spec until this one was split. The
+seam is a single fact:
 
 > For a stacked task, `worktree.prepare_worktree` checks out `spec.stacked_on`
 > (the parent's own unmerged branch head, ahead of `base_sha`), but the exported
@@ -50,113 +45,91 @@ the `contract` lens then found this:
 > `worktree.export_patch(container, spec.base_sha)`, so it captures the parent's
 > entire diff plus the child's own.
 
-`saffron/phases/package.py` applies that combined patch onto a fresh checkout of
-the **current** remote default branch to build the child's pull request. Once the
-parent's own pull request merges separately, re-verification re-fetches a default
-branch that already contains the parent's changes and applies the same hunks
-again. The implementer could not fix it: `saffron/phases/**` was forbidden to
-`SA-0020`, and the insufficiency only became visible after the plan checkpoint had
-passed — §5.3.1's stated ceiling on the scope-proposal door.
+That is the `contract` lens on `SA-0020`'s first attempt: ledger task 20,
+`EXHAUSTED` at $14.43 against a $16 budget, 2026-08-30, patch at
+`~/.saffron/batches/v0/SA-0020/patch.diff`. It passed every gate on attempt 1
+and could not fix the finding, because `saffron/phases/**` was forbidden to it
+and the insufficiency only became visible after the plan checkpoint — §5.3.1's
+stated ceiling on the scope-proposal door.
+
+**This spec builds the two bases and nothing that uses them.** `SA-0025` resolves
+a real parent, teaches PACKAGE to target its branch, and widens the gate. Split
+because those are the criteria that killed the first attempt, and because a
+mechanism with no production trigger can be witnessed exactly and reviewed
+cheaply.
 
 ## Problem
 - **The patch is computed against the wrong base the moment the worktree is not.**
   `export_patch(container, spec.base_sha)` is correct exactly while the worktree
-  starts at `base_sha`. Stacking breaks that identity and nothing else in the
-  pipeline notices, because every consumer downstream reads the patch and not the
+  starts at `base_sha`. Anything that moves the checkout breaks that identity and
+  nothing downstream notices, because every consumer reads the patch and not the
   tree.
-- **PACKAGE has no concept of a parent.** It resolves one base — the remote's
-  default-branch head (§5.7) — and applies one patch to it. A stacked child's
-  pull request has to open against its parent's branch, not against `main`, or
-  the diff GitHub renders is the parent's work plus the child's.
-- **Re-verification is where it becomes a wrong merge rather than a noisy diff.**
-  `needs_reverification`/`reverify` re-fetch the default branch and re-apply. A
-  parent that merged in between turns "apply the child's patch" into "apply the
-  parent's diff a second time" — a conflict at best, a silent double-land at
-  worst.
+- **One word for two bases is the defect, not a symptom of it.** A stacked task
+  has a pin for the run (`base_sha`, which the gates and policy are exported
+  from) and a starting point for the tree. Today those are the same field, so
+  there is no way to be right about both.
 - **`base_sha` is load-bearing in more places than the patch.** The gate
-  executables and the policy that declares them are exported from `base_sha`
-  (§5.4, backlog item 13). A stacked worktree tests a tree the parent has changed
-  using gates the parent has not.
+  executables and the policy declaring them are exported from `base_sha` (§5.4,
+  backlog item 13). A stacked worktree tests a tree the parent has changed using
+  gates the parent has not — a real disagreement this spec must record even
+  though it does not resolve it.
 
 ## Acceptance criteria
-- [ ] A dependent task's worktree is created from its parent's pushed branch head,
-      and a test asserts the parent's commits are present in the dependent's tree
-- [ ] A stacked task's exported patch contains **only its own commits** — the
-      parent's diff is not in it — and the witness is a real two-commit parent
-      branch with a child committed on top, not a patch handed to the assertion
-- [ ] A stacked task's pull request is opened against its parent's branch, so the
-      diff GitHub renders is the child's alone
-- [ ] Re-verification of a stacked child whose parent merged in the meantime does
-      not re-apply the parent's hunks, and a test drives that sequence rather than
-      asserting on a flag
-- [ ] `SA-0020`'s gate admits a parent at `READY_FOR_REVIEW`, `APPROVED` or
-      `MERGE_TRAIN` once stacking exists, and the refusal reasons `SA-0020`
-      shipped for those states are replaced rather than left contradicting the
-      gate
-- [ ] Where a stacked worktree and `base_sha`-exported gates disagree, the spec
-      records which wins and why in `docs/BACKLOG.md` — a decision, not a silence
+- [ ] `CellSpec` carries a second base distinct from `base_sha`, defaulting to
+      the shape every caller produces today, and `saffron/cli.py` sets it at the
+      one place `CellSpec` is constructed
+- [ ] A worktree created with that second base set contains the parent's commits,
+      and the witness is a real branch with real commits rather than a sha handed
+      to the assertion
+- [ ] A patch exported from such a worktree contains **only the commits made on
+      top of that base** — the parent's diff is not in it — witnessed by a real
+      two-commit parent branch with a child committed on top
+- [ ] With the second base unset, the worktree, the exported patch and the
+      recorded `base_sha` are byte-identical to today's, and a test asserts it
+- [ ] `saffron/cli.py` leaves the second base unset: **nothing in this spec
+      stacks a real task.** A test drives `saffron cell` on a spec with a
+      `depends_on` and asserts the cell is not stacked, so the half-built path
+      cannot be reached by an attended run, which does not pass gate 0
+- [ ] Where a stacked worktree and `base_sha`-exported gates disagree,
+      `docs/BACKLOG.md` records which wins and why — a decision, not a silence
 - [ ] Every new test runs with no network and no cell
 
 ## Out of scope
-**The dependency gate's admitting states for a merged parent.** `SA-0020` owns
-that and shipped it; this spec widens the list, it does not rewrite the lookup.
-
-**What happens when a stacked parent is rejected.** §4.2 assigns it to the merge
-train (§6.1) — *"one wasted task rather than three wasted nights"*. A child
-stacked on a parent that is later rejected is a wasted task by design.
-
-**Multi-node DAG ordering within one batch.** K=1; the scan only answers whether
-one dependent is admissible now.
+**Resolving a real parent, PACKAGE, and the dependency gate.** All three are
+`SA-0025`, and `saffron/phases/**` and `saffron/scheduler.py` are forbidden here.
+A pull request opened against the wrong base is the defect `SA-0025` exists to
+prevent; this spec must not ship a path that reaches it, which is what criterion
+5 is for.
 
 **Changing what `base_sha` means.** It is the run's pin and four other things
-depend on it (§5.4, items 13 and 15). This spec adds a second reference point for
-a stacked task; it does not redefine the first.
+depend on it (§5.4, items 13 and 15). This spec adds a second reference point; it
+does not redefine the first.
+
+**Multi-node DAG ordering within one batch.** K=1.
 
 ## Notes for the agent
 **`saffron/cli.py` is in `touches` because `CellSpec` is built in exactly one
-place, and it is there** (`cli.py`, the sole construction site). Any field the
-worktree and the export need — whatever the second base ends up called — is set
-at that call or it is not set at all. `SA-0020`'s first patch resolved it in
-`cli.py` as `_stacked_checkout(spec, ledger, url, mirror)`, which is where the
-ledger lookup of the parent's pushed head belongs: `session.py` drives one cell
-and does not choose what to stack on. This spec's earlier draft omitted
-`cli.py`, which would have failed `scope` after the plan checkpoint — the same
-ceiling `SA-0020`'s first attempt died on.
-
-**The documentation half is by hand, and here are the sentences.** Backlog item
-30's rule, applied to this spec rather than requested by it. Criterion 5 widens
-the gate, and `DESIGN.md` is in this spec's `forbidden` list, so an operator
-corrects these afterwards:
-
-- §4.2.1, the paragraph on `depends_on`: *"Every other parent state is still
-  refused, and the reason names the state it actually read."* Criterion 5
-  falsifies it for three states.
-- §3.1's frontmatter example: `depends_on: [TE-0139] # satisfied at
-  READY_FOR_REVIEW, see §4.2` — written as the design's intent, and true for
-  the first time once this ships.
-- §4.2 itself describes stacking in the present tense while `SA-0020` shipped
-  only the half that needs none; check its wording against what this spec
-  actually builds rather than assuming either is current.
-
-`CONTEXT.md` needs no change: **Retired spec** and **Touches** are both
-unaffected by stacking.
+place, and it is there** (`cli.py`, the sole construction site). A field nothing
+sets is a field that does not exist, and criterion 4's byte-identity claim is
+about that call. The earlier draft of this spec omitted `cli.py` and would have
+failed `scope` after the plan checkpoint — the ceiling `SA-0020`'s first attempt
+died on.
 
 **Read `SA-0020`'s first patch before starting.**
 `~/.saffron/batches/v0/SA-0020/patch.diff` already contains a working
-`spec.stacked_on` and a worktree that checks it out. The half that was wrong is
-downstream of it, and the finding above names the line.
+`spec.stacked_on` and a worktree that checks it out. Its `cli.py` hunks resolve a
+real parent, which is `SA-0025`'s and not yours: take the shape, not the wiring.
 
-**`export_patch`'s second argument is the whole defect.** A stacked task has two
-bases and the code has one word for them. Whatever names the second, name it once
-and make every consumer take it from the same place — `package.py` included, which
-is why it is in `touches` here and was not in `SA-0020`.
-
-**PACKAGE is forbidden to change what it reads at `fetch_head`.** Backlog item 16
-records that PACKAGE verifies under a policy read at `fetch_head` and that nothing
-says which; do not quietly move that while adding a base.
+**Name the second base once and make every consumer take it from the same
+place.** The defect is that two things share one word. A fix that adds a second
+word and then lets one caller keep guessing has not removed it.
 
 **A test that constructs the value it then asserts on proves nothing about the
 caller.** Build a real parent branch with real commits and a real child on top,
 then read the exported patch — do not assert on the sha the code was handed.
+
+**The documentation half is by hand, and this spec has none.** Backlog item 30's
+rule: `DESIGN.md` and `CONTEXT.md` describe the dependency gate and the phases,
+neither of which changes here. `SA-0025` carries the sentences.
 
 Commit after each coherent step. Uncommitted work dies with the cell.
