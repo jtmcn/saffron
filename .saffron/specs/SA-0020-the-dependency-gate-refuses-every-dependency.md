@@ -91,11 +91,16 @@ and reads as a verdict about `SA-0016`.
       a parent that has since been edited and re-run — measured on the first
       attempt (2026-08-30), `any(state in DEAD)` over every row reports "will not
       reach `READY_FOR_REVIEW`" about a parent whose fresh task is in flight
-- [ ] `SA-0018`, whose parent `SA-0016` is `MERGED` in this machine's ledger
-      (recorded by `SA-0019`'s `reconcile`, 2026-08-31), is a candidate rather
-      than a refusal when the scan is run against this repository's own specs
-      and ledger. `SA-0006` and `SA-0007` stay refused: `SA-0005` has no task at
-      all, and the reason has to say that rather than name a state it never read
+- [ ] Re-anchored 2026-08-31, after `SA-0006` and `SA-0007` were retired as
+      shipped and `SA-0018`'s own task merged, which filters it out before any
+      refusal runs: the live witness is **this spec**. `SA-0020`'s parent
+      `SA-0019` is `MERGED` in this machine's ledger, so `SA-0020` is a
+      candidate rather than a refusal when the scan runs against this
+      repository's own specs and ledger — while `SA-0022` and `SA-0023`, whose
+      parent is `SA-0020`, are refused with a reason naming what it actually
+      read: no task at `SA-0020`'s current `spec_sha`, because the spec was
+      edited after its only run. A witness a later retirement can invalidate is
+      one that has to be re-measured, not deleted
 - [ ] Every new test runs with no network and no cell
 
 ## Out of scope
