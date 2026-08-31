@@ -304,6 +304,11 @@ def plan_checkpoint(
             container, prompt=implement.PLAN_PROMPT, options=options, watch=watch
         )
         spent = attempt.cost_usd_est
+        # ponytail: the door is only here, at the plan checkpoint. A `touches`
+        # insufficiency the implementer discovers mid-diff has no exit and
+        # still burns to a ceiling — the case SA-0018 opened this door for,
+        # one phase later. The prompt asks for it "before writing any code",
+        # which shapes the behaviour without bounding it.
         for reprompted in (False, True):
             if artifacts.extraction_kind(attempt.text) == "scope_proposal":
                 try:
@@ -889,6 +894,10 @@ def _drive_cell(
                         "proposed_touches": final_touches,
                         "root_cause": proposal.root_cause,
                         "raw": proposed.raw,
+                        # `plan.json` is the raw block verbatim, so its watch
+                        # line's sha256 is re-derivable with `sha256sum`. This
+                        # is an envelope, so it has to carry the hash itself.
+                        "sha256": artifacts.hash_artifact(proposed.raw),
                     },
                     indent=2,
                 )

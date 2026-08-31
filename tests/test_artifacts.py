@@ -381,3 +381,12 @@ def test_a_legitimate_glob_outside_touches_is_still_accepted():
         _proposal(proposed_touches=["saffron/report/**"]), touches=TOUCHES
     )
     assert proposal.proposed_touches == ["saffron/report/**"]
+
+
+def test_a_root_cause_of_one_token_is_refused():
+    """The criterion asks for a one-paragraph root cause and the operator
+    ratifies on it, so `"x"` clearing a `.strip()` check is the whole review
+    surface being empty. Crude by design: this rejects a token, not a short
+    sentence."""
+    with pytest.raises(ScopeProposalRefused, match="root cause"):
+        validate_scope_proposal(_proposal(root_cause="x"), touches=TOUCHES)

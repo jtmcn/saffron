@@ -282,11 +282,17 @@ def test_a_proposal_refused_twice_ends_as_plan_rejected():
 
 
 def test_sa_0005s_own_criteria_reach_scope_review_naming_cli_py():
-    """Item 18's own corpse, driven through the phase rather than handed a
-    fake proposal to a recorder: SA-0005's real spec, its real touches (which
-    do not include cli.py), and a stub agent proposing exactly the gap item 18
-    found unanchorable — `saffron/cli.py` never carrying `risk=spec.risk` and
-    the queue line never carrying the effective tier."""
+    """Item 18's own corpse, driven through `plan_checkpoint` rather than
+    handed a fake proposal to a recorder: SA-0005's real spec, its real
+    `touches` (which do not include cli.py), and a stub agent proposing exactly
+    the gap item 18 found unanchorable — `saffron/cli.py` never carrying
+    `risk=spec.risk` and the queue line never carrying the effective tier.
+
+    What SA-0005's *criteria* say never enters this path: `CellSpec.acceptance`
+    is not read by the checkpoint, so the fixture is its `touches` plus a
+    scripted proposal. That is the honest maximum without a model in the loop,
+    and the criteria's own unreachability is item 18's point, not this test's.
+    """
     from pathlib import Path
 
     from saffron.intake import load_spec
@@ -904,9 +910,11 @@ def test_a_proposed_scope_reaches_scope_review_and_spends_no_further_turns(
     monkeypatch, tmp_path
 ):
     """The whole cell, not just the checkpoint: a proposal accepted on turn one
-    ends the attempt there — no IMPLEMENT turn, no gate suite, no REVIEW. Only
-    one turn is scripted; a second would raise `StopIteration`'s default
-    (`_turn(_block({"findings": []}))`) if `_drive_cell` reached for it."""
+    ends the attempt there — no IMPLEMENT turn, no gate suite, no REVIEW.
+
+    The turn count is the guard, not the script: `_drive` falls back to a clean
+    review turn rather than raising, so reaching for a second turn would pass
+    silently. `len(cell.turns) == 1` is what actually catches it."""
     cell = _stub_the_runtime(monkeypatch)
     outcome, ledger = _drive(
         monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PROPOSAL))]
@@ -914,7 +922,10 @@ def test_a_proposed_scope_reaches_scope_review_and_spends_no_further_turns(
     assert outcome.state == "SCOPE_REVIEW"
     assert outcome.scope_root_cause == _PROPOSAL["root_cause"]
     assert "infra/deploy.tf" in outcome.proposed_touches
-    # Host-added, never asked of the model (§5.2's writeback rule).
+    # Host-added, never asked of the model (§5.2's writeback rule). This repo
+    # has no `.saffron/specs` at all, so it pins the *fallback* spelling; the
+    # resolved-from-frontmatter case is
+    # `test_the_recorded_spec_path_is_the_real_file_not_a_name_guess`.
     assert ".saffron/specs/SY-1-*.md" in outcome.proposed_touches
     assert len(cell.turns) == 1
     # One call: the baseline, taken before any agent turn (§5.4's own rule to
@@ -2448,3 +2459,18 @@ def test_the_recorded_spec_path_is_the_real_file_not_a_name_guess(
         monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PROPOSAL))]
     )
     assert ".saffron/specs/no-id-in-this-name.md" in outcome.proposed_touches
+
+
+def test_the_recorded_proposal_carries_the_hash_of_its_own_raw_block(
+    monkeypatch, tmp_path
+):
+    """`plan.json` is the raw block verbatim, so `sha256sum plan.json` matches
+    the watch line it was announced with. The proposal is wrapped in an
+    envelope instead, so unless the envelope carries the hash the printed
+    sha256 matches nothing on disk and the record cannot be re-derived."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PROPOSAL))]
+    )
+    record = json.loads((outcome.task_dir / "scope_proposal.json").read_text())
+    assert record["sha256"] == artifacts.hash_artifact(record["raw"])

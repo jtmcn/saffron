@@ -131,6 +131,7 @@ def extraction_kind(raw: str) -> str:
 # free. Junk is outside `touches`, so without this every one of these reads as a
 # real escape (SA-0018 review).
 _WHOLE_REPO = {"*", "**", ".", "/", "./", "**/*"}
+_MIN_ROOT_CAUSE = 20
 
 
 def _unusable(path: str) -> str | None:
@@ -167,6 +168,13 @@ def validate_scope_proposal(raw: str, *, touches: list[str]) -> ScopeProposal:
         raise ScopeProposalRefused("scope proposal names no paths")
     if not proposal.root_cause.strip():
         raise ScopeProposalRefused("scope proposal carries no root cause")
+    # The operator ratifies on this paragraph, and a bare `.strip()` let `"x"`
+    # through. Crude on purpose: it rejects a token, not a short sentence.
+    if len(proposal.root_cause.strip()) < _MIN_ROOT_CAUSE:
+        raise ScopeProposalRefused(
+            f"scope proposal's root cause is {len(proposal.root_cause.strip())} "
+            f"characters; SA-0018 asks for a paragraph the operator can ratify on"
+        )
     for path in proposal.proposed_touches:
         if (why := _unusable(path)) is not None:
             raise ScopeProposalRefused(f"{path!r} is not a usable path: {why}")
