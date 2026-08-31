@@ -1134,6 +1134,34 @@ disagreement this pipeline has produced (item 9), and the adjudication is on
 acceptance criteria reach outside its own `touches` is unsatisfiable by
 construction, and nothing in intake checks for it.
 
+**And `SA-0016`'s criterion-path refusal, built to catch exactly this at
+intake, does not fire on `SA-0005` — measured, not reasoned about:**
+
+```
+uv run python -c "
+from pathlib import Path
+from saffron.intake import load_spec
+from saffron.scheduler import _unmatched_criterion_path
+spec, _ = load_spec(Path('.saffron/specs/SA-0005-size-wiring.md'))
+print(_unmatched_criterion_path(spec), len(spec.acceptance_criteria))"
+None 7
+```
+
+Seven criteria parse in full — `SA-0014` already fixed the truncation that
+would explain a `None` here — and still none of them trips the refusal,
+because none of the seven names a path at all, backticked or bare. They name
+behaviour: "the PR body header and the queue line report" the effective tier,
+"`size` runs in `_suite`". The paths that behaviour lives in are `cli.py` and
+`package.py`, exactly the ones this item already names as outside `touches`.
+A refusal keyed on path tokens cannot see a criterion that reaches outside
+`touches` by naming behaviour instead of a file, and no widening of the token
+rule changes that: resolving "the queue line" to a file is a symbol index,
+which is language-aware, and core knows nothing about languages (§2.1) — the
+check cannot live in the scan. `SA-0018` closes the gap from the other side
+instead: a door at the plan checkpoint an IMPLEMENT attempt can propose scope
+through, reaching `SCOPE_REVIEW` with the paths and the root cause, so a spec
+shaped like `SA-0005` stops there instead of at a fourth exhausted attempt.
+
 **Still open, deliberately:** `error_max_turns` is not resumable. A bound that
 resumes is not a bound, and committing per step removes most of the loss — if a
 run exhausts turns *with* its commits landing, that is the evidence for

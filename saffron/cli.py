@@ -33,6 +33,11 @@ CELL_EXIT = {
     # Already the default for an unnamed state; named because PACKAGE returns it
     # and it is the task's failure, not the operator's.
     "MERGE_FAILED": 1,
+    # Also already the default, and named for the opposite reason: a proposal
+    # is a task that stopped on purpose with something for the operator to
+    # ratify, not one that failed. It takes 1 because there is no reviewable
+    # diff, and saying so here keeps that a decision rather than a fallthrough.
+    "SCOPE_REVIEW": 1,
     "PREFLIGHT_FAILED": 2,
     "GATE_ERROR": 2,
     # Neither the task's failure nor the operator's: retry after the window.

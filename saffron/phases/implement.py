@@ -33,7 +33,8 @@ PYTHON = "/opt/saffron/python"
 
 PLAN_PROMPT = (
     "Produce the plan for this task. Read whatever you need to; change no "
-    "file and make no commit. " + EXTRACTION_PROMPT
+    "file and make no commit. If the declared touches cannot satisfy the "
+    "acceptance criteria, propose scope instead of a plan. " + EXTRACTION_PROMPT
 )
 
 IMPLEMENT_PROMPT = (

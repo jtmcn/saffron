@@ -34,6 +34,12 @@ def test_every_host_side_bound_is_set():
     assert options["max_budget_usd"] == 12.0
 
 
+def test_the_plan_prompt_names_the_scope_proposal_alternative():
+    """SA-0018: the door plan_checkpoint opens must be named where the agent
+    is asked for the plan, or nothing tells it the alternative exists."""
+    assert "propose scope" in implement.PLAN_PROMPT
+
+
 def test_the_cache_ttl_outlives_a_gate_suite():
     """The repair loop resumes across a gate suite, and a suite is minutes.
     The five-minute default expires every time (DESIGN.md §7.1)."""
