@@ -1540,14 +1540,36 @@ row unconditionally and was correctly blocked: `ORPHANED` is in
 `scheduler.REQUEUE_STATES`, so a live row stamped that way is handed back
 out as resumable — a second cell on the same branch.
 
-**Done, 2026-08-31.** `saffron/reconcile.py`'s `reconcile()` — a writer
+**Done, 2026-08-30.** `saffron/reconcile.py`'s `reconcile()` — a writer
 inverting `scheduler._open_prs`'s best-effort shape (an untrustworthy `gh`
 answer counts as "could not be asked", never "not merged"; `MERGED` is never
 asked again) — wired into a new `saffron reconcile --repo .` and into
 `saffron queue` before it scans. Neither asserts §4.2.1's batch-scan premise,
-so `ORPHANED` still has no writer, the shape `depends_on` leaves the
-scheduler until `SA-0020`. Tested against this repo's own six rows above,
-plus the CLI witness that `IMPLEMENTING` survives `queue`/`reconcile`.
+so neither stamps `ORPHANED`; the supervisor still does, on the path it
+already owned (`cell/session.py`, §4.5). **What has no writer is the scan's
+half** — the corpse a hard kill or a power cut leaves behind, which is the
+case §4.2.1 is actually about, and it waits for a caller that can assert the
+premise. Tested against this repo's own six rows above, plus the CLI witness
+that `IMPLEMENTING` survives `queue`/`reconcile`.
+
+**One live-task path is left open deliberately, and `SA-0020` must close it
+before a scan gets teeth.** The in-flight guard protects a first run for a
+structural reason — `pr_url` is NULL until PACKAGE's last write, so there is
+nothing to ask about. A *resumed* task escapes it. `_drive_cell` writes
+`READY_FOR_REVIEW` and calls `finish_run` before `cli._run_cell` invokes
+PACKAGE, so while PACKAGE runs the row reads `READY_FOR_REVIEW` and still
+carries the **previous** attempt's `pr_url`, whose `reviewDecision` is the
+`CHANGES_REQUESTED` that requeued it. Reconciling inside that window writes a
+`REQUEUE_STATES` value onto a task whose cell is alive — the same double
+-execution shape the first attempt was blocked for, arriving by the other
+column. Harmless in v0.5: no scan starts a cell, and PACKAGE's
+`set_task_package` overwrites the row moments later. **Done looks like** the
+state being stamped out of `PR_PENDING_STATES` before PACKAGE is called
+(`cli.py` owns that ordering), not a wider guard inside `reconcile` — the row
+is genuinely `READY_FOR_REVIEW` in that window, so no state test can tell it
+from a finished one. Note `runs.status = 'RUNNING'` is a liveness signal the
+ledger already carries and no forbidden file owns; it does not close *this*
+window, because `finish_run` precedes PACKAGE.
 
 ---
 

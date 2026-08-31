@@ -469,7 +469,9 @@ def test_queue_prints_the_real_scheduler_queue_and_writes_nothing_to_the_ledger(
     `build_queue` reading real files, not a value the test hands the CLI and
     then asserts back — that defect shipped `SA-0005` green and was caught in
     `SA-0007`'s review. And a repo this ledger has never seen must stay
-    unseen: `saffron queue` reads, it never writes."""
+    unseen: an unseen repo resolves to no `repo_id`, so the reconcile
+    `queue` now runs before it scans has nothing to ask about and writes
+    nothing. `queue` does write, on a repo the ledger knows."""
     repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC)
     home = tmp_path / "home"
 
@@ -608,6 +610,12 @@ def _fake_gh_says_merged(argv):
     )
 
 
+def _fake_gh_says_changes_requested(argv):
+    return subprocess.CompletedProcess(
+        argv, 0, '{"state": "OPEN", "reviewDecision": "CHANGES_REQUESTED"}', ""
+    )
+
+
 def _no_gh(_argv):
     raise FileNotFoundError("gh")
 
@@ -696,6 +704,45 @@ def test_queue_reconciles_before_it_scans_so_the_refusal_gate_sees_current_state
     assert "MERGED" in out
     # SY-1's task just became MERGED, one of `scheduler.DONE_STATES`.
     assert "queue: 0 candidate(s)" in out
+
+
+def test_queue_schedules_a_task_reconcile_moved_into_a_requeue_state(
+    tmp_path, monkeypatch, capsys
+):
+    """The case that proves the wiring rather than merely reaching it.
+
+    A seeded `READY_FOR_REVIEW` is already in `DONE_STATES`, so a queue of
+    zero holds whether reconcile ran or not — the test above witnesses the
+    call, not its effect. `CHANGES_REQUESTED` is in `REQUEUE_STATES`, so a
+    task reconcile moves there has to *appear* as a candidate it was not.
+    """
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-queue-requeues")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-1",
+        state="READY_FOR_REVIEW",
+        pr_url="https://github.com/o/r/pull/12",
+        spec_sha=hashlib.sha256(_A_SPEC.encode()).hexdigest(),
+    )
+    ledger.close()
+
+    # Unasked, the same spec is filtered out as done — the before half.
+    monkeypatch.setattr("saffron.cli.run_gh", _no_gh)
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+    assert "queue: 0 candidate(s)" in capsys.readouterr().out
+
+    monkeypatch.setattr("saffron.cli.run_gh", _fake_gh_says_changes_requested)
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    out = capsys.readouterr().out
+    assert "CHANGES_REQUESTED" in out
+    assert "queue: 1 candidate(s)" in out
+    assert "SY-1" in out
 
 
 def test_queue_says_the_refusals_did_not_run_when_gh_is_not_installed(

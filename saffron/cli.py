@@ -335,8 +335,20 @@ def _print_reconcile_summary(result: ReconcileResult) -> None:
     for label, ids in buckets:
         for task_id in ids:
             print(f"reconcile: task {task_id} → {label}")
-    if result.unasked:
-        print(f"reconcile: {result.unasked} task(s) could not be asked about")
+    for task_id in result.unasked:
+        print(f"reconcile: task {task_id} could not be asked about")
+    # Silence read identically to "there was nothing to ask about". A run
+    # that asked and found every answer unchanged now says which it was.
+    if not any(
+        (
+            result.merged,
+            result.rejected,
+            result.changes_requested,
+            result.orphaned,
+            result.unasked,
+        )
+    ):
+        print("reconcile: nothing moved")
 
 
 def _print_queue(

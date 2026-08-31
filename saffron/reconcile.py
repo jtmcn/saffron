@@ -1,6 +1,7 @@
 """Reconciling `tasks.state` against decisions made outside the ledger
-(`DESIGN.md` §4.2.1, §6.1). PACKAGE's last word is always `READY_FOR_REVIEW`;
-the ledger learns what happened after only by asking GitHub.
+(`DESIGN.md` §4.2.1, §6.1). PACKAGE's last word is `READY_FOR_REVIEW`, or
+`MERGE_FAILED` where the push or the pull request could not be made; the ledger
+learns what happened to the first of those only by asking GitHub.
 
 `GhRunner` is duplicated a third time here, matching `scheduler.py` and
 `phases/package.py` (both forbidden to import from here).
@@ -10,6 +11,18 @@ treats a failed `gh` as "nothing found", safe for a *refuser*. Here that
 would be catastrophic — an untrustworthy answer read as "not merged" would
 stamp `REJECTED` on a healthy branch — so every failure path below returns
 `None`, and the caller counts it rather than acting on it.
+
+**A live task is skipped by its state, and that is not the whole of it.** The
+in-flight guard covers a first run: `pr_url` is NULL until PACKAGE's last write,
+so there is nothing here to ask about. A *resumed* task is the gap. `_drive_cell`
+writes `READY_FOR_REVIEW` and calls `finish_run` before `cli._run_cell` invokes
+PACKAGE, so for as long as PACKAGE runs the row reads `READY_FOR_REVIEW` while
+still carrying the **previous** attempt's `pr_url` — whose `reviewDecision` is
+the `CHANGES_REQUESTED` that requeued it. Reconciling in that window writes a
+`REQUEUE_STATES` value onto a task whose cell is alive. Harmless in v0.5, where
+no scan starts a cell and PACKAGE overwrites the row immediately after; it stops
+being harmless the moment `SA-0020` gives a scan teeth. `docs/BACKLOG.md` carries
+it; do not close that item by widening this module's state guard alone.
 """
 
 from __future__ import annotations
@@ -68,10 +81,11 @@ class ReconcileResult:
     rejected: list[int] = field(default_factory=list)
     changes_requested: list[int] = field(default_factory=list)
     orphaned: list[int] = field(default_factory=list)
-    # A pull request `gh` gave no trustworthy answer about — missing,
+    # Pull requests `gh` gave no trustworthy answer about — missing,
     # unauthenticated, erroring, or an unparseable/wrong shape. Absence of an
-    # answer is never recorded as "not merged"; it is only ever counted.
-    unasked: int = 0
+    # answer is never recorded as "not merged"; the row is left exactly as it
+    # was and its id recorded here.
+    unasked: list[int] = field(default_factory=list)
 
 
 def _pr_status(url: str, gh: GhRunner) -> dict | None:
@@ -123,13 +137,18 @@ def reconcile(
             continue
         pr = _pr_status(pr_url, gh)
         if pr is None:
-            result.unasked += 1
+            result.unasked.append(row["task_id"])
             continue
         new_state = _next_state(pr)
         if new_state is None or new_state == state:
             continue
+        # Bucket first: a state outside `_BUCKET` must not raise *after* the
+        # row is written, which would abort the loop half-reconciled.
+        bucket = _BUCKET.get(new_state)
+        if bucket is None:
+            continue
         ledger.set_task_state(row["task_id"], new_state)
-        getattr(result, _BUCKET[new_state]).append(row["task_id"])
+        getattr(result, bucket).append(row["task_id"])
 
     if stamp_orphaned:
         for row in rows:

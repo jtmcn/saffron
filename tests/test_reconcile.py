@@ -61,9 +61,10 @@ class _FakeGh:
         return subprocess.CompletedProcess(argv, 0, json.dumps(answer), "")
 
 
-# This repo's own six recorded PR-carrying tasks, from its own
-# `git log --all --oneline --merges` — not invented. #65 (SA-0018) has no
-# merge commit; it is the one still open.
+# This repo's own six recorded PR-carrying tasks, not invented: the ids and
+# urls are the rows this machine's ledger held, and the five/one split is the
+# spec's own `gh pr view` measurement of 2026-08-30. Not `git log --merges` —
+# #51 was squash-merged, so that command does not list it.
 _REAL_SIX = [
     ("SA-0013", "https://github.com/jtmcn/saffron/pull/51"),
     ("SA-0014", "https://github.com/jtmcn/saffron/pull/56"),
@@ -100,7 +101,7 @@ def test_the_real_six_tasks_reconcile_to_their_real_pull_request_states(ledger):
         assert task_ids[spec_id] in result.merged
     assert task_ids["SA-0018"] not in result.merged
     assert _state(ledger, task_ids["SA-0018"]) == "READY_FOR_REVIEW"
-    assert result.unasked == 0
+    assert result.unasked == []
 
 
 @pytest.mark.parametrize(
@@ -113,8 +114,16 @@ def test_the_real_six_tasks_reconcile_to_their_real_pull_request_states(ledger):
             "CHANGES_REQUESTED",
         ),
         ({"state": "OPEN", "reviewDecision": None}, None, "READY_FOR_REVIEW"),
+        # The fifth mapping the module says it does not make: an unrecognised
+        # `state` leaves the row exactly as it was, like an unanswerable `gh`.
+        ({"state": "SOMETHING_NEW", "reviewDecision": None}, None, "READY_FOR_REVIEW"),
     ],
-    ids=["closed-unmerged", "open-changes-requested", "open-undecided"],
+    ids=[
+        "closed-unmerged",
+        "open-changes-requested",
+        "open-undecided",
+        "unrecognised-state",
+    ],
 )
 def test_one_pull_request_outcome_maps_to_one_ledger_state(
     ledger, pr, bucket, expect_state
@@ -155,7 +164,7 @@ def test_a_gh_that_cannot_be_trusted_leaves_the_state_exactly_as_it_found_it(
 
     result = reconcile(ledger, repo_id, gh=broken_gh)
 
-    assert result.unasked == 1
+    assert result.unasked == [task_id]
     assert result.merged == result.rejected == result.changes_requested == []
     assert _state(ledger, task_id) == "READY_FOR_REVIEW"
 
@@ -194,7 +203,7 @@ def test_stamp_orphaned_only_fires_when_the_caller_asserts_the_premise(ledger):
     for task_id in in_flight_ids:
         assert _state(ledger, task_id) in IN_FLIGHT_STATES
 
-    asserted = reconcile(ledger, repo_id, stamp_orphaned=True)
+    asserted = reconcile(ledger, repo_id, gh=gh, stamp_orphaned=True)
     assert sorted(asserted.orphaned) == sorted(in_flight_ids)
     for task_id in in_flight_ids:
         assert _state(ledger, task_id) == "ORPHANED"

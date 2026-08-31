@@ -403,9 +403,12 @@ class Ledger:
         pr_url: str,
     ) -> None:
         """PACKAGE's own write-back, after `finish_run` (§5.7). The state it
-        sets — always `READY_FOR_REVIEW` — is the ledger's *first* word on
-        the task, not its last: `reconcile` (`saffron/reconcile.py`) revises
-        it once GitHub records what the operator actually decided."""
+        sets — `READY_FOR_REVIEW`, or `MERGE_FAILED` on the four paths where
+        the push or the pull request could not be made — is not the last word
+        on the task: `reconcile` (`saffron/reconcile.py`) revises a
+        `READY_FOR_REVIEW` row once GitHub records what the operator decided.
+        `MERGE_FAILED` is not revised — it is not in `PR_PENDING_STATES`,
+        because it reaches the operator with no pull request to ask about."""
         self._db.execute(
             """UPDATE tasks
                   SET state = ?, branch = ?, pushed_sha = ?, pr_url = ?,
