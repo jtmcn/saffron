@@ -10,6 +10,16 @@ files, an acceptance criterion naming a path no `touches` pattern matches,
 and a `depends_on` no `MERGED` task satisfies. That is five of the six refusals gate 0
 describes — the sixth, a repo that failed preflight, is a batch-level check
 outside `build_queue`'s job.
+
+`SA-0023` adds a seventh, beyond §4.2.1's own six: `protected_touch_refusal`
+refuses a spec whose declared `touches` collides with a literal entry in the
+repo's `policy.yaml` `protected` list. Measured on `SA-0021` (task 18):
+run as a cell, that collision was discovered by `validate_plan` after a
+mirror fetch, an image build and one model turn — $0.82 to learn what both
+declarations already said before any of that started. It is the cheapest
+refusal here, needing no ledger and no `gh`, so `_refuse` checks it first.
+`build_queue` never reads `policy.yaml` itself — the caller already holds the
+export its specs come from, and hands the `protected` list in.
 """
 
 from __future__ import annotations
@@ -17,7 +27,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -268,6 +278,41 @@ def _unmatched_criterion_path(spec: Spec) -> str | None:
     return None
 
 
+def protected_touch_refusal(touches: list[str], protected: Sequence[str]) -> str | None:
+    """Why this spec's own `touches` collides with the repo's global deny
+    list, or `None`.
+
+    Matched with `scope.matches`, the same glob every other `touches`
+    comparison in this module uses (`_unmatched_criterion_path`, the
+    open-pull-request overlap in `_refuse`) — a string compare here would
+    repeat `SA-0016`'s fifth refusal's own mistake, where a criterion naming a
+    nested file string-compared to no match against a `**` pattern that
+    plainly covered it. `matches(entry, pattern)`, not the reverse: `entry` is
+    a concrete path, `pattern` is `touches`' own glob, and `scope.matches`
+    only interprets glob syntax on its right-hand side.
+
+    ponytail: only a *literal* `protected` entry is decided here. An entry
+    that is itself a glob (`.saffron/**`) would need `matches` to answer
+    whether two patterns can ever intersect, which needs the file list at
+    `base_sha` — neither the scan nor the attended run has that before a cell
+    starts. This repo's own `policy.yaml` marks three of its four `protected`
+    entries as literal paths, and a literal one is what `SA-0021` hit. An
+    entry left undecided here still meets `validate_plan`'s own
+    protected-path rejection once a plan names a concrete file — the backstop
+    this refusal does not replace, only gets in front of.
+    """
+    for entry in protected:
+        if _GLOB_CHARS.intersection(entry):
+            continue
+        if any(matches(entry, pattern) for pattern in touches):
+            return (
+                f"touches names {entry!r}, which policy.yaml's protected list "
+                "denies for every spec in this repo — not this spec's own "
+                "forbidden list"
+            )
+    return None
+
+
 def _dependency_refusal(
     dep: str,
     *,
@@ -334,9 +379,17 @@ def _refuse(
     open_prs: list[dict],
     merged_anywhere: frozenset[str],
     states_at_current_sha: dict[str, list[str]],
+    protected: Sequence[str],
 ) -> str | None:
     """The first of §4.2.1's remaining refusals this candidate earns, or
-    `None`. Order matches the acceptance criteria's own listing."""
+    `None`. Order matches the acceptance criteria's own listing — except the
+    `SA-0023` check below, which runs first because it is the cheapest: no
+    `gh`, no ledger, nothing but the spec and the policy already in hand."""
+    if (
+        reason := protected_touch_refusal(candidate.spec.touches, protected)
+    ) is not None:
+        return reason
+
     own_branch = _branch(candidate.spec.id)
     same_spec_pr = next(
         (pr for pr in open_prs if pr.get("headRefName") == own_branch), None
@@ -407,6 +460,7 @@ def build_queue(
     *,
     repo_slug: str | None = None,
     gh: GhRunner = run_gh,
+    protected: Sequence[str] = (),
 ) -> tuple[list[Candidate], list[Refusal]]:
     """Turn the specs `discover_specs` found in `directory` into an ordered
     queue and a list of refusals.
@@ -421,6 +475,13 @@ def build_queue(
     wires the CLI gets — skips both outright rather than erroring: nothing
     reaching this function yet knows the real slug, and a refusal gate that
     cannot check GitHub must not pretend it did.
+
+    `protected` is the repo's `policy.yaml` `protected` list (`SA-0023`).
+    This function never reads `policy.yaml` itself — the caller already
+    exports the tree its specs come from, and `policy.yaml` sits right beside
+    them in it. `()`, the default, is what every caller before `SA-0023`
+    gets, and reproduces exactly the queue they already had: nothing is
+    protected, so nothing is refused on that account.
 
     Ordered by `spec.priority` (lower runs first), then by `discover_specs`'
     filename order to break ties — `sorted` is stable and `discover_specs`
@@ -474,6 +535,7 @@ def build_queue(
             open_prs=open_prs,
             merged_anywhere=merged_anywhere,
             states_at_current_sha=states_at_current_sha,
+            protected=protected,
         )
         if reason is not None:
             refusals.append(Refusal(path=candidate.path, reason=reason))

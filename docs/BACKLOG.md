@@ -1470,6 +1470,8 @@ what failed here.
 
 ## 28. A spec whose `touches` are protected paths dies at the plan checkpoint with no exit
 
+**Status:** **done** — `SA-0023`, 2026-08-31.
+
 `SA-0021` — the spec that closes item 27 — declared `DESIGN.md` and `CONTEXT.md`
 in `touches`, which is the only honest declaration it could make. Run as a cell on
 2026-08-30 (ledger task 18) it ended `PLAN_REJECTED` in 2m44s having spent $0.82:
@@ -1510,6 +1512,20 @@ carry two meanings: a scope to ratify, and "this one is yours to do by hand".
 `CONTEXT.md` defines **Ratify** as what the operator does to a *proposed `touches`
 set*, so the second meaning needs either a different state or a deliberate widening
 of that definition — not a quiet reuse.
+
+**Closed differently from this item's own "Done looks like."** Not a second
+`SCOPE_REVIEW` producer — the tension two paragraphs up is why: that state already
+means "ratify a proposed `touches` set", and this collision is not one. Instead,
+`SA-0023` added a refusal beside `SA-0016`'s: `scheduler.protected_touch_refusal`
+compares a spec's declared `touches` against `policy.yaml`'s `protected` list with
+the same glob matcher every other `touches` comparison uses, deciding only literal
+`protected` entries — an entry that is itself a glob (`.saffron/**`) is left to
+`validate_plan`'s own rejection, unmoved, still the backstop. Read at both places
+this repo's specs actually run: the scan (`build_queue`'s new `protected`
+parameter) and the attended single-spec run (`cli._run_cell`, before a cell
+exists), both from the same `base_sha` export `build_queue`'s specs already come
+from — never the working copy (items 13 and 15). What it cost to learn: one task,
+$0.82, and a spec that had to be run by hand with nothing on the way in saying so.
 
 ---
 
