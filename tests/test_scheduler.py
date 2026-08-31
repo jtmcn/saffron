@@ -674,16 +674,20 @@ def test_a_non_empty_depends_on_refuses(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Measured 2026-08-26 against `~/.saffron/ledger.db`: `SA-0001` and
-    `SA-0008` queued, everything else filtered out with a `READY_FOR_REVIEW`
-    task at the same `spec_sha`, and nothing refused. A smoke check, not proof
-    the refusals work on their own — those are the fixtures above."""
+    """Re-measured 2026-08-31, after ten shipped specs moved to `specs/done/`
+    (`intake.discover_specs` globs `*.md`, not `**/*.md`): `SA-0009` and
+    `SA-0012` queued, everything else filtered out with a `READY_FOR_REVIEW`
+    task at the same `spec_sha`, and nothing refused. The two ids are not
+    arbitrary — they are the only top-level specs with an empty `depends_on`
+    that this repo has not finished, so any other choice would be refused by
+    the dependency gate rather than queued. A smoke check, not proof the
+    refusals work on their own — those are the fixtures above."""
     real_specs = Path(__file__).resolve().parent.parent / ".saffron" / "specs"
     directory = tmp_path / "specs"
     shutil.copytree(real_specs, directory)
     repo_id = _repo(ledger)
 
-    still_open = {"SA-0001", "SA-0008"}
+    still_open = {"SA-0009", "SA-0012"}
     for path in sorted(directory.glob("*.md")):
         spec, spec_sha = load_spec(path)
         if spec.id in still_open:
@@ -700,12 +704,12 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         directory, repo_id, ledger, repo_slug="joel/saffron", gh=_fake_gh([])
     )
 
-    assert [c.spec.id for c in candidates] == ["SA-0008", "SA-0001"]
+    assert [c.spec.id for c in candidates] == ["SA-0009", "SA-0012"]
     assert refusals == []
 
     # Again with no ledger, so nothing is filtered before `_refuse` runs. The
-    # pass above reaches the refusals for two of eighteen specs — the other
-    # sixteen are dropped as done first — so on its own it stays green while
+    # pass above reaches the refusals for two of twelve specs — the other ten
+    # are dropped as done first — so on its own it stays green while
     # every one of them is falsely refused, which is how the criterion-path
     # check shipped refusing SA-0011 and SA-0016 (this spec) on their own
     # criteria. `depends_on` refusals are expected here and are the shape the

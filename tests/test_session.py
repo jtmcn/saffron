@@ -301,6 +301,7 @@ def test_sa_0005s_own_criteria_reach_scope_review_naming_cli_py():
         Path(__file__).resolve().parents[1]
         / ".saffron"
         / "specs"
+        / "done"
         / "SA-0005-size-wiring.md"
     )
     parsed, spec_sha = load_spec(spec_path)
