@@ -55,6 +55,23 @@ DONE_STATES = frozenset(
     }
 )
 
+# What satisfies a dependency, and it is deliberately narrower than §4.2's own
+# rule. §4.2 admits a parent at `READY_FOR_REVIEW` *and* stacks the child on its
+# branch; `SA-0022` builds the stacking. Until then a child is cut from
+# `base_sha`, so only a parent already in the default branch can satisfy it —
+# and merging is permanent, so this one is read across every `spec_sha`.
+DEPENDENCY_MERGED = "MERGED"
+
+# Reached review and not landed. Not "unrun", and the reason has to say so.
+DEPENDENCY_WAITING_STATES = frozenset({"READY_FOR_REVIEW", "APPROVED", "MERGE_TRAIN"})
+
+# Will not merge as it stands. Read only at the parent's *current* `spec_sha`:
+# a dead row under a superseded sha is a fact about text that has since been
+# edited, and says nothing about the spec on disk (measured, SA-0020's first
+# attempt, 2026-08-30).
+DEPENDENCY_DEAD_STATES = frozenset({"REJECTED", "EXHAUSTED"})
+
+
 # The other side of the same rule: re-queue when nothing was learned about
 # the spec. A spec whose task is in one of these states is queued again,
 # resuming that same task_id rather than minting a new one.
@@ -75,8 +92,10 @@ class Candidate:
 
     `task_id` is `None` when there is no existing task to resume — either
     none was ever created at this `spec_sha`, or every one that exists is in
-    an in-flight state (a corpse this spec does not stamp `ORPHANED`; that
-    write belongs to the half of `SA-0009` that runs a cell). It is set only
+    an in-flight state. `SA-0019` ended the deferral this sentence used to
+    record: `reconcile` stamps `ORPHANED`, but only when a caller asserts
+    §4.2.1's batch-scan premise, and neither `queue` nor `reconcile` is a batch
+    scan — so a corpse still reaches this function unstamped. It is set only
     when a task at this `spec_sha` is in a `REQUEUE_STATES` state, so the resumed
     work reattaches to the row it was sent back to fix rather than a fresh
     one gate 0 (`SA-0016`) would refuse on its own PR.
@@ -249,7 +268,56 @@ def _unmatched_criterion_path(spec: Spec) -> str | None:
     return None
 
 
-def _refuse(candidate: Candidate, *, open_prs: list[dict]) -> str | None:
+def _dependency_refusal(
+    dep: str,
+    merged_anywhere: frozenset[str],
+    states_at_current_sha: dict[str, list[str]],
+) -> str | None:
+    """Why `dep` does not satisfy a dependency yet, or `None` if it does.
+
+    Every branch names the state it actually read. The old refusal said
+    "depends_on is not scheduled" about a spec whose state it never looked up,
+    which reads as a verdict on the parent and sends an operator to investigate
+    a spec with nothing wrong with it (§4.2.1).
+    """
+    if dep in merged_anywhere:
+        return None
+
+    states = states_at_current_sha.get(dep)
+    if not states:
+        # Two cases, one sentence, because the operator's next move is the same
+        # and the distinction is not one the scan can draw: the parent has never
+        # run, or it ran and its spec text has moved since.
+        return (
+            f"depends_on {dep} has no task at its current spec_sha, so nothing "
+            "says it merged: it has not run, or not since it was last edited"
+        )
+
+    waiting = [s for s in states if s in DEPENDENCY_WAITING_STATES]
+    if waiting:
+        return (
+            f"depends_on {dep} is {waiting[-1]} and has not merged — a dependent "
+            "is cut from the default branch, so it waits for the parent to land "
+            "(stacking is SA-0022)"
+        )
+
+    dead = [s for s in states if s in DEPENDENCY_DEAD_STATES]
+    if dead:
+        return (
+            f"depends_on {dep} is {dead[-1]}, which will not merge as it stands "
+            "— a different fact about the night from a parent not yet run"
+        )
+
+    return f"depends_on {dep} is {states[-1]}, which is not {DEPENDENCY_MERGED}"
+
+
+def _refuse(
+    candidate: Candidate,
+    *,
+    open_prs: list[dict],
+    merged_anywhere: frozenset[str],
+    states_at_current_sha: dict[str, list[str]],
+) -> str | None:
     """The first of §4.2.1's remaining refusals this candidate earns, or
     `None`. Order matches the acceptance criteria's own listing."""
     own_branch = _branch(candidate.spec.id)
@@ -296,8 +364,10 @@ def _refuse(candidate: Candidate, *, open_prs: list[dict]) -> str | None:
     if (escaped := _unmatched_criterion_path(candidate.spec)) is not None:
         return f"acceptance criteria name {escaped!r}, which no touches pattern matches"
 
-    if candidate.spec.depends_on:
-        return f"depends_on is not scheduled: {', '.join(candidate.spec.depends_on)}"
+    for dep in candidate.spec.depends_on:
+        reason = _dependency_refusal(dep, merged_anywhere, states_at_current_sha)
+        if reason is not None:
+            return reason
 
     return None
 
@@ -349,12 +419,33 @@ def build_queue(
             )
         )
 
+    # Read across every `spec_sha` — merging is permanent, and a parent's spec
+    # text moving afterwards does not un-merge its code.
+    merged_anywhere = frozenset(
+        spec_id
+        for (spec_id, _sha), rows in existing.items()
+        if any(row["state"] == DEPENDENCY_MERGED for row in rows)
+    )
+    # Every other state is read only at the sha the spec has on disk now.
+    states_at_current_sha = {
+        discovered.spec.id: [
+            row["state"]
+            for row in existing.get((discovered.spec.id, discovered.spec_sha), ())
+        ]
+        for discovered in specs
+    }
+
     open_prs = _open_prs(repo_slug, gh) if repo_slug is not None else []
 
     refusals = [Refusal(path=f.path, reason=f.reason) for f in failures]
     kept: list[Candidate] = []
     for candidate in candidates:
-        reason = _refuse(candidate, open_prs=open_prs)
+        reason = _refuse(
+            candidate,
+            open_prs=open_prs,
+            merged_anywhere=merged_anywhere,
+            states_at_current_sha=states_at_current_sha,
+        )
         if reason is not None:
             refusals.append(Refusal(path=candidate.path, reason=reason))
         else:

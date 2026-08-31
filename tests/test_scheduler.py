@@ -43,6 +43,11 @@ def _task_at(ledger, repo_id, *, spec_id, spec_sha, state):
     return task_id
 
 
+def _sha(path):
+    """The spec_sha the scan would compute for a spec file on disk."""
+    return load_spec(path)[1]
+
+
 def _repo(ledger, origin="/o"):
     return ledger.upsert_repo("r", origin, "/m.git", policy_sha="p" * 64)
 
@@ -659,7 +664,13 @@ def test_criterion_path_matching_is_exact_not_a_directory_insensitive_suffix(
 # ------------------------------------------------------- refusal: depends_on
 
 
-def test_a_non_empty_depends_on_refuses(tmp_path, ledger):
+def test_a_depends_on_refuses_when_the_scan_has_no_ledger_to_look_it_up_in(
+    tmp_path, ledger
+):
+    """Was `test_a_non_empty_depends_on_refuses`, which named the old rule:
+    any `depends_on` refused, unlooked-up. It still refuses here, but for a
+    read reason — with no `repo_id` there are no rows, so nothing says the
+    parent merged."""
     directory = _spec_dir(tmp_path)
     _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
 
@@ -668,6 +679,144 @@ def test_a_non_empty_depends_on_refuses(tmp_path, ledger):
     assert candidates == []
     assert len(refusals) == 1
     assert "TE-0" in refusals[0].reason
+    assert "no task" in refusals[0].reason
+
+
+def test_a_dependency_that_merged_is_a_candidate(tmp_path, ledger):
+    """§4.2's rule, narrowed to what needs no stacking: a merged parent is in
+    the default branch the child is cut from."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
+    _write_spec(directory, "b.md", id="TE-0", touches=["b.py"])
+    repo_id = _repo(ledger)
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-0",
+        spec_sha=_sha(directory / "b.md"),
+        state="MERGED",
+    )
+
+    candidates, refusals = build_queue(directory, repo_id, ledger)
+
+    assert "TE-1" in [c.spec.id for c in candidates]
+    assert [r for r in refusals if "TE-1" in str(r.path)] == []
+
+
+def test_a_merged_parent_satisfies_whatever_sha_it_ran_at(tmp_path, ledger):
+    """Merging is permanent and sha-independent — the parent's code is in the
+    default branch however its spec text has moved since."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
+    _write_spec(directory, "b.md", id="TE-0", touches=["b.py"])
+    repo_id = _repo(ledger)
+    _task_at(ledger, repo_id, spec_id="TE-0", spec_sha="0" * 64, state="MERGED")
+
+    candidates, _ = build_queue(directory, repo_id, ledger)
+
+    assert "TE-1" in [c.spec.id for c in candidates]
+
+
+@pytest.mark.parametrize("state", ["READY_FOR_REVIEW", "APPROVED", "MERGE_TRAIN"])
+def test_a_parent_waiting_to_merge_is_refused_as_waiting(tmp_path, ledger, state):
+    """Not unrun. §4.2's own rule admits these; this spec cannot, because a
+    child cut from `base_sha` would not have the parent's commits."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
+    _write_spec(directory, "b.md", id="TE-0", touches=["b.py"])
+    repo_id = _repo(ledger)
+    _task_at(
+        ledger, repo_id, spec_id="TE-0", spec_sha=_sha(directory / "b.md"), state=state
+    )
+
+    candidates, refusals = build_queue(directory, repo_id, ledger)
+
+    assert "TE-1" not in [c.spec.id for c in candidates]
+    reason = next(r.reason for r in refusals if r.path.name == "a.md")
+    assert state in reason
+    assert "merge" in reason.lower()
+
+
+@pytest.mark.parametrize("state", ["REJECTED", "EXHAUSTED"])
+def test_a_parent_that_will_not_merge_reads_differently_from_one_unrun(
+    tmp_path, ledger, state
+):
+    """A parent that will not merge and a parent not yet run are different
+    facts about the night."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
+    _write_spec(directory, "b.md", id="TE-0", touches=["b.py"])
+    repo_id = _repo(ledger)
+    _task_at(
+        ledger, repo_id, spec_id="TE-0", spec_sha=_sha(directory / "b.md"), state=state
+    )
+
+    _, refusals = build_queue(directory, repo_id, ledger)
+    reason = next(r.reason for r in refusals if r.path.name == "a.md")
+
+    assert state in reason
+    assert "not run" not in reason and "no task" not in reason
+
+
+def test_a_parent_with_no_task_names_that_rather_than_a_state(tmp_path, ledger):
+    """No reason claims a check it did not perform."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
+    _write_spec(directory, "b.md", id="TE-0", touches=["b.py"])
+    repo_id = _repo(ledger)
+
+    _, refusals = build_queue(directory, repo_id, ledger)
+    reason = next(r.reason for r in refusals if r.path.name == "a.md")
+
+    assert "TE-0" in reason
+    assert "no task" in reason
+
+
+def test_a_dead_state_under_a_superseded_sha_does_not_speak_for_the_parent(
+    tmp_path, ledger
+):
+    """Measured on this spec's own first attempt (2026-08-30): `any(state in
+    DEAD)` across every sha reports a parent dead when its spec has been
+    edited since, and the disposition of the text on disk is simply unknown.
+    """
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
+    _write_spec(directory, "b.md", id="TE-0", touches=["b.py"])
+    repo_id = _repo(ledger)
+    # The parent ran, was rejected, and its spec text has moved since.
+    _task_at(ledger, repo_id, spec_id="TE-0", spec_sha="f" * 64, state="REJECTED")
+
+    _, refusals = build_queue(directory, repo_id, ledger)
+    reason = next(r.reason for r in refusals if r.path.name == "a.md")
+
+    assert "REJECTED" not in reason
+    assert "no task" in reason
+
+
+def test_this_repos_own_specs_schedule_sa_0020_and_refuse_its_dependents(
+    tmp_path, ledger
+):
+    """Criterion 5's live witness, re-anchored 2026-08-31. `SA-0020`'s parent
+    `SA-0019` merged, so it is a candidate; `SA-0022` and `SA-0023` depend on
+    `SA-0020`, whose only task ran at a `spec_sha` the spec has since moved
+    off, so they are refused naming that rather than a state never read."""
+    real_specs = Path(__file__).resolve().parent.parent / ".saffron" / "specs"
+    directory = tmp_path / "specs"
+    shutil.copytree(real_specs, directory)
+    repo_id = _repo(ledger)
+    for path in sorted(directory.glob("*.md")):
+        spec, spec_sha = load_spec(path)
+        if spec.id in {"SA-0020", "SA-0022", "SA-0023"}:
+            continue
+        _task_at(ledger, repo_id, spec_id=spec.id, spec_sha=spec_sha, state="MERGED")
+
+    candidates, refusals = build_queue(directory, repo_id, ledger)
+
+    assert "SA-0020" in [c.spec.id for c in candidates]
+    for dependent in ("SA-0022", "SA-0023"):
+        reason = next(r.reason for r in refusals if r.path.name.startswith(dependent))
+        assert "SA-0020" in reason
+        assert "no task" in reason
 
 
 # ---------------------------------------------------------------------- smoke
