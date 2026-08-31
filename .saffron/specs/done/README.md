@@ -43,11 +43,20 @@ nothing.
 | `SA-0008` | `rebut.sustained_blockers()`; `QueueLine.sustained`, ranked by `sort_key` |
 | `SA-0010` | `rebut.unkept_fixes()`; `QueueLine.unkept`, ranked in the same bucket |
 | `SA-0012` | `_spec()` in `tests/test_package.py` builds a real `Spec` through `parse_spec`; all three declared witnesses exist and pass. The `SimpleNamespace` uses that remain there stand for `CellOutcome` and a fixture bundle, not for `Spec` |
+| `SA-0020` | The dependency gate: `_dependency_refusal` in `saffron/scheduler.py`, admitting a parent that `MERGED` and naming what it read otherwise. Implemented by hand, so **no cell task records it** — which is why the scan kept offering it, and is itself the gap noted below |
 | `SA-0011` | `saffron/gates/core/criteria.py`, `tests/test_criteria.py`, `Criterion` parsing in `intake.py` |
 | `SA-0014` | `discover_specs()` exists; its task is `MERGED` at an older `spec_sha` |
 
 `SA-0009` is not here: its task is `EXHAUSTED`, which the filter already reads,
 so the scan does not offer it.
+
+**A third cause, found on 2026-08-31 when `SA-0020` shipped.** Work done *by
+hand* writes no task at all — cells are the only thing that creates one. So a
+spec a human implemented looks exactly like a spec nobody has run, and its
+dependents stay refused however plainly its code sits in `main`. The gate asks
+whether the parent's work is in the default branch and answers from a record of
+cell runs; for a repo where humans and cells both commit, those are different
+questions. Retiring the spec here says what the ledger cannot.
 
 **Do not edit a spec in this directory.** An edit moves its `spec_sha`, and the
 sha is what the ledger's rows are keyed on.
