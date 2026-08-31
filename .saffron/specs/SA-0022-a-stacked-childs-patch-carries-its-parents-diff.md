@@ -10,10 +10,12 @@ touches:
   - saffron/cell/worktree.py
   - saffron/phases/package.py
   - saffron/scheduler.py
+  - saffron/cli.py
   - tests/test_session.py
   - tests/test_worktree.py
   - tests/test_package.py
   - tests/test_scheduler.py
+  - tests/test_cli.py
   - docs/BACKLOG.md
 forbidden:
   - DESIGN.md
@@ -22,7 +24,7 @@ forbidden:
   - saffron/reconcile.py
   - saffron/gates/**
   - saffron/report/**
-budget_usd: 20
+budget_usd: 30
 max_attempts: 4
 max_turns: 140
 risk: elevated
@@ -111,6 +113,34 @@ depend on it (§5.4, items 13 and 15). This spec adds a second reference point f
 a stacked task; it does not redefine the first.
 
 ## Notes for the agent
+**`saffron/cli.py` is in `touches` because `CellSpec` is built in exactly one
+place, and it is there** (`cli.py`, the sole construction site). Any field the
+worktree and the export need — whatever the second base ends up called — is set
+at that call or it is not set at all. `SA-0020`'s first patch resolved it in
+`cli.py` as `_stacked_checkout(spec, ledger, url, mirror)`, which is where the
+ledger lookup of the parent's pushed head belongs: `session.py` drives one cell
+and does not choose what to stack on. This spec's earlier draft omitted
+`cli.py`, which would have failed `scope` after the plan checkpoint — the same
+ceiling `SA-0020`'s first attempt died on.
+
+**The documentation half is by hand, and here are the sentences.** Backlog item
+30's rule, applied to this spec rather than requested by it. Criterion 5 widens
+the gate, and `DESIGN.md` is in this spec's `forbidden` list, so an operator
+corrects these afterwards:
+
+- §4.2.1, the paragraph on `depends_on`: *"Every other parent state is still
+  refused, and the reason names the state it actually read."* Criterion 5
+  falsifies it for three states.
+- §3.1's frontmatter example: `depends_on: [TE-0139] # satisfied at
+  READY_FOR_REVIEW, see §4.2` — written as the design's intent, and true for
+  the first time once this ships.
+- §4.2 itself describes stacking in the present tense while `SA-0020` shipped
+  only the half that needs none; check its wording against what this spec
+  actually builds rather than assuming either is current.
+
+`CONTEXT.md` needs no change: **Retired spec** and **Touches** are both
+unaffected by stacking.
+
 **Read `SA-0020`'s first patch before starting.**
 `~/.saffron/batches/v0/SA-0020/patch.diff` already contains a working
 `spec.stacked_on` and a worktree that checks it out. The half that was wrong is
