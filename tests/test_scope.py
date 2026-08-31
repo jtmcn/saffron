@@ -70,6 +70,80 @@ def test_no_declared_touches_skips_rather_than_failing_everything():
     assert "no touches declared" in result.summary
 
 
+def test_forbidden_and_protected_default_to_empty_and_change_nothing():
+    """Every caller and every test that predates the two new parameters is
+    unchanged: a call passing neither behaves exactly like one passing both
+    as empty lists."""
+    changed = ["src/a.py", "out/b.py"]
+    touches = ["src/**"]
+    implicit = scope_gate(changed, touches)
+    explicit = scope_gate(changed, touches, forbidden=[], protected=[])
+    assert implicit == explicit
+    assert implicit.status == "fail"
+    assert [f.code for f in implicit.failures] == ["out-of-scope"]
+
+
+def test_a_file_outside_touches_and_denied_still_reports_out_of_scope_unchanged():
+    """`forbidden`/`protected` are independent of the `touches` check: a file
+    can be both outside touches and denied by a list, and the pre-existing
+    out-of-scope failure for it is neither renamed nor dropped."""
+    result = scope_gate(
+        ["alembic/versions/0042_add.py"],
+        touches=["src/**"],
+        forbidden=["alembic/**"],
+        protected=["alembic/**"],
+    )
+    assert result.status == "fail"
+    codes = sorted(f.code for f in result.failures)
+    assert codes == ["forbidden", "out-of-scope", "protected"]
+    (out_of_scope,) = [f for f in result.failures if f.code == "out-of-scope"]
+    assert out_of_scope.message == "outside touches: src/**"
+
+
+def test_a_file_inside_touches_that_is_forbidden_fails_with_its_own_code():
+    result = scope_gate(
+        ["docs/DESIGN.md"],
+        touches=["docs/**"],
+        forbidden=["docs/DESIGN.md"],
+    )
+    assert result.status == "fail"
+    assert [f.file for f in result.failures] == ["docs/DESIGN.md"]
+    assert result.failures[0].code == "forbidden"
+    assert result.failures[0].message == "forbidden by the spec: docs/DESIGN.md"
+
+
+def test_a_file_inside_touches_that_is_protected_fails_with_its_own_code():
+    result = scope_gate(
+        ["docs/DESIGN.md"],
+        touches=["docs/**"],
+        protected=["docs/DESIGN.md"],
+    )
+    assert result.status == "fail"
+    assert [f.file for f in result.failures] == ["docs/DESIGN.md"]
+    assert result.failures[0].code == "protected"
+    assert result.failures[0].message == "protected by policy: docs/DESIGN.md"
+
+
+def test_forbidden_and_protected_failures_are_never_error():
+    forbidden_result = scope_gate(
+        ["docs/DESIGN.md"], touches=["docs/**"], forbidden=["docs/DESIGN.md"]
+    )
+    protected_result = scope_gate(
+        ["docs/DESIGN.md"], touches=["docs/**"], protected=["docs/DESIGN.md"]
+    )
+    assert forbidden_result.status == "fail"
+    assert protected_result.status == "fail"
+
+
+def test_no_declared_touches_skips_before_either_deny_list_is_checked():
+    """A bug spec awaiting DIAGNOSE has no touches yet, so its diff is not
+    checked against forbidden or protected either — the ceiling stated where
+    the code is."""
+    result = scope_gate(["a.py"], touches=[], forbidden=["a.py"], protected=["a.py"])
+    assert result.status == "skip"
+    assert "no touches declared" in result.summary
+
+
 def _hostile_repo(path):
     """A real repo whose worktree config bends every diff knob an agent can set."""
     path.mkdir(parents=True, exist_ok=True)

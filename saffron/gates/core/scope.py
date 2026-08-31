@@ -37,14 +37,28 @@ def matches(path: str, pattern: str) -> bool:
 
 
 def scope_gate(
-    changed_files: list[str], touches: list[str], *, diff: str | None = None
+    changed_files: list[str],
+    touches: list[str],
+    *,
+    diff: str | None = None,
+    forbidden: list[str] | None = None,
+    protected: list[str] | None = None,
 ) -> GateResult:
-    """Changed files ⊆ touches, judged against the diff those paths came from.
+    """Changed files ⊆ touches, and ⊄ forbidden/protected, judged against the
+    diff those paths came from.
 
     `diff` is the export the reviewer reads. Its headers must carry the a/ b/
     the host pinned; anything else means git did not honour the flags, and a
     gate that cannot recognise its own input reports `error` — infrastructure,
     charged to nobody (§5.4) — rather than a `pass` nobody checked.
+
+    `forbidden` (a spec's own deny list) and `protected` (the repo's global
+    one) default to empty, so every caller that predates them is unchanged.
+    Both are matched with the same `matches()` `touches` already uses — one
+    function, one meaning of "declared" — and checked against every changed
+    file independently of the `touches` check: a file can be both outside
+    `touches` and denied by one of these lists, and the `out-of-scope` failure
+    for it is never renamed or dropped just because it is also denied.
     """
     if diff is not None:
         # split_lines, not splitlines(): \r, \x0c and friends appear raw inside
@@ -59,35 +73,89 @@ def scope_gate(
                 )
 
     if not touches:
+        # A diff whose scope has not yet been ratified is not checked against
+        # either deny list — that is the documented shape for a bug awaiting
+        # DIAGNOSE (CONTEXT.md §3), not an oversight.
         return GateResult(
             gate="scope",
             status="skip",
             summary="no touches declared",
         )
 
+    forbidden = forbidden or []
+    protected = protected or []
+
     escaped = [
         path
         for path in changed_files
         if not any(matches(path, pattern) for pattern in touches)
     ]
-    if not escaped:
+    forbidden_hits = [
+        path
+        for path in changed_files
+        if any(matches(path, pattern) for pattern in forbidden)
+    ]
+    protected_hits = [
+        path
+        for path in changed_files
+        if any(matches(path, pattern) for pattern in protected)
+    ]
+
+    if not escaped and not forbidden_hits and not protected_hits:
         return GateResult(
             gate="scope",
             status="pass",
             summary=f"{len(changed_files)} changed files within touches",
         )
 
-    # The failure line is the whole channel to the agent (§5.4), and `touches`
-    # lives in frontmatter the spec body never carries — so it names them.
-    declared = ", ".join(touches)
+    # The failure line is the whole channel to the agent (§5.4), and none of
+    # the three lists live in the spec body — so each failure names its own.
+    declared_touches = ", ".join(touches)
+    declared_forbidden = ", ".join(forbidden)
+    declared_protected = ", ".join(protected)
+    failures = (
+        [
+            Failure(
+                file=path,
+                code="out-of-scope",
+                message=f"outside touches: {declared_touches}",
+            )
+            for path in escaped
+        ]
+        + [
+            Failure(
+                file=path,
+                code="forbidden",
+                message=f"forbidden by the spec: {declared_forbidden}",
+            )
+            for path in forbidden_hits
+        ]
+        + [
+            Failure(
+                file=path,
+                code="protected",
+                message=f"protected by policy: {declared_protected}",
+            )
+            for path in protected_hits
+        ]
+    )
+
+    if not forbidden_hits and not protected_hits:
+        # Byte-identical to the gate's behaviour before forbidden/protected
+        # existed, for every caller that never passes them.
+        summary = (
+            f"{len(escaped)} of {len(changed_files)} changed files outside touches"
+        )
+    else:
+        summary = (
+            f"{len(failures)} denial(s) across {len(changed_files)} changed files: "
+            f"{len(escaped)} outside touches, {len(forbidden_hits)} forbidden, "
+            f"{len(protected_hits)} protected"
+        )
+
     return GateResult(
         gate="scope",
         status="fail",
-        failures=[
-            Failure(
-                file=path, code="out-of-scope", message=f"outside touches: {declared}"
-            )
-            for path in escaped
-        ],
-        summary=f"{len(escaped)} of {len(changed_files)} changed files outside touches",
+        failures=failures,
+        summary=summary,
     )

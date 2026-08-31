@@ -765,7 +765,13 @@ def _drive_cell(
             results = [
                 # The diff goes with the paths: it is what proves the export the
                 # reviewer will read still has the shape the host pinned.
-                scope_gate(changed, spec.touches, diff=diff),
+                scope_gate(
+                    changed,
+                    spec.touches,
+                    diff=diff,
+                    forbidden=spec.forbidden,
+                    protected=policy.protected,
+                ),
                 integrity_gate(diff, policy.integrity, spec.touches),
                 # Host-side only, beside `scope`/`integrity`, for the same
                 # reason: never declared in `.saffron/gates` (`tool` would be

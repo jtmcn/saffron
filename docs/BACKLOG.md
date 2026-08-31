@@ -1589,6 +1589,42 @@ window, because `finish_run` precedes PACKAGE.
 
 ---
 
+## 30. A protected document's one-line definition of a gate drifts the moment the gate changes, and the fix is always by hand
+
+`SA-0024` widened `scope_gate` (`saffron/gates/core/scope.py`) to also fail a
+changed file matching a spec's `forbidden` list or the repo's `protected` list,
+not only a file outside `touches`. `CONTEXT.md` §3 still defines the gate in
+one line: *"The check that changed files are a subset of `touches`."* That
+sentence is now false — it describes half the gate — and nothing in this
+spec's `touches` can fix it: `CONTEXT.md` is `protected`, so no plan naming it
+can be validated (item 28's `SA-0023` refusal), and it is in this spec's own
+`forbidden` list besides. The correction is a by-hand follow-up, the same
+shape item 27 (`SA-0018`/`SA-0021`) and item 28 (`SA-0023`) already
+established for a protected document a spec cannot reach.
+
+**This is the second instance of that drift, not the first.** Item 27 is the
+first: `SA-0018` added a second producer of `SCOPE_REVIEW` and could not update
+`CONTEXT.md`'s **Touches** entry to say so, because `DESIGN.md` and
+`CONTEXT.md` were both in `SA-0018`'s own `forbidden` list — the same
+structural reason this item exists. `SA-0021` closed that one, by hand, one
+spec later. The pattern both instances share: a spec that changes what a core
+mechanism does can never be the spec that updates the one document defining it
+in prose, because that document is `protected` by the same policy the spec's
+own change makes more precise. A third instance should not need a third
+backlog item before it is treated as a rule of the process rather than a
+one-off gap: **any spec that changes core gate or phase behaviour should name,
+in its own notes, the `CONTEXT.md`/`DESIGN.md` sentence its change makes
+stale**, so the by-hand follow-up has a known list rather than a fresh reading
+of both documents each time.
+
+**Done looks like:** `CONTEXT.md` §3's `scope` gate line stating that it also
+fails a changed file denied by `forbidden` or `protected`, corrected by hand
+outside any spec's `touches` — and, if a third instance of this drift is
+found before then, a decision here on whether the rule above should become a
+spec that enforces it rather than something this paragraph only asks for.
+
+---
+
 ## What is *not* here, deliberately
 
 DIAGNOSE and `SCOPE_REVIEW`, the scheduler's conflict sets and stacking, `saffron
