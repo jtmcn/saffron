@@ -256,7 +256,10 @@ def _assembled_implement_prompt() -> str:
 
 def _definition(prompt: str, term: str) -> str:
     """One term's paragraph, delimited the way the model reads it."""
-    return prompt[prompt.index(f"**{term}**") :].split("\n\n", 1)[0]
+    marker = f"**{term}**"
+    start = prompt.find(marker)
+    assert start != -1, f"{marker} is not in the assembled prompt at all"
+    return prompt[start:].split("\n\n", 1)[0]
 
 
 def test_the_implement_prompt_offers_the_scope_proposal_door():
@@ -276,4 +279,10 @@ def test_the_implement_prompt_never_calls_scope_proposal_diagnose_only():
     assert "IMPLEMENT" in touches, (
         "the IMPLEMENT prompt names DIAGNOSE as the only proposer of `touches` "
         f"while offering the implementer the same door: {touches!r}"
+    )
+    # Naming IMPLEMENT is not enough on its own: "IMPLEMENT never proposes
+    # scope" satisfies the assertion above and reinstates the defect.
+    assert "on bug specs" not in touches, (
+        "the plural confines proposal to a spec type again, which is the "
+        f"restriction this test exists to keep out of the prompt: {touches!r}"
     )

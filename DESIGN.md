@@ -684,7 +684,7 @@ Explicitly **not** doing: a regex denylist over Bash command strings. It's the s
 
 ### 5.3.1 The scope proposal — IMPLEMENT's door out of an impossible spec
 
-A non-bug spec's `touches` is declared by hand, and a hand-written set can be wrong in a way no amount of implementation effort repairs: a criterion asks for behaviour that lives in a file the set does not cover. The plan checkpoint above rejects that plan correctly and cheaply — but rejection is *all* it does, so each remaining attempt rediscovers the same wall and the task ends with a spend and no finding. The exact case §5.2 was built for on bugs, arriving one phase later on everything else. So the implementer gets the same door: **before writing a plan, it may reply with a scope proposal instead**, naming the paths the criteria actually need and the root cause that makes the declared set insufficient.
+A non-bug spec's `touches` is declared by hand, and a hand-written set can be wrong in a way no amount of implementation effort repairs: a criterion asks for behaviour that lives in a file the set does not cover. The plan checkpoint above rejects that plan correctly and cheaply — but rejection is *all* it does. The task ends there, at `PLAN_REJECTED`, which reaches you reading "your spec needs work" about a spec that is as good as it can be, and §4.2.1 does not re-queue it. The alternative the implementer has without this door is worse: keep the plan inside `touches`, and grind every repair attempt to a ceiling having learned nothing the spec did not already say. The exact case §5.2 was built for on bugs, arriving one phase later on everything else. So the implementer gets the same door: **before writing a plan, it may reply with a scope proposal instead**, naming the paths the criteria actually need and the root cause that makes the declared set insufficient.
 
 Three rules keep it a door rather than an escape hatch:
 
@@ -693,6 +693,8 @@ Three rules keep it a door rather than an escape hatch:
 - **The task's own spec path is added host-side**, exactly as in §5.2, and the ratified set is a **superset** of the declared `touches` rather than a replacement. The prompt asks for paths "inside or outside" the declared set, and a prompt is not the boundary — so the union is taken host-side where it is one.
 
 What follows the proposal is §5.2's contract unchanged: the same state, the same one-click ratification, the same writeback on the task's own branch. Only the producer differs, which is why the rules live there and only the door lives here.
+
+**The door is at the plan checkpoint and nowhere else**, and a `ponytail:` in `cell/session.py` names that ceiling: a `touches` insufficiency the implementer discovers mid-diff, after the plan was accepted, still has no exit and still burns to a ceiling. This subsection describes an opening at the start of the phase, not a standing right to renegotiate scope during it.
 
 ### 5.4 Phase 3 — GATE ⇄ REPAIR
 
@@ -1085,7 +1087,7 @@ Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents
 | **Silent batch no-op** | Cell runtime down, Mac asleep, auth expired | `launchd` + preflight that fails loudly into the queue |
 | **Batch overshoots its budget by up to K×** | Budget gate compares against spend, which lags scheduling | Reserve the task budget at schedule, release the remainder at terminal state (§4.2) |
 | **Every re-queued task is refused** | Gate 0 sees the task's own open PR | Refusal keyed on another task's PR, not on the spec (§4.2) |
-| **Ratified bug tasks fail `scope` on their first commit** | The writeback edits a spec path DIAGNOSE never proposed | The spec's own path joins the ratified `touches` (§5.2) |
+| **Ratified tasks fail `scope` on their first commit** | The writeback edits a spec path the proposer never named | The spec's own path joins the ratified `touches` (§5.2) |
 | **Two bug tasks collide inside one file** | `touches` is empty when a bug is first scheduled | Gates 0 and 2 re-run at ratification against the ratified set (§4.2) |
 | **Baseline subtraction has nothing to subtract from** | `gate_results` stored status, not `failures[]` | `failures` table keyed `(gate, file, code)`; baseline rows hang off `run_id` (§4.1) |
 | **`spec_sha` invalidation never fires** | Nothing re-reads the repo after preflight pins `base_sha` | Mirror refetch and sha comparison at each task's scheduling (§4.1) |

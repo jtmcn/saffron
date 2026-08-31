@@ -144,10 +144,10 @@ operator does to a PR).
 the operator on bug specs; never enforced against a diff.
 
 **Touches**: The set of paths a task may change. Declared directly on non-bug specs.
-Proposed rather than declared by either phase that can find the declaration
-insufficient — DIAGNOSE on a bug spec, IMPLEMENT on any spec whose declared set
-cannot satisfy its acceptance criteria — and ratified by the operator in both
-cases. Once fixed it feeds the conflict set and the `scope` gate.
+Proposed, then ratified by the operator, where the declaration cannot stand: by
+DIAGNOSE on a bug spec, which has none, and by IMPLEMENT on any spec whose declared
+set cannot satisfy its acceptance criteria. Once fixed it feeds the conflict set
+and the `scope` gate.
 
 **`scope` gate**: The check that changed files are a subset of `touches`.
 

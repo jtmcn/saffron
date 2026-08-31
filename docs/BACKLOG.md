@@ -1431,7 +1431,11 @@ infrastructure fault (exit `2`), not an empty scan — the same call
 `PREFLIGHT_FAILED` makes. An existing but empty directory stays `([], [])`,
 which is a true statement about a repo with no specs.
 
+---
+
 ## 27. `SA-0018` built a door it could not document, and the prompt then contradicted it
+
+**Status:** **done** — `SA-0021`, by hand on the host, 2026-08-30.
 
 `SA-0018` added a second producer of `SCOPE_REVIEW`: an IMPLEMENT attempt whose
 declared `touches` cannot satisfy its criteria proposes a set instead of grinding
@@ -1497,6 +1501,15 @@ task. A plan naming a protected path *outside* `touches` stays a rejection: that
 an agent reaching for something it was never given, which is the case the check was
 written for. Until then, a docs spec over protected paths must be run by hand and
 say so in its own notes.
+
+**One tension to meet deliberately rather than at implementation time.** Such a
+proposal names only paths *inside* the declared `touches`, which is precisely what
+`validate_scope_proposal` refuses — "every proposed path is already inside touches".
+Generated host-side it would bypass that validator, and `SCOPE_REVIEW` would then
+carry two meanings: a scope to ratify, and "this one is yours to do by hand".
+`CONTEXT.md` defines **Ratify** as what the operator does to a *proposed `touches`
+set*, so the second meaning needs either a different state or a deliberate widening
+of that definition — not a quiet reuse.
 
 ---
 
