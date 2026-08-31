@@ -2414,3 +2414,37 @@ def test_the_review_lens_prompt_carries_the_claim_for_a_witnessed_spec(
     review_prompts = cell.system_prompts[1:]
     assert review_prompts
     assert all("the box ticks" in p for p in review_prompts)
+
+
+def test_a_proposed_scope_keeps_the_specs_declared_touches(monkeypatch, tmp_path):
+    """The ratified set is a superset, not a replacement. The prompt asks the
+    model for every path "inside or outside" the declared `touches`, but a
+    prompt is not the boundary — the same argument the host-added spec path
+    beside it already makes. A proposal of `["infra/deploy.tf"]` that replaced
+    `touches` would ratify a scope omitting every file the task must edit, and
+    the ratified attempt would then fail `scope` on its own work."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PROPOSAL))]
+    )
+    assert set(outcome.proposed_touches) >= {"src/**", "tests/**"}
+
+
+def test_the_recorded_spec_path_is_the_real_file_not_a_name_guess(
+    monkeypatch, tmp_path
+):
+    """Nothing ties a spec file's name to its `id` — `discover_specs` globs
+    `*.md` and reads `id` from frontmatter — so a repo whose specs are not
+    named `<id>-<slug>.md` got a glob matching no file, and the ratification's
+    first commit would fail the `scope` gate it exists to satisfy."""
+    specs = tmp_path / "repo" / ".saffron" / "specs"
+    specs.mkdir(parents=True)
+    (specs / "no-id-in-this-name.md").write_text(
+        "---\nid: SY-1\ntitle: a filename that says nothing about its id\n"
+        "type: feature\n---\n\n## Context\nx\n"
+    )
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PROPOSAL))]
+    )
+    assert ".saffron/specs/no-id-in-this-name.md" in outcome.proposed_touches

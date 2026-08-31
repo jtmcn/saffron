@@ -249,16 +249,27 @@ def require_session(session_id: str | None) -> str:
     return session_id
 
 
-def _spec_path_pattern(spec_id: str) -> str:
-    """A `touches`-legal glob for the task's own spec file (§5.2's rule,
-    reached here from IMPLEMENT rather than DIAGNOSE — SA-0018).
+def _spec_path(spec_id: str, repo: Path) -> str:
+    """A `touches` entry for the task's own spec file (§5.2's rule, reached
+    here from IMPLEMENT rather than DIAGNOSE — SA-0018).
 
-    `CellSpec` carries `spec_id`, never the file's actual path — the slug
-    after it is only known to the discovery scan that found the file, not to
-    this cell — so the pattern is what `matches()` can resolve without it:
-    `.saffron/specs/SA-0005-*.md` matches the one file `SA-0005` could ever
-    name, and nothing else, the same way any other glob `touches` entry does.
+    Read off the frontmatter, never guessed from the filename: nothing ties a
+    spec file's name to its `id` (`discover_specs` globs `*.md` and reads `id`
+    out of the frontmatter), so the `<id>-*.md` glob this used to return
+    matched no file at all in a repo that names its specs any other way — and
+    the writeback commit then failed the very `scope` gate the entry exists to
+    satisfy. Every spec in this repo follows the convention, which is why no
+    test caught it.
+
+    The glob stays as the fallback for a spec the scan cannot find: a pattern
+    that may match nothing still beats recording no spec path at all.
     """
+    from saffron.intake import discover_specs
+
+    found, _unparseable = discover_specs(repo / ".saffron" / "specs")
+    for discovered in found:
+        if discovered.spec.id == spec_id:
+            return discovered.path.relative_to(repo).as_posix()
     return f".saffron/specs/{spec_id}-*.md"
 
 
@@ -862,8 +873,15 @@ def _drive_cell(
             # Host-added, never the model's: the writeback this touches set
             # feeds is a commit to the spec file itself, and that commit would
             # otherwise fail its own `scope` gate (§5.2, DESIGN.md:618).
+            # A superset of the declared `touches`, never a replacement: the
+            # prompt asks for paths "inside or outside" them, and a prompt is
+            # not the boundary (SA-0018 review).
             final_touches = sorted(
-                {*proposal.proposed_touches, _spec_path_pattern(spec.spec_id)}
+                {
+                    *spec.touches,
+                    *proposal.proposed_touches,
+                    _spec_path(spec.spec_id, repo),
+                }
             )
             (task_dir / "scope_proposal.json").write_text(
                 json.dumps(
