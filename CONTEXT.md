@@ -143,9 +143,11 @@ operator does to a PR).
 **Envelope**: The loose outer bound a DIAGNOSE phase may read within. Declared by
 the operator on bug specs; never enforced against a diff.
 
-**Touches**: The set of paths a task may change. Declared directly on non-bug specs;
-proposed by DIAGNOSE and ratified by the operator on bug specs. Once fixed it feeds
-the conflict set and the `scope` gate.
+**Touches**: The set of paths a task may change. Declared directly on non-bug specs.
+Proposed rather than declared by either phase that can find the declaration
+insufficient — DIAGNOSE on a bug spec, IMPLEMENT on any spec whose declared set
+cannot satisfy its acceptance criteria — and ratified by the operator in both
+cases. Once fixed it feeds the conflict set and the `scope` gate.
 
 **`scope` gate**: The check that changed files are a subset of `touches`.
 
