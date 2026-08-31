@@ -1017,6 +1017,48 @@ def test_a_retired_parent_is_never_itself_offered_as_a_candidate(tmp_path, ledge
     assert [r for r in refusals if r.path.name == "b.md"] == []
 
 
+def test_an_unreadable_retired_spec_is_refused_by_path_not_only_by_silence(
+    tmp_path, ledger
+):
+    """A file in `done/` that stops parsing declares no id, so it credits
+    nothing — and without its own line the only trace is a child refused for
+    a parent the operator can see sitting in `done/`. Discarding those
+    failures made the refusal contradict the filesystem."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
+    (directory / "done").mkdir()
+    (directory / "done" / "b.md").write_text("no frontmatter here\n")
+    repo_id = _repo(ledger)
+
+    candidates, refusals = build_queue(directory, repo_id, ledger)
+
+    assert "TE-1" not in [c.spec.id for c in candidates]
+    retired = next(r for r in refusals if r.path.name == "b.md")
+    assert retired.path.parent.name == "done"
+    assert "credits no dependency" in retired.reason
+    assert "frontmatter" in retired.reason
+    # And the child's own line stops asserting a `done/` it could only partly
+    # read: it names what was unreadable there.
+    child = next(r.reason for r in refusals if r.path.name == "a.md")
+    assert "1 file in done/ could not be read as a spec" in child
+
+
+def test_a_retired_parent_admits_its_child_with_no_ledger_row_at_all(tmp_path, ledger):
+    """`repo_id is None` is a repo the ledger has never seen — which is
+    exactly the repo whose parent shipped by hand, so retirement has to be
+    read there too. The docstring that said a `depends_on` is refused
+    outright in this case described the gate before `SA-0020`."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
+    (directory / "done").mkdir()
+    _write_spec(directory / "done", "b.md", id="TE-0", touches=["b.py"])
+
+    candidates, refusals = build_queue(directory, None, ledger)
+
+    assert [c.spec.id for c in candidates] == ["TE-1"]
+    assert refusals == []
+
+
 def test_a_parent_that_is_neither_retired_nor_merged_names_both_checks(
     tmp_path, ledger
 ):
