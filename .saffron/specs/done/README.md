@@ -18,8 +18,13 @@ Two things defeat that filter, and both were measured on 2026-08-31:
   sentence in it. §4.2.1 keys on `spec_sha` deliberately so a *rewritten* spec
   runs again — nothing distinguishes a rewrite from a typo fix.
 
-Together they offered ten finished specs as candidates. At roughly $13 a cell
-that is about $130 of work already in the tree.
+Together they offered eleven finished specs as candidates. At roughly $13 a
+cell that is about $145 of work already in the tree.
+
+`SA-0012` is worth its own sentence: it declares its criteria as a frontmatter
+`acceptance:` block with witnesses rather than as markdown boxes, which is the
+stronger form `SA-0011` built. A count that reads the markdown list alone
+reports it as having none — it has three, and all three pass.
 
 **Retiring is not a ledger write.** Recording a task for work that never ran
 through a cell would put a false row in the audit trail, which is the one thing
@@ -37,6 +42,7 @@ nothing.
 | `SA-0007` | `phases/package.py` passes `outcome.effective_risk` and `advisory_gates`, and the queue line's `risk` is the effective tier |
 | `SA-0008` | `rebut.sustained_blockers()`; `QueueLine.sustained`, ranked by `sort_key` |
 | `SA-0010` | `rebut.unkept_fixes()`; `QueueLine.unkept`, ranked in the same bucket |
+| `SA-0012` | `_spec()` in `tests/test_package.py` builds a real `Spec` through `parse_spec`; all three declared witnesses exist and pass. The `SimpleNamespace` uses that remain there stand for `CellOutcome` and a fixture bundle, not for `Spec` |
 | `SA-0011` | `saffron/gates/core/criteria.py`, `tests/test_criteria.py`, `Criterion` parsing in `intake.py` |
 | `SA-0014` | `discover_specs()` exists; its task is `MERGED` at an older `spec_sha` |
 
