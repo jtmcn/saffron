@@ -1,4 +1,4 @@
-"""The `scope` gate: changed files ⊆ touches.
+"""The `scope` gate: changed files ⊆ touches, and ⊄ forbidden/protected.
 
 Core, because it operates on the diff as text and paths — no language knowledge
 anywhere (DESIGN.md §2.1).
