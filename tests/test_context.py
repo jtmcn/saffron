@@ -233,3 +233,56 @@ def test_criteria_section_round_trips_through_intakes_own_parser():
 
 def test_criteria_section_is_empty_for_no_acceptance():
     assert context.criteria_section([]) == ""
+
+
+def _assembled_implement_prompt() -> str:
+    """The IMPLEMENT system prompt as `session.py` assembles it (DESIGN.md §5.3).
+
+    The real `CONTEXT.md` through the real template, because the defect this
+    guards was invisible in either half alone: the template offers the scope
+    proposal, the vocabulary said proposing was DIAGNOSE's job, and only the
+    assembled string carries both.
+    """
+    root = Path(__file__).parent.parent
+    return context.build_system_prompt(
+        "IMPLEMENT",
+        (root / "CONTEXT.md").read_text(),
+        template=(root / "saffron/agents/prompts/implement.md").read_text(),
+        spec="(the task body)",
+        constraints=context.constraints_block(["src/**"], [], []),
+        witnesses="",
+    )
+
+
+def _definition(prompt: str, term: str) -> str:
+    """One term's paragraph, delimited the way the model reads it."""
+    marker = f"**{term}**"
+    start = prompt.find(marker)
+    assert start != -1, f"{marker} is not in the assembled prompt at all"
+    return prompt[start:].split("\n\n", 1)[0]
+
+
+def test_the_implement_prompt_offers_the_scope_proposal_door():
+    """The premise of the test below: without the door there is no contradiction."""
+    assert "scope_proposal" in _assembled_implement_prompt()
+
+
+def test_the_implement_prompt_never_calls_scope_proposal_diagnose_only():
+    """The defect is what reaches the model, so that is what this reads.
+
+    The same prompt offered any IMPLEMENT attempt the scope-proposal door and
+    told it, in §3's `Touches` entry, that proposing is DIAGNOSE's job on bug
+    specs. The stale half wins that argument by being the specific one.
+    """
+    touches = _definition(_assembled_implement_prompt(), "Touches")
+    assert "propose" in touches.lower(), "the entry no longer describes proposal"
+    assert "IMPLEMENT" in touches, (
+        "the IMPLEMENT prompt names DIAGNOSE as the only proposer of `touches` "
+        f"while offering the implementer the same door: {touches!r}"
+    )
+    # Naming IMPLEMENT is not enough on its own: "IMPLEMENT never proposes
+    # scope" satisfies the assertion above and reinstates the defect.
+    assert "on bug specs" not in touches, (
+        "the plural confines proposal to a spec type again, which is the "
+        f"restriction this test exists to keep out of the prompt: {touches!r}"
+    )
