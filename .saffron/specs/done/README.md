@@ -46,9 +46,19 @@ nothing.
 | `SA-0020` | The dependency gate: `_dependency_refusal` in `saffron/scheduler.py`, admitting a parent that `MERGED` and naming what it read otherwise. Implemented by hand, so **no cell task records it** — which is why the scan kept offering it, and is itself the gap noted below |
 | `SA-0011` | `saffron/gates/core/criteria.py`, `tests/test_criteria.py`, `Criterion` parsing in `intake.py` |
 | `SA-0014` | `discover_specs()` exists; its task is `MERGED` at an older `spec_sha` |
+| `SA-0009` | Split into `SA-0011` and `SA-0014`–`SA-0017`, then `SA-0020`; every criterion is in `main` — `discover_specs`, `tasks_by_spec`/`resolve_repo_id` without inserting, the refusal gate, `saffron queue`'s exit codes. Its last criterion, *"a test asserting `saffron queue` writes nothing at all"*, was **reversed on purpose** by `SA-0019`, which made the command reconcile before it scans |
+| `SA-0021` | `DESIGN.md` §5.3.1 and `CONTEXT.md`'s **Touches** entry, which now names both proposers of a scope. Implemented by hand because the cell could not: both documents are `protected`, which is why its task reads `PLAN_REJECTED` |
 
-`SA-0009` is not here: its task is `EXHAUSTED`, which the filter already reads,
-so the scan does not offer it.
+**A fourth thing the ledger cannot say, found 2026-08-31.** `DONE_STATES` means
+the scan is finished with a spec, not that the work is — `EXHAUSTED`,
+`PLAN_REJECTED`, `NOT_IMPLEMENTED` and `REJECTED` are all on it. So a spec the
+queue has stopped offering and a spec that is finished look identical from
+outside, and the row does not say which. `SA-0009` exhausted, and its work
+shipped anyway through the specs it was split into. `SA-0021`'s plan was
+rejected because the two documents it had to change are `protected`, and it
+shipped by hand. Neither row is about whether the work is done. Retiring them
+states it where the ledger cannot — which is now load-bearing rather than
+tidy, because a retired spec satisfies a dependent's `depends_on`.
 
 **A third cause, found on 2026-08-31 when `SA-0020` shipped.** Work done *by
 hand* writes no task at all — cells are the only thing that creates one. So a
