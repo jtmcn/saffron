@@ -796,30 +796,40 @@ def test_a_dead_state_under_a_superseded_sha_does_not_speak_for_the_parent(
     assert "no task" in reason
 
 
-def test_this_repos_own_specs_schedule_sa_0020_and_refuse_its_dependents(
+def test_this_repos_own_specs_admit_a_merged_parent_and_name_a_retired_one(
     tmp_path, ledger
 ):
-    """Criterion 5's live witness, re-anchored 2026-08-31. `SA-0020`'s parent
-    `SA-0019` merged, so it is a candidate; `SA-0022` and `SA-0023` depend on
-    `SA-0020`, whose only task ran at a `spec_sha` the spec has since moved
-    off, so they are refused naming that rather than a state never read."""
+    """Criterion 5's live witness, re-anchored a second time — 2026-08-31,
+    when `SA-0020` was retired to `specs/done/` as shipped, which is what the
+    criterion itself predicts happens to a witness built on a spec that is
+    about to finish. The shape is what survives, so it is the shape this
+    pins: one parent merged and on disk, one parent retired off it.
+
+    `SA-0017`'s parent `SA-0016` is top-level and merged, so it is admitted —
+    the first thing this gate ever schedules. `SA-0022` and `SA-0023` depend
+    on `SA-0020`, which is no longer in the directory at all: a different fact
+    from having no task, and the reason has to say which one it read.
+    """
     real_specs = Path(__file__).resolve().parent.parent / ".saffron" / "specs"
     directory = tmp_path / "specs"
     shutil.copytree(real_specs, directory)
     repo_id = _repo(ledger)
+
+    under_test = {"SA-0017", "SA-0022", "SA-0023"}
     for path in sorted(directory.glob("*.md")):
         spec, spec_sha = load_spec(path)
-        if spec.id in {"SA-0020", "SA-0022", "SA-0023"}:
+        if spec.id in under_test:
             continue
         _task_at(ledger, repo_id, spec_id=spec.id, spec_sha=spec_sha, state="MERGED")
 
     candidates, refusals = build_queue(directory, repo_id, ledger)
 
-    assert "SA-0020" in [c.spec.id for c in candidates]
+    assert "SA-0017" in [c.spec.id for c in candidates]
     for dependent in ("SA-0022", "SA-0023"):
         reason = next(r.reason for r in refusals if r.path.name.startswith(dependent))
         assert "SA-0020" in reason
-        assert "no task" in reason
+        assert "not among the specs in this directory" in reason
+        assert "spec_sha" not in reason
 
 
 def test_waiting_and_dead_parents_do_not_get_the_same_reason(tmp_path, ledger):
@@ -920,7 +930,7 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-08-31, after eleven shipped specs moved to
+    """Re-measured 2026-08-31, after twelve shipped specs moved to
     `specs/done/` (`intake.discover_specs` globs `*.md`, not `**/*.md`):
     `SA-0009` and `SA-0019` queued, everything else filtered out with a
     `READY_FOR_REVIEW` task at the same `spec_sha`, and nothing refused. The
@@ -955,7 +965,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     assert refusals == []
 
     # Again with no ledger, so nothing is filtered before `_refuse` runs. The
-    # pass above reaches the refusals for two of eleven specs — the other nine
+    # pass above reaches the refusals for two of ten specs — the other eight
     # are dropped as done first — so on its own it stays green while
     # every one of them is falsely refused, which is how the criterion-path
     # check shipped refusing SA-0011 and SA-0016 (this spec) on their own
