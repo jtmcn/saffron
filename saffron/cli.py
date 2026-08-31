@@ -13,6 +13,7 @@ from saffron.cell.session import CellSpec, run_one_cell
 from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
+from saffron.reconcile import ReconcileResult, reconcile
 from saffron.replay import replay
 from saffron.repos import image as repo_image
 from saffron.repos import mirror as git_mirror
@@ -81,6 +82,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     queue_parser.add_argument("--repo", type=Path, default=Path.cwd())
 
+    reconcile_parser = subcommands.add_parser(
+        "reconcile",
+        help="ask GitHub what happened to this repo's open pull requests",
+    )
+    reconcile_parser.add_argument("--repo", type=Path, default=Path.cwd())
+
     args = parser.parse_args(argv)
     out_dir_arg = getattr(args, "out", None)
     out_dir = out_dir_arg or (args.home / "batches" / "v0")
@@ -91,6 +98,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "queue":
             return _queue(args, ledger)
+
+        if args.command == "reconcile":
+            return _reconcile(args, ledger)
 
         line = replay(
             args.repo,
@@ -225,15 +235,13 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
 
 
 def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
-    """`saffron queue --repo .` — the scan a batch would run tonight, without
-    starting a cell or writing anything to the ledger.
+    """`saffron queue --repo .` — the scan a batch would run tonight.
 
-    The mirror and `base_sha` are resolved exactly the way `_run_cell`
-    resolves them, because the specs a scan must read are the ones
-    `base_sha` pins (§4.2.1's own rule) — the working copy is not consulted.
-    `resolve_repo_id`, never `upsert_repo`: a repo this ledger has never run
-    gets `None`, which `build_queue` already treats as "no history to filter
-    against," and a read must not mint the row it is only asking about.
+    No longer writes nothing: `reconcile`'s pull-request half runs first, so
+    the scan filters on current state. Still no cell, and never `ORPHANED` —
+    this is not a batch scan; an operator can run it at will, mid-phase
+    included. `resolve_repo_id`, never `upsert_repo`: an unseen repo gets
+    `None`, which both `build_queue` and `reconcile` treat as nothing to do.
     """
     repo = args.repo.resolve()
 
@@ -246,6 +254,11 @@ def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
 
     repo_id = ledger.resolve_repo_id(url)
 
+    gh_failures: list[str] = []
+    reconciled = ReconcileResult()
+    if repo_id is not None:
+        reconciled = reconcile(ledger, repo_id, gh=_guarded_gh(gh_failures))
+
     # Unlike `_run_cell`, a slug that cannot be read is not this command's
     # failure — it just means two of `build_queue`'s refusals cannot run, and
     # the printed output below says so on its own line rather than letting an
@@ -255,7 +268,6 @@ def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
     except package_phase.PackageError:
         repo_slug = None
 
-    gh_failures: list[str] = []
     with tempfile.TemporaryDirectory() as scratch:
         exported = git_mirror.export_saffron_dir(
             mirror, base_sha, Path(scratch) / "at-base"
@@ -271,7 +283,27 @@ def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
             gh=_guarded_gh(gh_failures),
         )
 
+    _print_reconcile_summary(reconciled)
     _print_queue(candidates, refusals, repo_slug, exported, gh_failures)
+    return 0
+
+
+def _reconcile(args: argparse.Namespace, ledger: Ledger) -> int:
+    """`saffron reconcile --repo .` — ask GitHub what happened to every open
+    pull request this repo's ledger is waiting on, and write what it says.
+    Never `ORPHANED`, for the same reason `queue` never asserts it."""
+    repo = args.repo.resolve()
+    url = package_phase.real_remote(repo)
+    repo_id = ledger.resolve_repo_id(url)
+    if repo_id is None:
+        print("reconcile: no ledger history for this repo")
+        return 0
+
+    gh_failures: list[str] = []
+    result = reconcile(ledger, repo_id, gh=_guarded_gh(gh_failures))
+    _print_reconcile_summary(result)
+    if gh_failures:
+        print(f"reconcile: gh could not be run ({gh_failures[0]})")
     return 0
 
 
@@ -291,6 +323,32 @@ def _guarded_gh(failures: list[str]) -> GhRunner:
             return subprocess.CompletedProcess(argv, 127, "", str(exc))
 
     return gh
+
+
+def _print_reconcile_summary(result: ReconcileResult) -> None:
+    """What `reconcile` changed, by task id."""
+    buckets = (
+        ("MERGED", result.merged),
+        ("REJECTED", result.rejected),
+        ("CHANGES_REQUESTED", result.changes_requested),
+    )
+    for label, ids in buckets:
+        for task_id in ids:
+            print(f"reconcile: task {task_id} → {label}")
+    for task_id in result.unasked:
+        print(f"reconcile: task {task_id} could not be asked about")
+    # Silence read identically to "there was nothing to ask about". A run
+    # that asked and found every answer unchanged now says which it was.
+    if not any(
+        (
+            result.merged,
+            result.rejected,
+            result.changes_requested,
+            result.orphaned,
+            result.unasked,
+        )
+    ):
+        print("reconcile: nothing moved")
 
 
 def _print_queue(

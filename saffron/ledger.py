@@ -261,6 +261,21 @@ class Ledger:
             grouped.setdefault((row["spec_id"], row["spec_sha"]), []).append(row)
         return grouped
 
+    def tasks_by_repo(self, repo_id: int) -> list[sqlite3.Row]:
+        """`task_id`/`state`/`pr_url` for every task in one repo, ungrouped —
+        what `reconcile` (`saffron/reconcile.py`) needs to update one task at
+        a time."""
+        return list(
+            self._db.execute(
+                """SELECT t.task_id, t.state, t.pr_url
+                     FROM tasks t
+                     JOIN runs r ON r.run_id = t.run_id
+                    WHERE r.repo_id = ?
+                    ORDER BY t.task_id""",
+                (repo_id,),
+            )
+        )
+
     def create_run(self, repo_id: int, base_sha: str) -> int:
         cursor = self._db.execute(
             "INSERT INTO runs (repo_id, base_sha, status) VALUES (?, ?, 'RUNNING')",
@@ -387,8 +402,13 @@ class Ledger:
         pushed_sha: str,
         pr_url: str,
     ) -> None:
-        """PACKAGE's own write-back. It runs after `finish_run`, so the state it
-        sets is the last word on the task (§5.7)."""
+        """PACKAGE's own write-back, after `finish_run` (§5.7). The state it
+        sets — `READY_FOR_REVIEW`, or `MERGE_FAILED` on the four paths where
+        the push or the pull request could not be made — is not the last word
+        on the task: `reconcile` (`saffron/reconcile.py`) revises a
+        `READY_FOR_REVIEW` row once GitHub records what the operator decided.
+        `MERGE_FAILED` is not revised — it is not in `PR_PENDING_STATES`,
+        because it reaches the operator with no pull request to ask about."""
         self._db.execute(
             """UPDATE tasks
                   SET state = ?, branch = ?, pushed_sha = ?, pr_url = ?,

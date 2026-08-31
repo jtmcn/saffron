@@ -1,6 +1,7 @@
 """The operator's only entry point, so it gets at least one end-to-end test."""
 
 import argparse
+import hashlib
 import subprocess
 import tempfile
 
@@ -468,7 +469,9 @@ def test_queue_prints_the_real_scheduler_queue_and_writes_nothing_to_the_ledger(
     `build_queue` reading real files, not a value the test hands the CLI and
     then asserts back — that defect shipped `SA-0005` green and was caught in
     `SA-0007`'s review. And a repo this ledger has never seen must stay
-    unseen: `saffron queue` reads, it never writes."""
+    unseen: an unseen repo resolves to no `repo_id`, so the reconcile
+    `queue` now runs before it scans has nothing to ask about and writes
+    nothing. `queue` does write, on a repo the ledger knows."""
     repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC)
     home = tmp_path / "home"
 
@@ -572,6 +575,174 @@ def test_queue_reads_the_specs_at_base_sha_not_the_working_copy(tmp_path, capsys
     assert "queue: 1 candidate(s)" in out
     assert "SY-1" in out
     assert "SY-2" not in out
+
+
+def _seed_repo(ledger, origin, *, name="repo"):
+    return ledger.upsert_repo(name, origin, "/m.git", policy_sha="p" * 64)
+
+
+def _seed_task(ledger, repo_id, *, spec_id, state, pr_url=None, spec_sha="s" * 40):
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+    task_id = ledger.create_task(
+        run_id, spec_id=spec_id, spec_sha=spec_sha, branch=f"saffron/{spec_id}"
+    )
+    ledger.set_task_state(task_id, state)
+    if pr_url is not None:
+        ledger._db.execute(
+            "UPDATE tasks SET pr_url = ? WHERE task_id = ?", (pr_url, task_id)
+        )
+        ledger._db.commit()
+    return task_id
+
+
+def _task_state(home, task_id):
+    ledger = Ledger(home / "ledger.db")
+    row = ledger._db.execute(
+        "SELECT state FROM tasks WHERE task_id = ?", (task_id,)
+    ).fetchone()
+    ledger.close()
+    return row["state"]
+
+
+def _fake_gh_says_merged(argv):
+    return subprocess.CompletedProcess(
+        argv, 0, '{"state": "MERGED", "reviewDecision": null}', ""
+    )
+
+
+def _fake_gh_says_changes_requested(argv):
+    return subprocess.CompletedProcess(
+        argv, 0, '{"state": "OPEN", "reviewDecision": "CHANGES_REQUESTED"}', ""
+    )
+
+
+def _no_gh(_argv):
+    raise FileNotFoundError("gh")
+
+
+@pytest.mark.parametrize(
+    "fake_gh, expect_state, expect_substring",
+    [
+        (_fake_gh_says_merged, "MERGED", "MERGED"),
+        (_no_gh, "READY_FOR_REVIEW", "could not be run"),
+    ],
+    ids=["gh-answers", "gh-missing"],
+)
+def test_reconcile_writes_what_gh_says_or_withholds_when_it_cannot_answer(
+    tmp_path, monkeypatch, capsys, fake_gh, expect_state, expect_substring
+):
+    """`saffron reconcile --repo .`, end to end: seed the ledger the way a
+    prior night would have, drive the real command through `cli.main`, and
+    check the row rather than handing `set_task_state` the value under test.
+    A `gh` that cannot run leaves it exactly as it found it."""
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-reconcile")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    task_id = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-9",
+        state="READY_FOR_REVIEW",
+        pr_url="https://github.com/o/r/pull/9",
+    )
+    ledger.close()
+    monkeypatch.setattr("saffron.cli.run_gh", fake_gh)
+
+    assert cli.main(["--home", str(home), "reconcile", "--repo", str(repo)]) == 0
+
+    assert expect_substring in capsys.readouterr().out
+    assert _task_state(home, task_id) == expect_state
+
+
+@pytest.mark.parametrize("command", ["queue", "reconcile"])
+def test_an_in_flight_task_survives_being_looked_at(tmp_path, command):
+    """`ORPHANED` is in `scheduler.REQUEUE_STATES`, so a row stamped while
+    its cell is alive is handed back out as resumable — a second cell on the
+    same branch. Driven through the CLI, not the stamping function, because
+    which command an operator runs is the property that matters."""
+    repo = _repo_with_spec(
+        tmp_path, spec_text=_A_SPEC, dirname=f"repo-inflight-{command}"
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-11", state="IMPLEMENTING")
+    ledger.close()
+
+    assert cli.main(["--home", str(home), command, "--repo", str(repo)]) == 0
+
+    assert _task_state(home, task_id) == "IMPLEMENTING"
+
+
+def test_queue_reconciles_before_it_scans_so_the_refusal_gate_sees_current_state(
+    tmp_path, monkeypatch, capsys
+):
+    """`queue` must see the state that is true *today*, not whatever PACKAGE
+    wrote once."""
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-queue-reconciles")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-1",
+        state="READY_FOR_REVIEW",
+        pr_url="https://github.com/o/r/pull/11",
+        spec_sha=hashlib.sha256(_A_SPEC.encode()).hexdigest(),
+    )
+    ledger.close()
+    monkeypatch.setattr("saffron.cli.run_gh", _fake_gh_says_merged)
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    out = capsys.readouterr().out
+    assert "MERGED" in out
+    # SY-1's task just became MERGED, one of `scheduler.DONE_STATES`.
+    assert "queue: 0 candidate(s)" in out
+
+
+def test_queue_schedules_a_task_reconcile_moved_into_a_requeue_state(
+    tmp_path, monkeypatch, capsys
+):
+    """The case that proves the wiring rather than merely reaching it.
+
+    A seeded `READY_FOR_REVIEW` is already in `DONE_STATES`, so a queue of
+    zero holds whether reconcile ran or not — the test above witnesses the
+    call, not its effect. `CHANGES_REQUESTED` is in `REQUEUE_STATES`, so a
+    task reconcile moves there has to *appear* as a candidate it was not.
+    """
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-queue-requeues")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-1",
+        state="READY_FOR_REVIEW",
+        pr_url="https://github.com/o/r/pull/12",
+        spec_sha=hashlib.sha256(_A_SPEC.encode()).hexdigest(),
+    )
+    ledger.close()
+
+    # Unasked, the same spec is filtered out as done — the before half.
+    monkeypatch.setattr("saffron.cli.run_gh", _no_gh)
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+    assert "queue: 0 candidate(s)" in capsys.readouterr().out
+
+    monkeypatch.setattr("saffron.cli.run_gh", _fake_gh_says_changes_requested)
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    out = capsys.readouterr().out
+    assert "CHANGES_REQUESTED" in out
+    assert "queue: 1 candidate(s)" in out
+    assert "SY-1" in out
 
 
 def test_queue_says_the_refusals_did_not_run_when_gh_is_not_installed(
