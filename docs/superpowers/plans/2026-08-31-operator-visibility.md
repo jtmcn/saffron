@@ -186,6 +186,13 @@ the code, never the spec file's location.
 git rebase origin/main
 ```
 
+This runs on the default branch, before any stack exists. **Once a stack is
+open, do not rebase by hand** — `gh stack sync` fetches, reconciles with
+GitHub, rebases the chain and refreshes pull request state in one operation,
+and a bare `git rebase` inside a stack rewrites branches Saffron has already
+pushed. If `sync` prints both chains and says `Sync aborted`, local and remote
+have diverged; stop and read, do not force.
+
 - [ ] **Step 3: Re-confirm the next free id**
 
 ```bash
@@ -225,10 +232,99 @@ captured, not after.
 
 ---
 
+## Stacking: two mechanisms, and the plan runs on the wrong one by default
+
+**This plan was written before `.claude/skills/run-saffron-spec-loop` existed
+and assumed each pull request merges before the next cell starts.** That is one
+valid way to run it. The other — the skill's, verified against this repo on
+2026-09-01 — leaves every pull request open and links them into a GitHub stack
+for one review pass. The two are not interchangeable, and four things break if
+you switch without reading this section.
+
+**There are two stacking mechanisms and only one of them stacks the code.**
+Saffron's own (`SA-0026`): `cli._resolve_stacked_on` reads `depends_on[0]`'s
+newest task in `DEPENDENCY_WAITING_STATES` — `READY_FOR_REVIEW`, `APPROVED`,
+`MERGE_TRAIN` — fetches that branch, and cuts the worktree from it, so PACKAGE
+opens the child's pull request *against the parent's branch*. `gh stack link`
+is the operator's, and it only retargets a base on GitHub; it moves no commits.
+Saffron's is the real one. `gh stack` is presentation over it.
+
+### K=1: only `depends_on[0]` is ever consulted
+
+`_resolve_stacked_on`'s docstring is explicit — *"A spec naming a second,
+unmerged parent does not stack on it too … out of reach by design."* Two specs
+here name two parents, and both are wrong as written for an unmerged stack:
+
+- **`SA-0035` declares `depends_on: [SA-0033, SA-0034]`**, so it would stack on
+  `SA-0033` and its worktree would **not contain `SA-0034`'s verdict write** —
+  the input its own `sustained`/`unkept` criterion needs. `SA-0034` depends on
+  `SA-0033`, so `SA-0034`'s branch already carries both. **Fixed below by
+  putting `SA-0034` first**; the newest parent goes in slot 0, always.
+- **`SA-0038` declares `depends_on: [SA-0037, SA-0031]`**, and those are on two
+  different chains. No ordering of that list fixes it: K=1 can reach one.
+
+### Therefore: two stacks, run and merged in sequence
+
+`gh stack` stacks are strictly linear — one parent, at most one child — and
+this plan's dependency graph forks. It cannot be one stack. Nor should the two
+chains be open at once:
+
+```
+stack 1   (main) <- saffron/SA-0029 <- saffron/SA-0030 <- saffron/SA-0031
+                    ── merge, then ──
+stack 2   (main) <- saffron/SA-0032 <- SA-0033 <- SA-0034 <- SA-0035
+                                    <- SA-0036 <- SA-0037 <- SA-0038
+```
+
+Merging part 1 before `SA-0032`'s cell starts pays for itself four times:
+`SA-0038`'s second parent becomes `MERGED` and satisfies the gate without
+needing a slot; `SA-0032` cuts from a `main` that already carries part 1's
+`docs/BACKLOG.md` entries; the two chain heads stop being siblings; and each
+stack stays inside a size a single review pass can hold.
+
+**Do not run the two chains concurrently.** They would be sibling branches from
+the same `base_sha`, and **eight of the ten specs name `docs/BACKLOG.md` in
+`touches`** — all but `SA-0032` and `SA-0034`, whose `envelope`s do not reach it
+and whose DIAGNOSE therefore cannot propose it. That is the exact collision the
+skill measured on `SA-0027`/`SA-0028`, where both appended `## 34.` and
+`git merge-tree` reported a conflict while the stacked pull request page
+rendered clean. Eight specs is a seven-way version of it.
+
+### `saffron queue` stops answering once the first pull request is open
+
+The skill's own measurement: `build_queue` is computed against **open** pull
+requests, so the moment one is open, every later spec is refused twice over —
+`an open pull request from another task already targets this spec`, and
+`touches overlaps open pull request's changed files`, which for this plan is
+`docs/BACKLOG.md` every time.
+
+`saffron cell` is unaffected: the attended path checks `protected` collisions
+(`protected_touch_refusal`) and retirement markers (`retirement_refusal`) and
+**nothing else** — no `depends_on` check, no overlap check, no open-pull-request
+check. It will happily run a spec `queue` refuses. That is what makes the stack
+workflow possible and what makes L2 below conditional.
+
+### Nothing merges until the stack does
+
+`gh pr merge` cannot merge a stack. The final merge is one command per stack,
+bottom-up and all-or-nothing:
+
+```bash
+gh stack merge <top-pr> --yes --squash    # that PR and every unmerged PR below it
+```
+
+If any pull request in that set cannot merge, none do.
+
 ## The per-spec loop
 
 Every task below runs the same steps. They are written once here and
 referenced by number, rather than repeated ten times.
+
+**If you are running the stack workflow, `.claude/skills/run-saffron-spec-loop`
+is authoritative for the mechanics** — the plan snapshot, `PYTHONUNBUFFERED=1`,
+recording from the ledger rather than the transcript, and `gh stack link`. What
+follows is this plan's spec-specific content laid over the same loop, with the
+steps that differ marked.
 
 **Two of them are independent-agent reviews, and "independent" is the whole
 point.** Both reviewers are dispatched as subagents with *no access to this
@@ -245,6 +341,21 @@ as regenerating a golden fixture after a migration.
   acceptance criterion naming a path no `touches` pattern matches, or an
   unsatisfied `depends_on`. This check costs nothing; `SA-0021` cost $0.82 to
   learn the same thing after a mirror fetch, an image build and a model turn.
+
+  **Under the stack workflow this check only means something for the first
+  spec of each stack.** Once one pull request is open, `queue` refuses every
+  later spec on `an open pull request from another task already targets this
+  spec` and on `touches overlaps … docs/BACKLOG.md`, and neither is a defect
+  in the spec. Two refusals still are, because `saffron cell` checks them too
+  and they are the cheap ones this step exists for:
+
+  - `refused  … protected …` — a `touches` entry hitting `policy.yaml`'s
+    `protected` list. Real; fix the spec.
+  - `refused  … retired-by …` — a retirement marker this spec's `touches`
+    cannot reach (`SA-0027`). Real; fix the spec.
+
+  Everything else, once a pull request is open, is the queue telling you the
+  batch is in flight. Read the refusal; do not "fix" a spec against it.
 - **L3 — Independent spec review.** Dispatch a subagent with a clean context.
   A spec is the input to a cell that will spend $8–18 against it and to a
   critic that will use its acceptance criteria as a rubric, so a defect here
@@ -263,7 +374,11 @@ as regenerating a golden fixture after a migration.
   - Is anything in it a guess presented as a measurement?
 
   Act on the findings; if any change touches frontmatter, re-run **L2**.
-- **L4 — Commit the spec:** `git commit -m "spec(<id>): <title>"`.
+- **L4 — Commit the spec on the default branch:**
+  `git commit -m "spec(<id>): <title>"`. Spec files never travel on a cell's
+  branch — `.saffron/**` is `protected`, no cell can write one, and
+  `saffron cell` reads the file from the working copy while the cell's worktree
+  comes from the mirror. Commit and push to `main` even while a stack is open.
 - **L5 — Run the cell:**
 
 ```bash
@@ -279,6 +394,10 @@ env CLAUDE_CODE_OAUTH_TOKEN=(bash -c 'source ~/.secrets; printf %s $CLAUDE_CODE_
 - **L6 — Read the PR, then mark it ready.** Read the disagreements first; the
   PR body puts them above the gate table because that is where judgment is
   worth most (§6). `gh pr ready <n>` — **do not merge yet.**
+
+  PACKAGE opens drafts deliberately (§5.7) and `gh pr ready` is the operator
+  ratifying one. Never reach for `gh stack submit --open`, which flips every
+  pull request in the stack at once.
 - **L7 — Independent code review**, per the `superpowers:requesting-code-review`
   skill, on the now-ready PR:
 
@@ -293,13 +412,28 @@ gh pr view <n> --json baseRefOid,headRefOid -q '.baseRefOid, .headRefOid'
     are already the requirements document and already the critic's rubric
   - `{BASE_SHA}` / `{HEAD_SHA}` — from the command above
 
+  `gh pr view <n> --json baseRefOid` returns the **parent branch's** head for a
+  stacked pull request, not `main`'s, so the range is that layer's own diff.
+  That is what makes a ten-spec chain reviewable at all; do not substitute
+  `main` for it.
+
   Fix Critical before merging, fix Important before proceeding to the next
-  task, note Minor. **Push back if the reviewer is wrong, with reasoning** —
-  the skill says so, and this repo's own REBUT phase exists because a
-  reviewer's confirmed finding and a correct finding are not the same thing.
-  Then `gh pr merge <n> --squash`.
-- **L8 — Retire:** `git mv .saffron/specs/<id>-*.md .saffron/specs/done/` and
-  commit as `chore(specs): retire <id> as shipped`.
+  task, note Minor. Commit fixes **on the cell's branch** (`saffron/<id>`) and
+  push — never on `main`, and never on the branch above. **Push back if the
+  reviewer is wrong, with reasoning** — the skill says so, and this repo's own
+  REBUT phase exists because a reviewer's confirmed finding and a correct
+  finding are not the same thing.
+
+  **Then stop. Do not merge.** Merging mid-loop is the sequential workflow, and
+  it is a different plan: it rebuilds the queue against a moved `main`, and it
+  denies every later spec the parent branch `_resolve_stacked_on` needs, since
+  a `MERGED` parent yields `(None, None)` and the child cuts from `main`
+  instead. Under the stack workflow the merge is Task 12, once per stack.
+- **L8 — Retire, after the stack merges, not here.**
+  `git mv .saffron/specs/<id>-*.md .saffron/specs/done/`, committed as
+  `chore(specs): retire <id> as shipped`. Retiring a spec whose pull request is
+  still open removes the file `saffron queue`, `record` and
+  `_retirement_markers_at` all read. Task 12 does this for a whole stack.
 
 ### Why two reviews and not one
 
@@ -338,8 +472,16 @@ So ratification is by hand:
    yourself. If it is wrong, the spec's `envelope` or its problem statement is
    wrong — fix that and go back to **L2**, rather than editing the proposal
    into something the diagnosis did not support.
-3. Commit: `git commit -m "ratify(<id>): <what the diagnosis found>"`.
+3. Commit **on the default branch**, not on any cell branch:
+   `git commit -m "ratify(<id>): <what the diagnosis found>"`.
 4. Re-run **L5**. The second cell implements against the ratified `touches`.
+
+**Editing the spec moves its `spec_sha`, and that is load-bearing.** The
+ratified file is a different spec as far as the ledger is concerned, so the
+first cell's `SCOPE_REVIEW` row belongs to the old sha and the second cell
+mints a new task. That is correct — but it also means the loop driver's
+`record` will say `no task for <id> at <sha> — did the cell run?` if you record
+before re-running. Ratify, re-run L5, then record.
 
 **This costs two cells for each of those two specs**, and the DIAGNOSE turns
 are paid twice. Budget for it: `SA-0032` and `SA-0034` are the only two tasks
@@ -1191,8 +1333,8 @@ title: nothing can build a queue row from the ledger, so the page reads a store 
 type: feature
 priority: 1
 depends_on:
-  - SA-0033
   - SA-0034
+  - SA-0033
 touches:
   - saffron/report/render.py
   - tests/test_report.py
@@ -1304,6 +1446,13 @@ does either; do not borrow a helper from one expecting the other's rule.
 **`Ledger` is `forbidden`.** Query through its existing methods, or read with
 SQL through the connection it exposes — do not add a method to it. If the
 query genuinely needs one, that is a finding for the pull request body.
+
+**`depends_on` lists `SA-0034` before `SA-0033`, and the order is not
+cosmetic.** `cli._resolve_stacked_on` consults `depends_on[0]` and nothing
+else, so slot 0 decides which branch this worktree is cut from. `SA-0034`
+depends on `SA-0033`, so its branch carries both; `SA-0033`'s carries only
+itself, and a cell cut from it would have no `findings.verdict` write to build
+`sustained` and `unkept` against. Newest parent in slot 0, always.
 
 Commit after each coherent step. Uncommitted work dies with the cell.
 ```
@@ -1668,6 +1817,14 @@ here or ever.
 tolerance layer.** A cell killed mid-write is the normal case for exactly the
 tasks this page exists for.
 
+**This spec names two parents on two different chains, and `depends_on[0]` is
+all Saffron can stack on.** `SA-0037` is slot 0 and is what this worktree is
+cut from; `SA-0031` — which is what writes the `events.jsonl` this page reads —
+**must already be `MERGED`** before this cell runs, so the gate is satisfied by
+the default branch rather than by a branch nothing can reach. That is why part
+1 merges before part 2 starts. Running it any other way gives this cell a tree
+with no event emission in it and a spec asking it to render one.
+
 **Liveness here is honest polling and the comment must say so.** The design
 chose regenerated static HTML over a server; a page that implies it is live
 oversells what a meta-refresh does.
@@ -1730,6 +1887,79 @@ Three protected documents no cell can correct. Each spec above leaves a
 git add DESIGN.md docs/BACKLOG.md docs/evidence/
 git commit -m "docs(design): the queue reads the ledger, and §6 said otherwise"
 ```
+
+---
+
+## Task 12: Link, check and merge each stack
+
+Runs **twice** — once for part 1 (`SA-0029`–`SA-0031`), once for part 2 and 3
+(`SA-0032`–`SA-0038`). Part 1's run completes before `SA-0032`'s cell starts.
+
+- [ ] **Step 1: Link the pull requests, bottom to top.**
+
+```bash
+uv run .claude/skills/run-saffron-spec-loop/driver.py stack            # dry run
+uv run .claude/skills/run-saffron-spec-loop/driver.py stack --execute
+```
+
+`link` is the command, not `submit`: PACKAGE has already opened every pull
+request, `link` takes existing numbers and keeps no local tracking state, and
+`submit` force-pushes from a local stack that does not exist here. If a chain
+is already stacked by Saffron — every spec in it declaring a parent in slot 0 —
+`link` finds each base already correct and changes nothing, which is the
+outcome to want.
+
+- [ ] **Step 2: Check the merge, not the pull request page.** A stacked page
+      renders a clean diff because GitHub computes it from the merge base. That
+      is not the check.
+
+```bash
+git merge-tree --write-tree origin/saffron/SA-0030 origin/saffron/SA-0031
+```
+
+Run it for each adjacent pair. `docs/BACKLOG.md` is in eight of the ten specs'
+`touches` and is append-only, so it is where a conflict will be — including the
+item *number*, not only the text: `SA-0027` and `SA-0028` both wrote `## 34.`
+A chain cut parent-from-parent should be clean; **any conflict here means a
+spec ran unstacked**, and the fix is to find which cell printed no
+`stacked on …` line, not to resolve the conflict and move on. If you do have to
+renumber, grep the *code* for comments citing the old number — four cited
+`item 34` last time.
+
+- [ ] **Step 3: Merge the stack.** One command, all-or-nothing, bottom-up:
+
+```bash
+gh stack merge <top-pr> --yes --squash
+```
+
+**Never `gh pr merge`** — it cannot merge a stack, and used per pull request it
+would land them out of order against bases that no longer exist. If the set
+cannot merge, none of it does; read the failure and fix the layer it names.
+
+- [ ] **Step 4: Sync and prune.**
+
+```bash
+gh stack sync --prune
+git checkout main && git pull
+```
+
+- [ ] **Step 5: Retire the stack's specs** — the L8 deferred from each task.
+
+```bash
+git mv .saffron/specs/SA-00NN-*.md .saffron/specs/done/
+git commit -m "chore(specs): retire SA-00NN…SA-00NN as shipped"
+```
+
+- [ ] **Step 6 (part 1's run only): confirm the default branch carries the
+      event seam** before `SA-0032`'s cell starts, since `SA-0038` depends on
+      it being `MERGED` rather than merely open:
+
+```bash
+git log --oneline origin/main | head -5
+grep -rn 'watch' --include='*.py' saffron/ | grep -v 'watches it'
+```
+
+Expected: no `watch` parameter anywhere in `saffron/`.
 
 ---
 
@@ -1797,6 +2027,16 @@ repo's `protected` list mean a host-authored commit to `.saffron/specs/…`
 would fail `scope` as a protected path. So L5a is manual, and a plan that
 treated `SCOPE_REVIEW` as a failure would re-run those specs for no reason
 while a plan that treated it as automatic would wait forever.
+
+*This plan was written for a workflow that merges each pull request, and the
+stack workflow breaks four of its steps.* `.claude/skills/run-saffron-spec-loop`
+post-dates it. The corrections are in "Stacking: two mechanisms" and Task 12,
+and the load-bearing ones are that `_resolve_stacked_on` reads `depends_on[0]`
+and nothing else — which had `SA-0035` cutting from the wrong parent and leaves
+`SA-0038`'s second parent unreachable unless part 1 merges first — and that
+`saffron queue` stops answering once any pull request is open, so L2's refusal
+is no longer evidence about the spec. Neither is visible from reading the plan;
+both come from reading `cli.py`.
 
 *Every measurement in this plan decays, and faster than it reads.* Between the
 design (2026-08-31) and this revision (2026-09-01) the ledger went from 23 task

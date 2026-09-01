@@ -424,6 +424,26 @@ known.
 dependencies require it — part 1's do not — but because v0.5 runs one attended
 cell at a time and §4.2's concurrency pool is not built.
 
+> **Correction, 2026-09-01: under the stack workflow the dependencies *do*
+> require an ordering, and it is part 1 first, merged.** `.claude/skills/run-saffron-spec-loop`
+> leaves every pull request open and links them, and `cli._resolve_stacked_on`
+> consults **`depends_on[0]` and nothing else** (K=1, its own docstring). Two
+> consequences this design did not anticipate, because it was written against a
+> merge-each-time loop where a `MERGED` parent always reaches the default
+> branch:
+>
+> - `SA-0035` names `SA-0033` before `SA-0034` and would be cut from
+>   `SA-0033`'s branch, without the `findings.verdict` write its own criteria
+>   consume. The plan reorders the list; the newest parent belongs in slot 0.
+> - `SA-0038` names parents on two different chains — `SA-0037` and `SA-0031` —
+>   and K=1 can reach one. So part 1 must be **merged**, not merely open, before
+>   part 2 starts, which also stops the two chain heads being siblings appending
+>   to the same `docs/BACKLOG.md`.
+>
+> Neither is a defect in this design's argument; both are facts about the
+> stacking mechanism that only appear when nothing merges between cells. The
+> plan's "Stacking: two mechanisms" section and Task 12 carry them.
+
 **Part 1 declares no dependency on `SA-0026`, and that is a finding rather
 than an omission.** The seam looks like it should collide over
 `saffron/cli.py`, and at `7ab27cf` it did not: `cli.py` never named `watch` —
