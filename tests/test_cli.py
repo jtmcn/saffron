@@ -8,7 +8,7 @@ import tempfile
 
 import pytest
 
-from saffron import cli
+from saffron import cli, intake
 from saffron.cell import session
 from saffron.cli import main
 from saffron.ledger import Ledger
@@ -362,6 +362,24 @@ def test_a_specs_declared_risk_reaches_the_cell(tmp_path, monkeypatch, capsys):
     cell_spec, _printed = _capture_cell_spec(monkeypatch, repo, tmp_path, args, capsys)
 
     assert cell_spec.risk == "elevated"
+
+
+def test_a_depends_on_reaches_the_cell_unstacked(tmp_path, monkeypatch, capsys):
+    """The half-built path (criteria 1-4) cannot be reached by an attended
+    run: `_run_cell` never consults `depends_on` at all — that is the
+    dependency gate's job, in `saffron/scheduler.py`, forbidden here and out
+    of scope (`SA-0025`) — so a spec declaring one still gets an ordinary,
+    unstacked `CellSpec`."""
+    repo = _local_origin(tmp_path)
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, depends_on="[SA-0001]")
+
+    cell_spec, _printed = _capture_cell_spec(monkeypatch, repo, tmp_path, args, capsys)
+
+    # The `depends_on` half of the claim, not just the `stacked_on` half:
+    # a field silently dropped at intake would leave this green.
+    assert intake.load_spec(args.spec)[0].depends_on == ["SA-0001"]
+    assert cell_spec.stacked_on is None
 
 
 def test_a_specs_declared_witnesses_reach_the_cell(tmp_path, monkeypatch, capsys):

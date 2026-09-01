@@ -48,7 +48,8 @@ def prepare_worktree(
     state_volume: str | None = None,
     created: set[str] | None = None,
 ) -> None:
-    """Clone the mirror into the volume at `base_sha` on `branch`, cell running.
+    """Clone the mirror into the volume at the base it is given, on `branch`,
+    cell running.
 
     `network`, `env` and `gates_dir` are required, not defaulted: a cell started
     without them joins the runtime's default network with full egress, or falls
@@ -65,6 +66,12 @@ def prepare_worktree(
 
     `git clone` refuses a non-empty destination, and a freshly formatted
     volume already has a `lost+found` — init/fetch/checkout in place instead.
+
+    `base_sha` is the base the **tree** is built on, which the caller has
+    already resolved: `CellSpec.tree_base` is the run's pin unstacked and the
+    parent's head otherwise. This function does not re-derive that — a second
+    copy of the rule is two things sharing one word again, one layer down, and
+    the two copies can disagree with nothing to notice.
     """
     state = state_volume or f"{volume}-state"
     if created is not None:
@@ -97,7 +104,7 @@ def prepare_worktree(
         )
 
     # Here and not at the call site: the seed above is an *ephemeral* container
-    # that can fail on a bad base_sha or an unreadable mirror, and recording the
+    # that can fail on a base the mirror does not have or an unreadable mirror, and recording the
     # cell's name before that reports a container nothing ever created.
     if created is not None:
         created.add(container)

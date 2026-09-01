@@ -259,6 +259,10 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         forbidden=spec.forbidden,
         acceptance=spec.acceptance,
         risk=spec.risk,
+        # Deliberately unset, and the only thing that keeps stacking off:
+        # `spec.depends_on` is not consulted on this path. `SA-0025` resolves
+        # a real parent here.
+        stacked_on=None,
         **ceilings,
     )
     outcome = run_one_cell(

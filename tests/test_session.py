@@ -96,6 +96,75 @@ def _spec(**overrides):
     return session.CellSpec(**(fields | overrides))
 
 
+def test_stacked_on_defaults_to_unset():
+    """The shape every caller produces today: no second base at all, so
+    `worktree.prepare_worktree` checks out `base_sha` exactly as before this
+    field existed."""
+    assert _spec().stacked_on is None
+
+
+def test_stacked_on_carries_a_second_base_distinct_from_base_sha():
+    spec = _spec(base_sha="b" * 40, stacked_on="c" * 40)
+    assert spec.stacked_on == "c" * 40
+    assert spec.base_sha == "b" * 40
+    assert spec.stacked_on != spec.base_sha
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["", "saffron/SA-0020", "HEAD~1", "b" * 39, "B" * 40, "$(id)"],
+    ids=["empty", "ref-name", "revision", "short", "uppercase", "shell"],
+)
+def test_a_second_base_that_is_not_a_resolved_sha_is_refused_at_the_type(bad):
+    """A parent that could not be resolved is `None`, never `""` — which as a
+    git range is a silent `HEAD..HEAD` — and never a ref name, which moves
+    between the fetch and the checkout and is interpolated into the seed
+    script besides. Refused here rather than in `prepare_worktree`, which runs
+    minutes later, past the image build and the proxy."""
+    with pytest.raises(ValueError, match="not a resolved sha"):
+        _spec(stacked_on=bad)
+
+
+def test_a_resolved_sha_is_accepted_at_either_length():
+    """sha-1 and sha-256 repositories both."""
+    assert _spec(stacked_on="c" * 40).tree_base == "c" * 40
+    assert _spec(stacked_on="c" * 64).tree_base == "c" * 64
+
+
+def test_tree_base_is_the_pin_unstacked_and_the_parent_stacked():
+    """One name for the second base. `base_sha` keeps pinning the gates and
+    the policy either way (§5.4), which is why the two cannot be one field."""
+    assert _spec().tree_base == "b" * 40
+    assert _spec(stacked_on="c" * 40).tree_base == "c" * 40
+
+
+def test_a_stacked_specs_patch_is_exported_against_its_parent_not_the_pin(
+    monkeypatch, tmp_path
+):
+    """Criterion 3 at the caller. `tests/test_worktree.py`'s real-git witness
+    proves that base yields only the child's commits; this proves Saffron is
+    the one that picks it. A test that hands `export_patch` its own answer
+    proves neither — the defect was every consumer choosing separately."""
+    from saffron.cell import worktree as wt
+
+    asked: list[str] = []
+
+    def _record(_container, base, /):
+        asked.append(base)
+        return "diff --git a/x b/x\n"
+
+    monkeypatch.setattr(wt, "commit_subjects", lambda c, base: asked.append(base) or [])
+    monkeypatch.setattr(wt, "export_patch", _record)
+    monkeypatch.setattr(wt, "changed_files", lambda c, base: asked.append(base) or [])
+    monkeypatch.setattr(wt, "head_sha", lambda c: "c" * 40)
+
+    session.export_patch(
+        "cell-1", _spec(stacked_on="d" * 40), tmp_path / "out", lambda _m: None
+    )
+
+    assert asked == ["d" * 40] * 3, "a consumer still reading the run's pin"
+
+
 _PLAN = {
     "understanding": "u",
     "approach": "a",
@@ -471,6 +540,8 @@ class _Cell:
         self.turns: list[str] = []
         self.system_prompts: list[str] = []
         self.measured_from: str | None = None
+        self.worktree_base: str | None = None
+        self.exported_from: str | None = None
         self.watched: list[str] = []
         self.exported = False
         self.subjects_from: str | None = None
@@ -586,12 +657,18 @@ def _stub_the_runtime(
     def _prepare_worktree(**k):
         # The real one records each name against its own create; a stub that
         # does not is a stub whose teardown ledger is always empty.
+        cell.worktree_base = k["base_sha"]
         if k.get("created") is not None:
             k["created"].update((k["state_volume"], k["container"]))
 
     monkeypatch.setattr("saffron.cell.worktree.prepare_worktree", _prepare_worktree)
     monkeypatch.setattr("saffron.cell.worktree.head_sha", lambda c: "c" * 40)
-    monkeypatch.setattr("saffron.cell.worktree.export_patch", lambda c, sha: patch)
+
+    def _export_patch(_container, sha):
+        cell.exported_from = sha
+        return patch
+
+    monkeypatch.setattr("saffron.cell.worktree.export_patch", _export_patch)
 
     def _commit_subjects(_container, sha):
         cell.subjects_from = sha
@@ -942,6 +1019,31 @@ def test_a_proposed_scope_reaches_scope_review_and_spends_no_further_turns(
     assert json.loads(recorded["raw"]) == _PROPOSAL
 
 
+def test_a_stacked_run_builds_its_worktree_and_its_patch_on_the_same_base(
+    monkeypatch, tmp_path
+):
+    """The join between the two: `_drive_cell` resolves the tree base once and
+    hands the same answer to `prepare_worktree` and to every exporter. Before
+    this test, passing `spec.base_sha` to the worktree while the patch was
+    exported against `tree_base` left the whole suite green — a tree built on
+    the pin and a diff measured from the parent, which is the spec's own defect
+    with the two halves swapped."""
+    cell = _stub_the_runtime(monkeypatch)
+    spec = _spec(stacked_on="d" * 40)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        spec=spec,
+        turns=[_turn(_block(_PLAN)), _turn()],
+    )
+
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert spec.tree_base == "d" * 40 != spec.base_sha
+    assert cell.worktree_base == spec.tree_base
+    assert cell.exported_from == spec.tree_base
+
+
 def test_a_green_run_leaves_the_patch_behind(monkeypatch, tmp_path):
     """The first live green run committed, then teardown removed the volume and
     the commit ceased to exist. §0: the product is a reviewable artifact."""
@@ -954,6 +1056,9 @@ def test_a_green_run_leaves_the_patch_behind(monkeypatch, tmp_path):
     assert (task_dir / "patch.diff").read_text() == _DIFF
     assert json.loads((task_dir / "patch.json").read_text()) == {
         "base_sha": "b" * 40,
+        # Equal unstacked, and recorded separately so a stacked task's record
+        # says what its diff is relative to rather than what pinned its gates.
+        "tree_base": "b" * 40,
         "head_sha": "c" * 40,
         "files": ["src/x.py"],
     }

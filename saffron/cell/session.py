@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import partial, wraps
@@ -147,6 +148,10 @@ class CellSessionError(RuntimeError):
     """The session cannot go on — not the agent's failure, the driver's."""
 
 
+# A resolved commit, the only shape a second base may take.
+_SHA = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
 @dataclass
 class CellSpec:
     spec_id: str
@@ -173,6 +178,32 @@ class CellSpec:
     budget_usd: float = 12.0
     max_attempts: int = 4
     max_turns: int = 60
+    # A stacked task's parent branch head. `base_sha` stays the run's pin:
+    # gates and policy are exported from it either way (§5.4, item 13).
+    # `SA-0025` resolves a real parent onto it; `cli.py` sets `None`.
+    stacked_on: str | None = None
+
+    def __post_init__(self) -> None:
+        # A resolver that could not find the parent must say `None`. An empty
+        # string would make `tree_base` an empty git range — a silent
+        # HEAD..HEAD — and a ref name is a moving target between the fetch and
+        # the checkout, besides being interpolated into the seed script.
+        if self.stacked_on is not None and not _SHA.fullmatch(self.stacked_on):
+            raise ValueError(
+                f"stacked_on is not a resolved sha: {self.stacked_on!r} — a "
+                "parent that could not be resolved is None, never a ref or ''"
+            )
+
+    @property
+    def tree_base(self) -> str:
+        """What the worktree is built on and the patch is exported against.
+
+        One name for the second base, so no consumer picks its own — the
+        defect this field exists to remove is two things sharing one word,
+        and a second word every caller resolves separately is the same bug.
+        Equal to `base_sha` unstacked, which is every caller today.
+        """
+        return self.base_sha if self.stacked_on is None else self.stacked_on
 
 
 @dataclass
@@ -486,11 +517,11 @@ def export_patch(
 
     head_sha, subjects = None, []
     try:
-        subjects = worktree.commit_subjects(container, spec.base_sha)
+        subjects = worktree.commit_subjects(container, spec.tree_base)
     except Exception as exc:
         watch(f"teardown: the agent's commit subjects are unreadable — {exc}")
     try:
-        patch = worktree.export_patch(container, spec.base_sha)
+        patch = worktree.export_patch(container, spec.tree_base)
         if not patch:
             # Absence and emptiness must not look alike: no commits, no file.
             watch("teardown: no commits, nothing to export")
@@ -503,9 +534,12 @@ def export_patch(
         (task_dir / "patch.json").write_text(
             json.dumps(
                 {
+                    # The run's pin, unchanged. `tree_base` is what the
+                    # diff below is relative to; equal unless stacked.
                     "base_sha": spec.base_sha,
+                    "tree_base": spec.tree_base,
                     "head_sha": head_sha,
-                    "files": worktree.changed_files(container, spec.base_sha),
+                    "files": worktree.changed_files(container, spec.tree_base),
                 },
                 indent=2,
             )
@@ -706,7 +740,9 @@ def _drive_cell(
             created=created,
             mirror=mirror,
             volume=volume,
-            base_sha=spec.base_sha,
+            # The tree's base, already resolved — `prepare_worktree` does
+            # not re-derive it. `base_sha` still pins the gates and policy.
+            base_sha=spec.tree_base,
             branch=spec.branch,
             image=cell_image,
             container=container,
@@ -715,7 +751,7 @@ def _drive_cell(
             gates_dir=gates_dir,
             state_volume=state,
         )
-        watch(f"cell: {container} up, worktree at {spec.base_sha[:8]}")
+        watch(f"cell: {container} up, worktree at {spec.tree_base[:8]}")
 
         executor = CellExecutor(container)
 
@@ -741,8 +777,8 @@ def _drive_cell(
             diff a reviewer reads, the plan turn's commits included.
             """
             nonlocal current_tier, advisory_gates
-            changed = worktree.changed_files(container, spec.base_sha)
-            diff = worktree.export_patch(container, spec.base_sha)
+            changed = worktree.changed_files(container, spec.tree_base)
+            diff = worktree.export_patch(container, spec.tree_base)
             # §5.6: elevated when the spec says so, or when this attempt's own
             # changed files cross an `elevate_on` path — from the list just
             # built above, never a second read of the diff.
@@ -805,7 +841,7 @@ def _drive_cell(
             window (§5.6)."""
             return failure.gate not in advisory_gates
 
-        # At base_sha the diff is empty, so `scope` and `integrity` pass with no
+        # At `tree_base` the diff is empty, so `scope` and `integrity` pass with no
         # failures, and `census` has no prior to compare and skips — nothing for
         # the subtraction to cancel a real escape against.
         baseline = _suite([])
@@ -1115,7 +1151,7 @@ def _drive_cell(
                 container,
                 # The critic sees the diff, not the cell's history: the same
                 # bytes the patch export leaves behind for the operator.
-                diff=worktree.export_patch(container, spec.base_sha),
+                diff=worktree.export_patch(container, spec.tree_base),
                 read_head=lambda path: worktree.read_at_head(container, path),
                 # A witnessed spec's claims live only in frontmatter (§3.2);
                 # append them so the critic sees what a markdown spec already gives.
@@ -1199,7 +1235,7 @@ def _drive_cell(
                     # cannot satisfy it.
                     head_moved=lambda: worktree.commits_ahead(container, before) > 0,
                     rerun_gates=_rebut_gates,
-                    diff=lambda: worktree.export_patch(container, spec.base_sha),
+                    diff=lambda: worktree.export_patch(container, spec.tree_base),
                     agent=agent,
                     watch=watch,
                     last_cost_usd=last_cost,
