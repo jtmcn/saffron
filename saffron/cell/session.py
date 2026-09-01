@@ -272,7 +272,7 @@ def repair_decision(
 def cut_off_at_turn_ceiling(attempt: AttemptResult) -> bool:
     """Was this turn's own §4.3 turn bound what ended it, rather than the
     agent's own say-so? The fact `_drive_cell` trusts before spending a
-    salvage turn on a zero-commit implement turn (SA-0027).
+    salvage turn on a zero-commit implement turn (SA-0028).
 
     Read off `terminal_reason`, the field `close_attempt` already persists
     for exactly this row: SA-0025's ledger carried `subtype: error_max_turns`
@@ -1056,6 +1056,7 @@ def _drive_cell(
                 advisory_gates=sorted(advisory_gates),
             )
 
+        implement_failed = False
         try:
             implemented = agent(
                 container,
@@ -1071,6 +1072,10 @@ def _drive_cell(
             # below rather than the attempt being thrown away here.
             watch(f"IMPLEMENT: the session failed — {failed}")
             implemented = _failed_turn(failed, session_id)
+            # `run_agent`'s own predicate, kept rather than re-derived from the
+            # result: `is_error` is only one of the four things it ORs, so a
+            # turn that crashed after emitting a clean result reads as success.
+            implement_failed = True
         session_id = require_session(implemented.session_id or session_id)
         spent += implemented.cost_usd_est
         last_cost = implemented.cost_usd_est
@@ -1086,8 +1091,7 @@ def _drive_cell(
             # with the volume at teardown (SA-0025: $14.61, 141 turns, zero
             # commits, $5.39 unspent). One more turn, resumed on the same
             # session, asking only for a commit. The budget ceiling is
-            # checked *before* it is spent, never after (§4.1's "never
-            # decides after" rule for a checked ceiling).
+            # checked *before* it is spent, never after (§4.3).
             if _over_budget():
                 watch(
                     f"budget: ${spent:.2f} of ${spec.budget_usd:.2f} — cut off "
@@ -1099,12 +1103,17 @@ def _drive_cell(
                     "IMPLEMENT: cut off at the turn ceiling with nothing "
                     "committed — spending one turn to salvage it"
                 )
+                # Clamped: a spec with a `max_turns` below the salvage
+                # constant would otherwise get a salvage turn with a *higher*
+                # ceiling than the implement turn it is salvaging.
+                salvage_turns = min(implement.SALVAGE_MAX_TURNS, spec.max_turns)
                 salvage_options = implement.agent_options(
                     system_prompt=system_prompt,
                     cwd=worktree.WORKTREE_MOUNT,
-                    max_turns=implement.SALVAGE_MAX_TURNS,
+                    max_turns=salvage_turns,
                     budget_usd=spec.budget_usd,
                 )
+                salvage_note = "the salvage turn committed nothing"
                 try:
                     salvaged = agent(
                         container,
@@ -1112,7 +1121,13 @@ def _drive_cell(
                         options=salvage_options,
                         resume=session_id,
                         watch=watch,
-                        last_cost_usd=last_cost,
+                        # Scaled, not carried over: the fallback charges a
+                        # crashed turn the previous turn's figure, and these
+                        # two ceilings differ by construction. Unscaled, a
+                        # crashed 5-turn salvage is billed a 120-turn
+                        # implement turn — $11.68 for a `git commit`, enough
+                        # to book EXHAUSTED on a task the salvage just saved.
+                        last_cost_usd=last_cost * salvage_turns / spec.max_turns,
                     )
                 except implement.AgentFailed as failed:
                     # The same rule as the implement turn itself (§4.3): a
@@ -1120,17 +1135,21 @@ def _drive_cell(
                     # whatever it managed to commit before it was cut.
                     watch(f"SALVAGE: the session failed — {failed}")
                     salvaged = _failed_turn(failed, session_id)
-                    # The salvage turn exists to rescue uncommitted work, so a
-                    # bound firing on *it* is the one place losing that work is
-                    # unforgivable. Same host checkpoint the repair loop takes.
-                    if worktree.dirty_paths(container):
-                        worktree.commit_dirty(
-                            container, f"checkpoint: host-committed — {failed}"
-                        )
-                        watch("SALVAGE: uncommitted work checkpointed by the host")
+                    salvage_note = str(failed)
                 session_id = require_session(salvaged.session_id or session_id)
                 spent += salvaged.cost_usd_est
                 last_cost = salvaged.cost_usd_est
+                # Unconditional, not only on the failure branch: a salvage turn
+                # that ends cleanly having committed nothing — a hook rejected
+                # the commit, say — loses exactly the work it was spent to
+                # save. Doneness is measured, never reported (§4.3), so its
+                # clean exit buys it no more trust than a bound firing. Same
+                # host checkpoint the repair loop takes below.
+                if worktree.dirty_paths(container):
+                    worktree.commit_dirty(
+                        container, f"checkpoint: host-committed — {salvage_note}"
+                    )
+                    watch("SALVAGE: uncommitted work checkpointed by the host")
                 # Same measurement point as before: the plan turn's head, not
                 # base_sha and not where the salvage turn itself started.
                 commits = worktree.commits_ahead(container, planned_sha)
@@ -1141,7 +1160,7 @@ def _drive_cell(
                         f"SALVAGE: cut off and could not be salvaged, "
                         f"${spent:.2f} spent"
                     )
-        elif commits == 0 and implemented.is_error:
+        elif commits == 0 and implement_failed:
             # Neither cut off at the turn ceiling nor finished: an idle or
             # wall-clock bound, a provider wall, a crash. Saying "finished"
             # here would collapse a third fact into the two this spec exists

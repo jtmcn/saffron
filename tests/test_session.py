@@ -588,6 +588,7 @@ class _Cell:
         self.exported = False
         self.subjects_from: str | None = None
         self.timeouts: list[float | None] = []
+        self.turn_last_costs: list[float | None] = []
         self.checkpointed: list[str] = []
         self.denied: list[str] = []
         self.failed: list[str] = []
@@ -838,6 +839,7 @@ def _drive(
         cell.turn_options.append(options)
         cell.resumes.append(resume)
         cell.timeouts.append(kwargs.get("timeout_s"))
+        cell.turn_last_costs.append(kwargs.get("last_cost_usd"))
         # A default, not a scripted turn: REVIEW invokes one session per lens
         # after a green loop, and every test predating it scripts the
         # implementer's turns only. An empty findings block is a clean review.
@@ -1045,7 +1047,7 @@ def test_a_spec_with_no_forbidden_shows_no_forbidden_list(monkeypatch, tmp_path)
 
 
 def test_no_commit_is_not_implemented(monkeypatch, tmp_path):
-    """SA-0027: a turn that ended on its own (`_turn()`'s default
+    """SA-0028: a turn that ended on its own (`_turn()`'s default
     `terminal_reason="completed"`) and produced nothing gets no salvage — the
     agent decided it was done, and that is not argued with (§4.3)."""
     cell = _stub_the_runtime(monkeypatch, commits=0)
@@ -1089,6 +1091,11 @@ def test_a_turn_cut_off_at_the_ceiling_with_nothing_committed_is_salvaged(
     # that could itself run to 140 turns is the defect again.
     assert cell.turn_options[2]["max_turns"] == implement.SALVAGE_MAX_TURNS
     assert cell.turn_options[2]["max_turns"] < cell.turn_options[1]["max_turns"]
+    # Measured from the plan turn's head, not base_sha: the plan turn holds
+    # Write and Edit, so anything it committed is not this attempt's work
+    # (§4.3). Without this the whole salvage path can measure from the wrong
+    # base and 159 tests stay green.
+    assert cell.measured_from == "c" * 40
     # Charged like any other turn — plan + the cut-off implement turn + the
     # salvage turn + REVIEW's two lenses at their default cost each.
     assert outcome.spent_usd == pytest.approx(0.1 + 0.4 + 0.1 + 0.2)
@@ -1206,6 +1213,85 @@ def test_a_salvage_turn_cut_off_mid_commit_still_keeps_the_work(monkeypatch, tmp
         for line in cell.watched
     )
     assert any("recovered 1 commit" in line for line in cell.watched)
+
+
+def test_a_salvage_that_ends_cleanly_without_committing_still_keeps_the_work(
+    monkeypatch, tmp_path
+):
+    """The likelier half of the same hole: the salvage turn reports success
+    and commits nothing — a hook rejected the commit, say. Its clean exit buys
+    it no more trust than a bound firing (§4.3), and the work it was spent to
+    save is still sitting in /work."""
+    cell = _stub_the_runtime(monkeypatch, commits=[0, 1])
+    monkeypatch.setattr(
+        "saffron.cell.worktree.dirty_paths",
+        lambda _c: (
+            ["saffron/cell/session.py"]
+            if len(cell.turns) == 3 and not cell.checkpointed
+            else []
+        ),
+    )
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=0.4)),
+            _turn(cost=0.05),
+        ],
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert cell.checkpointed == [
+        "checkpoint: host-committed — the salvage turn committed nothing"
+    ]
+    assert any("recovered 1 commit" in line for line in cell.watched)
+
+
+def test_a_crashed_salvage_turn_is_not_charged_the_implement_turns_cost(
+    monkeypatch, tmp_path
+):
+    """`_reconcile_cost` charges a turn that reported $0.00 the previous
+    turn's figure. The salvage turn's ceiling is 24x smaller by construction,
+    so carrying that figure over books a `git commit` at $11.68 and can
+    EXHAUST a task the salvage just rescued."""
+    cell = _stub_the_runtime(monkeypatch, commits=[0, 1])
+    _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=11.68)),
+            _turn(cost=0.05),
+        ],
+        spec=_spec(budget_usd=40.0, max_turns=120),
+    )
+    # 11.68 * 5 / 120 — the fallback estimate scaled to the ceiling the
+    # salvage turn actually ran under, not the one before it.
+    assert cell.turn_last_costs[2] == pytest.approx(11.68 * 5 / 120)
+
+
+def test_a_salvage_ceiling_never_exceeds_the_turn_ceiling_it_is_salvaging(
+    monkeypatch, tmp_path
+):
+    """`SALVAGE_MAX_TURNS` is a constant and `max_turns` is per spec, so a
+    spec that sets a ceiling below it would get a salvage turn allowed to run
+    longer than the implement turn that was cut off — the defect inverted."""
+    cell = _stub_the_runtime(monkeypatch, commits=[0, 1])
+    _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=0.4)),
+            _turn(cost=0.05),
+        ],
+        spec=_spec(max_turns=3),
+    )
+    assert implement.SALVAGE_MAX_TURNS > 3  # or this test proves nothing
+    assert cell.turn_options[2]["max_turns"] == 3
 
 
 def test_a_proposed_scope_reaches_scope_review_and_spends_no_further_turns(

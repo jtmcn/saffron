@@ -1965,7 +1965,7 @@ stated intent all along, and is true for the first time.
 
 ## 34. A turn ceiling that fires with zero commits was total loss, and item 18's prompt was not enough
 
-**Closed by `SA-0027`, 2026-09-01.** Item 18 closed `SA-0005`'s turn-ceiling gap
+**Closed by `SA-0028`, 2026-09-01.** Item 18 closed `SA-0005`'s turn-ceiling gap
 by making `max_turns` a real, per-spec, printed ceiling and asking
 `implement.md` for a commit per coherent step, "with the measurement." That was
 necessary and it was not sufficient: `SA-0025`, ledger task 24, hit the same
@@ -2024,6 +2024,23 @@ exists precisely to refuse that at GATE. If a diagnostic dump of the dirty tree
 turns out to be worth having for triage, it needs its own name, its own place
 PACKAGE never reads, and its own spec — not a quiet exception carved into the
 one artifact the operator trusts.
+
+**What review added after the cell, and what it left open.** Three holes the
+gates could not see: the host checkpoint fired only when the salvage turn was
+*cut off*, so a salvage that returned cleanly having committed nothing — a
+commit hook rejecting it is the likely shape — lost the work it was spent to
+save; the crashed-turn watch line keyed on `is_error`, one of the four things
+`run_agent`'s own failure predicate ORs, so a turn that crashed after emitting
+a clean result still read as "finished and produced nothing"; and the salvage
+turn inherited the implement turn's cost as `_reconcile_cost`'s fallback,
+which bills a five-turn `git commit` at a 120-turn turn's price and can book
+`EXHAUSTED` on a task the salvage just rescued. Still open: `commit_dirty`
+raises rather than returns when a hook rejects the commit
+(`worktree.py`), so a host checkpoint on a tree the repo's own `prek` hooks
+refuse converts an earned `NOT_IMPLEMENTED` into an infrastructure abort. That
+shape is pre-existing — the repair loop's checkpoint has it too — but the
+salvage path is where the tree is *known* dirty, so it is the likeliest place
+to fire. It needs its own spec.
 
 ---
 

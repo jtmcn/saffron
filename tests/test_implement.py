@@ -41,7 +41,7 @@ def test_the_plan_prompt_names_the_scope_proposal_alternative():
 
 
 def test_the_salvage_prompt_asks_to_commit_not_implement():
-    """SA-0027: the salvage turn's only job is a commit of what already
+    """SA-0028: the salvage turn's only job is a commit of what already
     exists — asking it to keep working is the defect this prompt exists to
     not repeat."""
     assert "commit" in implement.SALVAGE_PROMPT.lower()
@@ -56,6 +56,10 @@ def test_the_salvage_ceiling_is_far_below_an_ordinary_implement_turn():
         system_prompt="s", cwd="/work", max_turns=60, budget_usd=12.0
     )
     assert ordinary["max_turns"] / 4 > implement.SALVAGE_MAX_TURNS
+    # An absolute bound as well as a ratio: the ratio alone is satisfied by a
+    # 14-turn salvage against this fixture's 60, and 14 turns is a second
+    # implementation attempt however it compares to the first.
+    assert implement.SALVAGE_MAX_TURNS <= 8
 
 
 def test_the_cache_ttl_outlives_a_gate_suite():

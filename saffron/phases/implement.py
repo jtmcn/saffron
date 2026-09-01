@@ -42,7 +42,7 @@ IMPLEMENT_PROMPT = (
     "that produces no commits failed, whatever you say about it."
 )
 
-# session.py's one-turn salvage (SA-0027): spent only when the implement turn
+# session.py's one-turn salvage (SA-0028): spent only when the implement turn
 # was cut off at its own turn ceiling with the worktree still at zero commits
 # — the gap `committed` does not cover because a cell that never reaches GATE
 # is never gated. Bounded far below an ordinary implement turn's own
