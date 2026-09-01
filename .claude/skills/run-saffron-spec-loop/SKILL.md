@@ -95,8 +95,15 @@ Run it in the background — a cell takes 30–60 minutes — and watch for phas
 lines with a Monitor on the output file:
 
 ```
-^(IMPLEMENT|GATE|REVIEW|REBUT|PACKAGE|READY|EXHAUSTED|NOT_IMPLEMENTED|PLAN_REJECTED|MERGE_FAILED|RATE_LIMITED|gates:|baseline:|ceilings:|teardown|rate limit)|Traceback
+^(IMPLEMENT|GATE|REVIEW|REBUT|PACKAGE|gates:|baseline:|ceilings:|teardown|rate limit)|(READY_FOR_REVIEW|EXHAUSTED|NOT_IMPLEMENTED|PLAN_REJECTED|MERGE_FAILED|RATE_LIMITED)|Traceback
 ```
+
+The terminal states are in a **second, unanchored** group on purpose. The line
+that carries them is `saffron/cli.py`'s `f"{spec.id:<10} {outcome.state}"` — the
+padded spec id is at column 0, so `^RATE_LIMITED` matches nothing. Only the
+states that also reach `session.py`'s `watch(f"{outcome}: …")` print at column 0,
+and `PLAN_REJECTED`, the budget `EXHAUSTED` and `NOT_IMPLEMENTED` all return
+before it. Anchoring them read as a watched terminal state and was not one.
 
 Exit codes are load-bearing: `0` reviewable, `1` the task did not make it,
 `2` infrastructure failed.
@@ -119,14 +126,21 @@ Read from the ledger, never from the transcript (§4.3). Any state other than
 `READY_FOR_REVIEW` exits 1 — that spec is out of the stack; keep going.
 
 **Except a state that decided nothing**, where `record` prints the state, exits
-1, and leaves the spec **pending** — `next` hands it back. The rule is
+1, and leaves the spec **pending** with `last_state` set. The rule is
 `scheduler.DONE_STATES`, gate 0's own "running it again learns nothing new"
 (§4.2.1), not a second list: a state outside it means no cell has answered this
-spec. Two shapes, both measured on the first real batch:
+spec.
+
+A pending spec `record` has touched is *not* handed back by `next` — it walks
+past to the next untouched spec, because handing back a rate-limited head of the
+plan inside the same closed window loops forever and makes every spec behind it
+unreachable. `status` shows which is which (`pending  (last RATE_LIMITED, 1
+attempt(s))`), `next --retry` overrides once the window has reopened, and `skip`
+removes the spec for good. Two shapes, both measured on the first real batch:
 
 - **`RATE_LIMITED`, which is not `EXHAUSTED`.** A provider ceiling stopped the
-  run before it decided anything. Re-run once the window reopens; the cell's own
-  line says when:
+  run before it decided anything. Re-run with `next --retry` once the window
+  reopens; the cell's own line says when:
 
   ```
   rate limit: rejected — stopping, not exhausted; window reopens 00:20 local
@@ -266,7 +280,9 @@ sibling branches that is the trap in the next section.
 ## Exit codes
 
 `0` the command did what it says; `1` everything else — a usage error, an empty
-plan, a spec that is not reviewable, or `next` with nothing left. The driver
+plan, a spec that is not reviewable, or `next` with nothing left to hand back
+(either every spec is run, or every pending one has already had a cell — the
+message says which). The driver
 never returns `2`: `saffron/cli.py` reserves that for infrastructure, and this
 script is not it.
 
@@ -313,9 +329,25 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py status
   and leave them based on the default branch — a "stack" of siblings is a
   review convenience, not a claim about the code.
 
-- **`gh stack submit` opens an interactive editor** and cannot be driven by an
-  agent. `--auto` skips it but creates *new* PRs. Since PACKAGE already opened
-  them, `gh stack link` is the non-interactive path. Don't reach for `submit`.
+- **`link` is the command for these branches; `submit` is not.** There is now a
+  `gh-stack` skill, and it is authoritative: `link` "creates or updates a stack
+  on GitHub **without any local tracking state** … the path for branches managed
+  by another tool or living in another worktree", which is exactly Saffron's
+  branches. `submit` works from the *local* stack, pushes every branch with
+  `--force-with-lease`, and is not atomic. (An earlier version of this file said
+  `submit --auto` "creates new PRs" — it does not: it opens one only for a
+  branch that lacks one, and PACKAGE has already opened them all. The conclusion
+  held for the wrong reason.) `gh stack submit` also opens an interactive editor
+  without `--auto`. Don't reach for `submit`.
+
+- **`gh stack link <pr> <pr>` is ambiguous in its first argument.** Per
+  `gh-stack`'s reference: "a numeric first argument is treated as a stack number
+  only when a stack with that number exists," and then the remaining arguments
+  are *appended to that stack* rather than forming the intended one. `stack`
+  builds its command from PR numbers, and stack numbers appear to come from the
+  same repo-wide counter (#87/#88 produced stack #89), so a collision is
+  unlikely rather than impossible. Run `gh stack view` after `--execute` and read
+  what it actually built.
 
 - **Do not pass `--open`.** It flips every PR in the stack from draft to ready
   for review. PACKAGE opens drafts deliberately (§5.7).
@@ -378,6 +410,7 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py status
 | `record` says `no task for SA-00NN at <sha> — did the cell run?` | The spec file was edited after the cell ran, so its `spec_sha` moved. Re-run the cell, or revert the edit. |
 | `CLAUDE_CODE_OAUTH_TOKEN is unset` | The token must be scoped to the `saffron cell` invocation itself. Refresh with `claude setup-token`. |
 | Cell exits 2 | Infrastructure, not the task — **or** a provider rate limit, which exits 2 as well. Read the last lines first: `rate limit: rejected` means wait for the window, not debug the host. Otherwise `container system start` (the service is down more often than the images are missing) and `container image list` — `container images list` is not a subcommand. |
+| `next` says `nothing untouched left` | Every remaining spec has already had a cell that decided nothing. It lists each with its `last_state`. A reopened rate-limit window is the case for `next --retry`; anything else wants `skip`. |
 | `gh stack link` rejects an argument | An argument already belongs to a different stack. `gh stack view --json` shows current tracking; `gh stack unstack --local <n>` clears local state for that stack without touching GitHub. |
 | `gh stack view` shows a stack you did not create | Local tracking from an earlier session. It is read-only information; leave it alone unless it collides. |
 

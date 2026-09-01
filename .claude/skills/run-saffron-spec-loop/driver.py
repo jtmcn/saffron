@@ -36,13 +36,16 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 PLAN = REPO / ".saffron-loop" / "plan.json"
-# What a state has to be for `record` to consume the spec. Not a second list
-# invented here: `scheduler.DONE_STATES` is gate 0's own "running it again
-# learns nothing new" (§4.2.1), which is exactly this question. Measured
-# 2026-09-01 — SA-0028 came back `RATE_LIMITED` and SA-0027 was read mid-run
-# as `REBUTTING`; both were written to the plan, and both would have dropped
-# the spec out of the stack with nobody told.
-IN_FLIGHT = frozenset({"IMPLEMENTING", "REPAIRING", "REVIEWING", "REBUTTING"})
+# What a state has to be for `record` to consume the spec is
+# `scheduler.DONE_STATES`, gate 0's own "running it again learns nothing new"
+# (§4.2.1) — and what still has a cell behind it is `reconcile.IN_FLIGHT_STATES`.
+# Both are imported in `cmd_record`, neither is re-listed here: a copy that
+# omitted `QUEUED` would tell the operator to launch a second cell during the
+# minutes `session.py` spends on the proxy, the image and the baseline gates
+# before it leaves that state. Measured 2026-09-01 — SA-0028 came back
+# `RATE_LIMITED` and SA-0027 was read mid-run as `REBUTTING`; both were written
+# to the plan, and both would have dropped the spec out of the stack with
+# nobody told.
 
 if not (REPO / "DESIGN.md").is_file():  # the skill was moved; say so, do not guess
     raise SystemExit(
@@ -70,6 +73,13 @@ class Planned:
     state: str | None = None
     pr: int | None = None
     branch: str = ""
+    # What a cell last said about a spec that is still pending, and how many
+    # cells stopped without deciding. Pending-with-no-trace read identically to
+    # never-attempted, and `next` returns the first pending spec: a
+    # `RATE_LIMITED` head of the plan was handed straight back inside the same
+    # closed window, forever, with every later spec unreachable behind it.
+    attempts: int = 0
+    last_state: str | None = None
 
 
 def _ledger_and_repo():
@@ -288,12 +298,40 @@ def _warn_siblings(ordered: list[Planned]) -> None:
     )
 
 
-def cmd_next(_args) -> int:
-    for p in _load():
-        if p.state is None:
+def cmd_next(args) -> int:
+    """The first spec no cell has answered.
+
+    `last_state` is the guard. SKILL.md's "never re-run a cell more than once
+    on the same failure — an hour and real money a pass" is unenforceable by
+    anything else: the agent driving the loop reads this command's output, not
+    the rule. A pending spec that carries a `last_state` has already had its
+    cell, so hand back the next untouched one instead; `--retry` overrides for
+    the case the rule is written for (a rate-limit window that has reopened),
+    and `skip` takes a spec out for good.
+    """
+    rows = _load()
+    pending = [p for p in rows if p.state is None]
+    for p in pending:
+        if args.retry or p.last_state is None:
             print(p.spec_id)
             return 0
-    print("done: every spec in the plan has been run", file=sys.stderr)
+    if not pending:
+        print("done: every spec in the plan has been run", file=sys.stderr)
+        return 1
+    print(
+        "nothing untouched left: every pending spec has already had a cell.",
+        file=sys.stderr,
+    )
+    for p in pending:
+        print(
+            f"  {p.spec_id}  last={p.last_state}  attempts={p.attempts}",
+            file=sys.stderr,
+        )
+    print(
+        "re-run one deliberately with `next --retry` (a reopened rate-limit "
+        "window is the case for it), or take it out with `skip <spec> --why ...`.",
+        file=sys.stderr,
+    )
     return 1
 
 
@@ -306,6 +344,8 @@ def cmd_record(args) -> int:
         return _fail(f"{args.spec_id} is not in the plan")
 
     from saffron.intake import load_spec
+    from saffron.reconcile import IN_FLIGHT_STATES
+    from saffron.scheduler import DONE_STATES
 
     ledger, repo_id, _url = _ledger_and_repo()
     try:
@@ -337,7 +377,6 @@ def cmd_record(args) -> int:
         state = chosen["state"]
         url = urls.get(chosen["task_id"], "")
         pr = int(url.rstrip("/").rsplit("/", 1)[-1]) if "/pull/" in url else None
-        from saffron.scheduler import DONE_STATES
 
         if state in DONE_STATES:
             match.state, match.pr = state, pr
@@ -346,19 +385,31 @@ def cmd_record(args) -> int:
             # (`RATE_LIMITED` is not `EXHAUSTED`), a cell still mid-phase, an
             # orphaned row. Leaving the state set would let `next` walk past a
             # spec no cell has answered.
-            match.state, match.pr = None, None
+            match.state = None
+            # The pull request survives, though. `CHANGES_REQUESTED` is a
+            # `scheduler.REQUEUE_STATE`, not a `DONE_STATE`, so the documented
+            # `saffron queue --repo .` reconcile lands a reviewed spec here —
+            # and dropping the number would make `status` show it as never
+            # attempted, `stack` refuse it, and `next` hand it back for a
+            # second cell while its pull request is open.
+            match.pr = pr or match.pr
+            match.last_state = state
+            # Polling a live row is not an attempt; a cell that stopped
+            # without deciding is.
+            if state not in IN_FLIGHT_STATES:
+                match.attempts += 1
     finally:
         ledger.close()
 
     _save(rows)
-    where = f"#{pr}" if pr else "(no PR)"
+    where = f"#{match.pr}" if match.pr else "(no PR)"
     print(f"{match.spec_id}  {state}  {where}")
     if match.state is None:
         why = (
             "the cell is still running — wait for it to exit, then record again"
-            if state in IN_FLIGHT
-            else "nothing was decided about the task; re-run the cell, or "
-            "`skip` it deliberately"
+            if state in IN_FLIGHT_STATES
+            else "nothing was decided about the task; `next` will move on to "
+            "the next untouched spec rather than re-run this one"
         )
         print(f"left pending: {why}.", file=sys.stderr)
     return 0 if state == "READY_FOR_REVIEW" else 1
@@ -389,7 +440,14 @@ def cmd_status(_args) -> int:
     width = max(len(p.spec_id) for p in rows)
     for p in rows:
         pr = f"#{p.pr}" if p.pr else ""
-        print(f"  {p.spec_id:<{width}}  {p.state or 'pending':<18} {pr}")
+        # A pending spec that has already had a cell is not a pending spec that
+        # has not, and `next` treats them differently. Say which this is.
+        seen = (
+            f"  (last {p.last_state}, {p.attempts} attempt(s))"
+            if p.state is None and p.last_state
+            else ""
+        )
+        print(f"  {p.spec_id:<{width}}  {p.state or 'pending':<18} {pr:<5}{seen}")
     ready = [p for p in rows if p.state == "READY_FOR_REVIEW" and p.pr]
     print(f"\n{len(ready)}/{len(rows)} reviewable")
     return 0
@@ -414,6 +472,13 @@ def cmd_stack(args) -> int:
         "and ratifying one is `gh pr ready <n>` — the operator's call, not this\n"
         "script's."
     )
+    print(
+        "\ncheck the result: `link` reads a leading number as a *stack* number "
+        f"when a\nstack #{numbers[0]} already exists, and then appends the rest "
+        "to that stack rather than\nforming this one. Stack numbers come from the "
+        "same repo-wide counter as\npull requests, so the collision is unlikely, "
+        "not impossible — `gh stack view`\nafter --execute says which happened."
+    )
     if not args.execute:
         print("\n(dry run — pass --execute to run it)")
         return 0
@@ -430,6 +495,11 @@ def main() -> int:
     p.set_defaults(func=cmd_plan)
 
     p = sub.add_parser("next", help="print the next spec id to run")
+    p.add_argument(
+        "--retry",
+        action="store_true",
+        help="hand back a pending spec a cell has already answered",
+    )
     p.set_defaults(func=cmd_next)
 
     p = sub.add_parser("record", help="read the ledger for what a cell did")
