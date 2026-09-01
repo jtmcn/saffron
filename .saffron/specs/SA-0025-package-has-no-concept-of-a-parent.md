@@ -109,16 +109,30 @@ half-built.
 **The merge train.** Nothing here merges anything (§6.1).
 
 ## Notes for the agent
-**Three contracts `SA-0022` left you, and the first is a raise.**
-`prepare_worktree` raises `ValueError` on a `stacked_on` that is present but
-empty: a resolver that cannot find the parent must return `None`, never `""`,
-because falling back to the pin would build the cell on the wrong tree while
-everything downstream believed it was stacked. `stacked_on` is a sha resolved
-host-side, never a ref name — it is interpolated into the seed script, and a
-branch name is also a moving target between fetch and checkout. And
-`patch.json` now carries both `base_sha` and `tree_base`; `package.py:526`
-reads `base_sha` today, and **which of the two a stacked child's patch is
-applied against is your decision to make explicitly**, not to inherit.
+**The two facts you need are different kinds, and they arrive by different
+routes.** The tree base is a **sha** — `CellSpec.stacked_on`, which `cli.py`
+resolves from the parent's recorded `pushed_sha` and which `CellSpec` validates
+at construction. The pull request base is a **branch name**, and `package()`
+does not receive a `CellSpec` at all: `cli.py:273` hands it the intake `Spec`
+(it reads `spec.title`, which `CellSpec` has not got), and `CellOutcome`
+carries no base either. So `spec.stacked_on` is *not* reachable from
+`package()`. What is reachable is `spec.depends_on`, which the intake `Spec`
+does carry, and the branch naming convention `package.py:520` already uses for
+the child. Deriving the parent's branch from that, or passing it explicitly
+from `cli.py`, are both entirely inside your `touches` — this is ordinary work,
+not the scope-proposal door.
+
+**`SA-0022` left three contracts, and the first is a raise.** `CellSpec`
+rejects a `stacked_on` that is not a resolved 40- or 64-character lowercase
+hex sha: a parent that could not be found is `None`, never `""` (an empty git
+range is a silent `HEAD..HEAD`) and never a ref name (a moving target between
+fetch and checkout, and interpolated into the cell's seed script). Second,
+`prepare_worktree` takes **one** base and does not re-derive it — the caller
+passes `spec.tree_base`, and re-introducing a second copy of that rule is the
+defect `SA-0022` removed. Third, `patch.json` now carries both `base_sha` and
+`tree_base`; `package.py:526` reads `base_sha` today, and **which of the two a
+stacked child's patch is applied against is your decision to make
+explicitly**, not to inherit.
 
 **Backlog item 33 names re-verification as your inheritance.** It is the second
 `prepare_worktree` caller, and it builds its baseline and head worktrees from
@@ -129,12 +143,6 @@ because the parent's commits are not in it. `SA-0022` could only record it;
 **Backlog item 16 is a trap with your name on it.** PACKAGE verifies under a
 policy read at `fetch_head` and nothing says which; criterion 7 exists because
 adding a base is exactly the change that would quietly move it.
-
-**`spec.stacked_on` — or whatever `SA-0022` named it — is read, never
-redefined.** `package()` already takes the `CellSpec`, so the parent's branch
-reaches you without a new argument. If it genuinely does not, that is the
-scope-proposal door at the plan checkpoint (§5.3.1), not an edit to
-`saffron/cell/**`.
 
 **Criterion 5 is a deletion as much as an addition.** `_dependency_refusal`'s
 waiting branch names this work as pending. Search for the text, not just the
