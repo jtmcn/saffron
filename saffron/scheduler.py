@@ -26,7 +26,7 @@ export its specs come from, and hands the `protected` list in.
 acceptance criterion or a `saffron:retired-by` marker names that no
 `touches` pattern reaches — read from two different sources. A guard
 asserting "`SA-0026` will retire this" in a file `SA-0026`'s `touches` did
-not cover was measured twice in one run (docs/BACKLOG.md item 34) and fixed
+not cover was measured twice in one run (docs/BACKLOG.md item 35) and fixed
 by hand both times; `retirement_refusal` reads that fact from the repository
 rather than the spec's own prose, from `mirror.retirement_markers` handed in
 by the caller, the same shape `protected` already takes.

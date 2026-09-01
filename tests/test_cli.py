@@ -316,7 +316,7 @@ def test_a_spec_whose_touches_cannot_reach_its_own_marker_refuses_before_the_cel
 ):
     """`SA-0027`'s attended-path witness: a real marker at `base_sha` a real
     spec's `touches` do not cover, driven through the real `cli._run_cell` —
-    the defect `SA-0026`'s own review fixed by hand twice (item 34)."""
+    the defect `SA-0026`'s own review fixed by hand twice (item 35)."""
     repo = _local_origin_with_marker(tmp_path, "tests/test_package.py", "SY-9")
     args = _namespace(repo, tmp_path)
     args.spec = tmp_path / "SY-9.md"

@@ -348,7 +348,7 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
 
     # Same cheap-before-a-cell shape, one check later: a `saffron:retired-by`
     # marker this spec's own `touches` cannot reach (`SA-0027`, docs/BACKLOG.md
-    # item 34) is a `git grep` against the mirror, not a plan checkpoint an
+    # item 35) is a `git grep` against the mirror, not a plan checkpoint an
     # agent has to talk its way out of.
     markers = _retirement_markers_at(mirror, base_sha)
     retirement = retirement_refusal(spec, markers)

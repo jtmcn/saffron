@@ -16,7 +16,7 @@ from pathlib import Path
 _ADDED = re.compile(r"(\d+) insertions?\(\+\)")
 _REMOVED = re.compile(r"(\d+) deletions?\(-\)")
 
-# The marker convention (`SA-0027`, docs/BACKLOG.md item 34): a comment or
+# The marker convention (`SA-0027`, docs/BACKLOG.md item 35): a comment or
 # docstring carrying `saffron:retired-by <SPEC-ID>` declares that its file
 # asserts something the named spec is expected to falsify — a half-wired
 # capability's note to its own successor. Opt-in: a heuristic over every
