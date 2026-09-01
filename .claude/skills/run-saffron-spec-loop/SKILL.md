@@ -118,18 +118,36 @@ SA-0013  MERGED  #51
 Read from the ledger, never from the transcript (§4.3). Any state other than
 `READY_FOR_REVIEW` exits 1 — that spec is out of the stack; keep going.
 
-**Except `RATE_LIMITED`, which is not `EXHAUSTED`.** A provider ceiling stopped
-the run before it decided anything about the task, so `record` prints the state,
-exits 1, and leaves the spec **pending** — `next` hands it back. Re-run the cell
-once the window reopens; the cell's own line says when:
+**Except a state that decided nothing**, where `record` prints the state, exits
+1, and leaves the spec **pending** — `next` hands it back. The rule is
+`scheduler.DONE_STATES`, gate 0's own "running it again learns nothing new"
+(§4.2.1), not a second list: a state outside it means no cell has answered this
+spec. Two shapes, both measured on the first real batch:
 
-```
-rate limit: rejected — stopping, not exhausted; window reopens 00:20 local
-SA-0028    RATE_LIMITED
-```
+- **`RATE_LIMITED`, which is not `EXHAUSTED`.** A provider ceiling stopped the
+  run before it decided anything. Re-run once the window reopens; the cell's own
+  line says when:
 
-That run is money already spent and not recoverable: the re-run starts from
-`base_sha` again. This is the one failure a second cell run is right for.
+  ```
+  rate limit: rejected — stopping, not exhausted; window reopens 00:20 local
+  SA-0028    RATE_LIMITED
+  ```
+
+  That run is money already spent and not recoverable — the re-run starts from
+  `base_sha` again. This is the one failure a second cell run is right for.
+
+- **`IMPLEMENTING` / `REPAIRING` / `REVIEWING` / `REBUTTING` — you recorded too
+  early.** The cell is still running and the ledger row is live. `record` says
+  so rather than freezing a phase name into the plan:
+
+  ```
+  SA-0027  REBUTTING  (no PR)
+  left pending: the cell is still running — wait for it to exit, then record again.
+  ```
+
+  Wait for the cell process to exit, not for a log line: `READY_FOR_REVIEW`
+  prints *before* PACKAGE opens the pull request, so recording on that line
+  gets a task with no PR.
 
 If `record` errors (`no task for SA-00NN at <sha> — did the cell run?`), the
 spec's state stays unset and **`next` will hand you the same spec again**.

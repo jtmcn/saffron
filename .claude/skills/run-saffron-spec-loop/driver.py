@@ -36,9 +36,13 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 PLAN = REPO / ".saffron-loop" / "plan.json"
-# Measured 2026-09-01: SA-0028 hit the provider session limit after GATE
-# went green. Recording that as a state drops the spec from the stack.
-RETRYABLE = "RATE_LIMITED"
+# What a state has to be for `record` to consume the spec. Not a second list
+# invented here: `scheduler.DONE_STATES` is gate 0's own "running it again
+# learns nothing new" (§4.2.1), which is exactly this question. Measured
+# 2026-09-01 — SA-0028 came back `RATE_LIMITED` and SA-0027 was read mid-run
+# as `REBUTTING`; both were written to the plan, and both would have dropped
+# the spec out of the stack with nobody told.
+IN_FLIGHT = frozenset({"IMPLEMENTING", "REPAIRING", "REVIEWING", "REBUTTING"})
 
 if not (REPO / "DESIGN.md").is_file():  # the skill was moved; say so, do not guess
     raise SystemExit(
@@ -333,26 +337,30 @@ def cmd_record(args) -> int:
         state = chosen["state"]
         url = urls.get(chosen["task_id"], "")
         pr = int(url.rstrip("/").rsplit("/", 1)[-1]) if "/pull/" in url else None
-        # `RATE_LIMITED` is not `EXHAUSTED`. A provider ceiling stopped the
-        # run before it decided anything about the task, so recording it as a
-        # state would let `next` walk past a spec no cell has answered.
-        if state == RETRYABLE:
-            match.state, match.pr = None, None
-        else:
+        from saffron.scheduler import DONE_STATES
+
+        if state in DONE_STATES:
             match.state, match.pr = state, pr
+        else:
+            # Nothing was decided about the task: a provider ceiling
+            # (`RATE_LIMITED` is not `EXHAUSTED`), a cell still mid-phase, an
+            # orphaned row. Leaving the state set would let `next` walk past a
+            # spec no cell has answered.
+            match.state, match.pr = None, None
     finally:
         ledger.close()
 
     _save(rows)
     where = f"#{pr}" if pr else "(no PR)"
     print(f"{match.spec_id}  {state}  {where}")
-    if state == RETRYABLE:
-        print(
-            "left pending: a provider ceiling is not a verdict on the task. "
-            "Re-run the cell\nwhen the window reopens — the cell's own line "
-            "says when — or `skip` it deliberately.",
-            file=sys.stderr,
+    if match.state is None:
+        why = (
+            "the cell is still running — wait for it to exit, then record again"
+            if state in IN_FLIGHT
+            else "nothing was decided about the task; re-run the cell, or "
+            "`skip` it deliberately"
         )
+        print(f"left pending: {why}.", file=sys.stderr)
     return 0 if state == "READY_FOR_REVIEW" else 1
 
 
