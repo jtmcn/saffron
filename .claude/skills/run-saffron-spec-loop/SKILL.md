@@ -179,8 +179,16 @@ fix, and commit on the branch. `git checkout saffron/SA-0028`.
 
 **d. Independent review.** Invoke `superpowers:requesting-code-review` and
 dispatch one `general-purpose` subagent per PR with the full spec text, the
-git range, and an instruction to mutation-test its own findings. Fix what
-survives verification.
+git range, and an instruction to mutation-test its own findings.
+
+Tell it, in these words, to **walk the acceptance criteria one at a time, give
+the file:line that satisfies each, then try to kill that line with a
+mutation.** That instruction is what found the two worst defects of the first
+batch: a criterion satisfied only by a comment (rewriting the line it named
+passed 159 tests) and a rule the criteria require be `scope.matches` that no
+test could tell from `==`. Verify every finding against the code yourself
+before acting on it, and re-run its mutation — a finding's own claim to have
+been verified is part of what you are reviewing.
 
 **e. Verify and push.**
 
@@ -206,15 +214,14 @@ error: a stack needs two or more reviewable pull requests; have 0
 ```
 
 Once two specs are `READY_FOR_REVIEW` the dry run prints the plan and the
-command. **The block below was produced by forcing two merged specs' states in
-`plan.json` by hand** — the PR numbers are real, the stack has never been built:
+command. Real output from the first batch this skill ran:
 
 ```
 stack, bottom to top:
-  #82  SA-0025  (saffron/SA-0025)
-  #84  SA-0026  (saffron/SA-0026)
+  #87  SA-0028  (saffron/SA-0028)
+  #88  SA-0027  (saffron/SA-0027)
 
-  gh stack link 82 84
+  gh stack link 87 88
 
 not passing --open: PACKAGE opens drafts on purpose (DESIGN.md §5.7),
 and ratifying one is `gh pr ready <n>` — the operator's call, not this
@@ -241,9 +248,20 @@ gh pr view 86 --json number,isDraft,baseRefName,headRefName \
 {"base":"main","draft":false,"head":"joel/spec-loop-skill","n":86}
 ```
 
-Run it per PR and record `baseRefName` **before and after** `--execute`:
-whether `link` retargets an existing PR's base is the one thing about it this
-skill has not measured. Then hand the operator the stack URL `link` printed.
+**`link` does retarget the base — measured.** `#88 base=main` became
+`base=saffron/SA-0028`:
+
+```
+$ uv run .claude/skills/run-saffron-spec-loop/driver.py stack --execute
+Checking existing stacks...
+Looking up PRs for 2 branches...
+✓ Updated base branch for PR #88 to saffron/SA-0028
+✓ Created stack with 2 PRs (stack #89)
+```
+
+Each PR's *diff* stays correct — GitHub computes it from the merge base, so
+#88 still showed only its own seven files. What changes is the merge, and for
+sibling branches that is the trap in the next section.
 
 ## Exit codes
 
@@ -327,6 +345,26 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py status
   Cost of the loop is therefore not bounded by the specs' budgets alone.
   Check the provider window before starting a batch, not after.
 
+- **Two sibling specs will collide in an append-only document, on the number
+  as well as the text.** Measured: `SA-0027` and `SA-0028` both ran from the
+  same `base_sha`, and both appended `## 34.` to `docs/BACKLOG.md`. `gh stack
+  link` retargets the upper PR's base onto the lower one and GitHub then shows
+  a clean diff, so the stack *looks* right while `git merge-tree` says
+  otherwise:
+
+  ```
+  $ git merge-tree --write-tree origin/saffron/SA-0028 origin/saffron/SA-0027
+  CONFLICT (content): Merge conflict in docs/BACKLOG.md
+  ```
+
+  Check it before handing the stack over — a clean-looking PR page is not the
+  check. The fix is to rebase the upper branch onto the lower one, resolve
+  (renumber, then grep the *code* for comments citing the old number — four
+  cited `item 34` here), and force-push, which needs the operator's approval.
+  Prefer avoiding it: a spec with `depends_on` gets its worktree cut from the
+  parent's branch, so the second spec appends to a document that already has
+  the first spec's entry.
+
 - **`.saffron-loop/` is gitignored.** Run state, not source. A cell never sees
   it — the mirror is a `git clone --mirror`, so an untracked file cannot reach
   one — but it must never ride along in a review fix's commit either.
@@ -355,17 +393,18 @@ carrying `#51`, not the `NOT_IMPLEMENTED` row after it), `skip`, `status`,
 `gh stack init` / `view --short` / `view --json` / `rebase --no-trunk` /
 `unstack --local` sequence on throwaway local branches.
 
-**Run, output labelled above as reconstructed:** the populated `stack` dry run
-(states forced in `plan.json` by hand; PR numbers real) and the queue-collapse
-measurement (real `build_queue`, simulated open pull request).
+**Run, output labelled above as reconstructed:** the queue-collapse
+measurement only (real `build_queue`, simulated open pull request).
 
-**Run in anger, 2026-09-01** (first real batch): `plan --force`, `next`,
-`record` on a live `RATE_LIMITED` row, `status`. The rate-limit handling in
-`record` was added *because* of that run — before the fix `record` set the
-state and `next` walked straight past SA-0028 to SA-0027.
+**Run in anger, 2026-09-01** — the whole loop, end to end, over `SA-0028` and
+`SA-0027`, producing stack #89. `plan --force`, `next`, `record` (on a live
+`RATE_LIMITED` row, on a live `REBUTTING` row, and on both `READY_FOR_REVIEW`
+rows), `status`, `stack`, `stack --execute`. Three defects in this skill were
+found by that run and fixed: `record` consuming a spec on a state that decided
+nothing, the watch log being block-buffered so the phase lines never arrived,
+and the exit-2 troubleshooting row blaming infrastructure for a provider rate
+limit.
 
-**Not run:** `driver.py stack --execute`, and therefore `gh stack link` itself.
-It needs two open Saffron pull requests and none existed at authoring time.
-Everything said about it comes from `gh stack link --help`. In particular,
-whether it retargets an existing PR's base branch is **unmeasured** — record
-`baseRefName` before and after the first time you use it.
+**Not run:** nothing in this file. `stack --execute` and `gh stack link` were
+measured on the first batch (PRs #87 and #88, stack #89) and their output is
+reproduced verbatim above.
