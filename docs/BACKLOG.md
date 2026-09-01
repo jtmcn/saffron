@@ -2134,6 +2134,21 @@ most of this repository, which cites spec ids as attribution far more than as
 a claim about the future — a capability shipped inert *without* a marker is
 as invisible to this refusal as it was before.
 
+**What review added after the cell.** Two holes the gates could not see, both
+the same shape: `git grep` cannot tell a line that *writes* a marker from a
+line that *is* one. A spec must quote the marker it arms in its own
+acceptance criteria, so every such spec read back as carrying a marker at its
+own path and refused itself — naming its `forbidden` list, which was not the
+cause. `.saffron/specs` is now excluded from the grep: a spec is where a
+marker is discussed, never where one lives. `tests/**` deliberately is *not*
+excluded, because `SA-0025`'s own inertness guard lived in a test file — so
+`tests/test_mirror.py` spells the string by concatenation instead, having
+otherwise shipped four dangling markers into this repository and four
+permanent refusals into every `saffron queue`. And a third limitation for the
+list above: the empty-`touches` guard means a bug spec is checked against
+markers only *before* DIAGNOSE populates its `touches`, never after — the
+same pre-cell-only hole item 28's sibling refusal has.
+
 ---
 
 ## What is *not* here, deliberately

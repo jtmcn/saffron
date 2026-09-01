@@ -746,6 +746,33 @@ def test_a_marker_inside_touches_is_not_refused(tmp_path):
     assert retirement_refusal(spec, [("saffron/x.py", "TE-9")]) is None
 
 
+def test_reachability_is_scope_matches_and_not_string_equality(tmp_path):
+    """Criterion 4: "declared" means one thing in every gate. Every other
+    marker test uses a literal path equal to a literal pattern, so nothing
+    there can tell `scope.matches` from `==` — measured, both substitutions
+    passed all 163 tests. A glob and a nested path can.
+
+    The argument order is load-bearing too: `matches(path, pattern)`, not the
+    reverse. Swapped, `saffron/**` is asked whether it matches the pattern
+    `saffron/deep/x.py`, which it does not."""
+    spec = _spec_at(tmp_path, "a.md", id="TE-9", touches=["saffron/**"])
+
+    assert retirement_refusal(spec, [("saffron/deep/x.py", "TE-9")]) is None
+
+
+def test_a_forbidden_glob_reaches_a_nested_marker_too(tmp_path):
+    """The same rule on the `forbidden` half, which has its own call to
+    `matches` and so its own way to drift into equality."""
+    spec = _spec_at(
+        tmp_path, "a.md", id="TE-9", touches=["src/**"], forbidden=["docs/**"]
+    )
+
+    reason = retirement_refusal(spec, [("docs/BACKLOG.md", "TE-9")])
+
+    assert reason is not None
+    assert "forbidden" in reason
+
+
 def test_a_marker_outside_touches_refuses_and_names_the_file_and_touches(
     tmp_path,
 ):

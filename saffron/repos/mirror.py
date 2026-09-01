@@ -23,6 +23,13 @@ _REMOVED = re.compile(r"(\d+) deletions?\(-\)")
 # `SA-NNNN` mention would refuse most of this repository, which cites spec
 # ids as attribution far more often than as a claim about the future.
 _RETIREMENT_MARKER = "saffron:retired-by"
+# A spec's acceptance criteria must name the marker the spec plants, so every
+# spec that arms one writes the literal string into `.saffron/specs/`. Read
+# back, that quotation is a marker at the spec's own path — and the spec is
+# then refused for not reaching a file it never claimed. Measured on this
+# repository before the exclusion existed. A spec file is where a marker is
+# discussed; it is never where one lives.
+_MARKERS_ARE_NEVER_IN = ":(exclude).saffron/specs"
 _RETIREMENT_SPEC_ID = re.compile(r"saffron:retired-by\s+([A-Za-z0-9]+-[0-9]+)")
 
 
@@ -208,6 +215,10 @@ def retirement_markers(mirror: Path, sha: str) -> list[tuple[str, str]]:
     as a field boundary), while matches stay newline-separated so several
     hits parse apart cleanly.
 
+    `.saffron/specs/` is excluded: a spec that arms a marker must quote it in
+    its own acceptance criteria, and that quotation would otherwise read as a
+    marker at the spec's own path, refusing the spec that plants it.
+
     A mirror with no markers is `[]`, never an error: `git grep` exits 1 on
     no match, a fact about the tree, not a broken command — `error` ≠ `fail`,
     read onto a gathering step rather than a gate. Exit codes past 1 (a bad
@@ -216,6 +227,7 @@ def retirement_markers(mirror: Path, sha: str) -> list[tuple[str, str]]:
     """
     argv = ["git", "-C", str(mirror), "-c", "core.quotePath=false"]
     argv += ["grep", "-n", "-z", "-e", _RETIREMENT_MARKER, sha]
+    argv += ["--", _MARKERS_ARE_NEVER_IN]
     completed = _run(argv)
     if completed.returncode == 1:
         return []
