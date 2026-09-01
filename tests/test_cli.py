@@ -688,8 +688,8 @@ def test_the_newest_of_several_waiting_rows_wins_not_the_first(tmp_path):
 
 @pytest.mark.parametrize(
     "bad_sha",
-    [None, "", "not-a-sha", "abc123", "g" * 40],
-    ids=["absent", "empty", "short-non-hex", "too-short", "non-hex-40"],
+    [None, "", "not-a-sha", "abc123", "g" * 40, "a" * 40 + " ; rm -rf /"],
+    ids=["absent", "empty", "short-non-hex", "too-short", "non-hex-40", "trailing"],
 )
 def test_an_unresolved_pushed_sha_yields_an_unstacked_cell_not_a_construction_error(
     tmp_path, bad_sha
