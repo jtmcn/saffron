@@ -2206,6 +2206,30 @@ picked, and `events.jsonl`'s one-file-per-task, no-rotation ceiling — added by
 hand, after `SA-0040`, the way every other protected-path edit in this backlog
 is.
 
+
+## 37. `events.Terminal` and `CONTEXT.md`'s "terminal state" are two different things
+
+Found by an independent review of `SA-0029` (PR #91). `CONTEXT.md` reserves
+**terminal state** for the states that reach the operator — `READY_FOR_REVIEW`,
+`EXHAUSTED`, `PLAN_REJECTED` and the rest. `saffron/events.py`'s `Terminal`
+kind means something narrower: the five ways an IMPLEMENT turn ends having
+committed nothing. Two of the five (`plan_rejected`, and the exhausted family)
+*do* map onto a terminal state, which makes the collision easier to miss rather
+than harder.
+
+The name is not the cell's invention — `DESIGN.md` §4.1 names the nine kinds
+and `SA-0029`'s own acceptance criteria list `Terminal` among them, so renaming
+it inside the cell would have desynced the module from the design and from
+`SA-0030`/`SA-0040`, which both cite the name. It is documented in the
+dataclass's docstring instead.
+
+Done looks like: either `DESIGN.md` renames the kind (`TurnEnded` is the
+reviewer's suggestion, and it is a better name) and the three specs citing it
+follow, or `CONTEXT.md` gains an entry saying the two terms are deliberately
+distinct and which is which. Both are protected paths, so both are by hand —
+the same shape as item 36. Worth settling before `SA-0040`'s mapping
+table and `SA-0038`'s timeline both render the word.
+
 ---
 
 ## What is *not* here, deliberately

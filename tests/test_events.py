@@ -5,20 +5,27 @@ renderer — that is `SA-0030`/`SA-0031` and `SA-0040`. No network, no cell.
 from __future__ import annotations
 
 import json
+import typing
 
 import pytest
 
 from saffron.events import (
+    _KINDS,
     Agent,
     Attempt,
     Baseline,
     Budget,
+    Ceiling,
+    Event,
     EventLog,
     GateResult,
+    GateStatus,
+    Phase,
     PhaseStart,
     Preflight,
     Teardown,
     Terminal,
+    TerminalReason,
     read_log,
 )
 
@@ -35,16 +42,19 @@ _ONE_OF_EACH = [
     Attempt(
         timestamp=4.0,
         spec_id="SA-0029",
+        phase="GATE",
         attempt=1,
         commits=2,
-        spent_usd=1.5,
+        spent_usd_est=1.5,
         new_failures=0,
         decision="green",
     ),
     GateResult(timestamp=5.0, spec_id="SA-0029", gate="lint", status="fail"),
     Budget(timestamp=6.0, spec_id="SA-0029", ceiling="max_turns", value=141, limit=120),
     Agent(timestamp=7.0, spec_id="SA-0029", raw=False, event={"type": "text"}),
-    Terminal(timestamp=8.0, spec_id="SA-0029", reason="finished_empty", spent_usd=0.5),
+    Terminal(
+        timestamp=8.0, spec_id="SA-0029", reason="finished_empty", spent_usd_est=0.5
+    ),
     Teardown(timestamp=9.0, spec_id="SA-0029", step="container", ok=True),
 ]
 
@@ -98,21 +108,31 @@ def test_terminal_distinguishes_all_five_zero_commit_endings(tmp_path):
     log = EventLog(tmp_path)
     events = [
         Terminal(
-            timestamp=1.0, spec_id="SA", reason="cut_off_no_salvage_room", spent_usd=9.0
+            timestamp=1.0,
+            spec_id="SA",
+            reason="cut_off_no_salvage_room",
+            spent_usd_est=9.0,
         ),
         Terminal(
-            timestamp=2.0, spec_id="SA", reason="cut_off_salvage_failed", spent_usd=9.5
+            timestamp=2.0,
+            spec_id="SA",
+            reason="cut_off_salvage_failed",
+            spent_usd_est=9.5,
         ),
         Terminal(
             timestamp=3.0,
             spec_id="SA",
             reason="ended_without_finishing",
-            spent_usd=1.0,
+            spent_usd_est=1.0,
             subtype="error",
             terminal_reason="api_error",
         ),
-        Terminal(timestamp=4.0, spec_id="SA", reason="finished_empty", spent_usd=0.2),
-        Terminal(timestamp=5.0, spec_id="SA", reason="plan_rejected", spent_usd=0.1),
+        Terminal(
+            timestamp=4.0, spec_id="SA", reason="finished_empty", spent_usd_est=0.2
+        ),
+        Terminal(
+            timestamp=5.0, spec_id="SA", reason="plan_rejected", spent_usd_est=0.1
+        ),
     ]
     for event in events:
         log.append(event)
@@ -152,9 +172,10 @@ def test_on_disk_shape_is_pinned_by_a_hand_written_line(tmp_path):
                 "kind": "Attempt",
                 "timestamp": 1735689600.0,
                 "spec_id": "SA-0029",
+                "phase": "GATE",
                 "attempt": 1,
                 "commits": 2,
-                "spent_usd": 1.5,
+                "spent_usd_est": 1.5,
                 "new_failures": 0,
                 "decision": "green",
             }
@@ -165,9 +186,10 @@ def test_on_disk_shape_is_pinned_by_a_hand_written_line(tmp_path):
     assert loaded == Attempt(
         timestamp=1735689600.0,
         spec_id="SA-0029",
+        phase="GATE",
         attempt=1,
         commits=2,
-        spent_usd=1.5,
+        spent_usd_est=1.5,
         new_failures=0,
         decision="green",
     )
@@ -231,3 +253,176 @@ def test_event_log_appends_one_line_per_event(tmp_path):
     lines = (tmp_path / "events.jsonl").read_text().splitlines()
     assert len(lines) == 2
     assert all(json.loads(line)["kind"] == "Teardown" for line in lines)
+
+
+# --- The criteria an independent review found were held up by a comment, and
+# --- the two whole-file-loss defects it found by fuzzing (PR #91 review).
+
+
+def test_a_gate_that_never_ran_records_no_failure_count(tmp_path):
+    """`skip`/`error` never had a count computed, and `0` would be a lie.
+
+    Mutating `new_failures` back to `int = 0` left the whole suite green
+    before this existed: the rule was argued in a comment and asserted
+    nowhere. Same distinction `Attempt.new_failures` draws, and the same
+    reason — a page that reports "0 new failures" for a gate that did not run
+    is `tool`'s defect (DESIGN.md §5.4, Appendix H) one layer out.
+    """
+    log = EventLog(tmp_path)
+    log.append(
+        GateResult(timestamp=1.0, spec_id="SA-0029", gate="types", status="skip")
+    )
+    log.append(
+        GateResult(
+            timestamp=2.0,
+            spec_id="SA-0029",
+            gate="tests",
+            status="fail",
+            new_failures=0,
+        )
+    )
+    skipped, failed = read_log(tmp_path)
+    assert skipped.new_failures is None, "a skipped gate must not report a counted zero"
+    assert failed.new_failures == 0, "a counted zero must survive as zero"
+    assert skipped.new_failures != failed.new_failures
+
+
+def test_a_gate_result_says_which_tree_it_ran_against(tmp_path):
+    """Three trees emit these lines and one log holds all three."""
+    log = EventLog(tmp_path)
+    for against in ("baseline", "attempt", "rebuttal"):
+        log.append(
+            GateResult(
+                timestamp=1.0,
+                spec_id="SA-0029",
+                gate="tests",
+                status="pass",
+                against=against,
+            )
+        )
+    assert [e.against for e in read_log(tmp_path)] == [
+        "baseline",
+        "attempt",
+        "rebuttal",
+    ]
+
+
+def test_an_attempt_names_its_phase(tmp_path):
+    """CONTEXT.md: "'Attempt 3' without a phase is ambiguous — name both.\""""
+    log = EventLog(tmp_path)
+    log.append(
+        Attempt(
+            timestamp=1.0,
+            spec_id="SA-0029",
+            phase="REPAIR",
+            attempt=3,
+            commits=1,
+            spent_usd_est=1.0,
+        )
+    )
+    (loaded,) = read_log(tmp_path)
+    assert (loaded.phase, loaded.attempt) == ("REPAIR", 3)
+
+
+def test_the_enumerations_are_pinned(tmp_path):
+    """No type checker runs — `.saffron/gates/types` is a declared skip — so a
+    `Literal` is documentation unless something asserts its members."""
+    assert typing.get_args(Ceiling) == ("budget_usd", "max_attempts", "max_turns")
+    assert typing.get_args(GateStatus) == ("pass", "fail", "skip", "error")
+    assert set(typing.get_args(Phase)) == {
+        "DIAGNOSE",
+        "IMPLEMENT",
+        "GATE",
+        "REPAIR",
+        "REVIEW",
+        "REBUT",
+        "PACKAGE",
+    }
+    assert "PLAN" not in typing.get_args(Phase), (
+        "CONTEXT.md's plan-checkpoint entry lists 'PLAN' on its own _Avoid_ line "
+        "and says the checkpoint is deliberately not a phase"
+    )
+    assert len(typing.get_args(TerminalReason)) == 5
+
+
+def test_the_union_and_the_wire_table_cannot_drift(tmp_path):
+    """Both are hand-maintained lists of the same nine kinds."""
+    assert set(typing.get_args(Event)) == set(_KINDS.values())
+    assert len(_KINDS) == 9
+
+
+def test_every_kind_is_frozen():
+    for cls in _KINDS.values():
+        assert cls.__dataclass_params__.frozen, f"{cls.__name__} is not frozen"
+
+
+def test_an_unhashable_kind_does_not_take_the_file_down(tmp_path):
+    """`dict.get` raises TypeError on an unhashable key.
+
+    Found by fuzzing, not by the suite: the existing unknown-kind test used a
+    *string* kind, the one shape that cannot trigger it. A hand-edited log is
+    exactly the case per-line tolerance exists for.
+    """
+    good = json.dumps(
+        {
+            "kind": "Teardown",
+            "timestamp": 1.0,
+            "spec_id": "X",
+            "step": "s",
+            "ok": True,
+            "detail": "",
+        }
+    )
+    for bad in (
+        '{"kind": ["a"]}',
+        '{"kind": {"a": 1}}',
+        '{"kind": 7}',
+        '{"kind": null}',
+    ):
+        (tmp_path / "events.jsonl").write_text(f"{good}\n{bad}\n{good}\n")
+        assert len(read_log(tmp_path)) == 2, f"{bad} cost the file its good events"
+
+
+def test_a_field_a_newer_saffron_added_does_not_delete_the_event(tmp_path):
+    """The forward-compatibility case that will actually happen.
+
+    An unknown *kind* was already tolerated one line at a time. An unknown
+    *field* on a known kind was rejecting the whole line — which deletes every
+    event of that kind, the whole-file discard one kind at a time. SA-0030,
+    SA-0031 and SA-0040 are the specs that add fields to these kinds.
+    """
+    v2 = json.dumps(
+        {
+            "kind": "Teardown",
+            "timestamp": 2.0,
+            "spec_id": "X",
+            "step": "s",
+            "ok": True,
+            "detail": "",
+            "added_by_a_later_saffron": 1,
+        }
+    )
+    (tmp_path / "events.jsonl").write_text(v2 + "\n")
+    (loaded,) = read_log(tmp_path)
+    assert (loaded.step, loaded.ok) == ("s", True)
+
+
+def test_a_line_missing_a_required_field_is_still_dropped(tmp_path):
+    """The tolerance above must not become "accept anything"."""
+    (tmp_path / "events.jsonl").write_text('{"kind": "Teardown", "timestamp": 1.0}\n')
+    assert read_log(tmp_path) == []
+
+
+def test_append_never_raises_on_a_dict_a_cell_authored(tmp_path):
+    """`asdict` deep-copies before `json.dumps` is reached, and `Agent.event`
+    is a dict from inside an untrusted cell. A cycle raised RecursionError
+    straight through a method whose whole contract is that nothing does."""
+    circular: dict = {}
+    circular["self"] = circular
+    log = EventLog(tmp_path)
+    log.append(Agent(timestamp=1.0, spec_id="X", raw=False, event=circular, line=None))
+    log.append(
+        Agent(timestamp=2.0, spec_id="X", raw=False, event={"s": {1, 2}}, line=None)
+    )
+    log.append(Teardown(timestamp=3.0, spec_id="X", step="done", ok=True))
+    assert [type(e).__name__ for e in read_log(tmp_path)] == ["Teardown"]
