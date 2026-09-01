@@ -1,12 +1,17 @@
 # Operator visibility Implementation Plan
 
-> **For agentic workers:** this plan is **not** executed by a subagent or by
-> hand. Each task's deliverable is a Saffron spec file; the implementation is
-> done by an agent in a cell driven by `saffron cell`. The steps here are the
-> operator's. Do **not** invoke `superpowers:subagent-driven-development` or
-> `superpowers:executing-plans` on it — that would hand-write the code these
-> specs exist to have the factory write, in a repo whose point is that it
-> writes its own.
+> **For agentic workers:** this plan is **not** implemented by a subagent or
+> by hand. Each task's deliverable is a Saffron spec file; the implementation
+> is done by an agent in a cell driven by `saffron cell`. The steps here are
+> the operator's. Do **not** invoke `superpowers:subagent-driven-development`
+> or `superpowers:executing-plans` on it — that would hand-write the code
+> these specs exist to have the factory write, in a repo whose point is that
+> it writes its own.
+>
+> Subagents *are* used, twice per spec, and only to review: L3 reviews the
+> spec before a cell spends money against it, and L7 reviews the diff per
+> `superpowers:requesting-code-review` after the pull request is marked ready.
+> Reviewing is the one thing a fresh context is better at than this session.
 
 **Goal:** Make what the factory is doing and what it did visible — a typed
 host event stream, a ledger that records what the page needs, and a page
@@ -116,8 +121,15 @@ the design doc's numbering note together, so the two do not drift.
 
 ## The per-spec loop
 
-Every task below runs the same six steps. They are written once here and
+Every task below runs the same steps. They are written once here and
 referenced by number, rather than repeated ten times.
+
+**Two of them are independent-agent reviews, and "independent" is the whole
+point.** Both reviewers are dispatched as subagents with *no access to this
+session's history* — they get the spec, the design document and the diff, and
+nothing about how any of it came to be written. A reviewer that has read the
+reasoning is checking the reasoning against itself, which is the same defect
+as regenerating a golden fixture after a migration.
 
 - **L1 — Write the spec** to `.saffron/specs/<id>-<slug>.md`, body verbatim
   from the task.
@@ -127,8 +139,26 @@ referenced by number, rather than repeated ten times.
   acceptance criterion naming a path no `touches` pattern matches, or an
   unsatisfied `depends_on`. This check costs nothing; `SA-0021` cost $0.82 to
   learn the same thing after a mirror fetch, an image build and a model turn.
-- **L3 — Commit the spec:** `git commit -m "spec(<id>): <title>"`.
-- **L4 — Run the cell:**
+- **L3 — Independent spec review.** Dispatch a subagent with a clean context.
+  A spec is the input to a cell that will spend $8–18 against it and to a
+  critic that will use its acceptance criteria as a rubric, so a defect here
+  is the most expensive kind to find late. Give the reviewer the spec file,
+  `docs/superpowers/specs/2026-08-31-operator-visibility-design.md`, and
+  `DESIGN.md` §3.2, and ask specifically:
+
+  - Is every acceptance criterion **checkable** — could a critic hold the diff
+    against it and reach a verdict — or is any of them an aspiration?
+  - Does any criterion name a path no `touches` pattern matches? (Gate 0
+    refuses that, and L2 has already checked mechanically; this is the reading
+    that catches a criterion whose path is *implied* rather than named.)
+  - Is `## Out of scope` doing real work, or restating the title?
+  - Does the spec ask for anything the design does not support, or omit
+    anything the design requires of this part?
+  - Is anything in it a guess presented as a measurement?
+
+  Act on the findings; if any change touches frontmatter, re-run **L2**.
+- **L4 — Commit the spec:** `git commit -m "spec(<id>): <title>"`.
+- **L5 — Run the cell:**
 
 ```bash
 env CLAUDE_CODE_OAUTH_TOKEN=(bash -c 'source ~/.secrets; printf %s $CLAUDE_CODE_OAUTH_TOKEN') \
@@ -137,11 +167,78 @@ env CLAUDE_CODE_OAUTH_TOKEN=(bash -c 'source ~/.secrets; printf %s $CLAUDE_CODE_
 
   Exit `0` reviewable · `1` the task did not make it · `2` infrastructure,
   which is owed a re-run and charged to nobody.
-- **L5 — Review and ratify.** Read the disagreements first; the PR body puts
-  them above the gate table because that is where judgment is worth most (§6).
-  `gh pr ready <n> && gh pr merge <n> --squash`.
-- **L6 — Retire:** `git mv .saffron/specs/<id>-*.md .saffron/specs/done/` and
+- **L5a — Ratify a scope proposal.** *Bug specs only (Tasks 4 and 6).* See
+  "The ratification detour" below. Skip entirely for a feature or refactor
+  spec, which declares its own `touches`.
+- **L6 — Read the PR, then mark it ready.** Read the disagreements first; the
+  PR body puts them above the gate table because that is where judgment is
+  worth most (§6). `gh pr ready <n>` — **do not merge yet.**
+- **L7 — Independent code review**, per the `superpowers:requesting-code-review`
+  skill, on the now-ready PR:
+
+```bash
+gh pr view <n> --json baseRefOid,headRefOid -q '.baseRefOid, .headRefOid'
+```
+
+  Dispatch the reviewer subagent with the skill's `code-reviewer.md` template:
+
+  - `{DESCRIPTION}` — what the cell built, one or two sentences
+  - `{PLAN_OR_REQUIREMENTS}` — **the spec's own acceptance criteria**, which
+    are already the requirements document and already the critic's rubric
+  - `{BASE_SHA}` / `{HEAD_SHA}` — from the command above
+
+  Fix Critical before merging, fix Important before proceeding to the next
+  task, note Minor. **Push back if the reviewer is wrong, with reasoning** —
+  the skill says so, and this repo's own REBUT phase exists because a
+  reviewer's confirmed finding and a correct finding are not the same thing.
+  Then `gh pr merge <n> --squash`.
+- **L8 — Retire:** `git mv .saffron/specs/<id>-*.md .saffron/specs/done/` and
   commit as `chore(specs): retire <id> as shipped`.
+
+### Why two reviews and not one
+
+They catch different failures and neither substitutes for the other. L3 reads
+a spec nobody has implemented, where the failure mode is an unfalsifiable
+acceptance criterion — cheap to fix, and ruinous once a cell has spent $16
+satisfying it in a way you did not mean. L7 reads a diff, where the failure
+mode is code that satisfies every criterion and is still wrong.
+
+Saffron's own adversarial critic already ran inside the cell at L5, and L7 is
+deliberately not a second copy of it: the critic judged the diff against the
+spec from *inside* the run that produced it, under lenses the repo configured.
+L7 is outside that loop and reviews the same diff with the repo's own
+standards in hand. Where they disagree, that disagreement is the most useful
+thing on the page.
+
+### The ratification detour (L5a)
+
+`SA-0030` and `SA-0032` are `bug` specs with an `envelope` and no `touches`,
+so DIAGNOSE proposes the scope and the cell **stops** at `SCOPE_REVIEW`,
+exiting `1`. That is the door §5.2 designed, not a failure — but the plan must
+be honest that the door is half-built.
+
+`docs/BACKLOG.md` item 31: *"Nothing in `saffron/` performs the writeback yet:
+`SCOPE_REVIEW` writes `scope_proposal.json` and stops for a human."* And it
+cannot simply be built, because `SA-0024` made the deny lists independent of
+`touches` while this repo lists `.saffron/**` under `protected` — so a
+host-authored writeback commit to `.saffron/specs/…` would fail `scope` as a
+protected path, a blocking failure the agent cannot repair without destroying
+the ratification you just granted.
+
+So ratification is by hand:
+
+1. Read `~/.saffron/batches/v0/<id>/scope_proposal.json`.
+2. If the proposed `touches` is right, write it into the spec's frontmatter
+   yourself. If it is wrong, the spec's `envelope` or its problem statement is
+   wrong — fix that and go back to **L2**, rather than editing the proposal
+   into something the diagnosis did not support.
+3. Commit: `git commit -m "ratify(<id>): <what the diagnosis found>"`.
+4. Re-run **L5**. The second cell implements against the ratified `touches`.
+
+**This costs two cells for each of those two specs**, and the DIAGNOSE turns
+are paid twice. Budget for it: `SA-0030` and `SA-0032` are the only two tasks
+in this plan where the stated `budget_usd` is a per-cell figure rather than a
+per-spec one.
 
 ---
 
@@ -275,7 +372,7 @@ lets a renderer know what it holds.
 Commit after each coherent step. Uncommitted work dies with the cell.
 ```
 
-- [ ] **L2–L6** as described in "The per-spec loop".
+- [ ] **L2–L8** as described in "The per-spec loop".
 
 ---
 
@@ -391,7 +488,7 @@ charged to nobody.
 Commit after each coherent step. Uncommitted work dies with the cell.
 ```
 
-- [ ] **L2–L6.**
+- [ ] **L2–L8.**
 
 ---
 
@@ -501,7 +598,7 @@ still produced nothing mergeable. Do not economise on them.
 Commit after each coherent step. Uncommitted work dies with the cell.
 ```
 
-- [ ] **L2–L6.**
+- [ ] **L2–L8.**
 
 ---
 
@@ -612,10 +709,11 @@ table yet.
 Commit after each coherent step. Uncommitted work dies with the cell.
 ```
 
-- [ ] **L2–L6.** At L5, ratifying includes ratifying the DIAGNOSE scope
-      proposal — a bug spec's `touches` is proposed by the agent and approved
-      by you (§5.2). Exit `1` with state `SCOPE_REVIEW` is that door, not a
-      failure.
+- [ ] **L2–L8, including L5a.** This is a bug spec: the first cell exits `1`
+      at `SCOPE_REVIEW` having written `scope_proposal.json`, which is the
+      door §5.2 designed and not a failure. Ratify by hand and re-run L5 — see
+      "The ratification detour". **Two cells, and `budget_usd: 8` is per
+      cell.**
 
 ---
 
@@ -726,7 +824,7 @@ it would open.
 Commit after each coherent step. Uncommitted work dies with the cell.
 ```
 
-- [ ] **L2–L6.**
+- [ ] **L2–L8.**
 
 ---
 
@@ -848,8 +946,11 @@ it, say so and stop — that is a `SCOPE_REVIEW`, not a failure.
 Commit after each coherent step. Uncommitted work dies with the cell.
 ```
 
-- [ ] **L2–L6.** As Task 4, `SCOPE_REVIEW` at L5 is the ratification door, not
-      a failure.
+- [ ] **L2–L8, including L5a.** As Task 4: `SCOPE_REVIEW` is the ratification
+      door, ratification is by hand, and this is **two cells with
+      `budget_usd: 14` per cell.** The proposal is worth reading closely here
+      — this spec's first acceptance criterion is a measurement, so the
+      diagnosis it proposes a scope from is itself the deliverable.
 
 ---
 
@@ -980,7 +1081,7 @@ query genuinely needs one, that is a finding for the pull request body.
 Commit after each coherent step. Uncommitted work dies with the cell.
 ```
 
-- [ ] **L2–L6.**
+- [ ] **L2–L8.**
 
 ---
 
@@ -1106,8 +1207,8 @@ Commit after each coherent step. Uncommitted work dies with the cell.
       `docs/evidence/` file that does not exist yet, which is correct: gate 0
       matches acceptance criteria against `touches` patterns, and a criterion
       naming a path no pattern matches is a refusal.
-- [ ] **L3–L4.**
-- [ ] **L5: Look at the page before ratifying.**
+- [ ] **L3–L5.**
+- [ ] **L6: Look at the page before marking it ready.**
 
 ```bash
 open ~/.saffron/batches/v0/index.html
@@ -1116,9 +1217,13 @@ sqlite3 ~/.saffron/ledger.db "select count(distinct spec_id), sum(spent_usd_est)
 
 Expected: roughly 13 rows, `SA-0009` near the top at `EXHAUSTED` and $31.60,
 and a header total matching the query. This is the one review in the plan that
-is not only a diff read.
+is not only a diff read, and the one place a rendered page can be wrong in a
+way no test and no reviewer will catch from a diff.
 
-- [ ] **L6.**
+- [ ] **L7: Independent code review.** Give this reviewer the rendered
+      `index.html` as well as the diff — it is the artifact, and a reviewer
+      reading only `render.py` is reading the recipe rather than the dish.
+- [ ] **L8.**
 
 ---
 
@@ -1224,7 +1329,7 @@ over an estimate is how an estimate becomes a fact (§4.1).
 Commit after each coherent step. Uncommitted work dies with the cell.
 ```
 
-- [ ] **L2–L6.**
+- [ ] **L2–L8.**
 
 ---
 
@@ -1334,7 +1439,7 @@ visible as a quarantine.
 Commit after each coherent step. Uncommitted work dies with the cell.
 ```
 
-- [ ] **L2–L6.**
+- [ ] **L2–L8.**
 
 ---
 
@@ -1363,7 +1468,7 @@ Three protected documents no cell can correct. Each spec above leaves a
       term is a by-hand edit: `ontology/shapes/**` is in `gate_config`, so
       `integrity` refuses an edit no spec's `touches` names, and a design
       document should not quietly move a term in a vocabulary.
-- [ ] **Step 5: Close the backlog entries** the ten cells added, each with the
+- [ ] **Step 5: Close the backlog entries** the ten specs added, each with the
       commit that closed it — the shape items 1 and 29 use.
 - [ ] **Step 6: Commit.**
 
@@ -1408,14 +1513,23 @@ never reimplemented.
 
 **Two risks this plan does not remove.**
 
-*Cost.* Ten cells at $8–16 is a $120–130 ceiling before any repair loop,
-against a lifetime spend of $127. Splitting raised the total budget and
-lowered the per-spec risk; that is the trade, and it is worth restating rather
-than hiding. If a spec exhausts, re-cut it rather than raising its budget — a
-wide mechanical diff that cannot pass its own gates is usually a spec that
-should have been two.
+*Cost, corrected upward.* **Twelve cells, not ten**: `SA-0030` and `SA-0032`
+are bug specs whose first cell stops at `SCOPE_REVIEW`, so each is run twice
+and its DIAGNOSE turns are paid twice. At $8–16 a cell that is a **$140–150**
+ceiling before any repair loop, against a lifetime spend of $127. Splitting
+raised the total and lowered the per-spec risk; the ratification detour raises
+it again and is not optional. If a spec exhausts, re-cut it rather than raising
+its budget — a wide mechanical diff that cannot pass its own gates is usually
+a spec that should have been two.
 
-*Two bug specs need ratification.* `SA-0030` and `SA-0032` propose their own
-`touches` at DIAGNOSE and stop at `SCOPE_REVIEW` for the operator to ratify
-(§5.2). That exits `1`, which is not a failure — it is the door. A plan that
-treated it as one would re-run them for no reason.
+*The ratification detour is by hand and cannot be automated here.* Item 31:
+the writeback is designed, documented and half-built, and `SA-0024` plus this
+repo's `protected` list mean a host-authored commit to `.saffron/specs/…`
+would fail `scope` as a protected path. So L5a is manual, and a plan that
+treated `SCOPE_REVIEW` as a failure would re-run those specs for no reason
+while a plan that treated it as automatic would wait forever.
+
+*Neither review is Saffron's own critic.* The adversarial critic runs inside
+the cell at L5 under the repo's lenses; L3 and L7 are outside that loop. L7 in
+particular reads the same diff the critic already judged — that overlap is
+deliberate, and a disagreement between them is signal rather than waste.
