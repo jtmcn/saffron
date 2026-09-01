@@ -364,6 +364,21 @@ def test_a_specs_declared_risk_reaches_the_cell(tmp_path, monkeypatch, capsys):
     assert cell_spec.risk == "elevated"
 
 
+def test_a_depends_on_reaches_the_cell_unstacked(tmp_path, monkeypatch, capsys):
+    """The half-built path (criteria 1-4) cannot be reached by an attended
+    run: `_run_cell` never consults `depends_on` at all — that is the
+    dependency gate's job, in `saffron/scheduler.py`, forbidden here and out
+    of scope (`SA-0025`) — so a spec declaring one still gets an ordinary,
+    unstacked `CellSpec`."""
+    repo = _local_origin(tmp_path)
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, depends_on="[SA-0001]")
+
+    cell_spec, _printed = _capture_cell_spec(monkeypatch, repo, tmp_path, args, capsys)
+
+    assert cell_spec.stacked_on is None
+
+
 def test_a_specs_declared_witnesses_reach_the_cell(tmp_path, monkeypatch, capsys):
     """`cli.load_spec` parses the operator's host-side copy before the cell
     starts, so the witnesses the gate checks were never in `/work` — that, and

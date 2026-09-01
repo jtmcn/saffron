@@ -550,3 +550,218 @@ def test_the_container_is_recorded_before_the_run_that_creates_it(
             created=created,
         )
     assert created == {"st", "saffron-cell-SY-1"}
+
+
+# --------------------------------------------------------- stacked_on: no cell
+
+
+def test_prepare_worktree_without_stacked_on_checks_out_base_sha_unchanged(
+    monkeypatch, tmp_path
+):
+    """The shape every caller produces today (criterion 4): omitting
+    `stacked_on` and passing it explicitly as `None` must build the identical
+    seed script — proving the default is not a second, silently different
+    path. No cell: `run_ephemeral`/`run_detached`/`create_volume` are
+    monkeypatched to record what they were asked to do rather than run it.
+    """
+    scripts: list[str] = []
+    monkeypatch.setattr(runtime, "create_volume", lambda name: None)
+
+    def _record(image, command, **_kwargs):
+        scripts.append(command[-1])
+        return runtime.Completed(0, "", "")
+
+    monkeypatch.setattr(runtime, "run_ephemeral", _record)
+    monkeypatch.setattr(runtime, "run_detached", lambda *a, **k: None)
+
+    kwargs = dict(
+        mirror=tmp_path / "m.git",
+        volume="vol",
+        base_sha="b" * 40,
+        branch="saffron/SY-1",
+        image="img",
+        container="c",
+        network="net",
+        env={},
+        gates_dir=_gates_dir(tmp_path),
+    )
+    worktree.prepare_worktree(**kwargs)
+    worktree.prepare_worktree(**kwargs, stacked_on=None)
+
+    assert len(scripts) == 2
+    assert scripts[0] == scripts[1]
+    assert f"git checkout -q -b saffron/SY-1 {'b' * 40}" in scripts[0]
+
+
+def test_prepare_worktree_stacked_on_checks_out_the_parent_instead(
+    monkeypatch, tmp_path
+):
+    """A `stacked_on` sha, when given, is what gets checked out — never
+    `base_sha`, which stays the run's pin (§5.4)."""
+    scripts: list[str] = []
+    monkeypatch.setattr(runtime, "create_volume", lambda name: None)
+
+    def _record(image, command, **_kwargs):
+        scripts.append(command[-1])
+        return runtime.Completed(0, "", "")
+
+    monkeypatch.setattr(runtime, "run_ephemeral", _record)
+    monkeypatch.setattr(runtime, "run_detached", lambda *a, **k: None)
+
+    worktree.prepare_worktree(
+        mirror=tmp_path / "m.git",
+        volume="vol",
+        base_sha="b" * 40,
+        stacked_on="c" * 40,
+        branch="saffron/SY-1",
+        image="img",
+        container="c",
+        network="net",
+        env={},
+        gates_dir=_gates_dir(tmp_path),
+    )
+
+    assert f"git checkout -q -b saffron/SY-1 {'c' * 40}" in scripts[0]
+    assert "b" * 40 not in scripts[0]
+
+
+def _no_cell_runtime(monkeypatch, tmp_path):
+    """Fakes just enough of the cell runtime that `prepare_worktree` and the
+    diff-reading helpers run their real git commands against a host
+    directory instead of inside a container — the same commands, no cell and
+    no network. Only one volume/container pair is ever live in a test that
+    uses this, so a name -> directory mapping is all it takes.
+    """
+    volumes: dict[str, Path] = {}
+    containers: dict[str, Path] = {}
+
+    def _create_volume(name):
+        directory = tmp_path / f"vol-{name}"
+        directory.mkdir(parents=True, exist_ok=True)
+        volumes[name] = directory
+
+    def _run_ephemeral(image, command, *, mounts=(), **_kwargs):
+        script = command[-1]
+        for mount in mounts:
+            real = (
+                str(mount.source)
+                if mount.kind == "bind"
+                else str(volumes[mount.source])
+            )
+            script = script.replace(mount.target, real)
+        done = subprocess.run(["sh", "-euc", script], capture_output=True)
+        return runtime.Completed(
+            done.returncode, done.stdout.decode(), done.stderr.decode()
+        )
+
+    def _run_detached(name, image, *, mounts=(), **_kwargs):
+        for mount in mounts:
+            if mount.kind == "volume" and mount.target == worktree.WORKTREE_MOUNT:
+                containers[name] = volumes[mount.source]
+
+    def _exec(container, command, *, workdir=None, timeout_s=900):
+        cwd = containers[container] if workdir == worktree.WORKTREE_MOUNT else None
+        done = subprocess.run(list(command), cwd=cwd, capture_output=True)
+        return runtime.Completed(
+            done.returncode,
+            done.stdout.decode(errors="replace"),
+            done.stderr.decode(errors="replace"),
+        )
+
+    monkeypatch.setattr(runtime, "create_volume", _create_volume)
+    monkeypatch.setattr(runtime, "run_ephemeral", _run_ephemeral)
+    monkeypatch.setattr(runtime, "run_detached", _run_detached)
+    monkeypatch.setattr(runtime, "exec_", _exec)
+    return volumes
+
+
+def _commit_file(repo, name, content, message):
+    (repo / name).write_text(content)
+    subprocess.run(["git", "add", name], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-qm", message], cwd=repo, check=True, capture_output=True
+    )
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def test_a_stacked_worktree_holds_the_parents_real_commits_and_only_the_childs_new_commit_is_exported(
+    monkeypatch, tmp_path
+):
+    """Criteria 2 and 3, witnessed together: a real two-commit parent branch,
+    a real child commit on top of it, no cell.
+
+    A worktree built with `stacked_on` set to the parent's head contains the
+    parent's commits (criterion 2); a patch exported from it against that
+    same head contains only the child's own commit — the parent's diff is
+    not in it (criterion 3) — while a patch exported against the original
+    `base_sha` contains all three, which is the export the same generic
+    function gives for an ordinary, unstacked task.
+    """
+    origin = tmp_path / "origin"
+    root = _seed_repo(origin)
+    _commit_file(origin, "parent_a.txt", "from the parent\n", "parent commit A")
+    parent_head = _commit_file(
+        origin, "parent_b.txt", "also the parent\n", "parent commit B"
+    )
+    mirror = tmp_path / "m.git"
+    subprocess.run(
+        ["git", "clone", "--bare", "-q", str(origin), str(mirror)], check=True
+    )
+
+    volumes = _no_cell_runtime(monkeypatch, tmp_path)
+    volume, container = "vol", "container"
+    runtime.create_volume(volume)
+
+    worktree.prepare_worktree(
+        mirror=mirror,
+        volume=volume,
+        base_sha=root,
+        stacked_on=parent_head,
+        branch="saffron/child",
+        image="img",
+        container=container,
+        network="net",
+        env={},
+        gates_dir=_gates_dir(tmp_path),
+    )
+
+    # Criterion 2: a real branch, real commits — the tree is the parent's,
+    # not the root's.
+    assert worktree.head_sha(container) == parent_head
+    assert worktree.commits_ahead(container, root) == 2
+    assert (volumes[volume] / "parent_a.txt").read_text() == "from the parent\n"
+    assert (volumes[volume] / "parent_b.txt").read_text() == "also the parent\n"
+
+    # The child's own commit, made on top of the checked-out parent head.
+    (volumes[volume] / "child.txt").write_text("from the child\n")
+    subprocess.run(
+        ["git", "add", "child.txt"],
+        cwd=volumes[volume],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-qm", "child commit"],
+        cwd=volumes[volume],
+        check=True,
+        capture_output=True,
+    )
+
+    # Criterion 3: exported against the base it was actually built on, the
+    # patch holds only the child's own work.
+    stacked_patch = worktree.export_patch(container, parent_head)
+    assert "from the child" in stacked_patch
+    assert "from the parent" not in stacked_patch
+    assert "also the parent" not in stacked_patch
+    assert worktree.commits_ahead(container, parent_head) == 1
+
+    # Contrast: the same function, hedged against the original base_sha,
+    # answers the ordinary (unstacked) question instead — every commit made
+    # since the run's pin, parent's included.
+    whole_patch = worktree.export_patch(container, root)
+    assert "from the parent" in whole_patch
+    assert "also the parent" in whole_patch
+    assert "from the child" in whole_patch
+    assert worktree.commits_ahead(container, root) == 3

@@ -173,6 +173,16 @@ class CellSpec:
     budget_usd: float = 12.0
     max_attempts: int = 4
     max_turns: int = 60
+    # The parent's own unmerged branch head, for a stacked task — distinct
+    # from `base_sha`, which stays the run's pin: gates and the policy
+    # declaring them are exported from it regardless (§5.4, BACKLOG item 13),
+    # and this field does not change that. Defaults to the shape every caller
+    # produces today: unset, so `worktree.prepare_worktree` checks out
+    # `base_sha` exactly as before. `cli.py` sets it explicitly to `None` at
+    # the one place a `CellSpec` is built — nothing in `_drive_cell` reads it
+    # yet, so setting it to anything else here would stack no real task
+    # either; `SA-0025` resolves a real parent onto it and wires it through.
+    stacked_on: str | None = None
 
 
 @dataclass

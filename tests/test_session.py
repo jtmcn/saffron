@@ -96,6 +96,20 @@ def _spec(**overrides):
     return session.CellSpec(**(fields | overrides))
 
 
+def test_stacked_on_defaults_to_unset():
+    """The shape every caller produces today: no second base at all, so
+    `worktree.prepare_worktree` checks out `base_sha` exactly as before this
+    field existed."""
+    assert _spec().stacked_on is None
+
+
+def test_stacked_on_carries_a_second_base_distinct_from_base_sha():
+    spec = _spec(base_sha="b" * 40, stacked_on="c" * 40)
+    assert spec.stacked_on == "c" * 40
+    assert spec.base_sha == "b" * 40
+    assert spec.stacked_on != spec.base_sha
+
+
 _PLAN = {
     "understanding": "u",
     "approach": "a",

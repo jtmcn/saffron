@@ -47,6 +47,7 @@ def prepare_worktree(
     gates_dir: Path,
     state_volume: str | None = None,
     created: set[str] | None = None,
+    stacked_on: str | None = None,
 ) -> None:
     """Clone the mirror into the volume at `base_sha` on `branch`, cell running.
 
@@ -65,7 +66,14 @@ def prepare_worktree(
 
     `git clone` refuses a non-empty destination, and a freshly formatted
     volume already has a `lost+found` — init/fetch/checkout in place instead.
+
+    `stacked_on`, when set, is a stacked task's parent's own unmerged branch
+    head — ahead of `base_sha` — and is what the tree is actually built on;
+    `base_sha` stays the run's pin regardless (§5.4). Unset, which is every
+    caller today, the checkout is `base_sha` exactly as before this parameter
+    existed.
     """
+    checkout_ref = stacked_on or base_sha
     state = state_volume or f"{volume}-state"
     if created is not None:
         created.add(state)
@@ -80,7 +88,7 @@ def prepare_worktree(
             "git init -q && "
             f"git remote add origin {_MIRROR_MOUNT} && "
             "git fetch -q origin && "
-            f"git checkout -q -b {branch} {base_sha} && "
+            f"git checkout -q -b {branch} {checkout_ref} && "
             "git remote remove origin && "
             "git config user.email saffron@localhost && "
             "git config user.name Saffron",

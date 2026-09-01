@@ -1704,6 +1704,64 @@ default branch and the parent's commits are already in it. A parent that is
 merely `READY_FOR_REVIEW` is still refused, which is §4.2's own rule minus the
 half v0.5 cannot honour.
 
+## 33. Stacking's other half needs two bases, and the two now disagree on purpose
+
+`SA-0020`'s first attempt (ledger task 20, `EXHAUSTED` at $14.43 against a $16
+budget, 2026-08-30) found that a stacked task — one whose parent is still only
+`READY_FOR_REVIEW`, item 32's remaining half — needs `worktree.prepare_worktree`
+to check out the parent's own unmerged branch head, ahead of `base_sha`, while
+the exported patch was still computed as `export_patch(container, base_sha)`
+and so captured the parent's entire diff plus the child's own. It could not fix
+that: `saffron/phases/**` was forbidden to it, and the `touches` insufficiency
+only surfaced after the plan checkpoint, past §5.3.1's one door out.
+
+This split the remaining work in two. This item is the half with no production
+trigger: `CellSpec.stacked_on`, distinct from `base_sha`, and
+`worktree.prepare_worktree`'s matching parameter, so a worktree can be built on
+a base other than the run's pin and a patch can be exported against that same
+base rather than against `base_sha` — proven with a real two-commit parent
+branch and a real child commit on top, not a value a test constructs and then
+reads back. `cli.py` sets `stacked_on=None` explicitly at the one place a
+`CellSpec` is built, so `depends_on` is not consulted on that path at all and
+no real task stacks yet. `SA-0025` resolves a real parent onto the field, wires
+it into `_drive_cell`, teaches PACKAGE to target the parent's branch, and
+widens the dependency gate to admit a `READY_FOR_REVIEW` parent.
+
+**The disagreement this creates is real the moment `SA-0025` wires it up, and
+it is worth deciding now rather than at the hour nobody is watching.** A
+stacked worktree's tree is the parent's unmerged commits plus the child's own —
+code the gate executables and the policy declaring them, both exported from
+`base_sha` (item 13), have never seen. Two ways that can go wrong: a gate role
+the parent's own commits added exists in the tree but not in the exported
+`.saffron/gates/`, so `run_suite` never invokes it — a silent gap, not a
+`skip` that names itself; and a gate that would judge the parent's own change
+differently under the parent's own policy update instead judges it under the
+policy that predates that update.
+
+**Decision: `base_sha` wins — the gates and the policy declaring them stay
+resolved from it, stacked task or not.** Two reasons, not one. First, this
+spec's own out-of-scope line is explicit that it does not redefine what
+`base_sha` means; moving the gate source to `stacked_on` for some tasks and not
+others *is* that redefinition, one call site at a time, and item 13 already
+spent a whole item settling gates-from-`base_sha` as the run's pin — a second,
+task-local exception to it is a third thing to keep in step with the first two
+rather than one settled fact. Second, `base_sha` is the one value every task in
+a run shares; a gate source that moved with `stacked_on` would mean two
+sibling tasks stacked on two different parents run under two different gate
+suites inside the same run — a suite-drift vector already named once, for
+`reverify`'s missing `thread_env` (item 12), and the common case here rather
+than the exception.
+
+**What this defers, by name, for `SA-0025` to inherit rather than rediscover.**
+A parent that adds or changes a gate role stays invisible to a child stacked on
+it until the parent lands on the default branch and `base_sha` itself moves
+past it — the same shape item 13 already accepted for an operator's own
+branch, now also true of a dependent task's parent. Closing that without
+moving what `base_sha` pins means exporting a second, `stacked_on`-sourced gate
+set for a stacked task alone and running both suites, which is unbuilt and is
+not this item's to build: the requirement here was that the disagreement be
+recorded, not resolved.
+
 ---
 
 ## What is *not* here, deliberately
