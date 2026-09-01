@@ -2185,6 +2185,85 @@ Three things this refusal still cannot see, all named rather than fixed:
 
 ---
 
+## 36. The event schema wants its own `DESIGN.md` §4 subsection, and nothing can write one
+
+`saffron/events.py` fixes the nine kinds, the `kind` discriminator and the
+timestamp representation, and `DESIGN.md` carries no event schema at all.
+`DESIGN.md` is `protected`, so no cell can add one.
+
+Done looks like: a new §4.x naming the nine kinds, the wire discriminator and
+`events.jsonl`'s one-file-per-task, no-rotation ceiling — by hand, after
+`SA-0040`, when the shape has stopped moving.
+
+## 37. `events.Terminal` and `CONTEXT.md`'s "terminal state" are two different things
+
+`CONTEXT.md` reserves **terminal state** for the states that reach the operator.
+`events.Terminal` means the five ways an IMPLEMENT turn ends having committed
+nothing. Two of the five map onto a terminal state, which makes the collision
+easy to miss rather than hard.
+
+Renaming was deferred because `SA-0029`'s criteria and `SA-0030`/`SA-0040` all
+cite `Terminal`. An earlier draft of this item said the name was `DESIGN.md`
+§4.1's; it is not — see item 36. Found reviewing PR #91.
+
+Done looks like: `TurnEnded` across the three specs, or a `CONTEXT.md` entry
+saying the two terms are deliberately distinct. Protected either way, so by
+hand, and worth settling before `SA-0040` and `SA-0038` render the word.
+
+## 38. `events.Phase` splits `GATE ⇄ REPAIR`, and `CONTEXT.md` does not
+
+`CONTEXT.md` names six phases, counting `GATE ⇄ REPAIR` as one; `events.Phase`
+lists seven, because a gate attempt and a repair turn print different lines.
+The split is probably right and is currently held by a comment and a test.
+
+Done looks like: `CONTEXT.md` saying whether it is sanctioned, and the `Literal`
+following. Protected, so by hand. Second divergence — see item 37.
+
+## 39. `types` is a blocking gate that can never fail
+
+`.saffron/gates/types` emits `skip` unconditionally, `policy.yaml` declares it
+`blocking: true`, and `pyproject.toml` carries a configured `[tool.pyright]`
+block that nothing runs — pyright is not a dependency, a hook, or installed.
+`policy.yaml`'s own note on `shacl`, five lines below, states the principle this
+breaks: *a control that reads as present and is not is the founding defect of
+Appendix I.*
+
+Measured while reviewing PR #91: mutations replacing `Ceiling` and
+`TerminalReason` with bare `str`, and removing `Terminal` from the `Event`
+union, all left the suite green. `saffron/events.py` is a module whose whole
+value is type safety, and `tests/test_events.py` now hand-rolls
+`test_the_enumerations_are_pinned` as a substitute.
+
+Done looks like: pyright as a dev dependency and `.saffron/gates/types`
+executing it — the gate is already declared and already blocking, so nothing in
+`policy.yaml` changes. Or, if that is not wanted, the gate stops claiming to
+block. Either is a repo-side change and neither touches `saffron/`.
+
+
+## 40. A host-side fix round can undo a gate the cell passed
+
+`SA-0029` (PR #91) left its cell at 548 changed lines, inside the 600 a
+`feature` gets. Two host-side review rounds took it to **863**. The `size` gate
+runs inside the cell, against the cell's own diff; nothing re-runs it after the
+operator commits review fixes to the branch, so the branch merges failing a
+blocking gate it passed on the way out.
+
+Most of the growth is tests, and that is the second half of the finding:
+`_changed_lines` counts the whole diff, so a spec whose acceptance criteria
+demand thorough tests is charged for satisfying them. `SA-0029` has fourteen
+criteria, and both reviews of it added tests precisely because criteria were
+being held up by comments. Cutting those to reach 600 would trade a real
+control for a number.
+
+Done looks like: the loop running `size` (at minimum) against the branch before
+it is marked ready, and a decision on whether the ceiling should count test
+lines at all — §5.4 sets one number for a diff whose test half is mandated
+elsewhere. Recorded rather than fixed here: PR #91 is over the ceiling and is
+being merged over it deliberately, with this item as the record.
+
+
+---
+
 ## What is *not* here, deliberately
 
 DIAGNOSE and `SCOPE_REVIEW`, the scheduler's conflict sets and stacking, `saffron
