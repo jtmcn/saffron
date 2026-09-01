@@ -280,8 +280,15 @@ def cut_off_at_turn_ceiling(attempt: AttemptResult) -> bool:
     $11.68 with nothing to export. A rate-limit wall or a crash carries some
     other reason, or none, and must not read as this — spending a turn on a
     provider ceiling or a crash is not what the salvage exists for.
+
+    Both fields, because the ledger row carried both and `run_agent` keys on
+    the subtype (`implement.py`'s failure predicate). A result event that
+    arrived without `terminal_reason` would otherwise skip the salvage in
+    silence — a control that does not fire looks identical to one that did.
     """
-    return attempt.terminal_reason == "max_turns"
+    return (
+        attempt.terminal_reason == "max_turns" or attempt.subtype == "error_max_turns"
+    )
 
 
 def require_session(session_id: str | None) -> str:
@@ -1135,21 +1142,38 @@ def _drive_cell(
                     # whatever it managed to commit before it was cut.
                     watch(f"SALVAGE: the session failed — {failed}")
                     salvaged = _failed_turn(failed, session_id)
-                    salvage_note = str(failed)
+                    # Truncated: this reaches the PR body through
+                    # `commit_subjects`, and `str(failed)` carries in-cell stderr.
+                    salvage_note = str(failed)[:120]
                 session_id = require_session(salvaged.session_id or session_id)
                 spent += salvaged.cost_usd_est
-                last_cost = salvaged.cost_usd_est
+                # `last_cost` deliberately keeps the *implement* turn's figure.
+                # It anchors the crash fallback of the next turn, which runs on
+                # the full ceiling; the salvage turn's own cost is small by
+                # construction. Carrying it forward would undo the scaling above
+                # in the other direction — billing a crashed 120-turn repair
+                # turn the price of a `git commit`, which is §4.1's budget that
+                # silently stops counting, one hop downstream.
                 # Unconditional, not only on the failure branch: a salvage turn
                 # that ends cleanly having committed nothing — a hook rejected
                 # the commit, say — loses exactly the work it was spent to
                 # save. Doneness is measured, never reported (§4.3), so its
                 # clean exit buys it no more trust than a bound firing. Same
                 # host checkpoint the repair loop takes below.
-                if worktree.dirty_paths(container):
-                    worktree.commit_dirty(
-                        container, f"checkpoint: host-committed — {salvage_note}"
-                    )
-                    watch("SALVAGE: uncommitted work checkpointed by the host")
+                try:
+                    if worktree.dirty_paths(container):
+                        worktree.commit_dirty(
+                            container, f"checkpoint: host-committed — {salvage_note}"
+                        )
+                        watch("SALVAGE: uncommitted work checkpointed by the host")
+                except runtime.CellRuntimeError as broke:
+                    # `commit_dirty` raises on any non-zero git exit, so a hook
+                    # refusing the commit arrives here as a runtime error. It is
+                    # the repo's code being wrong, not the runtime breaking:
+                    # letting it out books exit 2, charged to nobody, on a task
+                    # that earned `NOT_IMPLEMENTED` (error ≠ fail). The
+                    # `commits_ahead` re-measure below still decides.
+                    watch(f"SALVAGE: the host checkpoint failed — {broke}")
                 # Same measurement point as before: the plan turn's head, not
                 # base_sha and not where the salvage turn itself started.
                 commits = worktree.commits_ahead(container, planned_sha)

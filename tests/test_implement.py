@@ -7,6 +7,7 @@ import pytest
 from saffron.cell import runtime
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure
+from saffron.intake import Spec
 from saffron.phases import implement
 
 
@@ -52,10 +53,11 @@ def test_the_salvage_prompt_asks_to_commit_not_implement():
 def test_the_salvage_ceiling_is_far_below_an_ordinary_implement_turn():
     """A salvage that can itself run to 140 turns is the defect again
     (SA-0025: 141 turns, $11.68, zero commits)."""
-    ordinary = implement.agent_options(
-        system_prompt="s", cwd="/work", max_turns=60, budget_usd=12.0
-    )
-    assert ordinary["max_turns"] / 4 > implement.SALVAGE_MAX_TURNS
+    # Read off `intake`'s own default rather than a literal this test wrote:
+    # a ratio against a number the assertion constructed proves nothing, and
+    # it is the real default that decides whether five turns is "far below".
+    ordinary = Spec.model_fields["max_turns"].default
+    assert ordinary / 4 > implement.SALVAGE_MAX_TURNS
     # An absolute bound as well as a ratio: the ratio alone is satisfied by a
     # 14-turn salvage against this fixture's 60, and 14 turns is a second
     # implementation attempt however it compares to the first.

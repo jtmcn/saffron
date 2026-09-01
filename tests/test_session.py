@@ -65,6 +65,22 @@ def test_a_turn_ceiling_is_cut_off():
     assert session.cut_off_at_turn_ceiling(attempt)
 
 
+def test_a_ceiling_that_reported_only_a_subtype_is_still_cut_off():
+    """That ledger row carried both fields, and `run_agent`'s own failure
+    predicate keys on the subtype. A result event that arrives without
+    `terminal_reason` must not skip the salvage in silence — a control that
+    never fires is indistinguishable from one that fired and found nothing."""
+    attempt = implement.AttemptResult(
+        session_id="s",
+        subtype="error_max_turns",
+        terminal_reason=None,
+        num_turns=60,
+        cost_usd_est=5.34,
+        is_error=True,
+    )
+    assert session.cut_off_at_turn_ceiling(attempt)
+
+
 def test_a_clean_finish_is_not_cut_off():
     attempt = implement.AttemptResult(
         session_id="s",
@@ -1130,7 +1146,11 @@ def test_a_salvage_turn_that_still_commits_nothing_is_not_implemented(
 ):
     """The salvage turn is a chance, not a guarantee: if it still leaves
     zero commits, the task ends NOT_IMPLEMENTED, and the watch line says the
-    turn ceiling cut it off rather than the agent finishing with nothing."""
+    turn ceiling cut it off rather than the agent finishing with nothing.
+
+    The *clean-tree* shape, deliberately: `_stub_the_runtime`'s `dirty_paths`
+    returns `[]`, so the host checkpoint below finds nothing to save. A dirty
+    tree here is the commoner case and is covered two tests down."""
     cell = _stub_the_runtime(monkeypatch, commits=0)
     outcome, _ledger = _drive(
         monkeypatch,
@@ -1270,6 +1290,68 @@ def test_a_crashed_salvage_turn_is_not_charged_the_implement_turns_cost(
     # 11.68 * 5 / 120 — the fallback estimate scaled to the ceiling the
     # salvage turn actually ran under, not the one before it.
     assert cell.turn_last_costs[2] == pytest.approx(11.68 * 5 / 120)
+
+
+def test_a_repair_turn_after_a_salvage_keeps_the_implement_turns_cost(
+    monkeypatch, tmp_path
+):
+    """The same scaling read in the other direction — the one that makes an
+    existing guarantee weaker rather than stronger. The salvage turn's cost is
+    small by construction, and the repair turn that follows it runs on the
+    *full* ceiling: inheriting the salvage figure would charge a crashed
+    120-turn turn the price of a `git commit`, which is §4.1's budget that
+    silently stops counting, one hop past where the salvage closed it."""
+    failing = Failure(file="a.py", code="E501", message="too long")
+    cell = _stub_the_runtime(
+        monkeypatch, commits=[0, 1], suites=([], _results(failing), [])
+    )
+    _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=11.68)),
+            _turn(cost=0.05),
+        ],
+        spec=_spec(budget_usd=40.0, max_turns=120),
+    )
+    # Turn 3 is the repair turn: the implement turn's figure, neither the
+    # salvage turn's $0.05 nor the scaled figure the salvage turn was given.
+    assert cell.turn_last_costs[3] == pytest.approx(11.68)
+
+
+def test_a_checkpoint_the_repo_refuses_is_not_an_infrastructure_abort(
+    monkeypatch, tmp_path
+):
+    """`commit_dirty` raises on any non-zero git exit, so a commit hook
+    rejecting the host checkpoint arrives as a `CellRuntimeError`. Letting it
+    out of the salvage path books exit 2, charged to nobody, on a task that
+    earned `NOT_IMPLEMENTED` — `error` collapsed into `fail`, on the one path
+    where the tree is known dirty and the agent already failed to commit it."""
+    cell = _stub_the_runtime(monkeypatch, commits=0)
+    monkeypatch.setattr(
+        "saffron.cell.worktree.dirty_paths", lambda _c: ["saffron/cell/session.py"]
+    )
+
+    def _refused(_container, _message):
+        raise runtime.CellRuntimeError("commit failed: hook refused the commit")
+
+    monkeypatch.setattr("saffron.cell.worktree.commit_dirty", _refused)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=0.4)),
+            _turn(cost=0.05),
+        ],
+    )
+    # The outcome the task earned, and the exit code that goes with it.
+    assert outcome.state == "NOT_IMPLEMENTED"
+    assert any("the host checkpoint failed" in line for line in cell.watched)
+    assert any("cut off and could not be salvaged" in line for line in cell.watched)
 
 
 def test_a_salvage_ceiling_never_exceeds_the_turn_ceiling_it_is_salvaging(
