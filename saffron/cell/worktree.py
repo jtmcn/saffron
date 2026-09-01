@@ -47,7 +47,6 @@ def prepare_worktree(
     gates_dir: Path,
     state_volume: str | None = None,
     created: set[str] | None = None,
-    stacked_on: str | None = None,
 ) -> None:
     """Clone the mirror into the volume at the base it is given, on `branch`,
     cell running.
@@ -68,19 +67,12 @@ def prepare_worktree(
     `git clone` refuses a non-empty destination, and a freshly formatted
     volume already has a `lost+found` — init/fetch/checkout in place instead.
 
-    `stacked_on`, when set, is a stacked task's parent branch head — a sha
-    resolved host-side, never a ref name: it is interpolated into the seed
-    script exactly as `base_sha` is, and a branch name would also be a moving
-    target between the fetch and the checkout. It is what the tree is built
-    on; `base_sha` stays the run's pin regardless (§5.4). Unset, which is
-    every caller today, the checkout is `base_sha` as before it existed.
+    `base_sha` is the base the **tree** is built on, which the caller has
+    already resolved: `CellSpec.tree_base` is the run's pin unstacked and the
+    parent's head otherwise. This function does not re-derive that — a second
+    copy of the rule is two things sharing one word again, one layer down, and
+    the two copies can disagree with nothing to notice.
     """
-    # `is not None`, not `or`: an empty string is a resolver that failed, and
-    # falling back to `base_sha` there builds a cell on the wrong tree while
-    # reporting success (Appendix I's shape).
-    if stacked_on is not None and not stacked_on:
-        raise ValueError("stacked_on is empty: a parent that could not be resolved")
-    checkout_ref = base_sha if stacked_on is None else stacked_on
     state = state_volume or f"{volume}-state"
     if created is not None:
         created.add(state)
@@ -95,7 +87,7 @@ def prepare_worktree(
             "git init -q && "
             f"git remote add origin {_MIRROR_MOUNT} && "
             "git fetch -q origin && "
-            f"git checkout -q -b {branch} {checkout_ref} && "
+            f"git checkout -q -b {branch} {base_sha} && "
             "git remote remove origin && "
             "git config user.email saffron@localhost && "
             "git config user.name Saffron",
@@ -112,7 +104,7 @@ def prepare_worktree(
         )
 
     # Here and not at the call site: the seed above is an *ephemeral* container
-    # that can fail on a bad base_sha or an unreadable mirror, and recording the
+    # that can fail on a base the mirror does not have or an unreadable mirror, and recording the
     # cell's name before that reports a container nothing ever created.
     if created is not None:
         created.add(container)

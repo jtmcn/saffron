@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import partial, wraps
@@ -147,6 +148,10 @@ class CellSessionError(RuntimeError):
     """The session cannot go on — not the agent's failure, the driver's."""
 
 
+# A resolved commit, the only shape a second base may take.
+_SHA = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
 @dataclass
 class CellSpec:
     spec_id: str
@@ -177,6 +182,17 @@ class CellSpec:
     # gates and policy are exported from it either way (§5.4, item 13).
     # `SA-0025` resolves a real parent onto it; `cli.py` sets `None`.
     stacked_on: str | None = None
+
+    def __post_init__(self) -> None:
+        # A resolver that could not find the parent must say `None`. An empty
+        # string would make `tree_base` an empty git range — a silent
+        # HEAD..HEAD — and a ref name is a moving target between the fetch and
+        # the checkout, besides being interpolated into the seed script.
+        if self.stacked_on is not None and not _SHA.fullmatch(self.stacked_on):
+            raise ValueError(
+                f"stacked_on is not a resolved sha: {self.stacked_on!r} — a "
+                "parent that could not be resolved is None, never a ref or ''"
+            )
 
     @property
     def tree_base(self) -> str:
@@ -724,8 +740,9 @@ def _drive_cell(
             created=created,
             mirror=mirror,
             volume=volume,
-            base_sha=spec.base_sha,
-            stacked_on=spec.stacked_on,
+            # The tree's base, already resolved — `prepare_worktree` does
+            # not re-derive it. `base_sha` still pins the gates and policy.
+            base_sha=spec.tree_base,
             branch=spec.branch,
             image=cell_image,
             container=container,
@@ -824,7 +841,7 @@ def _drive_cell(
             window (§5.6)."""
             return failure.gate not in advisory_gates
 
-        # At base_sha the diff is empty, so `scope` and `integrity` pass with no
+        # At `tree_base` the diff is empty, so `scope` and `integrity` pass with no
         # failures, and `census` has no prior to compare and skips — nothing for
         # the subtraction to cancel a real escape against.
         baseline = _suite([])

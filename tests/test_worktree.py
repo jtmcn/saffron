@@ -555,14 +555,17 @@ def test_the_container_is_recorded_before_the_run_that_creates_it(
 # --------------------------------------------------------- stacked_on: no cell
 
 
-def test_prepare_worktree_without_stacked_on_checks_out_base_sha_unchanged(
+def test_prepare_worktree_checks_out_exactly_the_base_it_is_given(
     monkeypatch, tmp_path
 ):
-    """The shape every caller produces today (criterion 4): omitting
-    `stacked_on` and passing it explicitly as `None` must build the identical
-    seed script — proving the default is not a second, silently different
-    path. No cell: `run_ephemeral`/`run_detached`/`create_volume` are
-    monkeypatched to record what they were asked to do rather than run it.
+    """One base argument, and the seed checks out that and nothing else.
+
+    `CellSpec.tree_base` resolves *which* base it is — the run's pin, or a
+    stacked task's parent head. This function does not re-derive that: a
+    second copy of the rule is two things sharing one word again, one layer
+    down, and the copies can disagree with nothing to notice. No cell:
+    `run_ephemeral`/`run_detached`/`create_volume` are monkeypatched to record
+    what they were asked to do rather than run it.
     """
     scripts: list[str] = []
     monkeypatch.setattr(runtime, "create_volume", lambda name: None)
@@ -586,63 +589,12 @@ def test_prepare_worktree_without_stacked_on_checks_out_base_sha_unchanged(
         gates_dir=_gates_dir(tmp_path),
     )
     worktree.prepare_worktree(**kwargs)
-    worktree.prepare_worktree(**kwargs, stacked_on=None)
+    worktree.prepare_worktree(**{**kwargs, "base_sha": "d" * 40})
 
-    assert len(scripts) == 2
-    assert scripts[0] == scripts[1]
     assert f"git checkout -q -b saffron/SY-1 {'b' * 40}" in scripts[0]
-
-
-def test_an_empty_stacked_on_raises_rather_than_falling_back_to_the_pin(tmp_path):
-    """A resolver that could not find the parent returns something falsy, and
-    `or` would silently build the cell on `base_sha` while everything
-    downstream believed it was stacked — a mechanism reporting success and
-    applying to the wrong tree (Appendix I's shape)."""
-    with pytest.raises(ValueError, match="could not be resolved"):
-        worktree.prepare_worktree(
-            mirror=tmp_path / "m.git",
-            volume="v",
-            base_sha="b" * 40,
-            stacked_on="",
-            branch="saffron/SY-1",
-            image="img",
-            container="c",
-            network="none",
-            env={},
-            gates_dir=tmp_path / "gates",
-        )
-
-
-def test_prepare_worktree_stacked_on_checks_out_the_parent_instead(
-    monkeypatch, tmp_path
-):
-    """A `stacked_on` sha, when given, is what gets checked out — never
-    `base_sha`, which stays the run's pin (§5.4)."""
-    scripts: list[str] = []
-    monkeypatch.setattr(runtime, "create_volume", lambda name: None)
-
-    def _record(image, command, **_kwargs):
-        scripts.append(command[-1])
-        return runtime.Completed(0, "", "")
-
-    monkeypatch.setattr(runtime, "run_ephemeral", _record)
-    monkeypatch.setattr(runtime, "run_detached", lambda *a, **k: None)
-
-    worktree.prepare_worktree(
-        mirror=tmp_path / "m.git",
-        volume="vol",
-        base_sha="b" * 40,
-        stacked_on="c" * 40,
-        branch="saffron/SY-1",
-        image="img",
-        container="c",
-        network="net",
-        env={},
-        gates_dir=_gates_dir(tmp_path),
-    )
-
-    assert f"git checkout -q -b saffron/SY-1 {'c' * 40}" in scripts[0]
-    assert "b" * 40 not in scripts[0]
+    assert f"git checkout -q -b saffron/SY-1 {'d' * 40}" in scripts[1]
+    # Byte-identical but for the base: nothing else in the seed moves with it.
+    assert scripts[0].replace("b" * 40, "d" * 40) == scripts[1]
 
 
 def _no_cell_runtime(monkeypatch, tmp_path):
@@ -716,12 +668,11 @@ def test_a_stacked_worktree_holds_the_parents_real_commits_and_only_the_childs_n
     """Criteria 2 and 3, witnessed together: a real two-commit parent branch,
     a real child commit on top of it, no cell.
 
-    A worktree built with `stacked_on` set to the parent's head contains the
-    parent's commits (criterion 2); a patch exported from it against that
-    same head contains only the child's own commit — the parent's diff is
-    not in it (criterion 3) — while a patch exported against the original
-    `base_sha` contains all three, which is the export the same generic
-    function gives for an ordinary, unstacked task.
+    A worktree built at the parent's head — what `CellSpec.tree_base` resolves
+    to for a stacked task — contains the parent's commits (criterion 2); a
+    patch exported against that same head contains only the child's own commit
+    (criterion 3), while one exported against the run's pin contains all three,
+    which is what the same generic function gives an unstacked task.
     """
     origin = tmp_path / "origin"
     root = _seed_repo(origin)
@@ -741,8 +692,8 @@ def test_a_stacked_worktree_holds_the_parents_real_commits_and_only_the_childs_n
     worktree.prepare_worktree(
         mirror=mirror,
         volume=volume,
-        base_sha=root,
-        stacked_on=parent_head,
+        # The tree base the caller resolved, not the run's pin.
+        base_sha=parent_head,
         branch="saffron/child",
         image="img",
         container=container,

@@ -1762,6 +1762,18 @@ set for a stacked task alone and running both suites, which is unbuilt and is
 not this item's to build: the requirement here was that the disagreement be
 recorded, not resolved.
 
+**`package.py`'s own read of the base, which looks correct and is not.**
+`saffron/phases/package.py:526` is `json.loads(patch.json)["base_sha"]`, and it
+feeds `assert_base_objects`, the `git apply --3way`, `needs_reverification`
+and the pull request body's provenance. `SA-0022` records `tree_base` beside
+`base_sha` precisely so that read *can* be made correct — for a stacked child
+the patch is relative to `tree_base`, and applying it to `base_sha` puts
+parent-relative hunks on a tree without the parent's commits: `MERGE_FAILED`
+at best, an apply that looks right at worst. It is the likeliest place
+`SA-0025` gets this wrong, because a one-word read that is correct today
+raises no question. `SA-0025` also owes `CONTEXT.md` an entry for the second
+base: `tree_base` is a new noun and it is already in a durable artifact.
+
 **Re-verification is the second caller, and it is not covered above.**
 `saffron/phases/package.py` calls `prepare_worktree` a second time, building
 its baseline and head worktrees from the current default-branch head. For a

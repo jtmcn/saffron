@@ -110,6 +110,27 @@ def test_stacked_on_carries_a_second_base_distinct_from_base_sha():
     assert spec.stacked_on != spec.base_sha
 
 
+@pytest.mark.parametrize(
+    "bad",
+    ["", "saffron/SA-0020", "HEAD~1", "b" * 39, "B" * 40, "$(id)"],
+    ids=["empty", "ref-name", "revision", "short", "uppercase", "shell"],
+)
+def test_a_second_base_that_is_not_a_resolved_sha_is_refused_at_the_type(bad):
+    """A parent that could not be resolved is `None`, never `""` — which as a
+    git range is a silent `HEAD..HEAD` — and never a ref name, which moves
+    between the fetch and the checkout and is interpolated into the seed
+    script besides. Refused here rather than in `prepare_worktree`, which runs
+    minutes later, past the image build and the proxy."""
+    with pytest.raises(ValueError, match="not a resolved sha"):
+        _spec(stacked_on=bad)
+
+
+def test_a_resolved_sha_is_accepted_at_either_length():
+    """sha-1 and sha-256 repositories both."""
+    assert _spec(stacked_on="c" * 40).tree_base == "c" * 40
+    assert _spec(stacked_on="c" * 64).tree_base == "c" * 64
+
+
 def test_tree_base_is_the_pin_unstacked_and_the_parent_stacked():
     """One name for the second base. `base_sha` keeps pinning the gates and
     the policy either way (§5.4), which is why the two cannot be one field."""
@@ -519,6 +540,8 @@ class _Cell:
         self.turns: list[str] = []
         self.system_prompts: list[str] = []
         self.measured_from: str | None = None
+        self.worktree_base: str | None = None
+        self.exported_from: str | None = None
         self.watched: list[str] = []
         self.exported = False
         self.subjects_from: str | None = None
@@ -634,12 +657,18 @@ def _stub_the_runtime(
     def _prepare_worktree(**k):
         # The real one records each name against its own create; a stub that
         # does not is a stub whose teardown ledger is always empty.
+        cell.worktree_base = k["base_sha"]
         if k.get("created") is not None:
             k["created"].update((k["state_volume"], k["container"]))
 
     monkeypatch.setattr("saffron.cell.worktree.prepare_worktree", _prepare_worktree)
     monkeypatch.setattr("saffron.cell.worktree.head_sha", lambda c: "c" * 40)
-    monkeypatch.setattr("saffron.cell.worktree.export_patch", lambda c, sha: patch)
+
+    def _export_patch(_container, sha):
+        cell.exported_from = sha
+        return patch
+
+    monkeypatch.setattr("saffron.cell.worktree.export_patch", _export_patch)
 
     def _commit_subjects(_container, sha):
         cell.subjects_from = sha
@@ -988,6 +1017,31 @@ def test_a_proposed_scope_reaches_scope_review_and_spends_no_further_turns(
     assert recorded["proposed_touches"] == outcome.proposed_touches
     assert recorded["root_cause"] == _PROPOSAL["root_cause"]
     assert json.loads(recorded["raw"]) == _PROPOSAL
+
+
+def test_a_stacked_run_builds_its_worktree_and_its_patch_on_the_same_base(
+    monkeypatch, tmp_path
+):
+    """The join between the two: `_drive_cell` resolves the tree base once and
+    hands the same answer to `prepare_worktree` and to every exporter. Before
+    this test, passing `spec.base_sha` to the worktree while the patch was
+    exported against `tree_base` left the whole suite green — a tree built on
+    the pin and a diff measured from the parent, which is the spec's own defect
+    with the two halves swapped."""
+    cell = _stub_the_runtime(monkeypatch)
+    spec = _spec(stacked_on="d" * 40)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        spec=spec,
+        turns=[_turn(_block(_PLAN)), _turn()],
+    )
+
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert spec.tree_base == "d" * 40 != spec.base_sha
+    assert cell.worktree_base == spec.tree_base
+    assert cell.exported_from == spec.tree_base
 
 
 def test_a_green_run_leaves_the_patch_behind(monkeypatch, tmp_path):
