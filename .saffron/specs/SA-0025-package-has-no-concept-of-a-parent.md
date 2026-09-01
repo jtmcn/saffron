@@ -28,10 +28,17 @@ risk: elevated
 ---
 
 ## Context
-`SA-0022` gives a task two bases: the run's pin (`base_sha`, which the gates and
-policy are exported from) and the tree's starting point. It deliberately stops
-there — `saffron/cli.py` leaves the second base unset, so nothing stacks a real
-task and nothing downstream has had to learn what a parent is.
+`SA-0022` gives a task two bases and one name for the second:
+`CellSpec.tree_base` is `base_sha` unstacked and `stacked_on` otherwise, and
+every consumer inside the cell — the worktree checkout, the patch export, the
+commit subjects, the changed-file lists the `scope` gate and the critic read —
+takes it from there. `base_sha` still pins what §5.4 says it pins: the gate
+executables, the policy declaring them, `create_run`, and `patch.json`'s own
+`base_sha` key, beside which `tree_base` is now recorded.
+
+What `SA-0022` stops short of is a **resolver**: `saffron/cli.py` sets
+`stacked_on=None` at the one place a `CellSpec` is built, so `tree_base` is
+`base_sha` on every path an operator can reach and no real task stacks.
 
 This spec turns it on. Three things have to become true in the same change or
 the feature ships broken, which is why they are one spec and not three.
@@ -102,6 +109,23 @@ half-built.
 **The merge train.** Nothing here merges anything (§6.1).
 
 ## Notes for the agent
+**Three contracts `SA-0022` left you, and the first is a raise.**
+`prepare_worktree` raises `ValueError` on a `stacked_on` that is present but
+empty: a resolver that cannot find the parent must return `None`, never `""`,
+because falling back to the pin would build the cell on the wrong tree while
+everything downstream believed it was stacked. `stacked_on` is a sha resolved
+host-side, never a ref name — it is interpolated into the seed script, and a
+branch name is also a moving target between fetch and checkout. And
+`patch.json` now carries both `base_sha` and `tree_base`; `package.py:526`
+reads `base_sha` today, and **which of the two a stacked child's patch is
+applied against is your decision to make explicitly**, not to inherit.
+
+**Backlog item 33 names re-verification as your inheritance.** It is the second
+`prepare_worktree` caller, and it builds its baseline and head worktrees from
+the current default-branch head — the wrong baseline for a stacked child,
+because the parent's commits are not in it. `SA-0022` could only record it;
+`saffron/phases/package.py` is yours.
+
 **Backlog item 16 is a trap with your name on it.** PACKAGE verifies under a
 policy read at `fetch_head` and nothing says which; criterion 7 exists because
 adding a base is exactly the change that would quietly move it.
@@ -130,6 +154,10 @@ state list — the refusal reasons are the gate's contract with the operator.
 
 **A test that constructs the value it then asserts on proves nothing about the
 caller.** Drive the pull request through `package()` and read the base it opened
-with.
+with. `SA-0022` shipped a criterion witnessed by a test that handed
+`export_patch` the base it then asserted on, so no mutation of Saffron could
+fail it; the review caught it, and the fix was to make Saffron do the choosing
+and assert on that. The same trap is one line away here: assert on the base the
+pull request was *opened with*, never the one the code was handed.
 
 Commit after each coherent step. Uncommitted work dies with the cell.
