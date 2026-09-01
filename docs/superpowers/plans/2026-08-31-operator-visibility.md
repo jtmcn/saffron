@@ -35,7 +35,9 @@ cell-marked tests.
 
 - **Specs are numbered from the highest existing `SA-` id + 1.** Confirmed
   against `origin/main` at `aaafda5` (2026-09-01): `SA-0028` is highest and has
-  **shipped** (PR #87), so this plan's ten are `SA-0029`–`SA-0038`.
+  **shipped** (PR #87), so this plan's **eleven** are `SA-0029`–`SA-0039`
+  (`SA-0039` is Task 10a, added after the count in the next heading was
+  written).
   **Re-confirm before writing each file** — this set has been renumbered twice.
 - **Every figure in a spec body is a dated measurement, and they go stale
   fast.** The ledger moved from 23 task rows to 29, and lifetime spend from
@@ -64,7 +66,7 @@ cell-marked tests.
 
 ---
 
-## Why ten specs
+## Why eleven specs
 
 The design describes three parts. Three specs would make three diffs too wide
 for their own repair loops — `docs/BACKLOG.md` item 25 records that failure
@@ -72,16 +74,17 @@ already, and `SA-0022` and `SA-0025` were both split mid-flight for it.
 
 | design part | specs | why it splits |
 |---|---|---|
-| 1 — event seam | `SA-0029`–`SA-0031` | a new module, then ~70 `watch` sites in a 1495-line file, then 33 across four phase files and three in `cli.py` |
+| 1 — event seam | `SA-0029`–`SA-0031` | a new module, then 47 `watch` sites in a 1495-line file, then 15 across four phase files and two in `cli.py` |
 | 2 — ledger gaps | `SA-0032`–`SA-0034` | three independent changes sharing only `ledger.py`; the third has unknown blast radius |
 | 3 — renderer | `SA-0035`–`SA-0039` | query, then render-and-delete, then the task page, then the trigger, then the timeline |
 
 `SA-0034` is a **bug**, not a feature, and takes an `envelope` rather than
 `touches`. Why `findings.verdict` is NULL is not known — measured, the write
-path fires and the verdict half arrives empty, on n=2. Declaring `touches`
-would mean diagnosing it by hand first, which §3.2 says inverts the economics:
-the operator does the expensive part and the agent types. DIAGNOSE proposes
-the scope and the operator ratifies it (§5.2).
+path fires and the verdict half arrives empty on one of the two rows where a
+verdict is expected at all. Declaring `touches` would mean diagnosing it by
+hand first, which §3.2 says inverts the economics: the operator does the
+expensive part and the agent types. DIAGNOSE proposes the scope and the
+operator ratifies it (§5.2).
 
 ## File structure
 
@@ -230,6 +233,33 @@ collision with part 1, and the same reasoning as `SA-0028` applies: if it adds
 or changes a `watch` line, it lands before `SA-0029`'s golden fixture is
 captured, not after.
 
+### Outcome, run 2026-09-01 13:14 PDT at `fb32aa1`
+
+All four steps clean; the corrections they produced are already folded into the
+spec bodies below, so **re-run them rather than trusting this record**.
+
+- `SA-0028` shipped as PR #87; five `SALVAGE:` lines present in `session.py`.
+  Highest id is still `SA-0028`, so `SA-0029`–`SA-0039` are free.
+- Working tree clean and level with `origin/main`; `make check` green at
+  **1048 passed, 20 deselected**. The deselected twenty are the `cell`-marked
+  tests `addopts` excludes — the exclusion `SA-0029`, `SA-0030` and `SA-0031`
+  each warn their golden-output test must not fall into.
+- **The `watch` grep found exactly what `SA-0031` claims and nothing more**:
+  `cli.py:226`, `:292`, `:297`, plus `runtime.py:314`, which is the word
+  "watches" in a docstring and the false positive the step predicts. Eight test
+  files carry `watch=`; all eight are in `SA-0031`'s `touches`.
+- `session.py` measures 1495 lines, 47 `watch(...)` sites and 11 `watch=watch`
+  keyword sites — `SA-0030`'s and `SA-0031`'s figures are exact.
+- **The thirteen specs in `.saffron/specs/` are all merged-but-unretired**, and
+  `saffron queue --repo .` answers `0 candidate(s), refusals: 0`. So `SA-0029`
+  is genuinely the first spec of a fresh batch, and L2's refusal check means
+  something for it.
+- **The phase call-site counts were wrong and are corrected below**: fifteen,
+  not thirty-three. That is the only figure in this plan that was wrong about
+  the *code* rather than stale about the ledger, and it was wrong in the
+  direction that would have sent a cell hunting for call sites that do not
+  exist.
+
 ---
 
 ## Stacking: two mechanisms, and the plan runs on the wrong one by default
@@ -283,7 +313,7 @@ needing a slot; `SA-0032` cuts from a `main` that already carries part 1's
 stack stays inside a size a single review pass can hold.
 
 **Do not run the two chains concurrently.** They would be sibling branches from
-the same `base_sha`, and **eight of the ten specs name `docs/BACKLOG.md` in
+the same `base_sha`, and **nine of the eleven specs name `docs/BACKLOG.md` in
 `touches`** — all but `SA-0032` and `SA-0034`, whose `envelope`s do not reach it
 and whose DIAGNOSE therefore cannot propose it. That is the exact collision the
 skill measured on `SA-0027`/`SA-0028`, where both appended `## 34.` and
@@ -774,9 +804,10 @@ sites keep receiving a string-taking callable until `SA-0031`. A half-migrated
 seam that leaves both files broken is the failure this split exists to avoid.
 
 **Six test files outside this spec's `touches` call a phase function with
-`watch=`** — `test_implement.py` (27 sites), `test_package.py` (7),
-`test_package_cell.py`, `test_rebut.py`, `test_review.py`,
-`test_agent_runner.py` — and the adapter is the only thing keeping them green.
+`watch=`** — `test_implement.py` (21 sites), `test_package.py` (7),
+`test_package_cell.py` (2), `test_rebut.py` (1), `test_review.py` (1),
+`test_agent_runner.py` (1), re-measured 2026-09-01 — and the adapter is the
+only thing keeping them green.
 That is what makes this spec's scope sufficient and `SA-0031`'s wider: `tests`
 is a blocking gate, and a migration that cannot edit its callers' tests cannot
 pass. Do not remove the adapter here to be tidy.
@@ -845,22 +876,39 @@ risk: elevated
 
 ## Context
 `SA-0030` migrated the supervisor and left an adapter at the phase boundary:
-`phases/` still receives a string-taking callable. Thirty-three call sites
-remain, measured 2026-09-01 — `implement.py` 8 (the agent stream and its
-raw-line quarantine), `package.py` 11 (re-verify, conflict, refusal-to-push,
-the pull request URL), `rebut.py` 9, `review.py` 5.
+`phases/` still receives a string-taking callable. **Fifteen `watch(...)` call
+sites remain**, re-measured 2026-09-01: `implement.py` **5** (the agent stream
+and its raw-line quarantine), `package.py` **8** (re-verify, conflict,
+refusal-to-push, the pull request URL), `rebut.py` **1**, `review.py` **1**.
 
-**And three more in `saffron/cli.py`, which this plan said would never be
-touched.** `_resolve_stacked_on` takes `watch=print` and calls it twice
-(`cli.py:226`, `:292`, `:297`), added by `256e529` — a review fix on `SA-0026`,
-landed the day this plan was written, on a spec whose own `touches` named no
-`watch`. It is the last `watch` outside `phases/`, so it is this spec's or
-nobody's.
+An earlier cut of this spec said thirty-three, split 8/11/9/5. It was wrong on
+both the total and every part, and the correction matters because this number
+*is* the spec's stated scope. The larger figures come from counting every
+`watch` **token** — parameter declarations and `watch=watch` pass-throughs
+included — which measures 6/12/14/7 and totals 39, not 33. `rebut.py` and
+`review.py` have **one call site each**; the other twelve and six tokens in
+those files are the parameter and its forwarding. Renaming the parameter still
+touches all of them, so the *edit* is wider than fifteen lines — but the
+migration proper is fifteen sites, and a spec that promises thirty-three
+invites an agent to go looking for eighteen that do not exist.
+
+**And two more in `saffron/cli.py`, which this plan said would never be
+touched.** `_resolve_stacked_on` takes `watch=print` (`cli.py:226`) and calls
+it twice (`cli.py:292`, `:297`), added by `256e529` — a review fix on
+`SA-0026`, landed the day this plan was written, on a spec whose own `touches`
+named no `watch`. It is the last `watch` outside `phases/`, so it is this
+spec's or nobody's.
 
 `implement.py` is the interesting one. It already holds `_describe`, written
 for the **cell's** events, and calls `watch(_describe(event))`. `SA-0029`
 shipped a host-side `describe`. Two functions now render events, and only one
 of them should survive.
+
+**There is a second, unrelated `_describe` and it must not be touched.**
+`review.py:216` defines `_describe(review: LensReview) -> str`, which renders a
+lens review and has nothing to do with events. `grep -rn _describe saffron/`
+returns both; only `implement.py:182`'s — the one taking an event `dict` —
+is this spec's.
 
 ## Problem
 - **The adapter is a seam with no owner.** It exists so `SA-0030` could land
@@ -882,12 +930,13 @@ of them should survive.
   `run_one_cell`.** `package()` is called from `saffron/cli.py`, *outside*
   `run_one_cell`, so its eight call sites would fall back to `print` and none
   of the lines an unattended morning most needs would be recorded.
-- **Seven test files call a migrated function with `watch=`** —
-  `test_implement.py` (27 sites), `test_package.py` (7), `test_cli.py` (3 on
-  `_resolve_stacked_on`), `test_package_cell.py`, `test_rebut.py`,
-  `test_review.py`, `test_agent_runner.py` — and `tests` is blocking. They are
-  in `touches` because a migration that cannot repair its callers' tests cannot
-  pass its own gates.
+- **Seven test files call a migrated function with `watch=`**, re-measured
+  2026-09-01 — `test_implement.py` (21 sites), `test_package.py` (7),
+  `test_cli.py` (**7**, on `_resolve_stacked_on`), `test_package_cell.py` (2),
+  `test_rebut.py` (1), `test_review.py` (1), `test_agent_runner.py` (1) — and
+  `tests` is blocking. They are in `touches` because a migration that cannot
+  repair its callers' tests cannot pass its own gates. `tests/test_session.py`
+  carries a further 18 and is `SA-0030`'s.
 
 ## Acceptance criteria
 - [ ] Every `watch(...)` in the four phase modules **and in
@@ -1138,8 +1187,9 @@ and it is in no ledger column. It exists only in
 writes and only a task that reaches PACKAGE ever gets to.
 
 A task that ends `EXHAUSTED` still produces a patch: teardown exports
-`patch.diff` for **16 of 17** task directories (measured 2026-09-01; 12 of 13 a
-day earlier), including `SA-0009`, the $31.60 most expensive task in the
+`patch.diff` for **16 of 18** task directories (re-measured 2026-09-01; 16 of
+17 earlier the same day, 12 of 13 the day before — the denominator grows with
+every cell), including `SA-0009`, the $31.60 most expensive task in the
 ledger. Its `patch.json` records `base_sha`, `head_sha` and the changed file
 list — and no line counts.
 
@@ -1272,7 +1322,17 @@ population where a verdict is even expected is **two rows**:
 | finding | spec | task state | `verdict` | `rebuttal` |
 |---|---|---|---|---|
 | 14 | `SA-0020` | `EXHAUSTED` | NULL | present |
-| 29 | `SA-0027` | `READY_FOR_REVIEW` | `withdrawn` | present |
+| 29 | `SA-0027` | `MERGED` | `withdrawn` | present |
+
+**Finding 14's `verdict` is `NULL`, not the empty string** — checked with
+`typeof(verdict)`, which returns `null` for finding 14 and `text` for finding
+29. A column written empty and a column never written are different defects and
+the diagnosis has to start from the right one.
+
+`SA-0027`'s pull request merged while Task 0 was running, so finding 29's task
+state reads `MERGED` where an earlier cut of this spec said `READY_FOR_REVIEW`.
+The state is context, not evidence: what makes this a contrast case is that
+both rows ran REBUT and only one recorded a verdict.
 
 **The write path works.** Finding 29 is a `contract`-lens blocker the critic
 withdrew, and both fields landed from the same `record_rebuttal` call. So the
@@ -1424,13 +1484,20 @@ risk: elevated
 ## Context
 `append_queue_line` has exactly two callers — `_finish` in `phases/package.py`
 and `replay` in `replay.py` — so a task that never reaches PACKAGE never
-reaches the page. Measured **2026-09-01**: the ledger holds **29 task rows
-across 17 specs in 7 states**; `queue.json` holds **14 rows, all of them
-`READY_FOR_REVIEW`**. Lifetime spend is **$186.52**, of which `EXHAUSTED`
-alone is $58.15 and appears on no page.
+reaches the page. Re-measured **2026-09-01, after a `reconcile`**: the ledger
+holds **29 task rows across 17 specs in 6 states**; `queue.json` holds **14
+rows, all of them `READY_FOR_REVIEW`**. Lifetime spend is **$186.52**, of which
+`EXHAUSTED` alone is $58.15 and appears on no page.
 
-A day earlier the same queries said 23 rows, 13 specs, 6 states and $127.00.
-**Re-take them at L1; the ratio is the finding, not the figures.**
+**The store now disagrees with the ledger about a state no task is in.**
+`reconcile` moved the last two `READY_FOR_REVIEW` tasks to `MERGED`, so the
+ledger holds **zero** rows in the one state `queue.json` reports for all
+fourteen of its own. That is the divergence in its sharpest form: the store is
+not merely stale, it describes a population that no longer exists.
+
+Earlier the same day the queries said 7 states; a day before that, 23 rows, 13
+specs, 6 states and $127.00. **Re-take them at L1; the ratio is the finding,
+not the figures.**
 
 `SA-0032`, `SA-0033` and `SA-0034` closed the three gaps that made the ledger
 unable to answer for a row. This spec builds the query. It renders nothing.
@@ -1574,14 +1641,15 @@ risk: elevated
 ## Context
 `SA-0035` built `queue_rows`, which answers for every task row. Nothing calls
 it. The page still renders from `queue.json`, whose 14 rows are **all**
-`READY_FOR_REVIEW` while the ledger records most of those specs as `MERGED` —
-`reconcile` updates the ledger and nothing updates the store.
+`READY_FOR_REVIEW` while the ledger, after a `reconcile` on 2026-09-01, records
+**no task in that state at all** — `reconcile` updates the ledger and nothing
+updates the store.
 
 Three specs appear on no page at all: `SA-0009` (`EXHAUSTED`, **$31.60**),
 `SA-0020` (`EXHAUSTED`, $14.43), `SA-0021` (`PLAN_REJECTED`, $0.82) — exactly
-what §6's sort levels 1 and 2 exist for. Measured 2026-09-01: 29 task rows
-across 17 specs in 7 states, against `queue.json`'s 14 in one. Re-take both at
-L1.
+what §6's sort levels 1 and 2 exist for. Re-measured 2026-09-01: 29 task rows
+across 17 specs in 6 states, against `queue.json`'s 14 in a state the ledger
+has emptied. Re-take both at L1.
 
 ## Problem
 - **The page reads green when the night was not.** Failures absent, successes
@@ -1590,10 +1658,14 @@ L1.
   relocated into the reporting layer.
 - **§6's sort has never been reached.** Every real row ranks 5. `sort_key` is
   not wrong; it has never been given a row it could rank.
-- **The header under-reports lifetime spend by roughly half**, and the missing
-  half is almost entirely `EXHAUSTED` — the state meaning a task could not pass
-  its own gates. It was 47% of $127.00 when this was cut; the percentage moves
-  with every run and the direction does not.
+- **The header reports the spend of tasks that merged, and nothing else.**
+  Re-measured 2026-09-01, `queue.json`'s rows total **$104.03** against the
+  ledger's **$186.52** — 44% unreported — and $104.03 is *exactly* `sum(
+  spent_usd_est) where state = 'MERGED'`. That equality is the finding: the
+  page is not approximately wrong, it is precisely a report on the successes.
+  Of the missing $82.49, `EXHAUSTED` is $58.15 — the state meaning a task
+  could not pass its own gates. It was 47% of $127.00 when this was cut; the
+  percentage moves with every run and the direction does not.
 
 ## Acceptance criteria
 - [ ] `write_index` renders from `queue_rows` and `queue.json` is read by
@@ -2088,8 +2160,8 @@ Three protected documents no cell can correct. Each spec above leaves a
       can reach the host's ledger. It was an acceptance criterion of `SA-0036`
       in the first cut of this plan, which an agent could only have discharged
       by inventing the numbers.
-- [ ] **Step 6: Close the backlog entries** the ten specs added, each with the
-      commit that closed it — the shape items 1 and 29 use.
+- [ ] **Step 6: Close the backlog entries** the eleven specs added, each with
+      the commit that closed it — the shape items 1 and 29 use.
 - [ ] **Step 7: Commit.**
 
 ```bash
@@ -2137,11 +2209,11 @@ built before trusting it.
 git merge-tree --write-tree origin/saffron/SA-0030 origin/saffron/SA-0031
 ```
 
-Run it for each adjacent pair. `docs/BACKLOG.md` is in eight of the ten specs'
-`touches` and is append-only, so it is where a conflict will be — including the
-item *number*, not only the text: `SA-0027` and `SA-0028` both wrote `## 34.`
-A chain cut parent-from-parent should be clean; **any conflict here means a
-spec ran unstacked**, and the fix is to find which cell printed no
+Run it for each adjacent pair. `docs/BACKLOG.md` is in nine of the eleven
+specs' `touches` and is append-only, so it is where a conflict will be —
+including the item *number*, not only the text: `SA-0027` and `SA-0028` both
+wrote `## 34.` A chain cut parent-from-parent should be clean; **any conflict
+here means a spec ran unstacked**, and the fix is to find which cell printed no
 `stacked on …` line, not to resolve the conflict and move on. If you do have to
 renumber, grep the *code* for comments citing the old number — four cited
 `item 34` last time.
@@ -2282,11 +2354,28 @@ design (2026-08-31) and this revision (2026-09-01) the ledger went from 23 task
 rows to 29, spend from $127.00 to $186.52, a seventh `tasks.state` appeared
 (`RATE_LIMITED`), `findings.verdict` went from 0 written to 1, and
 `session.py` grew 173 lines. Nothing in the argument moved; every figure did.
+
 Worse, the one fact this plan built a design constraint on — that `cli.py` does
 not name `watch` — was falsified by a *review fix on another spec* landed the
 same day, which no grep of queued specs would ever have caught. Task 0 Step 4
 now greps the code rather than the specs for that reason. Treat every number in
 a `## Context` as a claim with a date on it.
+
+*And it decayed again inside a single Task 0 run.* `saffron queue --repo .`
+reconciles before it answers, so **running the L2 check moved the ledger**:
+tasks 28 and 29 went `READY_FOR_REVIEW` → `MERGED`, `tasks.state` went from
+seven distinct values back to six, and the count of tasks in the one state
+`queue.json` reports for all fourteen of its rows fell to **zero**. The
+measuring instrument for part 3 is a writer. Take the numbers *before* the
+queue check, or take them after and say which — but do not mix a figure from
+each side of it, which is how `SA-0034`'s contrast table came to name a state
+its own row no longer had.
+
+*One figure was wrong about the code, not stale about the ledger.* The phase
+call-site count said thirty-three and measures fifteen. Ledger figures decay
+and the plan says so on every page; a call-site count does not decay, it was
+simply never taken. `grep -c 'watch('` per file is the whole check, and it
+costs less than reading this sentence.
 
 *Neither review is Saffron's own critic.* The adversarial critic runs inside
 the cell at L5 under the repo's lenses; L3 and L7 are outside that loop. L7 in
