@@ -563,13 +563,14 @@ def package(
     a conflict, a leaked credential, new failures after the rebase, a branch
     that moved, a parent that is gone — become `MERGE_FAILED`.
 
-    `parent_branch` is the stacking half `SA-0022` left inert: unset, which
-    is every caller today (`cli.py` sets `stacked_on=None`), every line below
-    resolves to exactly what it resolved to before this parameter existed.
-    Set, the pull request opens against that branch instead of the default
-    one, and the patch's preimage check reads `tree_base` rather than
-    `base_sha` — the two agree today and diverge only for a real stacked
-    task, which nothing yet produces (`SA-0026`).
+    `parent_branch` is the stacking half. Unset — a spec with no parent, or
+    one whose parent has merged — every line below resolves to exactly what it
+    resolved to before this parameter existed. Set, the pull request opens
+    against that branch instead of the default one, and the patch's preimage
+    check reads `tree_base` rather than `base_sha`: the two agree for an
+    unstacked task and diverge for a stacked one. `cli._resolve_stacked_on`
+    (`SA-0026`) is what supplies it, from the same parent it stacked the
+    worktree on.
     """
     branch = f"saffron/{spec.id}"
     patch = outcome.task_dir / "patch.diff"

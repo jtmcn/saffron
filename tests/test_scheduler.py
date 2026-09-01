@@ -425,6 +425,65 @@ def test_a_touches_overlap_with_an_open_prs_files_refuses(tmp_path, ledger):
     assert "saffron/OTHER-1" not in refusals[0].reason
 
 
+def test_the_stacking_parents_own_pull_request_is_not_an_overlap(tmp_path, ledger):
+    """A stacked child starts from its parent's tree, so sharing files with
+    the parent's open pull request is what stacking is for. Left refused,
+    this check shadowed the dependency admission entirely: a parent at
+    `READY_FOR_REVIEW` has an open pull request by definition, and almost
+    every spec in this repository touches `docs/BACKLOG.md` (`SA-0026`)."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
+    _write_spec(directory, "b.md", id="TE-0", touches=["b.py"])
+    repo_id = _repo(ledger)
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-0",
+        spec_sha=_sha(directory / "b.md"),
+        state="READY_FOR_REVIEW",
+    )
+    gh = _fake_gh(
+        [{"headRefName": "saffron/TE-0", "url": "u", "files": [{"path": "a.py"}]}]
+    )
+
+    _candidates, refusals = build_queue(
+        directory, repo_id, ledger, repo_slug="o/r", gh=gh
+    )
+
+    assert [r for r in refusals if r.path.name == "a.md"] == []
+
+
+def test_a_third_partys_overlap_still_refuses_a_stacked_child(tmp_path, ledger):
+    """The exemption above is `depends_on[0]`'s branch and nothing else —
+    K=1, the same one `cli._resolve_stacked_on` stacks on. Another task's
+    pull request over the same file is the collision the check exists for."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
+    _write_spec(directory, "b.md", id="TE-0", touches=["b.py"])
+    repo_id = _repo(ledger)
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-0",
+        spec_sha=_sha(directory / "b.md"),
+        state="READY_FOR_REVIEW",
+    )
+    gh = _fake_gh(
+        [
+            {"headRefName": "saffron/TE-0", "url": "p", "files": [{"path": "a.py"}]},
+            {"headRefName": "saffron/OTHER", "url": "o", "files": [{"path": "a.py"}]},
+        ]
+    )
+
+    _candidates, refusals = build_queue(
+        directory, repo_id, ledger, repo_slug="o/r", gh=gh
+    )
+
+    mine = [r for r in refusals if r.path.name == "a.md"]
+    assert len(mine) == 1
+    assert "touches overlaps" in mine[0].reason and "o" in mine[0].reason
+
+
 def test_an_overlap_past_three_files_says_how_many_it_did_not_print(tmp_path, ledger):
     """`overlap[:3]` truncated silently, so a five-file overlap read as three
     — an operator sizing the conflict off the line got the wrong number."""
@@ -792,10 +851,12 @@ def test_a_merged_parent_satisfies_whatever_sha_it_ran_at(tmp_path, ledger):
 
 
 @pytest.mark.parametrize("state", ["READY_FOR_REVIEW", "APPROVED", "MERGE_TRAIN"])
-def test_a_parent_waiting_to_merge_is_refused_as_waiting(tmp_path, ledger, state):
-    """The name predates `SA-0026` and is kept — `census` treats a rename as
-    remove-plus-add — but what it now proves is the opposite of what it once
-    did: §4.2's own rule admits these, and now the code does too. A dependent
+def test_a_parent_waiting_to_merge_is_admitted_for_stacking(tmp_path, ledger, state):
+    """Renamed with the widening: the old name asserted the opposite of what
+    this now proves, and `census`'s remove-plus-add is a cheaper price than a
+    name that lies to the next reader — a rename landed on the default branch
+    is in the next cell's baseline before it ever runs. §4.2's own rule admits
+    these, and now the code does too. A dependent
     branches off the parent's branch instead of `base_sha`
     (`cli._resolve_stacked_on`), so the gate that used to refuse them with
     "stacking is SA-0022" — a sentence describing machinery that did not
@@ -913,13 +974,14 @@ def test_this_repos_own_specs_admit_a_merged_parent_and_name_a_retired_one(
     assert [r for r in refusals if "SA-0020" in r.reason] == []
 
 
-def test_waiting_and_dead_parents_do_not_get_the_same_reason(tmp_path, ledger):
-    """The name predates `SA-0026` and is kept — `census` treats a rename as
-    remove-plus-add — but the distinction it now buys is a different one:
-    a waiting parent used to be refused with its own reason, distinct from a
-    dead parent's; now it is not refused at all, and only the dead parent
-    still is — proving the widening landed on exactly the three waiting
-    states and left `DEPENDENCY_DEAD_STATES` alone.
+def test_a_waiting_parent_is_admitted_where_a_dead_one_is_still_refused(
+    tmp_path, ledger
+):
+    """Renamed with the widening, for the reason above. A waiting parent used
+    to be refused with its own reason, distinct from a dead parent's; now it
+    is not refused at all, and only the dead parent still is — proving the
+    widening landed on exactly the three waiting states and left
+    `DEPENDENCY_DEAD_STATES` alone.
     """
     directory = _spec_dir(tmp_path)
     _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-8"])

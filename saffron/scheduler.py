@@ -472,8 +472,18 @@ def _refuse(
             f"an open pull request from another task already targets this spec: {url}"
         )
 
+    # K=1, the same first entry `cli._resolve_stacked_on` stacks on: a child
+    # cut from its parent's branch starts with the parent's changes already in
+    # its tree, so an overlap with the parent's own pull request is what
+    # stacking is *for*. Left in, this refusal shadows the dependency
+    # admission below entirely — a parent at `READY_FOR_REVIEW` has an open
+    # pull request by definition, and almost every spec here touches
+    # `docs/BACKLOG.md` (`SA-0026`).
+    parent_branch = (
+        _branch(candidate.spec.depends_on[0]) if candidate.spec.depends_on else None
+    )
     for pr in open_prs:
-        if pr.get("headRefName") == own_branch:
+        if pr.get("headRefName") in (own_branch, parent_branch):
             continue
         # `or []`, not a `.get` default: a `files` of `null` stores None.
         changed = [

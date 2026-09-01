@@ -1904,7 +1904,59 @@ capability must own the tests that assert the capability is off, or its
 refusal. `SA-0022` missed `saffron/cli.py`; this one missed
 `tests/test_package.py`. Both were caught in review rather than by the gate
 that could have caught them — an inertness guard names the spec that will
-retire it, and nothing checks that the named spec can reach the file.
+retire it, and nothing checks that the named spec can reach the file. At
+three instances the rule is wider than tests: `SA-0026` could reach neither
+`saffron/cell/session.py`'s nor `saffron/phases/package.py`'s comments saying
+stacking was off, both corrected by hand at review. **A spec that turns on a
+capability must be able to reach every artifact that says the capability is
+off** — the guard, the comment, and the design sentence alike.
+
+**The ledger's recorded sha is not the branch, and nothing put the branch in
+the mirror.** Found in review, not by a gate, and it would have killed the
+first real stacked run. `_resolve_stacked_on` originally returned the parent
+task's `pushed_sha`; two separate problems with that:
+
+- *Nothing fetches it.* `ensure_mirror` fetches `+refs/*:refs/*` from the
+  operator's **local checkout** with `--prune`, so a parent branch they do not
+  happen to have checked out is deleted from the mirror; `fetch_default_branch`
+  fetches only the default branch; and the cell's own seed (`worktree.py`)
+  fetches the mirror's default refspec. Measured: this repository's mirror had
+  already pruned `refs/heads/saffron/SA-0025` while that pull request was open,
+  and its `refs/heads/saffron/*` set is exactly the operator's local branches.
+  `git checkout -b <branch> <parent_sha>` in the seed is then
+  `fatal: unable to read tree`, exit 2, naming neither the parent nor why.
+  `fetch_default_branch`'s own comment made this argument one branch over.
+- *It is a commit behind.* `pushed_sha` is written once, by PACKAGE. Every
+  review fix an operator commits by hand moves the branch past it. Measured on
+  this pull request: task 26's `pushed_sha` was `ab23523` while
+  `saffron/SA-0026`'s head was `5ab674e` — a child would have been cut from a
+  tree containing the concatenation dodge the review had already removed.
+
+Both are one fix: the ledger says **which branch**, `fetch_parent_branch`
+(`SA-0025`, one branch over from where it was already used) says **which
+commit**. `ParentGone` there is an unstacked cell and a printed line, not a
+failure — a deleted parent branch has either merged or been abandoned, and
+neither is worth killing an attended run over.
+
+**The overlap refusal shadowed the widened gate completely.** `_refuse` checks
+a candidate's `touches` against every open pull request's changed files
+*before* it reaches the dependency check. A parent at `READY_FOR_REVIEW` has an
+open pull request by definition, and almost every spec here touches
+`docs/BACKLOG.md` — so nearly every stacked child was refused on its own
+parent's pull request and never reached the admission this item exists to
+build. `SA-0025`'s pull request changed `docs/BACKLOG.md`, which is in
+`SA-0026`'s `touches`: this very pair would have been refused. Fixed at review
+by exempting `depends_on[0]`'s branch, and only that one — a child cut from
+its parent's tree already contains the parent's changes, which is what
+stacking is; any other task's pull request over the same file is still the
+collision the check exists for.
+
+**Still owed by hand, and written down here so it is not merely remembered.**
+`DESIGN.md` §4.2.1's `depends_on` paragraph ("every other parent state is
+still refused"), §3.1's frontmatter example, and §5.7's description of PACKAGE
+resolving one base are all now false, and `CONTEXT.md` still has no `tree_base`
+entry. `DESIGN.md` and `CONTEXT.md` are `forbidden` to every spec in this
+sequence, deliberately, so an operator corrects all four.
 
 ---
 
