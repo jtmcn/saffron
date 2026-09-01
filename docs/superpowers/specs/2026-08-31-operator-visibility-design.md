@@ -69,6 +69,13 @@ sort levels 1 and 2 exist for:
 `SA-0009` is the most expensive thing in the ledger and exists in no rendered
 output.
 
+> **Note, 2026-09-01:** §6 — and part 2's gap 3 below, quoting it — cite
+> "`SA-0005` at $10.07" as the most expensive task. **`SA-0005` has no row in
+> this ledger**; the id does not appear in `tasks` at all, and the figure comes
+> from the superseded ledger behind
+> `docs/evidence/2026-08-25-morning-queue-from-real-rows.md`. `SA-0009` at
+> $31.60 is the live equivalent. The plan's Task 11 corrects `DESIGN.md`.
+
 **A spec that failed and was re-run shows only the success.** `SA-0019` has
 two task rows — `EXHAUSTED` at $12.12, then `MERGED` at $16.20. The page
 reports `$16.20`. The $12.12 attempt is not a row that sorts low; it is a row
@@ -410,6 +417,17 @@ wide for their own repair loops — item 25 records that failure, and `SA-0022`
 and `SA-0025` were both split mid-flight for it. Part 1 splits into a
 vocabulary and two migrations (`session.py` alone is 1322 lines); part 2 into
 its three independent gaps; part 3 into query, render, task page, timeline.
+
+> **Correction, 2026-09-01 — part 3 is missing a spec, and an independent
+> review of the plan found it.** This section re-sources the page's *content*
+> from the ledger and never names its *trigger*. Measured: the only production
+> writers of `index.html` are `_finish` in `phases/package.py` and `replay`,
+> and there is no `report` subcommand — so a night in which nothing reaches
+> PACKAGE regenerates no page, which is this design's founding defect moved one
+> layer out. Every part-3 spec `forbid`s `saffron/cell/**` and `saffron/cli.py`,
+> so none of them could have fixed it. The plan adds `SA-0039` for the trigger,
+> and `SA-0038`'s running marker depends on it: without a render that happens
+> during a run, a running task is never rendered at all.
 
 **Part 2's verdict gap is a `bug` with an `envelope`, not a `feature` with
 `touches`.** Why `findings.verdict` is NULL is not known — the write path

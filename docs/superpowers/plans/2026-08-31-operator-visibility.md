@@ -22,8 +22,8 @@ sourced from the ledger rather than from a store only successful tasks write.
 exactly what it prints today and an append-only JSONL log in the batch tree.
 The ledger gains the three things the page cannot render without. The page is
 then re-sourced from SQL, which makes the 13 task rows that never reach
-PACKAGE visible and lets roughly half of `report/index.py` be deleted rather
-than extended.
+PACKAGE visible and lets about a third of `report/index.py` be deleted rather
+than extended — 105 to 115 lines of 310, measured.
 
 **Tech Stack:** Python (uv), pytest, stdlib `sqlite3`, f-string HTML (no Jinja
 — see the `ponytail:` in `report/index.py`), `apple/container` for
@@ -74,7 +74,7 @@ already, and `SA-0022` and `SA-0025` were both split mid-flight for it.
 |---|---|---|
 | 1 — event seam | `SA-0029`–`SA-0031` | a new module, then ~70 `watch` sites in a 1495-line file, then 33 across four phase files and three in `cli.py` |
 | 2 — ledger gaps | `SA-0032`–`SA-0034` | three independent changes sharing only `ledger.py`; the third has unknown blast radius |
-| 3 — renderer | `SA-0035`–`SA-0038` | query, then render-and-delete, then the task page, then the timeline |
+| 3 — renderer | `SA-0035`–`SA-0039` | query, then render-and-delete, then the task page, then the trigger, then the timeline |
 
 `SA-0034` is a **bug**, not a feature, and takes an `envelope` rather than
 `touches`. Why `findings.verdict` is NULL is not known — measured, the write
@@ -177,7 +177,7 @@ grep -c 'SALVAGE:' saffron/cell/session.py
 Expected: PR #87 merged, and the `SALVAGE:` watch lines present in
 `session.py`. **A spec file in `.saffron/specs/` proves nothing either way** —
 retirement (L8) lags merging in this repo, and `.saffron/specs/` currently
-holds nine specs whose code is already on `main`. Check the pull request and
+holds **thirteen** specs whose code is already on `main` — all of them. Check the pull request and
 the code, never the spec file's location.
 
 - [ ] **Step 2: Rebase**
@@ -273,7 +273,7 @@ chains be open at once:
 stack 1   (main) <- saffron/SA-0029 <- saffron/SA-0030 <- saffron/SA-0031
                     ── merge, then ──
 stack 2   (main) <- saffron/SA-0032 <- SA-0033 <- SA-0034 <- SA-0035
-                                    <- SA-0036 <- SA-0037 <- SA-0038
+                                    <- SA-0036 <- SA-0037 <- SA-0039 <- SA-0038
 ```
 
 Merging part 1 before `SA-0032`'s cell starts pays for itself four times:
@@ -664,11 +664,13 @@ title: the supervisor's twenty progress lines are prose, and the record needs ev
 type: refactor
 priority: 1
 depends_on:
-  - SA-0028
   - SA-0029
+  - SA-0028
 touches:
   - saffron/cell/session.py
   - tests/test_session.py
+  - tests/test_events.py
+  - tests/fixtures/watch-golden.txt
   - docs/BACKLOG.md
 forbidden:
   - DESIGN.md
@@ -693,10 +695,12 @@ risk: elevated
 a driven session, captured from code nothing had yet changed. Nothing emits an
 event.
 
-`saffron/cell/session.py` is 1322 lines and holds about twenty `watch(...)`
-call sites: preflight's proxy and image lines, the baseline summary, the
-plan checkpoint, per-attempt gate decisions, the budget stop, teardown's patch
-export, and the terminal line.
+`saffron/cell/session.py` is **1495 lines** and holds **47** `watch(...)` call
+sites, measured 2026-09-01: preflight's proxy and image lines, the baseline
+summary, the plan checkpoint, per-attempt gate decisions, the budget stop,
+`SA-0028`'s four `SALVAGE:` lines, teardown's patch export, and the terminal
+line. It also passes `watch=watch` into the phases at eleven keyword sites,
+which `SA-0031` migrates and this spec must leave working.
 
 ## Problem
 - **The supervisor is where the sequence is decided and where it is lost.**
@@ -753,8 +757,17 @@ does not match, the migration is wrong — do not regenerate it. It was captured
 in `SA-0029` from code nothing had changed, which is the only capture that
 proves anything.
 
-**Keep the `emit` default in `session.py`.** Moving it to `cli.py` would put
-this diff in `SA-0026`'s file for no gain, and `cli.py` is `forbidden` here.
+**Keep the `emit` default in `session.py`.** `cli.py` is `forbidden` here, and
+`run_one_cell` must stay callable with no `emit` argument for every direct
+caller and test. `SA-0031` additionally *hoists* a fan-out into `cli.py` so
+PACKAGE shares one log; that does not remove this default, and building it here
+is what makes this spec landable alone.
+
+**`depends_on` lists `SA-0029` before `SA-0028`, and the order decides which
+tree this runs against.** `cli._resolve_stacked_on` consults `depends_on[0]`
+only. `SA-0028` is merged, so it has no waiting row and slot 0 would yield
+nothing to stack on — this cell would be cut from the default branch, without
+the `saffron/events.py` it exists to migrate onto. Newest parent in slot 0.
 
 **`phases/` still takes a `watch`.** Adapt at the boundary — the phase call
 sites keep receiving a string-taking callable until `SA-0031`. A half-migrated
@@ -800,7 +813,10 @@ touches:
   - saffron/phases/rebut.py
   - saffron/phases/review.py
   - saffron/cli.py
+  - saffron/cell/session.py
   - tests/test_session.py
+  - tests/test_events.py
+  - tests/fixtures/watch-golden.txt
   - tests/test_implement.py
   - tests/test_package.py
   - tests/test_package_cell.py
@@ -814,14 +830,16 @@ forbidden:
   - CONTEXT.md
   - .saffron/**
   - saffron/ledger.py
-  - saffron/cell/session.py
+  - saffron/cell/runtime.py
+  - saffron/cell/worktree.py
+  - saffron/cell/proxy.py
   - saffron/report/**
   - saffron/gates/**
   - saffron/events.py
   - images/**
-budget_usd: 16
+budget_usd: 18
 max_attempts: 4
-max_turns: 130
+max_turns: 140
 risk: elevated
 ---
 
@@ -854,6 +872,16 @@ of them should survive.
 - **PACKAGE's lines are the ones an unattended morning needs most** — a refused
   push, a conflict with the default branch, new failures against `main` — and
   they are strings.
+- **The adapter and eleven call sites live in `saffron/cell/session.py`.**
+  It passes `watch=watch` into the phases as a keyword at lines 358, 385, 410,
+  602, 936, 1073, 1130, 1245, 1273, 1302 and 1377, and the adapter `SA-0030`
+  left can live nowhere else. Renaming the phases' parameter forces edits
+  there, so the file is in `touches` — an earlier cut of this spec `forbid` it
+  and was unrunnable.
+- **PACKAGE's events cannot reach the log while `emit` is built inside
+  `run_one_cell`.** `package()` is called from `saffron/cli.py`, *outside*
+  `run_one_cell`, so its eight call sites would fall back to `print` and none
+  of the lines an unattended morning most needs would be recorded.
 - **Seven test files call a migrated function with `watch=`** —
   `test_implement.py` (27 sites), `test_package.py` (7), `test_cli.py` (3 on
   `_resolve_stacked_on`), `test_package_cell.py`, `test_rebut.py`,
@@ -867,10 +895,17 @@ of them should survive.
       `saffron/` still carries a `watch` parameter — a test greps the package
       and asserts none remains. `saffron/cli.py` is in `touches` precisely so
       this criterion can be discharged rather than worked around
-- [ ] **`cli.py:393` still calls `run_one_cell` with no `emit` argument**, and
-      a test asserts it. Migrating three lines in `_resolve_stacked_on` is not
-      licence to move the seam up: the default `emit` stays constructed in
-      `session.py`
+- [ ] **`saffron/cli.py` constructs the `emit` fan-out once and passes it to
+      both `run_one_cell` and `package()`**, so a task's PACKAGE events land in
+      the same `events.jsonl` as the rest of its run. A test drives a task
+      through PACKAGE and asserts the pull-request line is in the log, not only
+      on the terminal
+- [ ] `run_one_cell` **keeps a working default** for callers that pass no
+      `emit` — the one `SA-0030` built — and a test calls it with none and
+      asserts it still prints. Hoisting a fan-out in `cli.py` must not make the
+      supervisor uncallable without one
+- [ ] The eleven `watch=` keyword call sites in `saffron/cell/session.py` pass
+      `emit` instead
 - [ ] The seven test files in `touches` are migrated with their callees and the
       suite is green — no `watch=` remains anywhere under `tests/`
 - [ ] The adapter `SA-0030` left at the phase boundary is **deleted**
@@ -892,12 +927,15 @@ of them should survive.
       genuinely cell-marked; nothing new joins it
 
 ## Out of scope
-**`saffron/cell/session.py`.** `forbidden` — `SA-0030` finished it.
+**Everything in `saffron/cell/session.py` except the adapter and the eleven
+call sites that feed it.** `SA-0030` migrated that file's own `watch` lines and
+this spec must not revisit them. It is in `touches` to *delete the adapter*,
+nothing more — the rest of `saffron/cell/**` stays `forbidden`.
 
-**Everything in `saffron/cli.py` except `_resolve_stacked_on`'s three lines.**
-The file is in `touches` to finish the seam, not to be refactored. `SA-0026`
-and `SA-0027` have both merged, so nothing is racing for it — which is exactly
-why a wider edit here would be unforced.
+**Everything in `saffron/cli.py` except `_resolve_stacked_on`'s three lines and
+the `emit` fan-out.** The file is in `touches` to finish the seam, not to be
+refactored. `SA-0026` and `SA-0027` have both merged, so nothing is racing for
+it — which is exactly why a wider edit here would be unforced.
 
 **Changing any message**, for the reason `SA-0030` gives.
 
@@ -913,6 +951,15 @@ delegation is how two renderers survive a refactor meant to end them.
 That claim was true when the design was written and false one commit later.
 Where the two disagree, the code is the authority: `grep -rn watch
 saffron/cli.py` settles it, and this spec was cut after that grep was run.
+
+**Hoisting the fan-out into `cli.py` reverses a constraint this plan argued
+for, deliberately.** The design's reason for keeping the seam out of `cli.py`
+was a collision with in-flight stacking work, and that expired when `SA-0026`
+merged. The reason it now has to move is structural and does not expire:
+PACKAGE runs outside `run_one_cell`, so a fan-out built inside the supervisor
+can never see it. Building it one level up is the smaller of the two changes —
+the alternative is moving PACKAGE inside `run_one_cell`, which is a different
+spec and probably a worse design.
 
 **`implement.py`'s raw-line branch is a security boundary, not a formatting
 case.** A line that is not JSON came from a process sharing the runner's
@@ -1067,6 +1114,7 @@ touches:
   - saffron/phases/package.py
   - tests/test_ledger.py
   - tests/test_session.py
+  - tests/test_package.py
   - docs/BACKLOG.md
 forbidden:
   - DESIGN.md
@@ -1092,8 +1140,14 @@ writes and only a task that reaches PACKAGE ever gets to.
 A task that ends `EXHAUSTED` still produces a patch: teardown exports
 `patch.diff` for **16 of 17** task directories (measured 2026-09-01; 12 of 13 a
 day earlier), including `SA-0009`, the $31.60 most expensive task in the
-ledger. Its `patch.json` records `base_sha`, `tree_base` and the changed file
+ledger. Its `patch.json` records `base_sha`, `head_sha` and the changed file
 list — and no line counts.
+
+**`tree_base` is in `patch.json` only from `SA-0025` onward**, when `SA-0022`
+added it; `SA-0009`'s carries `base_sha` alone. So the stat cannot be
+backfilled from the batch tree for the very rows that motivate it, which is a
+second reason teardown computes it going forward rather than a reader deriving
+it.
 
 ## Problem
 - **The size of what a failed task built is unrecorded.** "It burned $31.60 and
@@ -1106,7 +1160,9 @@ list — and no line counts.
 
 ## Acceptance criteria
 - [ ] `tasks` gains `added` and `removed` as nullable INTEGER columns, via the
-      additive-migration shape `_add_gate_result_reference` establishes
+      additive-migration shape the `pushed_sha` / `pr_url` / `spent_usd_est`
+      columns establish — `PRAGMA table_info` then `ALTER TABLE tasks ADD
+      COLUMN`, in `Ledger`'s existing migration path
 - [ ] A test opens a database created before the migration and asserts it opens
       and reads
 - [ ] Teardown writes the stat, so a task that never reaches PACKAGE records
@@ -1142,10 +1198,13 @@ the first time stacking runs — reintroducing the defect `SA-0022` exists to
 have fixed, one layer along. A test that does not set `stacked_on` proves
 nothing here.
 
-**An additive migration, not a rebuild.** `docs/BACKLOG.md` records why
-`_add_gate_result_reference` needed SQLite's 12-step rebuild and why a
-`PRAGMA foreign_key_check` after it is theatre. Two nullable columns need
-`ALTER TABLE ... ADD COLUMN` and nothing more.
+**An additive migration, not a rebuild — and `_add_gate_result_reference` is
+the wrong thing to copy.** That method *is* SQLite's documented 12-step
+rebuild, needed because there is no ADD CONSTRAINT; `docs/BACKLOG.md` records
+why, and why a `PRAGMA foreign_key_check` after it is theatre. The precedent to
+follow is the one three methods up, which reads `PRAGMA table_info(tasks)` and
+issues `ALTER TABLE tasks ADD COLUMN` for anything missing. Two nullable
+columns need that and nothing more.
 
 **A real ledger with 29 task rows exists at `~/.saffron/ledger.db`.** There is
 no route to it from a cell and you must not try. Write the migration so that
@@ -1230,9 +1289,14 @@ tasks. That is correct, not the defect, and must not be counted as it.
   takes `verdict` and writes it. On finding 29 the value arrived; on finding 14
   it was `None`.
 - **Level 3 has effectively never rendered.** One stored verdict, on a
-  `withdrawn` blocker — which is by definition not a sustained one — and §6
-  measured that the most expensive task in the ledger, `SA-0005` at $10.07,
-  renders `0 concerns` on the bottom line of ten for exactly this reason.
+  `withdrawn` blocker, which is by definition not a sustained one. §6 makes the
+  same point against a task called `SA-0005` at $10.07 — **a row that is not in
+  this ledger**; the id does not appear in `tasks` at all, and the figure comes
+  from the superseded ledger behind
+  `docs/evidence/2026-08-25-morning-queue-from-real-rows.md`. The live
+  equivalent is `SA-0009`, `EXHAUSTED` at $31.60, which renders `0 concerns`
+  for exactly this reason. `DESIGN.md` carries the stale sentence and Task 11
+  corrects it.
 - **The rebuttal half works in both cases**, which is what narrows the fault:
   the same call, the same row shape, one field set and one not, on one of the
   two.
@@ -1394,16 +1458,20 @@ unable to answer for a row. This spec builds the query. It renders nothing.
       count when it exceeds one. A test builds a fixture ledger with two tasks
       for one spec at different states and asserts one row, the later state,
       and the summed cost
-- [ ] `attempts` counts `REPAIRING` sessions, not rows in `attempts`. A test
-      builds a task with four attempt rows across `IMPLEMENTING`, `REVIEWING`
-      and `REPAIRING` and asserts the rendered count is not 4
+- [ ] `attempts` is **`REPAIRING` sessions plus one**, not rows in `attempts`.
+      `repair_loop` counts `for attempt in range(1, max_attempts + 1)`, so the
+      first gate attempt precedes any repair: measured, `SA-0013` has **0**
+      `REPAIRING` rows and renders `1`, `SA-0019` has **1** and renders `2`.
+      A test builds a task with four attempt rows across `IMPLEMENTING`,
+      `REVIEWING` and `REPAIRING` and asserts the exact rendered count — not
+      merely that it "is not 4", which passes on every wrong value but one
 - [ ] The count is **labelled with its phase**, not rendered as a bare `att`.
-      `ontology/saffron.ttl`'s `withinPhase` states the rule — *"'Attempt 3'
+      The ontology's `saffron:withinPhase` states the rule — *"'Attempt 3'
       without a phase is ambiguous — name both (`CONTEXT.md` §2)"* — and this
       page is where the ambiguity is visible, since the number it shows and
       the number in the `attempts` table differ by design
 - [ ] A row carries whether its state is a `TerminalState` or only an
-      `EndState`, the distinction `ontology/saffron.ttl` draws and
+      `EndState`, the distinction the ontology draws and
       `tasks.state` conflates into one TEXT column. `MERGED` is history;
       `ORPHANED` is an unanswered question, and a page that renders them as
       the same kind of string reproduces the conflation the ontology named
@@ -1417,9 +1485,10 @@ unable to answer for a row. This spec builds the query. It renders nothing.
       from its state and gate results, with no `note` read from any store
 - [ ] `added`/`removed` come from the columns `SA-0033` added, and a NULL
       renders as missing rather than as zero
-- [ ] `sort_key` is imported unchanged from `report/index.py` and not
-      reimplemented; a test asserts a fixture with an `EXHAUSTED` task and a
-      `READY_FOR_REVIEW` task orders the first above the second
+- [ ] `sort_key` is **imported** unchanged from the existing morning-queue
+      module and not reimplemented — importing from a module this spec may not
+      edit is deliberate; a test asserts a fixture with an `EXHAUSTED` task and
+      a `READY_FOR_REVIEW` task orders the first above the second
 - [ ] Every test starts from a fixture **ledger**, never from a hand-built
       `QueueLine` — a test that constructs the value it asserts on proves
       nothing about the query
@@ -1483,6 +1552,8 @@ touches:
   - saffron/phases/package.py
   - saffron/replay.py
   - tests/test_report.py
+  - tests/test_replay.py
+  - tests/test_package.py
   - docs/BACKLOG.md
 forbidden:
   - DESIGN.md
@@ -1531,8 +1602,9 @@ L1.
       validator and `_migrate_v0_store` are **deleted**: a full re-render has
       no read-modify-write to serialise
 - [ ] `_atomic_write` survives and is what writes `index.html`
-- [ ] `_finish` in `phases/package.py` and `replay` call the new path, so
-      neither keeps a second writer alive
+- [ ] `_finish` in `saffron/phases/package.py` and `replay` in
+      `saffron/replay.py` call the new path, so neither keeps a second writer
+      alive
 - [ ] The header renders five fields — terminal-state counts, total spend,
       per-repo preflight, base-suite status, trailing accept rate — and
       **omits** batch wall clock rather than dashing it, with a comment naming
@@ -1671,9 +1743,9 @@ across attempts, the findings with their verdicts, and per-attempt cost.
   a table, not a cell.
 
 ## Acceptance criteria
-- [ ] `write_task_page` writes `out_dir/<spec_id>/index.html` — the existing
-      `task_dir` — so the page lands beside `patch.diff`, `plan.json` and
-      `baseline.json`
+- [ ] `write_task_page` writes an `index.html` into the task's own directory
+      in the batch tree — the existing `task_dir`, named for the spec id — so
+      the page lands beside `patch.diff`, `plan.json` and `baseline.json`
 - [ ] Every index row links to its task page, including rows with no pull
       request; a row with one links to both, distinctly labelled
 - [ ] The gate table shows every gate result across attempts with its status,
@@ -1735,7 +1807,7 @@ title: the event log has no reader, and a running task looks identical to a fini
 type: feature
 priority: 2
 depends_on:
-  - SA-0037
+  - SA-0039
   - SA-0031
 touches:
   - saffron/report/render.py
@@ -1790,7 +1862,10 @@ that finished.
       a non-terminal state, with a `ponytail:` naming the ceiling — this is
       polling, chosen over a server deliberately
 - [ ] The index marks a task that is currently running, distinctly from every
-      terminal state
+      terminal state. `SA-0039` supplies the only thing that makes this
+      renderable — a render triggered from phase events while the task is still
+      in flight; without it a running task is never rendered and the marker is
+      unreachable code
 - [ ] Agent-authored text from the log is escaped — a test asserts an event
       carrying `<script>` renders inert. A cell is untrusted and the renderer
       is host-side
@@ -1818,8 +1893,9 @@ tolerance layer.** A cell killed mid-write is the normal case for exactly the
 tasks this page exists for.
 
 **This spec names two parents on two different chains, and `depends_on[0]` is
-all Saffron can stack on.** `SA-0037` is slot 0 and is what this worktree is
-cut from; `SA-0031` — which is what writes the `events.jsonl` this page reads —
+all Saffron can stack on.** `SA-0039` is slot 0 and is what this worktree is
+cut from — it is the newest of part 3's chain, and it carries `SA-0037`'s task
+page with it; `SA-0031` — which is what writes the `events.jsonl` this page reads —
 **must already be `MERGED`** before this cell runs, so the gate is satisfied by
 the default branch rather than by a branch nothing can reach. That is why part
 1 merges before part 2 starts. Running it any other way gives this cell a tree
@@ -1840,6 +1916,132 @@ Commit after each coherent step. Uncommitted work dies with the cell.
 
 ---
 
+## Task 10a: `SA-0039` — the renderer has no trigger a failed night reaches
+
+**Found by an independent review of this plan, not by the design.** Every part-3
+spec forbids `saffron/cell/**` and `saffron/cli.py`, so none of them can wire
+the renderer to anything. `SA-0036` re-sources the page's *content* from the
+ledger and leaves its *trigger* where it was: measured, the only production
+writers of `index.html` are `_finish` in `saffron/phases/package.py` and
+`replay` in `saffron/replay.py`, and `saffron/cli.py:141` merely prints a path.
+There is no `report` subcommand. A night in which nothing reaches PACKAGE
+regenerates no page at all — the founding defect of this whole design, moved
+one layer out and left there.
+
+**Interfaces:** consumes `write_index` (`SA-0036`) and `write_task_page`
+(`SA-0037`). Produces the call sites that run them.
+
+- [ ] **L1: Write the spec**
+
+```markdown
+---
+id: SA-0039
+title: the page is re-sourced from the ledger and still only renders when a task succeeds
+type: feature
+priority: 1
+depends_on:
+  - SA-0037
+touches:
+  - saffron/cli.py
+  - saffron/report/render.py
+  - tests/test_cli.py
+  - tests/test_report.py
+  - docs/BACKLOG.md
+forbidden:
+  - DESIGN.md
+  - CONTEXT.md
+  - .saffron/**
+  - saffron/ledger.py
+  - saffron/cell/**
+  - saffron/phases/**
+  - saffron/gates/**
+  - saffron/events.py
+  - saffron/report/index.py
+  - images/**
+budget_usd: 12
+max_attempts: 4
+max_turns: 100
+risk: elevated
+---
+
+## Context
+`SA-0036` made `write_index` render every task row from the ledger, and
+`SA-0037` added a page per task. Nothing calls either one except the two
+writers that were there before: `_finish` in `saffron/phases/package.py`, and
+`replay`.
+
+`_finish` runs only on a task that reached PACKAGE. That is the same conditional
+this design was written to remove — `append_queue_line`'s two success-path
+callers — and re-sourcing the query did not touch it.
+
+## Problem
+- **A night where nothing packages regenerates no page.** The renderer can now
+  answer for an `EXHAUSTED` task; nothing asks it to. `saffron/cli.py:141`
+  prints the path to an `index.html` that may be days old.
+- **There is no `report` subcommand**, so an operator cannot regenerate the
+  page by hand either.
+- **A running task can never be rendered.** `SA-0038`'s running marker and its
+  meta-refresh both need a render that happens *during* a run, and no call site
+  exists that could produce one.
+
+## Acceptance criteria
+- [ ] The index and the task page are rendered **after every task, in every
+      terminal state** — a test drives a session to `EXHAUSTED` and asserts both
+      files exist and carry that task's row
+- [ ] The render runs from `saffron/cli.py`, after the outcome is known and
+      whether or not PACKAGE ran; a test asserts a task that never reaches
+      PACKAGE still updates the index
+- [ ] A render is also triggered on phase-boundary events **while the task is
+      in flight**, so a running task appears as running. It reads the ledger,
+      not the cell
+- [ ] **A render that raises never propagates.** A test points the output
+      directory somewhere unwritable and asserts the session still reaches its
+      terminal state and the process still exits on its own code. This is the
+      mirror of `_finish`'s rule, not a contradiction of it: PACKAGE refuses to
+      write a line for a pull request that was never opened, and the renderer
+      refuses to kill a run over a page
+- [ ] A render failure is **recorded as an event**, so a page that silently
+      stopped updating is diagnosable from the log
+- [ ] `saffron report --repo .` regenerates the whole tree from the ledger with
+      no cell — a test invokes it against a fixture ledger
+- [ ] Re-rendering is idempotent: two renders of an unchanged ledger produce
+      byte-identical output, asserted
+- [ ] Every new test runs with no network and no cell
+
+## Out of scope
+**Changing what either renderer produces.** `saffron/report/index.py` is
+`forbidden` and `render.py` is in `touches` only for a trigger helper. If a page
+is wrong, that is `SA-0036`'s or `SA-0037`'s defect, not this spec's.
+
+**A watcher, a daemon, or any long-lived process.** The trigger is a function
+call on a path that already runs.
+
+**Rendering from inside a cell.** `saffron/cell/**` is `forbidden`. The
+renderer is host-side and reads the ledger; a cell is untrusted.
+
+**Batch-level rendering.** §4.2's pool does not exist; one attended task at a
+time is the whole population.
+
+## Notes for the agent
+**The cost of a render is a SQL query and some f-strings, and that is why
+triggering it often is affordable.** Do not add caching, debouncing or a
+dirty flag; if profiling later says otherwise, that is a different spec.
+
+**`_finish` keeps its own call.** Two triggers for a packaged task is
+harmless — the render is idempotent and the second one wins with the same
+bytes. Removing `_finish`'s call is a wider change than this spec needs.
+
+**The unwritable-directory test is the one that matters.** Every other
+criterion here makes the page more available; this one keeps a page from
+taking down a $16 run.
+
+Commit after each coherent step. Uncommitted work dies with the cell.
+```
+
+- [ ] **L2–L8.** Ordinary feature spec: no ratification detour.
+
+---
+
 ## Task 11: The by-hand follow-ups
 
 Three protected documents no cell can correct. Each spec above leaves a
@@ -1856,6 +2058,13 @@ Three protected documents no cell can correct. Each spec above leaves a
       **never renumber** — section numbers are an API and specs cite them.
 - [ ] **Step 3: Correct §5.3's supervisor paragraph**, which describes a
       `watch` callable that no longer exists.
+- [ ] **Step 3a: Correct §6's `SA-0005` example.** It cites "the most
+      expensive task in the ledger, `SA-0005` at $10.07" as the task rendering
+      `0 concerns`. `SA-0005` has no row in `~/.saffron/ledger.db` — the figure
+      is from the superseded ledger behind
+      `docs/evidence/2026-08-25-morning-queue-from-real-rows.md`, and it
+      contradicts §6's own `SA-0009 at $31.60`. Replace the example, or date it
+      as historical.
 - [ ] **Step 4: Add a backlog item for `ORPHANED`'s classification.**
       `ontology/saffron.ttl` files it as an `EndState` that does not reach the
       operator, on the rationale *"downstream of a judgement they already
@@ -1895,12 +2104,19 @@ git commit -m "docs(design): the queue reads the ledger, and §6 said otherwise"
 Runs **twice** — once for part 1 (`SA-0029`–`SA-0031`), once for part 2 and 3
 (`SA-0032`–`SA-0038`). Part 1's run completes before `SA-0032`'s cell starts.
 
-- [ ] **Step 1: Link the pull requests, bottom to top.**
+- [ ] **Step 1: Link the pull requests, bottom to top — by hand.**
 
 ```bash
-uv run .claude/skills/run-saffron-spec-loop/driver.py stack            # dry run
-uv run .claude/skills/run-saffron-spec-loop/driver.py stack --execute
+gh stack link <bottom-pr> <next> … <top-pr>      # part 1: three numbers
 ```
+
+**Do not use `driver.py stack` here.** Two reasons, both measured: its
+`cmd_stack` calls `_load()` and fails with `no plan at .saffron-loop/plan.json`
+unless the whole run went through `driver.py plan`/`next`/`record`, which this
+plan's L1–L8 does not; and it links **every** reviewable pull request into one
+chain, which cannot produce the two separate stacks this plan needs. Use the
+driver if you are running the skill's loop instead of this one — then it is
+correct and this step is its job.
 
 `link` is the command, not `submit`: PACKAGE has already opened every pull
 request, `link` takes existing numbers and keeps no local tracking state, and
@@ -1908,6 +2124,10 @@ request, `link` takes existing numbers and keeps no local tracking state, and
 is already stacked by Saffron — every spec in it declaring a parent in slot 0 —
 `link` finds each base already correct and changes nothing, which is the
 outcome to want.
+
+`gh stack link`'s first argument is ambiguous: a number that matches an
+existing *stack* is read as one, and the rest are appended to it. Read what it
+built before trusting it.
 
 - [ ] **Step 2: Check the merge, not the pull request page.** A stacked page
       renders a clean diff because GitHub computes it from the merge base. That
@@ -1936,12 +2156,17 @@ gh stack merge <top-pr> --yes --squash
 would land them out of order against bases that no longer exist. If the set
 cannot merge, none of it does; read the failure and fix the layer it names.
 
-- [ ] **Step 4: Sync and prune.**
+- [ ] **Step 4: Update the local checkout.**
 
 ```bash
-gh stack sync --prune
-git checkout main && git pull
+git checkout main && git pull --ff-only
+git branch --merged main | grep '^  saffron/SA-' | xargs -r git branch -d
 ```
+
+**Not `gh stack sync --prune`.** `link` keeps no local tracking state, so from
+outside the stack `gh stack` reports `current branch … is not part of a stack`
+and `sync` has no stack argument to give it. Delete the merged branches with
+git, which is what `--prune` would have done.
 
 - [ ] **Step 5: Retire the stack's specs** — the L8 deferred from each task.
 
@@ -1956,10 +2181,11 @@ git commit -m "chore(specs): retire SA-00NN…SA-00NN as shipped"
 
 ```bash
 git log --oneline origin/main | head -5
-grep -rn 'watch' --include='*.py' saffron/ | grep -v 'watches it'
+grep -rn 'watch=\|watch:' --include='*.py' saffron/ tests/
 ```
 
-Expected: no `watch` parameter anywhere in `saffron/`.
+Expected: nothing. `saffron/cell/runtime.py` still contains the word "watches"
+in a docstring and is not a hit for this pattern.
 
 ---
 
@@ -1972,6 +2198,12 @@ timeline. The design's "What `DESIGN.md` must change" → Task 11, which also
 carries the evidence record its Verification section asks for, because that
 record cannot be produced from inside a cell. Its sequencing section → Task 0
 and the `depends_on` chain.
+
+**Eleven specs, not ten.** `SA-0039` was added after an independent review
+found that part 3 re-sources the page's content and leaves its trigger on the
+success path, and that no part-3 spec could reach a file where a trigger
+belongs. The design does not describe it; the design assumed a trigger that
+does not exist.
 
 **Ontology alignment**, checked against `ontology/saffron.ttl` and
 `RATIONALE.md`: the `EndState` / `TerminalState` split reaches the page as a
@@ -1986,11 +2218,18 @@ edit no spec's `touches` names, and the `shacl` gate is blocking.
 same-file serialisation, since nothing can run concurrently anyway:
 
 ```
-SA-0026 ─→ SA-0032 ─→ SA-0033 ─→ SA-0034 ─→ SA-0035 ─→ SA-0036 ─→ SA-0037 ─┐
- (shipped)                                                                 ├─→ SA-0038
-SA-0028 ─→ SA-0029 ─→ SA-0030 ─→ SA-0031 ──────────────────────────────────┘
+SA-0026 ─→ SA-0032 ─→ SA-0033 ─→ SA-0034 ─→ SA-0035 ─→ SA-0036 ─→ SA-0037 ─→ SA-0039 ─┐
+ (shipped)                                                                            ├─→ SA-0038
+SA-0028 ─→ SA-0029 ─→ SA-0030 ─→ SA-0031 ─────────────────────────────────────────────┘
  (shipped)
 ```
+
+**Slot 0 is the whole contract with `_resolve_stacked_on`.** Every arrow above
+is `depends_on[0]` of the spec it points at: `SA-0030`→`SA-0029`,
+`SA-0035`→`SA-0034`, `SA-0038`→`SA-0039`. A second parent is a gate condition
+only, never a tree. Three of these were wrong in earlier drafts and each would
+have cut a cell from the default branch without the thing it was migrating
+onto.
 
 **The two branches join at `SA-0038`, not at `SA-0035`.** An earlier drawing of
 this diagram merged them one box early; the frontmatter is the authority, and
