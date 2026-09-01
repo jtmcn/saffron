@@ -793,8 +793,13 @@ def test_a_merged_parent_satisfies_whatever_sha_it_ran_at(tmp_path, ledger):
 
 @pytest.mark.parametrize("state", ["READY_FOR_REVIEW", "APPROVED", "MERGE_TRAIN"])
 def test_a_parent_waiting_to_merge_is_refused_as_waiting(tmp_path, ledger, state):
-    """Not unrun. §4.2's own rule admits these; this spec cannot, because a
-    child cut from `base_sha` would not have the parent's commits."""
+    """The name predates `SA-0026` and is kept — `census` treats a rename as
+    remove-plus-add — but what it now proves is the opposite of what it once
+    did: §4.2's own rule admits these, and now the code does too. A dependent
+    branches off the parent's branch instead of `base_sha`
+    (`cli._resolve_stacked_on`), so the gate that used to refuse them with
+    "stacking is SA-0022" — a sentence describing machinery that did not
+    exist yet — has nothing left to refuse."""
     directory = _spec_dir(tmp_path)
     _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
     _write_spec(directory, "b.md", id="TE-0", touches=["b.py"])
@@ -805,10 +810,11 @@ def test_a_parent_waiting_to_merge_is_refused_as_waiting(tmp_path, ledger, state
 
     candidates, refusals = build_queue(directory, repo_id, ledger)
 
-    assert "TE-1" not in [c.spec.id for c in candidates]
-    reason = next(r.reason for r in refusals if r.path.name == "a.md")
-    assert state in reason
-    assert "merge" in reason.lower()
+    assert "TE-1" in [c.spec.id for c in candidates]
+    assert [r for r in refusals if r.path.name == "a.md"] == []
+    # The deleted sentence, not just the state list: a forward reference to
+    # machinery that now exists must not survive anywhere in the refusal text.
+    assert not any("SA-0022" in r.reason for r in refusals)
 
 
 @pytest.mark.parametrize("state", ["REJECTED", "EXHAUSTED"])
@@ -908,10 +914,12 @@ def test_this_repos_own_specs_admit_a_merged_parent_and_name_a_retired_one(
 
 
 def test_waiting_and_dead_parents_do_not_get_the_same_reason(tmp_path, ledger):
-    """Criteria 1 and 3 buy a *distinction*, and asserting each reason names
-    its own state does not witness one — a single generic message satisfies
-    both. Measured: deleting the waiting and dead branches outright left all
-    59 tests green before this test existed.
+    """The name predates `SA-0026` and is kept — `census` treats a rename as
+    remove-plus-add — but the distinction it now buys is a different one:
+    a waiting parent used to be refused with its own reason, distinct from a
+    dead parent's; now it is not refused at all, and only the dead parent
+    still is — proving the widening landed on exactly the three waiting
+    states and left `DEPENDENCY_DEAD_STATES` alone.
     """
     directory = _spec_dir(tmp_path)
     _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-8"])
@@ -934,14 +942,11 @@ def test_waiting_and_dead_parents_do_not_get_the_same_reason(tmp_path, ledger):
         state="REJECTED",
     )
 
-    _, refusals = build_queue(directory, repo_id, ledger)
-    waiting = next(r.reason for r in refusals if r.path.name == "a.md")
-    dead = next(r.reason for r in refusals if r.path.name == "b.md")
+    candidates, refusals = build_queue(directory, repo_id, ledger)
 
-    # Not merely different strings — they differ once the state name, the only
-    # part a generic message would also vary, is removed.
-    assert waiting.replace("READY_FOR_REVIEW", "") != dead.replace("REJECTED", "")
-    assert "waits for the parent to land" in waiting
+    assert "TE-1" in [c.spec.id for c in candidates]
+    assert [r for r in refusals if r.path.name == "a.md"] == []
+    dead = next(r.reason for r in refusals if r.path.name == "b.md")
     assert "will not merge as it stands" in dead
 
 

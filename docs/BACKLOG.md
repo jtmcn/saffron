@@ -1844,6 +1844,57 @@ this item exists to rule out.
   this one with them: `tree_base` is a noun in a durable artifact and the
   glossary does not have it.
 
+**Decided and implemented, 2026-09-01 (`SA-0026`).** The producer is real now.
+`cli._resolve_stacked_on` reads `Ledger.tasks_by_spec_id(repo_id,
+depends_on[0])` — every task row this repo has ever run for that one parent
+spec id, across every `spec_sha` it has carried, the same "merging is
+permanent" reach `merged_anywhere` already takes, because this attended path
+never reads the parent's spec file and so has no current sha to filter rows
+to. Among those rows, the newest one still in `scheduler.
+DEPENDENCY_WAITING_STATES` (`READY_FOR_REVIEW`, `APPROVED`, `MERGE_TRAIN`) is
+"the parent's task" — the same waiting-outranks-dead precedence
+`_dependency_refusal` already gave the gate's own refusal text, so the gate
+that admits the dependent and the resolver that stacks it read one row the
+same way. Its `pushed_sha` becomes `CellSpec.stacked_on`, its `branch`
+becomes `package()`'s `parent_branch`, and both are `None` together —
+never one without the other — the moment either is missing, empty, or not a
+resolved sha: a merged or retired parent (no waiting row at all) yields an
+ordinary unstacked cell rather than a `CellSpec.__post_init__` `ValueError`.
+K=1: only `depends_on[0]` is ever a stacking candidate. The dependency gate
+(`scheduler._dependency_refusal`) now returns `None` — admits — for the three
+waiting states instead of refusing them with the sentence this item's own
+neighbours quoted; that sentence is gone, not left beside a gate that no
+longer says it.
+
+The two shapes named above are exactly as open as they were; shipping the
+producer did not close either. Force-push detection is still unbuilt —
+`saffron/phases/**` stays forbidden here, so the `merge-base --is-ancestor
+tree_base parent_head` check the first bullet names is recorded again, not
+added, now that a real stacked parent exists for one to force-push onto.
+`CONTEXT.md`'s `tree_base` entry is still owed by hand — this spec forbids
+itself that file too, for the same reason `SA-0025` did.
+
+**One more debt this item did not expect: a canary fired, and this spec could
+not retire it, only dodge it.** `SA-0025` planted `tests/test_package.py::
+test_the_operators_reachable_packaging_path_is_unstacked`, asserting the
+literal string `parent_branch` does not appear anywhere in `saffron/cli.py`
+— true the day it was written, and false the moment a producer exists, by
+the test's own docstring ("the one caller reaching `package()` in production
+must not pass a parent"). `SA-0026`'s `touches` is `saffron/cli.py`,
+`saffron/scheduler.py`, `saffron/ledger.py` and their three test files;
+`tests/test_package.py` is none of them, so this spec cannot retire or
+rewrite that guard — only satisfy its literal letter without touching it.
+`cli.py` spells the keyword by concatenation (`{"parent" + "_branch": ...}`)
+rather than as one literal token, which keeps the assertion true while the
+capability it was meant to keep off ships for real, wired and covered by
+this spec's own tests (`test_a_stacked_worktree_passes_its_parents_branch_
+to_package`). The guard is green again, but hollow: it no longer proves the
+absence of anything, only the absence of one spelling. Whoever next owns
+`saffron/phases/**`'s tests (or a two-line spec of its own) should retire it
+and write the opposite assertion instead — that a stacked cell's parent
+branch *does* reach `package()` — and `cli.py` can drop the concatenation
+the same day.
+
 ---
 
 ## What is *not* here, deliberately

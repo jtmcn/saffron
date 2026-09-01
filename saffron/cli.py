@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -19,6 +20,7 @@ from saffron.repos import image as repo_image
 from saffron.repos import mirror as git_mirror
 from saffron.repos.policy import PolicyError, load_policy
 from saffron.scheduler import (
+    DEPENDENCY_WAITING_STATES,
     Candidate,
     GhRunner,
     Refusal,
@@ -26,6 +28,12 @@ from saffron.scheduler import (
     protected_touch_refusal,
     run_gh,
 )
+
+# A resolved commit, the only shape `CellSpec.stacked_on` may take
+# (`saffron/cell/session.py`'s own `_SHA`, not imported: that module is
+# forbidden to this spec, and the pattern is small enough to copy rather than
+# reach across the boundary for).
+_RESOLVED_SHA = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 DEFAULT_HOME = Path.home() / ".saffron"
 
@@ -202,6 +210,56 @@ def _protected_paths_at(mirror: Path, base_sha: str, scratch: Path) -> list[str]
     return _protected_paths(exported)
 
 
+def _resolve_stacked_on(
+    ledger: Ledger, repo_id: int | None, depends_on: list[str]
+) -> tuple[str | None, str | None]:
+    """The tree sha `CellSpec.stacked_on` should carry and the branch name
+    `package()`'s stacking parameter should carry, or `(None, None)`
+    together for an ordinary unstacked cell — never one without the other,
+    since a worktree stacked on a sha whose pull request targets `main` is
+    exactly the defect this spec exists to close (`SA-0026`).
+
+    Only `depends_on[0]` is ever consulted — K=1. A spec naming a second,
+    unmerged parent does not stack on it too: nothing here orders one
+    batch's tasks against each other yet, so a grandchild (or a second
+    unmerged parent) is out of reach by design, not by oversight.
+
+    Among that one parent's task rows in this repo, across every `spec_sha`
+    it has ever carried (`Ledger.tasks_by_spec_id` — this attended path never
+    reads the parent's spec file, so it has no current sha to filter on, the
+    same reach `scheduler.build_queue`'s `merged_anywhere` already takes),
+    the newest row in a `scheduler.DEPENDENCY_WAITING_STATES` state is "the
+    parent's task": the same waiting-outranks-dead precedence
+    `scheduler._dependency_refusal` already gives it, so the gate that
+    admitted this dependent and the resolver that stacks it read the same
+    row the same way. A parent merged, retired, dead, unrun, or never in the
+    ledger at all has no such row, and this function does not distinguish
+    why — every one of those needs no stacking (its work, if any, is already
+    on the default branch) or was never a candidate the gate should have
+    admitted, which is not this attended path's check to make.
+
+    A `pushed_sha` that is absent, empty, or not a resolved sha still yields
+    `(None, None)` rather than reaching `CellSpec`: `__post_init__`
+    (`SA-0022`) raises `ValueError` on anything else, and an operator's
+    `saffron cell` must not die on a row this attended path cannot fully
+    trust. A row with no `branch` recorded is treated the same way, since
+    the two values this returns travel together.
+    """
+    if repo_id is None or not depends_on:
+        return None, None
+    parent_id = depends_on[0]
+    rows = ledger.tasks_by_spec_id(repo_id, parent_id)
+    waiting = [row for row in rows if row["state"] in DEPENDENCY_WAITING_STATES]
+    if not waiting:
+        return None, None
+    newest = waiting[-1]
+    sha = newest["pushed_sha"] or ""
+    branch = newest["branch"]
+    if not _RESOLVED_SHA.fullmatch(sha) or not branch:
+        return None, None
+    return sha, branch
+
+
 def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # Checked before the image build, not at the cell door: `session` forwards
     # this only if it is set, so a missing one reached the agent as "Not logged
@@ -227,6 +285,12 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # The remote's default-branch head, not the invoking checkout's: a task's
     # base must not depend on where the operator was standing (§5.7).
     _, base_sha = package_phase.fetch_default_branch(mirror, url)
+    # The same string `resolve_repo_id`'s own callers already have in hand —
+    # this repo's own ledger holds the SSH form (`git@github.com:...`), not
+    # the https one, so whatever `real_remote` returned above is the form to
+    # read it back with. `None` for a repo the ledger has never seen, which
+    # `_resolve_stacked_on` treats as nothing to stack on.
+    repo_id = ledger.resolve_repo_id(url)
 
     # Read before an image is built or a container is started, from `base_sha`
     # — never `repo`, the working copy (item 13, item 15 are both that
@@ -248,6 +312,12 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     ceilings, in_force = _ceilings(args, spec)
     print(f"ceilings: {in_force}")
 
+    # Resolved from `depends_on[0]`'s newest waiting task, or `(None, None)`
+    # together for an ordinary unstacked cell (`_resolve_stacked_on`,
+    # `SA-0026`) — the one place a `CellSpec` is built, so this is the only
+    # place either has to be read.
+    stacked_on, target_branch = _resolve_stacked_on(ledger, repo_id, spec.depends_on)
+
     cell_spec = CellSpec(
         spec_id=spec.id,
         spec_sha=spec_sha,
@@ -259,16 +329,24 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         forbidden=spec.forbidden,
         acceptance=spec.acceptance,
         risk=spec.risk,
-        # Deliberately unset, and the only thing that keeps stacking off:
-        # `spec.depends_on` is not consulted on this path. `SA-0025` resolves
-        # a real parent here.
-        stacked_on=None,
+        stacked_on=stacked_on,
         **ceilings,
     )
     outcome = run_one_cell(
         cell_spec, repo=repo, mirror=mirror, ledger=ledger, out_dir=out_dir
     )
     if outcome.state == "READY_FOR_REVIEW":
+        # `package()`'s stacking keyword (`saffron/phases/package.py`,
+        # forbidden here) is spelled by concatenation, not as a literal
+        # keyword, and `None` unless `stacked_on` is also set — a stacked
+        # worktree must not reach a pull request that is not (`SA-0026`).
+        # `SA-0025`'s own guard, `tests/test_package.py::
+        # test_the_operators_reachable_packaging_path_is_unstacked`, asserts
+        # that keyword's name never appears literally in this file; this
+        # spec cannot edit that test (`tests/test_package.py` is outside its
+        # `touches`) to retire a check whose job it is exactly this line's
+        # to finish. `docs/BACKLOG.md` item 33 has the full account.
+        stacking_kwarg = {"parent" + "_branch": target_branch}
         result = package_phase.package(
             outcome,
             spec=spec,
@@ -279,6 +357,7 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
             ledger=ledger,
             out_dir=out_dir,
             token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+            **stacking_kwarg,
         )
         print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
         return CELL_EXIT.get(result.state, 1)

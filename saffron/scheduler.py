@@ -65,14 +65,19 @@ DONE_STATES = frozenset(
     }
 )
 
-# What satisfies a dependency, and it is deliberately narrower than §4.2's own
-# rule. §4.2 admits a parent at `READY_FOR_REVIEW` *and* stacks the child on its
-# branch; `SA-0022` builds the stacking. Until then a child is cut from
-# `base_sha`, so only a parent already in the default branch can satisfy it —
-# and merging is permanent, so this one is read across every `spec_sha`.
+# What always satisfies a dependency, independent of stacking: merging is
+# permanent, so this is read across every `spec_sha` — a parent's spec text
+# moving afterwards does not un-merge its code. §4.2's other admission,
+# `DEPENDENCY_WAITING_STATES` below, used to be narrower than §4.2's own rule
+# until a dependent had something to stack on; `SA-0026` resolves it, so both
+# admissions are live now.
 DEPENDENCY_MERGED = "MERGED"
 
-# Reached review and not landed. Not "unrun", and the reason has to say so.
+# Reached review and not landed, and §4.2 admits it outright: a dependent
+# stacks on this parent's branch instead of cutting from `base_sha`
+# (`CellSpec.stacked_on`, resolved by `cli._resolve_stacked_on`, `SA-0026`),
+# so these three no longer refuse — only `DEPENDENCY_DEAD_STATES` and the
+# fallthrough below still do.
 DEPENDENCY_WAITING_STATES = frozenset({"READY_FOR_REVIEW", "APPROVED", "MERGE_TRAIN"})
 
 # Will not merge as it stands. Read only at the parent's *current* `spec_sha`:
@@ -413,14 +418,12 @@ def _dependency_refusal(
 
     # Waiting outranks dead whatever the row order: a live task at
     # `READY_FOR_REVIEW` may still land, and a sibling row that did not is not
-    # a fact about the one that might.
-    waiting = [s for s in states if s in DEPENDENCY_WAITING_STATES]
-    if waiting:
-        return (
-            f"depends_on {dep} is {waiting[-1]} and has not merged — a dependent "
-            "is cut from the default branch, so it waits for the parent to land "
-            "(stacking is SA-0022)"
-        )
+    # a fact about the one that might — so any row still waiting satisfies
+    # the dependency, not just the newest row overall. `cli._resolve_stacked_on`
+    # (`SA-0026`) is what turns "satisfies" into a real `CellSpec.stacked_on`;
+    # this function only decides whether the dependent may run at all.
+    if any(state in DEPENDENCY_WAITING_STATES for state in states):
+        return None
 
     dead = [s for s in states if s in DEPENDENCY_DEAD_STATES]
     if dead:

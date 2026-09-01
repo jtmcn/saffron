@@ -276,6 +276,36 @@ class Ledger:
             )
         )
 
+    def tasks_by_spec_id(self, repo_id: int, spec_id: str) -> list[sqlite3.Row]:
+        """Every task this repo has ever run for one `spec_id`, across every
+        `spec_sha` it has carried, oldest first — `branch` and `pushed_sha`
+        beside the columns `tasks_by_spec` already carries (`SA-0026`).
+
+        Spans every `spec_sha`, not just the one the spec has on disk today:
+        the caller this serves (`cli._resolve_stacked_on`) is the attended
+        `saffron cell` path, which never exports the parent's spec file and
+        so has no current sha to filter on — the same "merging is permanent"
+        reach `scheduler.build_queue`'s `merged_anywhere` already takes, for
+        the same reason.
+
+        Every row, not the newest one per id: this repo's own ledger holds
+        ten tasks at one `spec_id`/`spec_sha`, mixing `READY_FOR_REVIEW` with
+        three `ORPHANED` (`SA-0013`), so "the parent's task" is a row the
+        caller has to choose deliberately among several, not the only one
+        there is.
+        """
+        return list(
+            self._db.execute(
+                """SELECT t.task_id, t.spec_id, t.spec_sha, t.state,
+                          t.branch, t.pushed_sha
+                     FROM tasks t
+                     JOIN runs r ON r.run_id = t.run_id
+                    WHERE r.repo_id = ? AND t.spec_id = ?
+                    ORDER BY t.task_id""",
+                (repo_id, spec_id),
+            )
+        )
+
     def create_run(self, repo_id: int, base_sha: str) -> int:
         cursor = self._db.execute(
             "INSERT INTO runs (repo_id, base_sha, status) VALUES (?, ?, 'RUNNING')",

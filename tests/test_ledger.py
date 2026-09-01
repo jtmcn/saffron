@@ -205,6 +205,68 @@ def test_package_writes_back_a_state_the_run_had_already_closed(tmp_path):
     ledger.close()
 
 
+def test_tasks_by_spec_id_carries_branch_and_pushed_sha_beside_state(tmp_path):
+    """The query `SA-0026`'s resolver needs and nothing before it returns:
+    `tasks_by_spec` stops at `task_id`/`spec_id`/`spec_sha`/`state`,
+    `tasks_by_repo` is `reconcile`'s three columns, `queue_lines` is the
+    printer's — none carries `branch` and `pushed_sha` beside `spec_id`."""
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+    task_id = ledger.create_task(
+        run_id, spec_id="SA-0001", spec_sha="s" * 40, branch="saffron/SA-0001"
+    )
+    ledger.record_push(task_id, "c" * 40)
+    ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+
+    (row,) = ledger.tasks_by_spec_id(repo_id, "SA-0001")
+
+    assert row["task_id"] == task_id
+    assert row["spec_id"] == "SA-0001"
+    assert row["spec_sha"] == "s" * 40
+    assert row["state"] == "READY_FOR_REVIEW"
+    assert row["branch"] == "saffron/SA-0001"
+    assert row["pushed_sha"] == "c" * 40
+    ledger.close()
+
+
+def test_tasks_by_spec_id_is_scoped_to_one_repo(tmp_path):
+    ledger = Ledger(tmp_path / "l.db")
+    repo_a = ledger.upsert_repo("a", "/a", "/m.git", policy_sha="p" * 64)
+    repo_b = ledger.upsert_repo("b", "/b", "/m.git", policy_sha="p" * 64)
+    for repo_id in (repo_a, repo_b):
+        run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+        ledger.create_task(
+            run_id, spec_id="SA-0001", spec_sha="s" * 40, branch="saffron/SA-0001"
+        )
+
+    assert len(ledger.tasks_by_spec_id(repo_a, "SA-0001")) == 1
+    ledger.close()
+
+
+def test_tasks_by_spec_id_spans_every_spec_sha_oldest_first(tmp_path):
+    """Merging is permanent and the parent's spec text may have moved since
+    — the same "every sha" reach `scheduler.build_queue`'s `merged_anywhere`
+    takes, and for the same reason: this attended path never reads the
+    parent's file, so it has no current sha to filter rows to."""
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    first_run = ledger.create_run(repo_id, base_sha="a" * 40)
+    first = ledger.create_task(
+        first_run, spec_id="SA-0001", spec_sha="1" * 40, branch="saffron/SA-0001"
+    )
+    second_run = ledger.create_run(repo_id, base_sha="a" * 40)
+    second = ledger.create_task(
+        second_run, spec_id="SA-0001", spec_sha="2" * 40, branch="saffron/SA-0001"
+    )
+
+    rows = ledger.tasks_by_spec_id(repo_id, "SA-0001")
+
+    assert [row["task_id"] for row in rows] == [first, second]
+    assert [row["spec_sha"] for row in rows] == ["1" * 40, "2" * 40]
+    ledger.close()
+
+
 def test_a_ledger_that_predates_the_package_columns_keeps_its_rows(tmp_path):
     """`CREATE TABLE IF NOT EXISTS` does not alter, so an existing
     ~/.saffron/ledger.db has neither column. The migration is additive: the
