@@ -180,7 +180,8 @@ class CellSpec:
     max_turns: int = 60
     # A stacked task's parent branch head. `base_sha` stays the run's pin:
     # gates and policy are exported from it either way (§5.4, item 13).
-    # `SA-0026` resolves a real parent onto it; `cli.py` sets `None`.
+    # `cli._resolve_stacked_on` (`SA-0026`) puts the parent's fetched branch
+    # head here, and `None` when there is no parent to stack on.
     stacked_on: str | None = None
 
     def __post_init__(self) -> None:

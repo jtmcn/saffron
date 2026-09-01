@@ -365,6 +365,13 @@ _Avoid_: "merge queue" (GitHub's feature, which this is not).
 **Stacked branch**: A dependent task's branch, cut from its parent's branch rather
 than `base_sha`, because dependencies are satisfied at `READY_FOR_REVIEW`.
 
+**Tree base**: The commit a task's worktree is built on and its patch is exported
+against — `base_sha` for an ordinary task, the parent's branch head for a stacked
+one. Recorded in `patch.json` beside `base_sha`, which stays the run's pin: gates
+and policy are exported from the pin either way.
+_Avoid_: using it and `base_sha` interchangeably. They differ for exactly one kind
+of task, and that is the kind every consumer of either has to be right about.
+
 ---
 
 ## 7. Repos

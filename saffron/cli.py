@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from saffron.cell.session import _SHA as _RESOLVED_SHA
 from saffron.cell.session import CellSpec, run_one_cell
 from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
@@ -19,6 +20,7 @@ from saffron.repos import image as repo_image
 from saffron.repos import mirror as git_mirror
 from saffron.repos.policy import PolicyError, load_policy
 from saffron.scheduler import (
+    DEPENDENCY_WAITING_STATES,
     Candidate,
     GhRunner,
     Refusal,
@@ -202,6 +204,91 @@ def _protected_paths_at(mirror: Path, base_sha: str, scratch: Path) -> list[str]
     return _protected_paths(exported)
 
 
+def _resolve_stacked_on(
+    ledger: Ledger,
+    repo_id: int | None,
+    depends_on: list[str],
+    *,
+    mirror: Path,
+    url: str,
+    watch=print,
+) -> tuple[str | None, str | None]:
+    """The tree sha `CellSpec.stacked_on` should carry and the branch name
+    `package()`'s stacking parameter should carry, or `(None, None)`
+    together for an ordinary unstacked cell — never one without the other,
+    since a worktree stacked on a sha whose pull request targets `main` is
+    exactly the defect this spec exists to close (`SA-0026`).
+
+    Only `depends_on[0]` is ever consulted — K=1. A spec naming a second,
+    unmerged parent does not stack on it too: nothing here orders one
+    batch's tasks against each other yet, so a grandchild (or a second
+    unmerged parent) is out of reach by design, not by oversight.
+
+    Among that one parent's task rows in this repo, across every `spec_sha`
+    it has ever carried (`Ledger.tasks_by_spec_id` — this attended path never
+    reads the parent's spec file, so it has no current sha to filter on, the
+    same reach `scheduler.build_queue`'s `merged_anywhere` already takes),
+    the newest row in a `scheduler.DEPENDENCY_WAITING_STATES` state is "the
+    parent's task": the same waiting-outranks-dead precedence
+    `scheduler._dependency_refusal` gives it. Not the *same* row, though —
+    that function reads only the parent's current `spec_sha`, and a parent
+    whose spec text moved after its pull request opened has a waiting row
+    here and none there. The branch is real either way; it is the gate, not
+    this resolver, that decides whether the dependent runs at all.
+    A parent merged, retired, dead, unrun, or never in the
+    ledger at all has no such row, and this function does not distinguish
+    why — every one of those needs no stacking (its work, if any, is already
+    on the default branch) or was never a candidate the gate should have
+    admitted, which is not this attended path's check to make.
+
+    **The ledger supplies the branch; the branch supplies the sha.** A row's
+    `pushed_sha` is written once, by PACKAGE, and every review fix an operator
+    commits by hand moves the branch past it — so the recorded sha is a tree
+    the parent's pull request may no longer show. Worse, nothing puts that
+    commit where the cell can read it: `ensure_mirror` fetches `+refs/*:refs/*`
+    from the operator's *local checkout* with `--prune`, so a parent branch the
+    operator does not happen to have locally is deleted from the mirror, and
+    the cell's own seed (`worktree.py`) fetches the mirror's default refspec.
+    Fetching the branch here fixes both — it is `fetch_default_branch`'s own
+    argument (`package.py`), one branch over.
+
+    `ParentGone` is an unstacked cell, not a failure: a parent branch that is
+    deleted has either merged, in which case its work is on the default branch
+    already, or been abandoned, in which case cutting from the default branch
+    is the safe answer. Neither is worth killing an attended run over.
+
+    A `pushed_sha` that is absent, empty, or not a resolved sha still yields
+    `(None, None)` rather than reaching `CellSpec`: `__post_init__`
+    (`SA-0022`) raises `ValueError` on anything else, and an operator's
+    `saffron cell` must not die on a row this attended path cannot fully
+    trust. A row with no `branch` recorded is treated the same way, since
+    the two values this returns travel together.
+    """
+    if repo_id is None or not depends_on:
+        return None, None
+    parent_id = depends_on[0]
+    rows = ledger.tasks_by_spec_id(repo_id, parent_id)
+    waiting = [row for row in rows if row["state"] in DEPENDENCY_WAITING_STATES]
+    if not waiting:
+        return None, None
+    newest = waiting[-1]
+    branch = newest["branch"]
+    # Refused here rather than left to the fetch: a row that evidences no push
+    # has no branch worth fetching, and "branch None is gone" would send an
+    # operator to look for a deleted ref instead of at the row.
+    if not branch or not _RESOLVED_SHA.fullmatch(newest["pushed_sha"] or ""):
+        watch(f"unstacked: {parent_id}'s newest waiting task records no pushed branch")
+        return None, None
+    try:
+        head = package_phase.fetch_parent_branch(mirror, url, branch)
+    except package_phase.ParentGone as gone:
+        watch(f"unstacked: {gone}")
+        return None, None
+    if not _RESOLVED_SHA.fullmatch(head):
+        return None, None
+    return head, branch
+
+
 def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # Checked before the image build, not at the cell door: `session` forwards
     # this only if it is set, so a missing one reached the agent as "Not logged
@@ -227,6 +314,12 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # The remote's default-branch head, not the invoking checkout's: a task's
     # base must not depend on where the operator was standing (§5.7).
     _, base_sha = package_phase.fetch_default_branch(mirror, url)
+    # The same string `resolve_repo_id`'s own callers already have in hand —
+    # this repo's own ledger holds the SSH form (`git@github.com:...`), not
+    # the https one, so whatever `real_remote` returned above is the form to
+    # read it back with. `None` for a repo the ledger has never seen, which
+    # `_resolve_stacked_on` treats as nothing to stack on.
+    repo_id = ledger.resolve_repo_id(url)
 
     # Read before an image is built or a container is started, from `base_sha`
     # — never `repo`, the working copy (item 13, item 15 are both that
@@ -248,6 +341,19 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     ceilings, in_force = _ceilings(args, spec)
     print(f"ceilings: {in_force}")
 
+    # Resolved from `depends_on[0]`'s newest waiting task, or `(None, None)`
+    # together for an ordinary unstacked cell (`_resolve_stacked_on`,
+    # `SA-0026`) — the one place a `CellSpec` is built, so this is the only
+    # place either has to be read.
+    stacked_on, target_branch = _resolve_stacked_on(
+        ledger, repo_id, spec.depends_on, mirror=mirror, url=url
+    )
+    # Printed for the same reason the ceilings are: which tree a run was cut
+    # from is not recoverable from the exit code, and a stacked run that
+    # surprises an operator is one they cannot diagnose.
+    if stacked_on is not None:
+        print(f"stacked on {target_branch} @ {stacked_on[:12]}")
+
     cell_spec = CellSpec(
         spec_id=spec.id,
         spec_sha=spec_sha,
@@ -259,10 +365,7 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         forbidden=spec.forbidden,
         acceptance=spec.acceptance,
         risk=spec.risk,
-        # Deliberately unset, and the only thing that keeps stacking off:
-        # `spec.depends_on` is not consulted on this path. `SA-0025` resolves
-        # a real parent here.
-        stacked_on=None,
+        stacked_on=stacked_on,
         **ceilings,
     )
     outcome = run_one_cell(
@@ -279,6 +382,9 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
             ledger=ledger,
             out_dir=out_dir,
             token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+            # `None` unless `stacked_on` is too: a stacked worktree must not
+            # reach a pull request that is not.
+            parent_branch=target_branch,
         )
         print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
         return CELL_EXIT.get(result.state, 1)

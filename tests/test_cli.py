@@ -1,6 +1,7 @@
 """The operator's only entry point, so it gets at least one end-to-end test."""
 
 import argparse
+import functools
 import hashlib
 import json
 import subprocess
@@ -256,6 +257,29 @@ def _local_origin(tmp_path):
     return repo
 
 
+def _push_parent_branch(repo, branch, *, content="the parent's work\n"):
+    """A real branch on the real origin, at a real commit. `_resolve_stacked_on`
+    fetches the parent rather than trusting the ledger's recorded sha, so a
+    parent that exists only as a ledger row is not a parent."""
+    was = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    _git(repo, "checkout", "-q", "-b", branch)
+    (repo / f"{branch.replace('/', '-')}.txt").write_text(content)
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", branch)
+    head = _rev_parse(repo, "HEAD")
+    _git(repo, "push", "-q", "origin", branch)
+    _git(repo, "checkout", "-q", was)
+    return head
+
+
+def _mirror_of(tmp_path, repo, *, name="resolver.git"):
+    """The pair `_resolve_stacked_on` needs, built the way `_run_cell` builds
+    them: a real bare mirror and the origin url it fetches from."""
+    from saffron.repos import mirror as git_mirror
+
+    return git_mirror.ensure_mirror(repo, tmp_path / name), package.real_remote(repo)
+
+
 def _local_origin_with_policy(tmp_path, policy_yaml, *, dirname="repo-protected"):
     """`_local_origin`, plus a real `.saffron/policy.yaml` committed *before*
     the bare clone is cut — the same ordering `_repo_with_spec` uses, and for
@@ -283,7 +307,10 @@ def _ceiling_spec(tmp_path, **frontmatter):
     return spec
 
 
-def _capture_cell_spec(monkeypatch, repo, tmp_path, namespace, capsys):
+def _capture_cell_spec(monkeypatch, repo, tmp_path, namespace, capsys, ledger=None):
+    """`ledger` is `None` for every caller before `SA-0026` — a fresh, unseeded
+    one, same as always. A caller proving `depends_on` resolution needs one
+    already carrying a parent's row, so it may pass its own instead."""
     captured: dict = {}
 
     def _capture(cell_spec, **_kwargs):
@@ -293,7 +320,7 @@ def _capture_cell_spec(monkeypatch, repo, tmp_path, namespace, capsys):
     monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
     monkeypatch.setattr("saffron.cli.run_one_cell", _capture)
     with pytest.raises(SystemExit):
-        cli._run_cell(namespace, Ledger(tmp_path / "l.db"), tmp_path / "out")
+        cli._run_cell(namespace, ledger or Ledger(tmp_path / "l.db"), tmp_path / "out")
     return captured["spec"], capsys.readouterr().out
 
 
@@ -365,11 +392,12 @@ def test_a_specs_declared_risk_reaches_the_cell(tmp_path, monkeypatch, capsys):
 
 
 def test_a_depends_on_reaches_the_cell_unstacked(tmp_path, monkeypatch, capsys):
-    """The half-built path (criteria 1-4) cannot be reached by an attended
-    run: `_run_cell` never consults `depends_on` at all — that is the
-    dependency gate's job, in `saffron/scheduler.py`, forbidden here and out
-    of scope (`SA-0025`) — so a spec declaring one still gets an ordinary,
-    unstacked `CellSpec`."""
+    """`_run_cell` does consult `depends_on` now (`SA-0026`,
+    `_resolve_stacked_on`) — but this repo's fresh `Ledger` has never seen
+    this origin, so `resolve_repo_id` finds nothing and resolution falls
+    through to unstacked, the correct answer for a repo the ledger has no
+    history for. `test_a_resolvable_parent_reaches_the_cell_stacked` below is
+    the seeded-ledger case this one is not."""
     repo = _local_origin(tmp_path)
     args = _namespace(repo, tmp_path)
     args.spec = _ceiling_spec(tmp_path, depends_on="[SA-0001]")
@@ -380,6 +408,358 @@ def test_a_depends_on_reaches_the_cell_unstacked(tmp_path, monkeypatch, capsys):
     # a field silently dropped at intake would leave this green.
     assert intake.load_spec(args.spec)[0].depends_on == ["SA-0001"]
     assert cell_spec.stacked_on is None
+
+
+def test_a_resolvable_parent_reaches_the_cell_stacked(tmp_path, monkeypatch, capsys):
+    """The seeded-ledger half of the claim above: a parent recorded
+    `READY_FOR_REVIEW`, with its branch really pushed, resolves to a real
+    `CellSpec.stacked_on` — read back through the whole of `_run_cell` from a
+    ledger row and a git ref the test did not hand the resolver.
+
+    The recorded `pushed_sha` is deliberately a commit no repository holds:
+    the ledger says *which branch*, and the branch says which commit."""
+    repo = _local_origin(tmp_path)
+    head = _push_parent_branch(repo, "saffron/SY-9000")
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
+
+    ledger = Ledger(tmp_path / "seeded.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    parent = _seed_task(ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW")
+    ledger.record_push(parent, "d" * 40)
+
+    cell_spec, printed = _capture_cell_spec(
+        monkeypatch, repo, tmp_path, args, capsys, ledger=ledger
+    )
+
+    assert cell_spec.stacked_on == head != "d" * 40
+    # Which tree a run was cut from is not in the exit code.
+    assert f"stacked on saffron/SY-9000 @ {head[:12]}" in printed
+
+
+def test_a_parent_branch_the_mirror_cannot_reach_is_an_unstacked_cell(
+    tmp_path, monkeypatch, capsys
+):
+    """`ensure_mirror` fetches `+refs/*:refs/*` from the operator's local
+    checkout with `--prune`, so a parent branch they do not happen to have
+    locally is deleted from the mirror — this repo's own mirror had already
+    lost `saffron/SA-0025` that way. The resolver fetches the branch itself;
+    when there is none to fetch, the answer is an ordinary unstacked cell and
+    a line saying so, never a dead run."""
+    repo = _local_origin(tmp_path)
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
+
+    # Everything the ledger can say is right; the branch is simply not there.
+    ledger = Ledger(tmp_path / "seeded.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    parent = _seed_task(ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW")
+    ledger.record_push(parent, "d" * 40)
+
+    cell_spec, printed = _capture_cell_spec(
+        monkeypatch, repo, tmp_path, args, capsys, ledger=ledger
+    )
+
+    assert cell_spec.stacked_on is None
+    assert "unstacked: parent branch saffron/SY-9000 is gone" in printed
+
+
+def test_the_cell_is_cut_from_the_branchs_head_not_the_ledgers_recorded_sha(
+    tmp_path, monkeypatch, capsys
+):
+    """`pushed_sha` is written once, by PACKAGE. Every review fix an operator
+    commits by hand moves the branch past it, so the recorded sha is a tree
+    the parent's pull request no longer shows — measured on this repository:
+    task 26's `pushed_sha` was a commit behind `saffron/SA-0026`'s head while
+    that pull request was open. A child cut from the recorded sha spends a
+    whole cell on code the operator has already amended."""
+    repo = _local_origin(tmp_path)
+    packaged = _push_parent_branch(repo, "saffron/SY-9000")
+
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
+
+    ledger = Ledger(tmp_path / "seeded.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    parent = _seed_task(ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW")
+    ledger.record_push(parent, packaged)
+
+    # The operator's review fix, after PACKAGE recorded the push.
+    _git(repo, "checkout", "-q", "saffron/SY-9000")
+    (repo / "fix.txt").write_text("the operator's review fix\n")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "fix")
+    reviewed = _rev_parse(repo, "HEAD")
+    _git(repo, "push", "-q", "origin", "saffron/SY-9000")
+    _git(repo, "checkout", "-q", "-")
+
+    cell_spec, _printed = _capture_cell_spec(
+        monkeypatch, repo, tmp_path, args, capsys, ledger=ledger
+    )
+
+    assert cell_spec.stacked_on == reviewed != packaged
+
+
+def test_a_stacked_worktree_passes_its_parents_branch_to_package(
+    tmp_path, monkeypatch, capsys
+):
+    """Criterion 4: a task whose worktree was stacked must not reach a pull
+    request that is not — `parent_branch` has to travel the same path as
+    `stacked_on`, all the way to the `package()` call."""
+    repo = _local_origin(tmp_path)
+    _push_parent_branch(repo, "saffron/SY-9000")
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
+
+    ledger = Ledger(tmp_path / "seeded.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    parent = _seed_task(ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW")
+    ledger.record_push(parent, "d" * 40)
+
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    monkeypatch.setattr(
+        "saffron.cli.run_one_cell",
+        lambda cell_spec, **k: session.CellOutcome(
+            state="READY_FOR_REVIEW", task_id=1, run_id=1, task_dir=tmp_path
+        ),
+    )
+    captured: dict = {}
+
+    def _fake_package(outcome, **kwargs):
+        captured.update(kwargs)
+        return package.PackageResult(
+            state="READY_FOR_REVIEW", pr_url="https://github.com/o/r/pull/1"
+        )
+
+    monkeypatch.setattr(cli.package_phase, "package", _fake_package)
+
+    assert cli._run_cell(args, ledger, tmp_path / "out") == 0
+
+    assert captured["parent_branch"] == "saffron/SY-9000"
+
+
+def test_an_unstacked_worktree_passes_no_parent_branch_to_package(
+    tmp_path, monkeypatch, capsys
+):
+    """The converse, and what `SA-0025`'s deleted text-search guard was
+    reaching for: the parent branch is `None` on the path an operator takes
+    for a spec with nothing to stack on. Asserted on the call `package()`
+    actually received, so a keyword spelled some other way cannot satisfy it.
+    """
+    repo = _local_origin(tmp_path)
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
+
+    # Seeded, so the repo row exists and resolution genuinely runs — the
+    # parent's task is `MERGED`, which needs no stacking.
+    ledger = Ledger(tmp_path / "seeded.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    parent = _seed_task(ledger, repo_id, spec_id="SY-9000", state="MERGED")
+    ledger.record_push(parent, "d" * 40)
+
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    monkeypatch.setattr(
+        "saffron.cli.run_one_cell",
+        lambda cell_spec, **k: session.CellOutcome(
+            state="READY_FOR_REVIEW", task_id=1, run_id=1, task_dir=tmp_path
+        ),
+    )
+    captured: dict = {}
+
+    def _fake_package(outcome, **kwargs):
+        captured.update(kwargs)
+        return package.PackageResult(
+            state="READY_FOR_REVIEW", pr_url="https://github.com/o/r/pull/1"
+        )
+
+    monkeypatch.setattr(cli.package_phase, "package", _fake_package)
+
+    assert cli._run_cell(args, ledger, tmp_path / "out") == 0
+
+    assert "parent_branch" in captured and captured["parent_branch"] is None
+
+
+def test_only_the_first_depends_on_entry_is_a_stacking_candidate(tmp_path):
+    """K=1: a spec with two unmerged parents does not stack on either one it
+    does not name first — `depends_on[1]`'s own resolvable, waiting task and
+    its real pushed branch must not leak into the result just because they
+    could stack too."""
+    repo = _local_origin(tmp_path)
+    _push_parent_branch(repo, "saffron/SY-2")
+    mirror, url = _mirror_of(tmp_path, repo)
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, "/o")
+    second = _seed_task(ledger, repo_id, spec_id="SY-2", state="READY_FOR_REVIEW")
+    ledger.record_push(second, "b" * 40)
+
+    stacked_on, parent_branch = cli._resolve_stacked_on(
+        ledger, repo_id, ["SY-1", "SY-2"], mirror=mirror, url=url, watch=lambda _: None
+    )
+
+    assert (stacked_on, parent_branch) == (None, None)
+    ledger.close()
+
+
+def test_which_of_a_parents_rows_supplies_the_sha_is_the_newest_waiting_one(
+    tmp_path,
+):
+    """This repo's own ledger holds ten tasks at one `spec_id`, mixing
+    `READY_FOR_REVIEW` with three `ORPHANED` (`SA-0013`) — "the parent's
+    task" is not a thing that exists until this states which row wins."""
+    repo = _local_origin(tmp_path)
+    head = _push_parent_branch(repo, "saffron/SA-0013")
+    mirror, url = _mirror_of(tmp_path, repo)
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, "/o")
+    states = [
+        "QUEUED",
+        "ORPHANED",
+        "REJECTED",
+        "ORPHANED",
+        "EXHAUSTED",
+        "CHANGES_REQUESTED",
+        "ORPHANED",
+        "GATE_ERROR",
+        "READY_FOR_REVIEW",
+        "NOT_IMPLEMENTED",
+    ]
+    assert len(states) == 10
+    assert states.count("ORPHANED") == 3
+    waiting_row = None
+    for i, state in enumerate(states):
+        task_id = _seed_task(
+            ledger, repo_id, spec_id="SA-0013", state=state, spec_sha=f"{i}" * 40
+        )
+        ledger.record_push(task_id, str(i) * 40)
+        if state == "READY_FOR_REVIEW":
+            waiting_row = task_id
+
+    stacked_on, parent_branch = cli._resolve_stacked_on(
+        ledger, repo_id, ["SA-0013"], mirror=mirror, url=url, watch=lambda _: None
+    )
+
+    # The only READY_FOR_REVIEW row is index 8, and it is what admits the
+    # parent at all. The sha is the branch's, not that row's `pushed_sha`
+    # (which is `8` * 40, a commit no repository holds).
+    assert (stacked_on, parent_branch) == (head, "saffron/SA-0013")
+
+    # ...and with that one row's state changed, the same ten rows and the
+    # same real branch resolve to nothing: it is the state that decides.
+    ledger.set_task_state(waiting_row, "ORPHANED")
+    assert cli._resolve_stacked_on(
+        ledger, repo_id, ["SA-0013"], mirror=mirror, url=url, watch=lambda _: None
+    ) == (None, None)
+    ledger.close()
+
+
+def test_the_newest_of_several_waiting_rows_wins_not_the_first(tmp_path):
+    """Waiting outranks dead whatever the row order, the same precedence
+    `scheduler._dependency_refusal` gives it — proven here by a row that
+    would win under "first waiting" losing to a later, still-waiting one.
+
+    The rows carry *different* branches, which a task's rows normally do not:
+    since the sha is now fetched from the branch, rows sharing one branch
+    resolve to one sha whichever wins, and the choice would be unobservable."""
+    repo = _local_origin(tmp_path)
+    first = _push_parent_branch(repo, "saffron/SY-9-first")
+    newest = _push_parent_branch(repo, "saffron/SY-9-newest")
+    assert first != newest
+    mirror, url = _mirror_of(tmp_path, repo)
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, "/o")
+    for state, branch in [
+        ("READY_FOR_REVIEW", "saffron/SY-9-first"),
+        ("ORPHANED", "saffron/SY-9-orphan"),
+        ("APPROVED", "saffron/SY-9-newest"),
+    ]:
+        task_id = _seed_task(
+            ledger, repo_id, spec_id="SY-9", state=state, branch=branch
+        )
+        ledger.record_push(task_id, "1" * 40)
+
+    stacked_on, branch = cli._resolve_stacked_on(
+        ledger, repo_id, ["SY-9"], mirror=mirror, url=url, watch=lambda _: None
+    )
+
+    assert (stacked_on, branch) == (newest, "saffron/SY-9-newest")
+    ledger.close()
+
+
+@pytest.mark.parametrize(
+    "bad_sha",
+    [None, "", "not-a-sha", "abc123", "g" * 40, "a" * 40 + " ; rm -rf /"],
+    ids=["absent", "empty", "short-non-hex", "too-short", "non-hex-40", "trailing"],
+)
+def test_an_unresolved_pushed_sha_yields_an_unstacked_cell_not_a_construction_error(
+    tmp_path, bad_sha
+):
+    """`CellSpec.__post_init__` (`SA-0022`) raises `ValueError` on anything
+    that is not `None` or a resolved sha — an operator's `saffron cell` must
+    not die on a parent row this attended path cannot fully trust."""
+    repo = _local_origin(tmp_path)
+    # Pushed for real, so the fetch below would succeed: the only thing that
+    # can refuse this row is the recorded push it does not evidence.
+    _push_parent_branch(repo, "saffron/SY-9")
+    mirror, url = _mirror_of(tmp_path, repo)
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, "/o")
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-9", state="READY_FOR_REVIEW")
+    if bad_sha is not None:
+        ledger.record_push(task_id, bad_sha)
+
+    stacked_on, parent_branch = cli._resolve_stacked_on(
+        ledger, repo_id, ["SY-9"], mirror=mirror, url=url, watch=lambda _: None
+    )
+
+    assert (stacked_on, parent_branch) == (None, None)
+    ledger.close()
+
+
+def test_a_row_with_no_branch_recorded_resolves_unstacked(tmp_path):
+    """`tasks.branch` is nullable (`ledger.py`), and the branch is the half
+    the ledger actually contributes now — a row without one cannot name a
+    parent to fetch, however good its `pushed_sha` looks."""
+    repo = _local_origin(tmp_path)
+    _push_parent_branch(repo, "saffron/SY-9")
+    mirror, url = _mirror_of(tmp_path, repo)
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, "/o")
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-9", state="READY_FOR_REVIEW")
+    ledger.record_push(task_id, "1" * 40)
+    ledger._db.execute("UPDATE tasks SET branch = NULL WHERE task_id = ?", (task_id,))
+    ledger._db.commit()
+
+    said = []
+    assert cli._resolve_stacked_on(
+        ledger, repo_id, ["SY-9"], mirror=mirror, url=url, watch=said.append
+    ) == (None, None)
+    # The row, not a ref that was never looked for.
+    assert said == ["unstacked: SY-9's newest waiting task records no pushed branch"]
+    ledger.close()
+
+
+def test_no_repo_id_or_no_depends_on_resolves_unstacked(tmp_path):
+    """A repo the ledger has never seen and a spec naming no parent are both
+    the ordinary case, not an edge one — neither should need a task row to
+    answer `(None, None)`."""
+    repo = _local_origin(tmp_path)
+    _push_parent_branch(repo, "saffron/SY-9")
+    mirror, url = _mirror_of(tmp_path, repo)
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, "/o")
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-9", state="READY_FOR_REVIEW")
+    ledger.record_push(task_id, "1" * 40)
+
+    resolve = functools.partial(
+        cli._resolve_stacked_on, mirror=mirror, url=url, watch=lambda _: None
+    )
+    assert resolve(ledger, None, ["SY-9"]) == (None, None)
+    assert resolve(ledger, repo_id, []) == (None, None)
+    ledger.close()
 
 
 def test_a_specs_declared_witnesses_reach_the_cell(tmp_path, monkeypatch, capsys):
@@ -694,10 +1074,15 @@ def _seed_repo(ledger, origin, *, name="repo"):
     return ledger.upsert_repo(name, origin, "/m.git", policy_sha="p" * 64)
 
 
-def _seed_task(ledger, repo_id, *, spec_id, state, pr_url=None, spec_sha="s" * 40):
+def _seed_task(
+    ledger, repo_id, *, spec_id, state, pr_url=None, spec_sha="s" * 40, branch=None
+):
     run_id = ledger.create_run(repo_id, base_sha="a" * 40)
     task_id = ledger.create_task(
-        run_id, spec_id=spec_id, spec_sha=spec_sha, branch=f"saffron/{spec_id}"
+        run_id,
+        spec_id=spec_id,
+        spec_sha=spec_sha,
+        branch=branch or f"saffron/{spec_id}",
     )
     ledger.set_task_state(task_id, state)
     if pr_url is not None:
