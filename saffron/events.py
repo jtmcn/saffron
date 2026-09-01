@@ -38,9 +38,22 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Literal
 
-GateStatus = Literal["pass", "fail", "skip", "error"]
+from saffron.gates.contract import GateStatus
 
-PhaseName = Literal[
+# CONTEXT.md is the authority and it names six: DIAGNOSE, IMPLEMENT,
+# GATE <-> REPAIR, REVIEW, REBUT, PACKAGE. Imported nowhere from because the
+# gate contract does not model phases; restated here, deliberately, as the only
+# place the host's own event vocabulary needs them.
+Phase = Literal["DIAGNOSE", "IMPLEMENT", "GATE", "REPAIR", "REVIEW", "REBUT", "PACKAGE"]
+
+# The prefix a progress line actually carries, which is *not* the same set.
+# `PLAN:` and `SALVAGE:` both print from inside IMPLEMENT and `SCOPE:` from
+# inside DIAGNOSE, so labelling them phases would restate in code exactly the
+# conflation CONTEXT.md exists to prevent — it lists "PLAN" on the plan
+# checkpoint's own _Avoid_ line and says the checkpoint is deliberately not a
+# phase. Both fields are carried: the phase for anything grouping by it, the
+# label so `SA-0040` can reproduce the line verbatim.
+LineLabel = Literal[
     "SCOPE", "PLAN", "IMPLEMENT", "SALVAGE", "REPAIR", "REVIEW", "REBUT", "PACKAGE"
 ]
 
@@ -88,14 +101,20 @@ class Baseline:
 @dataclass(frozen=True, slots=True)
 class PhaseStart:
     """A phase-scoped progress fact — roughly thirty of the 64 lines are this
-    shape. `phase` is a real field so a renderer knows which of the eight
-    phases produced it without parsing it back out of `detail`; `detail`
-    carries what is left, which is everything a message string would have
-    carried alone."""
+    shape. `phase` is the phase it happened in and `label` is the prefix the
+    line carries; they differ for `PLAN:`, `SALVAGE:` and `SCOPE:`, and
+    collapsing them is the thing CONTEXT.md's plan-checkpoint entry forbids.
+
+    ponytail: `detail` is a free string, and it is the one place in this
+    vocabulary where prose survives. Typing the roughly thirty line families
+    behind it is `SA-0040`'s mapping table, which either types them or names
+    the ones that resist; until then this field is the ceiling, not the
+    design."""
 
     timestamp: float
     spec_id: str
-    phase: PhaseName
+    phase: Phase
+    label: LineLabel
     detail: str = ""
 
 
@@ -129,7 +148,12 @@ class GateResult:
     spec_id: str
     gate: str
     status: GateStatus
-    new_failures: int = 0
+    # `None`, not `0` — the same absence-vs-zero rule `Attempt.new_failures`
+    # already follows. A `skip` or `error` never had a count computed, and a
+    # renderer that cannot tell that from a verified zero reports "0 new
+    # failures" for a gate that never ran. That is `tool`'s defect (§5.4,
+    # Appendix H) one layer out.
+    new_failures: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,7 +273,12 @@ class EventLog:
             with self._path.open("a") as handle:
                 handle.write(json.dumps(payload) + "\n")
                 handle.flush()
-        except OSError:
+        except (OSError, TypeError, ValueError):
+            # Not only OSError: `Agent.event` carries a cell-authored dict
+            # verbatim, so a value that is not JSON-serialisable raises
+            # TypeError from `json.dumps` and would cross the boundary this
+            # method's whole contract is that nothing crosses. Untrusted input
+            # reaching a host-side writer is exactly the case to swallow.
             return
 
 

@@ -25,7 +25,13 @@ from saffron.events import (
 _ONE_OF_EACH = [
     Preflight(timestamp=1.0, spec_id="SA-0029", step="proxy_start", detail="up"),
     Baseline(timestamp=2.0, spec_id="SA-0029", aborted=("tests",)),
-    PhaseStart(timestamp=3.0, spec_id="SA-0029", phase="IMPLEMENT", detail="3 commits"),
+    PhaseStart(
+        timestamp=3.0,
+        spec_id="SA-0029",
+        phase="IMPLEMENT",
+        label="SALVAGE",
+        detail="3 commits",
+    ),
     Attempt(
         timestamp=4.0,
         spec_id="SA-0029",
