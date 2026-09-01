@@ -372,6 +372,28 @@ as regenerating a golden fixture after a migration.
   unsatisfied `depends_on`. This check costs nothing; `SA-0021` cost $0.82 to
   learn the same thing after a mirror fetch, an image build and a model turn.
 
+  **L4 runs before this step, and the plan had them the other way round.**
+  `saffron queue` exports `.saffron/specs/` from the *mirror* at the default
+  branch's head — `cli.py` says `never the working copy (SA-0023)` in as many
+  words — and the mirror is fetched from `origin`. A spec that is uncommitted,
+  or committed and unpushed, is simply **not there**, and the command then
+  prints `queue: 0 candidate(s) / refusals: 0`. That is indistinguishable from
+  a clean pass. Measured on `SA-0029`: uncommitted, `0/0`; committed but
+  unpushed, `0/0`; pushed, one refusal naming a real defect. So commit and push
+  first (**L4**), then run this. `saffron cell` is unaffected either way —
+  `cli.py` loads the spec by the path you hand it, from the working copy — so
+  the cell would have run happily against a spec gate 0 refuses, which is
+  exactly the money this step exists to save.
+
+  **Gate 0 reports only the *first* unmatched criterion path.**
+  `_unmatched_criterion_path` returns on the first token that matches no
+  `touches` pattern, so a spec with three bad citations refuses three times,
+  one cell apart, unless you read the rest yourself. Note also that the token
+  is matched *as written*: a citation of `report/index.py` is not absorbed by a
+  `forbidden` entry of `saffron/report/**`, because the prefix is missing. Cite
+  by file and symbol and the whole class disappears — which is what the design
+  document already tells you to do.
+
   **Under the stack workflow this check only means something for the first
   spec of each stack.** Once one pull request is open, `queue` refuses every
   later spec on `an open pull request from another task already targets this
@@ -972,8 +994,12 @@ is this spec's.
 - [ ] Every new test runs with no network and no cell, and the golden-output
       test is **not** `cell`-marked, for the reason `SA-0030` gives: `addopts`
       would exclude it and the migration would verify against a skipped
-      assertion. `tests/test_package_cell.py` is the one file here that is
-      genuinely cell-marked; nothing new joins it
+      assertion. **Two of the seven test files in `touches` are cell-marked,
+      not one** — `tests/test_package_cell.py` and `tests/test_agent_runner.py`
+      — so their `watch=` sites are excluded from `make check` and the suite
+      will not catch a migration that breaks them. Migrate both, run
+      `uv run pytest -m cell` against them explicitly, and say in the pull
+      request body that you did. Nothing new joins them
 
 ## Out of scope
 **Everything in `saffron/cell/session.py` except the adapter and the eleven
