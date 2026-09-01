@@ -82,16 +82,28 @@ For each spec `next` names:
 reach any other shell (`.envrc` deliberately does not load it):
 
 ```bash
-env CLAUDE_CODE_OAUTH_TOKEN="$(bash -c 'source ~/.secrets; printf %s "$CLAUDE_CODE_OAUTH_TOKEN"')" \
-  uv run saffron cell .saffron/specs/SA-0028-*.md --repo .
+PYTHONUNBUFFERED=1 env CLAUDE_CODE_OAUTH_TOKEN="$(bash -c 'source ~/.secrets; printf %s "$CLAUDE_CODE_OAUTH_TOKEN"')" \
+  uv run saffron cell .saffron/specs/SA-0028-*.md --repo . > /tmp/SA-0028.log 2>&1
 ```
+
+`PYTHONUNBUFFERED=1` is not optional. Redirected to a file, the CLI's stdout is
+block-buffered and the watch lines sit in a 4KB buffer — measured, the log stayed
+at 0 bytes while `container list` showed the cell running and the batch directory
+filling. Without it the Monitor below reports nothing for most of the run.
 
 Run it in the background — a cell takes 30–60 minutes — and watch for phase
 lines with a Monitor on the output file:
 
 ```
-^(IMPLEMENT|GATE|REVIEW|REBUT|PACKAGE|READY|EXHAUSTED|NOT_IMPLEMENTED|PLAN_REJECTED|MERGE_FAILED|gates:|baseline:|ceilings:|teardown:)|Traceback
+^(IMPLEMENT|GATE|REVIEW|REBUT|PACKAGE|gates:|baseline:|ceilings:|teardown|rate limit)|(READY_FOR_REVIEW|EXHAUSTED|NOT_IMPLEMENTED|PLAN_REJECTED|MERGE_FAILED|RATE_LIMITED)|Traceback
 ```
+
+The terminal states are in a **second, unanchored** group on purpose. The line
+that carries them is `saffron/cli.py`'s `f"{spec.id:<10} {outcome.state}"` — the
+padded spec id is at column 0, so `^RATE_LIMITED` matches nothing. Only the
+states that also reach `session.py`'s `watch(f"{outcome}: …")` print at column 0,
+and `PLAN_REJECTED`, the budget `EXHAUSTED` and `NOT_IMPLEMENTED` all return
+before it. Anchoring them read as a watched terminal state and was not one.
 
 Exit codes are load-bearing: `0` reviewable, `1` the task did not make it,
 `2` infrastructure failed.
@@ -113,6 +125,44 @@ SA-0013  MERGED  #51
 Read from the ledger, never from the transcript (§4.3). Any state other than
 `READY_FOR_REVIEW` exits 1 — that spec is out of the stack; keep going.
 
+**Except a state that decided nothing**, where `record` prints the state, exits
+1, and leaves the spec **pending** with `last_state` set. The rule is
+`scheduler.DONE_STATES`, gate 0's own "running it again learns nothing new"
+(§4.2.1), not a second list: a state outside it means no cell has answered this
+spec.
+
+A pending spec `record` has touched is *not* handed back by `next` — it walks
+past to the next untouched spec, because handing back a rate-limited head of the
+plan inside the same closed window loops forever and makes every spec behind it
+unreachable. `status` shows which is which (`pending  (last RATE_LIMITED, 1
+attempt(s))`), `next --retry` overrides once the window has reopened, and `skip`
+removes the spec for good. Two shapes, both measured on the first real batch:
+
+- **`RATE_LIMITED`, which is not `EXHAUSTED`.** A provider ceiling stopped the
+  run before it decided anything. Re-run with `next --retry` once the window
+  reopens; the cell's own line says when:
+
+  ```
+  rate limit: rejected — stopping, not exhausted; window reopens 00:20 local
+  SA-0028    RATE_LIMITED
+  ```
+
+  That run is money already spent and not recoverable — the re-run starts from
+  `base_sha` again. This is the one failure a second cell run is right for.
+
+- **`IMPLEMENTING` / `REPAIRING` / `REVIEWING` / `REBUTTING` — you recorded too
+  early.** The cell is still running and the ledger row is live. `record` says
+  so rather than freezing a phase name into the plan:
+
+  ```
+  SA-0027  REBUTTING  (no PR)
+  left pending: the cell is still running — wait for it to exit, then record again.
+  ```
+
+  Wait for the cell process to exit, not for a log line: `READY_FOR_REVIEW`
+  prints *before* PACKAGE opens the pull request, so recording on that line
+  gets a task with no PR.
+
 If `record` errors (`no task for SA-00NN at <sha> — did the cell run?`), the
 spec's state stays unset and **`next` will hand you the same spec again**.
 Re-run the cell once, or take it out of the loop deliberately:
@@ -122,7 +172,8 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py skip SA-0028 --why "cell d
 ```
 
 Never re-run a cell more than once on the same failure — that is an hour and
-real money per pass.
+real money per pass. A rate limit is the exception above, and it is not the
+same failure: nothing about the task failed.
 
 **c. Address the in-cell critic.** Findings are at
 `~/.saffron/batches/v0/<SPEC-ID>/findings.json`:
@@ -142,8 +193,16 @@ fix, and commit on the branch. `git checkout saffron/SA-0028`.
 
 **d. Independent review.** Invoke `superpowers:requesting-code-review` and
 dispatch one `general-purpose` subagent per PR with the full spec text, the
-git range, and an instruction to mutation-test its own findings. Fix what
-survives verification.
+git range, and an instruction to mutation-test its own findings.
+
+Tell it, in these words, to **walk the acceptance criteria one at a time, give
+the file:line that satisfies each, then try to kill that line with a
+mutation.** That instruction is what found the two worst defects of the first
+batch: a criterion satisfied only by a comment (rewriting the line it named
+passed 159 tests) and a rule the criteria require be `scope.matches` that no
+test could tell from `==`. Verify every finding against the code yourself
+before acting on it, and re-run its mutation — a finding's own claim to have
+been verified is part of what you are reviewing.
 
 **e. Verify and push.**
 
@@ -169,15 +228,14 @@ error: a stack needs two or more reviewable pull requests; have 0
 ```
 
 Once two specs are `READY_FOR_REVIEW` the dry run prints the plan and the
-command. **The block below was produced by forcing two merged specs' states in
-`plan.json` by hand** — the PR numbers are real, the stack has never been built:
+command. Real output from the first batch this skill ran:
 
 ```
 stack, bottom to top:
-  #82  SA-0025  (saffron/SA-0025)
-  #84  SA-0026  (saffron/SA-0026)
+  #87  SA-0028  (saffron/SA-0028)
+  #88  SA-0027  (saffron/SA-0027)
 
-  gh stack link 82 84
+  gh stack link 87 88
 
 not passing --open: PACKAGE opens drafts on purpose (DESIGN.md §5.7),
 and ratifying one is `gh pr ready <n>` — the operator's call, not this
@@ -204,14 +262,27 @@ gh pr view 86 --json number,isDraft,baseRefName,headRefName \
 {"base":"main","draft":false,"head":"joel/spec-loop-skill","n":86}
 ```
 
-Run it per PR and record `baseRefName` **before and after** `--execute`:
-whether `link` retargets an existing PR's base is the one thing about it this
-skill has not measured. Then hand the operator the stack URL `link` printed.
+**`link` does retarget the base — measured.** `#88 base=main` became
+`base=saffron/SA-0028`:
+
+```
+$ uv run .claude/skills/run-saffron-spec-loop/driver.py stack --execute
+Checking existing stacks...
+Looking up PRs for 2 branches...
+✓ Updated base branch for PR #88 to saffron/SA-0028
+✓ Created stack with 2 PRs (stack #89)
+```
+
+Each PR's *diff* stays correct — GitHub computes it from the merge base, so
+#88 still showed only its own seven files. What changes is the merge, and for
+sibling branches that is the trap in the next section.
 
 ## Exit codes
 
 `0` the command did what it says; `1` everything else — a usage error, an empty
-plan, a spec that is not reviewable, or `next` with nothing left. The driver
+plan, a spec that is not reviewable, or `next` with nothing left to hand back
+(either every spec is run, or every pending one has already had a cell — the
+message says which). The driver
 never returns `2`: `saffron/cli.py` reserves that for infrastructure, and this
 script is not it.
 
@@ -258,9 +329,25 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py status
   and leave them based on the default branch — a "stack" of siblings is a
   review convenience, not a claim about the code.
 
-- **`gh stack submit` opens an interactive editor** and cannot be driven by an
-  agent. `--auto` skips it but creates *new* PRs. Since PACKAGE already opened
-  them, `gh stack link` is the non-interactive path. Don't reach for `submit`.
+- **`link` is the command for these branches; `submit` is not.** There is now a
+  `gh-stack` skill, and it is authoritative: `link` "creates or updates a stack
+  on GitHub **without any local tracking state** … the path for branches managed
+  by another tool or living in another worktree", which is exactly Saffron's
+  branches. `submit` works from the *local* stack, pushes every branch with
+  `--force-with-lease`, and is not atomic. (An earlier version of this file said
+  `submit --auto` "creates new PRs" — it does not: it opens one only for a
+  branch that lacks one, and PACKAGE has already opened them all. The conclusion
+  held for the wrong reason.) `gh stack submit` also opens an interactive editor
+  without `--auto`. Don't reach for `submit`.
+
+- **`gh stack link <pr> <pr>` is ambiguous in its first argument.** Per
+  `gh-stack`'s reference: "a numeric first argument is treated as a stack number
+  only when a stack with that number exists," and then the remaining arguments
+  are *appended to that stack* rather than forming the intended one. `stack`
+  builds its command from PR numbers, and stack numbers appear to come from the
+  same repo-wide counter (#87/#88 produced stack #89), so a collision is
+  unlikely rather than impossible. Run `gh stack view` after `--execute` and read
+  what it actually built.
 
 - **Do not pass `--open`.** It flips every PR in the stack from draft to ready
   for review. PACKAGE opens drafts deliberately (§5.7).
@@ -282,6 +369,34 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py status
   `gh stack checkout <n>`, which refetches the stack from GitHub; nothing on
   the remote is touched by `--local`.
 
+- **A rate limit can land anywhere, including after the work is done.**
+  Measured on SA-0028's first run: IMPLEMENT made 4 commits, GATE went green,
+  the correctness lens ran — and the session limit hit during REBUT, at $7.92
+  of a $14 budget. `teardown` still exported `patch.diff`, but PACKAGE never
+  ran, so there is no branch and no pull request, and the re-run starts over.
+  Cost of the loop is therefore not bounded by the specs' budgets alone.
+  Check the provider window before starting a batch, not after.
+
+- **Two sibling specs will collide in an append-only document, on the number
+  as well as the text.** Measured: `SA-0027` and `SA-0028` both ran from the
+  same `base_sha`, and both appended `## 34.` to `docs/BACKLOG.md`. `gh stack
+  link` retargets the upper PR's base onto the lower one and GitHub then shows
+  a clean diff, so the stack *looks* right while `git merge-tree` says
+  otherwise:
+
+  ```
+  $ git merge-tree --write-tree origin/saffron/SA-0028 origin/saffron/SA-0027
+  CONFLICT (content): Merge conflict in docs/BACKLOG.md
+  ```
+
+  Check it before handing the stack over — a clean-looking PR page is not the
+  check. The fix is to rebase the upper branch onto the lower one, resolve
+  (renumber, then grep the *code* for comments citing the old number — four
+  cited `item 34` here), and force-push, which needs the operator's approval.
+  Prefer avoiding it: a spec with `depends_on` gets its worktree cut from the
+  parent's branch, so the second spec appends to a document that already has
+  the first spec's entry.
+
 - **`.saffron-loop/` is gitignored.** Run state, not source. A cell never sees
   it — the mirror is a `git clone --mirror`, so an untracked file cannot reach
   one — but it must never ride along in a review fix's commit either.
@@ -294,7 +409,8 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py status
 | `plan` prints `nothing to run: no candidate specs` | Every spec is already done at its current `spec_sha`, or all are refused — the refusals are printed under the plan. |
 | `record` says `no task for SA-00NN at <sha> — did the cell run?` | The spec file was edited after the cell ran, so its `spec_sha` moved. Re-run the cell, or revert the edit. |
 | `CLAUDE_CODE_OAUTH_TOKEN is unset` | The token must be scoped to the `saffron cell` invocation itself. Refresh with `claude setup-token`. |
-| Cell exits 2 | Infrastructure, not the task. Check `container system status` and that the images in `CLAUDE.md` are built. |
+| Cell exits 2 | Infrastructure, not the task — **or** a provider rate limit, which exits 2 as well. Read the last lines first: `rate limit: rejected` means wait for the window, not debug the host. Otherwise `container system start` (the service is down more often than the images are missing) and `container image list` — `container images list` is not a subcommand. |
+| `next` says `nothing untouched left` | Every remaining spec has already had a cell that decided nothing. It lists each with its `last_state`. A reopened rate-limit window is the case for `next --retry`; anything else wants `skip`. |
 | `gh stack link` rejects an argument | An argument already belongs to a different stack. `gh stack view --json` shows current tracking; `gh stack unstack --local <n>` clears local state for that stack without touching GitHub. |
 | `gh stack view` shows a stack you did not create | Local tracking from an earlier session. It is read-only information; leave it alone unless it collides. |
 
@@ -310,12 +426,18 @@ carrying `#51`, not the `NOT_IMPLEMENTED` row after it), `skip`, `status`,
 `gh stack init` / `view --short` / `view --json` / `rebase --no-trunk` /
 `unstack --local` sequence on throwaway local branches.
 
-**Run, output labelled above as reconstructed:** the populated `stack` dry run
-(states forced in `plan.json` by hand; PR numbers real) and the queue-collapse
-measurement (real `build_queue`, simulated open pull request).
+**Run, output labelled above as reconstructed:** the queue-collapse
+measurement only (real `build_queue`, simulated open pull request).
 
-**Not run:** `driver.py stack --execute`, and therefore `gh stack link` itself.
-It needs two open Saffron pull requests and none existed at authoring time.
-Everything said about it comes from `gh stack link --help`. In particular,
-whether it retargets an existing PR's base branch is **unmeasured** — record
-`baseRefName` before and after the first time you use it.
+**Run in anger, 2026-09-01** — the whole loop, end to end, over `SA-0028` and
+`SA-0027`, producing stack #89. `plan --force`, `next`, `record` (on a live
+`RATE_LIMITED` row, on a live `REBUTTING` row, and on both `READY_FOR_REVIEW`
+rows), `status`, `stack`, `stack --execute`. Three defects in this skill were
+found by that run and fixed: `record` consuming a spec on a state that decided
+nothing, the watch log being block-buffered so the phase lines never arrived,
+and the exit-2 troubleshooting row blaming infrastructure for a provider rate
+limit.
+
+**Not run:** nothing in this file. `stack --execute` and `gh stack link` were
+measured on the first batch (PRs #87 and #88, stack #89) and their output is
+reproduced verbatim above.
