@@ -695,11 +695,13 @@ def package(
         ):
             return _refuse(leaked, "the commit subjects")
 
+        # `tree_base`, not `base_sha`: this block records the cell's run, and
+        # the tree the cell built on is the second base when stacked.
         pushed = commit_squash(
             worktree_path,
             spec_id=spec.id,
             title=spec.title,
-            base_sha=base_sha,
+            base_sha=tree_base,
             cell_head=outcome.cell_head_sha,
             attempts=outcome.attempts,
             spent_usd=outcome.spent_usd,
@@ -767,7 +769,9 @@ def package(
             spec,
             gates,
             outcome.new_failures,
-            base_sha=base_sha,
+            # Provenance is the record of the run, so the same second base the
+            # squash commit names — never the pin a stacked patch is not from.
+            base_sha=tree_base,
             head_sha=pushed,
             added=added,
             removed=removed,

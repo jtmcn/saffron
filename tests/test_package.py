@@ -1720,6 +1720,15 @@ def test_a_stacked_child_opens_against_its_parent_applies_onto_it_and_leaves_pol
     body = (stacked_packageable.outcome.task_dir / "pr_body.md").read_text()
     assert "f.txt" in body
 
+    # The two reviewer-facing records of what this was built on. Both once
+    # took the run's pin, which for a stacked child is a tree the patch is
+    # not relative to — here, the decoy that is in no repository at all.
+    tree_base = stacked_packageable.tree_base
+    assert f"- base `{tree_base}`" in body
+    message = git(stacked_packageable.remote, "log", "-1", "--format=%B", pushed)
+    assert f"base {tree_base[:12]}" in message
+    assert "0" * 12 not in body and "0" * 12 not in message
+
 
 def test_a_merged_parent_falls_back_to_the_ordinary_target(tmp_path, monkeypatch):
     """The parent's own commit is already an ancestor of the fetched default
