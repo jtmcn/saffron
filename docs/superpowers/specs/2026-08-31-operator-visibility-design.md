@@ -127,10 +127,49 @@ store only a successful task writes to.
 writer, not the addition of one.** `queue.json` becomes derived output, then
 goes away.
 
-`ORPHANED` deserves one note, because it is the state that argues hardest for
-the event log. Three task rows are `ORPHANED` at `$0.00` with zero or one
-attempt: a cell that died with nothing recorded. SQL can say a task ended
-that way; only an event log can say how far it got first.
+`ORPHANED` deserves more than one note, because it is the state that argues
+hardest for the event log **and** the one place this design has to adjudicate
+between two artifacts in the repo that disagree.
+
+Three task rows are `ORPHANED` at `$0.00` with zero or one attempt: a cell
+that died with nothing recorded. SQL can say a task ended that way; only an
+event log can say how far it got first.
+
+### The `ORPHANED` disagreement, and which side this takes
+
+`ontology/saffron.ttl` splits `tasks.state` into two sets, and its reason for
+the split is precisely this page's problem — `RATIONALE.md`: *"the state a
+task ends in is a wider set than the states that reach the operator, and
+`tasks.state` is one TEXT column for both."*
+
+`saffron:TerminalState` holds the nine states that reach the operator.
+`saffron:EndState` additionally holds `APPROVED`, `CHANGES_REQUESTED`,
+`REJECTED`, `MERGED` — *"downstream of a judgement they already made"* — **and
+`ORPHANED`**. So the ontology says `ORPHANED` does not reach the operator.
+
+`_STATE_RANK` in `report/index.py` ranks it **2**, among the states that need
+you. Neither artifact cites the other, and both ship.
+
+**This design takes `index.py`'s side, and the ontology's own comment is the
+argument.** The rationale *"downstream of a judgement they already made"* fits
+the four post-decision states exactly and does not fit `ORPHANED`, which is
+appended to that list as *"plus the state a crash produces."* A crash is not a
+judgement, and a task that died having spent nothing is not something the
+operator has already decided about — it is something nobody has looked at. On
+the measured ledger it is three rows.
+
+**But the ontology's distinction is the right one and the page should use its
+words.** A page rendering all 23 rows shows `EndState`s, not `TerminalState`s
+— `MERGED` is on it nine times — and the two want different treatment: a
+`MERGED` row is history, an `ORPHANED` row is an unanswered question. Part 3
+therefore renders the distinction rather than flattening `tasks.state` into
+one column of strings, which is the conflation the ontology named first.
+
+Reclassifying `ORPHANED` in the `.ttl` is **out of scope**: `ontology/shapes/**`
+is in `gate_config`, so `integrity` refuses an edit no spec's `touches` names,
+and this design should not be the thing that quietly moves a term in a
+vocabulary. It goes to `docs/BACKLOG.md` as a by-hand item with this argument
+attached.
 
 ---
 
@@ -406,6 +445,14 @@ nothing else would keep two tasks out of the same file.
   stays that way here. It is the input to the critic-ROI query (§4.6) and
   wants its own spec; a page that could write it is a different thing from a
   page that renders.
+- **An RDF class for the event log.** `ontology/saffron.ttl` keeps an explicit
+  *"left unmodelled because nothing reads them"* list —
+  `prov:wasInvalidatedBy` for `spec_sha` invalidation, tool-call granularity,
+  DCAT — and the event log joins it. The ontology's discipline is to model
+  what something reads, `RATIONALE.md`'s bottom line is *"don't build the
+  emitter"*, and nothing here reads RDF. Stated rather than left inferred,
+  because this design adds a whole record type and silence would read as an
+  oversight. Revisit at v2.5 (§9) with the emitter, or never.
 
 ## Verification
 

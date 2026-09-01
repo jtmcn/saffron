@@ -595,6 +595,16 @@ scope proposal is ratified before any of it is written (§5.2).
 ended; `preflight` says whether the machine was fit to start. A run can pass
 preflight and still abort.
 
+**A sibling defect lives in the same function, and it is not yours.**
+`ontology/RATIONALE.md`'s Q3 — gates that never fired — is blocked on exactly
+one thing: *"the declared set, which preflight parses and drops."* That is the
+same shape as this spec's defect, in the same place: preflight computes
+something and discards it. It is a **different value** (the declared gate set,
+not the preflight outcome) and it is outside this spec's problem statement.
+Note it in the pull request body if DIAGNOSE lands next to it, and do not
+widen the envelope to take it — an unasked-for fix riding inside a bug fix is
+what `## Out of scope` exists to stop.
+
 **`runs.preflight` is per-run, and a run is one repo's slice of a batch.** A
 batch is not a run (§4.1) — resist recording this at batch level, which has no
 table yet.
@@ -917,6 +927,17 @@ unable to answer for a row. This spec builds the query. It renders nothing.
 - [ ] `attempts` counts `REPAIRING` sessions, not rows in `attempts`. A test
       builds a task with four attempt rows across `IMPLEMENTING`, `REVIEWING`
       and `REPAIRING` and asserts the rendered count is not 4
+- [ ] The count is **labelled with its phase**, not rendered as a bare `att`.
+      `ontology/saffron.ttl`'s `withinPhase` states the rule — *"'Attempt 3'
+      without a phase is ambiguous — name both (`CONTEXT.md` §2)"* — and this
+      page is where the ambiguity is visible, since the number it shows and
+      the number in the `attempts` table differ by design
+- [ ] A row carries whether its state is a `TerminalState` or only an
+      `EndState`, the distinction `ontology/saffron.ttl` draws and
+      `tasks.state` conflates into one TEXT column. `MERGED` is history;
+      `ORPHANED` is an unanswered question, and a page that renders them as
+      the same kind of string reproduces the conflation the ontology named
+      first. The design's `ORPHANED` section carries the argument
 - [ ] `concerns` counts findings of severity `concern` only — `note` is
       excluded by construction (`CONTEXT.md` §5)
 - [ ] `sustained` and `unkept` are computed from `findings.verdict` and the
@@ -1333,9 +1354,18 @@ Three protected documents no cell can correct. Each spec above leaves a
       **never renumber** — section numbers are an API and specs cite them.
 - [ ] **Step 3: Correct §5.3's supervisor paragraph**, which describes a
       `watch` callable that no longer exists.
-- [ ] **Step 4: Close the backlog entries** the ten cells added, each with the
+- [ ] **Step 4: Add a backlog item for `ORPHANED`'s classification.**
+      `ontology/saffron.ttl` files it as an `EndState` that does not reach the
+      operator, on the rationale *"downstream of a judgement they already
+      made"* — which fits the four post-decision states and not a crash.
+      `_STATE_RANK` ranks it 2, among the states that need you. Record the
+      disagreement, that the page took `index.py`'s side, and that moving the
+      term is a by-hand edit: `ontology/shapes/**` is in `gate_config`, so
+      `integrity` refuses an edit no spec's `touches` names, and a design
+      document should not quietly move a term in a vocabulary.
+- [ ] **Step 5: Close the backlog entries** the ten cells added, each with the
       commit that closed it — the shape items 1 and 29 use.
-- [ ] **Step 5: Commit.**
+- [ ] **Step 6: Commit.**
 
 ```bash
 git add DESIGN.md docs/BACKLOG.md
@@ -1351,6 +1381,15 @@ one spec each, carrying the `tree_base` trap (Task 5) and the measure-first
 discipline (Task 6). Part 3 → Tasks 7–10, split query / render / page /
 timeline. The design's "What `DESIGN.md` must change" → Task 11. Its
 sequencing section → Task 0 and the `depends_on` chain.
+
+**Ontology alignment**, checked against `ontology/saffron.ttl` and
+`RATIONALE.md`: the `EndState` / `TerminalState` split reaches the page as a
+`SA-0033` criterion; `withinPhase`'s "name both" rule reaches it as another;
+`costUsdEst`'s "an estimate, and the suffix is not decoration" is a `SA-0035`
+criterion; Q3's dropped declared-gate set is noted as adjacent to `SA-0030`
+and explicitly not its job. Nothing here edits the ontology, and nothing
+should: `ontology/shapes/**` is in `gate_config`, so `integrity` refuses an
+edit no spec's `touches` names, and the `shacl` gate is blocking.
 
 **Dependency chain**, and every link is either a real consumption or a
 same-file serialisation, since nothing can run concurrently anyway:
