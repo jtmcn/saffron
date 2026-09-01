@@ -36,6 +36,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 PLAN = REPO / ".saffron-loop" / "plan.json"
+# Measured 2026-09-01: SA-0028 hit the provider session limit after GATE
+# went green. Recording that as a state drops the spec from the stack.
+RETRYABLE = "RATE_LIMITED"
 
 if not (REPO / "DESIGN.md").is_file():  # the skill was moved; say so, do not guess
     raise SystemExit(
@@ -327,16 +330,30 @@ def cmd_record(args) -> int:
         chosen = next(
             (row for row in reversed(tasks) if row["task_id"] in urls), tasks[-1]
         )
-        match.state = chosen["state"]
+        state = chosen["state"]
         url = urls.get(chosen["task_id"], "")
-        match.pr = int(url.rstrip("/").rsplit("/", 1)[-1]) if "/pull/" in url else None
+        pr = int(url.rstrip("/").rsplit("/", 1)[-1]) if "/pull/" in url else None
+        # `RATE_LIMITED` is not `EXHAUSTED`. A provider ceiling stopped the
+        # run before it decided anything about the task, so recording it as a
+        # state would let `next` walk past a spec no cell has answered.
+        if state == RETRYABLE:
+            match.state, match.pr = None, None
+        else:
+            match.state, match.pr = state, pr
     finally:
         ledger.close()
 
     _save(rows)
-    where = f"#{match.pr}" if match.pr else "(no PR)"
-    print(f"{match.spec_id}  {match.state}  {where}")
-    return 0 if match.state == "READY_FOR_REVIEW" else 1
+    where = f"#{pr}" if pr else "(no PR)"
+    print(f"{match.spec_id}  {state}  {where}")
+    if state == RETRYABLE:
+        print(
+            "left pending: a provider ceiling is not a verdict on the task. "
+            "Re-run the cell\nwhen the window reopens — the cell's own line "
+            "says when — or `skip` it deliberately.",
+            file=sys.stderr,
+        )
+    return 0 if state == "READY_FOR_REVIEW" else 1
 
 
 def cmd_skip(args) -> int:
