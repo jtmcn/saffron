@@ -65,11 +65,11 @@ already, and `SA-0022` and `SA-0025` were both split mid-flight for it.
 
 | design part | specs | why it splits |
 |---|---|---|
-| 1 — event seam | `SA-0027`–`SA-0029` | a new module, then ~20 call sites in a 1322-line file, then ~10 across four phase files |
-| 2 — ledger gaps | `SA-0030`–`SA-0032` | three independent changes sharing only `ledger.py`; the third has unknown blast radius |
-| 3 — renderer | `SA-0033`–`SA-0036` | query, then render-and-delete, then the task page, then the timeline |
+| 1 — event seam | `SA-0029`–`SA-0031` | a new module, then ~20 call sites in a 1322-line file, then ~10 across four phase files |
+| 2 — ledger gaps | `SA-0032`–`SA-0034` | three independent changes sharing only `ledger.py`; the third has unknown blast radius |
+| 3 — renderer | `SA-0035`–`SA-0038` | query, then render-and-delete, then the task page, then the timeline |
 
-`SA-0032` is a **bug**, not a feature, and takes an `envelope` rather than
+`SA-0034` is a **bug**, not a feature, and takes an `envelope` rather than
 `touches`. Why `findings.verdict` is NULL is not known — measured, the write
 path fires and the verdict half arrives empty, on n=2. Declaring `touches`
 would mean diagnosing it by hand first, which §3.2 says inverts the economics:
@@ -94,13 +94,59 @@ file. That is a design constraint, not a coincidence.
 
 ---
 
-## Task 0: Wait for `SA-0026`, then re-confirm numbering
+## Task 0: Wait for `SA-0028`, then re-confirm numbering
 
-- [ ] **Step 1: Confirm `SA-0026` merged**
+**Renumbered once here already, which is why this task exists.** `SA-0026`
+merged, and PR #85 added two more specs in the same window — `SA-0027` (an
+inertness guard whose retiring spec cannot reach the file) and `SA-0028` (an
+implement turn that dies on its ceiling with nothing committed). Both are
+spec files awaiting cells, not merged work. This plan's ten moved from
+`SA-0027`–`SA-0036` to `SA-0029`–`SA-0038`. Assume it happens again.
+
+### `SA-0028` blocks part 1, and not only over a file
+
+Its `touches` are `saffron/cell/session.py`, `saffron/phases/implement.py`,
+`tests/test_session.py`, `tests/test_implement.py` — part 1's exact territory.
+That alone would make it a dependency. The deeper problem is what it *does*:
+
+> - the watch line says which ceiling stopped it — `SA-0005`'s lesson, that a
+>   run stopped by one of three ceilings must say which
+> - a salvage that produces nothing still ends `NOT_IMPLEMENTED`, and the
+>   watch line distinguishes "was cut off and could not be salvaged" from
+>   "finished and produced nothing"
+
+**It adds `watch` lines.** So `SA-0029`'s golden fixture — the whole basis on
+which part 1's migrations are verified — cannot be captured until `SA-0028` has
+landed. Captured before, it records output that is about to change, and the
+migrations then fail against a stale fixture for a reason that is not a
+migration bug. That is why even `SA-0029`, which touches only
+`saffron/events.py` and its own tests, declares `depends_on: SA-0028`: the
+dependency is the fixture, not the module.
+
+**And its two new facts want event fields, not strings.** "Which of three
+ceilings stopped this" and "cut off versus finished empty" are exactly the
+kind of structured fact part 1 exists to stop losing — `SA-0029`'s `Budget`
+and `Terminal` dataclasses should carry them as typed fields when it models
+the vocabulary. Landing `SA-0028` first means modelling them once; landing it
+after means retrofitting two strings into a seam that has just been typed.
+
+`SA-0027` does not collide: it touches `saffron/cli.py`,
+`saffron/scheduler.py` and `saffron/repos/mirror.py`, none of which any spec
+in this plan modifies.
+
+### Steps
+
+- [ ] **Step 1: Confirm `SA-0028` has shipped**
 
 ```bash
-git fetch origin && git log --oneline -3 origin/main
+git fetch origin && git log --oneline -5 origin/main
+gh pr list --state merged --limit 5 --json number,title -q '.[] | "\(.number) \(.title)"'
 ```
+
+Expected: a merged `saffron/SA-0028` pull request. A spec file in
+`.saffron/specs/` is **not** enough — `SA-0028` exists as a spec today and has
+not been run, and part 1 depends on the code it will write, not on the spec
+that describes it.
 
 - [ ] **Step 2: Rebase**
 
@@ -114,8 +160,20 @@ git rebase origin/main
 ls .saffron/specs/ .saffron/specs/done/ | grep -o 'SA-[0-9]\{4\}' | sort -u | tail -3
 ```
 
-Expected: highest is `SA-0026`. If higher, renumber every spec below **and**
-the design doc's numbering note together, so the two do not drift.
+Expected: highest is `SA-0028`. If higher, renumber every spec below **and**
+the design doc's numbering note together, so the two do not drift. This has
+already happened twice.
+
+- [ ] **Step 4: Re-check part 1's territory for new collisions**
+
+```bash
+grep -l 'saffron/cell/session.py\|saffron/phases/' .saffron/specs/SA-*.md
+```
+
+Any spec still queued against `session.py` or `phases/` is a fresh collision
+with part 1, and the same reasoning as `SA-0028` applies: if it adds or
+changes a `watch` line, it lands before `SA-0029`'s golden fixture is
+captured, not after.
 
 ---
 
@@ -212,7 +270,7 @@ thing on the page.
 
 ### The ratification detour (L5a)
 
-`SA-0030` and `SA-0032` are `bug` specs with an `envelope` and no `touches`,
+`SA-0032` and `SA-0034` are `bug` specs with an `envelope` and no `touches`,
 so DIAGNOSE proposes the scope and the cell **stops** at `SCOPE_REVIEW`,
 exiting `1`. That is the door §5.2 designed, not a failure — but the plan must
 be honest that the door is half-built.
@@ -236,13 +294,13 @@ So ratification is by hand:
 4. Re-run **L5**. The second cell implements against the ratified `touches`.
 
 **This costs two cells for each of those two specs**, and the DIAGNOSE turns
-are paid twice. Budget for it: `SA-0030` and `SA-0032` are the only two tasks
+are paid twice. Budget for it: `SA-0032` and `SA-0034` are the only two tasks
 in this plan where the stated `budget_usd` is a per-cell figure rather than a
 per-spec one.
 
 ---
 
-## Task 1: `SA-0027` — the event vocabulary and its log
+## Task 1: `SA-0029` — the event vocabulary and its log
 
 Additive and deliberately inert: nothing emits these yet. `SA-0022` and
 `SA-0025` both shipped machinery with no producer for the same reason — a
@@ -256,11 +314,12 @@ seam is easier to review before thirty call sites move onto it.
 
 ```markdown
 ---
-id: SA-0027
+id: SA-0029
 title: the host has no event vocabulary, so a night's sequence exists only as prose
 type: feature
 priority: 1
-depends_on: []
+depends_on:
+  - SA-0028
 touches:
   - saffron/events.py
   - tests/test_events.py
@@ -299,7 +358,7 @@ This spec builds the vocabulary and changes no caller. Nothing emits an `Event`
 when it lands.
 
 ## Problem
-- **There is no type that can carry a host-side fact.** `SA-0028` and `SA-0029`
+- **There is no type that can carry a host-side fact.** `SA-0030` and `SA-0031`
   migrate call sites and cannot begin without one.
 - **A night's sequence is unrecoverable.** The ledger records outcomes and not
   order. Three task rows in this repo's ledger are `ORPHANED` at `$0.00` with
@@ -333,7 +392,7 @@ when it lands.
       have printed, for every kind
 - [ ] `tests/fixtures/watch-golden.txt` records the current terminal output of
       a driven session, captured from **unmodified** code and committed here as
-      the fixture `SA-0028` and `SA-0029` assert against
+      the fixture `SA-0030` and `SA-0031` assert against
 - [ ] An `EventLog` write failure raises nothing to its caller — a test points
       it at an unwritable path and asserts the call returns
 - [ ] A `ponytail:` names the ceiling: one file per task, no rotation, tens of
@@ -342,9 +401,9 @@ when it lands.
 
 ## Out of scope
 **Every call site.** `saffron/cell/**` and `saffron/phases/**` are `forbidden`
-here. `SA-0028` and `SA-0029` migrate them.
+here. `SA-0030` and `SA-0031` migrate them.
 
-**Any renderer.** `saffron/report/**` is `forbidden`. The page is `SA-0034`.
+**Any renderer.** `saffron/report/**` is `forbidden`. The page is `SA-0036`.
 
 **Emitting from the scheduler.** It has no `watch` today and gains events when
 §4.2's orchestration exists; adding them now is events with no producer.
@@ -360,8 +419,24 @@ generated after a change proves the change agrees with itself. This spec
 changes no call site, which is what makes the capture trustworthy — and it is
 the reason this spec exists separately at all.
 
+**Unmodified means "after `SA-0028` has landed", not "now".** `SA-0028` adds
+`watch` lines — one naming which of three ceilings stopped a run, one
+distinguishing "cut off and could not be salvaged" from "finished and produced
+nothing". A fixture captured before it records output that is about to change,
+and `SA-0030` and `SA-0031` then fail against a stale fixture for a reason that
+is not a migration bug. That is what `depends_on: SA-0028` is buying here, in a
+spec that shares no file with it.
+
+**Model `SA-0028`'s two new facts as typed fields, not as strings inside a
+message.** "Which of the three ceilings stopped this" belongs on `Budget` or
+`Terminal` as a field, and "cut off versus finished empty" belongs on
+`Terminal` — both are exactly the kind of structured fact this vocabulary
+exists to stop losing, and `SA-0005`'s lesson (a run stopped by one of three
+ceilings must say which) is the reason `SA-0028` wrote them in the first place.
+They arrive as prose; do not enshrine them that way.
+
 **`_describe` already exists in `phases/implement.py`** for the cell's own
-events. `SA-0029` moves it. Write `describe` here so that the moved one can
+events. `SA-0031` moves it. Write `describe` here so that the moved one can
 collapse into it, not beside it.
 
 **A dataclass per kind, not one class with a `type` string.** The cell uses a
@@ -376,7 +451,7 @@ Commit after each coherent step. Uncommitted work dies with the cell.
 
 ---
 
-## Task 2: `SA-0028` — `session.py`'s call sites become events
+## Task 2: `SA-0030` — `session.py`'s call sites become events
 
 **Interfaces:** consumes everything from Task 1. Produces
 `run_one_cell(..., emit=...)` with `watch` gone from `session.py`.
@@ -385,12 +460,13 @@ Commit after each coherent step. Uncommitted work dies with the cell.
 
 ```markdown
 ---
-id: SA-0028
+id: SA-0030
 title: the supervisor's twenty progress lines are prose, and the record needs events
 type: refactor
 priority: 1
 depends_on:
-  - SA-0027
+  - SA-0028
+  - SA-0029
 touches:
   - saffron/cell/session.py
   - tests/test_session.py
@@ -413,7 +489,7 @@ risk: elevated
 ---
 
 ## Context
-`SA-0027` shipped `saffron/events.py` — the vocabulary, `EventLog`,
+`SA-0029` shipped `saffron/events.py` — the vocabulary, `EventLog`,
 `read_log`, `describe` — and a golden fixture recording the terminal output of
 a driven session, captured from code nothing had yet changed. Nothing emits an
 event.
@@ -427,7 +503,7 @@ export, and the terminal line.
 - **The supervisor is where the sequence is decided and where it is lost.**
   Every phase transition, every attempt decision and the budget stop pass
   through here as a string.
-- **`emit` has no producer.** `SA-0027` built a vocabulary with no caller; the
+- **`emit` has no producer.** `SA-0029` built a vocabulary with no caller; the
   seam is unproven until a real driver uses it.
 - **The default lives in the wrong place to be changed later.** `run_one_cell`
   is where `watch` is defaulted, and `cli.py` never names it. That is what
@@ -452,33 +528,33 @@ export, and the terminal line.
 - [ ] An `EventLog` failure does not abort a run: a test makes `task_dir`
       unwritable and asserts the session still reaches its terminal state
 - [ ] `phases/` is untouched — it still receives a `watch`-shaped callable, and
-      a test asserts the seam between them is intact until `SA-0029`
+      a test asserts the seam between them is intact until `SA-0031`
 - [ ] Every new test runs with no network and no cell, except those that must
       drive a real session, which carry the `cell` marker
 
 ## Out of scope
-**The phases.** `saffron/phases/**` is `forbidden`. `SA-0029` migrates them,
+**The phases.** `saffron/phases/**` is `forbidden`. `SA-0031` migrates them,
 and doing both here is one diff too wide for one repair loop (item 25).
 
 **Changing any message.** If a line reads badly, it still reads exactly that
 way after this spec. The golden fixture is the point; improving copy in the
 same diff makes it impossible to tell a migration bug from an edit.
 
-**Any renderer, and any new event kind.** `SA-0027` fixed the vocabulary. A
+**Any renderer, and any new event kind.** `SA-0029` fixed the vocabulary. A
 call site that does not fit an existing kind is a finding for the pull request
 body, not a tenth dataclass added here.
 
 ## Notes for the agent
 **The golden fixture is the acceptance criterion, not a convenience.** If it
 does not match, the migration is wrong — do not regenerate it. It was captured
-in `SA-0027` from code nothing had changed, which is the only capture that
+in `SA-0029` from code nothing had changed, which is the only capture that
 proves anything.
 
 **Keep the `emit` default in `session.py`.** Moving it to `cli.py` would put
 this diff in `SA-0026`'s file for no gain, and `cli.py` is `forbidden` here.
 
 **`phases/` still takes a `watch`.** Adapt at the boundary — the phase call
-sites keep receiving a string-taking callable until `SA-0029`. A half-migrated
+sites keep receiving a string-taking callable until `SA-0031`. A half-migrated
 seam that leaves both files broken is the failure this split exists to avoid.
 
 **`error` ≠ `fail`, and the events must not blur them.** `fail` means the
@@ -492,7 +568,7 @@ Commit after each coherent step. Uncommitted work dies with the cell.
 
 ---
 
-## Task 3: `SA-0029` — the phases' call sites become events
+## Task 3: `SA-0031` — the phases' call sites become events
 
 **Interfaces:** consumes Tasks 1–2. Produces a repo with no `watch` parameter
 anywhere.
@@ -501,12 +577,12 @@ anywhere.
 
 ```markdown
 ---
-id: SA-0029
+id: SA-0031
 title: four phase modules still speak prose to a supervisor that speaks events
 type: refactor
 priority: 1
 depends_on:
-  - SA-0028
+  - SA-0030
 touches:
   - saffron/phases/implement.py
   - saffron/phases/package.py
@@ -532,19 +608,19 @@ risk: elevated
 ---
 
 ## Context
-`SA-0028` migrated the supervisor and left an adapter at the phase boundary:
+`SA-0030` migrated the supervisor and left an adapter at the phase boundary:
 `phases/` still receives a string-taking callable. About ten call sites remain,
 across `implement.py` (the agent stream and its raw-line quarantine),
 `package.py` (re-verify, conflict, refusal-to-push, the pull request URL),
 `rebut.py` and `review.py`.
 
 `implement.py` is the interesting one. It already holds `_describe`, written
-for the **cell's** events, and calls `watch(_describe(event))`. `SA-0027`
+for the **cell's** events, and calls `watch(_describe(event))`. `SA-0029`
 shipped a host-side `describe`. Two functions now render events, and only one
 of them should survive.
 
 ## Problem
-- **The adapter is a seam with no owner.** It exists so `SA-0028` could land
+- **The adapter is a seam with no owner.** It exists so `SA-0030` could land
   without touching four more files, and it is dead weight the moment those
   files move.
 - **Two `describe` implementations will drift.** The host and the cell
@@ -558,9 +634,9 @@ of them should survive.
 - [ ] Every `watch(...)` in the four phase modules is an `emit(<Event>)`, and
       no signature in `saffron/` still carries a `watch` parameter — a test
       greps the package and asserts none remains
-- [ ] The adapter `SA-0028` left at the phase boundary is **deleted**
+- [ ] The adapter `SA-0030` left at the phase boundary is **deleted**
 - [ ] **The terminal output does not change**, asserted against
-      `tests/fixtures/watch-golden.txt` as in `SA-0028`
+      `tests/fixtures/watch-golden.txt` as in `SA-0030`
 - [ ] `implement.py`'s `_describe` is gone and its behaviour is served by
       `events.describe`; a test asserts a cell event renders identically to
       the line `_describe` produced
@@ -574,9 +650,9 @@ of them should survive.
       drive a real session, which carry the `cell` marker
 
 ## Out of scope
-**`saffron/cell/session.py`.** `forbidden` — `SA-0028` finished it.
+**`saffron/cell/session.py`.** `forbidden` — `SA-0030` finished it.
 
-**Changing any message**, for the reason `SA-0028` gives.
+**Changing any message**, for the reason `SA-0030` gives.
 
 **The scheduler and `reconcile`.** Neither has a `watch` today.
 
@@ -602,15 +678,15 @@ Commit after each coherent step. Uncommitted work dies with the cell.
 
 ---
 
-## Task 4: `SA-0030` — `runs.preflight` is a column nothing writes
+## Task 4: `SA-0032` — `runs.preflight` is a column nothing writes
 
-**Interfaces:** produces a written `runs.preflight`. Consumed by `SA-0034`.
+**Interfaces:** produces a written `runs.preflight`. Consumed by `SA-0036`.
 
 - [ ] **L1: Write the spec**
 
 ```markdown
 ---
-id: SA-0030
+id: SA-0032
 title: runs.preflight is written on none of twenty-three runs
 type: bug
 priority: 1
@@ -674,10 +750,10 @@ header — it is a field that renders a confident em-dash.*
       drive a real session, which carries the `cell` marker
 
 ## Out of scope
-**The other five header fields.** `SA-0031` does the diff stat, `SA-0032` the
+**The other five header fields.** `SA-0033` does the diff stat, `SA-0034` the
 verdict, and batch wall clock has no source until §4.2.1's `batches` table.
 
-**Rendering it.** `saffron/report/**` is `forbidden`. `SA-0034`.
+**Rendering it.** `saffron/report/**` is `forbidden`. `SA-0036`.
 
 **Changing what preflight checks.** `preflight.py` is outside the envelope.
 This records an outcome; it does not alter one.
@@ -717,21 +793,21 @@ Commit after each coherent step. Uncommitted work dies with the cell.
 
 ---
 
-## Task 5: `SA-0031` — the diff stat is computed and discarded
+## Task 5: `SA-0033` — the diff stat is computed and discarded
 
 **Interfaces:** produces `tasks.added`, `tasks.removed` (nullable INTEGER).
-Consumed by `SA-0033`.
+Consumed by `SA-0035`.
 
 - [ ] **L1: Write the spec**
 
 ```markdown
 ---
-id: SA-0031
+id: SA-0033
 title: a task's diff stat survives only in a store that only PACKAGE writes
 type: feature
 priority: 1
 depends_on:
-  - SA-0030
+  - SA-0032
 touches:
   - saffron/ledger.py
   - saffron/cell/session.py
@@ -795,10 +871,10 @@ most expensive task in the ledger. Its `patch.json` records `base_sha`,
       drive a real session, which carry the `cell` marker
 
 ## Out of scope
-**Rendering it.** `saffron/report/**` is `forbidden`. `SA-0033`.
+**Rendering it.** `saffron/report/**` is `forbidden`. `SA-0035`.
 
 **Removing `queue.json`'s copy.** `_finish` keeps writing its store until
-`SA-0034` deletes the whole path. Two writers briefly is deliberate; a
+`SA-0036` deletes the whole path. Two writers briefly is deliberate; a
 half-removed store is worse than a duplicated number.
 
 **A per-file stat.** `patch.json` already lists changed files. Two integers is
@@ -828,23 +904,23 @@ Commit after each coherent step. Uncommitted work dies with the cell.
 
 ---
 
-## Task 6: `SA-0032` — the critic's verdict is never recorded
+## Task 6: `SA-0034` — the critic's verdict is never recorded
 
 A **bug**, with an `envelope`. Why the column is NULL is not known.
 
-**Interfaces:** produces a written `findings.verdict`. Consumed by `SA-0033`
+**Interfaces:** produces a written `findings.verdict`. Consumed by `SA-0035`
 for §6's level 3.
 
 - [ ] **L1: Write the spec**
 
 ```markdown
 ---
-id: SA-0032
+id: SA-0034
 title: findings.verdict is NULL on every finding, so a sustained blocker cannot be counted
 type: bug
 priority: 1
 depends_on:
-  - SA-0031
+  - SA-0033
 envelope:
   - saffron/phases/rebut.py
   - saffron/cell/session.py
@@ -932,7 +1008,7 @@ measured-fact convention exists to prevent.
 
 **Both blocker-bearing tasks are `EXHAUSTED`,** so they never reached PACKAGE
 and `sustained_blockers` was never called on them either. That is a second,
-independent reason level 3 has never rendered, and it is `SA-0033`'s to fix —
+independent reason level 3 has never rendered, and it is `SA-0035`'s to fix —
 do not chase it here.
 
 **`findings` carries three judgements and they must not collapse.** `verdict`
@@ -954,24 +1030,24 @@ Commit after each coherent step. Uncommitted work dies with the cell.
 
 ---
 
-## Task 7: `SA-0033` — the queue's rows, from the ledger
+## Task 7: `SA-0035` — the queue's rows, from the ledger
 
 Query and aggregation only. Nothing renders differently when it lands.
 
 **Interfaces:** produces `saffron.report.render.queue_rows(ledger) -> list[QueueLine]`.
-Consumed by `SA-0034`.
+Consumed by `SA-0036`.
 
 - [ ] **L1: Write the spec**
 
 ```markdown
 ---
-id: SA-0033
+id: SA-0035
 title: nothing can build a queue row from the ledger, so the page reads a store only success writes
 type: feature
 priority: 1
 depends_on:
-  - SA-0031
-  - SA-0032
+  - SA-0033
+  - SA-0034
 touches:
   - saffron/report/render.py
   - tests/test_report.py
@@ -1001,7 +1077,7 @@ reaches the page. Measured 2026-08-31: the ledger holds **23 task rows across
 13 specs in 6 states**; `queue.json` holds **10 rows in one state**. Total
 spend $127.00 against the page's $67.05.
 
-`SA-0030`, `SA-0031` and `SA-0032` closed the three gaps that made the ledger
+`SA-0032`, `SA-0033` and `SA-0034` closed the three gaps that made the ledger
 unable to answer for a row. This spec builds the query. It renders nothing.
 
 ## Problem
@@ -1046,7 +1122,7 @@ unable to answer for a row. This spec builds the query. It renders nothing.
       blocker answered by an argument and asserts it counts as `sustained`
 - [ ] A task that never reached PACKAGE produces a row whose caption is derived
       from its state and gate results, with no `note` read from any store
-- [ ] `added`/`removed` come from the columns `SA-0031` added, and a NULL
+- [ ] `added`/`removed` come from the columns `SA-0033` added, and a NULL
       renders as missing rather than as zero
 - [ ] `sort_key` is imported unchanged from `report/index.py` and not
       reimplemented; a test asserts a fixture with an `EXHAUSTED` task and a
@@ -1058,12 +1134,12 @@ unable to answer for a row. This spec builds the query. It renders nothing.
 
 ## Out of scope
 **Rendering, and deleting anything.** `report/index.py` is `forbidden` here.
-`SA-0034` swaps the writer and deletes the store's machinery.
+`SA-0036` swaps the writer and deletes the store's machinery.
 
 **Changing `sort_key`.** It has been correct and starved. Changing it in the
 diff that first feeds it makes it impossible to say which change moved a row.
 
-**The batch header.** `SA-0034`.
+**The batch header.** `SA-0036`.
 
 ## Notes for the agent
 **Per spec, newest state, summed cost is the shape that keeps both the money
@@ -1085,7 +1161,7 @@ Commit after each coherent step. Uncommitted work dies with the cell.
 
 ---
 
-## Task 8: `SA-0034` — the page renders from the ledger
+## Task 8: `SA-0036` — the page renders from the ledger
 
 The one spec in this plan whose output the operator sees.
 
@@ -1095,12 +1171,12 @@ The one spec in this plan whose output the operator sees.
 
 ```markdown
 ---
-id: SA-0034
+id: SA-0036
 title: the morning queue cannot show a task that failed, and reads green after a bad night
 type: feature
 priority: 1
 depends_on:
-  - SA-0033
+  - SA-0035
 touches:
   - saffron/report/render.py
   - saffron/report/index.py
@@ -1126,7 +1202,7 @@ risk: elevated
 ---
 
 ## Context
-`SA-0033` built `queue_rows`, which answers for all 23 task rows. Nothing calls
+`SA-0035` built `queue_rows`, which answers for all 23 task rows. Nothing calls
 it. The page still renders from `queue.json`, whose 10 rows are all
 `READY_FOR_REVIEW` and 9 of which are stale — the ledger records those specs as
 `MERGED`, because `reconcile` updates the ledger and nothing updates the store.
@@ -1176,7 +1252,7 @@ what §6's sort levels 1 and 2 exist for.
 - [ ] Every new test runs with no network and no cell
 
 ## Out of scope
-**Per-task pages and the live tail.** `SA-0035` and `SA-0036`.
+**Per-task pages and the live tail.** `SA-0037` and `SA-0038`.
 
 **A diff viewer.** §6's argument stands: the pull request is the diff viewer
 and it is better than anything built here.
@@ -1195,7 +1271,7 @@ must be checkable by the next reader rather than asserted by this one.
 read-modify-write of `queue.json`. A full re-render from SQL has no read half.
 Keeping it "to be safe" preserves a mechanism whose reason has been removed.
 
-**`sort_key` stays exactly as it is.** See `SA-0033`.
+**`sort_key` stays exactly as it is.** See `SA-0035`.
 
 **The trailing accept rate is trailing.** This batch's rate is unknowable when
 the batch ends, because merging is what happens next.
@@ -1227,7 +1303,7 @@ way no test and no reviewer will catch from a diff.
 
 ---
 
-## Task 9: `SA-0035` — a task page from the ledger
+## Task 9: `SA-0037` — a task page from the ledger
 
 **Interfaces:** produces `write_task_page(ledger, task_id, out_dir) -> Path`.
 
@@ -1235,12 +1311,12 @@ way no test and no reviewer will catch from a diff.
 
 ```markdown
 ---
-id: SA-0035
+id: SA-0037
 title: what a failed task did exists only in sqlite and a directory walk
 type: feature
 priority: 2
 depends_on:
-  - SA-0034
+  - SA-0036
 touches:
   - saffron/report/render.py
   - tests/test_report.py
@@ -1263,7 +1339,7 @@ risk: standard
 ---
 
 ## Context
-`SA-0034` made a failed task visible as a row. A row says `EXHAUSTED · 4 att ·
+`SA-0036` made a failed task visible as a row. A row says `EXHAUSTED · 4 att ·
 $31.60` and stops. Answering "what did $31.60 buy" still means opening
 `sqlite3`, joining `attempts`, `gate_results` and `failures`, and walking
 `~/.saffron/batches/v0/SA-0009/`.
@@ -1306,17 +1382,17 @@ across attempts, the findings with their verdicts, and per-attempt cost.
 - [ ] Every new test runs with no network and no cell
 
 ## Out of scope
-**The timeline and liveness.** `SA-0036` reads `events.jsonl` and adds the
+**The timeline and liveness.** `SA-0038` reads `events.jsonl` and adds the
 refresh. This page is SQL-only and must be good without a log, because every
-task that ran before `SA-0027` has none.
+task that ran before `SA-0029` has none.
 
 **A diff viewer**, a server, and any transcript rendering.
 
-**Changing the index.** `SA-0034` settled it; this adds links.
+**Changing the index.** `SA-0036` settled it; this adds links.
 
 ## Notes for the agent
 **A task with no events is the common case here, not the edge case.** This
-spec must not read `events.jsonl` at all — that is what makes `SA-0036`'s
+spec must not read `events.jsonl` at all — that is what makes `SA-0038`'s
 addition safe.
 
 **`terminal_reason` exists because a crashed session may report every cost
@@ -1333,7 +1409,7 @@ Commit after each coherent step. Uncommitted work dies with the cell.
 
 ---
 
-## Task 10: `SA-0036` — the timeline, and the live tail
+## Task 10: `SA-0038` — the timeline, and the live tail
 
 The event log's first reader.
 
@@ -1341,13 +1417,13 @@ The event log's first reader.
 
 ```markdown
 ---
-id: SA-0036
+id: SA-0038
 title: the event log has no reader, and a running task looks identical to a finished one
 type: feature
 priority: 2
 depends_on:
-  - SA-0035
-  - SA-0029
+  - SA-0037
+  - SA-0031
 touches:
   - saffron/report/render.py
   - tests/test_report.py
@@ -1370,12 +1446,12 @@ risk: standard
 ---
 
 ## Context
-`SA-0027` through `SA-0029` made every host-side progress line an event and
+`SA-0029` through `SA-0031` made every host-side progress line an event and
 appended it to `task_dir/events.jsonl`. Nothing has ever read one — that was
 deliberate, so the seam could be proven by its unchanged terminal output rather
 than by a consumer.
 
-`SA-0035`'s task page renders from SQL alone. It shows what a task ended with
+`SA-0037`'s task page renders from SQL alone. It shows what a task ended with
 and not the order it got there, and a task still running looks exactly like one
 that finished.
 
@@ -1386,13 +1462,13 @@ that finished.
 - **A running task is indistinguishable from a finished one.** The page is
   static and says nothing about which it is looking at.
 - **This is the last consumer the design named**, and until it exists
-  `SA-0027`'s record is a cost with no return.
+  `SA-0029`'s record is a cost with no return.
 
 ## Acceptance criteria
 - [ ] The task page renders a phase timeline from `events.jsonl` via
       `read_log` when one exists
 - [ ] A task whose log is **absent** still produces a page — a test asserts it,
-      because every task that ran before `SA-0027` has none
+      because every task that ran before `SA-0029` has none
 - [ ] A truncated final line is tolerated by `read_log` and not re-handled
       here; a test asserts a log ending mid-object still renders its whole
       prefix
@@ -1453,7 +1529,7 @@ Three protected documents no cell can correct. Each spec above leaves a
       than chosen"* to state that the ledger is the source and the event log
       is the live tail. Correct its two stale gap claims — `tasks.risk` **is**
       written, a merge **is** recorded. Restate *index, not a viewer*
-      explicitly, since `SA-0035` adds a per-task page and a reader could take
+      explicitly, since `SA-0037` adds a per-task page and a reader could take
       that as a reversal.
 - [ ] **Step 2: Add an event-schema subsection under §4.** Add a subsection;
       **never renumber** — section numbers are an API and specs cite them.
@@ -1489,9 +1565,9 @@ sequencing section → Task 0 and the `depends_on` chain.
 
 **Ontology alignment**, checked against `ontology/saffron.ttl` and
 `RATIONALE.md`: the `EndState` / `TerminalState` split reaches the page as a
-`SA-0033` criterion; `withinPhase`'s "name both" rule reaches it as another;
-`costUsdEst`'s "an estimate, and the suffix is not decoration" is a `SA-0035`
-criterion; Q3's dropped declared-gate set is noted as adjacent to `SA-0030`
+`SA-0035` criterion; `withinPhase`'s "name both" rule reaches it as another;
+`costUsdEst`'s "an estimate, and the suffix is not decoration" is a `SA-0037`
+criterion; Q3's dropped declared-gate set is noted as adjacent to `SA-0032`
 and explicitly not its job. Nothing here edits the ontology, and nothing
 should: `ontology/shapes/**` is in `gate_config`, so `integrity` refuses an
 edit no spec's `touches` names, and the `shacl` gate is blocking.
@@ -1500,10 +1576,15 @@ edit no spec's `touches` names, and the `shacl` gate is blocking.
 same-file serialisation, since nothing can run concurrently anyway:
 
 ```
-SA-0026 ─→ SA-0030 ─→ SA-0031 ─→ SA-0032 ─┐
-                                          ├─→ SA-0033 ─→ SA-0034 ─→ SA-0035 ─→ SA-0036
-SA-0027 ─→ SA-0028 ─→ SA-0029 ────────────────────────────────────────────────┘
+SA-0026 ─→ SA-0032 ─→ SA-0033 ─→ SA-0034 ─┐
+ (shipped)                                ├─→ SA-0035 ─→ SA-0036 ─→ SA-0037 ─→ SA-0038
+SA-0028 ─→ SA-0029 ─→ SA-0030 ─→ SA-0031 ─┘
+ (queued)
 ```
+
+`SA-0026` has shipped; `SA-0028` has not — it is a spec file awaiting a cell,
+and part 1 needs the code it will write, not the spec. It is the only link in
+this chain that is not yet satisfiable.
 
 **Type consistency.** `Event`, `EventLog`, `read_log`, `describe` (Task 1) are
 consumed under those names in Tasks 2, 3 and 10. `queue_rows` (Task 7) →
@@ -1513,7 +1594,7 @@ never reimplemented.
 
 **Two risks this plan does not remove.**
 
-*Cost, corrected upward.* **Twelve cells, not ten**: `SA-0030` and `SA-0032`
+*Cost, corrected upward.* **Twelve cells, not ten**: `SA-0032` and `SA-0034`
 are bug specs whose first cell stops at `SCOPE_REVIEW`, so each is run twice
 and its DIAGNOSE turns are paid twice. At $8–16 a cell that is a **$140–150**
 ceiling before any repair loop, against a lifetime spend of $127. Splitting

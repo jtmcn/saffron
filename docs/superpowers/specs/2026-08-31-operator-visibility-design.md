@@ -5,7 +5,7 @@ what the factory is doing and what it did: a typed host event stream, the
 three ledger gaps the page cannot render without, and a renderer sourced from
 the ledger rather than from the batch tree.
 
-They are cut into ten specs, `SA-0027`–`SA-0036`, in
+They are cut into ten specs, `SA-0029`–`SA-0038`, in
 `docs/superpowers/plans/2026-08-31-operator-visibility.md`. This document
 argues the design; the plan holds the spec bodies and the dependency chain.
 
@@ -173,7 +173,7 @@ attached.
 
 ---
 
-## Part 1 — the event seam (`SA-0027`–`SA-0029`)
+## Part 1 — the event seam (`SA-0029`–`SA-0031`)
 
 **The move already exists in the repo, one level down.** Inside a cell,
 `images/agent_runner.py` emits Saffron's own typed events as JSON lines, and
@@ -205,6 +205,19 @@ migration, must come back byte-identical after it. That is what makes a
 thirty-site mechanical diff verifiable instead of trusted, and it is what
 keeps this sub-project from growing a UI.
 
+**"Before the migration" has a floor, and `SA-0028` set it.** That queued spec
+adds `watch` lines — one naming which of three ceilings stopped a run, one
+distinguishing "cut off and could not be salvaged" from "finished and produced
+nothing" — so the capture is only trustworthy once it has shipped. Part 1
+waits on it for that reason even in the spec that shares no file with it.
+
+**And `SA-0028` is the best available evidence that this part is worth
+building.** It exists because `SA-0005` was stopped by one of three ceilings
+and nothing said which, and its remedy is to add two more strings to a seam
+that can only hold strings. Two facts an operator needs, arriving as prose,
+written by someone who had no other place to put them — while this design was
+being written. Part 1 is what gives the next such fact somewhere to go.
+
 Three details follow from invariants that already hold:
 
 - **The cell's events nest; they are not re-flattened.** `Agent` wraps the
@@ -220,7 +233,7 @@ Three details follow from invariants that already hold:
   ceiling — one file per task, no rotation, tens of MB a night by §4.1's own
   estimate.
 
-## Part 2 — the ledger's three gaps (`SA-0030`–`SA-0032`)
+## Part 2 — the ledger's three gaps (`SA-0032`–`SA-0034`)
 
 Independent of part 1; the two can run in either order.
 
@@ -276,7 +289,7 @@ state plus gate results, so a task that never reached PACKAGE gets one too.
 **What this part deliberately does not do:** it adds no write path for failed
 tasks. The ledger already has all 23.
 
-## Part 3 — the renderer (`SA-0033`–`SA-0036`)
+## Part 3 — the renderer (`SA-0035`–`SA-0038`)
 
 Depends on both parts above.
 
@@ -367,7 +380,7 @@ its own subsection under §4, cited by all three specs.
 | 2 — ledger gaps | preflight, diff stat and verdicts stop being em-dashes |
 | 3 — renderer | the 3 invisible specs and 47% of spend become visible |
 
-**The three parts are ten specs**, `SA-0027`–`SA-0036`, cut in
+**The three parts are ten specs**, `SA-0029`–`SA-0038`, cut in
 `docs/superpowers/plans/2026-08-31-operator-visibility.md`, which holds the
 dependency chain and each spec's body. Three specs would make three diffs too
 wide for their own repair loops — item 25 records that failure, and `SA-0022`
@@ -421,10 +434,11 @@ having now and has nothing to do with unattended nights: `SA-0009`'s $31.60
 takes `sqlite3` and a directory walk to see today, and that is equally true
 whether or not anyone watched the night it burned.
 
-> **Spec numbering:** confirmed against `origin/main` at `0d23005`. `SA-0025`
-> is shipped and `SA-0026` (*nothing resolves a real parent*) is running, so
-> these take `SA-0027`–`SA-0036`. Renumbered once already; re-confirm before
-> writing the spec files.
+> **Spec numbering:** confirmed against `origin/main` at `7ab27cf`. `SA-0026`
+> is shipped; `SA-0027` and `SA-0028` are queued spec files from PR #85, so
+> these take `SA-0029`–`SA-0038`. **Renumbered twice already** — once when
+> `SA-0026` appeared mid-design, once when `SA-0027`/`SA-0028` did. Re-confirm
+> before writing each spec file; the plan's Task 0 is where that happens.
 
 **`SA-0026` collides with part 2, and the collision is one file.** Stacking's
 producer touches `saffron/ledger.py` and `tests/test_ledger.py`, which is
