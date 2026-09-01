@@ -1844,7 +1844,7 @@ this item exists to rule out.
   this one with them: `tree_base` is a noun in a durable artifact and the
   glossary does not have it.
 
-**Decided and implemented, 2026-09-01 (`SA-0026`).** The producer is real now.
+**Decided and implemented, 2026-08-31 (`SA-0026`).** The producer is real now.
 `cli._resolve_stacked_on` reads `Ledger.tasks_by_spec_id(repo_id,
 depends_on[0])` — every task row this repo has ever run for that one parent
 spec id, across every `spec_sha` it has carried, the same "merging is
@@ -1853,9 +1853,11 @@ never reads the parent's spec file and so has no current sha to filter rows
 to. Among those rows, the newest one still in `scheduler.
 DEPENDENCY_WAITING_STATES` (`READY_FOR_REVIEW`, `APPROVED`, `MERGE_TRAIN`) is
 "the parent's task" — the same waiting-outranks-dead precedence
-`_dependency_refusal` already gave the gate's own refusal text, so the gate
-that admits the dependent and the resolver that stacks it read one row the
-same way. Its `pushed_sha` becomes `CellSpec.stacked_on`, its `branch`
+`_dependency_refusal` already gave the gate's own refusal text. Not the same
+row, though: the gate reads only the parent's current `spec_sha`, so a parent
+whose spec text moved after its pull request opened has a waiting row here and
+none there. The branch is real either way; the gate decides whether the
+dependent runs, and the resolver only decides what it is cut from. Its `pushed_sha` becomes `CellSpec.stacked_on`, its `branch`
 becomes `package()`'s `parent_branch`, and both are `None` together —
 never one without the other — the moment either is missing, empty, or not a
 resolved sha: a merged or retired parent (no waiting row at all) yields an
@@ -1874,26 +1876,35 @@ added, now that a real stacked parent exists for one to force-push onto.
 `CONTEXT.md`'s `tree_base` entry is still owed by hand — this spec forbids
 itself that file too, for the same reason `SA-0025` did.
 
-**One more debt this item did not expect: a canary fired, and this spec could
-not retire it, only dodge it.** `SA-0025` planted `tests/test_package.py::
+**A canary fired that this spec had no file to retire, and the deny list is
+what made that a defect.** `SA-0025` planted `tests/test_package.py::
 test_the_operators_reachable_packaging_path_is_unstacked`, asserting the
 literal string `parent_branch` does not appear anywhere in `saffron/cli.py`
 — true the day it was written, and false the moment a producer exists, by
 the test's own docstring ("the one caller reaching `package()` in production
-must not pass a parent"). `SA-0026`'s `touches` is `saffron/cli.py`,
-`saffron/scheduler.py`, `saffron/ledger.py` and their three test files;
-`tests/test_package.py` is none of them, so this spec cannot retire or
-rewrite that guard — only satisfy its literal letter without touching it.
-`cli.py` spells the keyword by concatenation (`{"parent" + "_branch": ...}`)
-rather than as one literal token, which keeps the assertion true while the
-capability it was meant to keep off ships for real, wired and covered by
-this spec's own tests (`test_a_stacked_worktree_passes_its_parents_branch_
-to_package`). The guard is green again, but hollow: it no longer proves the
-absence of anything, only the absence of one spelling. Whoever next owns
-`saffron/phases/**`'s tests (or a two-line spec of its own) should retire it
-and write the opposite assertion instead — that a stacked cell's parent
-branch *does* reach `package()` — and `cli.py` can drop the concatenation
-the same day.
+must not pass a parent"). `SA-0026` is that producer, and `tests/test_package.py`
+is not among its `touches`, so the cell could satisfy the guard's letter or
+fail the `scope` gate and nothing else. It spelled the keyword by
+concatenation (`{"parent" + "_branch": ...}`), said so in a comment, and
+recorded it here — the right handling of a box a spec put it in, and both
+review lenses still flagged the result, correctly: a green guard that proves
+only the absence of one spelling misleads whoever next reads it.
+
+Retired by hand at review, 2026-08-31. The text search is deleted rather than
+rewritten — it asserted a property of `cli.py` from `tests/test_package.py`,
+and a source grep is satisfiable by any caller willing to spell the keyword
+differently. Both halves are asserted on the call now, in `tests/test_cli.py`:
+`test_a_stacked_worktree_passes_its_parents_branch_to_package` for a stacked
+run, and `test_an_unstacked_worktree_passes_no_parent_branch_to_package` for
+the converse. `cli.py` spells the keyword.
+
+**The rule this is the second instance of.** A spec that turns on a
+capability must own the tests that assert the capability is off, or its
+`touches` hands the agent a choice between a false green and a `scope`
+refusal. `SA-0022` missed `saffron/cli.py`; this one missed
+`tests/test_package.py`. Both were caught in review rather than by the gate
+that could have caught them — an inertness guard names the spec that will
+retire it, and nothing checks that the named spec can reach the file.
 
 ---
 

@@ -1,7 +1,6 @@
 import json
 import subprocess
 import subprocess as sp
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -2064,12 +2063,3 @@ def test_fetch_parent_branch_names_a_commit_the_mirror_cannot_reach(
 
     with pytest.raises(ParentGone, match="cannot reach"):
         fetch_parent_branch(mirror, "unused://", "parent")
-
-
-def test_the_operators_reachable_packaging_path_is_unstacked():
-    """`saffron/cli.py` is forbidden to this spec, and criterion 6 is what
-    keeps the capability from shipping a path it cannot serve: the one
-    caller reaching `package()` in production must not pass a parent."""
-    import saffron.cli as cli
-
-    assert "parent_branch" not in Path(cli.__file__).read_text()

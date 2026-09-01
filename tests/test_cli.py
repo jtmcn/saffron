@@ -445,6 +445,47 @@ def test_a_stacked_worktree_passes_its_parents_branch_to_package(
     assert captured["parent_branch"] == "saffron/SY-9000"
 
 
+def test_an_unstacked_worktree_passes_no_parent_branch_to_package(
+    tmp_path, monkeypatch, capsys
+):
+    """The converse, and what `SA-0025`'s deleted text-search guard was
+    reaching for: the parent branch is `None` on the path an operator takes
+    for a spec with nothing to stack on. Asserted on the call `package()`
+    actually received, so a keyword spelled some other way cannot satisfy it.
+    """
+    repo = _local_origin(tmp_path)
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
+
+    # Seeded, so the repo row exists and resolution genuinely runs — the
+    # parent's task is `MERGED`, which needs no stacking.
+    ledger = Ledger(tmp_path / "seeded.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    parent = _seed_task(ledger, repo_id, spec_id="SY-9000", state="MERGED")
+    ledger.record_push(parent, "d" * 40)
+
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    monkeypatch.setattr(
+        "saffron.cli.run_one_cell",
+        lambda cell_spec, **k: session.CellOutcome(
+            state="READY_FOR_REVIEW", task_id=1, run_id=1, task_dir=tmp_path
+        ),
+    )
+    captured: dict = {}
+
+    def _fake_package(outcome, **kwargs):
+        captured.update(kwargs)
+        return package.PackageResult(
+            state="READY_FOR_REVIEW", pr_url="https://github.com/o/r/pull/1"
+        )
+
+    monkeypatch.setattr(cli.package_phase, "package", _fake_package)
+
+    assert cli._run_cell(args, ledger, tmp_path / "out") == 0
+
+    assert "parent_branch" in captured and captured["parent_branch"] is None
+
+
 def test_only_the_first_depends_on_entry_is_a_stacking_candidate(tmp_path):
     """K=1: a spec with two unmerged parents does not stack on either one it
     does not name first — `depends_on[1]`'s own resolvable, waiting task

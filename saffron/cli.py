@@ -230,9 +230,12 @@ def _resolve_stacked_on(
     same reach `scheduler.build_queue`'s `merged_anywhere` already takes),
     the newest row in a `scheduler.DEPENDENCY_WAITING_STATES` state is "the
     parent's task": the same waiting-outranks-dead precedence
-    `scheduler._dependency_refusal` already gives it, so the gate that
-    admitted this dependent and the resolver that stacks it read the same
-    row the same way. A parent merged, retired, dead, unrun, or never in the
+    `scheduler._dependency_refusal` gives it. Not the *same* row, though —
+    that function reads only the parent's current `spec_sha`, and a parent
+    whose spec text moved after its pull request opened has a waiting row
+    here and none there. The branch is real either way; it is the gate, not
+    this resolver, that decides whether the dependent runs at all.
+    A parent merged, retired, dead, unrun, or never in the
     ledger at all has no such row, and this function does not distinguish
     why — every one of those needs no stacking (its work, if any, is already
     on the default branch) or was never a candidate the gate should have
@@ -336,17 +339,6 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         cell_spec, repo=repo, mirror=mirror, ledger=ledger, out_dir=out_dir
     )
     if outcome.state == "READY_FOR_REVIEW":
-        # `package()`'s stacking keyword (`saffron/phases/package.py`,
-        # forbidden here) is spelled by concatenation, not as a literal
-        # keyword, and `None` unless `stacked_on` is also set — a stacked
-        # worktree must not reach a pull request that is not (`SA-0026`).
-        # `SA-0025`'s own guard, `tests/test_package.py::
-        # test_the_operators_reachable_packaging_path_is_unstacked`, asserts
-        # that keyword's name never appears literally in this file; this
-        # spec cannot edit that test (`tests/test_package.py` is outside its
-        # `touches`) to retire a check whose job it is exactly this line's
-        # to finish. `docs/BACKLOG.md` item 33 has the full account.
-        stacking_kwarg = {"parent" + "_branch": target_branch}
         result = package_phase.package(
             outcome,
             spec=spec,
@@ -357,7 +349,9 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
             ledger=ledger,
             out_dir=out_dir,
             token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
-            **stacking_kwarg,
+            # `None` unless `stacked_on` is too: a stacked worktree must not
+            # reach a pull request that is not.
+            parent_branch=target_branch,
         )
         print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
         return CELL_EXIT.get(result.state, 1)
