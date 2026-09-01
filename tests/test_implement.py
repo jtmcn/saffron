@@ -7,6 +7,7 @@ import pytest
 from saffron.cell import runtime
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure
+from saffron.intake import Spec
 from saffron.phases import implement
 
 
@@ -38,6 +39,29 @@ def test_the_plan_prompt_names_the_scope_proposal_alternative():
     """SA-0018: the door plan_checkpoint opens must be named where the agent
     is asked for the plan, or nothing tells it the alternative exists."""
     assert "propose scope" in implement.PLAN_PROMPT
+
+
+def test_the_salvage_prompt_asks_to_commit_not_implement():
+    """SA-0028: the salvage turn's only job is a commit of what already
+    exists — asking it to keep working is the defect this prompt exists to
+    not repeat."""
+    assert "commit" in implement.SALVAGE_PROMPT.lower()
+    assert "do not keep implementing" in implement.SALVAGE_PROMPT.lower()
+    assert implement.IMPLEMENT_PROMPT != implement.SALVAGE_PROMPT
+
+
+def test_the_salvage_ceiling_is_far_below_an_ordinary_implement_turn():
+    """A salvage that can itself run to 140 turns is the defect again
+    (SA-0025: 141 turns, $11.68, zero commits)."""
+    # Read off `intake`'s own default rather than a literal this test wrote:
+    # a ratio against a number the assertion constructed proves nothing, and
+    # it is the real default that decides whether five turns is "far below".
+    ordinary = Spec.model_fields["max_turns"].default
+    assert ordinary / 4 > implement.SALVAGE_MAX_TURNS
+    # An absolute bound as well as a ratio: the ratio alone is satisfied by a
+    # 14-turn salvage against this fixture's 60, and 14 turns is a second
+    # implementation attempt however it compares to the first.
+    assert implement.SALVAGE_MAX_TURNS <= 8
 
 
 def test_the_cache_ttl_outlives_a_gate_suite():

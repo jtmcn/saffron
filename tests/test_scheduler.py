@@ -8,7 +8,12 @@ import pytest
 from saffron.cell import runtime
 from saffron.intake import load_spec
 from saffron.ledger import Ledger
-from saffron.scheduler import DONE_STATES, REQUEUE_STATES, build_queue
+from saffron.scheduler import (
+    DONE_STATES,
+    REQUEUE_STATES,
+    build_queue,
+    retirement_refusal,
+)
 from tests.conftest import HostToolExecInTest
 
 
@@ -718,6 +723,218 @@ def test_criterion_path_matching_is_exact_not_a_directory_insensitive_suffix(
     assert candidates == []
     assert len(refusals) == 1
     assert "gates/core/scope.py" in refusals[0].reason
+
+
+# ---------------------------------------------- refusal: retirement markers
+
+
+def _spec_at(tmp_path, name, **kwargs):
+    """A real `Spec`, parsed the way `build_queue` parses one — `_write_spec`
+    writes the frontmatter, `load_spec` reads it back — so `retirement_refusal`
+    is tested against the same object `_refuse` actually receives, not a
+    `SimpleNamespace` standing in for one (docs/BACKLOG.md item 21's own
+    lesson)."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, name, **kwargs)
+    spec, _sha = load_spec(directory / name)
+    return spec
+
+
+def test_a_marker_inside_touches_is_not_refused(tmp_path):
+    spec = _spec_at(tmp_path, "a.md", id="TE-9", touches=["saffron/x.py"])
+
+    assert retirement_refusal(spec, [("saffron/x.py", "TE-9")]) is None
+
+
+def test_reachability_is_scope_matches_and_not_string_equality(tmp_path):
+    """Criterion 4: "declared" means one thing in every gate. Every other
+    marker test uses a literal path equal to a literal pattern, so nothing
+    there can tell `scope.matches` from `==` — measured, both substitutions
+    passed all 163 tests. A glob and a nested path can.
+
+    The argument order is load-bearing too: `matches(path, pattern)`, not the
+    reverse. Swapped, `saffron/**` is asked whether it matches the pattern
+    `saffron/deep/x.py`, which it does not."""
+    spec = _spec_at(tmp_path, "a.md", id="TE-9", touches=["saffron/**"])
+
+    assert retirement_refusal(spec, [("saffron/deep/x.py", "TE-9")]) is None
+
+
+def test_a_forbidden_glob_reaches_a_nested_marker_too(tmp_path):
+    """The same rule on the `forbidden` half, which has its own call to
+    `matches` and so its own way to drift into equality."""
+    spec = _spec_at(
+        tmp_path, "a.md", id="TE-9", touches=["src/**"], forbidden=["docs/**"]
+    )
+
+    reason = retirement_refusal(spec, [("docs/BACKLOG.md", "TE-9")])
+
+    assert reason is not None
+    assert "forbidden" in reason
+
+
+def test_a_marker_outside_touches_refuses_and_names_the_file_and_touches(
+    tmp_path,
+):
+    """`SA-0026`'s own measured defect: a guard says `TE-9` will retire it,
+    sitting in a file `TE-9`'s `touches` does not cover."""
+    spec = _spec_at(tmp_path, "a.md", id="TE-9", touches=["saffron/x.py"])
+
+    reason = retirement_refusal(spec, [("tests/test_package.py", "TE-9")])
+
+    assert reason is not None
+    assert "tests/test_package.py" in reason
+    assert "saffron/x.py" in reason
+
+
+def test_a_marker_in_the_specs_own_forbidden_list_refuses_differently(tmp_path):
+    """A spec that may not touch the file at all cannot retire the guard
+    either — a different mistake from `touches` merely not reaching it, and
+    the acceptance criteria ask for it to read differently so an operator
+    fixes the right thing."""
+    spec = _spec_at(
+        tmp_path,
+        "a.md",
+        id="TE-9",
+        touches=["saffron/x.py"],
+        forbidden=["saffron/phases/package.py"],
+    )
+
+    reason = retirement_refusal(spec, [("saffron/phases/package.py", "TE-9")])
+
+    assert reason is not None
+    assert "saffron/phases/package.py" in reason
+    assert "forbidden" in reason
+    assert reason != retirement_refusal(spec, [("tests/test_package.py", "TE-9")])
+
+
+def test_a_marker_naming_a_different_spec_is_not_this_candidates_problem(
+    tmp_path,
+):
+    spec = _spec_at(tmp_path, "a.md", id="TE-9", touches=["saffron/x.py"])
+
+    assert retirement_refusal(spec, [("tests/test_package.py", "TE-10")]) is None
+
+
+def test_a_bug_spec_with_no_touches_yet_is_not_refused_by_its_own_marker(tmp_path):
+    """Empty `touches` is a bug awaiting DIAGNOSE (§5.2) — the one phase that
+    could ever populate it must not be refused out from under itself."""
+    spec = _spec_at(tmp_path, "a.md", id="TE-9", type="bug")
+    assert spec.touches == []
+
+    assert retirement_refusal(spec, [("saffron/x.py", "TE-9")]) is None
+
+
+def test_a_bug_specs_forbidden_marker_still_refuses_despite_empty_touches(
+    tmp_path,
+):
+    """`forbidden` is not deferred alongside `touches` — a permanent fact
+    DIAGNOSE cannot change."""
+    spec = _spec_at(
+        tmp_path, "a.md", id="TE-9", type="bug", forbidden=["saffron/phases/package.py"]
+    )
+
+    reason = retirement_refusal(spec, [("saffron/phases/package.py", "TE-9")])
+
+    assert reason is not None
+    assert "forbidden" in reason
+
+
+def test_build_queue_still_admits_a_bug_spec_with_no_touches_despite_its_marker(
+    tmp_path, ledger
+):
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-9", type="bug")
+
+    candidates, refusals = build_queue(
+        directory, None, ledger, markers=[("saffron/x.py", "TE-9")]
+    )
+
+    assert [c.spec.id for c in candidates] == ["TE-9"]
+    assert refusals == []
+
+
+def test_a_marker_naming_an_unknown_spec_id_gets_its_own_dangling_line(
+    tmp_path, ledger
+):
+    """`SA-0024`'s `done/` rule, applied to a marker instead of a
+    `depends_on`: not silence, and not `TE-9`'s own refusal either — it has
+    nothing to do with the dangling marker and is still queued."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-9", touches=["saffron/x.py"])
+
+    candidates, refusals = build_queue(
+        directory,
+        None,
+        ledger,
+        markers=[("saffron/ghost.py", "TE-404")],
+    )
+
+    assert [c.spec.id for c in candidates] == ["TE-9"]
+    assert len(refusals) == 1
+    assert "saffron/ghost.py" in refusals[0].reason
+    assert "TE-404" in refusals[0].reason
+    assert refusals[0].path == Path("saffron/ghost.py")
+
+
+def test_a_dangling_line_says_so_when_a_spec_file_could_not_be_read(tmp_path, ledger):
+    """`known_ids` is built from the spec files that parsed, so an id declared
+    only by one that did not reads as declared by nothing. Calling that
+    dangling asserts something this scan never read — the same case
+    `_dependency_refusal` qualifies rather than asserting past (§4.2.1)."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-9", touches=["saffron/x.py"])
+    (directory / "b.md").write_text("no frontmatter here\n")
+
+    _candidates, refusals = build_queue(
+        directory,
+        None,
+        ledger,
+        markers=[("saffron/ghost.py", "TE-404")],
+    )
+
+    dangling = next(r.reason for r in refusals if r.path.name == "ghost.py")
+    assert "a dangling reference" in dangling
+    assert "1 spec file here did not parse" in dangling
+
+
+def test_a_dangling_line_is_unqualified_when_every_spec_file_parsed(tmp_path, ledger):
+    """The other half: with nothing unread, the line must not hedge. A
+    qualifier that is always present tells an operator nothing about which
+    scan actually had a blind spot."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-9", touches=["saffron/x.py"])
+
+    _candidates, refusals = build_queue(
+        directory,
+        None,
+        ledger,
+        markers=[("saffron/ghost.py", "TE-404")],
+    )
+
+    dangling = next(r.reason for r in refusals if r.path.name == "ghost.py")
+    assert "did not parse" not in dangling
+
+
+def test_a_marker_naming_a_retired_spec_is_not_dangling(tmp_path, ledger):
+    """`specs/done/` declares an id exactly the way a live spec file does
+    (`_retired_ids`) — a marker naming a retired spec is a real reference,
+    not a dangling one."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-9", touches=["saffron/x.py"])
+    done = directory / "done"
+    done.mkdir()
+    _write_spec(done, "TE-8.md", id="TE-8")
+
+    candidates, refusals = build_queue(
+        directory,
+        None,
+        ledger,
+        markers=[("saffron/x.py", "TE-8")],
+    )
+
+    assert [c.spec.id for c in candidates] == ["TE-9"]
+    assert refusals == []
 
 
 # --------------------------------------------- refusal: touches vs protected

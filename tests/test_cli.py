@@ -296,6 +296,58 @@ def _local_origin_with_policy(tmp_path, policy_yaml, *, dirname="repo-protected"
     return repo
 
 
+def _local_origin_with_marker(tmp_path, path, spec_id, *, dirname="repo-marked"):
+    """`_local_origin_with_policy`'s shape, for a marker instead of a
+    policy — committed before the bare clone is cut."""
+    repo = _repo_with_commit(tmp_path / dirname)
+    marker = repo / path
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(f"# saffron:retired-by {spec_id}\n")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "marker")
+    remote = tmp_path / f"{dirname}-remote.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(repo), str(remote)], check=True)
+    _git(repo, "remote", "add", "origin", str(remote))
+    return repo
+
+
+def test_a_spec_whose_touches_cannot_reach_its_own_marker_refuses_before_the_cell_starts(
+    tmp_path, monkeypatch, capsys
+):
+    """`SA-0027`'s attended-path witness: a real marker at `base_sha` a real
+    spec's `touches` do not cover, driven through the real `cli._run_cell` —
+    the defect `SA-0026`'s own review fixed by hand twice (item 35)."""
+    repo = _local_origin_with_marker(tmp_path, "tests/test_package.py", "SY-9")
+    args = _namespace(repo, tmp_path)
+    args.spec = tmp_path / "SY-9.md"
+    args.spec.write_text(
+        "---\nid: SY-9\ntitle: Nine\ntype: feature\ntouches: ['saffron/x.py']\n"
+        "---\n\n## Acceptance criteria\n- [ ] it works\n"
+    )
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    started = False
+
+    def _started(*_a, **_k):
+        nonlocal started
+        started = True
+        raise SystemExit(0)
+
+    monkeypatch.setattr("saffron.cli.run_one_cell", _started)
+    ledger = Ledger(tmp_path / "l.db")
+
+    result = cli._run_cell(args, ledger, tmp_path / "out")
+
+    assert result == 1
+    assert not started  # no cell, no model call
+    out = capsys.readouterr().out
+    assert "tests/test_package.py" in out
+    assert "saffron/x.py" in out
+    # No row left behind: the refusal happened before a task ever existed.
+    count = ledger._db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+    assert count == 0
+    ledger.close()
+
+
 def _ceiling_spec(tmp_path, **frontmatter):
     spec = tmp_path / "SY-2.md"
     declared = "".join(f"{key}: {value}\n" for key, value in frontmatter.items())
@@ -891,7 +943,13 @@ def test_a_spec_whose_touches_are_protected_refuses_before_the_cell_starts(
 
 
 def _repo_with_spec(
-    tmp_path, *, spec_text, dirname="repo", extra_specs=None, policy_yaml=None
+    tmp_path,
+    *,
+    spec_text,
+    dirname="repo",
+    extra_specs=None,
+    policy_yaml=None,
+    markers=None,
 ):
     """A repo whose `origin` is a local bare clone, cut *after* the spec is
     committed — so the remote's default-branch head, which is what `_queue`
@@ -901,7 +959,11 @@ def _repo_with_spec(
 
     `policy_yaml` is `None` by default — every caller before `SA-0023` gets a
     repo with no `.saffron/policy.yaml` at all, exactly as before, since
-    `_protected_paths` is best-effort about that (`cli.py`)."""
+    `_protected_paths` is best-effort about that (`cli.py`).
+
+    `markers` is `{path: spec_id}` — real `saffron:retired-by` markers
+    (`SA-0027`) committed at the same sha as the specs, `None` by default so
+    every caller before `SA-0027` gets exactly the repo it already had."""
     repo = tmp_path / dirname
     repo.mkdir()
     _git(repo, "init", "-q")
@@ -913,6 +975,10 @@ def _repo_with_spec(
         (specs / name).write_text(text)
     if policy_yaml is not None:
         (repo / ".saffron" / "policy.yaml").write_text(policy_yaml)
+    for path, spec_id in (markers or {}).items():
+        marker = repo / path
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(f"# saffron:retired-by {spec_id}\n")
     _git(repo, "add", "-A")
     _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "first")
     remote = tmp_path / f"{dirname}-remote.git"
@@ -979,6 +1045,56 @@ def test_queue_refuses_a_spec_whose_touches_match_a_protected_path(tmp_path, cap
     assert "DESIGN.md" in out
     assert "protected" in out
     assert "forbidden" in out
+
+
+def test_queue_refuses_a_spec_whose_touches_cannot_reach_its_own_marker(
+    tmp_path, capsys
+):
+    """`SA-0027`'s scan-side witness: a real `saffron:retired-by` marker
+    committed alongside the spec, and a real spec whose `touches` do not
+    cover it, driven through the real `saffron queue`."""
+    spec_text = (
+        "---\nid: SY-1\ntitle: One\ntype: feature\ntouches: ['saffron/x.py']\n"
+        "---\n\n## Acceptance criteria\n- [ ] it works\n"
+    )
+    repo = _repo_with_spec(
+        tmp_path,
+        spec_text=spec_text,
+        dirname="repo-marker",
+        markers={"tests/test_package.py": "SY-1"},
+    )
+    home = tmp_path / "home"
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    out = capsys.readouterr().out
+    assert "queue: 0 candidate(s)" in out
+    assert "refusals: 1" in out
+    assert "tests/test_package.py" in out
+    assert "saffron/x.py" in out
+
+
+def test_queue_prints_a_dangling_marker_by_its_own_repo_relative_path(tmp_path, capsys):
+    """A marker naming a spec id nothing in the specs directory declares gets
+    its own line — `SA-0024`'s `done/` rule applied to a marker instead of a
+    `depends_on` — and it names a path the export never held, so `_print_queue`
+    must not raise trying to make it relative to the export root."""
+    repo = _repo_with_spec(
+        tmp_path,
+        spec_text=_A_SPEC,
+        dirname="repo-ghost",
+        markers={"saffron/ghost.py": "ZZ-404"},
+    )
+    home = tmp_path / "home"
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    out = capsys.readouterr().out
+    # SY-1 is unrelated to the dangling marker and is still queued.
+    assert "queue: 1 candidate(s)" in out
+    assert "refusals: 1" in out
+    assert "saffron/ghost.py" in out
+    assert "ZZ-404" in out
 
 
 def test_queue_says_which_refusals_did_not_run_when_no_slug_resolves(tmp_path, capsys):

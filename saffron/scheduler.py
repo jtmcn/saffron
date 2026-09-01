@@ -20,6 +20,16 @@ declarations already said before any of that started. It is the cheapest
 refusal here, needing no ledger and no `gh`, so `_refuse` checks it first.
 `build_queue` never reads `policy.yaml` itself — the caller already holds the
 export its specs come from, and hands the `protected` list in.
+
+`SA-0027` adds an eighth, and it belongs beside the fifth
+(`_unmatched_criterion_path`): both are the same defect — a path an
+acceptance criterion or a `saffron:retired-by` marker names that no
+`touches` pattern reaches — read from two different sources. A guard
+asserting "`SA-0026` will retire this" in a file `SA-0026`'s `touches` did
+not cover was measured twice in one run (docs/BACKLOG.md item 35) and fixed
+by hand both times; `retirement_refusal` reads that fact from the repository
+rather than the spec's own prose, from `mirror.retirement_markers` handed in
+by the caller, the same shape `protected` already takes.
 """
 
 from __future__ import annotations
@@ -324,6 +334,93 @@ def protected_touch_refusal(touches: list[str], protected: Sequence[str]) -> str
     return None
 
 
+def retirement_refusal(spec: Spec, markers: Sequence[tuple[str, str]]) -> str | None:
+    """Why one of this spec's own `saffron:retired-by` markers cannot be
+    reached by it, or `None`.
+
+    `markers` is every `(path, spec_id)` pair `mirror.retirement_markers`
+    found at `base_sha` — the whole repository's, not this spec's own. A
+    marker naming a different spec id is not this candidate's problem and is
+    skipped outright; `_dangling_marker_refusals` is where an id nothing
+    declares gets its own line.
+
+    Matched with `scope.matches`, the same function `scope`, `integrity`,
+    `size` and `_unmatched_criterion_path` all use — "declared" means one
+    thing in every gate, never a second and more permissive rule invented
+    here. `forbidden` is checked first and named differently from `touches`:
+    a spec that may not touch the file at all is a different mistake from
+    one whose `touches` merely does not reach it, and the two are fixed by an
+    operator in different ways.
+
+    The `touches` half is skipped when `spec.touches` is empty —
+    `_unmatched_criterion_path`'s own guard: empty is the documented shape
+    for a bug awaiting DIAGNOSE (§5.2), and every marker reads as unreached
+    against it, which would refuse the whole bug class before the one phase
+    that could ever populate `touches` gets to run. `forbidden` is not
+    skipped alongside it — a bug spec can declare it before `touches`, and a
+    file it may never touch is a fact DIAGNOSE cannot change.
+    """
+    for path, marker_spec_id in markers:
+        if marker_spec_id != spec.id:
+            continue
+        if any(matches(path, pattern) for pattern in spec.forbidden):
+            return (
+                f"{path} asserts saffron:retired-by {spec.id}, but this "
+                f"spec's own forbidden list denies it: "
+                f"{', '.join(spec.forbidden)} — it may not touch that file at "
+                "all, a different mistake from touches not reaching it"
+            )
+        if spec.touches and not any(matches(path, pattern) for pattern in spec.touches):
+            return (
+                f"{path} asserts saffron:retired-by {spec.id}, but no "
+                f"touches pattern reaches it: {', '.join(spec.touches)}"
+            )
+    return None
+
+
+def _dangling_marker_refusals(
+    markers: Sequence[tuple[str, str]],
+    known_ids: frozenset[str],
+    unreadable: int = 0,
+) -> list[Refusal]:
+    """One `Refusal` per marker naming a spec id nothing in this directory —
+    live or retired to `done/` — declares, SA-0024's `done/` rule applied to
+    this class of dangling reference instead of a `depends_on`.
+
+    Not a candidate's own refusal: no spec here owns a marker naming an id
+    that never existed, or one that shipped and was retired under a
+    different id than the one still written in the comment. Silence would be
+    the alternative, and silence is exactly what this whole spec exists to
+    end.
+
+    `unreadable` is how many spec files — live or in `done/` — did not parse,
+    and so declare no id at all. `known_ids` is built from the ones that did,
+    so a marker naming an id declared *only* by an unparseable file lands here
+    and would otherwise be called dangling, which is a claim about a file this
+    scan never read. `_dependency_refusal` qualifies the identical case rather
+    than asserting past it (§4.2.1): every branch names the state it read.
+    """
+    blind = ""
+    if unreadable:
+        plural = "s" if unreadable > 1 else ""
+        blind = (
+            f", and {unreadable} spec file{plural} here did not parse, so it "
+            "declares no id either way"
+        )
+    return [
+        Refusal(
+            path=Path(path),
+            reason=(
+                f"saffron:retired-by {spec_id} at {path}, but no spec in "
+                f"this directory or {RETIRED_DIRNAME}/ declares {spec_id} — "
+                f"a dangling reference{blind}"
+            ),
+        )
+        for path, spec_id in markers
+        if spec_id not in known_ids
+    ]
+
+
 RETIRED_DIRNAME = "done"
 
 
@@ -444,6 +541,7 @@ def _refuse(
     retired: frozenset[str],
     unreadable_retired: int,
     protected: Sequence[str],
+    markers: Sequence[tuple[str, str]],
 ) -> str | None:
     """The first of §4.2.1's remaining refusals this candidate earns, or
     `None`. Order matches the acceptance criteria's own listing — except the
@@ -508,6 +606,12 @@ def _refuse(
     if (escaped := _unmatched_criterion_path(candidate.spec)) is not None:
         return f"acceptance criteria name {escaped!r}, which no touches pattern matches"
 
+    # The eighth refusal, beside the fifth: the same "touches doesn't reach
+    # what this spec claims it will" defect, read from the repository's own
+    # `saffron:retired-by` markers instead of the spec's acceptance criteria.
+    if (retirement := retirement_refusal(candidate.spec, markers)) is not None:
+        return retirement
+
     unmet = []
     for dep in candidate.spec.depends_on:
         reason = _dependency_refusal(
@@ -537,6 +641,7 @@ def build_queue(
     repo_slug: str | None = None,
     gh: GhRunner = run_gh,
     protected: Sequence[str] = (),
+    markers: Sequence[tuple[str, str]] = (),
 ) -> tuple[list[Candidate], list[Refusal]]:
     """Turn the specs `discover_specs` found in `directory` into an ordered
     queue and a list of refusals.
@@ -561,6 +666,12 @@ def build_queue(
     them in it. `()`, the default, is what every caller before `SA-0023`
     gets, and reproduces exactly the queue they already had: nothing is
     protected, so nothing is refused on that account.
+
+    `markers` is every `saffron:retired-by` marker `mirror.retirement_markers`
+    found at `base_sha`, repository-wide (`SA-0027`). This function never
+    reads the mirror itself, the same reason it never reads `policy.yaml` —
+    the caller already has it open. `()`, the default, reproduces exactly the
+    queue every caller before `SA-0027` got.
 
     Ordered by `spec.priority` (lower runs first), then by `discover_specs`'
     filename order to break ties — `sorted` is stable and `discover_specs`
@@ -607,6 +718,11 @@ def build_queue(
     retired, retired_failures = _retired_ids(directory)
     open_prs = _open_prs(repo_slug, gh) if repo_slug is not None else []
 
+    # Every id this directory declares, live or retired to `done/` — the same
+    # union `_dependency_refusal` already treats as satisfied. A marker naming
+    # anything else is a dangling reference, not any candidate's own refusal.
+    known_ids = frozenset(discovered.spec.id for discovered in specs) | retired
+
     refusals = [Refusal(path=f.path, reason=f.reason) for f in failures]
     refusals += [
         Refusal(
@@ -618,6 +734,9 @@ def build_queue(
         )
         for f in retired_failures
     ]
+    refusals += _dangling_marker_refusals(
+        markers, known_ids, len(failures) + len(retired_failures)
+    )
     kept: list[Candidate] = []
     for candidate in candidates:
         reason = _refuse(
@@ -628,6 +747,7 @@ def build_queue(
             retired=retired,
             unreadable_retired=len(retired_failures),
             protected=protected,
+            markers=markers,
         )
         if reason is not None:
             refusals.append(Refusal(path=candidate.path, reason=reason))
