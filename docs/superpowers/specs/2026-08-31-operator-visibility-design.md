@@ -28,6 +28,17 @@ Run, not reasoned. One snapshot of `~/.saffron/ledger.db` and
 different attempt counts because a cell was mid-run against the live database;
 every number below comes from the single consistent snapshot.
 
+> **Re-measured 2026-09-01, one day later**, and the figures below are kept as
+> the dated snapshot they are rather than edited in place. What moved: **29**
+> task rows across **17** specs in **7** states (`RATE_LIMITED` is new), total
+> spend **$186.52**, `queue.json` at **14** rows still all in one state,
+> `patch.diff` present for 16 of 17 task directories, and `findings.verdict`
+> written on **1** of 29 — see part 2's gap 3, which that one row changes. What
+> did not move: `runs.preflight` at 0, `SA-0009` invisible at $31.60,
+> `EXHAUSTED` holding $58.15, three `ORPHANED` rows at $0.00. **Every argument
+> below survives; no figure in it does.** The plan's Global Constraints require
+> re-taking them at L1.
+
 **The ledger holds 23 task rows across 13 specs in 6 states. `queue.json`
 holds 10 rows across 10 specs in one state.**
 
@@ -262,18 +273,30 @@ stacked child its parent's diff the first time stacking runs — the exact
 defect `SA-0022` exists to have fixed, reintroduced one layer along. The
 spec must name `tree_base` and test the stacked case.
 
-**Gap 3 — `findings.verdict`, NULL on 19/19.** The evidence points at the
-verdict half specifically rather than at the write path. Only **2**
-`REBUTTING` attempt rows exist in 65. Both anchored blockers belong to
-`EXHAUSTED` tasks. Finding 14 (`SA-0020`) carries a rebuttal —
+**Gap 3 — `findings.verdict`, NULL on 19/19 when this was written.** The
+evidence points at the verdict half specifically rather than at the write path.
+Only **2** `REBUTTING` attempt rows existed in 65. Both anchored blockers
+belonged to `EXHAUSTED` tasks. Finding 14 (`SA-0020`) carries a rebuttal —
 `fixed: Confirmed the finding by reading package.py` — beside a NULL verdict,
 written by the same `record_rebuttal` call (in `_drive_cell`'s REBUT branch), so
 `argued.get(n)` returned a value and `judged.get(n)` did not.
 
-At n=2 that is a lead, not a diagnosis. **This sub-project's first task is one
-measurement** — `result.verdicts` against `rebut.first_answers` on the
-recorded REBUT — and the fix follows what it finds. Guessing here would be
-the mistake `CONTEXT.md`'s measured-fact convention exists to prevent.
+**One day later this gap acquired its contrast case, and it is the most useful
+thing that has happened to this sub-project.** Re-measured 2026-09-01: finding
+29 (`SA-0027`, a `contract`-lens blocker) carries `verdict = withdrawn`
+*and* a rebuttal, both from the same call. So the write path works, and the
+population where a verdict is even expected is two rows — one written, one not.
+The question is no longer "does anything write `verdict`" but "what differs
+between those two REBUTs". The other 24 findings are NULL because REBUT never
+ran on their tasks, which is correct and must not be counted as the defect.
+
+It is still a bug spec, and more clearly so: with a working case beside a
+broken one, the outcome "the critic produced no verdict for finding 14, and
+nothing in `saffron/` is broken" is now live and the spec must be able to
+reach it. **This sub-project's first task is one measurement** —
+`result.verdicts` against `rebut.first_answers` on *both* recorded REBUTs — and
+the fix follows what it finds. Guessing here would be the mistake
+`CONTEXT.md`'s measured-fact convention exists to prevent.
 
 **Level 3 has never rendered, for two independent reasons**, and both must be
 fixed for it to work: no verdict is stored, *and* both blocker-bearing tasks
@@ -403,13 +426,33 @@ cell at a time and §4.2's concurrency pool is not built.
 
 **Part 1 declares no dependency on `SA-0026`, and that is a finding rather
 than an omission.** The seam looks like it should collide over
-`saffron/cli.py`, and it does not: `cli.py` never names `watch` — it calls
-`run_one_cell` and takes the default. So the `emit` fan-out is constructed
-inside `session.py` and `cli.py` is in no spec's `touches`. **Keeping the
-default there is a design constraint, not an accident**: moving it up would
-put the seam in stacking's file for no gain. Recorded here because it stops
-mattering as scheduling and starts mattering as design the moment the
-conflict-set scheduler exists.
+`saffron/cli.py`, and at `7ab27cf` it did not: `cli.py` never named `watch` —
+it called `run_one_cell` and took the default. So the `emit` fan-out is
+constructed inside `session.py`. **Keeping the default there is a design
+constraint, not an accident**: moving it up would put the seam in stacking's
+file for no gain. Recorded here because it stops mattering as scheduling and
+starts mattering as design the moment the conflict-set scheduler exists.
+
+> **Correction, 2026-09-01 — the second half of that claim was falsified within
+> a day, and the way it failed is worth more than the claim was.** `256e529`, a
+> *review fix on `SA-0026`*, gave `cli._resolve_stacked_on` a `watch=print`
+> parameter and two call sites (`cli.py:226`, `:292`, `:297`). So `cli.py` **is**
+> in a spec's `touches` — `SA-0031`'s — and part 1's last three `watch` sites
+> live there.
+>
+> The constraint survives its rationale. The *reason* given for keeping
+> `cli.py` out was avoiding a collision with in-flight stacking work, and that
+> has expired: `SA-0026` and `SA-0027` have both merged. The *rule* — the
+> `emit` default stays constructed in `session.py`, and `cli.py:393` calls
+> `run_one_cell` with no `emit` argument — is now an acceptance criterion of
+> `SA-0031` rather than a property the plan could take for granted.
+>
+> **What this says about the method.** The falsifying change was authored by a
+> review fix on a spec whose own `touches` named no `watch` at all. No amount
+> of reading queued spec frontmatter would have caught it; only grepping the
+> code would. A design that reasons about which files a change can reach must
+> re-derive that from the tree, not from the specs, immediately before
+> spending. The plan's Task 0 Step 4 now does.
 
 **Part 3 goes last, and the reason is not politeness about ordering.** It is
 the only part that changes what the operator sees, and it renders the record

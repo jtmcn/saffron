@@ -34,8 +34,15 @@ cell-marked tests.
 ## Global Constraints
 
 - **Specs are numbered from the highest existing `SA-` id + 1.** Confirmed
-  against `origin/main` at `0d23005`: `SA-0026` is highest and is *running*.
-  **Re-confirm before writing each file** — this set has been renumbered once.
+  against `origin/main` at `aaafda5` (2026-09-01): `SA-0028` is highest and has
+  **shipped** (PR #87), so this plan's ten are `SA-0029`–`SA-0038`.
+  **Re-confirm before writing each file** — this set has been renumbered twice.
+- **Every figure in a spec body is a dated measurement, and they go stale
+  fast.** The ledger moved from 23 task rows to 29, and lifetime spend from
+  $127.00 to $186.52, in the twenty-four hours between the design and this
+  revision. Each `## Context` carries the date it was measured; **re-take the
+  numbers at L1** and correct the body before committing the spec. A cell reads
+  a stale figure as fact.
 - **Every frontmatter field is required**: `id`, `title`, `type`, `priority`,
   `depends_on`, `touches` (or `envelope` for a bug), `forbidden`,
   `budget_usd`, `max_attempts`, `max_turns`, `risk`.
@@ -65,7 +72,7 @@ already, and `SA-0022` and `SA-0025` were both split mid-flight for it.
 
 | design part | specs | why it splits |
 |---|---|---|
-| 1 — event seam | `SA-0029`–`SA-0031` | a new module, then ~20 call sites in a 1322-line file, then ~10 across four phase files |
+| 1 — event seam | `SA-0029`–`SA-0031` | a new module, then ~70 `watch` sites in a 1495-line file, then 33 across four phase files and three in `cli.py` |
 | 2 — ledger gaps | `SA-0032`–`SA-0034` | three independent changes sharing only `ledger.py`; the third has unknown blast radius |
 | 3 — renderer | `SA-0035`–`SA-0038` | query, then render-and-delete, then the task page, then the timeline |
 
@@ -87,23 +94,43 @@ scheduler and PACKAGE emit these too and it keeps part 1 clear of
 `saffron/ledger.py`, `saffron/report/index.py`, `saffron/replay.py`, and the
 matching tests.
 
-**Never modified by any cell here:** `saffron/cli.py`. It does not name
-`watch` — it calls `run_one_cell` and takes the default — so keeping the
-`emit` default inside `session.py` keeps the whole seam out of `SA-0026`'s
-file. That is a design constraint, not a coincidence.
+**`saffron/cli.py` is touched once, by `SA-0031` — and the design said it
+never would be.** That claim was true at `7ab27cf` and false one commit later:
+`256e529`, a review fix on `SA-0026` landed 2026-08-31, gave
+`_resolve_stacked_on` a `watch=print` parameter and two `watch(...)` call sites
+(`cli.py:226`, `:292`, `:297`). Two things follow. The *reason* for keeping
+`cli.py` out — not colliding with in-flight stacking work — has expired, since
+`SA-0026` (#84) and `SA-0027` (#88) have both merged. The *constraint*
+underneath it survives and is restated as an acceptance criterion in
+`SA-0031`: **the `emit` default stays in `session.py`.** `cli.py:393` calls
+`run_one_cell` with no `emit` argument and must keep doing so. `SA-0031`
+migrates three lines in `_resolve_stacked_on` and nothing else in that file.
+
+**Also modified by cells, and missed by the first cut of this plan:**
+`tests/test_implement.py`, `tests/test_package.py`, `tests/test_package_cell.py`,
+`tests/test_rebut.py`, `tests/test_review.py`, `tests/test_agent_runner.py`,
+`tests/test_cli.py`. Each calls a migrated function with `watch=`, `tests` is a
+blocking gate, and a migration with no scope to repair them exhausts. They are
+in `SA-0031`'s `touches` for that reason.
 
 ---
 
-## Task 0: Wait for `SA-0028`, then re-confirm numbering
+## Task 0: `SA-0028` has shipped — re-confirm numbering and collisions
 
-**Renumbered once here already, which is why this task exists.** `SA-0026`
+**Renumbered twice here already, which is why this task exists.** `SA-0026`
 merged, and PR #85 added two more specs in the same window — `SA-0027` (an
 inertness guard whose retiring spec cannot reach the file) and `SA-0028` (an
-implement turn that dies on its ceiling with nothing committed). Both are
-spec files awaiting cells, not merged work. This plan's ten moved from
-`SA-0027`–`SA-0036` to `SA-0029`–`SA-0038`. Assume it happens again.
+implement turn that dies on its ceiling with nothing committed). This plan's
+ten moved from `SA-0027`–`SA-0036` to `SA-0029`–`SA-0038`. Assume it happens
+again.
 
-### `SA-0028` blocks part 1, and not only over a file
+**Both have since shipped** — `SA-0027` as PR #88, `SA-0028` as PR #87 — so
+part 1's floor is in place and Task 1 is unblocked. What remains of this task
+is the re-check, and the re-check is the half that has never once come back
+clean: the first pass of this plan cleared `cli.py` and `cli.py` had acquired
+a `watch` parameter the day before.
+
+### `SA-0028` was part 1's floor, and it has landed
 
 Its `touches` are `saffron/cell/session.py`, `saffron/phases/implement.py`,
 `tests/test_session.py`, `tests/test_implement.py` — part 1's exact territory.
@@ -115,13 +142,16 @@ That alone would make it a dependency. The deeper problem is what it *does*:
 >   watch line distinguishes "was cut off and could not be salvaged" from
 >   "finished and produced nothing"
 
-**It adds `watch` lines.** So `SA-0029`'s golden fixture — the whole basis on
-which part 1's migrations are verified — cannot be captured until `SA-0028` has
-landed. Captured before, it records output that is about to change, and the
-migrations then fail against a stale fixture for a reason that is not a
-migration bug. That is why even `SA-0029`, which touches only
-`saffron/events.py` and its own tests, declares `depends_on: SA-0028`: the
-dependency is the fixture, not the module.
+**It adds `watch` lines**, and they are on `main` now — four `SALVAGE:` lines
+and `IMPLEMENT: finished and produced nothing`, at `session.py:1143`–`1201`. So
+`SA-0029`'s golden fixture — the whole basis on which part 1's migrations are
+verified — could not have been captured before this landed: it would record
+output that was about to change, and the migrations would then fail against a
+stale fixture for a reason that is not a migration bug. That is why even
+`SA-0029`, which touches only `saffron/events.py` and its own tests, declares
+`depends_on: SA-0028`: the dependency is the fixture, not the module. The
+declaration stays in the frontmatter as the record of why; the gate now passes
+it.
 
 **And its two new facts want event fields, not strings.** "Which of three
 ceilings stopped this" and "cut off versus finished empty" are exactly the
@@ -136,17 +166,19 @@ in this plan modifies.
 
 ### Steps
 
-- [ ] **Step 1: Confirm `SA-0028` has shipped**
+- [ ] **Step 1: Re-confirm `SA-0028` has shipped.** It had, at `aaafda5`.
 
 ```bash
 git fetch origin && git log --oneline -5 origin/main
-gh pr list --state merged --limit 5 --json number,title -q '.[] | "\(.number) \(.title)"'
+gh pr list --state merged --limit 8 --json number,title -q '.[] | "\(.number) \(.title)"'
+grep -c 'SALVAGE:' saffron/cell/session.py
 ```
 
-Expected: a merged `saffron/SA-0028` pull request. A spec file in
-`.saffron/specs/` is **not** enough — `SA-0028` exists as a spec today and has
-not been run, and part 1 depends on the code it will write, not on the spec
-that describes it.
+Expected: PR #87 merged, and the `SALVAGE:` watch lines present in
+`session.py`. **A spec file in `.saffron/specs/` proves nothing either way** —
+retirement (L8) lags merging in this repo, and `.saffron/specs/` currently
+holds nine specs whose code is already on `main`. Check the pull request and
+the code, never the spec file's location.
 
 - [ ] **Step 2: Rebase**
 
@@ -164,15 +196,31 @@ Expected: highest is `SA-0028`. If higher, renumber every spec below **and**
 the design doc's numbering note together, so the two do not drift. This has
 already happened twice.
 
-- [ ] **Step 4: Re-check part 1's territory for new collisions**
+- [ ] **Step 4: Re-check part 1's territory — in the code, not only in the specs**
 
 ```bash
-grep -l 'saffron/cell/session.py\|saffron/phases/' .saffron/specs/SA-*.md
+# specs still queued against part 1's files
+grep -l 'saffron/cell/session.py\|saffron/phases/\|saffron/cli.py' .saffron/specs/SA-*.md
+# and the check that would have caught cli.py: where `watch` actually is
+grep -rn 'watch' --include='*.py' saffron/ \
+  | grep -v '^saffron/cell/session.py' | grep -v '^saffron/phases/'
+grep -rln 'watch=' --include='*.py' tests/
 ```
 
-Any spec still queued against `session.py` or `phases/` is a fresh collision
-with part 1, and the same reasoning as `SA-0028` applies: if it adds or
-changes a `watch` line, it lands before `SA-0029`'s golden fixture is
+**The spec grep alone is not enough, and this is the check that failed.** It
+returns merged-but-unretired specs as false positives, and it cannot see a
+`watch` parameter that arrived as a *review fix* on a spec whose own `touches`
+never mentioned one — which is exactly how `cli.py` acquired three of them.
+
+Read the second and third commands' output against `SA-0030`'s and `SA-0031`'s
+`touches`. **Every file they list must appear in one of the two**, or the
+migration ends `EXHAUSTED` against a blocking `tests` gate it has no scope to
+repair. As of 2026-09-01 that set is `saffron/cli.py` plus seven test files,
+and all eight are in `SA-0031`.
+
+Any spec still queued against `session.py`, `phases/` or `cli.py` is a fresh
+collision with part 1, and the same reasoning as `SA-0028` applies: if it adds
+or changes a `watch` line, it lands before `SA-0029`'s golden fixture is
 captured, not after.
 
 ---
@@ -419,6 +467,15 @@ generated after a change proves the change agrees with itself. This spec
 changes no call site, which is what makes the capture trustworthy — and it is
 the reason this spec exists separately at all.
 
+**A "driven session" needs no container, and the fixture test must not be
+marked `cell`.** `tests/test_session.py` carries **no** `pytest.mark.cell`: it
+drives `run_one_cell` end to end against a stubbed runtime, a stubbed export
+and a monkeypatched `run_agent`, and that is where the capture comes from.
+`pyproject`'s `addopts` excludes `cell`-marked tests from the default run, so a
+golden assertion carrying that marker would be **skipped by `make check`** and
+`SA-0030` and `SA-0031` would then verify their migrations against a test that
+never executes. Capture and assert host-side, unmarked.
+
 **Unmodified means "after `SA-0028` has landed", not "now".** `SA-0028` adds
 `watch` lines — one naming which of three ceilings stopped a run, one
 distinguishing "cut off and could not be salvaged" from "finished and produced
@@ -529,8 +586,12 @@ export, and the terminal line.
       unwritable and asserts the session still reaches its terminal state
 - [ ] `phases/` is untouched — it still receives a `watch`-shaped callable, and
       a test asserts the seam between them is intact until `SA-0031`
-- [ ] Every new test runs with no network and no cell, except those that must
-      drive a real session, which carry the `cell` marker
+- [ ] Every new test runs with no network and no cell. **The golden-output
+      test in particular must not carry the `cell` marker**: `pyproject`'s
+      `addopts` excludes those from the default run, and a skipped assertion is
+      how this spec's one real acceptance criterion passes without executing.
+      `tests/test_session.py` drives `run_one_cell` against a stubbed runtime
+      today and has no `cell` marker anywhere — follow it
 
 ## Out of scope
 **The phases.** `saffron/phases/**` is `forbidden`. `SA-0031` migrates them,
@@ -556,6 +617,14 @@ this diff in `SA-0026`'s file for no gain, and `cli.py` is `forbidden` here.
 **`phases/` still takes a `watch`.** Adapt at the boundary — the phase call
 sites keep receiving a string-taking callable until `SA-0031`. A half-migrated
 seam that leaves both files broken is the failure this split exists to avoid.
+
+**Six test files outside this spec's `touches` call a phase function with
+`watch=`** — `test_implement.py` (27 sites), `test_package.py` (7),
+`test_package_cell.py`, `test_rebut.py`, `test_review.py`,
+`test_agent_runner.py` — and the adapter is the only thing keeping them green.
+That is what makes this spec's scope sufficient and `SA-0031`'s wider: `tests`
+is a blocking gate, and a migration that cannot edit its callers' tests cannot
+pass. Do not remove the adapter here to be tidy.
 
 **`error` ≠ `fail`, and the events must not blur them.** `fail` means the
 repo's code is wrong; `error` means the gate broke, aborts the attempt, and is
@@ -588,31 +657,45 @@ touches:
   - saffron/phases/package.py
   - saffron/phases/rebut.py
   - saffron/phases/review.py
+  - saffron/cli.py
   - tests/test_session.py
+  - tests/test_implement.py
+  - tests/test_package.py
+  - tests/test_package_cell.py
+  - tests/test_rebut.py
+  - tests/test_review.py
+  - tests/test_agent_runner.py
+  - tests/test_cli.py
   - docs/BACKLOG.md
 forbidden:
   - DESIGN.md
   - CONTEXT.md
   - .saffron/**
-  - saffron/cli.py
   - saffron/ledger.py
   - saffron/cell/session.py
   - saffron/report/**
   - saffron/gates/**
   - saffron/events.py
   - images/**
-budget_usd: 12
+budget_usd: 16
 max_attempts: 4
-max_turns: 110
+max_turns: 130
 risk: elevated
 ---
 
 ## Context
 `SA-0030` migrated the supervisor and left an adapter at the phase boundary:
-`phases/` still receives a string-taking callable. About ten call sites remain,
-across `implement.py` (the agent stream and its raw-line quarantine),
-`package.py` (re-verify, conflict, refusal-to-push, the pull request URL),
-`rebut.py` and `review.py`.
+`phases/` still receives a string-taking callable. Thirty-three call sites
+remain, measured 2026-09-01 — `implement.py` 8 (the agent stream and its
+raw-line quarantine), `package.py` 11 (re-verify, conflict, refusal-to-push,
+the pull request URL), `rebut.py` 9, `review.py` 5.
+
+**And three more in `saffron/cli.py`, which this plan said would never be
+touched.** `_resolve_stacked_on` takes `watch=print` and calls it twice
+(`cli.py:226`, `:292`, `:297`), added by `256e529` — a review fix on `SA-0026`,
+landed the day this plan was written, on a spec whose own `touches` named no
+`watch`. It is the last `watch` outside `phases/`, so it is this spec's or
+nobody's.
 
 `implement.py` is the interesting one. It already holds `_describe`, written
 for the **cell's** events, and calls `watch(_describe(event))`. `SA-0029`
@@ -629,11 +712,25 @@ of them should survive.
 - **PACKAGE's lines are the ones an unattended morning needs most** — a refused
   push, a conflict with the default branch, new failures against `main` — and
   they are strings.
+- **Seven test files call a migrated function with `watch=`** —
+  `test_implement.py` (27 sites), `test_package.py` (7), `test_cli.py` (3 on
+  `_resolve_stacked_on`), `test_package_cell.py`, `test_rebut.py`,
+  `test_review.py`, `test_agent_runner.py` — and `tests` is blocking. They are
+  in `touches` because a migration that cannot repair its callers' tests cannot
+  pass its own gates.
 
 ## Acceptance criteria
-- [ ] Every `watch(...)` in the four phase modules is an `emit(<Event>)`, and
-      no signature in `saffron/` still carries a `watch` parameter — a test
-      greps the package and asserts none remains
+- [ ] Every `watch(...)` in the four phase modules **and in
+      `cli._resolve_stacked_on`** is an `emit(<Event>)`, and no signature in
+      `saffron/` still carries a `watch` parameter — a test greps the package
+      and asserts none remains. `saffron/cli.py` is in `touches` precisely so
+      this criterion can be discharged rather than worked around
+- [ ] **`cli.py:393` still calls `run_one_cell` with no `emit` argument**, and
+      a test asserts it. Migrating three lines in `_resolve_stacked_on` is not
+      licence to move the seam up: the default `emit` stays constructed in
+      `session.py`
+- [ ] The seven test files in `touches` are migrated with their callees and the
+      suite is green — no `watch=` remains anywhere under `tests/`
 - [ ] The adapter `SA-0030` left at the phase boundary is **deleted**
 - [ ] **The terminal output does not change**, asserted against
       `tests/fixtures/watch-golden.txt` as in `SA-0030`
@@ -646,11 +743,19 @@ of them should survive.
       parsed as one
 - [ ] A test asserts an unknown cell event kind reaches the log and the
       terminal without raising
-- [ ] Every new test runs with no network and no cell, except those that must
-      drive a real session, which carry the `cell` marker
+- [ ] Every new test runs with no network and no cell, and the golden-output
+      test is **not** `cell`-marked, for the reason `SA-0030` gives: `addopts`
+      would exclude it and the migration would verify against a skipped
+      assertion. `tests/test_package_cell.py` is the one file here that is
+      genuinely cell-marked; nothing new joins it
 
 ## Out of scope
 **`saffron/cell/session.py`.** `forbidden` — `SA-0030` finished it.
+
+**Everything in `saffron/cli.py` except `_resolve_stacked_on`'s three lines.**
+The file is in `touches` to finish the seam, not to be refactored. `SA-0026`
+and `SA-0027` have both merged, so nothing is racing for it — which is exactly
+why a wider edit here would be unforced.
 
 **Changing any message**, for the reason `SA-0030` gives.
 
@@ -661,6 +766,11 @@ of them should survive.
 ## Notes for the agent
 **Delete `_describe`; do not leave it wrapping the new one.** A one-line
 delegation is how two renderers survive a refactor meant to end them.
+
+**`cli.py` is in `touches`, and the design document says it never would be.**
+That claim was true when the design was written and false one commit later.
+Where the two disagree, the code is the authority: `grep -rn watch
+saffron/cli.py` settles it, and this spec was cut after that grep was run.
 
 **`implement.py`'s raw-line branch is a security boundary, not a formatting
 case.** A line that is not JSON came from a process sharing the runner's
@@ -714,8 +824,9 @@ risk: standard
 
 ## Context
 §4.1's schema gives `runs` a `preflight` column and §6's batch header lists
-per-repo preflight status as one of its six fields. Measured 2026-08-31
-against `~/.saffron/ledger.db`: **0 of 23 runs** have it set.
+per-repo preflight status as one of its six fields. Measured **2026-09-01**
+against `~/.saffron/ledger.db`: **0 of 29 runs** have it set — it was 0 of 23 a
+day earlier, so the gap widens with every cell and closes with none.
 
 Preflight runs on every cell — it starts the proxy, asserts the route out
 (§5.1.1), builds the image if the Dockerfile moved, and brings the cell up —
@@ -837,9 +948,10 @@ and it is in no ledger column. It exists only in
 writes and only a task that reaches PACKAGE ever gets to.
 
 A task that ends `EXHAUSTED` still produces a patch: teardown exports
-`patch.diff` for 12 of 13 task directories, including `SA-0009`, the $31.60
-most expensive task in the ledger. Its `patch.json` records `base_sha`,
-`tree_base` and the changed file list — and no line counts.
+`patch.diff` for **16 of 17** task directories (measured 2026-09-01; 12 of 13 a
+day earlier), including `SA-0009`, the $31.60 most expensive task in the
+ledger. Its `patch.json` records `base_sha`, `tree_base` and the changed file
+list — and no line counts.
 
 ## Problem
 - **The size of what a failed task built is unrecorded.** "It burned $31.60 and
@@ -893,7 +1005,7 @@ nothing here.
 `PRAGMA foreign_key_check` after it is theatre. Two nullable columns need
 `ALTER TABLE ... ADD COLUMN` and nothing more.
 
-**A real ledger with 23 task rows exists at `~/.saffron/ledger.db`.** There is
+**A real ledger with 29 task rows exists at `~/.saffron/ledger.db`.** There is
 no route to it from a cell and you must not try. Write the migration so that
 it would open.
 
@@ -948,31 +1060,58 @@ risk: elevated
 `confirmed` and the implementer answered with an argument rather than a fix.
 Both halves are load-bearing, and the first is `findings.verdict`.
 
-Measured 2026-08-31 against `~/.saffron/ledger.db`: `verdict` is NULL on
-**19 of 19** findings. Two blockers exist, both anchored, both belonging to
-`EXHAUSTED` tasks. Finding 14 (`SA-0020`) carries a rebuttal —
-`fixed: Confirmed the finding by reading package.py` — beside a NULL verdict,
-**written by the same `record_rebuttal` call**. So `argued.get(n)` returned a
-value and `judged.get(n)` did not. Only 2 `REBUTTING` attempt rows exist in 65.
+Measured **2026-09-01** against `~/.saffron/ledger.db`, and the picture is
+sharper than it was a day earlier, when `verdict` was NULL on 19 of 19.
 
-That is a lead, not a diagnosis, and n=2 is why this is a bug spec.
+`verdict` is now non-NULL on **1 of 29** findings — and the denominator that
+matters is neither number. Only **five findings belong to a task that ran REBUT
+at all** (5 `REBUTTING` attempt rows in 91), and REBUT judges blockers, so the
+population where a verdict is even expected is **two rows**:
+
+| finding | spec | task state | `verdict` | `rebuttal` |
+|---|---|---|---|---|
+| 14 | `SA-0020` | `EXHAUSTED` | NULL | present |
+| 29 | `SA-0027` | `READY_FOR_REVIEW` | `withdrawn` | present |
+
+**The write path works.** Finding 29 is a `contract`-lens blocker the critic
+withdrew, and both fields landed from the same `record_rebuttal` call. So the
+question is not "does anything write `verdict`" — it is "why did finding 14's
+arrive empty when finding 29's did not", and there is now a **contrast case**
+to diff against. A working run beside a broken one, one call apart, is a far
+better instrument than the single lead this spec was cut from.
+
+The other 24 findings carry NULL verdicts because REBUT never ran on their
+tasks. That is correct, not the defect, and must not be counted as it.
 
 ## Problem
-- **The critic's own judgement is not persisted.** `record_rebuttal` takes
-  `verdict` and writes it; the value arriving is `None`.
-- **Level 3 has never rendered.** It cannot, with no verdict stored — and
-  §6 measured that the most expensive task in the ledger, `SA-0005` at $10.07,
+- **The critic's judgement is persisted once in two chances.** `record_rebuttal`
+  takes `verdict` and writes it. On finding 29 the value arrived; on finding 14
+  it was `None`.
+- **Level 3 has effectively never rendered.** One stored verdict, on a
+  `withdrawn` blocker — which is by definition not a sustained one — and §6
+  measured that the most expensive task in the ledger, `SA-0005` at $10.07,
   renders `0 concerns` on the bottom line of ten for exactly this reason.
-- **The rebuttal half works**, which narrows the fault and is the strongest
-  clue available: the same call, the same row, one field set and one not.
+- **The rebuttal half works in both cases**, which is what narrows the fault:
+  the same call, the same row shape, one field set and one not, on one of the
+  two.
 
 ## Acceptance criteria
 - [ ] The cause is established **before** any fix, by reading
-      `rebut.first_answers` against `result.verdicts` on a recorded REBUT, and
-      stated in the pull request body — including whether the verdicts were
-      never produced, produced under keys that do not match, or produced and
-      dropped
-- [ ] A regression test exists that fails on the current `main`
+      `rebut.first_answers` against `result.verdicts` on **both** recorded
+      REBUTs — finding 14 (`SA-0020`, empty) against finding 29 (`SA-0027`,
+      written) — and stated in the pull request body. **The contrast is the
+      instrument:** what differs between the two runs is the answer. Name which
+      of the three it was — never produced, produced under keys that do not
+      match, or produced and dropped
+- [ ] **If the difference is that the critic produced no verdict for finding
+      14, then nothing in `saffron/` is broken and the correct outcome is to
+      say so and stop.** That is a finding for the pull request body and a
+      candidate spec of its own, not a fix to write. A spec with no route to
+      "this is working" will invent something to repair
+- [ ] The 24 findings on tasks that never ran REBUT are **not** treated as
+      instances of this defect. A NULL verdict on a finding no critic judged is
+      correct, and a change that writes one is worse than the bug
+- [ ] Otherwise, a regression test exists that fails on the current `main`
 - [ ] After a REBUT producing verdicts, `findings.verdict` is non-NULL for
       every judged blocker
 - [ ] A test drives the recording path with both a `confirmed` and a
@@ -1002,9 +1141,15 @@ nobody observed is a fabricated judgement.
 
 ## Notes for the agent
 **Measure before fixing; the acceptance criteria are ordered that way on
-purpose.** With n=2 the evidence supports "the verdict half arrived empty" and
-does not yet say why. A fix written against a guess is the mistake this repo's
-measured-fact convention exists to prevent.
+purpose.** The population is two rows and one of them is *correct* — which is
+better evidence than two failures would have been. A fix written against a
+guess is the mistake this repo's measured-fact convention exists to prevent.
+
+**These figures moved in a single day** — 0 of 19 verdicts became 1 of 29, and
+the second data point is what turned a lead into a contrast. Re-run the queries
+before the DIAGNOSE turn. If a third REBUT has happened since, it is either a
+second working case or a second broken one, and either changes the
+diagnosis.
 
 **Both blocker-bearing tasks are `EXHAUSTED`,** so they never reached PACKAGE
 and `sustained_blockers` was never called on them either. That is a second,
@@ -1073,9 +1218,13 @@ risk: elevated
 ## Context
 `append_queue_line` has exactly two callers — `_finish` in `phases/package.py`
 and `replay` in `replay.py` — so a task that never reaches PACKAGE never
-reaches the page. Measured 2026-08-31: the ledger holds **23 task rows across
-13 specs in 6 states**; `queue.json` holds **10 rows in one state**. Total
-spend $127.00 against the page's $67.05.
+reaches the page. Measured **2026-09-01**: the ledger holds **29 task rows
+across 17 specs in 7 states**; `queue.json` holds **14 rows, all of them
+`READY_FOR_REVIEW`**. Lifetime spend is **$186.52**, of which `EXHAUSTED`
+alone is $58.15 and appears on no page.
+
+A day earlier the same queries said 23 rows, 13 specs, 6 states and $127.00.
+**Re-take them at L1; the ratio is the finding, not the figures.**
 
 `SA-0032`, `SA-0033` and `SA-0034` closed the three gaps that made the ledger
 unable to answer for a row. This spec builds the query. It renders nothing.
@@ -1086,12 +1235,14 @@ unable to answer for a row. This spec builds the query. It renders nothing.
   than the page's.
 - **Row granularity is undecided and both obvious answers are wrong.** One row
   per task puts `SA-0013`'s nine `$0.00` `ORPHANED`/`NOT_IMPLEMENTED` dev-era
-  rows at rank 2, atop a page read in ten seconds. One row per spec at the
-  newest state loses `SA-0019`'s `EXHAUSTED` run at $12.12 — the defect this
-  whole design exists to fix.
+  rows — ten task rows totalling $1.62 — at rank 2, atop a page read in ten
+  seconds. One row per spec at the newest state loses `SA-0019`'s `EXHAUSTED`
+  run at $12.12 — the defect this whole design exists to fix.
 - **`attempts` means two things.** The page's `attempts` is gate attempts; the
-  table counts phase sessions. `SA-0013` renders `att 1` against 4 attempt
-  rows, `SA-0019` `att 2` against 5.
+  table counts phase sessions. `SA-0013` carries 13 attempt rows across
+  `IMPLEMENTING` and `REVIEWING` for a page that means 1; `SA-0019` carries 9
+  across three phases. A naive count renders a number an order of magnitude
+  too large.
 
 ## Acceptance criteria
 - [ ] `queue_rows(ledger)` returns `QueueLine`s built from SQL, reading no
@@ -1183,7 +1334,6 @@ touches:
   - saffron/phases/package.py
   - saffron/replay.py
   - tests/test_report.py
-  - docs/evidence/2026-09-01-queue-from-the-ledger.md
   - docs/BACKLOG.md
 forbidden:
   - DESIGN.md
@@ -1202,14 +1352,16 @@ risk: elevated
 ---
 
 ## Context
-`SA-0035` built `queue_rows`, which answers for all 23 task rows. Nothing calls
-it. The page still renders from `queue.json`, whose 10 rows are all
-`READY_FOR_REVIEW` and 9 of which are stale — the ledger records those specs as
-`MERGED`, because `reconcile` updates the ledger and nothing updates the store.
+`SA-0035` built `queue_rows`, which answers for every task row. Nothing calls
+it. The page still renders from `queue.json`, whose 14 rows are **all**
+`READY_FOR_REVIEW` while the ledger records most of those specs as `MERGED` —
+`reconcile` updates the ledger and nothing updates the store.
 
 Three specs appear on no page at all: `SA-0009` (`EXHAUSTED`, **$31.60**),
 `SA-0020` (`EXHAUSTED`, $14.43), `SA-0021` (`PLAN_REJECTED`, $0.82) — exactly
-what §6's sort levels 1 and 2 exist for.
+what §6's sort levels 1 and 2 exist for. Measured 2026-09-01: 29 task rows
+across 17 specs in 7 states, against `queue.json`'s 14 in one. Re-take both at
+L1.
 
 ## Problem
 - **The page reads green when the night was not.** Failures absent, successes
@@ -1218,9 +1370,10 @@ what §6's sort levels 1 and 2 exist for.
   relocated into the reporting layer.
 - **§6's sort has never been reached.** Every real row ranks 5. `sort_key` is
   not wrong; it has never been given a row it could rank.
-- **The header under-reports lifetime spend by 47%**, and the missing half is
-  almost entirely `EXHAUSTED` — the state meaning a task could not pass its own
-  gates.
+- **The header under-reports lifetime spend by roughly half**, and the missing
+  half is almost entirely `EXHAUSTED` — the state meaning a task could not pass
+  its own gates. It was 47% of $127.00 when this was cut; the percentage moves
+  with every run and the direction does not.
 
 ## Acceptance criteria
 - [ ] `write_index` renders from `queue_rows` and `queue.json` is read by
@@ -1243,10 +1396,6 @@ what §6's sort levels 1 and 2 exist for.
 - [ ] Every value interpolated into HTML is escaped, including text that
       originated in a cell — a test asserts a state or caption containing
       `<script>` renders inert
-- [ ] `docs/evidence/2026-09-01-queue-from-the-ledger.md` records this shipped
-      renderer pointed at `~/.saffron/ledger.db`, changing only the data
-      source, in the shape of `2026-08-25-morning-queue-from-real-rows.md`,
-      including row count, state spread and total spend
 - [ ] `docs/BACKLOG.md` records that §6's "the queue reads `queue.json`"
       paragraph is now wrong and the correction is by hand
 - [ ] Every new test runs with no network and no cell
@@ -1262,10 +1411,19 @@ and it is better than anything built here.
 **Deleting `queue.json` from disk.** The file stops being read and stops being
 written. Removing an operator's existing batch tree is not this spec's call.
 
+**The evidence record.** `docs/evidence/` is not in `touches`, and the record
+the design's Verification section asks for is **Task 11's, by hand**. It
+requires pointing the shipped renderer at `~/.saffron/ledger.db`, and there is
+no route from a cell to the host's ledger — `SA-0033`'s own notes say so in as
+many words. An agent asked for it could only write numbers it guessed, which is
+the one thing `## Notes for the agent` exists to forbid.
+
 ## Notes for the agent
-**This is the first spec in the sequence whose output a human looks at.** The
-evidence record is an acceptance criterion because the claim "23 rows, not 10"
-must be checkable by the next reader rather than asserted by this one.
+**This is the first spec in the sequence whose output a human looks at**, and
+it is the first whose correctness a test cannot fully establish. The operator
+renders the page against the real ledger at L6 and writes the evidence record
+at Task 11; your job is to make that render possible and correct, not to
+describe what it would have shown.
 
 **Deleting the lock is correct and will feel wrong.** `flock` guards a
 read-modify-write of `queue.json`. A full re-render from SQL has no read half.
@@ -1279,22 +1437,28 @@ the batch ends, because merging is what happens next.
 Commit after each coherent step. Uncommitted work dies with the cell.
 ```
 
-- [ ] **L2: Verify intake** — note this spec's `touches` names a
-      `docs/evidence/` file that does not exist yet, which is correct: gate 0
+- [ ] **L2: Verify intake.** No acceptance criterion here names a path outside
+      `touches` — the evidence record that used to be one has moved to Task 11,
+      because a cell cannot reach `~/.saffron/ledger.db` to produce it. Gate 0
       matches acceptance criteria against `touches` patterns, and a criterion
-      naming a path no pattern matches is a refusal.
+      naming a path no pattern matches is a refusal; a criterion naming a path
+      the *cell* cannot reach is worse, because gate 0 admits it.
 - [ ] **L3–L5.**
-- [ ] **L6: Look at the page before marking it ready.**
+- [ ] **L6: Render the page and look at it before marking it ready.** From the
+      branch, against the real ledger — the operator can do this and the cell
+      could not:
 
 ```bash
-open ~/.saffron/batches/v0/index.html
-sqlite3 ~/.saffron/ledger.db "select count(distinct spec_id), sum(spent_usd_est) from tasks"
+sqlite3 ~/.saffron/ledger.db \
+  "select count(*), count(distinct spec_id), round(sum(spent_usd_est),2) from tasks"
 ```
 
-Expected: roughly 13 rows, `SA-0009` near the top at `EXHAUSTED` and $31.60,
-and a header total matching the query. This is the one review in the plan that
-is not only a diff read, and the one place a rendered page can be wrong in a
-way no test and no reviewer will catch from a diff.
+Expected: one row per spec (17 at the last count, not 29), `SA-0009` near the
+top at `EXHAUSTED` and $31.60, and a header total matching the query. This is
+the one review in the plan that is not only a diff read, and the one place a
+rendered page can be wrong in a way no test and no reviewer will catch from a
+diff. **Keep the rendered page — Task 11's evidence record is written from
+it.**
 
 - [ ] **L7: Independent code review.** Give this reviewer the rendered
       `index.html` as well as the diff — it is the artifact, and a reviewer
@@ -1544,12 +1708,26 @@ Three protected documents no cell can correct. Each spec above leaves a
       term is a by-hand edit: `ontology/shapes/**` is in `gate_config`, so
       `integrity` refuses an edit no spec's `touches` names, and a design
       document should not quietly move a term in a vocabulary.
-- [ ] **Step 5: Close the backlog entries** the ten specs added, each with the
+- [ ] **Step 5: Write the evidence record.** `SA-0036`'s L6 rendered the
+      shipped page against `~/.saffron/ledger.db`; this writes it up as
+      `docs/evidence/2026-09-01-queue-from-the-ledger.md`, in the shape of
+      `docs/evidence/2026-08-25-morning-queue-from-real-rows.md` — a script
+      under `docs/evidence/scripts/` pointing the **shipped** `write_index` and
+      `sort_key` at the real ledger, changing only the data source, plus row
+      count, state spread and total spend.
+
+      **This is by hand because it cannot be otherwise.** The precedent record
+      was produced the same way — `docs/evidence/scripts/2026-08-25-queue-from-ledger.py`,
+      runnable from the repo root, committed under `docs(design)` — and no cell
+      can reach the host's ledger. It was an acceptance criterion of `SA-0036`
+      in the first cut of this plan, which an agent could only have discharged
+      by inventing the numbers.
+- [ ] **Step 6: Close the backlog entries** the ten specs added, each with the
       commit that closed it — the shape items 1 and 29 use.
-- [ ] **Step 6: Commit.**
+- [ ] **Step 7: Commit.**
 
 ```bash
-git add DESIGN.md docs/BACKLOG.md
+git add DESIGN.md docs/BACKLOG.md docs/evidence/
 git commit -m "docs(design): the queue reads the ledger, and §6 said otherwise"
 ```
 
@@ -1560,8 +1738,10 @@ git commit -m "docs(design): the queue reads the ledger, and §6 said otherwise"
 **Spec coverage.** Design part 1 → Tasks 1–3. Part 2's three gaps → Tasks 4–6,
 one spec each, carrying the `tree_base` trap (Task 5) and the measure-first
 discipline (Task 6). Part 3 → Tasks 7–10, split query / render / page /
-timeline. The design's "What `DESIGN.md` must change" → Task 11. Its
-sequencing section → Task 0 and the `depends_on` chain.
+timeline. The design's "What `DESIGN.md` must change" → Task 11, which also
+carries the evidence record its Verification section asks for, because that
+record cannot be produced from inside a cell. Its sequencing section → Task 0
+and the `depends_on` chain.
 
 **Ontology alignment**, checked against `ontology/saffron.ttl` and
 `RATIONALE.md`: the `EndState` / `TerminalState` split reaches the page as a
@@ -1576,15 +1756,20 @@ edit no spec's `touches` names, and the `shacl` gate is blocking.
 same-file serialisation, since nothing can run concurrently anyway:
 
 ```
-SA-0026 ─→ SA-0032 ─→ SA-0033 ─→ SA-0034 ─┐
- (shipped)                                ├─→ SA-0035 ─→ SA-0036 ─→ SA-0037 ─→ SA-0038
-SA-0028 ─→ SA-0029 ─→ SA-0030 ─→ SA-0031 ─┘
- (queued)
+SA-0026 ─→ SA-0032 ─→ SA-0033 ─→ SA-0034 ─→ SA-0035 ─→ SA-0036 ─→ SA-0037 ─┐
+ (shipped)                                                                 ├─→ SA-0038
+SA-0028 ─→ SA-0029 ─→ SA-0030 ─→ SA-0031 ──────────────────────────────────┘
+ (shipped)
 ```
 
-`SA-0026` has shipped; `SA-0028` has not — it is a spec file awaiting a cell,
-and part 1 needs the code it will write, not the spec. It is the only link in
-this chain that is not yet satisfiable.
+**The two branches join at `SA-0038`, not at `SA-0035`.** An earlier drawing of
+this diagram merged them one box early; the frontmatter is the authority, and
+it says `SA-0035` depends on `SA-0033` and `SA-0034` while `SA-0038` depends on
+`SA-0037` and `SA-0031`. Part 1 and part 2 never meet until the timeline needs
+both a task page and an event log.
+
+`SA-0026` (#84), `SA-0027` (#88) and `SA-0028` (#87) have all merged, so every
+link in this chain is now satisfiable and Task 1 can start.
 
 **Type consistency.** `Event`, `EventLog`, `read_log`, `describe` (Task 1) are
 consumed under those names in Tasks 2, 3 and 10. `queue_rows` (Task 7) →
@@ -1594,14 +1779,17 @@ never reimplemented.
 
 **Two risks this plan does not remove.**
 
-*Cost, corrected upward.* **Twelve cells, not ten**: `SA-0032` and `SA-0034`
-are bug specs whose first cell stops at `SCOPE_REVIEW`, so each is run twice
-and its DIAGNOSE turns are paid twice. At $8–16 a cell that is a **$140–150**
-ceiling before any repair loop, against a lifetime spend of $127. Splitting
-raised the total and lowered the per-spec risk; the ratification detour raises
-it again and is not optional. If a spec exhausts, re-cut it rather than raising
-its budget — a wide mechanical diff that cannot pass its own gates is usually
-a spec that should have been two.
+*Cost, corrected upward twice.* **Twelve cells, not ten**: `SA-0032` and
+`SA-0034` are bug specs whose first cell stops at `SCOPE_REVIEW`, so each is
+run twice and its DIAGNOSE turns are paid twice. Summing the declared budgets
+with those two counted twice gives **$152**, and `SA-0031` is $4 of that
+increase — it took `saffron/cli.py` and seven test files after the first cut of
+this plan left them unreachable. Call it a **$150–165** ceiling before any
+repair loop, against a lifetime spend that has itself reached $186.52.
+Splitting raised the total and lowered the per-spec risk; the ratification
+detour raises it again and is not optional. If a spec exhausts, re-cut it
+rather than raising its budget — a wide mechanical diff that cannot pass its
+own gates is usually a spec that should have been two.
 
 *The ratification detour is by hand and cannot be automated here.* Item 31:
 the writeback is designed, documented and half-built, and `SA-0024` plus this
@@ -1609,6 +1797,17 @@ repo's `protected` list mean a host-authored commit to `.saffron/specs/…`
 would fail `scope` as a protected path. So L5a is manual, and a plan that
 treated `SCOPE_REVIEW` as a failure would re-run those specs for no reason
 while a plan that treated it as automatic would wait forever.
+
+*Every measurement in this plan decays, and faster than it reads.* Between the
+design (2026-08-31) and this revision (2026-09-01) the ledger went from 23 task
+rows to 29, spend from $127.00 to $186.52, a seventh `tasks.state` appeared
+(`RATE_LIMITED`), `findings.verdict` went from 0 written to 1, and
+`session.py` grew 173 lines. Nothing in the argument moved; every figure did.
+Worse, the one fact this plan built a design constraint on — that `cli.py` does
+not name `watch` — was falsified by a *review fix on another spec* landed the
+same day, which no grep of queued specs would ever have caught. Task 0 Step 4
+now greps the code rather than the specs for that reason. Treat every number in
+a `## Context` as a claim with a date on it.
 
 *Neither review is Saffron's own critic.* The adversarial critic runs inside
 the cell at L5 under the repo's lenses; L3 and L7 are outside that loop. L7 in
