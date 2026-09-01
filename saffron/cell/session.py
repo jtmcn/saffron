@@ -1120,6 +1120,14 @@ def _drive_cell(
                     # whatever it managed to commit before it was cut.
                     watch(f"SALVAGE: the session failed — {failed}")
                     salvaged = _failed_turn(failed, session_id)
+                    # The salvage turn exists to rescue uncommitted work, so a
+                    # bound firing on *it* is the one place losing that work is
+                    # unforgivable. Same host checkpoint the repair loop takes.
+                    if worktree.dirty_paths(container):
+                        worktree.commit_dirty(
+                            container, f"checkpoint: host-committed — {failed}"
+                        )
+                        watch("SALVAGE: uncommitted work checkpointed by the host")
                 session_id = require_session(salvaged.session_id or session_id)
                 spent += salvaged.cost_usd_est
                 last_cost = salvaged.cost_usd_est
@@ -1133,6 +1141,15 @@ def _drive_cell(
                         f"SALVAGE: cut off and could not be salvaged, "
                         f"${spent:.2f} spent"
                     )
+        elif commits == 0 and implemented.is_error:
+            # Neither cut off at the turn ceiling nor finished: an idle or
+            # wall-clock bound, a provider wall, a crash. Saying "finished"
+            # here would collapse a third fact into the two this spec exists
+            # to separate, and a retry is warranted for this one.
+            watch(
+                "IMPLEMENT: the turn ended without finishing and produced "
+                f"nothing ({implemented.subtype}/{implemented.terminal_reason})"
+            )
         elif commits == 0:
             # The agent finished the turn on its own and produced nothing —
             # a different fact from being cut off, and not one more turn

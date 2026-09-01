@@ -1142,6 +1142,72 @@ def test_a_salvage_turn_that_still_commits_nothing_is_not_implemented(
     assert outcome.spent_usd == pytest.approx(0.1 + 0.4 + 0.05)
 
 
+def test_a_turn_that_crashed_is_not_reported_as_having_finished(monkeypatch, tmp_path):
+    """A third fact, and the one the two branches above would swallow. An idle
+    bound, a provider wall or a crash ends a turn without the agent deciding
+    anything — and it is not the turn ceiling either, so no salvage is owed.
+    Saying "finished and produced nothing" of it tells an operator scanning
+    watch lines that a retry is pointless, which is the opposite of true."""
+    cell = _stub_the_runtime(monkeypatch, commits=0)
+    crashed = implement.AttemptResult(
+        session_id="sess-1",
+        subtype="error",
+        terminal_reason="api_error",
+        num_turns=3,
+        cost_usd_est=0.4,
+        is_error=True,
+    )
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), implement.AgentFailed("api error", crashed)],
+    )
+    assert outcome.state == "NOT_IMPLEMENTED"
+    # No salvage turn: the ceiling is not what ended it (§4.3).
+    assert len(cell.turns) == 2
+    assert any(
+        "ended without finishing" in line and "error/api_error" in line
+        for line in cell.watched
+    )
+    assert not any("finished and produced nothing" in line for line in cell.watched)
+
+
+def test_a_salvage_turn_cut_off_mid_commit_still_keeps_the_work(monkeypatch, tmp_path):
+    """The salvage turn exists to rescue uncommitted work, so a bound firing
+    on *it* is the one place losing that work is unforgivable. The repair
+    loop already takes this host checkpoint for the identical situation."""
+    cell = _stub_the_runtime(monkeypatch, commits=[0, 1])
+    # Dirty only while the salvage turn has been cut and nothing has been
+    # checkpointed: the baseline suite reads `dirty_paths` too, and a tree
+    # that stayed dirty would fail `committed` at GATE and prove nothing.
+    monkeypatch.setattr(
+        "saffron.cell.worktree.dirty_paths",
+        lambda _c: (
+            ["saffron/cell/session.py"]
+            if len(cell.turns) == 3 and not cell.checkpointed
+            else []
+        ),
+    )
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=0.4)),
+            implement.AgentFailed("idle bound", _cut_off_turn(cost=0.1)),
+        ],
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert cell.checkpointed == ["checkpoint: host-committed — idle bound"]
+    assert any(
+        "SALVAGE: uncommitted work checkpointed by the host" in line
+        for line in cell.watched
+    )
+    assert any("recovered 1 commit" in line for line in cell.watched)
+
+
 def test_a_proposed_scope_reaches_scope_review_and_spends_no_further_turns(
     monkeypatch, tmp_path
 ):
