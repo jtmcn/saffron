@@ -40,6 +40,24 @@ def test_the_plan_prompt_names_the_scope_proposal_alternative():
     assert "propose scope" in implement.PLAN_PROMPT
 
 
+def test_the_salvage_prompt_asks_to_commit_not_implement():
+    """SA-0027: the salvage turn's only job is a commit of what already
+    exists — asking it to keep working is the defect this prompt exists to
+    not repeat."""
+    assert "commit" in implement.SALVAGE_PROMPT.lower()
+    assert "do not keep implementing" in implement.SALVAGE_PROMPT.lower()
+    assert implement.IMPLEMENT_PROMPT != implement.SALVAGE_PROMPT
+
+
+def test_the_salvage_ceiling_is_far_below_an_ordinary_implement_turn():
+    """A salvage that can itself run to 140 turns is the defect again
+    (SA-0025: 141 turns, $11.68, zero commits)."""
+    ordinary = implement.agent_options(
+        system_prompt="s", cwd="/work", max_turns=60, budget_usd=12.0
+    )
+    assert ordinary["max_turns"] / 4 > implement.SALVAGE_MAX_TURNS
+
+
 def test_the_cache_ttl_outlives_a_gate_suite():
     """The repair loop resumes across a gate suite, and a suite is minutes.
     The five-minute default expires every time (DESIGN.md §7.1)."""

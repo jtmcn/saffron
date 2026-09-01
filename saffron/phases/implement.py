@@ -42,6 +42,22 @@ IMPLEMENT_PROMPT = (
     "that produces no commits failed, whatever you say about it."
 )
 
+# session.py's one-turn salvage (SA-0027): spent only when the implement turn
+# was cut off at its own turn ceiling with the worktree still at zero commits
+# — the gap `committed` does not cover because a cell that never reaches GATE
+# is never gated. Bounded far below an ordinary implement turn's own
+# `max_turns`: this is a `git add`/`git commit` of what already exists, not a
+# second attempt at the task. A run once spent 141 turns and $11.68 doing
+# correct work it never committed; a salvage that could itself run that long
+# would be the same defect one level down.
+SALVAGE_MAX_TURNS = 5
+
+SALVAGE_PROMPT = (
+    "This turn was cut off before anything was committed. Do not keep "
+    "implementing, do not re-read files, do not investigate further — commit "
+    "exactly what already exists in the worktree, as-is, right now."
+)
+
 
 class AgentFailed(RuntimeError):
     """The turn did not finish cleanly: no result event, an error, a non-success

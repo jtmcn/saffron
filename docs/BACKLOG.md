@@ -1963,6 +1963,70 @@ stated intent all along, and is true for the first time.
 
 ---
 
+## 34. A turn ceiling that fires with zero commits was total loss, and item 18's prompt was not enough
+
+**Closed by `SA-0027`, 2026-09-01.** Item 18 closed `SA-0005`'s turn-ceiling gap
+by making `max_turns` a real, per-spec, printed ceiling and asking
+`implement.md` for a commit per coherent step, "with the measurement." That was
+necessary and it was not sufficient: `SA-0025`, ledger task 24, hit the same
+shape it was written about and died the same way.
+
+**Measured, once, and it cost a whole task.** `SA-0025` ran `NOT_IMPLEMENTED`
+at $14.61 — the first zero-commit run of the eight logged at the time. Its two
+attempt rows:
+
+| n | turns | cost | subtype | terminal_reason |
+|---|---|---|---|---|
+| 1 | 36 | $2.93 | `success` | `completed` |
+| 2 | 141 | $11.68 | `error_max_turns` | `max_turns` |
+
+The plan was accepted and was good. The implement turn ran to its ceiling
+trimming the diff to fit `size`, committed nothing, and `teardown: no commits,
+nothing to export` threw all of it away — with $5.39 of the budget still
+unspent. **The turn ceiling bound, not the dollars**, which is the fact a
+prompt cannot answer: `implement.md` already said "commit your work," and the
+agent still ran to 141 turns without doing it. Telling an agent to behave
+differently is not a control; it did not become one the second time either.
+
+**The control is structural, at the one boundary the host already owns.**
+`session.py` already reads `terminal_reason` off the closed turn and
+`commits_ahead` off the worktree — the two facts together are unambiguous: a
+turn that ended with `terminal_reason == "max_turns"` and zero commits was cut
+off, not finished. When both hold, and only then, the host now spends one more
+turn — resumed on the same `session_id`, so the agent keeps the context it
+already paid for — whose only instruction is to commit what already exists.
+Bounded at `SALVAGE_MAX_TURNS` (five, against an ordinary implement turn's
+default of sixty): a salvage that could itself run to 140 turns is the defect
+this item closes, one level down. The budget ceiling is checked before the
+salvage turn is spent, never after — a task with no room left ends exactly as
+it did before this existed, and the watch line says the budget stopped it
+rather than silently skipping the turn. A turn that finished on its own with
+nothing gets no salvage: the agent decided it was done, and §4.3's "doneness is
+measured, never reported" does not become "measured, then argued with."
+
+**What this does not cover, on purpose.** It is one turn at one boundary
+(IMPLEMENT only — not the REPAIR loop's own turns, which already checkpoint
+dirty work on a bound firing, item 4), it does not raise `max_turns` or spend
+the leftover budget on more implementation (the failed run did not need more
+turns; it needed to have committed at turn 20), and it does not steer a turn
+while it is running — the host cannot inject an instruction mid-turn, only
+resume at the boundary it already owns.
+
+**The decision this item also records: a dirty, uncommitted `/work` at
+teardown is still never packaged, even after this exists.** The tempting
+second half — when the salvage turn also produces nothing, export the working
+tree's diff anyway, on the theory that *some* record beats none — was
+considered and rejected. Control artifacts are extracted and hashed the moment
+they are produced and never re-read from `/work`; a file left in the workspace
+is a claim, not a record. A working-tree diff that reached `patch.diff` would
+be packaged as though it had passed gates it never faced, and `committed`
+exists precisely to refuse that at GATE. If a diagnostic dump of the dirty tree
+turns out to be worth having for triage, it needs its own name, its own place
+PACKAGE never reads, and its own spec — not a quiet exception carved into the
+one artifact the operator trusts.
+
+---
+
 ## What is *not* here, deliberately
 
 DIAGNOSE and `SCOPE_REVIEW`, the scheduler's conflict sets and stacking, `saffron

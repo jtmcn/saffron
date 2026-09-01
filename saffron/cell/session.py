@@ -269,6 +269,21 @@ def repair_decision(
     return "repair"
 
 
+def cut_off_at_turn_ceiling(attempt: AttemptResult) -> bool:
+    """Was this turn's own §4.3 turn bound what ended it, rather than the
+    agent's own say-so? The fact `_drive_cell` trusts before spending a
+    salvage turn on a zero-commit implement turn (SA-0027).
+
+    Read off `terminal_reason`, the field `close_attempt` already persists
+    for exactly this row: SA-0025's ledger carried `subtype: error_max_turns`
+    and `terminal_reason: max_turns` on the attempt that burned 141 turns and
+    $11.68 with nothing to export. A rate-limit wall or a crash carries some
+    other reason, or none, and must not read as this — spending a turn on a
+    provider ceiling or a crash is not what the salvage exists for.
+    """
+    return attempt.terminal_reason == "max_turns"
+
+
 def require_session(session_id: str | None) -> str:
     """Every turn after the first resumes, so a missing session_id is fatal.
 
@@ -1064,6 +1079,67 @@ def _drive_cell(
         # no commits failed, whatever the transcript says.
         commits = worktree.commits_ahead(container, planned_sha)
         watch(f"IMPLEMENT: {commits} commit(s), ${spent:.2f} spent")
+
+        if commits == 0 and cut_off_at_turn_ceiling(implemented):
+            # The agent did not decide it was finished — the turn ceiling cut
+            # it off with the work still in /work, uncommitted, about to die
+            # with the volume at teardown (SA-0025: $14.61, 141 turns, zero
+            # commits, $5.39 unspent). One more turn, resumed on the same
+            # session, asking only for a commit. The budget ceiling is
+            # checked *before* it is spent, never after (§4.1's "never
+            # decides after" rule for a checked ceiling).
+            if _over_budget():
+                watch(
+                    f"budget: ${spent:.2f} of ${spec.budget_usd:.2f} — cut off "
+                    "at the turn ceiling with nothing committed, no room left "
+                    "to salvage"
+                )
+            else:
+                watch(
+                    "IMPLEMENT: cut off at the turn ceiling with nothing "
+                    "committed — spending one turn to salvage it"
+                )
+                salvage_options = implement.agent_options(
+                    system_prompt=system_prompt,
+                    cwd=worktree.WORKTREE_MOUNT,
+                    max_turns=implement.SALVAGE_MAX_TURNS,
+                    budget_usd=spec.budget_usd,
+                )
+                try:
+                    salvaged = agent(
+                        container,
+                        prompt=implement.SALVAGE_PROMPT,
+                        options=salvage_options,
+                        resume=session_id,
+                        watch=watch,
+                        last_cost_usd=last_cost,
+                    )
+                except implement.AgentFailed as failed:
+                    # The same rule as the implement turn itself (§4.3): a
+                    # bound firing on the salvage turn must not discard
+                    # whatever it managed to commit before it was cut.
+                    watch(f"SALVAGE: the session failed — {failed}")
+                    salvaged = _failed_turn(failed, session_id)
+                session_id = require_session(salvaged.session_id or session_id)
+                spent += salvaged.cost_usd_est
+                last_cost = salvaged.cost_usd_est
+                # Same measurement point as before: the plan turn's head, not
+                # base_sha and not where the salvage turn itself started.
+                commits = worktree.commits_ahead(container, planned_sha)
+                if commits:
+                    watch(f"SALVAGE: recovered {commits} commit(s), ${spent:.2f} spent")
+                else:
+                    watch(
+                        f"SALVAGE: cut off and could not be salvaged, "
+                        f"${spent:.2f} spent"
+                    )
+        elif commits == 0:
+            # The agent finished the turn on its own and produced nothing —
+            # a different fact from being cut off, and not one more turn
+            # answers (§4.3: doneness is measured, never reported, and never
+            # argued with).
+            watch("IMPLEMENT: finished and produced nothing")
+
         if commits == 0:
             ledger.set_task_state(task_id, "NOT_IMPLEMENTED")
             ledger.finish_run(run_id, "COMPLETE")

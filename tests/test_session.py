@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import shutil
+from collections.abc import Sequence
 
 import pytest
 
@@ -48,6 +50,44 @@ def test_the_loop_exhausts_at_max_attempts():
     new = [_failure("lint", "a.py", "E501")]
     decision = session.repair_decision(attempt=4, max_attempts=4, new=new, previous=[])
     assert decision == "exhausted"
+
+
+def test_a_turn_ceiling_is_cut_off():
+    """SA-0025's own ledger row: `subtype: error_max_turns`,
+    `terminal_reason: max_turns`."""
+    attempt = implement.AttemptResult(
+        session_id="s",
+        subtype="error_max_turns",
+        terminal_reason="max_turns",
+        num_turns=60,
+        cost_usd_est=5.34,
+    )
+    assert session.cut_off_at_turn_ceiling(attempt)
+
+
+def test_a_clean_finish_is_not_cut_off():
+    attempt = implement.AttemptResult(
+        session_id="s",
+        subtype="success",
+        terminal_reason="completed",
+        num_turns=12,
+        cost_usd_est=1.0,
+    )
+    assert not session.cut_off_at_turn_ceiling(attempt)
+
+
+def test_a_provider_wall_is_not_a_turn_ceiling():
+    """A rate-limit wall or a crashed session must not read as the turn
+    ceiling — spending a salvage turn on either is not what it is for."""
+    attempt = implement.AttemptResult(
+        session_id="s",
+        subtype="success",
+        terminal_reason="api_error",
+        num_turns=1,
+        cost_usd_est=0.0,
+        is_error=True,
+    )
+    assert not session.cut_off_at_turn_ceiling(attempt)
 
 
 def test_an_errored_gate_aborts_rather_than_counting_against_the_task():
@@ -539,6 +579,8 @@ class _Cell:
         self.removed: list[tuple[str, str]] = []
         self.turns: list[str] = []
         self.system_prompts: list[str] = []
+        self.turn_options: list[dict] = []
+        self.resumes: list[str | None] = []
         self.measured_from: str | None = None
         self.worktree_base: str | None = None
         self.exported_from: str | None = None
@@ -586,7 +628,7 @@ def _grow_the_diff_after_the_first_turn(
 def _stub_the_runtime(
     monkeypatch,
     *,
-    commits=1,
+    commits: int | Sequence[int] = 1,
     suites=(),
     patch=_DIFF,
     changed=("src/x.py",),
@@ -690,9 +732,19 @@ def _stub_the_runtime(
 
     monkeypatch.setattr("saffron.cell.worktree.commit_dirty", _commit_dirty)
 
+    # A plain int reports the same figure on every call, as every test before
+    # the salvage turn assumed. A sequence lets a test say "zero, then one
+    # after the salvage turn" — the last value repeats for any call past the
+    # end, so a script only needs as many entries as it cares about.
+    if isinstance(commits, int):
+        commits_seq = itertools.repeat(commits)
+    else:
+        fixed = list(commits)
+        commits_seq = itertools.chain(fixed, itertools.repeat(fixed[-1]))
+
     def _commits_ahead(_container, sha):
         cell.measured_from = sha
-        return commits
+        return next(commits_seq)
 
     monkeypatch.setattr("saffron.cell.worktree.commits_ahead", _commits_ahead)
 
@@ -717,6 +769,20 @@ def _turn(text="", cost=0.1):
         num_turns=1,
         cost_usd_est=cost,
         text=text,
+    )
+
+
+def _cut_off_turn(cost=0.4):
+    """What `run_agent` hands back on the ceiling `error_max_turns` fires:
+    the shape SA-0025's own ledger row carried (`subtype: error_max_turns`,
+    `terminal_reason: max_turns`), packaged the way `implement.AgentFailed`
+    always carries a cut-off turn's cost forward (§4.1)."""
+    return implement.AttemptResult(
+        session_id="sess-1",
+        subtype="error_max_turns",
+        terminal_reason="max_turns",
+        num_turns=60,
+        cost_usd_est=cost,
     )
 
 
@@ -769,6 +835,8 @@ def _drive(
     def _run_agent(container, *, prompt, options, resume=None, **kwargs):
         cell.turns.append(prompt)
         cell.system_prompts.append(options["system_prompt"])
+        cell.turn_options.append(options)
+        cell.resumes.append(resume)
         cell.timeouts.append(kwargs.get("timeout_s"))
         # A default, not a scripted turn: REVIEW invokes one session per lens
         # after a green loop, and every test predating it scripts the
@@ -977,11 +1045,101 @@ def test_a_spec_with_no_forbidden_shows_no_forbidden_list(monkeypatch, tmp_path)
 
 
 def test_no_commit_is_not_implemented(monkeypatch, tmp_path):
+    """SA-0027: a turn that ended on its own (`_turn()`'s default
+    `terminal_reason="completed"`) and produced nothing gets no salvage — the
+    agent decided it was done, and that is not argued with (§4.3)."""
     cell = _stub_the_runtime(monkeypatch, commits=0)
     outcome, _ledger = _drive(
         monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
     )
     assert outcome.state == "NOT_IMPLEMENTED"
+    # Exactly plan + implement: no third turn was ever requested.
+    assert len(cell.turns) == 2
+    assert any("finished and produced nothing" in line for line in cell.watched)
+
+
+def test_a_turn_cut_off_at_the_ceiling_with_nothing_committed_is_salvaged(
+    monkeypatch, tmp_path
+):
+    """The turn ceiling, not the agent, ended it — SA-0025's exact shape:
+    `error_max_turns`/`max_turns` with zero commits. One more turn, resumed
+    on the same session, recovers the work instead of losing it at teardown."""
+    cell = _stub_the_runtime(monkeypatch, commits=[0, 1])
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=0.4)),
+            _turn(cost=0.1),
+        ],
+    )
+    # A commit landed on the salvage turn, so this is an ordinary run
+    # continuing into GATE — not a new state. (READY_FOR_REVIEW then buys
+    # REVIEW's own turns — one per lens — which is why the turn count below
+    # is a lower bound, not an exact one.)
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert len(cell.turns) >= 3
+    assert cell.turns[2] == implement.SALVAGE_PROMPT
+    # Resumed, never started fresh — a new session has no memory of the plan
+    # or the code it already wrote (§5.3).
+    assert cell.resumes[2] == "sess-1"
+    # Bounded far below an ordinary implement turn's own ceiling: a salvage
+    # that could itself run to 140 turns is the defect again.
+    assert cell.turn_options[2]["max_turns"] == implement.SALVAGE_MAX_TURNS
+    assert cell.turn_options[2]["max_turns"] < cell.turn_options[1]["max_turns"]
+    # Charged like any other turn — plan + the cut-off implement turn + the
+    # salvage turn + REVIEW's two lenses at their default cost each.
+    assert outcome.spent_usd == pytest.approx(0.1 + 0.4 + 0.1 + 0.2)
+    assert any("recovered 1 commit" in line for line in cell.watched)
+
+
+def test_a_cut_off_turn_over_budget_is_not_salvaged(monkeypatch, tmp_path):
+    """The budget ceiling is honoured before the salvage turn is spent, never
+    after: a task with no room left ends exactly as it did before this
+    control existed, and the watch line names the ceiling that stopped it."""
+    cell = _stub_the_runtime(monkeypatch, commits=0)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=12.0)),
+        ],
+        spec=_spec(budget_usd=12.0),
+    )
+    assert outcome.state == "NOT_IMPLEMENTED"
+    # No third turn: nothing left to spend it with.
+    assert len(cell.turns) == 2
+    assert any(
+        "no room left to salvage" in line and "budget" in line for line in cell.watched
+    )
+
+
+def test_a_salvage_turn_that_still_commits_nothing_is_not_implemented(
+    monkeypatch, tmp_path
+):
+    """The salvage turn is a chance, not a guarantee: if it still leaves
+    zero commits, the task ends NOT_IMPLEMENTED, and the watch line says the
+    turn ceiling cut it off rather than the agent finishing with nothing."""
+    cell = _stub_the_runtime(monkeypatch, commits=0)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=0.4)),
+            _turn(cost=0.05),
+        ],
+    )
+    assert outcome.state == "NOT_IMPLEMENTED"
+    assert len(cell.turns) == 3
+    assert any("cut off and could not be salvaged" in line for line in cell.watched)
+    assert not any("finished and produced nothing" in line for line in cell.watched)
+    assert outcome.spent_usd == pytest.approx(0.1 + 0.4 + 0.05)
 
 
 def test_a_proposed_scope_reaches_scope_review_and_spends_no_further_turns(
