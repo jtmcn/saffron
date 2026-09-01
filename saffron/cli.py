@@ -26,6 +26,7 @@ from saffron.scheduler import (
     Refusal,
     build_queue,
     protected_touch_refusal,
+    retirement_refusal,
     run_gh,
 )
 
@@ -204,6 +205,17 @@ def _protected_paths_at(mirror: Path, base_sha: str, scratch: Path) -> list[str]
     return _protected_paths(exported)
 
 
+def _retirement_markers_at(mirror: Path, base_sha: str) -> list[tuple[str, str]]:
+    """`git_mirror.retirement_markers`, best-effort the same way
+    `_protected_paths_at` is: a mirror this cheap pre-cell read cannot
+    actually grep (no such tree, no such mirror) answers `[]` rather than
+    aborting a run this check exists to save money on, not gate."""
+    try:
+        return git_mirror.retirement_markers(mirror, base_sha)
+    except git_mirror.GitError:
+        return []
+
+
 def _resolve_stacked_on(
     ledger: Ledger,
     repo_id: int | None,
@@ -334,6 +346,16 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         print(f"{spec.id:<10} refused  {collision}")
         return 1
 
+    # Same cheap-before-a-cell shape, one check later: a `saffron:retired-by`
+    # marker this spec's own `touches` cannot reach (`SA-0027`, docs/BACKLOG.md
+    # item 34) is a `git grep` against the mirror, not a plan checkpoint an
+    # agent has to talk its way out of.
+    markers = _retirement_markers_at(mirror, base_sha)
+    retirement = retirement_refusal(spec, markers)
+    if retirement is not None:
+        print(f"{spec.id:<10} refused  {retirement}")
+        return 1
+
     # Printed, not merely applied: three ceilings govern a run and only one of
     # them appears in the exit. SA-0005 was stopped by the turn ceiling with
     # more than half its budget left, and nothing on the way in had said what
@@ -442,6 +464,10 @@ def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
             # `policy.yaml` sits right beside `specs/` in the same export —
             # no second export, and never the working copy (`SA-0023`).
             protected=_protected_paths(exported),
+            # Read from the mirror directly, not the export: a marker is a
+            # comment anywhere in the tree, not something `.saffron/`'s own
+            # archive carries (`SA-0027`).
+            markers=_retirement_markers_at(mirror, base_sha),
             gh=_guarded_gh(gh_failures),
         )
 
@@ -532,7 +558,15 @@ def _print_queue(
         )
     print(f"refusals: {len(refusals)}")
     for refusal in refusals:
-        print(f"  {refusal.path.relative_to(root)}: {refusal.reason}")
+        # A dangling `saffron:retired-by` marker (`SA-0027`) names a
+        # repo-relative path from the mirror, never exported under `root` at
+        # all — `relative_to` raises on it, and the raw path is still a real
+        # answer, not a fallback worth hiding.
+        try:
+            shown = refusal.path.relative_to(root)
+        except ValueError:
+            shown = refusal.path
+        print(f"  {shown}: {refusal.reason}")
     if repo_slug is None:
         _print_skipped("no GitHub slug could be read from the remote")
     elif gh_failures:

@@ -16,6 +16,15 @@ from pathlib import Path
 _ADDED = re.compile(r"(\d+) insertions?\(\+\)")
 _REMOVED = re.compile(r"(\d+) deletions?\(-\)")
 
+# The marker convention (`SA-0027`, docs/BACKLOG.md item 34): a comment or
+# docstring carrying `saffron:retired-by <SPEC-ID>` declares that its file
+# asserts something the named spec is expected to falsify — a half-wired
+# capability's note to its own successor. Opt-in: a heuristic over every
+# `SA-NNNN` mention would refuse most of this repository, which cites spec
+# ids as attribution far more often than as a claim about the future.
+_RETIREMENT_MARKER = "saffron:retired-by"
+_RETIREMENT_SPEC_ID = re.compile(r"saffron:retired-by\s+([A-Za-z0-9]+-[0-9]+)")
+
 
 class GitError(RuntimeError):
     """A git invocation that did not do what was asked."""
@@ -187,3 +196,44 @@ def export_saffron_dir(mirror: Path, sha: str, dest: Path) -> Path:
     if not (dest / ".saffron").is_dir():
         raise GitError(f"{sha[:12]} has no .saffron for the cell to run")
     return dest
+
+
+def retirement_markers(mirror: Path, sha: str) -> list[tuple[str, str]]:
+    """Every `saffron:retired-by <SPEC-ID>` marker at `sha`, read straight
+    from the bare mirror — no export, no checkout, no working tree.
+
+    `git grep -n -z` against the tree-ish directly: `-z` NUL-delimits the
+    path, line number and matched text within one match (the same reason
+    `changed_files` passes `-z` — a path carrying a colon must not be misread
+    as a field boundary), while matches stay newline-separated so several
+    hits parse apart cleanly.
+
+    A mirror with no markers is `[]`, never an error: `git grep` exits 1 on
+    no match, a fact about the tree, not a broken command — `error` ≠ `fail`,
+    read onto a gathering step rather than a gate. Exit codes past 1 (a bad
+    revision, a corrupt mirror) still raise, the same as every other call in
+    this module.
+    """
+    argv = ["git", "-C", str(mirror), "-c", "core.quotePath=false"]
+    argv += ["grep", "-n", "-z", "-e", _RETIREMENT_MARKER, sha]
+    completed = _run(argv)
+    if completed.returncode == 1:
+        return []
+    if completed.returncode != 0:
+        raise GitError(
+            f"git grep {_RETIREMENT_MARKER!r} {sha[:12]}: {completed.stderr.strip()}"
+        )
+
+    prefix = f"{sha}:"
+    pairs: list[tuple[str, str]] = []
+    for record in completed.stdout.split("\n"):
+        if not record:
+            continue
+        fields = record.split("\0")
+        if len(fields) != 3:
+            continue
+        path = fields[0].removeprefix(prefix)
+        found = _RETIREMENT_SPEC_ID.search(fields[2])
+        if found is not None:
+            pairs.append((path, found.group(1)))
+    return pairs

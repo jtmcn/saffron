@@ -12,6 +12,7 @@ from saffron.repos.mirror import (
     export_saffron_dir,
     remove_worktree,
     resolve_pull_request,
+    retirement_markers,
 )
 
 
@@ -434,3 +435,69 @@ def test_export_saffron_dir_takes_a_tree_with_a_policy_and_no_gates(tmp_path, or
     dest = export_saffron_dir(mirror, sha, tmp_path / "first-gate")
 
     assert (dest / ".saffron" / "policy.yaml").read_text() == "gates: {}\n"
+
+
+# --------------------------------------------------------- retirement_markers
+
+
+def test_a_real_marker_is_read_back_from_a_real_mirror_at_a_real_sha(tmp_path):
+    """A real bare mirror, a real commit carrying a real
+    `saffron:retired-by` marker, read back through the function under test —
+    not a string the test greps in-process (SA-0027's own out-of-scope
+    line: this fixture is the only marker this spec plants anywhere)."""
+    repo = _plain_repo(tmp_path, "marked")
+    (repo / "guard.py").write_text(
+        "# TODO: saffron:retired-by SA-9001 once the real thing lands\nassert True\n"
+    )
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "plant a marker")
+    sha = git(repo, "rev-parse", "HEAD")
+
+    mirror = ensure_mirror(repo, tmp_path / "marked.git")
+
+    assert retirement_markers(mirror, sha) == [("guard.py", "SA-9001")]
+
+
+def test_a_mirror_with_no_markers_is_an_empty_result_not_an_error(tmp_path):
+    """`git grep` exits 1 when nothing matches — every repository before its
+    first marker is planted, this one included. That is not this function's
+    error to raise."""
+    repo = _plain_repo(tmp_path, "unmarked")
+    (repo / "a.py").write_text("x = 1\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "base")
+    sha = git(repo, "rev-parse", "HEAD")
+
+    mirror = ensure_mirror(repo, tmp_path / "unmarked.git")
+
+    assert retirement_markers(mirror, sha) == []
+
+
+def test_two_markers_in_two_files_both_come_back(tmp_path):
+    repo = _plain_repo(tmp_path, "two-marked")
+    (repo / "a.py").write_text("# saffron:retired-by SA-1\n")
+    (repo / "b.py").write_text("# saffron:retired-by SA-2\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "two markers")
+    sha = git(repo, "rev-parse", "HEAD")
+
+    mirror = ensure_mirror(repo, tmp_path / "two-marked.git")
+
+    assert sorted(retirement_markers(mirror, sha)) == [
+        ("a.py", "SA-1"),
+        ("b.py", "SA-2"),
+    ]
+
+
+def test_a_path_carrying_a_colon_is_still_read_correctly(tmp_path):
+    """The reason `-z` is used at all: a naive `str.split(":")` on the raw
+    line would misread a path's own colon as a field boundary."""
+    repo = _plain_repo(tmp_path, "colon-marked")
+    (repo / "weird:name.py").write_text("# saffron:retired-by SA-3\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "a colon in the path")
+    sha = git(repo, "rev-parse", "HEAD")
+
+    mirror = ensure_mirror(repo, tmp_path / "colon-marked.git")
+
+    assert retirement_markers(mirror, sha) == [("weird:name.py", "SA-3")]
