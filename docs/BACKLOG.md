@@ -1951,12 +1951,15 @@ its parent's tree already contains the parent's changes, which is what
 stacking is; any other task's pull request over the same file is still the
 collision the check exists for.
 
-**Still owed by hand, and written down here so it is not merely remembered.**
-`DESIGN.md` §4.2.1's `depends_on` paragraph ("every other parent state is
-still refused"), §3.1's frontmatter example, and §5.7's description of PACKAGE
-resolving one base are all now false, and `CONTEXT.md` still has no `tree_base`
-entry. `DESIGN.md` and `CONTEXT.md` are `forbidden` to every spec in this
-sequence, deliberately, so an operator corrects all four.
+**The by-hand half, done at review rather than owed.** `DESIGN.md` and
+`CONTEXT.md` are `forbidden` to every spec in this sequence, deliberately, so
+an operator corrects them: §4.2's dependency-gate rule and §4.2.1's `depends_on`
+paragraph (which said every other parent state is still refused), §5.7 (which
+described one base, and now carries the two-bases paragraph and the
+fetch-never-remember rule), §9's v2 list (which still deferred stacking), and
+`CONTEXT.md`'s new **Tree base** entry. §3.1's frontmatter example needed no
+edit: `depends_on: [TE-0139] # satisfied at READY_FOR_REVIEW` was the design's
+stated intent all along, and is true for the first time.
 
 ---
 
