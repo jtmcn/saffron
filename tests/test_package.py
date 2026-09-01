@@ -1718,7 +1718,9 @@ def test_a_stacked_child_opens_against_its_parent_applies_onto_it_and_leaves_pol
     # default branch's — main declares f.txt, the parent's own (unread)
     # commit declares other.txt.
     body = (stacked_packageable.outcome.task_dir / "pr_body.md").read_text()
-    assert "f.txt" in body
+    # The section itself, not the filename: `- touches `f.txt`` renders from
+    # the spec on every path, so it never discriminates the two policies.
+    assert "### Test files changed" in body
 
     # The two reviewer-facing records of what this was built on. Both once
     # took the run's pin, which for a stacked child is a tree the patch is
@@ -1813,6 +1815,206 @@ def test_a_merged_parent_falls_back_to_the_ordinary_target(tmp_path, monkeypatch
     assert result.state == "READY_FOR_REVIEW"
     argv = seen[0]
     assert argv[argv.index("--base") + 1] == "main"
+    ledger.close()
+
+
+def test_a_parent_that_moved_ahead_is_the_tree_everything_downstream_reads(
+    tmp_path, monkeypatch
+):
+    """The ordinary outcome of a review fix on the parent's own pull request,
+    and the only shape where `base_sha`, `tree_base` and `target_head` are
+    three different commits — so it is the only one that can tell which of
+    them each consumer reads."""
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    remote = tmp_path / "remote.git"
+    git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
+
+    work = tmp_path / "work"
+    work.mkdir()
+    git(work, "init", "-q", "-b", "main")
+    git(work, "config", "user.email", "t@example.com")
+    git(work, "config", "user.name", "Test")
+    (work / "f.txt").write_text("a\nb\nc\n")
+    (work / ".saffron").mkdir()
+    (work / ".saffron" / "policy.yaml").write_text(
+        "gates: {}\nintegrity:\n  test_paths:\n    - f.txt\n"
+    )
+    git(work, "add", "-A")
+    git(work, "commit", "-qm", "root")
+    git(work, "remote", "add", "origin", str(remote))
+    git(work, "push", "-q", "origin", "main")
+    base_sha = git(work, "rev-parse", "HEAD")
+
+    git(work, "checkout", "-q", "-b", "saffron/SA-0020")
+    (work / "f.txt").write_text("a\nb\nPARENT\n")
+    git(work, "commit", "-qam", "the parent's own work")
+    tree_base = git(work, "rev-parse", "HEAD")
+
+    # The child's patch, cut against the parent as it stood then.
+    git(work, "checkout", "-q", "-b", "cell")
+    (work / "f.txt").write_text("a\nb\nPARENT\nCHILD\n")
+    git(work, "commit", "-qam", "the agent's work")
+    patch_text = git(work, "diff", *DIFF_FLAGS, f"{tree_base}..HEAD") + "\n"
+
+    # ...and only then does the parent move, the way a review fix moves it.
+    git(work, "checkout", "-q", "saffron/SA-0020")
+    (work / "g.txt").write_text("the parent's review fix\n")
+    git(work, "add", "-A")
+    git(work, "commit", "-qm", "the parent's review fix")
+    parent_head = git(work, "rev-parse", "HEAD")
+    git(work, "push", "-q", "origin", "saffron/SA-0020")
+    git(work, "checkout", "-q", "main")
+
+    mirror = tmp_path / "m.git"
+    git(tmp_path, "clone", "-q", "--mirror", str(work), str(mirror))
+    git(mirror, "config", "user.email", "t@example.com")
+    git(mirror, "config", "user.name", "Test")
+
+    task_dir = tmp_path / "batch" / "SA-0005"
+    task_dir.mkdir(parents=True)
+    (task_dir / "patch.diff").write_text(patch_text)
+    (task_dir / "patch.json").write_text(
+        json.dumps({"base_sha": base_sha, "tree_base": tree_base})
+    )
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = ledger.upsert_repo("work", str(remote), str(mirror), "sha")
+    run_id = ledger.create_run(repo_id, base_sha)
+    task_id = ledger.create_task(run_id, "SA-0005", "s" * 40, branch="saffron/SA-0005")
+    ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+    ledger.finish_run(run_id, "COMPLETE")
+    outcome = _cell_outcome(task_dir, task_id, run_id)
+
+    # Stubbed, not skipped: the parent moved, so re-verification is exactly
+    # what this path must reach — and a real one starts a cell.
+    seen_reverify = {}
+
+    def _reverify(**kwargs):
+        seen_reverify.update(kwargs)
+        return [], []
+
+    monkeypatch.setattr("saffron.phases.package.reverify", _reverify)
+
+    def fake_gh(argv):
+        return sp.CompletedProcess(argv, 0, stdout="https://github.com/o/r/pull/4\n")
+
+    result = package(
+        outcome,
+        spec=_spec(touches=["f.txt"], criteria=["it works"]),
+        repo=work,
+        mirror=mirror,
+        image="unused",
+        ledger=ledger,
+        out_dir=tmp_path / "batch",
+        token=None,
+        parent_branch="saffron/SA-0020",
+        gh=fake_gh,
+        watch=lambda _: None,
+    )
+
+    assert result.state == "READY_FOR_REVIEW"
+
+    # Criterion 8, and the decision `BACKLOG` item 33 records: the fresh
+    # baseline is the tree this was packaged onto, not the default branch.
+    assert seen_reverify["new_base_sha"] == parent_head
+
+    # The child's own line and no more. Against the pin or the default
+    # branch this would carry the parent's two commits as well.
+    pushed = remote_sha(str(remote), "saffron/SA-0005", cwd=work)
+    assert git(mirror, "diff", "--name-only", parent_head, pushed) == "f.txt"
+    assert result.added == 1 and result.removed == 0
+
+    # The parent's review fix is underneath, so the rebase landed on the
+    # parent's head rather than on the commit the patch was cut against.
+    assert git(remote, "show", f"{pushed}:g.txt") == "the parent's review fix"
+
+    # And the two records of the run still name the tree the cell built on
+    # — the third distinct commit, neither the pin nor where it landed.
+    body = (task_dir / "pr_body.md").read_text()
+    message = git(remote, "log", "-1", "--format=%B", pushed)
+    assert f"- base `{tree_base}`" in body
+    assert f"base {tree_base[:12]}" in message
+    for other in (base_sha, parent_head):
+        assert other[:12] not in message and other not in body
+    ledger.close()
+
+
+def test_a_gone_parent_is_the_tasks_failure_not_infrastructure(tmp_path, monkeypatch):
+    """`ParentGone` subclasses `PackageError`, which `cli.main` exits 2 on.
+    One `except` is all that makes it the task's own failure instead, and
+    `error` is not `fail` (§5.4)."""
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    remote = tmp_path / "remote.git"
+    git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
+
+    work = tmp_path / "work"
+    work.mkdir()
+    git(work, "init", "-q", "-b", "main")
+    git(work, "config", "user.email", "t@example.com")
+    git(work, "config", "user.name", "Test")
+    (work / "f.txt").write_text("a\nb\nc\n")
+    (work / ".saffron").mkdir()
+    (work / ".saffron" / "policy.yaml").write_text("gates: {}\n")
+    git(work, "add", "-A")
+    git(work, "commit", "-qm", "root")
+    git(work, "remote", "add", "origin", str(remote))
+    git(work, "push", "-q", "origin", "main")
+
+    # Pushed, so the mirror has its objects, then deleted from the remote
+    # without ever merging — the shape the ancestor check cannot excuse.
+    git(work, "checkout", "-q", "-b", "saffron/SA-0020")
+    (work / "f.txt").write_text("a\nb\nPARENT\n")
+    git(work, "commit", "-qam", "the parent's own work")
+    tree_base = git(work, "rev-parse", "HEAD")
+    git(work, "push", "-q", "origin", "saffron/SA-0020")
+
+    git(work, "checkout", "-q", "-b", "cell")
+    (work / "f.txt").write_text("a\nb\nPARENT\nCHILD\n")
+    git(work, "commit", "-qam", "the agent's work")
+    patch_text = git(work, "diff", *DIFF_FLAGS, f"{tree_base}..HEAD") + "\n"
+    git(work, "checkout", "-q", "main")
+
+    mirror = tmp_path / "m.git"
+    git(tmp_path, "clone", "-q", "--mirror", str(work), str(mirror))
+    git(mirror, "config", "user.email", "t@example.com")
+    git(mirror, "config", "user.name", "Test")
+    git(work, "push", "-q", "origin", "--delete", "saffron/SA-0020")
+
+    task_dir = tmp_path / "batch" / "SA-0005"
+    task_dir.mkdir(parents=True)
+    (task_dir / "patch.diff").write_text(patch_text)
+    (task_dir / "patch.json").write_text(
+        json.dumps({"base_sha": "0" * 40, "tree_base": tree_base})
+    )
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = ledger.upsert_repo("work", str(remote), str(mirror), "sha")
+    run_id = ledger.create_run(repo_id, tree_base)
+    task_id = ledger.create_task(run_id, "SA-0005", "s" * 40, branch="saffron/SA-0005")
+    ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+    ledger.finish_run(run_id, "COMPLETE")
+    outcome = _cell_outcome(task_dir, task_id, run_id)
+
+    called = []
+    result = package(
+        outcome,
+        spec=_spec(touches=["f.txt"], criteria=["it works"]),
+        repo=work,
+        mirror=mirror,
+        image="unused",
+        ledger=ledger,
+        out_dir=tmp_path / "batch",
+        token=None,
+        parent_branch="saffron/SA-0020",
+        gh=lambda argv: called.append(argv),
+        watch=lambda _: None,
+    )
+
+    assert result.state == "MERGE_FAILED"
+    assert "saffron/SA-0020 is gone" in result.note
+    assert not called
+    assert remote_sha(str(remote), "saffron/SA-0005", cwd=work) == ""
+    assert _state(ledger, task_id)["state"] == "MERGE_FAILED"
     ledger.close()
 
 

@@ -1782,7 +1782,7 @@ not in it — which is a different failure from the gate-source disagreement
 this item decides. `saffron/phases/**` is forbidden to `SA-0022`, so recording
 it here is the only action available; `SA-0025` owns the file and the fix.
 
-**Decided and implemented, 2026-09-01 (`SA-0025`).** `package()` now takes an
+**Decided and implemented, 2026-08-31 (`SA-0025`).** `package()` now takes an
 optional `parent_branch`. Unset — every caller today — nothing above changes:
 `target_branch`/`target_head` resolve to `default`/`fetch_head` exactly as
 before, and reading `tree_base` instead of `base_sha` for the patch's preimage
@@ -1820,6 +1820,28 @@ is not this item's to do. The failure mode this leaves is a false negative
 that costs a task, never a pull request opened against a branch that is not
 there and never a silent double-apply of the parent's hunks — the two shapes
 this item exists to rule out.
+
+**Two more shapes accepted rather than solved, and one debt reassigned.**
+
+- *A parent force-pushed to a history that no longer contains `tree_base`.*
+  Distinct from the two `ParentGone` names: the fetch succeeds and the head is
+  reachable, so nothing above fires, and the child's patch three-way-rebases
+  onto a divergent parent. In the bad cases that conflicts and ends
+  `MERGE_FAILED`; in the benign-looking ones it can resurrect content the
+  force-push removed. A `merge-base --is-ancestor tree_base parent_head` check
+  would name it, and belongs with `SA-0026`, which is what first produces a
+  real parent to force-push.
+- *A pruned mirror inverts a gone parent's classification.*
+  `assert_base_objects(mirror, tree_base)` has to precede the fetch — it is
+  checking for objects the fetch would otherwise supply — so a parent deleted
+  without merging, in a mirror since gc'd, raises `PackageError` and exits 2
+  before the `ParentGone` path can make it this task's own `MERGE_FAILED`.
+  Latent and gc-dependent; the ordering is right and the classification is not.
+- *`CONTEXT.md` still owes `tree_base` an entry.* This item asked `SA-0025` for
+  it, and `SA-0025` forbids itself `CONTEXT.md` — correctly, since its
+  documentation half is by hand. `SA-0026` carries the sentences, and carries
+  this one with them: `tree_base` is a noun in a durable artifact and the
+  glossary does not have it.
 
 ---
 

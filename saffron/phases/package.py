@@ -73,9 +73,10 @@ class LeaseRejected(PackageError):
 
 class ParentGone(PackageError):
     """A stacked child's parent branch is not where PACKAGE was told it would
-    be — deleted, or moved to a commit this mirror cannot reach. Named
-    separately from a plain conflict: neither shape may open a pull request
-    against a branch that is not there (§5.7's stacking half, `SA-0025`)."""
+    be — deleted, or moved to a commit this mirror cannot reach. The task's
+    problem, not the toolchain's: caught in `package()` and turned into
+    `MERGE_FAILED`, and it must never escape as the `PackageError` it inherits
+    from (§5.7's stacking half, `SA-0025`)."""
 
 
 def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -459,9 +460,10 @@ def reverify(
 
     **Never host-side.** Exec'ing a gate on the host is the control plane
     executing model-authored code — the one thing §2 says it never does. Both
-    runs read their gates from `gates_dir`, exported from `new_base_sha`: the
-    two suites subtracted below come from one set of executables, and the
-    patch's own `.saffron/gates/*` are never run.
+    runs read their gates from the caller's `gates_dir`, which is exported from
+    the default branch even when `new_base_sha` is a parent's head: the two
+    suites subtracted below come from one set of executables, and the patch's
+    own `.saffron/gates/*` are never run.
 
     Twice, because the base moved: the old baseline describes a tree that no
     longer exists, and comparing against it would charge this task with the
@@ -475,9 +477,10 @@ def reverify(
 
     results = {}
     for label, sha in (("baseline", new_base_sha), ("head", packaged_sha)):
-        # packaged_sha, not the loop's `sha`: new_base_sha is today's default-branch
-        # head, identical for every concurrent task (DESIGN.md N4) — keying on it
-        # would let two tasks collide and tear down each other's live cell.
+        # packaged_sha, not the loop's `sha`: new_base_sha is a tree many
+        # concurrent tasks share — today's default-branch head, or one parent's
+        # head for all its children (DESIGN.md N4). Keying on it would let two
+        # tasks collide and tear down each other's live cell.
         volume = f"saffron-pkg-{label}-{packaged_sha[:12]}"
         container = f"saffron-pkg-{label}-{packaged_sha[:12]}"
         network = f"{container}-net"
