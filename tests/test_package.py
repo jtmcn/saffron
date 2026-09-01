@@ -1,6 +1,7 @@
 import json
 import subprocess
 import subprocess as sp
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -16,11 +17,13 @@ from saffron.phases.package import (
     APPLY_OK,
     LeaseRejected,
     PackageError,
+    ParentGone,
     apply_patch,
     assert_base_objects,
     commit_squash,
     default_branch,
     fetch_default_branch,
+    fetch_parent_branch,
     find_credentials,
     find_credentials_in_text,
     github_slug,
@@ -702,7 +705,11 @@ def test_a_conflict_persists_merge_failed_and_pushes_nothing(monkeypatch, tmp_pa
     task_dir = tmp_path / "batch" / "SA-0005"
     task_dir.mkdir(parents=True)
     (task_dir / "patch.diff").write_text(patch_text)
-    (task_dir / "patch.json").write_text(json.dumps({"base_sha": base}))
+    # tree_base equal to base_sha: what `SA-0022` writes for every unstacked
+    # task, which is every task this fixture builds.
+    (task_dir / "patch.json").write_text(
+        json.dumps({"base_sha": base, "tree_base": base})
+    )
 
     ledger = Ledger(tmp_path / "l.db")
     repo_id = ledger.upsert_repo("work", str(remote), str(mirror), "sha")
@@ -790,7 +797,11 @@ def packageable(monkeypatch, tmp_path):
     task_dir = tmp_path / "batch" / "SA-0005"
     task_dir.mkdir(parents=True)
     (task_dir / "patch.diff").write_text(patch_text)
-    (task_dir / "patch.json").write_text(json.dumps({"base_sha": base}))
+    # tree_base equal to base_sha: what `SA-0022` writes for every unstacked
+    # task, which is every task this fixture builds.
+    (task_dir / "patch.json").write_text(
+        json.dumps({"base_sha": base, "tree_base": base})
+    )
 
     ledger = Ledger(tmp_path / "l.db")
     repo_id = ledger.upsert_repo("work", str(remote), str(mirror), "sha")
@@ -1563,3 +1574,291 @@ def test_reverify_is_handed_the_policy_from_the_commit_it_verifies_against(
 
     assert list(seen["policy"].gates) == ["tests"]
     assert seen["gates_dir"].is_dir()
+
+
+# --- SA-0025: package() learns an inert parent branch ----------------------
+
+
+def test_omitting_the_parent_leaves_an_ordinary_package_unchanged(packageable):
+    """No caller in this spec passes a parent — the default must leave
+    exactly the base a reviewer saw before this spec touched `package()`."""
+    seen = []
+
+    def fake_gh(argv):
+        seen.append(argv)
+        return sp.CompletedProcess(argv, 0, stdout="https://github.com/o/r/pull/9\n")
+
+    result = package(packageable.outcome, gh=fake_gh, **packageable.kwargs)
+
+    assert result.state == "READY_FOR_REVIEW"
+    argv = seen[0]
+    assert argv[argv.index("--base") + 1] == "main"
+
+
+@pytest.fixture
+def stacked_packageable(monkeypatch, tmp_path):
+    """A parent branch with its own commit and its own policy, pushed and
+    never merged, and a child stacked on it whose patch is relative to the
+    parent's head — never the default branch, which the parent has not yet
+    reached."""
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    remote = tmp_path / "remote.git"
+    git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
+
+    work = tmp_path / "work"
+    work.mkdir()
+    git(work, "init", "-q", "-b", "main")
+    git(work, "config", "user.email", "t@example.com")
+    git(work, "config", "user.name", "Test")
+    (work / "f.txt").write_text("a\nb\nc\n")
+    (work / ".saffron").mkdir()
+    (work / ".saffron" / "policy.yaml").write_text(
+        "gates: {}\nintegrity:\n  test_paths:\n    - f.txt\n"
+    )
+    git(work, "add", "-A")
+    git(work, "commit", "-qm", "root")
+    git(work, "remote", "add", "origin", str(remote))
+    git(work, "push", "-q", "origin", "main")
+
+    # The parent's own branch, pushed and never merged here. Its own policy
+    # names a different test_path — a canary for criterion 7: read from
+    # here by mistake, the body would name other.txt instead.
+    git(work, "checkout", "-q", "-b", "saffron/SA-0020")
+    (work / "f.txt").write_text("a\nb\nPARENT\n")
+    (work / ".saffron" / "policy.yaml").write_text(
+        "gates: {}\nintegrity:\n  test_paths:\n    - other.txt\n"
+    )
+    git(work, "commit", "-qam", "the parent's own work")
+    tree_base = git(work, "rev-parse", "HEAD")
+    git(work, "push", "-q", "origin", "saffron/SA-0020")
+
+    # The child, stacked on the parent: its patch carries only its own line.
+    git(work, "checkout", "-q", "-b", "cell")
+    (work / "f.txt").write_text("a\nb\nPARENT\nCHILD\n")
+    git(work, "commit", "-qam", "the agent's work")
+    patch_text = git(work, "diff", *DIFF_FLAGS, f"{tree_base}..HEAD") + "\n"
+    git(work, "checkout", "-q", "main")
+
+    mirror = tmp_path / "m.git"
+    git(tmp_path, "clone", "-q", "--mirror", str(work), str(mirror))
+    git(mirror, "config", "user.email", "t@example.com")
+    git(mirror, "config", "user.name", "Test")
+
+    task_dir = tmp_path / "batch" / "SA-0005"
+    task_dir.mkdir(parents=True)
+    (task_dir / "patch.diff").write_text(patch_text)
+    # base_sha is a decoy the mirror never received: the only honest way to
+    # prove tree_base, not base_sha, is what the preimage check reads —
+    # reading the wrong key here raises before anything is pushed.
+    (task_dir / "patch.json").write_text(
+        json.dumps({"base_sha": "0" * 40, "tree_base": tree_base})
+    )
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = ledger.upsert_repo("work", str(remote), str(mirror), "sha")
+    run_id = ledger.create_run(repo_id, tree_base)
+    task_id = ledger.create_task(run_id, "SA-0005", "s" * 40, branch="saffron/SA-0005")
+    ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+    ledger.finish_run(run_id, "COMPLETE")
+
+    yield SimpleNamespace(
+        work=work,
+        remote=remote,
+        mirror=mirror,
+        tree_base=tree_base,
+        ledger=ledger,
+        task_id=task_id,
+        out_dir=tmp_path / "batch",
+        kwargs=dict(
+            spec=_spec(touches=["f.txt"], criteria=["it works"]),
+            repo=work,
+            mirror=mirror,
+            image="unused",
+            ledger=ledger,
+            out_dir=tmp_path / "batch",
+            token=None,
+            watch=lambda _: None,
+        ),
+        outcome=_cell_outcome(task_dir, task_id, run_id),
+    )
+    ledger.close()
+
+
+def test_a_stacked_child_opens_against_its_parent_applies_onto_it_and_leaves_policy_at_default(
+    stacked_packageable,
+):
+    """Criteria 2, 3 and 7 together: the pull request's own base, the
+    content actually pushed, and the policy PACKAGE verified under."""
+    seen = []
+
+    def fake_gh(argv):
+        seen.append(argv)
+        return sp.CompletedProcess(argv, 0, stdout="https://github.com/o/r/pull/2\n")
+
+    result = package(
+        stacked_packageable.outcome,
+        gh=fake_gh,
+        parent_branch="saffron/SA-0020",
+        **stacked_packageable.kwargs,
+    )
+
+    assert result.state == "READY_FOR_REVIEW"
+    argv = seen[0]
+    assert argv[argv.index("--base") + 1] == "saffron/SA-0020"
+
+    pushed = remote_sha(
+        str(stacked_packageable.remote), "saffron/SA-0005", cwd=stacked_packageable.work
+    )
+    # The bare remote itself, not `work`: the object only exists there once
+    # pushed — `work` never fetched it back.
+    content = git(stacked_packageable.remote, "show", f"{pushed}:f.txt")
+    assert "PARENT" in content and "CHILD" in content
+
+    # Backlog item 16: the policy PACKAGE verifies under stays at the
+    # default branch's — main declares f.txt, the parent's own (unread)
+    # commit declares other.txt.
+    body = (stacked_packageable.outcome.task_dir / "pr_body.md").read_text()
+    assert "f.txt" in body
+
+
+def test_a_merged_parent_falls_back_to_the_ordinary_target(tmp_path, monkeypatch):
+    """The parent's own commit is already an ancestor of the fetched default
+    branch, and its branch is gone — the ordinary shape once a PR merges.
+    PACKAGE must never try to fetch it: the sequence is what proves the
+    fallback, not a flag."""
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    remote = tmp_path / "remote.git"
+    git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
+
+    work = tmp_path / "work"
+    work.mkdir()
+    git(work, "init", "-q", "-b", "main")
+    git(work, "config", "user.email", "t@example.com")
+    git(work, "config", "user.name", "Test")
+    (work / "f.txt").write_text("a\nb\nc\n")
+    (work / ".saffron").mkdir()
+    (work / ".saffron" / "policy.yaml").write_text("gates: {}\n")
+    git(work, "add", "-A")
+    git(work, "commit", "-qm", "root")
+    git(work, "remote", "add", "origin", str(remote))
+    git(work, "push", "-q", "origin", "main")
+
+    git(work, "checkout", "-q", "-b", "saffron/SA-0020")
+    (work / "f.txt").write_text("a\nb\nPARENT\n")
+    git(work, "commit", "-qam", "the parent's own work")
+    tree_base = git(work, "rev-parse", "HEAD")
+    git(work, "push", "-q", "origin", "saffron/SA-0020")
+    git(work, "checkout", "-q", "main")
+    git(work, "merge", "-q", "--ff-only", "saffron/SA-0020")
+    git(work, "push", "-q", "origin", "main")
+    git(work, "push", "-q", "origin", "--delete", "saffron/SA-0020")
+
+    git(work, "checkout", "-q", "-b", "cell", tree_base)
+    (work / "f.txt").write_text("a\nb\nPARENT\nCHILD\n")
+    git(work, "commit", "-qam", "the agent's work")
+    patch_text = git(work, "diff", *DIFF_FLAGS, f"{tree_base}..HEAD") + "\n"
+    git(work, "checkout", "-q", "main")
+
+    mirror = tmp_path / "m.git"
+    git(tmp_path, "clone", "-q", "--mirror", str(work), str(mirror))
+    git(mirror, "config", "user.email", "t@example.com")
+    git(mirror, "config", "user.name", "Test")
+
+    task_dir = tmp_path / "batch" / "SA-0005"
+    task_dir.mkdir(parents=True)
+    (task_dir / "patch.diff").write_text(patch_text)
+    (task_dir / "patch.json").write_text(
+        json.dumps({"base_sha": "0" * 40, "tree_base": tree_base})
+    )
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = ledger.upsert_repo("work", str(remote), str(mirror), "sha")
+    run_id = ledger.create_run(repo_id, tree_base)
+    task_id = ledger.create_task(run_id, "SA-0005", "s" * 40, branch="saffron/SA-0005")
+    ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+    ledger.finish_run(run_id, "COMPLETE")
+    outcome = _cell_outcome(task_dir, task_id, run_id)
+
+    seen = []
+
+    def fake_gh(argv):
+        seen.append(argv)
+        return sp.CompletedProcess(argv, 0, stdout="https://github.com/o/r/pull/3\n")
+
+    result = package(
+        outcome,
+        spec=_spec(touches=["f.txt"], criteria=["it works"]),
+        repo=work,
+        mirror=mirror,
+        image="unused",
+        ledger=ledger,
+        out_dir=tmp_path / "batch",
+        token=None,
+        # This branch no longer exists on the remote — proof the fallback
+        # never tries to fetch it, not merely a flag it read.
+        parent_branch="saffron/SA-0020",
+        gh=fake_gh,
+        watch=lambda _: None,
+    )
+
+    assert result.state == "READY_FOR_REVIEW"
+    argv = seen[0]
+    assert argv[argv.index("--base") + 1] == "main"
+    ledger.close()
+
+
+def test_fetch_parent_branch_names_a_deleted_branch(tmp_path, bare_remote):
+    """`bare_remote` never had this branch — the ordinary shape of a parent
+    whose own PR merged and whose branch GitHub then deleted."""
+    mirror = tmp_path / "mirror.git"
+    git(tmp_path, "init", "-q", "--bare", str(mirror))
+    with pytest.raises(ParentGone, match="is gone"):
+        fetch_parent_branch(mirror, str(bare_remote), "saffron/ghost")
+
+
+def test_fetch_parent_branch_names_a_commit_the_mirror_cannot_reach(
+    tmp_path, monkeypatch
+):
+    """A fetch that reports success without actually transferring the
+    parent's objects — the shape an interrupted or partial fetch leaves.
+    `assert_base_objects`'s own check catches it; this proves the wrapper
+    names it distinctly from a plain `is gone`."""
+    mirror = tmp_path / "mirror.git"
+    git(tmp_path, "init", "-q", "--bare", str(mirror))
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    git(elsewhere, "init", "-q", "-b", "main")
+    git(elsewhere, "config", "user.email", "t@example.com")
+    git(elsewhere, "config", "user.name", "Test")
+    (elsewhere / "f").write_text("x\n")
+    git(elsewhere, "add", "-A")
+    git(elsewhere, "commit", "-qm", "x")
+    ghost = git(elsewhere, "rev-parse", "HEAD")
+
+    from saffron.phases.package import _run as real_run
+
+    def fake_run(cwd, *args):
+        if args[:1] == ("fetch",):
+            # Not `git update-ref`: it refuses a nonexistent object, which is
+            # exactly the point — a loose ref write is the only way to leave
+            # the mirror in the state a partial fetch would.
+            ref = mirror / "refs" / "heads" / "parent"
+            ref.parent.mkdir(parents=True, exist_ok=True)
+            ref.write_text(ghost + "\n")
+            return sp.CompletedProcess(args, 0, "", "")
+        return real_run(cwd, *args)
+
+    monkeypatch.setattr("saffron.phases.package._run", fake_run)
+
+    with pytest.raises(ParentGone, match="cannot reach"):
+        fetch_parent_branch(mirror, "unused://", "parent")
+
+
+def test_the_operators_reachable_packaging_path_is_unstacked():
+    """`saffron/cli.py` is forbidden to this spec, and criterion 6 is what
+    keeps the capability from shipping a path it cannot serve: the one
+    caller reaching `package()` in production must not pass a parent."""
+    import saffron.cli as cli
+
+    assert "parent_branch" not in Path(cli.__file__).read_text()
