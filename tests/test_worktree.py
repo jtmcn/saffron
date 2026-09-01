@@ -593,6 +593,26 @@ def test_prepare_worktree_without_stacked_on_checks_out_base_sha_unchanged(
     assert f"git checkout -q -b saffron/SY-1 {'b' * 40}" in scripts[0]
 
 
+def test_an_empty_stacked_on_raises_rather_than_falling_back_to_the_pin(tmp_path):
+    """A resolver that could not find the parent returns something falsy, and
+    `or` would silently build the cell on `base_sha` while everything
+    downstream believed it was stacked — a mechanism reporting success and
+    applying to the wrong tree (Appendix I's shape)."""
+    with pytest.raises(ValueError, match="could not be resolved"):
+        worktree.prepare_worktree(
+            mirror=tmp_path / "m.git",
+            volume="v",
+            base_sha="b" * 40,
+            stacked_on="",
+            branch="saffron/SY-1",
+            image="img",
+            container="c",
+            network="none",
+            env={},
+            gates_dir=tmp_path / "gates",
+        )
+
+
 def test_prepare_worktree_stacked_on_checks_out_the_parent_instead(
     monkeypatch, tmp_path
 ):
@@ -660,7 +680,11 @@ def _no_cell_runtime(monkeypatch, tmp_path):
                 containers[name] = volumes[mount.source]
 
     def _exec(container, command, *, workdir=None, timeout_s=900):
-        cwd = containers[container] if workdir == worktree.WORKTREE_MOUNT else None
+        # Raise rather than fall back to `None`: a helper that omitted
+        # `workdir` would otherwise run git against this checkout and go green.
+        if workdir != worktree.WORKTREE_MOUNT:
+            raise AssertionError(f"unexpected workdir {workdir!r}")
+        cwd = containers[container]
         done = subprocess.run(list(command), cwd=cwd, capture_output=True)
         return runtime.Completed(
             done.returncode,

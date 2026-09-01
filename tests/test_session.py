@@ -110,6 +110,40 @@ def test_stacked_on_carries_a_second_base_distinct_from_base_sha():
     assert spec.stacked_on != spec.base_sha
 
 
+def test_tree_base_is_the_pin_unstacked_and_the_parent_stacked():
+    """One name for the second base. `base_sha` keeps pinning the gates and
+    the policy either way (§5.4), which is why the two cannot be one field."""
+    assert _spec().tree_base == "b" * 40
+    assert _spec(stacked_on="c" * 40).tree_base == "c" * 40
+
+
+def test_a_stacked_specs_patch_is_exported_against_its_parent_not_the_pin(
+    monkeypatch, tmp_path
+):
+    """Criterion 3 at the caller. `tests/test_worktree.py`'s real-git witness
+    proves that base yields only the child's commits; this proves Saffron is
+    the one that picks it. A test that hands `export_patch` its own answer
+    proves neither — the defect was every consumer choosing separately."""
+    from saffron.cell import worktree as wt
+
+    asked: list[str] = []
+
+    def _record(_container, base, /):
+        asked.append(base)
+        return "diff --git a/x b/x\n"
+
+    monkeypatch.setattr(wt, "commit_subjects", lambda c, base: asked.append(base) or [])
+    monkeypatch.setattr(wt, "export_patch", _record)
+    monkeypatch.setattr(wt, "changed_files", lambda c, base: asked.append(base) or [])
+    monkeypatch.setattr(wt, "head_sha", lambda c: "c" * 40)
+
+    session.export_patch(
+        "cell-1", _spec(stacked_on="d" * 40), tmp_path / "out", lambda _m: None
+    )
+
+    assert asked == ["d" * 40] * 3, "a consumer still reading the run's pin"
+
+
 _PLAN = {
     "understanding": "u",
     "approach": "a",
@@ -968,6 +1002,9 @@ def test_a_green_run_leaves_the_patch_behind(monkeypatch, tmp_path):
     assert (task_dir / "patch.diff").read_text() == _DIFF
     assert json.loads((task_dir / "patch.json").read_text()) == {
         "base_sha": "b" * 40,
+        # Equal unstacked, and recorded separately so a stacked task's record
+        # says what its diff is relative to rather than what pinned its gates.
+        "tree_base": "b" * 40,
         "head_sha": "c" * 40,
         "files": ["src/x.py"],
     }

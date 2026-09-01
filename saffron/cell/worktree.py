@@ -49,7 +49,8 @@ def prepare_worktree(
     created: set[str] | None = None,
     stacked_on: str | None = None,
 ) -> None:
-    """Clone the mirror into the volume at `base_sha` on `branch`, cell running.
+    """Clone the mirror into the volume at the base it is given, on `branch`,
+    cell running.
 
     `network`, `env` and `gates_dir` are required, not defaulted: a cell started
     without them joins the runtime's default network with full egress, or falls
@@ -67,13 +68,19 @@ def prepare_worktree(
     `git clone` refuses a non-empty destination, and a freshly formatted
     volume already has a `lost+found` — init/fetch/checkout in place instead.
 
-    `stacked_on`, when set, is a stacked task's parent's own unmerged branch
-    head — ahead of `base_sha` — and is what the tree is actually built on;
-    `base_sha` stays the run's pin regardless (§5.4). Unset, which is every
-    caller today, the checkout is `base_sha` exactly as before this parameter
-    existed.
+    `stacked_on`, when set, is a stacked task's parent branch head — a sha
+    resolved host-side, never a ref name: it is interpolated into the seed
+    script exactly as `base_sha` is, and a branch name would also be a moving
+    target between the fetch and the checkout. It is what the tree is built
+    on; `base_sha` stays the run's pin regardless (§5.4). Unset, which is
+    every caller today, the checkout is `base_sha` as before it existed.
     """
-    checkout_ref = stacked_on or base_sha
+    # `is not None`, not `or`: an empty string is a resolver that failed, and
+    # falling back to `base_sha` there builds a cell on the wrong tree while
+    # reporting success (Appendix I's shape).
+    if stacked_on is not None and not stacked_on:
+        raise ValueError("stacked_on is empty: a parent that could not be resolved")
+    checkout_ref = base_sha if stacked_on is None else stacked_on
     state = state_volume or f"{volume}-state"
     if created is not None:
         created.add(state)

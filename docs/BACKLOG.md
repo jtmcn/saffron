@@ -1749,7 +1749,7 @@ rather than one settled fact. Second, `base_sha` is the one value every task in
 a run shares; a gate source that moved with `stacked_on` would mean two
 sibling tasks stacked on two different parents run under two different gate
 suites inside the same run — a suite-drift vector already named once, for
-`reverify`'s missing `thread_env` (item 12), and the common case here rather
+`reverify`'s missing `thread_env` (item 11), and the common case here rather
 than the exception.
 
 **What this defers, by name, for `SA-0025` to inherit rather than rediscover.**
@@ -1761,6 +1761,14 @@ moving what `base_sha` pins means exporting a second, `stacked_on`-sourced gate
 set for a stacked task alone and running both suites, which is unbuilt and is
 not this item's to build: the requirement here was that the disagreement be
 recorded, not resolved.
+
+**Re-verification is the second caller, and it is not covered above.**
+`saffron/phases/package.py` calls `prepare_worktree` a second time, building
+its baseline and head worktrees from the current default-branch head. For a
+stacked child that is the wrong baseline outright — the parent's commits are
+not in it — which is a different failure from the gate-source disagreement
+this item decides. `saffron/phases/**` is forbidden to `SA-0022`, so recording
+it here is the only action available; `SA-0025` owns the file and the fix.
 
 ---
 

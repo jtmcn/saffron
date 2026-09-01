@@ -259,11 +259,9 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         forbidden=spec.forbidden,
         acceptance=spec.acceptance,
         risk=spec.risk,
-        # Deliberately unset: this is the one place a `CellSpec` is built, and
-        # setting it to anything but `None` here is what would stack a real
-        # task. `SA-0025` resolves a real parent onto this field; until it
-        # does, `spec.depends_on` is not consulted at all on this path
-        # (docs/BACKLOG.md).
+        # Deliberately unset, and the only thing that keeps stacking off:
+        # `spec.depends_on` is not consulted on this path. `SA-0025` resolves
+        # a real parent here.
         stacked_on=None,
         **ceilings,
     )
