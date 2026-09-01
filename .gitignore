@@ -9,3 +9,6 @@ __pycache__/
 .venv/
 .ruff_cache/
 .pytest_cache/
+
+# `run-saffron-spec-loop` run state; the plan outlives the queue it was cut from.
+.saffron-loop/
