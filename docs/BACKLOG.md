@@ -2078,7 +2078,6 @@ deliberately not a phase, the same entry the plan checkpoint carries.
 
 ---
 
-||||||| parent of e932824 (saffron SA-0027: an inertness guard names the spec that will retire it, and nothing checks that spec's touches can reach the file)
 ## 35. An inertness guard names its own successor, and nothing checked the successor could reach it
 
 **Status:** **done** — `SA-0027`, 2026-09-01.
@@ -2148,6 +2147,41 @@ permanent refusals into every `saffron queue`. And a third limitation for the
 list above: the empty-`touches` guard means a bug spec is checked against
 markers only *before* DIAGNOSE populates its `touches`, never after — the
 same pre-cell-only hole item 28's sibling refusal has.
+
+**What the second review round found, and three more blind spots it named.**
+The item shipped carrying a stray diff3 conflict marker — one line, naming an
+in-cell commit that exists in no history here — through two review commits. In
+a file the project treats as a primary record, that is the workspace-claim
+failure in documentation form. And a dangling-marker line asserted more than
+the scan had read: `known_ids` is built from the spec files that *parsed*, so a
+marker naming an id declared only by an unparseable file was called a dangling
+reference. It now says how many files did not parse, the way
+`_dependency_refusal` already qualifies the identical case.
+
+Three things this refusal still cannot see, all named rather than fixed:
+
+- **A marker whose id the regex cannot parse is dropped in silence.**
+  `saffron:retired-by SA_0027`, a stray colon after the keyword, or a marker
+  inside a binary file all *match the grep* and then vanish — the false green
+  this item exists to end, one layer down. Fixing it is a decision and not a
+  one-liner: this repository writes the literal keyword in a regex, in three
+  scheduler f-strings, in two test writers and in this paragraph, and every one
+  of those would become a "malformed marker" line on every `saffron queue`. The
+  permissive id parse is kept deliberately for the same reason — trailing
+  garbage (`SA-0031-extra`) resolves to its prefix and so reaches an operator
+  as either a named refusal or a dangling line, where a stricter pattern would
+  return it to silence. Visible-and-possibly-misattributed beats invisible.
+- **Only `.saffron/specs` is excluded, so a document that writes a real id
+  arms a real marker.** This file, `CLAUDE.md` and `DESIGN.md` escape today
+  only by writing a placeholder rather than a concrete id. Excluding `docs/**`
+  was considered and rejected: `docs/` is a target repo's convention, not
+  Saffron's, and core knows nothing about a repo's layout (§2.1). `.saffron/`
+  is excluded precisely because it *is* Saffron's own path.
+- **The repo-wide `protected` list is not consulted.** `retirement_refusal`
+  reads `spec.forbidden` but not `policy.yaml`'s `protected`, which `_refuse`
+  already holds. A marker in a protected path, named by a spec whose `touches`
+  glob covers it, is admitted here and dies at the plan checkpoint instead —
+  the same corpse this refusal exists to prevent, one list over.
 
 ---
 

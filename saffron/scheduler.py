@@ -366,9 +366,9 @@ def retirement_refusal(spec: Spec, markers: Sequence[tuple[str, str]]) -> str | 
         if any(matches(path, pattern) for pattern in spec.forbidden):
             return (
                 f"{path} asserts saffron:retired-by {spec.id}, but this "
-                f"spec's own forbidden list denies {path} — it may not touch "
-                "that file at all, a different mistake from touches not "
-                "reaching it"
+                f"spec's own forbidden list denies it: "
+                f"{', '.join(spec.forbidden)} — it may not touch that file at "
+                "all, a different mistake from touches not reaching it"
             )
         if spec.touches and not any(matches(path, pattern) for pattern in spec.touches):
             return (
@@ -379,7 +379,9 @@ def retirement_refusal(spec: Spec, markers: Sequence[tuple[str, str]]) -> str | 
 
 
 def _dangling_marker_refusals(
-    markers: Sequence[tuple[str, str]], known_ids: frozenset[str]
+    markers: Sequence[tuple[str, str]],
+    known_ids: frozenset[str],
+    unreadable: int = 0,
 ) -> list[Refusal]:
     """One `Refusal` per marker naming a spec id nothing in this directory —
     live or retired to `done/` — declares, SA-0024's `done/` rule applied to
@@ -390,14 +392,28 @@ def _dangling_marker_refusals(
     different id than the one still written in the comment. Silence would be
     the alternative, and silence is exactly what this whole spec exists to
     end.
+
+    `unreadable` is how many spec files — live or in `done/` — did not parse,
+    and so declare no id at all. `known_ids` is built from the ones that did,
+    so a marker naming an id declared *only* by an unparseable file lands here
+    and would otherwise be called dangling, which is a claim about a file this
+    scan never read. `_dependency_refusal` qualifies the identical case rather
+    than asserting past it (§4.2.1): every branch names the state it read.
     """
+    blind = ""
+    if unreadable:
+        plural = "s" if unreadable > 1 else ""
+        blind = (
+            f", and {unreadable} spec file{plural} here did not parse, so it "
+            "declares no id either way"
+        )
     return [
         Refusal(
             path=Path(path),
             reason=(
                 f"saffron:retired-by {spec_id} at {path}, but no spec in "
                 f"this directory or {RETIRED_DIRNAME}/ declares {spec_id} — "
-                "a dangling reference"
+                f"a dangling reference{blind}"
             ),
         )
         for path, spec_id in markers
@@ -718,7 +734,9 @@ def build_queue(
         )
         for f in retired_failures
     ]
-    refusals += _dangling_marker_refusals(markers, known_ids)
+    refusals += _dangling_marker_refusals(
+        markers, known_ids, len(failures) + len(retired_failures)
+    )
     kept: list[Candidate] = []
     for candidate in candidates:
         reason = _refuse(

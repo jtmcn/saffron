@@ -877,6 +877,45 @@ def test_a_marker_naming_an_unknown_spec_id_gets_its_own_dangling_line(
     assert refusals[0].path == Path("saffron/ghost.py")
 
 
+def test_a_dangling_line_says_so_when_a_spec_file_could_not_be_read(tmp_path, ledger):
+    """`known_ids` is built from the spec files that parsed, so an id declared
+    only by one that did not reads as declared by nothing. Calling that
+    dangling asserts something this scan never read — the same case
+    `_dependency_refusal` qualifies rather than asserting past (§4.2.1)."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-9", touches=["saffron/x.py"])
+    (directory / "b.md").write_text("no frontmatter here\n")
+
+    _candidates, refusals = build_queue(
+        directory,
+        None,
+        ledger,
+        markers=[("saffron/ghost.py", "TE-404")],
+    )
+
+    dangling = next(r.reason for r in refusals if r.path.name == "ghost.py")
+    assert "a dangling reference" in dangling
+    assert "1 spec file here did not parse" in dangling
+
+
+def test_a_dangling_line_is_unqualified_when_every_spec_file_parsed(tmp_path, ledger):
+    """The other half: with nothing unread, the line must not hedge. A
+    qualifier that is always present tells an operator nothing about which
+    scan actually had a blind spot."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-9", touches=["saffron/x.py"])
+
+    _candidates, refusals = build_queue(
+        directory,
+        None,
+        ledger,
+        markers=[("saffron/ghost.py", "TE-404")],
+    )
+
+    dangling = next(r.reason for r in refusals if r.path.name == "ghost.py")
+    assert "did not parse" not in dangling
+
+
 def test_a_marker_naming_a_retired_spec_is_not_dangling(tmp_path, ledger):
     """`specs/done/` declares an id exactly the way a live spec file does
     (`_retired_ids`) — a marker naming a retired spec is a real reference,
