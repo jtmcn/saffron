@@ -19,7 +19,9 @@ agent runs that directly and tells the driver what happened.
 
 `saffron queue` is computed against **open** pull requests, and this workflow
 deliberately leaves them open. The moment the first cell packages, gate 0
-refuses the rest. Measured on this repo with two real specs queued:
+refuses the rest. Measured by driving `build_queue` against this repo's two
+real queued specs, with a **simulated** open pull request on `saffron/SA-0028`
+(the PR number below is the simulation's, not a real one):
 
 ```
 --- no open PRs ---
@@ -39,7 +41,7 @@ everything afterwards reads that plan.
 ## Prerequisites
 
 ```bash
-gh stack --version          # v0.1.0 — the `gh-stack` extension, required
+gh stack --version          # gh stack version 0.1.0 — the extension, required
 uv run pytest --version     # the repo's own toolchain
 ```
 
@@ -60,7 +62,7 @@ plan: 2 spec(s), bottom of the stack first
 written to .saffron-loop/plan.json
 
 note: 1 spec(s) declare no depends_on, so their branches will be siblings
-      cut from the default branch rather than a real chain. See Gotchas.
+      cut from the default branch rather than a real chain. See SKILL.md, Gotchas.
 ```
 
 Order is parents before children, then priority, then spec id. A spec refused
@@ -100,12 +102,27 @@ Exit codes are load-bearing: `0` reviewable, `1` the task did not make it,
 uv run .claude/skills/run-saffron-spec-loop/driver.py record SA-0028
 ```
 
+Prints `<SPEC-ID>  <state>  #<pr>` and exits 0 only for `READY_FOR_REVIEW`.
+Real output, from a spec this repo has actually run:
+
 ```
-SA-0028  READY_FOR_REVIEW  #86
+$ uv run .claude/skills/run-saffron-spec-loop/driver.py record SA-0013
+SA-0013  MERGED  #51
 ```
 
-Read from the ledger, never from the transcript (§4.3). Exit 1 for any state
-other than `READY_FOR_REVIEW` — that spec is out of the stack; keep going.
+Read from the ledger, never from the transcript (§4.3). Any state other than
+`READY_FOR_REVIEW` exits 1 — that spec is out of the stack; keep going.
+
+If `record` errors (`no task for SA-00NN at <sha> — did the cell run?`), the
+spec's state stays unset and **`next` will hand you the same spec again**.
+Re-run the cell once, or take it out of the loop deliberately:
+
+```bash
+uv run .claude/skills/run-saffron-spec-loop/driver.py skip SA-0028 --why "cell died in PREFLIGHT twice"
+```
+
+Never re-run a cell more than once on the same failure — that is an hour and
+real money per pass.
 
 **c. Address the in-cell critic.** Findings are at
 `~/.saffron/batches/v0/<SPEC-ID>/findings.json`:
@@ -144,6 +161,17 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py stack            # dry run
 uv run .claude/skills/run-saffron-spec-loop/driver.py stack --execute  # links them on GitHub
 ```
 
+With nothing run yet it refuses, which is the state you will see first:
+
+```
+$ uv run .claude/skills/run-saffron-spec-loop/driver.py stack
+error: a stack needs two or more reviewable pull requests; have 0
+```
+
+Once two specs are `READY_FOR_REVIEW` the dry run prints the plan and the
+command. **The block below was produced by forcing two merged specs' states in
+`plan.json` by hand** — the PR numbers are real, the stack has never been built:
+
 ```
 stack, bottom to top:
   #82  SA-0025  (saffron/SA-0025)
@@ -162,11 +190,30 @@ script's.
 opened** each pull request. `link` takes existing PR numbers bottom-to-top,
 does not rely on local stack state, and never removes existing PRs.
 
-Check the result and hand the operator the stack:
+Check the result. **Not `gh stack view`** — it only views the stack containing
+the *current* branch, and `link` keeps no local tracking, so from anywhere else
+it prints `✗ current branch "…" is not part of a stack` and looks like a
+failure. Read the PRs themselves:
 
 ```bash
-gh stack view --short
+gh pr view 86 --json number,isDraft,baseRefName,headRefName \
+  -q '{n:.number,draft:.isDraft,base:.baseRefName,head:.headRefName}'
 ```
+
+```
+{"base":"main","draft":false,"head":"joel/spec-loop-skill","n":86}
+```
+
+Run it per PR and record `baseRefName` **before and after** `--execute`:
+whether `link` retargets an existing PR's base is the one thing about it this
+skill has not measured. Then hand the operator the stack URL `link` printed.
+
+## Exit codes
+
+`0` the command did what it says; `1` everything else — a usage error, an empty
+plan, a spec that is not reviewable, or `next` with nothing left. The driver
+never returns `2`: `saffron/cli.py` reserves that for infrastructure, and this
+script is not it.
 
 ## Status at any point
 
@@ -235,8 +282,9 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py status
   `gh stack checkout <n>`, which refetches the stack from GitHub; nothing on
   the remote is touched by `--local`.
 
-- **`.saffron-loop/` is gitignored.** It must never reach a commit; a cell that
-  found it in the working tree would see an undeclared path.
+- **`.saffron-loop/` is gitignored.** Run state, not source. A cell never sees
+  it — the mirror is a `git clone --mirror`, so an untracked file cannot reach
+  one — but it must never ride along in a review fix's commit either.
 
 ## Troubleshooting
 
@@ -252,12 +300,22 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py status
 
 ## Verified
 
-Run on 2026-09-01 against this repo at `7ab27cf`: `plan`, `next`, `record`,
-`status`, `stack` (dry run, real PR numbers #82/#84), the empty-queue
-measurement, and the `gh stack init` / `view --json` / `rebase --no-trunk` /
+Against this repo at `7ab27cf`, 2026-09-01.
+
+**Run, output reproduced above verbatim:** `plan` (including a throwaway spec
+touching `DESIGN.md`, to prove the `protected` refusal fires), `next`,
+`record SA-0013` (ten ledger rows at one sha — it picks the `MERGED` one
+carrying `#51`, not the `NOT_IMPLEMENTED` row after it), `skip`, `status`,
+`stack` with nothing reviewable, `gh pr view --json`, and the
+`gh stack init` / `view --short` / `view --json` / `rebase --no-trunk` /
 `unstack --local` sequence on throwaway local branches.
 
-`gh stack link --execute` has **not** been run — it needs two open Saffron pull
-requests, and none existed at authoring time. Its behaviour above is taken from
-`gh stack link --help` and the local `init`/`view` experiments. Confirm the
-result with `gh stack view --short` the first time you use it.
+**Run, output labelled above as reconstructed:** the populated `stack` dry run
+(states forced in `plan.json` by hand; PR numbers real) and the queue-collapse
+measurement (real `build_queue`, simulated open pull request).
+
+**Not run:** `driver.py stack --execute`, and therefore `gh stack link` itself.
+It needs two open Saffron pull requests and none existed at authoring time.
+Everything said about it comes from `gh stack link --help`. In particular,
+whether it retargets an existing PR's base branch is **unmeasured** — record
+`baseRefName` before and after the first time you use it.
