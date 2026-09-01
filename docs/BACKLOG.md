@@ -1782,6 +1782,68 @@ not in it — which is a different failure from the gate-source disagreement
 this item decides. `saffron/phases/**` is forbidden to `SA-0022`, so recording
 it here is the only action available; `SA-0025` owns the file and the fix.
 
+**Decided and implemented, 2026-08-31 (`SA-0025`).** `package()` now takes an
+optional `parent_branch`. Unset — every caller today — nothing above changes:
+`target_branch`/`target_head` resolve to `default`/`fetch_head` exactly as
+before, and reading `tree_base` instead of `base_sha` for the patch's preimage
+check is a no-op, because `SA-0022` already writes the two equal for an
+unstacked task. Set, and the parent's own commits are not yet an ancestor of
+`fetch_head`, PACKAGE opens against the parent's current head instead —
+fetched fresh, so a parent that merged, force-updated or was deleted between
+the child's start and its push is caught (named as `ParentGone`, one message
+for "gone", a different one for "moved to a commit the mirror cannot reach")
+before a pull request opens against a branch that is not there. A parent
+already merged into `fetch_head` falls back to the ordinary target rather than
+re-fetching a branch that is routinely deleted the moment its own PR lands.
+
+This also answers the re-verification baseline question left open above:
+**the fresh baseline is whichever tree the child is ultimately packaged
+against** — the parent's current head when stacked and the merged-fallback
+has not fired, `fetch_head` otherwise — never `fetch_head` unconditionally.
+`needs_reverification` and `reverify`'s `new_base_sha` both read that one
+value (`target_head`) now, closing the gap the paragraph above named: a
+stacked child's baseline used to omit the parent's own commits entirely. The
+disagreement decided above — the gates and the policy declaring them staying
+pinned to `fetch_head`'s export regardless of stacking — is unchanged; only
+the baseline commit `reverify` diffs against moved.
+
+**Left unrecognised, by design: a squash-merged parent.** The ancestor check
+above is `git merge-base --is-ancestor tree_base fetch_head`, mirror-local.
+GitHub's squash-merge writes a new commit object onto the default branch that
+shares no history with the parent branch's own commits, so a squash-merged
+parent whose branch was then deleted — the ordinary shape once a PR lands —
+reads as "gone without merging" rather than "merged": `ParentGone` fires and
+the task ends `MERGE_FAILED` for a change that, in fact, already shipped.
+Recognising a squash merge needs GitHub's own merge record (the PR's `merged`
+flag and `merge_commit_sha`), not anything the mirror holds, and building that
+is not this item's to do. The failure mode this leaves is a false negative
+that costs a task, never a pull request opened against a branch that is not
+there and never a silent double-apply of the parent's hunks — the two shapes
+this item exists to rule out.
+
+**Two more shapes accepted rather than solved, and one debt reassigned.**
+
+- *A parent force-pushed to a history that no longer contains `tree_base`.*
+  Distinct from the two `ParentGone` names: the fetch succeeds and the head is
+  reachable, so nothing above fires, and the child's patch three-way-rebases
+  onto a divergent parent. In the bad cases that conflicts and ends
+  `MERGE_FAILED`; in the benign-looking ones it can resurrect content the
+  force-push removed. A `merge-base --is-ancestor tree_base parent_head` check
+  would name it, and `SA-0026` — which is what first produces a real parent to
+  force-push — cannot make it: `saffron/phases/**` is forbidden there. It needs
+  a spec of its own, after stacking is live and the shape can be measured.
+- *A pruned mirror inverts a gone parent's classification.*
+  `assert_base_objects(mirror, tree_base)` has to precede the fetch — it is
+  checking for objects the fetch would otherwise supply — so a parent deleted
+  without merging, in a mirror since gc'd, raises `PackageError` and exits 2
+  before the `ParentGone` path can make it this task's own `MERGE_FAILED`.
+  Latent and gc-dependent; the ordering is right and the classification is not.
+- *`CONTEXT.md` still owes `tree_base` an entry.* This item asked `SA-0025` for
+  it, and `SA-0025` forbids itself `CONTEXT.md` — correctly, since its
+  documentation half is by hand. `SA-0026` carries the sentences, and carries
+  this one with them: `tree_base` is a noun in a durable artifact and the
+  glossary does not have it.
+
 ---
 
 ## What is *not* here, deliberately

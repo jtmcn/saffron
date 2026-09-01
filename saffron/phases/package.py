@@ -71,6 +71,14 @@ class LeaseRejected(PackageError):
     """The branch moved underneath us — the task's problem, not the toolchain's."""
 
 
+class ParentGone(PackageError):
+    """A stacked child's parent branch is not where PACKAGE was told it would
+    be — deleted, or moved to a commit this mirror cannot reach. The task's
+    problem, not the toolchain's: caught in `package()` and turned into
+    `MERGE_FAILED`, and it must never escape as the `PackageError` it inherits
+    from (§5.7's stacking half, `SA-0025`)."""
+
+
 def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Every git call here inspects `returncode` *and* `stderr` — see
     `apply_patch`, where a zero exit does not mean what it looks like."""
@@ -153,6 +161,41 @@ def assert_base_objects(mirror: Path, base_sha: str) -> None:
             f"mirror {mirror} lacks the objects for base {base_sha[:12]}, so a "
             "three-way merge cannot be performed"
         )
+
+
+def fetch_parent_branch(mirror: Path, url: str, branch: str) -> str:
+    """The parent's current head, fetched fresh into the mirror — never a
+    value resolved earlier and trusted stale, because a stacked child's
+    parent does not hold still between the child's start and its push.
+
+    Two distinct failures, and the caller has to be able to say which:
+
+    - **Gone.** The fetch itself fails — deleted, renamed, or a permissions
+      change. Measured no differently from `fetch_default_branch`'s own
+      unreachable-remote case.
+    - **Moved to a commit the mirror cannot reach.** The fetch reports a
+      head, but the objects for it are not actually in the mirror — the same
+      hazard `assert_base_objects` exists to catch for the patch's own
+      preimage, reused here for the parent's.
+    """
+    fetched = _run(
+        mirror, "fetch", "--force", url, f"+refs/heads/{branch}:refs/heads/{branch}"
+    )
+    if fetched.returncode != 0:
+        raise ParentGone(
+            f"parent branch {branch} is gone: {fetched.stderr.strip()[:200]}"
+        )
+    head = _run(mirror, "rev-parse", f"refs/heads/{branch}").stdout.strip()
+    if not head:
+        raise ParentGone(f"parent branch {branch} is gone: no head reported")
+    try:
+        assert_base_objects(mirror, head)
+    except PackageError as unreachable:
+        raise ParentGone(
+            f"parent branch {branch} moved to {head[:12]}, which the mirror "
+            f"cannot reach: {unreachable}"
+        ) from unreachable
+    return head
 
 
 def apply_patch(worktree: Path, patch: Path) -> str:
@@ -417,9 +460,10 @@ def reverify(
 
     **Never host-side.** Exec'ing a gate on the host is the control plane
     executing model-authored code — the one thing §2 says it never does. Both
-    runs read their gates from `gates_dir`, exported from `new_base_sha`: the
-    two suites subtracted below come from one set of executables, and the
-    patch's own `.saffron/gates/*` are never run.
+    runs read their gates from the caller's `gates_dir`, which is exported from
+    the default branch even when `new_base_sha` is a parent's head: the two
+    suites subtracted below come from one set of executables, and the patch's
+    own `.saffron/gates/*` are never run.
 
     Twice, because the base moved: the old baseline describes a tree that no
     longer exists, and comparing against it would charge this task with the
@@ -433,9 +477,10 @@ def reverify(
 
     results = {}
     for label, sha in (("baseline", new_base_sha), ("head", packaged_sha)):
-        # packaged_sha, not the loop's `sha`: new_base_sha is today's default-branch
-        # head, identical for every concurrent task (DESIGN.md N4) — keying on it
-        # would let two tasks collide and tear down each other's live cell.
+        # packaged_sha, not the loop's `sha`: new_base_sha is a tree many
+        # concurrent tasks share — today's default-branch head, or one parent's
+        # head for all its children (DESIGN.md N4). Keying on it would let two
+        # tasks collide and tear down each other's live cell.
         volume = f"saffron-pkg-{label}-{packaged_sha[:12]}"
         container = f"saffron-pkg-{label}-{packaged_sha[:12]}"
         network = f"{container}-net"
@@ -507,6 +552,7 @@ def package(
     ledger,
     out_dir: Path,
     token: str | None,
+    parent_branch: str | None = None,
     gh: GhRunner = run_gh,
     watch=print,
 ) -> PackageResult:
@@ -515,7 +561,15 @@ def package(
     Every `PackageError` this raises is infrastructure and reaches `cli.main`,
     which exits 2 without a queue line. Only the task's own failures —
     a conflict, a leaked credential, new failures after the rebase, a branch
-    that moved — become `MERGE_FAILED`.
+    that moved, a parent that is gone — become `MERGE_FAILED`.
+
+    `parent_branch` is the stacking half `SA-0022` left inert: unset, which
+    is every caller today (`cli.py` sets `stacked_on=None`), every line below
+    resolves to exactly what it resolved to before this parameter existed.
+    Set, the pull request opens against that branch instead of the default
+    one, and the patch's preimage check reads `tree_base` rather than
+    `base_sha` — the two agree today and diverge only for a real stacked
+    task, which nothing yet produces (`SA-0026`).
     """
     branch = f"saffron/{spec.id}"
     patch = outcome.task_dir / "patch.diff"
@@ -523,13 +577,51 @@ def package(
     # `patch.json` missing surfaces as a traceback rather than this sentence.
     if not patch.is_file():
         raise PackageError(f"no patch at {patch}: there is nothing to package")
-    base_sha = json.loads((outcome.task_dir / "patch.json").read_text())["base_sha"]
+    patch_meta = json.loads((outcome.task_dir / "patch.json").read_text())
+    base_sha = patch_meta["base_sha"]
+    # Equal to base_sha for every task that exists today (`SA-0022` writes
+    # both, unstacked); the field this read exists for is `tree_base`, not
+    # `base_sha` — the run's pin, not the tree the patch is relative to.
+    tree_base = patch_meta.get("tree_base", base_sha)
     url = real_remote(repo)
     slug = github_slug(url)
     # Stays ahead of the fetch: the fetch writes the object store this reads,
     # and would otherwise supply the very objects it is checking for.
-    assert_base_objects(mirror, base_sha)
+    assert_base_objects(mirror, tree_base)
     default, fetch_head = fetch_default_branch(mirror, url)
+
+    # The tree PACKAGE checks out and diffs against — the default branch's
+    # fetched head unless a live, unmerged parent replaces it below. Two
+    # names because the pull request's `--base` wants the branch and the
+    # worktree/diff machinery wants the sha.
+    target_branch, target_head = default, fetch_head
+    if parent_branch is not None:
+        # A parent already an ancestor of `fetch_head` has landed — merged,
+        # and routinely deleted the moment its own PR does. Re-fetching it
+        # would be at best redundant and at worst a `ParentGone` for a
+        # branch nobody was ever going to need again. Mirror-local, so a
+        # squash-merged parent (BACKLOG item 33) is not recognised here —
+        # accepted and named, not solved.
+        merged = (
+            _run(
+                mirror, "merge-base", "--is-ancestor", tree_base, fetch_head
+            ).returncode
+            == 0
+        )
+        if not merged:
+            try:
+                parent_head = fetch_parent_branch(mirror, url, parent_branch)
+            except ParentGone as gone:
+                watch(f"PACKAGE: {gone}")
+                return _finish(
+                    ledger,
+                    outcome,
+                    out_dir,
+                    spec,
+                    repo.name,
+                    PackageResult(state="MERGE_FAILED", branch=branch, note=str(gone)),
+                )
+            target_branch, target_head = parent_branch, parent_head
 
     # The commit this package is verified against supplies its own policy, the
     # way `base_sha` supplies the cell's (§5.4). Read from the checkout, it
@@ -551,7 +643,7 @@ def package(
         raise PolicyError(f"at {default} {fetch_head[:12]}: {exc}") from exc
 
     scratch = out_dir / "package" / spec.id
-    worktree_path = mirror_ops.add_worktree(mirror, fetch_head, scratch)
+    worktree_path = mirror_ops.add_worktree(mirror, target_head, scratch)
     try:
         # -B, not -b: -b fails when the ref exists, which is the second-package
         # path exactly. Checked like every other git call here: an existing
@@ -565,7 +657,7 @@ def package(
             )
 
         if apply_patch(worktree_path, patch) == APPLY_CONFLICT:
-            watch(f"PACKAGE: {branch} conflicts with {default}")
+            watch(f"PACKAGE: {branch} conflicts with {target_branch}")
             return _finish(
                 ledger,
                 outcome,
@@ -575,7 +667,7 @@ def package(
                 PackageResult(
                     state="MERGE_FAILED",
                     branch=branch,
-                    note=f"conflicts with {default}",
+                    note=f"conflicts with {target_branch}",
                 ),
             )
 
@@ -606,30 +698,38 @@ def package(
         ):
             return _refuse(leaked, "the commit subjects")
 
+        # `tree_base`, not `base_sha`: this block records the cell's run, and
+        # the tree the cell built on is the second base when stacked.
         pushed = commit_squash(
             worktree_path,
             spec_id=spec.id,
             title=spec.title,
-            base_sha=base_sha,
+            base_sha=tree_base,
             cell_head=outcome.cell_head_sha,
             attempts=outcome.attempts,
             spent_usd=outcome.spent_usd,
             agent_subjects=outcome.agent_subjects,
         )
 
-        # Against the fetched default-branch head, because that is the diff a
-        # reviewer sees on the pull request.
-        added, removed = mirror_ops.diff_stat(mirror, fetch_head, pushed)
+        # Against the tree PACKAGE is opening this pull request onto — the
+        # fetched default-branch head, or the parent's current head when
+        # stacked — because that is the diff a reviewer actually sees.
+        added, removed = mirror_ops.diff_stat(mirror, target_head, pushed)
 
         verified_on, gates = "base", outcome.gates
-        if needs_reverification(fetch_head, base_sha):
+        # `tree_base`, not `base_sha`: the cell's own gates ran against
+        # `spec.tree_base` (`SA-0022`), so that is the tree a fresh baseline
+        # would be redundant against — and `target_head` is where a stacked
+        # child's own baseline has to include the parent's commits, closing
+        # the gap BACKLOG item 33 named as this spec's to fix.
+        if needs_reverification(target_head, tree_base):
             # A gate that errored raises out of `reverify`: infrastructure, and
             # never this task's MERGE_FAILED. The gates are the export the
             # policy above was read from — one commit, both halves.
             new, gates = reverify(
                 mirror=mirror,
                 packaged_sha=pushed,
-                new_base_sha=fetch_head,
+                new_base_sha=target_head,
                 policy=policy,
                 gates_dir=gates_dir,
                 image=image,
@@ -645,7 +745,7 @@ def package(
                 failure for failure in new if failure.gate not in outcome.advisory_gates
             ]
             if new:
-                watch(f"PACKAGE: {len(new)} new failures against {default}")
+                watch(f"PACKAGE: {len(new)} new failures against {target_branch}")
                 return _finish(
                     ledger,
                     outcome,
@@ -666,13 +766,15 @@ def package(
 
         # DIFF_FLAGS, not a bare diff: `diff.noprefix` in the operator's global
         # gitconfig makes every ` b/` path parse as garbage in `_test_diff`.
-        diff = _run(worktree_path, "diff", *DIFF_FLAGS, f"{fetch_head}..HEAD").stdout
+        diff = _run(worktree_path, "diff", *DIFF_FLAGS, f"{target_head}..HEAD").stdout
         body_path = outcome.task_dir / "pr_body.md"
         body = pr_body.render_pr_body(
             spec,
             gates,
             outcome.new_failures,
-            base_sha=base_sha,
+            # Provenance is the record of the run, so the same second base the
+            # squash commit names — never the pin a stacked patch is not from.
+            base_sha=tree_base,
             head_sha=pushed,
             added=added,
             removed=removed,
@@ -727,7 +829,7 @@ def package(
         pr_url = open_draft_pr(
             slug=slug,
             branch=branch,
-            base=default,
+            base=target_branch,
             title=f"{spec.id} — {neutralize(spec.title)}",
             body_path=body_path,
             gh=gh,
