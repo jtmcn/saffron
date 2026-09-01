@@ -35,9 +35,10 @@ cell-marked tests.
 
 - **Specs are numbered from the highest existing `SA-` id + 1.** Confirmed
   against `origin/main` at `aaafda5` (2026-09-01): `SA-0028` is highest and has
-  **shipped** (PR #87), so this plan's **eleven** are `SA-0029`–`SA-0039`
-  (`SA-0039` is Task 10a, added after the count in the next heading was
-  written).
+  **shipped** (PR #87), so this plan's **twelve** are `SA-0029`–`SA-0040`
+  (`SA-0039` is Task 10a; `SA-0040` is Task 1a, split out of `SA-0029` after a
+  plan checkpoint rejected it — both arrived after the count in the next
+  heading was written).
   **Re-confirm before writing each file** — this set has been renumbered twice.
 - **Every figure in a spec body is a dated measurement, and they go stale
   fast.** The ledger moved from 23 task rows to 29, and lifetime spend from
@@ -66,7 +67,7 @@ cell-marked tests.
 
 ---
 
-## Why eleven specs
+## Why twelve specs
 
 The design describes three parts. Three specs would make three diffs too wide
 for their own repair loops — `docs/BACKLOG.md` item 25 records that failure
@@ -74,7 +75,7 @@ already, and `SA-0022` and `SA-0025` were both split mid-flight for it.
 
 | design part | specs | why it splits |
 |---|---|---|
-| 1 — event seam | `SA-0029`–`SA-0031` | a new module, then 47 `watch` sites in a 1495-line file, then 15 across four phase files and two in `cli.py` |
+| 1 — event seam | `SA-0029`, `SA-0040`, `SA-0030`–`SA-0031` | the types, then the renderer and its fixture, then 47 `watch` sites in a 1495-line file, then 15 across four phase files and two in `cli.py` |
 | 2 — ledger gaps | `SA-0032`–`SA-0034` | three independent changes sharing only `ledger.py`; the third has unknown blast radius |
 | 3 — renderer | `SA-0035`–`SA-0039` | query, then render-and-delete, then the task page, then the trigger, then the timeline |
 
@@ -300,7 +301,7 @@ this plan's dependency graph forks. It cannot be one stack. Nor should the two
 chains be open at once:
 
 ```
-stack 1   (main) <- saffron/SA-0029 <- saffron/SA-0030 <- saffron/SA-0031
+stack 1   (main) <- saffron/SA-0029 <- saffron/SA-0040 <- saffron/SA-0030 <- saffron/SA-0031
                     ── merge, then ──
 stack 2   (main) <- saffron/SA-0032 <- SA-0033 <- SA-0034 <- SA-0035
                                     <- SA-0036 <- SA-0037 <- SA-0039 <- SA-0038
@@ -313,7 +314,7 @@ needing a slot; `SA-0032` cuts from a `main` that already carries part 1's
 stack stays inside a size a single review pass can hold.
 
 **Do not run the two chains concurrently.** They would be sibling branches from
-the same `base_sha`, and **nine of the eleven specs name `docs/BACKLOG.md` in
+the same `base_sha`, and **ten of the twelve specs name `docs/BACKLOG.md` in
 `touches`** — all but `SA-0032` and `SA-0034`, whose `envelope`s do not reach it
 and whose DIAGNOSE therefore cannot propose it. That is the exact collision the
 skill measured on `SA-0027`/`SA-0028`, where both appended `## 34.` and
@@ -2186,7 +2187,7 @@ Three protected documents no cell can correct. Each spec above leaves a
       can reach the host's ledger. It was an acceptance criterion of `SA-0036`
       in the first cut of this plan, which an agent could only have discharged
       by inventing the numbers.
-- [ ] **Step 6: Close the backlog entries** the eleven specs added, each with
+- [ ] **Step 6: Close the backlog entries** the twelve specs added, each with
       the commit that closed it — the shape items 1 and 29 use.
 - [ ] **Step 7: Commit.**
 
@@ -2235,7 +2236,7 @@ built before trusting it.
 git merge-tree --write-tree origin/saffron/SA-0030 origin/saffron/SA-0031
 ```
 
-Run it for each adjacent pair. `docs/BACKLOG.md` is in nine of the eleven
+Run it for each adjacent pair. `docs/BACKLOG.md` is in ten of the twelve
 specs' `touches` and is append-only, so it is where a conflict will be —
 including the item *number*, not only the text: `SA-0027` and `SA-0028` both
 wrote `## 34.` A chain cut parent-from-parent should be clean; **any conflict
@@ -2297,11 +2298,23 @@ carries the evidence record its Verification section asks for, because that
 record cannot be produced from inside a cell. Its sequencing section → Task 0
 and the `depends_on` chain.
 
-**Eleven specs, not ten.** `SA-0039` was added after an independent review
+**Twelve specs, not ten.** `SA-0039` was added after an independent review
 found that part 3 re-sources the page's content and leaves its trigger on the
 success path, and that no part-3 spec could reach a file where a trigger
 belongs. The design does not describe it; the design assumed a trigger that
 does not exist.
+
+`SA-0040` was added after `SA-0029`'s first cell exited `PLAN_REJECTED` at
+$2.20 — the agent's own estimate was 1100 changed lines against the 600 a
+`feature` gets (§5.4), and the checkpoint refused before a single edit. The
+split runs along the seam the spec review had already implied: `SA-0029` is the
+types and the log, `SA-0040` is `describe`, the mapping table proving nine kinds
+carry all 64 call sites, and the golden fixture. **The plan checkpoint is now
+the second gate to have re-cut a spec in this plan, and both times the spec was
+one this document called small.** Neither ceiling is visible from the prose; both
+are measured against the agent's own plan before any money is spent on a diff no
+gate could pass. Budget a re-cut per part rather than treating one as a
+surprise.
 
 **Ontology alignment**, checked against `ontology/saffron.ttl` and
 `RATIONALE.md`: the `EndState` / `TerminalState` split reaches the page as a
@@ -2318,13 +2331,13 @@ same-file serialisation, since nothing can run concurrently anyway:
 ```
 SA-0026 ─→ SA-0032 ─→ SA-0033 ─→ SA-0034 ─→ SA-0035 ─→ SA-0036 ─→ SA-0037 ─→ SA-0039 ─┐
  (shipped)                                                                            ├─→ SA-0038
-SA-0028 ─→ SA-0029 ─→ SA-0030 ─→ SA-0031 ─────────────────────────────────────────────┘
+SA-0028 ─→ SA-0029 ─→ SA-0040 ─→ SA-0030 ─→ SA-0031 ───────────────────────────────────┘
  (shipped)
 ```
 
 **Slot 0 is the whole contract with `_resolve_stacked_on`.** Every arrow above
-is `depends_on[0]` of the spec it points at: `SA-0030`→`SA-0029`,
-`SA-0035`→`SA-0034`, `SA-0038`→`SA-0039`. A second parent is a gate condition
+is `depends_on[0]` of the spec it points at: `SA-0040`→`SA-0029`,
+`SA-0030`→`SA-0040`, `SA-0035`→`SA-0034`, `SA-0038`→`SA-0039`. A second parent is a gate condition
 only, never a tree. Three of these were wrong in earlier drafts and each would
 have cut a cell from the default branch without the thing it was migrating
 onto.
