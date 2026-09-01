@@ -1829,8 +1829,9 @@ this item exists to rule out.
   onto a divergent parent. In the bad cases that conflicts and ends
   `MERGE_FAILED`; in the benign-looking ones it can resurrect content the
   force-push removed. A `merge-base --is-ancestor tree_base parent_head` check
-  would name it, and belongs with `SA-0026`, which is what first produces a
-  real parent to force-push.
+  would name it, and `SA-0026` — which is what first produces a real parent to
+  force-push — cannot make it: `saffron/phases/**` is forbidden there. It needs
+  a spec of its own, after stacking is live and the shape can be measured.
 - *A pruned mirror inverts a gone parent's classification.*
   `assert_base_objects(mirror, tree_base)` has to precede the fetch — it is
   checking for objects the fetch would otherwise supply — so a parent deleted
