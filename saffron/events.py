@@ -40,10 +40,9 @@ from typing import Literal
 
 from saffron.gates.contract import GateStatus
 
-# CONTEXT.md is the authority and it names six: DIAGNOSE, IMPLEMENT,
-# GATE <-> REPAIR, REVIEW, REBUT, PACKAGE. Imported nowhere from because the
-# gate contract does not model phases; restated here, deliberately, as the only
-# place the host's own event vocabulary needs them.
+# CONTEXT.md names GATE <-> REPAIR as one phase; split here because a gate
+# attempt and a repair turn render as different lines. Deliberate divergence,
+# recorded as backlog item 38.
 Phase = Literal["DIAGNOSE", "IMPLEMENT", "GATE", "REPAIR", "REVIEW", "REBUT", "PACKAGE"]
 
 # The prefix a progress line actually carries, which is *not* the same set.
@@ -128,16 +127,11 @@ class Attempt:
 
     timestamp: float
     spec_id: str
-    # CONTEXT.md's Attempt entry: "'Attempt 3' without a phase is ambiguous —
-    # name both." This kind covers the GATE <-> REPAIR loop's numbered attempt
-    # and an IMPLEMENT/SALVAGE turn alike, so the phase is not inferable.
+    # CONTEXT.md: "'Attempt 3' without a phase is ambiguous — name both."
     phase: Phase
     attempt: int
     commits: int
-    # `_est`, per DESIGN.md §4.1: every figure the runtime reports is a
-    # client-side estimate, the suffix travels with it wherever it is stored,
-    # and `events.jsonl` is stored. A field named for a measurement it cannot
-    # make is how an estimate becomes a fact.
+    # `_est` travels with any stored figure (DESIGN.md §4.1).
     spent_usd_est: float
     new_failures: int | None = None
     decision: Literal["green", "no-progress", "exhausted", "repair"] | None = None
@@ -156,18 +150,11 @@ class GateResult:
     spec_id: str
     gate: str
     status: GateStatus
-    # CONTEXT.md: "One execution of one gate against one tree — an attempt's,
-    # or a run's `base_sha` for the baseline. Exactly one of `attempt_id` and
-    # `run_id` is set on the row, and the baseline is why." Three trees emit
-    # these lines — the baseline suite, attempt N's, and the post-rebuttal
-    # re-run — and without this they are indistinguishable in one log.
-    against: Literal["baseline", "attempt", "rebuttal"] = "attempt"
+    # Required, not defaulted: a forgotten keyword would file a baseline result
+    # as an attempt's, indistinguishably from an observed one.
+    against: Literal["baseline", "attempt", "rebuttal"]
     attempt: int | None = None
-    # `None`, not `0` — the same absence-vs-zero rule `Attempt.new_failures`
-    # already follows. A `skip` or `error` never had a count computed, and a
-    # renderer that cannot tell that from a verified zero reports "0 new
-    # failures" for a gate that never ran. That is `tool`'s defect (§5.4,
-    # Appendix H) one layer out.
+    # `None`, never `0`: a skipped or errored gate had no count computed.
     new_failures: int | None = None
 
 
@@ -219,12 +206,10 @@ class Terminal:
     on the salvage branches.
 
     Not a `TerminalState`. CONTEXT.md reserves "terminal state" for the states
-    that reach the operator (`READY_FOR_REVIEW`, `EXHAUSTED`, `PLAN_REJECTED`,
-    ...); this kind is narrower. Two of the five map onto one, which makes the
-    collision easier to miss rather than harder. The name is DESIGN.md's and
-    this spec's, so it is documented here rather than changed unilaterally —
-    docs/BACKLOG.md carries the correction as by-hand work, CONTEXT.md being
-    protected."""
+    that reach the operator; this kind is narrower, and two of the five map
+    onto one, which makes the collision easy to miss. Renaming was deferred
+    because SA-0029's own criteria and SA-0030/SA-0040 all cite the name — not
+    because DESIGN.md does; it carries no event schema at all (backlog 36)."""
 
     timestamp: float
     spec_id: str
@@ -285,24 +270,31 @@ class EventLog:
 
     def __init__(self, task_dir: Path) -> None:
         self._path = Path(task_dir) / "events.jsonl"
+        # A disk-full night must not render as a night in which nothing
+        # happened. `append` never raises; this is how anyone can tell.
+        self.failed = False
 
     def append(self, event: Event) -> None:
         """Write one line, flushed. Never raises: a cell that cannot write its
         own log is not a cell whose task should die on that account — the
         caller has nothing useful to do with the failure either way."""
         try:
-            # `asdict` is inside the try, not above it: it deep-copies, and
-            # `Agent.event` holds a dict authored inside an untrusted cell, so
-            # a cycle raises RecursionError and a hostile `__deepcopy__` raises
-            # anything at all — both before `json.dumps` is ever reached. A
-            # contract that says "never raises" has to mean the serialisation
-            # too, which is the only part reading attacker-shaped input.
+            # `asdict` is inside the try because it deep-copies, and
+            # `Agent.event` is a `json.loads` product from an untrusted cell.
+            # Measured: nesting 1000 deep parses fine and `asdict` raises
+            # RecursionError on it, while `json.dumps` handles 5000 — so this
+            # statement, not the write, is the one reading hostile input.
             payload = {"kind": type(event).__name__, **asdict(event)}
             self._path.parent.mkdir(parents=True, exist_ok=True)
             with self._path.open("a") as handle:
                 handle.write(json.dumps(payload) + "\n")
                 handle.flush()
-        except Exception:
+        except (OSError, RecursionError, TypeError, ValueError):
+            # Everything reachable in the four statements above; narrower than
+            # bare `Exception` so a programming error introduced when SA-0030
+            # wires 64 producers still surfaces. `self.failed` is the
+            # breadcrumb — silence here must not read as "nothing happened".
+            self.failed = True
             return
 
 
@@ -336,20 +328,15 @@ def read_log(task_dir: Path) -> list[Event]:
             continue
         if not isinstance(obj, dict):
             continue
-        # `.get` raises TypeError on an unhashable key, so a hand-edited line
-        # whose `kind` is a list or an object would take the whole file down —
-        # the one thing per-line tolerance exists to prevent.
+        # `.get` raises TypeError on an unhashable key, which would take the
+        # whole file down — the one thing per-line tolerance exists to prevent.
         kind = obj.pop("kind", None)
         cls = _KINDS.get(kind) if isinstance(kind, str) else None
         if cls is None:
             continue
-        # Unknown *extra* fields are dropped, not the event carrying them. The
-        # forward-compatibility case this tolerance is for is a newer Saffron,
-        # and a newer Saffron is far likelier to add a field to an existing
-        # kind than to add a kind. Rejecting the whole line would silently
-        # delete every event of that kind — exactly the whole-file discard,
-        # one kind at a time. A line *missing* a required field still goes,
-        # via the TypeError below.
+        # Drop the unknown field, not the event carrying it: a newer Saffron
+        # adds fields to existing kinds, and rejecting the line would delete
+        # every event of that kind. A missing required field still goes below.
         expected = {f.name for f in fields(cls)}
         obj = {k: v for k, v in obj.items() if k in expected}
         # JSON has no tuple, so a field declared `tuple[str, ...]` (Baseline's
@@ -362,6 +349,6 @@ def read_log(task_dir: Path) -> list[Event]:
                 obj[name] = tuple(value)
         try:
             events.append(cls(**obj))
-        except TypeError:
+        except (TypeError, ValueError):
             continue
     return events

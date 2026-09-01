@@ -2187,48 +2187,80 @@ Three things this refusal still cannot see, all named rather than fixed:
 
 ## 36. The event schema wants its own `DESIGN.md` §4 subsection, and nothing can write one
 
-`SA-0029` gave the host nine typed events (`saffron/events.py`) for what
-`run_one_cell`'s 64 call sites currently author as prose into `watch()`, plus
-the durable `events.jsonl` log they round-trip through. §4.1 is where every
-other on-disk and on-wire shape this repository depends on is written down —
-`gate_results`, `Failure`'s identity tuple, the ledger's own tables — and this
-schema belongs beside them the same way, not only in a module docstring a
-renderer three specs from now has to go find.
+`saffron/events.py` fixes the nine kinds, the `kind` discriminator and the
+timestamp representation, and `DESIGN.md` carries no event schema at all.
+`DESIGN.md` is `protected`, so no cell can add one.
 
-It is not done here because `DESIGN.md` is `protected`, and every task that
-touches it is a cell with no exception for this one. `SA-0030` and `SA-0031`
-migrate the 64 call sites onto `events.py`'s types next, and `SA-0040` writes
-the renderer and the mapping table proving the nine kinds cover all 64 — once
-that lands, the subsection has a settled shape to describe rather than one
-still moving. Done looks like: a new §4.x naming the nine kinds, the `kind`
-discriminator and the timestamp representation `saffron/events.py` already
-picked, and `events.jsonl`'s one-file-per-task, no-rotation ceiling — added by
-hand, after `SA-0040`, the way every other protected-path edit in this backlog
-is.
-
+Done looks like: a new §4.x naming the nine kinds, the wire discriminator and
+`events.jsonl`'s one-file-per-task, no-rotation ceiling — by hand, after
+`SA-0040`, when the shape has stopped moving.
 
 ## 37. `events.Terminal` and `CONTEXT.md`'s "terminal state" are two different things
 
-Found by an independent review of `SA-0029` (PR #91). `CONTEXT.md` reserves
-**terminal state** for the states that reach the operator — `READY_FOR_REVIEW`,
-`EXHAUSTED`, `PLAN_REJECTED` and the rest. `saffron/events.py`'s `Terminal`
-kind means something narrower: the five ways an IMPLEMENT turn ends having
-committed nothing. Two of the five (`plan_rejected`, and the exhausted family)
-*do* map onto a terminal state, which makes the collision easier to miss rather
-than harder.
+`CONTEXT.md` reserves **terminal state** for the states that reach the operator.
+`events.Terminal` means the five ways an IMPLEMENT turn ends having committed
+nothing. Two of the five map onto a terminal state, which makes the collision
+easy to miss rather than hard.
 
-The name is not the cell's invention — `DESIGN.md` §4.1 names the nine kinds
-and `SA-0029`'s own acceptance criteria list `Terminal` among them, so renaming
-it inside the cell would have desynced the module from the design and from
-`SA-0030`/`SA-0040`, which both cite the name. It is documented in the
-dataclass's docstring instead.
+Renaming was deferred because `SA-0029`'s criteria and `SA-0030`/`SA-0040` all
+cite `Terminal`. An earlier draft of this item said the name was `DESIGN.md`
+§4.1's; it is not — see item 36. Found reviewing PR #91.
 
-Done looks like: either `DESIGN.md` renames the kind (`TurnEnded` is the
-reviewer's suggestion, and it is a better name) and the three specs citing it
-follow, or `CONTEXT.md` gains an entry saying the two terms are deliberately
-distinct and which is which. Both are protected paths, so both are by hand —
-the same shape as item 36. Worth settling before `SA-0040`'s mapping
-table and `SA-0038`'s timeline both render the word.
+Done looks like: `TurnEnded` across the three specs, or a `CONTEXT.md` entry
+saying the two terms are deliberately distinct. Protected either way, so by
+hand, and worth settling before `SA-0040` and `SA-0038` render the word.
+
+## 38. `events.Phase` splits `GATE ⇄ REPAIR`, and `CONTEXT.md` does not
+
+`CONTEXT.md` names six phases, counting `GATE ⇄ REPAIR` as one; `events.Phase`
+lists seven, because a gate attempt and a repair turn print different lines.
+The split is probably right and is currently held by a comment and a test.
+
+Done looks like: `CONTEXT.md` saying whether it is sanctioned, and the `Literal`
+following. Protected, so by hand. Second divergence — see item 37.
+
+## 39. `types` is a blocking gate that can never fail
+
+`.saffron/gates/types` emits `skip` unconditionally, `policy.yaml` declares it
+`blocking: true`, and `pyproject.toml` carries a configured `[tool.pyright]`
+block that nothing runs — pyright is not a dependency, a hook, or installed.
+`policy.yaml`'s own note on `shacl`, five lines below, states the principle this
+breaks: *a control that reads as present and is not is the founding defect of
+Appendix I.*
+
+Measured while reviewing PR #91: mutations replacing `Ceiling` and
+`TerminalReason` with bare `str`, and removing `Terminal` from the `Event`
+union, all left the suite green. `saffron/events.py` is a module whose whole
+value is type safety, and `tests/test_events.py` now hand-rolls
+`test_the_enumerations_are_pinned` as a substitute.
+
+Done looks like: pyright as a dev dependency and `.saffron/gates/types`
+executing it — the gate is already declared and already blocking, so nothing in
+`policy.yaml` changes. Or, if that is not wanted, the gate stops claiming to
+block. Either is a repo-side change and neither touches `saffron/`.
+
+
+## 40. A host-side fix round can undo a gate the cell passed
+
+`SA-0029` (PR #91) left its cell at 548 changed lines, inside the 600 a
+`feature` gets. Two host-side review rounds took it to **863**. The `size` gate
+runs inside the cell, against the cell's own diff; nothing re-runs it after the
+operator commits review fixes to the branch, so the branch merges failing a
+blocking gate it passed on the way out.
+
+Most of the growth is tests, and that is the second half of the finding:
+`_changed_lines` counts the whole diff, so a spec whose acceptance criteria
+demand thorough tests is charged for satisfying them. `SA-0029` has fourteen
+criteria, and both reviews of it added tests precisely because criteria were
+being held up by comments. Cutting those to reach 600 would trade a real
+control for a number.
+
+Done looks like: the loop running `size` (at minimum) against the branch before
+it is marked ready, and a decision on whether the ceiling should count test
+lines at all — §5.4 sets one number for a diff whose test half is mandated
+elsewhere. Recorded rather than fixed here: PR #91 is over the ceiling and is
+being merged over it deliberately, with this item as the record.
+
 
 ---
 

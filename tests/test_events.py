@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import typing
+from dataclasses import fields as dc_fields
 
 import pytest
 
@@ -49,7 +50,9 @@ _ONE_OF_EACH = [
         new_failures=0,
         decision="green",
     ),
-    GateResult(timestamp=5.0, spec_id="SA-0029", gate="lint", status="fail"),
+    GateResult(
+        timestamp=5.0, spec_id="SA-0029", gate="lint", status="fail", against="attempt"
+    ),
     Budget(timestamp=6.0, spec_id="SA-0029", ceiling="max_turns", value=141, limit=120),
     Agent(timestamp=7.0, spec_id="SA-0029", raw=False, event={"type": "text"}),
     Terminal(
@@ -70,8 +73,16 @@ def test_gate_result_error_and_fail_are_distinguishable(tmp_path):
     """`error` means the gate broke and is charged to nobody; `fail` means the
     repo's code is wrong. They must never collapse into one another."""
     log = EventLog(tmp_path)
-    log.append(GateResult(timestamp=1.0, spec_id="SA", gate="tests", status="error"))
-    log.append(GateResult(timestamp=2.0, spec_id="SA", gate="tests", status="fail"))
+    log.append(
+        GateResult(
+            timestamp=1.0, spec_id="SA", gate="tests", status="error", against="attempt"
+        )
+    )
+    log.append(
+        GateResult(
+            timestamp=2.0, spec_id="SA", gate="tests", status="fail", against="attempt"
+        )
+    )
     statuses = [e.status for e in read_log(tmp_path)]
     assert statuses == ["error", "fail"]
 
@@ -79,7 +90,11 @@ def test_gate_result_error_and_fail_are_distinguishable(tmp_path):
 def test_gate_result_carries_all_four_statuses(tmp_path):
     log = EventLog(tmp_path)
     for status in ("pass", "fail", "skip", "error"):
-        log.append(GateResult(timestamp=1.0, spec_id="SA", gate="g", status=status))
+        log.append(
+            GateResult(
+                timestamp=1.0, spec_id="SA", gate="g", status=status, against="attempt"
+            )
+        )
     assert [e.status for e in read_log(tmp_path)] == ["pass", "fail", "skip", "error"]
 
 
@@ -163,8 +178,7 @@ def test_agent_carries_a_parsed_dict_verbatim(tmp_path):
 
 
 def test_on_disk_shape_is_pinned_by_a_hand_written_line(tmp_path):
-    """Four later specs read this format. Pinned by a hand-written line, not
-    by round-tripping the writer's own output back through itself."""
+    """Pinned by a hand-written line, not by the writer's own output."""
     events_path = tmp_path / "events.jsonl"
     events_path.write_text(
         json.dumps(
@@ -262,15 +276,17 @@ def test_event_log_appends_one_line_per_event(tmp_path):
 def test_a_gate_that_never_ran_records_no_failure_count(tmp_path):
     """`skip`/`error` never had a count computed, and `0` would be a lie.
 
-    Mutating `new_failures` back to `int = 0` left the whole suite green
-    before this existed: the rule was argued in a comment and asserted
-    nowhere. Same distinction `Attempt.new_failures` draws, and the same
-    reason — a page that reports "0 new failures" for a gate that did not run
-    is `tool`'s defect (DESIGN.md §5.4, Appendix H) one layer out.
+    Mutating this back to `int = 0` left the suite green before this existed.
     """
     log = EventLog(tmp_path)
     log.append(
-        GateResult(timestamp=1.0, spec_id="SA-0029", gate="types", status="skip")
+        GateResult(
+            timestamp=1.0,
+            spec_id="SA-0029",
+            gate="types",
+            status="skip",
+            against="attempt",
+        )
     )
     log.append(
         GateResult(
@@ -278,6 +294,7 @@ def test_a_gate_that_never_ran_records_no_failure_count(tmp_path):
             spec_id="SA-0029",
             gate="tests",
             status="fail",
+            against="attempt",
             new_failures=0,
         )
     )
@@ -325,8 +342,8 @@ def test_an_attempt_names_its_phase(tmp_path):
 
 
 def test_the_enumerations_are_pinned(tmp_path):
-    """No type checker runs — `.saffron/gates/types` is a declared skip — so a
-    `Literal` is documentation unless something asserts its members."""
+    """`.saffron/gates/types` always skips, so a `Literal` is documentation
+    unless something asserts its members."""
     assert typing.get_args(Ceiling) == ("budget_usd", "max_attempts", "max_turns")
     assert typing.get_args(GateStatus) == ("pass", "fail", "skip", "error")
     assert set(typing.get_args(Phase)) == {
@@ -345,10 +362,22 @@ def test_the_enumerations_are_pinned(tmp_path):
     assert len(typing.get_args(TerminalReason)) == 5
 
 
+@pytest.mark.parametrize("event", _ONE_OF_EACH, ids=lambda e: type(e).__name__)
+def test_the_wire_keys_are_pinned_for_every_kind(tmp_path, event):
+    """`test_round_trips_every_kind` writes and reads with the same code, so a
+    coordinated rename survives it. This reads the keys off the line."""
+    EventLog(tmp_path).append(event)
+    written = json.loads((tmp_path / "events.jsonl").read_text())
+    assert set(written) == {"kind"} | {f.name for f in dc_fields(type(event))}
+    assert "spent_usd" not in written, "DESIGN.md §4.1: a stored figure keeps _est"
+
+
 def test_the_union_and_the_wire_table_cannot_drift(tmp_path):
     """Both are hand-maintained lists of the same nine kinds."""
     assert set(typing.get_args(Event)) == set(_KINDS.values())
     assert len(_KINDS) == 9
+    for cls in _KINDS.values():
+        assert "kind" not in {f.name for f in dc_fields(cls)}, "would clobber the tag"
 
 
 def test_every_kind_is_frozen():
@@ -357,12 +386,7 @@ def test_every_kind_is_frozen():
 
 
 def test_an_unhashable_kind_does_not_take_the_file_down(tmp_path):
-    """`dict.get` raises TypeError on an unhashable key.
-
-    Found by fuzzing, not by the suite: the existing unknown-kind test used a
-    *string* kind, the one shape that cannot trigger it. A hand-edited log is
-    exactly the case per-line tolerance exists for.
-    """
+    """`dict.get` raises TypeError on an unhashable key, losing the file."""
     good = json.dumps(
         {
             "kind": "Teardown",
@@ -384,13 +408,7 @@ def test_an_unhashable_kind_does_not_take_the_file_down(tmp_path):
 
 
 def test_a_field_a_newer_saffron_added_does_not_delete_the_event(tmp_path):
-    """The forward-compatibility case that will actually happen.
-
-    An unknown *kind* was already tolerated one line at a time. An unknown
-    *field* on a known kind was rejecting the whole line — which deletes every
-    event of that kind, the whole-file discard one kind at a time. SA-0030,
-    SA-0031 and SA-0040 are the specs that add fields to these kinds.
-    """
+    """An added field must not delete every event of its kind."""
     v2 = json.dumps(
         {
             "kind": "Teardown",
@@ -415,12 +433,18 @@ def test_a_line_missing_a_required_field_is_still_dropped(tmp_path):
 
 def test_append_never_raises_on_a_dict_a_cell_authored(tmp_path):
     """`asdict` deep-copies before `json.dumps` is reached, and `Agent.event`
-    is a dict from inside an untrusted cell. A cycle raised RecursionError
-    straight through a method whose whole contract is that nothing does."""
-    circular: dict = {}
-    circular["self"] = circular
+    comes from an untrusted cell."""
+    # The shape a cell can actually emit, at a measured depth: `json.loads`
+    # accepts it and `asdict`'s deepcopy cannot walk it. 500 is fine, 1000
+    # raises — the recursion limit. `json.dumps` alone handles 5000, so
+    # `asdict` is the only statement here that raises, which is why it moved
+    # inside the try. A hand-built cycle is unreachable by contrast.
+    deep = json.loads("[" * 1000 + "]" * 1000)
     log = EventLog(tmp_path)
-    log.append(Agent(timestamp=1.0, spec_id="X", raw=False, event=circular, line=None))
+    log.append(
+        Agent(timestamp=1.0, spec_id="X", raw=False, event={"d": deep}, line=None)
+    )
+    assert log.failed, "a swallowed write must leave a breadcrumb"
     log.append(
         Agent(timestamp=2.0, spec_id="X", raw=False, event={"s": {1, 2}}, line=None)
     )
