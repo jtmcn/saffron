@@ -5,6 +5,7 @@ import json
 import pytest
 
 from saffron.cell import runtime
+from saffron.events import Agent, Event, describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure
 from saffron.intake import Spec
@@ -195,12 +196,13 @@ def _result_line(**overrides):
 
 
 def test_the_stream_becomes_an_attempt_result():
-    watched = []
+    watched: list[Event] = []
     result = implement.run_agent(
         "cell",
         prompt="plan please",
         options={"max_turns": 3},
-        watch=watched.append,
+        spec_id="SY-1",
+        emit=watched.append,
         exec_stream=_stream(
             json.dumps({"type": "system", "subtype": "init", "data": {}}),
             json.dumps({"type": "text", "text": "<output>{}"}),
@@ -224,7 +226,7 @@ def test_an_absent_result_event_is_an_error_not_a_success():
             "cell",
             prompt="p",
             options={},
-            watch=lambda _line: None,
+            spec_id="SY-1",
             exec_stream=_stream(
                 json.dumps({"type": "text", "text": "all done!"}), returncode=0
             ),
@@ -240,7 +242,7 @@ def test_a_result_that_says_success_but_flags_an_error_is_not_a_success():
             "cell",
             prompt="p",
             options={},
-            watch=lambda _line: None,
+            spec_id="SY-1",
             exec_stream=_stream(
                 _result_line(
                     subtype="success",
@@ -260,7 +262,7 @@ def test_a_failed_turn_still_reports_what_it_spent():
             "cell",
             prompt="p",
             options={},
-            watch=lambda _line: None,
+            spec_id="SY-1",
             last_cost_usd=2.0,
             exec_stream=_stream(
                 _result_line(subtype="error_max_turns", is_error=True, total_cost_usd=0)
@@ -280,7 +282,7 @@ def test_a_turn_ceiling_is_named_rather_than_left_to_the_exit_code():
             "cell",
             prompt="p",
             options={"max_turns": 60},
-            watch=lambda _line: None,
+            spec_id="SY-1",
             exec_stream=_stream(
                 _result_line(subtype="error_max_turns", is_error=True), returncode=1
             ),
@@ -296,7 +298,7 @@ def test_a_runner_killed_after_emitting_its_result_is_not_a_clean_turn():
             "cell",
             prompt="p",
             options={},
-            watch=lambda _line: None,
+            spec_id="SY-1",
             exec_stream=_stream(_result_line(), timed_out=True),
             reap_cell=_no_reap,
         )
@@ -310,7 +312,7 @@ def test_a_clean_result_from_a_runner_that_exited_non_zero_is_not_a_success():
             "cell",
             prompt="p",
             options={},
-            watch=lambda _line: None,
+            spec_id="SY-1",
             exec_stream=_stream(_result_line(), returncode=1),
         )
 
@@ -321,7 +323,7 @@ def test_a_crash_reports_the_runners_own_error():
             "cell",
             prompt="p",
             options={},
-            watch=lambda _line: None,
+            spec_id="SY-1",
             exec_stream=_stream(
                 json.dumps({"type": "error", "error": "CLIConnectionError: no key"}),
                 returncode=1,
@@ -331,16 +333,95 @@ def test_a_crash_reports_the_runners_own_error():
 
 def test_a_line_that_is_not_an_event_is_shown_and_not_parsed():
     """Anything sharing the runner's stdout must not be read as an event."""
-    watched = []
+    watched: list[Event] = []
     result = implement.run_agent(
         "cell",
         prompt="p",
         options={},
-        watch=watched.append,
+        spec_id="SY-1",
+        emit=watched.append,
         exec_stream=_stream("npm WARN something", "", _result_line()),
     )
     assert result.subtype == "success"
-    assert any("(raw) npm WARN" in line for line in watched)
+    assert any("(raw) npm WARN" in describe(e) for e in watched)
+
+
+def test_json_that_is_not_an_object_is_quarantined_too():
+    """The other half of the quarantine, and the half nothing covered:
+    `json.loads` does not raise for `[1, 2]` or `"hi"`, so those reach the
+    `isinstance(event, dict)` branch rather than the `ValueError` one.
+    Measured — deleting that branch left all 1156 tests passing, and
+    `_describe_agent_event` calls `.get`, so a bare list would raise inside
+    the renderer instead of being shown."""
+    for payload in ("[1, 2]", '"just a string"', "42"):
+        watched: list[Event] = []
+        result = implement.run_agent(
+            "cell",
+            prompt="p",
+            options={},
+            spec_id="SY-1",
+            emit=watched.append,
+            exec_stream=_stream(payload, "", _result_line()),
+        )
+        assert result.subtype == "success"
+        quarantined = [e for e in watched if isinstance(e, Agent) and e.raw]
+        assert quarantined, payload
+        assert quarantined[0].line == payload
+        assert quarantined[0].event is None
+        assert describe(quarantined[0]) == f"agent: (raw) {payload}"
+
+
+def test_a_line_that_is_not_an_event_is_bounded_at_capture():
+    """`describe` cuts at 160, but the untruncated line used to reach
+    `events.jsonl` — an untrusted cell choosing how much control-plane disk it
+    writes. Measured on one 5 MB stdout line: 715 bytes written before this
+    spec's change, 10 MB after. Bounded at capture now, which is also what
+    AC5's own wording says ("shown, truncated")."""
+    watched: list[Event] = []
+    implement.run_agent(
+        "cell",
+        prompt="p",
+        options={},
+        spec_id="SY-1",
+        emit=watched.append,
+        exec_stream=_stream("z" * 50_000, "", _result_line()),
+    )
+    (raw,) = [e for e in watched if isinstance(e, Agent) and e.raw]
+    assert raw.line is not None
+    assert len(raw.line) == implement.QUARANTINE_BYTES
+    # Bounded for storage, still cut to 160 for the terminal — the two bounds
+    # are separate and a change to either must fail something.
+    assert describe(raw) == "agent: (raw) " + "z" * 160
+
+
+def test_a_raw_line_is_shown_and_never_read_as_an_event():
+    """A line that is not JSON came from a process sharing the runner's stdout
+    inside an untrusted cell (`test_json_that_is_not_an_object_is_quarantined_
+    too` above covers a line that parses but is not a dict — the sibling this
+    used to cite feeds `npm WARN something`, which takes the `ValueError`
+    branch, so it never proved that at all). Checked here at the event's own shape, not the rendered string
+    alone: `raw=True` is the quarantine, `event` stays unset — a raw line
+    read as an event would leave `event` populated instead — and `describe()`
+    still shows it, truncated, exactly as the operator saw it before this
+    migration (SA-0041)."""
+    watched: list[Event] = []
+    implement.run_agent(
+        "cell",
+        prompt="p",
+        options={},
+        spec_id="SY-1",
+        emit=watched.append,
+        exec_stream=_stream("npm WARN " + "x" * 200, _result_line()),
+    )
+    (raw,) = [e for e in watched if isinstance(e, Agent) and e.raw]
+    assert raw.event is None
+    assert raw.line is not None and raw.line.startswith("npm WARN ")
+    # Two different bounds, and this used to conflate them: capture keeps
+    # `QUARANTINE_BYTES`, render shows 160. Asserted against a literal, because
+    # `raw.line[:160]` is a no-op once capture bounds the line and stops
+    # distinguishing a renderer that truncates from one that does not.
+    assert len(raw.line) == 209
+    assert describe(raw) == "agent: (raw) npm WARN " + "x" * 151
 
 
 def test_a_crashed_attempt_keeps_the_last_good_cost():
@@ -351,7 +432,7 @@ def test_a_crashed_attempt_keeps_the_last_good_cost():
             "cell",
             prompt="p",
             options={},
-            watch=lambda _line: None,
+            spec_id="SY-1",
             last_cost_usd=4.12,
             exec_stream=_stream(
                 _result_line(subtype="error_during_execution", total_cost_usd=0)
@@ -369,7 +450,7 @@ def test_the_request_carries_the_prompt_the_options_and_the_resume():
         prompt="fix these",
         options={"max_turns": 3},
         resume="sess-1",
-        watch=lambda _line: None,
+        spec_id="SY-1",
         exec_stream=stream,
     )
     assert stream.request == {
@@ -434,7 +515,7 @@ def test_only_the_result_event_opens_the_completion_window():
         "cell",
         prompt="p",
         options={},
-        watch=lambda _line: None,
+        spec_id="SY-1",
         exec_stream=_exec_stream,
     )
     assert signals == [False, True, True]
@@ -444,17 +525,18 @@ def test_a_completion_window_close_is_a_finished_turn():
     """§4.3's completion axis, and the mistake splitting it from idle prevents:
     the runner emitted its result and a child held stdout open. That turn is
     done, so it returns rather than raising — and says which bound ended it."""
-    watched: list[str] = []
+    watched: list[Event] = []
     result = implement.run_agent(
         "cell",
         prompt="p",
         options={},
-        watch=watched.append,
+        spec_id="SY-1",
+        emit=watched.append,
         exec_stream=_stream(_result_line(), bound="completion"),
     )
     assert result.bound == "completion"
     assert result.cost_usd_est == 0.75
-    assert any("held stdout open" in line for line in watched)
+    assert any("held stdout open" in describe(e) for e in watched)
 
 
 def test_an_idle_kill_is_a_failed_turn_that_names_the_bound():
@@ -465,7 +547,7 @@ def test_an_idle_kill_is_a_failed_turn_that_names_the_bound():
             "cell",
             prompt="p",
             options={},
-            watch=lambda _line: None,
+            spec_id="SY-1",
             exec_stream=_stream(
                 _result_line(), returncode=124, timed_out=True, bound="idle"
             ),
@@ -482,7 +564,7 @@ def test_a_wall_clock_kill_before_any_result_names_the_bound_too():
             "cell",
             prompt="p",
             options={},
-            watch=lambda _line: None,
+            spec_id="SY-1",
             exec_stream=_stream(returncode=124, timed_out=True, bound="wall"),
             reap_cell=_no_reap,
         )
@@ -497,7 +579,7 @@ def test_a_turn_killed_before_its_result_event_still_reports_what_it_spent():
             "cell",
             prompt="p",
             options={},
-            watch=lambda _line: None,
+            spec_id="SY-1",
             last_cost_usd=4.0,
             exec_stream=_stream(returncode=124, timed_out=True, bound="wall"),
             reap_cell=_no_reap,
@@ -524,7 +606,7 @@ def test_a_killed_turn_reaps_the_cell_because_the_kill_does_not_reach_it():
             "cell",
             prompt="p",
             options={},
-            watch=lambda _line: None,
+            spec_id="SY-1",
             exec_stream=_stream(returncode=124, timed_out=True, bound="idle"),
             reap_cell=_reap,
         )
@@ -539,7 +621,7 @@ def test_a_turn_that_ended_on_its_own_is_not_reaped():
         "cell",
         prompt="p",
         options={},
-        watch=lambda _line: None,
+        spec_id="SY-1",
         exec_stream=_stream(_result_line(), bound="completion"),
         reap_cell=_recording_reap(reaped),
     )
@@ -553,7 +635,7 @@ def test_a_rate_limit_event_reaches_the_attempt_result():
         "cell",
         prompt="go",
         options={"max_turns": 3},
-        watch=lambda line: None,
+        spec_id="SY-1",
         exec_stream=_stream(
             json.dumps(
                 {
@@ -577,7 +659,7 @@ def test_the_last_rate_limit_status_wins():
         "cell",
         prompt="go",
         options={"max_turns": 3},
-        watch=lambda line: None,
+        spec_id="SY-1",
         exec_stream=_stream(
             json.dumps({"type": "rate_limit", "status": "allowed_warning"}),
             json.dumps({"type": "rate_limit", "status": "rejected", "resets_at": 7}),
@@ -593,7 +675,7 @@ def test_a_turn_with_no_rate_limit_event_carries_none():
         "cell",
         prompt="go",
         options={"max_turns": 3},
-        watch=lambda line: None,
+        spec_id="SY-1",
         exec_stream=_stream(_result_line()),
     )
     assert result.rate_limit_status is None

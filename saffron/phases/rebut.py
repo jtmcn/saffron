@@ -15,6 +15,7 @@ read-only session that sees the argument and never the transcript behind it.
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,6 +26,7 @@ from pydantic import BaseModel, Field, ValidationError
 from saffron.agents import context
 from saffron.agents.artifacts import EXTRACTION_PROMPT, parse_output_block
 from saffron.agents.findings import Finding
+from saffron.events import Event, PhaseStart, describe
 from saffron.phases import implement, review
 
 VERDICT_PROMPT_FILE = "rebut-verdict.md"
@@ -157,7 +159,7 @@ def run_rebuttal(
     options: dict,
     session_id: str,
     agent: Callable[..., implement.AttemptResult],
-    watch: Callable[[str], None] = print,
+    emit: Callable[[Event], None] = lambda event: print(describe(event)),
     last_cost_usd: float = 0.0,
 ) -> RebuttalTurn:
     """The implementer's one attempt, plus the turn that records it.
@@ -172,7 +174,7 @@ def run_rebuttal(
             prompt=REBUT_PROMPT.format(blockers=blocker_lines(blockers)),
             options=options,
             resume=session_id,
-            watch=watch,
+            emit=emit,
             last_cost_usd=last_cost_usd,
         )
     except implement.AgentFailed as failed:
@@ -189,7 +191,7 @@ def run_rebuttal(
             prompt=EXTRACT_PROMPT,
             options=options,
             resume=session_id,
-            watch=watch,
+            emit=emit,
             last_cost_usd=attempt.cost_usd_est,
         )
     except implement.AgentFailed as failed:
@@ -263,7 +265,7 @@ def run_verdict(
     max_turns: int,
     budget_usd: float,
     agent: Callable[..., implement.AttemptResult],
-    watch: Callable[[str], None] = print,
+    emit: Callable[[Event], None] = lambda event: print(describe(event)),
 ) -> LensVerdicts:
     """One lens, one fresh read-only session. `resume` is never passed, for the
     same reason as REVIEW: the critic must see the argument, not the session
@@ -276,7 +278,7 @@ def run_verdict(
     )
     try:
         attempt = agent(
-            container, prompt=VERDICT_TURN_PROMPT, options=options, watch=watch
+            container, prompt=VERDICT_TURN_PROMPT, options=options, emit=emit
         )
     except implement.AgentFailed as failed:
         cost = failed.attempt.cost_usd_est if failed.attempt else 0.0
@@ -441,7 +443,10 @@ def run_rebut(
     rerun_gates: Callable[[], str | None],
     diff: Callable[[], str],
     agent: Callable[..., implement.AttemptResult],
-    watch: Callable[[str], None] = print,
+    # Required, not defaulted — the same rule `review.run_review`'s own
+    # `spec_id` states: this phase authors its own `PhaseStart` line below.
+    spec_id: str,
+    emit: Callable[[Event], None] = lambda event: print(describe(event)),
     last_cost_usd: float = 0.0,
 ) -> RebutResult:
     """One rebuttal, the gate re-run, then one verdict session per lens.
@@ -463,14 +468,22 @@ def run_rebut(
         options=options | {"max_budget_usd": budget_usd},
         session_id=session_id,
         agent=agent,
-        watch=watch,
+        emit=emit,
         last_cost_usd=last_cost_usd,
     )
     moved = head_moved()
-    watch(
-        f"REBUT: {len(turn.rebuttals)} rebuttal(s), HEAD "
-        f"{'moved' if moved else 'did not move'}"
-        + (f", {turn.error}" if turn.error else "")
+    emit(
+        PhaseStart(
+            timestamp=time.time(),
+            spec_id=spec_id,
+            phase="REBUT",
+            label="REBUT",
+            detail=(
+                f"{len(turn.rebuttals)} rebuttal(s), HEAD "
+                f"{'moved' if moved else 'did not move'}"
+                + (f", {turn.error}" if turn.error else "")
+            ),
+        )
     )
     result = RebutResult(
         state="",
@@ -519,7 +532,7 @@ def run_rebut(
                 max_turns=max_turns,
                 budget_usd=budget_usd,
                 agent=agent,
-                watch=watch,
+                emit=emit,
             )
         )
     result.cost_usd += sum(v.cost_usd for v in result.verdicts)

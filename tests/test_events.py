@@ -619,6 +619,14 @@ _CASES: list[tuple[Event, str]] = [
     ),
     (Agent(timestamp=1.0, spec_id="x", raw=True, line="oops"), "agent: (raw) oops"),
     (
+        # The render bound, which capture-time truncation stopped witnessing:
+        # `implement` now stores at most QUARANTINE_BYTES, so an assertion
+        # written as `line[:160]` is a no-op. Measured — deleting `[:160]`
+        # from `describe`'s raw branch passed all 1160 tests.
+        Agent(timestamp=1.0, spec_id="x", raw=True, line="q" * 300),
+        "agent: (raw) " + "q" * 160,
+    ),
+    (
         Agent(
             timestamp=1.0,
             spec_id="x",
@@ -756,35 +764,74 @@ def test_the_table_did_not_quietly_lose_a_row():
 
 
 def test_the_duplicated_agent_renderer_still_matches_its_original():
-    """`_describe_agent_event` is `phases.implement._describe`, copied because
-    `events.py` stays dependency-light; `SA-0031` collapses the two. Nothing
-    asserted the copies agree, and one divergence had already appeared —
-    `_when(None)` returns "unknown" where `implement.when(None)` reads None as
-    *now*. Both are unreachable behind a `resets_at` guard, which is exactly
-    why only a test finds the next one."""
-    from saffron.phases import implement
+    """`_describe_agent_event` was duplicated as `phases.implement._describe`,
+    kept in step by nothing but a test. `SA-0041` deletes the copy, so this
+    test's job changed: there is no longer a second renderer to compare
+    against, and comparing `describe(Agent(event=e))` to
+    `_describe_agent_event(e)` asserts nothing — `describe`'s Agent branch
+    *is* `return _describe_agent_event(event.event)`, so that reads
+    `f(e) == f(e)` and cannot fail. Measured: rewriting the `rate_limit` and
+    `result` branches left 1156 tests passing.
 
-    events = [
-        {"type": "text", "text": "  a   b  "},
-        {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}},
-        {"type": "tool_result", "is_error": False},
-        {"type": "tool_result", "is_error": True},
-        {
-            "type": "result",
-            "subtype": "success",
-            "num_turns": 3,
-            "total_cost_usd": 0.5,
-            "terminal_reason": None,
-        },
-        {"type": "rate_limit", "status": "allowed"},
-        {"type": "rate_limit", "status": "rejected", "utilization": 0.5},
-        {"type": "rate_limit", "status": "rejected", "resets_at": 1_700_000_000},
-        {"type": "error", "error": "boom"},
-        {"type": "system", "subtype": "thinking_tokens"},
-        {"type": "unknown_to_both"},
+    That matters more now than before. While `Agent.event` was always `None`
+    this renderer was unreachable in production; it is now the sole renderer
+    for every `agent:` line an operator sees and every one `events.jsonl`
+    keeps, and the golden fixture excludes all of them by construction. So
+    each branch is pinned to the literal line it must produce.
+    """
+    cases = [
+        ({"type": "text", "text": "  a   b  "}, "agent: a b"),
+        # The 160/120 bounds are the whole reason a cell's output is safe to
+        # print: pin them, or shortening one is invisible. Measured — with
+        # only the short case above, `text[:160]` -> `text[:80]` passed.
+        ({"type": "text", "text": "x" * 400}, "agent: " + "x" * 160),
+        (
+            {"type": "tool_use", "name": "Bash", "input": {"command": "y" * 400}},
+            "agent: Bash " + json.dumps({"command": "y" * 400})[:120],
+        ),
+        (
+            {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}},
+            'agent: Bash {"command": "ls"}',
+        ),
+        ({"type": "tool_result", "is_error": False}, "agent: tool ok"),
+        ({"type": "tool_result", "is_error": True}, "agent: tool error"),
+        (
+            {
+                "type": "result",
+                "subtype": "success",
+                "num_turns": 3,
+                "total_cost_usd": 0.5,
+                "terminal_reason": None,
+            },
+            "agent: success in 3 turns, $0.5 (None)",
+        ),
+        ({"type": "rate_limit", "status": "allowed"}, "agent: rate limit allowed"),
+        (
+            {"type": "rate_limit", "status": "rejected", "utilization": 0.5},
+            "agent: rate limit rejected, 50% used",
+        ),
+        ({"type": "error", "error": "boom"}, "agent: error boom"),
+        (
+            {"type": "system", "subtype": "thinking_tokens"},
+            "agent: system thinking_tokens",
+        ),
+        ({"type": "unknown_to_both"}, "agent: unknown_to_both"),
     ]
-    for event in events:
-        assert _describe_agent_event(event) == implement._describe(event), event
+    for event, expected in cases:
+        assert _describe_agent_event(event) == expected, event
+        # And the wrapped form an operator actually meets renders identically.
+        assert (
+            describe(Agent(timestamp=1.0, spec_id="x", raw=False, event=event))
+            == expected
+        )
+
+    # `resets_at` renders a local clock time, so only its stable half is
+    # pinned; `_when`'s own formatting is covered by its call sites above.
+    resets = _describe_agent_event(
+        {"type": "rate_limit", "status": "rejected", "resets_at": 1_700_000_000}
+    )
+    assert resets.startswith("agent: rate limit rejected, resets ")
+    assert resets != "agent: rate limit rejected, resets "
 
 
 def test_findings_name_what_the_table_could_not_type():
@@ -1225,6 +1272,37 @@ def test_an_unwritable_event_log_does_not_abort_the_run(monkeypatch, tmp_path):
     assert (task_dir / "events.jsonl").is_dir()
 
 
+def test_no_spec_id_the_supervisor_passes_is_a_literal():
+    """Third instance of one defect tonight: `repair_loop`'s `spec_id` was
+    defaultable, the `run_agent` partial's was droppable, and `run_rebut`'s can
+    be set to `""` with 1156 tests still green. Each was found by a different
+    reviewer and patched separately.
+
+    They share a shape — a required argument whose *value* nothing reads —
+    and the events it labels are how `SA-0042`'s single fan-out will tell one
+    task's rows from another's in a shared log.
+
+    What this catches and what it does not. It catches a literal, which is the
+    `run_rebut` case no driven test reaches. It does **not** catch omission, a
+    wrong variable, or a default on a `def` — a default lives in a
+    `FunctionDef`, not a `Call` keyword, so instance one of the three above
+    would slip past it. Those are caught dynamically instead, by
+    `tests/test_session.py`'s `cell.spec_ids` assertion and by
+    `test_events_jsonl_reproduces_what_the_terminal_printed`. This is the
+    narrow backstop for the seam neither of those drives."""
+    import ast
+
+    tree = ast.parse(Path(session.__file__).read_text())
+    literals = [
+        ast.unparse(kw.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        for kw in node.keywords
+        if kw.arg == "spec_id" and not isinstance(kw.value, ast.Name | ast.Attribute)
+    ]
+    assert literals == [], f"spec_id passed as a literal: {literals}"
+
+
 def test_the_supervisor_hands_the_adapter_to_the_agent_it_calls(monkeypatch, tmp_path):
     """AC8's other half, which the isolated test below cannot reach: it proves
     `_phase_watch` renders correctly, not that `session.py` threads it into
@@ -1286,23 +1364,288 @@ def test_the_repair_seam_is_also_threaded(monkeypatch, tmp_path):
     assert cell.watched.count(spoken) == 3, cell.watched
 
 
+def _lines_from_cell(*raw_lines: str):
+    """A minimal `exec_stream` double: hands each line to `on_line`, in order,
+    then reports a clean exit — enough to drive `implement.run_agent` without
+    a real cell."""
+
+    def _exec(container, command, *, stdin_data, on_line, **kwargs):
+        for line in raw_lines:
+            on_line(line)
+        return _runtime.Completed(0, "", "")
+
+    return _exec
+
+
+def _scripted_agent(*texts: str):
+    """`Callable[..., implement.AttemptResult]`: one canned turn per text, for
+    driving `review.run_review`/`rebut.run_rebut` without a real agent."""
+    scripted = iter(texts)
+
+    def run(container, *, prompt, options, **kwargs):
+        return _turn(next(scripted))
+
+    return run
+
+
 def test_the_watch_shaped_callable_phases_still_receive_does_not_raise():
-    """AC8: `phases/implement.py`, `phases/review.py` and `phases/rebut.py`
-    are forbidden to this spec and still call a plain `watch(str)` —
-    `_phase_watch` is the adapter that keeps that seam intact until
-    `SA-0031` migrates them to construct events of their own. Each line here
-    is one those three files actually author today (read directly out of
-    them); `describe()` must reproduce every one byte for byte, proving the
-    adapter, not just the described text, is what is under test."""
-    lines = (
-        "agent: (raw) some stray stdout",
-        'agent: Bash {"command": "ls"}',
-        "REVIEW: correctness: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.10",
-        "REBUT: 1 rebuttal(s), HEAD moved",
+    """`_phase_watch` used to recover a typed event from a line
+    `phases/implement.py`, `phases/review.py` and `phases/rebut.py` had
+    already rendered to prose, by matching its prefix. There is no adapter
+    left to test — those three files construct `Agent`/`PhaseStart` events
+    directly now, at the point the dict or the fact is still available, and
+    `describe()` of what they construct is what used to be asserted here
+    byte for byte. Each of the four lines below is a real call site, driven
+    directly, not decoded from a hand-written string — the same "receives an
+    event-shaped callable and does not raise" property this test's name
+    promises, proven the other way around now that there is no longer a
+    watch-shaped one to feed it (SA-0041)."""
+    from saffron.agents.findings import Finding
+    from saffron.phases import implement, rebut
+
+    prompts_dir = Path(review.__file__).resolve().parents[1] / "agents" / "prompts"
+    context_md = (Path(review.__file__).resolve().parents[2] / "CONTEXT.md").read_text()
+    diff = "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-a\n+b\n"
+
+    # "agent: (raw) ..." and "agent: Bash ..." — implement.run_agent's own
+    # _consume, fed a non-JSON line and a real cell event.
+    implement_captured: list[Event] = []
+    implement.run_agent(
+        "cell",
+        prompt="p",
+        options={},
+        spec_id="s",
+        emit=implement_captured.append,
+        exec_stream=_lines_from_cell(
+            "some stray stdout",
+            json.dumps(
+                {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}
+            ),
+            json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "num_turns": 1,
+                    "total_cost_usd": 0.1,
+                    "session_id": "s1",
+                    "terminal_reason": "completed",
+                    "is_error": False,
+                }
+            ),
+        ),
     )
-    for line in lines:
-        captured: list[Event] = []
-        to_watch = session._phase_watch(captured.append, spec_id="SY-1")
-        to_watch(line)  # must not raise
-        (event,) = captured
-        assert describe(event) == line
+    implement_lines = [describe(e) for e in implement_captured]
+    assert "agent: (raw) some stray stdout" in implement_lines
+    assert 'agent: Bash {"command": "ls"}' in implement_lines
+
+    # "REVIEW: ..." — review.run_review's own PhaseStart, one clean lens.
+    review_captured: list[Event] = []
+    review.run_review(
+        "cell",
+        diff=diff,
+        read_head=lambda _p: None,
+        spec_body="fix it",
+        gates="",
+        context_md=context_md,
+        prompts_dir=prompts_dir,
+        max_turns=5,
+        budget_usd=1.0,
+        agent=_scripted_agent(_block({"findings": []}), _block({"findings": []})),
+        spec_id="s",
+        emit=review_captured.append,
+    )
+    review_lines = [describe(e) for e in review_captured]
+    assert (
+        "REVIEW: correctness: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.10"
+        in review_lines
+    )
+
+    # "REBUT: ..." — rebut.run_rebut's own PhaseStart, one fixed blocker.
+    rebut_captured: list[Event] = []
+    blocker = Finding(
+        lens="correctness",
+        severity="blocker",
+        file="x.py",
+        line=1,
+        claim="c",
+        anchored=True,
+    )
+    options = implement.agent_options(system_prompt="s", max_turns=5, budget_usd=1.0)
+    rebut.run_rebut(
+        "cell",
+        blockers=[blocker],
+        options=options,
+        session_id="sess-1",
+        spec_body="fix it",
+        context_md=context_md,
+        prompts_dir=prompts_dir,
+        max_turns=5,
+        budget_usd=1.0,
+        head_moved=lambda: True,
+        rerun_gates=lambda: None,
+        diff=lambda: diff,
+        agent=_scripted_agent(
+            "ok",
+            _block(
+                {"rebuttals": [{"finding": 1, "action": "fixed", "argument": "done"}]}
+            ),
+            _block(
+                {"verdicts": [{"finding": 1, "verdict": "withdrawn", "reason": "ok"}]}
+            ),
+        ),
+        spec_id="s",
+        emit=rebut_captured.append,
+    )
+    rebut_lines = [describe(e) for e in rebut_captured]
+    assert "REBUT: 1 rebuttal(s), HEAD moved" in rebut_lines
+
+
+def _identifier_watch_appears(source: str) -> bool:
+    """Structural, not textual: a docstring saying `watch=` for history's
+    sake (this file has several) must not make the check below pass by
+    accident. `watch` as a parameter name, a call keyword, or a bare name
+    reference are the only three shapes the old seam could have left behind;
+    a string literal is none of them."""
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.arg) and node.arg == "watch":
+            return True
+        if isinstance(node, ast.keyword) and node.arg == "watch":
+            return True
+        if isinstance(node, ast.Name) and node.id == "watch":
+            return True
+    return False
+
+
+def test_no_phase_this_spec_owns_still_takes_a_watch():
+    """Every `watch(...)` in these three files is an `emit(<Event>)` now, and
+    none of the three carries a `watch` parameter — checked structurally so a
+    prose mention of the old name cannot pass this by accident."""
+    root = Path(__file__).resolve().parents[1] / "saffron" / "phases"
+    for name in ("implement.py", "review.py", "rebut.py"):
+        source = (root / name).read_text()
+        assert not _identifier_watch_appears(source), name
+
+
+def test_the_supervisor_no_longer_adapts_events_to_prose():
+    """`_phase_watch` existed only to adapt `emit` to the `watch(str)` these
+    three phases used to expect. Both constructions — `plan_checkpoint`'s and
+    `_drive_cell`'s — are gone along with the function itself: checked by
+    attribute absence, and by a source scan so a reintroduction under the
+    same name anywhere in the module still fails this, not only a call site
+    this test happened to look at."""
+    assert not hasattr(session, "_phase_watch")
+    source = Path(session.__file__).read_text()
+    assert "_phase_watch" not in source
+
+
+def test_a_driven_agent_turn_logs_the_event_not_its_rendering():
+    """`Agent.event` carries the parsed cell event dict verbatim again.
+    `SA-0030`'s adapter was handed a string `_consume` had already rendered,
+    so every per-turn line landed in `Agent.detail` as prose and `Agent.event`
+    was permanently `None` — the inverse of what `events.Agent` documents.
+    Driven through the real call site, not constructed by hand, so this
+    fails if `_consume` ever goes back to rendering before it emits."""
+    from saffron.phases import implement
+
+    captured: list[Event] = []
+    implement.run_agent(
+        "cell",
+        prompt="p",
+        options={},
+        spec_id="s",
+        emit=captured.append,
+        exec_stream=_lines_from_cell(
+            json.dumps(
+                {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}
+            ),
+            json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "num_turns": 1,
+                    "total_cost_usd": 0.1,
+                    "session_id": "s1",
+                    "terminal_reason": "completed",
+                    "is_error": False,
+                }
+            ),
+        ),
+    )
+    (tool_use,) = [
+        e
+        for e in captured
+        if isinstance(e, Agent) and e.event and e.event.get("type") == "tool_use"
+    ]
+    assert tool_use.event == {
+        "type": "tool_use",
+        "name": "Bash",
+        "input": {"command": "ls"},
+    }
+    assert tool_use.raw is False
+    assert tool_use.detail == ""
+
+
+def test_an_unknown_cell_event_kind_does_not_raise(tmp_path):
+    """The runner degrades to a `passthrough`-shaped dict for a message shape
+    it has never seen, rather than asserting (`test_an_unknown_message_
+    passes_through_rather_than_crashing` in `test_agent_runner.py`). The host
+    side has to match: an unknown `type` must still reach `describe()` and
+    `EventLog.append` without raising."""
+    from saffron.phases import implement
+
+    captured: list[Event] = []
+    implement.run_agent(
+        "cell",
+        prompt="p",
+        options={},
+        spec_id="s",
+        emit=captured.append,
+        exec_stream=_lines_from_cell(
+            json.dumps({"type": "something_nobody_has_seen_before"}),
+            json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "num_turns": 1,
+                    "total_cost_usd": 0.1,
+                    "session_id": "s1",
+                    "terminal_reason": "completed",
+                    "is_error": False,
+                }
+            ),
+        ),
+    )
+    (unknown,) = [
+        e
+        for e in captured
+        if isinstance(e, Agent)
+        and e.event
+        and e.event.get("type") == "something_nobody_has_seen_before"
+    ]
+    # Reaches the terminal without raising.
+    assert "something_nobody_has_seen_before" in describe(unknown)
+    # Reaches the log without raising.
+    log = EventLog(tmp_path)
+    log.append(unknown)
+    assert not log.failed
+    [loaded] = _read(tmp_path, Agent)
+    assert loaded.event == unknown.event
+
+
+def test_no_test_this_spec_owns_still_passes_a_watch():
+    """No `watch=` remains in any test file this spec owns — the five the
+    `criteria`/`tests` gate actually collects. `test_agent_runner.py` is
+    cell-marked and excluded from both (`SA-0041`'s own notes), so it is
+    migrated by hand rather than named here; `SA-0042` claims the other
+    three the parent required this of."""
+    root = Path(__file__).resolve().parent
+    for name in (
+        "test_implement.py",
+        "test_review.py",
+        "test_rebut.py",
+        "test_session.py",
+        "test_events.py",
+    ):
+        source = (root / name).read_text()
+        assert not _identifier_watch_appears(source), name

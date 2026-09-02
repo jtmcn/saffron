@@ -113,7 +113,8 @@ def _run(
         rerun_gates=_rerun_gates,
         diff=lambda: DIFF,
         agent=_agent(*texts, record=record),
-        watch=lambda _line: None,
+        spec_id="SY-1",
+        emit=lambda _e: None,
     )
 
 

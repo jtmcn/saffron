@@ -67,7 +67,8 @@ def _review(*texts, read_head=lambda _p: None, record=None):
         max_turns=20,
         budget_usd=2.0,
         agent=_agent(*texts, record=record),
-        watch=lambda _line: None,
+        spec_id="SY-1",
+        emit=lambda _e: None,
     )
 
 

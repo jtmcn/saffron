@@ -2437,7 +2437,7 @@ next to it. Whether a malformed rebuttal is also worth one re-prompt is a
 separate question from whether the record should imply an answer that was never
 read.
 
-## 43. Two of `cell/session.py`'s events never fit a kind, and one adapter parses prose to find the rest
+## 43. Two of `cell/session.py`'s events never fit a kind, and `emit` is not the whole output seam
 
 `SA-0030` migrated all 47 `watch(...)` call sites in `cell/session.py` to
 `emit(<Event>)`, against `events.FAMILIES`. Two did not, by design —
@@ -2457,7 +2457,7 @@ scoped a tenth kind out from the start.
 **The second half of that gap has no substitute and was not disclosed until
 review found it: `emit` is no longer the supervisor's total output seam.**
 Those two `print()` calls go to process stdout whatever the caller passed.
-A caller supplying its own `emit` — which is exactly what `SA-0031` is
+A caller supplying its own `emit` — which is exactly what `SA-0042` is
 specified to do from `cli.py`, and what any batch or headless consumer would
 do — still gets two lines it cannot redirect, and the one it most wants is the
 task's own terminal announcement. Measured on `saffron/SA-0030`: driving
@@ -2469,21 +2469,22 @@ so the double silently no-ops if those calls ever move. Done looks like the
 tenth kind `SA-0029` scoped out, or an `emit`-shaped sink for lines no kind
 carries; not a third `print`.
 
-The second gap has no substitute yet. `phases/implement.py`,
-`phases/review.py` and `phases/rebut.py` are `forbidden` to `SA-0030` and
-still call a plain `watch(str)` with a line they have already fully
-formatted — `agent: `, `agent: (raw) `, `REVIEW: ` or `REBUT: ` are the only
-four prefixes those three files hand it today (checked by reading them
-directly, 2026-09-02). `session._phase_watch` recovers the event those
-strings were always going to be by matching on that prefix and slicing it off,
-which is correct only because no other prefix reaches it yet. `SA-0031`
-migrates those three files to construct `Agent`/`PhaseStart` events directly
-and call `describe()` themselves, which is what removes `_phase_watch`
-entirely — until then, a new watch line added to any of the three with a
-prefix outside that set of four lands in `_phase_watch`'s fallback branch as
-an un-prefix-stripped `Agent.detail`, silently readable but silently
-untyped, and nothing in `tests/test_events.py`'s golden fixture would catch
-it unless that new line happened to be exercised by the stubbed drive.
+**Closed by `SA-0041`, 2026-09-02.** `phases/implement.py`, `phases/review.py`
+and `phases/rebut.py` were `forbidden` to `SA-0030` and called a plain
+`watch(str)` with a line they had already fully formatted — `agent: `,
+`agent: (raw) `, `REVIEW: ` or `REBUT: ` were the only four prefixes those
+three files ever handed it. `session._phase_watch` recovered the event those
+strings were always going to be by matching on that prefix and slicing it
+off, which was correct only because no other prefix reached it. `SA-0041`
+migrated those three files to construct `Agent`/`PhaseStart` events directly
+and call `describe()` themselves — `implement.run_agent` gained a required
+`spec_id` and now emits `Agent(event=<dict>)` at the point the cell's own
+dict is still available, instead of flattening it to prose first — which is
+what let `_phase_watch` itself, both constructions, be deleted outright.
+`SA-0031`'s plan to migrate `cli.py`/`phases/package.py` in the same spec is
+what died at 141 turns; `SA-0042` carries that half forward on its own, since
+`package()` runs outside `run_one_cell` and never received the supervisor's
+`emit` in the first place.
 
 ## 44. A single turn can overshoot the budget ceiling, because the check runs before it
 
@@ -2550,9 +2551,12 @@ anything else an untrusted cell chose to put on stdout.
 
 Two things follow, neither addressed anywhere:
 
-- **Volume is unbounded.** The renderer's truncation was the only bound, and it
-  now applies to the *display* while persistence keeps everything. A cell that
-  cats a large file writes it to the control plane.
+- **Volume is unbounded on the path that matters.** `SA-0041` bounded the raw
+  quarantined line at capture (`implement.QUARANTINE_BYTES`, 8192) after review
+  measured 5 MB of stdout writing 5 MB of log. That closes the accidental case
+  only: the same payload wrapped in nine bytes of JSON takes the `Agent.event`
+  path and still writes 5 MB, because bounding it needs `saffron/events.py`,
+  which that spec forbids. One value, both paths, is still the open decision.
 - **The `secrets` gate never sees it.** That gate reads the diff. A batch tree
   artifact is not a diff, so a credential a cell printed to stdout is persisted
   host-side and scanned by nothing. §5.4 lists `secrets` as a v1 gate, so this

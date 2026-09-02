@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from saffron.agents.artifacts import EXTRACTION_PROMPT
 from saffron.cell import runtime
 from saffron.cell.worktree import STATE_MOUNT, WORKTREE_MOUNT
+from saffron.events import Agent, Event, describe
 from saffron.gates.baseline import NewFailure
 
 # The whole set an implementer is offered, not merely the set it may call
@@ -179,35 +180,24 @@ def when(stamp: int | None) -> str:
     return time.strftime("%H:%M local" if same_day else "%a %d %b %H:%M local", local)
 
 
-def _describe(event: dict) -> str:
-    """One line per event, for the operator watching v0.5 run."""
-    kind = event.get("type")
-    if kind == "text":
-        text = " ".join(str(event.get("text", "")).split())
-        return f"agent: {text[:160]}"
-    if kind == "tool_use":
-        return f"agent: {event.get('name')} {json.dumps(event.get('input'))[:120]}"
-    if kind == "tool_result":
-        return "agent: tool " + ("error" if event.get("is_error") else "ok")
-    if kind == "result":
-        return (
-            f"agent: {event.get('subtype')} in {event.get('num_turns')} turns, "
-            f"${event.get('total_cost_usd')} ({event.get('terminal_reason')})"
-        )
-    if kind == "rate_limit":
-        used = event.get("utilization")
-        return (
-            f"agent: rate limit {event.get('status')}"
-            + (f", {used:.0%} used" if isinstance(used, int | float) else "")
-            + (
-                f", resets {when(event.get('resets_at'))}"
-                if event.get("resets_at")
-                else ""
-            )
-        )
-    if kind == "error":
-        return f"agent: error {event.get('error')}"
-    return f"agent: {kind} {event.get('subtype') or event.get('kind') or ''}".rstrip()
+# Storage, not display. `describe` cuts at 160 for the terminal; this is what
+# `events.jsonl` keeps, and the two are different questions — 160 would throw
+# away the most interesting forensic artifact a cell produces (backlog 46).
+QUARANTINE_BYTES = 8192
+
+
+def _quarantined(spec_id: str, line: str) -> Agent:
+    """A line that is not an event, bounded before it is persisted.
+
+    Bounds the accidental case only, and says so: a cell that wants the disk
+    wraps its payload in nine bytes of JSON and takes the `Agent.event` path,
+    which this cannot reach — `saffron/events.py` is forbidden here. Measured
+    on one 5 MB stdout line: 5 MB written unbounded, 8 KB now; the same line
+    as `{"type":"text",...}` still writes 5 MB. Backlog item 46 is where both
+    paths get one answer."""
+    return Agent(
+        timestamp=time.time(), spec_id=spec_id, raw=True, line=line[:QUARANTINE_BYTES]
+    )
 
 
 def run_agent(
@@ -216,7 +206,8 @@ def run_agent(
     prompt: str,
     options: dict,
     resume: str | None = None,
-    watch: Callable[[str], None] = print,
+    spec_id: str,
+    emit: Callable[[Event], None] = lambda event: print(describe(event)),
     last_cost_usd: float = 0.0,
     timeout_s: float = 3600,
     exec_stream: Callable[..., runtime.Completed] = runtime.exec_stream,
@@ -226,6 +217,17 @@ def run_agent(
 
     The host reads Saffron's event schema, never the SDK's — `agent_runner.py`
     inside the cell is the only place the SDK's types exist.
+
+    `spec_id` is required, not defaulted: a forgotten keyword would file every
+    line of this turn's stream under an empty id, indistinguishably from an
+    observed one — the same rule `session.repair_loop` states for its own
+    `spec_id` (§4.1).
+
+    Every event this turn produces is emitted as `events.Agent` — the parsed
+    cell dict verbatim under `event`, a raw non-JSON line under `line`, or a
+    host-authored fact with neither — the moment it is known, and never
+    reduced to a string first: the dict is only ever available here, not
+    downstream of it (SA-0041).
     """
     request = json.dumps({"prompt": prompt, "options": options, "resume": resume})
     text: list[str] = []
@@ -246,11 +248,14 @@ def run_agent(
             event = json.loads(line)
         except ValueError:
             # Anything not an event came from a process sharing the runner's
-            # stdout. Show it to the operator; never try to read it as one.
-            watch(f"agent: (raw) {line[:160]}")
+            # stdout. Show it to the operator; never try to read it as one —
+            # `raw=True` is the quarantine, and it must survive every hop.
+            emit(_quarantined(spec_id, line))
             return
         if not isinstance(event, dict):
-            watch(f"agent: (raw) {line[:160]}")
+            # `json.loads` does not raise for a bare list or string, and
+            # `_describe_agent_event` calls `.get` — so this needs its own branch.
+            emit(_quarantined(spec_id, line))
             return
         if event.get("type") == "text":
             text.append(str(event.get("text", "")))
@@ -262,7 +267,10 @@ def run_agent(
             # Last one wins: the CLI emits on transition, so the final state is
             # the one the next turn would start under.
             rate_limit.update(event)
-        watch(_describe(event))
+        # The dict, verbatim, under `event` — never re-rendered to a string
+        # here. `describe()` is the one place it becomes prose, and it is
+        # called downstream of this line, not inside it.
+        emit(Agent(timestamp=time.time(), spec_id=spec_id, raw=False, event=event))
 
     done = exec_stream(
         container,
@@ -279,10 +287,17 @@ def run_agent(
         # run the suite and resume the session in this same container, so an
         # abandoned agent would still be editing /work underneath all three.
         reaped = reap_cell(container)
-        watch(
-            "agent: reaped the cell after the kill"
-            if reaped.returncode == 0
-            else f"agent: the cell would not reap — {reaped.stderr.strip()[:200]}"
+        emit(
+            Agent(
+                timestamp=time.time(),
+                spec_id=spec_id,
+                raw=False,
+                detail=(
+                    "reaped the cell after the kill"
+                    if reaped.returncode == 0
+                    else f"the cell would not reap — {reaped.stderr.strip()[:200]}"
+                ),
+            )
         )
 
     detail = "; ".join(errors) or done.stderr.strip()[-800:] or "no output"
@@ -322,7 +337,14 @@ def run_agent(
     if done.bound == "completion":
         # Not a failure and not silent: the operator should know a child of the
         # runner outlived it rather than wonder why the turn ended early.
-        watch("agent: result seen, then a child held stdout open — pipe closed")
+        emit(
+            Agent(
+                timestamp=time.time(),
+                spec_id=spec_id,
+                raw=False,
+                detail="result seen, then a child held stdout open — pipe closed",
+            )
+        )
     # One predicate for the accounting and the control flow both: a turn the
     # cost fallback treats as crashed must not also read as a clean return.
     # `timed_out` covers the idle and wall-clock kills only — a completion

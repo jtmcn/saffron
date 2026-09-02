@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from saffron.events import (
-    Agent,
     Attempt,
     Baseline,
     Budget,
@@ -66,73 +65,6 @@ TURN_TIMEOUT_S = 900.0
 # REBUT *is* gated (`_over_budget` before the rebuttal turn): by then the
 # findings are written and the operator has something to read either way.
 REVIEW_FLOOR_USD = 2.0
-
-
-def _phase_watch(
-    emit: Callable[[Event], None], *, spec_id: str
-) -> Callable[[str], None]:
-    """Adapts `emit` to the plain `Callable[[str], None]` `phases/implement.py`,
-    `phases/review.py` and `phases/rebut.py` still expect (`SA-0031` migrates
-    them, not this spec — `saffron/phases/**` is forbidden here).
-
-    Every line arriving here was already fully formatted by the phase that
-    produced it — `agent: `, `agent: (raw) `, `REVIEW: ` or `REBUT: ` are the
-    only prefixes those three files ever hand a `watch` callable (read
-    directly out of `implement.run_agent`, `review.run_review` and
-    `rebut.run_rebut`). Decomposing the line back into the kind that prefix
-    names, rather than swallowing it into one free-form field, is what lets
-    `describe()` reproduce it byte for byte — the terminal and `events.jsonl`
-    read the same fact for a call site this spec cannot move.
-    """
-
-    def _watch(line: str) -> None:
-        stamp = time.time()
-        if line.startswith("agent: (raw) "):
-            emit(
-                Agent(
-                    timestamp=stamp,
-                    spec_id=spec_id,
-                    raw=True,
-                    line=line[len("agent: (raw) ") :],
-                )
-            )
-        elif line.startswith("agent: "):
-            emit(
-                Agent(
-                    timestamp=stamp,
-                    spec_id=spec_id,
-                    raw=False,
-                    detail=line[len("agent: ") :],
-                )
-            )
-        elif line.startswith("REVIEW: "):
-            emit(
-                PhaseStart(
-                    timestamp=stamp,
-                    spec_id=spec_id,
-                    phase="REVIEW",
-                    label="REVIEW",
-                    detail=line[len("REVIEW: ") :],
-                )
-            )
-        elif line.startswith("REBUT: "):
-            emit(
-                PhaseStart(
-                    timestamp=stamp,
-                    spec_id=spec_id,
-                    phase="REBUT",
-                    label="REBUT",
-                    detail=line[len("REBUT: ") :],
-                )
-            )
-        else:
-            # Unreached today — every call site behind this seam is one of the
-            # four prefixes above. Recorded rather than dropped if a future
-            # one is not: an `Agent.detail` line is still readable, even
-            # un-prefix-stripped.
-            emit(Agent(timestamp=stamp, spec_id=spec_id, raw=False, detail=line))
-
-    return _watch
 
 
 def _default_emit(event: Event, *, log: EventLog) -> None:
@@ -449,15 +381,12 @@ def plan_checkpoint(
     """
     from saffron.agents import artifacts
 
-    # `agent` is `implement.run_agent` (`SA-0031` migrates that file, not this
-    # one), so it still wants a plain string `watch` — `_phase_watch` is the
-    # adapter that keeps both sides of that seam speaking events (§0).
-    watch = _phase_watch(emit, spec_id=spec.spec_id)
-
+    # `agent` is `implement.run_agent`, wrapped with `spec.spec_id` already
+    # bound (§0) — `emit` is handed straight through, with no adapter.
     spent = 0.0
     try:
         attempt = agent(
-            container, prompt=implement.PLAN_PROMPT, options=options, watch=watch
+            container, prompt=implement.PLAN_PROMPT, options=options, emit=emit
         )
         spent = attempt.cost_usd_est
         # ponytail: the door is only here, at the plan checkpoint. A `touches`
@@ -492,7 +421,7 @@ def plan_checkpoint(
                         prompt=f"{exc}\n\n{artifacts.EXTRACTION_PROMPT}",
                         options=options,
                         resume=require_session(attempt.session_id),
-                        watch=watch,
+                        emit=emit,
                         last_cost_usd=attempt.cost_usd_est,
                     )
                     spent += attempt.cost_usd_est
@@ -525,7 +454,7 @@ def plan_checkpoint(
                     prompt=f"{exc}\n\n{artifacts.EXTRACTION_PROMPT}",
                     options=options,
                     resume=require_session(attempt.session_id),
-                    watch=watch,
+                    emit=emit,
                     last_cost_usd=attempt.cost_usd_est,
                 )
                 spent += attempt.cost_usd_est
@@ -821,12 +750,6 @@ def _drive_cell(
     from saffron.repos import image
     from saffron.repos import mirror as mirror_ops
     from saffron.repos.policy import PolicyError, effective_risk, load_policy
-
-    # `implement.run_agent`, `review.run_review` and `rebut.run_rebut` are
-    # `phases/**` — forbidden here, and still typed against a plain string
-    # `watch` until `SA-0031`. Built once, closing over `spec.spec_id`, and
-    # threaded to every call site below that used to pass `watch=watch`.
-    to_watch = _phase_watch(emit, spec_id=spec.spec_id)
 
     def _preflight(step: str, detail: str) -> None:
         emit(
@@ -1144,10 +1067,16 @@ def _drive_cell(
 
         # Bound once, here, so no turn — plan, implement, repair, review or
         # rebuttal — can quietly inherit the library's hour (§4.3), or run on
-        # against a window the provider already closed.
+        # against a window the provider already closed. `spec_id` is bound
+        # here too: every call site below hands this `agent` an `emit`
+        # straight through, with no adapter to carry the id instead (§0).
         agent = stop_on_rejected(
             record_attempts(
-                partial(implement.run_agent, timeout_s=TURN_TIMEOUT_S),
+                partial(
+                    implement.run_agent,
+                    timeout_s=TURN_TIMEOUT_S,
+                    spec_id=spec.spec_id,
+                ),
                 ledger=ledger,
                 task_id=task_id,
             )
@@ -1323,7 +1252,7 @@ def _drive_cell(
                 prompt=implement.IMPLEMENT_PROMPT,
                 options=options,
                 resume=session_id,
-                watch=to_watch,
+                emit=emit,
                 last_cost_usd=last_cost,
             )
         except implement.AgentFailed as failed:
@@ -1395,7 +1324,7 @@ def _drive_cell(
                         prompt=implement.SALVAGE_PROMPT,
                         options=salvage_options,
                         resume=session_id,
-                        watch=to_watch,
+                        emit=emit,
                         # Scaled, not carried over: the fallback charges a
                         # crashed turn the previous turn's figure, and these
                         # two ceilings differ by construction. Unscaled, a
@@ -1539,7 +1468,7 @@ def _drive_cell(
                     prompt=implement.repair_prompt(new),
                     options=options,
                     resume=session_id,
-                    watch=to_watch,
+                    emit=emit,
                     last_cost_usd=last_cost,
                 )
             except implement.AgentFailed as failed:
@@ -1599,7 +1528,8 @@ def _drive_cell(
                 max_turns=spec.max_turns,
                 budget_usd=critic_budget(spec.budget_usd, spent),
                 agent=agent,
-                watch=to_watch,
+                spec_id=spec.spec_id,
+                emit=emit,
             )
             # Deliberately not gated on the host ceiling: a green diff nobody
             # reviewed is exactly the product Appendix K says means nothing.
@@ -1702,7 +1632,8 @@ def _drive_cell(
                     rerun_gates=_rebut_gates,
                     diff=lambda: worktree.export_patch(container, spec.tree_base),
                     agent=agent,
-                    watch=to_watch,
+                    spec_id=spec.spec_id,
+                    emit=emit,
                     last_cost_usd=last_cost,
                 )
                 rebut_result = result
