@@ -41,6 +41,17 @@ max_turns: 140
 risk: elevated
 ---
 
+## Status: superseded
+
+Ran 2026-09-01 and ended `EXHAUSTED` at 141 turns of 140 and $19.17 of an
+$18.00 budget, with six commits, red gates and no branch pushed. Superseded by
+`SA-0041` (the agent stream and the supervisor's adapter) and `SA-0042`
+(PACKAGE's events and the `cli.py` fan-out). Its exported patch is at
+`~/.saffron/batches/v0/SA-0031/patch.diff` — 1174 lines, incomplete, applies
+cleanly to `saffron/SA-0030` and leaves 15 failures. Kept as evidence for
+`docs/superpowers/specs/2026-09-01-splitting-a-too-wide-spec-design.md`,
+not as work to pick up.
+
 ## Context
 `SA-0030` migrated the supervisor and left an adapter at the phase boundary:
 `phases/` still receives a string-taking callable. **Fifteen `watch(...)` call
