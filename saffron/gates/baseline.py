@@ -8,6 +8,7 @@ them (DESIGN.md §5.4).
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Sequence
 from typing import NamedTuple
 
 from saffron.gates.contract import Failure, GateResult, identity
@@ -98,7 +99,9 @@ def suite_drift(head: list[GateResult], base: list[GateResult]) -> list[str]:
     return drift
 
 
-def is_no_progress(current: list[NewFailure], previous: list[NewFailure]) -> bool:
+def is_no_progress(
+    current: Sequence[NewFailure], previous: Sequence[NewFailure]
+) -> bool:
     """An identical new-failure set across two attempts: stop paying.
 
     No caller in v0 — there is no repair loop yet. It lives beside the

@@ -1,4 +1,6 @@
 #!/bin/sh
-# Saffron declares no type checker. `skip` is a first-class status and a repo
-# with no type system simply omits the gate — nothing in core changes (§5.4).
-echo '{"gate":"types","status":"skip","summary":"no type checker declared"}'
+# `typecheck.py`, not `types.py`: python puts the script's own directory on
+# sys.path[0], so a `types.py` beside it shadows the stdlib module every
+# import of `json`/`re`/`functools` reaches through. Measured — it crashed
+# under one interpreter and survived under another, writing nothing to stdout.
+exec python3 "$(dirname "$0")/typecheck.py"

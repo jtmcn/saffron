@@ -140,19 +140,45 @@ def _no_reap(container, **_kwargs):
     return runtime.Completed(0, "", "")
 
 
-def _stream(*lines, returncode=0, stderr="", timed_out=False, bound=""):
-    """A fake in-cell runner: the lines it prints, and how it exited."""
+class _stream:
+    """A fake in-cell runner: the lines it prints, and how it exited.
 
-    def _exec_stream(container, command, *, stdin_data, on_line, **kwargs):
-        _exec_stream.request = json.loads(stdin_data)
-        _exec_stream.command = list(command)
-        for line in lines:
+    A callable object rather than a closure with attributes hung off it: an
+    attribute assigned to a function is invisible to the `types` gate."""
+
+    def __init__(self, *lines, returncode=0, stderr="", timed_out=False, bound=""):
+        self._lines = lines
+        self._returncode = returncode
+        self._stderr = stderr
+        self._timed_out = timed_out
+        self._bound = bound
+        self.request: dict = {}
+        self.command: list[str] = []
+
+    def __call__(self, container, command, *, stdin_data, on_line, **kwargs):
+        self.request = json.loads(stdin_data)
+        self.command = list(command)
+        for line in self._lines:
             on_line(line)
         return runtime.Completed(
-            returncode, "", stderr, timed_out=timed_out, bound=bound
+            self._returncode,
+            "",
+            self._stderr,
+            timed_out=self._timed_out,
+            bound=self._bound,
         )
 
-    return _exec_stream
+
+def _recording_reap(reaped: list[str]):
+    """Returns what the real `reap_cell` returns — `run_agent` declares the
+    injection point as returning `Completed`, and a fake that returns None
+    is a fake of a different function."""
+
+    def _reap(container, **_kwargs):
+        reaped.append(container)
+        return runtime.Completed(0, "", "")
+
+    return _reap
 
 
 def _result_line(**overrides):
@@ -240,7 +266,9 @@ def test_a_failed_turn_still_reports_what_it_spent():
                 _result_line(subtype="error_max_turns", is_error=True, total_cost_usd=0)
             ),
         )
-    assert raised.value.attempt.cost_usd_est == 2.0
+    attempt = raised.value.attempt
+    assert attempt is not None
+    assert attempt.cost_usd_est == 2.0
 
 
 def test_a_turn_ceiling_is_named_rather_than_left_to_the_exit_code():
@@ -329,7 +357,9 @@ def test_a_crashed_attempt_keeps_the_last_good_cost():
                 _result_line(subtype="error_during_execution", total_cost_usd=0)
             ),
         )
-    assert raised.value.attempt.cost_usd_est == 4.12
+    attempt = raised.value.attempt
+    assert attempt is not None
+    assert attempt.cost_usd_est == 4.12
 
 
 def test_the_request_carries_the_prompt_the_options_and_the_resume():
@@ -441,7 +471,9 @@ def test_an_idle_kill_is_a_failed_turn_that_names_the_bound():
             ),
             reap_cell=_no_reap,
         )
-    assert raised.value.attempt.bound == "idle"
+    attempt = raised.value.attempt
+    assert attempt is not None
+    assert attempt.bound == "idle"
 
 
 def test_a_wall_clock_kill_before_any_result_names_the_bound_too():
@@ -509,7 +541,7 @@ def test_a_turn_that_ended_on_its_own_is_not_reaped():
         options={},
         watch=lambda _line: None,
         exec_stream=_stream(_result_line(), bound="completion"),
-        reap_cell=lambda container, **_k: reaped.append(container),
+        reap_cell=_recording_reap(reaped),
     )
     assert reaped == []
 

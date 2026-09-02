@@ -244,7 +244,7 @@ Event = (
     | Teardown
 )
 
-_KINDS: dict[str, type] = {
+_KINDS: dict[str, type[Event]] = {
     cls.__name__: cls
     for cls in (
         Preflight,

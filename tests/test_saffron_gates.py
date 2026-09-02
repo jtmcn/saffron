@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
+import tomllib
 from pathlib import Path
 
 import pytest
 
 from saffron.gates.contract import parse_gate_json
-from saffron.gates.runner import run_gate
 from saffron.repos.policy import load_policy
 
 REPO = Path(__file__).resolve().parent.parent
@@ -25,9 +26,196 @@ def test_the_policy_parses():
     assert set(policy.gates) == {"format", "lint", "types", "tests", "shacl"}
 
 
-def test_types_skips_because_saffron_declares_no_type_checker():
-    result = run_gate("types", GATES / "types", REPO)
-    assert result.status == "skip"
+def test_the_type_checker_override_is_scoped_to_the_one_file_that_needs_it():
+    """`unresolved-import = "ignore"` is load-bearing — the host is forbidden to
+    import the Agent SDK (§2.1) and the cell image installs it where it is used
+    — and it is the one rule in this repo turned off rather than satisfied.
+    `agent_runner.py` runs inside the cell where nothing else type-checks it, so
+    a widened `include` would let a typo'd import there go unreported."""
+    config = tomllib.loads((REPO / "pyproject.toml").read_text())
+    (override,) = config["tool"]["ty"]["overrides"]
+    assert override["include"] == ["images/agent_runner.py"]
+    assert override["rules"] == {"unresolved-import": "ignore"}
+
+
+def test_no_gate_script_shadows_a_stdlib_module():
+    """python puts a script's own directory on `sys.path[0]`, so a `types.py`
+    beside the gates shadowed the stdlib `types` that every `import json` and
+    `import subprocess` reaches through. Measured: it crashed under the pyenv
+    interpreter and survived under the venv's, writing nothing to stdout —
+    which is indistinguishable from a gate that never ran (§5.4)."""
+    shadowed = {p.stem for p in GATES.glob("*.py")} & set(sys.stdlib_module_names)
+    assert not shadowed, f"gate scripts shadow stdlib modules: {sorted(shadowed)}"
+
+
+def test_types_names_its_tool_and_passes_on_a_clean_tree():
+    """Invoked directly rather than through `run_gate`, for the reason the
+    ruff gates state below: `_gate_env` strips the venv that is this repo's
+    own declared toolchain."""
+    done = subprocess.run(
+        [str(GATES / "types")], cwd=REPO, capture_output=True, text=True, timeout=300
+    )
+    result = parse_gate_json(done.stdout, expected_gate="types")
+    assert result.status == "pass", result.summary
+    assert result.tool and result.tool.startswith("ty ")
+
+
+def test_types_fails_on_code_ty_rejects(tmp_path):
+    """A gate that has only ever passed is not known to be a gate."""
+    (tmp_path / "bad.py").write_text("def f(x: int) -> str:\n    return x\n")
+    done = subprocess.run(
+        [str(GATES / "types")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="types")
+    assert result.status == "fail", result.summary
+    assert len(result.failures) == 1
+    assert result.failures[0].file.endswith("bad.py")
+    assert result.failures[0].code == "invalid-return-type"
+    assert result.failures[0].line == 2
+
+
+def test_types_works_in_a_tree_that_has_no_venv(tmp_path):
+    """A cell's worktree is a fresh `git init`/fetch/checkout into a volume and
+    `.venv` is gitignored, so it is never there. A configured
+    `environment.python` that does not resolve is a hard ty failure — exit 2,
+    nothing on stdout — which this gate correctly calls `error`, and `error`
+    aborts the attempt and is charged to nobody (§5.4). A blocking gate that
+    can never run is the same defect as one that can never fail.
+
+    The repo's own config, in a tree shaped like a cell's: neither of the other
+    tests exercises that pair — one runs at `REPO`, which has a `.venv`, and
+    the rest in a `tmp_path` with no config at all.
+    """
+    (tmp_path / "pyproject.toml").write_text((REPO / "pyproject.toml").read_text())
+    (tmp_path / "bad.py").write_text("def f(x: int) -> str:\n    return x\n")
+    done = subprocess.run(
+        [str(GATES / "types")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="types")
+    assert result.status == "fail", result.summary
+
+
+def _stub_ty(tmp_path, version_body: str, check_body: str = "exit 0") -> dict[str, str]:
+    """A `ty` on PATH whose version no string literal in the gate could guess."""
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    (stub / "ty").write_text(
+        f'#!/bin/sh\ncase "$1" in\n  --version) {version_body} ;;\n'
+        f"  *) {check_body} ;;\nesac\n"
+    )
+    (stub / "ty").chmod(0o755)
+    return {**os.environ, "PATH": f"{stub}:{os.environ['PATH']}"}
+
+
+def test_types_reports_the_version_the_tool_printed_not_a_literal(tmp_path):
+    """The invariant `tool` exists for: obtained *by executing* the tool
+    (§5.4, Appendix H). Asserting the string starts with "ty" cannot tell an
+    executed version from a literal in the gate."""
+    env = _stub_ty(tmp_path, 'echo "ty 9.9.9-stub"')
+    done = subprocess.run(
+        [str(GATES / "types")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=env,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="types")
+    assert result.tool == "ty 9.9.9-stub"
+
+
+def test_types_errors_when_its_tool_runs_and_reports_no_version(tmp_path):
+    """A tool that runs and identifies nothing cannot produce the field that
+    separates a gate that ran from one that did not, so it is `error`."""
+    env = _stub_ty(tmp_path, "exit 0")
+    done = subprocess.run(
+        [str(GATES / "types")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=env,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="types")
+    assert result.status == "error"
+    assert "no version" in result.summary
+
+
+def test_types_errors_when_ty_exits_beyond_pass_or_fail(tmp_path):
+    """ty exits 0 clean and 1 on diagnostics. Anything else is ty itself
+    failing — an unresolvable configured environment, an unreadable file — and
+    that is charged to nobody, not read as a verdict on the repo's code.
+
+    The stub prints a well-formed diagnostic and a count that matches it, so
+    only the exit code can distinguish this from an ordinary `fail` — with an
+    empty stdout the count guard fires instead and the test passes without
+    ever exercising the rule it names."""
+    env = _stub_ty(
+        tmp_path,
+        'echo "ty 1.0.0"',
+        check_body='echo "a.py:1:1: error[bad] nope"; echo "Found 1 diagnostic"; '
+        "exit 2",
+    )
+    done = subprocess.run(
+        [str(GATES / "types")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=env,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="types")
+    assert result.status == "error", result.summary
+
+
+def test_types_errors_when_it_parses_fewer_diagnostics_than_ty_counted(tmp_path):
+    """§5.4: partial results are not results. ty reports diagnostics this
+    parser cannot key — one carrying no line, a message shape that moved — and
+    a dropped failure is both a smaller repair target than the real one and a
+    failure the baseline subtraction can never count as new."""
+    env = _stub_ty(
+        tmp_path,
+        'echo "ty 1.0.0"',
+        check_body='echo "b.py: error[io] Failed to read file"; '
+        'echo "Found 1 diagnostic"; exit 1',
+    )
+    done = subprocess.run(
+        [str(GATES / "types")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=env,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="types")
+    assert result.status == "error", result.summary
+    assert "parsed 0" in result.summary
+
+
+def test_types_errors_rather_than_passes_when_output_will_not_parse(tmp_path):
+    """ty has no JSON output, so the gate parses `concise` lines. A non-zero
+    exit that yields no parsed diagnostic means the format moved under us —
+    and silence is bit-for-bit a pass (§5.4)."""
+    env = _stub_ty(tmp_path, 'echo "ty 1.0.0"', check_body='echo "surprise"; exit 1')
+    done = subprocess.run(
+        [str(GATES / "types")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=env,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="types")
+    assert result.status == "error", result.summary
+    assert result.tool == "ty 1.0.0", "a parse failure is not a reason to drop the tool"
 
 
 @pytest.mark.parametrize("name", ["format", "lint"])

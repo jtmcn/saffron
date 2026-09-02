@@ -64,6 +64,17 @@ def _spec(*, touches=(), criteria=()):
     )
 
 
+def _recording_gh(called: list):
+    """`GhRunner` returns a CompletedProcess; a fake returning None is a fake
+    of a different function."""
+
+    def _gh(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        called.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    return _gh
+
+
 def _repo_with_commit(path):
     path.mkdir()
     git(path, "init", "-q")
@@ -2005,7 +2016,7 @@ def test_a_gone_parent_is_the_tasks_failure_not_infrastructure(tmp_path, monkeyp
         out_dir=tmp_path / "batch",
         token=None,
         parent_branch="saffron/SA-0020",
-        gh=lambda argv: called.append(argv),
+        gh=_recording_gh(called),
         watch=lambda _: None,
     )
 

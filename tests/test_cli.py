@@ -697,6 +697,7 @@ def test_which_of_a_parents_rows_supplies_the_sha_is_the_newest_waiting_one(
 
     # ...and with that one row's state changed, the same ten rows and the
     # same real branch resolve to nothing: it is the state that decides.
+    assert waiting_row is not None
     ledger.set_task_state(waiting_row, "ORPHANED")
     assert cli._resolve_stacked_on(
         ledger, repo_id, ["SA-0013"], mirror=mirror, url=url, watch=lambda _: None

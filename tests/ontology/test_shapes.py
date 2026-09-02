@@ -19,7 +19,8 @@ def _named_shape_of(shapes_graph: rdflib.Graph, node) -> set[str]:
     for named in shapes_graph.subjects(rdflib.RDF.type, SH.NodeShape):
         if not isinstance(named, rdflib.URIRef):
             continue
-        seen, frontier = set(), [named]
+        seen = set()
+        frontier: list[rdflib.BNode | rdflib.URIRef] = [named]
         while frontier:
             current = frontier.pop()
             if current in seen:

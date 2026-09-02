@@ -24,6 +24,7 @@ RUNNER_PATH = Path(__file__).resolve().parents[1] / "images" / "agent_runner.py"
 
 def _load():
     spec = importlib.util.spec_from_file_location("agent_runner", RUNNER_PATH)
+    assert spec and spec.loader, f"no import spec for {RUNNER_PATH}"
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

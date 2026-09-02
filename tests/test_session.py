@@ -5,6 +5,7 @@ import itertools
 import json
 import shutil
 from collections.abc import Sequence
+from dataclasses import replace
 
 import pytest
 
@@ -139,8 +140,11 @@ def test_an_early_return_still_produces_a_complete_outcome(tmp_path, monkeypatch
     assert outcome.agent_subjects == []
 
 
-def _spec(**overrides):
-    fields = dict(
+def _spec(**overrides) -> session.CellSpec:
+    """Built typed and then `replace`d rather than splatted from a dict: a
+    `dict` of mixed values widens every field to a union, so the `types` gate
+    could not see a factory handing `CellSpec` the wrong shape."""
+    base = session.CellSpec(
         spec_id="SY-1",
         spec_sha="a" * 64,
         branch="saffron/SY-1",
@@ -149,7 +153,7 @@ def _spec(**overrides):
         spec_type="feature",
         body="do the thing",
     )
-    return session.CellSpec(**(fields | overrides))
+    return replace(base, **overrides)
 
 
 def test_stacked_on_defaults_to_unset():
@@ -232,28 +236,35 @@ _PLAN = {
 }
 
 
-def _agent(*texts):
+class _agent:
     """A fake agent: one turn per text, each returning a result the host can
     read. It records the prompts, because the checkpoint's whole behaviour is
-    what it asks for and when."""
-    turns = iter(texts)
+    what it asks for and when.
 
-    def _run(container, *, prompt, options, resume=None, watch=print, **kwargs):
-        _run.prompts.append(prompt)
-        _run.resumes.append(resume)
+    A callable object rather than a closure with attributes hung off it: an
+    attribute assigned to a function is invisible to the `types` gate, so a
+    test reading `agent.prompt` for `agent.prompts` failed at runtime only.
+    """
+
+    def __init__(self, *texts: str) -> None:
+        self._turns = iter(texts)
+        self.prompts: list[str] = []
+        self.resumes: list[str | None] = []
+        self.session_id: str | None = "sess-1"
+
+    def __call__(
+        self, container, *, prompt, options, resume=None, watch=print, **kwargs
+    ):
+        self.prompts.append(prompt)
+        self.resumes.append(resume)
         return implement.AttemptResult(
-            session_id=_run.session_id,
+            session_id=self.session_id,
             subtype="success",
             terminal_reason="completed",
             num_turns=1,
             cost_usd_est=0.1,
-            text=next(turns),
+            text=next(self._turns),
         )
-
-    _run.prompts = []
-    _run.resumes = []
-    _run.session_id = "sess-1"
-    return _run
 
 
 def _block(plan):
@@ -2337,9 +2348,12 @@ def test_a_crashed_plan_turn_keeps_its_own_exception_and_its_cost():
     cell (§4.5). It carries what the checkpoint already spent, or the re-prompt's
     first half is a turn nobody charged for."""
 
+    called = False
+
     def _crash(container, *, prompt, options, resume=None, watch=print, **kwargs):
-        if not _crash.called:
-            _crash.called = True
+        nonlocal called
+        if not called:
+            called = True
             return implement.AttemptResult(
                 session_id="sess-1",
                 subtype="success",
@@ -2360,7 +2374,6 @@ def test_a_crashed_plan_turn_keeps_its_own_exception_and_its_cost():
             ),
         )
 
-    _crash.called = False
     with pytest.raises(implement.AgentFailed) as raised:
         session.plan_checkpoint(
             "cell",
@@ -2371,7 +2384,9 @@ def test_a_crashed_plan_turn_keeps_its_own_exception_and_its_cost():
             watch=lambda _line: None,
         )
     # Both turns: the one that failed validation and the one that crashed.
-    assert raised.value.attempt.cost_usd_est == 3.1
+    attempt = raised.value.attempt
+    assert attempt is not None
+    assert attempt.cost_usd_est == 3.1
 
 
 def test_a_critic_session_is_capped_at_what_is_left_not_at_the_whole_budget():

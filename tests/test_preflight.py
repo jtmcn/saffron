@@ -278,7 +278,7 @@ def test_the_probe_script_itself_answers_a_401(tmp_path):
             self.send_response(401)
             self.end_headers()
 
-        def log_message(self, *a):
+        def log_message(self, format, *args):
             pass
 
     server = HTTPServer(("127.0.0.1", 0), Unauthorized)
@@ -294,4 +294,6 @@ def test_the_probe_script_itself_answers_a_401(tmp_path):
     finally:
         server.shutdown()
     assert done.returncode == 0, done.stderr
-    assert preflight._STATUS.search(done.stdout).group(1) == "401"
+    status = preflight._STATUS.search(done.stdout)
+    assert status is not None, done.stdout
+    assert status.group(1) == "401"

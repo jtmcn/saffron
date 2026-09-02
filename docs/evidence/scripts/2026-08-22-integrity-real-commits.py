@@ -2,6 +2,7 @@ import importlib.util, subprocess, sys
 sys.path.insert(0, "/Users/joel/Code/saffron")
 spec = importlib.util.spec_from_file_location("ri",
     "/private/tmp/claude-501/-Users-joel-Code-saffron/048123ee-fefb-49c2-b32a-b235869b91dd/scratchpad/sa4/saffron/gates/core/integrity.py")
+assert spec and spec.loader, "the spike's source path no longer exists"
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 from saffron.repos.policy import load_policy
 from saffron.cell.worktree import DIFF_FLAGS

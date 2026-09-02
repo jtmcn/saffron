@@ -1,6 +1,6 @@
 import fcntl
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from unittest import mock
 
 from saffron.agents.findings import Finding
@@ -177,8 +177,11 @@ def test_a_gate_absent_from_advisory_gates_is_not_marked():
     assert "(advisory)" not in rendered
 
 
-def line(**overrides):
-    defaults = dict(
+def line(**overrides) -> QueueLine:
+    """Built typed and then `replace`d rather than splatted from a dict: a
+    `dict` of mixed values widens every field to a union, so the `types` gate
+    could not see a factory handing a model the wrong shape."""
+    base = QueueLine(
         repo="thermal-edge",
         spec_id="TE-9001",
         state="READY_FOR_REVIEW",
@@ -191,7 +194,7 @@ def line(**overrides):
         note="",
         risk="standard",
     )
-    return QueueLine(**{**defaults, **overrides})
+    return replace(base, **overrides)
 
 
 def test_the_index_holds_one_line_per_task():
@@ -372,8 +375,8 @@ def test_every_state_the_driver_can_produce_ranks_above_ordinary():
         assert _STATE_RANK[state] < _ORDINARY, state
 
 
-def _finding(**kw):
-    base = dict(
+def _finding(**kw) -> Finding:
+    base = Finding(
         lens="correctness",
         severity="blocker",
         file="a.py",
@@ -381,7 +384,9 @@ def _finding(**kw):
         claim="the tz default is wrong",
         anchored=True,
     )
-    return Finding(**{**base, **kw})
+    # Validated, not copied: `model_copy` skips validation, so an
+    # override the model would reject builds silently.
+    return Finding.model_validate(base.model_dump() | kw)
 
 
 def test_a_finding_cannot_close_an_issue_or_notify_an_account():
@@ -1113,7 +1118,7 @@ def test_re_running_a_spec_replaces_its_row_rather_than_doubling_it(tmp_path):
     )
     # Same spec id, a different repo: the batch tree holds several, and ids are
     # unique only within one.
-    elsewhere = QueueLine(**{**asdict(fresh), "repo": "thermal-edge"})
+    elsewhere = replace(fresh, repo="thermal-edge")
 
     append_queue_line(tmp_path, failed, header={})
     append_queue_line(tmp_path, elsewhere, header={})

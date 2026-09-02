@@ -30,6 +30,19 @@ from saffron.events import (
     read_log,
 )
 
+
+def _read[E: Event](tmp_path, kind: type[E]) -> list[E]:
+    """`read_log` returns the `Event` union; every test here knows the kind it
+    wrote. Narrowing at the read is what lets the `types` gate see an
+    attribute read off the wrong kind — the union is the whole point of the
+    module, so a test that reads it untyped gives that up."""
+    narrowed: list[E] = []
+    for event in read_log(tmp_path):
+        assert isinstance(event, kind), f"log holds a {type(event).__name__}"
+        narrowed.append(event)
+    return narrowed
+
+
 _ONE_OF_EACH = [
     Preflight(timestamp=1.0, spec_id="SA-0029", step="proxy_start", detail="up"),
     Baseline(timestamp=2.0, spec_id="SA-0029", aborted=("tests",)),
@@ -83,7 +96,7 @@ def test_gate_result_error_and_fail_are_distinguishable(tmp_path):
             timestamp=2.0, spec_id="SA", gate="tests", status="fail", against="attempt"
         )
     )
-    statuses = [e.status for e in read_log(tmp_path)]
+    statuses = [e.status for e in _read(tmp_path, GateResult)]
     assert statuses == ["error", "fail"]
 
 
@@ -95,7 +108,12 @@ def test_gate_result_carries_all_four_statuses(tmp_path):
                 timestamp=1.0, spec_id="SA", gate="g", status=status, against="attempt"
             )
         )
-    assert [e.status for e in read_log(tmp_path)] == ["pass", "fail", "skip", "error"]
+    assert [e.status for e in _read(tmp_path, GateResult)] == [
+        "pass",
+        "fail",
+        "skip",
+        "error",
+    ]
 
 
 def test_budget_ceilings_round_trip_distinctly(tmp_path):
@@ -110,7 +128,7 @@ def test_budget_ceilings_round_trip_distinctly(tmp_path):
     ]
     for event in events:
         log.append(event)
-    loaded = read_log(tmp_path)
+    loaded = _read(tmp_path, Budget)
     assert loaded == events
     assert [e.ceiling for e in loaded] == ["budget_usd", "max_attempts", "max_turns"]
     assert len({e.ceiling for e in loaded}) == 3
@@ -151,7 +169,7 @@ def test_terminal_distinguishes_all_five_zero_commit_endings(tmp_path):
     ]
     for event in events:
         log.append(event)
-    loaded = read_log(tmp_path)
+    loaded = _read(tmp_path, Terminal)
     assert loaded == events
     assert len({e.reason for e in loaded}) == 5
 
@@ -162,7 +180,7 @@ def test_agent_raw_line_round_trips_still_marked_as_raw(tmp_path):
     log = EventLog(tmp_path)
     event = Agent(timestamp=1.0, spec_id="SA", raw=True, line="not json at all")
     log.append(event)
-    [loaded] = read_log(tmp_path)
+    [loaded] = _read(tmp_path, Agent)
     assert loaded.raw is True
     assert loaded == event
 
@@ -172,7 +190,7 @@ def test_agent_carries_a_parsed_dict_verbatim(tmp_path):
     cell_event = {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}
     event = Agent(timestamp=1.0, spec_id="SA", raw=False, event=cell_event)
     log.append(event)
-    [loaded] = read_log(tmp_path)
+    [loaded] = _read(tmp_path, Agent)
     assert loaded.event == cell_event
     assert loaded.raw is False
 
@@ -298,7 +316,7 @@ def test_a_gate_that_never_ran_records_no_failure_count(tmp_path):
             new_failures=0,
         )
     )
-    skipped, failed = read_log(tmp_path)
+    skipped, failed = _read(tmp_path, GateResult)
     assert skipped.new_failures is None, "a skipped gate must not report a counted zero"
     assert failed.new_failures == 0, "a counted zero must survive as zero"
     assert skipped.new_failures != failed.new_failures
@@ -317,7 +335,7 @@ def test_a_gate_result_says_which_tree_it_ran_against(tmp_path):
                 against=against,
             )
         )
-    assert [e.against for e in read_log(tmp_path)] == [
+    assert [e.against for e in _read(tmp_path, GateResult)] == [
         "baseline",
         "attempt",
         "rebuttal",
@@ -337,13 +355,18 @@ def test_an_attempt_names_its_phase(tmp_path):
             spent_usd_est=1.0,
         )
     )
-    (loaded,) = read_log(tmp_path)
+    (loaded,) = _read(tmp_path, Attempt)
     assert (loaded.phase, loaded.attempt) == ("REPAIR", 3)
 
 
 def test_the_enumerations_are_pinned(tmp_path):
-    """`.saffron/gates/types` always skips, so a `Literal` is documentation
-    unless something asserts its members."""
+    """What the `types` gate cannot see, and why this stays beside it.
+
+    Measured against the gate: a member *removed* from one of these literals
+    fails both. A member quietly *added* fails only this — the gate is happy,
+    because a wider literal breaks no existing call. And widening the field
+    itself (`ceiling: Ceiling` to `ceiling: str`) is invisible to both, in any
+    checker, because nothing exercises the wider value (BACKLOG item 39)."""
     assert typing.get_args(Ceiling) == ("budget_usd", "max_attempts", "max_turns")
     assert typing.get_args(GateStatus) == ("pass", "fail", "skip", "error")
     assert set(typing.get_args(Phase)) == {
@@ -421,7 +444,7 @@ def test_a_field_a_newer_saffron_added_does_not_delete_the_event(tmp_path):
         }
     )
     (tmp_path / "events.jsonl").write_text(v2 + "\n")
-    (loaded,) = read_log(tmp_path)
+    (loaded,) = _read(tmp_path, Teardown)
     assert (loaded.step, loaded.ok) == ("s", True)
 
 

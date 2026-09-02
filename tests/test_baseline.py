@@ -1,8 +1,8 @@
 from saffron.gates.baseline import is_no_progress, subtract_baseline, suite_drift
-from saffron.gates.contract import Failure, GateResult
+from saffron.gates.contract import Failure, GateResult, GateStatus
 
 
-def gate(name: str, *failures: Failure, status: str = "fail") -> GateResult:
+def gate(name: str, *failures: Failure, status: GateStatus = "fail") -> GateResult:
     return GateResult(gate=name, status=status, failures=list(failures))
 
 

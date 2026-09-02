@@ -1,4 +1,5 @@
 import subprocess
+from typing import Any
 
 import pytest
 
@@ -186,8 +187,11 @@ def test_dropped_findings_are_kept_so_the_drop_rate_is_computable(diff, read_hea
 
 
 def test_severity_is_three_levels_and_nothing_else():
+    # Through an untyped alias: "critical" is the subject of the test, so
+    # `types` would otherwise report the test for demonstrating its own point.
+    make: Any = Finding
     with pytest.raises(ValueError):
-        Finding(lens="l", severity="critical", file="a.py", line=1, claim="c")
+        make(lens="l", severity="critical", file="a.py", line=1, claim="c")
 
 
 def test_diff_shaped_content_is_content(repo):
