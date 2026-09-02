@@ -2410,6 +2410,11 @@ unrelated red baseline in item 41. "HEAD already says what it did" is true only
 for a reader who re-reads the diff against every finding; the generated body
 says the opposite, and the body is what gets read.
 
+`SA-0034` (plan Task 6) is the natural home for the *recording* half — it is
+already a bug spec about a rebuttal outcome that is not written down — but its
+`forbidden` list excludes `saffron/report/**`, and no spec in part 3 touches
+`pr_body.py` either. The visible half has no home in that plan yet.
+
 Done looks like the artifact's *shape* failure not being silently equivalent to
 the agent having no answer. Cheapest honest fix is not a re-prompt: it is that a
 `RebuttalTurn` carrying `error` renders in the pull request body as

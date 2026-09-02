@@ -263,6 +263,53 @@ def test_a_run_that_timed_out_is_a_probe_that_did_not_run(monkeypatch):
         preflight.assert_proxy_reaches_upstream("img", "saffron-cells", "10.88.0.2")
 
 
+def test_a_cell_is_not_made_to_proxy_its_own_loopback():
+    """BACKLOG item 41. `proxy_env` set `NO_PROXY: ""`, so `urllib` routed
+    everything through squid — `127.0.0.1` included, which squid denies
+    because it allowlists only the upstream. A cell could not reach a server
+    it had started itself, so the test below failed at baseline on every cell
+    run (ten `TCP_DENIED/403` lines in one) and baseline subtraction hid it.
+
+    These variables bound nothing: the cells network is created `--internal`
+    (`cell/runtime.py:154`) and only the proxy is dual-homed, so a cell has no
+    route out whatever it sets them to. Driven rather than asserted against
+    `urllib`'s bypass helper, which typeshed does not export.
+    """
+    import os
+    import socket
+    import subprocess
+    import sys
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    with socket.socket() as probe:
+        if probe.connect_ex(("127.0.0.1", proxy.PROXY_PORT)) == 0:
+            pytest.skip(f"something is listening on 127.0.0.1:{proxy.PROXY_PORT}")
+
+    class Unauthorized(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(401)
+            self.end_headers()
+
+        def log_message(self, format, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Unauthorized)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/v1/models"
+        done = subprocess.run(
+            [sys.executable, "-c", preflight._UPSTREAM_PROBE.format(url=url)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=os.environ | proxy.proxy_env("127.0.0.1"),
+        )
+    finally:
+        server.shutdown()
+    assert done.returncode == 0, done.stderr
+
+
 def test_the_probe_script_itself_answers_a_401(tmp_path):
     """The script, executed — not its output, fabricated. Every other test here
     asserts the pass *condition*; this one runs `_UPSTREAM_PROBE` against a real

@@ -145,4 +145,11 @@ def stop_proxy() -> None:
 
 def proxy_env(address: str) -> dict[str, str]:
     url = f"http://{address}:{PROXY_PORT}"
-    return {"HTTPS_PROXY": url, "HTTP_PROXY": url, "NO_PROXY": ""}
+    # Loopback is the cell talking to itself, and squid denies it: a test that
+    # binds a socket failed at baseline on every run (backlog item 41). These
+    # variables bound nothing anyway — the cells network is `--internal`.
+    return {
+        "HTTPS_PROXY": url,
+        "HTTP_PROXY": url,
+        "NO_PROXY": "127.0.0.1,localhost",
+    }
