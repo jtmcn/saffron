@@ -92,14 +92,17 @@ spec's.
 - **PACKAGE's lines are the ones an unattended morning needs most** — a refused
   push, a conflict with the default branch, new failures against `main` — and
   they are strings.
-- **The adapter and eleven `watch=watch` keyword sites live in
-  `saffron/cell/session.py`.** They sit in `_drive_cell` (**6**),
-  `plan_checkpoint` (**3**), `run_one_cell` (**1**) and `_repair` (**1**),
-  counted 2026-09-01 **before `SA-0030` ran**; the count is the scope, the
-  symbols are how to find them, and no line number here survives that
-  migration. The adapter can live nowhere else, and renaming the phases'
-  parameter forces edits there, so the file is in `touches` — an earlier cut
-  of this spec `forbid` it and was unrunnable.
+- **The adapter and eight keyword sites live in `saffron/cell/session.py`.**
+  Re-counted against `saffron/SA-0030` after that cell ran: `_drive_cell`
+  (**4**), `plan_checkpoint` (**3**), `_repair` (**1**). It was eleven before,
+  spread `_drive_cell` 6 / `plan_checkpoint` 3 / `run_one_cell` 1 / `_repair`
+  1 — `SA-0030` consolidated three of them away, which is why this spec cites
+  symbols and not the line numbers an earlier cut carried. `SA-0030` built
+  **two** adapters, not one: `_phase_watch` is constructed separately inside
+  `plan_checkpoint` and again in `_drive_cell` as `to_watch`. Both go. The
+  adapter can live nowhere else, and renaming the phases' parameter forces
+  edits there, so the file is in `touches` — an earlier cut of this spec
+  `forbid` it and was unrunnable.
 - **PACKAGE's events cannot reach the log while `emit` is built inside
   `run_one_cell`.** `package()` is called from `saffron/cli.py`, *outside*
   `run_one_cell`, so its eight call sites would fall back to `print` and none
@@ -128,8 +131,10 @@ spec's.
       `emit` — the one `SA-0030` built — and a test calls it with none and
       asserts it still prints. Hoisting a fan-out in `cli.py` must not make the
       supervisor uncallable without one
-- [ ] The eleven `watch=` keyword call sites in `saffron/cell/session.py` pass
-      `emit` instead
+- [ ] The keyword call sites in `saffron/cell/session.py` pass `emit` instead,
+      and **both** `_phase_watch` constructions go — `plan_checkpoint`'s and
+      `_drive_cell`'s `to_watch`. Count them yourself: it was eleven before
+      `SA-0030` and eight after, and it may move again
 - [ ] The seven test files in `touches` are migrated with their callees and the
       suite is green — no `watch=` remains anywhere under `tests/`
 - [ ] The adapter `SA-0030` left at the phase boundary is **deleted**
@@ -146,6 +151,17 @@ spec's.
       `tests/test_events.py` is that assertion's ancestor and must be retired
       *with* the function rather than left importing a symbol that no longer
       exists
+- [ ] **`Agent.event` carries the parsed cell event again.** `SA-0030`'s
+      contract lens raised this as a concern and it is correct: `_phase_watch`
+      receives a string `implement._consume` has *already* rendered with
+      `_describe`, so every per-turn agent line lands in `Agent.detail` as
+      opaque prose and `Agent.event` is permanently `None` — the opposite of
+      what `events.Agent`'s docstring promises, which reserves `detail` for a
+      host-authored fact with no cell event behind it. The dict cannot be
+      recovered downstream of `_describe`, which is why this is `SA-0031`'s to
+      fix and not `SA-0030`'s: emit `Agent(event=...)` at the call site in
+      `implement.py`. A test asserts a driven agent turn leaves a log entry
+      whose `event` is the dict, not its rendering
 - [ ] An `Agent` event wraps the cell's event dict verbatim, and the
       `agent: (raw)` path — a line that is not an event, from a process sharing
       the runner's stdout — is still shown to the operator and still never
