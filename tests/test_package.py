@@ -1,11 +1,13 @@
 import json
 import subprocess
 import subprocess as sp
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from saffron.agents.findings import Finding
+from saffron.events import describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
 from saffron.intake import Spec, parse_spec
@@ -36,7 +38,7 @@ from saffron.phases.package import (
     reverify,
 )
 from saffron.phases.review import LensReview
-from saffron.repos.mirror import ensure_mirror
+from saffron.repos.mirror import GitError, ensure_mirror
 from saffron.repos.policy import PolicyError
 
 
@@ -255,7 +257,6 @@ def test_reverify_execs_the_gates_from_the_mount_never_the_applied_tree(
         policy=Policy(gates={"tests": GateDeclaration()}),
         gates_dir=tmp_path / "gates",
         image="img",
-        watch=lambda _line: None,
     )
     assert (new, head) == ([], [])
     assert asked == [["/gates/.saffron/gates/tests"]] * 2
@@ -734,6 +735,8 @@ def test_a_conflict_persists_merge_failed_and_pushes_nothing(monkeypatch, tmp_pa
     def never_called(argv):
         raise AssertionError("gh must not be reached on a conflict")
 
+    said: list = []
+
     result = package(
         outcome,
         spec=spec,
@@ -744,10 +747,17 @@ def test_a_conflict_persists_merge_failed_and_pushes_nothing(monkeypatch, tmp_pa
         out_dir=tmp_path / "batch",
         token=None,
         gh=never_called,
-        watch=lambda _: None,
+        emit=said.append,
     )
 
     assert result.state == "MERGE_FAILED"
+    # Which branch conflicts with which is the whole content of the line, and
+    # the census below can only see that *something* was emitted here. A
+    # module-level `_say = print` alias reverted this site with the census
+    # green; the rendered line is what that cannot fake.
+    assert "PACKAGE: saffron/SA-0005 conflicts with main" in [
+        describe(event) for event in said
+    ]
     row = next(r for r in ledger.queue_lines() if r["task_id"] == task_id)
     assert row["state"] == "MERGE_FAILED"
     # The remote must be untouched — the assertion the state alone cannot make.
@@ -820,6 +830,8 @@ def packageable(monkeypatch, tmp_path):
     ledger.set_task_state(task_id, "READY_FOR_REVIEW")
     ledger.finish_run(run_id, "COMPLETE")
 
+    emitted: list = []
+
     yield SimpleNamespace(
         work=work,
         remote=remote,
@@ -836,8 +848,12 @@ def packageable(monkeypatch, tmp_path):
             ledger=ledger,
             out_dir=tmp_path / "batch",
             token=None,
-            watch=lambda _: None,
+            emit=emitted.append,
         ),
+        # Recorded, not dropped: a branch an existing test already drives can
+        # then assert the line it emits, which is what five of the seven
+        # migrated sites had no way to do.
+        events=emitted,
         outcome=_cell_outcome(task_dir, task_id, run_id),
     )
     ledger.close()
@@ -880,6 +896,284 @@ def test_a_green_cell_becomes_a_branch_a_draft_pr_and_a_queue_line(packageable):
     assert "SA-0005" in index
 
 
+def test_the_pull_request_url_is_logged_as_an_event(packageable):
+    """The pull-request line reaches the log, not only the terminal — the one
+    an unattended morning most needs about a task that reached PACKAGE. Every
+    keyword is read out of `packageable.kwargs` explicitly, rather than
+    spreading a merged dict, so the fixture's own `emit=lambda _: None` is
+    overridden by this test's own logging one and nothing else."""
+    from saffron.events import EventLog, PhaseStart, describe, read_log
+
+    task_dir = packageable.outcome.task_dir
+    log = EventLog(task_dir)
+    seen: list = []
+
+    def emit(event):
+        seen.append(event)
+        log.append(event)
+
+    kwargs = packageable.kwargs
+    result = package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/9\n"),
+        spec=kwargs["spec"],
+        repo=kwargs["repo"],
+        mirror=kwargs["mirror"],
+        image=kwargs["image"],
+        ledger=kwargs["ledger"],
+        out_dir=kwargs["out_dir"],
+        token=kwargs["token"],
+        emit=emit,
+    )
+
+    assert result.state == "READY_FOR_REVIEW"
+    assert result.pr_url == "https://x/pull/9"
+    # Reached the in-memory fan-out this call was actually handed...
+    assert any(
+        isinstance(event, PhaseStart) and event.detail == result.pr_url
+        for event in seen
+    )
+    # ...and, read back from disk, the durable log too — not merely printed.
+    logged = read_log(task_dir)
+    packaged = [
+        event
+        for event in logged
+        if isinstance(event, PhaseStart) and event.detail == result.pr_url
+    ]
+    # `describe` renders `label` and never reads `phase`. Asserting only the
+    # latter left every PACKAGE line free to print under another label with the
+    # suite green — measured, 1163 passed with `label="REVIEW"`.
+    assert [describe(event) for event in packaged] == [f"PACKAGE: {result.pr_url}"]
+    assert packaged[0].phase == "PACKAGE"
+
+
+def test_a_worktree_that_will_not_go_away_is_said_and_not_raised(
+    monkeypatch, packageable
+):
+    """The cleanup line was the last of the seven with no witness but the
+    census, and the census cannot tell a demotion from a deletion. Two
+    properties at once: the sentence reaches `emit`, and a cleanup that fails
+    never replaces the outcome — swallowing the `GitError` is what keeps a
+    packaged pull request from surfacing as exit 2 (infrastructure)."""
+    stuck = GitError("worktree is locked")
+    monkeypatch.setattr(
+        "saffron.repos.mirror.remove_worktree",
+        lambda mirror, dest: (_ for _ in ()).throw(stuck),
+    )
+
+    result = package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/4\n"),
+        **packageable.kwargs,
+    )
+
+    # The pull request stands. `finally` runs after the result is built, so a
+    # raise here would discard a branch that is already pushed.
+    assert result.state == "READY_FOR_REVIEW"
+    assert result.pr_url == "https://x/pull/4"
+
+    scratch = packageable.out_dir / "package" / "SA-0005"
+    assert f"PACKAGE: could not remove {scratch}: {stuck}" in [
+        describe(event) for event in packageable.events
+    ]
+
+
+def _write_aliases(tree) -> frozenset[str]:
+    """Names this module binds to a stream writer, so a call through one is
+    read as the write it is. Round 2's census matched the *name* `print` and
+    the attribute `.write`; `_say = print` at module scope is neither, and
+    reverted three sites with 1166 tests, ruff and `ty` green. Attribute
+    aliases are recognised only when rooted at `sys` or `os`, so an ordinary
+    `stderr = done.stderr` (`package.py`) does not become a suspect."""
+    import ast
+
+    def rooted_at_a_stream_module(value) -> bool:
+        if not isinstance(value, ast.Attribute):
+            return False
+        if value.attr not in {"write", "writelines", "stdout", "stderr", "print"}:
+            return False
+        while isinstance(value, ast.Attribute):
+            value = value.value
+        return isinstance(value, ast.Name) and value.id in {"sys", "os"}
+
+    bound: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            aliased = (
+                isinstance(node.value, ast.Name) and node.value.id == "print"
+            ) or rooted_at_a_stream_module(node.value)
+            if aliased:
+                bound.update(
+                    target.id for target in node.targets if isinstance(target, ast.Name)
+                )
+        elif isinstance(node, ast.ImportFrom):
+            bound.update(
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name == "print"
+            )
+    return frozenset(bound)
+
+
+def _stream_writes(scope, *, allow: frozenset[str], aliases=frozenset()) -> list[int]:
+    """Lines under `scope` that write to a stream, skipping those an allowed
+    function or any lambda encloses. Policed by *mechanism and location*, not
+    by source text: round 1 asserted an exact list of `print(...)` source
+    segments, and five sites moved to `sys.stdout.write` under it with 1165
+    tests, ruff and `ty` all green — while a reformat of a line it was not
+    policing failed it. A lambda is shielded because an `emit` default that
+    prints is what a caller passing none asked for."""
+    import ast
+
+    def writes(call: ast.Call) -> bool:
+        func = call.func
+        if isinstance(func, ast.Name):
+            return func.id == "print" or func.id in aliases
+        # `sys.stdout.write`, `sys.stderr.writelines`, `os.write`. `package.py`
+        # writes files through `Path.write_text`, never a bare `.write`.
+        return isinstance(func, ast.Attribute) and func.attr in {
+            "write",
+            "writelines",
+            "print",
+        }
+
+    found: list[int] = []
+
+    def walk(node, shielded: bool) -> None:
+        for child in ast.iter_child_nodes(node):
+            inside = (
+                shielded
+                or isinstance(child, ast.Lambda)
+                or (isinstance(child, ast.FunctionDef) and child.name in allow)
+            )
+            if not inside and isinstance(child, ast.Call) and writes(child):
+                found.append(child.lineno)
+            walk(child, inside)
+
+    walk(scope, False)
+    return found
+
+
+def test_only_the_line_no_kind_carries_writes_to_a_stream_outside_emit():
+    """The five sites nobody witnesses behaviourally — ParentGone, conflict,
+    new-failures, LeaseRejected, the cleanup failure — plus the second
+    `unstacked:` site in `cli.py`, which no test drives at all. Reinstating the
+    defect on all six, line for line, left 1165 tests green under round 1's
+    census because it recognised only the literal name `print`.
+
+    `reverify`'s line is the one exception and is allowed by *location*:
+    `events.FINDINGS[1]` records that no `PhaseStart` label fits a lower-case
+    hyphenated step without widening `LineLabel`, which lives in the forbidden
+    `saffron/events.py`."""
+    import ast
+
+    from saffron import cli as cli_module
+    from saffron.phases import package as package_module
+
+    package_tree = ast.parse(Path(package_module.__file__).read_text())
+    # `emit` is `package`'s own default sink — the same shielding the lambda
+    # rule gives a one-line default, spelled longer because it also logs.
+    assert (
+        _stream_writes(
+            package_tree,
+            allow=frozenset({"reverify", "emit"}),
+            aliases=_write_aliases(package_tree),
+        )
+        == []
+    ), (
+        "package.py writes to a stream outside `emit`: a PACKAGE line reaches "
+        "the terminal and not `events.jsonl`. Emit a `PhaseStart` through "
+        "`_emit_package` instead. A legitimate *file* write goes through "
+        "`Path.write_text`, which this does not see."
+    )
+
+    # Only the resolver: `cli.py` is the terminal-facing entry point and prints
+    # all over, legitimately. Its stacking lines are the two that must not.
+    cli_tree = ast.parse(Path(cli_module.__file__).read_text())
+    resolver = next(
+        node
+        for node in ast.walk(cli_tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "_resolve_stacked_on"
+    )
+    assert (
+        _stream_writes(resolver, allow=frozenset(), aliases=_write_aliases(cli_tree))
+        == []
+    ), (
+        "`cli._resolve_stacked_on` writes to a stream: its `unstacked:` lines "
+        "must be `Preflight` events through `emit`, so a stacking decision is "
+        "recoverable the morning after."
+    )
+
+
+def test_package_with_no_emit_still_reaches_the_durable_log(packageable):
+    """`run_one_cell` defaults to a fan-out that logs; `package()` shipped
+    defaulting to one that only prints, which is this spec's own defect wearing
+    a default argument. Today `cli.py` is the only production caller and always
+    passes `emit`, so nothing was broken — this is what stops the second caller
+    from reintroducing it silently."""
+    from saffron.events import PhaseStart, read_log
+
+    kwargs = {k: v for k, v in packageable.kwargs.items() if k != "emit"}
+    result = package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/7\n"),
+        **kwargs,
+    )
+
+    assert result.state == "READY_FOR_REVIEW"
+    assert [
+        describe(event)
+        for event in read_log(packageable.outcome.task_dir)
+        if isinstance(event, PhaseStart) and event.detail == result.pr_url
+    ] == [f"PACKAGE: {result.pr_url}"]
+
+
+def test_the_refusal_to_push_is_emitted_and_the_log_never_learns_the_leak(packageable):
+    """The refusal is the line an unattended morning most needs after the
+    pull-request URL, and it was the least witnessed: demoting it to `print`
+    passed 1163 tests. The leak assertion is a standing guard, not a witness
+    for this diff — `_scan` returns `f"{path}: {what}"` and never the value,
+    and `_finish` already writes that same string into `index.html` — but this
+    seam gives the scan's output a second destination on disk, and a guard is
+    cheap where an undeletable secret is the failure."""
+    from saffron.events import EventLog, PhaseStart, describe, read_log
+
+    work = packageable.work
+    git(work, "checkout", "-q", "cell")
+    (work / "config.py").write_text(f'ANTHROPIC_API_KEY = "{FAKE_KEY}"\n')
+    git(work, "add", "-A")
+    git(work, "commit", "-qm", "the agent hardcoded a key")
+    patch = packageable.outcome.task_dir / "patch.diff"
+    patch.write_text(git(work, "diff", *DIFF_FLAGS, f"{packageable.base}..HEAD") + "\n")
+    git(work, "checkout", "-q", "main")
+
+    task_dir = packageable.outcome.task_dir
+    log = EventLog(task_dir)
+    kwargs = packageable.kwargs
+    result = package(
+        packageable.outcome,
+        gh=_no_gh,
+        spec=kwargs["spec"],
+        repo=kwargs["repo"],
+        mirror=kwargs["mirror"],
+        image=kwargs["image"],
+        ledger=kwargs["ledger"],
+        out_dir=kwargs["out_dir"],
+        token=kwargs["token"],
+        emit=log.append,
+    )
+
+    assert result.state == "MERGE_FAILED"
+    refusals = [
+        describe(event)
+        for event in read_log(task_dir)
+        if isinstance(event, PhaseStart) and "refusing to push" in event.detail
+    ]
+    assert len(refusals) == 1
+    assert refusals[0].startswith("PACKAGE: refusing to push — ")
+    assert FAKE_KEY not in (task_dir / "events.jsonl").read_text()
+
+
 def test_the_bodys_diff_is_pinned_against_the_operators_gitconfig(packageable):
     """`diff.noprefix` is a global anyone may set, and it rewrites every path
     the host parses out of the diff. Without `DIFF_FLAGS`, §7's gate-gaming
@@ -916,6 +1210,18 @@ def test_a_branch_that_moved_is_the_tasks_failure(monkeypatch, packageable):
 
     assert result.state == "MERGE_FAILED" and result.pushed_sha == ""
     assert _state(packageable.ledger, packageable.task_id)["state"] == "MERGE_FAILED"
+    # The branch moving under the task is the operator's line, so it is logged
+    # and not merely printed. A push that *broke* is `error` and says nothing
+    # here — the test below asserts that side.
+    # The event carries git's own `stale info` output; `note` carries the short
+    # form. The operator needs the former and the queue line shows the latter.
+    # Matched, not counted: a later line added to this path is not this test's
+    # business, but the line going missing is.
+    assert [
+        line
+        for line in map(describe, packageable.events)
+        if line.startswith("PACKAGE: the branch moved underneath us")
+    ]
 
 
 def test_a_push_that_broke_is_infrastructure_and_records_nothing(
@@ -1011,6 +1317,12 @@ def test_new_failures_after_the_rebase_are_the_tasks_failure(monkeypatch, packag
         remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=packageable.work)
         == ""
     )
+    # `note` is the queue line; this is the operator's. The count and the
+    # branch it is counted against both live here and nowhere else — the
+    # subtraction is against the *moved* default branch, not the base.
+    assert "PACKAGE: 1 new failures against main" in [
+        describe(event) for event in packageable.events
+    ]
 
 
 def _no_gh(argv):
@@ -1671,6 +1983,8 @@ def stacked_packageable(monkeypatch, tmp_path):
     ledger.set_task_state(task_id, "READY_FOR_REVIEW")
     ledger.finish_run(run_id, "COMPLETE")
 
+    emitted: list = []
+
     yield SimpleNamespace(
         work=work,
         remote=remote,
@@ -1687,8 +2001,12 @@ def stacked_packageable(monkeypatch, tmp_path):
             ledger=ledger,
             out_dir=tmp_path / "batch",
             token=None,
-            watch=lambda _: None,
+            emit=emitted.append,
         ),
+        # Recorded, not dropped: a branch an existing test already drives can
+        # then assert the line it emits, which is what five of the seven
+        # migrated sites had no way to do.
+        events=emitted,
         outcome=_cell_outcome(task_dir, task_id, run_id),
     )
     ledger.close()
@@ -1819,7 +2137,7 @@ def test_a_merged_parent_falls_back_to_the_ordinary_target(tmp_path, monkeypatch
         # never tries to fetch it, not merely a flag it read.
         parent_branch="saffron/SA-0020",
         gh=fake_gh,
-        watch=lambda _: None,
+        emit=lambda _: None,
     )
 
     assert result.state == "READY_FOR_REVIEW"
@@ -1919,7 +2237,7 @@ def test_a_parent_that_moved_ahead_is_the_tree_everything_downstream_reads(
         token=None,
         parent_branch="saffron/SA-0020",
         gh=fake_gh,
-        watch=lambda _: None,
+        emit=lambda _: None,
     )
 
     assert result.state == "READY_FOR_REVIEW"
@@ -2006,6 +2324,7 @@ def test_a_gone_parent_is_the_tasks_failure_not_infrastructure(tmp_path, monkeyp
     outcome = _cell_outcome(task_dir, task_id, run_id)
 
     called = []
+    emitted: list = []
     result = package(
         outcome,
         spec=_spec(touches=["f.txt"], criteria=["it works"]),
@@ -2017,11 +2336,15 @@ def test_a_gone_parent_is_the_tasks_failure_not_infrastructure(tmp_path, monkeyp
         token=None,
         parent_branch="saffron/SA-0020",
         gh=_recording_gh(called),
-        watch=lambda _: None,
+        emit=emitted.append,
     )
 
     assert result.state == "MERGE_FAILED"
     assert "saffron/SA-0020 is gone" in result.note
+    # A parent that vanished is the one PACKAGE line an unattended morning
+    # cannot reconstruct from the queue: the child never pushed, so there is no
+    # branch to read. It is logged, not merely printed.
+    assert [describe(event) for event in emitted] == [f"PACKAGE: {result.note}"]
     assert not called
     assert remote_sha(str(remote), "saffron/SA-0005", cwd=work) == ""
     assert _state(ledger, task_id)["state"] == "MERGE_FAILED"

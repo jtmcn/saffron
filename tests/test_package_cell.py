@@ -17,22 +17,23 @@ pytestmark = pytest.mark.cell
 SAFFRON_ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_reverification_runs_the_suite_inside_a_cell(tmp_path):
+def test_reverification_runs_the_suite_inside_a_cell(tmp_path, capsys):
     """The gates come from the host-side export, mounted read-only; running them
     on the host would be the control plane executing model-authored code (§2).
 
-    Asserts `reverify` completes and reports both suites via `watch`. The
-    empty-diff assertion below is not vacuous: `reverify` raises
-    `PackageError` if either suite has an errored gate (`aborted_gates`), so
-    two silently-broken suites cannot net to `new_failures == []` here — only
-    two suites that both actually ran can produce this result.
+    Asserts `reverify` completes and prints both suites — a direct `print`,
+    per `events.FINDINGS[1]`, not routed through any callback the caller
+    supplies. The empty-diff assertion below is not vacuous: `reverify`
+    raises `PackageError` if either suite has an errored gate
+    (`aborted_gates`), so two silently-broken suites cannot net to
+    `new_failures == []` here — only two suites that both actually ran can
+    produce this result.
     """
     mirror = mirror_ops.ensure_mirror(SAFFRON_ROOT, tmp_path / "m.git")
     head = mirror_ops._git(mirror, "rev-parse", "HEAD")
     policy, _ = load_policy(SAFFRON_ROOT)
     tag = repo_image.build_cell_image(SAFFRON_ROOT)
 
-    seen = []
     # Same sha for both suites: the subtraction must then be empty, which is
     # the invariant worth pinning — a non-empty result here would mean the
     # gates are not deterministic, not that the packaged commit is bad.
@@ -43,14 +44,14 @@ def test_reverification_runs_the_suite_inside_a_cell(tmp_path):
         policy=policy,
         gates_dir=mirror_ops.export_saffron_dir(mirror, head, tmp_path / "gates"),
         image=tag,
-        watch=seen.append,
     )
     assert new_failures == []
     # The head results are returned, not just the subtraction: the body's gate
     # table has to show the run its own sentence claims.
     assert head_results and all(r.status != "error" for r in head_results)
-    assert any("baseline suite" in line for line in seen)
-    assert any("head suite" in line for line in seen)
+    printed = capsys.readouterr().out
+    assert "re-verify: baseline suite" in printed
+    assert "re-verify: head suite" in printed
 
 
 def test_the_reverification_cell_carries_no_credential(tmp_path, monkeypatch):
@@ -85,7 +86,6 @@ def test_the_reverification_cell_carries_no_credential(tmp_path, monkeypatch):
             policy=policy,
             gates_dir=tmp_path / "gates",
             image="unused",
-            watch=lambda _: None,
         )
     # Exact: the declared gate env and nothing else. `cell_env` would add
     # CLAUDE_CONFIG_DIR and the proxy variables, and fail here.

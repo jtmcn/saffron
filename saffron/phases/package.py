@@ -15,11 +15,13 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from saffron.cell.worktree import DIFF_FLAGS
+from saffron.events import Event, EventLog, PhaseStart, describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import GateResult, split_lines
 from saffron.phases.rebut import sustained_blockers, unkept_fixes
@@ -450,7 +452,6 @@ def reverify(
     policy,
     gates_dir: Path,
     image: str,
-    watch,
 ) -> tuple[list[NewFailure], list[GateResult]]:
     """Run the suite on the packaged commit, in a cell. Returns the new
     failures *and* the head results, because the body's gate table has to show
@@ -505,7 +506,13 @@ def reverify(
                 env=dict(policy.thread_env),
                 gates_dir=gates_dir,
             )
-            watch(f"re-verify: {label} suite at {sha[:12]}")
+            # `events.FINDINGS[1]`: a lower-case, hyphenated step inside
+            # PACKAGE's own re-run of the suite, not a phase transition — no
+            # `PhaseStart` label fits it without widening `LineLabel`, and
+            # `events.py` is forbidden here. Same exemption as
+            # `events.FINDINGS[0]`'s outcome line in `cell/session.py`: a
+            # direct, unconditional `print`, never routed through `emit`.
+            print(f"re-verify: {label} suite at {sha[:12]}")
             # Gate paths are cell-side (`/gates/.saffron/gates/...`); `cwd` is
             # a host path that `CellExecutor` ignores. Same shape as the
             # session's suite — matched deliberately, so the two cannot drift
@@ -554,7 +561,7 @@ def package(
     token: str | None,
     parent_branch: str | None = None,
     gh: GhRunner = run_gh,
-    watch=print,
+    emit: Callable[[Event], None] | None = None,
 ) -> PackageResult:
     """§5.7, host-side, after the cell is gone.
 
@@ -572,6 +579,36 @@ def package(
     (`SA-0026`) is what supplies it, from the same parent it stacked the
     worktree on.
     """
+
+    if emit is None:
+        # The same shape `run_one_cell` defaults to, and for the same reason:
+        # a caller that forgets `emit` must still get `events.jsonl`. A
+        # print-only default is this spec's own defect, defaulted back in.
+        log = EventLog(outcome.task_dir)
+
+        def emit(event: Event) -> None:
+            line = describe(event)
+            if line:
+                print(line)
+            log.append(event)
+
+    def _emit_package(detail: str) -> None:
+        """Every `PACKAGE:` line this phase prints, fanned out through
+        `emit` rather than the free-string callback the call sites below
+        used before — `describe()`'s own `PhaseStart` branch renders
+        `f"{label}: {detail}"`, so `label` fixed at `"PACKAGE"` reproduces
+        the exact text every call site printed before, without a new event
+        kind."""
+        emit(
+            PhaseStart(
+                timestamp=time.time(),
+                spec_id=spec.id,
+                phase="PACKAGE",
+                label="PACKAGE",
+                detail=detail,
+            )
+        )
+
     branch = f"saffron/{spec.id}"
     patch = outcome.task_dir / "patch.diff"
     # Before the sidecar is read: an empty diff writes neither file, and
@@ -613,7 +650,7 @@ def package(
             try:
                 parent_head = fetch_parent_branch(mirror, url, parent_branch)
             except ParentGone as gone:
-                watch(f"PACKAGE: {gone}")
+                _emit_package(str(gone))
                 return _finish(
                     ledger,
                     outcome,
@@ -658,7 +695,7 @@ def package(
             )
 
         if apply_patch(worktree_path, patch) == APPLY_CONFLICT:
-            watch(f"PACKAGE: {branch} conflicts with {target_branch}")
+            _emit_package(f"{branch} conflicts with {target_branch}")
             return _finish(
                 ledger,
                 outcome,
@@ -674,7 +711,7 @@ def package(
 
         def _refuse(leaked: list[str], where: str, **counts) -> PackageResult:
             """One refusal for both channels a cell has to the remote."""
-            watch(f"PACKAGE: refusing to push — {'; '.join(leaked)}")
+            _emit_package(f"refusing to push — {'; '.join(leaked)}")
             return _finish(
                 ledger,
                 outcome,
@@ -734,7 +771,6 @@ def package(
                 policy=policy,
                 gates_dir=gates_dir,
                 image=image,
-                watch=watch,
             )
             verified_on = "packaged"
             # The same advisory rule the repair loop applies, for the same
@@ -746,7 +782,7 @@ def package(
                 failure for failure in new if failure.gate not in outcome.advisory_gates
             ]
             if new:
-                watch(f"PACKAGE: {len(new)} new failures against {target_branch}")
+                _emit_package(f"{len(new)} new failures against {target_branch}")
                 return _finish(
                     ledger,
                     outcome,
@@ -807,7 +843,7 @@ def package(
             # Only this: a plain PackageError here is an auth or transport
             # failure, and recording MERGE_FAILED would send the operator to
             # read a diff that was never the cause (§5.4, error != fail).
-            watch(f"PACKAGE: {moved}")
+            _emit_package(str(moved))
             return _finish(
                 ledger,
                 outcome,
@@ -835,7 +871,7 @@ def package(
             body_path=body_path,
             gh=gh,
         )
-        watch(f"PACKAGE: {pr_url}")
+        _emit_package(pr_url)
         return _finish(
             ledger,
             outcome,
@@ -859,7 +895,7 @@ def package(
         except mirror_ops.GitError as stuck:
             # Never let cleanup replace the outcome: it would turn a recorded
             # MERGE_FAILED into an exit 2. `add_worktree` self-heals anyway.
-            watch(f"PACKAGE: could not remove {scratch}: {stuck}")
+            _emit_package(f"could not remove {scratch}: {stuck}")
 
 
 def _finish(ledger, outcome, out_dir: Path, spec, repo_name: str, result):

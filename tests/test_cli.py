@@ -6,12 +6,14 @@ import hashlib
 import json
 import subprocess
 import tempfile
+from pathlib import Path
 
 import pytest
 
 from saffron import cli, intake
 from saffron.cell import session
 from saffron.cli import main
+from saffron.events import PhaseStart, Preflight, describe, read_log
 from saffron.ledger import Ledger
 from saffron.phases import package
 from tests.conftest import HostToolExecInTest
@@ -125,6 +127,122 @@ def test_the_exit_code_distinguishes_the_terminal_states(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli, "run_one_cell", _crash)
     assert cli.main(argv) == 2
+
+
+def test_no_signature_in_the_package_still_takes_a_watch():
+    """`SA-0031` migrated `cell/session.py`'s own 64 call sites off a bare
+    `watch(str)` callback onto `emit(Event)`; this spec finishes the seam for
+    the two files that were left behind. No function anywhere in `saffron/`
+    may still take a parameter named `watch`, and neither
+    `saffron/phases/package.py` nor `saffron/cli.py` may still call one."""
+    import ast
+
+    root = Path(cli.__file__).resolve().parent
+
+    for path in root.rglob("*.py"):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            # `ast.Lambda` is in the walk because this spec's own `emit`
+            # defaults are lambdas: a lambda is the shape a `watch` parameter
+            # would come back in, and without it one passed this test.
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
+                names = {
+                    arg.arg
+                    for arg in (
+                        *node.args.posonlyargs,
+                        *node.args.args,
+                        *node.args.kwonlyargs,
+                    )
+                }
+                assert "watch" not in names, (
+                    f"{path.relative_to(root)}:{getattr(node, 'name', '<lambda>')} "
+                    "still takes watch"
+                )
+
+    # Calls, parsed — not the substring `watch(`, which a comment recalling
+    # "the old `watch(str)` callback" would fail while changing nothing.
+    for path in (root / "phases" / "package.py", Path(cli.__file__)):
+        for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
+            if not isinstance(node, ast.Call):
+                continue
+            called = node.func
+            name = (
+                called.id
+                if isinstance(called, ast.Name)
+                else called.attr
+                if isinstance(called, ast.Attribute)
+                else ""
+            )
+            assert name != "watch", f"{path.name}:{node.lineno} still calls watch"
+
+
+def test_package_events_land_in_the_runs_own_log(monkeypatch, tmp_path):
+    """`cli.py` builds one `emit` fan-out and hands the identical object to
+    both `run_one_cell` and `package()`, so PACKAGE's own events reach the
+    same `events.jsonl` as everything else in the run — not merely the
+    terminal, which the old free-string `watch(...)` already reached."""
+    spec = tmp_path / "SY-1.md"
+    spec.write_text(
+        "---\nid: SY-1\ntitle: One\ntype: feature\ntouches: ['src/**']\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    monkeypatch.setattr("saffron.repos.mirror.ensure_mirror", lambda repo, at: at)
+    monkeypatch.setattr(
+        "saffron.phases.package.real_remote", lambda repo: "https://github.com/o/r.git"
+    )
+    monkeypatch.setattr(
+        "saffron.phases.package.fetch_default_branch",
+        lambda mirror, url: ("main", "a" * 40),
+    )
+
+    captured: list = []
+
+    def _fake_run_one_cell(cell_spec, **kwargs):
+        emit = kwargs["emit"]
+        captured.append(emit)
+        emit(
+            Preflight(
+                timestamp=1.0,
+                spec_id=cell_spec.spec_id,
+                step="cell_up",
+                detail="from run_one_cell",
+            )
+        )
+        return session.CellOutcome(
+            state="READY_FOR_REVIEW", task_id=1, run_id=1, task_dir=tmp_path
+        )
+
+    def _fake_package(outcome, **kwargs):
+        emit = kwargs["emit"]
+        captured.append(emit)
+        emit(
+            PhaseStart(
+                timestamp=2.0,
+                spec_id=kwargs["spec"].id,
+                phase="PACKAGE",
+                label="PACKAGE",
+                detail="from package",
+            )
+        )
+        return package.PackageResult(
+            state="READY_FOR_REVIEW", pr_url="https://github.com/o/r/pull/1"
+        )
+
+    monkeypatch.setattr(cli, "run_one_cell", _fake_run_one_cell)
+    monkeypatch.setattr(cli.package_phase, "package", _fake_package)
+
+    home = tmp_path / "home"
+    assert cli.main(["--home", str(home), "cell", str(spec)]) == 0
+
+    # The same object, not two lookalikes: proof it was built once and shared.
+    assert len(captured) == 2 and captured[0] is captured[1]
+
+    events = read_log(home / "batches" / "v0" / "SY-1")
+    details = [
+        event.detail for event in events if isinstance(event, Preflight | PhaseStart)
+    ]
+    assert "from run_one_cell" in details
+    assert "from package" in details
 
 
 def test_a_setup_failure_before_the_cell_exits_two_as_well(monkeypatch, tmp_path):
@@ -645,7 +763,13 @@ def test_only_the_first_depends_on_entry_is_a_stacking_candidate(tmp_path):
     ledger.record_push(second, "b" * 40)
 
     stacked_on, parent_branch = cli._resolve_stacked_on(
-        ledger, repo_id, ["SY-1", "SY-2"], mirror=mirror, url=url, watch=lambda _: None
+        ledger,
+        repo_id,
+        ["SY-1", "SY-2"],
+        mirror=mirror,
+        url=url,
+        spec_id="SY-1",
+        emit=lambda _: None,
     )
 
     assert (stacked_on, parent_branch) == (None, None)
@@ -687,7 +811,13 @@ def test_which_of_a_parents_rows_supplies_the_sha_is_the_newest_waiting_one(
             waiting_row = task_id
 
     stacked_on, parent_branch = cli._resolve_stacked_on(
-        ledger, repo_id, ["SA-0013"], mirror=mirror, url=url, watch=lambda _: None
+        ledger,
+        repo_id,
+        ["SA-0013"],
+        mirror=mirror,
+        url=url,
+        spec_id="SA-0013",
+        emit=lambda _: None,
     )
 
     # The only READY_FOR_REVIEW row is index 8, and it is what admits the
@@ -700,7 +830,13 @@ def test_which_of_a_parents_rows_supplies_the_sha_is_the_newest_waiting_one(
     assert waiting_row is not None
     ledger.set_task_state(waiting_row, "ORPHANED")
     assert cli._resolve_stacked_on(
-        ledger, repo_id, ["SA-0013"], mirror=mirror, url=url, watch=lambda _: None
+        ledger,
+        repo_id,
+        ["SA-0013"],
+        mirror=mirror,
+        url=url,
+        spec_id="SA-0013",
+        emit=lambda _: None,
     ) == (None, None)
     ledger.close()
 
@@ -732,7 +868,13 @@ def test_the_newest_of_several_waiting_rows_wins_not_the_first(tmp_path):
         ledger.record_push(task_id, "1" * 40)
 
     stacked_on, branch = cli._resolve_stacked_on(
-        ledger, repo_id, ["SY-9"], mirror=mirror, url=url, watch=lambda _: None
+        ledger,
+        repo_id,
+        ["SY-9"],
+        mirror=mirror,
+        url=url,
+        spec_id="SY-9",
+        emit=lambda _: None,
     )
 
     assert (stacked_on, branch) == (newest, "saffron/SY-9-newest")
@@ -763,7 +905,13 @@ def test_an_unresolved_pushed_sha_yields_an_unstacked_cell_not_a_construction_er
         ledger.record_push(task_id, bad_sha)
 
     stacked_on, parent_branch = cli._resolve_stacked_on(
-        ledger, repo_id, ["SY-9"], mirror=mirror, url=url, watch=lambda _: None
+        ledger,
+        repo_id,
+        ["SY-9"],
+        mirror=mirror,
+        url=url,
+        spec_id="SY-9",
+        emit=lambda _: None,
     )
 
     assert (stacked_on, parent_branch) == (None, None)
@@ -785,12 +933,58 @@ def test_a_row_with_no_branch_recorded_resolves_unstacked(tmp_path):
     ledger._db.execute("UPDATE tasks SET branch = NULL WHERE task_id = ?", (task_id,))
     ledger._db.commit()
 
-    said = []
+    seen = []
     assert cli._resolve_stacked_on(
-        ledger, repo_id, ["SY-9"], mirror=mirror, url=url, watch=said.append
+        ledger,
+        repo_id,
+        ["SY-9"],
+        mirror=mirror,
+        url=url,
+        spec_id="SY-9",
+        emit=seen.append,
     ) == (None, None)
     # The row, not a ref that was never looked for.
-    assert said == ["unstacked: SY-9's newest waiting task records no pushed branch"]
+    assert [describe(event) for event in seen] == [
+        "unstacked: SY-9's newest waiting task records no pushed branch"
+    ]
+    ledger.close()
+
+
+def test_a_parent_branch_that_is_gone_says_so_through_emit(tmp_path):
+    """The second of the resolver's two `unstacked:` lines, and the one no
+    test drove: a parent branch deleted between PACKAGE and this run. It is
+    not a failure — a deleted branch has merged or been abandoned, and either
+    way the default branch is the right cut — but an operator reading the
+    morning's log has to be able to see why a spec with `depends_on` came out
+    unstacked, which a line that only ever reached the terminal cannot tell
+    them."""
+    # No `_push_parent_branch`: the origin really has no `saffron/SY-9`, so
+    # the fetch fails for git's own reason rather than a patched one. The
+    # ledger row still looks perfect — a recorded branch and a resolved sha —
+    # which is exactly the state a merged-and-deleted parent leaves behind.
+    repo = _local_origin(tmp_path)
+    mirror, url = _mirror_of(tmp_path, repo)
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, "/o")
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-9", state="READY_FOR_REVIEW")
+    ledger.record_push(task_id, "1" * 40)
+
+    seen = []
+    assert cli._resolve_stacked_on(
+        ledger,
+        repo_id,
+        ["SY-9"],
+        mirror=mirror,
+        url=url,
+        spec_id="SY-9",
+        emit=seen.append,
+    ) == (None, None)
+    # git's own stderr rides along in the detail, so the line is matched by
+    # its head rather than whole — the branch name is the part an operator
+    # needs, and the part a demotion to `print` takes away.
+    assert len(seen) == 1
+    assert describe(seen[0]).startswith("unstacked: parent branch saffron/SY-9 is gone")
     ledger.close()
 
 
@@ -808,7 +1002,11 @@ def test_no_repo_id_or_no_depends_on_resolves_unstacked(tmp_path):
     ledger.record_push(task_id, "1" * 40)
 
     resolve = functools.partial(
-        cli._resolve_stacked_on, mirror=mirror, url=url, watch=lambda _: None
+        cli._resolve_stacked_on,
+        mirror=mirror,
+        url=url,
+        spec_id="SY-9",
+        emit=lambda _: None,
     )
     assert resolve(ledger, None, ["SY-9"]) == (None, None)
     assert resolve(ledger, repo_id, []) == (None, None)

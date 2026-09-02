@@ -7,10 +7,13 @@ import hashlib
 import os
 import subprocess
 import tempfile
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 from saffron.cell.session import _SHA as _RESOLVED_SHA
 from saffron.cell.session import CellSpec, run_one_cell
+from saffron.events import Event, EventLog, Preflight, describe
 from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
@@ -223,7 +226,8 @@ def _resolve_stacked_on(
     *,
     mirror: Path,
     url: str,
-    watch=print,
+    spec_id: str,
+    emit: Callable[[Event], None] = lambda event: print(describe(event)),
 ) -> tuple[str | None, str | None]:
     """The tree sha `CellSpec.stacked_on` should carry and the branch name
     `package()`'s stacking parameter should carry, or `(None, None)`
@@ -289,12 +293,26 @@ def _resolve_stacked_on(
     # has no branch worth fetching, and "branch None is gone" would send an
     # operator to look for a deleted ref instead of at the row.
     if not branch or not _RESOLVED_SHA.fullmatch(newest["pushed_sha"] or ""):
-        watch(f"unstacked: {parent_id}'s newest waiting task records no pushed branch")
+        emit(
+            Preflight(
+                timestamp=time.time(),
+                spec_id=spec_id,
+                step="unstacked",
+                detail=f"{parent_id}'s newest waiting task records no pushed branch",
+            )
+        )
         return None, None
     try:
         head = package_phase.fetch_parent_branch(mirror, url, branch)
     except package_phase.ParentGone as gone:
-        watch(f"unstacked: {gone}")
+        emit(
+            Preflight(
+                timestamp=time.time(),
+                spec_id=spec_id,
+                step="unstacked",
+                detail=str(gone),
+            )
+        )
         return None, None
     if not _RESOLVED_SHA.fullmatch(head):
         return None, None
@@ -363,12 +381,34 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     ceilings, in_force = _ceilings(args, spec)
     print(f"ceilings: {in_force}")
 
+    # Built once, here, and handed to every phase this command drives —
+    # `_resolve_stacked_on` below, `run_one_cell`, and `package()` — so a
+    # task's PACKAGE events land in the same `events.jsonl` as everything
+    # before them. `run_one_cell`'s own default (session.py's
+    # `_default_emit`) is this same shape; duplicated rather than imported,
+    # the way `_when` is duplicated across modules instead of reaching into a
+    # forbidden one.
+    task_dir = out_dir / spec.id
+    event_log = EventLog(task_dir)
+
+    def emit(event: Event) -> None:
+        line = describe(event)
+        if line:
+            print(line)
+        event_log.append(event)
+
     # Resolved from `depends_on[0]`'s newest waiting task, or `(None, None)`
     # together for an ordinary unstacked cell (`_resolve_stacked_on`,
     # `SA-0026`) — the one place a `CellSpec` is built, so this is the only
     # place either has to be read.
     stacked_on, target_branch = _resolve_stacked_on(
-        ledger, repo_id, spec.depends_on, mirror=mirror, url=url
+        ledger,
+        repo_id,
+        spec.depends_on,
+        mirror=mirror,
+        url=url,
+        spec_id=spec.id,
+        emit=emit,
     )
     # Printed for the same reason the ceilings are: which tree a run was cut
     # from is not recoverable from the exit code, and a stacked run that
@@ -391,7 +431,7 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         **ceilings,
     )
     outcome = run_one_cell(
-        cell_spec, repo=repo, mirror=mirror, ledger=ledger, out_dir=out_dir
+        cell_spec, repo=repo, mirror=mirror, ledger=ledger, out_dir=out_dir, emit=emit
     )
     if outcome.state == "READY_FOR_REVIEW":
         result = package_phase.package(
@@ -407,6 +447,7 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
             # `None` unless `stacked_on` is too: a stacked worktree must not
             # reach a pull request that is not.
             parent_branch=target_branch,
+            emit=emit,
         )
         print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
         return CELL_EXIT.get(result.state, 1)

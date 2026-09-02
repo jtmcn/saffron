@@ -2486,6 +2486,35 @@ what died at 141 turns; `SA-0042` carries that half forward on its own, since
 `package()` runs outside `run_one_cell` and never received the supervisor's
 `emit` in the first place.
 
+**The first half closed by `SA-0042`, 2026-09-02; the second half is still
+open and this spec moved against it.** `cli.py` now builds one `emit` fan-out
+— print plus a task-scoped `EventLog`, the same shape `session._default_emit`
+already used — and hands the identical object to both `run_one_cell` and
+`package()`, so PACKAGE's events finally reach `events.jsonl` too. **Seven** of
+`package.py`'s eight `watch(str)` call sites and `cli._resolve_stacked_on`'s
+two are now `emit(<Event>)`, against existing kinds and with no message change.
+
+The eighth did not migrate, and it is the mirror image of
+`events.FINDINGS[0]` above: `reverify`'s `"re-verify: {label} suite at {sha}"`
+is `events.FINDINGS[1]`'s own named exception — no `PhaseStart` label fits a
+lower-case, hyphenated step without widening `LineLabel`, which needs the
+forbidden `events.py` — so it stays a direct, unconditional `print()`.
+
+That leaves the second half of this item worse, not better, and review is what
+said so. `session.py`'s two `print`s are untouched (forbidden here), and
+`package.py` now adds a **third** — precisely the shape the done condition
+above rules out. It is also a small regression in kind: before, a caller could
+pass `package(watch=…)` and capture or silence the `re-verify:` line, and no
+caller can redirect it now. Done is unchanged: the tenth kind, or an
+`emit`-shaped sink for lines no kind carries. Three prints, not two.
+
+Two stale docstrings for whoever takes that on, both in `session.py` and so
+both unrepairable here. `_default_emit`'s says `cli.py` "never passes `emit`",
+and `run_one_cell`'s says the default "lives here, not in `cli.py` (forbidden
+to this spec)". `cli.py` is no longer forbidden, is the only production caller
+of `run_one_cell`, and now builds exactly that fan-out — so the `emit is None`
+branch is reached from tests alone.
+
 ## 44. A single turn can overshoot the budget ceiling, because the check runs before it
 
 `_over_budget` gates a turn on what has been spent *so far*. It cannot bound
