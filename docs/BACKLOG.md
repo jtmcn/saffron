@@ -2337,9 +2337,22 @@ being merged over it deliberately, with this item as the record.
 
 ## 41. `NO_PROXY=""` denies a cell its own loopback, so a test that stands up a local server fails at baseline forever
 
-`saffron/cell/proxy.py:148` returns `{"HTTPS_PROXY": url, "HTTP_PROXY": url,
-"NO_PROXY": ""}`. Empty means *nothing* bypasses squid — `127.0.0.1` included.
-`tests/test_preflight.py:266` binds an `HTTPServer` on loopback and probes it
+**Status:** **done**, by hand, on `joel/cell-loopback-not-proxied`. `proxy_env`
+returns `NO_PROXY: "127.0.0.1,localhost"`, and a driven test asserts the probe
+reaches a server started beside it while the upstream stays proxied. The
+alternative this item offered — marking the failing test `cell` — was **not**
+taken: it passes on the host, and excluding it would have hidden the defect
+rather than fixed it. One correction to the reasoning below, from review: the
+open question is not whether `--internal` makes these variables inert.
+`DESIGN.md` §5.1 records that an `--internal` network still routes to the host
+gateway, which is why `assert_host_is_unreachable` exists. What makes the
+change safe is narrower and measured — `10.88.0.1` matches neither `NO_PROXY`
+entry, so nothing the gateway exposes becomes reachable.
+
+`saffron/cell/proxy.py:proxy_env` returned `{"HTTPS_PROXY": url, "HTTP_PROXY":
+url, "NO_PROXY": ""}`. Empty means *nothing* bypasses squid — `127.0.0.1`
+included. `test_the_probe_script_itself_answers_a_401` binds an `HTTPServer` on
+loopback and probes it
 with `preflight._UPSTREAM_PROBE`, which uses `urllib` and so honours the proxy
 variables. The container's request to itself is routed out to squid, which
 allowlists only the upstream, and is denied.
@@ -2409,6 +2422,11 @@ disagreement, founded on a lens finding that was itself founded on the
 unrelated red baseline in item 41. "HEAD already says what it did" is true only
 for a reader who re-reads the diff against every finding; the generated body
 says the opposite, and the body is what gets read.
+
+`SA-0034` (plan Task 6) is the natural home for the *recording* half — it is
+already a bug spec about a rebuttal outcome that is not written down — but its
+`forbidden` list excludes `saffron/report/**`, and no spec in part 3 touches
+`pr_body.py` either. The visible half has no home in that plan yet.
 
 Done looks like the artifact's *shape* failure not being silently equivalent to
 the agent having no answer. Cheapest honest fix is not a re-prompt: it is that a

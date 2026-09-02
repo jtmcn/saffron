@@ -263,6 +263,63 @@ def test_a_run_that_timed_out_is_a_probe_that_did_not_run(monkeypatch):
         preflight.assert_proxy_reaches_upstream("img", "saffron-cells", "10.88.0.2")
 
 
+def test_a_cell_is_not_made_to_proxy_its_own_loopback():
+    """BACKLOG item 41. `proxy_env` set `NO_PROXY: ""`, so `urllib` routed
+    everything through squid — `127.0.0.1` included, which squid denies
+    because it allowlists only the upstream. A cell could not reach a server
+    it had started itself, so the test below failed at baseline on every cell
+    run (ten `TCP_DENIED/403` lines in one) and baseline subtraction hid it.
+
+    The environment is built, not inherited: `getproxies_environment` gives
+    lowercase `no_proxy` the last word, so `os.environ | proxy_env(...)`
+    cannot override one and the test reads the developer's shell instead of
+    the value under test. Measured — with `no_proxy=127.0.0.1,localhost` set
+    ambiently this passed against the unfixed code, and with
+    `no_proxy=example.com` it failed against the fixed one.
+
+    The status is asserted, not just the exit code: `_UPSTREAM_PROBE` catches
+    `HTTPError` and exits 0 on any answer, so `returncode == 0` would accept a
+    `403 TCP_DENIED` from a real proxy as a pass. The skip below then guards
+    only against a spurious *failure*, never a silent pass.
+    """
+    import os
+    import socket
+    import subprocess
+    import sys
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    with socket.socket() as listening:
+        if listening.connect_ex(("127.0.0.1", proxy.PROXY_PORT)) == 0:
+            pytest.skip(f"something answers on 127.0.0.1:{proxy.PROXY_PORT}")
+
+    class Unauthorized(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(401)
+            self.end_headers()
+
+        def log_message(self, format, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Unauthorized)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/v1/models"
+        done = subprocess.run(
+            [sys.executable, "-c", preflight._UPSTREAM_PROBE.format(url=url)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env={"PATH": os.environ["PATH"]} | proxy.proxy_env("127.0.0.1"),
+        )
+    finally:
+        server.shutdown()
+    assert done.returncode == 0, done.stderr
+    status = preflight._STATUS.search(done.stdout)
+    assert status is not None, done.stdout
+    assert status.group(1) == "401"
+
+
 def test_the_probe_script_itself_answers_a_401(tmp_path):
     """The script, executed — not its output, fabricated. Every other test here
     asserts the pass *condition*; this one runs `_UPSTREAM_PROBE` against a real
