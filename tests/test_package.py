@@ -38,7 +38,7 @@ from saffron.phases.package import (
     reverify,
 )
 from saffron.phases.review import LensReview
-from saffron.repos.mirror import ensure_mirror
+from saffron.repos.mirror import GitError, ensure_mirror
 from saffron.repos.policy import PolicyError
 
 
@@ -735,6 +735,8 @@ def test_a_conflict_persists_merge_failed_and_pushes_nothing(monkeypatch, tmp_pa
     def never_called(argv):
         raise AssertionError("gh must not be reached on a conflict")
 
+    said: list = []
+
     result = package(
         outcome,
         spec=spec,
@@ -745,10 +747,17 @@ def test_a_conflict_persists_merge_failed_and_pushes_nothing(monkeypatch, tmp_pa
         out_dir=tmp_path / "batch",
         token=None,
         gh=never_called,
-        emit=lambda _: None,
+        emit=said.append,
     )
 
     assert result.state == "MERGE_FAILED"
+    # Which branch conflicts with which is the whole content of the line, and
+    # the census below can only see that *something* was emitted here. A
+    # module-level `_say = print` alias reverted this site with the census
+    # green; the rendered line is what that cannot fake.
+    assert "PACKAGE: saffron/SA-0005 conflicts with main" in [
+        describe(event) for event in said
+    ]
     row = next(r for r in ledger.queue_lines() if r["task_id"] == task_id)
     assert row["state"] == "MERGE_FAILED"
     # The remote must be untouched — the assertion the state alone cannot make.
@@ -938,7 +947,75 @@ def test_the_pull_request_url_is_logged_as_an_event(packageable):
     assert packaged[0].phase == "PACKAGE"
 
 
-def _stream_writes(scope, *, allow: frozenset[str]) -> list[int]:
+def test_a_worktree_that_will_not_go_away_is_said_and_not_raised(
+    monkeypatch, packageable
+):
+    """The cleanup line was the last of the seven with no witness but the
+    census, and the census cannot tell a demotion from a deletion. Two
+    properties at once: the sentence reaches `emit`, and a cleanup that fails
+    never replaces the outcome — swallowing the `GitError` is what keeps a
+    packaged pull request from surfacing as exit 2 (infrastructure)."""
+    stuck = GitError("worktree is locked")
+    monkeypatch.setattr(
+        "saffron.repos.mirror.remove_worktree",
+        lambda mirror, dest: (_ for _ in ()).throw(stuck),
+    )
+
+    result = package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/4\n"),
+        **packageable.kwargs,
+    )
+
+    # The pull request stands. `finally` runs after the result is built, so a
+    # raise here would discard a branch that is already pushed.
+    assert result.state == "READY_FOR_REVIEW"
+    assert result.pr_url == "https://x/pull/4"
+
+    scratch = packageable.out_dir / "package" / "SA-0005"
+    assert f"PACKAGE: could not remove {scratch}: {stuck}" in [
+        describe(event) for event in packageable.events
+    ]
+
+
+def _write_aliases(tree) -> frozenset[str]:
+    """Names this module binds to a stream writer, so a call through one is
+    read as the write it is. Round 2's census matched the *name* `print` and
+    the attribute `.write`; `_say = print` at module scope is neither, and
+    reverted three sites with 1166 tests, ruff and `ty` green. Attribute
+    aliases are recognised only when rooted at `sys` or `os`, so an ordinary
+    `stderr = done.stderr` (`package.py`) does not become a suspect."""
+    import ast
+
+    def rooted_at_a_stream_module(value) -> bool:
+        if not isinstance(value, ast.Attribute):
+            return False
+        if value.attr not in {"write", "writelines", "stdout", "stderr", "print"}:
+            return False
+        while isinstance(value, ast.Attribute):
+            value = value.value
+        return isinstance(value, ast.Name) and value.id in {"sys", "os"}
+
+    bound: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            aliased = (
+                isinstance(node.value, ast.Name) and node.value.id == "print"
+            ) or rooted_at_a_stream_module(node.value)
+            if aliased:
+                bound.update(
+                    target.id for target in node.targets if isinstance(target, ast.Name)
+                )
+        elif isinstance(node, ast.ImportFrom):
+            bound.update(
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name == "print"
+            )
+    return frozenset(bound)
+
+
+def _stream_writes(scope, *, allow: frozenset[str], aliases=frozenset()) -> list[int]:
     """Lines under `scope` that write to a stream, skipping those an allowed
     function or any lambda encloses. Policed by *mechanism and location*, not
     by source text: round 1 asserted an exact list of `print(...)` source
@@ -951,7 +1028,7 @@ def _stream_writes(scope, *, allow: frozenset[str]) -> list[int]:
     def writes(call: ast.Call) -> bool:
         func = call.func
         if isinstance(func, ast.Name):
-            return func.id == "print"
+            return func.id == "print" or func.id in aliases
         # `sys.stdout.write`, `sys.stderr.writelines`, `os.write`. `package.py`
         # writes files through `Path.write_text`, never a bare `.write`.
         return isinstance(func, ast.Attribute) and func.attr in {
@@ -996,7 +1073,19 @@ def test_only_the_line_no_kind_carries_writes_to_a_stream_outside_emit():
     package_tree = ast.parse(Path(package_module.__file__).read_text())
     # `emit` is `package`'s own default sink — the same shielding the lambda
     # rule gives a one-line default, spelled longer because it also logs.
-    assert _stream_writes(package_tree, allow=frozenset({"reverify", "emit"})) == []
+    assert (
+        _stream_writes(
+            package_tree,
+            allow=frozenset({"reverify", "emit"}),
+            aliases=_write_aliases(package_tree),
+        )
+        == []
+    ), (
+        "package.py writes to a stream outside `emit`: a PACKAGE line reaches "
+        "the terminal and not `events.jsonl`. Emit a `PhaseStart` through "
+        "`_emit_package` instead. A legitimate *file* write goes through "
+        "`Path.write_text`, which this does not see."
+    )
 
     # Only the resolver: `cli.py` is the terminal-facing entry point and prints
     # all over, legitimately. Its stacking lines are the two that must not.
@@ -1006,7 +1095,14 @@ def test_only_the_line_no_kind_carries_writes_to_a_stream_outside_emit():
         for node in ast.walk(cli_tree)
         if isinstance(node, ast.FunctionDef) and node.name == "_resolve_stacked_on"
     )
-    assert _stream_writes(resolver, allow=frozenset()) == []
+    assert (
+        _stream_writes(resolver, allow=frozenset(), aliases=_write_aliases(cli_tree))
+        == []
+    ), (
+        "`cli._resolve_stacked_on` writes to a stream: its `unstacked:` lines "
+        "must be `Preflight` events through `emit`, so a stacking decision is "
+        "recoverable the morning after."
+    )
 
 
 def test_package_with_no_emit_still_reaches_the_durable_log(packageable):
@@ -1117,12 +1213,15 @@ def test_a_branch_that_moved_is_the_tasks_failure(monkeypatch, packageable):
     # The branch moving under the task is the operator's line, so it is logged
     # and not merely printed. A push that *broke* is `error` and says nothing
     # here — the test below asserts that side.
-    assert len(packageable.events) == 1
     # The event carries git's own `stale info` output; `note` carries the short
     # form. The operator needs the former and the queue line shows the latter.
-    assert describe(packageable.events[0]).startswith(
-        "PACKAGE: the branch moved underneath us"
-    )
+    # Matched, not counted: a later line added to this path is not this test's
+    # business, but the line going missing is.
+    assert [
+        line
+        for line in map(describe, packageable.events)
+        if line.startswith("PACKAGE: the branch moved underneath us")
+    ]
 
 
 def test_a_push_that_broke_is_infrastructure_and_records_nothing(
@@ -1218,6 +1317,12 @@ def test_new_failures_after_the_rebase_are_the_tasks_failure(monkeypatch, packag
         remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=packageable.work)
         == ""
     )
+    # `note` is the queue line; this is the operator's. The count and the
+    # branch it is counted against both live here and nowhere else — the
+    # subtraction is against the *moved* default branch, not the base.
+    assert "PACKAGE: 1 new failures against main" in [
+        describe(event) for event in packageable.events
+    ]
 
 
 def _no_gh(argv):

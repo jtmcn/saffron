@@ -159,11 +159,21 @@ def test_no_signature_in_the_package_still_takes_a_watch():
                     "still takes watch"
                 )
 
-    package_src = (root / "phases" / "package.py").read_text()
-    assert "watch(" not in package_src
-
-    cli_src = Path(cli.__file__).read_text()
-    assert "watch(" not in cli_src
+    # Calls, parsed — not the substring `watch(`, which a comment recalling
+    # "the old `watch(str)` callback" would fail while changing nothing.
+    for path in (root / "phases" / "package.py", Path(cli.__file__)):
+        for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
+            if not isinstance(node, ast.Call):
+                continue
+            called = node.func
+            name = (
+                called.id
+                if isinstance(called, ast.Name)
+                else called.attr
+                if isinstance(called, ast.Attribute)
+                else ""
+            )
+            assert name != "watch", f"{path.name}:{node.lineno} still calls watch"
 
 
 def test_package_events_land_in_the_runs_own_log(monkeypatch, tmp_path):
@@ -937,6 +947,44 @@ def test_a_row_with_no_branch_recorded_resolves_unstacked(tmp_path):
     assert [describe(event) for event in seen] == [
         "unstacked: SY-9's newest waiting task records no pushed branch"
     ]
+    ledger.close()
+
+
+def test_a_parent_branch_that_is_gone_says_so_through_emit(tmp_path):
+    """The second of the resolver's two `unstacked:` lines, and the one no
+    test drove: a parent branch deleted between PACKAGE and this run. It is
+    not a failure — a deleted branch has merged or been abandoned, and either
+    way the default branch is the right cut — but an operator reading the
+    morning's log has to be able to see why a spec with `depends_on` came out
+    unstacked, which a line that only ever reached the terminal cannot tell
+    them."""
+    # No `_push_parent_branch`: the origin really has no `saffron/SY-9`, so
+    # the fetch fails for git's own reason rather than a patched one. The
+    # ledger row still looks perfect — a recorded branch and a resolved sha —
+    # which is exactly the state a merged-and-deleted parent leaves behind.
+    repo = _local_origin(tmp_path)
+    mirror, url = _mirror_of(tmp_path, repo)
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, "/o")
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-9", state="READY_FOR_REVIEW")
+    ledger.record_push(task_id, "1" * 40)
+
+    seen = []
+    assert cli._resolve_stacked_on(
+        ledger,
+        repo_id,
+        ["SY-9"],
+        mirror=mirror,
+        url=url,
+        spec_id="SY-9",
+        emit=seen.append,
+    ) == (None, None)
+    # git's own stderr rides along in the detail, so the line is matched by
+    # its head rather than whole — the branch name is the part an operator
+    # needs, and the part a demotion to `print` takes away.
+    assert len(seen) == 1
+    assert describe(seen[0]).startswith("unstacked: parent branch saffron/SY-9 is gone")
     ledger.close()
 
 
