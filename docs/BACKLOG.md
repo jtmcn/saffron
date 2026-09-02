@@ -2551,9 +2551,12 @@ anything else an untrusted cell chose to put on stdout.
 
 Two things follow, neither addressed anywhere:
 
-- **Volume is unbounded.** The renderer's truncation was the only bound, and it
-  now applies to the *display* while persistence keeps everything. A cell that
-  cats a large file writes it to the control plane.
+- **Volume is unbounded on the path that matters.** `SA-0041` bounded the raw
+  quarantined line at capture (`implement.QUARANTINE_BYTES`, 8192) after review
+  measured 5 MB of stdout writing 5 MB of log. That closes the accidental case
+  only: the same payload wrapped in nine bytes of JSON takes the `Agent.event`
+  path and still writes 5 MB, because bounding it needs `saffron/events.py`,
+  which that spec forbids. One value, both paths, is still the open decision.
 - **The `secrets` gate never sees it.** That gate reads the diff. A batch tree
   artifact is not a diff, so a credential a cell printed to stdout is persisted
   host-side and scanned by nothing. §5.4 lists `secrets` as a v1 gate, so this
