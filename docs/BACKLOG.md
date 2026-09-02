@@ -2533,6 +2533,43 @@ this independently: its mid-flight split hands child 1 the parent's branch, and
 there is no branch to hand.
 
 
+## 46. `events.jsonl` now persists an untrusted cell's raw output verbatim, and nothing bounds or scans it
+
+`SA-0041` makes `implement.run_agent` emit the parsed cell event under
+`Agent.event`, which is the fix that spec exists for — the dict was previously
+flattened to prose before the host ever saw it, so `Agent.event` was
+permanently `None`.
+
+The side effect, raised by that run's contract lens: **what reaches persistence
+changed shape.** Before, only `_describe`'s bounded renderings were written — a
+`tool_result` became the fixed string `agent: tool ok`, `text` was truncated at
+160 characters and `tool_use` at 120. Now the raw dict is written verbatim to
+`~/.saffron/batches/v0/<id>/events.jsonl`, and for `text`, `tool_use` and
+`tool_result` that dict can carry full file contents, whole command outputs, or
+anything else an untrusted cell chose to put on stdout.
+
+Two things follow, neither addressed anywhere:
+
+- **Volume is unbounded.** The renderer's truncation was the only bound, and it
+  now applies to the *display* while persistence keeps everything. A cell that
+  cats a large file writes it to the control plane.
+- **The `secrets` gate never sees it.** That gate reads the diff. A batch tree
+  artifact is not a diff, so a credential a cell printed to stdout is persisted
+  host-side and scanned by nothing. §5.4 lists `secrets` as a v1 gate, so this
+  is a gap that widens rather than one that exists today — which is the reason
+  to record it now rather than after it is built.
+
+Neither the golden fixture nor the unit tests can see this: both exercise small
+synthetic dicts, so the change is invisible to the suite by construction.
+
+Done looks like a decision about what the log is for. If it is an operator's
+record of a night, the rendered line is sufficient and `Agent.event` should be
+bounded the way the display already is. If it is evidence, it needs a size cap
+and to be in the `secrets` gate's reach. `SA-0041` could not make that choice —
+`saffron/events.py` is `forbidden` to it — and made the reachability fix it was
+asked for, which is correct.
+
+
 ---
 
 ## What is *not* here, deliberately
