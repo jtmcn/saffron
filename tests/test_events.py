@@ -1216,6 +1216,37 @@ def test_an_unwritable_event_log_does_not_abort_the_run(monkeypatch, tmp_path):
     assert (task_dir / "events.jsonl").is_dir()
 
 
+def test_the_supervisor_hands_the_adapter_to_the_agent_it_calls(monkeypatch, tmp_path):
+    """AC8's other half, which the isolated test below cannot reach: it proves
+    `_phase_watch` renders correctly, not that `session.py` threads it into
+    anything. Measured — replacing `watch=` with a live no-op at all six
+    `agent(...)` call sites, so every `agent:` line during PLAN, IMPLEMENT,
+    SALVAGE and REPAIR vanishes from the terminal *and* `events.jsonl`, left
+    218 tests passing. The golden fixture cannot catch it either: its harness
+    stubs the agent and captures no `agent:` line, which its own header
+    records.
+
+    Four of the six sites a green run reaches: `plan_checkpoint`'s turn,
+    `_drive_cell`'s IMPLEMENT turn, and one per REVIEW lens — the lenses run
+    through the same `agent` callable, so they witness the seam too. SALVAGE
+    and REPAIR are reached only by a failing run and stay unwitnessed here;
+    the `REVIEW:`/`REBUT:` *lines* are covered by the golden fixture instead.
+    """
+    spoken = 'agent: Bash {"command": "ls"}'
+    cell = _stub_the_runtime(monkeypatch, suites=([], []))
+    outcome, _ = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        agent_says=spoken,
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    # Exact, not `>= 1`: the count is the number of seams exercised, and a
+    # migration that drops one should fail here rather than pass quietly.
+    assert cell.watched.count(spoken) == 4, cell.watched
+
+
 def test_the_watch_shaped_callable_phases_still_receive_does_not_raise():
     """AC8: `phases/implement.py`, `phases/review.py` and `phases/rebut.py`
     are forbidden to this spec and still call a plain `watch(str)` —

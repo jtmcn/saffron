@@ -489,6 +489,7 @@ def _loop(*rounds, max_attempts=4):
     suites = iter(rounds)
     repairs = []
     state, _attempts, _new = session.repair_loop(
+        spec_id="SA-TEST",
         run_gates=lambda: next(suites),
         baseline=[],
         max_attempts=max_attempts,
@@ -545,6 +546,7 @@ def test_a_dirty_tree_buys_one_repair_turn():
     trees = iter([["a.py"], []])
 
     state, attempts, _ = session.repair_loop(
+        spec_id="SA-TEST",
         run_gates=lambda: _dirty_suite(next(trees)),
         baseline=_dirty_suite([]),
         max_attempts=4,
@@ -560,6 +562,7 @@ def test_a_tree_still_dirty_after_the_repair_turn_ends_the_attempt():
     calls: list[str] = []
 
     state, attempts, new = session.repair_loop(
+        spec_id="SA-TEST",
         run_gates=lambda: _dirty_suite(["a.py"]),
         baseline=_dirty_suite([]),
         max_attempts=4,
@@ -578,6 +581,7 @@ def test_a_gate_that_stopped_running_between_the_suites_is_not_a_green():
     baseline = [GateResult(gate="tests", status="pass", tool="pytest 8.0")]
     head = [GateResult(gate="tests", status="skip")]
     state, _attempts, _new = session.repair_loop(
+        spec_id="SA-TEST",
         run_gates=lambda: head,
         baseline=baseline,
         max_attempts=4,
@@ -591,6 +595,7 @@ def test_a_baseline_failure_is_not_the_tasks_problem():
     """Only new failures count, or every task inherits the repo's flaky tests."""
     pre_existing = Failure(file="old.py", code="E501", message="too long")
     state, _attempts, _new = session.repair_loop(
+        spec_id="SA-TEST",
         run_gates=lambda: _results(pre_existing),
         baseline=_results(pre_existing),
         max_attempts=4,
@@ -847,6 +852,7 @@ def _drive(
     gates=(),
     use_default_emit=False,
     capture=None,
+    agent_says=None,
 ):
     """Run one whole cell against the stubbed runtime and return its outcome.
 
@@ -875,6 +881,12 @@ def _drive(
     scripted = iter(turns)
 
     def _run_agent(container, *, prompt, options, resume=None, **kwargs):
+        # `agent_says`: the real `implement.run_agent` reports the cell's
+        # stream by calling the `watch` it was handed. This stub swallowed it
+        # in `**kwargs` and never called it, which is why severing the seam at
+        # all six `agent(...)` sites left 218 tests green — measured.
+        if agent_says is not None:
+            kwargs["watch"](agent_says)
         cell.turns.append(prompt)
         cell.system_prompts.append(options["system_prompt"])
         cell.turn_options.append(options)

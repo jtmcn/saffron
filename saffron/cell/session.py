@@ -560,7 +560,12 @@ def repair_loop(
     baseline: list[GateResult],
     max_attempts: int,
     repair: Callable[[Sequence[NewFailure]], str | None],
-    spec_id: str = "",
+    # Required, not defaulted, for the reason `events.GateResult.against`
+    # already states: a forgotten keyword files every attempt's events under
+    # an empty id, indistinguishably from an observed one — and SA-0031's log
+    # is shared across tasks. Measured: dropping it from the one production
+    # call site passed all 1148 tests.
+    spec_id: str,
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
     blocking: Callable[[NewFailure], bool] = lambda _nf: True,
 ) -> tuple[str, int, list[NewFailure]]:

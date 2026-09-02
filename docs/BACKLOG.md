@@ -2454,6 +2454,21 @@ other printed line in order, but not these two. A future report reading
 the gap is real but has a working substitute, which is presumably why `SA-0029`
 scoped a tenth kind out from the start.
 
+**The second half of that gap has no substitute and was not disclosed until
+review found it: `emit` is no longer the supervisor's total output seam.**
+Those two `print()` calls go to process stdout whatever the caller passed.
+A caller supplying its own `emit` — which is exactly what `SA-0031` is
+specified to do from `cli.py`, and what any batch or headless consumer would
+do — still gets two lines it cannot redirect, and the one it most wants is the
+task's own terminal announcement. Measured on `saffron/SA-0030`: driving
+`run_one_cell(..., emit=seen.append)` without the test harness's
+`session.print` double leaks `READY_FOR_REVIEW: $0.40 spent, session sess-1`
+to stdout; at base, `watch=` captured 100% of output. Note the harness hides
+this — `tests/test_session.py` patches `session.print` with `raising=False`,
+so the double silently no-ops if those calls ever move. Done looks like the
+tenth kind `SA-0029` scoped out, or an `emit`-shaped sink for lines no kind
+carries; not a third `print`.
+
 The second gap has no substitute yet. `phases/implement.py`,
 `phases/review.py` and `phases/rebut.py` are `forbidden` to `SA-0030` and
 still call a plain `watch(str)` with a line they have already fully
