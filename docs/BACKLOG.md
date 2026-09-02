@@ -2437,6 +2437,38 @@ next to it. Whether a malformed rebuttal is also worth one re-prompt is a
 separate question from whether the record should imply an answer that was never
 read.
 
+## 43. Two of `cell/session.py`'s events never fit a kind, and one adapter parses prose to find the rest
+
+`SA-0030` migrated all 47 `watch(...)` call sites in `cell/session.py` to
+`emit(<Event>)`, against `events.FAMILIES`. Two did not, by design —
+`events.FINDINGS[0]` names them: the task's own terminal announcement
+(`f"{outcome}: ${spent:.2f} spent, session {session_id}"`) and the rate-limit
+rejection line. Neither `Terminal` (scoped to the five zero-commit IMPLEMENT
+endings) nor `Budget` (a ceiling/value/limit triple) fits an arbitrary outcome
+word and a session id without a tenth kind, which this spec's own out-of-scope
+section forbids. Both stay direct `print()` calls in `_drive_cell`, which means
+`events.jsonl` never carries them — `read_log` plus `describe` reproduces every
+other printed line in order, but not these two. A future report reading
+"what did this task's own log say happened" has to fall back to the ledger's
+`tasks.state` for the outcome word, which is already there and already typed;
+the gap is real but has a working substitute, which is presumably why `SA-0029`
+scoped a tenth kind out from the start.
+
+The second gap has no substitute yet. `phases/implement.py`,
+`phases/review.py` and `phases/rebut.py` are `forbidden` to `SA-0030` and
+still call a plain `watch(str)` with a line they have already fully
+formatted — `agent: `, `agent: (raw) `, `REVIEW: ` or `REBUT: ` are the only
+four prefixes those three files hand it today (checked by reading them
+directly, 2026-09-02). `session._phase_watch` recovers the event those
+strings were always going to be by matching on that prefix and slicing it off,
+which is correct only because no other prefix reaches it yet. `SA-0031`
+migrates those three files to construct `Agent`/`PhaseStart` events directly
+and call `describe()` themselves, which is what removes `_phase_watch`
+entirely — until then, a new watch line added to any of the three with a
+prefix outside that set of four lands in `_phase_watch`'s fallback branch as
+an un-prefix-stripped `Agent.detail`, silently readable but silently
+untyped, and nothing in `tests/test_events.py`'s golden fixture would catch
+it unless that new line happened to be exercised by the stubbed drive.
 
 ---
 

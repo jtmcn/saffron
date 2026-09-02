@@ -10,12 +10,28 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import partial, wraps
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
+from saffron.events import (
+    Agent,
+    Attempt,
+    Baseline,
+    Budget,
+    Event,
+    EventLog,
+    LineLabel,
+    Phase,
+    PhaseStart,
+    Preflight,
+    Teardown,
+    Terminal,
+    describe,
+)
 from saffron.gates.baseline import (
     NewFailure,
     is_no_progress,
@@ -50,6 +66,87 @@ TURN_TIMEOUT_S = 900.0
 # REBUT *is* gated (`_over_budget` before the rebuttal turn): by then the
 # findings are written and the operator has something to read either way.
 REVIEW_FLOOR_USD = 2.0
+
+
+def _phase_watch(
+    emit: Callable[[Event], None], *, spec_id: str
+) -> Callable[[str], None]:
+    """Adapts `emit` to the plain `Callable[[str], None]` `phases/implement.py`,
+    `phases/review.py` and `phases/rebut.py` still expect (`SA-0031` migrates
+    them, not this spec — `saffron/phases/**` is forbidden here).
+
+    Every line arriving here was already fully formatted by the phase that
+    produced it — `agent: `, `agent: (raw) `, `REVIEW: ` or `REBUT: ` are the
+    only prefixes those three files ever hand a `watch` callable (read
+    directly out of `implement.run_agent`, `review.run_review` and
+    `rebut.run_rebut`). Decomposing the line back into the kind that prefix
+    names, rather than swallowing it into one free-form field, is what lets
+    `describe()` reproduce it byte for byte — the terminal and `events.jsonl`
+    read the same fact for a call site this spec cannot move.
+    """
+
+    def _watch(line: str) -> None:
+        stamp = time.time()
+        if line.startswith("agent: (raw) "):
+            emit(
+                Agent(
+                    timestamp=stamp,
+                    spec_id=spec_id,
+                    raw=True,
+                    line=line[len("agent: (raw) ") :],
+                )
+            )
+        elif line.startswith("agent: "):
+            emit(
+                Agent(
+                    timestamp=stamp,
+                    spec_id=spec_id,
+                    raw=False,
+                    detail=line[len("agent: ") :],
+                )
+            )
+        elif line.startswith("REVIEW: "):
+            emit(
+                PhaseStart(
+                    timestamp=stamp,
+                    spec_id=spec_id,
+                    phase="REVIEW",
+                    label="REVIEW",
+                    detail=line[len("REVIEW: ") :],
+                )
+            )
+        elif line.startswith("REBUT: "):
+            emit(
+                PhaseStart(
+                    timestamp=stamp,
+                    spec_id=spec_id,
+                    phase="REBUT",
+                    label="REBUT",
+                    detail=line[len("REBUT: ") :],
+                )
+            )
+        else:
+            # Unreached today — every call site behind this seam is one of the
+            # four prefixes above. Recorded rather than dropped if a future
+            # one is not: an `Agent.detail` line is still readable, even
+            # un-prefix-stripped.
+            emit(Agent(timestamp=stamp, spec_id=spec_id, raw=False, detail=line))
+
+    return _watch
+
+
+def _default_emit(event: Event, *, log: EventLog) -> None:
+    """What `run_one_cell` fans an event out to when the caller (every direct
+    caller today, and `cli.py`, which is forbidden here and never passes
+    `emit`) hands it none: the terminal an operator watches, and one durable
+    `EventLog` at `task_dir`. `EventLog.append` never raises (§0's own rule),
+    so a disk-full night still reaches its terminal state — it just stops
+    growing `events.jsonl`, which `EventLog.failed` is the breadcrumb for.
+    """
+    line = describe(event)
+    if line:
+        print(line)
+    log.append(event)
 
 
 def critic_budget(budget_usd: float, spent: float) -> float:
@@ -256,7 +353,7 @@ def repair_decision(
     max_attempts: int,
     new: Sequence[NewFailure],
     previous: Sequence[NewFailure],
-) -> str:
+) -> Literal["green", "no-progress", "exhausted", "repair"]:
     """What the loop does next: green | no-progress | exhausted | repair."""
     if not new:
         return "green"
@@ -334,7 +431,7 @@ def plan_checkpoint(
     spec: CellSpec,
     protected: list[str],
     agent: Callable[..., AttemptResult],
-    watch: Callable[[str], None] = print,
+    emit: Callable[[Event], None] = lambda event: print(describe(event)),
 ) -> tuple[AttemptResult, str, float]:
     """Turn one: the plan, validated before an implementation token is spent.
 
@@ -351,6 +448,11 @@ def plan_checkpoint(
     failure gets, so refusing it cannot itself become the plan's escape hatch.
     """
     from saffron.agents import artifacts
+
+    # `agent` is `implement.run_agent` (`SA-0031` migrates that file, not this
+    # one), so it still wants a plain string `watch` — `_phase_watch` is the
+    # adapter that keeps both sides of that seam speaking events (§0).
+    watch = _phase_watch(emit, spec_id=spec.spec_id)
 
     spent = 0.0
     try:
@@ -376,7 +478,15 @@ def plan_checkpoint(
                     # ordinary content `PlanRejected` from `validate_plan`.
                     if reprompted:
                         raise
-                    watch(f"SCOPE: proposal refused, re-prompting once — {exc}")
+                    emit(
+                        PhaseStart(
+                            timestamp=time.time(),
+                            spec_id=spec.spec_id,
+                            phase="IMPLEMENT",
+                            label="SCOPE",
+                            detail=f"proposal refused, re-prompting once — {exc}",
+                        )
+                    )
                     attempt = agent(
                         container,
                         prompt=f"{exc}\n\n{artifacts.EXTRACTION_PROMPT}",
@@ -401,7 +511,15 @@ def plan_checkpoint(
             except artifacts.PlanNotSchema as exc:
                 if reprompted:
                     raise
-                watch(f"PLAN: not the schema, re-prompting once — {exc}")
+                emit(
+                    PhaseStart(
+                        timestamp=time.time(),
+                        spec_id=spec.spec_id,
+                        phase="IMPLEMENT",
+                        label="PLAN",
+                        detail=f"not the schema, re-prompting once — {exc}",
+                    )
+                )
                 attempt = agent(
                     container,
                     prompt=f"{exc}\n\n{artifacts.EXTRACTION_PROMPT}",
@@ -442,7 +560,8 @@ def repair_loop(
     baseline: list[GateResult],
     max_attempts: int,
     repair: Callable[[Sequence[NewFailure]], str | None],
-    watch: Callable[[str], None] = print,
+    spec_id: str = "",
+    emit: Callable[[Event], None] = lambda event: print(describe(event)),
     blocking: Callable[[NewFailure], bool] = lambda _nf: True,
 ) -> tuple[str, int, list[NewFailure]]:
     """GATE ⇄ REPAIR (§5.4), host-invoked. Returns the terminal state, the
@@ -459,29 +578,66 @@ def repair_loop(
     and what `repair` is handed, exactly as if the failure had never happened.
     Defaulted to "everything is blocking" so every existing caller — none of
     which knows about tiers or declarations — is unaffected (§5.6).
+
+    `commits`/`spent_usd_est` are not this loop's to know — the implement turn
+    that got here holds them — so every `Attempt` event below carries `0`/`0.0`
+    for both: neither is read by any render branch this loop's own lines reach
+    (`aborted`, `drift`, or `new_failures`+`decision`), only by the plain
+    "IMPLEMENT: N commit(s)" branch `_drive_cell` emits separately.
     """
     previous: list[NewFailure] = []
     for attempt in range(1, max_attempts + 1):
         results = run_gates()
         if aborted := aborted_gates(results):
-            watch(f"gates: {aborted} errored — infrastructure, not the task")
+            emit(
+                Attempt(
+                    timestamp=time.time(),
+                    spec_id=spec_id,
+                    phase="GATE",
+                    attempt=attempt,
+                    commits=0,
+                    spent_usd_est=0.0,
+                    aborted=tuple(aborted),
+                )
+            )
             return "GATE_ERROR", attempt, []
         if drift := suite_drift(results, baseline):
             # The suites differ in a way no failure can express, so the
             # subtraction is not to be trusted — let alone reported (§5.4).
-            watch(f"gates: {drift} — distrusting the subtraction")
+            emit(
+                Attempt(
+                    timestamp=time.time(),
+                    spec_id=spec_id,
+                    phase="GATE",
+                    attempt=attempt,
+                    commits=0,
+                    spent_usd_est=0.0,
+                    drift=tuple(drift),
+                )
+            )
             return "GATE_ERROR", attempt, []
         new = [nf for nf in subtract_baseline(results, baseline) if blocking(nf)]
         decision = repair_decision(
             attempt=attempt, max_attempts=max_attempts, new=new, previous=previous
         )
-        watch(f"gates: attempt {attempt}, {len(new)} new failures -> {decision}")
+        emit(
+            Attempt(
+                timestamp=time.time(),
+                spec_id=spec_id,
+                phase="GATE",
+                attempt=attempt,
+                commits=0,
+                spent_usd_est=0.0,
+                new_failures=len(new),
+                decision=decision,
+            )
+        )
         if decision == "green":
             return "READY_FOR_REVIEW", attempt, new
         if decision in ("no-progress", "exhausted"):
-            # §3.3 has one state for both. Which one it was is on the watch line
-            # above; the task's outcome — it could not pass its own gates — is
-            # the same either way.
+            # §3.3 has one state for both. Which one it was is on the emitted
+            # event above; the task's outcome — it could not pass its own
+            # gates — is the same either way.
             return "EXHAUSTED", attempt, new
         previous = new
         if stopped := repair(new):
@@ -525,7 +681,7 @@ def export_patch(
     container: str,
     spec: CellSpec,
     task_dir: Path,
-    watch: Callable[[str], None],
+    emit: Callable[[Event], None],
 ) -> tuple[str | None, list[str]]:
     """The run's durable product (§0), plus the two facts PACKAGE needs about a
     cell that no longer exists. The commits live only on the worktree volume,
@@ -538,16 +694,31 @@ def export_patch(
     """
     from saffron.cell import worktree
 
+    def _teardown(step: str, *, ok: bool, detail: str) -> None:
+        emit(
+            Teardown(
+                timestamp=time.time(),
+                spec_id=spec.spec_id,
+                step=step,
+                ok=ok,
+                detail=detail,
+            )
+        )
+
     head_sha, subjects = None, []
     try:
         subjects = worktree.commit_subjects(container, spec.tree_base)
     except Exception as exc:
-        watch(f"teardown: the agent's commit subjects are unreadable — {exc}")
+        _teardown(
+            "commit_subjects",
+            ok=False,
+            detail=f"the agent's commit subjects are unreadable — {exc}",
+        )
     try:
         patch = worktree.export_patch(container, spec.tree_base)
         if not patch:
             # Absence and emptiness must not look alike: no commits, no file.
-            watch("teardown: no commits, nothing to export")
+            _teardown("no_commits", ok=True, detail="no commits, nothing to export")
             return head_sha, subjects
         # The only surviving name for the commit once the volume is gone — the
         # diff itself does not carry it.
@@ -567,9 +738,13 @@ def export_patch(
                 indent=2,
             )
         )
-        watch(f"teardown: exported {len(patch)} bytes to {task_dir / 'patch.diff'}")
+        _teardown(
+            "exported",
+            ok=True,
+            detail=f"exported {len(patch)} bytes to {task_dir / 'patch.diff'}",
+        )
     except Exception as exc:
-        watch(f"teardown: patch export FAILED — {exc}")
+        _teardown("export_failed", ok=False, detail=f"patch export FAILED — {exc}")
     return head_sha, subjects
 
 
@@ -580,18 +755,28 @@ def run_one_cell(
     mirror: Path,
     ledger: Ledger,
     out_dir: Path,
-    watch: Callable[[str], None] = print,
+    emit: Callable[[Event], None] | None = None,
 ) -> CellOutcome:
     """Create a cell, drive one IMPLEMENT session in it, and gate the result.
 
     Returns what the cell produced, terminal state included. Every transition
     is printed, because v0.5's whole point is that the operator watches it.
 
+    The default lives here, not in `cli.py` (forbidden to this spec) and not
+    in `_drive_cell` (which does not yet know `task_dir` when this is called):
+    a caller that hands no `emit` gets both consumers `_default_emit`
+    describes — the terminal, and one `EventLog` at this run's own
+    `task_dir` — built once, so the two agree on the object they are being
+    handed rather than each constructing their own.
+
     Thin, because teardown learns two of the outcome's fields *after* every
     `return` inside `_drive_cell`: a `finally` cannot reach a value already
     returned, so the export hands them back through `exported` and they are
     stamped here.
     """
+    if emit is None:
+        log = EventLog(out_dir / spec.spec_id)
+        emit = partial(_default_emit, log=log)
     exported: dict = {}
     outcome = _drive_cell(
         spec,
@@ -599,7 +784,7 @@ def run_one_cell(
         mirror=mirror,
         ledger=ledger,
         out_dir=out_dir,
-        watch=watch,
+        emit=emit,
         exported=exported,
     )
     outcome.cell_head_sha = exported.get("head_sha")
@@ -614,7 +799,7 @@ def _drive_cell(
     mirror: Path,
     ledger: Ledger,
     out_dir: Path,
-    watch: Callable[[str], None],
+    emit: Callable[[Event], None],
     exported: dict,
 ) -> CellOutcome:
     """`run_one_cell`'s whole body. `exported` is teardown's way out."""
@@ -631,6 +816,30 @@ def _drive_cell(
     from saffron.repos import image
     from saffron.repos import mirror as mirror_ops
     from saffron.repos.policy import PolicyError, effective_risk, load_policy
+
+    # `implement.run_agent`, `review.run_review` and `rebut.run_rebut` are
+    # `phases/**` — forbidden here, and still typed against a plain string
+    # `watch` until `SA-0031`. Built once, closing over `spec.spec_id`, and
+    # threaded to every call site below that used to pass `watch=watch`.
+    to_watch = _phase_watch(emit, spec_id=spec.spec_id)
+
+    def _preflight(step: str, detail: str) -> None:
+        emit(
+            Preflight(
+                timestamp=time.time(), spec_id=spec.spec_id, step=step, detail=detail
+            )
+        )
+
+    def _phase_start(phase: Phase, label: LineLabel, detail: str) -> None:
+        emit(
+            PhaseStart(
+                timestamp=time.time(),
+                spec_id=spec.spec_id,
+                phase=phase,
+                label=label,
+                detail=detail,
+            )
+        )
 
     network = "saffron-cells"
     volume = f"saffron-wt-{spec.spec_id}"
@@ -722,17 +931,17 @@ def _drive_cell(
         # internal network before the proxy leaves it no route out (evidence
         # 2026-08-28), and a dead route found here costs one container start
         # rather than an image build and an attempt (§5.1.1).
-        watch("preflight: starting the proxy")
+        _preflight("proxy_starting", "starting the proxy")
         proxy_ip = proxy.start_proxy(network)
-        watch(f"preflight: proxy at {proxy_ip}")
+        _preflight("proxy_addr", f"proxy at {proxy_ip}")
         answered = preflight.assert_proxy_reaches_upstream(
             image.BASE_TAG, network, proxy_ip
         )
-        watch(f"preflight: proxy reaches {proxy.UPSTREAM_HOST} ({answered})")
+        _preflight("egress", f"proxy reaches {proxy.UPSTREAM_HOST} ({answered})")
 
         # The cell runs the repo's own image, never the base: the base carries
         # no toolchain, so every gate would error before the agent is reached.
-        watch(f"preflight: building {image.cell_tag(repo)}")
+        _preflight("image", f"building {image.cell_tag(repo)}")
         cell_image = image.build_cell_image(repo)
 
         # Probed from the base image, not the repo's. The probe runs `python`,
@@ -745,11 +954,12 @@ def _drive_cell(
         # tolerated listeners print every run, including when there are none —
         # an exception that goes quiet is the invisibility it was granted around.
         ports, tolerated = preflight.host_probe_ports()
-        watch(
-            f"preflight: probing {len(ports)} host ports at "
+        _preflight(
+            "ports",
+            f"probing {len(ports)} host ports at "
             + ", ".join(preflight.probe_addresses())
             + "; tolerating "
-            + (", ".join(tolerated) or "nothing")
+            + (", ".join(tolerated) or "nothing"),
         )
         # The list the operator was just shown, not a second one taken now. No
         # cell exists yet, and none will until this returns.
@@ -774,7 +984,7 @@ def _drive_cell(
             gates_dir=gates_dir,
             state_volume=state,
         )
-        watch(f"cell: {container} up, worktree at {spec.tree_base[:8]}")
+        _preflight("cell_up", f"{container} up, worktree at {spec.tree_base[:8]}")
 
         executor = CellExecutor(container)
 
@@ -868,7 +1078,20 @@ def _drive_cell(
         # failures, and `census` has no prior to compare and skips — nothing for
         # the subtraction to cancel a real escape against.
         baseline = _suite([])
-        watch("baseline: " + ", ".join(f"{r.gate}={r.status}" for r in baseline))
+        baseline_aborted = aborted_gates(baseline)
+        # One event for both facts (`Baseline.aborted`/`gates`/`statuses`),
+        # matching what two consecutive `watch()` calls used to print with
+        # nothing between them — `describe()` joins them with the same "\n"
+        # (§5.4, `events.Baseline`'s own docstring).
+        emit(
+            Baseline(
+                timestamp=time.time(),
+                spec_id=spec.spec_id,
+                aborted=tuple(baseline_aborted),
+                gates=tuple(r.gate for r in baseline),
+                statuses=tuple(r.status for r in baseline),
+            )
+        )
         for result in baseline:
             ledger.record_gate_result(result, run_id=run_id)
 
@@ -876,10 +1099,7 @@ def _drive_cell(
             json.dumps([r.model_dump() for r in baseline], indent=2)
         )
 
-        if aborted := aborted_gates(baseline):
-            watch(
-                f"baseline errored in {aborted} — the toolchain is broken, not the code"
-            )
+        if baseline_aborted:
             ledger.set_task_state(task_id, "PREFLIGHT_FAILED")
             ledger.finish_run(run_id, "COMPLETE")
             return CellOutcome(
@@ -912,7 +1132,9 @@ def _drive_cell(
             max_turns=spec.max_turns,
             budget_usd=spec.budget_usd,
         )
-        watch(f"IMPLEMENT: system prompt {len(system_prompt)} chars")
+        _phase_start(
+            "IMPLEMENT", "IMPLEMENT", f"system prompt {len(system_prompt)} chars"
+        )
         ledger.set_task_state(task_id, "IMPLEMENTING")
 
         # Bound once, here, so no turn — plan, implement, repair, review or
@@ -933,7 +1155,7 @@ def _drive_cell(
                 spec=spec,
                 protected=policy.protected,
                 agent=agent,
-                watch=watch,
+                emit=emit,
             )
         except artifacts.ScopeProposed as proposed:
             # The attempt ends here: no IMPLEMENT turn, no gate suite, no
@@ -971,10 +1193,12 @@ def _drive_cell(
                     indent=2,
                 )
             )
-            watch(
-                f"SCOPE_REVIEW: proposed {final_touches}, "
+            _phase_start(
+                "IMPLEMENT",
+                "SCOPE_REVIEW",
+                f"proposed {final_touches}, "
                 f"sha256 {artifacts.hash_artifact(proposed.raw)[:12]}, "
-                f"${proposed.spent_usd:.2f} spent"
+                f"${proposed.spent_usd:.2f} spent",
             )
             ledger.set_task_state(task_id, "SCOPE_REVIEW")
             ledger.finish_run(run_id, "COMPLETE")
@@ -990,7 +1214,15 @@ def _drive_cell(
                 scope_root_cause=proposal.root_cause,
             )
         except artifacts.PlanRejected as rejected:
-            watch(f"PLAN: rejected, ${rejected.spent_usd:.2f} spent — {rejected}")
+            emit(
+                Terminal(
+                    timestamp=time.time(),
+                    spec_id=spec.spec_id,
+                    reason="plan_rejected",
+                    spent_usd_est=rejected.spent_usd,
+                    detail=str(rejected),
+                )
+            )
             ledger.set_task_state(task_id, "PLAN_REJECTED")
             ledger.finish_run(run_id, "COMPLETE")
             return CellOutcome(
@@ -1006,7 +1238,11 @@ def _drive_cell(
             # No plan and no commits, but a live cell: the earned state, not the
             # ORPHANED that a crash out of `run_one_cell` would stamp (§4.5).
             plan_cost = failed.attempt.cost_usd_est if failed.attempt else 0.0
-            watch(f"PLAN: the session failed, ${plan_cost:.2f} spent — {failed}")
+            _phase_start(
+                "IMPLEMENT",
+                "PLAN",
+                f"the session failed, ${plan_cost:.2f} spent — {failed}",
+            )
             ledger.set_task_state(task_id, "NOT_IMPLEMENTED")
             ledger.finish_run(run_id, "COMPLETE")
             return CellOutcome(
@@ -1024,7 +1260,11 @@ def _drive_cell(
         # Extracted and hashed the moment it is produced, and never read from
         # /work again: a plan the implementer can rewrite is a claim (§5.3).
         (task_dir / "plan.json").write_text(raw_plan)
-        watch(f"PLAN: accepted, sha256 {artifacts.hash_artifact(raw_plan)[:12]}")
+        _phase_start(
+            "IMPLEMENT",
+            "PLAN",
+            f"accepted, sha256 {artifacts.hash_artifact(raw_plan)[:12]}",
+        )
 
         # Doneness is measured from here, not from base_sha: the plan turn holds
         # Write/Edit/Bash and only a prompt telling it not to commit, so a plan
@@ -1045,7 +1285,15 @@ def _drive_cell(
             against the task's own budget (§4.3)."""
             if spent < spec.budget_usd:
                 return False
-            watch(f"budget: ${spent:.2f} of ${spec.budget_usd:.2f} — stopping")
+            emit(
+                Budget(
+                    timestamp=time.time(),
+                    spec_id=spec.spec_id,
+                    ceiling="budget_usd",
+                    value=spent,
+                    limit=spec.budget_usd,
+                )
+            )
             return True
 
         if _over_budget():
@@ -1070,14 +1318,14 @@ def _drive_cell(
                 prompt=implement.IMPLEMENT_PROMPT,
                 options=options,
                 resume=session_id,
-                watch=watch,
+                watch=to_watch,
                 last_cost_usd=last_cost,
             )
         except implement.AgentFailed as failed:
             # A bound firing, or a crash, must never discard committed work
             # (§4.3) — so the failure is recorded and the worktree is measured
             # below rather than the attempt being thrown away here.
-            watch(f"IMPLEMENT: the session failed — {failed}")
+            _phase_start("IMPLEMENT", "IMPLEMENT", f"the session failed — {failed}")
             implemented = _failed_turn(failed, session_id)
             # `run_agent`'s own predicate, kept rather than re-derived from the
             # result: `is_error` is only one of the four things it ORs, so a
@@ -1090,7 +1338,16 @@ def _drive_cell(
         # Doneness is measured, never reported (§4.3): an attempt that produced
         # no commits failed, whatever the transcript says.
         commits = worktree.commits_ahead(container, planned_sha)
-        watch(f"IMPLEMENT: {commits} commit(s), ${spent:.2f} spent")
+        emit(
+            Attempt(
+                timestamp=time.time(),
+                spec_id=spec.spec_id,
+                phase="IMPLEMENT",
+                attempt=1,
+                commits=commits,
+                spent_usd_est=spent,
+            )
+        )
 
         if commits == 0 and cut_off_at_turn_ceiling(implemented):
             # The agent did not decide it was finished — the turn ceiling cut
@@ -1100,15 +1357,21 @@ def _drive_cell(
             # session, asking only for a commit. The budget ceiling is
             # checked *before* it is spent, never after (§4.3).
             if _over_budget():
-                watch(
-                    f"budget: ${spent:.2f} of ${spec.budget_usd:.2f} — cut off "
-                    "at the turn ceiling with nothing committed, no room left "
-                    "to salvage"
+                emit(
+                    Terminal(
+                        timestamp=time.time(),
+                        spec_id=spec.spec_id,
+                        reason="cut_off_no_salvage_room",
+                        spent_usd_est=spent,
+                        detail=f"${spent:.2f} of ${spec.budget_usd:.2f}",
+                    )
                 )
             else:
-                watch(
-                    "IMPLEMENT: cut off at the turn ceiling with nothing "
-                    "committed — spending one turn to salvage it"
+                _phase_start(
+                    "IMPLEMENT",
+                    "IMPLEMENT",
+                    "cut off at the turn ceiling with nothing committed — "
+                    "spending one turn to salvage it",
                 )
                 # Clamped: a spec with a `max_turns` below the salvage
                 # constant would otherwise get a salvage turn with a *higher*
@@ -1127,7 +1390,7 @@ def _drive_cell(
                         prompt=implement.SALVAGE_PROMPT,
                         options=salvage_options,
                         resume=session_id,
-                        watch=watch,
+                        watch=to_watch,
                         # Scaled, not carried over: the fallback charges a
                         # crashed turn the previous turn's figure, and these
                         # two ceilings differ by construction. Unscaled, a
@@ -1140,7 +1403,9 @@ def _drive_cell(
                     # The same rule as the implement turn itself (§4.3): a
                     # bound firing on the salvage turn must not discard
                     # whatever it managed to commit before it was cut.
-                    watch(f"SALVAGE: the session failed — {failed}")
+                    _phase_start(
+                        "IMPLEMENT", "SALVAGE", f"the session failed — {failed}"
+                    )
                     salvaged = _failed_turn(failed, session_id)
                     # Truncated: this reaches the PR body through
                     # `commit_subjects`, and `str(failed)` carries in-cell stderr.
@@ -1165,7 +1430,11 @@ def _drive_cell(
                         worktree.commit_dirty(
                             container, f"checkpoint: host-committed — {salvage_note}"
                         )
-                        watch("SALVAGE: uncommitted work checkpointed by the host")
+                        _phase_start(
+                            "IMPLEMENT",
+                            "SALVAGE",
+                            "uncommitted work checkpointed by the host",
+                        )
                 except runtime.CellRuntimeError as broke:
                     # `commit_dirty` raises on any non-zero git exit, so a hook
                     # refusing the commit arrives here as a runtime error. It is
@@ -1173,32 +1442,55 @@ def _drive_cell(
                     # letting it out books exit 2, charged to nobody, on a task
                     # that earned `NOT_IMPLEMENTED` (error ≠ fail). The
                     # `commits_ahead` re-measure below still decides.
-                    watch(f"SALVAGE: the host checkpoint failed — {broke}")
+                    _phase_start(
+                        "IMPLEMENT", "SALVAGE", f"the host checkpoint failed — {broke}"
+                    )
                 # Same measurement point as before: the plan turn's head, not
                 # base_sha and not where the salvage turn itself started.
                 commits = worktree.commits_ahead(container, planned_sha)
                 if commits:
-                    watch(f"SALVAGE: recovered {commits} commit(s), ${spent:.2f} spent")
+                    _phase_start(
+                        "IMPLEMENT",
+                        "SALVAGE",
+                        f"recovered {commits} commit(s), ${spent:.2f} spent",
+                    )
                 else:
-                    watch(
-                        f"SALVAGE: cut off and could not be salvaged, "
-                        f"${spent:.2f} spent"
+                    emit(
+                        Terminal(
+                            timestamp=time.time(),
+                            spec_id=spec.spec_id,
+                            reason="cut_off_salvage_failed",
+                            spent_usd_est=spent,
+                        )
                     )
         elif commits == 0 and implement_failed:
             # Neither cut off at the turn ceiling nor finished: an idle or
             # wall-clock bound, a provider wall, a crash. Saying "finished"
             # here would collapse a third fact into the two this spec exists
             # to separate, and a retry is warranted for this one.
-            watch(
-                "IMPLEMENT: the turn ended without finishing and produced "
-                f"nothing ({implemented.subtype}/{implemented.terminal_reason})"
+            emit(
+                Terminal(
+                    timestamp=time.time(),
+                    spec_id=spec.spec_id,
+                    reason="ended_without_finishing",
+                    spent_usd_est=spent,
+                    subtype=implemented.subtype,
+                    terminal_reason=implemented.terminal_reason,
+                )
             )
         elif commits == 0:
             # The agent finished the turn on its own and produced nothing —
             # a different fact from being cut off, and not one more turn
             # answers (§4.3: doneness is measured, never reported, and never
             # argued with).
-            watch("IMPLEMENT: finished and produced nothing")
+            emit(
+                Terminal(
+                    timestamp=time.time(),
+                    spec_id=spec.spec_id,
+                    reason="finished_empty",
+                    spent_usd_est=spent,
+                )
+            )
 
         if commits == 0:
             ledger.set_task_state(task_id, "NOT_IMPLEMENTED")
@@ -1242,14 +1534,14 @@ def _drive_cell(
                     prompt=implement.repair_prompt(new),
                     options=options,
                     resume=session_id,
-                    watch=watch,
+                    watch=to_watch,
                     last_cost_usd=last_cost,
                 )
             except implement.AgentFailed as failed:
                 # The same rule as the implement turn (§4.3): a bound firing
                 # mid-loop must not discard work that is already committed and
                 # a suite that may be nearly green. The next gate suite measures.
-                watch(f"REPAIR: the session failed — {failed}")
+                _phase_start("REPAIR", "REPAIR", f"the session failed — {failed}")
                 repaired = _failed_turn(failed, session_id)
                 # "Commit as you go" is a prompt, and a prompt is never the
                 # boundary (§0). Real edits the turn never got to commit do not
@@ -1259,7 +1551,9 @@ def _drive_cell(
                     worktree.commit_dirty(
                         container, f"checkpoint: host-committed — {failed}"
                     )
-                    watch("REPAIR: uncommitted work checkpointed by the host")
+                    _phase_start(
+                        "REPAIR", "REPAIR", "uncommitted work checkpointed by the host"
+                    )
             session_id = require_session(repaired.session_id or session_id)
             spent += repaired.cost_usd_est
             last_cost = repaired.cost_usd_est
@@ -1270,7 +1564,8 @@ def _drive_cell(
             baseline=baseline,
             max_attempts=spec.max_attempts,
             repair=_repair,
-            watch=watch,
+            spec_id=spec.spec_id,
+            emit=emit,
             blocking=_blocking,
         )
 
@@ -1299,7 +1594,7 @@ def _drive_cell(
                 max_turns=spec.max_turns,
                 budget_usd=critic_budget(spec.budget_usd, spent),
                 agent=agent,
-                watch=watch,
+                watch=to_watch,
             )
             # Deliberately not gated on the host ceiling: a green diff nobody
             # reviewed is exactly the product Appendix K says means nothing.
@@ -1319,7 +1614,7 @@ def _drive_cell(
                 )
             )
             outcome, why = review.review_state(reviews)
-            watch(f"REVIEW: {why}")
+            _phase_start("REVIEW", "REVIEW", why)
 
         # Same reasoning as `reviews` above: bound only inside the REBUTTING
         # branch below, and READY_FOR_REVIEW's own outcomes skip it entirely.
@@ -1339,12 +1634,30 @@ def _drive_cell(
                     infrastructure and still not charged to the task (§5.4)."""
                     results = _run_gates()
                     if aborted := aborted_gates(results):
-                        watch(
-                            f"gates: {aborted} errored — infrastructure, not the task"
+                        emit(
+                            Attempt(
+                                timestamp=time.time(),
+                                spec_id=spec.spec_id,
+                                phase="REBUT",
+                                attempt=1,
+                                commits=0,
+                                spent_usd_est=0.0,
+                                aborted=tuple(aborted),
+                            )
                         )
                         return "GATE_ERROR"
                     if drift := suite_drift(results, baseline):
-                        watch(f"gates: {drift} — distrusting the subtraction")
+                        emit(
+                            Attempt(
+                                timestamp=time.time(),
+                                spec_id=spec.spec_id,
+                                phase="REBUT",
+                                attempt=1,
+                                commits=0,
+                                spent_usd_est=0.0,
+                                drift=tuple(drift),
+                            )
+                        )
                         return "GATE_ERROR"
                     # Same filter the repair loop applies: an advisory failure
                     # surviving the rebuttal is still not the task's problem
@@ -1354,7 +1667,17 @@ def _drive_cell(
                         for nf in subtract_baseline(results, baseline)
                         if _blocking(nf)
                     ]
-                    watch(f"gates: {len(new)} new failures after the rebuttal")
+                    emit(
+                        Attempt(
+                            timestamp=time.time(),
+                            spec_id=spec.spec_id,
+                            phase="REBUT",
+                            attempt=1,
+                            commits=0,
+                            spent_usd_est=0.0,
+                            new_failures=len(new),
+                        )
+                    )
                     return "EXHAUSTED" if new else None
 
                 result = rebut.run_rebut(
@@ -1374,7 +1697,7 @@ def _drive_cell(
                     rerun_gates=_rebut_gates,
                     diff=lambda: worktree.export_patch(container, spec.tree_base),
                     agent=agent,
-                    watch=watch,
+                    watch=to_watch,
                     last_cost_usd=last_cost,
                 )
                 rebut_result = result
@@ -1410,9 +1733,15 @@ def _drive_cell(
                         rebuttal=argued.get(n),
                     )
                 outcome, why = result.state, result.why
-                watch(f"REBUT: {why}")
+                _phase_start("REBUT", "REBUT", why)
 
-        watch(f"{outcome}: ${spent:.2f} spent, session {session_id}")
+        # `events.FINDINGS[0]`: the task's own terminal announcement is
+        # neither a `Terminal` (scoped to the five zero-commit IMPLEMENT
+        # endings) nor a `Budget` (a ceiling/value/limit triple, not an
+        # arbitrary outcome word and a session id) — typing it needs a tenth
+        # kind, out of scope here, so it stays a direct `print`, same as the
+        # `rate limit: rejected` line in the `except RateLimited` branch below.
+        print(f"{outcome}: ${spent:.2f} spent, session {session_id}")
         ledger.set_task_state(task_id, outcome)
         ledger.finish_run(run_id, "COMPLETE")
         return CellOutcome(
@@ -1430,7 +1759,9 @@ def _drive_cell(
             advisory_gates=sorted(advisory_gates),
         )
     except RateLimited as stopped:
-        watch(
+        # `events.FINDINGS[0]`, second half — see the comment above the
+        # outcome announcement this shares its exemption with.
+        print(
             "rate limit: rejected — stopping, not exhausted"
             + (
                 f"; window reopens {implement.when(stopped.resets_at)}"
@@ -1466,22 +1797,34 @@ def _drive_cell(
         ledger.set_task_state(task_id, "ORPHANED")
         raise
     finally:
-        watch("teardown")
+
+        def _teardown(step: str, *, ok: bool = True, detail: str = "") -> None:
+            emit(
+                Teardown(
+                    timestamp=time.time(),
+                    spec_id=spec.spec_id,
+                    step=step,
+                    ok=ok,
+                    detail=detail,
+                )
+            )
+
+        _teardown("start")
         # First, and on every path the exception one included: the export execs
         # inside the cell, so it must precede the container's removal as well as
         # the volume's. An EXHAUSTED run with commits is worth reading too.
         if container in created:
             exported["head_sha"], exported["subjects"] = export_patch(
-                container, spec, task_dir, watch
+                container, spec, task_dir, emit
             )
         removed = [("container", container, runtime.remove_container(container))]
         # Before the proxy goes: its log goes with it.
         for denied in proxy.denied_egress():
-            watch(f"teardown: proxy DENIED {denied}")
+            _teardown("proxy_denied", ok=False, detail=f"proxy DENIED {denied}")
         # Not a denial: an allowed CONNECT the proxy could not open. Reported
         # apart because the fix is the network, not the allowlist.
         for failed in proxy.failed_egress():
-            watch(f"teardown: proxy FAILED {failed}")
+            _teardown("proxy_failed", ok=False, detail=f"proxy FAILED {failed}")
         proxy.stop_proxy()
         removed.append(("network", network, runtime.remove_network(network)))
         # Volumes go too, or the same spec_id cannot be re-run.
@@ -1492,4 +1835,8 @@ def _drive_cell(
         # Reported, never raised: this is a `finally`.
         for kind, name, done in removed:
             if done.returncode != 0 and name in created:
-                watch(f"teardown: {kind} {name} survived — {done.stderr.strip()[:160]}")
+                _teardown(
+                    "survived",
+                    ok=False,
+                    detail=f"{kind} {name} survived — {done.stderr.strip()[:160]}",
+                )
