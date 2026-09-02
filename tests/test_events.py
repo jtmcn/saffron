@@ -42,7 +42,7 @@ from saffron.events import (
     read_log,
 )
 from saffron.gates.contract import Failure
-from saffron.phases import review
+from saffron.phases import implement, review
 from tests.test_session import (
     _HIDDEN_DIFF,
     _INTEGRITY_POLICY,
@@ -1262,6 +1262,66 @@ def test_an_unwritable_event_log_does_not_abort_the_run(monkeypatch, tmp_path):
     assert (task_dir / "baseline.json").is_file()
     assert (task_dir / "plan.json").is_file()
     assert (task_dir / "events.jsonl").is_dir()
+
+
+def test_the_supervisor_binds_every_required_argument_of_run_agent():
+    """`implement.run_agent` is monkeypatched in every `_drive` test, so the
+    seam between the supervisor and its real signature is invisible to the
+    whole suite. Measured: deleting `spec_id=spec.spec_id` from the
+    `partial(implement.run_agent, ...)` leaves 1156 tests **and** `ty check`
+    green, and in production raises `TypeError: missing 1 required
+    keyword-only argument` on the PLAN turn of every run — after the proxy,
+    the image build and the worktree have already been paid for.
+
+    Read statically, because the only way to exercise it dynamically is to
+    stop stubbing the function the tests exist to stub."""
+    import ast
+    import inspect
+
+    required = {
+        name
+        for name, param in inspect.signature(implement.run_agent).parameters.items()
+        if param.kind is param.KEYWORD_ONLY and param.default is param.empty
+    }
+    # `record_attempts` supplies these per call; the partial supplies the rest.
+    per_call = {"prompt", "options"}
+    tree = ast.parse(Path(session.__file__).read_text())
+    partials = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and node.args
+        and ast.unparse(node.args[0]) == "implement.run_agent"
+    ]
+    assert partials, "no partial(implement.run_agent, ...) in session.py"
+    for call in partials:
+        bound = {kw.arg for kw in call.keywords if kw.arg}
+        missing = required - per_call - bound
+        assert not missing, f"partial does not bind {sorted(missing)}"
+
+
+def test_every_spec_id_the_supervisor_passes_comes_from_the_spec():
+    """Third instance of one defect tonight: `repair_loop`'s `spec_id` was
+    defaultable, the `run_agent` partial's was droppable, and `run_rebut`'s can
+    be set to `""` with 1156 tests still green. Each was found by a different
+    reviewer and patched separately.
+
+    They share a shape — a required argument whose *value* nothing reads —
+    and the events it labels are how `SA-0042`'s single fan-out will tell one
+    task's rows from another's in a shared log. Checked structurally because
+    the dynamic version needs a test per call site, which is what let the
+    third one through."""
+    import ast
+
+    tree = ast.parse(Path(session.__file__).read_text())
+    literals = [
+        ast.unparse(kw.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        for kw in node.keywords
+        if kw.arg == "spec_id" and not isinstance(kw.value, ast.Name | ast.Attribute)
+    ]
+    assert literals == [], f"spec_id passed as a literal: {literals}"
 
 
 def test_the_supervisor_hands_the_adapter_to_the_agent_it_calls(monkeypatch, tmp_path):

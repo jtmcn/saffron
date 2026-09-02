@@ -346,11 +346,57 @@ def test_a_line_that_is_not_an_event_is_shown_and_not_parsed():
     assert any("(raw) npm WARN" in describe(e) for e in watched)
 
 
+def test_json_that_is_not_an_object_is_quarantined_too():
+    """The other half of the quarantine, and the half nothing covered:
+    `json.loads` does not raise for `[1, 2]` or `"hi"`, so those reach the
+    `isinstance(event, dict)` branch rather than the `ValueError` one.
+    Measured — deleting that branch left all 1156 tests passing, and
+    `_describe_agent_event` calls `.get`, so a bare list would raise inside
+    the renderer instead of being shown."""
+    for payload in ("[1, 2]", '"just a string"', "42"):
+        watched: list[Event] = []
+        result = implement.run_agent(
+            "cell",
+            prompt="p",
+            options={},
+            spec_id="SY-1",
+            emit=watched.append,
+            exec_stream=_stream(payload, "", _result_line()),
+        )
+        assert result.subtype == "success"
+        quarantined = [e for e in watched if isinstance(e, Agent) and e.raw]
+        assert quarantined, payload
+        assert quarantined[0].line == payload
+        assert quarantined[0].event is None
+        assert describe(quarantined[0]) == f"agent: (raw) {payload}"
+
+
+def test_a_line_that_is_not_an_event_is_bounded_at_capture():
+    """`describe` cuts at 160, but the untruncated line used to reach
+    `events.jsonl` — an untrusted cell choosing how much control-plane disk it
+    writes. Measured on one 5 MB stdout line: 715 bytes written before this
+    spec's change, 10 MB after. Bounded at capture now, which is also what
+    AC5's own wording says ("shown, truncated")."""
+    watched: list[Event] = []
+    implement.run_agent(
+        "cell",
+        prompt="p",
+        options={},
+        spec_id="SY-1",
+        emit=watched.append,
+        exec_stream=_stream("z" * 5000, "", _result_line()),
+    )
+    (raw,) = [e for e in watched if isinstance(e, Agent) and e.raw]
+    assert raw.line == "z" * 160
+    assert describe(raw) == "agent: (raw) " + "z" * 160
+
+
 def test_a_raw_line_is_shown_and_never_read_as_an_event():
     """A line that is not JSON came from a process sharing the runner's stdout
-    inside an untrusted cell (`test_a_line_that_is_not_an_event_is_shown_and_
-    not_parsed` above proves the same for a line that parses but is not a
-    dict). Checked here at the event's own shape, not the rendered string
+    inside an untrusted cell (`test_json_that_is_not_an_object_is_quarantined_
+    too` above covers a line that parses but is not a dict — the sibling this
+    used to cite feeds `npm WARN something`, which takes the `ValueError`
+    branch, so it never proved that at all). Checked here at the event's own shape, not the rendered string
     alone: `raw=True` is the quarantine, `event` stays unset — a raw line
     read as an event would leave `event` populated instead — and `describe()`
     still shows it, truncated, exactly as the operator saw it before this

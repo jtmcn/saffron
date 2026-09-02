@@ -180,6 +180,14 @@ def when(stamp: int | None) -> str:
     return time.strftime("%H:%M local" if same_day else "%a %d %b %H:%M local", local)
 
 
+def _quarantined(spec_id: str, line: str) -> Agent:
+    """A line that is not an event, bounded at the same 160 characters
+    `describe` renders it at. `raw=True` is the quarantine and must survive
+    every hop; the bound is what keeps an untrusted cell from choosing how
+    much of the control plane's disk it writes."""
+    return Agent(timestamp=time.time(), spec_id=spec_id, raw=True, line=line[:160])
+
+
 def run_agent(
     container: str,
     *,
@@ -230,10 +238,18 @@ def run_agent(
             # Anything not an event came from a process sharing the runner's
             # stdout. Show it to the operator; never try to read it as one —
             # `raw=True` is the quarantine, and it must survive every hop.
-            emit(Agent(timestamp=time.time(), spec_id=spec_id, raw=True, line=line))
+            # Truncated at capture, not at render: `describe` already cuts at
+            # 160, but the untruncated line reached `events.jsonl`. Measured on
+            # one 5 MB stdout line — 715 bytes written before this spec, 10 MB
+            # after. The cell is untrusted and this is a control-plane file.
+            emit(_quarantined(spec_id, line))
             return
         if not isinstance(event, dict):
-            emit(Agent(timestamp=time.time(), spec_id=spec_id, raw=True, line=line))
+            # JSON that is not an object: `_describe_agent_event` calls `.get`,
+            # so a bare list or string would raise inside the renderer. Same
+            # quarantine, and it has its own branch because `json.loads` does
+            # not raise for it.
+            emit(_quarantined(spec_id, line))
             return
         if event.get("type") == "text":
             text.append(str(event.get("text", "")))
