@@ -255,7 +255,6 @@ def test_reverify_execs_the_gates_from_the_mount_never_the_applied_tree(
         policy=Policy(gates={"tests": GateDeclaration()}),
         gates_dir=tmp_path / "gates",
         image="img",
-        watch=lambda _line: None,
     )
     assert (new, head) == ([], [])
     assert asked == [["/gates/.saffron/gates/tests"]] * 2
@@ -744,7 +743,7 @@ def test_a_conflict_persists_merge_failed_and_pushes_nothing(monkeypatch, tmp_pa
         out_dir=tmp_path / "batch",
         token=None,
         gh=never_called,
-        watch=lambda _: None,
+        emit=lambda _: None,
     )
 
     assert result.state == "MERGE_FAILED"
@@ -836,7 +835,7 @@ def packageable(monkeypatch, tmp_path):
             ledger=ledger,
             out_dir=tmp_path / "batch",
             token=None,
-            watch=lambda _: None,
+            emit=lambda _: None,
         ),
         outcome=_cell_outcome(task_dir, task_id, run_id),
     )
@@ -878,6 +877,53 @@ def test_a_green_cell_becomes_a_branch_a_draft_pr_and_a_queue_line(packageable):
     index = (packageable.out_dir / "index.html").read_text()
     assert "+2/−1" in body and "+2/−1" in index
     assert "SA-0005" in index
+
+
+def test_the_pull_request_url_is_logged_as_an_event(packageable):
+    """The pull-request line reaches the log, not only the terminal — the one
+    an unattended morning most needs about a task that reached PACKAGE. Every
+    keyword is read out of `packageable.kwargs` explicitly, rather than
+    spreading a merged dict, so the fixture's own `emit=lambda _: None` is
+    overridden by this test's own logging one and nothing else."""
+    from saffron.events import EventLog, PhaseStart, read_log
+
+    task_dir = packageable.outcome.task_dir
+    log = EventLog(task_dir)
+    seen: list = []
+
+    def emit(event):
+        seen.append(event)
+        log.append(event)
+
+    kwargs = packageable.kwargs
+    result = package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/9\n"),
+        spec=kwargs["spec"],
+        repo=kwargs["repo"],
+        mirror=kwargs["mirror"],
+        image=kwargs["image"],
+        ledger=kwargs["ledger"],
+        out_dir=kwargs["out_dir"],
+        token=kwargs["token"],
+        emit=emit,
+    )
+
+    assert result.state == "READY_FOR_REVIEW"
+    assert result.pr_url == "https://x/pull/9"
+    # Reached the in-memory fan-out this call was actually handed...
+    assert any(
+        isinstance(event, PhaseStart) and event.detail == result.pr_url
+        for event in seen
+    )
+    # ...and, read back from disk, the durable log too — not merely printed.
+    logged = read_log(task_dir)
+    assert any(
+        isinstance(event, PhaseStart)
+        and event.phase == "PACKAGE"
+        and event.detail == result.pr_url
+        for event in logged
+    )
 
 
 def test_the_bodys_diff_is_pinned_against_the_operators_gitconfig(packageable):
@@ -1687,7 +1733,7 @@ def stacked_packageable(monkeypatch, tmp_path):
             ledger=ledger,
             out_dir=tmp_path / "batch",
             token=None,
-            watch=lambda _: None,
+            emit=lambda _: None,
         ),
         outcome=_cell_outcome(task_dir, task_id, run_id),
     )
@@ -1819,7 +1865,7 @@ def test_a_merged_parent_falls_back_to_the_ordinary_target(tmp_path, monkeypatch
         # never tries to fetch it, not merely a flag it read.
         parent_branch="saffron/SA-0020",
         gh=fake_gh,
-        watch=lambda _: None,
+        emit=lambda _: None,
     )
 
     assert result.state == "READY_FOR_REVIEW"
@@ -1919,7 +1965,7 @@ def test_a_parent_that_moved_ahead_is_the_tree_everything_downstream_reads(
         token=None,
         parent_branch="saffron/SA-0020",
         gh=fake_gh,
-        watch=lambda _: None,
+        emit=lambda _: None,
     )
 
     assert result.state == "READY_FOR_REVIEW"
@@ -2017,7 +2063,7 @@ def test_a_gone_parent_is_the_tasks_failure_not_infrastructure(tmp_path, monkeyp
         token=None,
         parent_branch="saffron/SA-0020",
         gh=_recording_gh(called),
-        watch=lambda _: None,
+        emit=lambda _: None,
     )
 
     assert result.state == "MERGE_FAILED"

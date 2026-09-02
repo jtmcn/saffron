@@ -2486,6 +2486,22 @@ what died at 141 turns; `SA-0042` carries that half forward on its own, since
 `package()` runs outside `run_one_cell` and never received the supervisor's
 `emit` in the first place.
 
+**Closed the rest of the way by `SA-0042`, 2026-09-02.** `cli.py` now builds
+one `emit` fan-out — print plus a task-scoped `EventLog`, the same shape
+`session._default_emit` already used — and hands the identical object to both
+`run_one_cell` and `package()`, so PACKAGE's events finally reach
+`events.jsonl` too. `package.py`'s own eight `watch(str)` call sites and
+`cli._resolve_stacked_on`'s two are now `emit(<Event>)`, all against existing
+kinds and with no message change. One line did not migrate, the mirror image
+of `events.FINDINGS[0]` above: `reverify`'s `"re-verify: {label} suite at
+{sha}"` is `events.FINDINGS[1]`'s own named exception — no `PhaseStart` label
+fits a lower-case, hyphenated step without widening `LineLabel`, which needs
+`events.py` and was forbidden here — so it stays a direct, unconditional
+`print()`, invisible to `events.jsonl` for the same reason the outcome line
+above still is. The gap this leaves is narrower than the one closed: it is
+one line, inside one function, already named and reasoned about before this
+spec existed, rather than a second `print` nobody had noticed leaking.
+
 ## 44. A single turn can overshoot the budget ceiling, because the check runs before it
 
 `_over_budget` gates a turn on what has been spent *so far*. It cannot bound
