@@ -756,38 +756,74 @@ def test_the_table_did_not_quietly_lose_a_row():
 
 
 def test_the_duplicated_agent_renderer_still_matches_its_original():
-    """`_describe_agent_event` used to be duplicated as `phases.implement.
-    _describe`, kept in step by nothing but a test — one divergence had
-    already appeared (`_when(None)` reads "unknown" where `implement.when
-    (None)` reads `None` as *now*, both unreachable behind a `resets_at`
-    guard). SA-0041 deletes the copy: `implement.run_agent` now emits the raw
-    cell dict under `Agent.event` and `describe()` is the only renderer left.
-    This test's job is now to prove that renderer produces, for the parsed
-    dict wrapped in an `Agent` event, exactly what `_describe_agent_event`
-    produces for the dict alone — the parity `implement._describe` used to
-    guarantee, now guaranteed by there being one renderer instead of two."""
-    events = [
-        {"type": "text", "text": "  a   b  "},
-        {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}},
-        {"type": "tool_result", "is_error": False},
-        {"type": "tool_result", "is_error": True},
-        {
-            "type": "result",
-            "subtype": "success",
-            "num_turns": 3,
-            "total_cost_usd": 0.5,
-            "terminal_reason": None,
-        },
-        {"type": "rate_limit", "status": "allowed"},
-        {"type": "rate_limit", "status": "rejected", "utilization": 0.5},
-        {"type": "rate_limit", "status": "rejected", "resets_at": 1_700_000_000},
-        {"type": "error", "error": "boom"},
-        {"type": "system", "subtype": "thinking_tokens"},
-        {"type": "unknown_to_both"},
+    """`_describe_agent_event` was duplicated as `phases.implement._describe`,
+    kept in step by nothing but a test. `SA-0041` deletes the copy, so this
+    test's job changed: there is no longer a second renderer to compare
+    against, and comparing `describe(Agent(event=e))` to
+    `_describe_agent_event(e)` asserts nothing — `describe`'s Agent branch
+    *is* `return _describe_agent_event(event.event)`, so that reads
+    `f(e) == f(e)` and cannot fail. Measured: rewriting the `rate_limit` and
+    `result` branches left 1156 tests passing.
+
+    That matters more now than before. While `Agent.event` was always `None`
+    this renderer was unreachable in production; it is now the sole renderer
+    for every `agent:` line an operator sees and every one `events.jsonl`
+    keeps, and the golden fixture excludes all of them by construction. So
+    each branch is pinned to the literal line it must produce.
+    """
+    cases = [
+        ({"type": "text", "text": "  a   b  "}, "agent: a b"),
+        # The 160/120 bounds are the whole reason a cell's output is safe to
+        # print: pin them, or shortening one is invisible. Measured — with
+        # only the short case above, `text[:160]` -> `text[:80]` passed.
+        ({"type": "text", "text": "x" * 400}, "agent: " + "x" * 160),
+        (
+            {"type": "tool_use", "name": "Bash", "input": {"command": "y" * 400}},
+            "agent: Bash " + json.dumps({"command": "y" * 400})[:120],
+        ),
+        (
+            {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}},
+            'agent: Bash {"command": "ls"}',
+        ),
+        ({"type": "tool_result", "is_error": False}, "agent: tool ok"),
+        ({"type": "tool_result", "is_error": True}, "agent: tool error"),
+        (
+            {
+                "type": "result",
+                "subtype": "success",
+                "num_turns": 3,
+                "total_cost_usd": 0.5,
+                "terminal_reason": None,
+            },
+            "agent: success in 3 turns, $0.5 (None)",
+        ),
+        ({"type": "rate_limit", "status": "allowed"}, "agent: rate limit allowed"),
+        (
+            {"type": "rate_limit", "status": "rejected", "utilization": 0.5},
+            "agent: rate limit rejected, 50% used",
+        ),
+        ({"type": "error", "error": "boom"}, "agent: error boom"),
+        (
+            {"type": "system", "subtype": "thinking_tokens"},
+            "agent: system thinking_tokens",
+        ),
+        ({"type": "unknown_to_both"}, "agent: unknown_to_both"),
     ]
-    for event in events:
-        wrapped = Agent(timestamp=0.0, spec_id="s", raw=False, event=event)
-        assert _describe_agent_event(event) == describe(wrapped), event
+    for event, expected in cases:
+        assert _describe_agent_event(event) == expected, event
+        # And the wrapped form an operator actually meets renders identically.
+        assert (
+            describe(Agent(timestamp=1.0, spec_id="x", raw=False, event=event))
+            == expected
+        )
+
+    # `resets_at` renders a local clock time, so only its stable half is
+    # pinned; `_when`'s own formatting is covered by its call sites above.
+    resets = _describe_agent_event(
+        {"type": "rate_limit", "status": "rejected", "resets_at": 1_700_000_000}
+    )
+    assert resets.startswith("agent: rate limit rejected, resets ")
+    assert resets != "agent: rate limit rejected, resets "
 
 
 def test_findings_name_what_the_table_could_not_type():
