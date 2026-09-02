@@ -390,7 +390,14 @@ def read_log(task_dir: Path) -> list[Event]:
 def _when(stamp: int | None) -> str:
     """`phases.implement.when`, duplicated rather than imported: `events.py`
     is core and stays dependency-light, and `SA-0031` deletes this copy the
-    moment `implement._describe` collapses into `describe` below."""
+    moment `implement._describe` collapses into `describe` below.
+
+    Not byte-identical, and the difference is load-bearing for that collapse:
+    the original hands `None` to `time.localtime`, which reads it as *now* and
+    prints a reset time that has already passed. Both call sites here guard
+    with `if event.get("resets_at")`, so neither branch is reachable today —
+    `SA-0031` must pick one deliberately rather than inherit whichever copy
+    it deletes last."""
     import time
 
     if stamp is None:

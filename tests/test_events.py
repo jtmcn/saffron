@@ -760,7 +760,10 @@ def test_normalise_replaces_exactly_the_three_volatile_substrings():
 # real cell: `agent:` (real SDK events), `SCOPE:`/`SCOPE_REVIEW:`, `SALVAGE:`,
 # `REPAIR:`, `REBUT:`, `Budget`'s stopping line, a no-commit `Terminal`,
 # `unstacked:` and every `PACKAGE:` line (PACKAGE runs after `run_one_cell`
-# returns). `SA-0030`/`SA-0031` verify against this file and must know that.
+# returns). Nor is `Baseline`'s aborted variant: both driven runs have every
+# declared gate report, so the second `baseline errored in [...]` line never
+# appears here and is proven only by the `describe` case above.
+# `SA-0030`/`SA-0031` verify against this file and must know that.
 
 
 def _golden_fixture_path() -> Path:
