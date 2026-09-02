@@ -10,6 +10,9 @@ touches:
   - saffron/agents/prompts/review-correctness.md
   - saffron/agents/prompts/review-contract.md
   - tests/test_review.py
+  - tests/test_events.py
+  - tests/test_session.py
+  - tests/fixtures/watch-golden.txt
   - docs/BACKLOG.md
 forbidden:
   - DESIGN.md
@@ -177,6 +180,14 @@ marked `preserves` are in that same file and must be green before and after,
 untouched. Weakening one to make room for the third lens satisfies the
 `criteria` gate and destroys the thing the criterion was protecting — this is
 the exact move the two specs before this one had to have reverted in review.
+
+**A third lens changes three files outside this spec's own test file.** The
+REVIEW phase prints one line per lens, so `tests/fixtures/watch-golden.txt`
+gains a `REVIEW:` line and its `$0.40 spent` total moves; `tests/test_events.py`
+hardcodes those same lines; and `tests/test_session.py` scripts a fixed number
+of agent turns per task. All three are in `touches` for that reason. Update them
+to match the third lens — do not revert them to keep the diff small, and do not
+weaken an assertion to avoid updating a fixture.
 
 **Cite code by file and symbol, never by line number**, and do not backtick a
 path in an acceptance criterion that this spec's `touches` does not cover — gate
