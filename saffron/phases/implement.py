@@ -180,12 +180,24 @@ def when(stamp: int | None) -> str:
     return time.strftime("%H:%M local" if same_day else "%a %d %b %H:%M local", local)
 
 
+# Storage, not display. `describe` cuts at 160 for the terminal; this is what
+# `events.jsonl` keeps, and the two are different questions — 160 would throw
+# away the most interesting forensic artifact a cell produces (backlog 46).
+QUARANTINE_BYTES = 8192
+
+
 def _quarantined(spec_id: str, line: str) -> Agent:
-    """A line that is not an event, bounded at the same 160 characters
-    `describe` renders it at. `raw=True` is the quarantine and must survive
-    every hop; the bound is what keeps an untrusted cell from choosing how
-    much of the control plane's disk it writes."""
-    return Agent(timestamp=time.time(), spec_id=spec_id, raw=True, line=line[:160])
+    """A line that is not an event, bounded before it is persisted.
+
+    Bounds the accidental case only, and says so: a cell that wants the disk
+    wraps its payload in nine bytes of JSON and takes the `Agent.event` path,
+    which this cannot reach — `saffron/events.py` is forbidden here. Measured
+    on one 5 MB stdout line: 5 MB written unbounded, 8 KB now; the same line
+    as `{"type":"text",...}` still writes 5 MB. Backlog item 46 is where both
+    paths get one answer."""
+    return Agent(
+        timestamp=time.time(), spec_id=spec_id, raw=True, line=line[:QUARANTINE_BYTES]
+    )
 
 
 def run_agent(
@@ -238,17 +250,11 @@ def run_agent(
             # Anything not an event came from a process sharing the runner's
             # stdout. Show it to the operator; never try to read it as one —
             # `raw=True` is the quarantine, and it must survive every hop.
-            # Truncated at capture, not at render: `describe` already cuts at
-            # 160, but the untruncated line reached `events.jsonl`. Measured on
-            # one 5 MB stdout line — 715 bytes written before this spec, 10 MB
-            # after. The cell is untrusted and this is a control-plane file.
             emit(_quarantined(spec_id, line))
             return
         if not isinstance(event, dict):
-            # JSON that is not an object: `_describe_agent_event` calls `.get`,
-            # so a bare list or string would raise inside the renderer. Same
-            # quarantine, and it has its own branch because `json.loads` does
-            # not raise for it.
+            # `json.loads` does not raise for a bare list or string, and
+            # `_describe_agent_event` calls `.get` — so this needs its own branch.
             emit(_quarantined(spec_id, line))
             return
         if event.get("type") == "text":

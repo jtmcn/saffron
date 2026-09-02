@@ -629,6 +629,7 @@ class _Cell:
         self.exported = False
         self.subjects_from: str | None = None
         self.timeouts: list[float | None] = []
+        self.spec_ids: list[str | None] = []
         self.turn_last_costs: list[float | None] = []
         self.checkpointed: list[str] = []
         self.denied: list[str] = []
@@ -910,6 +911,7 @@ def _drive(
         cell.turn_options.append(options)
         cell.resumes.append(resume)
         cell.timeouts.append(kwargs.get("timeout_s"))
+        cell.spec_ids.append(kwargs.get("spec_id"))
         cell.turn_last_costs.append(kwargs.get("last_cost_usd"))
         # A default, not a scripted turn: REVIEW invokes one session per lens
         # after a green loop, and every test predating it scripts the
@@ -2408,6 +2410,11 @@ def test_every_turn_carries_the_drivers_wall_clock_not_the_librarys(
     _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
     assert session.TURN_TIMEOUT_S < 3600
     assert cell.timeouts == [session.TURN_TIMEOUT_S] * len(cell.turns)
+    # `spec_id` is bound in the same `partial`, and nothing read its value:
+    # dropping it left 1156 tests and `ty check` green while breaking the PLAN
+    # turn of every production run, and `spec_id=container` was equally silent.
+    # It is what SA-0042's shared log will key one task's rows on.
+    assert cell.spec_ids == ["SY-1"] * len(cell.turns)
 
 
 def test_a_crashed_plan_turn_keeps_its_own_exception_and_its_cost():

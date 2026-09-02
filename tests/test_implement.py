@@ -384,10 +384,13 @@ def test_a_line_that_is_not_an_event_is_bounded_at_capture():
         options={},
         spec_id="SY-1",
         emit=watched.append,
-        exec_stream=_stream("z" * 5000, "", _result_line()),
+        exec_stream=_stream("z" * 50_000, "", _result_line()),
     )
     (raw,) = [e for e in watched if isinstance(e, Agent) and e.raw]
-    assert raw.line == "z" * 160
+    assert raw.line is not None
+    assert len(raw.line) == implement.QUARANTINE_BYTES
+    # Bounded for storage, still cut to 160 for the terminal — the two bounds
+    # are separate and a change to either must fail something.
     assert describe(raw) == "agent: (raw) " + "z" * 160
 
 
@@ -413,9 +416,12 @@ def test_a_raw_line_is_shown_and_never_read_as_an_event():
     (raw,) = [e for e in watched if isinstance(e, Agent) and e.raw]
     assert raw.event is None
     assert raw.line is not None and raw.line.startswith("npm WARN ")
-    # `describe()` truncates to 160 chars at render time — never at the point
-    # the line is captured, so the full line still survives in `events.jsonl`.
-    assert describe(raw) == f"agent: (raw) {raw.line[:160]}"
+    # Two different bounds, and this used to conflate them: capture keeps
+    # `QUARANTINE_BYTES`, render shows 160. Asserted against a literal, because
+    # `raw.line[:160]` is a no-op once capture bounds the line and stops
+    # distinguishing a renderer that truncates from one that does not.
+    assert len(raw.line) == 209
+    assert describe(raw) == "agent: (raw) npm WARN " + "x" * 151
 
 
 def test_a_crashed_attempt_keeps_the_last_good_cost():
