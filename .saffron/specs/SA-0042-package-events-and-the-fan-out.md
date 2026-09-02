@@ -115,6 +115,25 @@ probably a worse design.
 unattended morning reads about a task that got all the way to PACKAGE and still
 produced nothing mergeable. Do not economise on them.
 
+**Do not rename `package()` or `_resolve_stacked_on`.** `events.FAMILIES` cites
+them as `phases/package.py:package` and `cli.py:_resolve_stacked_on`, and ten of
+its rows resolve through those two constants;
+`test_every_row_cites_a_file_and_symbol_that_exist` walks the AST and asserts
+each names a symbol that exists. `saffron/events.py` is `forbidden` here, so a
+rename is a `tests` failure this spec cannot repair — it would have to edit the
+table it is forbidden to touch. Migrate the call sites inside those functions;
+leave their names alone.
+
+**A witness is judged against `tree_base`, not `base_sha`.** The notes in
+`SA-0041` said "absent or failing at `base_sha`", and `criteria.py`'s own
+docstring has the same slip. The baseline suite runs in the worktree at
+`tree_base` (`session.py`, "At `tree_base` the diff is empty"), which for a
+stacked child is a different tree. This spec stacks on `SA-0041`, so the side
+your witnesses are judged against is `saffron/SA-0041`'s head — the tests
+`SA-0041` added exist there, and two of this spec's `preserves` witnesses live
+in `tests/test_events.py`, which is **not** in `touches`. They must be green
+there and stay green; you cannot repair them.
+
 **Run the `cell`-marked test by hand and say so.** `tests/test_package_cell.py`
 is the one `cell`-marked file in `touches` — `tests/test_agent_runner.py` is
 `SA-0041`'s. `addopts = "-m 'not cell'"` excludes it from `make check`, the
