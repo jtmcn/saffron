@@ -615,7 +615,12 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("REPAIR: the session failed", _S, PhaseStart),
     _Family("REPAIR: uncommitted work checkpointed", _S, PhaseStart),
     _Family("REVIEW:", _S, PhaseStart),
+    # Two of the three `REVIEW:` lines in the captured fixture come from
+    # `run_review`, not the supervisor, and `SA-0031` migrates `phases/*.py`
+    # by reading this table — so the file it has to edit has to appear in it.
+    _Family("REVIEW: (per-lens)", "phases/review.py:run_review", PhaseStart),
     _Family("REBUT:", _S, PhaseStart),
+    _Family("REBUT: (verdict)", "phases/rebut.py:run_rebut", PhaseStart),
     _Family("teardown", _S, Teardown),
     _Family("teardown: commit subjects unreadable", _EP, Teardown),
     _Family("teardown: no commits, nothing to export", _EP, Teardown),

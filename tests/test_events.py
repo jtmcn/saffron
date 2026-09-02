@@ -6,6 +6,7 @@ call sites. No network, no cell.
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import typing
@@ -34,6 +35,7 @@ from saffron.events import (
     Teardown,
     Terminal,
     TerminalReason,
+    _describe_agent_event,
     describe,
     read_log,
 )
@@ -704,6 +706,73 @@ def test_every_family_has_a_kind_and_renders():
         assert family.kind in _KINDS.values(), family.prefix
 
 
+def test_every_row_cites_a_file_and_symbol_that_exist():
+    """AC2, the half the assertion above cannot make. `family.kind in
+    _KINDS.values()` is true of *any* row carrying any of the nine types, so
+    the table could cite anything: a row reading
+    `_Family("QQQQ", "no/such/file.py:nope", Teardown)` passed every check
+    here. Resolve each citation instead — the file exists, and the symbol is
+    defined in it."""
+    root = Path(__file__).resolve().parents[1] / "saffron"
+    cited = {(f.prefix, f.where) for f in FAMILIES}
+    cited |= {(prefix, where) for prefix, where, _ in FINDINGS}
+    for prefix, where in sorted(cited):
+        rel, _, symbol = where.partition(":")
+        path = root / rel
+        assert path.exists(), f"{prefix!r} cites a file that does not exist: {rel}"
+        defined = {
+            node.name
+            for node in ast.walk(ast.parse(path.read_text()))
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+        }
+        assert symbol in defined, f"{prefix!r} cites {rel}, which defines no {symbol}"
+
+
+def test_the_table_did_not_quietly_lose_a_row():
+    """AC2 again, and the mutation neither assertion above catches: deleting
+    three rows — `unstacked:`, `baseline errored in`, `PACKAGE: (pr_url)` —
+    left every test in this file passing. The table is the proof the nine
+    kinds cover all 64 call sites and is what `SA-0030`/`SA-0031` read to find
+    their work, so losing a row silently is the failure that matters.
+
+    `SA-0030` and `SA-0031` migrate these call sites and will move this count.
+    That is the point: moving it is a deliberate edit, not a silent one."""
+    assert len(FAMILIES) == 57
+    assert len({f.prefix for f in FAMILIES}) == 57
+
+
+def test_the_duplicated_agent_renderer_still_matches_its_original():
+    """`_describe_agent_event` is `phases.implement._describe`, copied because
+    `events.py` stays dependency-light; `SA-0031` collapses the two. Nothing
+    asserted the copies agree, and one divergence had already appeared —
+    `_when(None)` returns "unknown" where `implement.when(None)` reads None as
+    *now*. Both are unreachable behind a `resets_at` guard, which is exactly
+    why only a test finds the next one."""
+    from saffron.phases import implement
+
+    events = [
+        {"type": "text", "text": "  a   b  "},
+        {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}},
+        {"type": "tool_result", "is_error": False},
+        {"type": "tool_result", "is_error": True},
+        {
+            "type": "result",
+            "subtype": "success",
+            "num_turns": 3,
+            "total_cost_usd": 0.5,
+            "terminal_reason": None,
+        },
+        {"type": "rate_limit", "status": "allowed"},
+        {"type": "rate_limit", "status": "rejected", "utilization": 0.5},
+        {"type": "rate_limit", "status": "rejected", "resets_at": 1_700_000_000},
+        {"type": "error", "error": "boom"},
+        {"type": "system", "subtype": "thinking_tokens"},
+        {"type": "unknown_to_both"},
+    ]
+    for event in events:
+        assert _describe_agent_event(event) == implement._describe(event), event
+
+
 def test_findings_name_what_the_table_could_not_type():
     """The two call-site shapes `FAMILIES` refused to force into a
     `message: str` are named, not silently dropped."""
@@ -754,16 +823,35 @@ def test_normalise_replaces_exactly_the_three_volatile_substrings():
 
 # --- The golden fixture: driven, not typed ----------------------------------
 #
-# Reached by this harness: `preflight:`/`cell:`, `baseline:`, `PLAN:`,
-# `IMPLEMENT:`, `gates:`, `REVIEW:`, the outcome line, and `teardown:`. Not
-# reached, because the harness monkeypatches the agent and never touches a
-# real cell: `agent:` (real SDK events), `SCOPE:`/`SCOPE_REVIEW:`, `SALVAGE:`,
-# `REPAIR:`, `REBUT:`, `Budget`'s stopping line, a no-commit `Terminal`,
-# `unstacked:` and every `PACKAGE:` line (PACKAGE runs after `run_one_cell`
-# returns). Nor is `Baseline`'s aborted variant: both driven runs have every
-# declared gate report, so the second `baseline errored in [...]` line never
-# appears here and is proven only by the `describe` case above.
-# `SA-0030`/`SA-0031` verify against this file and must know that.
+# AC6. `SA-0030` and `SA-0031` are specified to trust this file, so what it
+# does *not* prove is stated at the granularity that matters — the render
+# branch, not the kind. A kind appearing here does not mean its branches do.
+#
+# Captured: `preflight:` (4 of 5 steps), `cell:`, `baseline:` (the joined
+# line only), `PLAN: accepted`, `IMPLEMENT: system prompt`, `IMPLEMENT: N
+# commit(s)`, `gates: attempt N …` (green, repair, no-progress), `REVIEW:`
+# per-lens and summary, the outcome line, `teardown` and `teardown: exported
+# N bytes`.
+#
+# Not captured, because the harness monkeypatches the agent and never touches
+# a real cell: `agent:` in every form; `SCOPE:`/`SCOPE_REVIEW:`; `SALVAGE:`;
+# `REPAIR:`; `REBUT:`; `unstacked:`; and every `PACKAGE:` line, which runs
+# after `run_one_cell` returns.
+#
+# Not captured though the kind above it is — the gaps easiest to mistake for
+# coverage:
+#   * `GateResult` entirely. No call site prints one alone; it renders for a
+#     future consumer (`SA-0036`) and this file proves nothing about it.
+#   * `Baseline`'s `aborted` variant — both driven runs have every declared
+#     gate report, so the second `baseline errored in [...]` line never
+#     appears. Proven only by the `describe` case above.
+#   * `Attempt`'s `aborted`, `drift` and `after the rebuttal` branches.
+#   * every `PLAN:` branch except `accepted`, and both `IMPLEMENT:` session
+#     failures (`the session failed`, `cut off … spending one turn`).
+#   * `Budget`'s stopping line and all five `Terminal` reasons.
+#   * every `teardown:` line except `exported N bytes` — no `no commits`, no
+#     `patch export FAILED`, no `commit subjects unreadable`, no `proxy
+#     DENIED`/`FAILED`, no `survived`.
 
 
 def _golden_fixture_path() -> Path:
@@ -799,3 +887,191 @@ def test_watch_output_matches_the_golden_fixture(monkeypatch, tmp_path):
         ]
     )
     assert captured == _golden_fixture_path().read_text().rstrip("\n")
+
+
+# --- The join: `describe` against lines the fixture actually captured -------
+#
+# `_CASES` above are literals, typed beside the code that produces them; the
+# fixture is captured from real `watch(...)` call sites. Nothing compared the
+# two, so `describe` could drift from `cell/session.py` and every test here
+# stayed green — measured: rewriting the `gates: attempt …` branch and its
+# `_CASES` literal together passed 67 tests. That is the one drift `SA-0030`
+# cannot survive, because it replaces those call sites with
+# `watch(describe(event))` and its only acceptance criterion is that the
+# output does not change. Asserting the line is one the fixture *carries*, and
+# that `describe` reproduces it, is what ties the two halves of this spec
+# together.
+#
+# Not joinable, and deliberately absent: the normalised lines (`<LAN-ADDR>`,
+# `<N>`, `<TASK_DIR>`), where `describe` renders the real value the normaliser
+# replaced; and `{outcome}: $N spent, session …`, which `FINDINGS[0]` records
+# as needing a tenth kind.
+_JOINED: tuple[tuple[Event, str], ...] = (
+    (
+        Preflight(
+            timestamp=1.0, spec_id="x", step="proxy", detail="starting the proxy"
+        ),
+        "preflight: starting the proxy",
+    ),
+    (
+        Preflight(
+            timestamp=1.0,
+            spec_id="x",
+            step="upstream",
+            detail="proxy reaches api.anthropic.com (401)",
+        ),
+        "preflight: proxy reaches api.anthropic.com (401)",
+    ),
+    (
+        Preflight(
+            timestamp=1.0,
+            spec_id="x",
+            step="image",
+            detail="building saffron/cell:repo",
+        ),
+        "preflight: building saffron/cell:repo",
+    ),
+    (
+        Preflight(
+            timestamp=1.0,
+            spec_id="x",
+            step="cell_up",
+            detail="saffron-cell-SY-1 up, worktree at bbbbbbbb",
+        ),
+        "cell: saffron-cell-SY-1 up, worktree at bbbbbbbb",
+    ),
+    (
+        Baseline(
+            timestamp=1.0,
+            spec_id="x",
+            gates=("scope", "integrity", "size", "committed", "census", "criteria"),
+            statuses=("pass", "skip", "pass", "pass", "skip", "skip"),
+        ),
+        "baseline: scope=pass, integrity=skip, size=pass, committed=pass, "
+        "census=skip, criteria=skip",
+    ),
+    (
+        PhaseStart(
+            timestamp=1.0,
+            spec_id="x",
+            phase="IMPLEMENT",
+            label="PLAN",
+            detail="accepted, sha256 841501830587",
+        ),
+        "PLAN: accepted, sha256 841501830587",
+    ),
+    (
+        Attempt(
+            timestamp=1.0,
+            spec_id="x",
+            phase="IMPLEMENT",
+            attempt=1,
+            commits=1,
+            spent_usd_est=0.2,
+        ),
+        "IMPLEMENT: 1 commit(s), $0.20 spent",
+    ),
+    (
+        Attempt(
+            timestamp=1.0,
+            spec_id="x",
+            phase="GATE",
+            attempt=1,
+            commits=0,
+            spent_usd_est=0.0,
+            new_failures=0,
+            decision="green",
+        ),
+        "gates: attempt 1, 0 new failures -> green",
+    ),
+    (
+        Attempt(
+            timestamp=1.0,
+            spec_id="x",
+            phase="GATE",
+            attempt=1,
+            commits=0,
+            spent_usd_est=0.0,
+            new_failures=1,
+            decision="repair",
+        ),
+        "gates: attempt 1, 1 new failures -> repair",
+    ),
+    (
+        Attempt(
+            timestamp=1.0,
+            spec_id="x",
+            phase="GATE",
+            attempt=2,
+            commits=0,
+            spent_usd_est=0.0,
+            new_failures=1,
+            decision="no-progress",
+        ),
+        "gates: attempt 2, 1 new failures -> no-progress",
+    ),
+    (
+        PhaseStart(
+            timestamp=1.0,
+            spec_id="x",
+            phase="REVIEW",
+            label="REVIEW",
+            detail="correctness: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.10",
+        ),
+        "REVIEW: correctness: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.10",
+    ),
+    (
+        PhaseStart(
+            timestamp=1.0,
+            spec_id="x",
+            phase="REVIEW",
+            label="REVIEW",
+            detail="contract: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.10",
+        ),
+        "REVIEW: contract: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.10",
+    ),
+    (
+        PhaseStart(
+            timestamp=1.0,
+            spec_id="x",
+            phase="REVIEW",
+            label="REVIEW",
+            detail="no blockers, 0 concern(s)",
+        ),
+        "REVIEW: no blockers, 0 concern(s)",
+    ),
+    (
+        Teardown(timestamp=1.0, spec_id="x", step="start", ok=True),
+        "teardown",
+    ),
+)
+
+
+@pytest.mark.parametrize("event,line", _JOINED)
+def test_describe_reproduces_a_line_the_fixture_captured(event, line):
+    """AC1 + AC3, joined. The expected string must be a line the capture
+    really produced — not one typed here — and `describe` must reproduce it
+    exactly."""
+    captured = _golden_fixture_path().read_text().splitlines()
+    assert line in captured, f"not a captured line: {line!r}"
+    assert describe(event) == line
+
+
+def test_the_join_covers_every_captured_line_a_kind_renders():
+    """A join that silently shrinks proves less each time it is edited. Every
+    fixture line is either joined above, normalised, or named in `FINDINGS`;
+    nothing else is allowed to go unchecked."""
+    captured = [
+        line
+        for line in _golden_fixture_path().read_text().splitlines()
+        if line and not line.startswith("#")
+    ]
+    joined = {line for _, line in _JOINED}
+    unchecked = [
+        line
+        for line in captured
+        if line not in joined
+        and "<" not in line
+        and not re.match(r"^(READY_FOR_REVIEW|EXHAUSTED):", line)
+    ]
+    assert unchecked == [], f"captured but joined to no kind: {unchecked}"
