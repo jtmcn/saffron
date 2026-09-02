@@ -142,7 +142,10 @@ def test_no_signature_in_the_package_still_takes_a_watch():
     for path in root.rglob("*.py"):
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            # `ast.Lambda` is in the walk because this spec's own `emit`
+            # defaults are lambdas: a lambda is the shape a `watch` parameter
+            # would come back in, and without it one passed this test.
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
                 names = {
                     arg.arg
                     for arg in (
@@ -152,7 +155,8 @@ def test_no_signature_in_the_package_still_takes_a_watch():
                     )
                 }
                 assert "watch" not in names, (
-                    f"{path.relative_to(root)}:{node.name} still takes watch"
+                    f"{path.relative_to(root)}:{getattr(node, 'name', '<lambda>')} "
+                    "still takes watch"
                 )
 
     package_src = (root / "phases" / "package.py").read_text()

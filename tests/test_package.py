@@ -1,6 +1,7 @@
 import json
 import subprocess
 import subprocess as sp
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -885,7 +886,7 @@ def test_the_pull_request_url_is_logged_as_an_event(packageable):
     keyword is read out of `packageable.kwargs` explicitly, rather than
     spreading a merged dict, so the fixture's own `emit=lambda _: None` is
     overridden by this test's own logging one and nothing else."""
-    from saffron.events import EventLog, PhaseStart, read_log
+    from saffron.events import EventLog, PhaseStart, describe, read_log
 
     task_dir = packageable.outcome.task_dir
     log = EventLog(task_dir)
@@ -918,12 +919,90 @@ def test_the_pull_request_url_is_logged_as_an_event(packageable):
     )
     # ...and, read back from disk, the durable log too — not merely printed.
     logged = read_log(task_dir)
-    assert any(
-        isinstance(event, PhaseStart)
-        and event.phase == "PACKAGE"
-        and event.detail == result.pr_url
+    packaged = [
+        event
         for event in logged
+        if isinstance(event, PhaseStart) and event.detail == result.pr_url
+    ]
+    # `describe` renders `label` and never reads `phase`. Asserting only the
+    # latter left every PACKAGE line free to print under another label with the
+    # suite green — measured, 1163 passed with `label="REVIEW"`.
+    assert [describe(event) for event in packaged] == [f"PACKAGE: {result.pr_url}"]
+    assert packaged[0].phase == "PACKAGE"
+
+
+def test_every_line_package_speaks_goes_through_emit_but_the_one_no_kind_carries():
+    """The six sites nobody witnesses. Reverting any of ParentGone, conflict,
+    refusing-to-push, new-failures, LeaseRejected or the cleanup failure back to
+    a bare `print` — reinstating, line for line, the defect this spec exists to
+    fix — left the whole suite green. Only the pull-request line was pinned.
+
+    `reverify`'s is the one exception, and it is named rather than counted:
+    `events.FINDINGS[1]` records that no `PhaseStart` label fits a lower-case
+    hyphenated step without widening `LineLabel`, which lives in the forbidden
+    `saffron/events.py`. A second entry appearing here is a line that stopped
+    reaching `events.jsonl`, not a formatting change."""
+    import ast
+
+    from saffron.phases import package as package_module
+
+    src = Path(package_module.__file__).read_text()
+    printed = [
+        ast.get_source_segment(src, node)
+        for node in ast.walk(ast.parse(src))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "print"
+    ]
+    assert printed == [
+        # The `emit` default: printing is what a caller that passed none asked for.
+        "print(describe(event))",
+        'print(f"re-verify: {label} suite at {sha[:12]}")',
+    ]
+
+
+def test_the_refusal_to_push_is_emitted_and_the_log_never_learns_the_leak(packageable):
+    """The refusal is the line an unattended morning most needs after the
+    pull-request URL, and it was the least witnessed: demoting it to `print`
+    passed 1163 tests. It is also the one migrated line that now writes a
+    credential scan's own output to a file on disk, which the free-string
+    `watch` never did — so what it does *not* say is worth pinning too."""
+    from saffron.events import EventLog, PhaseStart, describe, read_log
+
+    work = packageable.work
+    git(work, "checkout", "-q", "cell")
+    (work / "config.py").write_text(f'ANTHROPIC_API_KEY = "{FAKE_KEY}"\n')
+    git(work, "add", "-A")
+    git(work, "commit", "-qm", "the agent hardcoded a key")
+    patch = packageable.outcome.task_dir / "patch.diff"
+    patch.write_text(git(work, "diff", *DIFF_FLAGS, f"{packageable.base}..HEAD") + "\n")
+    git(work, "checkout", "-q", "main")
+
+    task_dir = packageable.outcome.task_dir
+    log = EventLog(task_dir)
+    kwargs = packageable.kwargs
+    result = package(
+        packageable.outcome,
+        gh=_no_gh,
+        spec=kwargs["spec"],
+        repo=kwargs["repo"],
+        mirror=kwargs["mirror"],
+        image=kwargs["image"],
+        ledger=kwargs["ledger"],
+        out_dir=kwargs["out_dir"],
+        token=kwargs["token"],
+        emit=log.append,
     )
+
+    assert result.state == "MERGE_FAILED"
+    refusals = [
+        describe(event)
+        for event in read_log(task_dir)
+        if isinstance(event, PhaseStart) and "refusing to push" in event.detail
+    ]
+    assert len(refusals) == 1
+    assert refusals[0].startswith("PACKAGE: refusing to push — ")
+    assert FAKE_KEY not in (task_dir / "events.jsonl").read_text()
 
 
 def test_the_bodys_diff_is_pinned_against_the_operators_gitconfig(packageable):

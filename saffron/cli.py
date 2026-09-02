@@ -386,8 +386,8 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # task's PACKAGE events land in the same `events.jsonl` as everything
     # before them. `run_one_cell`'s own default (session.py's
     # `_default_emit`) is this same shape; duplicated rather than imported,
-    # the way `events.py` itself duplicates `_when`/`_describe_agent_event`
-    # across modules instead of reaching into a forbidden one.
+    # the way `_when` is duplicated across modules instead of reaching into a
+    # forbidden one.
     task_dir = out_dir / spec.id
     event_log = EventLog(task_dir)
 
