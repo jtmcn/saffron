@@ -1319,7 +1319,7 @@ inside this envelope, beside `findings.verdict`, and is the same defect family:
 a rebuttal exchange whose outcome is not written down. The *rendering* is
 `saffron/report/pr_body.py`, which this spec's `forbidden` list excludes and
 which **no spec in part 3 touches either** — `SA-0035`–`SA-0039` work in
-`report/index.py`. So item 42's visible half has no home in this plan as
+`report/render.py`, and only `SA-0036` touches `report/index.py` at all. So item 42's visible half has no home in this plan as
 written. It is a Task 11 by-hand follow-up, or a thirteenth spec, and the
 choice should be made deliberately rather than discovered when `SA-0034`'s
 DIAGNOSE proposes a scope that gate 0 refuses.
