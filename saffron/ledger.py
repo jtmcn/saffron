@@ -118,10 +118,14 @@ CREATE INDEX IF NOT EXISTS findings_by_task ON findings(task_id);
 
 
 def _inserted_id(cursor: sqlite3.Cursor) -> int:
-    """`lastrowid` is `int | None` — None when the statement inserted no row.
+    """`lastrowid` is `int | None` on the sqlite3 type stubs.
 
-    `int(None)` raised TypeError, which reads as a caller passing rubbish
-    rather than a ledger that accepted an INSERT and recorded nothing.
+    Measured, it is not None after a statement that inserted nothing — it
+    reports the connection's *previous* insert, which is why `open_attempt`
+    guards on `rowcount` instead (see there, and `tests/test_ledger.py`). So
+    this branch is defensive rather than reachable; it exists because
+    `int(None)` would raise TypeError, reading as a caller passing rubbish
+    rather than as a ledger that recorded nothing.
     """
     row_id = cursor.lastrowid
     if row_id is None:

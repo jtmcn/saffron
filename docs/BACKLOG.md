@@ -2257,6 +2257,36 @@ value, and none does; pyright behaves identically. So this item's reading of
 only control over a member quietly *added* or renamed, and it stays. The row the
 gate uniquely covers is the dropped union member.
 
+Caught in review, and the sharpest finding of the branch: the first version set
+`[tool.ty.environment] python = ".venv"`. A cell worktree is a fresh
+`git init`/fetch/checkout and `.venv` is gitignored, so it is never present —
+and a configured environment ty cannot resolve is a hard failure, exit 2 with
+nothing on stdout, which this gate correctly calls `error`. `error` aborts the
+attempt and is charged to nobody (§5.4), so a blocking `types` gate would have
+aborted every attempt against this repo. Item 39 would have been closed by
+replacing a gate that could never fail with one that could never run. Reproduced
+against a clean clone before fixing; the fix is that ty resolves the environment
+from its own executable, so `/opt/venv/bin/ty` finds `/opt/venv`. The test that
+should have caught it now exists — none of the others paired the repo's own
+config with a tree shaped like a cell's.
+
+The parser is `concise` and reconciles against ty's own `Found N diagnostics`
+trailer, so a diagnostic it cannot key (one carrying no line, a message shape
+that moved) is `error` rather than a smaller repair target than the real one.
+Exit codes beyond 0 and 1 are `error` for the same reason. ty's only JSON output
+is its `gitlab` format, which is a schema name and not a destination; a flag
+naming a forge this repo does not use would read as an integration it is not.
+
+`# ty: ignore` joins `integrity.suppressions`. ty honours it, and before this
+branch that did not matter because nothing enforced types; a blocking gate with
+a suppression syntax the anti-gaming gate cannot see is the hole that gate
+exists to close.
+
+One standing cost, recorded rather than fixed: `docs/evidence/scripts/` is in
+scope, so every future evidence script — a verbatim record of something already
+executed — must type-check or a blocking gate goes red. Three existing ones
+needed an `assert spec and spec.loader`.
+
 Also fixed in passing: the gate's implementation was first written as
 `.saffron/gates/types.py`, which sits on `sys.path[0]` and shadows the stdlib
 `types` every `import json` reaches through. It crashed under one interpreter

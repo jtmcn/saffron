@@ -15,7 +15,9 @@ repos:
         language: system
         entry: uv run ty check
         pass_filenames: false
-        types: [python]
+        # ty's own configuration lives in pyproject.toml, so a change there
+        # must trigger the hook that reads it.
+        files: ^(.*\.py|pyproject\.toml)$
 
   # A retired term, not the whole `_Avoid_` list: most of those words are ordinary
   # English elsewhere. Only a word a settled decision killed outright is decidable

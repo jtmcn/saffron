@@ -32,7 +32,9 @@ def _blocker(lens="correctness", **kwargs) -> Finding:
         claim="the tz default is wrong",
         anchored=True,
     )
-    return base.model_copy(update=kwargs)
+    # Validated, not copied: `model_copy` skips validation, so an
+    # override the model would reject builds silently.
+    return Finding.model_validate(base.model_dump() | kwargs)
 
 
 def _turn(text, cost=0.1):

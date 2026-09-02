@@ -18,9 +18,9 @@ saffron = "saffron.cli:main"
 # cell, where a globally-installed host binary does not exist.
 # pyoxigraph and pyshacl are test-only: SA-0001 validates the ontology, and
 # nothing under saffron/ imports either (the emitter is a later, conditional task).
-# ty is pinned exactly, not floored: the `types` gate parses its `concise`
-# output (ty emits no JSON), and it is pre-1.0 — a format change on a routine
-# resolve would turn a batch red overnight rather than at review.
+# ty is pinned exactly, not floored: the `types` gate parses its JSON output
+# and it is pre-1.0 — a schema change on a routine resolve would turn a batch
+# red overnight rather than at review.
 dev = [
     "pytest>=8",
     "ruff>=0.16.3",
@@ -47,13 +47,16 @@ addopts = "-m 'not cell'"
 # record of past spikes, but a spike script that no longer type-checks is a
 # record of something that no longer runs.
 [tool.ty.environment]
-python = ".venv"
+# No `python` key: a configured environment that does not resolve is a hard
+# ty failure, and a cell worktree has no `.venv` — it is gitignored, and the
+# worktree is a fresh fetch. ty resolves from its own executable instead, so
+# /opt/venv/bin/ty finds /opt/venv and .venv/bin/ty finds .venv.
 python-version = "3.12"
 
 # The host is architecturally forbidden to import the Agent SDK (§2.1); the cell
 # image installs it where it is used. Declared here rather than as an inline
-# ignore because `# type: ignore` is a suppression `integrity` fails on, and
-# because this is an architectural fact, not a local nuisance.
+# ignore because an inline type-ignore comment is a suppression `integrity`
+# fails on, and because this is an architectural fact, not a local nuisance.
 [[tool.ty.overrides]]
 include = ["images/agent_runner.py"]
 [tool.ty.overrides.rules]

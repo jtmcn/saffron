@@ -29,12 +29,23 @@ integrity:
   # The call form of pytest's skip, not just its decorator: as a test's first
   # statement it left `tests`, `census` and `integrity` all green. Not free, as
   # an earlier note here claimed: the tokens this list declares are themselves
-  # scanned, so the list below accounts for 5 of the 70 `added-suppression`
+  # scanned, so the list below accounts for 6 of the 70 `added-suppression`
   # failures this branch's diff reports. Describe a token, never quote one.
   # pytest's expected-failure marker needs one entry, not two: the bare form
   # in the list already matches the call form as well.
+  # ty honours its own ignore comment as well as the checker-agnostic one, and
+  # the `types` gate is blocking — a suppression syntax this list cannot see is
+  # the hole `integrity` exists to close. The bare form matches the
+  # rule-scoped form too, as with the expected-failure marker above.
   suppressions:
-    ["@pytest.mark.skip", "pytest.skip(", "xfail", "# type: ignore", "# noqa"]
+    [
+      "@pytest.mark.skip",
+      "pytest.skip(",
+      "xfail",
+      "# type: ignore",
+      "# ty: ignore",
+      "# noqa",
+    ]
   # Collection runs in the repo's own Python, so `census` cannot see a conftest
   # that hides a test from the runner. This routes the edit to a person.
   # ruff.toml/.ruff.toml take precedence over pyproject.toml's [tool.ruff] and

@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,18 @@ GATES = REPO / ".saffron" / "gates"
 def test_the_policy_parses():
     policy, _ = load_policy(REPO)
     assert set(policy.gates) == {"format", "lint", "types", "tests", "shacl"}
+
+
+def test_the_type_checker_override_is_scoped_to_the_one_file_that_needs_it():
+    """`unresolved-import = "ignore"` is load-bearing — the host is forbidden to
+    import the Agent SDK (§2.1) and the cell image installs it where it is used
+    — and it is the one rule in this repo turned off rather than satisfied.
+    `agent_runner.py` runs inside the cell where nothing else type-checks it, so
+    a widened `include` would let a typo'd import there go unreported."""
+    config = tomllib.loads((REPO / "pyproject.toml").read_text())
+    (override,) = config["tool"]["ty"]["overrides"]
+    assert override["include"] == ["images/agent_runner.py"]
+    assert override["rules"] == {"unresolved-import": "ignore"}
 
 
 def test_no_gate_script_shadows_a_stdlib_module():
@@ -63,6 +76,31 @@ def test_types_fails_on_code_ty_rejects(tmp_path):
     assert result.failures[0].file.endswith("bad.py")
     assert result.failures[0].code == "invalid-return-type"
     assert result.failures[0].line == 2
+
+
+def test_types_works_in_a_tree_that_has_no_venv(tmp_path):
+    """A cell's worktree is a fresh `git init`/fetch/checkout into a volume and
+    `.venv` is gitignored, so it is never there. A configured
+    `environment.python` that does not resolve is a hard ty failure — exit 2,
+    nothing on stdout — which this gate correctly calls `error`, and `error`
+    aborts the attempt and is charged to nobody (§5.4). A blocking gate that
+    can never run is the same defect as one that can never fail.
+
+    The repo's own config, in a tree shaped like a cell's: neither of the other
+    tests exercises that pair — one runs at `REPO`, which has a `.venv`, and
+    the rest in a `tmp_path` with no config at all.
+    """
+    (tmp_path / "pyproject.toml").write_text((REPO / "pyproject.toml").read_text())
+    (tmp_path / "bad.py").write_text("def f(x: int) -> str:\n    return x\n")
+    done = subprocess.run(
+        [str(GATES / "types")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="types")
+    assert result.status == "fail", result.summary
 
 
 def _stub_ty(tmp_path, version_body: str, check_body: str = "exit 0") -> dict[str, str]:
@@ -109,6 +147,57 @@ def test_types_errors_when_its_tool_runs_and_reports_no_version(tmp_path):
     result = parse_gate_json(done.stdout, expected_gate="types")
     assert result.status == "error"
     assert "no version" in result.summary
+
+
+def test_types_errors_when_ty_exits_beyond_pass_or_fail(tmp_path):
+    """ty exits 0 clean and 1 on diagnostics. Anything else is ty itself
+    failing — an unresolvable configured environment, an unreadable file — and
+    that is charged to nobody, not read as a verdict on the repo's code.
+
+    The stub prints a well-formed diagnostic and a count that matches it, so
+    only the exit code can distinguish this from an ordinary `fail` — with an
+    empty stdout the count guard fires instead and the test passes without
+    ever exercising the rule it names."""
+    env = _stub_ty(
+        tmp_path,
+        'echo "ty 1.0.0"',
+        check_body='echo "a.py:1:1: error[bad] nope"; echo "Found 1 diagnostic"; '
+        "exit 2",
+    )
+    done = subprocess.run(
+        [str(GATES / "types")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=env,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="types")
+    assert result.status == "error", result.summary
+
+
+def test_types_errors_when_it_parses_fewer_diagnostics_than_ty_counted(tmp_path):
+    """§5.4: partial results are not results. ty reports diagnostics this
+    parser cannot key — one carrying no line, a message shape that moved — and
+    a dropped failure is both a smaller repair target than the real one and a
+    failure the baseline subtraction can never count as new."""
+    env = _stub_ty(
+        tmp_path,
+        'echo "ty 1.0.0"',
+        check_body='echo "b.py: error[io] Failed to read file"; '
+        'echo "Found 1 diagnostic"; exit 1',
+    )
+    done = subprocess.run(
+        [str(GATES / "types")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=env,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="types")
+    assert result.status == "error", result.summary
+    assert "parsed 0" in result.summary
 
 
 def test_types_errors_rather_than_passes_when_output_will_not_parse(tmp_path):
