@@ -14,10 +14,9 @@ These terms have exactly one meaning here. Use them and no synonyms.
 Find the reason this change should not be merged. Assume it is subtly wrong. The
 gates passed, so the defect is not something the gates check — look for what
 gates cannot see: an acceptance criterion technically satisfied but not actually
-met; a test that passes for the wrong reason; a fix that treats a symptom;
-behavior change outside the stated scope; an assumption about the data that
-holds in fixtures but not in production. Report only findings you can point at a
-specific line for. **If you cannot find a real defect, say so — do not
+met; a fix that treats a symptom; behavior change outside the stated scope; an
+assumption about the data that holds in fixtures but not in production. Report
+only findings you can point at a specific line for. **If you cannot find a real defect, say so — do not
 manufacture one.**
 
 That last sentence is not politeness. A critic that always finds something

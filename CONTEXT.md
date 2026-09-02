@@ -177,9 +177,10 @@ agent must leave alone. Not machine-enforced; it reduces sprawl by being read.
 _Avoid_: conflating with `forbidden`, which is enforced.
 
 **Risk tier**: `standard` or `elevated`. Set on the spec, or raised automatically
-when the diff touches a path in the repo's `elevate_on`. Elevated adds the third
-lens and makes `size` blocking. It does **not** make `coverage` blocking —
-`coverage` is advisory at every tier (`DESIGN.md` §5.4).
+when the diff touches a path in the repo's `elevate_on`. Elevated makes `size`
+blocking and marks the queue entry; it adds no lens, because every declared
+lens runs at every tier (`DESIGN.md` §5.5.1). It does **not** make `coverage`
+blocking — `coverage` is advisory at every tier (`DESIGN.md` §5.4).
 _Avoid_: "priority" (a separate field), "severity" (that is a finding property),
 "critical", "high-risk".
 
@@ -283,7 +284,7 @@ _Avoid_: "the reviewer" (that's the operator), "QA", "the checker".
 _Avoid_: "the coder", "the writer", "the worker".
 
 **Lens**: One critic perspective with a bounded remit — correctness & data
-semantics, contract & schema, blast radius. Lenses are disjoint by construction,
+semantics, contract & schema, test adequacy. Lenses are disjoint by construction,
 which is why any single blocker routes to REBUT and why there is no vote.
 _Avoid_: "reviewer", "pass", "check", "critic #2".
 
@@ -291,8 +292,10 @@ _Avoid_: "reviewer", "pass", "check", "critic #2".
 _Avoid_: "issue", "comment", "bug", "problem".
 
 **Anchored**: A finding that either falls inside a diff hunk, or cites a line
-naming an identifier the diff changed. The second target is what keeps the
-blast-radius lens usable, since its findings point at code the diff did not touch.
+naming an identifier the diff changed. The second target is what keeps a lens
+usable when its findings point at code the diff did not touch — written for
+blast radius (retired, `DESIGN.md` §5.5.1) and now load-bearing for test
+adequacy, whose finding is often about a test that already existed.
 Unanchored findings are recorded and excluded, never deleted — the drop rate per
 lens is the signal that a lens is badly prompted.
 
