@@ -1349,9 +1349,9 @@ def test_the_supervisor_hands_the_adapter_to_the_agent_it_calls(monkeypatch, tmp
     assert outcome.state == "READY_FOR_REVIEW"
     # Exact, not `>= 1`: the count is the number of seams exercised, and a
     # migration that drops one should fail here rather than pass quietly.
-    # Derived, not hard-coded: two turns plus one session per lens. `4` reads
-    # as a constant and is not one — `review.LENSES` has two entries beside a
-    # `ponytail:` saying a third is an open question, and adding it would fail
+    # Derived, not hard-coded: two turns plus one session per lens. `5` reads
+    # as a constant and is not one — `review.LENSES` gained its third entry in
+    # #34 and a fourth is still an open question, and adding one would fail
     # this test for a change that has nothing to do with the seam.
     assert cell.watched.count(spoken) == 2 + len(review.LENSES), cell.watched
 

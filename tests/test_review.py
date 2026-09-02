@@ -213,6 +213,11 @@ def test_each_lens_prompt_carries_the_framing_that_makes_it_a_critic(lens):
     assert "def gap(series, tz=" in prompt
     assert "pytest 8.0" in prompt
     assert "**Lens**:" in prompt  # CONTEXT.md §5's vocabulary
+    # The `<output>` contract, for every lens rather than only the one that
+    # shipped last: a prompt that loses a field name produces findings the
+    # host cannot anchor, and it still reads like a critic while doing it.
+    for field in ("`file`", "`line`", "`severity`", "`claim`"):
+        assert field in prompt
 
 
 def test_the_lenses_declare_disjoint_remits():
@@ -262,10 +267,33 @@ def test_the_adequacy_prompt_demands_a_checkable_mutation():
     line and watch a test fail — it can only name the edit that would keep
     the suite green, which is what makes a finding checkable in one command
     by someone who can run it, rather than a claim about coverage the lens
-    has no way to have confirmed."""
-    prompt = (PROMPTS / review.LENSES["adequacy"]).read_text()
-    assert "no tool that can run anything" in prompt
-    assert "checkable in one command" in prompt
+    has no way to have confirmed.
+
+    Asserted against the whole remit, not two stock phrases: the prompt *is*
+    the deliverable here, and a 15-line stub carrying only those two phrases
+    passed an earlier version of this test — a witness that reads as coverage
+    of the acceptance criterion and is not, which is the exact defect this
+    lens exists to file.
+    """
+    # Normalized like its sibling above: the file is wrapped at 79 columns, so
+    # a legal reflow must not fail an assertion about what the prompt says.
+    flat = " ".join((PROMPTS / review.LENSES["adequacy"]).read_text().split())
+    assert "no tool that can run anything" in flat
+    # The demand itself, not merely the word for it.
+    assert "name the smallest concrete edit" in flat
+    assert "keep the test passing while the behaviour it claims to cover breaks" in flat
+    assert "checkable in one command" in flat
+    # And the shapes it is told to look for. Each is a distinct way a test
+    # passes without exercising the change; a prompt naming fewer is a
+    # narrower lens than the criterion asked for, and says so nowhere.
+    for shape in (
+        "pass identically before this change",
+        "assertion on a value the code under test never reads",
+        "constructs the value it then asserts",
+        "structural assertion over source text",
+        "witness whose setup is the only input",
+    ):
+        assert shape in flat, shape
 
 
 def test_the_gate_results_reach_the_critic_with_the_tool_that_ran():

@@ -537,6 +537,26 @@ does not fail a task for money. Closing this item for real still means
 wiring a risk tier into `run_one_cell` and deciding whether `adequacy` is the
 lens that tier gates or whether, having shipped ungated, it stays that way.
 
+**And `DESIGN.md` §5.5 still says the opposite of the shipped code — #34 did
+not settle it after all.** The spec put `DESIGN.md` and `CONTEXT.md` in
+`forbidden`, so the cell structurally could not touch either; the sentence
+above assigning that half to #34 stands unanswered rather than resolved, and
+this paragraph exists so the trail is not lost with the work. §5.5 still lists
+lens #3 as blast radius at `elevated` (`:889`, `:893`), still asserts `revert`
+displaces a test-quality lens (`:903`), and §5.6 still says the tier *adds*
+the third lens (`:915`); §7's cost table still prices `Review × 2 lenses`
+(`:1124`) and the roadmap still files the third lens under v2 (`:1217`).
+
+`CONTEXT.md` is worse than stale, because it is a runtime input rather than a
+record: §5's `Lens` entry names the three remits as correctness, contract and
+blast radius, and `context.SECTIONS_BY_PHASE["REVIEW"]` injects §5 verbatim
+into every lens's system prompt under a heading reading *"These terms have
+exactly one meaning here."* The adequacy lens is therefore handed a vocabulary
+block that does not contain its own lens and does contain one that will never
+file anything, and §3's *"Elevated adds the third lens"* is now false at every
+tier. No gate compares either document against `review.LENSES`, so both are
+invisible to the suite.
+
 ## 7. `CLAUDE.md` no longer reaches the agent, so the flywheel's middle bucket is inert
 
 `setting_sources: []` was set because a target repo's `.claude/` was configuring

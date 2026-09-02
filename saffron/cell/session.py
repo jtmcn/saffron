@@ -59,7 +59,9 @@ TURN_TIMEOUT_S = 900.0
 
 # REVIEW is deliberately not gated on the spend ceiling — a green diff nobody
 # reviewed is not a product — so its sessions are capped at what is left rather
-# than at the whole task budget, which is how a $12 task bills $40. The floor is
+# than at the whole task budget, which is how a $12 task bills $40 — one
+# remainder per declared lens, never decremented between them, so `LENSES`
+# growing moves that number rather than dividing it. The floor is
 # what keeps "not gated" true when nothing is left: below it a lens would be
 # refused for having no room, and the task would reach the operator unreviewed.
 # REBUT *is* gated (`_over_budget` before the rebuttal turn): by then the
