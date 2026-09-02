@@ -7,7 +7,8 @@ generates the glossary's run-record half from it, and emits the run record
 itself as a graph so that a knowledge graph has a producer.
 
 > **Citations:** a bare `§` cites `DESIGN.md`, per repo convention. This
-> document's own sections are cited as *part N*.
+> document's own sections are cited as *part N*; the operator-visibility
+> plan's parts are always named as *the plan's part N*.
 
 **It supersedes `ontology/RATIONALE.md`'s bottom line**, deliberately and on
 stated grounds (part 1). That document is eight days old and its measurements
@@ -18,8 +19,8 @@ are not disputed; the question it asked is not the question being asked now.
 Run, not reasoned. Every number below came from this repo at `6a7bdd9`.
 
 - **The two documents overlap far less than they appear to.** Of the 27 terms
-  `CONTEXT.md` defines in its run-record sections (§4 Verification, §5 Review,
-  §6 Outcomes), **8 exist in the graph and 19 do not**: `Gate contract`,
+  `CONTEXT.md` defines in its run-record sections (that file's own §4
+  Verification, §5 Review and §6 Outcomes — not `DESIGN.md` numbering), **8 exist in the graph and 19 do not**: `Gate contract`,
   `Status`, `Baseline`, `New failure`, `Pre-existing failure`, `Repair`,
   `No-progress`, `Critic`, `Implementer`, `Lens`, `Anchored`, `Verdict`,
   `Adjudication`, `Ratify`, `Approve`, `Trailing accept rate`, `Merge train`,
@@ -44,7 +45,7 @@ Run, not reasoned. Every number below came from this repo at `6a7bdd9`.
   *"SQL, once a `criteria` table exists"*; Q3 *"once declared gates are
   stored"*. The ledger holds `repos, runs, tasks, attempts, gate_results,
   failures, findings`. There is no `criteria` table.
-- **Part 3's renderer does not exist.** `saffron/report/` holds `__init__.py`,
+- **The plan's part 3 renderer does not exist.** `saffron/report/` holds `__init__.py`,
   `index.py`, `pr_body.py`. `render.py` — the file `SA-0035`–`SA-0039` all
   write to — is unwritten. This is the deadline in part 4.
 
@@ -115,6 +116,12 @@ consequences, each load-bearing:
 
 ## 4. Sequencing, and the deadline
 
+**This is two projects sharing one ontology, and they get separate plans.**
+Phase A is the vocabulary axis; Phases B–D are the run-record axis. They share
+`ontology/saffron.ttl` and nothing else — no module, no test, no schema. Phase A
+can ship, or be abandoned, without touching the emitter, and vice versa. Writing
+them as one plan would couple two things whose only real link is a file name.
+
 **Phase A — vocabulary.** Marker-delimited regions in `CONTEXT.md`'s run-record
 sections, a generator, and a drift test. Migrate the five closed sets *first*,
 because they are already asserted equal: a faithful generator produces a
@@ -130,10 +137,10 @@ rather than a new assertion framework.
 instead of the hand-written fixture, and compare to the committed
 `ontology/queries/expected/*.csv`. **This phase can invalidate the premise.** If
 the queries are as painful as RATIONALE found, that is grounds to stop: keep the
-graph as an external analytical artifact and leave part 3 on SQL. Phase C is
-placed before part 3 depends on anything precisely so that stopping is cheap.
+graph as an external analytical artifact and leave the plan's part 3 on SQL. Phase C is
+placed before the plan's part 3 depends on anything precisely so that stopping is cheap.
 
-**Phase D — part 3 on the graph.** `SA-0035` becomes *"the queue's rows, from
+**Phase D — the plan's part 3, on the graph.** `SA-0035` becomes *"the queue's rows, from
 the graph"*; `SA-0036`–`SA-0039` follow.
 
 **The deadline.** `saffron/report/render.py` is unwritten. Building it
@@ -142,7 +149,7 @@ SQL, it is a rewrite of shipped, gated, reviewed code. The whole
 "foundational versus bolted-on" question reduces to that date.
 
 **`2026-08-31-operator-visibility.md` is amended, not forked.** `SA-0035`'s
-embedded spec text says "from the ledger", and part 3's dependency chain shifts.
+embedded spec text says "from the ledger", and the plan's part 3 dependency chain shifts.
 That plan has been renumbered twice already and says so; a fork would make a
 third numbering the reader has to reconcile.
 
