@@ -1,7 +1,8 @@
 """SA-0029/SA-0040: the host event vocabulary, its durable log, and
 `describe()` — the renderer that proves the nine kinds are sufficient for the
-64 `watch(...)` call sites. No emission: `SA-0030`/`SA-0031` migrate those
-call sites. No network, no cell.
+64 `watch(...)` call sites. `SA-0030` is the first real producer — the tests
+from "The seam" heading down drive `saffron.cell.session.run_one_cell` for
+real (stubbed runtime, no network, no cell) and read back what it emitted.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from saffron.cell import runtime as _runtime
+from saffron.cell import session
 from saffron.events import (
     _KINDS,
     FAMILIES,
@@ -40,7 +42,19 @@ from saffron.events import (
     read_log,
 )
 from saffron.gates.contract import Failure
-from tests.test_session import _PLAN, _block, _drive, _results, _stub_the_runtime, _turn
+from saffron.phases import review
+from tests.test_session import (
+    _HIDDEN_DIFF,
+    _INTEGRITY_POLICY,
+    _PLAN,
+    _block,
+    _drive,
+    _grow_the_diff_after_the_first_turn,
+    _results,
+    _spec,
+    _stub_the_runtime,
+    _turn,
+)
 
 
 def _read[E: Event](tmp_path, kind: type[E]) -> list[E]:
@@ -1075,3 +1089,220 @@ def test_the_join_covers_every_captured_line_a_kind_renders():
         and not re.match(r"^(READY_FOR_REVIEW|EXHAUSTED):", line)
     ]
     assert unchecked == [], f"captured but joined to no kind: {unchecked}"
+
+
+# --- The seam: SA-0030 drives run_one_cell for real ------------------------
+#
+# Everything above proves `describe()` is sufficient once an `Event` exists.
+# These five drive `saffron.cell.session.run_one_cell` — the same stubbed
+# runtime `tests/test_session.py` uses everywhere, no network, no cell — to
+# prove something actually constructs one now.
+
+
+def test_run_one_cell_with_no_emit_argument_still_prints(monkeypatch, tmp_path, capsys):
+    """AC3: `cli.py` is forbidden to this spec and never passes `emit` — every
+    direct caller today gets `run_one_cell`'s default, which must still print
+    for the operator watching, exactly as the golden fixture's own run does."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        use_default_emit=True,
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    printed = capsys.readouterr().out
+    assert "preflight: starting the proxy" in printed
+    assert "READY_FOR_REVIEW: $0.40 spent, session sess-1" in printed
+
+
+def test_events_jsonl_reproduces_what_the_terminal_printed(
+    monkeypatch, tmp_path, capsys
+):
+    """AC4: the default `emit` fans out to both consumers, and `read_log` +
+    `describe` must reproduce the same sequence `capsys` captured — except
+    the two lines `events.FINDINGS[0]` names, which `session._drive_cell`
+    prints directly rather than forcing into a tenth kind, and which the join
+    test above already excludes from every other kind-level check the same
+    way (`re.match(r"^(READY_FOR_REVIEW|EXHAUSTED):", line)`)."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        use_default_emit=True,
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    printed = [line for line in capsys.readouterr().out.split("\n") if line]
+    without_outcome = [
+        line
+        for line in printed
+        if not re.match(r"^(READY_FOR_REVIEW|EXHAUSTED):", line)
+    ]
+    logged = [
+        line
+        for event in read_log(tmp_path / "out" / "SY-1")
+        for line in describe(event).split("\n")
+        if line
+    ]
+    assert without_outcome == logged
+
+    # `spec_id` is written at 21 sites in `session.py` and read by no test:
+    # measured, replacing every one with a wrong literal passed all 1149.
+    # `describe` never renders it, so the golden fixture cannot cover it
+    # either, and today the log's own path makes it redundant. `SA-0042`
+    # gives `cli.py` one fan-out across a task's phases, at which point this
+    # field is the only thing saying which task a row belongs to.
+    assert {event.spec_id for event in read_log(tmp_path / "out" / "SY-1")} == {"SY-1"}
+
+
+def test_a_gate_error_is_recorded_distinctly_from_a_gate_failure(monkeypatch, tmp_path):
+    """AC6: `error` — the gate itself broke — must never blur into `fail`,
+    the repo's code being wrong. `Attempt.aborted` (an errored gate) and
+    `Attempt.new_failures`/`decision` (a real failure, repaired or not) are
+    the two shapes `repair_loop` never lets collide on one event; this is
+    what proves the *events* carry the distinction, not just the line."""
+    errored: list[Event] = []
+    cell = _stub_the_runtime(monkeypatch)
+    _grow_the_diff_after_the_first_turn(monkeypatch, cell, big=_HIDDEN_DIFF)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(spec_type="bug"),
+        policy=_INTEGRITY_POLICY,
+        capture=errored,
+    )
+    assert outcome.state == "GATE_ERROR"
+    (error_attempt,) = [e for e in errored if isinstance(e, Attempt) and e.aborted]
+    assert error_attempt.aborted == ("integrity",)
+    assert error_attempt.new_failures is None
+    assert error_attempt.decision is None
+
+    failing = Failure(file="a.py", code="E501", message="too long")
+    failed: list[Event] = []
+    cell_b = _stub_the_runtime(
+        monkeypatch, suites=([], _results(failing), _results(failing))
+    )
+    outcome_b, _ledger_b = _drive(
+        monkeypatch,
+        tmp_path / "b",
+        cell=cell_b,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn()],
+        capture=failed,
+    )
+    assert outcome_b.state == "EXHAUSTED"
+    (fail_attempt,) = [
+        e for e in failed if isinstance(e, Attempt) and e.decision == "no-progress"
+    ]
+    assert fail_attempt.aborted == ()
+    assert fail_attempt.new_failures == 1
+
+
+def test_an_unwritable_event_log_does_not_abort_the_run(monkeypatch, tmp_path):
+    """AC7: `EventLog.append` never raises, and neither does a disk-full
+    night take the run down with it. `events.jsonl` pre-created as a
+    directory breaks only the log's own write — `open(path, "a")` raises
+    `IsADirectoryError`, caught by `EventLog.append`'s own `except (OSError,
+    ...)` — while every other `task_dir` file the run writes is untouched."""
+    cell = _stub_the_runtime(monkeypatch)
+    task_dir = tmp_path / "out" / "SY-1"
+    task_dir.mkdir(parents=True)
+    (task_dir / "events.jsonl").mkdir()
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        use_default_emit=True,
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert (task_dir / "baseline.json").is_file()
+    assert (task_dir / "plan.json").is_file()
+    assert (task_dir / "events.jsonl").is_dir()
+
+
+def test_the_supervisor_hands_the_adapter_to_the_agent_it_calls(monkeypatch, tmp_path):
+    """AC8's other half, which the isolated test below cannot reach: it proves
+    `_phase_watch` renders correctly, not that `session.py` threads it into
+    anything. Measured — replacing `watch=` with a live no-op at all six
+    `agent(...)` call sites, so every `agent:` line during PLAN, IMPLEMENT,
+    SALVAGE and REPAIR vanishes from the terminal *and* `events.jsonl`, left
+    218 tests passing. The golden fixture cannot catch it either: its harness
+    stubs the agent and captures no `agent:` line, which its own header
+    records.
+
+    Four *calls*, not four of the six `agent(...)` sites. A green run reaches
+    two of those — `plan_checkpoint`'s turn and `_drive_cell`'s IMPLEMENT turn
+    — and the other two calls arrive through `review.run_review`, one per
+    lens, which is a `watch=` site rather than an `agent(...)` one. SALVAGE and
+    REPAIR are reached only by a failing run: `test_the_repair_seam_is_also_
+    threaded` below drives one. The `REVIEW:`/`REBUT:` *lines* are covered by
+    the golden fixture instead.
+    """
+    spoken = 'agent: Bash {"command": "ls"}'
+    cell = _stub_the_runtime(monkeypatch, suites=([], []))
+    outcome, _ = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        agent_says=spoken,
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    # Exact, not `>= 1`: the count is the number of seams exercised, and a
+    # migration that drops one should fail here rather than pass quietly.
+    # Derived, not hard-coded: two turns plus one session per lens. `4` reads
+    # as a constant and is not one — `review.LENSES` has two entries beside a
+    # `ponytail:` saying a third is an open question, and adding it would fail
+    # this test for a change that has nothing to do with the seam.
+    assert cell.watched.count(spoken) == 2 + len(review.LENSES), cell.watched
+
+
+def test_the_repair_seam_is_also_threaded(monkeypatch, tmp_path):
+    """The sibling above drives a green run, which never reaches the SALVAGE or
+    REPAIR `agent(...)` sites. Measured: severing `watch=` at only those two
+    left 1129 tests passing, so every `agent:` line during REPAIR — the phase
+    an operator most needs to watch — could vanish from the terminal and the
+    log unnoticed. A failing run reaches REPAIR, so it is witnessed here."""
+    spoken = 'agent: Bash {"command": "pytest"}'
+    failing = Failure(file="a.py", code="E501", message="too long")
+    cell = _stub_the_runtime(
+        monkeypatch, suites=([], _results(failing), _results(failing))
+    )
+    outcome, _ = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn()],
+        agent_says=spoken,
+    )
+    assert outcome.state == "EXHAUSTED"
+    # The plan turn, IMPLEMENT, and one REPAIR turn per failed attempt. No
+    # lens runs: REVIEW is never reached on a red loop.
+    assert cell.watched.count(spoken) == 3, cell.watched
+
+
+def test_the_watch_shaped_callable_phases_still_receive_does_not_raise():
+    """AC8: `phases/implement.py`, `phases/review.py` and `phases/rebut.py`
+    are forbidden to this spec and still call a plain `watch(str)` —
+    `_phase_watch` is the adapter that keeps that seam intact until
+    `SA-0031` migrates them to construct events of their own. Each line here
+    is one those three files actually author today (read directly out of
+    them); `describe()` must reproduce every one byte for byte, proving the
+    adapter, not just the described text, is what is under test."""
+    lines = (
+        "agent: (raw) some stray stdout",
+        'agent: Bash {"command": "ls"}',
+        "REVIEW: correctness: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.10",
+        "REBUT: 1 rebuttal(s), HEAD moved",
+    )
+    for line in lines:
+        captured: list[Event] = []
+        to_watch = session._phase_watch(captured.append, spec_id="SY-1")
+        to_watch(line)  # must not raise
+        (event,) = captured
+        assert describe(event) == line

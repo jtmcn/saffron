@@ -11,6 +11,7 @@ import pytest
 
 from saffron.agents import artifacts
 from saffron.cell import runtime, session
+from saffron.events import describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
 from saffron.gates.core.committed import committed_gate
@@ -279,7 +280,7 @@ def test_an_accepted_plan_costs_exactly_one_turn():
         spec=_spec(),
         protected=["DESIGN.md"],
         agent=agent,
-        watch=lambda _line: None,
+        emit=lambda _event: None,
     )
     assert json.loads(raw) == _PLAN
     assert attempt.session_id == "sess-1"
@@ -298,7 +299,7 @@ def test_a_plan_outside_touches_is_rejected_without_a_second_turn():
             spec=_spec(),
             protected=[],
             agent=agent,
-            watch=lambda _line: None,
+            emit=lambda _event: None,
         )
     assert len(agent.prompts) == 1
 
@@ -311,7 +312,7 @@ def test_output_that_is_not_the_schema_is_re_prompted_exactly_once():
         spec=_spec(),
         protected=[],
         agent=agent,
-        watch=lambda _line: None,
+        emit=lambda _event: None,
     )
     assert json.loads(raw) == _PLAN
     assert len(agent.prompts) == 2
@@ -335,7 +336,7 @@ def test_a_turn_with_no_session_id_is_never_resumed():
             spec=_spec(),
             protected=[],
             agent=agent,
-            watch=lambda _line: None,
+            emit=lambda _event: None,
         )
 
 
@@ -348,7 +349,7 @@ def test_a_second_schema_failure_rejects_rather_than_asking_again():
             spec=_spec(),
             protected=[],
             agent=agent,
-            watch=lambda _line: None,
+            emit=lambda _event: None,
         )
     assert len(agent.prompts) == 2
 
@@ -373,7 +374,7 @@ def test_a_proposal_outside_touches_ends_the_checkpoint_in_one_turn():
             spec=_spec(),
             protected=[],
             agent=agent,
-            watch=lambda _line: None,
+            emit=lambda _event: None,
         )
     assert excinfo.value.proposal.proposed_touches == ["infra/deploy.tf"]
     assert excinfo.value.spent_usd == 0.1
@@ -392,7 +393,7 @@ def test_a_refused_proposal_is_reprompted_and_a_plan_can_follow():
         spec=_spec(),
         protected=[],
         agent=agent,
-        watch=lambda _line: None,
+        emit=lambda _event: None,
     )
     assert json.loads(raw) == _PLAN
     assert len(agent.prompts) == 2
@@ -412,7 +413,7 @@ def test_a_proposal_refused_twice_ends_as_plan_rejected():
             spec=_spec(),
             protected=[],
             agent=agent,
-            watch=lambda _line: None,
+            emit=lambda _event: None,
         )
     assert len(agent.prompts) == 2
 
@@ -467,7 +468,7 @@ def test_sa_0005s_own_criteria_reach_scope_review_naming_cli_py():
             spec=cell_spec,
             protected=[],
             agent=agent,
-            watch=lambda _line: None,
+            emit=lambda _event: None,
         )
     assert "saffron/cli.py" in excinfo.value.proposal.proposed_touches
 
@@ -488,11 +489,12 @@ def _loop(*rounds, max_attempts=4):
     suites = iter(rounds)
     repairs = []
     state, _attempts, _new = session.repair_loop(
+        spec_id="SA-TEST",
         run_gates=lambda: next(suites),
         baseline=[],
         max_attempts=max_attempts,
         repair=repairs.append,
-        watch=lambda _line: None,
+        emit=lambda _event: None,
     )
     return state, repairs
 
@@ -544,11 +546,12 @@ def test_a_dirty_tree_buys_one_repair_turn():
     trees = iter([["a.py"], []])
 
     state, attempts, _ = session.repair_loop(
+        spec_id="SA-TEST",
         run_gates=lambda: _dirty_suite(next(trees)),
         baseline=_dirty_suite([]),
         max_attempts=4,
         repair=lambda new: calls.append("repair"),
-        watch=lambda _: None,
+        emit=lambda _event: None,
     )
     assert calls == ["repair"]
     assert state == "READY_FOR_REVIEW"
@@ -559,11 +562,12 @@ def test_a_tree_still_dirty_after_the_repair_turn_ends_the_attempt():
     calls: list[str] = []
 
     state, attempts, new = session.repair_loop(
+        spec_id="SA-TEST",
         run_gates=lambda: _dirty_suite(["a.py"]),
         baseline=_dirty_suite([]),
         max_attempts=4,
         repair=lambda _: calls.append("repair"),
-        watch=lambda _: None,
+        emit=lambda _event: None,
     )
     assert calls == ["repair"]  # exactly one, not four
     assert state == "EXHAUSTED"
@@ -577,11 +581,12 @@ def test_a_gate_that_stopped_running_between_the_suites_is_not_a_green():
     baseline = [GateResult(gate="tests", status="pass", tool="pytest 8.0")]
     head = [GateResult(gate="tests", status="skip")]
     state, _attempts, _new = session.repair_loop(
+        spec_id="SA-TEST",
         run_gates=lambda: head,
         baseline=baseline,
         max_attempts=4,
         repair=lambda _new: None,
-        watch=lambda _line: None,
+        emit=lambda _event: None,
     )
     assert state == "GATE_ERROR"
 
@@ -590,11 +595,12 @@ def test_a_baseline_failure_is_not_the_tasks_problem():
     """Only new failures count, or every task inherits the repo's flaky tests."""
     pre_existing = Failure(file="old.py", code="E501", message="too long")
     state, _attempts, _new = session.repair_loop(
+        spec_id="SA-TEST",
         run_gates=lambda: _results(pre_existing),
         baseline=_results(pre_existing),
         max_attempts=4,
         repair=lambda _new: None,
-        watch=lambda _line: None,
+        emit=lambda _event: None,
     )
     assert state == "READY_FOR_REVIEW"
 
@@ -844,8 +850,22 @@ def _drive(
     policy="gates: {}\n",
     base_policy=None,
     gates=(),
+    use_default_emit=False,
+    capture=None,
+    agent_says=None,
 ):
-    """Run one whole cell against the stubbed runtime and return its outcome."""
+    """Run one whole cell against the stubbed runtime and return its outcome.
+
+    `use_default_emit`: skip the `emit=`/`session.print` doubles above and
+    call `run_one_cell` exactly as `cli.py` does — no `emit` argument at all
+    — so a test can exercise `_default_emit`/`EventLog` for real, against
+    `tmp_path / "out" / spec.spec_id`.
+
+    `capture`: an optional list that, alongside `cell.watched`'s described
+    strings, also collects the raw `Event` each one was built from — for a
+    test that needs a field `describe()` does not render (`Attempt.aborted`
+    vs `Attempt.decision`, say).
+    """
     repo = tmp_path / "repo"
     (repo / ".saffron" / "gates").mkdir(parents=True)
     for name in gates:
@@ -861,6 +881,12 @@ def _drive(
     scripted = iter(turns)
 
     def _run_agent(container, *, prompt, options, resume=None, **kwargs):
+        # `agent_says`: the real `implement.run_agent` reports the cell's
+        # stream by calling the `watch` it was handed. This stub swallowed it
+        # in `**kwargs` and never called it, which is why severing the seam at
+        # all six `agent(...)` sites left 218 tests green — measured.
+        if agent_says is not None:
+            kwargs["watch"](agent_says)
         cell.turns.append(prompt)
         cell.system_prompts.append(options["system_prompt"])
         cell.turn_options.append(options)
@@ -879,13 +905,36 @@ def _drive(
 
     # Left open: the caller reads its rows. tmp_path takes the file away.
     ledger = Ledger(tmp_path / "ledger.db")
+    if use_default_emit:
+        outcome = session.run_one_cell(
+            spec or _spec(),
+            repo=repo,
+            mirror=tmp_path / "m.git",
+            ledger=ledger,
+            out_dir=tmp_path / "out",
+        )
+        return outcome, ledger
+
+    # `events.FINDINGS[0]`'s two lines (the outcome announcement, and the
+    # rate-limit rejection) are direct `print()` calls in `session.py` —
+    # nothing describable fits either shape (§0's own out-of-scope note).
+    # Monkeypatching the module's own `print` name, not `builtins.print`,
+    # is what routes exactly those two lines into `cell.watched` alongside
+    # everything `emit` captures below, in the order both actually run.
+    monkeypatch.setattr(session, "print", cell.watched.append, raising=False)
+
+    def _emit(event):
+        cell.watched.append(describe(event))
+        if capture is not None:
+            capture.append(event)
+
     outcome = session.run_one_cell(
         spec or _spec(),
         repo=repo,
         mirror=tmp_path / "m.git",
         ledger=ledger,
         out_dir=tmp_path / "out",
-        watch=cell.watched.append,
+        emit=_emit,
     )
     return outcome, ledger
 
@@ -2381,7 +2430,7 @@ def test_a_crashed_plan_turn_keeps_its_own_exception_and_its_cost():
             spec=_spec(),
             protected=[],
             agent=_crash,
-            watch=lambda _line: None,
+            emit=lambda _event: None,
         )
     # Both turns: the one that failed validation and the one that crashed.
     attempt = raised.value.attempt
