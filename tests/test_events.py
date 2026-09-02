@@ -42,6 +42,7 @@ from saffron.events import (
     read_log,
 )
 from saffron.gates.contract import Failure
+from saffron.phases import review
 from tests.test_session import (
     _HIDDEN_DIFF,
     _INTEGRITY_POLICY,
@@ -1148,6 +1149,14 @@ def test_events_jsonl_reproduces_what_the_terminal_printed(
     ]
     assert without_outcome == logged
 
+    # `spec_id` is written at 21 sites in `session.py` and read by no test:
+    # measured, replacing every one with a wrong literal passed all 1149.
+    # `describe` never renders it, so the golden fixture cannot cover it
+    # either, and today the log's own path makes it redundant. `SA-0042`
+    # gives `cli.py` one fan-out across a task's phases, at which point this
+    # field is the only thing saying which task a row belongs to.
+    assert {event.spec_id for event in read_log(tmp_path / "out" / "SY-1")} == {"SY-1"}
+
 
 def test_a_gate_error_is_recorded_distinctly_from_a_gate_failure(monkeypatch, tmp_path):
     """AC6: `error` — the gate itself broke — must never blur into `fail`,
@@ -1226,11 +1235,13 @@ def test_the_supervisor_hands_the_adapter_to_the_agent_it_calls(monkeypatch, tmp
     stubs the agent and captures no `agent:` line, which its own header
     records.
 
-    Four of the six sites a green run reaches: `plan_checkpoint`'s turn,
-    `_drive_cell`'s IMPLEMENT turn, and one per REVIEW lens — the lenses run
-    through the same `agent` callable, so they witness the seam too. SALVAGE
-    and REPAIR are reached only by a failing run and stay unwitnessed here;
-    the `REVIEW:`/`REBUT:` *lines* are covered by the golden fixture instead.
+    Four *calls*, not four of the six `agent(...)` sites. A green run reaches
+    two of those — `plan_checkpoint`'s turn and `_drive_cell`'s IMPLEMENT turn
+    — and the other two calls arrive through `review.run_review`, one per
+    lens, which is a `watch=` site rather than an `agent(...)` one. SALVAGE and
+    REPAIR are reached only by a failing run: `test_the_repair_seam_is_also_
+    threaded` below drives one. The `REVIEW:`/`REBUT:` *lines* are covered by
+    the golden fixture instead.
     """
     spoken = 'agent: Bash {"command": "ls"}'
     cell = _stub_the_runtime(monkeypatch, suites=([], []))
@@ -1244,7 +1255,35 @@ def test_the_supervisor_hands_the_adapter_to_the_agent_it_calls(monkeypatch, tmp
     assert outcome.state == "READY_FOR_REVIEW"
     # Exact, not `>= 1`: the count is the number of seams exercised, and a
     # migration that drops one should fail here rather than pass quietly.
-    assert cell.watched.count(spoken) == 4, cell.watched
+    # Derived, not hard-coded: two turns plus one session per lens. `4` reads
+    # as a constant and is not one — `review.LENSES` has two entries beside a
+    # `ponytail:` saying a third is an open question, and adding it would fail
+    # this test for a change that has nothing to do with the seam.
+    assert cell.watched.count(spoken) == 2 + len(review.LENSES), cell.watched
+
+
+def test_the_repair_seam_is_also_threaded(monkeypatch, tmp_path):
+    """The sibling above drives a green run, which never reaches the SALVAGE or
+    REPAIR `agent(...)` sites. Measured: severing `watch=` at only those two
+    left 1129 tests passing, so every `agent:` line during REPAIR — the phase
+    an operator most needs to watch — could vanish from the terminal and the
+    log unnoticed. A failing run reaches REPAIR, so it is witnessed here."""
+    spoken = 'agent: Bash {"command": "pytest"}'
+    failing = Failure(file="a.py", code="E501", message="too long")
+    cell = _stub_the_runtime(
+        monkeypatch, suites=([], _results(failing), _results(failing))
+    )
+    outcome, _ = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn()],
+        agent_says=spoken,
+    )
+    assert outcome.state == "EXHAUSTED"
+    # The plan turn, IMPLEMENT, and one REPAIR turn per failed attempt. No
+    # lens runs: REVIEW is never reached on a red loop.
+    assert cell.watched.count(spoken) == 3, cell.watched
 
 
 def test_the_watch_shaped_callable_phases_still_receive_does_not_raise():
