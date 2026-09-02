@@ -1,17 +1,24 @@
-"""SA-0029: the host event vocabulary and its durable log. No emission, no
-renderer — that is `SA-0030`/`SA-0031` and `SA-0040`. No network, no cell.
+"""SA-0029/SA-0040: the host event vocabulary, its durable log, and
+`describe()` — the renderer that proves the nine kinds are sufficient for the
+64 `watch(...)` call sites. No emission: `SA-0030`/`SA-0031` migrate those
+call sites. No network, no cell.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import typing
 from dataclasses import fields as dc_fields
+from pathlib import Path
 
 import pytest
 
+from saffron.cell import runtime as _runtime
 from saffron.events import (
     _KINDS,
+    FAMILIES,
+    FINDINGS,
     Agent,
     Attempt,
     Baseline,
@@ -27,8 +34,11 @@ from saffron.events import (
     Teardown,
     Terminal,
     TerminalReason,
+    describe,
     read_log,
 )
+from saffron.gates.contract import Failure
+from tests.test_session import _PLAN, _block, _drive, _results, _stub_the_runtime, _turn
 
 
 def _read[E: Event](tmp_path, kind: type[E]) -> list[E]:
@@ -473,3 +483,316 @@ def test_append_never_raises_on_a_dict_a_cell_authored(tmp_path):
     )
     log.append(Teardown(timestamp=3.0, spec_id="X", step="done", ok=True))
     assert [type(e).__name__ for e in read_log(tmp_path)] == ["Teardown"]
+
+
+# --- SA-0040: `describe()` and the mapping table ---------------------------
+
+# One event per render branch `describe()` has — the exact-line proof
+# `AC1` asks for. `test_every_family_has_a_kind_and_renders` below checks
+# every kind used in `FAMILIES` appears at least once here.
+_CASES: list[tuple[Event, str]] = [
+    (
+        Preflight(timestamp=1.0, spec_id="x", step="proxy_start", detail="up"),
+        "preflight: up",
+    ),
+    (
+        Preflight(timestamp=1.0, spec_id="x", step="cell_up", detail="c up"),
+        "cell: c up",
+    ),
+    (
+        Preflight(timestamp=1.0, spec_id="x", step="unstacked", detail="gone"),
+        "unstacked: gone",
+    ),
+    (
+        Baseline(timestamp=1.0, spec_id="x", gates=("lint",), statuses=("pass",)),
+        "baseline: lint=pass",
+    ),
+    (
+        # Both fields set, as the real call site leaves them: the gate-status
+        # line always prints, and the aborted-gate line joins it as a second
+        # line from the *same* event — never one or the other.
+        Baseline(
+            timestamp=1.0,
+            spec_id="x",
+            gates=("lint", "tests"),
+            statuses=("pass", "error"),
+            aborted=("tests",),
+        ),
+        "baseline: lint=pass, tests=error\n"
+        "baseline errored in ['tests'] — the toolchain is broken, not the code",
+    ),
+    (
+        PhaseStart(
+            timestamp=1.0,
+            spec_id="x",
+            phase="IMPLEMENT",
+            label="PLAN",
+            detail="accepted, sha256 abc",
+        ),
+        "PLAN: accepted, sha256 abc",
+    ),
+    (
+        Attempt(
+            timestamp=1.0,
+            spec_id="x",
+            phase="GATE",
+            attempt=1,
+            commits=0,
+            spent_usd_est=0.0,
+            aborted=("tests",),
+        ),
+        "gates: ['tests'] errored — infrastructure, not the task",
+    ),
+    (
+        Attempt(
+            timestamp=1.0,
+            spec_id="x",
+            phase="GATE",
+            attempt=1,
+            commits=0,
+            spent_usd_est=0.0,
+            drift=("tests: pass->skip",),
+        ),
+        "gates: ['tests: pass->skip'] — distrusting the subtraction",
+    ),
+    (
+        Attempt(
+            timestamp=1.0,
+            spec_id="x",
+            phase="GATE",
+            attempt=2,
+            commits=0,
+            spent_usd_est=1.0,
+            new_failures=1,
+            decision="repair",
+        ),
+        "gates: attempt 2, 1 new failures -> repair",
+    ),
+    (
+        Attempt(
+            timestamp=1.0,
+            spec_id="x",
+            phase="REBUT",
+            attempt=1,
+            commits=0,
+            spent_usd_est=1.0,
+            new_failures=0,
+        ),
+        "gates: 0 new failures after the rebuttal",
+    ),
+    (
+        Attempt(
+            timestamp=1.0,
+            spec_id="x",
+            phase="IMPLEMENT",
+            attempt=1,
+            commits=3,
+            spent_usd_est=1.5,
+        ),
+        "IMPLEMENT: 3 commit(s), $1.50 spent",
+    ),
+    (
+        GateResult(
+            timestamp=1.0, spec_id="x", gate="lint", status="pass", against="attempt"
+        ),
+        "gates: lint=pass",
+    ),
+    (
+        Budget(timestamp=1.0, spec_id="x", ceiling="budget_usd", value=9.0, limit=9.0),
+        "budget: $9.00 of $9.00 — stopping",
+    ),
+    (Agent(timestamp=1.0, spec_id="x", raw=True, line="oops"), "agent: (raw) oops"),
+    (
+        Agent(
+            timestamp=1.0,
+            spec_id="x",
+            raw=False,
+            event={"type": "error", "error": "boom"},
+        ),
+        "agent: error boom",
+    ),
+    (
+        Agent(
+            timestamp=1.0,
+            spec_id="x",
+            raw=False,
+            detail="reaped the cell after the kill",
+        ),
+        "agent: reaped the cell after the kill",
+    ),
+    (
+        Terminal(
+            timestamp=1.0,
+            spec_id="x",
+            reason="cut_off_no_salvage_room",
+            spent_usd_est=9.0,
+            detail="$9.00 of $9.00",
+        ),
+        "budget: $9.00 of $9.00 — cut off at the turn ceiling with nothing "
+        "committed, no room left to salvage",
+    ),
+    (
+        Terminal(
+            timestamp=1.0,
+            spec_id="x",
+            reason="cut_off_salvage_failed",
+            spent_usd_est=9.5,
+        ),
+        "SALVAGE: cut off and could not be salvaged, $9.50 spent",
+    ),
+    (
+        Terminal(
+            timestamp=1.0,
+            spec_id="x",
+            reason="ended_without_finishing",
+            spent_usd_est=1.0,
+            subtype="error",
+            terminal_reason="api_error",
+        ),
+        "IMPLEMENT: the turn ended without finishing and produced nothing "
+        "(error/api_error)",
+    ),
+    (
+        Terminal(
+            timestamp=1.0, spec_id="x", reason="finished_empty", spent_usd_est=0.2
+        ),
+        "IMPLEMENT: finished and produced nothing",
+    ),
+    (
+        Terminal(
+            timestamp=1.0,
+            spec_id="x",
+            reason="plan_rejected",
+            spent_usd_est=0.1,
+            detail="not the schema",
+        ),
+        "PLAN: rejected, $0.10 spent — not the schema",
+    ),
+    (Teardown(timestamp=1.0, spec_id="x", step="start", ok=True), "teardown"),
+    (
+        Teardown(
+            timestamp=1.0,
+            spec_id="x",
+            step="export",
+            ok=True,
+            detail="exported 42 bytes to /x/patch.diff",
+        ),
+        "teardown: exported 42 bytes to /x/patch.diff",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "event,expected",
+    _CASES,
+    ids=lambda v: (
+        getattr(v, "__class__", type(v)).__name__ if not isinstance(v, str) else v[:24]
+    ),
+)
+def test_describe_renders_every_kind_and_variant(event, expected):
+    """AC1: `describe(event)` is the exact line the call site prints today,
+    for every kind and every render branch — never a `type` string switch."""
+    assert describe(event) == expected
+
+
+def test_every_family_has_a_kind_and_renders():
+    """AC2: every row in the module's own table names a real kind, and that
+    kind is proven to render by `_CASES` above."""
+    kinds_with_a_render_example = {type(event) for event, _ in _CASES}
+    assert kinds_with_a_render_example == set(_KINDS.values())
+    for family in FAMILIES:
+        assert family.kind in _KINDS.values(), family.prefix
+
+
+def test_findings_name_what_the_table_could_not_type():
+    """The two call-site shapes `FAMILIES` refused to force into a
+    `message: str` are named, not silently dropped."""
+    assert len(FINDINGS) == 2
+    for prefix, where, note in FINDINGS:
+        assert prefix and where and note
+
+
+# --- The fixture's normaliser -----------------------------------------------
+
+_IPV4 = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
+_PATCH_PATH = re.compile(r"\S*/patch\.diff\b")
+_PROMPT_CHARS = re.compile(r"system prompt \d+ chars")
+
+
+def _normalise(line: str) -> str:
+    """What the fixture's capture and its assertion both run every line
+    through. Three things move between hosts and runs and nothing else does:
+    the LAN address `preflight.probe_addresses()` reports (the stable gateway
+    is left alone), pytest's absolute `tmp_path` ahead of `patch.diff`, and a
+    system prompt's `CONTEXT.md`-dependent character count."""
+    line = _IPV4.sub(
+        lambda m: m.group(0) if m.group(0) == _runtime.GATEWAY else "<LAN-ADDR>", line
+    )
+    line = _PATCH_PATH.sub("<TASK_DIR>/patch.diff", line)
+    return _PROMPT_CHARS.sub("system prompt <N> chars", line)
+
+
+def test_normalise_replaces_exactly_the_three_volatile_substrings():
+    port_line = (
+        f"preflight: probing 1 host ports at {_runtime.GATEWAY}, 192.168.1.42; "
+        "tolerating nothing"
+    )
+    assert _normalise(port_line) == (
+        f"preflight: probing 1 host ports at {_runtime.GATEWAY}, <LAN-ADDR>; "
+        "tolerating nothing"
+    )
+    path_line = "teardown: exported 12 bytes to /tmp/xyz/out/SY-1/patch.diff"
+    assert (
+        _normalise(path_line) == "teardown: exported 12 bytes to <TASK_DIR>/patch.diff"
+    )
+    prompt_line = "IMPLEMENT: system prompt 4821 chars"
+    assert _normalise(prompt_line) == "IMPLEMENT: system prompt <N> chars"
+    untouched = "REVIEW: no blockers, 0 concern(s)"
+    assert _normalise(untouched) == untouched
+    assert _normalise(_normalise(untouched)) == _normalise(untouched)
+
+
+# --- The golden fixture: driven, not typed ----------------------------------
+#
+# Reached by this harness: `preflight:`/`cell:`, `baseline:`, `PLAN:`,
+# `IMPLEMENT:`, `gates:`, `REVIEW:`, the outcome line, and `teardown:`. Not
+# reached, because the harness monkeypatches the agent and never touches a
+# real cell: `agent:` (real SDK events), `SCOPE:`/`SCOPE_REVIEW:`, `SALVAGE:`,
+# `REPAIR:`, `REBUT:`, `Budget`'s stopping line, a no-commit `Terminal`,
+# `unstacked:` and every `PACKAGE:` line (PACKAGE runs after `run_one_cell`
+# returns). `SA-0030`/`SA-0031` verify against this file and must know that.
+
+
+def _golden_fixture_path() -> Path:
+    return Path(__file__).parent / "fixtures" / "watch-golden.txt"
+
+
+def test_watch_output_matches_the_golden_fixture(monkeypatch, tmp_path):
+    cell_a = _stub_the_runtime(monkeypatch, suites=([], []))
+    outcome_a, _ = _drive(
+        monkeypatch, tmp_path / "a", cell=cell_a, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert outcome_a.state == "READY_FOR_REVIEW"
+
+    failing = Failure(file="a.py", code="E501", message="too long")
+    cell_b = _stub_the_runtime(
+        monkeypatch, suites=([], _results(failing), _results(failing))
+    )
+    outcome_b, _ = _drive(
+        monkeypatch,
+        tmp_path / "b",
+        cell=cell_b,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn()],
+    )
+    assert outcome_b.state == "EXHAUSTED"
+
+    captured = "\n".join(
+        [
+            "# green: PLAN -> IMPLEMENT -> gates green -> REVIEW",
+            *(_normalise(line) for line in cell_a.watched),
+            "",
+            "# failing gate, repaired once, then no-progress -> EXHAUSTED",
+            *(_normalise(line) for line in cell_b.watched),
+        ]
+    )
+    assert captured == _golden_fixture_path().read_text().rstrip("\n")

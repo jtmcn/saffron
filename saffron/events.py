@@ -6,11 +6,19 @@ them for the operator. Host-side the arrangement is inverted — 64 call sites
 across `cell/session.py`, `phases/*.py` and `cli.py` author prose straight into
 `watch()`, and the structure behind each line dies with the terminal scroll.
 
-This module is the fix, and only the fix's first half: nine frozen dataclasses
-— one per kind, never one class with a `type` string, so a future renderer
-knows what it holds — an `Event` union naming all nine, and a tiny durable log.
-Nothing here emits an `Event`; `SA-0030`/`SA-0031` migrate the call sites, and
-`SA-0040` writes the renderer that turns these back into the prose above.
+This module is the fix: nine frozen dataclasses — one per kind, never one
+class with a `type` string, so a future renderer knows what it holds — an
+`Event` union naming all nine, a tiny durable log, and `describe()`, which
+turns one back into the prose above. `FAMILIES` below is the proof that the
+nine kinds are sufficient: one row per call-site shape, citing the file and
+symbol it lives in (never a line number — DESIGN.md's own citation rule) and
+the kind `describe()` renders it from. Two shapes resisted typing outright and
+are named as `FINDINGS` instead of forced into a `message: str` — the escape
+hatch this vocabulary exists to close.
+
+Nothing here emits an `Event` yet; `SA-0030`/`SA-0031` migrate the 64 call
+sites to construct one and call `describe()` in place of the f-string they
+author today.
 
 Every event carries `timestamp` (unix epoch seconds, `time.time()` — the one
 documented representation; every reader and writer here agrees on it) and
@@ -53,7 +61,15 @@ Phase = Literal["DIAGNOSE", "IMPLEMENT", "GATE", "REPAIR", "REVIEW", "REBUT", "P
 # phase. Both fields are carried: the phase for anything grouping by it, the
 # label so `SA-0040` can reproduce the line verbatim.
 LineLabel = Literal[
-    "SCOPE", "PLAN", "IMPLEMENT", "SALVAGE", "REPAIR", "REVIEW", "REBUT", "PACKAGE"
+    "SCOPE",
+    "SCOPE_REVIEW",
+    "PLAN",
+    "IMPLEMENT",
+    "SALVAGE",
+    "REPAIR",
+    "REVIEW",
+    "REBUT",
+    "PACKAGE",
 ]
 
 Ceiling = Literal["budget_usd", "max_attempts", "max_turns"]
@@ -88,13 +104,22 @@ class Preflight:
 
 @dataclass(frozen=True, slots=True)
 class Baseline:
-    """The baseline gate suite finished. `aborted` names the gates that
-    errored against `base_sha` — non-empty means the toolchain is broken and
-    the task never reaches an agent (PREFLIGHT_FAILED)."""
+    """The baseline gate suite finished. `gates`/`statuses` are every gate's
+    status, always populated — two parallel tuples, not one of pairs:
+    `read_log`'s tuple coercion is one level deep, and a nested
+    `tuple[tuple[str, str], ...]` would round-trip as a tuple of *lists*.
+    `aborted` names the ones that errored against `base_sha` — non-empty
+    means the toolchain is broken and the task never reaches an agent
+    (PREFLIGHT_FAILED). Both can be set on the same event: the real call site
+    prints the joined `baseline: g=s, ...` line unconditionally and then, only
+    when something errored, a second line naming it — `describe()` renders
+    both, in that order, from the one event."""
 
     timestamp: float
     spec_id: str
     aborted: tuple[str, ...] = ()
+    gates: tuple[str, ...] = ()
+    statuses: tuple[GateStatus, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,7 +148,13 @@ class Attempt:
     run continue — the GATE ⇄ REPAIR loop's own numbered attempt
     (`new_failures`/`decision` set), or an IMPLEMENT/SALVAGE turn that landed
     commits (left `None`). Cut off *and recovered* is this, not `Terminal`:
-    that branch has commits and the run goes on."""
+    that branch has commits and the run goes on.
+
+    `aborted`/`drift` are the loop's own two ways of distrusting a suite
+    mid-attempt — `session.aborted_gates`/`suite_drift`, both already
+    `list[str]` at the call site. Named apart from `Baseline.aborted`: that one
+    means the toolchain was already broken before an agent ran; these mean it
+    broke, or moved, between two suites of the same attempt."""
 
     timestamp: float
     spec_id: str
@@ -135,6 +166,8 @@ class Attempt:
     spent_usd_est: float
     new_failures: int | None = None
     decision: Literal["green", "no-progress", "exhausted", "repair"] | None = None
+    aborted: tuple[str, ...] = ()
+    drift: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -352,3 +385,271 @@ def read_log(task_dir: Path) -> list[Event]:
         except (TypeError, ValueError):
             continue
     return events
+
+
+def _when(stamp: int | None) -> str:
+    """`phases.implement.when`, duplicated rather than imported: `events.py`
+    is core and stays dependency-light, and `SA-0031` deletes this copy the
+    moment `implement._describe` collapses into `describe` below."""
+    import time
+
+    if stamp is None:
+        return "unknown"
+    local = time.localtime(stamp)
+    today = time.localtime()
+    same_day = (local.tm_year, local.tm_yday) == (today.tm_year, today.tm_yday)
+    return time.strftime("%H:%M local" if same_day else "%a %d %b %H:%M local", local)
+
+
+def _describe_agent_event(event: dict) -> str:
+    """`phases.implement._describe`, verbatim in shape: the one place a raw
+    Claude Agent SDK event dict becomes a line, duplicated here for the same
+    reason as `_when` above."""
+    kind = event.get("type")
+    if kind == "text":
+        text = " ".join(str(event.get("text", "")).split())
+        return f"agent: {text[:160]}"
+    if kind == "tool_use":
+        return f"agent: {event.get('name')} {json.dumps(event.get('input'))[:120]}"
+    if kind == "tool_result":
+        return "agent: tool " + ("error" if event.get("is_error") else "ok")
+    if kind == "result":
+        return (
+            f"agent: {event.get('subtype')} in {event.get('num_turns')} turns, "
+            f"${event.get('total_cost_usd')} ({event.get('terminal_reason')})"
+        )
+    if kind == "rate_limit":
+        used = event.get("utilization")
+        return (
+            f"agent: rate limit {event.get('status')}"
+            + (f", {used:.0%} used" if isinstance(used, int | float) else "")
+            + (
+                f", resets {_when(event.get('resets_at'))}"
+                if event.get("resets_at")
+                else ""
+            )
+        )
+    if kind == "error":
+        return f"agent: error {event.get('error')}"
+    return f"agent: {kind} {event.get('subtype') or event.get('kind') or ''}".rstrip()
+
+
+def describe(event: Event) -> str:
+    """One line per event — `implement._describe`'s shape, widened to the
+    whole vocabulary. Returns the exact line today's `watch(...)` call site
+    would have printed, so `SA-0030`/`SA-0031` can replace that call site with
+    `watch(describe(event))` and change nothing an operator sees.
+
+    Dispatches on `type(event)`, never a `type` string field — the module's
+    own rule (line 9 above) applies here too. `FAMILIES` below is the table
+    proving every one of the 64 call sites this exists to replace reaches a
+    branch here; `FINDINGS` names the two that do not.
+    """
+    if isinstance(event, Preflight):
+        if event.step == "cell_up":
+            return f"cell: {event.detail}"
+        if event.step == "unstacked":
+            return f"unstacked: {event.detail}"
+        return f"preflight: {event.detail}"
+
+    if isinstance(event, Baseline):
+        # The real call site (`_drive_cell`) prints the joined gate-status
+        # line unconditionally, then — only on a broken toolchain — a second
+        # line naming what errored. Both facts can live on one `Baseline`, so
+        # both must render: an if/else here would silently drop whichever
+        # line lost, and on PREFLIGHT_FAILED the per-gate line is the one
+        # diagnosis needs most.
+        lines = []
+        if event.gates or event.statuses:
+            joined = ", ".join(
+                f"{gate}={status}"
+                for gate, status in zip(event.gates, event.statuses, strict=True)
+            )
+            lines.append(f"baseline: {joined}")
+        if event.aborted:
+            lines.append(
+                f"baseline errored in {list(event.aborted)} — the toolchain "
+                "is broken, not the code"
+            )
+        return "\n".join(lines)
+
+    if isinstance(event, PhaseStart):
+        return f"{event.label}: {event.detail}"
+
+    if isinstance(event, Attempt):
+        if event.aborted:
+            return (
+                f"gates: {list(event.aborted)} errored — infrastructure, not the task"
+            )
+        if event.drift:
+            return f"gates: {list(event.drift)} — distrusting the subtraction"
+        if event.new_failures is not None and event.decision is not None:
+            return (
+                f"gates: attempt {event.attempt}, {event.new_failures} new "
+                f"failures -> {event.decision}"
+            )
+        if event.new_failures is not None:
+            return f"gates: {event.new_failures} new failures after the rebuttal"
+        return f"IMPLEMENT: {event.commits} commit(s), ${event.spent_usd_est:.2f} spent"
+
+    if isinstance(event, GateResult):
+        # No call site prints one alone today — every printed line joins
+        # several (`Baseline`) or reports only a count (`Attempt`). Still
+        # rendered: a future consumer (a report page, `SA-0036`) reads one
+        # `GateResult` at a time, and "the nine kinds render" cannot mean
+        # "eight of them."
+        return f"gates: {event.gate}={event.status}"
+
+    if isinstance(event, Budget):
+        return f"budget: ${event.value:.2f} of ${event.limit:.2f} — stopping"
+
+    if isinstance(event, Agent):
+        if event.raw:
+            return f"agent: (raw) {(event.line or '')[:160]}"
+        if event.event is not None:
+            return _describe_agent_event(event.event)
+        return f"agent: {event.detail}"
+
+    if isinstance(event, Terminal):
+        if event.reason == "cut_off_no_salvage_room":
+            return (
+                f"budget: {event.detail} — cut off at the turn ceiling with "
+                "nothing committed, no room left to salvage"
+            )
+        if event.reason == "cut_off_salvage_failed":
+            return (
+                "SALVAGE: cut off and could not be salvaged, "
+                f"${event.spent_usd_est:.2f} spent"
+            )
+        if event.reason == "ended_without_finishing":
+            return (
+                "IMPLEMENT: the turn ended without finishing and produced "
+                f"nothing ({event.subtype}/{event.terminal_reason})"
+            )
+        if event.reason == "finished_empty":
+            return "IMPLEMENT: finished and produced nothing"
+        return f"PLAN: rejected, ${event.spent_usd_est:.2f} spent — {event.detail}"
+
+    if isinstance(event, Teardown):
+        if event.step == "start":
+            return "teardown"
+        return f"teardown: {event.detail}"
+
+    raise TypeError(f"describe() has no branch for {type(event).__name__}")
+
+
+@dataclass(frozen=True, slots=True)
+class _Family:
+    """One row: a call-site shape, where it lives (file and symbol — never a
+    line number, DESIGN.md's own citation rule), and the kind `describe()`
+    renders it from. `tests/test_events.py` pairs every row with a concrete
+    event and the literal line it must produce."""
+
+    prefix: str
+    where: str
+    kind: type
+
+
+# The proof `SA-0029`'s nine kinds are sufficient for the 64 call sites across
+# `cell/session.py`, `phases/{implement,package,review,rebut}.py` and
+# `cli.py`. Grouped by rendered shape, not by literal call site: two call
+# sites that print the same shape (both `SALVAGE: the session failed — …`
+# branches, both `agent: (raw) …` guards) are one row. Two rows can still
+# share a prefix and differ in kind — `budget:` is `Budget` when the ceiling
+# is merely reached and `Terminal` when it is reached with nothing committed
+# and no salvage room left; `IMPLEMENT:` spans `PhaseStart`, `Attempt` and
+# `Terminal` depending on which of the three it is. That is not an
+# inconsistency to fix; it is `describe()` reading the *fields*, never the
+# prefix, to decide what happened.
+# Short aliases so a row is one line: the citation, not its length, is the
+# point. `_S` covers every branch of `_drive_cell` itself.
+_S = "cell/session.py:_drive_cell"
+_PC = "cell/session.py:plan_checkpoint"
+_RL = "cell/session.py:repair_loop"
+_EP = "cell/session.py:export_patch"
+_IA = "phases/implement.py:run_agent"
+_IC = "phases/implement.py:_consume"
+_PKG = "phases/package.py:package"
+_CLI = "cli.py:_resolve_stacked_on"
+
+FAMILIES: tuple[_Family, ...] = (
+    _Family("preflight: starting the proxy", _S, Preflight),
+    _Family("preflight: proxy at", _S, Preflight),
+    _Family("preflight: proxy reaches", _S, Preflight),
+    _Family("preflight: building", _S, Preflight),
+    _Family("preflight: probing", _S, Preflight),
+    _Family("cell:", _S, Preflight),
+    _Family("unstacked:", _CLI, Preflight),
+    _Family("baseline: (joined gate=status)", _S, Baseline),
+    _Family("baseline errored in", _S, Baseline),
+    _Family("SCOPE: proposal refused", _PC, PhaseStart),
+    _Family("SCOPE_REVIEW: proposed", _S, PhaseStart),
+    _Family("PLAN: not the schema", _PC, PhaseStart),
+    _Family("PLAN: the session failed", _S, PhaseStart),
+    _Family("PLAN: accepted", _S, PhaseStart),
+    _Family("PLAN: rejected", _S, Terminal),
+    _Family("IMPLEMENT: system prompt", _S, PhaseStart),
+    _Family("IMPLEMENT: the session failed", _S, PhaseStart),
+    _Family("IMPLEMENT: cut off … spending one turn", _S, PhaseStart),
+    _Family("IMPLEMENT: N commit(s)", _S, Attempt),
+    _Family("IMPLEMENT: the turn ended without finishing", _S, Terminal),
+    _Family("IMPLEMENT: finished and produced nothing", _S, Terminal),
+    _Family("budget: … stopping", _S, Budget),
+    _Family("budget: … cut off … no room left to salvage", _S, Terminal),
+    _Family("SALVAGE: the session failed", _S, PhaseStart),
+    _Family("SALVAGE: uncommitted work checkpointed", _S, PhaseStart),
+    _Family("SALVAGE: the host checkpoint failed", _S, PhaseStart),
+    _Family("SALVAGE: recovered N commit(s)", _S, PhaseStart),
+    _Family("SALVAGE: cut off and could not be salvaged", _S, Terminal),
+    _Family("gates: attempt N, K new failures -> decision", _RL, Attempt),
+    _Family("gates: … errored — infrastructure", _RL, Attempt),
+    _Family("gates: … distrusting the subtraction", _RL, Attempt),
+    _Family("gates: N new failures after the rebuttal", _S, Attempt),
+    _Family("REPAIR: the session failed", _S, PhaseStart),
+    _Family("REPAIR: uncommitted work checkpointed", _S, PhaseStart),
+    _Family("REVIEW:", _S, PhaseStart),
+    _Family("REBUT:", _S, PhaseStart),
+    _Family("teardown", _S, Teardown),
+    _Family("teardown: commit subjects unreadable", _EP, Teardown),
+    _Family("teardown: no commits, nothing to export", _EP, Teardown),
+    _Family("teardown: exported N bytes", _EP, Teardown),
+    _Family("teardown: patch export FAILED", _EP, Teardown),
+    _Family("teardown: proxy DENIED", _S, Teardown),
+    _Family("teardown: proxy FAILED", _S, Teardown),
+    _Family("teardown: … survived", _S, Teardown),
+    _Family("agent: (raw)", _IA, Agent),
+    _Family("agent: (event dict rendering)", _IC, Agent),
+    _Family("agent: reaped/would not reap", _IA, Agent),
+    _Family("agent: result seen, then a child held stdout open", _IA, Agent),
+    _Family("PACKAGE: (ParentGone)", _PKG, PhaseStart),
+    _Family("PACKAGE: conflicts with", _PKG, PhaseStart),
+    _Family("PACKAGE: refusing to push", _PKG, PhaseStart),
+    _Family("PACKAGE: N new failures against", _PKG, PhaseStart),
+    _Family("PACKAGE: (LeaseRejected)", _PKG, PhaseStart),
+    _Family("PACKAGE: (pr_url)", _PKG, PhaseStart),
+    _Family("PACKAGE: could not remove", _PKG, PhaseStart),
+)
+
+# The two call-site shapes `FAMILIES` above could not fit into the nine kinds
+# without a `message: str` standing in for a shape of its own — named here
+# rather than forced, per this spec's own acceptance criteria.
+FINDINGS: tuple[tuple[str, str, str], ...] = (
+    (
+        "{outcome}: $N spent, session … / rate limit: rejected — not exhausted",
+        _S,
+        "Both are the task's own terminal announcement, not a kind's. "
+        "`Terminal` is scoped to the five zero-commit ways one IMPLEMENT turn "
+        "ends (backlog item 37); `Budget` carries a ceiling/value/limit triple, "
+        "not an arbitrary outcome word and a session id. Typing this needs a "
+        "tenth kind, out of scope here.",
+    ),
+    (
+        "re-verify: {label} suite at {sha}",
+        "phases/package.py:reverify",
+        "Every other `PhaseStart` prefix is a phase name in bare caps; "
+        "`re-verify` is lower-case with a hyphen and names a step inside "
+        "PACKAGE re-running the gate suite, not a phase transition. Widening "
+        "`LineLabel`'s casing for one call site would carry no more than a "
+        "free string does.",
+    ),
+)

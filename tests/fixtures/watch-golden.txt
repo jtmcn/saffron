@@ -1,0 +1,35 @@
+# green: PLAN -> IMPLEMENT -> gates green -> REVIEW
+preflight: starting the proxy
+preflight: proxy at <LAN-ADDR>
+preflight: proxy reaches api.anthropic.com (401)
+preflight: building saffron/cell:repo
+preflight: probing 1 host ports at 10.88.0.1, <LAN-ADDR>; tolerating rapportd:49152
+cell: saffron-cell-SY-1 up, worktree at bbbbbbbb
+baseline: scope=pass, integrity=skip, size=pass, committed=pass, census=skip, criteria=skip
+IMPLEMENT: system prompt <N> chars
+PLAN: accepted, sha256 841501830587
+IMPLEMENT: 1 commit(s), $0.20 spent
+gates: attempt 1, 0 new failures -> green
+REVIEW: correctness: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.10
+REVIEW: contract: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.10
+REVIEW: no blockers, 0 concern(s)
+READY_FOR_REVIEW: $0.40 spent, session sess-1
+teardown
+teardown: exported 62 bytes to <TASK_DIR>/patch.diff
+
+# failing gate, repaired once, then no-progress -> EXHAUSTED
+preflight: starting the proxy
+preflight: proxy at <LAN-ADDR>
+preflight: proxy reaches api.anthropic.com (401)
+preflight: building saffron/cell:repo
+preflight: probing 1 host ports at 10.88.0.1, <LAN-ADDR>; tolerating rapportd:49152
+cell: saffron-cell-SY-1 up, worktree at bbbbbbbb
+baseline: scope=pass, integrity=skip, size=pass, committed=pass, census=skip, criteria=skip
+IMPLEMENT: system prompt <N> chars
+PLAN: accepted, sha256 841501830587
+IMPLEMENT: 1 commit(s), $0.20 spent
+gates: attempt 1, 1 new failures -> repair
+gates: attempt 2, 1 new failures -> no-progress
+EXHAUSTED: $0.30 spent, session sess-1
+teardown
+teardown: exported 62 bytes to <TASK_DIR>/patch.diff
