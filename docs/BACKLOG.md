@@ -2335,6 +2335,91 @@ elsewhere. Recorded rather than fixed here: PR #91 is over the ceiling and is
 being merged over it deliberately, with this item as the record.
 
 
+## 41. `NO_PROXY=""` denies a cell its own loopback, so a test that stands up a local server fails at baseline forever
+
+`saffron/cell/proxy.py:148` returns `{"HTTPS_PROXY": url, "HTTP_PROXY": url,
+"NO_PROXY": ""}`. Empty means *nothing* bypasses squid — `127.0.0.1` included.
+`tests/test_preflight.py:266` binds an `HTTPServer` on loopback and probes it
+with `preflight._UPSTREAM_PROBE`, which uses `urllib` and so honours the proxy
+variables. The container's request to itself is routed out to squid, which
+allowlists only the upstream, and is denied.
+
+Measured on `SA-0040`, 2026-09-01. In-cell baseline: `1 failed, 1094 passed`.
+Same commit on the host: `1 passed`. That run's teardown printed ten of these,
+one per suite execution across baseline, two gate attempts and the
+post-rebuttal run:
+
+```
+teardown: proxy DENIED … TCP_DENIED/403 3367 GET http://127.0.0.1:37283/v1/models
+```
+
+Three costs, in increasing order of seriousness:
+
+- **Every cell run starts with a red `tests` gate.** Baseline subtraction
+  absorbs it correctly, which is exactly why it has gone unnoticed since the
+  proxy was wired.
+- **It misleads the critic.** `SA-0040`'s correctness lens opened its blocker
+  with "the `tests` gate reports 1 failure in this run", reasoned to the
+  nearest new test, and raised a blocker against the golden fixture's digest.
+  The digest was fine — mutating it fails the assertion — but the rebuttal
+  turn's artifact was itself lost to a JSON parse error, so the pull request
+  shipped a `confirmed` disagreement founded on this line. One environment
+  papercut cost a lens finding, a rebuttal, and an operator adjudication.
+- **It trains the operator to skim the denials.** `teardown: proxy DENIED` is
+  the channel that would show a cell trying to reach something it should not.
+  Ten lines per run that are one repo test talking to itself is noise in the
+  one place noise is most expensive.
+
+Done looks like a decision, not a patch. `NO_PROXY=""` is the correct isolation
+posture for anything off-box and must not be widened to hosts. The open
+question is whether loopback *inside the container* — which is the cell
+itself, and reaches nothing the cell does not already have — belongs behind
+the boundary at all. If it does, the alternative is that `saffron`'s own suite
+cannot contain a test that binds a socket, and `test_the_probe_script_itself
+_answers_a_401` should carry the `cell` marker and say so.
+
+
+## 42. A rebuttal lost to a trailing comma is recorded as a confirmed disagreement
+
+`phases/rebut.py:207` discards a rebuttal artifact that is not the schema and
+returns `RebuttalTurn(error=...)`. That is deliberate, and the comment says
+why: the plan checkpoint re-prompts once (`cell/session.py:404`) because a
+rejected plan costs an attempt that has not happened yet, whereas *"this
+attempt is already made, and HEAD already says what it did."*
+
+`SA-0040` (PR #93) is the case where the second half of that sentence does not
+hold. Measured 2026-09-01:
+
+```
+REBUT: 0 rebuttal(s), HEAD moved, not the schema: Illegal trailing comma
+       before end of object: line 6 column 1116 (char 1186)
+```
+
+The turn cost $2.59, edited the branch, and conceded one of the two blockers —
+`describe`'s `Baseline` branch was rewritten and a test added, and the critic's
+re-read correctly marked that one `withdrawn`. Its *arguments* were what the
+trailing comma destroyed. On the other blocker the critic then wrote
+`confirmed: The implementer offered no argument and made no visible change`,
+and that finding was false: the fixture digest it doubted is captured, not
+typed, and mutating it fails the assertion at `tests/test_events.py:798`.
+Nothing needed to change, and there was no surviving argument to say so.
+
+So the operator inherits a pull request body asserting a confirmed
+disagreement, founded on a lens finding that was itself founded on the
+unrelated red baseline in item 41. "HEAD already says what it did" is true only
+for a reader who re-reads the diff against every finding; the generated body
+says the opposite, and the body is what gets read.
+
+Done looks like the artifact's *shape* failure not being silently equivalent to
+the agent having no answer. Cheapest honest fix is not a re-prompt: it is that a
+`RebuttalTurn` carrying `error` renders in the pull request body as
+**"the rebuttal was unreadable"** rather than as an implementer who declined to
+argue, and that `HEAD moved` — already recorded in `rebuttal.json` — is shown
+next to it. Whether a malformed rebuttal is also worth one re-prompt is a
+separate question from whether the record should imply an answer that was never
+read.
+
+
 ---
 
 ## What is *not* here, deliberately
