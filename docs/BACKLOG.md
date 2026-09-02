@@ -2508,10 +2508,12 @@ pass `package(watch=…)` and capture or silence the `re-verify:` line, and no
 caller can redirect it now. Done is unchanged: the tenth kind, or an
 `emit`-shaped sink for lines no kind carries. Three prints, not two.
 
-One further consequence for whoever takes that on: `session._default_emit`'s
-docstring now says `cli.py` "never passes `emit`", which this spec made false
-— `cli.py` is the only production caller of `run_one_cell` and always passes
-one, so the `emit is None` branch is now reached from tests alone.
+Two stale docstrings for whoever takes that on, both in `session.py` and so
+both unrepairable here. `_default_emit`'s says `cli.py` "never passes `emit`",
+and `run_one_cell`'s says the default "lives here, not in `cli.py` (forbidden
+to this spec)". `cli.py` is no longer forbidden, is the only production caller
+of `run_one_cell`, and now builds exactly that fan-out — so the `emit is None`
+branch is reached from tests alone.
 
 ## 44. A single turn can overshoot the budget ceiling, because the check runs before it
 

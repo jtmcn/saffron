@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from saffron.cell.worktree import DIFF_FLAGS
-from saffron.events import Event, PhaseStart, describe
+from saffron.events import Event, EventLog, PhaseStart, describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import GateResult, split_lines
 from saffron.phases.rebut import sustained_blockers, unkept_fixes
@@ -561,7 +561,7 @@ def package(
     token: str | None,
     parent_branch: str | None = None,
     gh: GhRunner = run_gh,
-    emit: Callable[[Event], None] = lambda event: print(describe(event)),
+    emit: Callable[[Event], None] | None = None,
 ) -> PackageResult:
     """§5.7, host-side, after the cell is gone.
 
@@ -579,6 +579,18 @@ def package(
     (`SA-0026`) is what supplies it, from the same parent it stacked the
     worktree on.
     """
+
+    if emit is None:
+        # The same shape `run_one_cell` defaults to, and for the same reason:
+        # a caller that forgets `emit` must still get `events.jsonl`. A
+        # print-only default is this spec's own defect, defaulted back in.
+        log = EventLog(outcome.task_dir)
+
+        def emit(event: Event) -> None:
+            line = describe(event)
+            if line:
+                print(line)
+            log.append(event)
 
     def _emit_package(detail: str) -> None:
         """Every `PACKAGE:` line this phase prints, fanned out through
