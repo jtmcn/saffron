@@ -46,7 +46,7 @@ def _side(results: list[GateResult]) -> _Side | None:
     enumerating = [r for r in results if r.collected is not None]
     if not enumerating:
         return None
-    collected = {name for r in enumerating for name in r.collected}
+    collected = {name for r in enumerating for name in (r.collected or ())}
     failed = {f.code for r in enumerating for f in r.failures}
     # ponytail: "at least one overlap", not "every code is a node id" — a mixed
     # side reads as fully readable, so a non-node-id-keyed failure on it stays

@@ -6,6 +6,17 @@ repos:
         args: [--fix]
       - id: ruff-format
 
+  # Local, not an upstream rev: the `types` gate parses ty's output, so the hook
+  # and the gate must run the one version `pyproject.toml` pins.
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty (the types gate's checker)
+        language: system
+        entry: uv run ty check
+        pass_filenames: false
+        types: [python]
+
   # A retired term, not the whole `_Avoid_` list: most of those words are ordinary
   # English elsewhere. Only a word a settled decision killed outright is decidable
   # by grep. The excluded paths all state the vocabulary rules and so must quote

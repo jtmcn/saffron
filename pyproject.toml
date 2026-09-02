@@ -18,7 +18,17 @@ saffron = "saffron.cli:main"
 # cell, where a globally-installed host binary does not exist.
 # pyoxigraph and pyshacl are test-only: SA-0001 validates the ontology, and
 # nothing under saffron/ imports either (the emitter is a later, conditional task).
-dev = ["pytest>=8", "ruff>=0.16.3", "pyoxigraph>=0.4", "pyshacl>=0.26", "rdflib>=7"]
+# ty is pinned exactly, not floored: the `types` gate parses its `concise`
+# output (ty emits no JSON), and it is pre-1.0 — a format change on a routine
+# resolve would turn a batch red overnight rather than at review.
+dev = [
+    "pytest>=8",
+    "ruff>=0.16.3",
+    "ty==0.0.77",
+    "pyoxigraph>=0.4",
+    "pyshacl>=0.26",
+    "rdflib>=7",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -32,21 +42,22 @@ testpaths = ["tests"]
 markers = ["cell: needs a real cell runtime; excluded from the default run"]
 addopts = "-m 'not cell'"
 
-[tool.pyright]
-# Wire pyright to the project venv: by default it resolves the pyenv global
-# interpreter (no pydantic/pytest), so every import failed and types degraded
-# to Unknown. `venvPath` is the dir containing the venv, `venv` its name.
-venvPath = "."
-venv = ".venv"
-pythonVersion = "3.12"
-# basic is the pyright default: reportArgType etc, but not the strict-only rules
-# (e.g. reportUnknownMemberType). Raise per-rule below instead of strict mode.
-typeCheckingMode = "basic"
-# docs are a record (ruff excludes them too); spikes are throwaway; .saffron is
-# this repo being its own target. `.venv` is excluded from *analysis* (type-
-# checking the installed packages is pure noise) but the venvPath/venv pair above
-# still resolves imports against it.
-exclude = ["docs", "spikes", ".saffron", ".venv"]
+[tool.ty]
+# Everything is in scope, docs included. `docs/` is excluded from ruff as a
+# record of past spikes, but a spike script that no longer type-checks is a
+# record of something that no longer runs.
+[tool.ty.environment]
+python = ".venv"
+python-version = "3.12"
+
+# The host is architecturally forbidden to import the Agent SDK (§2.1); the cell
+# image installs it where it is used. Declared here rather than as an inline
+# ignore because `# type: ignore` is a suppression `integrity` fails on, and
+# because this is an architectural fact, not a local nuisance.
+[[tool.ty.overrides]]
+include = ["images/agent_runner.py"]
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
 
 [tool.ruff]
 # ruff formats python blocks inside markdown; plan docs and spec files are

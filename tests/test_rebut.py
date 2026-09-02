@@ -23,16 +23,16 @@ DIFF = """diff --git a/src/gap.py b/src/gap.py
 OPTIONS = implement.agent_options(system_prompt="s", max_turns=5, budget_usd=1.0)
 
 
-def _blocker(lens="correctness", **kwargs):
-    base = {
-        "lens": lens,
-        "severity": "blocker",
-        "file": "src/gap.py",
-        "line": 1,
-        "claim": "the tz default is wrong",
-        "anchored": True,
-    }
-    return Finding(**(base | kwargs))
+def _blocker(lens="correctness", **kwargs) -> Finding:
+    base = Finding(
+        lens=lens,
+        severity="blocker",
+        file="src/gap.py",
+        line=1,
+        claim="the tz default is wrong",
+        anchored=True,
+    )
+    return base.model_copy(update=kwargs)
 
 
 def _turn(text, cost=0.1):

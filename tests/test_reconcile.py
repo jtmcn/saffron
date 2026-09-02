@@ -85,7 +85,7 @@ def test_the_real_six_tasks_reconcile_to_their_real_pull_request_states(ledger):
         )
         for spec_id, url in _REAL_SIX
     }
-    answers = {
+    answers: dict[str, dict | None] = {
         url: {"state": "MERGED", "reviewDecision": None}
         for spec_id, url in _REAL_SIX
         if spec_id != "SA-0018"

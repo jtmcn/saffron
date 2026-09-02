@@ -117,6 +117,18 @@ CREATE INDEX IF NOT EXISTS findings_by_task ON findings(task_id);
 """
 
 
+def _inserted_id(cursor: sqlite3.Cursor) -> int:
+    """`lastrowid` is `int | None` — None when the statement inserted no row.
+
+    `int(None)` raised TypeError, which reads as a caller passing rubbish
+    rather than a ledger that accepted an INSERT and recorded nothing.
+    """
+    row_id = cursor.lastrowid
+    if row_id is None:
+        raise ValueError("INSERT reported no rowid")
+    return row_id
+
+
 class Ledger:
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -312,7 +324,7 @@ class Ledger:
             (repo_id, base_sha),
         )
         self._db.commit()
-        return int(cursor.lastrowid)
+        return _inserted_id(cursor)
 
     def finish_run(self, run_id: int, status: str) -> None:
         self._db.execute(
@@ -336,7 +348,7 @@ class Ledger:
             (run_id, spec_id, spec_sha, risk, branch, budget_usd),
         )
         self._db.commit()
-        return int(cursor.lastrowid)
+        return _inserted_id(cursor)
 
     def set_task_state(self, task_id: int, state: str) -> None:
         """Also rolls the task's spend up from its attempts. Derived rather than
@@ -372,7 +384,7 @@ class Ledger:
         if cursor.rowcount != 1:
             raise ValueError(f"no task {task_id} to open an attempt against")
         self._db.commit()
-        return int(cursor.lastrowid)
+        return _inserted_id(cursor)
 
     def close_attempt(
         self,
@@ -454,7 +466,7 @@ class Ledger:
         a finding by its position in it (`review.anchored_blockers`)."""
         with self._db:
             return [
-                int(
+                _inserted_id(
                     self._db.execute(
                         """INSERT INTO findings
                                (task_id, lens, severity, file, line, claim, anchored)
@@ -468,7 +480,7 @@ class Ledger:
                             f.claim,
                             int(f.anchored),
                         ),
-                    ).lastrowid
+                    )
                 )
                 for f in findings
             ]
@@ -510,7 +522,7 @@ class Ledger:
                     result.summary,
                 ),
             )
-            gate_result_id = int(cursor.lastrowid)
+            gate_result_id = _inserted_id(cursor)
             self._db.executemany(
                 """INSERT INTO failures (gate_result_id, file, code, message, line)
                    VALUES (?, ?, ?, ?, ?)""",

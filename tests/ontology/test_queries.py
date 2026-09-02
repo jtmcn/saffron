@@ -12,6 +12,15 @@ def query(stem_prefix: str):
     return found
 
 
+def _solutions(store, text: str) -> ox.QuerySolutions:
+    """`Store.query` returns one of three result kinds; every query asserted on
+    here is a SELECT. Narrowed at the call, so a query rewritten as an ASK
+    fails here rather than at the first attribute read on a row."""
+    result = store.query(text)
+    assert isinstance(result, ox.QuerySolutions), type(result).__name__
+    return result
+
+
 def run(store, query_path):
     """CSV rows, newline-normalized — the serializer emits CRLF per RFC 4180 and
     a committed fixture read back through universal newlines would never match."""
@@ -46,7 +55,7 @@ def test_query_states_its_sql_equivalent(query):
 def test_q1_finds_a_criterion_nothing_automatic_asserted_on(store):
     """The bucket-triage question (§8): the operator rejected on a criterion and
     no gate or lens had reached it. An unbound assertor is the whole signal."""
-    rows = list(store.query(query("Q1").read_text()))
+    rows = list(_solutions(store, query("Q1").read_text()))
     assert rows, "Q1 must find the rejected task's failed criterion"
     assert any(row["assertor"] is None for row in rows)
 
@@ -54,7 +63,7 @@ def test_q1_finds_a_criterion_nothing_automatic_asserted_on(store):
 def test_q3_names_a_declared_gate_that_never_ran(store):
     """Set containment across two populations — declared and executed. The
     §4.1 schema stores the declared side nowhere."""
-    rows = list(store.query(query("Q3").read_text()))
+    rows = list(_solutions(store, query("Q3").read_text()))
     never_ran = [r["gate"] for r in rows if r["everRan"].value == "false"]
     assert len(never_ran) == 1
 
@@ -64,7 +73,7 @@ def test_q4_reconstructs_a_merged_change_end_to_end(store):
     PR is reachable from the PR by derivation alone — asserted per PR, because a
     union across PRs lets one complete chain cover for an incomplete one."""
     chains: dict[str, set[str]] = {}
-    for row in store.query(query("Q4").read_text()):
+    for row in _solutions(store, query("Q4").read_text()):
         kind = str(row["kind"]).removeprefix(f"<{NS}").removesuffix(">")
         chains.setdefault(str(row["pr"]), set()).add(kind)
     assert chains, "no merged PR reconstructed"
@@ -86,7 +95,7 @@ def test_q4_excludes_a_merged_pr_whose_chain_is_broken(store):
     """The fixture's second merged PR records no derivation back to its spec.
     N5 is only a property if a change that fails it is visibly absent — a query
     that returned it anyway would be reporting reachability it never checked."""
-    prs = {str(r["pr"]) for r in store.query(query("Q4").read_text())}
+    prs = {str(r["pr"]) for r in _solutions(store, query("Q4").read_text())}
     assert "<https://saffron.dev/data/pr-t4>" not in prs
     merged = list(
         store.query(f"""
@@ -130,7 +139,7 @@ def test_q3_a_red_advisory_gate_does_not_unseat_a_sole_blocking_failure():
     )
     rows = {
         str(r["gate"]): r["soleFailures"].value
-        for r in store.query(query("Q3").read_text())
+        for r in _solutions(store, query("Q3").read_text())
     }
     assert rows["<https://saffron.dev/data/g-types>"] == "1"
 
@@ -154,7 +163,7 @@ def test_q3_a_gate_that_fired_in_another_run_still_never_fired_in_this_one():
     )
     never_ran = {
         (str(r["run"]), str(r["gate"]))
-        for r in store.query(query("Q3").read_text())
+        for r in _solutions(store, query("Q3").read_text())
         if r["everRan"].value == "false"
     }
     assert (
@@ -178,7 +187,7 @@ def test_q4_a_rejected_task_reusing_the_spec_is_not_reconstructible():
         :pr-t1b a saffron:PullRequest ; prov:wasDerivedFrom :diff-t1b .
         """
     )
-    prs = {str(r["pr"]) for r in store.query(query("Q4").read_text())}
+    prs = {str(r["pr"]) for r in _solutions(store, query("Q4").read_text())}
     assert prs == {"<https://saffron.dev/data/pr-t1>"}
 
 
@@ -199,7 +208,7 @@ def test_q5_a_merged_task_with_no_cost_estimate_still_counts_as_accepted():
     )
     rows = {
         (str(r["specType"]), str(r["riskTier"])): r["accepted"].value
-        for r in store.query(query("Q5").read_text())
+        for r in _solutions(store, query("Q5").read_text())
     }
     assert (
         rows[("<https://saffron.dev/ns#refactor>", "<https://saffron.dev/ns#standard>")]
@@ -218,7 +227,7 @@ def test_q1_a_finding_without_a_mode_is_not_reported_as_silence():
             earl:test :ac-t3-1 ; earl:result [ earl:outcome earl:failed ] .
         """
     )
-    rows = list(store.query(query("Q1").read_text()))
+    rows = list(_solutions(store, query("Q1").read_text()))
     assert all(r["assertor"] is not None for r in rows)
 
 
@@ -236,7 +245,7 @@ def test_q3_a_red_size_at_standard_risk_does_not_unseat_a_sole_blocking_failure(
     )
     rows = {
         str(r["gate"]): r["soleFailures"].value
-        for r in store.query(query("Q3").read_text())
+        for r in _solutions(store, query("Q3").read_text())
     }
     assert rows["<https://saffron.dev/data/g-types>"] == "1"
 
@@ -254,7 +263,7 @@ def test_q3_a_red_size_at_elevated_risk_does_unseat_it():
     )
     rows = {
         str(r["gate"]): r["soleFailures"].value
-        for r in store.query(query("Q3").read_text())
+        for r in _solutions(store, query("Q3").read_text())
     }
     assert rows["<https://saffron.dev/data/g-lint>"] == "0"
 
@@ -264,6 +273,6 @@ def test_q4_a_merged_pr_reaching_its_spec_by_a_shortcut_is_not_end_to_end():
     is what separates them; a union of kinds across PRs cannot."""
     store = mutated(PREAMBLE + ":diff-t4-1 prov:wasDerivedFrom :spec-t4 .")
     chains: dict[str, set[str]] = {}
-    for row in store.query(query("Q4").read_text()):
+    for row in _solutions(store, query("Q4").read_text()):
         chains.setdefault(str(row["pr"]), set()).add(str(row["kind"]))
     assert len(chains["<https://saffron.dev/data/pr-t4>"]) < 9

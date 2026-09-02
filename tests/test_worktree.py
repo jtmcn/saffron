@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -47,8 +48,12 @@ def test_mounts_carry_the_gates_read_only():
 
 def test_prepare_worktree_requires_a_gates_dir():
     """Required, not defaulted — the Appendix I lesson, in a third place."""
+    # Through a deliberately untyped alias: omitting `gates_dir` is the subject
+    # of this test, so `types` would otherwise report the test for
+    # demonstrating the very thing it asserts.
+    prepare: Any = worktree.prepare_worktree
     with pytest.raises(TypeError):
-        worktree.prepare_worktree(
+        prepare(
             mirror=Path("/m"),
             volume="v",
             base_sha="abc",
@@ -577,19 +582,21 @@ def test_prepare_worktree_checks_out_exactly_the_base_it_is_given(
     monkeypatch.setattr(runtime, "run_ephemeral", _record)
     monkeypatch.setattr(runtime, "run_detached", lambda *a, **k: None)
 
-    kwargs = dict(
-        mirror=tmp_path / "m.git",
-        volume="vol",
-        base_sha="b" * 40,
-        branch="saffron/SY-1",
-        image="img",
-        container="c",
-        network="net",
-        env={},
-        gates_dir=_gates_dir(tmp_path),
-    )
-    worktree.prepare_worktree(**kwargs)
-    worktree.prepare_worktree(**{**kwargs, "base_sha": "d" * 40})
+    def _prepare(base_sha: str) -> None:
+        worktree.prepare_worktree(
+            mirror=tmp_path / "m.git",
+            volume="vol",
+            base_sha=base_sha,
+            branch="saffron/SY-1",
+            image="img",
+            container="c",
+            network="net",
+            env={},
+            gates_dir=_gates_dir(tmp_path),
+        )
+
+    _prepare("b" * 40)
+    _prepare("d" * 40)
 
     assert f"git checkout -q -b saffron/SY-1 {'b' * 40}" in scripts[0]
     assert f"git checkout -q -b saffron/SY-1 {'d' * 40}" in scripts[1]

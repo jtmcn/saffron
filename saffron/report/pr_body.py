@@ -66,11 +66,11 @@ def render_pr_body(
     added: int,
     removed: int,
     transcript_path: str,
-    reviews: list[LensReview] = (),
+    reviews: Sequence[LensReview] = (),
     rebut_result: RebutResult | None = None,
     attempts: int = 1,
     spent_usd: float = 0.0,
-    test_paths: list[str] = (),
+    test_paths: Sequence[str] = (),
     diff: str = "",
     verified_on: str = "base",
     effective_risk: str | None = None,
@@ -185,7 +185,9 @@ def _new_failures(new_failures: list[NewFailure]) -> str:
     return "\n".join(lines)
 
 
-def _disagreements(reviews: list[LensReview], rebut_result: RebutResult | None) -> str:
+def _disagreements(
+    reviews: Sequence[LensReview], rebut_result: RebutResult | None
+) -> str:
     """§6: disagreements first. Two columns — the implementer's rebuttal and
     the critic's verdict. Never `adjudication`: that is the operator's, and it
     happens in GitHub against the pull request this phase is creating."""
@@ -219,7 +221,7 @@ def _disagreements(reviews: list[LensReview], rebut_result: RebutResult | None) 
     return "\n".join(lines)
 
 
-def _findings(reviews: list[LensReview]) -> str:
+def _findings(reviews: Sequence[LensReview]) -> str:
     rows = [(r.lens, f) for r in reviews for f in r.findings]
     if not rows:
         return ""
@@ -252,7 +254,9 @@ def _fence(text: str) -> str:
     return "`" * max(4, longest + 1)
 
 
-def _test_diff(diff: str, test_paths: list[str], *, budget: int = _BODY_LIMIT) -> str:
+def _test_diff(
+    diff: str, test_paths: Sequence[str], *, budget: int = _BODY_LIMIT
+) -> str:
     """§7's second countermeasure. `test_paths` is the repo's declaration
     (`policy.integrity.test_paths`); core supplies the question, never the
     answer (§2.1).

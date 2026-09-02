@@ -31,6 +31,7 @@ ENV VIRTUAL_ENV=/opt/venv PATH="/opt/venv/bin:$PATH" UV_NO_SYNC=1
 # the network refused: the defect it closes stays green and bills the agent a
 # turn, so nothing else would report the ENV going missing. /seed survives the
 # sync above only to give `uv run` a project here.
-RUN ruff --version && pytest --version && git --version && pgrep --version \
+RUN ruff --version && ty --version && pytest --version && git --version \
+ && pgrep --version \
  && pyshacl --version \
  && cd /seed && UV_OFFLINE=1 uv run python -c "import pytest" && rm -rf /seed
