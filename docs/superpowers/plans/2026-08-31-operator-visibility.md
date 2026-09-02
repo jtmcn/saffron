@@ -1298,6 +1298,37 @@ Commit after each coherent step. Uncommitted work dies with the cell.
 
 A **bug**, with an `envelope`. Why the column is NULL is not known.
 
+### Re-checked 2026-09-02: the premise does not reproduce
+
+**Do not write this spec as titled.** It says `findings.verdict` is NULL on
+every finding. Measured against `~/.saffron/ledger.db`: 3 of 5 blockers carry a
+verdict, and the pattern is not a broken write path.
+
+| spec | task | state | verdict |
+|---|---|---|---|
+| `SA-0019` | 17 | `EXHAUSTED` | — |
+| `SA-0020` | 20 | `EXHAUSTED` | — |
+| `SA-0027` | 29 | `MERGED` | `withdrawn` |
+| `SA-0040` | 32 | `MERGED` | `confirmed` |
+| `SA-0040` | 32 | `MERGED` | `withdrawn` |
+
+Every NULL is on an `EXHAUSTED` task and every task that reached review has one.
+REBUT runs only after the gate loop goes green, so a task that exhausted never
+reaches the phase that writes a verdict. Concerns and notes are NULL too, and
+should be: they are never rebutted.
+
+What remains is narrower than a spec. `SA-0020` has a **rebuttal recorded and no
+verdict** — one row, on a run that ended between the two halves of REBUT. That
+is worth ten minutes reading `phases/rebut.py`'s ordering, not $14 and a
+DIAGNOSE turn against an envelope.
+
+§6's sort level 3 still needs sustained blockers to be countable, so the *goal*
+survives. Re-cut this task around what is actually missing before writing it —
+and note that `SA-0040` produced two verdicts with **no** rebuttal recorded at
+all, because the rebuttal artifact was lost to a JSON parse error (item 42),
+which is a likelier source of an uncountable sustained blocker than the write
+path is.
+
 ### Backlog item 42 is adjacent, and only half of it fits inside this spec
 
 Recorded 2026-09-01, after `SA-0040`. Its rebuttal turn cost $2.59, moved HEAD
