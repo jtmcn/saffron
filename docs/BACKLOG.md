@@ -2486,6 +2486,91 @@ what died at 141 turns; `SA-0042` carries that half forward on its own, since
 `package()` runs outside `run_one_cell` and never received the supervisor's
 `emit` in the first place.
 
+## 44. A single turn can overshoot the budget ceiling, because the check runs before it
+
+`_over_budget` gates a turn on what has been spent *so far*. It cannot bound
+what the turn about to run will cost, and a turn's cost is not knowable until
+it ends.
+
+Measured on `SA-0031`, 2026-09-01. Admitted under an $18.00 budget with roughly
+$6 spent, its IMPLEMENT turn ran to the 140-turn ceiling and cost **$13.18 on
+its own**, ending the run at **$19.17 — 6.5% over a ceiling it never checked
+against.** The ledger row records `budget_usd 18.0, spent_usd_est 19.165`.
+
+The overshoot is bounded only by the turn ceiling and the wall clock, which are
+the same two bounds that let the turn get long in the first place. A task with
+`max_turns` raised — the obvious response to a turn that ran out of turns — has
+a proportionally larger overshoot available to it.
+
+Done looks like a decision about which of two honest options to take, not a
+patch: charge the ceiling *before* a turn against a worst-case estimate and
+refuse a turn that could exceed it, or accept that `budget_usd` is a
+best-effort bound and say so where it is declared. What it should not stay is a
+number the system reports as a ceiling and enforces as a suggestion.
+
+## 45. An `EXHAUSTED` run that made commits pushes no branch, so its work survives only as a patch
+
+`SA-0028` closed the door where an implement turn dies on its ceiling with
+*nothing* committed. This is the door beside it: commits exist, gates are red,
+the budget or the attempts are gone, and PACKAGE never runs — so nothing is
+pushed and there is no pull request.
+
+Measured on `SA-0031`: six commits, 39 new gate failures, `$19.17` spent, and a
+ledger row reading `branch saffron/SA-0031, pushed_sha NULL, pr_url NULL`. The
+only survivor is `teardown`'s `patch.diff`. It is real work — it applies
+cleanly to `saffron/SA-0030` and leaves 15 failures, so it was roughly 85%
+finished — and nothing in the system will ever look at it again.
+
+The cost is not the disk space. It is that the operator's only route back to
+$19.17 of work is to know the batch tree exists, find the patch, and apply it by
+hand — none of which any output tells them.
+
+Done looks like pushing the branch on any terminal state that made commits,
+recording `pushed_sha`, and saying so on the way out. A pull request is a
+separate question — red gates should not open one — but a branch nobody can
+reach is not a decision, it is a leak. The split design
+(`docs/superpowers/specs/2026-09-01-splitting-a-too-wide-spec-design.md`) needs
+this independently: its mid-flight split hands child 1 the parent's branch, and
+there is no branch to hand.
+
+
+## 46. `events.jsonl` now persists an untrusted cell's raw output verbatim, and nothing bounds or scans it
+
+`SA-0041` makes `implement.run_agent` emit the parsed cell event under
+`Agent.event`, which is the fix that spec exists for — the dict was previously
+flattened to prose before the host ever saw it, so `Agent.event` was
+permanently `None`.
+
+The side effect, raised by that run's contract lens: **what reaches persistence
+changed shape.** Before, only `_describe`'s bounded renderings were written — a
+`tool_result` became the fixed string `agent: tool ok`, `text` was truncated at
+160 characters and `tool_use` at 120. Now the raw dict is written verbatim to
+`~/.saffron/batches/v0/<id>/events.jsonl`, and for `text`, `tool_use` and
+`tool_result` that dict can carry full file contents, whole command outputs, or
+anything else an untrusted cell chose to put on stdout.
+
+Two things follow, neither addressed anywhere:
+
+- **Volume is unbounded.** The renderer's truncation was the only bound, and it
+  now applies to the *display* while persistence keeps everything. A cell that
+  cats a large file writes it to the control plane.
+- **The `secrets` gate never sees it.** That gate reads the diff. A batch tree
+  artifact is not a diff, so a credential a cell printed to stdout is persisted
+  host-side and scanned by nothing. §5.4 lists `secrets` as a v1 gate, so this
+  is a gap that widens rather than one that exists today — which is the reason
+  to record it now rather than after it is built.
+
+Neither the golden fixture nor the unit tests can see this: both exercise small
+synthetic dicts, so the change is invisible to the suite by construction.
+
+Done looks like a decision about what the log is for. If it is an operator's
+record of a night, the rendered line is sufficient and `Agent.event` should be
+bounded the way the display already is. If it is evidence, it needs a size cap
+and to be in the `secrets` gate's reach. `SA-0041` could not make that choice —
+`saffron/events.py` is `forbidden` to it — and made the reachability fix it was
+asked for, which is correct.
+
+
 ---
 
 ## What is *not* here, deliberately
