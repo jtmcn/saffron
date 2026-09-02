@@ -68,9 +68,13 @@ Three things changed.
    is an unwritten query-and-render layer over the run record. RATIONALE scored
    five queries with no renderer in view.
 
-**RATIONALE's table is kept intact.** The revisit is appended to it, not
-substituted for it, because `SA-0001` and the ontology's own comments cite that
-document and a reader must be able to follow why the verdict moved.
+**RATIONALE's table is kept intact, and the revisit lives here, not there.**
+`ontology/RATIONALE.md` is capped at 40 lines by
+`tests/ontology/test_vocabulary.py::test_rationale_is_within_its_cap_and_covers_every_query`,
+and the file is *exactly* at that cap — the cap is an acceptance criterion of
+`SA-0001`, and a full file is what it is saying. Appending the revisit was tried
+and failed the suite. So the record of why the verdict moved is this document,
+and making it discoverable from RATIONALE.md is an open question (part 6).
 
 ## 2. Two authorities, not one
 
@@ -185,6 +189,14 @@ third numbering the reader has to reconcile.
   `saffron:revert`, because the two sides cannot be reconciled from inside a
   cell. Phase A removes that constraint. Until then the spec carries a note
   saying so.
+
+- **A superseded document that does not say so.** `ontology/RATIONALE.md` still
+  reads as current, and its 40-line cap leaves no room for a pointer. Three ways
+  out, none taken here: raise the cap by one line and amend `SA-0001`'s
+  criterion; spend one of the 40 lines on the pointer, editing the record to
+  describe its own supersession; or leave it and rely on this document being
+  found first. The third is what ships today and it is the weakest, so this is
+  the first thing to settle, not the last.
 
 ## 7. Success criterion
 
