@@ -12,6 +12,7 @@ the spec, the diff and the gate results are all passed explicitly.
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +22,7 @@ from pydantic import BaseModel, ValidationError
 from saffron.agents import context
 from saffron.agents.artifacts import EXTRACTION_PROMPT, parse_output_block
 from saffron.agents.findings import Finding, Severity, anchor
+from saffron.events import Event, PhaseStart, describe
 from saffron.gates.contract import GateResult
 from saffron.phases import implement
 
@@ -140,7 +142,7 @@ def run_lens(
     max_turns: int,
     budget_usd: float,
     agent: Callable[..., implement.AttemptResult],
-    watch: Callable[[str], None] = print,
+    emit: Callable[[Event], None] = lambda event: print(describe(event)),
 ) -> LensReview:
     """One lens, one fresh session. `resume` is never passed, deliberately: the
     critic must not see the implementer's transcript or its own earlier runs."""
@@ -151,7 +153,7 @@ def run_lens(
         tools=REVIEW_TOOLS,
     )
     try:
-        attempt = agent(container, prompt=REVIEW_PROMPT, options=options, watch=watch)
+        attempt = agent(container, prompt=REVIEW_PROMPT, options=options, emit=emit)
     except implement.AgentFailed as failed:
         # A lens that crashed still cost money, and a lens that did not run must
         # never read as a lens that found nothing.
@@ -186,7 +188,11 @@ def run_review(
     # Passed, never defaulted — the same shape `plan_checkpoint` uses, and a
     # module-level default would bind `run_agent` at import time.
     agent: Callable[..., implement.AttemptResult],
-    watch: Callable[[str], None] = print,
+    # Required, not defaulted, for the reason `implement.run_agent`'s own
+    # `spec_id` states: this phase authors its own `PhaseStart` line below, and
+    # a forgotten keyword would file it under an empty id (§4.1).
+    spec_id: str,
+    emit: Callable[[Event], None] = lambda event: print(describe(event)),
 ) -> list[LensReview]:
     """Every declared lens, in order, on this diff. The host drives the loop."""
     reviews = []
@@ -205,10 +211,18 @@ def run_review(
             max_turns=max_turns,
             budget_usd=budget_usd,
             agent=agent,
-            watch=watch,
+            emit=emit,
         )
         review.findings = anchor(review.findings, diff, read_head=read_head)
-        watch(f"REVIEW: {_describe(review)}")
+        emit(
+            PhaseStart(
+                timestamp=time.time(),
+                spec_id=spec_id,
+                phase="REVIEW",
+                label="REVIEW",
+                detail=_describe(review),
+            )
+        )
         reviews.append(review)
     return reviews
 

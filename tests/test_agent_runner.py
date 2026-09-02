@@ -177,7 +177,7 @@ def test_without_a_credential_the_agent_fails_rather_than_reporting_success():
                 container,
                 prompt="say hello",
                 options={"max_turns": 1},
-                watch=lambda _line: None,
+                spec_id="SY-1",
                 timeout_s=180,
             )
     finally:

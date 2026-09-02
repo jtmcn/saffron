@@ -4,6 +4,7 @@ import hashlib
 import itertools
 import json
 import shutil
+import time
 from collections.abc import Sequence
 from dataclasses import replace
 
@@ -11,7 +12,7 @@ import pytest
 
 from saffron.agents import artifacts
 from saffron.cell import runtime, session
-from saffron.events import describe
+from saffron.events import Agent, describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
 from saffron.gates.core.committed import committed_gate
@@ -254,7 +255,14 @@ class _agent:
         self.session_id: str | None = "sess-1"
 
     def __call__(
-        self, container, *, prompt, options, resume=None, watch=print, **kwargs
+        self,
+        container,
+        *,
+        prompt,
+        options,
+        resume=None,
+        emit=lambda event: print(describe(event)),
+        **kwargs,
     ):
         self.prompts.append(prompt)
         self.resumes.append(resume)
@@ -882,11 +890,21 @@ def _drive(
 
     def _run_agent(container, *, prompt, options, resume=None, **kwargs):
         # `agent_says`: the real `implement.run_agent` reports the cell's
-        # stream by calling the `watch` it was handed. This stub swallowed it
-        # in `**kwargs` and never called it, which is why severing the seam at
-        # all six `agent(...)` sites left 218 tests green — measured.
+        # stream by calling the `emit` it was handed with an `Agent` event.
+        # This stub swallowed it in `**kwargs` and never called it, which is
+        # why severing the seam at all six `agent(...)` sites left 218 tests
+        # green — measured (SA-0030). `describe()` of the constructed event
+        # reproduces `agent_says` verbatim, so callers still script the exact
+        # line they expect to see.
         if agent_says is not None:
-            kwargs["watch"](agent_says)
+            kwargs["emit"](
+                Agent(
+                    timestamp=time.time(),
+                    spec_id=kwargs.get("spec_id", ""),
+                    raw=False,
+                    detail=agent_says.removeprefix("agent: "),
+                )
+            )
         cell.turns.append(prompt)
         cell.system_prompts.append(options["system_prompt"])
         cell.turn_options.append(options)
@@ -2399,7 +2417,15 @@ def test_a_crashed_plan_turn_keeps_its_own_exception_and_its_cost():
 
     called = False
 
-    def _crash(container, *, prompt, options, resume=None, watch=print, **kwargs):
+    def _crash(
+        container,
+        *,
+        prompt,
+        options,
+        resume=None,
+        emit=lambda event: print(describe(event)),
+        **kwargs,
+    ):
         nonlocal called
         if not called:
             called = True
