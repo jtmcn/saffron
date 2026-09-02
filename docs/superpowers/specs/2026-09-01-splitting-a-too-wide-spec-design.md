@@ -96,8 +96,17 @@ two children at $9 and 70 turns would reproduce the failure exactly.
 
 ### Criteria are conserved
 
-Every acceptance criterion in the parent is claimed by exactly one child, or
-appears in `dropped` with a reason. Without this, "split this spec" becomes a
+Every acceptance criterion in the parent is claimed by **at least** one child,
+or appears in `dropped` with a reason.
+
+*At least*, not exactly one — corrected by the dry run below. Some criteria are
+invariants rather than work: "the terminal output does not change" and
+"`run_one_cell` stays callable with no `emit`" must hold for **every** child,
+and assigning them to one would let the other break them. `intake.Criterion`
+already models this and the first draft of this design did not: `preserves:
+true` marks a criterion whose witness is checked **green at both sides** rather
+than red-at-base and green-at-head. So the partition is over the criteria that
+are *work*, and `preserves` criteria are copied to every child. Without this, "split this spec" becomes a
 way to shed the criteria that were hard — which is the failure to expect from a
 turn that has just spent 141 turns failing them.
 
@@ -136,7 +145,11 @@ Run before anything is rendered, all reusing code that exists:
 2. each child's criteria are reachable from its own `touches`
    (`scheduler._unmatched_criterion_path`, the gate-0 function)
 3. the criteria partition is total — every parent criterion claimed or dropped
-4. every claimed criterion names a witness
+4. every claimed criterion names a witness — and the witness's file is **not**
+   required to be in that child's `touches`. A `preserves` criterion names a
+   test that already exists and must stay green; the child never edits it. Only
+   the paths a criterion's *prose* cites are checked against `touches`, which is
+   what check 2 already does
 
 A proposal failing any check ends the run `SPLIT_REFUSED`. There is no second
 attempt, for the reason a rejected plan gets none: re-asking is negotiating.
@@ -284,6 +297,33 @@ rather than this design:
 - an `EXHAUSTED` run that made commits pushes no branch, so its work survives
   only as `patch.diff`. `SA-0028` fixed the zero-commit door; this is the one
   beside it
+
+## The dry run
+
+`SA-0031` was split by hand on 2026-09-01, deliberately following this design's
+shape before any of it was built. Three findings, all folded in above.
+
+**The cut came from a coupling argument, not a file grouping — which is the
+evidence for the agent proposing it.** `saffron/phases/package.py` looks like it
+belongs with its three sibling phase modules, and it does not: `package()` is
+called from `saffron/cli.py`, outside `run_one_cell`, so its events cannot reach
+the log until `cli.py` builds the fan-out. The two must ship together. Meanwhile
+both `_phase_watch` constructions exist *only* for the other three phases, so
+the adapter dies with them. Approach C — the host grouping files by directory —
+would have made exactly the wrong cut, and cheaply.
+
+**The children are the first specs in this repo to declare `acceptance:`.** That
+is the point, and it is also a warning: it forces the spec to name the test node
+ids the implementation will create, before it exists. Prescriptive, and the
+forcing function is the value — but a proposing turn will find this the hardest
+field to fill honestly, and a plan should expect the first proposals to name
+witnesses that drift from the tests eventually written. The gate catches that as
+a failure, which is the right outcome and an expensive one.
+
+**Counts do not conserve.** `SA-0031`'s 12 criteria became 8 + 6 = 14, because
+two invariants repeat across both children and one criterion spanning two
+subsystems split in half. A host check asserting `sum(len(child.criteria)) ==
+len(parent.criteria)` would refuse every honest split.
 
 ## Open question
 
