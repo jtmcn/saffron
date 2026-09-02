@@ -46,16 +46,10 @@ acceptance:
       line an unattended morning most needs about a task that reached PACKAGE.
     witness: tests/test_package.py::test_the_pull_request_url_is_logged_as_an_event
   - claim: >-
-      The two `cell`-marked files in `touches` are migrated and run explicitly.
-      `addopts` excludes them from `make check`, so the default suite cannot
-      catch a migration that breaks them; say in the pull request body that
-      `uv run pytest -m cell` was run against both.
-    witness: tests/test_package_cell.py::test_package_emits_its_events_in_a_real_cell
-  - claim: >-
       `run_one_cell` keeps a working default for callers passing no `emit`.
       Hoisting a fan-out into `cli.py` must not make the supervisor uncallable
       without one.
-    witness: tests/test_events.py::test_run_one_cell_prints_without_an_emit_argument
+    witness: tests/test_events.py::test_run_one_cell_with_no_emit_argument_still_prints
     preserves: true
   - claim: >-
       The terminal output does not change, asserted against
@@ -121,10 +115,14 @@ probably a worse design.
 unattended morning reads about a task that got all the way to PACKAGE and still
 produced nothing mergeable. Do not economise on them.
 
-**Run the `cell`-marked tests by hand and say so.** `uv run pytest -m cell
-tests/test_package_cell.py` needs the images in `CLAUDE.md`. A criterion that
-passes because its test was excluded is the failure `SA-0040` and `SA-0030`
-both warned about.
+**Run the `cell`-marked test by hand and say so.** `tests/test_package_cell.py`
+is the one `cell`-marked file in `touches` — `tests/test_agent_runner.py` is
+`SA-0041`'s. `addopts = "-m 'not cell'"` excludes it from `make check`, the
+`tests` gate and the `criteria` gate's collection, so a witness inside it could
+never be collected and would block every attempt. That is why this is a note and
+not a criterion. Migrate its two `watch=` sites, run
+`uv run pytest -m cell tests/test_package_cell.py` (it needs the images in
+`CLAUDE.md`), and say in the pull request body that you did.
 
 **Every criterion names a witness and the `criteria` gate checks it** — absent
 or failing at `base_sha`, green at head, except the two marked `preserves`,

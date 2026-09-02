@@ -18,8 +18,8 @@ failure the factory has.
 | `SA-0020` | split into `SA-0020` + `SA-0022`; the gate and the stacking could not ship together |
 | `SA-0022`, `SA-0025` | both split mid-flight |
 | `SA-0029` | plan checkpoint rejected 1100 estimated lines against `feature`'s 600, at $2.20. Split **by hand** into `SA-0029` + `SA-0040` |
-| `SA-0029` (shipped) | 548 changed lines in the cell, **863** after two host-side review rounds |
-| `SA-0040` | 671 in the cell, **974** after review |
+| `SA-0029` (shipped) | 548 changed lines in the cell, **885** after two host-side review rounds (the 863 in the first draft does not reproduce under `size._changed_lines`) |
+| `SA-0040` | **974** after review; the in-cell figure is three recorded `size` results — 306, 658, 683 — not the single 671 the first draft cited |
 | `SA-0031` | plan estimated 850 against `refactor`'s 1000 — accepted. Died at 141 turns of 140, **$19.17 of an $18.00 budget**, 6 commits, gates red, no branch pushed, no pull request |
 
 `docs/BACKLOG.md` item 25 already records the failure class, and item 40
@@ -31,17 +31,29 @@ records the review-round half of it.
 exceeds the ceiling for its type (`gates/core/size.py:25` — `bug` 300,
 `feature` 600, `refactor` 1000). It works: it is what stopped `SA-0029`.
 
-For `SA-0031` it did not fire, and the reason matters for the design. The
-estimate was **850** against a ceiling of **1000**, so the plan was accepted.
-The exported patch is **1174 lines and incomplete** — the estimate was wrong by
-at least 38%, and the run died on **turns and budget**, not on lines.
+For `SA-0031` it did not fire, and the reason matters more than the first draft
+of this document claimed. The estimate was **850** against a ceiling of
+**1000**, so the plan was accepted.
 
-Two conclusions:
+The first draft then said the incomplete patch was "1174 lines", concluded the
+estimate was 38% too low, and reasoned from there. That number is `wc -l` on a
+diff — it counts context lines and hunk headers. Run through
+`size._changed_lines`, the function the ceiling is actually enforced with, the
+same patch is **481 lines**, and the ledger agrees: `SA-0031`'s own `size` gate
+recorded *"481 changed lines within the refactor ceiling of 1000"*.
 
-- A plan-time check against a self-reported estimate is necessary and
-  insufficient. It catches an honest over-estimate and misses an optimistic one.
-- The binding constraint is not always the diff. `SA-0031` was inside its line
-  ceiling and outside every other one.
+So the estimate was **77% too high**, not too low, and the run died with the
+diff at less than half its ceiling. Which kills one of the two conclusions and
+strengthens the other:
+
+- ~~A plan-time check catches an honest over-estimate and misses an optimistic
+  one.~~ **Withdrawn.** `SA-0031`'s estimate was pessimistic and the check still
+  let it through, because the estimate was never the problem.
+- **The binding constraint is not the diff.** `SA-0031` was comfortably inside
+  its line ceiling and outside every other one — 141 turns of 140, $19.17 of
+  $18.00. A line-based ceiling is measuring the wrong thing, and the mid-flight
+  trigger is not a backstop for a bad estimate; it is the only trigger that
+  watches the constraint that actually binds.
 
 ## Decisions
 
@@ -68,7 +80,9 @@ from `/work`.
   "children": [
     { "title":    "...",
       "touches":  ["..."],
-      "criteria": [ {"criterion": 1, "witness": "tests/test_x.py::test_y"} ],
+      "criteria": [ {"criterion": 1,
+                     "claim":     "...",
+                     "witness":   "tests/test_x.py::test_y"} ],
       "context":  "...",
       "notes":    "..." }
   ],
@@ -122,9 +136,17 @@ this name ran at head and passed, and if it existed at base it was not green
 there.* That is red-to-green, enforced as a gate, fed by an `acceptance:` block
 in frontmatter (`intake.py:45`). It shipped in `SA-0011`.
 
-Nothing uses it. Every baseline in the first batch reads
-`criteria=skip` — the spec declares no witnesses — including all four specs of
-part 1.
+The first draft said "nothing uses it", which is false. `SA-0011`, `SA-0012`
+and `SA-0013` all declare `acceptance:`, and the ledger holds a passing
+`criteria` result — attempt 7, `SA-0013`, *"3 criteria witnessed at head"*.
+`SA-0013` is a working model, and its two `preserves` witnesses name tests that
+actually exist.
+
+What is true is narrower: **no spec written in this batch declares one**, so
+every one of `SA-0029`, `SA-0040`, `SA-0030` and `SA-0031` ran with the gate
+inert. And the observation that "every baseline reads `criteria=skip`" is true
+but proves nothing — at baseline the prior side is empty, so the gate always
+skips. It was evidence of nothing.
 
 It is aimed at exactly what went wrong. Twice in one evening a criterion was
 satisfied only by a comment or an inert test: `SA-0040`'s `FAMILIES` table
@@ -141,6 +163,12 @@ function on the proposing turn: it must name the test it intends to write.
 
 Run before anything is rendered, all reusing code that exists:
 
+0. **a claim may be rewritten, and check 2 runs against the rewrite.** The dry
+   run proved this is not optional: running `_unmatched_criterion_path` over
+   the parent's criteria *verbatim* against each child's `touches` refuses four
+   of them, and one — the parent's sweep over all seven test files — is
+   unreachable from *either* child, so no assignment of it survives. A split
+   that may only inherit claims is a split that cannot be made
 1. each child's `touches` ⊆ the parent's — no scope growth through splitting
 2. each child's criteria are reachable from its own `touches`
    (`scheduler._unmatched_criterion_path`, the gate-0 function)
@@ -187,9 +215,10 @@ At the mid-flight boundary the budget is gone by definition — `SA-0031` was at
 $19.17 of $18.00. A split turn gated on remaining spend would fire never. It is
 therefore exempt, capped separately, and its overspend recorded as its own
 line rather than hidden. The cap is a single figure the plan must pick and
-justify from measurement — `SA-0031`'s plan turn cost $2.35 and `SA-0029`'s
-rejected one $2.20, so the honest starting point is roughly one plan turn, not
-a fraction of a budget.
+justify from measurement. `SA-0029`'s rejected plan turn cost **$2.2030**,
+exactly; `SA-0030`'s cost **$2.347**. `SA-0031` has no separate plan row at all
+— its two attempts are $5.99 and $13.18 — so the honest starting point is
+roughly one plan turn, around $2.50, not a fraction of a budget.
 
 This is not a new principle. `cell/session.py:45` already states that REVIEW is
 "deliberately not gated on the spend ceiling — a green diff nobody reviewed is
@@ -223,9 +252,22 @@ targets the **default branch**. The parent's commits become part of child 1's
 diff and are reviewed as one unit; the parent branch is then deleted. Child 2
 stacks on child 1 in the ordinary way.
 
-This is the `tree_base` / `base_sha` distinction `SA-0022` already shipped
-(`cell/session.py:199`) — the worktree is cut from one, the diff measured from
-the other. No new concept, one new combination.
+**This is a new concept and it reverses a shipped invariant. The first draft
+said the opposite and was wrong.** `SA-0022`'s `tree_base` is not "the diff
+base" as against `base_sha`: *every* diff in the system is measured from
+`tree_base`, and `base_sha` is only the pin for exporting `.saffron`, protected
+paths and retirement markers. The pull request's target is neither — it is
+`target_branch`, which `cli._resolve_stacked_on` returns **paired** with
+`stacked_on` and hands to `package(parent_branch=...)`.
+
+That pairing is the invariant. `package`'s own docstring says a worktree
+stacked on a sha whose pull request targets the default branch "is exactly the
+defect this spec exists to close (`SA-0026`)" — and absorbing is precisely that
+combination. It is still the right call here, because a `SPLIT_PROPOSED` parent
+has no pull request for a child to target, so `SA-0026`'s defect (a child's
+diff re-applying its parent's hunks against a base that will merge separately)
+cannot arise. But it must be built as a deliberate, named exception with its
+own test, not slipped in as "one new combination".
 
 ### Exit code
 
@@ -239,8 +281,8 @@ is none until ratification. The state carries the distinction, as
 ```
 $ uv run saffron ratify SA-0031 --repo .
 re-validated against main @ 5c8f30e
-  wrote .saffron/specs/SA-0041-the-four-phase-modules.md
-  wrote .saffron/specs/SA-0042-the-fan-out-and-the-adapters.md
+  wrote .saffron/specs/SA-0041-the-agent-stream-becomes-events.md
+  wrote .saffron/specs/SA-0042-package-events-and-the-fan-out.md
          depends_on: [SA-0041]
   marked SA-0031 retired-by SA-0041
 
@@ -248,8 +290,16 @@ review the diff, then commit. Nothing queues until you do.
 ```
 
 `ratify` reads `split.json`, **re-runs all four checks against the current
-tree**, renders the spec files, retires the parent with the
-`saffron:retired-by` marker `SA-0027` built, and stops. It does not commit,
+tree**, renders the spec files, retires the parent, and stops.
+
+Retirement is **not** the `saffron:retired-by` marker, though the first draft
+said it was. `repos/mirror.py:32` excludes `.saffron/specs` from the marker
+grep — *"a spec file is where a marker is discussed; it is never where one
+lives"* — so a marker written into the parent's spec file is invisible, and one
+written anywhere else names a path the child's `touches` must reach or
+`scheduler.retirement_refusal` refuses the child. The dry run found the working
+shape by accident: a prose `## Status: superseded` block and a move to
+`.saffron/specs/done/`. That is what `ratify` should do. It does not commit,
 push, or queue.
 
 The re-validation is not ceremony. Every measured figure in the first batch
@@ -320,10 +370,25 @@ field to fill honestly, and a plan should expect the first proposals to name
 witnesses that drift from the tests eventually written. The gate catches that as
 a failure, which is the right outcome and an expensive one.
 
-**Counts do not conserve.** `SA-0031`'s 12 criteria became 8 + 6 = 14, because
-two invariants repeat across both children and one criterion spanning two
-subsystems split in half. A host check asserting `sum(len(child.criteria)) ==
-len(parent.criteria)` would refuse every honest split.
+**Counts do not conserve.** `SA-0031`'s 12 criteria became 9 + 5 = 14, because
+invariants repeat across both children and criteria spanning two subsystems
+split. A host check asserting `sum(len(child.criteria)) == len(parent.criteria)`
+would refuse every honest split.
+
+**And the first cut of the split silently dropped one.** The parent required
+that no `watch=` remain anywhere under `tests/`; neither child claimed it, and
+the arithmetic in this section concealed it — "two invariants and one split"
+predicts 15, not 14, and nobody noticed the missing one until review. That is
+the exact failure host check 3 exists to prevent, committed by hand while
+writing the check. It is the strongest argument in this document for automating
+the conservation check rather than trusting a careful author.
+
+**An obligation with no possible witness belongs in `## Notes`, not in
+`acceptance:`.** Two of the children's criteria named witnesses inside
+`cell`-marked files, which `addopts` excludes from the `criteria` gate's
+collection — so they could never be collected at head and would have blocked
+every attempt. The `criteria` gate can only witness what the default suite
+collects; everything else is a note.
 
 ## Open question
 

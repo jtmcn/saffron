@@ -53,9 +53,13 @@ acceptance:
     witness: tests/test_events.py::test_a_driven_agent_turn_logs_the_event_not_its_rendering
   - claim: >-
       `implement._describe` is deleted, not left delegating, and its behaviour
-      is served by `events.describe`. `SA-0040`'s parity test is retired with
-      it rather than left importing a symbol that no longer exists.
-    witness: tests/test_implement.py::test_the_cells_events_render_through_the_host_renderer
+      is served by `events.describe`. `SA-0040`'s parity test keeps its node id
+      and has its body rewritten against `events.describe` — `census` fails any
+      test collected at base and absent at head and has no `touches` override,
+      so deleting it is an unrepairable gate failure, and keeping `_describe`
+      alive to satisfy it leaves this criterion silently unmet.
+    witness: tests/test_events.py::test_the_duplicated_agent_renderer_still_matches_its_original
+    preserves: true
   - claim: >-
       The `agent: (raw)` path survives exactly: a line that is not JSON came
       from a process sharing the runner's stdout inside an untrusted cell, and
@@ -66,13 +70,17 @@ acceptance:
       raising.
     witness: tests/test_events.py::test_an_unknown_cell_event_kind_does_not_raise
   - claim: >-
+      No `watch=` remains in any test file this spec owns. The parent required
+      this of all seven; `SA-0042` claims the three it owns.
+    witness: tests/test_events.py::test_no_test_this_spec_owns_still_passes_a_watch
+  - claim: >-
       The terminal output does not change, asserted against
       `tests/fixtures/watch-golden.txt` line for line.
     witness: tests/test_events.py::test_watch_output_matches_the_golden_fixture
     preserves: true
   - claim: >-
       `run_one_cell` stays callable with no `emit` argument and still prints.
-    witness: tests/test_events.py::test_run_one_cell_prints_without_an_emit_argument
+    witness: tests/test_events.py::test_run_one_cell_with_no_emit_argument_still_prints
     preserves: true
 budget_usd: 14
 max_attempts: 4
@@ -136,5 +144,14 @@ round so a test can observe the supervisor handing the adapter over. It is what
 `test_the_supervisor_hands_the_adapter_to_the_agent_it_calls` uses; when the
 adapter goes, that test becomes the witness for its replacement rather than
 being deleted.
+
+**`tests/test_agent_runner.py` is `cell`-marked, and nothing automatic will
+check it.** `addopts = "-m 'not cell'"` excludes it from `make check`, from the
+`tests` gate, and from the `criteria` gate's collection — so a witness inside it
+could never be collected and would block every attempt, which is why this is a
+note and not a criterion. Its one `watch=` site calls `implement.run_agent`
+with the signature this spec removes. Migrate it, run
+`uv run pytest -m cell tests/test_agent_runner.py` by hand, and say in the pull
+request body that you did.
 
 Commit after each coherent step. Uncommitted work dies with the cell.
