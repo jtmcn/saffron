@@ -1193,8 +1193,8 @@ def test_a_turn_cut_off_at_the_ceiling_with_nothing_committed_is_salvaged(
     # base and 159 tests stay green.
     assert cell.measured_from == "c" * 40
     # Charged like any other turn — plan + the cut-off implement turn + the
-    # salvage turn + REVIEW's two lenses at their default cost each.
-    assert outcome.spent_usd == pytest.approx(0.1 + 0.4 + 0.1 + 0.2)
+    # salvage turn + REVIEW's three lenses at their default cost each.
+    assert outcome.spent_usd == pytest.approx(0.1 + 0.4 + 0.1 + 0.3)
     assert any("recovered 1 commit" in line for line in cell.watched)
 
 
@@ -2115,9 +2115,10 @@ def test_a_repair_turn_that_fails_does_not_discard_committed_work(
     assert outcome.state == "READY_FOR_REVIEW"
     (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
     assert run_row["status"] == "COMPLETE"
-    # Plan, implement, the failed repair turn's $0.40, and REVIEW's two lenses:
-    # the critic is spend too, and a total that omits it stops being a total.
-    assert any("$0.80 spent" in line for line in cell.watched)
+    # Plan, implement, the failed repair turn's $0.40, and REVIEW's three
+    # lenses: the critic is spend too, and a total that omits it stops being
+    # a total.
+    assert any("$0.90 spent" in line for line in cell.watched)
     # A clean tree has nothing to checkpoint — the host must not commit an
     # empty no-op just because a turn was cut.
     assert cell.checkpointed == []
@@ -2321,12 +2322,13 @@ def _rebuttable(monkeypatch, cell, *, rebut_commits):
 
 
 def _through_rebut(*rebut_turns):
-    """Plan, implement, one lens filing a blocker, one filing nothing, then the
-    rebuttal's own turns."""
+    """Plan, implement, one lens filing a blocker, the other two filing
+    nothing, then the rebuttal's own turns."""
     return [
         _turn(_block(_PLAN)),
         _turn(),
         _turn(_block(_BLOCKER)),
+        _turn(_block({"findings": []})),
         _turn(_block({"findings": []})),
         *rebut_turns,
     ]
@@ -2677,6 +2679,7 @@ def test_a_review_records_the_findings_it_dropped_as_well_as_the_ones_it_kept(
             _turn(),
             _turn(_block(_BLOCKER)),
             _turn(_block(_UNANCHORABLE)),
+            _turn(_block({"findings": []})),
             _turn("I have addressed the findings."),
             _turn(_block(_CLAIMED_FIX)),
         ],
@@ -2811,7 +2814,8 @@ def test_a_rebuttal_numbered_badly_records_the_answer_that_was_asked_for(
 def test_what_the_task_spent_is_the_sum_of_the_turns_it_ran(monkeypatch, tmp_path):
     """The equality is the point: `spent_usd_est` is derived from `attempts`, so
     a turn that spends without opening a row makes the two disagree. Every
-    phase's turns are counted here — plan, implement, both lenses, rebuttal."""
+    phase's turns are counted here — plan, implement, all three lenses,
+    rebuttal."""
     cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
     _rebuttable(monkeypatch, cell, rebut_commits=0)
     outcome, ledger = _drive(
@@ -2828,6 +2832,7 @@ def test_what_the_task_spent_is_the_sum_of_the_turns_it_ran(monkeypatch, tmp_pat
     assert [row["phase"] for row in ledger.attempts(outcome.task_id)] == [
         "IMPLEMENTING",
         "IMPLEMENTING",
+        "REVIEWING",
         "REVIEWING",
         "REVIEWING",
         "REBUTTING",

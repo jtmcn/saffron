@@ -41,10 +41,6 @@ other lenses redundant. Yours is what the changed code *computes*:
   minor units, float rounding and accumulation, integer division.
 - **Order and state** — assumed sort order, mutation of a shared or reused
   object, iteration order, idempotency of a retried operation.
-- **Evidence** — a test that asserts something weaker than the criterion it
-  claims to cover, a test that would pass identically before this change, a
-  fixture that is the only input the new code is correct for, a criterion the
-  diff satisfies in letter and not in behaviour.
 
 Not yours. Another lens reports these, so leave them alone even when you see
 them, and do not mention them in your findings:
@@ -54,6 +50,12 @@ them, and do not mention them in your findings:
   the contract & schema lens.
 - What else in the repository calls the changed code, and what breaks
   downstream of it — that is the blast-radius lens.
+- Whether a test would actually notice this code being wrong — an assertion
+  weaker than the criterion it claims to cover, one built from a value the
+  test itself constructed, or one a rename or reformat would defeat without
+  the behaviour changing. That is the test-adequacy lens; a data-semantics
+  defect you can name is yours even when the test around it is also weak, but
+  the weakness of the test itself is not.
 
 The test at the edge: if fixing the defect means changing what the code
 computes, it is yours; if it means holding an interface or a stored format

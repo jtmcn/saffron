@@ -53,10 +53,14 @@ Not yours. Another lens reports these, so leave them alone even when you see
 them, and do not mention them in your findings:
 
 - Whether the computation is right — timezones, boundaries, null handling,
-  units, ordering, a test that asserts too little — that is the correctness &
-  data-semantics lens.
+  units, ordering — that is the correctness & data-semantics lens.
 - What else in the repository calls the changed code, and what breaks
   downstream of it — that is the blast-radius lens.
+- Whether a test would actually notice this code being wrong — an assertion
+  weaker than the criterion it claims to cover, or one built from a value the
+  test itself constructed rather than one the code produced. That is the
+  test-adequacy lens, even when what the test fails to catch is a broken
+  contract.
 
 The test at the edge: if fixing the defect means holding an interface or a
 stored format stable, it is yours; if it means changing what the code computes,

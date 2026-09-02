@@ -506,6 +506,37 @@ this remit asks whether they test *each thing*.
 §5.5's disjointness argument still holds — this is a third remit, not a second
 opinion on the first two.
 
+**Half done, 2026-09-02, by #34 — the remit half, not the risk-tier half.**
+This item's own "done looks like" named two things: remits that do not
+overlap, and the third lens at `elevated`. Only the first shipped. The third
+lens is `adequacy` (`saffron/agents/prompts/review-adequacy.md`), a prompted
+critic with no mutation tool and no coverage gate — both were priced again
+against this item's own evidence and both lost again, for the reasons already
+recorded above. It reads the diff and asks whether the tests in it would
+actually notice the code being wrong: an assertion on a value the exercised
+code never reads, a test that constructs the value it then asserts, a
+structural check over source text a rename defeats, a witness whose setup is
+the only input the new code is correct for. Holding no tool that can run
+anything, it cannot mutate a line and watch a test fail the way a person
+would — so every finding names the edit that would keep the suite green
+instead, checkable in one command by whoever can run one. The correctness
+lens's own `Evidence` bullet — the one BACKLOG item 6 first flagged as
+misfiled test-adequacy language sitting under a data-semantics remit — moved
+into this lens rather than being copied, and all three prompts now name all
+three boundaries in their `Not yours` lists.
+
+**The risk-tier half is deliberately still open, not silently dropped.**
+Nothing in v0.5 or since carries a risk tier that could gate this lens the way
+this item originally specified, and building one was out of scope for #34:
+measured against this repo's own specs, 28 of 34 declare `elevated`, so
+gating on tier would exclude six specs while costing an edit to the
+supervisor — which #34 could not touch — for a saving of one lens session
+($0.76–$0.91 on the two specs it was priced against). The lens runs at every
+tier instead, and REVIEW is not gated on the host budget ceiling, so this
+does not fail a task for money. Closing this item for real still means
+wiring a risk tier into `run_one_cell` and deciding whether `adequacy` is the
+lens that tier gates or whether, having shipped ungated, it stays that way.
+
 ## 7. `CLAUDE.md` no longer reaches the agent, so the flywheel's middle bucket is inert
 
 `setting_sources: []` was set because a target repo's `.claude/` was configuring

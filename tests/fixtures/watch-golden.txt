@@ -12,8 +12,9 @@ IMPLEMENT: 1 commit(s), $0.20 spent
 gates: attempt 1, 0 new failures -> green
 REVIEW: correctness: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.10
 REVIEW: contract: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.10
+REVIEW: adequacy: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.10
 REVIEW: no blockers, 0 concern(s)
-READY_FOR_REVIEW: $0.40 spent, session sess-1
+READY_FOR_REVIEW: $0.50 spent, session sess-1
 teardown
 teardown: exported 62 bytes to <TASK_DIR>/patch.diff
 
