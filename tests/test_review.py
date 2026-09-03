@@ -47,7 +47,11 @@ def _agent(*texts, record=None):
     def run(container, *, prompt, options, **kwargs):
         if record is not None:
             record.append({"prompt": prompt, "options": options, "kwargs": kwargs})
-        text = next(scripted)
+        # Falls back to a clean review for any lens beyond the ones a test
+        # scripted explicitly — the same shape `test_session.py`'s harness
+        # uses, so a test that only cares about one or two lenses need not
+        # name every lens declared in `review.LENSES`.
+        text = next(scripted, _block([]))
         if isinstance(text, BaseException):
             raise text
         return _turn(text)
@@ -98,13 +102,16 @@ def test_every_declared_lens_runs_once_and_never_resumes():
     assert [r.lens for r in reviews] == list(review.LENSES)
     assert len(record) == len(review.LENSES)
     assert all(call["kwargs"].get("resume") is None for call in record)
-    # Different lenses, not the same one twice.
-    assert len({call["options"]["system_prompt"] for call in record}) == 2
+    # Different lenses, not the same one twice — every declared lens gets its
+    # own prompt, whatever the count.
+    assert len({call["options"]["system_prompt"] for call in record}) == len(
+        review.LENSES
+    )
 
 
 def test_a_lens_that_finds_nothing_is_a_clean_review():
     reviews = _review(_block([]), _block([]))
-    assert [r.findings for r in reviews] == [[], []]
+    assert [r.findings for r in reviews] == [[] for _ in review.LENSES]
     assert review.review_state(reviews)[0] == "READY_FOR_REVIEW"
 
 
@@ -179,9 +186,10 @@ def test_a_lens_whose_session_failed_still_charges_what_it_spent():
 
 
 def test_the_blast_radius_lens_is_not_declared():
-    """§5.5 runs it at `risk: elevated` only, and nothing in v0.5 carries a
-    risk tier — a lens wired here would run on every task instead."""
-    assert set(review.LENSES) == {"correctness", "contract"}
+    """BACKLOG item 6, settled by #34: the third lens is test adequacy, not
+    blast radius — that plan is retired, not merely deferred, and a lens
+    wired here would run on every task with no risk tier to gate it."""
+    assert set(review.LENSES) == {"correctness", "contract", "adequacy"}
 
 
 @pytest.mark.parametrize("lens", sorted(review.LENSES))
@@ -205,6 +213,11 @@ def test_each_lens_prompt_carries_the_framing_that_makes_it_a_critic(lens):
     assert "def gap(series, tz=" in prompt
     assert "pytest 8.0" in prompt
     assert "**Lens**:" in prompt  # CONTEXT.md §5's vocabulary
+    # The `<output>` contract, for every lens rather than only the one that
+    # shipped last: a prompt that loses a field name produces findings the
+    # host cannot anchor, and it still reads like a critic while doing it.
+    for field in ("`file`", "`line`", "`severity`", "`claim`"):
+        assert field in prompt
 
 
 def test_the_lenses_declare_disjoint_remits():
@@ -213,10 +226,74 @@ def test_the_lenses_declare_disjoint_remits():
     its own rather than leaving the boundary to judgement."""
     correctness = (PROMPTS / review.LENSES["correctness"]).read_text()
     contract = (PROMPTS / review.LENSES["contract"]).read_text()
+    adequacy = (PROMPTS / review.LENSES["adequacy"]).read_text()
     assert "migration reversibility" in correctness.split("Not yours.")[1]
     assert "timezones" in contract.split("Not yours.")[1]
+    assert "timezones" in adequacy.split("Not yours.")[1]
+    assert "migration reversibility" in adequacy.split("Not yours.")[1]
     for text in (correctness, contract):
         assert "blast-radius lens" in text.split("Not yours.")[1]
+        assert "test-adequacy lens" in text.split("Not yours.")[1]
+    assert "blast-radius lens" in adequacy.split("Not yours.")[1]
+
+
+def test_the_declared_lenses_are_the_three_that_run():
+    """A third lens is declared, and its remit is whether the suite would
+    notice the code being wrong. `review.py` gains one entry in `LENSES` and
+    one prompt file; `run_review` iterates the mapping rather than a second,
+    hand-written list, so nothing else has to learn a third lens exists."""
+    assert set(review.LENSES) == {"correctness", "contract", "adequacy"}
+    reviews = _review(_block([]), _block([]), _block([]))
+    assert [r.lens for r in reviews] == list(review.LENSES)
+
+
+def test_exactly_one_prompt_claims_the_test_adequacy_remit():
+    """§5.5's no-voting rule rests on the remits being disjoint by
+    construction. The `Evidence` bullet that used to sit in the correctness
+    lens's own remit list — naming a test that would pass identically before
+    this change — belongs to the adequacy lens now, and moving it rather than
+    copying it means the phrase appears in exactly one prompt file."""
+    phrase = "pass identically before this change"
+    texts = {lens: (PROMPTS / path).read_text() for lens, path in review.LENSES.items()}
+    carriers = [lens for lens, text in texts.items() if phrase in text.lower()]
+    assert carriers == ["adequacy"]
+    # It left the correctness lens's own remit, not just its Not-yours list.
+    correctness_remit = texts["correctness"].split("Not yours.")[0]
+    assert phrase not in correctness_remit.lower()
+
+
+def test_the_adequacy_prompt_demands_a_checkable_mutation():
+    """The lens holds no tool that can run anything, so it cannot mutate a
+    line and watch a test fail — it can only name the edit that would keep
+    the suite green, which is what makes a finding checkable in one command
+    by someone who can run it, rather than a claim about coverage the lens
+    has no way to have confirmed.
+
+    Asserted against the whole remit, not two stock phrases: the prompt *is*
+    the deliverable here, and a 15-line stub carrying only those two phrases
+    passed an earlier version of this test — a witness that reads as coverage
+    of the acceptance criterion and is not, which is the exact defect this
+    lens exists to file.
+    """
+    # Normalized like its sibling above: the file is wrapped at 79 columns, so
+    # a legal reflow must not fail an assertion about what the prompt says.
+    flat = " ".join((PROMPTS / review.LENSES["adequacy"]).read_text().split())
+    assert "no tool that can run anything" in flat
+    # The demand itself, not merely the word for it.
+    assert "name the smallest concrete edit" in flat
+    assert "keep the test passing while the behaviour it claims to cover breaks" in flat
+    assert "checkable in one command" in flat
+    # And the shapes it is told to look for. Each is a distinct way a test
+    # passes without exercising the change; a prompt naming fewer is a
+    # narrower lens than the criterion asked for, and says so nowhere.
+    for shape in (
+        "pass identically before this change",
+        "assertion on a value the code under test never reads",
+        "constructs the value it then asserts",
+        "structural assertion over source text",
+        "witness whose setup is the only input",
+    ):
+        assert shape in flat, shape
 
 
 def test_the_gate_results_reach_the_critic_with_the_tool_that_ran():

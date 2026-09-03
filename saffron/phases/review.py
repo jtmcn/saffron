@@ -36,12 +36,14 @@ REVIEW_TOOLS = ["Read", "Glob", "Grep"]
 LENSES = {
     "correctness": "review-correctness.md",
     "contract": "review-contract.md",
+    "adequacy": "review-adequacy.md",
 }
-# ponytail: two lenses. The tier this comment used to wait on now exists
-# (`session.py:663`), so the blocker is gone and the remit is the open question:
-# §5.5 says a third lens would be blast radius and that `revert` already answers
-# test quality "for free"; BACKLOG item 6 says the gap is test adequacy and that
-# no lens asks it. They contradict, `revert` is unbuilt, and #34 settles both.
+# BACKLOG item 6, settled by #34: the third lens is not blast radius (that plan
+# is retired) and it is not `revert`, which is unbuilt and asks a different
+# question anyway (whether the new tests test *anything*, not *each thing*).
+# It is a prompted lens that reads the diff and asks whether the tests would
+# notice the code being wrong — no mutation tool, no coverage gate, both
+# priced and both rejected in `docs/evidence/`.
 
 REVIEW_PROMPT = (
     "Review this change now. Read whatever you need to; you hold no tool that "

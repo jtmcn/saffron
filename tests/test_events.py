@@ -1105,6 +1105,22 @@ _JOINED: tuple[tuple[Event, str], ...] = (
         Teardown(timestamp=1.0, spec_id="x", step="start", ok=True),
         "teardown",
     ),
+    # Appended, not inserted with the other REVIEW lines above: `census`
+    # identifies a parametrized case by its positional index, and every
+    # index already existed by name before this lens shipped. Slotting this
+    # tuple in between `contract` and the summary line renumbered the two
+    # cases after it, which reads as one test removed and one added rather
+    # than as the one line actually gained.
+    (
+        PhaseStart(
+            timestamp=1.0,
+            spec_id="x",
+            phase="REVIEW",
+            label="REVIEW",
+            detail="adequacy: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.10",
+        ),
+        "REVIEW: adequacy: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.10",
+    ),
 )
 
 
@@ -1161,7 +1177,7 @@ def test_run_one_cell_with_no_emit_argument_still_prints(monkeypatch, tmp_path, 
     assert outcome.state == "READY_FOR_REVIEW"
     printed = capsys.readouterr().out
     assert "preflight: starting the proxy" in printed
-    assert "READY_FOR_REVIEW: $0.40 spent, session sess-1" in printed
+    assert "READY_FOR_REVIEW: $0.50 spent, session sess-1" in printed
 
 
 def test_events_jsonl_reproduces_what_the_terminal_printed(
@@ -1333,9 +1349,9 @@ def test_the_supervisor_hands_the_adapter_to_the_agent_it_calls(monkeypatch, tmp
     assert outcome.state == "READY_FOR_REVIEW"
     # Exact, not `>= 1`: the count is the number of seams exercised, and a
     # migration that drops one should fail here rather than pass quietly.
-    # Derived, not hard-coded: two turns plus one session per lens. `4` reads
-    # as a constant and is not one — `review.LENSES` has two entries beside a
-    # `ponytail:` saying a third is an open question, and adding it would fail
+    # Derived, not hard-coded: two turns plus one session per lens. `5` reads
+    # as a constant and is not one — `review.LENSES` gained its third entry in
+    # #34 and a fourth is still an open question, and adding one would fail
     # this test for a change that has nothing to do with the seam.
     assert cell.watched.count(spoken) == 2 + len(review.LENSES), cell.watched
 
@@ -1438,7 +1454,7 @@ def test_the_watch_shaped_callable_phases_still_receive_does_not_raise():
     assert "agent: (raw) some stray stdout" in implement_lines
     assert 'agent: Bash {"command": "ls"}' in implement_lines
 
-    # "REVIEW: ..." — review.run_review's own PhaseStart, one clean lens.
+    # "REVIEW: ..." — review.run_review's own PhaseStart, three clean lenses.
     review_captured: list[Event] = []
     review.run_review(
         "cell",
@@ -1450,7 +1466,11 @@ def test_the_watch_shaped_callable_phases_still_receive_does_not_raise():
         prompts_dir=prompts_dir,
         max_turns=5,
         budget_usd=1.0,
-        agent=_scripted_agent(_block({"findings": []}), _block({"findings": []})),
+        agent=_scripted_agent(
+            _block({"findings": []}),
+            _block({"findings": []}),
+            _block({"findings": []}),
+        ),
         spec_id="s",
         emit=review_captured.append,
     )
