@@ -43,10 +43,18 @@ acceptance:
   - claim: >-
       The subset is arithmetic on lists the host already holds — the names
       collected at head minus the names collected at base — and never a second
-      enumeration. A witness a criterion declares joins it, unless that
-      criterion is `preserves`, which is specified to be green on both sides
-      and would contradict the gate.
+      enumeration. A `preserves` witness is excluded: it is specified to be
+      green on both sides, so requiring it to fail without the source would
+      contradict its own declaration.
     witness: tests/test_revert.py::test_the_subset_is_the_new_names_and_excludes_a_preserved_witness
+  - claim: >-
+      A witness a criterion declares joins the subset, intersected with what
+      head actually enumerated. Its own half of the arithmetic, because it is
+      reached by the opposite route: a declared witness that already existed at
+      base is on both sides, so the difference above never sees it, and a
+      witness no runner enumerated at head is `criteria`'s failure to report
+      rather than a name this gate may claim ran.
+    witness: tests/test_revert.py::test_a_declared_witness_joins_the_subset_even_when_it_existed_at_base
   - claim: >-
       The worktree the other gates measure is the worktree they started with.
       `saffron/cell/worktree.py` restores every path this gate reverted, on the
