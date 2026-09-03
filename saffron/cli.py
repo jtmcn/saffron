@@ -212,12 +212,16 @@ def _protected_paths_at(
     exported `.saffron` yet. A `base_sha` this repo has not onboarded — no
     `.saffron` at all — is the same best-effort case: `session.py`'s own
     `export_saffron_dir` call, deeper in preflight, is still there to say so
-    properly once a cell actually starts."""
+    properly once a cell actually starts.
+
+    Nothing is collected here, and that is the point: `git archive` fails on
+    an unmatched pathspec, so every repo without a `.saffron` at `base_sha`
+    reaches this handler. Reporting that as an unreadable policy is the
+    absence-as-unreadability defect `_protected_paths` exists to avoid, one
+    function up."""
     try:
         exported = git_mirror.export_saffron_dir(mirror, base_sha, scratch)
-    except git_mirror.GitError as broke:
-        if unread is not None:
-            unread.append(str(broke))
+    except git_mirror.GitError:
         return []
     return _protected_paths(exported, unread)
 
@@ -606,6 +610,12 @@ def _print_reconcile_summary(result: ReconcileResult) -> None:
         print("reconcile: nothing moved")
 
 
+_GH_REFUSALS_SKIPPED = (
+    "the open-pull-request and touches-overlap refusals did not run, so the "
+    "refusal list above is incomplete"
+)
+
+
 def _print_queue(
     candidates: list[Candidate],
     refusals: list[Refusal],
@@ -636,9 +646,11 @@ def _print_queue(
             shown = refusal.path
         print(f"  {shown}: {refusal.reason}")
     if repo_slug is None:
-        _print_skipped("no GitHub slug could be read from the remote")
+        _print_skipped(
+            "no GitHub slug could be read from the remote", _GH_REFUSALS_SKIPPED
+        )
     elif gh_failures:
-        _print_skipped(f"gh could not be run ({gh_failures[0]})")
+        _print_skipped(f"gh could not be run ({gh_failures[0]})", _GH_REFUSALS_SKIPPED)
     if policy_unread:
         # Not a refusal that found nothing: one that never ran. The same
         # distinction `_print_skipped` draws for a `gh` that could not start.
@@ -652,18 +664,13 @@ def _print_queue(
         )
 
 
-_GH_REFUSALS_SKIPPED = (
-    "the open-pull-request and touches-overlap refusals did not run, so the "
-    "refusal list above is incomplete"
-)
-
-
-def _print_skipped(because: str, consequence: str = _GH_REFUSALS_SKIPPED) -> None:
+def _print_skipped(because: str, consequence: str) -> None:
     """One line saying a refusal never ran, and which one.
 
-    The consequence is a parameter rather than a constant in the string: a
-    note that names the wrong refusals is the defect this whole gate exists
-    to remove, one level up (§5.4).
+    The consequence is a required parameter rather than a constant in the
+    string: a note that names the wrong refusals is the defect this whole gate
+    exists to remove, one level up (§5.4), and a default would hand the next
+    caller the `gh` clause without it having read one.
     """
     print(f"note: {because} — {consequence}")
 

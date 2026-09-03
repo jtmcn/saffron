@@ -335,25 +335,20 @@ def protected_touch_refusal(
         for pattern in touches:
             if not matches(entry, pattern):
                 continue
-            # A path the spec's own `forbidden` bars is one `validate_plan`
-            # rejects before it ever consults `protected` (measured: same
-            # plan, same protected list, the reason names `forbidden`), so
-            # refusing here would cost a night for a plan that cannot be
-            # accepted — which is why `_unmatched_criterion_path` above
-            # exempts the same list.
+            # A path the spec's own `forbidden` bars is barred twice over
+            # already: `validate_plan` rejects a plan declaring it (measured —
+            # same plan, same protected list, the reason names `forbidden`),
+            # and `scope` fails the diff under its own `forbidden` code
+            # whatever the plan said (`SA-0024`, DESIGN.md §3.1). Refusing
+            # here would cost a night for a path no turn can reach, which is
+            # why `_unmatched_criterion_path` above exempts the same list.
             #
-            # ponytail: "cannot be planned", not "cannot be reached". Neither
-            # `forbidden` nor `protected` is enforced against the *diff* —
-            # `scope` checks only that changed files are inside `touches` — so
-            # an agent that plans nothing protected and then edits it anyway
-            # is caught by no gate. That hole predates this refusal and is not
-            # widened by it, but this exemption is the first thing to lean on
-            # the plan checkpoint as a backstop, so the ceiling is named here.
-            #
-            # An exact literal match is not exempted: a spec naming the same
-            # path in `touches` and `forbidden` is contradicting itself, not
-            # narrowing a glob, and that is worth one line in the morning
-            # queue rather than a silent admission.
+            # Not exempted when `pattern == entry`: a spec naming the same
+            # literal path in `touches` and `forbidden` is contradicting
+            # itself, not narrowing a glob. A `forbidden` *glob* equal to the
+            # `touches` glob is the same contradiction and is still exempted —
+            # it reaches a cell and dies at the plan checkpoint, for the money
+            # this refusal exists to save.
             if pattern != entry and any(matches(entry, denied) for denied in forbidden):
                 continue
             if pattern == entry:

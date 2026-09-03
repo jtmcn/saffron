@@ -1265,6 +1265,71 @@ def test_the_attended_run_says_the_protected_check_did_not_run(
     ledger.close()
 
 
+def test_a_repo_with_no_saffron_dir_is_absence_and_says_nothing(
+    tmp_path, monkeypatch, capsys
+):
+    """`git archive` fails on an unmatched pathspec, so every repo not yet
+    onboarded reaches `_protected_paths_at`'s error handler — the ordinary
+    case, not a broken one. Reporting it as an unreadable policy is the same
+    absence-as-unreadability defect `_protected_paths` was fixed for, and the
+    note would then print on every first run against a new repo."""
+    repo = _local_origin(tmp_path)
+    args = _namespace(repo, tmp_path)
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    monkeypatch.setattr(
+        "saffron.cli.run_one_cell",
+        lambda *_a, **_k: (_ for _ in ()).throw(SystemExit(0)),
+    )
+    ledger = Ledger(tmp_path / "l.db")
+
+    with pytest.raises(SystemExit):
+        cli._run_cell(args, ledger, tmp_path / "out")
+
+    out = capsys.readouterr().out
+    assert "could not be read" not in out
+    assert "protected list" not in out
+    ledger.close()
+
+
+def test_the_attended_run_does_not_refuse_a_path_its_own_forbidden_bars(
+    tmp_path, monkeypatch, capsys
+):
+    """The false-refusal direction, on the path that has shipped every spec in
+    this repository — `_run_cell` never calls `build_queue`, so the gate-0
+    witness does not cover it. A `protected` path the spec's own `forbidden`
+    already bars is barred twice over (`validate_plan`, and `scope` against
+    the diff since `SA-0024`), so refusing here costs a night for nothing."""
+    repo = _local_origin_with_policy(
+        tmp_path,
+        "gates: {}\nprotected: ['DESIGN.md']\nintegrity:\n  test_paths: ['tests/**']\n",
+        dirname="repo-attended-forbidden",
+    )
+    args = _namespace(repo, tmp_path)
+    args.spec = tmp_path / "SY-8.md"
+    args.spec.write_text(
+        "---\nid: SY-8\ntitle: Eight\ntype: docs\ntouches: ['**']\n"
+        "forbidden: ['DESIGN.md']\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    reached = []
+    monkeypatch.setattr(
+        "saffron.cli.run_one_cell",
+        lambda *_a, **_k: (reached.append(True), (_ for _ in ()).throw(SystemExit(0)))[
+            0
+        ],
+    )
+    ledger = Ledger(tmp_path / "l.db")
+
+    with pytest.raises(SystemExit):
+        cli._run_cell(args, ledger, tmp_path / "out")
+
+    out = capsys.readouterr().out
+    assert "refused" not in out, out
+    assert reached, "the run was refused before it reached a cell"
+    ledger.close()
+
+
 def test_queue_says_the_protected_check_did_not_run_when_policy_is_unreadable(
     tmp_path, capsys
 ):

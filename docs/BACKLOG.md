@@ -2700,8 +2700,6 @@ rebuttal path carrying the attempt number it actually ran at. That needs
 `saffron/events.py`, which `SA-0041` and `SA-0042` both forbid — so it is
 either a spec of its own or the first thing part 3's first spec does.
 
----
-
 ## 48. §4.2.1's count of the refusal gate drifted the moment `SA-0023` added a seventh
 
 `SA-0023` added `protected_touch_refusal` (`saffron/scheduler.py`), so
@@ -2726,11 +2724,21 @@ first instance.
 
 **Status:** the count is **done** — `DESIGN.md:383` now reads *"The refusal
 gate refuses seven things"* and names `SA-0023`'s as the seventh, corrected by
-hand on the host. The reader is not: nothing checks that `DESIGN.md`'s stated
-count matches the refusals the code implements, so an eighth drifts the same
-way. Item 30 records the general practice this instance argues for — a spec
-that changes core behaviour naming the `CONTEXT.md`/`DESIGN.md` sentence it
-makes stale — and reached it from `SA-0024`'s side of the same wall.
+hand on the host. **The item's own prediction has already come true, and this
+is the evidence.** `SA-0027` added an eighth: `scheduler.py`'s module docstring
+says so in as many words (*"`SA-0027` adds an eighth"*), and it still opens by
+calling `SA-0023`'s the seventh *"beyond §4.2.1's own six"* — a sentence made
+stale by the very correction that closed this item. §4.2.1 says seven and the
+code implements eight, one document revision after the last time it was wrong
+by one.
+
+So the count is fixed and the **reader is not**, which was always the load-
+bearing half: nothing checks that `DESIGN.md`'s stated count matches the
+refusals the code implements, and the drift recurred inside a single release.
+**Done looks like** that check existing — cheap, and it fails the moment a
+ninth is added — not another by-hand sweep. Item 30 reached the same practice
+from `SA-0024`'s side of the same wall; two instances and one recurrence is
+the third time, which item 30 itself said should not need a fresh item.
 
 ---
 
