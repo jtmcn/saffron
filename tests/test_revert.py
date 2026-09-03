@@ -156,6 +156,10 @@ def test_a_collected_name_that_reads_as_an_option_never_reaches_the_runner():
     # And the real name is still judged — the drop narrows the subset, it does
     # not cost the gate its verdict.
     assert result.status == "pass"
+    # Reported, not silently swallowed: a name shaped like an option is the one
+    # sign the operator gets that something in the cell printed a collection
+    # line it had no business printing, and the verdict alone does not carry it.
+    assert "--deselect=t.py::test_new" in result.summary
 
 
 def test_the_source_is_restored_when_the_run_raises():
@@ -176,6 +180,14 @@ def test_the_source_is_restored_when_the_run_raises():
     )
     assert result.status == "error"
     assert result.status != "fail"
+    # A run that raised and a checkout that never happened are both `error`,
+    # and the operator is sent to a different subsystem by each. The messages
+    # are the only thing that distinguishes them, so they are asserted rather
+    # than assumed — the code spends its longest comment on keeping them apart.
+    assert "could not be executed" in result.summary
+    # And the exception itself, not only the prefix: dropping what was caught
+    # leaves the prefix standing and the operator holding "— None".
+    assert "the reverted run crashed" in result.summary
     # The context manager's own `finally` restored the paths even though the
     # body it wrapped raised — worktree.py's guarantee, exercised here
     # through the fake that stands in for it.
@@ -211,17 +223,31 @@ def test_a_checkout_that_failed_is_an_error_not_a_failure():
     )
     assert result.status == "error"
     assert result.status != "fail"
+    assert "could not revert or restore" in result.summary
+    assert "checkout failed" in result.summary
 
 
 def test_each_kind_of_nothing_to_revert_is_a_skip():
-    """Three different nothings, none of them evidence: no names at base, a
-    diff that adds no test, and a diff with no source side outside the
-    repo's declared test paths. Not `pytest.mark.parametrize` — the witness
+    """Four different nothings, none of them evidence: no names at base, none
+    at head, a diff that adds no test, and a diff with no source side outside
+    the repo's declared test paths. Not `pytest.mark.parametrize` — the witness
     the host checks is this literal node id, and a parametrized test is
     collected only under `[id]`-suffixed names, never the bare one."""
     cases = [
         # No names at base: nothing to subtract from.
         ([], [_tests("t.py::test_a")], ["pkg/a.py"], "no readable test enumeration"),
+        # None at head, which is not symmetry for its own sake: this repo's
+        # `tests` gate reports `collected: null` on every one of its `error`
+        # paths, and `run_gate` synthesizes the same for its own failures. The
+        # gate is called inside `_suite` before `aborted_gates` is consulted,
+        # so a head `tests` error reaches it — and without this half of the
+        # guard `set(None)` raises out of the supervisor and exits 2.
+        (
+            [_tests("t.py::test_a")],
+            [GateResult(gate="tests", status="error", summary="pytest exploded")],
+            ["pkg/a.py"],
+            "no readable test enumeration",
+        ),
         # A diff that adds no test: the subset is empty.
         (
             [_tests("t.py::test_a")],
@@ -260,7 +286,7 @@ def test_a_reverted_run_keyed_on_exception_types_is_a_skip_not_a_failure():
     direction. The reverted test *did* fail — correctly, it depends on its
     source — but the runner keyed the failure on `AssertionError`, so the
     naive membership test finds the node id in `collected`, does not find it
-    in `failed`, and reports theatre. A false `fail` here calls a correct test
+    in `failed`, and reports theater. A false `fail` here calls a correct test
     fraudulent and blocks the spec that shipped it, which is the expensive
     direction; `skip` is what `criteria` degrades to on the same unreadable
     field, and it is what this must do."""
@@ -304,6 +330,7 @@ def test_a_reverted_run_that_did_not_enumerate_is_a_skip():
         run_tests=run_tests,
     )
     assert result.status == "skip", result
+    assert "no collected tests" in result.summary
 
 
 def test_a_reverted_run_that_enumerated_nothing_still_passes():
@@ -364,6 +391,9 @@ def test_a_reverted_run_that_could_not_produce_a_result_is_a_skip_not_an_error()
     )
     assert result.status == "skip", result
     assert result.status != "error", "an untrustworthy result ends the attempt"
+    # The summary, not only the status: three skips sit between this branch and
+    # the verdict, and a mutant reaching one of the others reaches `skip` too.
+    assert "no readable verdict" in result.summary
 
 
 def test_a_repo_that_declares_no_test_paths_is_a_skip_and_never_reverts():

@@ -3162,7 +3162,7 @@ def test_revert_restores_before_committed_reads_the_tree(monkeypatch, tmp_path):
     ]
     # That the attempt-1 read precedes the revert is the gate's own contract,
     # witnessed in `test_revert.py`; the exact list above is what pins the
-    # *wiring* — that `_suite` asks for it at all, and asks once per pass.
+    # *wiring* — that `_suite` asks for it at all, and asks once per call.
 
 
 def test_revert_is_absent_when_the_repo_declares_no_tests_gate(monkeypatch, tmp_path):

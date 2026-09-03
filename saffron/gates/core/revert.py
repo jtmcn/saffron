@@ -59,8 +59,17 @@ def _argv_safe(name: str) -> bool:
     and this repo's own `tests` gate calls any collection line holding `::` a
     name — so a line reading `--deselect=t.py::test_new` is new at head, joins
     the subset, and deselects the very test the gate is asking about, turning
-    the theater case into a `pass`. Dropped rather than skipped on: a skip is
-    what an agent emitting one such line would be buying.
+    the theater case into a `pass`. Dropped rather than skipped on, because a
+    dropped name still leaves the real ones judged.
+
+    **This closes the false-`pass` shape and not the family.** Measured: a
+    printed line needs no leading `-` to do damage — `zzz::bogus` reaches the
+    reverted run as a node id that matches no file, pytest exits 4, and this
+    gate reads an untrustworthy run as `skip`. So a `skip` is buyable for one
+    line in a new test file, and no name filter closes that: a bogus id can be
+    spelled inside `test_paths` as easily as outside them. Named in
+    `docs/BACKLOG.md` item 51 rather than papered over here, and the drop is
+    reported in the summary so the attempt is at least visible.
     """
     return not name.startswith("-")
 
@@ -116,14 +125,23 @@ def revert_gate(
     # witness as a live `criteria` hole; this widens the same hole rather than
     # opening a new one, and the spec's own subset claim is what asks for it.
     declared = {c.witness for c in acceptance}
-    subset = sorted(
-        name
-        for name in ((set(after) - set(before)) | (declared & set(after))) - preserved
-        if _argv_safe(name)
+    candidates = ((set(after) - set(before)) | (declared & set(after))) - preserved
+    subset = sorted(name for name in candidates if _argv_safe(name))
+    # A dropped name is the only evidence the operator gets that something in
+    # the cell printed a collection line it had no business printing. Carried
+    # on the verdicts and on the skip a drop can itself cause — the later
+    # skips already say the gate produced no evidence, and none of them is a
+    # judgement the narrowing changed.
+    dropped = sorted(candidates - set(subset))
+    note = (
+        f" — ignored {len(dropped)} collected name(s) reading as command-line "
+        f"options: {', '.join(dropped[:3])}"
+        if dropped
+        else ""
     )
     if not subset:
         return GateResult(
-            gate="revert", status="skip", summary="the diff adds no new test"
+            gate="revert", status="skip", summary=f"the diff adds no new test{note}"
         )
 
     # File-level, not hunk-level: a changed file matching none of the repo's
@@ -260,6 +278,12 @@ def revert_gate(
     # ponytail: "at least one overlap", not "every code is a node id" — the
     # same ceiling `criteria._side` names, and the same upgrade path
     # (per-failure membership) once a runner mixes the two keyings in one run.
+    #
+    # ponytail: and a runner reporting `fail` with an *empty* `failures` list
+    # reads below as "every name in the subset passed" — a blocking `fail` on a
+    # correct spec. `criteria._side` has the same hole and it degrades to
+    # `skip`; here the blast radius is the opposite way round. Closing either
+    # means obliging the `tests` role to key its failures, which is item 50.
     if failed and not (failed & collected):
         return GateResult(
             gate="revert",
@@ -289,7 +313,10 @@ def revert_gate(
                 )
                 for name in passed
             ],
-            summary=f"{len(passed)} of {len(subset)} new test(s) passed without their source",
+            summary=(
+                f"{len(passed)} of {len(subset)} new test(s) passed "
+                f"without their source{note}"
+            ),
         )
     return GateResult(
         gate="revert",
@@ -298,5 +325,7 @@ def revert_gate(
         # gate is unlike `census`/`criteria` in that it does execute one, and a
         # pass without it is indistinguishable from a gate that never ran.
         tool=reverted_result.tool,
-        summary=f"{len(subset)} new test(s) failed without their source, as required",
+        summary=(
+            f"{len(subset)} new test(s) failed without their source, as required{note}"
+        ),
     )

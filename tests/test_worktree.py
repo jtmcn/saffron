@@ -997,3 +997,27 @@ def test_a_restore_that_cannot_read_the_tree_raises(tmp_path, monkeypatch):
         worktree.source_reverted("c", base, paths),
     ):
         pass
+
+
+def test_the_restore_ignores_work_the_gate_never_touched(tmp_path, monkeypatch):
+    """The clean-tree check is scoped to `paths`, and the scoping is what lets
+    `revert` run at all on a tree with uncommitted work on it — the gate
+    refuses only when that work collides with what it would revert. Unscoped,
+    the restore reads the agent's unrelated edits as its own failure and ends
+    the attempt as infrastructure."""
+    base, paths = _repo_with_a_diff(tmp_path, monkeypatch)
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "notes.md").write_text("committed\n")
+    _commit(tmp_path, "an unrelated file")
+
+    with worktree.source_reverted("c", base, paths):
+        (tmp_path / "docs" / "notes.md").write_text("uncommitted\n")
+        (tmp_path / "docs" / "scratch.md").write_text("and untracked\n")
+
+    # Survives untouched, and the restore did not read either as its own doing.
+    assert (tmp_path / "docs" / "notes.md").read_text() == "uncommitted\n"
+    assert (tmp_path / "docs" / "scratch.md").exists()
+    porcelain = _porcelain(tmp_path)
+    assert "docs/notes.md" in porcelain
+    assert "docs/scratch.md" in porcelain
+    assert "src/" not in porcelain

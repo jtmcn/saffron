@@ -94,18 +94,32 @@ moved the sha**, leaving no row at all at the new one, which `build_queue` reads
 spec that has never run. That is what makes this retirement load-bearing rather than
 tidy: without it, a future batch starts a fresh cell for work sitting in `main`.
 
-**Two edits outside `SA-0044`'s declared scope, disclosed here because no gate
-saw them.** `tests/test_worktree.py` is not in its `touches` and
-`saffron/scheduler.py` is in its `forbidden`; both were made by hand after the
-cell, so the `scope` gate that would have failed the first and refused the
-second never ran. The first is load-bearing: the spec's fourth criterion — *"the
+**Eight paths outside `SA-0044`'s declared scope, disclosed here because no
+gate saw them.** Everything after the cell was done by hand, so the `scope` gate
+that would have refused or failed each of these never ran:
+
+| path | why `scope` would have objected | anticipated by the spec? |
+|---|---|---|
+| `DESIGN.md` | `forbidden` | yes — §5.4 and §5.5.1 describe the gate |
+| `CONTEXT.md` | `forbidden` | yes — its *Notes for the agent* defer this to the operator |
+| `ontology/saffron.ttl` | not in `touches` | yes — same note |
+| `ontology/shapes/saffron-shapes.ttl` | not in `touches` | it is where the set is actually closed |
+| `.saffron/specs/done/SA-0044-*.md` | `forbidden` (`.saffron/**`) | the retirement itself |
+| `.saffron/specs/done/README.md` | `forbidden` (`.saffron/**`) | this record |
+| `saffron/scheduler.py` | `forbidden` | no |
+| `tests/test_worktree.py` | not in `touches` | no |
+
+The last two are the ones nothing anticipated. `tests/test_worktree.py` is
+load-bearing: the spec's fourth criterion — *"the
 worktree the other gates measure is the worktree they started with"* — names a
 witness in `tests/test_revert.py`, and that test exercises the *fake* context
 manager the gate is handed, not `worktree._restore_source`. The guarantee is
-witnessed in `tests/test_worktree.py` instead, against real git. The second is
-one docstring sentence, backlog item 48's refusal count, corrected alongside the
-`DESIGN.md` §4.2.1 count it contradicted. The spec itself is not edited to match
-— the rule below is why.
+witnessed there instead, against real git — and splitting it out would put a
+witness in one branch and its subject (`saffron/cell/worktree.py`, which *is* in
+`touches`) in another. `saffron/scheduler.py` is one docstring sentence, backlog
+item 48's refusal count, corrected alongside the `DESIGN.md` §4.2.1 count it
+contradicted; separating them would recreate the drift item 48 exists to catch.
+The spec itself is not edited to match — the rule below is why.
 
 **Do not edit a spec in this directory.** An edit moves its `spec_sha`, and the
 sha is what the ledger's rows are keyed on.
