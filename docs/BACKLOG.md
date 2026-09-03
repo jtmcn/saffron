@@ -2700,6 +2700,46 @@ rebuttal path carrying the attempt number it actually ran at. That needs
 `saffron/events.py`, which `SA-0041` and `SA-0042` both forbid — so it is
 either a spec of its own or the first thing part 3's first spec does.
 
+## 48. §4.2.1's count of the refusal gate drifts every time one is added, and has twice
+
+`SA-0023` added `protected_touch_refusal` (`saffron/scheduler.py`), so
+`DESIGN.md:383` — *"The refusal gate refuses six things, and the fifth is the
+only one with a corpse behind it"* — undercounts by one, and the enumeration
+that follows it does not mention the new one at all.
+
+The drift was designed in rather than overlooked: `DESIGN.md` is `protected`,
+so `SA-0023` could not touch it, and the module docstring is honest about the
+gap ("beyond §4.2.1's own six"). What makes it worth an item rather than a
+shrug is the circularity underneath. **The only spec that could repair a
+sentence in `DESIGN.md` is one whose `touches` names `DESIGN.md` — and that is
+now exactly what this refusal refuses.** `SA-0021` was the last such spec and
+it was run by hand for this reason; after `SA-0023` it does not even reach a
+cell. Every future correction to the two authoritative documents is a
+by-hand correction, permanently.
+
+That is the right trade — a cell rewriting the definition of its own
+constraints is what a global deny list is for — but it means the documents
+drift by default and nothing schedules the catch-up. §4.2.1's count is the
+first instance.
+
+**Status: open, and the reason it is still open is the item's own argument.**
+The six→seven correction landed: `DESIGN.md:383` now reads *"The refusal gate
+refuses seven things"* and names `SA-0023`'s as the seventh, by hand on the
+host. It was already wrong again by the time this was written. `SA-0027` added
+an eighth — `scheduler.py`'s module docstring says so in as many words — so
+§4.2.1 says seven and `_refuse` applies eight, one document revision after the
+last time it was off by one.
+
+**That recurrence is the evidence, not a second item.** The count was corrected
+once, by hand, by an operator who happened to be looking; nothing was scheduled
+to look again, and the drift returned within the same release. **Done looks
+like** a check that `DESIGN.md`'s stated count matches the refusals the code
+implements — it fails the moment a ninth is added, which no sweep does — plus
+the by-hand correction to eight that is outstanding now. Whether such a check
+is cheap is unmeasured: it needs the refusals to be enumerable by something
+other than reading `_refuse`, and no registry exists. Item 30 reached the same
+practice from `SA-0024`'s side of the same wall; this is the third instance,
+which item 30 itself said should not need a third item to become a rule.
 
 ---
 

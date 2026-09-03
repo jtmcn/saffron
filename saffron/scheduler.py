@@ -11,7 +11,7 @@ and a `depends_on` no `MERGED` task satisfies. That is five of the six refusals 
 describes — the sixth, a repo that failed preflight, is a batch-level check
 outside `build_queue`'s job.
 
-`SA-0023` adds a seventh, beyond §4.2.1's own six: `protected_touch_refusal`
+`SA-0023` adds the seventh §4.2.1 now counts: `protected_touch_refusal`
 refuses a spec whose declared `touches` collides with a literal entry in the
 repo's `policy.yaml` `protected` list. Measured on `SA-0021` (task 18):
 run as a cell, that collision was discovered by `validate_plan` after a
@@ -299,7 +299,9 @@ def _unmatched_criterion_path(spec: Spec) -> str | None:
     return None
 
 
-def protected_touch_refusal(touches: list[str], protected: Sequence[str]) -> str | None:
+def protected_touch_refusal(
+    touches: list[str], protected: Sequence[str], forbidden: Sequence[str]
+) -> str | None:
     """Why this spec's own `touches` collides with the repo's global deny
     list, or `None`.
 
@@ -323,11 +325,46 @@ def protected_touch_refusal(touches: list[str], protected: Sequence[str]) -> str
     this refusal does not replace, only gets in front of.
     """
     for entry in protected:
+        # ponytail: `_GLOB_CHARS` includes `[`, which `scope._to_regex` does
+        # not tokenise — it escapes a bracket and matches it literally. So a
+        # `protected` entry containing one is skipped as undecidable when the
+        # matcher would in fact have decided it. Fails safe, and the backstop
+        # below still catches it.
         if _GLOB_CHARS.intersection(entry):
             continue
-        if any(matches(entry, pattern) for pattern in touches):
+        for pattern in touches:
+            if not matches(entry, pattern):
+                continue
+            # A path the spec's own `forbidden` bars is barred twice over
+            # already: `validate_plan` rejects a plan that declares it
+            # (measured — same plan, same protected list, the reason names
+            # `forbidden`), and `scope` fails it in the diff under `scope`'s
+            # own `forbidden` code whatever the plan said (`SA-0024`,
+            # DESIGN.md §3.2). Refusing here would cost a night for a path no
+            # diff can keep, which is why `_unmatched_criterion_path` above
+            # exempts the same list. A plan may clear the checkpoint by
+            # declaring nothing — `files_to_change` has no minimum — so the
+            # two backstops are alternatives, not a sequence.
+            #
+            # Not exempted when `pattern == entry`: a spec naming the same
+            # literal path in `touches` and `forbidden` is contradicting
+            # itself, not narrowing a glob.
+            #
+            # ponytail: a `forbidden` *glob* equal to the `touches` glob is
+            # the same contradiction and is still exempted. Deciding it needs
+            # glob-against-glob intersection, which this refusal does not do
+            # (see the `_GLOB_CHARS` skip above) — so that spec reaches a cell
+            # and spends the $0.82 this refusal exists to save.
+            if pattern != entry and any(matches(entry, denied) for denied in forbidden):
+                continue
+            if pattern == entry:
+                named = f"touches names {entry!r}"
+            else:
+                # Never "touches names X" for a glob: the operator greps the
+                # spec for a path that is not written in it.
+                named = f"touches pattern {pattern!r} covers {entry!r}"
             return (
-                f"touches names {entry!r}, which policy.yaml's protected list "
+                f"{named}, which policy.yaml's protected list "
                 "denies for every spec in this repo — not this spec's own "
                 "forbidden list"
             )
@@ -548,7 +585,9 @@ def _refuse(
     `SA-0023` check below, which runs first because it is the cheapest: no
     `gh`, no ledger, nothing but the spec and the policy already in hand."""
     if (
-        reason := protected_touch_refusal(candidate.spec.touches, protected)
+        reason := protected_touch_refusal(
+            candidate.spec.touches, protected, candidate.spec.forbidden
+        )
     ) is not None:
         return reason
 

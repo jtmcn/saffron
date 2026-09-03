@@ -411,6 +411,14 @@ def _local_origin_with_policy(tmp_path, policy_yaml, *, dirname="repo-protected"
     remote = tmp_path / f"{dirname}-remote.git"
     subprocess.run(["git", "clone", "-q", "--bare", str(repo), str(remote)], check=True)
     _git(repo, "remote", "add", "origin", str(remote))
+    # The working copy's policy is then made to disagree with the committed
+    # one. Without this the two reads are indistinguishable, and rewriting
+    # the export read to a working-copy read — backlog items 13 and 15, the
+    # exact mistake `SA-0023`'s own notes name twice — leaves the suite
+    # green. Measured: it did, until this line.
+    (repo / ".saffron" / "policy.yaml").write_text(
+        "gates: {}\nprotected: []\nintegrity:\n  test_paths: ['tests/**']\n"
+    )
     return repo
 
 
@@ -1183,6 +1191,11 @@ def _repo_with_spec(
     remote = tmp_path / f"{dirname}-remote.git"
     subprocess.run(["git", "clone", "-q", "--bare", str(repo), str(remote)], check=True)
     _git(repo, "remote", "add", "origin", str(remote))
+    if policy_yaml is not None:
+        # Same reason as `_local_origin_with_policy`: with the committed
+        # and working-copy policies identical, a read of either passes and
+        # the export-not-working-copy property has no witness.
+        (repo / ".saffron" / "policy.yaml").write_text("protected: []\n")
     return repo
 
 
@@ -1216,6 +1229,152 @@ def test_queue_prints_the_real_scheduler_queue_and_writes_nothing_to_the_ledger(
         count = ledger._db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         assert count == 0, f"{table} should be empty against an unseen repo"
     ledger.close()
+
+
+def test_the_attended_run_says_the_protected_check_did_not_run(
+    tmp_path, monkeypatch, capsys
+):
+    """The attended path is the one that spends — an image build and a
+    preflight suite follow. A check that could not run must say so before the
+    money, which is the whole argument for running it here rather than at the
+    plan checkpoint."""
+    repo = _local_origin_with_policy(
+        tmp_path, "protected: [oh: no: unbalanced\n", dirname="repo-attended-bad"
+    )
+    args = _namespace(repo, tmp_path)
+    args.spec = tmp_path / "SY-9.md"
+    args.spec.write_text(
+        "---\nid: SY-9\ntitle: Nine\ntype: docs\ntouches: ['DESIGN.md']\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    monkeypatch.setattr(
+        "saffron.cli.run_one_cell",
+        lambda *_a, **_k: (_ for _ in ()).throw(SystemExit(0)),
+    )
+    ledger = Ledger(tmp_path / "l.db")
+
+    with pytest.raises(SystemExit):
+        cli._run_cell(args, ledger, tmp_path / "out")
+
+    out = capsys.readouterr().out
+    # Unreadable, so nothing was refused — and the operator is told which
+    # check did not run rather than being left to read `refusals: 0`.
+    assert "policy.yaml at this base_sha could not be read" in out
+    assert "this spec was not checked against the protected list" in out
+    ledger.close()
+
+
+def test_a_repo_with_no_saffron_dir_is_absence_and_says_nothing(
+    tmp_path, monkeypatch, capsys
+):
+    """`git archive` fails on an unmatched pathspec, so every repo not yet
+    onboarded reaches `_protected_paths_at`'s error handler — the ordinary
+    case, not a broken one. Reporting it as an unreadable policy is the same
+    absence-as-unreadability defect `_protected_paths` was fixed for, and the
+    note would then print on every first run against a new repo."""
+    repo = _local_origin(tmp_path)
+    args = _namespace(repo, tmp_path)
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    monkeypatch.setattr(
+        "saffron.cli.run_one_cell",
+        lambda *_a, **_k: (_ for _ in ()).throw(SystemExit(0)),
+    )
+    ledger = Ledger(tmp_path / "l.db")
+
+    with pytest.raises(SystemExit):
+        cli._run_cell(args, ledger, tmp_path / "out")
+
+    out = capsys.readouterr().out
+    assert "could not be read" not in out
+    assert "protected list" not in out
+    ledger.close()
+
+
+def test_the_attended_run_does_not_refuse_a_path_its_own_forbidden_bars(
+    tmp_path, monkeypatch, capsys
+):
+    """The false-refusal direction, on the path that has shipped every spec in
+    this repository — `_run_cell` never calls `build_queue`, so the gate-0
+    witness does not cover it. A `protected` path the spec's own `forbidden`
+    already bars is barred twice over (`validate_plan`, and `scope` against
+    the diff since `SA-0024`), so refusing here costs a night for nothing."""
+    repo = _local_origin_with_policy(
+        tmp_path,
+        "gates: {}\nprotected: ['DESIGN.md']\nintegrity:\n  test_paths: ['tests/**']\n",
+        dirname="repo-attended-forbidden",
+    )
+    args = _namespace(repo, tmp_path)
+    args.spec = tmp_path / "SY-8.md"
+    args.spec.write_text(
+        "---\nid: SY-8\ntitle: Eight\ntype: docs\ntouches: ['**']\n"
+        "forbidden: ['DESIGN.md']\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    reached = []
+    monkeypatch.setattr(
+        "saffron.cli.run_one_cell",
+        lambda *_a, **_k: (reached.append(True), (_ for _ in ()).throw(SystemExit(0)))[
+            0
+        ],
+    )
+    ledger = Ledger(tmp_path / "l.db")
+
+    with pytest.raises(SystemExit):
+        cli._run_cell(args, ledger, tmp_path / "out")
+
+    out = capsys.readouterr().out
+    assert "refused" not in out, out
+    assert reached, "the run was refused before it reached a cell"
+    ledger.close()
+
+
+def test_queue_says_the_protected_check_did_not_run_when_policy_is_unreadable(
+    tmp_path, capsys
+):
+    """A scan that could not read `policy.yaml` must not print what a scan
+    that read it and found no collision prints (§5.4) — and it must not claim
+    the *other* refusals were the ones that did not run, which is the defect
+    this whole gate removes one level up."""
+    spec_text = (
+        "---\nid: SY-1\ntitle: One\ntype: docs\ntouches: ['DESIGN.md']\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    repo = _repo_with_spec(
+        tmp_path,
+        spec_text=spec_text,
+        dirname="repo-badpolicy",
+        policy_yaml="protected: [oh: no: unbalanced\n",
+    )
+    home = tmp_path / "home"
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    out = capsys.readouterr().out
+    # This repo's origin is a local bare clone, so no slug resolves and the
+    # `gh` note legitimately prints too. The property is per-line: the policy
+    # note must carry its own consequence, not borrow the `gh` one.
+    policy_line = next(
+        line for line in out.splitlines() if "policy.yaml at this base_sha" in line
+    )
+    assert "no spec was checked against the protected list" in policy_line
+    assert "open-pull-request" not in policy_line
+
+
+def test_queue_says_nothing_when_a_repo_simply_declares_no_policy(tmp_path, capsys):
+    """Absent is not unreadable. Every repo not yet onboarded has no
+    `policy.yaml`, and that is the ordinary case, not a skipped check."""
+    spec_text = (
+        "---\nid: SY-1\ntitle: One\ntype: docs\ntouches: ['src/**']\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    repo = _repo_with_spec(tmp_path, spec_text=spec_text, dirname="repo-nopolicy")
+    home = tmp_path / "home"
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    assert "protected list" not in capsys.readouterr().out
 
 
 def test_queue_refuses_a_spec_whose_touches_match_a_protected_path(tmp_path, capsys):
@@ -1597,7 +1756,7 @@ def test_the_plan_checkpoint_still_rejects_what_the_refusal_could_not_decide(
 
     # The refusal cannot decide a glob against a glob — this is the gap the
     # plan checkpoint exists to close.
-    assert protected_touch_refusal(touches, protected) is None
+    assert protected_touch_refusal(touches, protected, []) is None
 
     raw = (
         "<output>"
