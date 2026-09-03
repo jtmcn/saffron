@@ -206,9 +206,11 @@ meaning.
 in backticks. Three kinds, and the distinction is the core/repo boundary:
 
 - **Core gates** — `scope`, `size`, `secrets`, `integrity`, `census`, `committed`,
-  `criteria`. Implemented in Saffron. They never execute repo code, which is why
-  they can be core; most read the diff, but `committed` reads the worktree's status
-  instead, and `census` and `criteria` read other gates' results (`DESIGN.md` §2.1).
+  `criteria`, `revert`. Implemented in Saffron. Most read the diff; `committed`
+  reads the worktree's status instead, and `census` and `criteria` read other
+  gates' results. `revert` is the one that runs something, and §2.1's rule is
+  shaped around it rather than broken by it: core invokes declared gates, never
+  tools (`DESIGN.md` §2.1).
 - **Contract gates** — the gate roles above. Declared in `policy.yaml`, implemented
   in the repo's `.saffron/gates/`.
 - **Repo-defined gates** — anything a repo adds against its own hard-to-fake

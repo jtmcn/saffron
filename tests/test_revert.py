@@ -83,7 +83,7 @@ def test_a_new_test_that_passes_without_the_source_is_a_failure():
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
-        dirty=tuple,
+        dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=run_tests,
     )
@@ -117,11 +117,45 @@ def test_the_subset_is_the_new_names_and_excludes_a_preserved_witness():
         ],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
-        dirty=tuple,
+        dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
     )
     assert captured == [["t.py::test_new"]]
+
+
+def test_a_collected_name_that_reads_as_an_option_never_reaches_the_runner():
+    """This gate is the one place a `collected` name is *executed* rather than
+    compared: `run_gate` builds `argv = [executable, *subset]` with no `--`.
+    This repo's own `tests` gate calls any collection line holding `::` a name,
+    so a line printed at import time can read as an option — and
+    `--deselect=t.py::test_new` is new at head, joins the subset, and deselects
+    the one test the gate is asking about. The theater case then reports
+    `pass`, silently, at the hands of the thing the gate is watching.
+
+    Dropped rather than skipped on: a `skip` is what one such line would be
+    buying, and disabling the gate outright is worth more to an agent than
+    hiding one test."""
+    captured: list[list[str]] = []
+
+    def run_tests(subset):
+        captured.append(subset)
+        return _tests(*subset, failed=tuple(subset))
+
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", "t.py::test_new", "--deselect=t.py::test_new")],
+        acceptance=[],
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        dirty=lambda: [],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=run_tests,
+    )
+    assert captured == [["t.py::test_new"]]
+    # And the real name is still judged — the drop narrows the subset, it does
+    # not cost the gate its verdict.
+    assert result.status == "pass"
 
 
 def test_the_source_is_restored_when_the_run_raises():
@@ -136,7 +170,7 @@ def test_the_source_is_restored_when_the_run_raises():
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
-        dirty=tuple,
+        dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=run_tests,
     )
@@ -157,7 +191,7 @@ def test_a_restore_that_failed_is_also_an_error():
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
-        dirty=tuple,
+        dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[], fail_on_exit=True),
         run_tests=lambda subset: _tests(*subset, failed=tuple(subset)),
     )
@@ -171,7 +205,7 @@ def test_a_checkout_that_failed_is_an_error_not_a_failure():
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
-        dirty=tuple,
+        dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[], fail_on_enter=True),
         run_tests=_refuse_run,
     )
@@ -187,28 +221,38 @@ def test_each_kind_of_nothing_to_revert_is_a_skip():
     collected only under `[id]`-suffixed names, never the bare one."""
     cases = [
         # No names at base: nothing to subtract from.
-        ([], [_tests("t.py::test_a")], ["pkg/a.py"]),
+        ([], [_tests("t.py::test_a")], ["pkg/a.py"], "no readable test enumeration"),
         # A diff that adds no test: the subset is empty.
-        ([_tests("t.py::test_a")], [_tests("t.py::test_a")], ["pkg/a.py"]),
+        (
+            [_tests("t.py::test_a")],
+            [_tests("t.py::test_a")],
+            ["pkg/a.py"],
+            "adds no new test",
+        ),
         # A diff with no source side outside the repo's declared test paths.
         (
             [_tests("t.py::test_a")],
             [_tests("t.py::test_a", "t.py::test_new")],
             ["tests/test_a.py"],
+            "no source outside",
         ),
     ]
-    for prior, results, changed_files in cases:
+    # Each case is asserted on its own summary as well as its status: `skip` is
+    # the answer to all three, so a status alone cannot tell a case reaching the
+    # right verdict by the wrong route from one reaching it by the right one.
+    for prior, results, changed_files, summary in cases:
         result = revert_gate(
             prior=prior,
             results=results,
             acceptance=[],
             changed_files=changed_files,
             test_paths=[_TESTS],
-            dirty=tuple,
+            dirty=lambda: [],
             reverted=_refuse,
             run_tests=_refuse_run,
         )
-        assert result.status == "skip"
+        assert result.status == "skip", result
+        assert summary in result.summary, result
 
 
 def test_a_reverted_run_keyed_on_exception_types_is_a_skip_not_a_failure():
@@ -230,7 +274,7 @@ def test_a_reverted_run_keyed_on_exception_types_is_a_skip_not_a_failure():
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
-        dirty=tuple,
+        dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
     )
@@ -255,7 +299,7 @@ def test_a_reverted_run_that_did_not_enumerate_is_a_skip():
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
-        dirty=tuple,
+        dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
     )
@@ -279,7 +323,7 @@ def test_a_reverted_run_that_enumerated_nothing_still_passes():
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
-        dirty=tuple,
+        dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
     )
@@ -314,7 +358,7 @@ def test_a_reverted_run_that_could_not_produce_a_result_is_a_skip_not_an_error()
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
-        dirty=tuple,
+        dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
     )
@@ -334,7 +378,7 @@ def test_a_repo_that_declares_no_test_paths_is_a_skip_and_never_reverts():
         acceptance=[],
         changed_files=["pkg/a.py", "t.py"],
         test_paths=[],
-        dirty=tuple,
+        dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=lambda _s: _tests(),
     )
@@ -358,7 +402,7 @@ def test_the_verdict_is_scoped_to_the_subset_not_the_whole_enumeration():
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
-        dirty=tuple,
+        dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
     )
@@ -379,7 +423,7 @@ def test_the_tool_is_the_one_that_actually_ran():
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
-        dirty=tuple,
+        dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
     )
@@ -405,7 +449,7 @@ def test_a_declared_witness_joins_the_subset_even_when_it_existed_at_base():
         acceptance=[Criterion(claim="it works", witness="t.py::test_w")],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
-        dirty=tuple,
+        dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
     )
@@ -426,7 +470,7 @@ def test_a_declared_witness_the_head_run_never_collected_is_not_asserted():
         acceptance=[Criterion(claim="it works", witness="t.py::nonexistent")],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
-        dirty=tuple,
+        dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=lambda _s: _tests(),
     )

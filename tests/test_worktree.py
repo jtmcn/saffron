@@ -881,3 +881,119 @@ def test_a_revert_that_fails_halfway_still_restores(tmp_path, monkeypatch):
         raise AssertionError("the body must not run")
 
     assert _porcelain(tmp_path) == ""
+
+
+# Every git operation here reports an exit code, and until these four tests
+# nothing read one: replacing all three `raise runtime.CellRuntimeError` lines
+# in `_revert_source`/`_restore_source` with `pass` left the whole suite green.
+# A revert that silently did not happen runs the new tests against the source
+# they shipped with, and `revert` calls correct work theater; a restore that
+# silently did not happen hands `committed` a tree the agent did not make.
+
+
+def _failing(monkeypatch, predicate):
+    """Make `_git` report failure for the calls `predicate` names, and run the
+    real thing for the rest."""
+    real = worktree._git
+
+    def flaky(container, *args):
+        if predicate(args):
+            return runtime.Completed(1, "", "git exploded")
+        return real(container, *args)
+
+    monkeypatch.setattr(worktree, "_git", flaky)
+
+
+def test_a_revert_whose_checkout_fails_raises(tmp_path, monkeypatch):
+    base, paths = _repo_with_a_diff(tmp_path, monkeypatch)
+    # The revert's checkout, not the restore's: they differ by the tree named.
+    _failing(monkeypatch, lambda args: args[0] == "checkout" and args[1] != "HEAD")
+
+    with (
+        pytest.raises(runtime.CellRuntimeError, match="revert checkout failed"),
+        worktree.source_reverted("c", base, paths),
+    ):
+        raise AssertionError("the body must not run")
+
+    assert _porcelain(tmp_path) == ""
+
+
+def test_a_restore_whose_checkout_fails_raises(tmp_path, monkeypatch):
+    base, paths = _repo_with_a_diff(tmp_path, monkeypatch)
+    _failing(monkeypatch, lambda args: args[0] == "checkout" and args[1] == "HEAD")
+
+    with (
+        pytest.raises(runtime.CellRuntimeError, match="restore checkout failed"),
+        worktree.source_reverted("c", base, paths),
+    ):
+        pass
+
+
+def test_a_restore_whose_rm_fails_raises(tmp_path, monkeypatch):
+    base, paths = _repo_with_a_diff(tmp_path, monkeypatch)
+    # The restore's `rm` carries `--ignore-unmatch`; the revert's does not.
+    _failing(monkeypatch, lambda args: args[0] == "rm" and "--ignore-unmatch" in args)
+
+    with (
+        pytest.raises(runtime.CellRuntimeError, match="restore rm failed"),
+        worktree.source_reverted("c", base, paths),
+    ):
+        pass
+
+
+def test_a_restore_that_reported_success_and_restored_nothing_raises(
+    tmp_path, monkeypatch
+):
+    """An exit code is not the guarantee. The two arms of the restore partition
+    the paths, so one that no-ops while the other succeeds exits 0 with the
+    source still reverted — which `committed` reads as the agent's dirty tree
+    and the salvage checkpoints commit."""
+    base, paths = _repo_with_a_diff(tmp_path, monkeypatch)
+    real = worktree._git
+
+    def lying(container, *args):
+        if args[0] == "checkout" and args[1] == "HEAD":
+            return runtime.Completed(0, "", "")
+        return real(container, *args)
+
+    monkeypatch.setattr(worktree, "_git", lying)
+
+    with (
+        pytest.raises(runtime.CellRuntimeError, match="left the tree dirty"),
+        worktree.source_reverted("c", base, paths),
+    ):
+        pass
+
+    # And it raised because the tree really was still reverted, not because the
+    # check fires on a tree it should accept.
+    assert (tmp_path / "src" / "kept.py").read_text() == "kept = 1\n"
+
+
+def test_no_source_paths_runs_no_git_at_all(monkeypatch):
+    """Unreachable from the gate, which skips before it reverts nothing — kept
+    because the restore's `git status` is pathspec-scoped, and an empty
+    pathspec is not "no paths" to git, it is every path. Without this guard a
+    no-op block would report the agent's unrelated work as a failed restore."""
+
+    def explode(*_args):
+        raise AssertionError("nothing to revert; must not run git")
+
+    monkeypatch.setattr(worktree, "_git", explode)
+
+    ran = False
+    with worktree.source_reverted("c", "base-sha", []):
+        ran = True
+    assert ran
+
+
+def test_a_restore_that_cannot_read_the_tree_raises(tmp_path, monkeypatch):
+    """The check above is only as good as its read: a `git status` that did not
+    run is not a clean tree."""
+    base, paths = _repo_with_a_diff(tmp_path, monkeypatch)
+    _failing(monkeypatch, lambda args: args[0] == "status")
+
+    with (
+        pytest.raises(runtime.CellRuntimeError, match="restore status failed"),
+        worktree.source_reverted("c", base, paths),
+    ):
+        pass

@@ -48,7 +48,7 @@ nothing.
 | `SA-0014` | `discover_specs()` exists; its task is `MERGED` at an older `spec_sha` |
 | `SA-0009` | Split into `SA-0011` and `SA-0014`–`SA-0017`, then `SA-0020`; every criterion is in `main` — `discover_specs`, `tasks_by_spec`/`resolve_repo_id` without inserting, the refusal gate, `saffron queue`'s exit codes. Its last criterion, *"a test asserting `saffron queue` writes nothing at all"*, was **reversed on purpose** by `SA-0019`, which made the command reconcile before it scans |
 | `SA-0021` | `DESIGN.md` §5.3.1 and `CONTEXT.md`'s **Touches** entry, which now names both proposers of a scope. Implemented by hand because the cell could not: both documents are `protected`, which is why its task reads `PLAN_REJECTED` |
-| `SA-0044` | `saffron/gates/core/revert.py` (279 lines), `tests/test_revert.py` (18 tests), `source_reverted`/`_revert_source`/`_restore_source`/`_exists_at` in `saffron/cell/worktree.py` with four host-git tests in `tests/test_worktree.py`, and the `_suite` wiring plus three tests in `tests/test_session.py`. **Retired in the same pull request that ships it** — see the paragraph below |
+| `SA-0044` | `saffron/gates/core/revert.py` (302 lines), `tests/test_revert.py` (19 tests), `source_reverted`/`_revert_source`/`_restore_source`/`_exists_at` in `saffron/cell/worktree.py` with ten host-git tests in `tests/test_worktree.py`, and the `_suite` wiring plus three tests in `tests/test_session.py`. **Retired in the same pull request that ships it** — see the paragraph below |
 
 **A fourth thing the ledger cannot say, found 2026-08-31.** `DONE_STATES` means
 the scan is finished with a spec, not that the work is — `EXHAUSTED`,
@@ -93,6 +93,19 @@ filtering it out, for the wrong reason. **Then correcting an acceptance criterio
 moved the sha**, leaving no row at all at the new one, which `build_queue` reads as a
 spec that has never run. That is what makes this retirement load-bearing rather than
 tidy: without it, a future batch starts a fresh cell for work sitting in `main`.
+
+**Two edits outside `SA-0044`'s declared scope, disclosed here because no gate
+saw them.** `tests/test_worktree.py` is not in its `touches` and
+`saffron/scheduler.py` is in its `forbidden`; both were made by hand after the
+cell, so the `scope` gate that would have failed the first and refused the
+second never ran. The first is load-bearing: the spec's fourth criterion — *"the
+worktree the other gates measure is the worktree they started with"* — names a
+witness in `tests/test_revert.py`, and that test exercises the *fake* context
+manager the gate is handed, not `worktree._restore_source`. The guarantee is
+witnessed in `tests/test_worktree.py` instead, against real git. The second is
+one docstring sentence, backlog item 48's refusal count, corrected alongside the
+`DESIGN.md` §4.2.1 count it contradicted. The spec itself is not edited to match
+— the rule below is why.
 
 **Do not edit a spec in this directory.** An edit moves its `spec_sha`, and the
 sha is what the ledger's rows are keyed on.

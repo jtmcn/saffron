@@ -294,6 +294,22 @@ def _restore_source(container: str, paths: list[str]) -> None:
         if done.returncode != 0:
             raise runtime.CellRuntimeError(f"restore rm failed: {done.stderr.strip()}")
 
+    # An exit code is not the guarantee this function makes. The two arms above
+    # partition `paths`, so one that succeeds while the other silently does
+    # nothing exits 0 with the source still reverted — and `committed` runs
+    # next and blames that on the agent (§5.4). Scoped to `paths` because work
+    # elsewhere in the tree is the agent's and none of this function's business;
+    # the gate has already refused to run if any of *these* paths was dirty.
+    done = _git(
+        container, "status", "--porcelain", "--untracked-files=all", "--", *paths
+    )
+    if done.returncode != 0:
+        raise runtime.CellRuntimeError(f"restore status failed: {done.stderr.strip()}")
+    if done.stdout.strip():
+        raise runtime.CellRuntimeError(
+            f"restore left the tree dirty: {done.stdout.strip()}"
+        )
+
 
 @contextlib.contextmanager
 def source_reverted(
@@ -309,6 +325,10 @@ def source_reverted(
     """
     paths = list(paths)
     if not paths:
+        # Unreachable from the gate, which skips before it gets here — kept
+        # because `_restore_source` ends in a pathspec-scoped `git status`, and
+        # an empty pathspec is not "no paths" to git, it is *every* path: the
+        # restore would read the agent's unrelated work as its own failure.
         yield
         return
     # The revert is inside the `try`, not before it: it is two git operations,

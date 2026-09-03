@@ -1,11 +1,12 @@
 """The `revert` gate: does a new test detect the thing it claims to? (§5.4)
 
-The anti-theater gate. Stash the source hunks of the diff, keep the test
-hunks, run only the new and changed tests, and require them to **fail**. Ship
-the half core can compute: "new" is a set difference over names the host
-already holds (`collected(head) - collected(base)`, `census`'s own route);
-"changed-body-same-name" needs a hunk-to-node-id mapping, which is language
-knowledge §2.1 keeps out of core (`docs/BACKLOG.md`).
+The anti-theater gate. Revert the source *files* of the diff, keep the test
+files, run only the new tests, and require them to **fail** — file-level, not
+hunk-level, which is the ceiling the `ponytail:` below names. "New" is a set
+difference over names the host already holds (`collected(head) -
+collected(base)`, `census`'s own route); "changed-body-same-name" needs a
+hunk-to-node-id mapping, which is language knowledge §2.1 keeps out of core
+(`docs/BACKLOG.md` item 49).
 
 The one sanctioned exception to "core executes nothing" (§2.1): it re-invokes
 a gate the repo already declared, through the same JSON contract as every
@@ -47,6 +48,21 @@ def _collected(results: list[GateResult]) -> list[str] | None:
     if not reported:
         return None
     return [name for names in reported for name in names]
+
+
+def _argv_safe(name: str) -> bool:
+    """Whether a collected name may be handed to a process as an argument.
+
+    This gate is the one place a `collected` name is *executed* rather than
+    compared: `runner.run_gate` builds `argv = [executable, *subset]` with no
+    `--` separator. A name starting with `-` is an option to whatever runs it,
+    and this repo's own `tests` gate calls any collection line holding `::` a
+    name — so a line reading `--deselect=t.py::test_new` is new at head, joins
+    the subset, and deselects the very test the gate is asking about, turning
+    the theater case into a `pass`. Dropped rather than skipped on: a skip is
+    what an agent emitting one such line would be buying.
+    """
+    return not name.startswith("-")
 
 
 def revert_gate(
@@ -100,7 +116,11 @@ def revert_gate(
     # witness as a live `criteria` hole; this widens the same hole rather than
     # opening a new one, and the spec's own subset claim is what asks for it.
     declared = {c.witness for c in acceptance}
-    subset = sorted(((set(after) - set(before)) | (declared & set(after))) - preserved)
+    subset = sorted(
+        name
+        for name in ((set(after) - set(before)) | (declared & set(after))) - preserved
+        if _argv_safe(name)
+    )
     if not subset:
         return GateResult(
             gate="revert", status="skip", summary="the diff adds no new test"
@@ -172,14 +192,17 @@ def revert_gate(
             summary=f"could not revert or restore the source — {exc}",
         )
 
-    if run_failed is not None or reverted_result is None:
+    if reverted_result is None:
+        # `reverted_result is None` and `run_failed is not None` are the same
+        # fact stated twice — the result is assigned only where no exception
+        # escaped — so testing both is a branch no input can kill. The
+        # exception itself still carries the message.
+        #
         # ponytail: unreachable through `runner.run_gate`, which turns every
         # failure it has — `GateNotExecutable`, a timeout, unparseable stdout,
         # a missing `tool` — into `GateResult(status="error")`, i.e. the branch
         # below. This catches a `run_tests` that raises outright, which only a
-        # different injection could do. Kept because the two are genuinely
-        # different facts and collapsing them is how the `error`/`fail` rule
-        # gets lost.
+        # different injection could do.
         return GateResult(
             gate="revert",
             status="error",
