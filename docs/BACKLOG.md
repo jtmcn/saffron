@@ -2743,11 +2743,25 @@ which item 30 itself said should not need a third item to become a rule.
 
 ---
 
+## 49. `revert` only checks *new* tests — a changed-body-same-name test has no coverage
+
+Its subset is `collected(head) - collected(base)`, `census`'s own route. That
+catches a new test that tests nothing; it cannot catch an *existing* test
+rewritten under the same node id, which needs a hunk-to-node-id mapping —
+language knowledge §2.1 keeps out of core. **Done looks like** a repo-declared
+role reporting that mapping, so core can compute a second, disjoint subset
+through the machinery already built; unbuilt because no runner reports it
+yet. `criteria`'s witnesses and the third critic lens (§5.5.1) both narrow
+this, so a changed-body test with no declared witness is the only true gap.
+
+---
+
 ## What is *not* here, deliberately
 
 DIAGNOSE and `SCOPE_REVIEW`, the scheduler's conflict sets and stacking, `saffron
-gc`, multi-repo, the merge train, and the `secrets`/`revert` gates. All are
-v1+ by `DESIGN.md` §9's own build order, and none of them is blocked by anything
+gc`, multi-repo, the merge train, and the `secrets` gate. All are v1+ by
+`DESIGN.md` §9's own build order, and none of them is blocked by anything
 above. `size` left this list on 2026-08-25: it is built and unwired, which is
-item 17. §4.2's own argument applies: at a two-deep queue they arbitrate contention
-that never arrives.
+item 17. `revert` left it with `SA-0044`: it is built and wired into `_suite`,
+which is item 49. §4.2's own argument applies: at a two-deep queue they
+arbitrate contention that never arrives.

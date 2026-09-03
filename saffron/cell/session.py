@@ -746,9 +746,10 @@ def _drive_cell(
     from saffron.gates.core.committed import committed_gate
     from saffron.gates.core.criteria import criteria_gate
     from saffron.gates.core.integrity import integrity_gate
+    from saffron.gates.core.revert import revert_gate
     from saffron.gates.core.scope import scope_gate
     from saffron.gates.core.size import size_gate
-    from saffron.gates.runner import CellExecutor, run_suite
+    from saffron.gates.runner import CellExecutor, run_gate, run_suite
     from saffron.repos import image
     from saffron.repos import mirror as mirror_ops
     from saffron.repos.policy import PolicyError, effective_risk, load_policy
@@ -960,6 +961,36 @@ def _drive_cell(
             # ponytail: cancelled by identity, so a head-only artifact (a .pyc
             # for a file the task added) needs the repo's .gitignore — item 14.
             declared = run_suite(gates, cwd=repo, executor=executor)
+
+            # Between `declared` (real `collected`/`failures` at head) and
+            # `committed` (must see the tree this gate restored, not the one
+            # it reverted) — a late restore would leave a dirty tree
+            # mis-blamed on the agent (§5.4). No `tests` role means no
+            # runner to re-invoke, so — unlike `census`/`criteria`'s
+            # unconditional `skip` — it is left out of `results` entirely.
+            revert_results = (
+                [
+                    revert_gate(
+                        prior=prior,
+                        results=declared,
+                        acceptance=spec.acceptance,
+                        changed_files=changed,
+                        test_paths=policy.integrity.test_paths,
+                        reverted=lambda paths: worktree.source_reverted(
+                            container, spec.tree_base, paths
+                        ),
+                        run_tests=lambda subset: run_gate(
+                            "tests",
+                            gates["tests"],
+                            cwd=repo,
+                            subset=subset,
+                            executor=executor,
+                        ),
+                    )
+                ]
+                if "tests" in gates
+                else []
+            )
             committed = committed_gate(worktree.dirty_paths(container))
             results = [
                 # The diff goes with the paths: it is what proves the export the
@@ -986,6 +1017,7 @@ def _drive_cell(
                     blocking="size" not in advisory_gates,
                 ),
                 *declared,
+                *revert_results,
                 committed,
             ]
             # Last, and given the whole suite: it reads `collected` off whatever

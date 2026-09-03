@@ -8,7 +8,8 @@ collection, and the difference compounds across a four-attempt repair loop.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import contextlib
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
 from saffron.cell import runtime
@@ -237,6 +238,66 @@ def dirty_paths(container: str) -> list[str]:
             index += 1
         paths.append(entry[3:])
     return sorted(paths)
+
+
+def _exists_at(container: str, ref: str, path: str) -> bool:
+    """Whether `path` is present in the tree `ref` names — read from git, not
+    the worktree, the same reason `read_at_head` is (§5.4)."""
+    return _git(container, "cat-file", "-e", f"{ref}:{path}").returncode == 0
+
+
+def _revert_source(container: str, tree_base: str, paths: list[str]) -> None:
+    """Check `paths` back to their content at `tree_base` — or, for a path
+    added by this diff and so absent there, remove it. Reverting an added
+    file to nothing rather than leaving it in place is what makes stashing
+    the source of a spec that lands a module *and* its tests together break
+    the import, instead of trivially satisfying the gate (`DESIGN.md` §5.4).
+    """
+    existing = [p for p in paths if _exists_at(container, tree_base, p)]
+    added = [p for p in paths if p not in existing]
+    if existing:
+        done = _git(container, "checkout", tree_base, "--", *existing)
+        if done.returncode != 0:
+            raise runtime.CellRuntimeError(
+                f"revert checkout failed: {done.stderr.strip()}"
+            )
+    if added:
+        done = _git(container, "rm", "-f", "-q", "--", *added)
+        if done.returncode != 0:
+            raise runtime.CellRuntimeError(f"revert rm failed: {done.stderr.strip()}")
+
+
+def _restore_source(container: str, paths: list[str]) -> None:
+    """Undo `_revert_source`: check every path back to HEAD, whichever of the
+    two operations above put it in its reverted state."""
+    done = _git(container, "checkout", "HEAD", "--", *paths)
+    if done.returncode != 0:
+        raise runtime.CellRuntimeError(
+            f"restore checkout failed: {done.stderr.strip()}"
+        )
+
+
+@contextlib.contextmanager
+def source_reverted(
+    container: str, tree_base: str, paths: Sequence[str]
+) -> Iterator[None]:
+    """The `revert` gate's one piece of worktree mutation (`DESIGN.md` §5.4).
+
+    Reverts `paths` to `tree_base` for the block, then restores them to HEAD
+    from a `finally` — failing and erroring paths alike, so the tree
+    `committed` measures next is the one the agent's commits produced. Raises
+    `runtime.CellRuntimeError` on a failed checkout or restore; the gate
+    turns that into `error`, not `fail` — it did not run.
+    """
+    paths = list(paths)
+    if not paths:
+        yield
+        return
+    _revert_source(container, tree_base, paths)
+    try:
+        yield
+    finally:
+        _restore_source(container, paths)
 
 
 def changed_files(container: str, base_sha: str) -> list[str]:
