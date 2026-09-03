@@ -153,6 +153,15 @@ repo's own declared `tests` gate through the runner's existing entry point, and
 learn nothing about pytest.
 
 ## Notes for the agent
+**Do not declare the gate in `ontology/saffron.ttl`.** Adding
+`saffron:revert a saffron:CoreGate` there fails
+`tests/ontology/test_vocabulary_agrees_with_context.py`, which asserts that
+`CONTEXT.md`'s *Core gates* bullet and `saffron:CoreGate` close the set the same
+way — measured, one added line, one failure. `CONTEXT.md` is `forbidden` here,
+so the two sides cannot be brought back into agreement from inside this task.
+The ontology entry and the `CONTEXT.md` bullet are a follow-up the operator
+makes together. Leave both alone; nothing fails while neither moves.
+
 **Take the runner as an argument; do not discover gates.** The supervisor
 already holds the discovered gate list and the executor. Hand this gate a
 callable that runs the declared test gate over a subset and returns a
