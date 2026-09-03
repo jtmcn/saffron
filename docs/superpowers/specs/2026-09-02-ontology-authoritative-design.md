@@ -1,95 +1,133 @@
 # The ontology becomes authoritative — design
 
 The run record has a vocabulary (`ontology/saffron.ttl`) and a glossary
-(`CONTEXT.md`), and they overlap on five closed sets that are asserted equal and
-nothing else. This design makes the vocabulary authoritative for the run record,
-generates the glossary's run-record half from it, and emits the run record
-itself as a graph so that a knowledge graph has a producer.
+(`CONTEXT.md`). Where they overlap they are asserted equal, and a core gate
+declared on one side alone fails the test suite with no repair a cell can make.
+This design generates the glossary's run-record half from the vocabulary, and
+then asks — by the experiment `DESIGN.md` Appendix O already specifies, not by
+argument — whether the vocabulary should also become executable.
 
 > **Citations:** a bare `§` cites `DESIGN.md`, per repo convention. This
-> document's own sections are cited as *part N*; the operator-visibility
-> plan's parts are always named as *the plan's part N*.
+> document's own sections are cited as *part N*; the operator-visibility plan's
+> parts are always named as *the plan's part N*.
 
-**It supersedes `ontology/RATIONALE.md`'s bottom line**, deliberately and on
-stated grounds (part 1). That document is eight days old and its measurements
-are not disputed; the question it asked is not the question being asked now.
+**Read part 1 first.** An earlier draft of this document proposed superseding
+`ontology/RATIONALE.md` by argument. §9 and Appendix O forbid exactly that, and
+part 1 is what changed as a result.
 
 ## What was measured
 
-Run, not reasoned. Every number below came from this repo at `6a7bdd9`.
+Run, not reasoned — and the extraction rule is stated for each, because the
+first draft of this section got four numbers wrong by leaving the rules
+implicit.
 
-- **The two documents overlap far less than they appear to.** Of the 27 terms
-  `CONTEXT.md` defines in its run-record sections (that file's own §4
-  Verification, §5 Review and §6 Outcomes — not `DESIGN.md` numbering), **8 exist in the graph and 19 do not**: `Gate contract`,
-  `Status`, `Baseline`, `New failure`, `Pre-existing failure`, `Repair`,
-  `No-progress`, `Critic`, `Implementer`, `Lens`, `Anchored`, `Verdict`,
+- **Rule: a line beginning `` `**Term**` `` in `CONTEXT.md` lines 188–376
+  (its §4 Verification, §5 Review, §6 Outcomes — that file's own numbering, not
+  `DESIGN.md`'s). Presence in the graph means a `saffron:` IRI local name **or
+  an `rdfs:label`** matches, case- and separator-insensitively.** Under that
+  rule: **32 definitions, 13 present, 19 absent.** By local name alone, 11 are
+  present — `Implementer` and `Lens` are present only as `rdfs:label`s
+  (`saffron.ttl:53`, `:56`). The 19 absent: `Gate contract`, `` `tool` ``,
+  `Status`, `Blocking / advisory`, `Baseline`, `New failure`, `Pre-existing
+  failure`, `Repair`, `No-progress`, `Critic`, `Anchored`, `Verdict`,
   `Adjudication`, `Ratify`, `Approve`, `Trailing accept rate`, `Merge train`,
   `Stacked branch`, `Tree base`.
-- **The graph is declarations, not prose.** 76 `saffron:` terms; **10** carry an
-  `rdfs:comment`. `CONTEXT.md` is 501 lines, ~88 bolded terms, 56 `_Avoid_`
-  lists and 24 lines of rationale block quote.
-- **The graph is the side that has already drifted.** `saffron:TerminalState`'s
+- **Rule: terms as the repo's own `declared_terms()` counts them**
+  (`tests/ontology/test_no_dead_terms.py`), which excludes the ontology IRI:
+  **91 terms**, of which **9 carry an `rdfs:comment`**. A tenth comment is on
+  the ontology IRI, which that test says is not a term.
+- **The graph is the side that has already drifted.** `saffron.ttl:125`'s
   comment says *"CONTEXT.md §6 lists six of these and DESIGN.md §3.3 lists
-  nine"*. `CONTEXT.md` now lists nine. The prose in the graph is stale about the
-  very disagreement it was written to record.
-- **Declaring one gate on one side alone fails the suite.** Appending
-  `saffron:revert a saffron:CoreGate` to `ontology/saffron.ttl` and running
-  `tests/ontology/`: `1 failed, 6 passed`, `Extra items in the right set:
-  'revert'`. `CONTEXT.md` is `forbidden` to every spec in flight, so a cell
-  cannot repair it. This is the concrete defect that started the design.
+  nine"*. `CONTEXT.md` now lists nine, and a test asserts it.
+- **Declaring one gate on one side alone breaks four checks, not one.**
+  Appending `saffron:revert a saffron:CoreGate ; saffron:blockingAt
+  saffron:alwaysBlocking .` to `ontology/saffron.ttl` at `6a7bdd9` and running
+  `tests/ontology/`: **`4 failed, 70 passed`** —
+  `test_no_dead_terms::test_no_term_exists_without_a_reader`,
+  `test_no_dead_terms::test_the_check_would_catch_a_new_dead_term`,
+  `test_shapes::test_the_lifecycle_graph_conforms`, and
+  `test_vocabulary_agrees_with_context` (*"Extra items in the right set:
+  'revert'"*). Scoped to that last file alone it is `1 failed, 6 passed`; the
+  first draft quoted the scoped number as if it were the directory's.
+- **The closed sets are closed in three places, not two.**
+  `ontology/shapes/saffron-shapes.ttl:81-90` re-enumerates core gates and gate
+  roles as SHACL `sh:in` lists, and `.saffron/gates/shacl.py` is a **blocking**
+  repo-defined gate that validates every tracked `.ttl` against them.
 - **`saffron/` has two runtime dependencies**, `pydantic` and `pyyaml`.
-  `pyproject.toml` states the reason graph libraries are not among them:
-  *"pyoxigraph and pyshacl are test-only … nothing under `saffron/` imports
-  either (the emitter is a later, conditional task)."*
-- **Two of RATIONALE's five verdicts rest on conditions still unmet.** Q1 is
-  *"SQL, once a `criteria` table exists"*; Q3 *"once declared gates are
-  stored"*. The ledger holds `repos, runs, tasks, attempts, gate_results,
-  failures, findings`. There is no `criteria` table.
-- **The plan's part 3 renderer does not exist.** `saffron/report/` holds `__init__.py`,
-  `index.py`, `pr_body.py`. `render.py` — the file `SA-0035`–`SA-0039` all
-  write to — is unwritten. This is the deadline in part 4.
+  `pyproject.toml`: *"pyoxigraph and pyshacl are test-only … nothing under
+  `saffron/` imports either (the emitter is a later, conditional task)."*
+- **The ledger has no `criteria` table.** It holds `repos, runs, tasks,
+  attempts, gate_results, failures, findings`.
+- **`saffron/report/render.py` does not exist.** `saffron/report/` holds
+  `__init__.py`, `index.py`, `pr_body.py`. (That `SA-0035`–`SA-0039` all write
+  to `render.py` is a fact about the plan, not about this repo — the plan says
+  so at its line 1352, and none of those specs exist as files.)
+- **`ontology/RATIONALE.md` is seven days old** (`71722ec`, 2026-08-26) and is
+  **exactly at** the 40-line cap that `SA-0001` names as an acceptance
+  criterion.
 
-## 1. Superseding `ontology/RATIONALE.md`
+## 1. The record, and what it permits
 
-RATIONALE scored one question: *is the RDF layer worth emitting, given five
-analytical queries?* It answered five of five for SQL, and added that the graph
-does not beat *"the glossary rival of §4.6.2b: `CONTEXT.md` already is that
-glossary."* Both conclusions are correct for that question.
+The first draft argued that `ontology/RATIONALE.md` should be superseded. That
+was the wrong document to argue with, and argument was the wrong method.
 
-Three things changed.
+**§9 v2.5 and Appendix O govern, and RATIONALE is downstream of them.** §9 says
+the emitter is built *"only if `ontology/RATIONALE.md` says the queries are
+worth reading"*, records that it says otherwise, and concludes: **"Appendix O's
+spike is the only thing that reopens an emitter."** Appendix O adds the sentence
+that the first draft walked straight into:
 
-1. **The question.** A knowledge graph is now a goal in its own right, not a
-   means of answering five queries faster. RATIONALE never evaluated that, so it
-   does not govern it.
-2. **Two of its conditions went unmet.** Q1 and Q3 were conditional on schema
-   that still does not exist (*What was measured*). As things stand, Q1 remains
-   *"awkward — criteria are markdown checkboxes, in no table."*
-3. **A sixth consumer appeared.** Part 3 of `2026-08-31-operator-visibility.md`
-   is an unwritten query-and-render layer over the run record. RATIONALE scored
-   five queries with no renderer in view.
+> an ontology that controls execution needs the emitter the RATIONALE said not
+> to build. That is not incoherent — it would be built for a reason the RATIONALE
+> never tested — but the reason must be the new one, argued on its own evidence,
+> **and not the analytics case arriving through a side door**.
 
-**RATIONALE's table is kept intact, and the revisit lives here, not there.**
-`ontology/RATIONALE.md` is capped at 40 lines by
-`tests/ontology/test_vocabulary.py::test_rationale_is_within_its_cap_and_covers_every_query`,
-and the file is *exactly* at that cap — the cap is an acceptance criterion of
-`SA-0001`, and a full file is what it is saying. Appending the revisit was tried
-and failed the suite. So the record of why the verdict moved is this document,
-and making it discoverable from RATIONALE.md is an open question (part 6).
+Two of the first draft's three grounds — that Q1 and Q3 rest on unmet
+conditions, and that a query-and-render layer is a sixth consumer — *are* the
+analytics case. Principle 56 names the error exactly: *"the honest response to
+'then let's make it operational' is a different experiment, not a re-reading of
+the first one."*
+
+So this design splits along what the record already permits.
+
+**Phase A needs no reopening of anything.** §9 names the vocabulary's two
+readers as *"the `shacl` gate and the `CONTEXT.md` cross-check"*. Generating the
+cross-checked half rather than hand-maintaining it strengthens an existing
+reader; it builds no emitter and makes nothing executable. Nothing in §9,
+Appendix O or RATIONALE speaks against it, and the defect it closes is measured
+above.
+
+**Everything past Phase A goes through Appendix O's spike, unchanged.** Not a
+re-reading of `SA-0001`, and not this document's argument. Appendix O specifies
+it: build §4.2.1's refusal predicate twice — once as the Python `intake` already
+needs, once as shapes over a hand-authored graph of in-flight tasks — and answer
+
+1. Does the shape form state a refusal the Python form leaves implicit?
+2. Does either catch a case the other misses, on the same fixtures?
+3. What does the graph cost to keep current, per scheduled task?
+4. Can the shape form be read by someone who has not read the Python?
+
+**"A yes on 1 and 4 with an acceptable 3 reopens §1.4. Anything else closes
+it."** This design does not predict that outcome and does not depend on it.
+
+**What a knowledge-graph goal does and does not change.** It is a genuinely new
+reason, of the kind Appendix O contemplates — but Appendix O already anticipated
+a new reason and still routed it through the spike. A goal changes what the
+spike is *for*, not whether it runs.
 
 ## 2. Two authorities, not one
-
-The framing that collided with RATIONALE was "the ontology is authoritative".
-Authoritative over *what* is the whole question, and there are two answers:
 
 - **The ontology is authoritative for vocabulary** — what the words mean.
 - **The ledger is authoritative for facts** — what happened in a run.
 
-Conflating them is what made the earlier framing read as a bid to replace
-`CONTEXT.md` wholesale, which RATIONALE had already refused. Separated, the two
-axes share the ontology and nothing else, and each can be built or abandoned
-without the other.
+Conflating them is what made the first draft read as a bid to replace
+`CONTEXT.md`, which RATIONALE had refused on its own evidence. Separated, the
+two axes share the ontology and nothing else.
 
-## 3. The graph is a derived read model
+## 3. If the spike reopens it: a derived read model
+
+Conditional on part 1's gate. Recorded now so the spike is run against a
+concrete proposal rather than an open question.
 
 ```
 cells ──▶ ledger.db  (SQL, write path, unchanged)
@@ -98,109 +136,108 @@ cells ──▶ ledger.db  (SQL, write path, unchanged)
 ontology/saffron.ttl (vocabulary) ──▶ generator ──▶ CONTEXT.md (+ drift gate)
 ```
 
-**The ledger stays the system of record; the graph is projected from it.** Four
-consequences, each load-bearing:
+**The ledger stays the system of record.** RATIONALE's case was that SQL serves
+the write path, and nothing here disputes it: a read model is additive, so
+abandoning it costs one module and no data.
 
-- **It preserves what RATIONALE actually defended.** Its case was that SQL
-  serves the write path. Nothing here disputes that. A read model is additive,
-  so abandoning it costs one module and no data.
-- **The emitter needs no new dependency.** N-Triples is line-based — one
-  `<s> <p> <o> .` per line — so *writing* it needs no library. Only *reading*
-  needs an engine, and reading happens in the report path, which never runs in a
-  cell. `pyoxigraph` becomes an optional `saffron[graph]` extra, not a runtime
-  dependency, and `pyproject.toml`'s stated constraint holds.
-- **The emitter reads the ledger and never writes it.** A bad emit costs one
-  command re-run and cannot corrupt the record.
-- **`test_no_dead_terms` stops being an obstacle and becomes the mechanism.**
-  Its rule — every `saffron:` term is referenced by a query or a shape, so that
-  the vocabulary is not *"an isomorphic re-encoding of the §4.1 ledger worth
-  nothing"* — is exactly the right bar. The 19 orphan terms earn their place by
-  being emitted and queried by a renderer that really reads them. **No exemption
-  class, and no thin queries written to clear the gate.**
+**The emitter needs no new dependency.** N-Triples is line-based, so *writing*
+it needs no library. Reading needs an engine — but note the constraint's exact
+words: *"nothing under `saffron/` imports either."* A `saffron/report/render.py`
+that imports `pyoxigraph` breaks that sentence literally even as an optional
+extra, and `tests/ontology/` already reads graphs inside the `tests` gate today.
+The honest statement is that the constraint holds in the *packaging* sense and
+must be amended in the *literal* sense; the spike should price that.
 
-## 4. Sequencing, and the deadline
+**`test_no_dead_terms` is a weaker mechanism than the first draft claimed.**
+`tests/ontology/ontology_paths.py` scans only `ontology/queries/*.rq` and
+`ontology/shapes/*.ttl`. A renderer under `saffron/` is **not** scanned, so a
+committed `.rq` satisfies the gate whether or not anything calls it — which is
+the shape of the thin query this design forbids one sentence later. A rule with
+no check behind it, in a document arguing for mechanism over assertion, is a
+defect. **Fix: the renderer loads its SPARQL from `ontology/queries/*.rq`**, so
+the file that satisfies the dead-term test is the same file the renderer
+executes.
 
-**This is two projects sharing one ontology, and they get separate plans.**
-Phase A is the vocabulary axis; Phases B–D are the run-record axis. They share
-`ontology/saffron.ttl` and nothing else — no module, no test, no schema. Phase A
-can ship, or be abandoned, without touching the emitter, and vice versa. Writing
-them as one plan would couple two things whose only real link is a file name.
+## 4. Sequencing — one plan, gated
 
-**Phase A — vocabulary.** Marker-delimited regions in `CONTEXT.md`'s run-record
-sections, a generator, and a drift test. Migrate the five closed sets *first*,
-because they are already asserted equal: a faithful generator produces a
-**zero-line diff**, which proves the renderer before it is trusted with anything
-new. Then promote terms as they earn readers. Independent of every later phase.
+**Phase A — vocabulary. Unconditional.**
+Marker-delimited regions in `CONTEXT.md`'s run-record sections, a generator, a
+drift test. **And the `sh:in` lists in `ontology/shapes/saffron-shapes.ttl`**,
+which are the third copy of the same closed sets and are enforced by a blocking
+gate — without them the success criterion in part 7 is unreachable. Migrate the
+five already-asserted sets first: a faithful generator produces a **zero-line
+diff**, which proves it before it is trusted with new content.
 
-**Phase B — the emitter.** `saffron/graph/emit.py`, validated by the **existing**
-SHACL shapes. The shapes, their lifecycle fixture and their negative fixtures
-are already written and tested; emitter correctness is validation against them
-rather than a new assertion framework.
+**Phase B — Appendix O's spike.** As specified, unmodified, with its four
+questions answered in writing. **This is a gate, not a formality.** Anything
+other than yes-on-1-and-4-with-acceptable-3 closes §1.4, and Phases C–E do not
+happen.
 
-**Phase C — the honest check.** Port `Q1`–`Q5` to run against *emitted* graphs
-instead of the hand-written fixture, and compare to the committed
-`ontology/queries/expected/*.csv`. **This phase can invalidate the premise.** If
-the queries are as painful as RATIONALE found, that is grounds to stop: keep the
-graph as an external analytical artifact and leave the plan's part 3 on SQL. Phase C is
-placed before the plan's part 3 depends on anything precisely so that stopping is cheap.
+**Phase C — the emitter.** Only if Phase B reopens it. Validated by the existing
+SHACL shapes and their fixtures.
 
-**Phase D — the plan's part 3, on the graph.** `SA-0035` becomes *"the queue's rows, from
-the graph"*; `SA-0036`–`SA-0039` follow.
+**Phase D — the query seam.** Port `Q1`–`Q5` to run against emitted graphs
+rather than the hand-authored fixture, compared to the committed
+`expected/*.csv`. A second off-ramp: if they are still better in SQL, stop and
+keep the graph as an external analytical artifact.
 
-**The deadline.** `saffron/report/render.py` is unwritten. Building it
-graph-first costs nothing extra today. Once `SA-0035`/`SA-0036` land against
-SQL, it is a rewrite of shipped, gated, reviewed code. The whole
-"foundational versus bolted-on" question reduces to that date.
+**Phase E — the plan's part 3 on the graph.** `SA-0035` becomes *"the queue's
+rows, from the graph"*.
 
-**`2026-08-31-operator-visibility.md` is amended, not forked.** `SA-0035`'s
-embedded spec text says "from the ledger", and the plan's part 3 dependency chain shifts.
-That plan has been renumbered twice already and says so; a fork would make a
-third numbering the reader has to reconcile.
+**The deadline, and its honest weight.** `saffron/report/render.py` is unwritten,
+so building it graph-first is free today and a rewrite once `SA-0035`/`SA-0036`
+land against SQL. That is a real cost of ordering, and it is **not** a reason to
+skip Phase B — a deadline is not evidence. If the plan's part 3 must ship first,
+it ships on SQL and Phase E becomes a later migration.
+
+**`2026-08-31-operator-visibility.md` is amended, not forked** — and only if
+Phase B reopens the question.
 
 ## 5. Testing
 
-- **Emitter:** SHACL validation of emitted triples against the existing shapes.
-- **Round trip:** known ledger fixture → emit → query → assert against the
-  committed `expected/*.csv`.
-- **Generator:** the committed `CONTEXT.md` equals the render. The first
-  migration must produce a zero-line diff (part 4, Phase A).
-- **Escaping is a security boundary, not formatting.** Findings and claims are
-  agent-authored and become RDF literals. A cell is untrusted, so a claim
-  containing a quote, a backslash or a newline must not be able to forge a
-  triple. A test asserts it, in the same spirit as `SA-0038`'s requirement that
-  an event carrying `<script>` render inert.
-- **Absent inputs are normal.** Every task that ran before `SA-0029` has no
-  `events.jsonl`. The emitter projects those tasks from SQL alone.
-- **Off the critical path:** a failed emit never fails a task. The graph is
-  derived and projected after the fact, so the emitter stays outside the
-  `error`/`fail` vocabulary rather than becoming a gate.
+- **Generator:** the committed `CONTEXT.md` and `saffron-shapes.ttl` equal the
+  render. First migration must be a zero-line diff (part 4, Phase A).
+- **Emitter (Phase C):** SHACL validation of emitted triples against the
+  existing shapes; round trip from a known ledger fixture to the committed
+  `expected/*.csv`.
+- **Escaping is a security boundary.** Agent-authored findings become RDF
+  literals, and a cell is untrusted: a claim containing a quote, a backslash or
+  a newline must not forge a triple. Tested, in the same spirit as `SA-0038`'s
+  requirement that an event carrying `<script>` render inert.
+- **Absent inputs are normal.** Tasks predating `SA-0029` have no
+  `events.jsonl`; the emitter projects them from SQL alone.
+- **Off the critical path:** a failed emit never fails a task.
 
 ## 6. What stays open, and is stated rather than closed
 
-- **The 56 `_Avoid_` lists stay hand-written.** They are enforced by a prek hook
-  reading `CONTEXT.md`'s settled-naming section. Modelling them in RDF would
-  mean rewriting that hook to read the graph, and nothing yet needs it.
+- **`Status` cannot be promoted.** `test_vocabulary_agrees_with_context.py`
+  asserts that `pass`/`fail`/`skip`/`error` are deliberately **not** `saffron:`
+  terms — EARL's outcomes stand for them, and the test fails if `saffron:pass`
+  is added. It is in the 19 above and generating `CONTEXT.md`'s Status line
+  means generating from EARL, not from `saffron:`. **Settle before Phase A.**
+- **The 56 `_Avoid_` lists stay hand-written**, enforced by the prek hook.
 - **Whole-system vocabulary stays in `CONTEXT.md`.** Only the run-record
-  sections are generated. `CONTEXT.md` names the whole system — repos, style,
-  the flywheel — and the graph names only the run record. That split is
-  `test_vocabulary_agrees_with_context.py`'s own stated premise and this design
-  keeps it.
-- **The `revert` gate's declaration.** `SA-0044` currently must not declare
-  `saffron:revert`, because the two sides cannot be reconciled from inside a
-  cell. Phase A removes that constraint. Until then the spec carries a note
-  saying so.
-
-- **A superseded document that does not say so.** `ontology/RATIONALE.md` still
-  reads as current, and its 40-line cap leaves no room for a pointer. Three ways
-  out, none taken here: raise the cap by one line and amend `SA-0001`'s
-  criterion; spend one of the 40 lines on the pointer, editing the record to
-  describe its own supersession; or leave it and rely on this document being
-  found first. The third is what ships today and it is the weakest, so this is
-  the first thing to settle, not the last.
+  sections are generated.
+- **IRI minting is unspecified.** Phase C must mint stable IRIs for ledger rows
+  and `prov:qualifiedAssociation` nodes — `lifecycle.ttl` uses named nodes, no
+  blanks — stable across re-emits, since `Q4`'s chain depends on it. Where the
+  emitted graph lives, and whether it is rebuilt whole, is also unstated.
+- **A superseded document that does not say so.** `ontology/RATIONALE.md` is at
+  its 40-line cap, so a pointer does not fit, and `saffron.ttl:125` still says
+  *"see RATIONALE.md"*. Raising the cap to 41 and amending `SA-0001`'s criterion
+  is two lines; leaving an ADR reading as current is a landmine. **Settle in
+  this PR.**
+- **`SA-0044`'s note** not to declare `saffron:revert` is a workaround Phase A
+  retires. Delete it then.
 
 ## 7. Success criterion
 
-A new core gate can be declared in `ontology/saffron.ttl` alone, and
-`CONTEXT.md` updates from it with the suite green — the defect measured above,
-closed. And `Q1`–`Q5` run against a graph the emitter produced from a real
-ledger, not a fixture written by hand.
+**Phase A:** a new core gate is declared in `ontology/saffron.ttl` alone, and
+`CONTEXT.md` **and** `saffron-shapes.ttl` update from it with all four checks
+green — `test_vocabulary_agrees_with_context`, both `test_no_dead_terms` cases,
+`test_shapes::test_the_lifecycle_graph_conforms` — and the blocking `shacl`
+gate passing. (The dead-term cases still require the new term to have a reader;
+Phase A does not exempt it, and must not.)
+
+**Phase B:** Appendix O's four questions answered in writing, and §1.4 either
+reopened or closed on that evidence.
