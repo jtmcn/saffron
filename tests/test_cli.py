@@ -1756,7 +1756,7 @@ def test_the_plan_checkpoint_still_rejects_what_the_refusal_could_not_decide(
 
     # The refusal cannot decide a glob against a glob — this is the gap the
     # plan checkpoint exists to close.
-    assert protected_touch_refusal(touches, protected) is None
+    assert protected_touch_refusal(touches, protected, []) is None
 
     raw = (
         "<output>"

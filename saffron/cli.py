@@ -214,11 +214,15 @@ def _protected_paths_at(
     `export_saffron_dir` call, deeper in preflight, is still there to say so
     properly once a cell actually starts.
 
-    Nothing is collected here, and that is the point: `git archive` fails on
-    an unmatched pathspec, so every repo without a `.saffron` at `base_sha`
-    reaches this handler. Reporting that as an unreadable policy is the
+    Nothing is collected in this handler, and that is the point: `git archive`
+    fails on an unmatched pathspec, so every repo without a `.saffron` at
+    `base_sha` reaches it. Reporting that as an unreadable policy is the
     absence-as-unreadability defect `_protected_paths` exists to avoid, one
-    function up."""
+    function up. A genuinely broken mirror is not lost with it: `session.py`
+    calls `export_saffron_dir` unguarded during preflight, *before* the image
+    build and before any container exists, so it raises to `main`'s handler
+    and exits `2` having spent nothing. (A missing `git` binary raises
+    `OSError`, not `GitError`, and never reached this handler at all.)"""
     try:
         exported = git_mirror.export_saffron_dir(mirror, base_sha, scratch)
     except git_mirror.GitError:

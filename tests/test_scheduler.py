@@ -1019,7 +1019,7 @@ def test_a_path_the_specs_own_forbidden_bars_is_not_a_collision(tmp_path, ledger
     `protected`, so a spec that has denied itself the path cannot reach it
     whatever `touches` covers. Refusing here would cost a night for a
     collision that cannot happen — which is why `_unmatched_criterion_path`
-    exempts the same list twenty lines above."""
+    exempts the same list."""
     directory = _spec_dir(tmp_path)
     # `docs/**` rather than a leading-`*` pattern: `_write_spec` emits touches
     # unquoted and YAML reads a leading `*` as an alias.
