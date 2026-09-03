@@ -3066,7 +3066,11 @@ def test_revert_reports_a_new_test_that_passed_without_its_source(
 ):
     """The theater case, reached through the real suite closure rather than
     called on `revert_gate` directly — the wiring's own witness that a
-    passing reverted test becomes a blocking new failure."""
+    passing reverted test becomes a blocking new failure.
+
+    The policy declares `test_paths`: without them core cannot tell a source
+    file from a test file, and `revert` skips rather than revert the tests it
+    is about to run."""
     base = _revert_tests("t.py::test_a")
     head = _revert_tests("t.py::test_a", "t.py::test_new")
     cell = _stub_the_runtime(monkeypatch, suites=(base, head, head, head, head))
@@ -3080,7 +3084,7 @@ def test_revert_reports_a_new_test_that_passed_without_its_source(
         tmp_path,
         cell=cell,
         turns=[_turn(_block(_PLAN)), _turn(), _turn(), _turn(), _turn()],
-        policy="gates: {tests: {}}\n",
+        policy='gates: {tests: {}}\nintegrity:\n  test_paths: ["tests/**"]\n',
         gates=("tests",),
     )
     assert outcome.state == "EXHAUSTED"
@@ -3142,17 +3146,23 @@ def test_revert_restores_before_committed_reads_the_tree(monkeypatch, tmp_path):
     # The changed source file, never the changed test file.
     assert cell.reverted == [["src/x.py"]]
     # Baseline: `prior` is empty, so `revert` skips without touching the
-    # worktree at all. Attempt 1: it reverts, re-runs, and restores before
-    # `committed` ever reads the tree.
+    # worktree at all. Attempt 1: it reads the tree *before* reverting — the
+    # restore checks out HEAD, so a source path with uncommitted work must be
+    # seen while that work still exists — then reverts, re-runs, and restores
+    # before `committed` ever reads the tree.
     assert order == [
         "run_suite",
         "dirty_paths",
         "run_suite",
+        "dirty_paths",
         "revert:enter",
         "run_gate",
         "revert:exit",
         "dirty_paths",
     ]
+    # The pre-revert read is not the one `committed` uses, and it is not
+    # optional: reading after the restore would always see a clean tree.
+    assert order.index("dirty_paths") < order.index("revert:enter")
 
 
 def test_revert_is_absent_when_the_repo_declares_no_tests_gate(monkeypatch, tmp_path):

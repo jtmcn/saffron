@@ -268,13 +268,31 @@ def _revert_source(container: str, tree_base: str, paths: list[str]) -> None:
 
 
 def _restore_source(container: str, paths: list[str]) -> None:
-    """Undo `_revert_source`: check every path back to HEAD, whichever of the
-    two operations above put it in its reverted state."""
-    done = _git(container, "checkout", "HEAD", "--", *paths)
-    if done.returncode != 0:
-        raise runtime.CellRuntimeError(
-            f"restore checkout failed: {done.stderr.strip()}"
-        )
+    """Undo `_revert_source`, partitioned the same way it is.
+
+    Measured: `git checkout HEAD -- <paths>` requires *every* pathspec to exist
+    in `HEAD` and aborts the whole checkout on the first that does not — it
+    restores nothing, not just that one path. A source file the diff *deleted*
+    is absent from `HEAD` and present at `tree_base`, so `_revert_source`
+    recreated it; handing it back here took the entire restore down with it and
+    left the tree fully reverted for `committed` and the host's salvage
+    checkpoints to act on. `changed_files` is computed `--no-renames`, so every
+    rename contributes one such delete.
+    """
+    at_head = [p for p in paths if _exists_at(container, "HEAD", p)]
+    absent = [p for p in paths if p not in at_head]
+    if at_head:
+        done = _git(container, "checkout", "HEAD", "--", *at_head)
+        if done.returncode != 0:
+            raise runtime.CellRuntimeError(
+                f"restore checkout failed: {done.stderr.strip()}"
+            )
+    if absent:
+        # `--ignore-unmatch`: the path may already be gone, and a restore that
+        # fails because the tree is already right is not a failure.
+        done = _git(container, "rm", "-f", "-q", "--ignore-unmatch", "--", *absent)
+        if done.returncode != 0:
+            raise runtime.CellRuntimeError(f"restore rm failed: {done.stderr.strip()}")
 
 
 @contextlib.contextmanager
@@ -293,8 +311,12 @@ def source_reverted(
     if not paths:
         yield
         return
-    _revert_source(container, tree_base, paths)
+    # The revert is inside the `try`, not before it: it is two git operations,
+    # and a second that fails after the first succeeded leaves half the source
+    # reverted with no restore attempted. Entering first costs one restore of an
+    # untouched tree in the worst case, which is a no-op.
     try:
+        _revert_source(container, tree_base, paths)
         yield
     finally:
         _restore_source(container, paths)

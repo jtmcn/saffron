@@ -976,6 +976,10 @@ def _drive_cell(
                         acceptance=spec.acceptance,
                         changed_files=changed,
                         test_paths=policy.integrity.test_paths,
+                        # Read before the revert, not after — but only if
+                        # the gate gets far enough to touch the tree, so the
+                        # baseline pass costs no container round trip.
+                        dirty=lambda: worktree.dirty_paths(container),
                         reverted=lambda paths: worktree.source_reverted(
                             container, spec.tree_base, paths
                         ),

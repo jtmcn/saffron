@@ -271,3 +271,145 @@ def test_a_reverted_run_that_enumerated_nothing_still_passes():
         run_tests=run_tests,
     )
     assert result.status == "pass", result
+
+
+def test_a_reverted_run_that_could_not_produce_a_result_is_a_skip_not_an_error():
+    """The gate's own canonical case, and `error` here ended the whole task.
+
+    `DESIGN.md` §5.4: *"a spec that lands source and tests together makes every
+    new test fail for the trivial reason and `revert` reports green."* Measured
+    on this repo's own `.saffron/gates/tests.py`: removing the module makes the
+    new tests fail to *import*, pytest exits on a collection error, no line
+    matches the gate's `path:line: word: message` regex and none carries the
+    `FAILED ` its fallback reads — so the gate reports `error`, not `fail`.
+    Mapped to `error` here it reached `session.aborted_gates`, which ends the
+    attempt: the gate would have killed every spec that ships a module with its
+    tests, which is most of them, and this one.
+    """
+
+    def run_tests(_subset):
+        return GateResult(
+            gate="tests",
+            status="error",
+            tool="pytest 8.3.2",
+            summary="pytest exited 2 with no parsed failures",
+        )
+
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", "t.py::test_new")],
+        acceptance=[],
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=run_tests,
+    )
+    assert result.status == "skip", result
+    assert result.status != "error", "an untrustworthy result ends the attempt"
+
+
+def test_a_repo_that_declares_no_test_paths_is_a_skip_and_never_reverts():
+    """`policy.integrity.test_paths` defaults to `[]`. With none declared every
+    changed file reads as source, so the gate would revert the very tests it is
+    about to run — and must not touch the worktree at all."""
+    log: list = []
+
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", "t.py::test_new")],
+        acceptance=[],
+        changed_files=["pkg/a.py", "t.py"],
+        test_paths=[],
+        reverted=lambda paths: _reverted(paths, log=log),
+        run_tests=lambda _s: _tests(),
+    )
+    assert result.status == "skip", result
+    assert log == [], "nothing may be reverted when source cannot be identified"
+
+
+def test_the_verdict_is_scoped_to_the_subset_not_the_whole_enumeration():
+    """A repo's `tests` gate is contractually asked for a subset, but nothing
+    stops it running the whole suite. The verdict must still be about the new
+    names only — judging every collected name would fail the task for every
+    pre-existing test that passes, which is all of them."""
+
+    def run_tests(_subset):
+        # Ignores its argument, as a mis-implemented repo gate would.
+        return _tests("t.py::test_a", "t.py::test_new", failed=("t.py::test_new",))
+
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", "t.py::test_new")],
+        acceptance=[],
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=run_tests,
+    )
+    assert result.status == "pass", result
+
+
+def test_the_tool_is_the_one_that_actually_ran():
+    """§5.4 and Appendix H: a pass without `tool` is indistinguishable from a
+    gate that never ran, and this gate — unlike `census`/`criteria` — does
+    execute one."""
+
+    def run_tests(subset):
+        return _tests(*subset, failed=tuple(subset))
+
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", "t.py::test_new")],
+        acceptance=[],
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=run_tests,
+    )
+    assert result.status == "pass"
+    assert result.tool == "pytest 8.3.2"
+
+
+def test_a_declared_witness_joins_the_subset_even_when_it_existed_at_base():
+    """The second half of the spec's subset claim. `criteria._judge` requires a
+    non-`preserves` witness to be *not* green at base, so a criterion naming a
+    test that already existed there is claiming this change is what makes it
+    pass — and whether it passes without the source is exactly this gate's
+    question. The set difference alone never reaches it, because the name is on
+    both sides."""
+
+    def run_tests(subset):
+        # Theatre: the declared witness passes with its source reverted.
+        return _tests(*subset)
+
+    result = revert_gate(
+        prior=[_tests("t.py::test_w")],
+        results=[_tests("t.py::test_w")],
+        acceptance=[Criterion(claim="it works", witness="t.py::test_w")],
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=run_tests,
+    )
+    assert result.status == "fail", result
+    assert [f.file for f in result.failures] == ["t.py::test_w"]
+
+
+def test_a_declared_witness_the_head_run_never_collected_is_not_asserted():
+    """`declared & set(after)`, not `declared`: a witness no runner enumerated
+    at head is a `criteria` failure to report, not a name this gate may claim
+    ran and passed. Reverting for it would ask the runner about a test that
+    does not exist."""
+    log: list = []
+
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a")],
+        acceptance=[Criterion(claim="it works", witness="t.py::nonexistent")],
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        reverted=lambda paths: _reverted(paths, log=log),
+        run_tests=lambda _s: _tests(),
+    )
+    assert result.status == "skip", result
+    assert log == [], "an unenumerated witness must not reach the worktree"

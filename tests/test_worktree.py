@@ -747,3 +747,134 @@ def test_a_stacked_worktree_holds_the_parents_real_commits_and_only_the_childs_n
     assert "also the parent" in whole_patch
     assert "from the child" in whole_patch
     assert worktree.commits_ahead(container, root) == 3
+
+
+# --- source_reverted, against a real git repo on the host ------------------
+#
+# `_git` is a one-function seam over `runtime.exec_`, so these run the real
+# `_revert_source`/`_restore_source`/`_exists_at` against real git without a
+# container. `-m cell` is what the *isolation* of a worktree needs; the tree
+# arithmetic here needs only git, and leaving it to a cell-marked test is how
+# the whole of this code shipped with `make check` saying nothing about it.
+
+
+def _host_git(tmp_path, monkeypatch):
+    """Point `worktree._git` at a real repo in `tmp_path` instead of a cell."""
+
+    def exec_(_container, command, *, workdir=None, timeout_s=900):
+        done = subprocess.run(
+            command, cwd=tmp_path, capture_output=True, text=True, check=False
+        )
+        return runtime.Completed(done.returncode, done.stdout, done.stderr)
+
+    monkeypatch.setattr(worktree.runtime, "exec_", exec_)
+
+
+def _commit(tmp_path, message):
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", message],
+        cwd=tmp_path,
+        check=True,
+    )
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def _porcelain(tmp_path):
+    return subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def _repo_with_a_diff(tmp_path, monkeypatch):
+    """A repo whose HEAD commit modified one source file, deleted a second and
+    added a third — the three shapes `changed_files` can carry. Renames arrive
+    as the delete, because the diff is computed `--no-renames`."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "kept.py").write_text("kept = 1\n")
+    (tmp_path / "src" / "gone.py").write_text("gone = 1\n")
+    base = _commit(tmp_path, "base")
+
+    (tmp_path / "src" / "kept.py").write_text("kept = 2\n")
+    (tmp_path / "src" / "gone.py").unlink()
+    (tmp_path / "src" / "added.py").write_text("added = 1\n")
+    _commit(tmp_path, "the diff")
+
+    _host_git(tmp_path, monkeypatch)
+    return base, ["src/kept.py", "src/gone.py", "src/added.py"]
+
+
+def test_the_reverted_tree_is_the_source_as_it_stood_at_the_base(tmp_path, monkeypatch):
+    base, paths = _repo_with_a_diff(tmp_path, monkeypatch)
+    inside = {}
+
+    with worktree.source_reverted("c", base, paths):
+        inside["kept"] = (tmp_path / "src" / "kept.py").read_text()
+        inside["gone_exists"] = (tmp_path / "src" / "gone.py").exists()
+        inside["added_exists"] = (tmp_path / "src" / "added.py").exists()
+
+    # Modified goes back, deleted comes back, added goes away — the last is
+    # what makes a spec landing a module with its tests break the import.
+    assert inside == {"kept": "kept = 1\n", "gone_exists": True, "added_exists": False}
+
+
+def test_a_diff_that_deletes_a_source_file_still_restores_every_other_path(
+    tmp_path, monkeypatch
+):
+    """`git checkout HEAD -- <paths>` aborts the whole checkout on the first
+    pathspec absent from HEAD, restoring none of the others. A deleted source
+    file is exactly that, every rename contributes one, and the tree was left
+    fully reverted for `committed` and the salvage checkpoints to act on."""
+    base, paths = _repo_with_a_diff(tmp_path, monkeypatch)
+
+    with worktree.source_reverted("c", base, paths):
+        pass
+
+    assert (tmp_path / "src" / "kept.py").read_text() == "kept = 2\n"
+    assert not (tmp_path / "src" / "gone.py").exists()
+    assert (tmp_path / "src" / "added.py").read_text() == "added = 1\n"
+    assert _porcelain(tmp_path) == ""
+
+
+def test_the_tree_is_restored_when_the_body_raises(tmp_path, monkeypatch):
+    base, paths = _repo_with_a_diff(tmp_path, monkeypatch)
+
+    with pytest.raises(RuntimeError), worktree.source_reverted("c", base, paths):
+        raise RuntimeError("the reverted run crashed")
+
+    assert (tmp_path / "src" / "kept.py").read_text() == "kept = 2\n"
+    assert _porcelain(tmp_path) == ""
+
+
+def test_a_revert_that_fails_halfway_still_restores(tmp_path, monkeypatch):
+    """The revert is two git operations. A second that fails after the first
+    succeeded used to raise with half the source reverted and no restore
+    attempted, because the mutation sat outside the `try`."""
+    base, paths = _repo_with_a_diff(tmp_path, monkeypatch)
+    real = worktree._git
+
+    def flaky(container, *args):
+        if args[0] == "rm" and "--ignore-unmatch" not in args:
+            return runtime.Completed(1, "", "rm exploded")
+        return real(container, *args)
+
+    monkeypatch.setattr(worktree, "_git", flaky)
+
+    with (
+        pytest.raises(runtime.CellRuntimeError),
+        worktree.source_reverted("c", base, paths),
+    ):
+        raise AssertionError("the body must not run")
+
+    assert _porcelain(tmp_path) == ""

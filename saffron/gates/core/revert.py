@@ -33,6 +33,10 @@ Reverted = Callable[[list[str]], AbstractContextManager[None]]
 # discovered here; core knows nothing about which gate fills the role (§2.1).
 RunTests = Callable[[list[str]], GateResult]
 
+# Read lazily, like the two above: the early skips must not cost the caller a
+# container round trip, and the baseline pass takes one of them every time.
+DirtyPaths = Callable[[], Sequence[str]]
+
 
 def _collected(results: list[GateResult]) -> list[str] | None:
     """`census._collected`'s own route, copied rather than imported: `census`
@@ -50,6 +54,7 @@ def revert_gate(
     acceptance: Sequence[Criterion],
     changed_files: Sequence[str],
     test_paths: Sequence[str],
+    dirty: DirtyPaths = tuple,
     reverted: Reverted,
     run_tests: RunTests,
 ) -> GateResult:
@@ -75,7 +80,16 @@ def revert_gate(
     # specified to be green at base and at head, and requiring it to fail
     # without the source would contradict its own declaration (§5.4).
     preserved = {c.witness for c in acceptance if c.preserves}
-    subset = sorted((set(after) - set(before)) - preserved)
+    # The union, not the difference alone: a criterion's witness is declared to
+    # be *not* green at base (`criteria._judge` enforces that for anything not
+    # `preserves`), so it is a name this change is claiming to make pass — and
+    # a name whose source dependence is exactly what this gate asks about. A
+    # witness that already appears at head joins by set union anyway; one the
+    # runner did not enumerate at head is dropped below rather than asserted.
+    # No `preserves` filter here: the `- preserved` below already removes them,
+    # and a second guard for the same thing is a branch no test can kill.
+    declared = {c.witness for c in acceptance}
+    subset = sorted(((set(after) - set(before)) | (declared & set(after))) - preserved)
     if not subset:
         return GateResult(
             gate="revert", status="skip", summary="the diff adds no new test"
@@ -83,6 +97,17 @@ def revert_gate(
 
     # File-level, not hunk-level (out of scope, `docs/BACKLOG.md`): a changed
     # file matching none of the repo's declared test paths is source.
+    if not test_paths:
+        # A fourth kind of nothing, and it must be caught before the worktree is
+        # touched: with no declared test paths every changed file reads as
+        # source, so the gate would revert the very tests it is about to run.
+        # `policy.integrity.test_paths` defaults to `[]`, so this is every repo
+        # that has not declared them.
+        return GateResult(
+            gate="revert",
+            status="skip",
+            summary="the repo declares no test paths, so source cannot be told from test",
+        )
     source = [
         p for p in changed_files if not any(matches(p, pat) for pat in test_paths)
     ]
@@ -93,9 +118,36 @@ def revert_gate(
             summary="the diff has no source outside the repo's declared test paths",
         )
 
+    # The restore checks out `HEAD`, not the tree as it stood a moment ago, so
+    # an uncommitted edit to a source path does not survive this gate — and
+    # `committed` runs next and would report the tree clean, which is the one
+    # gate whose whole job is to notice that it is not. Refusing to run is the
+    # only honest answer: no evidence about theatre is worth destroying the
+    # agent's uncommitted work and blinding the gate that would have caught it.
+    if collides := sorted(set(dirty()) & set(source)):
+        return GateResult(
+            gate="revert",
+            status="skip",
+            summary=(
+                "uncommitted changes to source this gate would revert: "
+                f"{', '.join(collides[:3])} — restoring to HEAD would destroy "
+                "them and hide them from `committed`"
+            ),
+        )
+
+    reverted_result: GateResult | None = None
+    run_failed: Exception | None = None
     try:
         with reverted(source):
-            reverted_result = run_tests(subset)
+            # Recorded rather than raised, so the `with` unwinds normally and
+            # the restore in its `finally` still runs — then reported on its
+            # own below. An exception out of the repo's `tests` gate is not a
+            # failed checkout, and one message for both sends the operator to
+            # the wrong subsystem.
+            try:
+                reverted_result = run_tests(subset)
+            except Exception as exc:  # noqa: BLE001 — reported below, not swallowed
+                run_failed = exc
     except Exception as exc:
         # A checkout or a restore that did not happen means this gate never
         # ran — infrastructure, charged to nobody, never the task's `fail`.
@@ -105,13 +157,36 @@ def revert_gate(
             summary=f"could not revert or restore the source — {exc}",
         )
 
-    if reverted_result.status not in ("pass", "fail"):
+    if run_failed is not None or reverted_result is None:
+        # The tool could not be executed at all. Unlike a result it *did*
+        # return (below), this is the gate breaking, so it stays `error`.
         return GateResult(
             gate="revert",
             status="error",
+            summary=f"the reverted run could not be executed — {run_failed}",
+        )
+    if reverted_result.status not in ("pass", "fail"):
+        # **Not `error`, and this is the whole gate's usability.** `error` ends
+        # the attempt through `session.aborted_gates` — so mapping this here
+        # killed the task in the gate's own canonical case. Measured: a spec
+        # that lands a module and its tests together has its module removed by
+        # `_revert_source`, the tests then fail to *import*, and this repo's
+        # `tests` gate reports `error` ("pytest exited N with no parsed
+        # failures") rather than `fail`, because a collection error prints no
+        # line its regex or its `FAILED ` fallback can read. `DESIGN.md` §5.4
+        # says that exact case must report green.
+        #
+        # `skip` rather than `pass`, for the reason the three nothings above
+        # are skips: a run that produced no trustworthy result is not evidence
+        # that these tests failed without their source, only that none of them
+        # was *seen* to pass. Non-blocking either way, and honest about which.
+        return GateResult(
+            gate="revert",
+            status="skip",
             summary=(
-                "the reverted run did not produce a trustworthy result: "
-                f"{reverted_result.status}"
+                "the reverted run produced no trustworthy result "
+                f"({reverted_result.status}) — the new tests could not run "
+                "without their source, which is not evidence either way"
             ),
         )
 
@@ -162,6 +237,7 @@ def revert_gate(
         return GateResult(
             gate="revert",
             status="fail",
+            tool=reverted_result.tool,
             failures=[
                 Failure(
                     file=name,
@@ -175,5 +251,9 @@ def revert_gate(
     return GateResult(
         gate="revert",
         status="pass",
+        # The tool that actually ran, never a literal (§5.4, Appendix H): this
+        # gate is unlike `census`/`criteria` in that it does execute one, and a
+        # pass without it is indistinguishable from a gate that never ran.
+        tool=reverted_result.tool,
         summary=f"{len(subset)} new test(s) failed without their source, as required",
     )
