@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -800,7 +801,9 @@ def _repo_with_a_diff(tmp_path, monkeypatch):
     """A repo whose HEAD commit modified one source file, deleted a second and
     added a third — the three shapes `changed_files` can carry. Renames arrive
     as the delete, because the diff is computed `--no-renames`."""
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "kept.py").write_text("kept = 1\n")
     (tmp_path / "src" / "gone.py").write_text("gone = 1\n")

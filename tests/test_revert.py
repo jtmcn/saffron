@@ -83,12 +83,17 @@ def test_a_new_test_that_passes_without_the_source_is_a_failure():
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
+        dirty=tuple,
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=run_tests,
     )
     assert result.status == "fail"
     assert [f.file for f in result.failures] == ["t.py::test_new"]
     assert result.failures[0].code == "passed-without-source"
+    # §5.4 / Appendix H: obtained from the run that happened, on this branch as
+    # much as on the passing one — a verdict without it reads as a gate that
+    # never ran.
+    assert result.tool == "pytest 8.3.2"
     # And the restore still ran on the passing (green) path, not only the
     # exceptional ones.
     assert ("restore", ["pkg/a.py"]) in log
@@ -112,6 +117,7 @@ def test_the_subset_is_the_new_names_and_excludes_a_preserved_witness():
         ],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
+        dirty=tuple,
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
     )
@@ -130,6 +136,7 @@ def test_the_source_is_restored_when_the_run_raises():
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
+        dirty=tuple,
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=run_tests,
     )
@@ -150,6 +157,7 @@ def test_a_restore_that_failed_is_also_an_error():
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
+        dirty=tuple,
         reverted=lambda paths: _reverted(paths, log=[], fail_on_exit=True),
         run_tests=lambda subset: _tests(*subset, failed=tuple(subset)),
     )
@@ -163,6 +171,7 @@ def test_a_checkout_that_failed_is_an_error_not_a_failure():
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
+        dirty=tuple,
         reverted=lambda paths: _reverted(paths, log=[], fail_on_enter=True),
         run_tests=_refuse_run,
     )
@@ -195,6 +204,7 @@ def test_each_kind_of_nothing_to_revert_is_a_skip():
             acceptance=[],
             changed_files=changed_files,
             test_paths=[_TESTS],
+            dirty=tuple,
             reverted=_refuse,
             run_tests=_refuse_run,
         )
@@ -220,6 +230,7 @@ def test_a_reverted_run_keyed_on_exception_types_is_a_skip_not_a_failure():
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
+        dirty=tuple,
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
     )
@@ -244,6 +255,7 @@ def test_a_reverted_run_that_did_not_enumerate_is_a_skip():
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
+        dirty=tuple,
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
     )
@@ -267,6 +279,7 @@ def test_a_reverted_run_that_enumerated_nothing_still_passes():
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
+        dirty=tuple,
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
     )
@@ -301,6 +314,7 @@ def test_a_reverted_run_that_could_not_produce_a_result_is_a_skip_not_an_error()
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
+        dirty=tuple,
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
     )
@@ -320,6 +334,7 @@ def test_a_repo_that_declares_no_test_paths_is_a_skip_and_never_reverts():
         acceptance=[],
         changed_files=["pkg/a.py", "t.py"],
         test_paths=[],
+        dirty=tuple,
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=lambda _s: _tests(),
     )
@@ -343,6 +358,7 @@ def test_the_verdict_is_scoped_to_the_subset_not_the_whole_enumeration():
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
+        dirty=tuple,
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
     )
@@ -363,6 +379,7 @@ def test_the_tool_is_the_one_that_actually_ran():
         acceptance=[],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
+        dirty=tuple,
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
     )
@@ -388,6 +405,7 @@ def test_a_declared_witness_joins_the_subset_even_when_it_existed_at_base():
         acceptance=[Criterion(claim="it works", witness="t.py::test_w")],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
+        dirty=tuple,
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
     )
@@ -408,8 +426,83 @@ def test_a_declared_witness_the_head_run_never_collected_is_not_asserted():
         acceptance=[Criterion(claim="it works", witness="t.py::nonexistent")],
         changed_files=["pkg/a.py"],
         test_paths=[_TESTS],
+        dirty=tuple,
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=lambda _s: _tests(),
     )
     assert result.status == "skip", result
     assert log == [], "an unenumerated witness must not reach the worktree"
+
+
+def test_uncommitted_work_on_a_path_this_would_revert_is_a_skip():
+    """The guard's own witness, and the reason it exists is destruction rather
+    than a wrong verdict. The restore checks out `HEAD`, not the tree as it
+    stood a moment ago, so an uncommitted edit to a source path does not
+    survive this gate — and `committed` runs immediately after and would then
+    report the tree clean, which is the one gate whose whole job is noticing
+    that it is not. No evidence about theater is worth that trade."""
+
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", "t.py::test_new")],
+        acceptance=[],
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        dirty=lambda: ["pkg/a.py"],
+        # Never entered: refusing is how this proves the worktree was untouched.
+        reverted=_refuse,
+        run_tests=_refuse_run,
+    )
+    assert result.status == "skip", result
+    assert "pkg/a.py" in result.summary
+
+
+def test_uncommitted_work_somewhere_else_does_not_stop_the_gate():
+    """The other side of the same operator. A guard that skipped on *any* dirty
+    path would silence the gate on almost every attempt — the agent's tree is
+    dirty by construction while it works — and inverting the set operation is a
+    one-character slip that leaves the whole suite green."""
+    log: list = []
+
+    def run_tests(subset):
+        return _tests(*subset, failed=tuple(subset))
+
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", "t.py::test_new")],
+        acceptance=[],
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        dirty=lambda: ["docs/unrelated.md", "tests/test_new.py"],
+        reverted=lambda paths: _reverted(paths, log=log),
+        run_tests=run_tests,
+    )
+    assert result.status == "pass", result
+    assert ("revert", ["pkg/a.py"]) in log
+
+
+def test_the_dirty_read_happens_before_anything_is_reverted():
+    """Ordering, not just presence: read after the restore and it always sees a
+    clean tree, so the guard would be dead code that still passes both tests
+    above."""
+    order: list = []
+
+    def dirty():
+        order.append("dirty")
+        return []
+
+    def reverted(paths):
+        order.append("revert")
+        return _reverted(paths, log=[])
+
+    revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", "t.py::test_new")],
+        acceptance=[],
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        dirty=dirty,
+        reverted=reverted,
+        run_tests=lambda subset: _tests(*subset, failed=tuple(subset)),
+    )
+    assert order == ["dirty", "revert"]

@@ -33,8 +33,10 @@ Reverted = Callable[[list[str]], AbstractContextManager[None]]
 # discovered here; core knows nothing about which gate fills the role (§2.1).
 RunTests = Callable[[list[str]], GateResult]
 
-# Read lazily, like the two above: the early skips must not cost the caller a
-# container round trip, and the baseline pass takes one of them every time.
+# Read lazily, like the two above, so the skips that never touch the worktree
+# cost no container round trip. Required, and for the reason `CLAUDE.md` gives
+# for cell creation's `network`/`env`: this one fails *open*, and open here is
+# the agent's uncommitted work silently overwritten.
 DirtyPaths = Callable[[], Sequence[str]]
 
 
@@ -54,17 +56,20 @@ def revert_gate(
     acceptance: Sequence[Criterion],
     changed_files: Sequence[str],
     test_paths: Sequence[str],
-    dirty: DirtyPaths = tuple,
+    dirty: DirtyPaths,
     reverted: Reverted,
     run_tests: RunTests,
 ) -> GateResult:
     """New tests, run with their own source reverted, must not pass.
 
-    `skip` is not evidence, and there are three different kinds of nothing to
-    revert: no readable enumeration at base (nothing to subtract from), a diff
-    that adds no test (the subset is empty), and a diff whose changed files
-    are entirely inside the repo's declared test paths (nothing to revert).
-    None of the three touches `reverted` or `run_tests`.
+    `skip` is not evidence, and it is the answer to five different things, none
+    of which touches `reverted` or `run_tests`: no readable enumeration at base
+    (nothing to subtract from), a diff that adds no test (the subset is empty),
+    a repo that declares no test paths (source cannot be told from test), a
+    diff whose changed files are entirely inside those paths (nothing to
+    revert), and uncommitted work on a path this would revert (the restore
+    would destroy it). A sixth `skip` comes later and does touch both: a
+    reverted run that returned no trustworthy result.
     """
     before = _collected(prior)
     after = _collected(results)
@@ -88,6 +93,12 @@ def revert_gate(
     # runner did not enumerate at head is dropped below rather than asserted.
     # No `preserves` filter here: the `- preserved` below already removes them,
     # and a second guard for the same thing is a branch no test can kill.
+    #
+    # ponytail: a witness that was red at base *by flake* is pulled in by this
+    # union, and reported as theater if it passes reverted — blocking, and no
+    # repair turn can fix a test that is fine. §5.4 already names the flaky
+    # witness as a live `criteria` hole; this widens the same hole rather than
+    # opening a new one, and the spec's own subset claim is what asks for it.
     declared = {c.witness for c in acceptance}
     subset = sorted(((set(after) - set(before)) | (declared & set(after))) - preserved)
     if not subset:
@@ -95,8 +106,12 @@ def revert_gate(
             gate="revert", status="skip", summary="the diff adds no new test"
         )
 
-    # File-level, not hunk-level (out of scope, `docs/BACKLOG.md`): a changed
-    # file matching none of the repo's declared test paths is source.
+    # File-level, not hunk-level: a changed file matching none of the repo's
+    # declared test paths is source.
+    #
+    # ponytail: a file that is half test and half source is therefore reverted
+    # whole or not at all — the spec's own Out of scope names this and asks for
+    # the marker. `docs/BACKLOG.md` item 49 carries the sibling gap.
     if not test_paths:
         # A fourth kind of nothing, and it must be caught before the worktree is
         # touched: with no declared test paths every changed file reads as
@@ -122,7 +137,7 @@ def revert_gate(
     # an uncommitted edit to a source path does not survive this gate — and
     # `committed` runs next and would report the tree clean, which is the one
     # gate whose whole job is to notice that it is not. Refusing to run is the
-    # only honest answer: no evidence about theatre is worth destroying the
+    # only honest answer: no evidence about theater is worth destroying the
     # agent's uncommitted work and blinding the gate that would have caught it.
     if collides := sorted(set(dirty()) & set(source)):
         return GateResult(
@@ -158,8 +173,13 @@ def revert_gate(
         )
 
     if run_failed is not None or reverted_result is None:
-        # The tool could not be executed at all. Unlike a result it *did*
-        # return (below), this is the gate breaking, so it stays `error`.
+        # ponytail: unreachable through `runner.run_gate`, which turns every
+        # failure it has — `GateNotExecutable`, a timeout, unparseable stdout,
+        # a missing `tool` — into `GateResult(status="error")`, i.e. the branch
+        # below. This catches a `run_tests` that raises outright, which only a
+        # different injection could do. Kept because the two are genuinely
+        # different facts and collapsing them is how the `error`/`fail` rule
+        # gets lost.
         return GateResult(
             gate="revert",
             status="error",
@@ -184,9 +204,9 @@ def revert_gate(
             gate="revert",
             status="skip",
             summary=(
-                "the reverted run produced no trustworthy result "
-                f"({reverted_result.status}) — the new tests could not run "
-                "without their source, which is not evidence either way"
+                f"the reverted run returned {reverted_result.status} and no "
+                "readable verdict — no new test was seen to pass without its "
+                "source, which is not the same as one having failed"
             ),
         )
 
