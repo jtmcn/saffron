@@ -80,6 +80,7 @@ saffron:integrity a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking
 saffron:census    a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
 saffron:committed a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
 saffron:criteria  a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
+saffron:revert    a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
 
 saffron:GateRole a owl:Class ; rdfs:label "gate role" ;
     rdfs:comment "A name in the contract. The repo supplies the executable; core supplies the meaning (§5.4)." .

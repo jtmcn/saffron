@@ -82,7 +82,7 @@ saffron:CoreGateShape a sh:NodeShape ;
     sh:targetClass saffron:CoreGate ;
     sh:in ( saffron:scope saffron:size saffron:secrets
             saffron:integrity saffron:census saffron:committed
-            saffron:criteria ) .
+            saffron:criteria saffron:revert ) .
 
 saffron:GateRoleShape a sh:NodeShape ;
     sh:targetClass saffron:GateRole ;
@@ -105,7 +105,8 @@ saffron:ContractGateShape a sh:NodeShape ;
 # the empty one, and only `sh:in` is vacuous when there are no values.
 saffron:CoreGateBlockingShape a sh:NodeShape ;
     sh:targetNode saffron:scope, saffron:secrets, saffron:integrity,
-                  saffron:census, saffron:committed, saffron:criteria ;
+                  saffron:census, saffron:committed, saffron:criteria,
+                  saffron:revert ;
     sh:property [ sh:path saffron:blockingAt ; sh:in ( saffron:alwaysBlocking ) ] .
 
 # The one core gate a risk tier moves, and the correction `SA-0001` forced on the

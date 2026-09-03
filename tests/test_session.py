@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import itertools
 import json
@@ -636,6 +637,8 @@ class _Cell:
         self.failed: list[str] = []
         self.preflight: list[str] = []
         self.gate_paths: list[list[str]] = []
+        self.order: list[str] = []
+        self.reverted: list[list[str]] = []
 
 
 _DIFF = """diff --git a/src/x.py b/src/x.py
@@ -768,6 +771,17 @@ def _stub_the_runtime(
 
     monkeypatch.setattr("saffron.cell.worktree.changed_files", _changed_files)
     monkeypatch.setattr("saffron.cell.worktree.dirty_paths", lambda container: [])
+
+    @contextlib.contextmanager
+    def _source_reverted(_container, _tree_base, paths):
+        # No git, no container: records what `revert_gate` was asked to
+        # revert and stands in for `worktree.source_reverted`'s own
+        # restore-in-a-finally guarantee, which is exercised directly in
+        # `tests/test_revert.py`.
+        cell.reverted.append(list(paths))
+        yield
+
+    monkeypatch.setattr("saffron.cell.worktree.source_reverted", _source_reverted)
 
     def _commit_dirty(_container, message):
         cell.checkpointed.append(message)
@@ -3018,6 +3032,155 @@ def test_the_criteria_gate_skips_for_a_spec_that_declares_no_witnesses(
     )
     result = next(r for r in outcome.gates if r.gate == "criteria")
     assert result.status == "skip"
+
+
+def _revert_tests(*names: str) -> list[GateResult]:
+    return [
+        GateResult(
+            gate="tests", status="pass", tool="pytest 8.3.2", collected=list(names)
+        )
+    ]
+
+
+def _revert_run_gate(
+    _name, _executable, *, cwd, subset=None, executor=None, timeout_s=900, fails=True
+):
+    """A `run_gate` fake for the `revert` re-run: every name in `subset`
+    fails when `fails` (standing in for the repo's real `tests` gate keying
+    failures on node ids, `DESIGN.md` §5.4), or passes anyway — the theater
+    case — when it does not."""
+    subset = list(subset or [])
+    return GateResult(
+        gate="tests",
+        status="fail" if subset and fails else "pass",
+        tool="pytest 8.3.2",
+        collected=subset,
+        failures=[Failure(file=n, code=n, message="assert") for n in subset]
+        if fails
+        else [],
+    )
+
+
+def test_revert_reports_a_new_test_that_passed_without_its_source(
+    monkeypatch, tmp_path
+):
+    """The theater case, reached through the real suite closure rather than
+    called on `revert_gate` directly — the wiring's own witness that a
+    passing reverted test becomes a blocking new failure.
+
+    The policy declares `test_paths`: without them core cannot tell a source
+    file from a test file, and `revert` skips rather than revert the tests it
+    is about to run."""
+    base = _revert_tests("t.py::test_a")
+    head = _revert_tests("t.py::test_a", "t.py::test_new")
+    cell = _stub_the_runtime(monkeypatch, suites=(base, head, head, head, head))
+    monkeypatch.setattr(
+        "saffron.gates.runner.run_gate",
+        lambda *a, **k: _revert_run_gate(*a, **k, fails=False),
+    )
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn(), _turn(), _turn()],
+        policy='gates: {tests: {}}\nintegrity:\n  test_paths: ["tests/**"]\n',
+        gates=("tests",),
+    )
+    assert outcome.state == "EXHAUSTED"
+    result = next(r for r in outcome.gates if r.gate == "revert")
+    assert result.status == "fail"
+    assert [f.code for f in result.failures] == ["passed-without-source"]
+
+
+def test_revert_restores_before_committed_reads_the_tree(monkeypatch, tmp_path):
+    """`committed` runs immediately after `revert` in `_suite`; if the
+    restore ran late, a dirty tree from the revert would already have been
+    measured and mis-blamed on the agent (§5.4). Also proves
+    `policy.integrity.test_paths` — the repo's declared test-path
+    vocabulary, reused rather than a second field — reaches `revert`: the
+    changed test file is excluded from what it reverts."""
+    cell = _stub_the_runtime(monkeypatch, changed=("src/x.py", "tests/test_x.py"))
+    order: list[str] = []
+    scripted = iter(
+        [_revert_tests("t.py::test_a"), _revert_tests("t.py::test_a", "t.py::test_new")]
+    )
+
+    def _run_suite(gates, **_kwargs):
+        order.append("run_suite")
+        return next(scripted, [])
+
+    @contextlib.contextmanager
+    def _source_reverted(_container, _tree_base, paths):
+        order.append("revert:enter")
+        cell.reverted.append(list(paths))
+        yield
+        order.append("revert:exit")
+
+    def _dirty_paths(_container):
+        order.append("dirty_paths")
+        return []
+
+    def _run_gate(
+        _name, _executable, *, cwd, subset=None, executor=None, timeout_s=900
+    ):
+        order.append("run_gate")
+        return _revert_run_gate(
+            _name, _executable, cwd=cwd, subset=subset, executor=executor
+        )
+
+    monkeypatch.setattr("saffron.gates.runner.run_suite", _run_suite)
+    monkeypatch.setattr("saffron.cell.worktree.source_reverted", _source_reverted)
+    monkeypatch.setattr("saffron.cell.worktree.dirty_paths", _dirty_paths)
+    monkeypatch.setattr("saffron.gates.runner.run_gate", _run_gate)
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        policy='gates: {tests: {}}\nintegrity:\n  test_paths: ["tests/**"]\n',
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    # The changed source file, never the changed test file.
+    assert cell.reverted == [["src/x.py"]]
+    # Baseline: `prior` is empty, so `revert` skips without touching the
+    # worktree at all. Attempt 1: it reads the tree *before* reverting — the
+    # restore checks out HEAD, so a source path with uncommitted work must be
+    # seen while that work still exists — then reverts, re-runs, and restores
+    # before `committed` ever reads the tree.
+    assert order == [
+        "run_suite",
+        "dirty_paths",
+        "run_suite",
+        "dirty_paths",
+        "revert:enter",
+        "run_gate",
+        "revert:exit",
+        "dirty_paths",
+    ]
+    # That the attempt-1 read precedes the revert is the gate's own contract,
+    # witnessed in `test_revert.py`; the exact list above is what pins the
+    # *wiring* — that `_suite` asks for it at all, and asks once per call.
+
+
+def test_revert_is_absent_when_the_repo_declares_no_tests_gate(monkeypatch, tmp_path):
+    """A repo declaring no `tests` role has no runner for `revert` to
+    re-invoke at all, so it is left out of the suite entirely — unlike
+    `census`/`criteria`'s unconditional `skip`, `revert` never touches the
+    worktree for a role that does not exist — the default `gates: {}`
+    policy every other test in this module drives."""
+    base = _revert_tests("t.py::test_a")
+    head = _revert_tests("t.py::test_a", "t.py::test_new")
+    cell = _stub_the_runtime(monkeypatch, suites=(base, head))
+
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert not [r for r in outcome.gates if r.gate == "revert"]
+    assert cell.reverted == []
 
 
 def test_the_implement_prompt_names_the_witnesses_it_is_judged_against(

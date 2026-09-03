@@ -2722,32 +2722,97 @@ constraints is what a global deny list is for — but it means the documents
 drift by default and nothing schedules the catch-up. §4.2.1's count is the
 first instance.
 
-**Status: open, and the reason it is still open is the item's own argument.**
-The six→seven correction landed: `DESIGN.md:383` now reads *"The refusal gate
-refuses seven things"* and names `SA-0023`'s as the seventh, by hand on the
-host. It was already wrong again by the time this was written. `SA-0027` added
-an eighth — `scheduler.py`'s module docstring says so in as many words — so
-§4.2.1 says seven and `_refuse` applies eight, one document revision after the
-last time it was off by one.
+**Status: the count is correct and the item stays open, which is the whole
+argument.** Two corrections have now landed by hand. The six→seven one came
+with `SA-0023`; it was already wrong again by the time that was written,
+because `SA-0027` had added an eighth. `DESIGN.md:383` now reads *"The refusal
+gate refuses eight things"* and names both, and `scheduler.py`'s docstring says
+§4.2.1 counts them.
 
-**That recurrence is the evidence, not a second item.** The count was corrected
-once, by hand, by an operator who happened to be looking; nothing was scheduled
-to look again, and the drift returned within the same release. **Done looks
-like** a check that `DESIGN.md`'s stated count matches the refusals the code
-implements — it fails the moment a ninth is added, which no sweep does — plus
-the by-hand correction to eight that is outstanding now. Whether such a check
-is cheap is unmeasured: it needs the refusals to be enumerable by something
-other than reading `_refuse`, and no registry exists. Item 30 reached the same
-practice from `SA-0024`'s side of the same wall; this is the third instance,
-which item 30 itself said should not need a third item to become a rule.
+**Twice in one release, each time caught by a person who happened to be
+looking, is the finding.** Neither correction was scheduled; both were noticed
+while reading for something else, and between them the authoritative document
+said the wrong number for the whole of that window. A ninth refusal will drift
+exactly the same way. **Done looks like** a check that `DESIGN.md`'s stated
+count matches what `_refuse` applies — it fails the moment the ninth lands,
+which no sweep does. Whether that check is cheap is unmeasured: it needs the
+refusals enumerable by something other than reading `_refuse`, and no registry
+exists. Item 30 reached the same practice from `SA-0024`'s side of the same
+wall; this is the third instance, which item 30 itself said should not need a
+third item to become a rule.
+
+---
+
+## 49. `revert` only checks *new* tests — a changed-body-same-name test has no coverage
+
+Its subset is `collected(head) - collected(base)`, `census`'s own route. That
+catches a new test that tests nothing; it cannot catch an *existing* test
+rewritten under the same node id, which needs a hunk-to-node-id mapping —
+language knowledge §2.1 keeps out of core. **Done looks like** a repo-declared
+role reporting that mapping, so core can compute a second, disjoint subset
+through the machinery already built; unbuilt because no runner reports it
+yet. `criteria`'s witnesses and the third critic lens (§5.5.1) both narrow
+this, so a changed-body test with no declared witness is the only true gap.
+
+---
+
+## 50. `revert` produces no evidence for the spec shape it was built for
+
+Its canonical case is a spec that lands a module *and* its tests together: the
+revert removes the module, the new tests fail to import, and that is the gate's
+success condition rather than a problem. This repo's `tests` gate cannot report
+it as one. A collection error prints no line its regex or its `FAILED ` fallback
+can key on, so it reports `error`; `revert` will not read an untrustworthy run
+as a pass, so it reports **`skip`** — honest, non-blocking, and no evidence in
+either direction. The gate therefore bites hardest on a diff that adds tests for
+source that already existed, and says nothing at all about one that adds both.
+
+**Done looks like** the `tests` role reporting a collection error inside the
+contract it already fills — `failures` keyed on the node ids it was asked to run
+and could not collect — which turns the case into the `fail` `revert` is waiting
+for. A contract question, not core's: §5.4 already obliges the role to accept a
+subset, and this obliges it to say what became of one. Until then the ceiling
+lives in `revert.py`'s comment and one test, and nowhere an operator reads.
+
+---
+
+## 51. A cell can buy `revert` a `skip` for one printed line
+
+`revert` is the only gate that *executes* a name the cell produced, so it is the
+only one where a collection line is an argument rather than a string to compare.
+Names reading as command-line options are dropped (`_argv_safe`), which closes
+the shape that would force a false `pass` — a `--deselect=` line deselecting the
+one test the gate is asking about. **It does not close the family.**
+
+Measured against this repo's own gates. A test file registering an `atexit`
+handler that prints `zzz::bogus` leaks that line onto `pytest --collect-only`'s
+stdout: the handler runs after pytest tears its capture down, so a plain
+module-level `print` does *not* leak and this does. The collection still exits
+0, and `.saffron/gates/tests.py` calls any line holding `::` a collected name.
+The name is new at head, joins the subset, matches no file, the reverted run
+exits 4 with no parsed failures, the `tests` gate reports `error`, and `revert`
+reads an untrustworthy run as `skip`. **One line in a new test file, and the
+anti-theater gate is off for that attempt.** It needs no `conftest.py`, so the
+`gate_config` routing in `.saffron/policy.yaml` — which exists for exactly this
+class, and says so — never fires.
+
+**No name filter closes it.** A bogus id spells as easily inside the repo's
+declared `test_paths` as outside them, and telling a real node id from an
+invented one is the language knowledge §2.1 keeps out of core. **Done looks
+like** the contract addition item 50 wants for the opposite reason: a `tests`
+role that reports what became of each name it was handed, so a name it could not
+collect is a fact the gate can read rather than a silence it must interpret.
+Until then the dropped names are named in the gate's summary — which makes the
+*other* shape visible to an operator, and leaves this one invisible.
 
 ---
 
 ## What is *not* here, deliberately
 
 DIAGNOSE and `SCOPE_REVIEW`, the scheduler's conflict sets and stacking, `saffron
-gc`, multi-repo, the merge train, and the `secrets`/`revert` gates. All are
-v1+ by `DESIGN.md` §9's own build order, and none of them is blocked by anything
+gc`, multi-repo, the merge train, and the `secrets` gate. All are v1+ by
+`DESIGN.md` §9's own build order, and none of them is blocked by anything
 above. `size` left this list on 2026-08-25: it is built and unwired, which is
-item 17. §4.2's own argument applies: at a two-deep queue they arbitrate contention
-that never arrives.
+item 17. `revert` left it with `SA-0044`: it is built and wired into `_suite`,
+which is item 49. §4.2's own argument applies: at a two-deep queue they
+arbitrate contention that never arrives.
