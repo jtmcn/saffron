@@ -115,13 +115,47 @@ def revert_gate(
             ),
         )
 
-    # The same predicate `criteria._green` computes, in the direction that
-    # closes `criteria`'s own documented hole: a name is theater iff it ran
-    # (is in `collected`) and did not fail (its code is absent from
-    # `failures`). A name that failed, errored, or vanished from collection
-    # entirely are three acceptable answers; only a clean pass is the defect.
-    collected = set(reverted_result.collected or ())
+    # `criteria._side`'s readability guard, which the naive form of this
+    # verdict drops. Both halves are `_side`'s, for `_side`'s measured reason:
+    # this repo's own `tests` gate keys `failures[].code` on the caught
+    # exception type on its common path and reaches node ids only through a
+    # fallback, so `failed` can be a set of strings no node id ever equals.
+    # Read that way, every genuinely-failing reverted test stays out of
+    # `failed` while remaining in `collected` and reads as a clean pass — a
+    # false `fail` on a correct, source-dependent test, which is the expensive
+    # direction. `criteria` degrades to `skip` rather than report `pass` on a
+    # field it could not read; this gate degrades the same way rather than
+    # report `fail`.
+    #
+    # `collected is None` (did not enumerate), not `not collected`: a run that
+    # enumerated and found nothing is readable, and it is the ordinary answer
+    # when every reverted test fails at import — which is a `pass` here, not a
+    # skip.
+    if reverted_result.collected is None:
+        return GateResult(
+            gate="revert",
+            status="skip",
+            summary="the reverted run reported no collected tests — nothing to read",
+        )
+    collected = set(reverted_result.collected)
     failed = {f.code for f in reverted_result.failures}
+    # ponytail: "at least one overlap", not "every code is a node id" — the
+    # same ceiling `criteria._side` names, and the same upgrade path
+    # (per-failure membership) once a runner mixes the two keyings in one run.
+    if failed and not (failed & collected):
+        return GateResult(
+            gate="revert",
+            status="skip",
+            summary=(
+                "the reverted run keyed its failures on something other than a "
+                "node id, so a failing test cannot be told from a passing one"
+            ),
+        )
+
+    # A name is theater iff it ran (is in `collected`) and did not fail (its
+    # code is absent from `failures`). A name that failed, errored, or vanished
+    # from collection entirely are three acceptable answers; only a clean pass
+    # is the defect.
     passed = sorted(name for name in subset if name in collected and name not in failed)
 
     if passed:

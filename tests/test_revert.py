@@ -10,14 +10,37 @@ _TESTS = "tests/**"
 
 
 def _tests(*names: str, failed: tuple[str, ...] = ()) -> GateResult:
-    """A `tests` gate result the way the repo's own runner reports one:
-    `collected` names, `failures[].code` keyed on the ones that failed."""
+    """A `tests` gate result keyed the way the repo's runner keys one on its
+    *fallback* path: `failures[].code` is the failing test's node id.
+
+    This is the shape every fixture here used to build, and building only it
+    is why a missing readability guard passed the whole suite. `_tests_keyed_
+    elsewhere` below is the runner's common path, which is the one that
+    breaks the naive verdict.
+    """
     return GateResult(
         gate="tests",
         status="fail" if failed else "pass",
         tool="pytest 8.3.2",
         collected=list(names),
         failures=[Failure(file=n, code=n, message="assert") for n in failed],
+    )
+
+
+def _tests_keyed_elsewhere(*names: str, failed: tuple[str, ...] = ()) -> GateResult:
+    """The same run as `_tests`, reported the way this repo's own `tests` gate
+    reports it on its *common* path: one `path:line: word: message` line
+    anywhere in the output satisfies its regex, and every `failures[].code` is
+    then the caught exception type rather than a node id. `test_criteria.py`'s
+    `keyed_elsewhere` fixture is the same shape, for the same reason."""
+    return GateResult(
+        gate="tests",
+        status="fail" if failed else "pass",
+        tool="pytest 8.3.2",
+        collected=list(names),
+        failures=[
+            Failure(file=n, code="AssertionError", message="assert") for n in failed
+        ],
     )
 
 
@@ -176,3 +199,75 @@ def test_each_kind_of_nothing_to_revert_is_a_skip():
             run_tests=_refuse_run,
         )
         assert result.status == "skip"
+
+
+def test_a_reverted_run_keyed_on_exception_types_is_a_skip_not_a_failure():
+    """The blocker `criteria._side` exists to prevent, in this gate's own
+    direction. The reverted test *did* fail — correctly, it depends on its
+    source — but the runner keyed the failure on `AssertionError`, so the
+    naive membership test finds the node id in `collected`, does not find it
+    in `failed`, and reports theatre. A false `fail` here calls a correct test
+    fraudulent and blocks the spec that shipped it, which is the expensive
+    direction; `skip` is what `criteria` degrades to on the same unreadable
+    field, and it is what this must do."""
+
+    def run_tests(subset):
+        return _tests_keyed_elsewhere(*subset, failed=tuple(subset))
+
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", "t.py::test_new")],
+        acceptance=[],
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=run_tests,
+    )
+    assert result.status == "skip", result
+    assert "node id" in result.summary
+
+
+def test_a_reverted_run_that_did_not_enumerate_is_a_skip():
+    """`collected is None` is the runner not enumerating at all, which is
+    unreadable. It is not the same fact as enumerating and finding nothing —
+    that is the ordinary answer when every reverted test dies at import, and
+    it stays a `pass`."""
+
+    def run_tests(subset):
+        return GateResult(
+            gate="tests", status="pass", tool="pytest 8.3.2", collected=None
+        )
+
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", "t.py::test_new")],
+        acceptance=[],
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=run_tests,
+    )
+    assert result.status == "skip", result
+
+
+def test_a_reverted_run_that_enumerated_nothing_still_passes():
+    """The distinction the guard must not collapse: `collected == []` is
+    readable. Every new test vanishing from collection is exactly what a
+    reverted source produces when the tests cannot import, and it is the
+    gate's own success condition — not something to skip."""
+
+    def run_tests(subset):
+        return GateResult(
+            gate="tests", status="fail", tool="pytest 8.3.2", collected=[]
+        )
+
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", "t.py::test_new")],
+        acceptance=[],
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=run_tests,
+    )
+    assert result.status == "pass", result
