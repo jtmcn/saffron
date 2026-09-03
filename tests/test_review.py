@@ -253,13 +253,24 @@ def test_exactly_one_prompt_claims_the_test_adequacy_remit():
     lens's own remit list — naming a test that would pass identically before
     this change — belongs to the adequacy lens now, and moving it rather than
     copying it means the phrase appears in exactly one prompt file."""
-    phrase = "pass identically before this change"
-    texts = {lens: (PROMPTS / path).read_text() for lens, path in review.LENSES.items()}
-    carriers = [lens for lens, text in texts.items() if phrase in text.lower()]
-    assert carriers == ["adequacy"]
-    # It left the correctness lens's own remit, not just its Not-yours list.
+    texts = {
+        lens: " ".join((PROMPTS / path).read_text().split())
+        for lens, path in review.LENSES.items()
+    }
+    for phrase in (
+        "pass identically before this change",
+        # Shared framing until #34's review: §5.5's instruction paragraph named
+        # this lens's remit in the *first* thing all three lenses read, above
+        # the `Not yours.` list meant to take it back. Whole file, not the
+        # remit half — the defect was in the half a split-based check cannot
+        # see.
+        "a test that passes for the wrong reason",
+    ):
+        carriers = [lens for lens, text in texts.items() if phrase in text.lower()]
+        assert carriers == ["adequacy"], (phrase, carriers)
+    # And it left the correctness lens's own remit, not just its Not-yours list.
     correctness_remit = texts["correctness"].split("Not yours.")[0]
-    assert phrase not in correctness_remit.lower()
+    assert "pass identically before this change" not in correctness_remit.lower()
 
 
 def test_the_adequacy_prompt_demands_a_checkable_mutation():

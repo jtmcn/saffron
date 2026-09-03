@@ -137,9 +137,10 @@ def _is_anchored(
 ) -> bool:
     if finding.line in facts.hunk_lines.get(finding.file, ()):
         return True
-    # The second target is not a nicety: the blast-radius lens is asked what else
-    # calls this, so its best findings cite lines the diff never touched. A
-    # hunk-only rule zeroes that lens out silently (§5.5, principle 28).
+    # The second target is not a nicety: written for blast radius (retired,
+    # §5.5.1) and kept for test adequacy, whose finding is often about a test
+    # that already existed. A hunk-only rule zeroes such a lens out silently
+    # (§5.5, principle 28).
     content = read_head(finding.file)
     if content is None:
         return False

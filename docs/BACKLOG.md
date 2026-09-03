@@ -557,6 +557,15 @@ file anything, and §3's *"Elevated adds the third lens"* is now false at every
 tier. No gate compares either document against `review.LENSES`, so both are
 invisible to the suite.
 
+**Retiring blast radius leaves its remit owned by nobody, at three seats.** All
+three prompts still name "the blast-radius lens" in their `Not yours` lists, so
+callers-and-downstream findings are actively routed away from every lens that
+could file one — worse than uncovered, because each lens is told someone else
+has it. Left deliberately (`DESIGN.md` §5.5.1): releasing the remit by editing
+three `Not yours` lists scatters it across three lenses, which is the overlap
+this item was opened about. Reviving it is a new decision with its own
+evidence, and it wants the same risk tier the half above is waiting on.
+
 ## 7. `CLAUDE.md` no longer reaches the agent, so the flywheel's middle bucket is inert
 
 `setting_sources: []` was set because a target repo's `.claude/` was configuring

@@ -872,13 +872,13 @@ Fresh session, read-only tools, different system prompt, ideally a different mod
 
 Its instruction is not "review this code":
 
-> Find the reason this change should not be merged. Assume it is subtly wrong. The gates passed, so the defect is not something the gates check — look for what gates cannot see: an acceptance criterion technically satisfied but not actually met; a test that passes for the wrong reason; a fix that treats a symptom; behavior change outside the stated scope; an assumption about the data that holds in fixtures but not in production. Report only findings you can point at a specific line for. **If you cannot find a real defect, say so — do not manufacture one.**
+> Find the reason this change should not be merged. Assume it is subtly wrong. The gates passed, so the defect is not something the gates check — look for what gates cannot see: an acceptance criterion technically satisfied but not actually met; a fix that treats a symptom; behavior change outside the stated scope; an assumption about the data that holds in fixtures but not in production. Report only findings you can point at a specific line for. **If you cannot find a real defect, say so — do not manufacture one.**
 
 That last clause is not politeness. A critic prompted to find problems will always find problems, and you'll spend your mornings adjudicating invented ones.
 
 **Findings are reconciled against the diff before they count.** The critic emits `file` and `line` per finding; the host drops any finding it cannot anchor, and logs the drop. An unanchorable finding is either a hallucination or a complaint about pre-existing code, and neither belongs in a queue that is supposed to be about *this change*. Same move as measuring doneness from git (§4.3): treat agent output as claims, reconcile against a host-computed fact set. Perhaps twenty lines of code, and it is the difference between a critic you read and a critic you learn to skim.
 
-**Anchoring admits two targets, not one, and the second exists for lens #3.** The blast-radius lens is asked *what else calls this* — so its best findings point at lines the diff never touched: an unupdated caller, a missing migration, a serializer left behind. A hunk-only rule discards most of what that lens is for, and the drop-rate diagnostic below would then read as a prompting defect when the reconciler is what is wrong. So a finding anchors if its file and line fall **inside a diff hunk**, *or* if that line **mentions an identifier the diff added, removed or renamed**. The second test is deliberately crude — tokenize the changed lines on word boundaries, intersect with the tokens on the cited line, no language knowledge anywhere — and crude is enough, because anchoring only ever had to establish that a finding points at real code with a real connection to this change. Everything else is still dropped and still counted.
+**Anchoring admits two targets, not one, and the second exists for lens #3.** The rule was written for blast radius, §5.5.1's retired #3, which is asked *what else calls this* — so its best findings point at lines the diff never touched: an unupdated caller, a missing migration, a serializer left behind. **The rule outlived the lens rather than lapsing with it:** test adequacy also cites code the diff did not touch, because the test that should have caught the change is often one that already existed. A hunk-only rule discards most of what that lens is for, and the drop-rate diagnostic below would then read as a prompting defect when the reconciler is what is wrong. So a finding anchors if its file and line fall **inside a diff hunk**, *or* if that line **mentions an identifier the diff added, removed or renamed**. The second test is deliberately crude — tokenize the changed lines on word boundaries, intersect with the tokens on the cited line, no language knowledge anywhere — and crude is enough, because anchoring only ever had to establish that a finding points at real code with a real connection to this change. Everything else is still dropped and still counted.
 
 > The general lesson, because it will recur: **a reconciler tuned to one producer silently disables another.** The hunk rule was written with lenses #1 and #2 in mind and would have zeroed out #3 without a single error message — the only symptom being a lens that looked badly prompted.
 
@@ -886,11 +886,13 @@ Dropped findings are recorded with `anchored = false`, not deleted — a lens th
 
 **Severity is two levels that count and one that doesn't.** `blocker` routes to REBUT. `concern` reaches the operator's judgement and is the number in a queue line. `note` appears in the PR body and is excluded from every count — because without a third level, every true-but-trivial observation inflates the concern count that drives queue sort order, and you learn to ignore the number. The critic is told the distinction explicitly; a lens that files everything as `concern` is as much a prompting defect as one that hallucinates.
 
-Two lenses in v1, a third at elevated risk — **different lenses, not repeated ones**:
+Three lenses — **different lenses, not repeated ones**:
 
 1. **Correctness & data semantics** — timezones, chunk boundaries, null/gap propagation, unit errors, market-hours assumptions.
 2. **Contract & schema** — public API compatibility, migration reversibility, serialization and schema conformance, anything downstream consumers depend on.
-3. *(elevated)* **Blast radius** — what else calls this, what breaks downstream, what the diff changes that the spec never asked for.
+3. **Test adequacy** — whether the tests in the diff would notice the code being wrong: an assertion on a value the exercised path never reads, a test that constructs the value it then asserts, a structural check over source text a rename defeats, a witness whose setup is the only input the change is correct for.
+
+#3 was **blast radius** until 2026-09-02 and is not any more; §5.5.1 records the amendment and the evidence behind it. Only the *content* of #3 changed — the numbering is an API and this section is cited by it.
 
 **Each lens is a separate host-invoked session, not a subagent.** The runtime has a subagent facility that fits a lens almost perfectly — per-agent model, effort level, and a read-only tool list — and it is the wrong mechanism here for one reason: *the model decides when to spawn a subagent.* A REVIEW phase that asks one session to delegate to two or three lens subagents produces a lens set that varies by task, silently, with no error when a lens is skipped. Saffron needs all declared lenses to run on every reviewed diff, so the host invokes each one and collects its findings. The subagent *shape* is still the right configuration — it is where per-lens model and effort live — it just gets driven from the host rather than requested in a prompt.
 
@@ -898,9 +900,22 @@ This is §4.3's doneness rule again, one level out: **anything that must happen 
 
 One property the subagent facility does confirm: a fresh session receives no parent conversation at all — only what its invoker puts in the prompt. That is exactly the isolation this phase requires, and it means the diff, the spec, the gate results and the acceptance criteria must all be passed explicitly. There is no context to inherit, by design.
 
-**Any single blocker routes to REBUT.** No voting. A majority rule sounds rigorous and is decoration here: the lenses are disjoint by construction, so the schema critic will never independently corroborate the correctness critic's timezone finding, and "majority" with two disjoint lenses means "never." False positives are handled by the rebuttal plus queue ordering (§6), which is the better mechanism anyway.
+**Any single blocker routes to REBUT.** No voting. A majority rule sounds rigorous and is decoration here: the lenses are disjoint by construction, so the schema critic will never independently corroborate the correctness critic's timezone finding, and "majority" over disjoint lenses means "never" at any count. False positives are handled by the rebuttal plus queue ordering (§6), which is the better mechanism anyway.
 
-Note that lens #3 in a naive design would be "test quality" — but the `revert` gate now answers that mechanically and for free. Per §8's own triage rule, that's a bucket-1 solution displacing a bucket-3 one, which is exactly the direction things should move.
+This section argued until 2026-09-02 that lens #3 in a naive design would be "test quality", displaced by `revert` answering it mechanically and for free — a bucket-1 solution displacing a bucket-3 one, per §8's triage rule. **That argument is withdrawn, and §5.5.1 says why.** The direction is still right; the displacement was not measured, and when it was, it did not hold.
+
+#### 5.5.1 Lens #3 is test adequacy, not blast radius
+
+**Amended 2026-09-02, on measurement rather than reasoning** (`docs/evidence/2026-08-25-mutation-testing-vs-a-lens.md`, `docs/BACKLOG.md` item 6). Two claims this section made are false:
+
+- **`revert` does not displace a test-quality remit.** It stashes the source hunks, keeps the test hunks, and requires the new tests to fail — so a spec that lands source and tests together makes every new test fail for the trivial reason and `revert` reports green without ever asking whether a particular line is tested. **`revert` asks whether the new tests test *anything*; this remit asks whether they test *each thing*.** The two do not overlap, and the second is the one nothing else covers. `revert` is also still unbuilt (`SA-0044`), so the free answer was never being collected.
+- **A test can be fully covered and still prove nothing.** `saffron/gates/core/size.py` reports 100% statement and 100% branch coverage, and a line whose removal left all sixteen of its tests green was executed by every one of them. An *executed line whose effect nothing observes* is the class coverage cannot report by construction, which is why a coverage gate was priced against this remit and lost.
+
+**What the lens is.** A prompted critic (`saffron/agents/prompts/review-adequacy.md`) holding no tool that can run anything: no test runner, no interpreter, no mutation harness — all three priced against this remit and rejected in the evidence above. It cannot mutate a line and watch a test fail, so every finding instead names the smallest edit that would keep the suite green while the behaviour breaks. That is what makes a finding checkable in one command by someone who *can* run one, rather than a claim about coverage the lens has no way to have confirmed.
+
+**Blast radius is retired, not deferred.** It is the lens that would have caught the `git config diff.srcPrefix` escape (Appendix L), and that argument stands — but it was never built, because it was gated on a risk tier nothing wires, and the gap measured on two live diffs was test adequacy instead. Reviving it is a new decision with its own evidence, not the resumption of this one. What the retirement does **not** touch is the second anchoring target above: the reconciler rule blast radius motivated is load-bearing for #3 as it now stands. One consequence is deliberate and worth stating rather than discovering: all three prompts still route callers-and-downstream findings away to "the blast-radius lens", so that class is now owned by nobody and is suppressed at three seats rather than merely uncovered at one. Left as-is on purpose — a `Not yours` list edited to release the remit would scatter it across three lenses, which is the overlap §5.5 spends its no-voting rule on.
+
+**Ungated, and that half is open.** The lens runs at every risk tier, not at `elevated` only — measured against this repo's own specs, 28 of 34 declare `elevated`, so gating would exclude six tasks to save one lens session ($0.76–$0.91 on the two it was priced against). REVIEW is not gated on the spend ceiling (§5.5), so the third session cannot fail a task for money; it does raise the worst-case REVIEW overrun from two remainders to three, because the per-lens cap is not decremented between lenses. Whether `adequacy` is what a tier should gate, once a tier exists, is `docs/BACKLOG.md` item 6's remaining half.
 
 ### 5.6 Phase 4b — REBUT
 
@@ -912,7 +927,7 @@ Why allow rebuttal rather than mandate a fix: sometimes the critic is wrong, and
 
 **The order, settled.** "Confirmed blockers" here means *anchored* (§5.5) — the host has already established the finding points at real changed code, and that is the only confirmation available before a rebuttal exists. The critic's `verdict` (§4.1) comes **after** the argument: anchored blockers → the implementer rebuts → each lens that raised one confirms or withdraws it, in a fresh read-only session that sees the argument and never the transcript behind it. A critic verdicting first would be restating its finding rather than disagreeing with an answer, which is the one thing this phase exists to record. Three outcomes reach `READY_FOR_REVIEW` — every blocker withdrawn, a fix that commits and stays green, and a confirmed blocker the implementer argued against — because none of them is the machine's to settle: adjudication is yours, in the PR. A rebuttal that neither moved HEAD nor recorded an argument earns nothing and halts at `REBUTTING`; §3.3 has no state for it, and `NOT_IMPLEMENTED` would name the wrong phase.
 
-**Risk tiering.** `risk: elevated` — set explicitly in the spec, or auto-elevated when the diff touches any path in the repo's `policy.elevate_on` (a repo with migrations and an ontology might list `migrations/**`, `**/*.ttl`, `trading/**`; Saffron's own lists `saffron/gates/**` and `saffron/cell/**`) — adds the third lens, makes `size` blocking, and marks the queue entry so you read it cold rather than skim. **`coverage` does not become blocking** — not at `elevated`, not ever; see §5.4.
+**Risk tiering.** `risk: elevated` — set explicitly in the spec, or auto-elevated when the diff touches any path in the repo's `policy.elevate_on` (a repo with migrations and an ontology might list `migrations/**`, `**/*.ttl`, `trading/**`; Saffron's own lists `saffron/gates/**` and `saffron/cell/**`) — makes `size` blocking and marks the queue entry so you read it cold rather than skim. **It does not add a lens:** every lens `review.LENSES` declares runs on every reviewed diff at every tier (§5.5.1). Tier-gating one is still an open question and, until it is settled, the tier buys a gate and an ordering, not a critic. **`coverage` does not become blocking** — not at `elevated`, not ever; see §5.4.
 
 Getting `elevate_on` right is most of what "onboarding a repo" actually means. It is the repo owner answering one question — *where in here does a plausible-looking wrong change hurt most?* — and it is worth more than any amount of gate configuration.
 
@@ -1121,9 +1136,9 @@ Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents
 | Diagnose (bugs) | $0.30–1.00 |
 | Implement (incl. plan) | $2–6 |
 | Repair × 2 | $1–4 |
-| Review × 2 lenses | $1–2 |
+| Review × 3 lenses | $1.50–3 |
 | Rebut | $0.50–1.50 |
-| **Total** | **$5–14** |
+| **Total** | **$5–15** |
 
 **Extend the prompt-cache TTL, or the repair loop pays full price every attempt.** The default cache lifetime is five minutes. The repair loop resumes the same session *across a gate suite*, and a suite against real fixture services is minutes — so on most attempts the cache has expired and the entire accumulated context is re-billed as fresh input. The repair row above is the row this lands on, and it is the row that runs up to four times. The runtime exposes a one-hour TTL through an environment variable; set it on the cell. It trades a higher cache-write rate for reads that actually survive a suite, and it is the single cheapest cost lever in the system — one env var against the most-repeated phase.
 
@@ -1199,7 +1214,7 @@ Success criterion: an agent fixes one real bug inside the cell, and the cell dem
 - DIAGNOSE + `SCOPE_REVIEW`.
 - Full gate set including `scope`, `integrity`, `revert`, `secrets`, `no-network`, `size`.
 - Repair loop with baseline comparison and no-progress detection.
-- Adversarial review, 2 lenses; rebuttal.
+- Adversarial review, 3 lenses (§5.5.1); rebuttal.
 - Scheduler: refusal gate, budget gate, ordering by priority then FIFO. **Not** conflict sets, round-robin or stacking (§4.2) — with one repo and a shallow queue all three are dead code, and `depends_on` waits with them.
 - Real PRs + index page.
 - **One repo: Saffron itself.** No `--repos` flag yet, no round-robin, but the `repos` table and the `.saffron/` layout exist from the start so that adding the second is data rather than code.
@@ -1214,7 +1229,7 @@ Success criterion: a full night runs while you sleep, and you merge at least hal
 - Multi-repo batching: `--repos`, `--all`, round-robin, per-repo preflight and baselines, repo column in the queue.
 - Conflict sets — two repos and a deeper queue are the condition §4.2 defers them to, and by v2 it has arrived. `depends_on` and stacked branches came early instead, in v0.5: the dependency gate refused the states stacking exists for, and a refusal whose text names machinery that does not exist is worse than either the feature or its absence.
 - Repo-declared conditional gates against domain surfaces — this is where a repo's real leverage shows up (§5.4).
-- Third lens and risk tiering.
+- Risk tiering — the third lens shipped ahead of it and ungated (§5.5.1).
 - Merge train with re-verification.
 - Rejection log habit (§8).
 
@@ -1393,7 +1408,7 @@ Three principles this revision contributes:
 13. **When a check feels language-specific, separate the question from the vocabulary.** "Was a test deleted or silenced?" is universal; `@pytest.mark.skip` is not. Put the question in core and the tokens in `policy.yaml` (§5.4, `integrity`). This is the single most reusable move in the whole design.
 14. **Generality is a claim, and claims need tests.** Two Python repos prove nothing about language independence. Repo three exists to falsify §2.1, should be chosen for dissimilarity rather than usefulness, and has a pass condition stated in advance: the diff to Saffron's source is empty.
 
-**What did not change, and shouldn't:** every safety property in §5.1 is about containers and git, not about languages, so repo-agnostic costs nothing there. The critic lenses (§5.5) are stated in terms of correctness, contracts and blast radius rather than any stack — that was accidental in rev 2 and is load-bearing now. And §8's flywheel becomes *more* valuable with multiple repos, because a rejection reason promoted from `CLAUDE.md` to a gate in one repo is a gate you can copy into the next.
+**What did not change, and shouldn't:** every safety property in §5.1 is about containers and git, not about languages, so repo-agnostic costs nothing there. The critic lenses (§5.5) are stated in terms of correctness, contracts and test adequacy rather than any stack — that was accidental in rev 2 and is load-bearing now. And §8's flywheel becomes *more* valuable with multiple repos, because a rejection reason promoted from `CLAUDE.md` to a gate in one repo is a gate you can copy into the next.
 
 ---
 
