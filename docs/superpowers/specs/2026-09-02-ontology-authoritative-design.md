@@ -21,7 +21,7 @@ Run, not reasoned — and the extraction rule is stated for each, because the
 first draft of this section got four numbers wrong by leaving the rules
 implicit.
 
-- **Rule: a line beginning `` `**Term**` `` in `CONTEXT.md` lines 188–376
+- **Rule: a line beginning `` `**Term**` `` in `CONTEXT.md` lines 189–379
   (its §4 Verification, §5 Review, §6 Outcomes — that file's own numbering, not
   `DESIGN.md`'s). Presence in the graph means a `saffron:` IRI local name **or
   an `rdfs:label`** matches, case- and separator-insensitively.** Under that
@@ -34,21 +34,29 @@ implicit.
   `Stacked branch`, `Tree base`.
 - **Rule: terms as the repo's own `declared_terms()` counts them**
   (`tests/ontology/test_no_dead_terms.py`), which excludes the ontology IRI:
-  **91 terms**, of which **9 carry an `rdfs:comment`**. A tenth comment is on
+  **92 terms**, of which **9 carry an `rdfs:comment`**. A tenth comment is on
   the ontology IRI, which that test says is not a term.
-- **The graph is the side that has already drifted.** `saffron.ttl:125`'s
+- **The graph is the side that has already drifted.** `saffron.ttl:126`'s
   comment says *"CONTEXT.md §6 lists six of these and DESIGN.md §3.3 lists
   nine"*. `CONTEXT.md` now lists nine, and a test asserts it.
 - **Declaring one gate on one side alone breaks four checks, not one.**
-  Appending `saffron:revert a saffron:CoreGate ; saffron:blockingAt
-  saffron:alwaysBlocking .` to `ontology/saffron.ttl` at `6a7bdd9` and running
-  `tests/ontology/`: **`4 failed, 70 passed`** —
+  Appending `saffron:probe a saffron:CoreGate ; saffron:blockingAt
+  saffron:alwaysBlocking .` to `ontology/saffron.ttl` at this branch's HEAD —
+  which this branch leaves untouched — and running `tests/ontology/`: **`4 failed, 70 passed`** —
   `test_no_dead_terms::test_no_term_exists_without_a_reader`,
   `test_no_dead_terms::test_the_check_would_catch_a_new_dead_term`,
   `test_shapes::test_the_lifecycle_graph_conforms`, and
   `test_vocabulary_agrees_with_context` (*"Extra items in the right set:
-  'revert'"*). Scoped to that last file alone it is `1 failed, 6 passed`; the
+  'probe'"*). Scoped to that last file alone it is `1 failed, 6 passed`; the
   first draft quoted the scoped number as if it were the directory's.
+- **`revert` is no longer the instance to measure on, and why that matters.**
+  The first draft measured with `saffron:revert`, which `73c2b9f` (PR #112) has
+  since declared in all three surfaces by hand. So the defect is not
+  hypothetical and was not cheap: closing one gate took three coordinated edits
+  by the operator, which is the cost this design removes. A gate name that is
+  still undeclared everywhere — `saffron:probe` above — is what any mutant here
+  must use; re-running the first draft's `revert` mutant today appends a
+  duplicate triple and the suite stays green.
 - **The closed sets are closed in three places, not two.**
   `ontology/shapes/saffron-shapes.ttl:81-90` re-enumerates core gates and gate
   roles as SHACL `sh:in` lists, and `.saffron/gates/shacl.py` is a **blocking**
@@ -129,6 +137,10 @@ two axes share the ontology and nothing else.
 Conditional on part 1's gate. Recorded now so the spike is run against a
 concrete proposal rather than an open question.
 
+The emitter runs **on the control plane**, against `ledger.db`, and never
+inside a cell: it reads the audit trail a cell cannot reach and its output is a
+control artifact. That is the same rule §2 states for everything that matters.
+
 ```
 cells ──▶ ledger.db  (SQL, write path, unchanged)
               │
@@ -140,13 +152,18 @@ ontology/saffron.ttl (vocabulary) ──▶ generator ──▶ CONTEXT.md (+ dr
 the write path, and nothing here disputes it: a read model is additive, so
 abandoning it costs one module and no data.
 
-**The emitter needs no new dependency.** N-Triples is line-based, so *writing*
-it needs no library. Reading needs an engine — but note the constraint's exact
-words: *"nothing under `saffron/` imports either."* A `saffron/report/render.py`
-that imports `pyoxigraph` breaks that sentence literally even as an optional
-extra, and `tests/ontology/` already reads graphs inside the `tests` gate today.
-The honest statement is that the constraint holds in the *packaging* sense and
-must be amended in the *literal* sense; the spike should price that.
+**The emitter needs no new dependency; the *reader* does, and it is not a
+wording problem.** N-Triples is line-based, so *writing* it needs no library.
+Reading needs an engine, and that is where the cost lands. `pyoxigraph` and
+`pyshacl` sit in `[dependency-groups] dev`; `[project] dependencies` is
+`pydantic` + `pyyaml`; and `[tool.hatch.build.targets.wheel] packages =
+["saffron"]`. So a `saffron/report/render.py` that imports `pyoxigraph` makes it
+a **runtime dependency of the shipped package**, not a broken sentence — which
+this plan's first global constraint forbids outright. Part 3's own fix does not
+avoid it either: loading SPARQL from `ontology/queries/*.rq` still needs an
+engine to execute it. Phase C therefore has a real choice to price — promote the
+engine to a runtime dependency, ship the renderer outside `saffron/`, or emit
+a shape the renderer can read without SPARQL — and it is not a drafting one.
 
 **`test_no_dead_terms` is a weaker mechanism than the first draft claimed.**
 `tests/ontology/ontology_paths.py` scans only `ontology/queries/*.rq` and
@@ -167,6 +184,25 @@ which are the third copy of the same closed sets and are enforced by a blocking
 gate — without them the success criterion in part 7 is unreachable. Migrate the
 five already-asserted sets first: a faithful generator produces a **zero-line
 diff**, which proves it before it is trusted with new content.
+
+**The zero-line diff is reachable, but only because the wrap was measured.**
+Three of the five sets wrap across source lines (`CONTEXT.md:201-202`,
+`:208-209`, `:331-333`), so a generator that emits each set on one line cannot
+reproduce the committed bytes — the first draft's did not. Greedy wrapping the
+rewritten span at the committed continuation indent reproduces all five exactly
+at **width 82, 83 or 84, and at no other width** (76-92 searched). The plan
+takes 83 and tests the boundary, because a number found by search is a fact
+about the committed file that a later hand edit can invalidate silently.
+
+**Phase A is an operator-side fix plus a gate, not a cell-side repair.**
+`CONTEXT.md` is `protected` repo-wide in `.saffron/policy.yaml` and
+`ontology/shapes/**` is in `integrity.gate_config`, so after Phase A a cell that
+declares a core gate still cannot write the two derived surfaces —
+`protected_touch_refusal` (`saffron/scheduler.py:302`) refuses the task at plan
+time, by design. What Phase A changes is that the operator's three coordinated
+hand edits become one command, and that forgetting it becomes a **failing gate
+instead of silent drift**. That is the whole claim; it is worth making, and it
+is not "the cell can now fix it".
 
 **Phase B — Appendix O's spike.** As specified, unmodified, with its four
 questions answered in writing. **This is a gate, not a formality.** Anything
@@ -214,21 +250,48 @@ Phase B reopens the question.
   asserts that `pass`/`fail`/`skip`/`error` are deliberately **not** `saffron:`
   terms — EARL's outcomes stand for them, and the test fails if `saffron:pass`
   is added. It is in the 19 above and generating `CONTEXT.md`'s Status line
-  means generating from EARL, not from `saffron:`. **Settle before Phase A.**
-- **The 56 `_Avoid_` lists stay hand-written**, enforced by the prek hook.
-- **Whole-system vocabulary stays in `CONTEXT.md`.** Only the run-record
-  sections are generated.
+  means generating from EARL, not from `saffron:`. **It does not block Phase
+  A** — `Status` is not one of the five cross-checked sets and nothing generates
+  it — so this is settled only before anything tries to.
+- **The 56 `_Avoid_` lists stay hand-written, and are essentially
+  unenforced.** The `retired-vocabulary` prek hook is a single pattern —
+  `(?i)gate[ -]runs?\b` — and `.pre-commit-config.yaml` says why in as many
+  words: *"A retired term, not the whole `_Avoid_` list: most of those words are
+  ordinary English elsewhere."* It also excludes `docs/superpowers/`, so it does
+  not read this document. Phase A does not change that and should not be read as
+  claiming to.
+- **Whole-system vocabulary stays in `CONTEXT.md`.** What is generated is the
+  **five sets `test_vocabulary_agrees_with_context.py` already cross-checks**,
+  which is not the same as "the run-record sections": `Risk tier`
+  (`CONTEXT.md:179`) is in §3 Scope, outside §4-§6. The cross-check is the rule,
+  because a set that is generated but unasserted has no witness.
+- **`CLAUDE.md` says something Phase A makes false, and must be amended with
+  it.** It reads *"`CONTEXT.md` is authoritative for what the words mean"*.
+  After Phase A that holds for the file as a whole but not for those five sets,
+  where the vocabulary is authoritative and `CONTEXT.md` is its render. One
+  sentence in `CLAUDE.md`, in the same commit as the generator — an
+  authoritative file that is quietly no longer authoritative is the defect this
+  design exists to remove, not one to introduce.
 - **IRI minting is unspecified.** Phase C must mint stable IRIs for ledger rows
   and `prov:qualifiedAssociation` nodes — `lifecycle.ttl` uses named nodes, no
   blanks — stable across re-emits, since `Q4`'s chain depends on it. Where the
   emitted graph lives, and whether it is rebuilt whole, is also unstated.
-- **A superseded document that does not say so.** `ontology/RATIONALE.md` is at
-  its 40-line cap, so a pointer does not fit, and `saffron.ttl:125` still says
-  *"see RATIONALE.md"*. Raising the cap to 41 and amending `SA-0001`'s criterion
-  is two lines; leaving an ADR reading as current is a landmine. **Settle in
-  this PR.**
-- **`SA-0044`'s note** not to declare `saffron:revert` is a workaround Phase A
-  retires. Delete it then.
+- **~~A superseded document that does not say so.~~ Settled in this PR.** Part 1
+  retracts the supersession — RATIONALE's verdict stands and is downstream of §9
+  and Appendix O — so the real gap was narrower: nothing in `RATIONALE.md`
+  pointed at Appendix O, the one thing that reopens the question it closed. It
+  is a spike verdict, not an ADR, and it is at its 40-line cap
+  (`test_vocabulary.py:64` asserts `<= 40`, an `SA-0001` acceptance criterion).
+  Raising the cap to 41 would weaken a shipped spec's witness to fit a later
+  document in. Unnecessary: `RATIONALE.md:22` **already** carries a revisit
+  clause — *"Revisit at v2.5 (§9) only if reconstructibility must be enforced
+  continuously"* — and §9 v2.5 is exactly where Appendix O's spike lives. This
+  PR edits that existing sentence in place to name the spike, at **zero net
+  lines**. No cap change, no `SA-0001` amendment.
+- **`SA-0044`'s note** not to declare `saffron:revert` is a workaround PR #112
+  discharged and Phase A retires. **Append that it was discharged; do not delete
+  it.** `SA-0044` is a completed spec, and deleting the paragraph edits the
+  record of why a shipped task was scoped as it was.
 
 ## 7. Success criterion
 
