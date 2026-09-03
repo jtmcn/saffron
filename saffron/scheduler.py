@@ -21,7 +21,7 @@ refusal here, needing no ledger and no `gh`, so `_refuse` checks it first.
 `build_queue` never reads `policy.yaml` itself — the caller already holds the
 export its specs come from, and hands the `protected` list in.
 
-`SA-0027` adds an eighth, and it belongs beside the fifth
+`SA-0027` adds the eighth §4.2.1 now counts, and it belongs beside the fifth
 (`_unmatched_criterion_path`): both are the same defect — a path an
 acceptance criterion or a `saffron:retired-by` marker names that no
 `touches` pattern reaches — read from two different sources. A guard

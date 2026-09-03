@@ -2722,24 +2722,24 @@ constraints is what a global deny list is for — but it means the documents
 drift by default and nothing schedules the catch-up. §4.2.1's count is the
 first instance.
 
-**Status: open, and the reason it is still open is the item's own argument.**
-The six→seven correction landed: `DESIGN.md:383` now reads *"The refusal gate
-refuses seven things"* and names `SA-0023`'s as the seventh, by hand on the
-host. It was already wrong again by the time this was written. `SA-0027` added
-an eighth — `scheduler.py`'s module docstring says so in as many words — so
-§4.2.1 says seven and `_refuse` applies eight, one document revision after the
-last time it was off by one.
+**Status: the count is correct and the item stays open, which is the whole
+argument.** Two corrections have now landed by hand. The six→seven one came
+with `SA-0023`; it was already wrong again by the time that was written,
+because `SA-0027` had added an eighth. `DESIGN.md:383` now reads *"The refusal
+gate refuses eight things"* and names both, and `scheduler.py`'s docstring says
+§4.2.1 counts them.
 
-**That recurrence is the evidence, not a second item.** The count was corrected
-once, by hand, by an operator who happened to be looking; nothing was scheduled
-to look again, and the drift returned within the same release. **Done looks
-like** a check that `DESIGN.md`'s stated count matches the refusals the code
-implements — it fails the moment a ninth is added, which no sweep does — plus
-the by-hand correction to eight that is outstanding now. Whether such a check
-is cheap is unmeasured: it needs the refusals to be enumerable by something
-other than reading `_refuse`, and no registry exists. Item 30 reached the same
-practice from `SA-0024`'s side of the same wall; this is the third instance,
-which item 30 itself said should not need a third item to become a rule.
+**Twice in one release, each time caught by a person who happened to be
+looking, is the finding.** Neither correction was scheduled; both were noticed
+while reading for something else, and between them the authoritative document
+said the wrong number for the whole of that window. A ninth refusal will drift
+exactly the same way. **Done looks like** a check that `DESIGN.md`'s stated
+count matches what `_refuse` applies — it fails the moment the ninth lands,
+which no sweep does. Whether that check is cheap is unmeasured: it needs the
+refusals enumerable by something other than reading `_refuse`, and no registry
+exists. Item 30 reached the same practice from `SA-0024`'s side of the same
+wall; this is the third instance, which item 30 itself said should not need a
+third item to become a rule.
 
 ---
 
