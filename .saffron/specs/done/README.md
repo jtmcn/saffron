@@ -48,6 +48,7 @@ nothing.
 | `SA-0014` | `discover_specs()` exists; its task is `MERGED` at an older `spec_sha` |
 | `SA-0009` | Split into `SA-0011` and `SA-0014`–`SA-0017`, then `SA-0020`; every criterion is in `main` — `discover_specs`, `tasks_by_spec`/`resolve_repo_id` without inserting, the refusal gate, `saffron queue`'s exit codes. Its last criterion, *"a test asserting `saffron queue` writes nothing at all"*, was **reversed on purpose** by `SA-0019`, which made the command reconcile before it scans |
 | `SA-0021` | `DESIGN.md` §5.3.1 and `CONTEXT.md`'s **Touches** entry, which now names both proposers of a scope. Implemented by hand because the cell could not: both documents are `protected`, which is why its task reads `PLAN_REJECTED` |
+| `SA-0044` | `saffron/gates/core/revert.py` (279 lines), `tests/test_revert.py` (18 tests), `source_reverted`/`_revert_source`/`_restore_source`/`_exists_at` in `saffron/cell/worktree.py` with four host-git tests in `tests/test_worktree.py`, and the `_suite` wiring plus three tests in `tests/test_session.py`. **Retired in the same pull request that ships it** — see the paragraph below |
 
 **A fourth thing the ledger cannot say, found 2026-08-31.** `DONE_STATES` means
 the scan is finished with a spec, not that the work is — `EXHAUSTED`,
@@ -73,6 +74,25 @@ directory: a parent retired here admits its dependents exactly as a `MERGED`
 task does. Which makes the move above load-bearing rather than cosmetic —
 **retiring a spec whose work is not actually in `main` will schedule a child
 against code that does not exist.** The evidence column is the check.
+
+**A retirement that lands with its own work, 2026-09-03 (`SA-0044`).** Every row
+above retired a spec whose code was already in `main`; this one merges with it. The
+rule the evidence column enforces — *retiring a spec whose work is not actually in
+`main` will schedule a child against code that does not exist* — is not weakened by
+that, because the move and the code are in one merge commit: no scan ever sees the
+retirement without the gate. Doing it in a separate follow-up would be the riskier
+order, since the window between the two is exactly when a batch could start a cell.
+
+`SA-0044` is the `EXHAUSTED`-but-shipped case this file's fourth paragraph
+describes, and the first one measured since it was written. Its cell hit the turn
+ceiling, went green on repair, and died on the budget ceiling mid-review with seven
+commits made; an `EXHAUSTED` run pushes no branch (backlog item 45), so the work was
+recovered from `patch.diff` and finished by hand. The ledger row says `EXHAUSTED`,
+which is on `DONE_STATES` — so at its original `spec_sha` the scan was already
+filtering it out, for the wrong reason. **Then correcting an acceptance criterion
+moved the sha**, leaving no row at all at the new one, which `build_queue` reads as a
+spec that has never run. That is what makes this retirement load-bearing rather than
+tidy: without it, a future batch starts a fresh cell for work sitting in `main`.
 
 **Do not edit a spec in this directory.** An edit moves its `spec_sha`, and the
 sha is what the ledger's rows are keyed on.
