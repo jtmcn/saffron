@@ -1727,13 +1727,13 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     rather than a problem: this test exists to be re-anchored, and every spec
     that lands moves it by construction.
 
-    The measured queue is the two specs with no `depends_on` — `SA-0045`, the
-    batch schema, and `SA-0052`, the scheduler fix — each of which cuts from
-    `main`. The other four are one linear chain,
+    The measured queue is the three specs with no `depends_on` — `SA-0045`, the
+    batch schema, `SA-0052`, the scheduler fix, and `SA-0053`, the watch verb —
+    each of which cuts from `main`. The other four are one linear chain,
     `SA-0046` -> `SA-0048` -> `SA-0049` -> `SA-0050`, each refused for the
     parent above it having no task at its current `spec_sha`. That is the shape
     §4.2.1 says a stack presents on its first night, before anything has run,
-    and it is a stronger anchor than the empty directory this replaced: two
+    and it is a stronger anchor than the empty directory this replaced: three
     independent roots and a four-deep chain, against real files.
 
     Note what this does *not* exercise. `_fake_gh([])` means `open_prs` is
@@ -1750,7 +1750,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         directory, repo_id, ledger, repo_slug="joel/saffron", gh=_fake_gh([])
     )
 
-    assert [c.spec.id for c in candidates] == ["SA-0045", "SA-0052"]
+    assert [c.spec.id for c in candidates] == ["SA-0045", "SA-0052", "SA-0053"]
     # The chain, in filename order, each naming the parent above it. Not merely
     # refused: refused for the parent it actually declares, which is what
     # distinguishes a dependency refusal from a criterion-path one.
