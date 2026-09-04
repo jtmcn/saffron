@@ -40,13 +40,18 @@ acceptance:
   - claim: >-
       PACKAGE rewrites the task's `policy_sha` when re-verification runs under
       a different declaration, which is what happens when `policy.yaml`'s bytes
-      differ between `base_sha` and `fetch_head`.
+      differ between `base_sha` and `fetch_head`. A recorded sha of NULL counts
+      as different and is written: it means nothing recorded what this task ran
+      under, which is the gap the spec exists to close.
     witness: tests/test_package.py::test_reverifying_under_a_changed_policy_records_the_policy_it_used
   - claim: >-
-      When the two declarations are identical, PACKAGE leaves the row alone —
-      `updated_at` does not move. An unconditional write satisfies the previous
-      claim while being wrong, and only this one can tell them apart.
-    witness: tests/test_package.py::test_reverifying_under_an_unchanged_policy_does_not_touch_the_row
+      When the two declarations are identical, PACKAGE issues no policy write
+      at all — the recording method is not called. An unconditional write
+      satisfies the previous claim while being wrong, and only this one can
+      tell them apart. Asserted on the call, never on `updated_at`: PACKAGE
+      moves that column on every non-raising return anyway, through
+      `record_push` and `set_task_package`.
+    witness: tests/test_package.py::test_reverifying_under_an_unchanged_policy_issues_no_policy_write
   - claim: >-
       A task row created before this change reads back with a NULL
       `policy_sha`, never a value invented for a task nobody observed.
@@ -103,31 +108,70 @@ something about it needs a batch; this makes the comparison possible and stops.
 
 **The fourth witness is the one to write first, and it is why this spec is not
 one criterion.** "Rewrites when it differs" is satisfied by an unconditional
-write, which is also wrong. Only "does not touch the row when it does not
-differ" can tell a correct implementation from a lazy one, and `updated_at` is
-the observable that distinguishes them. `SA-0047` uses the same device for the
-same reason, on a task that must not be re-stamped.
+write, which is also wrong, and only the no-op case can tell them apart.
+
+**Assert it on the call, not on the row.** `updated_at` is the obvious
+observable and it does not work here: `package()` moves that column on every
+non-raising return, through `record_push` and `set_task_package`, so a correct
+implementation fails a test written that way. It is also `datetime('now')` at
+second resolution, so two writes inside one second are indistinguishable
+anyway. Wrap or monkeypatch the recording method and assert it was not called.
+
+**The no-op branch has to be built, not inherited.** `packageable`'s task row
+is created with no `policy_sha`, so it is NULL — which is the *differs* branch
+by the rule above, not the unchanged one. The no-op test must first seed the
+row with the sha256 of the fixture's committed `policy.yaml` bytes.
 
 **`policy_sha` is a hash of `policy.yaml`'s bytes, not of the tree.** The two
 declarations differ exactly when that file's contents changed between
 `base_sha` and `fetch_head` — **not** whenever the base moved. A base can move
 a hundred commits without `policy.yaml` changing a byte, and a test that moves
-the base and expects a rewrite is testing the wrong thing. `tests/test_package.py`
-already has tests that mutate `policy.yaml` at `fetch_head` through the
-`packageable` fixture; that is the "differs" branch, and the unmutated fixture
-is the no-op branch.
+the base and expects a rewrite is testing the wrong thing.
+
+**Writing `policy.yaml` in the fixture's working copy does not reach
+`fetch_head`.** Two of the three existing tests that touch it write the working
+copy only and never commit — that is their whole point, that the checkout's
+policy does not govern. The differs branch needs a `git commit` *and* a push to
+the default branch inside the fixture's repo, the way the test that names a
+policy fault at the default-branch head does. Copy that one, not the nearer-
+looking ones.
 
 **Both writes are additive, and any new parameter must default.**
 `saffron/replay.py` calls `create_task` and is `forbidden` here, as are three
 test modules outside `touches`. A required parameter breaks callers this spec
 cannot legally repair.
 
-**Read `ledger.py`'s three migration shapes before writing a fourth**, and use
-the guarded `ALTER TABLE ADD COLUMN` one — `CREATE TABLE IF NOT EXISTS` is a
-no-op on a `tasks` table that already exists, which is every ledger there is.
+**Read `ledger.py`'s migration shapes before inventing a new one**, and use the
+guarded `PRAGMA table_info` + `ALTER TABLE ADD COLUMN` one — `CREATE TABLE IF
+NOT EXISTS` is a no-op on a `tasks` table that already exists, which is every
+ledger there is. `SA-0045` added a second block of exactly this shape for
+`runs.batch_id`, and this spec is cut from that branch, so there is a worked
+example one commit back.
 
-**Every new test runs with no network and no cell**, except any that must
-drive a real session, which carries the `cell` marker.
+**Two size economies, because this spec is the wider of the pair.** The first
+witness is a near-copy of `SA-0045`'s `batch_id` migration test — share one
+old-schema helper between it and the fifth rather than building the fixture
+twice. And the `tests/test_package.py` tests run 25–40 lines each, which is
+where the ceiling pressure is.
+
+**The sixth witness is a new test and `preserves` is correctly `false`.** Its
+claim reads like a preservation — the repo-level column keeps working — but a
+new test cannot preserve, because it did not pass at base. Flipping it to
+`true` fails with `witness-not-preserved`.
+
+**Do not add `policy_sha` to `queue_lines`.** It selects explicit columns and
+feeds the morning queue, and `saffron/report/**` is `forbidden` here — a column
+added there would render nowhere and read as a reader that does not exist.
+
+**No new test may carry the `cell` marker, and this is the one that would burn
+the budget silently.** `pyproject.toml` sets `addopts = "-m 'not cell'"`, and
+the `tests` gate passes the same argv to `--collect-only` deliberately. A
+cell-marked witness is therefore never collected at head, `criteria` reports
+`witness-not-collected`, the gate fails, and the attempt is spent — three
+times, on a test that was correct. Every witness here is reachable without a
+container: the session tests already drive `run_one_cell` end to end against a
+stubbed runtime, and that helper already takes a base-policy argument, which is
+the knob witnesses 2 and 6 need.
 
 `risk: elevated` because `saffron/ledger.py` and `saffron/cell/**` are both in
 this repo's `elevate_on`.
