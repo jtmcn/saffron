@@ -2807,6 +2807,99 @@ Until then the dropped names are named in the gate's summary — which makes the
 
 ---
 
+## 52. `MERGE_TRAIN` is a state the scheduler reads twice and neither authoritative document declares
+
+`DESIGN.md:259` shows a task entering it, `saffron/scheduler.py:67` has it in
+`DONE_STATES` and `:91` in `DEPENDENCY_WAITING_STATES`, and §4.2.1 names it twice
+— in the queue filter and in the list of parents that admit a dependent. It
+appears in **neither** `CONTEXT.md` nor `ontology/saffron.ttl`.
+
+Found by Appendix O's spike (rev 19), while counting what a shape form would need.
+It is the fourth defect the modelling exercise has found in these documents, which
+is Appendix O's own argument *for* the vocabulary landing on the same page as the
+verdict that closed the operational question against it.
+
+**It is not obvious which set it joins, and that is the work.** `CONTEXT.md` §6 is
+careful that a state a task *ends in* is a wider set than the states that *reach
+you* — `MERGED` ends a task and reaches nobody. `MERGE_TRAIN` is a re-queue arrow
+in §3.3 and "done with the spec" to the scheduler, so it is plainly an `EndState`;
+whether it is a `TerminalState` needs deciding rather than assuming, and that
+decision is exactly the one item this document keeps getting wrong.
+
+Phase A makes the propagation free once decided: `saffron:MERGE_TRAIN a
+saffron:EndState` in the vocabulary and `uv run python -m ontology.render` writes
+`CONTEXT.md` and the shapes. `TaskShape`'s `endedInState` list is the one hand
+edit, and `test_every_terminal_state_is_a_state_a_task_can_end_in` names the file
+if it is forgotten.
+
+Two soft copies are worth knowing about and are **not** part of this: `cli.py`'s
+exit-code map and `report/index.py`'s `_STATE_RANK` both fall through to a
+documented default rather than raising, so an undeclared state degrades there
+rather than breaking. That is by design and stays.
+
+**Done looks like** `MERGE_TRAIN` declared once in `ontology/saffron.ttl`, the
+derived surfaces regenerated, `TaskShape` updated, and a one-line note in §3.3 or
+§6 saying which of the two sets it joined and why.
+
+---
+
+## 53. Three closed sets live only in the shapes, where nothing cross-checks them
+
+`SpecType` (`feature`/`bug`/`refactor`), `BlockingLevel`
+(`alwaysBlocking`/`blockingWhenElevated`/`advisory`) and the rebuttal roles
+(`disputes`/`concedes`, `confirms`/`withdraws`) are closed by `sh:in` in
+`ontology/shapes/saffron-shapes.ttl` and enforced by the blocking `shacl` gate.
+None is among the five sets Phase A generates, because `CONTEXT.md` does not
+enumerate any of them — so `test_vocabulary_agrees_with_context` cannot see them
+and `ontology/render.py` does not write them.
+
+They are therefore in exactly the state the five were in before Phase A: a closed
+set with one hand-maintained copy per file, and no check that the copies agree.
+The difference is that the second copy has not been written yet, so nothing has
+drifted. This is a deferred decision, not a live defect.
+
+**Done looks like** a decision, in writing: either `CONTEXT.md` enumerates them
+and they join `CLOSED_SETS`, `SETS` and `SHAPE_SETS` — three lines and a
+regenerate — or a stated reason why they are shape-internal and not vocabulary,
+of the kind §4 already gives for repo-defined gate names. The reason matters more
+than the choice; `test_the_generator_and_the_cross_check_name_the_same_five_sets`
+will hold whichever way it goes.
+
+---
+
+## 54. The drift test rides the `tests` gate, so the ledger cannot say which check failed
+
+`tests/ontology/test_generated_surfaces_are_current.py` is what catches a
+vocabulary that moved ahead of its derived surfaces. It is a pytest test, not a
+`.saffron/gates/` executable, and that was chosen deliberately: it inherits its
+`tool` field by execution (`pytest --version`), which a hand-written gate would
+have to obtain itself (§5.4, Appendix H) — the exact hole Appendix H is about.
+
+The cost is paid in the morning queue. An operator sees "some test failed" rather
+than a named gate, and the distinction between "the code is wrong" and "the
+generated documents are stale" is one the ledger cannot make.
+
+**Done looks like** either a `.saffron/gates/` executable that runs the render and
+obtains its own `tool` by executing something real, or a written decision that the
+test is enough — with the reason, so the next reader does not re-litigate it. It
+becomes worth doing the first night an operator misreads a stale-surface failure
+as a code failure.
+
+---
+
+## 55. `dist/` is not gitignored, so a build artifact is one `git add -A` from being committed
+
+`uv build` writes `dist/` and nothing ignores it. It is not present in a clean
+tree, so it is invisible until someone runs a build — and `pyproject.toml`'s
+`packages = ["saffron"]` is a claim worth checking by building, which is how this
+was found.
+
+**Done looks like** one line in `.gitignore`. Filed rather than fixed in passing
+because it belongs to no branch in flight; it is a two-minute item for whoever
+touches packaging next.
+
+---
+
 ## What is *not* here, deliberately
 
 DIAGNOSE and `SCOPE_REVIEW`, the scheduler's conflict sets and stacking, `saffron
