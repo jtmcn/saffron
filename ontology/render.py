@@ -163,3 +163,17 @@ def render_shapes(text: str, *, vocabulary: Path, _members=None) -> str:
         close_at = text.index(")", open_at)
         text = text[:open_at] + f"sh:in ( {body} " + text[close_at:]
     return text
+
+
+def main() -> None:
+    root = Path(__file__).resolve().parents[1]
+    vocabulary = root / "ontology" / "saffron.ttl"
+    for path, fn in (
+        (root / "CONTEXT.md", render_context),
+        (root / "ontology" / "shapes" / "saffron-shapes.ttl", render_shapes),
+    ):
+        path.write_text(fn(path.read_text(), vocabulary=vocabulary))
+
+
+if __name__ == "__main__":
+    main()
