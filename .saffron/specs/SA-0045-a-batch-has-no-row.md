@@ -1,53 +1,78 @@
 ---
 id: SA-0045
-title: a batch has no row, and a task cannot say which policy it ran under
+title: a batch has nowhere to record that it happened
 type: feature
 priority: 1
 depends_on: []
 touches:
   - saffron/ledger.py
-  - saffron/cell/session.py
-  - saffron/phases/package.py
   - tests/test_ledger.py
-  - tests/test_session.py
-  - tests/test_package.py
-  - docs/BACKLOG.md
 forbidden:
   - DESIGN.md
   - CONTEXT.md
   - .saffron/**
   - saffron/cli.py
+  - saffron/cell/**
+  - saffron/phases/**
   - saffron/scheduler.py
   - saffron/report/**
   - saffron/gates/**
   - saffron/events.py
-budget_usd: 10
+  - saffron/replay.py
+budget_usd: 6
 max_attempts: 3
-max_turns: 80
+max_turns: 60
 risk: elevated
+acceptance:
+  - claim: >-
+      A `batches` table exists carrying the seven fields §4.2.1 names —
+      `batch_id`, `started_at`, `ended_at`, `budget_usd`, `spent_usd_est`,
+      `until_ts` and `status` — and no others. `concurrency` is not among them:
+      §4.2.1 defers it until K has a second position.
+    witness: tests/test_ledger.py::test_the_batches_table_carries_exactly_the_fields_4_2_1_names
+  - claim: >-
+      `status` admits exactly `DRAINED`, `BUDGET`, `UNTIL` and
+      `INFRASTRUCTURE`, one per stop condition, and rejects a fifth value.
+      Tested through `ledger._db` with raw SQL — no `create_batch` method
+      exists yet, and the spec that adds the loop adds it with its caller.
+    witness: tests/test_ledger.py::test_a_batch_status_outside_the_four_stop_reasons_is_rejected
+  - claim: >-
+      `runs` carries a nullable `batch_id`. A run created outside a batch
+      leaves it NULL rather than inventing a batch that did not happen.
+    witness: tests/test_ledger.py::test_a_run_created_outside_a_batch_has_a_null_batch_id
+  - claim: >-
+      An existing ledger gains the new column rather than silently keeping the
+      old shape. `CREATE TABLE IF NOT EXISTS` does not alter, so a database
+      that already holds `runs` needs the guarded `ALTER TABLE` this module
+      already uses for `pushed_sha` and `pr_url`.
+    witness: tests/test_ledger.py::test_a_ledger_built_by_the_previous_schema_gains_batch_id
+  - claim: >-
+      A ledger written before this change opens, reads, and accepts a new run
+      — the property that makes this safe to land on a database holding every
+      task this repo has run.
+    witness: tests/test_ledger.py::test_a_ledger_built_by_the_previous_schema_still_opens_and_writes
+  - claim: >-
+      No column arrives without a reader. `batches` has no `concurrency` and
+      `tasks` gains no `priority` — both are §4.2.1's explicit cuts, and a
+      column written at scan and read by nobody is item 18's pattern wearing a
+      schema.
+    witness: tests/test_ledger.py::test_the_schema_adds_no_column_that_nothing_reads
 ---
 
 ## Context
 
 §4.2.1 names the schema a batch needs, and says why it is not the same call as
 `tasks.priority`: *"The batch's window and its stop reason have to survive for
-§6's morning queue to render the night."* Neither exists. `ledger.py` declares
-`repos`, `runs`, `tasks`, `attempts`, `gate_results`, `failures` and
-`findings`, and no `batches`.
+§6's morning queue to render the night."* Neither exists. This module declares
+seven tables — `repos`, `runs`, `tasks`, `attempts`, `gate_results`, `failures`
+and `findings` — and no `batches`. Its own docstring says so, and says why:
+*"`batches` and `decisions` wait for a scheduler and an operator to have
+something to put in them."* Backlog item 58 is the scheduler arriving.
 
-Backlog item 16 is the second half, and it is filed separately only because it
-was found separately. `repos.policy_sha` is per repo and written once, at cell
-start, from the export at `base_sha`. When the default branch has moved,
-PACKAGE re-verifies under `fetch_head`'s policy — a *different* declaration,
-correctly so — and nothing records that: not the ledger, not the pull request
-body, not a watch line. The sha is already in hand at the call site and
-discarded as `policy, _`.
-
-§4.1's invalidation rule — *change a repo's gate declarations mid-batch and its
-in-flight tasks are invalidated* — is the same question from the other end. It
-has no reader today: one cell runs at a time, so a policy cannot move under an
-in-flight task because there is no flight. A batch is precisely that window,
-which is why this lands before the loop rather than after it.
+This is the first of the five specs in the batch-orchestration plan and the one
+the other four record into. It lands **only** the schema. Nothing writes a
+`batches` row when this merges, and that is deliberate: the writer is the loop,
+and the loop is three specs away.
 
 ## Problem
 
@@ -55,75 +80,63 @@ which is why this lands before the loop rather than after it.
   stop reason. No row carries either, so the header would render a confident
   em-dash — the failure §6's own rule names.
 - **`runs` cannot be grouped.** Every run is standalone. Nothing can ask which
-  runs belonged to one night, which is the question the morning queue is for.
-- **A task cannot say what it ran under.** Two different policy declarations
-  can govern one task — the export at `base_sha` for its gates, `fetch_head`'s
-  for PACKAGE's re-verification — and the ledger records neither against the
-  task.
-
-## Acceptance criteria
-
-- [ ] A `batches` table exists carrying `batch_id`, `started_at`, `ended_at`,
-      `budget_usd`, `spent_usd_est`, `until_ts` and `status`
-- [ ] `status` accepts exactly `DRAINED`, `BUDGET`, `UNTIL` and
-      `INFRASTRUCTURE`, and a test asserts a fifth value is rejected
-- [ ] `runs` carries a nullable `batch_id`, and a run created outside a batch
-      leaves it NULL rather than inventing one
-- [ ] `tasks` carries a nullable `policy_sha`
-- [ ] The session writes `tasks.policy_sha` at cell start, from the same
-      export its gate executables already resolve against — never the working
-      copy
-- [ ] PACKAGE rewrites `tasks.policy_sha` when re-verification runs under a
-      different policy, and leaves it unchanged when it does not; a test drives
-      both branches
-- [ ] `concurrency` is **not** a column on `batches`, and `tasks.priority` is
-      **not** added — both are §4.2.1's explicit cuts
-- [ ] A ledger created before this change opens and reads without error, and a
-      test asserts it against a database built by the previous schema
-- [ ] Existing rows are not backfilled: a `policy_sha` invented for a task
-      nobody observed is the "column named for a measurement it cannot make"
-      failure §4.1 warns about
-- [ ] Every new test runs with no network and no cell
+  runs belonged to one night, which is the question the morning queue exists to
+  answer.
+- **The module docstring is about to become false.** It says seven of ten
+  tables and names `batches` as waiting.
 
 ## Out of scope
 
-**Writing a `batches` row from a running batch.** Nothing runs one yet. This
-spec lands the schema and the two `policy_sha` writes that have call sites
-today; the row is written by the spec that adds the loop.
+**Writing a `batches` row.** Nothing runs a batch yet. This lands the table;
+`SA-0049` writes the row and adds the method that does it.
+
+**`tasks.policy_sha` and backlog item 16.** `SA-0046`, which is where the two
+writers live. Split from this spec deliberately: the two share a location — a
+migration in `Ledger.__init__` — and no mechanism.
 
 **Rendering any of it.** `saffron/report/**` is `forbidden`.
 
-**Removing `repos.policy_sha`.** It answers a different question — what the
-repo declared when it was last seen — and `upsert_repo`'s callers depend on it.
-The new column is per task and additive.
-
-**Deciding what invalidation *does*.** §4.1 says in-flight tasks are
-invalidated; acting on that needs a batch to be in flight. This makes the
-comparison possible and stops there.
+**Backfilling `batch_id` on existing runs.** A batch invented for runs nobody
+grouped is the "column named for a measurement it cannot make" failure §4.1
+warns about. They stay NULL.
 
 ## Notes for the agent
 
-**Read `ledger.py`'s existing migration shapes before inventing a third.**
-There are two: `CREATE TABLE IF NOT EXISTS` for new tables, and the
-`gate_results_new` rebuild for altering an existing one. Adding a nullable
-column to `runs` and `tasks` should need neither a rebuild nor a new style.
+**There are three migration shapes in this module, not two. Read all three
+before writing a fourth.**
 
-**The eighth criterion is the one to write first.** A ledger created by the
-previous schema must still open — that is what makes this safe to land on a
-database holding every task this repo has run. Build the fixture from the
-current schema, then migrate it, then read it.
+1. `CREATE TABLE IF NOT EXISTS` in `SCHEMA`, for a table that does not exist.
+2. The guarded `PRAGMA table_info` + `ALTER TABLE ADD COLUMN` block — for a new
+   column on a table that already exists. Its comment states the trap in as
+   many words: *"An existing ledger predates these columns, and `IF NOT
+   EXISTS` does not alter."*
+3. The `gate_results_new` rebuild, for changing a constraint.
 
-**`tasks.policy_sha` is written twice by design, and the two writes mean
-different things.** At cell start it records what the gates ran under; at
-PACKAGE it records what re-verification ran under, and those differ exactly
-when the base moved. Overwriting is correct — the last value is what the
-packaged commit was verified against — but the sixth criterion asks you to
-prove the no-op case too, because a write that always fires is
-indistinguishable from one that fires for the right reason.
+**`batches` is the first. `runs.batch_id` is the second, and getting that
+wrong is the whole risk in this spec.** Adding `batch_id` to the `SCHEMA`
+string alone is a silent no-op on every ledger that already exists — including
+the operator's `~/.saffron/ledger.db`, which holds every task this repo has
+run. It would pass its tests, merge, and then fail the next `saffron cell` with
+`no such column: batch_id`. The fourth witness above exists to catch exactly
+that, and it must be written against a database built by the *previous* schema,
+not a fresh one.
 
-**Do not add a column you cannot point at a reader for.** §4.2.1 rejects
-`tasks.priority` on exactly that ground, and this repo has produced six
-instances of the pattern item 18 named. `batch_id`, `policy_sha` and every
-`batches` column above have a named reader in §4.2.1 or §6; nothing else does.
+**Any new parameter on `create_run` must be optional and default to `None`.**
+`saffron/replay.py` calls it and is `forbidden` here, so a required parameter
+breaks a caller this spec cannot legally repair — the attempt would then burn
+its repair turns on a `scope` failure with no fix available.
+
+**Fix the module docstring in the same diff.** It says seven of ten tables and
+names `batches` as waiting. It is in `touches`, so this is free, and it is the
+kind of line that stays wrong for months.
+
+**Column types are yours to choose but say why in a comment.** §4.1 gives names
+only. `started_at`/`ended_at`/`until_ts` should follow whatever this module
+already does for timestamps rather than inventing a second representation —
+read `runs` and `tasks` first. `ended_at` and `spent_usd_est` are unset while a
+batch is running, so they are nullable; `budget_usd` is known at start.
+
+**Every new test here runs with no network and no cell.** This spec touches
+one module and a schema; nothing in it needs a container.
 
 `risk: elevated` because `saffron/ledger.py` is in this repo's `elevate_on`.

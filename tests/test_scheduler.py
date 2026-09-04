@@ -1484,14 +1484,20 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-04: the top-level spec directory is empty, because
-    every spec Saffron has run is retired to `specs/done/` and no new batch has
-    landed. So the measured queue is empty, and this half says so.
+    """Re-measured 2026-09-04, twice in one day — which is the practice, not a
+    problem. The morning's measurement was an empty directory, every shipped
+    spec having been retired to `specs/done/`. The afternoon's is the first two
+    specs of the batch-orchestration plan, and it is the better anchor: an
+    empty queue is a weak assertion, and this one exercises the dependency
+    refusal against real spec files.
 
-    It re-anchors the moment a spec is added — which is the point. A batch that
-    lands and does not queue is exactly the failure worth a red test, and the
-    three previous anchorings of this test were each that same correction made
-    by hand.
+    `SA-0045` has no `depends_on` and queues. `SA-0046` declares `SA-0045`,
+    which has no task at its `spec_sha` yet, so it is refused with the reason
+    naming the parent — the shape §4.2.1 says a stack presents on its first
+    night, before anything has run.
+
+    It re-anchors again the moment the next spec lands, and each of the four
+    previous anchorings was that same correction made by hand.
     """
     live = Path(__file__).resolve().parent.parent / ".saffron" / "specs"
     directory = tmp_path / "specs"
@@ -1502,8 +1508,13 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         directory, repo_id, ledger, repo_slug="joel/saffron", gh=_fake_gh([])
     )
 
-    assert [c.spec.id for c in candidates] == []
-    assert refusals == []
+    assert [c.spec.id for c in candidates] == ["SA-0045"]
+    assert len(refusals) == 1
+    assert refusals[0].path.name.startswith("SA-0046")
+    # Not merely refused: refused for the parent it actually declares, which is
+    # what distinguishes a dependency refusal from a criterion-path one.
+    assert "SA-0045" in refusals[0].reason
+    assert "depends_on" in refusals[0].reason
 
 
 def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger):
