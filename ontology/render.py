@@ -140,8 +140,18 @@ def render_context(text: str, *, vocabulary: Path, _members=None) -> str:
     return text
 
 
-# Shape name -> ontology class whose members fill its sh:in list.
-SHAPE_SETS = {"CoreGateShape": "CoreGate", "GateRoleShape": "GateRole"}
+# Anchor in saffron-shapes.ttl -> the ontology class whose members fill the
+# first `sh:in ( … )` after it. Anchored on text, not on a shape name, because
+# two of these lists are nested inside `sh:property [ … ]` blocks and
+# `TaskShape`'s own first `sh:in` is endedInState — a superset of the terminal
+# states, hand-maintained, which a shape-name anchor would have rewritten.
+SHAPE_SETS = {
+    "saffron:CoreGateShape": "CoreGate",
+    "saffron:GateRoleShape": "GateRole",
+    "saffron:TerminalStateShape": "TerminalState",
+    "sh:path saffron:riskTier": "RiskTier",
+    "sh:path saffron:severity": "Severity",
+}
 _PER_LINE = 3
 _INDENT = " " * 12
 
@@ -152,7 +162,7 @@ def render_shapes(text: str, *, vocabulary: Path, _members=None) -> str:
     Three terms per line with a twelve-space continuation indent, which is what
     is committed. The `shacl` gate reads this file, so a reflow is a gate diff.
     """
-    for shape, class_name in SHAPE_SETS.items():
+    for anchor, class_name in SHAPE_SETS.items():
         # Same rules as `render_context`: a fixture names the sets it is about,
         # and an empty list is looked up by `in` rather than falling through.
         if _members is not None and class_name not in _members:
@@ -165,13 +175,13 @@ def render_shapes(text: str, *, vocabulary: Path, _members=None) -> str:
         # `_join` guards the CONTEXT.md path; this one emitted `sh:in (  )`,
         # which parses as rdf:nil — a constraint nothing can satisfy.
         if not names:
-            raise ValueError(f"{shape}: a closed set rendered to no members")
+            raise ValueError(f"{anchor}: a closed set rendered to no members")
         rows = [
             " ".join(f"saffron:{n}" for n in names[i : i + _PER_LINE])
             for i in range(0, len(names), _PER_LINE)
         ]
         body = f"\n{_INDENT}".join(rows)
-        start = text.index(f"saffron:{shape}")
+        start = text.index(anchor)
         open_at = text.index("sh:in (", start)
         close_at = text.index(")", open_at)
         text = text[:open_at] + f"sh:in ( {body} " + text[close_at:]

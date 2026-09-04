@@ -69,3 +69,31 @@ def test_every_shape_has_a_negative_fixture(shapes_graph):
         if isinstance(s, rdflib.URIRef)
     }
     assert named == {p.stem for p in NEGATIVE}
+
+
+def test_every_core_gate_declares_a_blocking_level(shapes_graph):
+    """Generating `CoreGateShape`'s `sh:in` removed a check that was catching
+    this by accident. `CoreGateBlockingShape` holds a fourth copy of the core
+    gates as `sh:targetNode`, and it cannot be generated: it targets the
+    always-blocking gates and asserts they are always-blocking, so rendering it
+    from the vocabulary would make it vacuous. Before the generator existed, a
+    core gate missing from it was rejected by `CoreGateShape`'s `sh:in`, which
+    forced a human into this file; now that list writes itself, and an advisory
+    core gate conforms with the §5.4 axiom silently not applying to it.
+
+    Read from the shapes rather than through `ontology.render`, deliberately:
+    the generator is what endangered this invariant.
+    """
+    vocabulary = rdflib.Graph().parse(VOCABULARY, format="turtle")
+    declared = set(vocabulary.subjects(rdflib.RDF.type, rdflib.URIRef(f"{NS}CoreGate")))
+    covered: set = set()
+    for shape in ("CoreGateBlockingShape", "SizeTierShape"):
+        covered |= set(
+            shapes_graph.objects(rdflib.URIRef(f"{NS}{shape}"), SH.targetNode)
+        )
+    missing = sorted(str(gate).removeprefix(NS) for gate in declared - covered)
+    assert not missing, (
+        f"core gates with no declared blocking level: {missing}. §5.4 fixes "
+        "these core-side, so add each to saffron:CoreGateBlockingShape (or "
+        "saffron:SizeTierShape if a risk tier moves it) in saffron-shapes.ttl."
+    )

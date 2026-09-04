@@ -186,3 +186,42 @@ def test_the_generator_and_the_cross_check_name_the_same_five_sets():
     from test_vocabulary_agrees_with_context import CLOSED_SETS
 
     assert {term: cls for term, (cls, _) in render.SETS.items()} == CLOSED_SETS
+
+
+def test_a_new_terminal_state_reaches_the_shape_that_closes_the_set(tmp_path):
+    """Review found the documented workflow — edit the vocabulary, run the
+    renderer — turned the blocking `shacl` gate red for three of the five sets.
+    `TerminalStateShape`, `FindingShape`'s severity and `TaskShape`'s riskTier
+    each hold a second copy that the generator did not cover, and
+    `ontology/shapes/**` is `gate_config`, so no cell could repair it.
+
+    `TaskShape`'s endedInState list stays hand-maintained: it closes over
+    `EndState`, a superset of the terminal states, so it is not one of the five.
+    """
+    vocab = tmp_path / "saffron.ttl"
+    vocab.write_text(
+        VOCABULARY.read_text()
+        + "\nsaffron:BUDGET_SPENT a saffron:TerminalState , saffron:EndState .\n"
+    )
+    out = render.render_shapes(SHAPES_FILE.read_text(), vocabulary=vocab)
+    assert "saffron:BUDGET_SPENT" in out
+    # It must land in the shape that closes the set, not merely somewhere.
+    head = out[out.index("saffron:TerminalStateShape") :]
+    assert "saffron:BUDGET_SPENT" in head[: head.index(" .")]
+
+
+def test_severity_and_risk_tier_render_into_their_nested_property_shapes():
+    """Both sit inside an `sh:property [ ... ]` block rather than at the top
+    level of a named shape, and `TaskShape`'s first `sh:in` is endedInState —
+    so a shape-name anchor would have rewritten the wrong list."""
+    out = render.render_shapes(
+        SHAPES_FILE.read_text(),
+        vocabulary=VOCABULARY,
+        _members={"Severity": ["blocker", "concern", "note", "wart"]},
+    )
+    assert (
+        "sh:in ( saffron:blocker saffron:concern saffron:note\n            saffron:wart ) ]"
+        in out
+    )
+    # endedInState is a superset and must not have been touched.
+    assert "saffron:MERGED saffron:ORPHANED ) ]" in out
