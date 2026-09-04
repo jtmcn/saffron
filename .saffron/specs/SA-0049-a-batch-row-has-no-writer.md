@@ -44,22 +44,29 @@ acceptance:
       constraint nobody can see fire.
     witness: tests/test_ledger.py::test_closing_a_batch_with_an_invented_stop_reason_is_refused
   - claim: >-
-      A night's spend is derived from the tasks that spent it, never passed in.
-      The identical argument set_task_state already makes about a task's spend
-      and its attempts: a figure passed by a caller can disagree with the rows
-      it is made of, and a figure derived from them cannot.
-    witness: tests/test_ledger.py::test_a_batchs_spend_is_summed_from_its_tasks_not_passed_in
+      Closing a batch computes its spend in the same statement that sets the
+      status and the end, and stores it — derived, never passed by a caller.
+      The identical shape set_task_state already uses to roll a task's spend up
+      from its attempts inside its own UPDATE: a figure a caller passes can
+      disagree with the rows it is made of, and a derived one cannot. Storing
+      it is what gives batches.spent_usd_est a writer; a pure query would leave
+      that column written by nobody, which the schema test guarding item 18
+      exists to forbid.
+    witness: tests/test_ledger.py::test_closing_a_batch_derives_and_stores_its_spend
   - claim: >-
-      A batch with no runs yet reports zero spend rather than nothing. The
-      empty sum is a real answer about a night that has spent nothing, and a
-      NULL there would read as "not measured" — the distinction events.py
-      already draws in as many words.
-    witness: tests/test_ledger.py::test_a_batch_with_no_runs_has_spent_zero
+      A batch closed with no runs stores zero, not NULL. The empty sum is a
+      real answer about a night that spent nothing, and NULL is reserved for
+      the batch still running — the same distinction ended_at draws, and the
+      convention events.py fixes: None means not measured, zero is a
+      measurement.
+    witness: tests/test_ledger.py::test_a_batch_closed_with_no_runs_stores_zero_not_null
   - claim: >-
-      A run opened inside a batch is reachable from it, so the rows a night is
-      made of can be found from the night. This is what runs.batch_id was
-      added for and nothing has yet connected the two ends.
-    witness: tests/test_ledger.py::test_a_run_opened_inside_a_batch_is_reachable_from_it
+      A reader returns the runs a batch is made of, so a night can be walked
+      from its own row. The column already round-trips through create_run —
+      a test added in SA-0045's review round proves that — but no method
+      projects it, and queue_lines does not. This witness goes through the new
+      reader, never raw SQL, or it re-proves what is already proven.
+    witness: tests/test_ledger.py::test_a_batchs_runs_are_readable_from_the_batch
 ---
 
 ## Context
@@ -73,8 +80,9 @@ is measurable.** `saffron/ledger.py` is in this repo's `elevate_on`, so any
 spec touching it runs at elevated risk, where `size` is **blocking** at 600
 changed lines rather than advisory. The loop is the widest piece of the batch
 work; making it carry the ledger methods too would put the largest spec under
-the strictest ceiling, which is the arrangement backlog item 56 measured the
-cost of. This half is small and elevated; the loop is large and standard.
+the strictest ceiling — the arrangement backlog item 25 measured the cost of
+(`SA-0009`: 990 changed lines, never converged, `EXHAUSTED` at $31.60), and
+item 56 is the un-built check that would have caught it. This half is small and elevated; the loop is large and standard.
 
 ## Problem
 
@@ -101,23 +109,31 @@ judgement. This stores what it is told, and refuses a fifth.
 
 ## Notes for the agent
 
-**Read `finish_run` before writing `finish_batch`.** It is four lines and it is
+**Read `finish_run` before writing `finish_batch`.** Five body lines, and it is
 the shape: one `UPDATE`, status and end together, then commit. Do not invent a
 second style for the same job one table over.
 
 **Derive the spend; do not accept it.** `set_task_state`'s docstring gives the
 argument in one sentence — *"Derived rather than passed, so the figure can
-never disagree with the rows it is made of"* — and a batch stands in the same
-relation to its tasks as a task does to its attempts. The join runs
-`batches` → `runs.batch_id` → `tasks.run_id` → `tasks.spent_usd_est`. A
-`COALESCE` to `0.0` is what makes the fifth witness true, and `set_task_state`
-already uses exactly that for the same reason.
+never disagree with the rows it is made of"* — and a batch stands to its tasks
+as a task stands to its attempts.
 
-**Zero and NULL are different answers and this schema uses both.** A batch that
-has spent nothing has spent `0.0`; `ended_at` and `status` are NULL while it
-runs because those are *not yet measured*. `events.py` states the convention
-this repo follows — *"`None`, never `0`: a skipped or errored gate had no count
-computed"* — and the two columns here fall on opposite sides of it.
+**The join does not stop at `tasks.spent_usd_est`, and this module says why.**
+`task_spend`'s docstring: *"Summed, not read off `tasks.spent_usd_est`, which is
+only as fresh as the last `set_task_state` and would silently omit the turn that
+just closed."* A batch reading that column would inherit exactly that staleness —
+the same defect this witness exists to prevent, one level up. Go the whole way:
+`batches` → `runs.batch_id` → `tasks.run_id` → `attempts.cost_usd_est`, with a
+`COALESCE` to `0.0`, which is what makes the fifth witness true and what
+`set_task_state` already does for the same reason.
+
+**Zero and NULL are different answers, and `spent_usd_est` is on both sides of
+the line depending on when you look.** While a batch runs it is NULL, with
+`ended_at` and `status`, because none of the three has been measured yet — which
+is what `SA-0045`'s own schema comment means by *"unset while the batch is still
+going"*. When the batch closes, all three are written, and a night that spent
+nothing stores `0.0` rather than NULL. `events.py` fixes the convention this
+follows: *"`None`, never `0`: a skipped or errored gate had no count computed."*
 
 **These methods have no caller when this merges, and that is the plan.**
 `SA-0050` is the first. Do not add one: `saffron/cli.py` and every phase are
@@ -131,9 +147,26 @@ wants to prove the round trip, it calls the methods directly, the way
 `criteria` reports `witness-not-collected`, and the attempt is spent on a test
 that was correct. Nothing here needs a container.
 
-**Migrations: read the three shapes already in this module.** This spec adds no
-column — `SA-0045` added them all — so it should need none of the three. If it
-appears to, something has been misread.
+**Migrations: this spec adds no column.** `SA-0045` added them all, so none of
+this module's several migration shapes should be needed. If one appears to be,
+something has been misread.
+
+**Correct one stale cross-reference while you are here.** A comment in this
+module names `SA-0049` as the batch loop. The loop is now `SA-0050`; this spec
+is the writer. `saffron/ledger.py` is in `touches`, so fix it. The identical
+stale reference in `saffron/preflight.py` is `forbidden` here and is being
+corrected by hand — leave it alone.
+
+**Witness 1 is not the existing `test_a_batch_still_running_has_no_status_yet`.**
+That one asserts the same two NULLs by raw `INSERT`. This one asserts them
+through the new opener, which is the part that does not exist. Different node
+id, so `criteria` is satisfied either way — but a copy of the old test proves
+nothing new and the adequacy lens will say so.
+
+**Witness 3: let the constraint speak.** The schema's `CHECK` already refuses a
+fifth status and `sqlite3` raises `IntegrityError`. Do not catch it and re-raise
+something friendlier — the witness is that the writer surfaces the database's
+own refusal rather than swallowing it.
 
 `risk: elevated` because `saffron/ledger.py` is in this repo's `elevate_on`,
 which also makes `size` blocking here. The spec is small on purpose.
