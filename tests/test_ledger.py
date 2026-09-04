@@ -493,7 +493,8 @@ def test_a_ledger_that_predates_spent_usd_est_keeps_its_rows(tmp_path):
     EXISTS` does not alter, and no migration may lose a row."""
     path = tmp_path / "old.db"
     before = SCHEMA.replace("    spent_usd_est REAL NOT NULL DEFAULT 0.0,\n", "")
-    assert "spent_usd_est" not in before  # otherwise this test proves nothing
+    tasks_columns = before.split("CREATE TABLE IF NOT EXISTS tasks")[1].split(");")[0]
+    assert "spent_usd_est" not in tasks_columns  # otherwise this test proves nothing
     old = sqlite3.connect(path)
     old.executescript(before)
     old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')")
@@ -587,6 +588,129 @@ def test_a_ledger_that_predates_attempts_gains_the_reference(tmp_path):
         "SELECT 1 FROM sqlite_master WHERE name = 'gate_results_by_attempt'"
     ).fetchone()
     ledger.close()
+
+
+def test_the_batches_table_carries_exactly_the_fields_4_2_1_names(ledger):
+    """§4.2.1: `(batch_id, started_at, ended_at, budget_usd, spent_usd_est,
+    until_ts, status)` and no others — `concurrency` waits until K has a
+    second position."""
+    columns = {
+        row["name"]
+        for row in ledger._db.execute("PRAGMA table_info(batches)").fetchall()
+    }
+    assert columns == {
+        "batch_id",
+        "started_at",
+        "ended_at",
+        "budget_usd",
+        "spent_usd_est",
+        "until_ts",
+        "status",
+    }
+
+
+def test_a_batch_status_outside_the_four_stop_reasons_is_rejected(ledger):
+    """One row per stop condition — `DRAINED`, `BUDGET`, `UNTIL`,
+    `INFRASTRUCTURE` — and nothing else. No `create_batch` method exists yet
+    (the spec that adds the loop adds it with its caller), so this goes
+    through `ledger._db` directly."""
+    for status in ("DRAINED", "BUDGET", "UNTIL", "INFRASTRUCTURE"):
+        ledger._db.execute(
+            "INSERT INTO batches (budget_usd, status) VALUES (50, ?)", (status,)
+        )
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger._db.execute(
+            "INSERT INTO batches (budget_usd, status) VALUES (50, 'CRASHED')"
+        )
+
+
+def test_a_run_created_outside_a_batch_has_a_null_batch_id(ledger):
+    """`runs.batch_id` is nullable, and a run minted with no `batch_id`
+    argument leaves it NULL rather than inventing a batch that did not
+    happen."""
+    repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+    row = ledger._db.execute(
+        "SELECT batch_id FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    assert row["batch_id"] is None
+
+
+def test_a_ledger_built_by_the_previous_schema_gains_batch_id(tmp_path):
+    """`CREATE TABLE IF NOT EXISTS` does not alter, so a database that already
+    holds `runs` needs the guarded `ALTER TABLE` this module already uses for
+    `pushed_sha` and `pr_url` — this time on `runs`, not `tasks`."""
+    path = tmp_path / "old.db"
+    before = SCHEMA.replace(
+        "    batch_id   INTEGER REFERENCES batches(batch_id),\n", ""
+    )
+    assert (
+        "batch_id   INTEGER REFERENCES batches(batch_id)" not in before
+    )  # otherwise this test proves nothing
+    old = sqlite3.connect(path)
+    old.executescript(before)
+    old.execute("DROP TABLE batches")  # the previous schema never had it either
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    columns = {
+        row["name"] for row in ledger._db.execute("PRAGMA table_info(runs)").fetchall()
+    }
+    assert "batch_id" in columns
+    ledger.close()
+
+
+def test_a_ledger_built_by_the_previous_schema_still_opens_and_writes(tmp_path):
+    """The property that makes this safe to land on a database holding every
+    task this repo has run: a ledger written before `batches` existed opens,
+    reads, and accepts a new run."""
+    path = tmp_path / "old.db"
+    before = SCHEMA.replace(
+        "    batch_id   INTEGER REFERENCES batches(batch_id),\n", ""
+    )
+    old = sqlite3.connect(path)
+    old.executescript(before)
+    old.execute("DROP TABLE batches")
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    run_id = ledger.create_run(1, base_sha="b" * 40)
+    row = ledger._db.execute(
+        "SELECT batch_id FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    assert row["batch_id"] is None
+    ledger.close()
+
+
+def test_the_schema_adds_no_column_that_nothing_reads(ledger):
+    """§4.2.1's two explicit cuts: `batches` has no `concurrency`, and `tasks`
+    gains no `priority` — both would be item 18's pattern wearing a schema, a
+    column written at scan and read by nobody."""
+    batches_columns = {
+        row["name"]
+        for row in ledger._db.execute("PRAGMA table_info(batches)").fetchall()
+    }
+    tasks_columns = {
+        row["name"] for row in ledger._db.execute("PRAGMA table_info(tasks)").fetchall()
+    }
+    # A table that doesn't exist trivially satisfies "has no such column" —
+    # assert `batches` actually landed before asserting what it left out, or
+    # this passes just as well against the schema this spec starts from.
+    assert batches_columns == {
+        "batch_id",
+        "started_at",
+        "ended_at",
+        "budget_usd",
+        "spent_usd_est",
+        "until_ts",
+        "status",
+    }
+    assert "concurrency" not in batches_columns
+    assert "priority" not in tasks_columns
 
 
 def test_an_attempt_against_no_task_raises_rather_than_naming_another(ledger, task):
