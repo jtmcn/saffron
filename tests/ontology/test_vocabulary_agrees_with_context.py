@@ -14,6 +14,8 @@ import pytest
 import rdflib
 from ontology_paths import FIXTURES, NS, ONTOLOGY, VOCABULARY
 
+from ontology import render
+
 CONTEXT = ONTOLOGY.parent / "CONTEXT.md"
 
 # term in CONTEXT.md -> the class in the ontology whose members it should match
@@ -32,13 +34,18 @@ def context_enumeration(term: str) -> set[str]:
     First sentence only: every one of these definitions goes on to mention other
     backticked names — `elevate_on`, `coverage`, `DESIGN.md` — that are prose
     about the set rather than members of it.
+
+    The token pattern is imported rather than repeated: `ontology.render`
+    locates its write span from the same matches, so the span it rewrites cannot
+    reach a token this rejects. Two copies let it, and `DESIGN.md` in a first
+    sentence made the renderer delete the prose after it while this stayed green.
     """
     body = CONTEXT.read_text()
     # The marker, not the marker plus a colon: `Core gates` is a bullet that
     # introduces its members with an em dash instead.
     start = body.index(f"**{term}**") + len(f"**{term}**")
     sentence = re.split(r"\.(?:\s|$)", body[start:], maxsplit=1)[0]
-    return set(re.findall(r"`([A-Za-z_][A-Za-z0-9_-]*)`", sentence))
+    return set(render.MEMBER_TOKEN.findall(sentence))
 
 
 def ontology_members(class_name: str) -> set[str]:

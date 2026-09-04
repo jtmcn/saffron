@@ -64,14 +64,20 @@ def test_prose_outside_the_backticked_span_is_untouched():
     )
 
 
-@pytest.mark.parametrize("width", [81, 82, 83, 84, 85])
-def test_the_width_band_is_82_to_84_and_nothing_else(width, monkeypatch):
-    """83 was found by search, so it is a fact about the committed CONTEXT.md
-    that a later hand edit can invalidate silently."""
+def test_the_committed_width_reproduces_and_the_wrap_is_load_bearing(monkeypatch):
+    """Pinning the 82-84 band as literals made a *legitimate* vocabulary edit
+    able to turn the blocking `tests` gate red: adding `BUDGET_SPENT` and
+    regenerating shifts the band, and `[82]` failed with a message about widths
+    rather than about drift, repairable only by re-measuring and hand-editing
+    this test. The stable property is the one worth pinning — the committed
+    width reproduces, and a width that must reflow does not, so the wrap is
+    doing work rather than passing text through.
+    """
     committed = (VOCABULARY.parents[1] / "CONTEXT.md").read_text()
-    monkeypatch.setattr(render, "_WIDTH", width)
-    reproduces = render.render_context(committed, vocabulary=VOCABULARY) == committed
-    assert reproduces == (82 <= width <= 84)
+    assert render.render_context(committed, vocabulary=VOCABULARY) == committed
+
+    monkeypatch.setattr(render, "_WIDTH", 40)
+    assert render.render_context(committed, vocabulary=VOCABULARY) != committed
 
 
 def test_a_closed_set_that_renders_to_no_members_is_an_error():
@@ -214,8 +220,9 @@ def test_severity_and_risk_tier_render_into_their_nested_property_shapes():
     """Both sit inside an `sh:property [ ... ]` block rather than at the top
     level of a named shape, and `TaskShape`'s first `sh:in` is endedInState —
     so a shape-name anchor would have rewritten the wrong list."""
+    committed = SHAPES_FILE.read_text()
     out = render.render_shapes(
-        SHAPES_FILE.read_text(),
+        committed,
         vocabulary=VOCABULARY,
         _members={"Severity": ["blocker", "concern", "note", "wart"]},
     )
@@ -223,5 +230,97 @@ def test_severity_and_risk_tier_render_into_their_nested_property_shapes():
         "sh:in ( saffron:blocker saffron:concern saffron:note\n            saffron:wart ) ]"
         in out
     )
-    # endedInState is a superset and must not have been touched.
-    assert "saffron:MERGED saffron:ORPHANED ) ]" in out
+
+    def ended_in_state(text: str) -> str:
+        at = text.index("sh:path saffron:endedInState")
+        opened = text.index("sh:in (", at)
+        return text[opened : text.index(")", opened)]
+
+    # endedInState is a superset and must not have been touched. Compared to the
+    # input rather than pinned to a literal: it is hand-maintained, so pinning
+    # its tail would make adding a terminal state fail *this* test, which is the
+    # brittleness that got the width band rewritten.
+    assert ended_in_state(out) == ended_in_state(committed)
+
+
+def test_backticked_prose_before_the_enumeration_is_not_swallowed():
+    """The first review round bounded the *extent* of the rewrite and left its
+    *start* raw. `context_enumeration` collects members with
+    `` `([A-Za-z_][A-Za-z0-9_-]*)` ``, which rejects a token holding a `.` — so
+    `` `DESIGN.md` `` sits inside a raw first-backtick-to-last-backtick span and
+    outside the reader's set, and `main()` deleted the words between them while
+    the blocking cross-check stayed green. `CONTEXT.md` is `protected` and the
+    currency test's message tells the operator to run the renderer, so this was
+    the same destructive shape as the bug that round fixed, one token narrower.
+    """
+    text = (
+        "**Severity**: Per `DESIGN.md` §5.5, one of `blocker`, `concern`, or `note`.\n"
+    )
+    out = render.render_context(
+        text,
+        vocabulary=VOCABULARY,
+        _members={"Severity": ["blocker", "concern", "note"]},
+    )
+    assert out == text
+
+
+def test_a_backticked_non_member_between_members_is_refused():
+    """Locating the span from member tokens fixes prose *before* the list; a
+    rejected token *between* two members is still inside the span. Refuse
+    rather than silently overwrite it."""
+    with pytest.raises(ValueError, match="non-member"):
+        render.render_context(
+            "**Severity**: `blocker`, see `DESIGN.md`, or `note`.\n",
+            vocabulary=VOCABULARY,
+            _members={"Severity": ["blocker", "note"]},
+        )
+
+
+def test_the_shapes_close_the_same_five_sets_the_glossary_does():
+    """An incomplete `SHAPE_SETS` is the exact defect the shapes expansion was
+    written to fix, and nothing guarded against reintroducing it: a sixth set
+    added to `SETS` and `CLOSED_SETS` alone would drift silently again."""
+    assert set(render.SHAPE_SETS.values()) == {cls for cls, _ in render.SETS.values()}
+
+
+def test_a_term_appearing_twice_is_refused_rather_than_guessed():
+    """`str.index` took the first match. Two `**Severity**` in one document is
+    a real edit, and rewriting whichever came first is a silent wrong answer in
+    a file the operator cannot review as a diff, because `main()` writes it."""
+    with pytest.raises(ValueError, match="exactly one definition"):
+        render.render_context(
+            "**Severity**: `blocker` or `note`.\nLater: **Severity**: again.\n",
+            vocabulary=VOCABULARY,
+            _members={"Severity": ["blocker", "note"]},
+        )
+
+
+def test_a_definition_with_no_backticked_member_is_refused():
+    with pytest.raises(ValueError, match="no backticked members"):
+        render.render_context(
+            "**Severity**: none of them are ticked here.\n",
+            vocabulary=VOCABULARY,
+            _members={"Severity": ["blocker"]},
+        )
+
+
+def test_a_shape_anchor_that_is_not_unique_is_refused():
+    doubled = SHAPES_FILE.read_text() + "\nsaffron:CoreGateShape a sh:NodeShape .\n"
+    with pytest.raises(ValueError, match="exactly one occurrence"):
+        render.render_shapes(
+            doubled, vocabulary=VOCABULARY, _members={"CoreGate": ["scope"]}
+        )
+
+
+def test_a_list_that_is_not_saffron_iris_is_refused():
+    """The anchors are text, so the `sh:in` found after one is not guaranteed to
+    be the list meant. Confirm before overwriting a file the `shacl` gate reads."""
+    text = SHAPES_FILE.read_text().replace(
+        "saffron:CoreGateShape a sh:NodeShape ;",
+        'saffron:CoreGateShape a sh:NodeShape ;\n    sh:property [ sh:in ( "x" ) ] ;',
+        1,
+    )
+    with pytest.raises(ValueError, match="not saffron: IRIs"):
+        render.render_shapes(
+            text, vocabulary=VOCABULARY, _members={"CoreGate": ["scope"]}
+        )

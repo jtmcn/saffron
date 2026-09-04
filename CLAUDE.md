@@ -6,8 +6,12 @@ adversarial critic, and packages the result. `DESIGN.md` is authoritative for wh
 does; `CONTEXT.md` is authoritative for what the words mean. Both are read constantly — cite
 `DESIGN.md` by section number (`§5.4`), and use `CONTEXT.md`'s vocabulary exactly. For the
 five closed sets `tests/ontology/test_vocabulary_agrees_with_context.py` names,
-`ontology/saffron.ttl` is authoritative and `CONTEXT.md` is generated from it: edit the
-vocabulary and run `uv run python -m ontology.render`.
+`ontology/saffron.ttl` is authoritative and both `CONTEXT.md` and
+`ontology/shapes/saffron-shapes.ttl` are generated from it: edit the vocabulary and run
+`uv run python -m ontology.render`. Two shape lists stay hand-maintained because the
+vocabulary cannot imply them — a new core gate needs a blocking level in
+`saffron:CoreGateBlockingShape`, a new terminal state a place in `saffron:TaskShape`'s
+endedInState — and a test names the shape and the file when you forget.
 
 > Saffron is also a *target repo* of itself (`.saffron/`), so this file is the standing
 > instruction surface for agents running in a cell here (§8). Budget: ~200 lines. If it grows

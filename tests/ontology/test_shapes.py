@@ -2,6 +2,7 @@
 
 import pytest
 import rdflib
+import rdflib.collection
 from ontology_paths import FIXTURES, NEGATIVE, NS, VENDOR, VOCABULARY
 from pyshacl import validate
 
@@ -96,4 +97,30 @@ def test_every_core_gate_declares_a_blocking_level(shapes_graph):
         f"core gates with no declared blocking level: {missing}. §5.4 fixes "
         "these core-side, so add each to saffron:CoreGateBlockingShape (or "
         "saffron:SizeTierShape if a risk tier moves it) in saffron-shapes.ttl."
+    )
+
+
+def test_every_terminal_state_is_a_state_a_task_can_end_in(shapes_graph):
+    """`TaskShape`'s endedInState list is a hand-maintained *superset* of the
+    now-generated `TerminalStateShape` list, and nothing held the generated
+    subset inside it. Measured: declaring `saffron:BUDGET_SPENT` and running the
+    renderer left `tests/ontology/` and the `shacl` gate green while a one-task
+    graph was rejected — the shapes file saying a state reaches the operator and
+    that no task may end in it. endedInState closes over `EndState`, a superset,
+    so it is correctly not generated; that makes it a hole to route to a person,
+    which is the argument `CoreGateBlockingShape` already carries one shape over.
+    """
+    vocabulary = rdflib.Graph().parse(VOCABULARY, format="turtle")
+    terminal = set(
+        vocabulary.subjects(rdflib.RDF.type, rdflib.URIRef(f"{NS}TerminalState"))
+    )
+    accepted: set = set()
+    for shape in shapes_graph.subjects(SH.path, rdflib.URIRef(f"{NS}endedInState")):
+        for lst in shapes_graph.objects(shape, SH["in"]):
+            accepted |= set(rdflib.collection.Collection(shapes_graph, lst))
+    missing = sorted(str(state).removeprefix(NS) for state in terminal - accepted)
+    assert not missing, (
+        f"terminal states no task may end in: {missing}. Add each to "
+        "saffron:TaskShape's endedInState sh:in list in saffron-shapes.ttl — it "
+        "closes over EndState, a superset, so the generator cannot write it."
     )
