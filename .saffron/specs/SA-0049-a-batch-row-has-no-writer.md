@@ -21,7 +21,7 @@ forbidden:
   - saffron/preflight.py
   - saffron/reconcile.py
   - saffron/replay.py
-budget_usd: 8
+budget_usd: 10
 max_attempts: 3
 max_turns: 70
 risk: elevated
@@ -67,6 +67,24 @@ acceptance:
       projects it, and queue_lines does not. This witness goes through the new
       reader, never raw SQL, or it re-proves what is already proven.
     witness: tests/test_ledger.py::test_a_batchs_runs_are_readable_from_the_batch
+  - claim: >-
+      A run can be attached to the batch it ran under after the row already
+      exists. create_run takes no batch and the only call that mints a run is
+      inside run_one_cell, in saffron/cell/**, which the loop that owns the
+      batch may not edit — so without this stamp runs.batch_id is written by
+      nobody, every join through it returns nothing, and the spend derived
+      above is zero for every real night. The shape record_push and
+      set_task_package already use on tasks: the row exists, then the fact
+      about it arrives.
+    witness: tests/test_ledger.py::test_a_run_can_be_attached_to_its_batch_after_the_fact
+  - claim: >-
+      The same derivation the close performs is readable while the batch is
+      still running, so the loop's budget gate reads its spend back rather than
+      keeping a tally. task_spend's docstring is the argument one level down —
+      "a caller whose own tally lost a frame reads it back rather than
+      reporting the gap" — and the close and the reader must not be two
+      spellings of one sum that can drift apart.
+    witness: tests/test_ledger.py::test_a_running_batchs_spend_is_readable_before_it_closes
 ---
 
 ## Context
@@ -162,6 +180,17 @@ That one asserts the same two NULLs by raw `INSERT`. This one asserts them
 through the new opener, which is the part that does not exist. Different node
 id, so `criteria` is satisfied either way — but a copy of the old test proves
 nothing new and the adequacy lens will say so.
+
+**The two readers exist because `SA-0050` cannot reach the writes itself.**
+The loop that opens and closes a batch may edit neither `saffron/ledger.py` nor
+`saffron/cell/**`, so the attach and the running-spend reader are this spec's
+to add and the loop's to call. Both have no caller when this merges, exactly as
+the opener and the closer do.
+
+**One sum, not two.** The reader and the close compute the same figure —
+`batches` → `runs.batch_id` → `tasks.run_id` → `attempts.cost_usd_est` — so the
+close derives its stored value through the reader rather than repeating the
+SQL. Two spellings of one sum is how they come to disagree.
 
 **Witness 3: let the constraint speak.** The schema's `CHECK` already refuses a
 fifth status and `sqlite3` raises `IntegrityError`. Do not catch it and re-raise

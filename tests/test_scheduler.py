@@ -1723,17 +1723,18 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-04, a fifth time, and the churn is the practice
+    """Re-measured 2026-09-04, a sixth time, and the churn is the practice
     rather than a problem: this test exists to be re-anchored, and every spec
     that lands moves it by construction.
 
     The measured queue is the two specs with no `depends_on` — `SA-0045`, the
-    batch schema, and `SA-0052`, the scheduler fix that cuts from `main`. The
-    other three are one linear chain, `SA-0046` -> `SA-0048` -> `SA-0049`, each
-    refused for the parent above it having no task at its current `spec_sha`.
-    That is the shape §4.2.1 says a stack presents on its first night, before
-    anything has run, and it is a stronger anchor than the empty directory this
-    replaced: two independent roots and a three-deep chain, against real files.
+    batch schema, and `SA-0052`, the scheduler fix — each of which cuts from
+    `main`. The other four are one linear chain,
+    `SA-0046` -> `SA-0048` -> `SA-0049` -> `SA-0050`, each refused for the
+    parent above it having no task at its current `spec_sha`. That is the shape
+    §4.2.1 says a stack presents on its first night, before anything has run,
+    and it is a stronger anchor than the empty directory this replaced: two
+    independent roots and a four-deep chain, against real files.
 
     Note what this does *not* exercise. `_fake_gh([])` means `open_prs` is
     empty, so the open-pull-request overlap refusal never runs here — which is
@@ -1753,7 +1754,12 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     # The chain, in filename order, each naming the parent above it. Not merely
     # refused: refused for the parent it actually declares, which is what
     # distinguishes a dependency refusal from a criterion-path one.
-    chain = [("SA-0046", "SA-0045"), ("SA-0048", "SA-0046"), ("SA-0049", "SA-0048")]
+    chain = [
+        ("SA-0046", "SA-0045"),
+        ("SA-0048", "SA-0046"),
+        ("SA-0049", "SA-0048"),
+        ("SA-0050", "SA-0049"),
+    ]
     assert len(refusals) == len(chain)
     for refusal, (child, parent) in zip(refusals, chain, strict=True):
         assert refusal.path.name.startswith(child)
