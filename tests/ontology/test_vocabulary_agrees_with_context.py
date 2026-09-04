@@ -2,7 +2,7 @@
 
 Not a generated vocabulary: `CONTEXT.md` names the whole system and the ontology
 names only the run record, so most of that file has no term here and would fail
-the dead-term test if it did. This checks the overlap alone — three sets both
+the dead-term test if it did. This checks the overlap alone — five sets both
 documents already enumerate — because that overlap is where they have measurably
 drifted. `CONTEXT.md` §6 listed six terminal states, `DESIGN.md` §3.3 listed
 nine, and `saffron/cell/session.py` wrote a tenth state neither called terminal.
@@ -13,6 +13,8 @@ import re
 import pytest
 import rdflib
 from ontology_paths import FIXTURES, NS, ONTOLOGY, VOCABULARY
+
+from ontology import render
 
 CONTEXT = ONTOLOGY.parent / "CONTEXT.md"
 
@@ -32,13 +34,18 @@ def context_enumeration(term: str) -> set[str]:
     First sentence only: every one of these definitions goes on to mention other
     backticked names — `elevate_on`, `coverage`, `DESIGN.md` — that are prose
     about the set rather than members of it.
+
+    The token pattern is imported rather than repeated: `ontology.render`
+    locates its write span from the same matches, so the span it rewrites cannot
+    reach a token this rejects. Two copies let it, and `DESIGN.md` in a first
+    sentence made the renderer delete the prose after it while this stayed green.
     """
     body = CONTEXT.read_text()
     # The marker, not the marker plus a colon: `Core gates` is a bullet that
     # introduces its members with an em dash instead.
     start = body.index(f"**{term}**") + len(f"**{term}**")
     sentence = re.split(r"\.(?:\s|$)", body[start:], maxsplit=1)[0]
-    return set(re.findall(r"`([A-Za-z_][A-Za-z0-9_-]*)`", sentence))
+    return set(render.MEMBER_TOKEN.findall(sentence))
 
 
 def ontology_members(class_name: str) -> set[str]:
@@ -102,3 +109,24 @@ def test_the_gate_statuses_are_earl_outcomes_rather_than_saffron_terms():
         assert (None, earl.outcome, outcome) in graph, (
             f"no assertion in the fixture stands for a `{status}` gate result"
         )
+
+
+def test_every_severity_has_its_own_bullet():
+    """`**Severity**`'s first sentence is generated; the bullets under it are a
+    second, complete copy — one per member, each carrying what the severity
+    *does* (`blocker` routes to REBUT). A new severity would land in the
+    sentence and have no bullet, and nothing noticed.
+
+    Terminal states are deliberately not checked this way: only two of the nine
+    have their own paragraph, so that list is selective rather than a copy.
+    """
+    body = CONTEXT.read_text()
+    missing = [
+        member
+        for member in sorted(ontology_members("Severity"))
+        if f"- **`{member}`**" not in body
+    ]
+    assert not missing, (
+        f"severities with no bullet in CONTEXT.md: {missing}. Each bullet says "
+        "what the severity does, which the generated sentence cannot state."
+    )

@@ -170,6 +170,11 @@ so the two sides cannot be brought back into agreement from inside this task.
 The ontology entry and the `CONTEXT.md` bullet are a follow-up the operator
 makes together. Leave both alone; nothing fails while neither moves.
 
+> Discharged: PR #112 made the three edits by hand, and Phase A of
+> `2026-09-02-ontology-authoritative.md` reduces them to one command plus one —
+> a core gate still needs its blocking level in `saffron:CoreGateBlockingShape`,
+> which the vocabulary cannot imply and a test refuses to let you forget.
+
 **Take the runner as an argument; do not discover gates.** The supervisor
 already holds the discovered gate list and the executor. Hand this gate a
 callable that runs the declared test gate over a subset and returns a
