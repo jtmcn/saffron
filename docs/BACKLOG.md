@@ -38,22 +38,20 @@ that cannot start. Absorbs **16** and half of **44**.
 ### Tier 1 — breaks at 03:00 with nobody watching
 
 **45**, **51** (with **49**/**50**, which its fix closes), **47**, **46**,
-**40**, **26**, **7**, **59**.
+**40**, **26**, **7**. (**59** is done — `SA-0052`, PR #118.)
 
 Each fails in the dark or destroys work no one is awake to rescue. **45** loses
 a run's commits nightly; **51** switches the anti-theater gate off for one
 printed line; **47** feeds part 3 a column of zeros; **46** is the only account
 of a night nobody watched; **40** merges a diff over a ceiling it passed;
 **26** cannot tell an empty night from a missing directory; **7** leaves §8's
-flywheel inert exactly where it was meant to compound; **59** refuses a stacked
-grandchild the machinery exists to admit, and does it where only a batch can
-see.
+flywheel inert exactly where it was meant to compound.
 
 ### Tier 2 — the morning after
 
 Operator visibility parts 2 and 3 — `SA-0032`–`SA-0039`, with the plan's Task 6
 rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
-**38**), plus **43**, **48**, **52**.
+**38**), plus **43**, **48**, **52**, **60**.
 
 ### Tier 3 — real, not urgent
 
@@ -3311,6 +3309,14 @@ plan itself is written by hand — §4.4 is design, and `DESIGN.md` is
 **Tier 1.** Measured 2026-09-04, on this repo's own queue, by the first stack
 three deep.
 
+**Status:** **done**, by `SA-0053`'s predecessor `SA-0052` (PR #118, merge
+`37b2dc2`) — one attempt, $5.03, no blocking findings. The exemption now walks
+`depends_on[0]` transitively through the discovered specs, carrying a visited
+set seeded with the candidate's own id so a dependency cycle ends the walk
+instead of hanging the scan. `build_queue`'s signature is unchanged and the two
+live-witness tests were not touched: 239 added lines, 0 removed. Verified after
+the merge — the queue that had refused `SA-0049` reports zero refusals.
+
 `saffron/scheduler.py`'s open-pull-request overlap refusal exempts the
 candidate's own branch and one parent:
 
@@ -3355,6 +3361,47 @@ is what fails today.
 **Not** widening the refusal to ignore all overlaps: the gate is right about
 two unrelated tasks touching one file, which is what it was built for. Only the
 ancestor case is wrong, and only because the chain is walked one link deep.
+
+---
+
+## 60. A review lens's whole report is discarded on a schema error, and nothing re-prompts
+
+**Tier 2.** Measured 2026-09-04 on `SA-0053`, and the finding it cost was a
+real one.
+
+The correctness lens returned a well-argued finding about `saffron/watch.py`
+and omitted one field:
+
+```
+correctness produced nothing — not the schema: 1 validation error for _Report
+findings.0.severity
+  Field required [type=missing]
+```
+
+`review.py:168` turns that exception straight into `LensReview(..., error=...)`.
+The finding is gone — recoverable only by grepping `events.jsonl` by hand,
+which is how the text above was retrieved.
+
+**The stop is correct and is not the defect.** `review.py:274` makes an errored
+lens a stop at `REVIEWING`: *"A lens that errored **is** a stop"*. So a
+vanished lens can never read as a clean review, which is the Appendix I
+discipline working exactly as designed. Nothing here argues for softening it.
+
+**The gap is the missing re-prompt.** The plan artifact re-prompts once on a
+schema failure — `session.py:451`, *"not the schema, re-prompting once"* — and
+a lens does not, though both are a fresh session returning JSON against a
+declared shape and both cost roughly the same to ask again. One malformed
+enum field ended the attempt at $3.61 with a correct finding thrown away.
+
+**Done looks like** `review.py` re-prompting a lens once on `NotSchema`, the
+way `artifacts.py` already does for the plan, with the second failure still
+producing the stop it produces today. The re-prompt must carry the validation
+error itself: the lens omitted a required field, and being told which one is
+most of the fix.
+
+**Not** relaxing the schema to make `severity` optional. The severity is what
+`_describe` counts and what decides whether a finding blocks; a report whose
+findings have no severity is not a report that can be acted on.
 
 ---
 
