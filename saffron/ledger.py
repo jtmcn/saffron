@@ -1,7 +1,7 @@
 """The ledger — SQLite, one file, WAL, authoritative for state (DESIGN.md §4.1).
 
-Seven of the ten tables. `batches` and `decisions` wait for a scheduler and an
-operator to have something to put in them.
+Eight of the ten tables. `decisions` waits for an operator to have something
+to put in it.
 """
 
 from __future__ import annotations
@@ -23,9 +23,30 @@ CREATE TABLE IF NOT EXISTS repos (
     enabled     INTEGER NOT NULL DEFAULT 1
 );
 
+-- One night's window and how it ended (§4.2.1). Timestamps are TEXT, matching
+-- every other timestamp this module writes (`datetime('now')`, sortable as
+-- text) rather than inventing a second representation. `budget_usd` is known
+-- at start and required; `ended_at` and the running spend estimate are unset
+-- while the batch is still going, so both of those columns are nullable.
+-- `status` is one of the four stop reasons — `DRAINED`, `BUDGET`, `UNTIL`,
+-- `INFRASTRUCTURE`, one per stop condition (§4.2.1) — and the CHECK is
+-- satisfied by NULL, so a still-running batch's row is neither a violation
+-- nor a fifth reason. No `concurrency`: §4.2.1 defers it until K has a second
+-- position.
+CREATE TABLE IF NOT EXISTS batches (
+    batch_id      INTEGER PRIMARY KEY,
+    started_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at      TEXT,
+    budget_usd    REAL NOT NULL,
+    spent_usd_est REAL,
+    until_ts      TEXT,
+    status        TEXT CHECK (status IN ('DRAINED', 'BUDGET', 'UNTIL', 'INFRASTRUCTURE'))
+);
+
 CREATE TABLE IF NOT EXISTS runs (
     run_id     INTEGER PRIMARY KEY,
     repo_id    INTEGER NOT NULL REFERENCES repos(repo_id),
+    batch_id   INTEGER REFERENCES batches(batch_id),
     base_sha   TEXT NOT NULL,
     preflight  TEXT,
     started_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -153,6 +174,16 @@ class Ledger:
         if "spent_usd_est" not in existing:
             self._db.execute(
                 "ALTER TABLE tasks ADD COLUMN spent_usd_est REAL NOT NULL DEFAULT 0.0"
+            )
+        # Same trap, this time on `runs`: `batches` arriving in `SCHEMA` does
+        # not retrofit `batch_id` onto a `runs` table that already exists.
+        runs_existing = {
+            row["name"]
+            for row in self._db.execute("PRAGMA table_info(runs)").fetchall()
+        }
+        if "batch_id" not in runs_existing:
+            self._db.execute(
+                "ALTER TABLE runs ADD COLUMN batch_id INTEGER REFERENCES batches(batch_id)"
             )
         # The backfill the old schema comment promised. A ledger written before
         # `attempts` existed holds a *task_id* in `gate_results.attempt_id`, and
@@ -322,10 +353,18 @@ class Ledger:
             )
         )
 
-    def create_run(self, repo_id: int, base_sha: str) -> int:
+    def create_run(
+        self, repo_id: int, base_sha: str, batch_id: int | None = None
+    ) -> int:
+        """`batch_id` defaults to `None` — a run created outside a batch (or
+        by `saffron/replay.py`, which calls this with no `batch_id` at all)
+        leaves the column NULL rather than inventing a batch that did not
+        happen. Nothing passes a real value yet; the batch loop that will is
+        `SA-0049`."""
         cursor = self._db.execute(
-            "INSERT INTO runs (repo_id, base_sha, status) VALUES (?, ?, 'RUNNING')",
-            (repo_id, base_sha),
+            """INSERT INTO runs (repo_id, base_sha, batch_id, status)
+               VALUES (?, ?, ?, 'RUNNING')""",
+            (repo_id, base_sha, batch_id),
         )
         self._db.commit()
         return _inserted_id(cursor)
