@@ -49,12 +49,12 @@ cell-marked tests. No new dependencies.
 
 ---
 
-## Why six specs
+## Why seven specs
 
 Item 56 is the measurement that sets the shape: `SA-0009` was §4.2.1's
 *read-only* half as one spec, landed 990 changed lines against a 600-line
 `feature` ceiling, and ended `EXHAUSTED` at $31.60 with zero lines merged. This
-plan is §4.2.1's *executing* half, which is larger. Splitting it six ways is
+plan is §4.2.1's *executing* half, which is larger. Splitting it seven ways is
 not caution — it is the recut that item 25 had to perform by hand afterwards,
 performed first.
 
@@ -64,7 +64,7 @@ looks thin, that is deliberate.
 ## Stacking
 
 The six run as **one linear stack**: `SA-0045` → `SA-0046` → `SA-0047` →
-`SA-0048` → `SA-0049` → `SA-0050`. K=1 means they are serial regardless.
+`SA-0048` → `SA-0050` → `SA-0051`. K=1 means they are serial regardless.
 
 **`SA-0047`'s `depends_on` is a stacking edge, not a logical one.** It touches
 only `saffron/scheduler.py` and would run correctly against `main`. It is
@@ -85,7 +85,7 @@ A plan carrying a copy of a spec that exists on disk is a drift vector, and this
 one already drifted once — the copy below was replaced after L3.
 
 **Interfaces:** produces the `batches` table and `runs.batch_id`. Consumed by
-`SA-0049`'s loop and by part 3's pages.
+`SA-0050`'s loop and by part 3's pages.
 
 - [x] **L1: Write the spec.**
 - [x] **L2: Read it back** against §4.2.1's schema paragraph.
@@ -175,7 +175,7 @@ rather than given a spec, and Task 5's criteria now name it.
 
 **Interfaces:** consumes `SA-0045`'s `runs.batch_id`. Produces
 `batch_preflight(...)` returning a per-repo readiness result. Consumed by
-`SA-0049`.
+`SA-0050`.
 
 - [ ] **L1: Write the spec**
 
@@ -253,7 +253,7 @@ detection as well turns a warned failure into a silent one."*
       drive a real session, which carries the `cell` marker
 
 ## Out of scope
-**Calling it from a batch.** `SA-0049`.
+**Calling it from a batch.** `SA-0050`.
 
 **`saffron gc` (§4.5).** Deferred at K=1, deliberately; the disk *check* is
 not.
@@ -276,17 +276,48 @@ slug and only reaches it after the budget is spent.
 
 ---
 
-## Task 5: `SA-0049` — nothing runs the queue it prints
+## Task 5: `SA-0049` — the batches table has no writer
+
+**Written: `.saffron/specs/SA-0049-a-batch-row-has-no-writer.md`.**
+
+**This task exists because the loop's draft could not have run.** It forbade
+`saffron/ledger.py` while carrying a criterion that a `batches` row is written
+at start and completed at stop — and `SA-0045` had explicitly deferred
+`create_batch` to "the spec that adds the loop". A criterion unsatisfiable
+inside `touches` fails `scope` on every attempt with no legal repair, which is
+the same defect L3 found in `SA-0048`'s draft. Found by writing it out rather
+than by review.
+
+**The split is also what keeps the widest spec off the strictest ceiling.**
+`saffron/ledger.py` is in `elevate_on`, so any spec touching it runs elevated,
+where `size` is **blocking** at 600 rather than advisory. Carrying the ledger
+methods would have put the largest piece of this plan under the tightest
+ceiling — item 56's arrangement exactly. This half is small and elevated; the
+loop is large and standard.
+
+**Interfaces:** produces the batch writer — open, close with a stop reason, and
+a spend derived from the tasks rather than passed. Consumed by `SA-0050`.
+
+- [x] **L1: Write the spec.**
+- [ ] **L2: Read it back.** The fourth witness is the load-bearing one: the
+      spend is summed from the tasks, never accepted from a caller — the same
+      argument `set_task_state` already makes about a task and its attempts.
+- [ ] **L3: Spec review.**
+- [ ] **L4–L8:** as Task 1.
+
+---
+
+## Task 6: `SA-0050` — nothing runs the queue it prints
 
 **Interfaces:** consumes `SA-0045`'s schema, `SA-0047`'s stamping and
 `SA-0048`'s preflight. Produces `run_batch(...)` returning a stop reason.
-Consumed by `SA-0050`.
+Consumed by `SA-0051`.
 
 - [ ] **L1: Write the spec**
 
 ```markdown
 ---
-id: SA-0049
+id: SA-0050
 title: the scan resolves a queue and nothing executes it, so a night cannot happen
 type: feature
 priority: 1
@@ -305,9 +336,10 @@ forbidden:
   - saffron/phases/**
   - saffron/report/**
   - saffron/gates/**
-  - saffron/ledger.py
   - saffron/scheduler.py
   - saffron/preflight.py
+  - saffron/ledger.py
+  - saffron/reconcile.py
 budget_usd: 16
 max_attempts: 4
 max_turns: 110
@@ -351,15 +383,16 @@ them, so §9's v1 criterion is unreachable.
       any terminal state" would never reach two
 - [ ] `--until` is compared against an injected clock, never `time.time()`
       read inside the loop, so the condition is testable without waiting
-- [ ] A `batches` row is written at start and completed at stop, carrying the
-      window, the spend and the status
+- [ ] A `batches` row is opened at start and closed at stop with the reason,
+      through `SA-0049`'s writer — `saffron/ledger.py` is `forbidden` here, so
+      this spec calls those methods and adds none
 - [ ] Every `run_one_cell` call is made through an injected callable, so every
       test above runs with no network and no cell
 - [ ] No test in this spec carries the `cell` marker — if one needs a real
       cell, the seam is in the wrong place
 
 ## Out of scope
-**The CLI.** `saffron/cli.py` is `forbidden`; `SA-0050` wires the command.
+**The CLI.** `saffron/cli.py` is `forbidden`; `SA-0051` wires the command.
 
 **Concurrency.** K=1. No pool, no `--concurrency`, no reserved budget.
 
@@ -392,20 +425,20 @@ above seems to need a real night, the seam is wrong.
 
 ---
 
-## Task 6: `SA-0050` — the command
+## Task 7: `SA-0051` — the command
 
-**Interfaces:** consumes `SA-0049`'s `run_batch`. Produces `saffron batch`.
+**Interfaces:** consumes `SA-0050`'s `run_batch`. Produces `saffron batch`.
 
 - [ ] **L1: Write the spec**
 
 ```markdown
 ---
-id: SA-0050
+id: SA-0051
 title: run_batch has no caller, so a night still cannot be started
 type: feature
 priority: 1
 depends_on:
-  - SA-0049
+  - SA-0050
 touches:
   - saffron/cli.py
   - tests/test_cli.py
@@ -483,7 +516,7 @@ trusting a night, and a test pins it.
 
 ---
 
-## Task 7: The by-hand follow-ups
+## Task 8: The by-hand follow-ups
 
 Protected documents no cell can correct, plus the host artifact that is not
 code.
@@ -511,12 +544,12 @@ git commit -m "docs(design): a batch runs, and three documents described a facto
 
 ---
 
-## Task 8: Link, check and merge the stack
+## Task 9: Link, check and merge the stack
 
 - [ ] **Step 1: Link the pull requests, bottom to top — by hand.**
 
 ```bash
-gh stack link <SA-0045-pr> <SA-0047-pr> <SA-0048-pr> <SA-0049-pr> <SA-0050-pr>
+gh stack link <SA-0045-pr> <SA-0047-pr> <SA-0048-pr> <SA-0050-pr> <SA-0051-pr>
 ```
 
 `link`, not `submit`: PACKAGE has already opened every pull request, and
@@ -566,7 +599,7 @@ env CLAUDE_CODE_OAUTH_TOKEN=(...) uv run saffron batch --repo . --budget 20 --un
 ```
 
 §9's criterion is *a full night runs while you sleep*, and every property in
-`SA-0049` was tested against a fake clock and a fake cell. **The first real
+`SA-0050` was tested against a fake clock and a fake cell. **The first real
 batch is the measurement**, and whatever it returns is `docs/evidence/`
 material in the shape of `docs/evidence/2026-08-25-morning-queue-from-real-rows.md`.
 
@@ -578,7 +611,7 @@ material in the shape of `docs/evidence/2026-08-25-morning-queue-from-real-rows.
 task: the `batches` schema to `SA-0045`; item 16's policy lineage to
 `SA-0046`; the `ORPHANED` stamp to `SA-0047`; `load_policy` validation, the
 auth check and disk headroom to `SA-0048`; the loop, the four stop conditions
-and the breaker to `SA-0049`; the command and exit codes to `SA-0050`. Item
+and the breaker to `SA-0050`; the command and exit codes to `SA-0051`. Item
 44's enforceable half is in Task 5.
 
 **What L3 changed, recorded because the plan was wrong rather than incomplete.**
@@ -587,19 +620,19 @@ named two of `ledger.py`'s three shapes — omitting the only one that alters an
 existing table. That note would have produced a no-op migration, green tests, a
 merge, and then `no such column` on the operator's real ledger, at exit `2`,
 taking the five dependent specs with it. The split and the correction are Tasks
-1 and 2. **The plan applied its own width test to `SA-0049` and not to Task 1**,
+1 and 2. **The plan applied its own width test to `SA-0050` and not to Task 1**,
 which is the process defect worth keeping rather than the schema one.
 
 **Placeholders.** None. Every acceptance criterion is checkable and names what
 it is checked against.
 
-**Naming consistency.** `run_batch` is produced by `SA-0049` and consumed by
-`SA-0050` under that name in both. `batch_preflight` is named once, in
-`SA-0048`'s interface line, and `SA-0049` consumes it only through
+**Naming consistency.** `run_batch` is produced by `SA-0050` and consumed by
+`SA-0051` under that name in both. `batch_preflight` is named once, in
+`SA-0048`'s interface line, and `SA-0050` consumes it only through
 `SA-0048`'s result rather than by name — deliberate, because whether it is one
 function or a small module is DIAGNOSE's answer, not this plan's.
 
-**The known risk.** `SA-0049` is the widest spec here — nine criteria against
+**The known risk.** `SA-0050` is the widest spec here — nine criteria against
 two files — and item 56 is the standing measurement of what happens when a
 spec is too wide for its own repair loop. Task 4's L2 carries an explicit
 instruction to split it at the stop-conditions/breaker seam if L3 reports two
