@@ -53,6 +53,33 @@ def _sha(path):
     return load_spec(path)[1]
 
 
+REAL_SPECS = Path(__file__).resolve().parent.parent / ".saffron" / "specs"
+
+
+def _real_corpus(tmp_path, *, promote=frozenset()):
+    """This repo's own spec files, arranged as a scannable directory.
+
+    Every spec Saffron has run is retired to `specs/done/`, so the live
+    top-level directory is empty between batches and a test anchored to it
+    measures nothing. The real files are still the corpus worth scanning —
+    they carry real `depends_on` chains and real acceptance criteria, which
+    is what the checks below are for — so a test names the ids it needs at
+    top level and this puts them there, leaving the rest retired.
+
+    `README.md` is dropped: `discover_specs` globs `*.md` and reports it as a
+    failure, which is correct and is not what any caller here is measuring.
+    """
+    specs = tmp_path / "specs"
+    specs.mkdir()
+    done = specs / "done"
+    shutil.copytree(REAL_SPECS / "done", done)
+    (done / "README.md").unlink()
+    for path in sorted(done.glob("*.md")):
+        if load_spec(path)[0].id in promote:
+            shutil.move(str(path), specs / path.name)
+    return specs
+
+
 def _repo(ledger, origin="/o"):
     return ledger.upsert_repo("r", origin, "/m.git", policy_sha="p" * 64)
 
@@ -1224,20 +1251,29 @@ def test_a_dead_state_under_a_superseded_sha_does_not_speak_for_the_parent(
 def test_this_repos_own_specs_admit_a_merged_parent_and_name_a_retired_one(
     tmp_path, ledger
 ):
-    """Criterion 5's live witness, re-anchored a third time — 2026-08-31,
-    when retirement began satisfying a dependency. The shape survives each
-    time, so it is the shape this pins: one parent merged and on disk, one
-    parent retired off it, and both admitting their children.
+    """Criterion 5's live witness, re-anchored a fourth time — 2026-09-04,
+    when the last active spec was retired and the top-level directory went
+    empty. The shape survives each time, so it is the shape this pins: one
+    parent merged and on disk, one parent retired off it, and both admitting
+    their children.
 
-    `SA-0017`'s parent `SA-0016` is top-level and merged — the first thing
-    this gate ever scheduled. `SA-0022` and `SA-0023` depend on `SA-0020`,
-    which is in `specs/done/` and has no task at all, because it was
-    implemented by hand: the case the ledger alone can never answer. A parent
-    that is genuinely absent still refuses, which the synthetic tests hold.
+    The four ids are promoted out of `specs/done/` rather than read where they
+    happen to lie, which is the only thing that changed. Every previous
+    anchoring picked whichever real specs were mid-flight at the time; there
+    are none now, and waiting for the next batch would leave this dark for as
+    long as the queue is empty. The files are the same real files, and the
+    arrangement is the one that was measured.
+
+    `SA-0017`'s parent `SA-0016` is promoted alongside it and carries a
+    `MERGED` task — the first thing this gate ever scheduled. `SA-0022` and
+    `SA-0023` depend on `SA-0020`, which stays in `specs/done/` and has no
+    task at all, because it was implemented by hand: the case the ledger alone
+    can never answer. A parent that is genuinely absent still refuses, which
+    the synthetic tests hold.
     """
-    real_specs = Path(__file__).resolve().parent.parent / ".saffron" / "specs"
-    directory = tmp_path / "specs"
-    shutil.copytree(real_specs, directory)
+    directory = _real_corpus(
+        tmp_path, promote={"SA-0016", "SA-0017", "SA-0022", "SA-0023"}
+    )
     repo_id = _repo(ledger)
 
     under_test = {"SA-0017", "SA-0022", "SA-0023"}
@@ -1448,52 +1484,49 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-08-31, after twelve shipped specs moved to
-    `specs/done/` (`intake.discover_specs` globs `*.md`, not `**/*.md`):
-    `SA-0009` and `SA-0019` queued, everything else filtered out with a
-    `READY_FOR_REVIEW` task at the same `spec_sha`, and nothing refused. The
-    two ids are not arbitrary — they are the only top-level specs with an
-    empty `depends_on`, and every other one would be refused by the dependency
-    gate rather than queued, which would test the refusal instead of the
-    filter. Re-anchored 2026-08-31, when `SA-0009` was retired to `specs/done/`
-    as shipped and `SA-0024` took its place as the second such spec. A smoke
-    check, not proof the refusals work on their own — those are the fixtures
-    above."""
-    real_specs = Path(__file__).resolve().parent.parent / ".saffron" / "specs"
-    directory = tmp_path / "specs"
-    shutil.copytree(real_specs, directory)
-    repo_id = _repo(ledger)
+    """Re-measured 2026-09-04: the top-level spec directory is empty, because
+    every spec Saffron has run is retired to `specs/done/` and no new batch has
+    landed. So the measured queue is empty, and this half says so.
 
-    still_open = {"SA-0019", "SA-0024"}
-    for path in sorted(directory.glob("*.md")):
-        spec, spec_sha = load_spec(path)
-        if spec.id in still_open:
-            continue
-        _task_at(
-            ledger,
-            repo_id,
-            spec_id=spec.id,
-            spec_sha=spec_sha,
-            state="READY_FOR_REVIEW",
-        )
+    It re-anchors the moment a spec is added — which is the point. A batch that
+    lands and does not queue is exactly the failure worth a red test, and the
+    three previous anchorings of this test were each that same correction made
+    by hand.
+    """
+    live = Path(__file__).resolve().parent.parent / ".saffron" / "specs"
+    directory = tmp_path / "specs"
+    shutil.copytree(live, directory)
+    repo_id = _repo(ledger)
 
     candidates, refusals = build_queue(
         directory, repo_id, ledger, repo_slug="joel/saffron", gh=_fake_gh([])
     )
 
-    assert [c.spec.id for c in candidates] == ["SA-0019", "SA-0024"]
+    assert [c.spec.id for c in candidates] == []
     assert refusals == []
 
-    # Again with no ledger, so nothing is filtered before `_refuse` runs. The
-    # pass above reaches the refusals for two of nine specs — the other seven
-    # are dropped as done first — so on its own it stays green while
-    # every one of them is falsely refused, which is how the criterion-path
-    # check shipped refusing SA-0011 and SA-0016 (this spec) on their own
-    # criteria. `depends_on` refusals are expected here and are the shape the
-    # Notes describe; a criterion-path refusal on a real spec is not.
-    _, unfiltered = build_queue(
+
+def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger):
+    """The half of the smoke check that catches a defect, pointed at the whole
+    retired corpus — 36 specs rather than the 9 that happened to be in flight.
+
+    No ledger, so nothing is filtered before `_refuse` runs and every spec
+    reaches it. The criterion-path check shipped refusing `SA-0011` and
+    `SA-0016` on their own criteria, and this is the assertion that catches
+    that class: a `depends_on` refusal is the expected shape here, because the
+    corpus is one long dependency chain with no tasks behind it; a refusal on
+    anything else is the bug.
+    """
+    # Every spec at top level: a spec left in `done/` is never scanned, and
+    # this check wants each one to reach `_refuse`.
+    directory = _real_corpus(tmp_path)
+    for path in sorted((directory / "done").glob("*.md")):
+        shutil.move(str(path), directory / path.name)
+
+    _, refusals = build_queue(
         directory, None, ledger, repo_slug="joel/saffron", gh=_fake_gh([])
     )
 
-    assert [r for r in unfiltered if "acceptance criteria name" in r.reason] == []
-    assert all("depends_on" in r.reason for r in unfiltered)
+    assert refusals, "the corpus refuses nothing, so this asserts nothing"
+    assert [r for r in refusals if "acceptance criteria name" in r.reason] == []
+    assert all("depends_on" in r.reason for r in refusals)
