@@ -4,10 +4,9 @@ title: the overlap refusal walks one hop, so a stack three deep refuses its own 
 type: bug
 priority: 1
 depends_on: []
-envelope:
-  - saffron/scheduler.py
-  - tests/**
 touches:
+  - saffron/scheduler.py
+  - tests/test_scheduler.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -25,6 +24,35 @@ budget_usd: 8
 max_attempts: 3
 max_turns: 70
 risk: standard
+acceptance:
+  - claim: >-
+      A candidate three deep in a stack is admitted when the open pull request
+      it overlaps belongs to its own grandparent. That parent's changes are
+      already in this candidate's base, because a stacked child is cut from its
+      parent's branch head — there is nothing to conflict with.
+    witness: tests/test_scheduler.py::test_a_grandparents_open_pull_request_does_not_refuse_its_grandchild
+  - claim: >-
+      Two unrelated tasks touching one file are still refused, naming the pull
+      request and the overlapping paths. This is what the gate was built for
+      and the fix must not widen past the ancestor case.
+    witness: tests/test_scheduler.py::test_an_unrelated_open_pull_request_still_refuses_on_overlap
+  - claim: >-
+      Only the first dependency is treated as an ancestor. K=1 fixes the first
+      entry as the sole stacking candidate, so a second entry is a dependency
+      rather than a base: its changes are not in this candidate's tree and an
+      overlap with its pull request is a real conflict, still refused.
+    witness: tests/test_scheduler.py::test_a_second_dependency_is_not_an_ancestor_and_still_refuses
+  - claim: >-
+      A dependency cycle terminates the walk instead of hanging the scan.
+      Nothing validates the graph for cycles at parse time, so this is
+      reachable from a hand-written pair, and unattended a hang costs the whole
+      night rather than one task.
+    witness: tests/test_scheduler.py::test_a_dependency_cycle_does_not_hang_the_ancestor_walk
+  - claim: >-
+      A parent the scan cannot see ends the walk quietly rather than raising —
+      a retired parent is not in the scanned set, and a dangling id is already
+      the dependency gate's refusal to make with its own reason.
+    witness: tests/test_scheduler.py::test_an_unscanned_parent_ends_the_walk_without_raising
 ---
 
 ## Context
@@ -83,11 +111,12 @@ admits what it should.
 
 ## Notes for the agent
 
-**This is a bug spec with an `envelope` and no `touches` because the shape is
-genuinely open.** Whether the ancestor set is computed in `build_queue` and
-passed to `_refuse` as one more keyword, or derived inside `_refuse` from a
-map handed to it, is what DIAGNOSE answers. What is fixed is that the exemption
-must cover every ancestor rather than one.
+**The internal shape is yours; the file is not.** Whether the ancestor set is
+computed in `build_queue` and passed to `_refuse` as one more keyword, or
+derived inside `_refuse` from a map handed to it, is a judgement call — both
+live entirely inside the one module `touches` permits, which is why this spec
+declares that module rather than leaving `touches` empty for a proposal.
+What is fixed is that the exemption must cover every ancestor rather than one.
 
 **The specs are already in hand.** `build_queue` binds `specs` from
 `discover_specs` before it loops, and calls `_refuse` inside that loop. The
