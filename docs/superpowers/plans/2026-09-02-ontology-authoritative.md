@@ -700,16 +700,95 @@ Not a task in the sense above: it produces a written answer, not a deliverable. 
 
 Appendix O assumed §4.2.1's scheduler was unbuilt. It is now built — `saffron/scheduler.py:302` `protected_touch_refusal`, `:374` `retirement_refusal`, `:497` `_dependency_refusal`, `:572` `_refuse`, `:675` `build_queue` — so the experiment is **half the size Appendix O priced**: the Python arm exists, and only the shape arm has to be written.
 
-- [ ] **B1.** Hand-author a graph of in-flight tasks covering the refusal cases `scheduler.py` already implements, under `tests/ontology/fixtures/`.
-- [ ] **B2.** Express §4.2.1's refusal predicate as SHACL shapes over that graph. **Write them from §4.2.1's prose, not by reading `scheduler.py`.** This is the one place the shrunk experiment threatens its own result: questions 1 and 2 ask whether the shape form states something the Python leaves implicit and whether either catches what the other misses, and a shape arm transcribed from the Python inherits its blind spots by construction and answers both trivially. Appendix O priced two arms built from the same spec; only one of them still has to be built, so the discipline that made them independent has to be supplied by hand. Record in B3 which source each shape came from.
-- [ ] **B3.** Run both arms on the same fixtures and answer, in writing, appended to this plan:
+- [x] **B1.** Hand-author a graph of in-flight tasks covering the refusal cases `scheduler.py` already implements, under `tests/ontology/fixtures/`.
+- [x] **B2.** Express §4.2.1's refusal predicate as SHACL shapes over that graph. **Write them from §4.2.1's prose, not by reading `scheduler.py`.** This is the one place the shrunk experiment threatens its own result: questions 1 and 2 ask whether the shape form states something the Python leaves implicit and whether either catches what the other misses, and a shape arm transcribed from the Python inherits its blind spots by construction and answers both trivially. Appendix O priced two arms built from the same spec; only one of them still has to be built, so the discipline that made them independent has to be supplied by hand. Record in B3 which source each shape came from.
+- [x] **B3.** Run both arms on the same fixtures and answer, in writing, appended to this plan:
   1. Does the shape form state a refusal the Python form leaves implicit?
   2. Does either catch a case the other misses, on the same fixtures?
   3. What does the graph cost to keep current, per scheduled task?
   4. Can the shape form be read by someone who has not read the Python?
-- [ ] **B4.** Apply Appendix O's rule verbatim: *"A yes on 1 and 4 with an acceptable 3 reopens §1.4. Anything else closes it, and `ontology/` stays what §9's v2.5 already says it is: a completed project."*
+- [x] **B4.** Apply Appendix O's rule verbatim: *"A yes on 1 and 4 with an acceptable 3 reopens §1.4. Anything else closes it, and `ontology/` stays what §9's v2.5 already says it is: a completed project."*
 
 **If it closes:** stop. Phase A stands on its own, `ontology/queries/` stays as worked examples, and the plan's part 3 renderer is built on SQL as `2026-08-31-operator-visibility.md` already specifies. Record the answers anyway — a negative result that is written down is what stops the question being reopened by argument a third time.
+
+
+### Phase B — the answers, and the verdict
+
+Run 2026-09-04. The shape arm was written from §4.2 gate 0 and §4.2.1's prose
+with `saffron/scheduler.py` unread, and the scheduler was opened only afterwards,
+to score both arms on the same twelve hand-authored in-flight tasks. Artifacts
+were kept out of the tree deliberately: the rule below closes the question, and
+the plan says a closing result means they do not land.
+
+**Appendix O's premise does not survive contact.** It says "its refusal predicate
+is pure set containment". Four of the eight refusals are glob matching, not set
+containment: `touches` against an open PR's changed files (2), a criterion's path
+against `touches` (5), `touches` against protected paths (7), and a
+`saffron:retired-by` marker against `touches` (8). Set containment is what the
+other four are, and it is what shapes are for; the half the appendix rests on is
+the half that is not.
+
+**1. Does the shape form state a refusal the Python form leaves implicit?**
+**No — and the inverse is true.** `_unmatched_criterion_path` carries a condition
+§4.2.1 never states: a path token covered by the spec's own `forbidden` is a
+citation, not a target, because `SA-0016`'s criteria name a path for a shape to
+copy while forbidding that directory, and the unguarded form refused that very
+spec. A shape arm written from the prose, as Appendix O requires, cannot contain
+that rule — the prose does not have it. The Python also skips tokens holding glob
+characters, and records a measured trade (two of seventeen falsely refused) that
+has no declarative expression at all.
+
+**2. Does either catch a case the other misses, on the same fixtures?**
+**Yes, one-way: the shape arm misses, the Python does not.** On `**/size.py`
+against `saffron/gates/core/size.py`, `scope.matches` returns `True` and the
+task is admitted; the shape arm refuses it. That is a false refusal at gate 0,
+which §4.2.1 prices at "a whole spec overnight with no cell started and nothing
+to notice until morning". SHACL has no glob operator, and SPARQL's `REGEX` needs
+a regex the graph does not carry. The empty-`touches` bug case failed the same
+way for a different reason — `FILTER NOT EXISTS` is vacuously true over an empty
+set, so the declarative form's *default* is the wrong answer, and the guard had
+to be added after watching it refuse the whole bug class. The Python states that
+skip as its first line. No case was found that the shape arm catches and the
+Python misses.
+
+**3. What does the graph cost to keep current, per scheduled task?**
+**Unacceptable.** The refusal predicate needs 28 terms the vocabulary does not
+have — a ~30% extension of 91 — because the run record describes tasks that have
+*ended* and the scheduler reasons about tasks that have not. `TaskShape` requires
+`endedInState` with `sh:minCount 1`, so an in-flight task cannot be represented
+at all without failing the blocking `shacl` gate, and the vocabulary declares
+zero in-flight states. `MERGE_TRAIN`, named twice in §4.2.1's own rules, is not
+in the vocabulary either. Per scheduled task the emitter would carry the spec,
+both `spec_sha`s, the state, every `touches` pattern, every criterion path,
+`depends_on`, the open PR set with changed files, protected paths, retirement
+markers and preflight status. And for the four glob refusals to work at all it
+must also carry a **pre-translated regex per pattern** — reimplementing
+`scope.matches` in the emitter, which is the second source of truth
+`_unmatched_criterion_path`'s own docstring forbids in the same breath: *"the
+same function `scope`, `integrity` and `size` all reuse, so 'declared' means one
+thing in every gate — never a second, more permissive rule invented here."*
+
+**4. Can the shape form be read by someone who has not read the Python?**
+**No better than the Python, and it lies.** The four shapes are SPARQL text
+carrying fully-qualified IRIs inside string literals, opaque to SHACL's own
+validation; the readable half is the `sh:message`. It cannot state the
+`forbidden` carve-out, and on `**/size.py` it states a refusal that is wrong. A
+form that reads clearly and answers incorrectly is worse than one that reads
+plainly and is right.
+
+**B4 — the rule applied verbatim.** *"A yes on 1 and 4 with an acceptable 3
+reopens §1.4. Anything else closes it."* No on 1, no on 4, and 3 is not
+acceptable. **§1.4 stands, and `ontology/` stays what §9's v2.5 already says it
+is: a completed project.** Phase A stands on its own — it made the vocabulary
+authoritative for five closed sets it already described, which is documentation
+generation and reopens nothing. `ontology/queries/` stays as worked examples, and
+the operator-visibility renderer is built on SQL as
+`2026-08-31-operator-visibility.md` specifies. Phases C-E are not written.
+
+Recorded rather than left implicit, per the instruction above: a negative result
+that is written down is what stops the question being reopened by argument a
+third time. Principle 56 applies to this run too — it answers the operational
+question on its own evidence, and nothing else.
 
 ---
 
