@@ -105,6 +105,16 @@ with its pull request is a genuine conflict. The walk follows slot zero only.
 **The dependency gate.** A different refusal with a different rule; it already
 admits what it should.
 
+**Whether every ancestor is *really* a base.** A child is only cut from its
+parent's branch when that parent has a task in a waiting state; a parent that
+already merged leaves the child cut from the default branch instead, so an
+exemption for it is an over-approximation. It is narrow — a stack merges bottom
+up, so reaching it needs an out-of-order merge — and the one-hop code being
+fixed makes exactly the same unconditional assumption today. Widening it from
+one link to all does not make that assumption worse, and narrowing it is a
+separate question about consulting ledger state inside a refusal that currently
+needs none.
+
 **Anything outside `saffron/scheduler.py`.** The whole fix lives there —
 `build_queue` already has the discovered specs in scope where it calls
 `_refuse`, so no new lookup and no new caller.
@@ -138,14 +148,33 @@ pull request of theirs to collide with, so the walk ends quietly.
 open pull request. Two things could name a branch and the refusal already
 built its own with `_branch`; reuse it rather than reconstructing the string.
 
+**Three of the five witnesses are regression guards and pass before the fix as
+well as after — that is intended, not a mistake to correct.** Only the
+grandparent case and the cycle are red at head today. An unrelated pull request
+already refuses, a second `depends_on` entry already refuses, and no walk exists
+yet so nothing raises on an unscanned parent. Do not spend turns trying to make
+those three fail first; they exist so the fix cannot pass by widening the gate
+into uselessness. Every witness is a new node id, so none can be green at
+`base_sha` in the sense `criteria` refuses — that check reads the *base* tree's
+own collected names.
+
 **No new test may carry the `cell` marker.** `pyproject.toml` sets
 `addopts = "-m 'not cell'"` and the `tests` gate passes the same argv to
 `--collect-only`, so a cell-marked test is never collected at head. Nothing
 here needs a container: `build_queue` takes an injected `gh` callable and every
 existing refusal test uses it.
 
-**`tests/test_scheduler.py` holds two tests anchored to this repo's real spec
-files** — one promoting ids out of `specs/done/`, one asserting what the live
-directory queues. They are re-anchored deliberately as specs land and they are
-not yours to loosen. If a change here moves them, that is a finding to report,
-not a test to edit.
+**Two tests here are anchored to this repo's real spec files, and neither is
+affected by this fix.** One promotes ids out of `specs/done/` and passes no
+`repo_slug` at all; the other copies the live spec directory and passes an
+empty `gh`. Both leave `open_prs` empty, so the overlap refusal never executes
+in either — which is why the ancestor walk cannot move them, and why the
+synthetic fixtures beside them are where this behaviour gets pinned.
+
+If either does move, that is a finding worth reporting rather than a green to
+chase: it would mean the walk reached a path the fix was not supposed to touch.
+
+**`build_queue`'s own signature is not yours.** `saffron/cli.py` and the
+`run-saffron-spec-loop` skill's driver both call it and neither is in
+`touches`, so a new *required* parameter breaks a caller this spec cannot
+legally repair. `_refuse` is private and free to change.
