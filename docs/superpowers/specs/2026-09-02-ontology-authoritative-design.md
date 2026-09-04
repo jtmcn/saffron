@@ -56,7 +56,7 @@ implicit.
   by the operator, which is the cost this design removes. A gate name that is
   still undeclared everywhere — `saffron:probe` above — is what any mutant here
   must use; re-running the first draft's `revert` mutant today appends a
-  duplicate triple and the suite stays green.
+  duplicate triple and the test suite stays green.
 - **The closed sets are closed in three places, not two.**
   `ontology/shapes/saffron-shapes.ttl:81-90` re-enumerates core gates and gate
   roles as SHACL `sh:in` lists, and `.saffron/gates/shacl.py` is a **blocking**
@@ -70,7 +70,7 @@ implicit.
   `__init__.py`, `index.py`, `pr_body.py`. (That `SA-0035`–`SA-0039` all write
   to `render.py` is a fact about the plan, not about this repo — the plan says
   so at its line 1352, and none of those specs exist as files.)
-- **`ontology/RATIONALE.md` is seven days old** (`71722ec`, 2026-08-26) and is
+- **`ontology/RATIONALE.md` last changed at `71722ec`** (2026-08-26) and is
   **exactly at** the 40-line cap that `SA-0001` names as an acceptance
   criterion.
 
@@ -166,7 +166,8 @@ engine to a runtime dependency, ship the renderer outside `saffron/`, or emit
 a shape the renderer can read without SPARQL — and it is not a drafting one.
 
 **`test_no_dead_terms` is a weaker mechanism than the first draft claimed.**
-`tests/ontology/ontology_paths.py` scans only `ontology/queries/*.rq` and
+`tests/ontology/ontology_paths.py:referenced_terms()` — the function the
+dead-term test reads — scans only `ontology/queries/*.rq` and
 `ontology/shapes/*.ttl`. A renderer under `saffron/` is **not** scanned, so a
 committed `.rq` satisfies the gate whether or not anything calls it — which is
 the shape of the thin query this design forbids one sentence later. A rule with
@@ -178,8 +179,14 @@ executes.
 ## 4. Sequencing — one plan, gated
 
 **Phase A — vocabulary. Unconditional.**
-Marker-delimited regions in `CONTEXT.md`'s run-record sections, a generator, a
-drift test. **And the `sh:in` lists in `ontology/shapes/saffron-shapes.ttl`**,
+A generator and a drift check over the five sets part 6 names, located by the
+bold term already committed above each one and with **no markers**. An earlier
+draft of this part proposed marker-delimited regions: `CONTEXT.md` is injected
+into every agent prompt (`saffron/agents/context.py`), so a marker comment is
+prompt text, and the plan forbids scaffolding outright. The check is a pytest
+test on the blocking `tests` gate rather than a new gate executable — the plan
+gives the reason, and says which word it uses.
+**And the `sh:in` lists in `ontology/shapes/saffron-shapes.ttl`**,
 which are the third copy of the same closed sets and are enforced by a blocking
 gate — without them the success criterion in part 7 is unreachable. Migrate the
 five already-asserted sets first: a faithful generator produces a **zero-line
@@ -191,8 +198,10 @@ Three of the five sets wrap across source lines (`CONTEXT.md:201-202`,
 reproduce the committed bytes — the first draft's did not. Greedy wrapping the
 rewritten span at the committed continuation indent reproduces all five exactly
 at **width 82, 83 or 84, and at no other width** (76-92 searched). The plan
-takes 83 and tests the boundary, because a number found by search is a fact
-about the committed file that a later hand edit can invalidate silently.
+takes 83 and **commits** a test over 81-85 asserting exactly that band, because
+a number found by search is a fact about the committed file that a later hand
+edit can invalidate silently — and a boundary probed once during authoring, then
+restored, leaves no witness against that edit.
 
 **Phase A is an operator-side fix plus a gate, not a cell-side repair.**
 `CONTEXT.md` is `protected` repo-wide in `.saffron/policy.yaml` and
@@ -204,10 +213,16 @@ hand edits become one command, and that forgetting it becomes a **failing gate
 instead of silent drift**. That is the whole claim; it is worth making, and it
 is not "the cell can now fix it".
 
-**Phase B — Appendix O's spike.** As specified, unmodified, with its four
-questions answered in writing. **This is a gate, not a formality.** Anything
-other than yes-on-1-and-4-with-acceptable-3 closes §1.4, and Phases C–E do not
-happen.
+**Phase B — Appendix O's spike.** Its four questions and its pass condition are
+taken unmodified. One premise of it is not: Appendix O says *"§4.2.1's scheduler
+is decided in full and unbuilt … Build it twice"*, and it is now built
+(`saffron/scheduler.py:302`, `:374`, `:497`, `:572`, `:675`). So only the shape
+arm remains to write, and that biases the experiment in a direction the spike
+must guard against — a shape arm authored by reading `scheduler.py` inherits the
+Python form's blind spots, which are exactly what questions 1 and 2 ask about.
+The plan therefore requires the shape arm to be written from §4.2.1's prose.
+**This is a gate, not a formality.** Anything other than
+yes-on-1-and-4-with-acceptable-3 closes §1.4, and Phases C–E do not happen.
 
 **Phase C — the emitter.** Only if Phase B reopens it. Validated by the existing
 SHACL shapes and their fixtures.

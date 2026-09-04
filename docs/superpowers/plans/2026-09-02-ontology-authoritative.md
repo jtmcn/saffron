@@ -6,7 +6,7 @@
 
 **Architecture:** A generator reads `ontology/saffron.ttl` and rewrites two derived surfaces: the enumerations in `CONTEXT.md`'s closed-set definitions, and the `sh:in` lists in `ontology/shapes/saffron-shapes.ttl`. A drift test asserts the committed files equal the render. Nothing under `saffron/` imports the generator, and no runtime dependency is added.
 
-**Tech Stack:** Python 3.14, `rdflib` and `pyoxigraph` (already dev-only deps), pytest, `uv`.
+**Tech Stack:** Python `>=3.12` (`pyproject.toml`; `[tool.ty.environment]` pins `3.12`, so the generator must not use 3.13+ syntax), `rdflib` and `pyoxigraph` (already dev-only deps), pytest, `uv`.
 
 **Spec:** `docs/superpowers/specs/2026-09-02-ontology-authoritative-design.md`
 
@@ -16,9 +16,12 @@
 - **`CONTEXT.md` is injected into agent prompts** by `saffron/agents/context.py`. Do not add marker comments, HTML, or any generator scaffolding to it — the file must read exactly as it does now to a human and to an agent. The generator locates its regions by the existing bold term.
 - **The `shacl` gate is blocking** (`.saffron/gates/shacl.py`) and validates every tracked `.ttl` against `ontology/shapes/`. A shapes file that fails SHACL fails the gate suite.
 - **Bare "suite" means the gate suite** (`CONTEXT.md`). The repo's own tests are always "the test suite".
-- **A new test is not trusted until it has been run against the unfixed code** — or, for one guarding a property already true, against a mutant that breaks it (CLAUDE.md). **A mutant must name a term that is undeclared everywhere.** `saffron:revert` is not one: `73c2b9f` (PR #112) declared it in all three surfaces, so appending it appends a duplicate triple and the suite stays green — measured, `74 passed`. Every mutant below uses `saffron:probe`, which is declared nowhere.
+- **A new test is not trusted until it has been run against the unfixed code** — or, for one guarding a property already true, against a mutant that breaks it (CLAUDE.md). **A mutant must name a term that is undeclared everywhere.** `saffron:revert` is not one: `73c2b9f` (PR #112) declared it in all three surfaces, so appending it appends a duplicate triple and the test suite stays green — measured, `74 passed`. Every mutant below uses `saffron:probe`, which is declared nowhere.
 - **Commit subjects are lowercase `type(scope): what changed`**, written about the defect rather than the file.
+- **"Drift test", not "drift gate".** It is a pytest test riding the existing blocking `tests` gate, not a new `.saffron/gates/` executable. That choice is deliberate — it inherits the `tool` field by execution (`pytest --version`), which a hand-written gate would have to obtain itself (§5.4, Appendix H). The cost is that the operator sees "some test failed" rather than a distinct `gate` name in the ledger; if that matters later, promoting it is a separate task. The spec calls it a gate in the loose sense; this plan builds a test.
 - **Phase B is a gate.** Tasks 7+ do not exist until it returns, and its pass condition is `DESIGN.md` Appendix O's, not this plan's.
+- **A block headed `# append to ontology/render.py` starts two blank lines below what precedes it**, per PEP 8 and `ruff format`. Appending with one is the whole of the difference between a green `format` gate and a red one.
+- **Every code block here is gate-clean as written, and must stay so.** `format`, `lint` and `types` are all `blocking: true` (`.saffron/policy.yaml`), and `tests/test_saffron_gates.py` asserts each passes on a clean tree — so a block that only passes pytest fails `make check`. An earlier draft's blocks did exactly that: two unguarded `re` matches gave `ty` two `unresolved-attribute` diagnostics, and three lines were unformatted. **`# ty: ignore` is not the repair** — it is in `integrity.suppressions`, so adding one trips `added-suppression` instead. Guard the match.
 
 ## File structure
 
@@ -27,8 +30,10 @@
 | `ontology/render.py` (create) | The only generator. Reads the vocabulary; renders the two derived surfaces. Pure functions over text — no file writes except in `main()`. |
 | `tests/ontology/test_render.py` (create) | Unit tests for member extraction and both renderers. |
 | `tests/ontology/test_generated_surfaces_are_current.py` (create) | The drift test: committed files equal the render. |
-| `CONTEXT.md` (modify) | Five enumerations become generated. Prose untouched. |
-| `ontology/shapes/saffron-shapes.ttl` (modify, lines 81–90) | Two `sh:in` lists become generated. |
+| `CONTEXT.md` (becomes generated; **no diff in Phase A**) | Five enumerations become generated. Prose untouched. A faithful generator changes zero bytes, which is Task 2's proof. |
+| `ontology/shapes/saffron-shapes.ttl` (becomes generated; **no diff in Phase A**), lines 81–90 | Two `sh:in` lists become generated. |
+| `CLAUDE.md` (modify) | One sentence: `CONTEXT.md` stops being authoritative for the five generated sets (spec part 6, Task 6). |
+| `.saffron/policy.yaml` (modify) | `ontology/render.py` joins `integrity.gate_config` (Task 4). |
 | `docs/superpowers/plans/2026-09-02-ontology-authoritative.md` | This plan; Phase B's answers are appended to it. |
 
 **Not in this plan:** `Status`/EARL (spec part 6 — not one of the five cross-checked sets, so it blocks nothing here), promoting the other 18 absent terms, and anything requiring an emitter. `ontology/RATIONALE.md` is **not** deferred: the spec's own PR settles it, in place and at zero net lines, so no cap change reaches this plan.
@@ -52,24 +57,44 @@
 
 ```python
 # tests/ontology/test_render.py
-from ontology_paths import VOCABULARY
+from ontology_paths import ONTOLOGY, VOCABULARY
 
 from ontology import render
 
+SHAPES_FILE = ONTOLOGY / "shapes" / "saffron-shapes.ttl"
 
-def test_members_are_returned_in_vocabulary_source_order():
+
+def test_members_are_returned_in_vocabulary_source_order(tmp_path):
     """CONTEXT.md's terminal-state order is deliberate and is neither
-    alphabetical nor rdflib's iteration order, so source order is the only
-    rule that can reproduce the committed bytes."""
-    assert render.members("CoreGate", vocabulary=VOCABULARY) == [
-        "scope", "size", "secrets", "integrity", "census", "committed",
-        "criteria", "revert",
+    alphabetical nor rdflib's iteration order, so source order is the only rule
+    that can reproduce the committed bytes.
+
+    Pinned on a synthetic vocabulary: pinning the real one would make this test
+    a fourth hand-maintained copy of the set Phase A exists to generate, so
+    declaring a ninth core gate would need a hand edit here. The real order is
+    covered end to end by the zero-diff test.
+    """
+    vocabulary = tmp_path / "saffron.ttl"
+    vocabulary.write_text(
+        "@prefix saffron: <https://saffron.dev/ns#> .\n"
+        "saffron:zulu a saffron:CoreGate .\n"
+        "saffron:alpha a saffron:CoreGate .\n"
+        "saffron:mike a saffron:CoreGate .\n"
+    )
+    assert render.members("CoreGate", vocabulary=vocabulary) == [
+        "zulu",
+        "alpha",
+        "mike",
     ]
 
 
 def test_members_of_a_class_with_no_instances_is_empty_not_an_error():
     assert render.members("NoSuchClass", vocabulary=VOCABULARY) == []
 ```
+
+**The synthetic order is `zulu, alpha, mike`** — deliberately neither alphabetical nor its reverse, so `sorted()` and `sorted(reverse=True)` both break it.
+
+**`ONTOLOGY` and `SHAPES_FILE` are declared here, not in Task 3**, because appending an import mid-file is `E402` and `lint` is blocking. `pytest` is *not* imported yet for the mirror-image reason: nothing in this task uses it, and an unused import is `F401`. Each task adds its imports to the top of the file at the step that first needs them — never below the functions.
 
 - [ ] **Step 2: Run it and watch it fail**
 
@@ -109,13 +134,17 @@ def members(class_name: str, *, vocabulary: Path) -> list[str]:
         str(s).removeprefix(NS)
         for s in graph.subjects(rdflib.RDF.type, rdflib.URIRef(f"{NS}{class_name}"))
     ]
+
     def first_offset(name: str) -> int:
         found = re.search(rf"saffron:{re.escape(name)}\b", text)
         return found.start() if found else len(text)
+
     return sorted(names, key=first_offset)
 ```
 
-Also create an empty `ontology/__init__.py` so `from ontology import render` resolves. Two things to confirm in this step rather than assume: that a test under `tests/ontology/` can `from ontology import render` (the suite's `conftest.py` puts that directory on the path, not the repo root), and that `pyproject.toml`'s `packages = ["saffron"]` keeps the new package out of the wheel — `uv build && unzip -l dist/*.whl | grep -c ontology/` should print `0`.
+**The blank lines around `first_offset` are `ruff format`'s, not decoration.** Written without them the block fails the blocking `format` gate.
+
+Also create an empty `ontology/__init__.py` so `from ontology import render` resolves. Two things to confirm in this step rather than assume: that a test under `tests/ontology/` can `from ontology import render` (the test suite's `conftest.py` puts that directory on the path, not the repo root), and that `pyproject.toml`'s `packages = ["saffron"]` keeps the new package out of the wheel — `uv build && unzip -l dist/*.whl | grep -c ontology/` should print `0`.
 
 - [ ] **Step 4: Run the tests**
 
@@ -124,7 +153,9 @@ Expected: PASS, 2 tests.
 
 - [ ] **Step 5: Verify it is a real check, not a tautology**
 
-Temporarily change `sorted(names, key=first_offset)` to `sorted(names)` and re-run. Expected: FAIL, alphabetical order (`census, committed, criteria, integrity, revert, scope, secrets, size`). Restore.
+Temporarily change `sorted(names, key=first_offset)` to `sorted(names)` and re-run. Expected: FAIL — `test_members_are_returned_in_vocabulary_source_order` gets `["alpha", "mike", "zulu"]`. Restore.
+
+Measured against the finished Task 5 file this mutant fails **7 of 14**, because source order is what every zero-diff assertion rests on. Each mutant below states the test it is aimed at *and* the total, so a run showing more reds than the aim is not a surprise to investigate.
 
 - [ ] **Step 6: Commit**
 
@@ -149,6 +180,8 @@ The write path mirrors the existing read path exactly: `test_vocabulary_agrees_w
 
 - [ ] **Step 1: Write the failing test**
 
+Add `import pytest` to the top of `tests/ontology/test_render.py` — the first two tests below need it, and Task 1 could not carry it without tripping `F401`. Then append:
+
 ```python
 def test_each_closed_set_renders_the_committed_bytes_unchanged():
     """The five sets are already asserted equal by
@@ -161,7 +194,10 @@ def test_each_closed_set_renders_the_committed_bytes_unchanged():
 def test_a_new_member_lands_in_the_sentence_with_the_declared_join():
     text = "**Severity**: `blocker`, `concern`, or `note`.\n"
     out = render.render_context(
-        text, vocabulary=VOCABULARY, _members={"Severity": ["blocker", "concern", "note", "wart"]}  # keyed by class
+        text,
+        vocabulary=VOCABULARY,
+        # `_members` is keyed by ontology class, not by the CONTEXT.md term.
+        _members={"Severity": ["blocker", "concern", "note", "wart"]},
     )
     assert out == "**Severity**: `blocker`, `concern`, `note`, or `wart`.\n"
 
@@ -171,8 +207,35 @@ def test_prose_outside_the_backticked_span_is_untouched():
     out = render.render_context(
         text, vocabulary=VOCABULARY, _members={"GateRole": ["format", "lint", "types"]}
     )
-    assert out == "**Gate role**: A name in the contract — `format`, `lint`, `types`. The repo supplies it.\n"
+    assert (
+        out
+        == "**Gate role**: A name in the contract — `format`, `lint`, `types`. The repo supplies it.\n"
+    )
+
+
+@pytest.mark.parametrize("width", [81, 82, 83, 84, 85])
+def test_the_width_band_is_82_to_84_and_nothing_else(width, monkeypatch):
+    """83 was found by search, so it is a fact about the committed CONTEXT.md
+    that a later hand edit can invalidate silently."""
+    committed = (VOCABULARY.parents[1] / "CONTEXT.md").read_text()
+    monkeypatch.setattr(render, "_WIDTH", width)
+    reproduces = render.render_context(committed, vocabulary=VOCABULARY) == committed
+    assert reproduces == (82 <= width <= 84)
+
+
+def test_a_closed_set_that_renders_to_no_members_is_an_error():
+    """An empty enumeration would leave `**Severity**: , or .` behind and pass
+    every assertion above. The fixture reaches this only because the lookup is
+    by `in` — an empty list is falsy and `or` fell through to the vocabulary."""
+    with pytest.raises(ValueError, match="rendered to no members"):
+        render.render_context(
+            "**Severity**: `blocker`, `concern`, or `note`.\n",
+            vocabulary=VOCABULARY,
+            _members={"Severity": []},
+        )
 ```
+
+**The width band is committed, not probed.** The design says 83 is "a fact about the committed file that a later hand edit can invalidate silently", so the boundary has to leave a witness: a temporary edit made during authoring and then restored does not. `monkeypatch` sets the module global, which `render_context` reads at call time.
 
 - [ ] **Step 2: Run it and watch it fail**
 
@@ -203,6 +266,11 @@ SETS = {
 
 
 def _join(names: list[str], style: str) -> str:
+    # A closed set that renders to nothing is a generator bug, not an output:
+    # `**Terminal state**: A state that reaches the operator — .` would pass
+    # every assertion below and be silently wrong.
+    if not names:
+        raise ValueError("a closed set rendered to no members")
     ticked = [f"`{n}`" for n in names]
     if style == "comma":
         return ", ".join(ticked)
@@ -218,7 +286,11 @@ def _continuation_indent(text: str, span_start: int, span_end: int) -> str:
     wraps shows it directly; one that does not inherits its own line's indent."""
     newline = text.find("\n", span_start, span_end)
     at = newline + 1 if newline != -1 else text.rfind("\n", 0, span_start) + 1
-    return re.match(r"[ \t]*", text[at:]).group()
+    # Sliced rather than `re.match(...).group()`: that match is `Match | None` to
+    # `ty`, and the blocking `types` gate does not take "this pattern always
+    # matches" for an answer.
+    rest = text[at:]
+    return rest[: len(rest) - len(rest.lstrip(" \t"))]
 
 
 def render_context(text: str, *, vocabulary: Path, _members=None) -> str:
@@ -238,12 +310,23 @@ def render_context(text: str, *, vocabulary: Path, _members=None) -> str:
         # others are not in its text and indexing for them would raise.
         if _members is not None and class_name not in _members:
             continue
-        # `_members` is keyed by ontology class in both renderers, never by
-        # the CONTEXT.md term — one key space, so a test reads the same either side.
-        names = (_members or {}).get(class_name) or members(class_name, vocabulary=vocabulary)
+        # `in`, not `or`: an empty member list is falsy, and falling through to
+        # the real vocabulary would make an empty-set fixture silently pass.
+        # `_members` is keyed by ontology class in both renderers, never by the
+        # CONTEXT.md term — one key space, so a test reads the same either side.
+        names = (
+            _members[class_name]
+            if _members is not None
+            else members(class_name, vocabulary=vocabulary)
+        )
         start = text.index(f"**{term}**")
         # First sentence: up to a period followed by whitespace or end of text.
-        end = re.search(r"\.(?:\s|$)", text[start:]).start() + start
+        # Guarded, not asserted: a definition with no sentence end is a real
+        # input, and `ty` rejects `.start()` on `Match | None` regardless.
+        stop = re.search(r"\.(?:\s|$)", text[start:])
+        if stop is None:
+            raise ValueError(f"{term}'s definition has no first sentence to rewrite")
+        end = stop.start() + start
         sentence = text[start:end]
         first, last = sentence.index("`"), sentence.rindex("`") + 1
         # `rfind`, not `rindex`: a one-line fixture has no preceding newline.
@@ -264,16 +347,19 @@ def render_context(text: str, *, vocabulary: Path, _members=None) -> str:
 - [ ] **Step 4: Run the tests**
 
 Run: `uv run pytest tests/ontology/test_render.py -v`
-Expected: PASS, 5 tests. **The zero-line-diff test is the one that matters** — it proves the generator reproduces bytes a human wrote before it is trusted to write new ones. All five were run against the real `CONTEXT.md` while this plan was written; a sketch whose expected output has not been executed is the defect this step exists to catch.
+Expected: PASS, 11 tests — 5 named above plus the 5 width parameters and the empty-set case. **The zero-line-diff test is the one that matters** — it proves the generator reproduces bytes a human wrote before it is trusted to write new ones. All eleven were run against the real `CONTEXT.md` while this plan was written; a sketch whose expected output has not been executed is the defect this step exists to catch.
 
 - [ ] **Step 5: Prove the zero-diff test can fail**
 
-Two mutants, because the join and the wrap fail independently:
+Three mutants, because the join, the wrap and the empty-set guard fail independently:
 
-1. Change `"or-comma"` to `"comma"` for `Severity`. Expected: FAIL on `test_each_closed_set_renders_the_committed_bytes_unchanged`.
-2. Set `_WIDTH = 80`. Expected: FAIL on the same test, with a three-hunk diff collapsing `Gate role`, `Core gates` and `Terminal state` onto single lines. This is the mutant that matters — it is the bug the first draft of this plan shipped.
+1. Change `"or-comma"` to `"comma"` for `Severity`. Expected: FAIL on `test_each_closed_set_renders_the_committed_bytes_unchanged` (6 of 14 — the width parameters rest on the same render).
+2. Replace the whole `textwrap.fill(...)` call with `body = _join(names, style)`. Expected: FAIL on the same test (5 of 14, including the three in-band width parameters), **with a three-hunk diff collapsing `Gate role`, `Core gates` and `Terminal state` each onto one line.** This is the mutant that matters — it is the bug the first draft of this plan shipped.
+3. Replace `if not names:` with `if False:` in `_join`. Expected: FAIL on `test_a_closed_set_that_renders_to_no_members_is_an_error` alone (1 of 14).
 
-Restore both.
+Restore all three.
+
+**`_WIDTH = 80` is not the mutant for hunk 2, and an earlier draft said it was.** Measured, it produces **one** hunk, on `Core gates` alone, and it *adds* a line break rather than collapsing anything — narrowing a greedy wrap can only wrap earlier. No width in 76-92 gives three hunks. The collapse is what dropping the wrap entirely does, which is what the first draft actually shipped; the sentence was right about the bug and attached to the wrong edit. The width boundary is covered instead by the committed `test_the_width_band_is_82_to_84_and_nothing_else`, which a temporary `_WIDTH` edit could never leave behind.
 
 - [ ] **Step 6: Commit**
 
@@ -297,12 +383,9 @@ git commit -m "feat(ontology): the glossary's enumerations render from the vocab
 
 - [ ] **Step 1: Write the failing test**
 
+`ONTOLOGY` and `SHAPES_FILE` are already at the top of the file from Task 1 — appending an import here instead is `E402 Module level import not at top of file`, and `lint` is blocking. This block is functions only:
+
 ```python
-from ontology_paths import ONTOLOGY
-
-SHAPES_FILE = ONTOLOGY / "shapes" / "saffron-shapes.ttl"
-
-
 def test_the_shapes_render_the_committed_bytes_unchanged():
     committed = SHAPES_FILE.read_text()
     assert render.render_shapes(committed, vocabulary=VOCABULARY) == committed
@@ -342,10 +425,15 @@ def render_shapes(text: str, *, vocabulary: Path, _members=None) -> str:
     is committed. The `shacl` gate reads this file, so a reflow is a gate diff.
     """
     for shape, class_name in SHAPE_SETS.items():
-        # Same rule as `render_context`: a fixture names the sets it is about.
+        # Same rules as `render_context`: a fixture names the sets it is about,
+        # and an empty list is looked up by `in` rather than falling through.
         if _members is not None and class_name not in _members:
             continue
-        names = (_members or {}).get(class_name) or members(class_name, vocabulary=vocabulary)
+        names = (
+            _members[class_name]
+            if _members is not None
+            else members(class_name, vocabulary=vocabulary)
+        )
         rows = [
             " ".join(f"saffron:{n}" for n in names[i : i + _PER_LINE])
             for i in range(0, len(names), _PER_LINE)
@@ -361,11 +449,11 @@ def render_shapes(text: str, *, vocabulary: Path, _members=None) -> str:
 - [ ] **Step 4: Run the tests**
 
 Run: `uv run pytest tests/ontology/test_render.py -v`
-Expected: PASS, 7 tests.
+Expected: PASS, 13 tests.
 
 - [ ] **Step 5: Prove the wrap rule is load-bearing**
 
-Temporarily set `_PER_LINE = 4` and re-run. Expected: FAIL on the zero-diff shapes test. Restore.
+Temporarily set `_PER_LINE = 4` and re-run. Expected: FAIL on the zero-diff shapes test (2 of 14, with `test_the_in_list_wraps_at_three_terms_per_line`). Restore.
 
 - [ ] **Step 6: Commit**
 
@@ -379,7 +467,7 @@ git commit -m "feat(ontology): the shapes' sh:in lists are a third copy of the s
 ### Task 4: The drift test, and `main()`
 
 **Files:**
-- Modify: `ontology/render.py`
+- Modify: `ontology/render.py`, `.saffron/policy.yaml`
 - Create: `tests/ontology/test_generated_surfaces_are_current.py`
 
 **Interfaces:**
@@ -442,7 +530,7 @@ printf '\nsaffron:probe a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBl
 uv run pytest tests/ontology/test_generated_surfaces_are_current.py -v
 ```
 
-Expected: BOTH tests FAIL, each naming the regenerate command.
+Expected: BOTH tests FAIL (2 of 2 in that file), each naming the regenerate command.
 
 **`probe`, not `revert`.** `saffron:revert` is already declared in all three surfaces (`73c2b9f`), so appending it appends a duplicate triple: measured on a worktree at this branch's HEAD, `tests/ontology/` reports **`74 passed`** and nothing fails. A mutant that does not mutate would let this test — the whole point of Phase A — be committed having never been seen to fail. `saffron:probe` is declared nowhere, and appending it fails four checks at HEAD (`test_no_dead_terms` ×2, `test_shapes::test_the_lifecycle_graph_conforms`, `test_vocabulary_agrees_with_context[Core gates-CoreGate]`), which is the design's measurement reproduced. Then:
 
@@ -474,10 +562,20 @@ if __name__ == "__main__":
 Run: `uv run python -m ontology.render && git diff --stat`
 Expected: no output from `git diff --stat`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Route the generator itself to a person**
+
+`CONTEXT.md` is `protected` and `ontology/shapes/**` is in `integrity.gate_config`, so a cell cannot edit either derived surface. Nothing covers the file that decides whether they are *current*: replacing `render_context`'s body with `return text` makes both drift tests pass unconditionally, and neither `integrity` nor `protected_touch_refusal` sees it. Add to `.saffron/policy.yaml`'s `integrity.gate_config` list:
+
+```yaml
+      "ontology/render.py",
+```
+
+Same argument the list already makes for `conftest.py` and `ontology/shapes/**`: the rules a gate enforces have to be routed to a person, not just the gate's own executable. Note the list is scanned for the tokens it declares, so describe the path — do not add a comment quoting a suppression.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add ontology/render.py tests/ontology/test_generated_surfaces_are_current.py
+git add ontology/render.py tests/ontology/test_generated_surfaces_are_current.py .saffron/policy.yaml
 git commit -m "feat(ontology): a closed set split across three files drifts silently"
 ```
 
@@ -526,21 +624,24 @@ def test_declaring_a_core_gate_in_the_vocabulary_alone_updates_both_surfaces(tmp
 - [ ] **Step 2: Run it**
 
 Run: `uv run pytest tests/ontology/test_render.py -v`
-Expected: PASS, 8 tests.
+Expected: PASS, 14 tests. Whole directory: **`90 passed`** (74 existing + 14 + Task 4's 2).
 
 - [ ] **Step 3: Prove Task 5 can fail**
 
-The only task whose assertions are all about a term the tests themselves introduce, so it needs a mutant like the rest. Temporarily make `render_context` return its input unchanged. Expected: FAIL on the `context_out` assertion. Restore.
+The only task whose assertions are all about a term the tests themselves introduce, so it needs a mutant like the rest. Temporarily make `render_context` return its input unchanged. Expected: FAIL on the `context_out` assertion (6 of 14 — including the width band's 81 and 85, which an identity render reproduces at every width). Restore.
 
 - [ ] **Step 4: Full verification**
 
 Run: `make check > /tmp/check.log 2>&1; echo "exit: $?"; tail -3 /tmp/check.log`
-Expected: exit 0. `ruff format` rewrites files then reports failure — re-run before believing a red result (CLAUDE.md).
+Expected: exit 0, **`1230 passed, 20 deselected`**. `ruff format` rewrites files then reports failure — re-run before believing a red result (CLAUDE.md).
 
-`make check` is `lint test` (`Makefile:18`) and does **not** run the `shacl` gate, which is a `.saffron/gates/` executable and is blocking on the file this plan rewrites. Run it directly too:
+`make check` is `lint test` (`Makefile:18`) and does **not** run two blocking gates that this plan's files reach. Run both directly:
 
 Run: `uv run python .saffron/gates/shacl.py; echo "exit: $?"`
-Expected: a `pass` result. Without this step the design's Phase A criterion — "the blocking `shacl` gate passing" — is asserted rather than checked.
+Expected: a `pass` result, `0 violations across 2 graphs`. Without this the design's Phase A criterion — "the blocking `shacl` gate passing" — is asserted rather than checked.
+
+Run: `uv run python .saffron/gates/typecheck.py; echo "exit: $?"`
+Expected: a `pass` result, `no type errors`. Same reason, and not hypothetical: an earlier draft of Task 2's implementation left two `re` matches unguarded and this gate reported two `unresolved-attribute` diagnostics on them. `make check`'s `lint` target runs `prek`, which does run `ty` — but reading the gate's own JSON is what the criterion is stated in.
 
 - [ ] **Step 5: Record that `SA-0044`'s workaround is spent**
 
@@ -561,6 +662,38 @@ git commit -m "feat(ontology): one declaration reaches all three copies, so the 
 
 ---
 
+### Task 6: `CLAUDE.md` stops claiming an authority it no longer has
+
+Spec part 6 requires this and calls it the point: *"an authoritative file that is quietly no longer authoritative is the defect this design exists to remove, not one to introduce."* `CLAUDE.md:5-6` reads *"`DESIGN.md` is authoritative for what the system does; `CONTEXT.md` is authoritative for what the words mean."* After Task 2 that holds for the file as a whole but not for the five generated sets, where the vocabulary is authoritative and `CONTEXT.md` is its render.
+
+**Files:**
+- Modify: `CLAUDE.md`
+- Modify: `tests/ontology/test_vocabulary_agrees_with_context.py` (docstring only)
+
+- [ ] **Step 1: Amend the sentence**
+
+One sentence, after the existing pair — the budget is ~200 lines and the file is the standing instruction surface for cells:
+
+> For the five closed sets `tests/ontology/test_vocabulary_agrees_with_context.py` names, `ontology/saffron.ttl` is authoritative and `CONTEXT.md` is generated from it: edit the vocabulary and run `uv run python -m ontology.render`.
+
+- [ ] **Step 2: Correct a count the cross-check has had wrong since before this plan**
+
+`test_vocabulary_agrees_with_context.py`'s module docstring says the overlap is *"three sets both documents already enumerate"*; `CLOSED_SETS` holds **five**. Pre-existing, and not this plan's defect — but Task 2 makes that file the naming authority the `CLAUDE.md` sentence above points at, so it cannot be left saying the wrong number. One word.
+
+- [ ] **Step 3: Verify**
+
+Run: `uv run pytest tests/ tests/ontology/ -q && uv run python .saffron/gates/lint.py`
+Expected: green, and `CLAUDE.md` still under its ~200-line budget.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add CLAUDE.md tests/ontology/test_vocabulary_agrees_with_context.py
+git commit -m "docs(ontology): CLAUDE.md named CONTEXT.md authoritative for words the vocabulary now owns"
+```
+
+---
+
 ## Phase B — Appendix O's spike. **This is a gate.**
 
 Not a task in the sense above: it produces a written answer, not a deliverable. **Do not begin it as part of Phase A's review cycle.** Its pass condition is `DESIGN.md` Appendix O's, quoted below, and it is the only thing that reopens §1.4.
@@ -568,7 +701,7 @@ Not a task in the sense above: it produces a written answer, not a deliverable. 
 Appendix O assumed §4.2.1's scheduler was unbuilt. It is now built — `saffron/scheduler.py:302` `protected_touch_refusal`, `:374` `retirement_refusal`, `:497` `_dependency_refusal`, `:572` `_refuse`, `:675` `build_queue` — so the experiment is **half the size Appendix O priced**: the Python arm exists, and only the shape arm has to be written.
 
 - [ ] **B1.** Hand-author a graph of in-flight tasks covering the refusal cases `scheduler.py` already implements, under `tests/ontology/fixtures/`.
-- [ ] **B2.** Express §4.2.1's refusal predicate as SHACL shapes over that graph.
+- [ ] **B2.** Express §4.2.1's refusal predicate as SHACL shapes over that graph. **Write them from §4.2.1's prose, not by reading `scheduler.py`.** This is the one place the shrunk experiment threatens its own result: questions 1 and 2 ask whether the shape form states something the Python leaves implicit and whether either catches what the other misses, and a shape arm transcribed from the Python inherits its blind spots by construction and answers both trivially. Appendix O priced two arms built from the same spec; only one of them still has to be built, so the discipline that made them independent has to be supplied by hand. Record in B3 which source each shape came from.
 - [ ] **B3.** Run both arms on the same fixtures and answer, in writing, appended to this plan:
   1. Does the shape form state a refusal the Python form leaves implicit?
   2. Does either catch a case the other misses, on the same fixtures?
@@ -588,6 +721,7 @@ Write that plan after Phase B returns, from the answers. The design's part 6 alr
 
 ## Self-review notes
 
-- **Spec coverage.** Part 4 Phase A → Tasks 1–5. Part 4 Phase B → Phase B above. Part 7's Phase A criterion → Task 5. Part 3's `test_no_dead_terms` correction → Task 5 Step 1's docstring, which states why the `sh:in` entry satisfies rather than exempts. Parts 3/4 Phases C–E → deliberately unplanned, with the reason stated.
+- **Spec coverage.** Part 4 Phase A → Tasks 1–5. Part 6's `CLAUDE.md` amendment → **Task 6**, which an earlier draft of this plan left out entirely: the spec instructed it, this plan neither scheduled nor excluded it, and it is the one instruction the spec calls the defect the design exists to remove. Part 4 Phase B → Phase B above. Part 7's Phase A criterion → Task 5. Part 3's `test_no_dead_terms` correction → Task 5 Step 1's docstring, which states why the `sh:in` entry satisfies rather than exempts. Parts 3/4 Phases C–E → deliberately unplanned, with the reason stated.
 - **Not covered, and named in the spec as such:** `Status`/EARL (spec part 6) is a decision, not a task, and is listed above as out of plan; it blocks nothing here because it is not one of the five cross-checked sets. `RATIONALE.md` is settled in the spec's own PR, in place and at zero net lines.
-- **Every code block here was executed against the real files before this plan was committed.** That is what produced Task 1's eight-member expectation, Task 2's `_WIDTH` band, the `_members` guard, and `probe` in place of `revert` — four defects a reading pass had already missed. A plan that prints runnable Python next to an expected result is making a measured claim, and CLAUDE.md's "run the tool, don't merely locate it" applies to it.
+- **Every code block here was executed against the real files, and run through the blocking gates, before this plan was committed.** Executing them produced Task 2's `_WIDTH` band, the `_members` guard, and `probe` in place of `revert`. Running the *gates* over them produced the rest: `ty` rejected two unguarded `re` matches, `ruff format` rewrote three lines, and `make check` therefore could not reach the exit 0 Task 5 Step 4 claimed. Pytest-green is not gate-green, and this plan asserted the second having only measured the first.
+- **Two stated numbers did not reproduce and are corrected above.** `_WIDTH = 80` does not collapse three sets onto single lines — dropping `textwrap.fill` does, which is the bug the first draft shipped and is now the mutant. Task 1's eight-member expectation was real but made the test a fourth hand-maintained copy of the set Phase A generates: with it, the spec's own part 7 success path reported `1 failed, 83 passed`. On a synthetic vocabulary it reports `90 passed`. A plan that prints runnable Python next to an expected result is making a measured claim, and CLAUDE.md's "run the tool, don't merely locate it" applies to it.
