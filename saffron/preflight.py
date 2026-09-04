@@ -18,7 +18,7 @@ default-branch pin, policy validation, disk headroom, in that order, stopping
 at the first failure and naming it. `saffron cell` calls `prepare_mirror`
 alone, never `check_readiness` — the auth-validity probe and the disk check
 are reached through the readiness entry point, whose first caller is a batch
-loop (`SA-0049`), not the attended path.
+loop (`SA-0050`), not the attended path.
 """
 
 from __future__ import annotations
@@ -392,7 +392,7 @@ def check_readiness(
     stopping at the first failure and naming it.
 
     Not called by `saffron cell` (`_run_cell` calls `prepare_mirror` alone):
-    this is the once-per-run entry point a batch loop calls (`SA-0049`), and
+    this is the once-per-run entry point a batch loop calls (`SA-0050`), and
     it is the only path that reaches the network-bound `validate_token` probe
     or touches the disk at all.
     """
