@@ -100,3 +100,33 @@ def test_the_in_list_wraps_at_three_terms_per_line():
         _members={"CoreGate": ["a", "b", "c", "d"]},
     )
     assert "sh:in ( saffron:a saffron:b saffron:c\n            saffron:d ) ." in out
+
+
+def test_declaring_a_core_gate_in_the_vocabulary_alone_updates_both_surfaces(tmp_path):
+    """The measured defect, closed. Declaring `saffron:probe` in the vocabulary
+    alone fails four checks with no repair a cell can make; here one edit
+    propagates to both derived surfaces.
+
+    `probe`, not `revert`: PR #112 declared `revert` in all three surfaces by
+    hand, so asserting on it would pass with the generator doing nothing. The
+    gate name has to be one the repo has never seen.
+
+    The generated sh:in entry is also what gives the new term a reader —
+    test_no_dead_terms regexes `saffron:<name>` over shapes/*.ttl — so this
+    does not exempt the term from the dead-term rule, it satisfies it.
+    """
+    context = (ONTOLOGY.parent / "CONTEXT.md").read_text()
+    vocab = tmp_path / "saffron.ttl"
+    vocab.write_text(
+        VOCABULARY.read_text()
+        + "\nsaffron:probe a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .\n"
+    )
+    assert "probe" in render.members("CoreGate", vocabulary=vocab)
+
+    context_out = render.render_context(context, vocabulary=vocab)
+    assert "`revert`, `probe`." in context_out
+    # The claim is that it propagates, so the un-mutated render must differ.
+    assert render.render_context(context, vocabulary=VOCABULARY) == context
+
+    shapes_out = render.render_shapes(SHAPES_FILE.read_text(), vocabulary=vocab)
+    assert "saffron:probe" in shapes_out
