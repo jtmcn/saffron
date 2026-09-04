@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     pushed_sha TEXT,
     pr_url     TEXT,
     spent_usd_est REAL NOT NULL DEFAULT 0.0,
+    policy_sha TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -168,7 +169,7 @@ class Ledger:
             row["name"]
             for row in self._db.execute("PRAGMA table_info(tasks)").fetchall()
         }
-        for column in ("pushed_sha", "pr_url"):
+        for column in ("pushed_sha", "pr_url", "policy_sha"):
             if column not in existing:
                 self._db.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
         if "spent_usd_est" not in existing:
@@ -384,11 +385,17 @@ class Ledger:
         branch: str,
         risk: str = "standard",
         budget_usd: float | None = None,
+        policy_sha: str | None = None,
     ) -> int:
+        """`policy_sha` is the declaration the cell's gates ran under — read
+        from the export at `base_sha` (§5.4) — and defaults to `None`: every
+        caller that predates this parameter (`saffron/replay.py` included)
+        still records a task, just one that cannot say what it ran under."""
         cursor = self._db.execute(
-            """INSERT INTO tasks (run_id, spec_id, spec_sha, state, risk, branch, budget_usd)
-               VALUES (?, ?, ?, 'QUEUED', ?, ?, ?)""",
-            (run_id, spec_id, spec_sha, risk, branch, budget_usd),
+            """INSERT INTO tasks
+                   (run_id, spec_id, spec_sha, state, risk, branch, budget_usd, policy_sha)
+               VALUES (?, ?, ?, 'QUEUED', ?, ?, ?, ?)""",
+            (run_id, spec_id, spec_sha, risk, branch, budget_usd, policy_sha),
         )
         self._db.commit()
         return _inserted_id(cursor)
@@ -476,6 +483,28 @@ class Ledger:
             "UPDATE tasks SET pushed_sha = ?, updated_at = datetime('now') "
             "WHERE task_id = ?",
             (pushed_sha, task_id),
+        )
+        self._db.commit()
+
+    def task_policy_sha(self, task_id: int) -> str | None:
+        """What this task is currently on record as having run under — the
+        base_sha declaration `create_task` recorded, or whatever PACKAGE last
+        wrote over it with `record_policy`. PACKAGE reads this back to decide
+        whether a re-verification ran under a different declaration."""
+        row = self._db.execute(
+            "SELECT policy_sha FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        return row["policy_sha"] if row is not None else None
+
+    def record_policy(self, task_id: int, policy_sha: str) -> None:
+        """PACKAGE's own write-back (§5.7, backlog item 16): issued only when
+        re-verification ran under a declaration different from the one this
+        task is on record for — never unconditionally, which would satisfy
+        the letter of "rewrites when it differs" while doing it every time."""
+        self._db.execute(
+            "UPDATE tasks SET policy_sha = ?, updated_at = datetime('now') "
+            "WHERE task_id = ?",
+            (policy_sha, task_id),
         )
         self._db.commit()
 

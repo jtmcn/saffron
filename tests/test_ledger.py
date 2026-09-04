@@ -718,6 +718,57 @@ def test_a_ledger_built_by_the_previous_schema_still_opens_and_writes(tmp_path):
     ledger.close()
 
 
+def _schema_without_policy_sha() -> str:
+    """`tasks` minus `policy_sha` — the shape a ledger written before this
+    change actually has. Shared by the migration test below and the
+    no-backfill test, rather than building the fixture twice."""
+    before = SCHEMA.replace("    policy_sha TEXT,\n", "")
+    # `repos` carries its own, unrelated `policy_sha` column (§4.1) — this
+    # checks only that `tasks`'s copy of the exact line is gone, otherwise
+    # this test proves nothing.
+    assert "    policy_sha TEXT,\n" not in before
+    return before
+
+
+def test_a_ledger_built_by_the_previous_schema_gains_policy_sha(tmp_path):
+    """`tasks` carries a nullable `policy_sha`, added the way a column on an
+    existing table has to be — the guarded `ALTER TABLE` this module already
+    uses, never `CREATE TABLE IF NOT EXISTS`, which does not alter."""
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.executescript(_schema_without_policy_sha())
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    columns = {
+        row["name"] for row in ledger._db.execute("PRAGMA table_info(tasks)").fetchall()
+    }
+    assert "policy_sha" in columns
+    ledger.close()
+
+
+def test_an_existing_task_is_not_backfilled_with_a_policy_sha(tmp_path):
+    """A task row created before this change reads back with a NULL
+    `policy_sha`, never a value invented for a task nobody observed."""
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.executescript(_schema_without_policy_sha())
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.execute(
+        "INSERT INTO tasks (run_id, spec_id, spec_sha, state) "
+        "VALUES (1, 'SA-0016', 's', 'QUEUED')"
+    )
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    row = ledger._db.execute("SELECT policy_sha FROM tasks").fetchone()
+    assert row["policy_sha"] is None
+    ledger.close()
+
+
 def test_the_schema_adds_no_column_that_nothing_reads(ledger):
     """§4.2.1's two explicit cuts: `batches` has no `concurrency`, and `tasks`
     gains no `priority` — both would be item 18's pattern wearing a schema, a

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 import subprocess as sp
@@ -1667,6 +1668,107 @@ def test_a_policy_fault_at_the_default_branch_head_names_it(packageable):
             gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
             **packageable.kwargs,
         )
+
+
+def test_reverifying_under_a_changed_policy_records_the_policy_it_used(
+    monkeypatch, packageable
+):
+    """PACKAGE rewrites `policy_sha` when re-verification runs under a
+    declaration different from the one recorded — which is what happens when
+    `policy.yaml`'s bytes differ between `base_sha` and `fetch_head`, not
+    merely because the base moved. Left NULL rather than seeded: `packageable`'s
+    `create_task` records no `policy_sha`, which is every pre-existing task and
+    the exact gap backlog item 16 exists to close, and NULL must count as
+    'different' just as a real prior declaration would — an implementation
+    that only rewrites a non-NULL mismatch (`recorded is not None and recorded
+    != policy_sha`) would leave this task's `policy_sha` NULL forever and
+    still pass a test that seeded a real value first. Pushed the way
+    `test_a_policy_fault_at_the_default_branch_head_names_it` is, not the
+    working-copy-only tests: the checkout's policy never reaches `fetch_head`.
+    `reverify` itself is faked, the way `test_a_re_verified_body_shows_the_
+    gates_that_re_ran` fakes it: no cell, no container, anywhere here."""
+    monkeypatch.setattr(
+        "saffron.phases.package.reverify",
+        lambda **_k: (
+            [],
+            [GateResult(gate="tests", status="pass", tool="t", summary="")],
+        ),
+    )
+    work = packageable.work
+    before = packageable.ledger._db.execute(
+        "SELECT policy_sha FROM tasks WHERE task_id = ?", (packageable.task_id,)
+    ).fetchone()
+    assert before["policy_sha"] is None  # otherwise this test proves nothing
+
+    (work / ".saffron" / "policy.yaml").write_text(
+        "gates:\n  tests: {}\nintegrity:\n  test_paths:\n    - f.txt\n"
+        "envelope_default: []\n"
+    )
+    git(work, "commit", "-qam", "widen the declaration")
+    git(work, "push", "-q", "origin", "main")
+    new_sha = hashlib.sha256(
+        (work / ".saffron" / "policy.yaml").read_bytes()
+    ).hexdigest()
+
+    result = package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **packageable.kwargs,
+    )
+
+    assert result.state == "READY_FOR_REVIEW"
+    row = packageable.ledger._db.execute(
+        "SELECT policy_sha FROM tasks WHERE task_id = ?", (packageable.task_id,)
+    ).fetchone()
+    assert row["policy_sha"] == new_sha
+
+
+def test_reverifying_under_an_unchanged_policy_issues_no_policy_write(
+    monkeypatch, packageable
+):
+    """The no-op branch has to be built, not inherited: an unconditional
+    write would satisfy "rewrites when it differs" while also firing here,
+    which is wrong — only asserting on the call, never on `updated_at`
+    (PACKAGE moves that column on every non-raising return anyway), can tell
+    the two implementations apart. `reverify` itself is faked: no cell, no
+    container, anywhere here."""
+    monkeypatch.setattr(
+        "saffron.phases.package.reverify",
+        lambda **_k: (
+            [],
+            [GateResult(gate="tests", status="pass", tool="t", summary="")],
+        ),
+    )
+    work = packageable.work
+    policy_sha = hashlib.sha256(
+        (work / ".saffron" / "policy.yaml").read_bytes()
+    ).hexdigest()
+    packageable.ledger._db.execute(
+        "UPDATE tasks SET policy_sha = ? WHERE task_id = ?",
+        (policy_sha, packageable.task_id),
+    )
+    packageable.ledger._db.commit()
+
+    # The base still moves — re-verification still runs — but `policy.yaml`
+    # itself is untouched, so its declaration is exactly what was recorded.
+    (work / "other.txt").write_text("main moved, policy untouched\n")
+    git(work, "add", "-A")
+    git(work, "commit", "-qm", "main moved")
+    git(work, "push", "-q", "origin", "main")
+
+    recorded: list = []
+    monkeypatch.setattr(
+        Ledger, "record_policy", lambda self, *a, **k: recorded.append(a)
+    )
+
+    result = package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **packageable.kwargs,
+    )
+
+    assert result.state == "READY_FOR_REVIEW"
+    assert recorded == []
 
 
 def test_an_advisory_failure_after_the_rebase_does_not_fail_the_merge(
