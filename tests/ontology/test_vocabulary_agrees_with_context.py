@@ -109,3 +109,24 @@ def test_the_gate_statuses_are_earl_outcomes_rather_than_saffron_terms():
         assert (None, earl.outcome, outcome) in graph, (
             f"no assertion in the fixture stands for a `{status}` gate result"
         )
+
+
+def test_every_severity_has_its_own_bullet():
+    """`**Severity**`'s first sentence is generated; the bullets under it are a
+    second, complete copy — one per member, each carrying what the severity
+    *does* (`blocker` routes to REBUT). A new severity would land in the
+    sentence and have no bullet, and nothing noticed.
+
+    Terminal states are deliberately not checked this way: only two of the nine
+    have their own paragraph, so that list is selective rather than a copy.
+    """
+    body = CONTEXT.read_text()
+    missing = [
+        member
+        for member in sorted(ontology_members("Severity"))
+        if f"- **`{member}`**" not in body
+    ]
+    assert not missing, (
+        f"severities with no bullet in CONTEXT.md: {missing}. Each bullet says "
+        "what the severity does, which the generated sentence cannot state."
+    )
