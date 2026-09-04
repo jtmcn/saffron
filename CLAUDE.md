@@ -4,7 +4,10 @@ Saffron is a Python orchestrator that turns spec files into reviewable pull requ
 an agent in an isolated cell, drives it through a hard gate loop, subjects the diff to an
 adversarial critic, and packages the result. `DESIGN.md` is authoritative for what the system
 does; `CONTEXT.md` is authoritative for what the words mean. Both are read constantly — cite
-`DESIGN.md` by section number (`§5.4`), and use `CONTEXT.md`'s vocabulary exactly.
+`DESIGN.md` by section number (`§5.4`), and use `CONTEXT.md`'s vocabulary exactly. For the
+five closed sets `tests/ontology/test_vocabulary_agrees_with_context.py` names,
+`ontology/saffron.ttl` is authoritative and `CONTEXT.md` is generated from it: edit the
+vocabulary and run `uv run python -m ontology.render`.
 
 > Saffron is also a *target repo* of itself (`.saffron/`), so this file is the standing
 > instruction surface for agents running in a cell here (§8). Budget: ~200 lines. If it grows

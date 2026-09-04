@@ -2,7 +2,7 @@
 
 Not a generated vocabulary: `CONTEXT.md` names the whole system and the ontology
 names only the run record, so most of that file has no term here and would fail
-the dead-term test if it did. This checks the overlap alone — three sets both
+the dead-term test if it did. This checks the overlap alone — five sets both
 documents already enumerate — because that overlap is where they have measurably
 drifted. `CONTEXT.md` §6 listed six terminal states, `DESIGN.md` §3.3 listed
 nine, and `saffron/cell/session.py` wrote a tenth state neither called terminal.
