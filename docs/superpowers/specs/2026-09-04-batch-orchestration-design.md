@@ -39,15 +39,23 @@ Checked against the code, not assumed:
 | The refusal gate's eight refusals | **built** — `scheduler._refuse` |
 | `depends_on` admitted by merged, retired, or stacked parent | **built** — `SA-0020`, `SA-0022`, `SA-0025`, `SA-0026` |
 | Per-task preflight: mirror, origin refusal, base pin | **built** — `_run_cell`, `cli.py:344`, but per *task* |
-| The scan stamps in-flight tasks `ORPHANED` before filtering | **missing** |
+| The scan stamps in-flight tasks `ORPHANED` before filtering | **built** — `reconcile(…, stamp_orphaned=True)`, `reconcile.py:153`; `IN_FLIGHT_STATES` at `:54`. No caller passes it, which is the loop's job |
 | `load_policy` validation as a preflight step | **missing** |
-| Auth check before the night starts | **missing** |
+| Auth check before the night starts | **half** — presence at `cli.py:348`; validity, which is Appendix J's actual landmine, is unchecked |
 | Disk-headroom check | **missing** |
 | `batches` table, `runs.batch_id` | **missing** |
 | The K=1 loop, four stop conditions, the breaker | **missing** |
 | `saffron batch` and its exit codes | **missing** |
 
 The scan is done. **The night is not.**
+
+**Corrected 2026-09-04.** Two rows above first read `missing` and were wrong.
+The `ORPHANED` stamp is fully built in `reconcile.py` — eight states
+enumerated once, both branches tested, and a `stamp_orphaned` parameter whose
+docstring already says *"no command in this version of Saffron is a batch
+scan."* The error was grepping `scheduler.py` alone rather than the tree, and
+it would have bought a spec for work already done. What is missing is only a
+caller, which the loop is. The auth check is likewise half-present.
 
 ---
 

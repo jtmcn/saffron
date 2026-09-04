@@ -151,105 +151,25 @@ computable for the first time.
 
 ---
 
-## Task 3: `SA-0047` — the scan trusts an in-flight state that cannot be true
+## Task 3: `SA-0047` — withdrawn, the mechanism already exists
 
-**Interfaces:** consumes nothing. Produces a scan that stamps corpses before
-filtering. Consumed by `SA-0049`.
+**Not written, and the id is left unused rather than recycled.** This task was
+to make the scan stamp in-flight tasks `ORPHANED` before filtering, on the
+premise that nothing did. `saffron/reconcile.py` already does: `IN_FLIGHT_STATES`
+enumerates §4.2.1's eight states once, `reconcile(..., stamp_orphaned=True)`
+stamps them, and `test_stamp_orphaned_only_fires_when_the_caller_asserts_the_premise`
+drives both branches — including the property this plan cared most about, that
+`saffron queue` must not stamp.
 
-- [ ] **L1: Write the spec**
+**The premise came from grepping one file.** `scheduler.py` names `ORPHANED`
+only inside `REQUEUE_STATES`, and the conclusion "nothing stamps it" was drawn
+from that without searching the tree. The design doc's table carried the error
+too, and both are corrected.
 
-```markdown
----
-id: SA-0047
-title: a task left IMPLEMENTING by a host crash is neither done nor requeued, so the scan drops it forever
-type: bug
-priority: 1
-depends_on:
-  - SA-0045
-envelope:
-  - saffron/scheduler.py
-  - tests/**
-touches:
-forbidden:
-  - DESIGN.md
-  - CONTEXT.md
-  - .saffron/**
-  - saffron/cli.py
-  - saffron/cell/**
-  - saffron/phases/**
-  - saffron/report/**
-  - saffron/gates/**
-budget_usd: 8
-max_attempts: 3
-max_turns: 70
-risk: elevated
----
-
-## Context
-§4.2.1 states the rule in a block quote: *"The in-flight states are not on
-either list, and the scan must not treat that as 'queue it'. `DRAFT`,
-`QUEUED`, `DIAGNOSING`, `IMPLEMENTING`, `GATING`, `REPAIRING`, `REVIEWING` and
-`REBUTTING` at scan time mean a corpse: one batch runs at a time, so nothing is
-legitimately in flight when a scan happens. `ORPHANED` covers only the deaths
-the supervisor stamped (§4.5) — a host power cut leaves the task in
-`IMPLEMENTING`. **The scan stamps any in-flight task `ORPHANED` before
-filtering**, which is §4.3's reconcile step doing the job it is already named
-for, and the task then re-queues by the ordinary rule."*
-
-`scheduler.py` names `ORPHANED` only inside `REQUEUE_STATES`. Nothing stamps
-it at scan time.
-
-## Problem
-- **An in-flight state at scan time is silently neither.** It is not in
-  `DONE_STATES`, so the spec is not filtered out; it is not in
-  `REQUEUE_STATES`, so no task resumes. What the scan does with it today is
-  undefined by §4.2.1's own reading and is decided by fallthrough.
-- **The failure mode is invisible and permanent.** A host power cut mid-cell
-  leaves `IMPLEMENTING`. Unattended, nobody sees it. On every subsequent night
-  the same row is read the same way.
-- **This becomes load-bearing exactly when batches land.** Attended, the
-  operator sees the cell die and can act.
-
-## Acceptance criteria
-- [ ] The scan stamps every task in an in-flight state `ORPHANED` before the
-      `DONE_STATES` / `REQUEUE_STATES` filter runs
-- [ ] The eight in-flight states are enumerated from one place, not written
-      twice, and a test asserts the enumeration matches §4.2.1's list exactly
-- [ ] A stamped task then re-queues by the ordinary rule, resuming its own
-      `task_id` rather than minting a new one — §4.2.1's *"resolves to a task,
-      not to a spec"*
-- [ ] A task already `ORPHANED` is not re-stamped and its `updated_at` does not
-      move
-- [ ] The stamp is written only when a caller asserts a scan is happening —
-      `saffron queue` must **not** stamp, for the reason `cli.py:557` already
-      records about `reconcile`, and a test asserts `queue` leaves the row
-      untouched
-- [ ] Terminal states and requeue states are untouched
-- [ ] Every new test runs with no network and no cell
-
-## Out of scope
-**Preventing the crash.** This reclaims a corpse; it does not stop one.
-
-**`saffron gc` (§4.5).** Volume reclamation is deferred at K=1. This is the
-ledger half only.
-
-**Changing `DONE_STATES` or `REQUEUE_STATES`.** Both are correct as they
-stand; the gap is the third category.
-
-## Notes for the agent
-Read `cli.py:557` first — *"Never `ORPHANED`, for the same reason `queue` never
-asserts it"* — and preserve that property. A scan that stamps is a *batch*
-scan; a scan that prints is not. The distinction is the whole of the fifth
-criterion.
-
-This is a bug spec with an `envelope` and no `touches` because whether the
-stamp belongs in `build_queue`, beside it, or in a `Ledger` method is what
-DIAGNOSE answers.
-```
-
-- [ ] **L2–L8:** as Task 1, substituting this spec's path.
-
----
+**What is genuinely missing is a caller** — no code in `saffron/` passes
+`stamp_orphaned=True`, because the parameter's own docstring is right that no
+command here is a batch scan. That is one line in the loop, folded into Task 5
+rather than given a spec, and Task 5's criteria now name it.
 
 ## Task 4: `SA-0048` — preflight is per task, and a night needs it per night
 
@@ -410,6 +330,11 @@ them, so §9's v1 criterion is unreachable.
 ## Acceptance criteria
 - [ ] `run_batch` iterates the sorted candidates, calling `run_one_cell` once
       per task, and returns a stop reason
+- [ ] The scan the batch runs asserts §4.2.1's batch-scan premise —
+      `reconcile(..., stamp_orphaned=True)` — so a corpse a dead scan left
+      behind is stamped before filtering, and a test proves an `IMPLEMENTING`
+      row is `ORPHANED` and re-queued. This is Task 3's whole content: the
+      mechanism exists and has no caller
 - [ ] It stops on all four conditions and the returned reason distinguishes
       them: `DRAINED`, `BUDGET`, `UNTIL`, `INFRASTRUCTURE`
 - [ ] The budget gate is **one comparison before each task** — uncommitted
