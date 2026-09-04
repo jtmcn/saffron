@@ -61,7 +61,7 @@ integrity:
   gate_config:
     [
       "ontology/shapes/**",
-      "ontology/render.py",
+      "ontology/*.py",
       "**/pyproject.toml",
       ".saffron/**",
       "**/conftest.py",

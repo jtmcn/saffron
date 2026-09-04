@@ -59,6 +59,8 @@ def _join(names: list[str], style: str) -> str:
     if not names:
         raise ValueError("a closed set rendered to no members")
     ticked = [f"`{n}`" for n in names]
+    if len(ticked) == 1:
+        return ticked[0]
     if style == "comma":
         return ", ".join(ticked)
     if style == "or-comma":
@@ -107,10 +109,17 @@ def render_context(text: str, *, vocabulary: Path, _members=None) -> str:
             else members(class_name, vocabulary=vocabulary)
         )
         start = text.index(f"**{term}**")
+        # Bounded at the definition's own blank line. Unbounded, a definition
+        # left without a trailing period matched a period paragraphs away and
+        # `main()` deleted everything between — and `main()` is what the
+        # currency test tells the operator to run.
+        block_end = text.find("\n\n", start)
+        if block_end == -1:
+            block_end = len(text)
         # First sentence: up to a period followed by whitespace or end of text.
         # Guarded, not asserted: a definition with no sentence end is a real
         # input, and `ty` rejects `.start()` on `Match | None` regardless.
-        stop = re.search(r"\.(?:\s|$)", text[start:])
+        stop = re.search(r"\.(?:\s|$)", text[start:block_end])
         if stop is None:
             raise ValueError(f"{term}'s definition has no first sentence to rewrite")
         end = stop.start() + start
@@ -153,6 +162,10 @@ def render_shapes(text: str, *, vocabulary: Path, _members=None) -> str:
             if _members is not None
             else members(class_name, vocabulary=vocabulary)
         )
+        # `_join` guards the CONTEXT.md path; this one emitted `sh:in (  )`,
+        # which parses as rdf:nil — a constraint nothing can satisfy.
+        if not names:
+            raise ValueError(f"{shape}: a closed set rendered to no members")
         rows = [
             " ".join(f"saffron:{n}" for n in names[i : i + _PER_LINE])
             for i in range(0, len(names), _PER_LINE)

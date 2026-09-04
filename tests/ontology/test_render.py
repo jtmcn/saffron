@@ -130,3 +130,59 @@ def test_declaring_a_core_gate_in_the_vocabulary_alone_updates_both_surfaces(tmp
 
     shapes_out = render.render_shapes(SHAPES_FILE.read_text(), vocabulary=vocab)
     assert "saffron:probe" in shapes_out
+
+
+def test_a_definition_whose_first_sentence_is_unterminated_is_refused():
+    """Review found `main()` could destroy the file it rewrites. The sentence
+    search ran to end of document, so a definition left without a trailing
+    period matched a period in a *later paragraph* and the span between — blank
+    line and prose — was silently deleted. `CONTEXT.md` is `protected` and
+    `main()` writes it in place, and the currency test's message tells the
+    operator to run exactly that, so the destructive path was the documented
+    remedy. Refuse instead: the definition is the search's upper bound.
+    """
+    text = (
+        "**Severity**: `blocker`, `concern`, or `note`\n"
+        "\n"
+        "Some later paragraph mentioning `elevate_on` and more. Then more text.\n"
+    )
+    with pytest.raises(ValueError, match="no first sentence"):
+        render.render_context(
+            text,
+            vocabulary=VOCABULARY,
+            _members={"Severity": ["blocker", "concern", "note"]},
+        )
+
+
+def test_render_shapes_refuses_a_closed_set_that_renders_to_no_members():
+    """`_join` guards this for CONTEXT.md; the shapes path had no guard, and
+    `sh:in (  )` parses as rdf:nil — a constraint nothing can satisfy. It was
+    masked only by `main()` rendering CONTEXT.md first, which is ordering, not
+    a guard."""
+    with pytest.raises(ValueError, match="rendered to no members"):
+        render.render_shapes(
+            SHAPES_FILE.read_text(), vocabulary=VOCABULARY, _members={"CoreGate": []}
+        )
+
+
+def test_a_one_member_or_comma_set_does_not_open_with_a_comma():
+    """`", ".join(ticked[:-1])` is empty for one member, so the join emitted
+    a leading comma. The empty-set guard above does not reach this case."""
+    out = render.render_context(
+        "**Severity**: `blocker`, `concern`, or `note`.\n",
+        vocabulary=VOCABULARY,
+        _members={"Severity": ["blocker"]},
+    )
+    assert out == "**Severity**: `blocker`.\n"
+
+
+def test_the_generator_and_the_cross_check_name_the_same_five_sets():
+    """`SETS` governs what is generated; `CLOSED_SETS` governs what is checked
+    for agreement. They are deliberately separate — folding one into the other
+    would let a set dropped from `SETS` vanish from generation and from the
+    cross-check in the same edit. Separate, but they must agree, or a sixth set
+    is checked and never generated: the drift class Phase A exists to close.
+    """
+    from test_vocabulary_agrees_with_context import CLOSED_SETS
+
+    assert {term: cls for term, (cls, _) in render.SETS.items()} == CLOSED_SETS
