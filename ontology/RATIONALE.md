@@ -20,7 +20,7 @@ outcome `SA-0001` names as a successful one.
 
 Nor does it beat the glossary rival of §4.6.2b: `CONTEXT.md` already is that
 glossary. Revisit at v2.5 (§9) only if reconstructibility must be *enforced
-continuously* rather than spot-checked.
+continuously* rather than spot-checked — or if Appendix O's spike reopens §1.4.
 
 ## What the modelling found, which is the part that paid
 
