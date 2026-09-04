@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from saffron import cli, intake
+from saffron import cli, intake, preflight
 from saffron.cell import session
 from saffron.cli import main
 from saffron.events import PhaseStart, Preflight, describe, read_log
@@ -1099,12 +1099,71 @@ def test_a_missing_token_fails_before_the_image_is_built(tmp_path, monkeypatch):
         raise SystemExit(0)
 
     # The mirror is the first thing `_run_cell` touches; nothing may run.
-    monkeypatch.setattr("saffron.cli.git_mirror.ensure_mirror", _reached)
+    # Patched at the canonical module, not through `cli`'s own namespace:
+    # the hoist into `preflight.prepare_mirror` moved the call site, and a
+    # dotted string through `saffron.cli` would have to keep tracking where
+    # the call lives rather than what it calls.
+    monkeypatch.setattr("saffron.repos.mirror.ensure_mirror", _reached)
     with pytest.raises(RuntimeError, match="CLAUDE_CODE_OAUTH_TOKEN is unset"):
         cli._run_cell(
             _namespace(repo, tmp_path), Ledger(tmp_path / "l.db"), tmp_path / "out"
         )
     assert not reached
+
+
+def test_one_cell_still_prepares_itself_in_order_after_the_hoist(tmp_path, monkeypatch):
+    """`_run_cell`'s own preparation, unchanged in order by the hoist into
+    `preflight.prepare_mirror`: the token refusal still fires before the
+    mirror is ever touched, and the mirror fetch, the non-forge origin
+    refusal and the default-branch pin all still happen before a cell
+    starts (`SA-0048`) — asserted on the order calls land in, not on the
+    exit code alone."""
+    order: list[str] = []
+
+    def _mk(name, result):
+        def _fn(*_a, **_k):
+            order.append(name)
+            return result
+
+        return _fn
+
+    monkeypatch.setattr(
+        preflight.git_mirror, "ensure_mirror", _mk("mirror", tmp_path / "m")
+    )
+    monkeypatch.setattr(
+        preflight.package_phase,
+        "real_remote",
+        _mk("real_remote", "https://github.com/o/r.git"),
+    )
+    monkeypatch.setattr(preflight.package_phase, "github_slug", _mk("origin", "o/r"))
+    monkeypatch.setattr(
+        preflight.package_phase,
+        "fetch_default_branch",
+        _mk("default_branch", ("main", "a" * 40)),
+    )
+
+    def _started(*_a, **_k):
+        order.append("cell")
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli, "run_one_cell", _started)
+
+    repo = _repo_with_commit(tmp_path / "repo")
+    with pytest.raises(SystemExit):
+        cli._run_cell(
+            _namespace(repo, tmp_path), Ledger(tmp_path / "l.db"), tmp_path / "out"
+        )
+
+    assert order == ["mirror", "real_remote", "origin", "default_branch", "cell"]
+
+    # And the token refusal still fires before any of it: nothing above ran.
+    order.clear()
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    with pytest.raises(RuntimeError, match="CLAUDE_CODE_OAUTH_TOKEN is unset"):
+        cli._run_cell(
+            _namespace(repo, tmp_path), Ledger(tmp_path / "l2.db"), tmp_path / "out"
+        )
+    assert order == []
 
 
 def test_a_spec_whose_touches_are_protected_refuses_before_the_cell_starts(

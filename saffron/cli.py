@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from saffron import preflight
 from saffron.cell.session import _SHA as _RESOLVED_SHA
 from saffron.cell.session import CellSpec, run_one_cell
 from saffron.events import Event, EventLog, Preflight, describe
@@ -382,17 +383,15 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     spec, spec_sha = load_spec(args.spec)
 
     digest = hashlib.sha256(str(repo).encode()).hexdigest()[:12]
-    mirror = git_mirror.ensure_mirror(
+    # `preflight.prepare_mirror`: the mirror fetch, the non-forge origin
+    # refusal (read for its refusal, not its value — `package` needs the slug
+    # and only reaches it after the budget is spent, §5.1) and the
+    # default-branch pin (the remote's head, not the invoking checkout's,
+    # §5.7) — hoisted so a batch can pay for them once per run (§4.2.1),
+    # while a single `saffron cell` still pays for them here, per task.
+    mirror, url, base_sha = preflight.prepare_mirror(
         repo, args.home / "mirrors" / f"{repo.name}-{digest}.git"
     )
-    url = package_phase.real_remote(repo)
-    # Read for its refusal, not its value: `package` needs the slug and only
-    # reaches it after the budget is spent, so a non-GitHub origin fails here
-    # for the same reason an unreachable one does (§5.1).
-    package_phase.github_slug(url)
-    # The remote's default-branch head, not the invoking checkout's: a task's
-    # base must not depend on where the operator was standing (§5.7).
-    _, base_sha = package_phase.fetch_default_branch(mirror, url)
     # The same string `resolve_repo_id`'s own callers already have in hand —
     # this repo's own ledger holds the SSH form (`git@github.com:...`), not
     # the https one, so whatever `real_remote` returned above is the form to
