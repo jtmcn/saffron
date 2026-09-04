@@ -435,7 +435,16 @@ def check_readiness(
         except PolicyError as exc:
             return Readiness(False, "policy", str(exc))
 
-    if not disk_headroom_ok(home):
+    # `disk_headroom_ok` raises rather than reading an unrunnable check as a
+    # pass, which is right and is not this function's contract: §4.4 step 1
+    # skips a repo that fails preflight rather than taking the batch down, so
+    # every failure here arrives as a named `Readiness`, never as an exception
+    # a caller must know to catch.
+    try:
+        headroom = disk_headroom_ok(home)
+    except RuntimeError as exc:
+        return Readiness(False, "disk", str(exc))
+    if not headroom:
         return Readiness(
             False,
             "disk",

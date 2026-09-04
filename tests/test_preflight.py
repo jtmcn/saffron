@@ -346,6 +346,84 @@ def _stub_prepare(monkeypatch, *, exported: Path) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("target", "boom", "step"),
+    [
+        ("ensure_mirror", preflight.git_mirror.GitError("fetch failed"), "mirror"),
+        ("real_remote", preflight.package_phase.PackageError("no remote"), "origin"),
+        (
+            "github_slug",
+            preflight.package_phase.PackageError("not a forge remote"),
+            "origin",
+        ),
+        (
+            "fetch_default_branch",
+            preflight.package_phase.PackageError("no head"),
+            "default_branch",
+        ),
+    ],
+)
+def test_a_failing_preparation_step_is_named_not_raised(
+    monkeypatch, tmp_path, target, boom, step
+):
+    """§4.4 step 1 skips a repo that fails preflight rather than taking the
+    batch down, so every one of these has to arrive as a named `Readiness`.
+    Each of the four was caught by a branch no test drove: stubbing all of
+    them to succeed, as every other test here does, leaves the `except` arms
+    dead and deleting one changes nothing the suite can see."""
+    exported = tmp_path / "export"
+    (exported / ".saffron").mkdir(parents=True)
+    _stub_prepare(monkeypatch, exported=exported)
+
+    owner = (
+        preflight.git_mirror if target == "ensure_mirror" else preflight.package_phase
+    )
+
+    def _raise(*_a, **_k):
+        raise boom
+
+    monkeypatch.setattr(owner, target, _raise)
+
+    result = preflight.check_readiness(
+        tmp_path / "repo",
+        tmp_path / "mirror",
+        tmp_path / "scratch",
+        tmp_path / "home",
+        token="tok",
+        validate_token=lambda token: True,
+    )
+
+    assert result.ok is False
+    assert result.step == step
+
+
+def test_a_disk_check_that_cannot_run_is_named_not_raised(monkeypatch, tmp_path):
+    """`disk_headroom_ok` raises rather than reading an unrunnable check as a
+    pass — correct, and not this function's contract. Unguarded, that raise
+    left `check_readiness` as a bare exception, which is the one failure a
+    caller cannot skip a repo on."""
+    exported = tmp_path / "export"
+    (exported / ".saffron").mkdir(parents=True)
+    _stub_prepare(monkeypatch, exported=exported)
+
+    def _boom(_path):
+        raise OSError("no such file or directory")
+
+    monkeypatch.setattr(preflight.shutil, "disk_usage", _boom)
+
+    result = preflight.check_readiness(
+        tmp_path / "repo",
+        tmp_path / "mirror",
+        tmp_path / "scratch",
+        tmp_path / "home",
+        token="tok",
+        validate_token=lambda token: True,
+    )
+
+    assert result.ok is False
+    assert result.step == "disk"
+
+
 def test_readiness_runs_its_checks_in_the_order_4_2_1_gives(monkeypatch, tmp_path):
     """§4.2.1: auth, mirror fetch, origin refusal, default-branch pin, policy
     validation, disk headroom — asserted on the order calls land in, and on
