@@ -1294,9 +1294,32 @@ Commit after each coherent step. Uncommitted work dies with the cell.
 
 ---
 
-## Task 6: `SA-0034` — the critic's verdict is never recorded
+## Task 6: `SA-0034` — a rebuttal lost to a parse error reads as a conceded blocker
 
-A **bug**, with an `envelope`. Why the column is NULL is not known.
+**Re-cut 2026-09-04.** The task as originally titled — *the critic's verdict is
+never recorded* — was disproven on 2026-09-02 and is not being written; the
+measurement that killed it is kept below, because it is the reason.
+
+**What this task is now:** backlog item 42's *visible* half. A `RebuttalTurn`
+carrying `error` must render in the pull request body as **"the rebuttal was
+unreadable"**, shown next to the `HEAD moved` that `rebuttal.json` already
+records — not as an implementer who offered no argument. Measured on `SA-0040`:
+the turn cost $2.59, moved HEAD and conceded a blocker, its artifact was
+discarded for a trailing comma, and the critic then wrote *"confirmed: The
+implementer offered no argument and made no visible change"* about a finding
+that was false. The operator inherits a body asserting a confirmed
+disagreement.
+
+**`touches` must include `saffron/report/pr_body.py` and
+`saffron/phases/rebut.py`.** This is the correction that made the re-cut
+necessary: the original `SA-0034` put `saffron/report/**` in `forbidden`, and
+no other spec in this plan touches `pr_body.py` — so item 42's visible half had
+no home anywhere in part 3.
+
+**Deliberately out of scope:** whether a malformed rebuttal also earns one
+re-prompt. That is a separate question from whether the record should imply an
+answer nobody read, and bundling them makes the spec two mechanisms wide —
+item 56's shape.
 
 ### Re-checked 2026-09-02: the premise does not reproduce
 

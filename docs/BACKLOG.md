@@ -5,13 +5,63 @@ live run exposed or a decision deliberately deferred — none is speculation abo
 what might be nice. Each says what "done" looks like, so it can be picked up
 cold.
 
-Ordered by what would hurt most on the first unattended night.
+**Numbered in filing order, not priority order.** The numbers are an API — ten
+comments under `saffron/` cite them (`BACKLOG item 33`, `backlog item 41`), so
+an item is appended and never renumbered, exactly as `DESIGN.md`'s sections
+are. The header line here used to claim the file was ordered by what would hurt
+most on the first unattended night; it never was, and as items were appended it
+drifted further. **The order to work in is the index below.**
 
 **Where the evidence lives.** `DESIGN.md` Appendices I–L narrate what building
 and running v0.5 found. The per-task briefs and implementation reports were
 written under `.superpowers/`, which is gitignored and does **not** survive a
 merge — anything from them worth keeping was moved into the appendices or into
 `docs/superpowers/plans/2026-08-19-v0.5-findings.md` before this was written.
+
+---
+
+## Priority — the order to work in
+
+Settled 2026-09-04. The sort is toward **v1's success criterion**: *a full night
+runs while you sleep, and you merge at least half of what it produces before the
+coffee's cold* (§9). That target is what makes the tiers below mean anything,
+and it is the one thing to re-argue if the order looks wrong — the disagreement
+will be with the target, not with the sort.
+
+### Tier 0 — the milestone gate
+
+**58** — §4.4 batch orchestration — and nothing else until it is real. Nothing in Saffron runs more
+than one cell: `cli.py` exposes `replay`, `cell`, `queue` and `reconcile`, and
+`queue` only *prints* what a batch would run. Every item below tunes a machine
+that cannot start. Absorbs **16** and half of **44**.
+
+### Tier 1 — breaks at 03:00 with nobody watching
+
+**45**, **51** (with **49**/**50**, which its fix closes), **47**, **46**,
+**40**, **26**, **7**.
+
+Each fails in the dark or destroys work no one is awake to rescue. **45** loses
+a run's commits nightly; **51** switches the anti-theater gate off for one
+printed line; **47** feeds part 3 a column of zeros; **46** is the only account
+of a night nobody watched; **40** merges a diff over a ceiling it passed;
+**26** cannot tell an empty night from a missing directory; **7** leaves §8's
+flywheel inert exactly where it was meant to compound.
+
+### Tier 2 — the morning after
+
+Operator visibility parts 2 and 3 — `SA-0032`–`SA-0039`, with the plan's Task 6
+rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
+**38**), plus **43**, **48**, **52**.
+
+### Tier 3 — real, not urgent
+
+**22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
+**56**, **57**.
+
+**What this ordering costs, stated plainly:** tiers 2 and 3 hold 22 of the 29
+open items, including every ontology item and every operator-visibility spec
+there is already a full plan for. That is the deliberate consequence of ranking
+by the milestone rather than by what is nearest to hand.
 
 ---
 
@@ -1017,6 +1067,26 @@ because a mount named `/gates` holding specs is otherwise a surprise.
 
 ## 14. `committed` fails on build artifacts a repo does not gitignore
 
+**Decided 2026-09-04, and the item's own open measurement is now taken.**
+`.gitignore` is the declaration. It already exists, `git status --porcelain`
+already honours it, and stating that as an onboarding requirement is the whole
+fix. **Tier 3.**
+
+This item asked to be tested before it was closed: *"if none of
+`format`/`lint`/`types`/`tests` writes either file then this item is right by
+accident and should say so for the right reason."* Measured — all five declared
+gates run against a clean tree, `git status --porcelain` diffed before and
+after: **zero untracked artifacts.** `.mypy_cache` is moot, because the
+typechecker is `ty` and it wrote no cache. `.coverage` came from a hand-run
+during #33, not from a declared gate. So this repo is right by accident,
+confirmed, and it stays right until a gate that writes an artifact is declared.
+
+**The narrower fallback is explicitly not being built**: `committed` ignoring
+untracked paths the baseline call also produced *by directory* would be a
+second identity rule sitting beside the baseline subtraction's, and `CLAUDE.md`
+warns in as many words against making those match. Item 55 (`dist/`) is the
+same family and is one line of `.gitignore`.
+
 `dirty_paths` is read after the declared suite on both calls so that an artifact
 a gate writes lands on baseline and head alike and `subtract_baseline` cancels it
 (§5.4). The cancellation is by identity — `(gate, file, code, message)` — so it
@@ -1121,6 +1191,16 @@ written.
 ---
 
 ## 16. No record says which policy PACKAGE verified under
+
+**Decided 2026-09-04: a `policy_sha` column on `tasks`, built with item 58
+rather than before it.** Written at cell start and rewritten at PACKAGE when it
+differs, which gives the per-task lineage this item says is the part that makes
+it an item.
+
+The pairing this item asks for is now answerable: §4.1's invalidation rule has
+no reader until batches exist, and a batch is precisely the window in which a
+policy moves under an in-flight task. With the column, invalidation is a
+comparison rather than a document's claim. **Tier 0**, folded into item 58.
 
 Found reviewing item 15's fix, which created the gap by closing a worse one.
 `policy_sha` on the `repos` row is written once, at cell start, from the export
@@ -2684,6 +2764,22 @@ branch is reached from tests alone.
 
 ## 44. A single turn can overshoot the budget ceiling, because the check runs before it
 
+**Decided 2026-09-04: option two, plus the ceiling that is actually
+enforceable.** `budget_usd` is a best-effort bound and says so where it is
+declared. The enforceable ceiling is **per batch, checked between tasks** —
+folded into item 58.
+
+Option one is rejected for the reason this item states about itself: a turn's
+cost is not knowable until it ends, so charging a worst-case estimate means
+*guessing* the bound. That is the defect item 56 argues against for size
+predicates, and here it is worse — a guess that refuses a legitimate turn costs
+more than a 6.5% overshoot.
+
+The reframe is what §9's v1 target buys. Unattended, one task running $1.17
+over is not the exposure; a night spending unboundedly is. Between tasks
+nothing is mid-flight, which is exactly why a bound is enforceable there and
+cannot be inside a turn. **Tier 0**, with item 58.
+
 `_over_budget` gates a turn on what has been spent *so far*. It cannot bound
 what the turn about to run will cost, and a turn's cost is not knowable until
 it ends.
@@ -2731,6 +2827,23 @@ there is no branch to hand.
 
 
 ## 46. `events.jsonl` now persists an untrusted cell's raw output verbatim, and nothing bounds or scans it
+
+**Decided 2026-09-04: it is evidence, not an operator's record.** So it takes
+a size cap and must come within the `secrets` gate's reach. **Tier 1.**
+
+The deciding argument is §9's v1 criterion. The defining property of the
+milestone is that *nobody was watching* — so a log reduced to bounded
+renderings would discard the only account of the night it matters most on.
+That rules out the cheaper answer.
+
+Two specifics, so the spec does not have to re-derive them:
+
+- **One value on both paths.** Reuse `implement.QUARANTINE_BYTES` (8192) rather
+  than minting a second number — the item names "one value, both paths" as the
+  open half, and a second constant is how the two drift.
+- **`secrets` must reach the batch tree, not only the diff.** §5.4 lists it as
+  a v1 gate, so this is written down now to be built into it rather than
+  retrofitted after.
 
 `SA-0041` makes `implement.run_agent` emit the parsed cell event under
 `Agent.event`, which is the fix that spec exists for — the dict was previously
@@ -2852,6 +2965,13 @@ third item to become a rule.
 
 ## 49. `revert` only checks *new* tests — a changed-body-same-name test has no coverage
 
+**Decided 2026-09-04, with items 50 and 51: the `tests` role reports what
+became of each name it was handed.** One §5.4 contract addition, not three
+fixes. It closes 50 and 51 outright and narrows this one; what is left here is
+the changed-body-same-name case, which needs the repo-declared hunk-to-node-id
+mapping this item already describes. **Tier 1** with 51, since that is what
+forces the contract.
+
 Its subset is `collected(head) - collected(base)`, `census`'s own route. That
 catches a new test that tests nothing; it cannot catch an *existing* test
 rewritten under the same node id, which needs a hunk-to-node-id mapping —
@@ -2864,6 +2984,11 @@ this, so a changed-body test with no declared witness is the only true gap.
 ---
 
 ## 50. `revert` produces no evidence for the spec shape it was built for
+
+**Decided 2026-09-04: closed by the contract change item 49 now records.** A
+`tests` role that reports the disposition of every name it was handed turns a
+collection error into the `fail` `revert` is waiting for, which is exactly what
+this item asks for. **Tier 1** with 51.
 
 Its canonical case is a spec that lands a module *and* its tests together: the
 revert removes the module, the new tests fail to import, and that is the gate's
@@ -2884,6 +3009,18 @@ lives in `revert.py`'s comment and one test, and nowhere an operator reads.
 ---
 
 ## 51. A cell can buy `revert` a `skip` for one printed line
+
+**Decided 2026-09-04: the §5.4 contract change, and this item is why it is
+Tier 1.** A cell switches the anti-theater gate off for an attempt with one
+printed line, needing no `conftest.py`, so the `gate_config` routing that
+exists for this class never fires. That is a control reading as present while
+not applying — Appendix I's founding defect — and the item is explicit that no
+name filter closes it, because telling a real node id from an invented one is
+language knowledge §2.1 keeps out of core. **Contract or nothing.**
+
+The cost is real and is accepted: every onboarded repo's `tests` gate has to
+implement the addition, and v2's success criterion is an afternoon-long
+onboarding. Under §9's v1 target that cost lands later than this defect does.
 
 `revert` is the only gate that *executes* a name the cell produced, so it is the
 only one where a collection line is an argument rather than a string to compare.
@@ -2951,6 +3088,23 @@ derived surfaces regenerated, `TaskShape` updated, and a one-line note in §3.3 
 ---
 
 ## 53. Three closed sets live only in the shapes, where nothing cross-checks them
+
+**Decided 2026-09-04: they are vocabulary. Enumerate all three** in
+`CONTEXT.md`, joining `CLOSED_SETS`, `SETS` and `SHAPE_SETS` — three lines and
+a regenerate. **Tier 3.**
+
+The item says the reason matters more than the choice, so: the test is **who
+has to know the term.** `SpecType` appears in every spec's frontmatter and,
+since item 56, selects the size ceiling that can end a run `EXHAUSTED`.
+`BlockingLevel` is written by repo authors in `policy.yaml`, which is the exact
+surface v2's afternoon-long onboarding is measured against. The rebuttal roles
+render into pull request bodies read at review time. None of the three is
+internal to the shapes.
+
+§4's precedent for leaving repo-defined gate *names* out does not extend to
+these: gate names are open by design, and a set that is closed by `sh:in` and
+enforced by a blocking gate is a controlled vocabulary whether or not it is
+written down as one.
 
 `SpecType` (`feature`/`bug`/`refactor`), `BlockingLevel`
 (`alwaysBlocking`/`blockingWhenElevated`/`advisory`) and the rebuttal roles
@@ -3104,6 +3258,49 @@ deliberate — most of the others are common English (`run`, `session`, `the
 tool`) and a mechanical match would drown in false positives, whereas
 `gate[ -]run` is safely distinctive. Worth stating in the config so the next
 reader does not take the gap for an oversight and "finish" it.
+
+---
+
+## 58. Nothing runs a batch, and v1 is defined by a night that does
+
+**Tier 0.** Not found by a run — found by asking what the other 29 items were
+being ordered *toward*, 2026-09-04.
+
+`saffron/cli.py` exposes four subcommands: `replay`, `cell`, `queue`,
+`reconcile`. There is no `run_batch` anywhere under `saffron/`. `queue` prints
+what a batch *would* run and reconciles pull request state; nothing executes
+it. §4.4 "Batch orchestration" is design with no implementation, and §9's v1
+criterion — *a full night runs while you sleep, and you merge at least half of
+what it produces before the coffee's cold* — is therefore not merely unmet but
+structurally unreachable.
+
+What runs specs today is `run-saffron-spec-loop`, a Claude Code skill driving
+`saffron cell` once per spec with an agent supervising. That is the attended
+loop working as intended, and it is **not** the thing v1 names: the skill is
+host tooling, not the product, and it needs someone at the keyboard.
+
+**This is why it sits above the whole backlog.** Every open item is a
+refinement of a pipeline that cannot yet run unattended, and "what would hurt
+most on the first unattended night" cannot be honestly ranked while nothing can
+produce one. Two items fold into it rather than standing alone:
+
+- **Item 16** — a task's policy lineage. §4.1's invalidation rule (*change a
+  repo's gate declarations mid-batch and its in-flight tasks are invalidated*)
+  is a doc claim with no reader until batches exist, and a batch is exactly the
+  window where a policy moves under an in-flight task. Building the runner
+  against a ledger that cannot say what a task ran under is building it twice.
+- **Item 44**'s enforceable half — a per-batch ceiling, checked *between* tasks.
+  That is the only place a spend bound is enforceable at all, because nothing is
+  mid-flight at that moment; `budget_usd` cannot be, for the reason item 44 now
+  records.
+
+**Done looks like** a plan, split into specs by that plan — the shape
+`docs/superpowers/plans/2026-08-31-operator-visibility.md` uses. **Not one
+spec.** §4.4 spans `cli.py`, a new orchestration module, `scheduler.py` and
+`ledger.py`, and item 56 is the measurement of what happens when a spec that
+wide reaches a cell: `SA-0009`, $31.60, `EXHAUSTED`, zero lines merged. The
+plan itself is written by hand — §4.4 is design, and `DESIGN.md` is
+`protected`.
 
 ---
 
