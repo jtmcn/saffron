@@ -1508,18 +1508,18 @@ wild while authoring the spec.
 **Status:** **done** — the resplit landed. `SA-0014` (PR #56), `SA-0015`
 (#59), `SA-0016` (#60) and `SA-0017` (#64) are all `MERGED`, so the too-wide
 `SA-0009` was recut into four pieces that each fit inside one repair loop.
-**One idea in the body below was not built and is not filed anywhere else:** a
-pre-flight scan that weighs a spec — criteria count, `touches` breadth — against
-its `type`'s size ceiling *before* a cell starts, which would have caught this
-for the price of a `gh`-free check. Worth its own item if it is wanted.
+The "still open" paragraph at the end of the body is now **item 56**: nothing
+weighs a spec's own shape against its `type`'s size ceiling before a cell
+starts. That is a separate control from the recut, and the recut did not build
+it.
 
-**Status:** open, resplit as `SA-0014`–`SA-0017`. Found by running `SA-0009`
-(task 11).
+Resplit as `SA-0014`–`SA-0017`. Found by running `SA-0009` (task 11).
 
 `SA-0009` was §4.2.1's read-only half — discovery, the re-queue filter, the
 six refusals, `saffron queue` — as one spec. It never converged: two `IMPLEMENTING`
-attempts landed 990 changed lines across seven files, `size` failed every gate
-run after at the 600-line feature ceiling (`gate_result_id` 113/124/135), and
+attempts landed 990 changed lines across seven files, `size` reported `fail` in
+every gate result after, at the 600-line `feature` ceiling
+(`gate_result_id` 113/124/135), and
 two `REPAIRING` attempts each burned a full `max_turns=100` trying to cut the
 diff down without ever getting `committed` clean again — $31.60 against an $18
 budget, terminal state `EXHAUSTED`, zero lines merged.
@@ -1541,10 +1541,10 @@ wiring) — chained by `depends_on`, ~150–420 lines apiece by the same diffsta
 `EXHAUSTED` task above, and editing it would only mint a fresh `spec_sha` for
 a monolith nothing intends to run again.
 
-**Still open:** nothing yet checks a spec's own shape — how many acceptance
-criteria, how many files in `touches` — against its `type`'s size ceiling
-before a cell starts. That would have caught this one for the price of a
-`gh`-free scan, the same argument item 18 made for turn ceilings.
+**Split out as item 56:** nothing yet checks a spec's own shape — how many
+acceptance criteria, how many files in `touches` — against its `type`'s size
+ceiling before a cell starts. That would have caught this one for the price of
+a `gh`-free scan, the same argument item 18 made for turn ceilings.
 
 ---
 
@@ -3004,6 +3004,53 @@ was found.
 **Done looks like** one line in `.gitignore`. Filed rather than fixed in passing
 because it belongs to no branch in flight; it is a two-minute item for whoever
 touches packaging next.
+
+---
+
+## 56. Nothing weighs a spec against its own size ceiling before the money is spent
+
+Split out of item 25, which the `SA-0014`–`SA-0017` recut closed by hand. The
+recut fixed one spec; **the check that would have caught it before a cell
+started was never built**, and every spec written since has been sized by
+whoever wrote it.
+
+`SA-0009` is the measurement. Two `IMPLEMENTING` attempts landed 990 changed
+lines across seven files, `size` reported `fail` in every gate result after, at
+the 600-line `feature` ceiling (`gate_result_id` 113/124/135), and two
+`REPAIRING` attempts
+each burned a full `max_turns=100` trying to cut the diff back down without
+ever getting `committed` clean again. **$31.60 against an $18 budget,
+`EXHAUSTED`, zero lines merged.** The overrun was not bad luck: the diffstat
+split cleanly along the spec's own acceptance criteria, and
+`tests/test_scheduler.py` alone was 433 of the 990 lines because it was
+carrying fixtures for two unrelated mechanisms the spec text asked for
+separately.
+
+**Everything the check needs is already parsed and host-side.** `Spec` carries
+`type`, `touches` and `acceptance_criteria`; `saffron/gates/core/size.py`
+carries `_CEILINGS` (`bug` 300, `feature` 600, `refactor` 1000) and
+`_DEFAULT_CEILING`. The scan runs before a container starts and costs no
+`gh` call, which is what makes this cheap in the way item 18's turn-ceiling
+argument was cheap: the ceiling already exists and is enforced far too late,
+against a diff somebody has already paid for.
+
+**The hard part is the predicate, not the plumbing, and it should not be
+guessed.** Criteria count times files in `touches` is a number with no
+measurement behind it, and a refusal gate that fires on a good spec is worse
+than no gate — `saffron queue` refuses before a cell runs, so a false positive
+costs a spec that never gets written rather than a diff that never lands.
+Twenty specs carry a `MERGED` row in `~/.saffron/ledger.db` with a real
+diffstat behind them, each pinned to its own `spec_sha`, so the honest first
+move is to fit the predicate against that corpus and see whether it separates
+`SA-0009` from the twenty that converged.
+
+**Done looks like** one of: a warning line on `saffron queue` naming a spec
+whose shape predicts an over-ceiling diff, fitted against the merged corpus
+rather than reasoned; or a written finding that the corpus does not separate
+them, which retires the idea. **The refusal gate is the wrong home either
+way** — §4.2.1's refusals are all facts (a parent did not merge, a path is
+protected), and this is a forecast. A forecast that blocks is the shape item
+23 is about.
 
 ---
 
