@@ -75,9 +75,9 @@ acceptance:
       is the state §6's morning queue reads.
     witness: tests/test_batch.py::test_every_stop_path_closes_the_batch_row_with_its_reason
   - claim: >-
-      Each run the night produces is attached to the batch. runs.batch_id is
-      nullable and create_run does not take one, so without this stamp the
-      column is written by nobody, every join through it returns nothing, and
+      Each run the night produces is attached to the batch. create_run accepts
+      a batch id and the only call that mints a run passes none, so without
+      this stamp the column is written by nobody, every join through it returns nothing, and
       the spend SA-0049 derives is zero for every real night.
     witness: tests/test_batch.py::test_each_run_is_attached_to_the_batch_it_ran_under
   - claim: >-
@@ -87,6 +87,15 @@ acceptance:
       the whole night, and it has to leave a row behind or an expired token at
       22:00 produces a night with no record that it was attempted.
     witness: tests/test_batch.py::test_a_readiness_failure_closes_the_batch_without_starting_a_task
+  - claim: >-
+      A runner that raises rather than returning an outcome still closes the
+      batch row, and the raise counts as an abort for the breaker. Driving one
+      cell raises on an unreadable policy at base, on a runtime that will not
+      start and on a mirror that will not fetch, all from outside the block
+      that would catch them — the command is the only handler today, and a
+      batch has none. Unhandled, the night ends with no end and no status,
+      which is the one state that cannot be told from a night still running.
+    witness: tests/test_batch.py::test_a_runner_that_raises_still_closes_the_batch_row
 ---
 
 ## Context
@@ -146,10 +155,18 @@ it and already landed in `SA-0048`.
 
 ## Notes for the agent
 
-**Everything the loop reaches out to is injected, and that is the whole test
-strategy.** The cell runner, the clock and the readiness check each take a real
-default bound as a keyword — the shape `scheduler.build_queue` uses for `gh`
-and `phases/package.py` uses for its runner. An eight-hour window, a live
+**The clock and the readiness check take real defaults bound as keywords — the
+cell runner does not, and this is the sentence that decides the spec.** It is a
+required callable from a candidate to that candidate's outcome, with no default
+at all. `run_one_cell` takes a `CellSpec`, not a `Candidate`, and the only code
+that builds one is `cli._run_cell` using two `cli`-private helpers this spec
+forbids: the ceilings resolver and the one that decides what a child stacks on.
+A loop that built a `CellSpec` itself would therefore pass no stacked-on parent
+for any candidate, cutting every child of a stack from `base_sha` — and §4.2.1
+says what follows: *"it builds against code that does not exist yet and fails
+its own gates."* That is a silent correctness bug no witness here could catch,
+because all of them run against a fake runner. `SA-0051` owns `cli.py` and
+supplies the adapter. An eight-hour window, a live
 token probe and a real cell are all untestable; a fake clock, a callable
 returning canned `CellOutcome`s and a stub readiness are not. **If a criterion
 above seems to need a real night, the seam is in the wrong place.**
@@ -161,9 +178,9 @@ counts three states and they are worth naming in their own frozenset in this
 module, with a comment saying which set it is deliberately not.
 
 **Attach the run after the cell returns, not at creation.** `CellOutcome`
-carries `run_id`. `create_run` takes no batch and lives in `saffron/ledger.py`;
-the call that mints the run is in `run_one_cell`, in `saffron/cell/**`. Both
-are `forbidden`, so the stamp is a ledger method `SA-0049` adds and this spec
+carries `run_id`. `create_run` accepts a batch id and lives in
+`saffron/ledger.py`; the call that mints the run is in `run_one_cell`, in
+`saffron/cell/**`, and passes none. Both are `forbidden`, so the stamp is a ledger method `SA-0049` adds and this spec
 calls once per task. It is the shape `record_push` and `set_task_package`
 already use on `tasks`: the row exists, then the fact about it arrives.
 
@@ -173,6 +190,18 @@ rather than reporting the gap"* — and `CellOutcome.spent_usd` is exactly such 
 tally: its own docstring says the field is defaulted because several early
 returns precede the binding. `SA-0049` exposes the batch's derived spend as a
 reader; the budget gate calls it.
+
+**The ledger is an ordinary argument, not a keyword with a default**, and the
+witnesses that involve money need scaffolding worth naming here. The spend is
+derived through `batches` to `runs` to `tasks` to `attempts`, so a fake runner
+returning a bare outcome leaves the budget gate reading zero. A test that wants
+the gate to see money has the fake runner write it — create the run, the task
+and a closed attempt — and return an outcome carrying that run id.
+
+**Say what the loop returns.** A stop reason is what `SA-0051` turns into an
+exit code, and the four are `DRAINED`, `BUDGET`, `UNTIL` and `INFRASTRUCTURE`.
+Return the reason itself rather than a boolean or an exit code: the command
+owns the mapping to a code, and §4.2.1 gives it three-to-one.
 
 **Order the checks and say so in one comment.** Before each task: the deadline,
 then the budget, then the breaker's standing count. The batch row is closed

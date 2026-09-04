@@ -44,11 +44,12 @@ acceptance:
       constraint nobody can see fire.
     witness: tests/test_ledger.py::test_closing_a_batch_with_an_invented_stop_reason_is_refused
   - claim: >-
-      Closing a batch computes its spend in the same statement that sets the
-      status and the end, and stores it — derived, never passed by a caller.
-      The identical shape set_task_state already uses to roll a task's spend up
-      from its attempts inside its own UPDATE: a figure a caller passes can
-      disagree with the rows it is made of, and a derived one cannot. Storing
+      Closing a batch writes the status, the end and the spend in one UPDATE —
+      finish_run's shape, one table over — and the spend it writes is the
+      reader's return value bound as a parameter, never a second copy of the
+      join. Derived rather than passed by a caller, which is set_task_state's
+      argument; through the reader rather than repeated in SQL, which is how
+      the close and the reader stay one sum. Storing
       it is what gives batches.spent_usd_est a writer; a pure query would leave
       that column written by nobody, which the schema test guarding item 18
       exists to forbid.
@@ -69,10 +70,10 @@ acceptance:
     witness: tests/test_ledger.py::test_a_batchs_runs_are_readable_from_the_batch
   - claim: >-
       A run can be attached to the batch it ran under after the row already
-      exists. create_run takes no batch and the only call that mints a run is
-      inside run_one_cell, in saffron/cell/**, which the loop that owns the
-      batch may not edit — so without this stamp runs.batch_id is written by
-      nobody, every join through it returns nothing, and the spend derived
+      exists. create_run accepts a batch id, but the only call that mints a run
+      passes none — it is inside run_one_cell, in saffron/cell/**, which the
+      loop that owns the batch may not edit — so without this stamp
+      runs.batch_id is written by nobody, every join through it returns nothing, and the spend derived
       above is zero for every real night. The shape record_push and
       set_task_package already use on tasks: the row exists, then the fact
       about it arrives.
@@ -180,6 +181,11 @@ That one asserts the same two NULLs by raw `INSERT`. This one asserts them
 through the new opener, which is the part that does not exist. Different node
 id, so `criteria` is satisfied either way — but a copy of the old test proves
 nothing new and the adequacy lens will say so.
+
+**Four methods, and `SA-0050` calls all four.** An opener, a closer taking the
+stop reason, an attach for a run whose row already exists, and a reader for the
+spend of a batch still running. The names are yours; the shapes are not, and a
+name chosen here is the one the loop will have to find.
 
 **The two readers exist because `SA-0050` cannot reach the writes itself.**
 The loop that opens and closes a batch may edit neither `saffron/ledger.py` nor
