@@ -129,3 +129,37 @@ def render_context(text: str, *, vocabulary: Path, _members=None) -> str:
         )[column:]
         text = text[:start] + sentence[:first] + body + sentence[last:] + text[end:]
     return text
+
+
+# Shape name -> ontology class whose members fill its sh:in list.
+SHAPE_SETS = {"CoreGateShape": "CoreGate", "GateRoleShape": "GateRole"}
+_PER_LINE = 3
+_INDENT = " " * 12
+
+
+def render_shapes(text: str, *, vocabulary: Path, _members=None) -> str:
+    """Rewrite each `sh:in ( … )` list from the vocabulary.
+
+    Three terms per line with a twelve-space continuation indent, which is what
+    is committed. The `shacl` gate reads this file, so a reflow is a gate diff.
+    """
+    for shape, class_name in SHAPE_SETS.items():
+        # Same rules as `render_context`: a fixture names the sets it is about,
+        # and an empty list is looked up by `in` rather than falling through.
+        if _members is not None and class_name not in _members:
+            continue
+        names = (
+            _members[class_name]
+            if _members is not None
+            else members(class_name, vocabulary=vocabulary)
+        )
+        rows = [
+            " ".join(f"saffron:{n}" for n in names[i : i + _PER_LINE])
+            for i in range(0, len(names), _PER_LINE)
+        ]
+        body = f"\n{_INDENT}".join(rows)
+        start = text.index(f"saffron:{shape}")
+        open_at = text.index("sh:in (", start)
+        close_at = text.index(")", open_at)
+        text = text[:open_at] + f"sh:in ( {body} " + text[close_at:]
+    return text

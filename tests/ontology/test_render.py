@@ -84,3 +84,19 @@ def test_a_closed_set_that_renders_to_no_members_is_an_error():
             vocabulary=VOCABULARY,
             _members={"Severity": []},
         )
+
+
+def test_the_shapes_render_the_committed_bytes_unchanged():
+    committed = SHAPES_FILE.read_text()
+    assert render.render_shapes(committed, vocabulary=VOCABULARY) == committed
+
+
+def test_the_in_list_wraps_at_three_terms_per_line():
+    """The committed file wraps at three, with a twelve-space continuation
+    indent. Reflowing it would be a diff in a file the shacl gate reads."""
+    out = render.render_shapes(
+        SHAPES_FILE.read_text(),
+        vocabulary=VOCABULARY,
+        _members={"CoreGate": ["a", "b", "c", "d"]},
+    )
+    assert "sh:in ( saffron:a saffron:b saffron:c\n            saffron:d ) ." in out
