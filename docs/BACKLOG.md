@@ -182,6 +182,11 @@ boundary this work fixed. All carry `ponytail:` comments or a line here.
 
 ## 2. The agent can disable a core gate from inside the cell
 
+**Status:** **done**, in `cf0dee8` (*fix(cell): a gate the agent could
+reconfigure from inside the cell*). `DIFF_FLAGS` at `saffron/cell/worktree.py:131`
+pins `--src-prefix=a/`, `--dst-prefix=b/` and `--no-ext-diff`, and both
+`export_patch` and `changed_files` diff through it.
+
 `worktree.export_patch` runs bare `git diff`, inheriting worktree config the
 agent can write. One `git config diff.srcPrefix x/` and a diff deleting the
 entire test suite reads as `pass`, because path matching no longer recognises
@@ -232,6 +237,10 @@ The `--numstat` cross-check remains an upgrade path in the docstring rather
 than shipped code.
 
 ## 3. `findings` and `attempts` have no tables
+
+**Status:** **done**, in `229c4b2` (*feat(ledger): an attempt had no identity,
+so every one of them shared the task's*). Both tables exist — `attempts` at
+`saffron/ledger.py:54`, `findings` at `:98`.
 
 `DESIGN.md` §4.1 declares both. Neither exists, so:
 
@@ -356,6 +365,14 @@ in them.
 
 ## 4. Three of five supervisor bounds are missing
 
+**Status:** **done**. All five bounds are present. Idle and completion landed
+in `293f558` (*feat(cell): the two bounds that make silence mean something*) as
+`runtime.IDLE_TIMEOUT_S` (300s) and `runtime.COMPLETION_TIMEOUT_S` (10s), and
+`Completed.bound` names which of the three ended a read loop rather than
+collapsing them into one flag. The wall clock is no longer the unoverridden
+3600s this item was written about: `session.py:1115` passes `TURN_TIMEOUT_S`
+(900s), and idle catches a stall five minutes in either way.
+
 §4.3 wants turns, spend, idle, completion and wall clock. v0.5 has turns, spend
 (host-side, per task) and a wall clock on `exec_stream`. **Idle and completion do
 not exist**, and the wall clock defaults to 3600s that `run_one_cell` never
@@ -414,6 +431,13 @@ still takes the next exec.
 
 ## 5. PACKAGE, and the fact that patches perish
 
+**Status:** **done** — PACKAGE shipped as sub-project A (`cc986bf` onward,
+`saffron/phases/package.py`), and `DESIGN.md` §5.7 is its specification. Patches
+no longer perish: a green run rebases onto the remote default branch, re-runs the
+full suite when the base moved, pushes a branch and opens a draft pull request.
+Item 11 is this build's own follow-up list and item 16 is what its policy fix
+left.
+
 There is no PR, no push, no index. A green run leaves `patch.diff` and
 `patch.json` in the batch tree and nothing tells you they are there — finding one
 requires knowing the layout by heart.
@@ -449,6 +473,12 @@ so `commit_squash` passes `-c user.email=saffron@localhost` on the command line.
 a local path, so nothing downstream knew where a pull request would go (§4.1).
 
 ## 6. The critic's lenses overlap, and the third does not exist
+
+**Status:** **done** — `SA-0043`, PR #105 (`80a7a3e`). The third lens exists
+as `saffron/agents/prompts/review-adequacy.md`, wired at `phases/review.py:39`.
+The remit question this item raised was settled separately by #34, and
+`review.py:41` records the reasoning: the third lens is adequacy, not blast
+radius.
 
 Measured on the critic's first live run (Appendix L): **both lenses filed the
 same `touches` finding.** §5.5's no-voting rule rests on lenses being disjoint by
@@ -580,6 +610,12 @@ of `/work` (Appendix J). The fix is right and it has a cost: the repo's
 
 ## 8. N1 rests on seven guessed ports
 
+**Status:** **done**, in `8e6838a` (*feat(preflight): a host process the
+operator has accepted, named and reported*). `PROBED_PORTS` is gone.
+`listening_sockets` parses `lsof -nP -iTCP`, `host_probe_ports` raises rather
+than covering nothing when the enumeration fails, and `probed_ports` drops a
+port only when *every* listener on it is a tolerated process.
+
 `preflight.PROBED_PORTS` is `5432, 5433, 3306, 6379, 8000, 8080, 27017`. The
 probe raises rather than passing when it cannot run, which is right — but "no
 host service answered on seven ports I thought of" and "no host service is
@@ -626,6 +662,23 @@ too much to check, and reporting it as a probe that did not run. The connects
 go through a thread pool now; the timeout stays generous.
 
 ## 9. Unverified against a live model
+
+**Status:** **partly met, and the standing claim in it is now false.** Two of
+the three "expensive" paths this item was waiting on have since fired in
+production, both recorded elsewhere in this file rather than here:
+
+- **A critic confirming a plausible-but-wrong finding** — item 42, measured on
+  `SA-0040` 2026-09-01. The critic wrote `confirmed: The implementer offered no
+  argument and made no visible change` about a finding that was false, and the
+  operator inherited a pull request body asserting it.
+- **`GATE ⇄ REPAIR` firing at all** — item 45, measured on `SA-0031`: six
+  commits, 39 new gate failures and an `EXHAUSTED` terminal. The bullet below
+  claiming it "did not fire, for the fourth time" describes 2026-08-25 and has
+  not held since.
+
+**Still unmet:** a rebuttal that claims a fix and does neither — §4.3's doneness
+rule at the point an agent has the strongest incentive to lie. That one still
+needs a task chosen to fail rather than a fifth hope.
 
 Everything here is built and unit-tested and has never met a real session. On
 this project's evidence that is exactly where the next defect is.
@@ -676,6 +729,11 @@ the first task that reached PACKAGE.
 
 ## 10. Small, measured, cheap
 
+**Status:** **done bar one bullet.** Three of the four carry their own dated
+closures below. The open one is `implement.md` doing double duty — it still
+emits a plan block when told to implement, and `session.py:391` still always
+sends `PLAN_PROMPT` first, so it stays harmless and stays untidy.
+
 - `rebut.py` numbers blockers from 0 in the prompt. **Done, 2026-08-21:**
   numbered from 1 in both places they are produced. Not cosmetic —
   `run_verdict` requires the verdict set to match the blockers exactly, so a
@@ -703,6 +761,12 @@ the first task that reached PACKAGE.
 ---
 
 ## 11. What PACKAGE left, and the one design question it raised
+
+**Status:** **done**, 2026-08-23 — all six, plus the design decision the
+first one asked for, in `DESIGN.md` rev 16. The full account is in this item's
+own body below. **One accepted risk stands and is not closed by it:** the
+credential refusal keeps a secret off the remote, not off the host, and §5.4's
+`secrets` gate is still v1's to build.
 
 Written at the close of sub-project A (PR #5). Every item was found by review or
 by measurement during that build; none is speculation. The first is a design
@@ -809,6 +873,10 @@ mechanism. The accepted credential risk above is unchanged and still §5.4's
 
 ## 12. `census` trusts the gate runner, and the gate runner is in the cell
 
+**Status:** **done**, 2026-08-23 — both halves. The full account is in this
+item's own body below, which was written as the fix landed; this line exists so
+a scan of the file's status markers sees it.
+
 Promised by the split's spec (part 2.3) and not written until the fix wave.
 `census`'s subtraction is exact about the two lists it is handed, and both lists
 are produced inside the untrusted cell — by `/work/.saffron/gates/tests.py` and a
@@ -878,6 +946,11 @@ identical look ends the attempt on the no-progress rule.
 ---
 
 ## 13. Gate executables come from `base_sha`; the policy declaring them still comes from the working copy
+
+**Status:** **done**, in `1b670c3` (*fix(session): the policy declaring a
+run's gates came from the working copy*). `session.py:800` reads
+`load_policy(gates_dir)` — the same export the gate executables resolve
+against.
 
 The same asymmetry item 11 raised for a task's base, in a second place, left
 half-closed by the fix that closed the first. `session.py` calls
@@ -996,6 +1069,11 @@ sitting next to the subtraction's, and CLAUDE.md warns against making those matc
 
 ## 15. Two more reads of the working copy, one of them the same defect as item 13
 
+**Status:** **done**, in `2d67d0d` (*fix(package): PACKAGE was verified under
+the checkout's policy, not the base's*). `package.py:676` reads
+`load_policy(gates_dir)`. **Item 16 is what this fix created** and stays open:
+nothing records *which* policy PACKAGE verified under.
+
 Found while closing item 13, measured, not reasoned — and left open because
 both sit in PACKAGE rather than in the cell.
 
@@ -1070,6 +1148,10 @@ with it.
 
 ## 17. `size` exists and nothing calls it
 
+**Status:** **done** — `SA-0005` (`2f7c6d9`). `size_gate` is called at
+`session.py:1017`, advisory unless the effective risk tier is elevated
+(`session.py:950`).
+
 `SA-0002` built the gate (#15) and its spec put the consumer out of scope, on
 the correct reasoning that the risk tier has none until v1. So the module is
 present, unit-tested, adversarially reviewed — and unreachable: `session.py`'s
@@ -1142,6 +1224,8 @@ reach outside its own `touches` is unsatisfiable by construction.
 ---
 
 ## 18. A spec's ceilings were declarations with no reader, and turn exhaustion is total loss
+
+**Status:** **done**, 2026-08-25 — the item's own closure paragraph is below.
 
 Found by running `SA-0005`, which is the only way it could have been found: it
 is invisible to every unit test and to four green live runs.
@@ -1278,7 +1362,7 @@ production does and runs `shacl` through `CellExecutor`, asserting `pass` and a
 ## 21. Two `SimpleNamespace` fakes stand in for `Spec` and drift silently
 
 **Status:** **done**, driven from `SA-0012`
-(`.saffron/specs/SA-0012-spec-doubles.md`) in PR #49 (`f31550c`). Both call sites
+(`.saffron/specs/done/SA-0012-spec-doubles.md`) in PR #49 (`f31550c`). Both call sites
 now build a real `Spec` through `parse_spec`. Found by `SA-0011`. Review of that
 diff found the defect had moved rather than died — value drift where this was
 shape drift — which is item 24. Read what follows for why the fakes cost what
@@ -1324,7 +1408,7 @@ a string literal, as `tests/test_report.py` already does), so the next field
 an unrelated suite three tasks later. Roughly twenty lines.
 
 **One thing it left.** `SA-0011`'s `touches` still names `tests/test_package.py`
-(`.saffron/specs/SA-0011-criteria-have-witnesses.md:24`), declared only because
+(`.saffron/specs/done/SA-0011-criteria-have-witnesses.md:24`), declared only because
 of these fakes. `SA-0012` and `SA-0013` both put it out of scope, and
 `.saffron/**` is `forbidden` in every spec — no cell can do it. It wants a
 human edit.
@@ -1390,9 +1474,9 @@ night.
 
 ## 24. The fixture item 21 built drifts in value, not shape
 
-**Status:** open, specced as `SA-0013`
-(`.saffron/specs/SA-0013-fixture-values-are-witnessed.md`), drivable once `#49`
-is on `main`. Found by review of `SA-0012` (PR #49).
+**Status:** **done** — `SA-0013` (PR #51), 2026-08-28. Found by review of
+`SA-0012` (PR #49); the spec it was written into is
+`.saffron/specs/done/SA-0013-fixture-values-are-witnessed.md`.
 
 Item 21's fix replaced the two `SimpleNamespace` fakes with `_spec()`, which
 builds a real `Spec` by putting a string literal through `parse_spec`. Nothing
@@ -1420,6 +1504,14 @@ wild while authoring the spec.
 ---
 
 ## 25. A spec's own diff can be too large for its own repair loop
+
+**Status:** **done** — the resplit landed. `SA-0014` (PR #56), `SA-0015`
+(#59), `SA-0016` (#60) and `SA-0017` (#64) are all `MERGED`, so the too-wide
+`SA-0009` was recut into four pieces that each fit inside one repair loop.
+**One idea in the body below was not built and is not filed anywhere else:** a
+pre-flight scan that weighs a spec — criteria count, `touches` breadth — against
+its `type`'s size ceiling *before* a cell starts, which would have caught this
+for the price of a `gh`-free check. Worth its own item if it is wanted.
 
 **Status:** open, resplit as `SA-0014`–`SA-0017`. Found by running `SA-0009`
 (task 11).
@@ -1591,6 +1683,9 @@ $0.82, and a spec that had to be run by hand with nothing on the way in saying s
 
 ## 29. Nothing recorded that a task merged, measured against this repo's own ledger
 
+**Status:** **done**, 2026-08-30, driven from `SA-0019` (PR #70) — the
+item's own closure paragraph is below.
+
 `SA-0019`. `set_task_state` is the only writer of `tasks.state`, and PACKAGE's
 last word is always `READY_FOR_REVIEW` — nothing asked GitHub what happened
 after, though §3.3 draws arrows onward to `MERGED`/`REJECTED`/
@@ -1733,6 +1828,10 @@ spec directory is `protected`. Found by the review of `SA-0024`, not by a run.
 
 ## 32. The dependency gate asked whether a parent shipped and answered from a record of cell runs
 
+**Status:** **done**, 2026-08-31, by hand on the host — `_retired_ids` at
+`saffron/scheduler.py:464`, read at `:757`. The account is in this item's own
+body below; this line exists so a scan of the file's status markers sees it.
+
 **Done, 2026-08-31**, by hand on the host — `_retired_ids` in
 `saffron/scheduler.py`, admitting a `depends_on` whose parent sits in
 `.saffron/specs/done/`.
@@ -1765,6 +1864,11 @@ merely `READY_FOR_REVIEW` is still refused, which is §4.2's own rule minus the
 half v0.5 cannot honour.
 
 ## 33. Stacking's other half needs two bases, and the two now disagree on purpose
+
+**Status:** **done** — all three specs merged: `SA-0022` (PR #81),
+`SA-0025` (#82) and `SA-0026` (#84). `CellSpec.stacked_on` is distinct from
+`base_sha`, PACKAGE resolves a real parent, and `CONTEXT.md` carries the **Tree
+base** entry the split needed.
 
 `SA-0020`'s first attempt (ledger task 20, `EXHAUSTED` at $14.43 against a $16
 budget, 2026-08-30) found that a stacked task — one whose parent is still only
@@ -2024,6 +2128,9 @@ stated intent all along, and is true for the first time.
 ---
 
 ## 34. A turn ceiling that fires with zero commits was total loss, and item 18's prompt was not enough
+
+**Status:** **done** — `SA-0028` (PR #87), 2026-09-01. The item's own
+closure paragraph is below.
 
 **Closed by `SA-0028`, 2026-09-01.** Item 18 closed `SA-0005`'s turn-ceiling gap
 by making `max_turns` a real, per-spec, printed ceiling and asking
