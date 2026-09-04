@@ -1484,20 +1484,22 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-04, twice in one day — which is the practice, not a
-    problem. The morning's measurement was an empty directory, every shipped
-    spec having been retired to `specs/done/`. The afternoon's is the first two
-    specs of the batch-orchestration plan, and it is the better anchor: an
-    empty queue is a weak assertion, and this one exercises the dependency
-    refusal against real spec files.
+    """Re-measured 2026-09-04, a fifth time, and the churn is the practice
+    rather than a problem: this test exists to be re-anchored, and every spec
+    that lands moves it by construction.
 
-    `SA-0045` has no `depends_on` and queues. `SA-0046` declares `SA-0045`,
-    which has no task at its `spec_sha` yet, so it is refused with the reason
-    naming the parent — the shape §4.2.1 says a stack presents on its first
-    night, before anything has run.
+    The measured queue is the two specs with no `depends_on` — `SA-0045`, the
+    batch schema, and `SA-0052`, the scheduler fix that cuts from `main`. The
+    other three are one linear chain, `SA-0046` -> `SA-0048` -> `SA-0049`, each
+    refused for the parent above it having no task at its current `spec_sha`.
+    That is the shape §4.2.1 says a stack presents on its first night, before
+    anything has run, and it is a stronger anchor than the empty directory this
+    replaced: two independent roots and a three-deep chain, against real files.
 
-    It re-anchors again the moment the next spec lands, and each of the four
-    previous anchorings was that same correction made by hand.
+    Note what this does *not* exercise. `_fake_gh([])` means `open_prs` is
+    empty, so the open-pull-request overlap refusal never runs here — which is
+    why this test is untouched by backlog item 59's ancestor walk, and why the
+    fixtures above are where that behaviour is pinned.
     """
     live = Path(__file__).resolve().parent.parent / ".saffron" / "specs"
     directory = tmp_path / "specs"
@@ -1508,13 +1510,16 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         directory, repo_id, ledger, repo_slug="joel/saffron", gh=_fake_gh([])
     )
 
-    assert [c.spec.id for c in candidates] == ["SA-0045"]
-    assert len(refusals) == 1
-    assert refusals[0].path.name.startswith("SA-0046")
-    # Not merely refused: refused for the parent it actually declares, which is
-    # what distinguishes a dependency refusal from a criterion-path one.
-    assert "SA-0045" in refusals[0].reason
-    assert "depends_on" in refusals[0].reason
+    assert [c.spec.id for c in candidates] == ["SA-0045", "SA-0052"]
+    # The chain, in filename order, each naming the parent above it. Not merely
+    # refused: refused for the parent it actually declares, which is what
+    # distinguishes a dependency refusal from a criterion-path one.
+    chain = [("SA-0046", "SA-0045"), ("SA-0048", "SA-0046"), ("SA-0049", "SA-0048")]
+    assert len(refusals) == len(chain)
+    for refusal, (child, parent) in zip(refusals, chain, strict=True):
+        assert refusal.path.name.startswith(child)
+        assert parent in refusal.reason
+        assert "depends_on" in refusal.reason
 
 
 def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger):
