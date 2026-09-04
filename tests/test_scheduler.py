@@ -516,6 +516,245 @@ def test_a_third_partys_overlap_still_refuses_a_stacked_child(tmp_path, ledger):
     assert "touches overlaps" in mine[0].reason and "o" in mine[0].reason
 
 
+def test_a_grandparents_open_pull_request_does_not_refuse_its_grandchild(
+    tmp_path, ledger
+):
+    """Backlog item 59: a stack is transitive, and the exemption above only
+    ever walked one hop. `TE-2` depends on `TE-1`, which depends on `TE-0` —
+    `TE-2` is cut from `TE-1`'s branch head, which is itself cut from `TE-0`'s,
+    so `TE-0`'s changes are already in `TE-2`'s own tree by the time it runs.
+    An open pull request from `TE-0` overlapping `TE-2`'s `touches` is nothing
+    to conflict with, at two hops just as much as one."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(
+        directory, "a.md", id="TE-2", touches=["shared.py"], depends_on=["TE-1"]
+    )
+    _write_spec(directory, "b.md", id="TE-1", touches=["mid.py"], depends_on=["TE-0"])
+    _write_spec(directory, "c.md", id="TE-0", touches=["base.py"])
+    repo_id = _repo(ledger)
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-1",
+        spec_sha=_sha(directory / "b.md"),
+        state="READY_FOR_REVIEW",
+    )
+    gh = _fake_gh(
+        [{"headRefName": "saffron/TE-0", "url": "g", "files": [{"path": "shared.py"}]}]
+    )
+
+    _candidates, refusals = build_queue(
+        directory, repo_id, ledger, repo_slug="o/r", gh=gh
+    )
+
+    assert [r for r in refusals if r.path.name == "a.md"] == []
+
+
+def test_an_unrelated_open_pull_request_still_refuses_on_overlap(tmp_path, ledger):
+    """The gate `SA-0016` built and the ancestor walk must not widen past: two
+    tasks with no dependency relationship at all, touching one file, are still
+    refused, and the reason still names the pull request and the file.
+
+    Pinned at both ends: `build_queue` end to end, and the walk itself —
+    `_ancestor_branches` of a spec with no `depends_on` is `frozenset()`,
+    which is the whole reason nothing here can be exempted. Imported inside
+    the test, not at module level, so a source revert that removes the
+    function fails only this test rather than the whole file's collection."""
+    from saffron.scheduler import _ancestor_branches
+
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"])
+    gh = _fake_gh(
+        [
+            {
+                "headRefName": "saffron/OTHER",
+                "url": "https://example/pull/5",
+                "files": [{"path": "a.py"}],
+            }
+        ]
+    )
+
+    candidates, refusals = build_queue(directory, None, ledger, repo_slug="o/r", gh=gh)
+
+    assert candidates == []
+    assert len(refusals) == 1
+    assert "touches overlaps" in refusals[0].reason
+    assert "a.py" in refusals[0].reason
+    assert "https://example/pull/5" in refusals[0].reason
+    assert _ancestor_branches("TE-1", {}) == frozenset()
+
+
+def test_a_second_dependency_is_not_an_ancestor_and_still_refuses(tmp_path, ledger):
+    """§4.2 fixes K=1: only `depends_on[0]` is ever a stacking candidate. A
+    second entry is a dependency the candidate is not cut from, so its
+    changes are not in the candidate's tree and an overlap with its pull
+    request is a real conflict — the ancestor walk must not exempt it just
+    because it happens to sit in the same `depends_on` list.
+
+    `TE-0` (the first, exempted entry) is itself given a parent, `TE-A`, so
+    this also exercises a real two-hop walk rather than one that happens to
+    stop after a single link — a one-hop reading of K=1 would refuse `TE-A`'s
+    own overlap too, which the assertions below rule out before ever reaching
+    `TE-9`'s. `TE-A`'s pull request is listed first, so a walk that wrongly
+    stopped at `TE-0` would return on it before ever inspecting `TE-9`'s."""
+    from saffron.scheduler import _ancestor_branches
+
+    directory = _spec_dir(tmp_path)
+    _write_spec(
+        directory,
+        "a.md",
+        id="TE-1",
+        touches=["shared.py", "sibling.py"],
+        depends_on=["TE-0", "TE-9"],
+    )
+    _write_spec(directory, "b.md", id="TE-0", touches=["mid.py"], depends_on=["TE-A"])
+    _write_spec(directory, "d.md", id="TE-A", touches=["base.py"])
+    _write_spec(directory, "c.md", id="TE-9", touches=["other.py"])
+    repo_id = _repo(ledger)
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-0",
+        spec_sha=_sha(directory / "b.md"),
+        state="READY_FOR_REVIEW",
+    )
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-9",
+        spec_sha=_sha(directory / "c.md"),
+        state="READY_FOR_REVIEW",
+    )
+    gh = _fake_gh(
+        [
+            # The grandparent's own pull request, listed first: exempted by
+            # the two-hop walk, so this must not be what the refusal names.
+            {
+                "headRefName": "saffron/TE-A",
+                "url": "ga",
+                "files": [{"path": "shared.py"}],
+            },
+            # The second `depends_on` entry's: not an ancestor, still refused.
+            {
+                "headRefName": "saffron/TE-9",
+                "url": "u9",
+                "files": [{"path": "sibling.py"}],
+            },
+        ]
+    )
+
+    _candidates, refusals = build_queue(
+        directory, repo_id, ledger, repo_slug="o/r", gh=gh
+    )
+
+    mine = next(r for r in refusals if r.path.name == "a.md")
+    assert "touches overlaps" in mine.reason
+    assert "sibling.py" in mine.reason and "u9" in mine.reason
+    assert "shared.py" not in mine.reason and "ga" not in mine.reason
+    assert _ancestor_branches("TE-1", {"TE-1": "TE-0", "TE-0": "TE-A"}) == {
+        "saffron/TE-0",
+        "saffron/TE-A",
+    }
+
+
+def test_a_dependency_cycle_does_not_hang_the_ancestor_walk(tmp_path, ledger):
+    """Nothing validates `depends_on` for cycles at parse time, so a
+    hand-written pair that depend on each other are reachable input, not a
+    hypothetical — and the ancestor walk is computed for every candidate on
+    every scan, whether or not any pull request ever overlaps. A `visited`
+    set must stop it; unattended, a hang here costs the whole night rather
+    than the one task the old one-hop refusal cost.
+
+    The cycle sits one hop *above* the candidate (`TE-8` and `TE-9` depend
+    on each other) rather than including the candidate itself, so the walk
+    must pass through it and come out the other side with both branches
+    collected — a one-hop reading of K=1 would never reach `TE-9` at all,
+    and would refuse `TE-7` on `TE-9`'s pull request instead of exempting
+    it, which is what the assertions below check for."""
+    from saffron.scheduler import _ancestor_branches
+
+    directory = _spec_dir(tmp_path)
+    _write_spec(
+        directory, "a.md", id="TE-7", touches=["shared.py"], depends_on=["TE-8"]
+    )
+    _write_spec(directory, "b.md", id="TE-8", touches=["p1.py"], depends_on=["TE-9"])
+    _write_spec(directory, "c.md", id="TE-9", touches=["p2.py"], depends_on=["TE-8"])
+    repo_id = _repo(ledger)
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-8",
+        spec_sha=_sha(directory / "b.md"),
+        state="READY_FOR_REVIEW",
+    )
+    gh = _fake_gh(
+        [
+            {
+                "headRefName": "saffron/TE-9",
+                "url": "p2",
+                "files": [{"path": "shared.py"}],
+            }
+        ]
+    )
+
+    _candidates, refusals = build_queue(
+        directory, repo_id, ledger, repo_slug="o/r", gh=gh
+    )
+
+    # The point under test is reaching this line at all — a walk that hangs
+    # on the cycle never gets here — and that the cycle is still correctly
+    # read as an ancestor rather than a stranger's overlap.
+    assert [
+        r for r in refusals if r.path.name == "a.md" and "touches overlaps" in r.reason
+    ] == []
+    parent_of = {"TE-7": "TE-8", "TE-8": "TE-9", "TE-9": "TE-8"}
+    assert _ancestor_branches("TE-7", parent_of) == {"saffron/TE-8", "saffron/TE-9"}
+
+
+def test_an_unscanned_parent_ends_the_walk_without_raising(tmp_path, ledger):
+    """A parent the scan cannot see ends the walk quietly rather than
+    raising. `TE-0` (a real, scanned parent) itself depends on `TE-GONE`,
+    which is retired to `specs/done/` — the operator's own assertion that its
+    work already shipped, and not among the specs `parent_of` is built from.
+    The walk still exempts `TE-0`'s immediate parent along the way, but must
+    not raise trying to look `TE-GONE` up to go further."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(
+        directory, "a.md", id="TE-1", touches=["shared.py"], depends_on=["TE-0"]
+    )
+    _write_spec(
+        directory, "b.md", id="TE-0", touches=["mid.py"], depends_on=["TE-GONE"]
+    )
+    done = directory / "done"
+    done.mkdir()
+    _write_spec(done, "c.md", id="TE-GONE", touches=["base.py"])
+    repo_id = _repo(ledger)
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-0",
+        spec_sha=_sha(directory / "b.md"),
+        state="READY_FOR_REVIEW",
+    )
+    gh = _fake_gh(
+        [
+            {
+                "headRefName": "saffron/TE-GONE",
+                "url": "g",
+                "files": [{"path": "shared.py"}],
+            }
+        ]
+    )
+
+    _candidates, refusals = build_queue(
+        directory, repo_id, ledger, repo_slug="o/r", gh=gh
+    )
+
+    assert [
+        r for r in refusals if r.path.name == "a.md" and "touches overlaps" in r.reason
+    ] == []
+
+
 def test_an_overlap_past_three_files_says_how_many_it_did_not_print(tmp_path, ledger):
     """`overlap[:3]` truncated silently, so a five-file overlap read as three
     — an operator sizing the conflict off the line got the wrong number."""

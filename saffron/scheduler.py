@@ -158,6 +158,44 @@ def _branch(spec_id: str) -> str:
     return f"saffron/{spec_id}"
 
 
+def _ancestor_branches(spec_id: str, parent_of: dict[str, str]) -> frozenset[str]:
+    """Every branch a candidate's stack is cut from, K=1 walked transitively
+    (backlog item 59). `parent_of` maps a spec id to its `depends_on[0]` —
+    the sole stacking candidate at each link, the same slot
+    `cli._resolve_stacked_on` stacks on — built only from specs this scan
+    actually found, so a spec with no `depends_on` and a spec absent from the
+    directory look identical here: neither is a key.
+
+    A stacked child is cut from its parent's branch head, so a linear stack's
+    every ancestor's changes are already in the child's own tree by
+    construction — there is nothing to conflict with, at any depth, not just
+    one hop up.
+
+    The walk follows slot zero only, one link at a time, and stops the
+    instant it reaches a spec `parent_of` does not know about — a retired
+    parent (in `specs/done/`, not the scanned directory) or a dangling
+    `depends_on` (already the dependency gate's own refusal to make). Either
+    way there is no further chain to read, so the walk ends quietly rather
+    than raising on a missing key.
+
+    `visited` guards against a cycle: nothing validates `depends_on` for
+    cycles at parse time, so a hand-written pair that depends on each other
+    would otherwise walk forever. The moment the next parent is already on
+    the path just walked, the walk stops instead of repeating it.
+    """
+    branches: set[str] = set()
+    visited = {spec_id}
+    current = spec_id
+    while current in parent_of:
+        parent = parent_of[current]
+        if parent in visited:
+            break
+        visited.add(parent)
+        branches.add(_branch(parent))
+        current = parent
+    return frozenset(branches)
+
+
 def _open_prs(repo_slug: str, gh: GhRunner) -> list[dict]:
     """Every open pull request in `repo_slug`, or `[]` on anything that keeps
     this from being a trustworthy answer.
@@ -579,6 +617,7 @@ def _refuse(
     unreadable_retired: int,
     protected: Sequence[str],
     markers: Sequence[tuple[str, str]],
+    ancestor_branches: frozenset[str],
 ) -> str | None:
     """The first of §4.2.1's remaining refusals this candidate earns, or
     `None`. Order matches the acceptance criteria's own listing — except the
@@ -609,18 +648,21 @@ def _refuse(
             f"an open pull request from another task already targets this spec: {url}"
         )
 
-    # K=1, the same first entry `cli._resolve_stacked_on` stacks on: a child
-    # cut from its parent's branch starts with the parent's changes already in
-    # its tree, so an overlap with the parent's own pull request is what
-    # stacking is *for*. Left in, this refusal shadows the dependency
-    # admission below entirely — a parent at `READY_FOR_REVIEW` has an open
-    # pull request by definition, and almost every spec here touches
-    # `docs/BACKLOG.md` (`SA-0026`).
-    parent_branch = (
-        _branch(candidate.spec.depends_on[0]) if candidate.spec.depends_on else None
-    )
+    # K=1, walked transitively (backlog item 59): a child cut from its
+    # parent's branch starts with the parent's changes already in its tree,
+    # and a stack is transitive — the grandparent's changes, and every
+    # ancestor's above it, are in that same tree by construction, so an
+    # overlap with any of their pull requests is what stacking is *for*.
+    # `ancestor_branches` is `_ancestor_branches`' answer, following
+    # `depends_on[0]` one link at a time and nothing else — a *second*
+    # `depends_on` entry is a dependency, not a base, and still refuses
+    # below. Left un-exempted, this refusal shadows the dependency admission
+    # entirely — a parent at `READY_FOR_REVIEW` has an open pull request by
+    # definition, and almost every spec here touches `docs/BACKLOG.md`
+    # (`SA-0026`).
     for pr in open_prs:
-        if pr.get("headRefName") in (own_branch, parent_branch):
+        branch = pr.get("headRefName")
+        if branch == own_branch or branch in ancestor_branches:
             continue
         # `or []`, not a `.get` default: a `files` of `null` stores None.
         changed = [
@@ -757,6 +799,17 @@ def build_queue(
     retired, retired_failures = _retired_ids(directory)
     open_prs = _open_prs(repo_slug, gh) if repo_slug is not None else []
 
+    # `spec_id` -> `depends_on[0]`, the sole stacking candidate at each link
+    # (backlog item 59), built only from what this scan actually found — a
+    # spec with an empty `depends_on` and a spec absent from the directory
+    # are indistinguishable to `_ancestor_branches`, and both are meant to
+    # end the walk rather than raise on a missing key.
+    parent_of = {
+        discovered.spec.id: discovered.spec.depends_on[0]
+        for discovered in specs
+        if discovered.spec.depends_on
+    }
+
     # Every id this directory declares, live or retired to `done/` — the same
     # union `_dependency_refusal` already treats as satisfied. A marker naming
     # anything else is a dangling reference, not any candidate's own refusal.
@@ -787,6 +840,7 @@ def build_queue(
             unreadable_retired=len(retired_failures),
             protected=protected,
             markers=markers,
+            ancestor_branches=_ancestor_branches(candidate.spec.id, parent_of),
         )
         if reason is not None:
             refusals.append(Refusal(path=candidate.path, reason=reason))
