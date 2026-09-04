@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import subprocess
+import types
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -318,6 +321,218 @@ def test_a_cell_is_not_made_to_proxy_its_own_loopback():
     status = preflight._STATUS.search(done.stdout)
     assert status is not None, done.stdout
     assert status.group(1) == "401"
+
+
+def _stub_prepare(monkeypatch, *, exported: Path) -> None:
+    """Every step `check_readiness` runs before "policy", stubbed to pass —
+    so a test can fail exactly one later step without reaching git or the
+    network for the earlier ones."""
+    monkeypatch.setattr(preflight.git_mirror, "ensure_mirror", lambda repo, path: path)
+    monkeypatch.setattr(
+        preflight.package_phase,
+        "real_remote",
+        lambda repo: "https://github.com/o/r.git",
+    )
+    monkeypatch.setattr(preflight.package_phase, "github_slug", lambda url: "o/r")
+    monkeypatch.setattr(
+        preflight.package_phase,
+        "fetch_default_branch",
+        lambda mirror, url: ("main", "a" * 40),
+    )
+    monkeypatch.setattr(
+        preflight.git_mirror,
+        "export_saffron_dir",
+        lambda mirror, sha, scratch: exported,
+    )
+
+
+def test_readiness_runs_its_checks_in_the_order_4_2_1_gives(monkeypatch, tmp_path):
+    """§4.2.1: auth, mirror fetch, origin refusal, default-branch pin, policy
+    validation, disk headroom — asserted on the order calls land in, and on
+    the result naming what passed rather than a bare boolean."""
+    order: list[str] = []
+
+    def _mk(name, result):
+        def _fn(*_a, **_k):
+            order.append(name)
+            return result
+
+        return _fn
+
+    exported = tmp_path / "exported"
+    (exported / ".saffron").mkdir(parents=True)
+    (exported / ".saffron" / "policy.yaml").write_text("gates: {}\n")
+
+    monkeypatch.setattr(
+        preflight.git_mirror, "ensure_mirror", _mk("mirror", tmp_path / "m")
+    )
+    monkeypatch.setattr(preflight.package_phase, "real_remote", _mk("real_remote", "u"))
+    monkeypatch.setattr(preflight.package_phase, "github_slug", _mk("origin", "o/r"))
+    monkeypatch.setattr(
+        preflight.package_phase,
+        "fetch_default_branch",
+        _mk("default_branch", ("main", "a" * 40)),
+    )
+    monkeypatch.setattr(
+        preflight.git_mirror, "export_saffron_dir", _mk("export", exported)
+    )
+    monkeypatch.setattr(preflight, "load_policy", _mk("policy", (object(), "sha")))
+    monkeypatch.setattr(preflight, "disk_headroom_ok", _mk("disk", True))
+
+    def _auth(token):
+        order.append("auth")
+        return True
+
+    result = preflight.check_readiness(
+        tmp_path / "repo",
+        tmp_path / "mirror",
+        tmp_path / "scratch",
+        tmp_path / "home",
+        token="tok",
+        validate_token=_auth,
+    )
+
+    assert result.ok
+    assert (
+        order.index("auth")
+        < order.index("mirror")
+        < order.index("real_remote")
+        < order.index("origin")
+        < order.index("default_branch")
+        < order.index("export")
+        < order.index("policy")
+        < order.index("disk")
+    )
+
+
+def test_a_policy_that_does_not_load_fails_readiness(monkeypatch, tmp_path):
+    """The other half of §4.2.1's "plus two": a policy that declares a gate
+    whose executable is missing fails readiness before the night starts,
+    rather than being discovered by the first cell after an image build."""
+    exported = tmp_path / "exported"
+    (exported / ".saffron").mkdir(parents=True)
+    (exported / ".saffron" / "policy.yaml").write_text("gates:\n  lint: {}\n")
+    _stub_prepare(monkeypatch, exported=exported)
+
+    result = preflight.check_readiness(
+        tmp_path / "repo",
+        tmp_path / "mirror",
+        tmp_path / "scratch",
+        tmp_path / "home",
+        token="tok",
+        validate_token=lambda token: True,
+    )
+
+    assert result.ok is False
+    assert result.step == "policy"
+    assert result.detail is not None and "lint" in result.detail
+
+
+def test_a_present_but_invalid_token_fails_readiness(monkeypatch, tmp_path):
+    """Presence alone is what the guard checks today; Appendix J measured the
+    failure that hides behind it. The validity probe here is injected, so
+    this never reaches the network."""
+
+    def _unreached(*_a, **_k):
+        raise AssertionError("readiness moved past an invalid token")
+
+    monkeypatch.setattr(preflight.git_mirror, "ensure_mirror", _unreached)
+
+    result = preflight.check_readiness(
+        tmp_path / "repo",
+        tmp_path / "mirror",
+        tmp_path / "scratch",
+        tmp_path / "home",
+        token="sk-expired",
+        validate_token=lambda token: False,
+    )
+
+    assert result.ok is False
+    assert result.step == "auth"
+
+
+def test_a_whitespace_token_fails_readiness(monkeypatch, tmp_path):
+    """An empty or whitespace token fails, not merely an absent one — the
+    distinction the existing presence check already makes with `strip()`."""
+
+    def _unreached(_token):
+        raise AssertionError("a validity probe ran against an empty token")
+
+    result = preflight.check_readiness(
+        tmp_path / "repo",
+        tmp_path / "mirror",
+        tmp_path / "scratch",
+        tmp_path / "home",
+        token="   ",
+        validate_token=_unreached,
+    )
+
+    assert result.ok is False
+    assert result.step == "auth"
+
+
+def test_a_check_that_cannot_run_is_a_failure_not_a_pass(monkeypatch, tmp_path):
+    """The rule `host_probe_ports` already follows, one check over: a
+    headroom check that cannot even run must not read as a pass."""
+
+    def _boom(_path):
+        raise OSError("no such file or directory")
+
+    monkeypatch.setattr(preflight.shutil, "disk_usage", _boom)
+
+    with pytest.raises(RuntimeError, match="could not be checked"):
+        preflight.disk_headroom_ok(tmp_path)
+
+
+def test_insufficient_disk_headroom_fails_readiness(monkeypatch, tmp_path):
+    """Checked on the filesystem holding the batch tree — the one holding the
+    mirrors, worktrees and the runtime's own volumes — against the named
+    constant, not against `/` and not skipped."""
+    exported = tmp_path / "exported"
+    exported.mkdir()
+    _stub_prepare(monkeypatch, exported=exported)
+
+    seen: dict[str, Path] = {}
+
+    def _fake_usage(path):
+        seen["path"] = Path(path)
+        return types.SimpleNamespace(total=0, used=0, free=0)
+
+    monkeypatch.setattr(preflight.shutil, "disk_usage", _fake_usage)
+    home = tmp_path / "home"
+
+    result = preflight.check_readiness(
+        tmp_path / "repo",
+        tmp_path / "mirror",
+        tmp_path / "scratch",
+        home,
+        token="tok",
+        validate_token=lambda token: True,
+    )
+
+    assert result.ok is False
+    assert result.step == "disk"
+    assert seen["path"] == home
+
+
+def test_the_token_probes_default_request_shape_is_asserted_not_sent(monkeypatch):
+    """With the probe injected everywhere else, the real one is exercised by
+    no test — Appendix H's vacuous pass, in the check written against it.
+    The URL and the header the default builds are asserted here without
+    ever sending the request."""
+    seen: dict[str, str] = {}
+    headers: dict[str, str] = {}
+
+    def _capture(request, timeout=None):
+        seen["url"] = request.full_url
+        headers.update(request.headers)
+        raise urllib.error.URLError("not actually sent")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _capture)
+
+    assert preflight.validate_claude_token("tok-123") is False
+    assert seen["url"] == f"https://{proxy.UPSTREAM_HOST}/v1/models"
+    assert headers["Authorization"] == "Bearer tok-123"
 
 
 def test_the_probe_script_itself_answers_a_401(tmp_path):
