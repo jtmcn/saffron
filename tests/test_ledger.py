@@ -636,6 +636,37 @@ def test_a_run_created_outside_a_batch_has_a_null_batch_id(ledger):
     assert row["batch_id"] is None
 
 
+def test_a_run_created_inside_a_batch_carries_its_batch_id(ledger):
+    """The other half, and the one that makes the parameter load-bearing.
+    Without it, discarding the caller's `batch_id` at the INSERT — binding
+    `None` unconditionally — keeps every other test in this change green while
+    defeating the only reason the column exists: grouping a run into the batch
+    that ran it (§4.2.1). Raw `batches` insert because no `create_batch` method
+    exists yet; the spec that adds the loop adds it with its caller."""
+    repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    cursor = ledger._db.execute("INSERT INTO batches (budget_usd) VALUES (50)")
+    batch_id = cursor.lastrowid
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=batch_id)
+    row = ledger._db.execute(
+        "SELECT batch_id FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    assert row["batch_id"] == batch_id
+
+
+def test_a_batch_still_running_has_no_status_yet(ledger):
+    """The schema comment says the CHECK is satisfied by NULL, so a row for a
+    batch that has not stopped is neither a violation nor a fifth reason.
+    Nothing asserted it, and `NOT NULL` on `status` would keep every other
+    test here green while making an in-flight batch unrecordable — which is
+    the row `SA-0049` writes at start and completes at stop."""
+    ledger._db.execute("INSERT INTO batches (budget_usd) VALUES (50)")
+    row = ledger._db.execute(
+        "SELECT status, ended_at, spent_usd_est FROM batches"
+    ).fetchone()
+    assert row["status"] is None
+    assert row["ended_at"] is None
+
+
 def test_a_ledger_built_by_the_previous_schema_gains_batch_id(tmp_path):
     """`CREATE TABLE IF NOT EXISTS` does not alter, so a database that already
     holds `runs` needs the guarded `ALTER TABLE` this module already uses for
