@@ -833,6 +833,9 @@ def _drive_cell(
         # against (§5.6). `_suite` below computes the real, per-attempt
         # effective tier from the diff it already has.
         risk=spec.risk,
+        # The declaration these gates actually ran under, read above from the
+        # export at base_sha — never the working copy (§5.4, backlog item 16).
+        policy_sha=policy_sha,
     )
 
     # Only what this run reached the creation of can leak. `volume rm` on a
