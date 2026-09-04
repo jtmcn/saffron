@@ -32,6 +32,7 @@ from saffron.scheduler import (
     retirement_refusal,
     run_gh,
 )
+from saffron.watch import UnknownTask, follow
 
 DEFAULT_HOME = Path.home() / ".saffron"
 
@@ -102,6 +103,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     reconcile_parser.add_argument("--repo", type=Path, default=Path.cwd())
 
+    watch_parser = subcommands.add_parser(
+        "watch", help="follow one task's event log, agent-free"
+    )
+    watch_parser.add_argument("task", help="the spec id whose task directory to read")
+    watch_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="keep every line, including the token counter and bare tool "
+        "acknowledgements the default view drops",
+    )
+    watch_parser.add_argument("--interval", type=float, default=1.0)
+
     args = parser.parse_args(argv)
     out_dir_arg = getattr(args, "out", None)
     out_dir = out_dir_arg or (args.home / "batches" / "v0")
@@ -115,6 +128,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "reconcile":
             return _reconcile(args, ledger)
+
+        if args.command == "watch":
+            return _watch(args, out_dir)
 
         line = replay(
             args.repo,
@@ -567,6 +583,35 @@ def _reconcile(args: argparse.Namespace, ledger: Ledger) -> int:
     _print_reconcile_summary(result)
     if gh_failures:
         print(f"reconcile: gh could not be run ({gh_failures[0]})")
+    return 0
+
+
+def _watch(args: argparse.Namespace, out_dir: Path) -> int:
+    """`saffron watch SY-1` — follow one task's `events.jsonl`, rendered
+    exactly as the attended terminal that ran it would have printed each
+    line.
+
+    `task_dir` is built from `out_dir`, the same batch-tree root `main`
+    already computed above — never a second reading of `--home` here, which
+    is how a watcher comes to read a directory nothing writes.
+    """
+    task_dir = out_dir / args.task
+    try:
+        for line in follow(task_dir, verbose=args.all, interval=args.interval):
+            print(line)
+    except UnknownTask:
+        print(f"watch: no task directory at {task_dir}")
+        # `0`/`1`/`2` belong to *running* a task (reviewable, did not make
+        # it, infrastructure failed) — watching is not running one. `2`
+        # would claim the infrastructure broke when the real cause is a
+        # mistyped spec id; `0` would make that typo look like a task that
+        # simply has not started yet. `1` is this spec's own choice.
+        return 1
+    except KeyboardInterrupt:
+        # The documented way this ends, the way `tail -f` ends: interrupted,
+        # not on a detected finish (out of scope — the teardown event is not
+        # a reliable end marker).
+        pass
     return 0
 
 

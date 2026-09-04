@@ -1628,6 +1628,63 @@ def test_reconcile_writes_what_gh_says_or_withholds_when_it_cannot_answer(
     assert _task_state(home, task_id) == expect_state
 
 
+def test_watch_reads_the_batch_tree_the_cli_already_computes(tmp_path, monkeypatch):
+    """The task directory `watch` reads is `out_dir / task` — the same
+    batch-tree root `main` already computes from `--home` for every other
+    subcommand, never a second reading of it. `follow` itself is stubbed:
+    this witness is about which path reaches it, not about following."""
+    seen = {}
+
+    def fake_follow(task_dir, *, verbose=False, interval=1.0):
+        seen["task_dir"] = task_dir
+        return iter(())
+
+    monkeypatch.setattr(cli, "follow", fake_follow)
+
+    assert cli.main(["--home", str(tmp_path), "watch", "SY-1"]) == 0
+
+    assert seen["task_dir"] == tmp_path / "batches" / "v0" / "SY-1"
+
+
+def test_watch_exits_one_and_names_the_directory_for_an_unknown_task(tmp_path, capsys):
+    """A mistyped spec id exits 1, and the message says where it looked.
+
+    Driven through the command rather than through `follow`, because the whole
+    content of the decision is the exit code an operator sees. Delete the
+    handler in `_watch` and `UnknownTask` reaches `main`'s catch-all, which
+    returns 2 — infrastructure failed — for what is a typo. A module-level
+    test of the exception leaves that edit invisible.
+    """
+    assert cli.main(["--home", str(tmp_path), "watch", "SA-9999"]) == 1
+
+    printed = capsys.readouterr().out
+    assert str(tmp_path / "batches" / "v0" / "SA-9999") in printed
+
+
+def test_watch_passes_its_flags_through_to_the_follower(tmp_path, monkeypatch):
+    """Both flags reach `follow`. Without this, dropping `verbose=args.all`
+    and `interval=args.interval` from the call leaves every other test in the
+    suite green — the flags parse, print in `--help`, and change nothing,
+    which is a CLI wearing the same defect item 18 found in a dataclass.
+    """
+    seen = {}
+
+    def fake_follow(task_dir, *, verbose=False, interval=1.0):
+        seen.update(verbose=verbose, interval=interval)
+        return iter(())
+
+    monkeypatch.setattr(cli, "follow", fake_follow)
+
+    assert (
+        cli.main(
+            ["--home", str(tmp_path), "watch", "SY-1", "--all", "--interval", "0.25"]
+        )
+        == 0
+    )
+
+    assert seen == {"verbose": True, "interval": 0.25}
+
+
 @pytest.mark.parametrize("command", ["queue", "reconcile"])
 def test_an_in_flight_task_survives_being_looked_at(tmp_path, command):
     """`ORPHANED` is in `scheduler.REQUEUE_STATES`, so a row stamped while
