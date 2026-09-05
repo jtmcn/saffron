@@ -41,8 +41,13 @@ evidence. That is the gate now, and it is one cheap spec away.
 
 ### Tier 1 — breaks at 03:00 with nobody watching
 
-**45**, **51** (with **49**/**50**, which its fix closes), **47**, **46**,
-**40**, **26**, **7**. (**59** is done — `SA-0052`, PR #118.)
+**69**, **45**, **51** (with **49**/**50**, which its fix closes), **47**,
+**46**, **40**, **26**, **7**. (**59** is done — `SA-0052`, PR #118.)
+
+**69 is first**, and it is the only item here that is about the factory's
+ability to tell whether its own work is sound. Nine tests shipped in one
+session naming behaviour they did not guard, every one of them past the lens
+built to catch exactly that.
 
 Each fails in the dark or destroys work no one is awake to rescue. **45** loses
 a run's commits nightly; **51** switches the anti-theater gate off for one
@@ -60,9 +65,10 @@ rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
 ### Tier 3 — real, not urgent
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
-**56**, **57**, **61**, **62**, **63**, **64**, **68**. (**65** is done.)
+**56**, **57**, **61**, **62**, **63**, **64**, **69**. (**65** and **68** are
+done.)
 
-**What this ordering costs, stated plainly:** tiers 2 and 3 hold 25 of the 32
+**What this ordering costs, stated plainly:** tiers 2 and 3 hold 24 of the 32
 open items, including every ontology item and every operator-visibility spec
 there is already a full plan for. That is the deliberate consequence of ranking
 by the milestone rather than by what is nearest to hand.
@@ -3695,6 +3701,24 @@ but it should be a decision, not a drift.
 
 ## 68. Readiness and the scan each fetch the same mirror, once per night
 
+**Status: done** — `SA-0055`, PR #131, merge `819cbff`. `_resolve_queue` takes
+an optional `PinnedBase`; `_batch` hands down the mirror, url and base_sha that
+`check_readiness` already established, and `saffron queue` — which runs no
+readiness check on purpose — still derives its own.
+
+**The first spec Saffron ran unattended.** `saffron batch` picked it up,
+drove the cell, packaged it and opened the pull request: 25 minutes, $6.68
+against a $15 budget, `READY_FOR_REVIEW`, `batch: DRAINED`, exit 0. It also
+found a third duplicated `real_remote` call this item did not know about.
+
+Two things the review round found afterwards are worth carrying, because both
+are about a claim outrunning its evidence rather than about this fix. The
+`PinnedBase` docstring said it avoided adjacent same-typed parameters and did
+not — measured, `PinnedBase(mirror, base_sha, url)` type-checked cleanly and
+put the URL in `base_sha`, now fixed with `kw_only`. And the narrowing at the
+call site called "a passing `Readiness` carries all three" a contract, which
+`Readiness` does not enforce and nothing asserted; it does now.
+
 **Tier 3.** Found reviewing `SA-0054` (PR #123).
 
 `check_readiness` and `_resolve_queue` both call `ensure_mirror`, `real_remote`
@@ -3716,6 +3740,83 @@ ordering constraint that makes this awkward and worth doing carefully:
 readiness must run *first* (a scan that raises before the batch row exists is
 what item 58's review fixed), so the seam is readiness handing its results
 down, never the scan handing them up.
+
+---
+
+## 69. The adequacy lens reads where only running can answer, and nine tests got through
+
+**Tier 1.** Measured across one session, 2026-09-05: the batch orchestration
+stack and the two pull requests after it.
+
+**Nine tests shipped naming a behaviour they did not guard.** Each passed the
+gates, passed three review lenses including the one built for this question,
+and passed a human read. Every one was found by running a mutation:
+
+| Where | The mutant that survived |
+|---|---|
+| `SA-0045`, `SA-0046` | reflow one `SCHEMA` line — both migration guards assert what `replace` removed |
+| `SA-0048` | `exc.code not in (401, 403)` -> `not in (999,)`; 89 tests green |
+| `SA-0050` | delete the breaker reset; suite green |
+| `SA-0054` | `parent_branch=None`; 76/76 green — every stacked child would target `main` |
+| `SA-0054` | `print(f"batch: {stop}")` -> `pass`; 76/76 green |
+| item 65 | delete `sh:in`; every case decided by `sh:class` instead |
+| `SA-0055` | `pinned=derived` invisible to an assertion matching only `ast.Constant` |
+| `SA-0055` | delete the `readiness.ok` guard; the narrowing assert raises and exit 2 still holds |
+
+Two of them were written by review agents, and one by the operator's own
+session while fixing the others.
+
+**This is not a diligence problem, and "review harder" cannot fix it.** A
+vacuous test and a sound one are textually identical: nobody writes a test
+intending it not to guard. Vacuity is not a property of the test's text — it is
+a property of how the *pair* responds to perturbation, and reading examines one
+object while the defect lives in the relation between two. Every row above
+required simulating an execution: that `str.replace` removes all occurrences,
+that a stub two files away discards `**kwargs`, that no test in 1260 captures
+stdout, which SHACL constraint fires first.
+
+`saffron/agents/prompts/review-adequacy.md` states the compromise in its own
+words — *"You cannot mutate a line and watch a test fail, which is the ordinary
+way a person would answer this question."* The lens was built knowing it was
+substituting reading for running. This session is the evidence that the
+substitution does not hold: on `SA-0055` the adequacy lens returned **0
+findings** while two of seven witnesses were weak.
+
+**This contradicts a standing decision, and the decision was reasonable.**
+`docs/evidence/2026-08-25-mutation-testing-vs-a-lens.md` recommended the
+prompted lens over a tool, and its arguments still hold about *tools*:
+`cosmic-ray` returned 11 survivors of which 10 were one annotation mutated ten
+ways, `mutmut` cannot scope below a function and cannot run over a suite that
+gates its own tree. But that record's lens evidence was n=5, sonnet, one repo,
+and — its own words — "a prompt written after the defect was known". It should
+be read alongside this item rather than as settled.
+
+**Done looks like** a mutation check that is *spec-guided rather than
+syntactic*, which is the thing the review agents actually did and the thing
+neither tool does. Saffron already holds the targets as structured data: each
+`acceptance:` entry is a claim plus the witness that guards it. For each
+witness, break the property the claim names and require **that named witness**
+to fail — a stronger assertion than any tool's "something failed". Cost is one
+scoped test run per witness, not a suite run per syntactic mutant, which is
+what put mutation testing out of the window in the first place.
+
+Note this is the granularity `revert` (§5.4) is missing rather than a
+replacement for it: that gate stashes the whole patch and asks whether the new
+tests test *anything*. This asks whether they test *each thing*, which is where
+all nine of the above live.
+
+**Two constraints on the design, both learned the hard way here.**
+
+*The mutant must be minimal.* Deleting `sh:class` and `sh:in` together proved
+one of them was load-bearing, not which, and shipped a vacuous test anyway. One
+claim, one mutant.
+
+*It must not become the only reader.* Everything else the review round found —
+an unmeasured request shape on the token probe, a write lock held after a
+designed raise, a batch row left open on Ctrl-C, three docstrings claiming more
+than their code — was found by reading, and no mutation would have surfaced any
+of it. The two answer different questions. Only one of them has a mechanical
+answer, and it is currently being guessed at.
 
 ---
 
