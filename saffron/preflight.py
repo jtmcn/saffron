@@ -287,13 +287,16 @@ def _last_line(done: runtime.Completed) -> str:
 # The agent's own credential, checked against the same host
 # `assert_proxy_reaches_upstream` probes.
 #
-# UNMEASURED: `Authorization: Bearer` is inferred, not observed. `session.py`
-# forwards the environment variable; nothing here has seen what this endpoint
-# answers a subscription OAuth token presented this way, and an API key is not
-# an OAuth token. A valid token answering 401 skips every repo (§4.4 step 1),
-# so until `docs/evidence/` holds a real measurement the UNKNOWN verdict below
-# is what keeps that inference from reading as a dead credential.
+# `anthropic-version` is required and is checked BEFORE the credential —
+# measured against the live endpoint, 2026-09-05, both tokens
+# (`docs/evidence/2026-09-05-token-probe-request-shape.md`). Without it a
+# *valid* token gets `400 anthropic-version: header is required`, and so does
+# a revoked one: the header is validated first, so the response says nothing
+# about the credential at all. That is why this constant is not decoration.
+# `anthropic-beta` is not required; the OAuth token authenticates on
+# `anthropic-version` alone.
 _TOKEN_PROBE_URL = f"https://{proxy.UPSTREAM_HOST}/v1/models"
+_TOKEN_PROBE_HEADERS = {"anthropic-version": "2023-06-01"}
 
 
 class TokenVerdict(enum.Enum):
@@ -336,9 +339,17 @@ def validate_claude_token(token: str, *, timeout_s: float = 20) -> TokenCheck:
     `total_cost_usd: 0.0`, and an expired token at 22:00 buys a night of
     clean-looking nothing. A 401 or 403 here is exactly the failure this
     function exists to catch, not the pass it is one door over.
+
+    The boolean form of this function never caught it. Without
+    `anthropic-version` the endpoint answers `400` to every token, valid or
+    revoked, because it validates the header before the credential — and
+    `exc.code not in (401, 403)` read `400` as a pass. It accepted any string
+    at all, which is Appendix J's failure reproduced inside the check written
+    against it.
     """
     request = urllib.request.Request(
-        _TOKEN_PROBE_URL, headers={"Authorization": f"Bearer {token}"}
+        _TOKEN_PROBE_URL,
+        headers={"Authorization": f"Bearer {token}", **_TOKEN_PROBE_HEADERS},
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout_s):

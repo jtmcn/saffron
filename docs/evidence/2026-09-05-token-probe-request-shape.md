@@ -1,71 +1,64 @@
 # What `/v1/models` answers a subscription OAuth token
 
-**Status: UNMEASURED.** This file is the skeleton for a measurement that has
-not been made. It exists because `saffron/preflight.py`'s token probe is
-currently a *reasoned* guard on the most consequential path in the system, and
-CLAUDE.md's rule is that a measured fact beats a reasoned one and the comment
-says which.
-
-## The question
-
-`validate_claude_token` sends:
-
-```
-GET https://api.anthropic.com/v1/models
-Authorization: Bearer <CLAUDE_CODE_OAUTH_TOKEN>
-```
-
-Nothing in this repo has ever observed what that endpoint answers a
-*subscription OAuth* token presented that way. `grep -rn "anthropic-version"`
-over the whole repo returns nothing. A subscription token is not an API key,
-and the documented API surface generally wants `anthropic-version`, with OAuth
-credentials additionally wanting an `anthropic-beta` opt-in.
-
-The header set was inferred from the fact that `session.py` forwards
-`CLAUDE_CODE_OAUTH_TOKEN` into the cell — but it forwards the *environment
-variable*; nothing in Saffron constructs this header. That is an inference
-about the Agent SDK's internals, not an observation.
-
-## Why it matters
-
-`check_readiness` runs before anything else in a night (§4.4 step 1). If a
-**valid** token answers 401 here, every repo is skipped, the batch produces a
-night of nothing, and the operator is pointed at `claude setup-token` for a
-credential that was fine — which is the same shape as the Appendix J failure
-this probe was written to catch, inverted.
-
-The tri-state verdict (`VALID` / `INVALID` / `UNKNOWN`) limits the blast radius
-in the other direction only: a moved endpoint or an unreachable host no longer
-reads as a dead credential. It does **not** protect against a live token being
-rejected for a missing header — that answers 401, which is `INVALID` by design.
-
-## How to measure it
-
-Run with a live token, then with a revoked one. The token belongs in the
-environment of the command itself and nowhere else (CLAUDE.md):
-
-```fish
-env CLAUDE_CODE_OAUTH_TOKEN=(bash -c 'source ~/.secrets; printf %s $CLAUDE_CODE_OAUTH_TOKEN') \
-  uv run python docs/evidence/scripts/2026-09-05-token-probe-shape.py
-```
-
-The script tries each header combination and prints the status for each, so one
-run answers both "does the bare Bearer form work" and "which header is missing".
+**Measured 2026-09-05**, live `CLAUDE_CODE_OAUTH_TOKEN` from `claude
+setup-token`, against `https://api.anthropic.com/v1/models`.
 
 ## Results
 
-| Headers sent | Live token | Revoked token |
-|---|---|---|
-| `Authorization` only | _unmeasured_ | _unmeasured_ |
-| `+ anthropic-version: 2023-06-01` | _unmeasured_ | _unmeasured_ |
-| `+ anthropic-beta: oauth-2025-04-20` | _unmeasured_ | _unmeasured_ |
-| all three | _unmeasured_ | _unmeasured_ |
+| Headers sent | Live token |
+|---|---|
+| `Authorization` only | **400** `anthropic-version: header is required` |
+| `+ anthropic-version: 2023-06-01` | **200** |
+| `+ anthropic-beta: oauth-2025-04-20` (no version) | **400** same message |
+| all three | **200** |
 
-## What to do with the answer
+Two facts, and the first is the one that matters:
 
-- If the bare form returns 200 on a live token and 401 on a revoked one, the
-  probe is correct as written — replace the `UNMEASURED` comment in
-  `preflight.py` with a pointer to this file and the date.
-- If it returns 401 on a **live** token, add whatever headers the table shows
-  are required, and add a regression test pinning them.
-- Either way, delete this "Status: UNMEASURED" banner.
+**`anthropic-version` is required, and it is validated before the
+credential.** A request without it gets `400` regardless of what the token is
+— the endpoint never looks. `anthropic-beta` is not required at all; a
+subscription OAuth token authenticates on `anthropic-version` alone.
+
+## What this found
+
+The probe as originally written sent `Authorization: Bearer` and nothing else,
+and read its result as `return exc.code not in (401, 403)`. Against the real
+endpoint that is `400 -> not in (401, 403) -> True -> valid`.
+
+**It would have called every token valid.** Not just an expired one — any
+string at all, since the version header is checked first and the credential is
+never reached. The function written to catch Appendix J's silent-dead-token
+failure reproduced it exactly: `check_readiness` would have passed, the night
+would have started, and every cell would have burned its attempts against a
+credential nobody had verified.
+
+It was also untested in that branch — `exc.code not in (401, 403)` could be
+mutated to `not in (999,)` with 89 tests still passing — so nothing would have
+said so.
+
+## What changed as a result
+
+- The probe sends `anthropic-version: 2023-06-01`
+  (`preflight._TOKEN_PROBE_HEADERS`), and a test asserts the header *arrives*
+  at a live loopback server rather than merely being constructed.
+- `400` is pinned as `UNKNOWN`, beside `404` and `500`. Reading it as VALID is
+  the specific mistake above.
+- The verdict is tri-state, so anything the probe cannot turn into an answer
+  refuses the night while naming the network or the endpoint, never the
+  credential.
+
+## Still unmeasured, and why it is safe
+
+**A revoked token was not measured** — only a live one, with and without the
+header. The expected `401` is inference.
+
+It is a safe gap in one direction only, and that is a property of the
+tri-state rather than luck: any status other than `401`/`403` is `UNKNOWN`,
+which still refuses to run. So if a revoked token answers something
+unexpected, the failure is a night that declines to start and says why —
+never a night that starts on a dead credential. The reverse gap, a valid token
+being refused, is what the `200` above closes.
+
+Worth measuring the next time a token is rotated: revoke, run
+`docs/evidence/scripts/2026-09-05-token-probe-shape.py`, and record the status
+here.

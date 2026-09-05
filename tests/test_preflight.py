@@ -610,7 +610,10 @@ def _answering(code: int):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             received["path"] = self.path
-            received.update(self.headers)
+            # Case-folded: `urllib` capitalises header names on the way out
+            # (`anthropic-version` becomes `Anthropic-version`) and HTTP is
+            # case-insensitive about them, so the wire is fine either way.
+            received.update({k.lower(): v for k, v in self.headers.items()})
             self.send_response(code)
             self.end_headers()
             self.wfile.write(b"{}")
@@ -632,6 +635,10 @@ def _answering(code: int):
         (200, preflight.TokenVerdict.VALID),
         (401, preflight.TokenVerdict.INVALID),
         (403, preflight.TokenVerdict.INVALID),
+        # 400 is the measured answer to a request missing `anthropic-version`,
+        # for a valid token and a revoked one alike. Reading it as VALID is
+        # what made the boolean form accept any string at all.
+        (400, preflight.TokenVerdict.UNKNOWN),
         (404, preflight.TokenVerdict.UNKNOWN),
         (500, preflight.TokenVerdict.UNKNOWN),
     ],
@@ -652,9 +659,13 @@ def test_the_token_probe_reads_each_status_as_its_own_verdict(
         checked = preflight.validate_claude_token("tok-123")
 
     assert checked.verdict is verdict
-    # The header arrived, rather than merely being constructed.
-    assert received["Authorization"] == "Bearer tok-123"
+    # The headers arrived, rather than merely being constructed.
+    assert received["authorization"] == "Bearer tok-123"
     assert received["path"] == "/v1/models"
+    # Measured 2026-09-05: without this the endpoint answers 400 to every
+    # token, valid or revoked, because it checks the header before the
+    # credential — so the probe would say nothing about the credential at all.
+    assert received["anthropic-version"] == "2023-06-01"
 
 
 def test_a_probe_that_cannot_reach_the_host_does_not_accuse_the_credential(
