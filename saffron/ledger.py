@@ -1,6 +1,6 @@
 """The ledger — SQLite, one file, WAL, authoritative for state (DESIGN.md §4.1).
 
-Eight of the ten tables. `decisions` waits for an operator to have something
+Eight of the nine tables. `decisions` waits for an operator to have something
 to put in it.
 """
 

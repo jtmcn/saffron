@@ -675,9 +675,8 @@ def test_a_ledger_built_by_the_previous_schema_gains_batch_id(tmp_path):
     before = SCHEMA.replace(
         "    batch_id   INTEGER REFERENCES batches(batch_id),\n", ""
     )
-    assert (
-        "batch_id   INTEGER REFERENCES batches(batch_id)" not in before
-    )  # otherwise this test proves nothing
+    runs_columns = before.split("CREATE TABLE IF NOT EXISTS runs")[1].split(");")[0]
+    assert "batch_id" not in runs_columns  # otherwise this test proves nothing
     old = sqlite3.connect(path)
     old.executescript(before)
     old.execute("DROP TABLE batches")  # the previous schema never had it either
@@ -700,6 +699,8 @@ def test_a_ledger_built_by_the_previous_schema_still_opens_and_writes(tmp_path):
     before = SCHEMA.replace(
         "    batch_id   INTEGER REFERENCES batches(batch_id),\n", ""
     )
+    runs_columns = before.split("CREATE TABLE IF NOT EXISTS runs")[1].split(");")[0]
+    assert "batch_id" not in runs_columns  # otherwise this test proves nothing
     old = sqlite3.connect(path)
     old.executescript(before)
     old.execute("DROP TABLE batches")
