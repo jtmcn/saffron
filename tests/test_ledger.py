@@ -820,10 +820,36 @@ def test_an_opened_batch_is_in_flight_with_no_stop_reason(ledger):
         (batch_id,),
     ).fetchone()
     assert row["budget_usd"] == 50
-    assert row["until_ts"] == "2026-09-06T06:00:00"
+    # Normalised, not stored verbatim — see the sortability test below.
+    assert row["until_ts"] == "2026-09-06 06:00:00"
     assert row["status"] is None
     assert row["ended_at"] is None
     assert row["spent_usd_est"] is None
+
+
+def test_an_until_sorts_against_the_timestamps_it_will_be_compared_with(ledger):
+    """`until_ts` is the only timestamp a caller supplies, and the schema
+    comment promises every one of them is `datetime('now')`-shaped and
+    "sortable as text". Stored verbatim it was neither: an ISO `T` string
+    sorts *after* a space-separated one for the same night, so an `ended_at`
+    of 23:00 compared as text against an `until_ts` of 06:30 says the batch
+    ended before its own deadline.
+
+    Nothing compares them in SQL yet — the loop compares in Python — which is
+    exactly why this is pinned now rather than after §6 renders the window."""
+    batch_id = ledger.create_batch(budget_usd=50, until_ts="2026-09-06T06:30:00")
+    ledger.close_batch(batch_id, "UNTIL")
+    row = ledger._db.execute(
+        "SELECT until_ts, ended_at FROM batches WHERE batch_id = ?", (batch_id,)
+    ).fetchone()
+
+    # Both spellings agree, so text order is time order.
+    assert row["until_ts"] == "2026-09-06 06:30:00"
+    assert row["ended_at"] < row["until_ts"]
+    later = ledger._db.execute(
+        "SELECT ? < ? AS ordered", ("2026-09-06 06:30:00", "2026-09-06 23:00:00")
+    ).fetchone()
+    assert later["ordered"] == 1
 
 
 def test_closing_a_batch_records_its_stop_reason_and_end(ledger):
@@ -984,3 +1010,73 @@ def test_a_running_batchs_spend_is_readable_before_it_closes(ledger):
     ).fetchone()
     assert row["status"] is None
     assert row["ended_at"] is None
+
+
+def test_attaching_a_run_that_does_not_exist_raises_rather_than_passing(ledger):
+    """The stamp that decides whether a night's spend is measurable at all.
+
+    An unknown `batch_id` already hit the foreign key; an unknown `run_id`
+    matched zero rows and returned cleanly. That asymmetry is the shape of the
+    failure the method exists to prevent — `runs.batch_id` written by nobody,
+    every join through it empty, and `batch_spend` reporting 0.0 for a night
+    that really spent, so the budget gate never fires."""
+    batch_id = ledger.create_batch(budget_usd=50)
+    with pytest.raises(ValueError, match="no run 9999"):
+        ledger.attach_run_to_batch(9999, batch_id)
+
+
+def test_closing_a_batch_that_does_not_exist_raises_rather_than_passing(ledger):
+    """Same hole one table over: a silent close leaves the real row open, and
+    an open row is the one state that cannot be told from a night still
+    running."""
+    with pytest.raises(ValueError, match="no batch 9999"):
+        ledger.close_batch(9999, "DRAINED")
+
+
+def test_a_refused_stop_reason_leaves_no_write_lock_behind(ledger, tmp_path):
+    """`close_batch` is documented to surface `IntegrityError` on a status
+    outside the four stop reasons — and a failed UPDATE has already had
+    sqlite3 issue an implicit BEGIN. Without the rollback the connection holds
+    the write lock until it next commits, and every other process on the
+    ledger gets `database is locked`: `saffron reconcile`, the morning
+    `saffron queue`."""
+    batch_id = ledger.create_batch(budget_usd=50)
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.close_batch(batch_id, "NOT_A_STOP_REASON")
+
+    assert ledger._db.in_transaction is False
+    # A second connection can still write, which is the fact that matters.
+    other = sqlite3.connect(tmp_path / "ledger.db", timeout=1)
+    other.execute("UPDATE batches SET budget_usd = 51 WHERE batch_id = ?", (batch_id,))
+    other.commit()
+    other.close()
+
+
+def test_the_high_water_mark_is_the_greatest_run_id(ledger):
+    """`saffron/batch.py` reads this immediately before a candidate runs, so a
+    run minted by a call that then raised can be told from one that already
+    existed. It was reaching into `ledger._db` for it."""
+    assert ledger.max_run_id() == 0
+    repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+    assert ledger.max_run_id() == run_id
+
+
+def test_only_runs_minted_after_the_mark_are_swept_into_the_batch(ledger):
+    """The sweep is scoped to `run_id > since_run_id`, not to every
+    `batch_id IS NULL` row: a ledger accumulates plenty of those from
+    `saffron cell` and `replay.py`, and folding them in would charge an
+    unrelated past run's spend to tonight's budget."""
+    repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    stale = ledger.create_run(repo_id, base_sha="a" * 40)  # an earlier attended run
+    batch_id = ledger.create_batch(budget_usd=50)
+    high_water = ledger.max_run_id()
+    minted = ledger.create_run(repo_id, base_sha="b" * 40)  # what the crash left
+
+    assert ledger.attach_orphan_runs_to_batch(batch_id, high_water) == 1
+    attached = {row["run_id"] for row in ledger.batch_runs(batch_id)}
+    assert attached == {minted}
+    stale_row = ledger._db.execute(
+        "SELECT batch_id FROM runs WHERE run_id = ?", (stale,)
+    ).fetchone()
+    assert stale_row["batch_id"] is None

@@ -381,9 +381,15 @@ class Ledger:
         """Opens one night's window (§4.2.1). `status`, `ended_at` and
         `spent_usd_est` stay NULL until `close_batch` — none of the three is
         known yet, and NULL is what "not yet measured" means for a batch still
-        going, the same distinction `ended_at` already draws on `runs`."""
+        going, the same distinction `ended_at` already draws on `runs`.
+
+        `until_ts` goes through `datetime(?)` so it lands in the one spelling
+        this module writes — `YYYY-MM-DD HH:MM:SS`, UTC, sortable as text. An
+        ISO `T` string stored verbatim is neither: `'2026-09-06 23:00:00' <
+        '2026-09-06T06:00:00'` is true, so an `ended_at` at 23:00 would sort
+        before an `until_ts` of 06:30 the same night."""
         cursor = self._db.execute(
-            "INSERT INTO batches (budget_usd, until_ts) VALUES (?, ?)",
+            "INSERT INTO batches (budget_usd, until_ts) VALUES (?, datetime(?))",
             (budget_usd, until_ts),
         )
         self._db.commit()
@@ -395,27 +401,76 @@ class Ledger:
         rather than repeated in SQL, so the close and the reader can never
         become two spellings of one sum that drift apart. A `status` outside
         §4.2.1's four stop reasons is refused by the CHECK on `batches` — this
-        surfaces `sqlite3.IntegrityError` rather than swallowing it."""
-        spent = self.batch_spend(batch_id)
-        self._db.execute(
-            """UPDATE batches
-                  SET status = ?, ended_at = datetime('now'), spent_usd_est = ?
-                WHERE batch_id = ?""",
-            (status, spent, batch_id),
-        )
-        self._db.commit()
+        surfaces `sqlite3.IntegrityError` rather than swallowing it.
+
+        `with self._db:` because of that raise: a failed UPDATE has already had
+        sqlite3 issue an implicit BEGIN, and without the rollback the write
+        lock is held until this connection next commits — every other process
+        on the ledger gets `database is locked`. The read and the write share
+        the transaction too, so a cost landing between them cannot be omitted
+        from the figure stored."""
+        with self._db:
+            spent = self.batch_spend(batch_id)
+            cursor = self._db.execute(
+                """UPDATE batches
+                      SET status = ?, ended_at = datetime('now'), spent_usd_est = ?
+                    WHERE batch_id = ?""",
+                (status, spent, batch_id),
+            )
+            # A batch_id matching nothing updates nothing and would close
+            # cleanly, leaving the real row open — `open_attempt`'s guard,
+            # for the same reason.
+            if cursor.rowcount != 1:
+                raise ValueError(f"no batch {batch_id} to close")
 
     def attach_run_to_batch(self, run_id: int, batch_id: int) -> None:
         """`create_run` accepts a `batch_id`, but the only call that mints a
         run (`run_one_cell`, in `saffron/cell/**`) passes none — this stamps
         it on after the row already exists, the shape `record_push` and
         `set_task_package` already use on `tasks`: the row exists, then the
-        fact about it arrives."""
-        self._db.execute(
-            "UPDATE runs SET batch_id = ? WHERE run_id = ?",
-            (batch_id, run_id),
-        )
-        self._db.commit()
+        fact about it arrives.
+
+        Raises on a run that does not exist. The two sides were asymmetric: an
+        unknown `batch_id` hits the foreign key, an unknown `run_id` matched
+        zero rows and returned cleanly — and a stamp that silently does not
+        land is exactly what makes `batch_spend` under-count, the budget gate
+        never fire, and the night overspend."""
+        with self._db:
+            cursor = self._db.execute(
+                "UPDATE runs SET batch_id = ? WHERE run_id = ?",
+                (batch_id, run_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(f"no run {run_id} to attach to batch {batch_id}")
+
+    def max_run_id(self) -> int:
+        """The high-water mark on `runs.run_id`.
+
+        Read immediately before a candidate runs, so a run minted by a call
+        that then raised can be told apart from every run that already
+        existed. `saffron/batch.py` needs it and may not reach past this
+        class for it."""
+        row = self._db.execute(
+            "SELECT COALESCE(MAX(run_id), 0) AS high_water FROM runs"
+        ).fetchone()
+        return int(row["high_water"])
+
+    def attach_orphan_runs_to_batch(self, batch_id: int, since_run_id: int) -> int:
+        """Stamp any unattached run minted after `since_run_id`, returning how
+        many. Answers "the runner raised — did it leave a billed run behind?"
+
+        Scoped to `run_id > since_run_id` rather than every `batch_id IS NULL`
+        row: a ledger accumulates plenty of those from `saffron cell` and
+        `replay.py`, both of which pass no batch on purpose, and sweeping all
+        of them would fold an unrelated past run's spend into tonight's
+        budget."""
+        with self._db:
+            cursor = self._db.execute(
+                """UPDATE runs SET batch_id = ?
+                    WHERE run_id > ? AND batch_id IS NULL""",
+                (batch_id, since_run_id),
+            )
+            return cursor.rowcount
 
     def batch_spend(self, batch_id: int) -> float:
         """The same join `close_batch` derives through:
