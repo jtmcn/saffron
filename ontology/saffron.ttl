@@ -108,6 +108,8 @@ saffron:specType     a owl:ObjectProperty ; rdfs:domain saffron:Spec ; rdfs:rang
 saffron:costUsdEst   a owl:DatatypeProperty ; rdfs:domain saffron:Attempt ; rdfs:range xsd:decimal ;
     rdfs:comment "An estimate, and the suffix is not decoration (§4.1)." .
 saffron:budgetUsd    a owl:DatatypeProperty ; rdfs:domain saffron:Batch ; rdfs:range xsd:decimal .
+saffron:endedBecause a owl:ObjectProperty ; rdfs:domain saffron:Batch ; rdfs:range saffron:BatchStopReason ;
+    rdfs:comment "Why a night stopped. Absent while it is still running — the distinction §6's morning queue reads." .
 saffron:baseSha      a owl:DatatypeProperty ; rdfs:domain saffron:Run ; rdfs:range xsd:string .
 saffron:severity     a owl:ObjectProperty ; rdfs:domain saffron:Finding ; rdfs:range saffron:Severity .
 saffron:blockingAt   a owl:ObjectProperty ; rdfs:domain saffron:Gate ; rdfs:range saffron:BlockingLevel .
@@ -139,6 +141,14 @@ saffron:ORPHANED a saffron:EndState .
 
 saffron:RiskTier a owl:Class .
 saffron:standard a saffron:RiskTier . saffron:elevated a saffron:RiskTier .
+
+## How a night ended (§4.2.1). Not a task's end state: these describe the batch,
+## and a batch that drained is not a batch that passed — every task in it may
+## have failed. INFRASTRUCTURE is the breaker, and it is the only one of the
+## four that says the machine rather than the work was wrong.
+saffron:BatchStopReason a owl:Class .
+saffron:DRAINED a saffron:BatchStopReason . saffron:BUDGET a saffron:BatchStopReason .
+saffron:UNTIL a saffron:BatchStopReason . saffron:INFRASTRUCTURE a saffron:BatchStopReason .
 
 saffron:SpecType a owl:Class .
 saffron:feature a saffron:SpecType . saffron:bug a saffron:SpecType . saffron:refactor a saffron:SpecType .

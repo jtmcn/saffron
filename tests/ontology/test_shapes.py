@@ -124,3 +124,87 @@ def test_every_terminal_state_is_a_state_a_task_can_end_in(shapes_graph):
         "saffron:TaskShape's endedInState sh:in list in saffron-shapes.ttl — it "
         "closes over EndState, a superset, so the generator cannot write it."
     )
+
+
+@pytest.mark.parametrize(
+    ("reason", "accepted"),
+    [
+        ("DRAINED", True),
+        ("BUDGET", True),
+        ("UNTIL", True),
+        ("INFRASTRUCTURE", True),
+        # A fifth reason invented in SQL, where the set used to live alone.
+        ("CANCELLED", False),
+        # A *task's* terminal state. This is the confusion the class exists to
+        # prevent: `EXHAUSTED` is a task that could not pass its gates, and a
+        # night is not a task. `saffron batch` maps three of the four stop
+        # reasons to exit 0, so reading one set as the other misreports a night.
+        ("EXHAUSTED", False),
+        ("ORPHANED", False),
+    ],
+)
+def test_a_night_stops_for_one_of_four_reasons_and_no_others(
+    reason, accepted, shapes_graph
+):
+    """The enumeration, exercised. `batches.status` carries a CHECK constraint
+    saying the same thing, and the two are not redundant: the constraint refuses
+    a bad write, and this says the four are a closed set with a meaning — one
+    that does not overlap the task end states despite sharing a column type and
+    a naming style."""
+    data = rdflib.Graph()
+    data.parse(VOCABULARY, format="turtle")
+    data.parse(
+        data=f"""@prefix saffron: <{NS}> .
+        @prefix : <https://saffron.dev/data/> .
+        :b a saffron:Batch ; saffron:budgetUsd 50.0 ;
+           saffron:endedBecause saffron:{reason} .""",
+        format="turtle",
+    )
+    conforms, _, text = validate(data, shacl_graph=shapes_graph, advanced=True)
+    assert conforms is accepted, text
+
+
+def test_a_batch_still_running_has_no_stop_reason_and_that_is_legal(shapes_graph):
+    """`minCount 0`, and it is the axiom rather than an omission. `batches.status`
+    is nullable and NULL means *still running* — the one state §6's morning queue
+    must tell apart from a night that stopped, and the thing a CHECK constraint
+    cannot say, since it can only name which strings are legal."""
+    data = rdflib.Graph()
+    data.parse(VOCABULARY, format="turtle")
+    data.parse(
+        data=f"""@prefix saffron: <{NS}> .
+        @prefix : <https://saffron.dev/data/> .
+        :b a saffron:Batch ; saffron:budgetUsd 50.0 .""",
+        format="turtle",
+    )
+    conforms, _, text = validate(data, shacl_graph=shapes_graph, advanced=True)
+    assert conforms, text
+
+
+def test_a_reason_that_claims_the_class_is_still_refused_by_the_enumeration(
+    shapes_graph,
+):
+    """The one case where `sh:in` is the constraint doing the work. Measured:
+    deleting `sh:in` from `BatchShape` left every case above passing, because
+    `sh:class` alone rejects them — `CANCELLED` is undeclared, and `EXHAUSTED`
+    and `ORPHANED` are typed `EndState`. So the test named for the enumeration
+    survived its own mutant. A value that declares itself a `BatchStopReason`
+    clears `sh:class`, which leaves the enumeration as the only thing that can
+    refuse it — and refusing it is what closes the set.
+    """
+    data = rdflib.Graph()
+    data.parse(VOCABULARY, format="turtle")
+    data.parse(
+        data=f"""@prefix saffron: <{NS}> .
+        @prefix : <https://saffron.dev/data/> .
+        :CANCELLED a saffron:BatchStopReason .
+        :b a saffron:Batch ; saffron:budgetUsd 50.0 ;
+           saffron:endedBecause :CANCELLED .""",
+        format="turtle",
+    )
+    conforms, results, text = validate(data, shacl_graph=shapes_graph, advanced=True)
+    assert not conforms, text
+    # On the component, not the message: `sh:class` rejecting this would read as
+    # a pass to a membership check on the text, which is the trap above.
+    components = set(results.objects(None, SH.sourceConstraintComponent))
+    assert components == {SH.InConstraintComponent}, text

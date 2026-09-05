@@ -33,10 +33,11 @@ will be with the target, not with the sort.
 **58 is done** (merge `57b676c`, 2026-09-05), and with it **16** and half of
 **44**. `saffron batch` exists and the machine below can start.
 
-What replaces it as the gate is not an item: **run a night.** The code is
-merged and no batch has ever run, so nothing here is yet evidence of anything.
-Until one night has run end to end, every item below is being ordered toward a
-milestone whose first real test has not happened.
+What replaced it as the gate was not an item: **run a night.** One has now run
+against an empty queue (`DRAINED`, 2026-09-05) — the plumbing works. What is
+still unmeasured is a night that *runs* something: no cell has started under a
+batch, so the budget gate, the breaker and packaging are code with tests and no
+evidence. That is the gate now, and it is one cheap spec away.
 
 ### Tier 1 — breaks at 03:00 with nobody watching
 
@@ -59,9 +60,9 @@ rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
 ### Tier 3 — real, not urgent
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
-**56**, **57**, **61**, **62**, **63**, **64**, **65**, **68**.
+**56**, **57**, **61**, **62**, **63**, **64**, **68**. (**65** is done.)
 
-**What this ordering costs, stated plainly:** tiers 2 and 3 hold 26 of the 33
+**What this ordering costs, stated plainly:** tiers 2 and 3 hold 25 of the 32
 open items, including every ontology item and every operator-visibility spec
 there is already a full plan for. That is the deliberate consequence of ranking
 by the milestone rather than by what is nearest to hand.
@@ -3137,20 +3138,20 @@ written down as one.
 (`alwaysBlocking`/`blockingWhenElevated`/`advisory`) and the rebuttal roles
 (`disputes`/`concedes`, `confirms`/`withdraws`) are closed by `sh:in` in
 `ontology/shapes/saffron-shapes.ttl` and enforced by the blocking `shacl` gate.
-None is among the five sets Phase A generates, because `CONTEXT.md` does not
-enumerate any of them — so `test_vocabulary_agrees_with_context` cannot see them
-and `ontology/render.py` does not write them.
+None is among the generated sets, because `CONTEXT.md` does not enumerate any of
+them — so `test_vocabulary_agrees_with_context` cannot see them and
+`ontology/render.py` does not write them.
 
-They are therefore in exactly the state the five were in before Phase A: a closed
-set with one hand-maintained copy per file, and no check that the copies agree.
-The difference is that the second copy has not been written yet, so nothing has
-drifted. This is a deferred decision, not a live defect.
+They are therefore in exactly the state the generated sets were in before Phase
+A: a closed set with one hand-maintained copy per file, and no check that the
+copies agree. The difference is that the second copy has not been written yet,
+so nothing has drifted. This is a deferred decision, not a live defect.
 
 **Done looks like** a decision, in writing: either `CONTEXT.md` enumerates them
 and they join `CLOSED_SETS`, `SETS` and `SHAPE_SETS` — three lines and a
 regenerate — or a stated reason why they are shape-internal and not vocabulary,
 of the kind §4 already gives for repo-defined gate names. The reason matters more
-than the choice; `test_the_generator_and_the_cross_check_name_the_same_five_sets`
+than the choice; `test_the_generator_and_the_cross_check_name_the_same_sets`
 will hold whichever way it goes.
 
 ---
@@ -3297,10 +3298,16 @@ reader does not take the gap for an oversight and "finish" it.
 the launchd job. Absorbed items **16** and half of **44**, both now closed
 above.
 
-**A night has been built and not yet run.** Until one has, this repo has code
-for an unattended night and no evidence about it — which is the distinction
-this file exists to keep. The first run should be against an empty queue, where
-`DRAINED` in seconds proves the plumbing before a night with money in it.
+**A night has been run, against an empty queue** — `DRAINED`, exit `0`, $0.00,
+2026-09-05 (`docs/evidence/2026-09-05-first-batch-drained.md`). That proves
+readiness, the mirror fetch, the scan, `reconcile`, the ledger row, the
+deadline resolving to tomorrow, and the exit code.
+
+**No cell has started under a batch.** So the budget gate, the breaker,
+`--until` firing, packaging, the orphan sweep and what a night costs are all
+tested and none is measured. A night with one cheap spec in it is the next
+thing worth running, and until it has, this item is done in the sense that the
+code exists rather than in the sense that the night works.
 
 What the review round found is worth recording, because it is the argument for
 the round: seven tests across the stack named behaviour they did not guard, and
@@ -3583,6 +3590,27 @@ same fix.
 ---
 
 ## 65. The batch's four stop reasons are a closed set that lives only in SQL
+
+**Status: done** — `saffron:BatchStopReason` in the vocabulary, `CONTEXT.md`
+regenerated, and `saffron:BatchShape` closing the set with `sh:in`.
+
+Four readers now have to agree, and a test fails on each direction of drift:
+the vocabulary, `CONTEXT.md`'s **Batch stop reason** entry (generated, not
+hand-copied), `batch.StopReason`, and the `CHECK` on `batches.status` — the
+last parsed out of `SCHEMA` rather than restated, because a copy of the four in
+a test drifts exactly the way the constraint drifted from the vocabulary. That
+is the specific hole this item named: a fifth reason added in SQL alone.
+
+The shape carries one axiom the `CHECK` cannot state. `minCount 0`: a batch
+with no stop reason is legal *precisely while it is in flight*, which is the
+NULL-means-running distinction §6's morning queue reads. A constraint can say
+which strings are legal; it cannot say that absence means something.
+
+Worth recording because it is the confusion the class exists to prevent: the
+shape rejects `EXHAUSTED` and `ORPHANED` as stop reasons. They are *task* end
+states, they share a column type and a naming style with these four, and
+`saffron batch` maps three of the four to exit `0` — so reading one set as the
+other misreports a night.
 
 **Tier 3.** Found reviewing `SA-0045` (PR #115), and again reviewing `SA-0049`.
 

@@ -35,7 +35,7 @@ def test_members_of_a_class_with_no_instances_is_empty_not_an_error():
 
 
 def test_each_closed_set_renders_the_committed_bytes_unchanged():
-    """The five sets are already asserted equal by
+    """The six sets are already asserted equal by
     test_vocabulary_agrees_with_context, so a faithful generator changes
     nothing. A non-empty diff here means the generator is wrong, not CONTEXT.md."""
     committed = (VOCABULARY.parents[1] / "CONTEXT.md").read_text()
@@ -182,11 +182,11 @@ def test_a_one_member_or_comma_set_does_not_open_with_a_comma():
     assert out == "**Severity**: `blocker`.\n"
 
 
-def test_the_generator_and_the_cross_check_name_the_same_five_sets():
+def test_the_generator_and_the_cross_check_name_the_same_sets():
     """`SETS` governs what is generated; `CLOSED_SETS` governs what is checked
     for agreement. They are deliberately separate — folding one into the other
     would let a set dropped from `SETS` vanish from generation and from the
-    cross-check in the same edit. Separate, but they must agree, or a sixth set
+    cross-check in the same edit. Separate, but they must agree, or a new set
     is checked and never generated: the drift class Phase A exists to close.
     """
     from test_vocabulary_agrees_with_context import CLOSED_SETS
@@ -196,13 +196,13 @@ def test_the_generator_and_the_cross_check_name_the_same_five_sets():
 
 def test_a_new_terminal_state_reaches_the_shape_that_closes_the_set(tmp_path):
     """Review found the documented workflow — edit the vocabulary, run the
-    renderer — turned the blocking `shacl` gate red for three of the five sets.
-    `TerminalStateShape`, `FindingShape`'s severity and `TaskShape`'s riskTier
-    each hold a second copy that the generator did not cover, and
-    `ontology/shapes/**` is `gate_config`, so no cell could repair it.
+    renderer — turned the blocking `shacl` gate red for three of the five sets
+    that existed then. `TerminalStateShape`, `FindingShape`'s severity and
+    `TaskShape`'s riskTier each hold a second copy that the generator did not
+    cover, and `ontology/shapes/**` is `gate_config`, so no cell could repair it.
 
     `TaskShape`'s endedInState list stays hand-maintained: it closes over
-    `EndState`, a superset of the terminal states, so it is not one of the five.
+    `EndState`, a superset of the terminal states, so it is not one of the six.
     """
     vocab = tmp_path / "saffron.ttl"
     vocab.write_text(
@@ -276,9 +276,9 @@ def test_a_backticked_non_member_between_members_is_refused():
         )
 
 
-def test_the_shapes_close_the_same_five_sets_the_glossary_does():
+def test_the_shapes_close_the_same_sets_the_glossary_does():
     """An incomplete `SHAPE_SETS` is the exact defect the shapes expansion was
-    written to fix, and nothing guarded against reintroducing it: a sixth set
+    written to fix, and nothing guarded against reintroducing it: a new set
     added to `SETS` and `CLOSED_SETS` alone would drift silently again."""
     assert set(render.SHAPE_SETS.values()) == {cls for cls, _ in render.SETS.values()}
 

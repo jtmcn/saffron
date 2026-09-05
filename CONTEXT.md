@@ -105,6 +105,15 @@ _Avoid_: "job", "work item", "unit".
 concurrency pool, one `--until`.
 _Avoid_: "session" (that means an agent session), "cycle", "sweep", "run".
 
+**Batch stop reason**: `DRAINED`, `BUDGET`, `UNTIL`, or `INFRASTRUCTURE`. Why a
+night ended, written on the batch when it closes and absent while it is still
+running — an absent one means in flight, not unknown. Never a task's end state:
+these describe the night, and `DRAINED` says the queue emptied, not that
+anything in it succeeded. `INFRASTRUCTURE` is the breaker firing, and it is the
+only one of the four that says the machine rather than the work was wrong.
+_Avoid_: "failed" for `INFRASTRUCTURE` (a task fails; a night stops), "finished",
+"timeout" for `UNTIL`.
+
 **Run**: One repo's slice of a batch, owning its own `base_sha`, preflight outcome,
 and baseline. A batch contains one run per repo.
 > Batch and run are **not** synonyms and stopped being interchangeable when Saffron
