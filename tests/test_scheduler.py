@@ -1723,18 +1723,22 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-04, a ninth time, and the churn is the practice
+    """Re-measured 2026-09-05, a tenth time, and the churn is the practice
     rather than a problem: this test exists to be re-anchored, and every spec
     that lands *or retires* moves it by construction.
 
-    With `SA-0052` and `SA-0053` retired to `done/`, the live corpus is exactly
-    one thing: the batch stack. `SA-0045` is its only root and its only
-    candidate, and `SA-0046` -> `SA-0048` -> `SA-0049` -> `SA-0050` ->
-    `SA-0051` -> `SA-0054` is one linear chain six deep, each refused for the
-    parent above it having no task at its current `spec_sha`. That is the shape §4.2.1 says
-    a stack presents on its first night, before anything has run, and it is the
-    strongest form this anchor has taken: one root, and every other spec
-    refused for exactly one reason.
+    The batch stack merged and its seven specs retired to `done/`, so the live
+    corpus is one spec with no dependencies: `SA-0055`, a candidate, and
+    nothing refused. The weakest shape this anchor has taken — a single root
+    and an empty refusal list — and worth saying why it is kept anyway. It is
+    the *only* assertion that the real corpus parses at all: `build_queue` runs
+    over the committed files rather than fixtures, so a spec whose frontmatter
+    stops loading fails here and in no other test.
+
+    The dependency-chain assertion this carried through nine anchorings is gone
+    with the chain that justified it. `test_a_parent_with_no_task_names_that_
+    rather_than_a_state` pins that behaviour on fixtures, where it belongs and
+    where it does not move every time a spec merges.
 
     Note what this does *not* exercise. `_fake_gh([])` means `open_prs` is
     empty, so the open-pull-request overlap refusal never runs here — which is
@@ -1750,23 +1754,12 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         directory, repo_id, ledger, repo_slug="joel/saffron", gh=_fake_gh([])
     )
 
-    assert [c.spec.id for c in candidates] == ["SA-0045"]
-    # The chain, in filename order, each naming the parent above it. Not merely
-    # refused: refused for the parent it actually declares, which is what
-    # distinguishes a dependency refusal from a criterion-path one.
-    chain = [
-        ("SA-0046", "SA-0045"),
-        ("SA-0048", "SA-0046"),
-        ("SA-0049", "SA-0048"),
-        ("SA-0050", "SA-0049"),
-        ("SA-0051", "SA-0050"),
-        ("SA-0054", "SA-0051"),
-    ]
-    assert len(refusals) == len(chain)
-    for refusal, (child, parent) in zip(refusals, chain, strict=True):
-        assert refusal.path.name.startswith(child)
-        assert parent in refusal.reason
-        assert "depends_on" in refusal.reason
+    assert [c.spec.id for c in candidates] == ["SA-0055"]
+    assert refusals == []
+    # Not a bare count: an empty corpus would also give one candidate and no
+    # refusals if `discover_specs` silently found nothing, and that is the way
+    # this assertion could go quiet without changing.
+    assert len(list(directory.glob("*.md"))) == 1
 
 
 def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger):
