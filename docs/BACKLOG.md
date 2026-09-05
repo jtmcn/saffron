@@ -33,10 +33,11 @@ will be with the target, not with the sort.
 **58 is done** (merge `57b676c`, 2026-09-05), and with it **16** and half of
 **44**. `saffron batch` exists and the machine below can start.
 
-What replaces it as the gate is not an item: **run a night.** The code is
-merged and no batch has ever run, so nothing here is yet evidence of anything.
-Until one night has run end to end, every item below is being ordered toward a
-milestone whose first real test has not happened.
+What replaced it as the gate was not an item: **run a night.** One has now run
+against an empty queue (`DRAINED`, 2026-09-05) — the plumbing works. What is
+still unmeasured is a night that *runs* something: no cell has started under a
+batch, so the budget gate, the breaker and packaging are code with tests and no
+evidence. That is the gate now, and it is one cheap spec away.
 
 ### Tier 1 — breaks at 03:00 with nobody watching
 
@@ -3297,10 +3298,16 @@ reader does not take the gap for an oversight and "finish" it.
 the launchd job. Absorbed items **16** and half of **44**, both now closed
 above.
 
-**A night has been built and not yet run.** Until one has, this repo has code
-for an unattended night and no evidence about it — which is the distinction
-this file exists to keep. The first run should be against an empty queue, where
-`DRAINED` in seconds proves the plumbing before a night with money in it.
+**A night has been run, against an empty queue** — `DRAINED`, exit `0`, $0.00,
+2026-09-05 (`docs/evidence/2026-09-05-first-batch-drained.md`). That proves
+readiness, the mirror fetch, the scan, `reconcile`, the ledger row, the
+deadline resolving to tomorrow, and the exit code.
+
+**No cell has started under a batch.** So the budget gate, the breaker,
+`--until` firing, packaging, the orphan sweep and what a night costs are all
+tested and none is measured. A night with one cheap spec in it is the next
+thing worth running, and until it has, this item is done in the sense that the
+code exists rather than in the sense that the night works.
 
 What the review round found is worth recording, because it is the argument for
 the round: seven tests across the stack named behaviour they did not guard, and
