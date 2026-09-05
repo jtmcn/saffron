@@ -1723,20 +1723,20 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-05, an eleventh time. `SA-0055` merged and retired,
-    so the live corpus is empty and the queue this repo would run tonight is
-    nothing.
+    """Re-measured 2026-09-05, a twelfth time — the eleventh anchored an empty
+    corpus and predicted it would move "the moment a spec is filed", which it
+    did within the hour.
 
-    An empty queue is the weakest thing this anchor could assert, and "0 == 0"
-    is exactly the shape that passes when the scan is broken — so what it
-    asserts now is not the emptiness but *why* it is empty: the top level holds
-    no spec, `done/` holds many, and `discover_specs` globs non-recursively, so
-    a retired corpus is invisible to a scan pointed at its parent. That is a
-    real property with a real failure mode — a recursive glob would offer forty
-    shipped specs as tonight's work — and it is the one this file can still
-    measure while nothing is in flight.
+    Item 69's three specs are in flight: `SA-0056` is the only root and the
+    only candidate, and `SA-0057` -> `SA-0058` is a chain two deep behind it,
+    each refused for the parent above having no task at its current
+    `spec_sha`. The shape §4.2.1 says a stack presents on its first night.
 
-    It re-anchors to a candidate list again the moment a spec is filed.
+    Kept from the eleventh because it is the part that does not churn: the
+    non-recursive glob. `done/` holds forty-odd shipped specs one directory
+    down and the scan must see none of them — a real property with a real
+    failure mode, and the reason `done/` retires a spec rather than deleting
+    it.
 
     The dependency-chain assertion this carried through nine anchorings is gone
     with the chain that justified it, and the corpus-parses property it briefly
@@ -1757,13 +1757,18 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         directory, repo_id, ledger, repo_slug="joel/saffron", gh=_fake_gh([])
     )
 
-    assert candidates == []
-    assert refusals == []
-    # Why it is empty, not merely that it is. Nothing in flight at the top
-    # level, plenty shipped one directory down, and the scan sees only the
-    # first — the non-recursive glob, which is the whole reason `done/`
-    # retires a spec rather than deleting it.
-    assert list(directory.glob("*.md")) == []
+    assert [c.spec.id for c in candidates] == ["SA-0056"]
+    # Refused for the parent each actually declares, which is what separates a
+    # dependency refusal from a criterion-path one.
+    chain = [("SA-0057", "SA-0056"), ("SA-0058", "SA-0057")]
+    assert len(refusals) == len(chain)
+    for refusal, (child, parent) in zip(refusals, chain, strict=True):
+        assert refusal.path.name.startswith(child)
+        assert parent in refusal.reason
+        assert "depends_on" in refusal.reason
+    # And the retired corpus stays invisible: `discover_specs` globs
+    # non-recursively, so forty-odd shipped specs one directory down are not
+    # offered as tonight's work.
     assert len(list((directory / "done").glob("*.md"))) > 30
 
 

@@ -870,6 +870,64 @@ for n in 1..max_attempts:
 - **`EXHAUSTED` is a respectable outcome.** A task that can't pass its own gates in four tries is telling you the spec was underspecified or the codebase is hostile at that point. Both worth knowing.
 - **The budget stop shares it, deliberately.** A task the spend ceiling stops before its next turn is `EXHAUSTED` too, and in the ledger and the morning queue that is indistinguishable from four failed attempts — the distinction lives only on the watch line. Accepted for v0.5, which is attended: the operator is reading that line as it happens, and the `tasks` row carries the budget and the spend. It stops being acceptable when the queue is read the next morning instead of watched, so v1 splits it — the two have opposite remedies, raise the budget versus rewrite the spec.
 
+#### 5.4.1 The `witness` gate — an acceptance claim that nothing guards
+
+**Added 2026-09-05, on measurement** (`docs/BACKLOG.md` item 69). Nine tests
+shipped in one session naming a behaviour they did not guard. Each passed every
+gate, all three lenses including `adequacy`, and a human read; each was found by
+running a mutation. Two were written by review agents and one by the operator's
+own session while fixing the others.
+
+**The premise.** A vacuous test and a sound one are textually identical — nobody
+writes a test intending it not to guard, so intent, naming and structure all
+read correct. Vacuity is not a property of the test's text; it is a property of
+how the *pair* responds to perturbation. Reading examines one object while the
+defect lives in the relation between two, which is why §5.5.1's lens cannot
+answer this and says so in its own prompt.
+
+**What the gate does.** A spec's `acceptance:` already pairs a claim with the
+witness that guards it. Each entry may additionally declare a **mutant**: the
+smallest edit that breaks the claim while leaving the code syntactically whole.
+For each such entry the gate applies the mutant to the head tree, invokes the
+repo's declared `tests` gate over **exactly that one witness**, and requires the
+result to be `fail`. A mutant the witness survives is the finding: the claim is
+asserted by nothing.
+
+**It is `revert`'s exception, not a new one** (§2.1). The gate executes no tool:
+it applies a text edit the *spec* supplied and then invokes a gate the repo
+already declared, through the same JSON contract, with the subset argument
+`revert` established. Core still knows nothing about the toolchain — only that a
+`tests` gate exists and that the contract obliges it to accept a subset. Any
+future core gate wanting to run something must fit that shape or move to the
+repo side.
+
+**Why the spec declares the mutant rather than an agent generating it.** A cell
+is untrusted, and a mutant it authored is a mutant chosen to be killed. The
+operator writes the spec, and the claim and the edit that breaks it are one
+thought — §5.5.1 already asks the lens to name that edit in prose, so the
+naming exists and nothing runs it. The cost is real and lands where it belongs:
+writing a claim now means saying what would falsify it.
+
+**Reversion is at hunk granularity and cannot reach this.** `revert` (§5.4)
+stashes whole files and asks whether the new tests test *anything*. Scaling it
+down to hunks does not help: a diff that adds a function has one hunk, and
+reverting it kills every test trivially while the token-level property inside it
+goes unmeasured. All nine of the above live below hunk granularity. **`revert`
+asks whether the tests test anything; `adequacy` asks whether they test each
+thing and cannot run; this asks the same question and can.**
+
+**A mutant that does not apply is named, never silently skipped.** The gate
+reports `skip` for a criterion whose `find` text is absent or matches more than
+once, and the result *names* every such criterion. A check that quietly buys
+nothing is the defect one level up, and it is the failure mode Appendix I is
+about.
+
+**Blocking level.** Advisory at `standard`, blocking at `elevated` — the level
+`size` already carries, and for the same reason: an elevated diff is one where a
+plausible-looking wrong change hurts most, and a claim guarded by nothing is
+exactly that. A spec declaring no mutants reports `skip`, so this cannot fail a
+task retroactively.
+
 ### 5.5 Phase 4 — REVIEW (adversarial)
 
 Fresh session, read-only tools, different system prompt, ideally a different model or effort level. It never sees the implementer's transcript. It sees the spec, the diff, the gate results, and the acceptance criteria.
