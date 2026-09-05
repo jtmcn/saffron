@@ -53,10 +53,17 @@ uv run saffron cell .saffron/specs/SA-0002-size-gate.md --repo .    # v0.5: one 
 uv run saffron queue --repo .              # v0.5: what a batch would run; reconciles PR state first
 uv run saffron reconcile --repo .          # ask GitHub what happened to open pull requests
 uv run saffron watch SA-0002               # follow a task's event log; --no-follow for a finished one
+uv run saffron batch --repo . --budget 50 --until 06:30   # v0.6: a night, unattended
 ```
 
-`saffron cell` needs `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) in the environment
-of the command itself, and nowhere else. `.envrc` deliberately does not load it: direnv would
+`saffron batch` is the unattended one: `--until` is a *start no new task after* bound, not a
+kill, so a night ends at the deadline plus at most one task (backlog item 67). Under launchd it
+needs `PYTHONUNBUFFERED=1`, or SIGTERM discards the log — which is the night's only
+human-readable record. `docs/host/dev.saffron.batch.plist` and `docs/HOST-HARDENING.md` §4a
+carry the setup.
+
+`saffron cell` and `saffron batch` need `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) in
+the environment of the command itself, and nowhere else. `.envrc` deliberately does not load it: direnv would
 export it into every shell in this directory, and from there into any Claude Code session
 started in one. `.env` is no home for it either — `.envrc` loads that with
 `dotenv_if_exists`. Scope it to the invocation instead (fish):

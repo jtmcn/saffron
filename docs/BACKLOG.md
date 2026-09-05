@@ -30,10 +30,13 @@ will be with the target, not with the sort.
 
 ### Tier 0 — the milestone gate
 
-**58** — §4.4 batch orchestration — and nothing else until it is real. Nothing in Saffron runs more
-than one cell: `cli.py` exposes `replay`, `cell`, `queue` and `reconcile`, and
-`queue` only *prints* what a batch would run. Every item below tunes a machine
-that cannot start. Absorbs **16** and half of **44**.
+**58 is done** (merge `57b676c`, 2026-09-05), and with it **16** and half of
+**44**. `saffron batch` exists and the machine below can start.
+
+What replaces it as the gate is not an item: **run a night.** The code is
+merged and no batch has ever run, so nothing here is yet evidence of anything.
+Until one night has run end to end, every item below is being ordered toward a
+milestone whose first real test has not happened.
 
 ### Tier 1 — breaks at 03:00 with nobody watching
 
@@ -51,14 +54,14 @@ flywheel inert exactly where it was meant to compound.
 
 Operator visibility parts 2 and 3 — `SA-0032`–`SA-0039`, with the plan's Task 6
 rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
-**38**), plus **43**, **48**, **52**, **60**.
+**38**), plus **43**, **48**, **52**, **60**, **66**, **67**.
 
 ### Tier 3 — real, not urgent
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
-**56**, **57**, **61**, **62**, **63**, **64**.
+**56**, **57**, **61**, **62**, **63**, **64**, **65**, **68**.
 
-**What this ordering costs, stated plainly:** tiers 2 and 3 hold 22 of the 29
+**What this ordering costs, stated plainly:** tiers 2 and 3 hold 26 of the 33
 open items, including every ontology item and every operator-visibility spec
 there is already a full plan for. That is the deliberate consequence of ranking
 by the milestone rather than by what is nearest to hand.
@@ -1191,6 +1194,18 @@ written.
 ---
 
 ## 16. No record says which policy PACKAGE verified under
+
+**Status: done** — `SA-0046`, PR #116, merge `57b676c`. `tasks.policy_sha` is
+written at cell start from the export at `base_sha` and rewritten at PACKAGE
+only when re-verification ran under a different declaration. The record stands
+across a gate that errors out of `reverify`, on purpose: the row says what
+re-verification ran *under*, not what it concluded.
+
+One thing the column does not do, worth knowing before a reader trusts it: it
+holds the *last* declaration a task ran under, not both. After PACKAGE rewrites
+it, the base-time value is gone, so "what did this task's cell gates run under"
+is no longer answerable from it. §4.1's invalidation reader compares against
+in-flight tasks, before PACKAGE, so that reader is unaffected.
 
 **Decided 2026-09-04: a `policy_sha` column on `tasks`, built with item 58
 rather than before it.** Written at cell start and rewritten at PACKAGE when it
@@ -2764,6 +2779,18 @@ branch is reached from tests alone.
 
 ## 44. A single turn can overshoot the budget ceiling, because the check runs before it
 
+**Status: done** — `SA-0050`, PR #121, merge `57b676c`. `run_batch` computes
+`budget_usd - ledger.batch_spend(batch_id)` before each candidate, reading
+spend back out of the ledger rather than trusting a tally kept in the loop —
+which is what survives a caller cut mid-night.
+
+The wording this item settled needed one correction after review, and
+`DESIGN.md` §3 and `CONTEXT.md` now carry it: the batch bound is *also*
+best-effort, because it admits a task on that task's **declared** ceiling. A
+night can end at most one task's overshoot above budget. Bounded by one
+overshoot rather than unbounded is the real distinction, and it is the whole
+value of checking between tasks.
+
 **Decided 2026-09-04: option two, plus the ceiling that is actually
 enforceable.** `budget_usd` is a best-effort bound and says so where it is
 declared. The enforceable ceiling is **per batch, checked between tasks** —
@@ -3263,6 +3290,29 @@ reader does not take the gap for an oversight and "finish" it.
 
 ## 58. Nothing runs a batch, and v1 is defined by a night that does
 
+**Status: done** — seven specs, `SA-0045` through `SA-0054`, PRs #115/#116/#117
+/#120/#121/#122/#123, merged together as `57b676c`. `saffron batch --repo .
+--budget 50 --until 06:30` exists, `saffron/batch.py` owns the loop, the
+`batches` table records the night, and `docs/host/dev.saffron.batch.plist` is
+the launchd job. Absorbed items **16** and half of **44**, both now closed
+above.
+
+**A night has been built and not yet run.** Until one has, this repo has code
+for an unattended night and no evidence about it — which is the distinction
+this file exists to keep. The first run should be against an empty queue, where
+`DRAINED` in seconds proves the plumbing before a night with money in it.
+
+What the review round found is worth recording, because it is the argument for
+the round: seven tests across the stack named behaviour they did not guard, and
+every one read fine. Two migration guards asserted the string `replace` had
+just removed; the breaker reset was deletable with the suite green;
+`parent_branch=None` would have targeted `main` from every stacked child; both
+operator-facing print lines were replaceable with `pass`. And the token probe
+was inert — `400` read as valid, so it accepted any string at all (item **66**,
+and `docs/evidence/2026-09-05-token-probe-request-shape.md`). None of that was
+caught by reading. It was caught by running the mutation, and by one live
+measurement.
+
 **Tier 0.** Not found by a run — found by asking what the other 29 items were
 being ordered *toward*, 2026-09-04.
 
@@ -3529,6 +3579,115 @@ watch SA-0051` resolves, what `patch.diff` and `plan.json` live beside, and
 what the batch index links to; making it run-scoped changes four things to fix
 one, and `plan.json` being overwritten by a re-run is the same defect with the
 same fix.
+
+---
+
+## 65. The batch's four stop reasons are a closed set that lives only in SQL
+
+**Tier 3.** Found reviewing `SA-0045` (PR #115), and again reviewing `SA-0049`.
+
+`DRAINED`, `BUDGET`, `UNTIL` and `INFRASTRUCTURE` are a closed set — a `CHECK`
+constraint on `batches.status` refuses anything else, and `batch.StopReason` is
+a `Literal` of the same four. They appear in neither `ontology/saffron.ttl` nor
+`CONTEXT.md`.
+
+Every other closed set in this repo is generated from the vocabulary and
+cross-checked by `tests/ontology/test_vocabulary_agrees_with_context.py`, which
+is the mechanism CLAUDE.md names as authoritative. This is the sixth, and the
+first with no vocabulary entry: nothing stops a fifth reason being added in SQL
+alone, and nothing tells a reader of `CONTEXT.md` that the four exist.
+
+Deferring was correct in the layer that found it — `ontology/` and `CONTEXT.md`
+were both `forbidden` to `SA-0045` and to every spec above it — but the
+deferral has no owner now.
+
+**Done looks like** a `saffron:BatchStopReason` class in the vocabulary with the
+four individuals, `uv run python -m ontology.render` re-run, and the closed-set
+test naming it alongside the other five. The `CHECK` constraint stays: the
+vocabulary is authoritative for the words, and the constraint is what enforces
+them at the one place a bad value could be written.
+
+---
+
+## 66. The token probe is measured for a live credential and inferred for a dead one
+
+**Tier 2.** Filed 2026-09-05 alongside the measurement in
+`docs/evidence/2026-09-05-token-probe-request-shape.md`.
+
+That measurement established what `/v1/models` answers a *live* subscription
+token, and it mattered: without `anthropic-version` the endpoint returns `400`
+for any token at all, because it validates the header before the credential —
+so the probe's original boolean form (`exc.code not in (401, 403)`) called every
+credential valid, including a revoked one. That is fixed.
+
+What is still inferred is the other half. Nothing has observed what a
+**revoked** token answers with the header present. `401` is the expectation and
+the code treats `401`/`403` as the only INVALID verdicts.
+
+The gap is safe in one direction by construction: any other status is
+`UNKNOWN`, which refuses the night while naming the endpoint rather than the
+credential. So a wrong guess costs a night that declines to start and says why
+— never a night that starts on a dead token. That is why this is Tier 2 rather
+than Tier 1.
+
+**Done looks like** the results table in that evidence file having a revoked
+column, filled from a real run. The moment to do it is a token rotation, when a
+dead token exists anyway: revoke, run
+`docs/evidence/scripts/2026-09-05-token-probe-shape.py`, record the status. If
+it is not `401`/`403`, add it to the INVALID set and say in the comment that it
+was measured.
+
+---
+
+## 67. `--until` does not stop a running cell, and §4.5 says it does
+
+**Tier 2.** Found reviewing `SA-0054` (PR #123).
+
+`run_batch` checks the deadline between candidates, and `run_one_cell` takes no
+deadline argument at all — so a cell already running at 06:30 runs to its own
+`max_turns` and `max_attempts`. The wall-clock end of a night is therefore the
+deadline plus at most one task, which can be hours.
+
+`DESIGN.md` §4.5 states the opposite: *"The supervisor sets [`ORPHANED`] on
+kill, on crash, and on `--until`."* Two documents now disagree in writing, and
+the code matches the weaker one.
+
+`docs/HOST-HARDENING.md` §4a was amended to describe the real behaviour — a
+"start no new task after" bound — so an operator reading the setup guide is not
+misled today. That is a patch over the gap, not the gap closed.
+
+**Done looks like** one of two decisions taken deliberately and written down:
+either the supervisor gains a deadline and stamps `ORPHANED` when it passes, and
+§4.5 stands; or §4.5 is amended to say the bound is between tasks, and the
+budget is named as the ceiling that actually holds unattended. The second is
+cheaper and defensible — a killed cell mid-REBUT wastes everything it spent —
+but it should be a decision, not a drift.
+
+---
+
+## 68. Readiness and the scan each fetch the same mirror, once per night
+
+**Tier 3.** Found reviewing `SA-0054` (PR #123).
+
+`check_readiness` and `_resolve_queue` both call `ensure_mirror`, `real_remote`
+and `fetch_default_branch`, and `saffron batch` calls both — readiness first
+(§4.4 step 1), then the scan. §4.2.1's whole argument for hoisting preflight
+was that a batch does these once per run rather than once per task; it now does
+them twice per run.
+
+`Readiness` already returns `mirror`, `url` and `base_sha` precisely so a caller
+need not re-derive them, and `_resolve_queue` recomputes all three anyway.
+
+Harmless at K=1 against one repo — two mirror fetches, seconds apart, the second
+a no-op fetch — which is why this is Tier 3 rather than urgent. It stops being
+harmless at multi-repo, where it doubles the network cost of starting a night.
+
+**Done looks like** `_resolve_queue` accepting the mirror, url and base_sha a
+readiness check already established, rather than deriving its own. Note the
+ordering constraint that makes this awkward and worth doing carefully:
+readiness must run *first* (a scan that raises before the batch row exists is
+what item 58's review fixed), so the seam is readiness handing its results
+down, never the scan handing them up.
 
 ---
 
