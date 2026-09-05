@@ -529,6 +529,11 @@ class QueueResolution:
     resolution was computed against — so it is cheaper to carry them here
     than to have that caller re-derive them from a function that already
     had them.
+
+    `exported` is **already deleted** by the time a caller reads it: the
+    export is a `TemporaryDirectory` closed before this is returned. It is
+    carried for the paths derived from it during the scan, never to be opened
+    afterwards — `mirror`, beside it, *is* live, and the two read alike.
     """
 
     repo_id: int | None
@@ -563,6 +568,10 @@ def _resolve_queue(
     `ORPHANED` before this resolution filters. `False` is what `saffron
     queue` passes: an operator can run this at will, mid-phase included, and
     must never have a live task stamped a corpse for having been looked at.
+
+    This writes to the ledger, which a function named for resolving a queue
+    does not obviously do: `reconcile`'s pull-request half runs first, so the
+    scan filters on current state rather than yesterday's.
 
     `resolve_repo_id`, never `upsert_repo`: an unseen repo gets `None`, which
     both `build_queue` and `reconcile` treat as nothing to do.
@@ -747,6 +756,12 @@ def _print_reconcile_summary(result: ReconcileResult) -> None:
         ("MERGED", result.merged),
         ("REJECTED", result.rejected),
         ("CHANGES_REQUESTED", result.changes_requested),
+        # `orphaned` counted toward "something moved" below while having no
+        # line of its own, so a resolution that only orphaned printed nothing
+        # at all — not the ids, not "nothing moved". `saffron queue` never
+        # orphans, so the only caller that reaches this is the unattended
+        # night, which is the one with nobody watching.
+        ("ORPHANED", result.orphaned),
     )
     for label, ids in buckets:
         for task_id in ids:

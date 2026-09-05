@@ -18,6 +18,7 @@ from saffron.cli import main
 from saffron.events import PhaseStart, Preflight, describe, read_log
 from saffron.ledger import Ledger
 from saffron.phases import package
+from saffron.reconcile import ReconcileResult
 from tests.conftest import HostToolExecInTest
 from tests.test_replay import target  # noqa: F401 — a pytest fixture, used by name
 
@@ -2210,3 +2211,28 @@ def test_the_plan_checkpoint_still_rejects_what_the_refusal_could_not_decide(
         validate_plan(
             raw, touches=touches, forbidden=[], protected=protected, spec_type="docs"
         )
+
+
+def test_an_orphan_only_resolution_names_the_rows_it_stamped(capsys):
+    """`orphaned` counted toward "something moved" — suppressing the "nothing
+    moved" line — while having no bucket of its own, so a resolution that only
+    orphaned printed nothing whatsoever. `ReconcileResult`'s own docstring
+    promises "task ids, not bare counts, so an operator can trace exactly
+    which row moved and why", and this was the one bucket that did not.
+
+    `saffron queue` never orphans, so the only caller that reaches this line
+    is the unattended night — the one with nobody watching it happen."""
+    cli._print_reconcile_summary(ReconcileResult(orphaned=[7, 9]))
+
+    printed = capsys.readouterr().out
+    assert "reconcile: task 7 → ORPHANED" in printed
+    assert "reconcile: task 9 → ORPHANED" in printed
+    assert "nothing moved" not in printed
+
+
+def test_a_resolution_that_changed_nothing_still_says_so(capsys):
+    """The other half: silence must not read as "there was nothing to ask
+    about"."""
+    cli._print_reconcile_summary(ReconcileResult())
+
+    assert "reconcile: nothing moved" in capsys.readouterr().out
