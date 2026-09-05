@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from saffron import preflight
@@ -515,20 +516,62 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     return CELL_EXIT.get(outcome.state, 1)
 
 
-def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
-    """`saffron queue --repo .` — the scan a batch would run tonight.
+@dataclass
+class QueueResolution:
+    """What resolving one repo's queue over the pinned base produced —
+    everything either caller needs, not just what `_print_queue` reads.
 
-    No longer writes nothing: `reconcile`'s pull-request half runs first, so
-    the scan filters on current state. Still no cell, and never `ORPHANED` —
-    this is not a batch scan; an operator can run it at will, mid-phase
-    included. `resolve_repo_id`, never `upsert_repo`: an unseen repo gets
-    `None`, which both `build_queue` and `reconcile` treat as nothing to do.
+    `_queue`'s printer wants `candidates`, `refusals`, `reconciled`,
+    `exported` and the two "could not read" lists (`gh_failures`,
+    `policy_unread`), plus `repo_slug` for the note about which refusals
+    could not run. A batch scan (`SA-0054`) additionally wants `mirror`,
+    `base_sha` and `repo_id` — the pinned tree and the ledger identity this
+    resolution was computed against — so it is cheaper to carry them here
+    than to have that caller re-derive them from a function that already
+    had them.
     """
-    repo = args.repo.resolve()
+
+    repo_id: int | None
+    mirror: Path
+    base_sha: str
+    repo_slug: str | None
+    exported: Path
+    candidates: list[Candidate]
+    refusals: list[Refusal]
+    reconciled: ReconcileResult
+    gh_failures: list[str]
+    policy_unread: list[str]
+
+
+def _resolve_queue(
+    repo: Path,
+    home: Path,
+    ledger: Ledger,
+    *,
+    stamp_orphaned: bool,
+) -> QueueResolution:
+    """Resolve one repo's queue over its pinned `base_sha` — the mirror, the
+    pinned base, the reconcile, the slug, the export, and the scan over that
+    export, never the working copy. This is the resolving half of the scan a
+    batch would run tonight; printing it is the caller's job.
+
+    `stamp_orphaned` is required, not defaulted, because the two callers this
+    function exists for disagree about it and a default would decide for
+    whichever one forgets to think about it. `True` asserts §4.2.1's
+    batch-scan premise — one batch runs at a time, so an in-flight task found
+    here is a corpse a dead scan left behind, and `reconcile` records it
+    `ORPHANED` before this resolution filters. `False` is what `saffron
+    queue` passes: an operator can run this at will, mid-phase included, and
+    must never have a live task stamped a corpse for having been looked at.
+
+    `resolve_repo_id`, never `upsert_repo`: an unseen repo gets `None`, which
+    both `build_queue` and `reconcile` treat as nothing to do.
+    """
+    repo = repo.resolve()
 
     digest = hashlib.sha256(str(repo).encode()).hexdigest()[:12]
     mirror = git_mirror.ensure_mirror(
-        repo, args.home / "mirrors" / f"{repo.name}-{digest}.git"
+        repo, home / "mirrors" / f"{repo.name}-{digest}.git"
     )
     url = package_phase.real_remote(repo)
     _, base_sha = package_phase.fetch_default_branch(mirror, url)
@@ -539,7 +582,9 @@ def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
     policy_unread: list[str] = []
     reconciled = ReconcileResult()
     if repo_id is not None:
-        reconciled = reconcile(ledger, repo_id, gh=_guarded_gh(gh_failures))
+        reconciled = reconcile(
+            ledger, repo_id, gh=_guarded_gh(gh_failures), stamp_orphaned=stamp_orphaned
+        )
 
     # Unlike `_run_cell`, a slug that cannot be read is not this command's
     # failure — it just means two of `build_queue`'s refusals cannot run, and
@@ -572,8 +617,39 @@ def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
             gh=_guarded_gh(gh_failures),
         )
 
-    _print_reconcile_summary(reconciled)
-    _print_queue(candidates, refusals, repo_slug, exported, gh_failures, policy_unread)
+    return QueueResolution(
+        repo_id=repo_id,
+        mirror=mirror,
+        base_sha=base_sha,
+        repo_slug=repo_slug,
+        exported=exported,
+        candidates=candidates,
+        refusals=refusals,
+        reconciled=reconciled,
+        gh_failures=gh_failures,
+        policy_unread=policy_unread,
+    )
+
+
+def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
+    """`saffron queue --repo .` — print what `_resolve_queue` found tonight.
+
+    Still no cell, and never `ORPHANED` — this is not a batch scan; an
+    operator can run it at will, mid-phase included. `stamp_orphaned=False`
+    asserts exactly that: `_resolve_queue`'s own docstring names the premise
+    this passes on.
+    """
+    resolved = _resolve_queue(args.repo, args.home, ledger, stamp_orphaned=False)
+
+    _print_reconcile_summary(resolved.reconciled)
+    _print_queue(
+        resolved.candidates,
+        resolved.refusals,
+        resolved.repo_slug,
+        resolved.exported,
+        resolved.gh_failures,
+        resolved.policy_unread,
+    )
     return 0
 
 

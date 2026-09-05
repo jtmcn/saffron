@@ -1,8 +1,10 @@
 """The operator's only entry point, so it gets at least one end-to-end test."""
 
 import argparse
+import ast
 import functools
 import hashlib
+import inspect
 import json
 import subprocess
 import tempfile
@@ -1923,6 +1925,251 @@ def test_queue_says_the_refusals_did_not_run_when_gh_is_not_installed(
     out = capsys.readouterr().out
     assert "gh could not be run" in out
     assert "did not run" in out
+
+
+def test_resolving_a_queue_is_one_function_over_the_pinned_base(tmp_path, monkeypatch):
+    """`_resolve_queue` does what `_queue` did inline, and in the same order:
+    the mirror, the pinned base, the reconcile, the slug, the export, and the
+    scan over that export — never the working copy, which is what makes an
+    unpushed spec a draft rather than tonight's work."""
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-resolve-order")
+    # Committed, never pushed — the pinned-base witness. A `_resolve_queue`
+    # that scanned the working copy would see this too.
+    (repo / ".saffron" / "specs" / "SY-2.md").write_text(
+        _A_SPEC.replace("SY-1", "SY-2")
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "unpushed")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    # A task at a spec id the queue's own directory need not carry — reconcile
+    # scans every row in the repo, not just this scan's candidates, so this is
+    # a clean witness that reconcile ran without disturbing SY-1's own status.
+    task_id = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-9",
+        state="READY_FOR_REVIEW",
+        pr_url="https://github.com/o/r/pull/1",
+    )
+
+    order = []
+    real_ensure = cli.git_mirror.ensure_mirror
+    real_fetch = cli.package_phase.fetch_default_branch
+    real_reconcile = cli.reconcile
+    real_slug = cli.package_phase.github_slug
+    real_export = cli.git_mirror.export_saffron_dir
+    real_build = cli.build_queue
+
+    def _ensure(*a, **k):
+        order.append("mirror")
+        return real_ensure(*a, **k)
+
+    def _fetch(*a, **k):
+        order.append("base")
+        return real_fetch(*a, **k)
+
+    def _reconcile(*a, **k):
+        order.append("reconcile")
+        return real_reconcile(*a, **k)
+
+    def _slug(*a, **k):
+        order.append("slug")
+        return real_slug(*a, **k)
+
+    def _export(*a, **k):
+        order.append("export")
+        return real_export(*a, **k)
+
+    def _build(*a, **k):
+        order.append("scan")
+        return real_build(*a, **k)
+
+    monkeypatch.setattr(cli.git_mirror, "ensure_mirror", _ensure)
+    monkeypatch.setattr(cli.package_phase, "fetch_default_branch", _fetch)
+    monkeypatch.setattr(cli, "reconcile", _reconcile)
+    monkeypatch.setattr(cli.package_phase, "github_slug", _slug)
+    monkeypatch.setattr(cli.git_mirror, "export_saffron_dir", _export)
+    monkeypatch.setattr(cli, "build_queue", _build)
+    monkeypatch.setattr(cli, "run_gh", _fake_gh_says_merged)
+
+    resolved = cli._resolve_queue(repo, home, ledger, stamp_orphaned=False)
+
+    assert order == ["mirror", "base", "reconcile", "slug", "export", "scan"]
+    assert resolved.repo_id == repo_id
+    assert [c.spec.id for c in resolved.candidates] == ["SY-1"]
+    assert resolved.reconciled.merged == [task_id]
+    # The local origin here has no GitHub slug to resolve.
+    assert resolved.repo_slug is None
+    ledger.close()
+
+
+def test_the_stamping_premise_is_a_required_argument(tmp_path):
+    """A default here would decide the premise for whichever caller forgets
+    to think about it — so there is no default to fall back on."""
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-stamp-required")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+
+    # `getattr` with a name built at runtime, not a direct call: a static
+    # type checker would catch a missing required keyword argument at the
+    # call site, but the whole point of this witness is that the *runtime*
+    # enforces it too — there is no default `stamp_orphaned` value for a
+    # caller to fall back on.
+    attr = "_resolve" + "_queue"
+    resolve_queue = getattr(cli, attr)
+    with pytest.raises(TypeError):
+        resolve_queue(repo, home, ledger)  # no stamp_orphaned given
+
+    ledger.close()
+
+
+def test_told_to_stamp_it_orphans_an_in_flight_task_and_re_queues_it(tmp_path):
+    """Told to stamp, it stamps: a task left in an in-flight state is
+    recorded orphaned and re-queues by the ordinary rule (`ORPHANED` is in
+    `scheduler.REQUEUE_STATES`)."""
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-stamp-yes")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    task_id = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-1",
+        state="IMPLEMENTING",
+        spec_sha=hashlib.sha256(_A_SPEC.encode()).hexdigest(),
+    )
+
+    resolved = cli._resolve_queue(repo, home, ledger, stamp_orphaned=True)
+
+    row = ledger._db.execute(
+        "SELECT state FROM tasks WHERE task_id = ?", (task_id,)
+    ).fetchone()
+    assert row["state"] == "ORPHANED"
+    assert task_id in resolved.reconciled.orphaned
+    assert len(resolved.candidates) == 1
+    assert resolved.candidates[0].task_id == task_id
+    ledger.close()
+
+
+def test_told_not_to_stamp_it_leaves_an_in_flight_task_alone(tmp_path):
+    """Told not to stamp, it leaves an in-flight task exactly as it found
+    it — the existing behaviour of the attended command, and the reason the
+    argument exists rather than a constant."""
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-stamp-no")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    task_id = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-1",
+        state="IMPLEMENTING",
+        spec_sha=hashlib.sha256(_A_SPEC.encode()).hexdigest(),
+    )
+
+    resolved = cli._resolve_queue(repo, home, ledger, stamp_orphaned=False)
+
+    row = ledger._db.execute(
+        "SELECT state FROM tasks WHERE task_id = ?", (task_id,)
+    ).fetchone()
+    assert row["state"] == "IMPLEMENTING"
+    assert resolved.reconciled.orphaned == []
+    assert len(resolved.candidates) == 1
+    assert resolved.candidates[0].task_id is None
+    ledger.close()
+
+
+def _queue_calls(name, *, keyword=None, value=None):
+    """Whether `cli._queue`'s body contains a call to `name` — and, if a
+    `keyword` is given, a literal keyword argument matching `value`.
+
+    AST over `inspect.getsource`, not a substring search — a comment or a
+    docstring merely naming `name` must not satisfy this — and not a call
+    into the real function either: this is a structural check that the
+    *printing* command still routes through the extraction, precisely so
+    that reverting the extraction (and nothing else) makes it false. This
+    file's own `test_no_signature_in_the_package_still_takes_a_watch` is the
+    precedent for reading source this way rather than importing and calling
+    it."""
+    tree = ast.parse(inspect.getsource(cli._queue))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        called = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+        if called != name:
+            continue
+        if keyword is None:
+            return True
+        for kw in node.keywords:
+            if kw.arg == keyword and isinstance(kw.value, ast.Constant):
+                return kw.value.value == value
+    return False
+
+
+def test_the_printed_queue_is_unchanged_by_the_extraction(tmp_path, capsys):
+    """The attended command prints what it printed before — the candidates,
+    the refusals, the reconcile summary, and the two lines that say a slug or
+    a policy could not be read — asserted against the current output rather
+    than against the fact that output happened. And it prints it by way of
+    the extraction, not a second, inline copy of the same sequence — the
+    defect a copy would eventually drift into."""
+    repo = _repo_with_spec(
+        tmp_path,
+        spec_text=_A_SPEC,
+        dirname="repo-unchanged-output",
+        extra_specs={"SY-3.md": "no frontmatter at all\n"},
+    )
+    home = tmp_path / "home"
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    out = capsys.readouterr().out
+    assert out == (
+        "reconcile: nothing moved\n"
+        "queue: 1 candidate(s)\n"
+        "  SY-1       priority=3  .saffron/specs/SY-1.md\n"
+        "refusals: 1\n"
+        "  .saffron/specs/SY-3.md: spec has no YAML frontmatter block\n"
+        "note: no GitHub slug could be read from the remote — the "
+        "open-pull-request and touches-overlap refusals did not run, so the "
+        "refusal list above is incomplete\n"
+    )
+    assert _queue_calls("_resolve_queue"), (
+        "the printed queue must come from `_resolve_queue`, not a second "
+        "copy of its sequence"
+    )
+
+
+def test_looking_at_the_queue_still_never_stamps_a_corpse(tmp_path):
+    """The existing guarantee, re-asserted at the level where it could
+    regress: the extraction is what put a stamping switch within reach of
+    this path for the first time, and `queue` must still never flip it —
+    which means passing `stamp_orphaned=False` at the call site, not relying
+    on a default that does not exist."""
+    repo = _repo_with_spec(
+        tmp_path, spec_text=_A_SPEC, dirname="repo-queue-never-stamps"
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-1", state="IMPLEMENTING")
+    ledger.close()
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    assert _task_state(home, task_id) == "IMPLEMENTING"
+    assert _queue_calls("_resolve_queue", keyword="stamp_orphaned", value=False), (
+        "`saffron queue` must pass `stamp_orphaned=False` explicitly — the "
+        "switch the extraction put within `_queue`'s reach"
+    )
 
 
 def test_the_plan_checkpoint_still_rejects_what_the_refusal_could_not_decide(
