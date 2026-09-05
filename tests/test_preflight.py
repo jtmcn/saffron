@@ -792,3 +792,34 @@ def test_readiness_and_prepare_mirror_run_the_same_three_steps_in_the_same_order
 
     assert prepared == ["mirror", "real_remote", "origin", "default_branch"]
     assert ready == prepared
+
+
+def test_a_passing_readiness_carries_the_base_it_pinned(monkeypatch, tmp_path):
+    """`Readiness` declares `mirror`, `url` and `base_sha` optional and
+    enforces nothing — `Readiness(True)` is constructible, and this repo's own
+    test helpers built exactly that until a caller started reading the fields.
+
+    `cli._batch` now relies on a passing readiness carrying all three: it hands
+    them to `_resolve_queue` as a `PinnedBase` so the scan does not derive them
+    a second time. That reliance rested on a comment calling it
+    `check_readiness`'s contract, which nothing asserted and nothing enforced.
+    This is the assertion, so the narrowing at the call site is backed by a
+    measured fact rather than by the shape of the single success return."""
+    exported = tmp_path / "exported"
+    (exported / ".saffron").mkdir(parents=True)
+    _stub_prepare(monkeypatch, exported=exported)
+    monkeypatch.setattr(preflight, "disk_headroom_ok", lambda home: True)
+
+    result = preflight.check_readiness(
+        tmp_path / "repo",
+        tmp_path / "mirror",
+        scratch=tmp_path / "scratch",
+        home=tmp_path / "home",
+        token="tok",
+        validate_token=lambda _t: preflight.TokenCheck(preflight.TokenVerdict.VALID),
+    )
+
+    assert result.ok
+    assert result.mirror == tmp_path / "mirror"
+    assert result.url == "https://github.com/o/r.git"
+    assert result.base_sha == "a" * 40
