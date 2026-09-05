@@ -36,13 +36,27 @@ acceptance:
       only cover one of them.
     witness: tests/test_watch.py::test_a_log_renders_as_the_lines_its_terminal_printed
   - claim: >-
-      The default view drops the two line shapes that are 80 percent of a real
-      log and carry no operator signal — the agent's running token estimate and
-      its bare tool acknowledgements. Measured on one live task: 681 of 850
-      lines. A watcher that prints all of it is one an operator stops reading,
-      which is the failure this spec exists to prevent rather than a matter of
-      taste.
+      The default view drops exactly two shapes, both identified by the agent
+      payload's own type rather than by the text it renders to: the periodic
+      system event whose subtype is the running thinking-token estimate, and
+      the bare tool result. Measured on one live task: 630 and 71 of 878
+      lines, which is 80 percent of the log. A watcher that prints all of it
+      is one an operator stops reading, which is the failure this spec exists
+      to prevent rather than a matter of taste.
     witness: tests/test_watch.py::test_the_default_view_drops_the_token_counter_and_bare_acknowledgements
+  - claim: >-
+      The agent's rate-limit line is kept. It is six lines in that same log and
+      it is the operator's first warning that a night is about to die of a
+      provider ceiling — the one agent line least safe to hide. A filter that
+      drops it has confused the rarest signal for the commonest noise.
+    witness: tests/test_watch.py::test_the_rate_limit_line_is_signal_and_is_kept
+  - claim: >-
+      The agent's own prose is never filtered, whatever it happens to say. A
+      free-text message renders as the agent's tag followed by the text
+      itself, so it shares a prefix space with every telemetry shape — an
+      agent remarking that a rate limit looks wrong must not be filtered as
+      the rate-limit line it is about.
+    witness: tests/test_watch.py::test_the_agents_own_words_are_never_filtered
   - claim: >-
       Everything is still reachable, because the dropped lines are the record
       of what the agent actually did and a diagnosis needs them. The filter is
@@ -65,9 +79,16 @@ acceptance:
     witness: tests/test_watch.py::test_a_partial_final_line_is_dropped_and_the_whole_ones_survive
   - claim: >-
       Naming a task with no directory says which directory it looked in and
-      exits non-zero. An operator who mistypes a spec id must not get the same
-      silent empty output as a task that has genuinely produced nothing yet.
-    witness: tests/test_watch.py::test_an_unknown_task_names_the_directory_it_looked_in
+      exits 1. Driven through the command itself, not only the module: the
+      whole content of the decision is which exit code an operator sees, and a
+      module-level test leaves the handler deletable — with it gone the outer
+      catch-all returns 2 instead, and every test still passes.
+    witness: tests/test_cli.py::test_watch_exits_one_and_names_the_directory_for_an_unknown_task
+  - claim: >-
+      Both flags reach the follower. Without this the unfiltered flag and the
+      poll interval can be dropped from the call entirely and the suite stays
+      green, which makes the flags decoration rather than wiring.
+    witness: tests/test_cli.py::test_watch_passes_its_flags_through_to_the_follower
   - claim: >-
       The command resolves its task directory from the same batch-tree root
       the rest of the CLI already computes, rather than rebuilding the path
@@ -124,10 +145,20 @@ from reading it.
 
 ## Notes for the agent
 
-**The filter is a predicate over rendered lines, not over event kinds.** The
-noise is two shapes inside one kind — the agent stream — so a kind-level filter
-would drop the agent's real work with them. Both dropped shapes are recognisable
-in the rendered line.
+**Filter on the agent payload's own `type`, never on the rendered line.** The
+noise is two shapes inside one event kind, so filtering by kind would drop the
+agent's real work with them — but filtering by rendered text is worse, and this
+is the sentence a previous attempt got wrong. `_describe_agent_event` renders a
+free-text message as `agent:` followed by the text itself, so *any* prefix match
+on the rendered line collides with whatever the agent happens to say. The
+discriminators are in the payload: the periodic system event carrying the
+thinking-token estimate as its subtype, and the tool result. Both are exact
+matches on fields, not prefixes on prose.
+
+**The rate-limit line is signal.** It renders with a leading `agent: rate limit`
+and it is tempting to read as telemetry; it is the provider ceiling announcing
+itself, six lines against the token counter's 630, and hiding it is how a night
+dies of `RATE_LIMITED` with nothing on screen to say so.
 
 **Injected, so the tests neither sleep nor wait.** The poll interval is a
 parameter with a real default bound as a keyword — the shape this repo uses for

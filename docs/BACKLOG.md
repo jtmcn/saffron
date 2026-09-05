@@ -38,27 +38,25 @@ that cannot start. Absorbs **16** and half of **44**.
 ### Tier 1 — breaks at 03:00 with nobody watching
 
 **45**, **51** (with **49**/**50**, which its fix closes), **47**, **46**,
-**40**, **26**, **7**, **59**.
+**40**, **26**, **7**. (**59** is done — `SA-0052`, PR #118.)
 
 Each fails in the dark or destroys work no one is awake to rescue. **45** loses
 a run's commits nightly; **51** switches the anti-theater gate off for one
 printed line; **47** feeds part 3 a column of zeros; **46** is the only account
 of a night nobody watched; **40** merges a diff over a ceiling it passed;
 **26** cannot tell an empty night from a missing directory; **7** leaves §8's
-flywheel inert exactly where it was meant to compound; **59** refuses a stacked
-grandchild the machinery exists to admit, and does it where only a batch can
-see.
+flywheel inert exactly where it was meant to compound.
 
 ### Tier 2 — the morning after
 
 Operator visibility parts 2 and 3 — `SA-0032`–`SA-0039`, with the plan's Task 6
 rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
-**38**), plus **43**, **48**, **52**.
+**38**), plus **43**, **48**, **52**, **60**.
 
 ### Tier 3 — real, not urgent
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
-**56**, **57**.
+**56**, **57**, **61**, **62**, **63**.
 
 **What this ordering costs, stated plainly:** tiers 2 and 3 hold 22 of the 29
 open items, including every ontology item and every operator-visibility spec
@@ -3311,6 +3309,14 @@ plan itself is written by hand — §4.4 is design, and `DESIGN.md` is
 **Tier 1.** Measured 2026-09-04, on this repo's own queue, by the first stack
 three deep.
 
+**Status:** **done**, by `SA-0053`'s predecessor `SA-0052` (PR #118, merge
+`37b2dc2`) — one attempt, $5.03, no blocking findings. The exemption now walks
+`depends_on[0]` transitively through the discovered specs, carrying a visited
+set seeded with the candidate's own id so a dependency cycle ends the walk
+instead of hanging the scan. `build_queue`'s signature is unchanged and the two
+live-witness tests were not touched: 239 added lines, 0 removed. Verified after
+the merge — the queue that had refused `SA-0049` reports zero refusals.
+
 `saffron/scheduler.py`'s open-pull-request overlap refusal exempts the
 candidate's own branch and one parent:
 
@@ -3355,6 +3361,130 @@ is what fails today.
 **Not** widening the refusal to ignore all overlaps: the gate is right about
 two unrelated tasks touching one file, which is what it was built for. Only the
 ancestor case is wrong, and only because the chain is walked one link deep.
+
+---
+
+## 60. A review lens's whole report is discarded on a schema error, and nothing re-prompts
+
+**Tier 2.** Measured 2026-09-04 on `SA-0053`, and the finding it cost was a
+real one.
+
+The correctness lens returned a well-argued finding about `saffron/watch.py`
+and omitted one field:
+
+```
+correctness produced nothing — not the schema: 1 validation error for _Report
+findings.0.severity
+  Field required [type=missing]
+```
+
+`review.py:168` turns that exception straight into `LensReview(..., error=...)`.
+The finding is gone — recoverable only by grepping `events.jsonl` by hand,
+which is how the text above was retrieved.
+
+**The stop is correct and is not the defect.** `review.py:274` makes an errored
+lens a stop at `REVIEWING`: *"A lens that errored **is** a stop"*. So a
+vanished lens can never read as a clean review, which is the Appendix I
+discipline working exactly as designed. Nothing here argues for softening it.
+
+**The gap is the missing re-prompt.** The plan artifact re-prompts once on a
+schema failure — `session.py:451`, *"not the schema, re-prompting once"* — and
+a lens does not, though both are a fresh session returning JSON against a
+declared shape and both cost roughly the same to ask again. One malformed
+enum field ended the attempt at $3.61 with a correct finding thrown away.
+
+**Done looks like** `review.py` re-prompting a lens once on `NotSchema`, the
+way `artifacts.py` already does for the plan, with the second failure still
+producing the stop it produces today. The re-prompt must carry the validation
+error itself: the lens omitted a required field, and being told which one is
+most of the fix.
+
+**Not** relaxing the schema to make `severity` optional. The severity is what
+`_describe` counts and what decides whether a finding blocks; a report whose
+findings have no severity is not a report that can be acted on.
+
+---
+
+## 61. `describe` raises on a payload `read_log` hands back unchecked
+
+**Tier 3.** Found reviewing `SA-0053` (PR #119), and fixed *around* rather than
+fixed: `saffron/events.py` was `forbidden` to that spec.
+
+`read_log` type-checks nothing — it is `cls(**obj)` onto a plain dataclass — so
+a corrupt or hand-edited line round-trips into `Agent(event='not an object')`
+and `describe` raises `AttributeError` on `.get`. Measured:
+
+```
+read_log tolerates it: [Agent(timestamp=1.0, spec_id='T1', raw=False, event='x', …)]
+describe RAISED: AttributeError 'str' object has no attribute 'get'
+```
+
+That is per-line corruption defeating the per-line tolerance `read_log`'s own
+docstring promises, and it takes the whole caller down with it. `watch.py`
+guards its own call (`_is_malformed`), so the follower is safe; every other
+caller of `describe` is not.
+
+**Done looks like** `read_log` refusing to build an event whose field is the
+wrong type at all — the drop it already performs for a missing field, extended
+to a present one of the wrong shape — so no caller has to guard. The producer
+side is already guarded (`implement.py:255` checks `isinstance(event, dict)`),
+so nothing hostile reaches this today; a hand-edited log does.
+
+**Not** each caller repeating `watch.py`'s guard. That is the duplication the
+guard exists to make unnecessary once, and `describe`'s contract should be
+"any `Event`" or it is not the single renderer this repo relies on it being.
+
+---
+
+## 62. A follower re-reads the whole log every poll, so watching a night is O(n²)
+
+**Tier 3.** Measured 2026-09-04 while reviewing `SA-0053` (PR #119), and named
+in a `ponytail:` beside the call.
+
+`watch.follow` calls `read_log` once per poll and slices past what it has
+already seen. `read_log` has no offset — it reads and parses the entire file —
+so following costs O(n²) over a night. Measured: **5.7s for one `read_log`** on
+a 37 MB / 160k-line log, past which the default 1s interval falls permanently
+behind and pegs a core re-parsing what it already rendered. `events.py`'s own
+`ponytail:` names "tens of MB a night" as the ceiling, so this is inside the
+range the log is designed for.
+
+**Done looks like** `read_log` taking a byte offset and returning the position
+it stopped at, with `follow` holding that between polls. The truncated-final-
+line tolerance has to survive it: a partial line at the offset boundary must
+leave the offset *before* it, or the next poll resumes mid-object and drops
+every line after.
+
+**Not** having the follower parse the file itself. A second parser beside
+`read_log` is the same defect as a second renderer beside `describe`, which is
+the thing `SA-0053` was written to avoid.
+
+---
+
+## 63. `describe` renders three agent payload fields unclipped, straight to a terminal
+
+**Tier 3.** Found reviewing `SA-0053` (PR #119). Not a regression — the
+attended terminal has had this exposure since `SA-0029` — but that PR added a
+*second* consumer, which is what makes it worth filing.
+
+`_describe_agent_event` clips `text` at 160 characters and `tool_use` at 120.
+Its `error`, `rate_limit` and fallback branches clip nothing and strip nothing.
+An `Agent` event carrying `{"type": "error", "error": "\x1b[2J\x1b]0;…\x07" +
+"A"*5000}` renders with the escape bytes intact, which reaches the operator's
+terminal as a screen clear and a title change. The content is authored inside a
+cell, and CLAUDE.md's governing line is that a cell is untrusted.
+
+`saffron watch` makes it worse in one specific way: it can replay a finished
+cell's output into a fresh terminal, long after the run, for an operator who
+was not watching when it happened.
+
+**Done looks like** the three unclipped branches clipped like the other two,
+and C0 control characters other than nothing at all stripped in `describe` —
+once, where the single renderer is, not in each caller.
+
+**Not** escaping in `watch.py`. That is a second renderer by another name, and
+it would leave the attended terminal — the one that reads this output during a
+live run — still exposed.
 
 ---
 

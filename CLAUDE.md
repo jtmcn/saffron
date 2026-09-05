@@ -52,6 +52,7 @@ uv run saffron replay <repo> <pr>          # v0: replay a merged PR, agent-free
 uv run saffron cell .saffron/specs/SA-0002-size-gate.md --repo .    # v0.5: one attended cell
 uv run saffron queue --repo .              # v0.5: what a batch would run; reconciles PR state first
 uv run saffron reconcile --repo .          # ask GitHub what happened to open pull requests
+uv run saffron watch SA-0002               # follow a task's event log; --no-follow for a finished one
 ```
 
 `saffron cell` needs `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) in the environment
