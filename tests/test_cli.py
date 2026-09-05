@@ -2011,6 +2011,101 @@ def test_resolving_a_queue_is_one_function_over_the_pinned_base(tmp_path, monkey
     ledger.close()
 
 
+def test_a_resolution_given_a_pinned_base_does_not_derive_one(tmp_path, monkeypatch):
+    """Handed the mirror, the origin and the base a night's readiness already
+    found, `_resolve_queue` uses them and reaches for none of the three
+    functions that would derive them again — the fix itself, asserted by
+    counting rather than by the returned fields happening to match."""
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-pinned-given")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+
+    # Derived once, for real, before the counters go on — the answer a
+    # night's readiness would already have handed in.
+    digest = hashlib.sha256(str(repo.resolve()).encode()).hexdigest()[:12]
+    mirror = cli.git_mirror.ensure_mirror(
+        repo, home / "mirrors" / f"{repo.name}-{digest}.git"
+    )
+    url = cli.package_phase.real_remote(repo)
+    _, base_sha = cli.package_phase.fetch_default_branch(mirror, url)
+
+    counts = {"mirror": 0, "remote": 0, "fetch": 0}
+
+    def _ensure(*a, **k):
+        counts["mirror"] += 1
+        return mirror
+
+    def _remote(*a, **k):
+        counts["remote"] += 1
+        return url
+
+    def _fetch(*a, **k):
+        counts["fetch"] += 1
+        return ("main", base_sha)
+
+    monkeypatch.setattr(cli.git_mirror, "ensure_mirror", _ensure)
+    monkeypatch.setattr(cli.package_phase, "real_remote", _remote)
+    monkeypatch.setattr(cli.package_phase, "fetch_default_branch", _fetch)
+
+    resolved = cli._resolve_queue(
+        repo,
+        home,
+        ledger,
+        stamp_orphaned=False,
+        pinned=cli.PinnedBase(mirror=mirror, url=url, base_sha=base_sha),
+    )
+
+    assert counts == {"mirror": 0, "remote": 0, "fetch": 0}
+    # A sanity check that the resolution still ran the scan over the pinned
+    # tree, not the main assertion above.
+    assert [c.spec.id for c in resolved.candidates] == ["SY-1"]
+    ledger.close()
+
+
+def test_a_resolution_given_no_pinned_base_still_derives_its_own(tmp_path, monkeypatch):
+    """Handed nothing, `_resolve_queue` derives the base itself exactly as it
+    does today — `saffron queue`'s own path, and the reason the argument is
+    optional rather than required: the default is the full derivation, not a
+    stub that returns something empty."""
+    # `pinned` exists and defaults to `None` — the shape this whole witness is
+    # about. A `_resolve_queue` with no such parameter at all (as it read
+    # before this change) has nothing here to be optional about.
+    assert inspect.signature(cli._resolve_queue).parameters["pinned"].default is None
+
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-pinned-none")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+
+    real_ensure = cli.git_mirror.ensure_mirror
+    real_remote = cli.package_phase.real_remote
+    real_fetch = cli.package_phase.fetch_default_branch
+    counts = {"mirror": 0, "remote": 0, "fetch": 0}
+
+    def _ensure(*a, **k):
+        counts["mirror"] += 1
+        return real_ensure(*a, **k)
+
+    def _remote(*a, **k):
+        counts["remote"] += 1
+        return real_remote(*a, **k)
+
+    def _fetch(*a, **k):
+        counts["fetch"] += 1
+        return real_fetch(*a, **k)
+
+    monkeypatch.setattr(cli.git_mirror, "ensure_mirror", _ensure)
+    monkeypatch.setattr(cli.package_phase, "real_remote", _remote)
+    monkeypatch.setattr(cli.package_phase, "fetch_default_branch", _fetch)
+
+    resolved = cli._resolve_queue(repo, home, ledger, stamp_orphaned=False)
+
+    assert counts == {"mirror": 1, "remote": 1, "fetch": 1}
+    assert [c.spec.id for c in resolved.candidates] == ["SY-1"]
+    ledger.close()
+
+
 def test_the_stamping_premise_is_a_required_argument(tmp_path):
     """A default here would decide the premise for whichever caller forgets
     to think about it — so there is no default to fall back on."""
@@ -2155,6 +2250,40 @@ def test_the_printed_queue_is_unchanged_by_the_extraction(tmp_path, capsys):
     )
 
 
+def test_the_printed_queue_is_unchanged_by_sharing_the_base(tmp_path, capsys):
+    """`saffron queue` prints exactly what it printed before — it is the
+    caller that gains nothing from sharing the pinned base with `saffron
+    batch`, and must lose nothing to it either. `_queue` never has a pinned
+    base to offer, so this is the same full derivation, producing the same
+    output, byte for byte."""
+    # The sharing mechanism exists — `_resolve_queue` now has a `pinned`
+    # parameter to *not* use — and `_queue` still never reaches for it.
+    assert inspect.signature(cli._resolve_queue).parameters["pinned"].default is None
+    assert not _queue_calls("_resolve_queue", keyword="pinned")
+
+    repo = _repo_with_spec(
+        tmp_path,
+        spec_text=_A_SPEC,
+        dirname="repo-unchanged-by-sharing",
+        extra_specs={"SY-3.md": "no frontmatter at all\n"},
+    )
+    home = tmp_path / "home"
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    out = capsys.readouterr().out
+    assert out == (
+        "reconcile: nothing moved\n"
+        "queue: 1 candidate(s)\n"
+        "  SY-1       priority=3  .saffron/specs/SY-1.md\n"
+        "refusals: 1\n"
+        "  .saffron/specs/SY-3.md: spec has no YAML frontmatter block\n"
+        "note: no GitHub slug could be read from the remote — the "
+        "open-pull-request and touches-overlap refusals did not run, so the "
+        "refusal list above is incomplete\n"
+    )
+
+
 def test_looking_at_the_queue_still_never_stamps_a_corpse(tmp_path):
     """The existing guarantee, re-asserted at the level where it could
     regress: the extraction is what put a stamping switch within reach of
@@ -2248,9 +2377,21 @@ def test_a_resolution_that_changed_nothing_still_says_so(capsys):
 def _readiness_passes(monkeypatch):
     """Readiness now runs *before* the scan (§4.4 step 1 ahead of step 4), so
     a test that fakes `_resolve_queue` and not this one never reaches the
-    scan at all."""
+    scan at all.
+
+    Carries real-shaped `mirror`/`url`/`base_sha` dummy values, not the bare
+    `ok=True` this once was: `_batch` now reads and shares them with
+    `_resolve_queue`, and a passing `Readiness` with none set is not a shape
+    `check_readiness` itself ever returns."""
     monkeypatch.setattr(
-        cli.preflight, "check_readiness", lambda *a, **k: preflight.Readiness(True)
+        cli.preflight,
+        "check_readiness",
+        lambda *a, **k: preflight.Readiness(
+            True,
+            mirror=Path("/tmp/pinned-mirror.git"),
+            url="https://github.com/o/r.git",
+            base_sha="a" * 40,
+        ),
     )
 
 
@@ -2287,7 +2428,7 @@ def test_saffron_batch_runs_a_night_with_the_defaults_4_2_1_fixes(
 
     captured: dict = {}
 
-    def _fake_resolve_queue(repo, home_arg, ledger, *, stamp_orphaned):
+    def _fake_resolve_queue(repo, home_arg, ledger, *, stamp_orphaned, pinned=None):
         captured["repo"] = repo
         return _fake_batch_resolution(tmp_path)
 
@@ -2455,7 +2596,12 @@ def test_the_night_is_given_a_real_readiness_check_not_the_loops_default(
 
     def _fake_check_readiness(repo_arg, mirror_path, *, scratch, home, token):
         seen.update(repo=repo_arg, mirror_path=mirror_path, home=home, token=token)
-        return preflight.Readiness(True)
+        return preflight.Readiness(
+            True,
+            mirror=Path("/tmp/pinned-mirror.git"),
+            url="https://github.com/o/r.git",
+            base_sha="a" * 40,
+        )
 
     monkeypatch.setattr(cli.preflight, "check_readiness", _fake_check_readiness)
 
@@ -2904,6 +3050,143 @@ def test_readiness_is_probed_before_the_scan_that_depends_on_it(tmp_path, monkey
     assert order == ["readiness"]
 
 
+def test_readiness_still_runs_before_the_scan_it_now_feeds(tmp_path, monkeypatch):
+    """The order is not traded away for the sharing: readiness still runs
+    first, and what it found is exactly what `_resolve_queue` receives — the
+    pinned base travels downward, from readiness into the scan, never
+    upward."""
+    home = tmp_path / "home"
+    order: list[str] = []
+    found = preflight.Readiness(
+        True,
+        mirror=Path("/tmp/pinned-mirror.git"),
+        url="https://github.com/o/r.git",
+        base_sha="b" * 40,
+    )
+
+    def _readiness(*_a, **_k):
+        order.append("readiness")
+        return found
+
+    seen: dict = {}
+
+    def _resolve(repo, home_arg, ledger, *, stamp_orphaned, pinned=None):
+        order.append("resolve")
+        seen["pinned"] = pinned
+        return _fake_batch_resolution(tmp_path)
+
+    monkeypatch.setattr(cli.preflight, "check_readiness", _readiness)
+    monkeypatch.setattr(cli, "_resolve_queue", _resolve)
+    monkeypatch.setattr(cli, "run_batch", lambda *a, **k: "DRAINED")
+
+    assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 0
+
+    assert order == ["readiness", "resolve"]
+    pinned = seen["pinned"]
+    assert pinned is not None
+    assert pinned.mirror == found.mirror
+    assert pinned.url == found.url
+    assert pinned.base_sha == found.base_sha
+
+
+def test_a_failed_readiness_still_scans_nothing(tmp_path, monkeypatch):
+    """A readiness failure still means no scan at all — not a scan given a
+    half-built base. The three derivation calls run once, for readiness, and
+    `_resolve_queue` never runs at all."""
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-failed-readiness")
+    home = tmp_path / "home"
+
+    real_ensure = cli.git_mirror.ensure_mirror
+    real_remote = cli.package_phase.real_remote
+    counts = {"mirror": 0, "remote": 0, "fetch": 0}
+
+    def _ensure(*a, **k):
+        counts["mirror"] += 1
+        return real_ensure(*a, **k)
+
+    def _remote(*a, **k):
+        counts["remote"] += 1
+        return real_remote(*a, **k)
+
+    def _fetch(*a, **k):
+        counts["fetch"] += 1
+        raise package.PackageError("no default branch could be fetched")
+
+    monkeypatch.setattr(cli.git_mirror, "ensure_mirror", _ensure)
+    monkeypatch.setattr(cli.package_phase, "real_remote", _remote)
+    monkeypatch.setattr(cli.package_phase, "fetch_default_branch", _fetch)
+
+    def _fake_check_readiness(repo_arg, mirror_path, *, scratch, home, token):
+        mirror = cli.git_mirror.ensure_mirror(repo_arg, mirror_path)
+        url = cli.package_phase.real_remote(repo_arg)
+        try:
+            cli.package_phase.fetch_default_branch(mirror, url)
+        except package.PackageError as exc:
+            return preflight.Readiness(False, "default_branch", str(exc))
+        raise AssertionError("fetch_default_branch should have raised")
+
+    monkeypatch.setattr(cli.preflight, "check_readiness", _fake_check_readiness)
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: pytest.fail("the scan ran")
+    )
+    # Not a scan given a half-built base: on a failed readiness, `_batch`
+    # must not even build the `PinnedBase` it would otherwise share —
+    # asserted by making its construction fail loudly if reached at all.
+    monkeypatch.setattr(
+        cli,
+        "PinnedBase",
+        lambda *a, **k: pytest.fail(
+            "PinnedBase must not be built when readiness failed"
+        ),
+    )
+
+    assert main(["--home", str(home), "batch", "--repo", str(repo)]) == 2
+    assert counts == {"mirror": 1, "remote": 1, "fetch": 1}
+
+
+def test_a_night_pins_its_base_once(tmp_path, monkeypatch):
+    """One night fetches the mirror once. `ensure_mirror`, `real_remote` and
+    `fetch_default_branch` each run exactly once across the whole `saffron
+    batch` command, end to end — the defect itself, and the only witness that
+    measures it."""
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-one-night")
+    home = tmp_path / "home"
+
+    real_ensure = cli.git_mirror.ensure_mirror
+    real_remote = cli.package_phase.real_remote
+    real_fetch = cli.package_phase.fetch_default_branch
+    counts = {"mirror": 0, "remote": 0, "fetch": 0}
+
+    def _ensure(*a, **k):
+        counts["mirror"] += 1
+        return real_ensure(*a, **k)
+
+    def _remote(*a, **k):
+        counts["remote"] += 1
+        return real_remote(*a, **k)
+
+    def _fetch(*a, **k):
+        counts["fetch"] += 1
+        return real_fetch(*a, **k)
+
+    monkeypatch.setattr(cli.git_mirror, "ensure_mirror", _ensure)
+    monkeypatch.setattr(cli.package_phase, "real_remote", _remote)
+    monkeypatch.setattr(cli.package_phase, "fetch_default_branch", _fetch)
+
+    def _fake_check_readiness(repo_arg, mirror_path, *, scratch, home, token):
+        mirror = cli.git_mirror.ensure_mirror(repo_arg, mirror_path)
+        url = cli.package_phase.real_remote(repo_arg)
+        _, base_sha = cli.package_phase.fetch_default_branch(mirror, url)
+        return preflight.Readiness(True, mirror=mirror, url=url, base_sha=base_sha)
+
+    monkeypatch.setattr(cli.preflight, "check_readiness", _fake_check_readiness)
+    monkeypatch.setattr(cli, "run_batch", lambda *a, **k: "DRAINED")
+
+    assert main(["--home", str(home), "batch", "--repo", str(repo)]) == 0
+
+    assert counts == {"mirror": 1, "remote": 1, "fetch": 1}
+
+
 def test_an_unready_night_still_leaves_a_row_saying_it_was_attempted(
     tmp_path, monkeypatch, capsys
 ):
@@ -2997,6 +3280,64 @@ def test_a_night_says_what_it_set_out_to_do_before_what_became_of_it(
     printed = capsys.readouterr().out
     assert "budget $25.00" in printed
     assert "until none" in printed
+
+
+def test_the_printed_night_is_unchanged_by_sharing_the_base(
+    tmp_path, monkeypatch, capsys
+):
+    """`saffron batch` prints exactly what it printed before — the plan
+    header, the reconcile summary, the refusals and the scan gaps. The
+    night's log is its only human-readable record, so a refactor that
+    quietly drops a line from it is not a refactor."""
+    refusal_path = tmp_path / "SY-7.md"
+    resolved = cli.QueueResolution(
+        repo_id=1,
+        mirror=tmp_path / "m.git",
+        base_sha="a" * 40,
+        repo_slug="o/r",
+        exported=tmp_path,
+        candidates=[
+            Candidate(
+                path=Path("SY-1.md"),
+                spec=intake.Spec(
+                    id="SY-1", title="t", type="chore", touches=["src/**"]
+                ),
+                spec_sha="s" * 64,
+                task_id=None,
+            )
+        ],
+        refusals=[Refusal(path=refusal_path, reason="depends_on SY-9000 is unknown")],
+        reconciled=cli.ReconcileResult(merged=[3]),
+        gh_failures=["gh: command not found"],
+        policy_unread=["policy.yaml: no such file"],
+    )
+    _readiness_passes(monkeypatch)
+    monkeypatch.setattr(cli, "_resolve_queue", lambda *a, **k: resolved)
+    monkeypatch.setattr(cli, "_batch_runner", lambda *a, **k: lambda _c: None)
+    monkeypatch.setattr(cli, "run_batch", lambda *a, **k: "DRAINED")
+
+    args = argparse.Namespace(
+        repo=tmp_path, home=tmp_path / "home", budget=50.0, until=None
+    )
+    ledger = Ledger(tmp_path / "l.db")
+    assert cli._batch(args, ledger, tmp_path / "out") == 0
+    ledger.close()
+
+    printed = capsys.readouterr().out
+    assert printed == (
+        "reconcile: task 3 → MERGED\n"
+        "batch: 1 candidate(s), budget $50.00, until none\n"
+        f"  {'SY-1':<10} priority=3\n"
+        "refusals: 1\n"
+        f"  {refusal_path}: depends_on SY-9000 is unknown\n"
+        "note: gh could not be run (gh: command not found) — the "
+        "open-pull-request and touches-overlap refusals did not run, so the "
+        "refusal list above is incomplete\n"
+        "note: policy.yaml at this base_sha could not be read — no spec "
+        "was checked against the protected list, so the refusal list "
+        "above is incomplete\n"
+        "batch: DRAINED\n"
+    )
 
 
 @pytest.mark.parametrize("value", ["6:30pm", "06:30:00", "0630", "", "25:00", "06:99"])

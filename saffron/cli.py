@@ -665,12 +665,31 @@ class QueueResolution:
     policy_unread: list[str]
 
 
+@dataclass(frozen=True)
+class PinnedBase:
+    """The tree one night is pinned to — one fact about one repo, carried
+    together rather than as three adjacent parameters. `check_readiness`
+    already derives exactly these three values and returns them on
+    `Readiness`; this is what a caller hands back to `_resolve_queue` so the
+    derivation happens once per run, not once per caller.
+
+    Not three positional fields for the reason `check_readiness` itself is
+    keyword-only about `scratch`/`home`: this repo's history has an instance
+    of adjacent same-typed parameters transposing and type-checking cleanly
+    anyway."""
+
+    mirror: Path
+    url: str
+    base_sha: str
+
+
 def _resolve_queue(
     repo: Path,
     home: Path,
     ledger: Ledger,
     *,
     stamp_orphaned: bool,
+    pinned: PinnedBase | None = None,
 ) -> QueueResolution:
     """Resolve one repo's queue over its pinned `base_sha` — the mirror, the
     pinned base, the reconcile, the slug, the export, and the scan over that
@@ -686,6 +705,15 @@ def _resolve_queue(
     queue` passes: an operator can run this at will, mid-phase included, and
     must never have a live task stamped a corpse for having been looked at.
 
+    `pinned` is optional, and optional is the decision: given one, this uses
+    it and derives nothing. Given none — `saffron queue`'s own call, always —
+    it derives its own exactly as it always has, because that command runs no
+    readiness check and has no pinned base to offer. `saffron batch` is the
+    one caller with something to share: it already paid for `ensure_mirror`,
+    `real_remote` and `fetch_default_branch` inside `check_readiness`, and
+    passing that answer down here is what stops this function from paying for
+    them again, seconds later, against the same remote.
+
     This writes to the ledger, which a function named for resolving a queue
     does not obviously do: `reconcile`'s pull-request half runs first, so the
     scan filters on current state rather than yesterday's.
@@ -695,12 +723,15 @@ def _resolve_queue(
     """
     repo = repo.resolve()
 
-    digest = hashlib.sha256(str(repo).encode()).hexdigest()[:12]
-    mirror = git_mirror.ensure_mirror(
-        repo, home / "mirrors" / f"{repo.name}-{digest}.git"
-    )
-    url = package_phase.real_remote(repo)
-    _, base_sha = package_phase.fetch_default_branch(mirror, url)
+    if pinned is not None:
+        mirror, url, base_sha = pinned.mirror, pinned.url, pinned.base_sha
+    else:
+        digest = hashlib.sha256(str(repo).encode()).hexdigest()[:12]
+        mirror = git_mirror.ensure_mirror(
+            repo, home / "mirrors" / f"{repo.name}-{digest}.git"
+        )
+        url = package_phase.real_remote(repo)
+        _, base_sha = package_phase.fetch_default_branch(mirror, url)
 
     repo_id = ledger.resolve_repo_id(url)
 
@@ -902,7 +933,20 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     candidates: list[Candidate] = []
     runner: Callable[[Candidate], CellOutcome] = _no_candidate_should_run
     if readiness.ok:
-        resolved = _resolve_queue(repo, args.home, ledger, stamp_orphaned=True)
+        # Readiness already paid for these three reads; a passing `Readiness`
+        # always carries all three (`preflight.check_readiness`'s own
+        # contract), so this narrows what the type checker otherwise sees as
+        # `Path | None` / `str | None` rather than deriving them a second
+        # time.
+        assert readiness.mirror is not None
+        assert readiness.url is not None
+        assert readiness.base_sha is not None
+        pinned = PinnedBase(
+            mirror=readiness.mirror, url=readiness.url, base_sha=readiness.base_sha
+        )
+        resolved = _resolve_queue(
+            repo, args.home, ledger, stamp_orphaned=True, pinned=pinned
+        )
 
         # The night says what its own scan could not check. `_resolve_queue`
         # leaves reporting to its caller, and the attended caller discharges
@@ -913,9 +957,11 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         _print_reconcile_summary(resolved.reconciled)
         _print_batch_plan(resolved, budget_usd=args.budget, until=until)
 
-        url = package_phase.real_remote(repo)
+        # The same remote `readiness` already read — reused, not re-derived,
+        # for the same reason `_resolve_queue` above no longer derives it
+        # either.
         runner = _batch_runner(
-            resolved, repo=repo, ledger=ledger, out_dir=out_dir, url=url
+            resolved, repo=repo, ledger=ledger, out_dir=out_dir, url=pinned.url
         )
         candidates = resolved.candidates
 
