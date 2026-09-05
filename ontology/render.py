@@ -43,8 +43,9 @@ def members(class_name: str, *, vocabulary: Path) -> list[str]:
     return sorted(names, key=first_offset)
 
 
-# Measured, not chosen: greedy-wrapping the five spans reproduces the committed
-# bytes at 82, 83 and 84 and at no other width (76-92 searched).
+# Measured, not chosen: greedy-wrapping the six spans reproduces the committed
+# bytes at 82, 83 and 84 and at no other width (76-92 searched). Re-measured
+# when the batch stop reasons joined: still those three widths and no others.
 _WIDTH = 83
 
 # CONTEXT.md bold term -> (ontology class, join style). The join styles are the
@@ -100,7 +101,7 @@ def render_context(
     including the em dash, the connective prose and the sentences after, is
     left exactly as committed.
 
-    Three of the five sets wrap across source lines, so the rewritten span is
+    Three of the six sets wrap across source lines, so the rewritten span is
     re-wrapped at the committed width and continuation indent. Emitting it on
     one line reproduces the members correctly and the bytes wrongly.
     """

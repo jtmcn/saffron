@@ -5,7 +5,7 @@ an agent in an isolated cell, drives it through a hard gate loop, subjects the d
 adversarial critic, and packages the result. `DESIGN.md` is authoritative for what the system
 does; `CONTEXT.md` is authoritative for what the words mean. Both are read constantly — cite
 `DESIGN.md` by section number (`§5.4`), and use `CONTEXT.md`'s vocabulary exactly. For the
-five closed sets `tests/ontology/test_vocabulary_agrees_with_context.py` names,
+closed sets `tests/ontology/test_vocabulary_agrees_with_context.py` names,
 `ontology/saffron.ttl` is authoritative and both `CONTEXT.md` and
 `ontology/shapes/saffron-shapes.ttl` are generated from it: edit the vocabulary and run
 `uv run python -m ontology.render`. Two shape lists stay hand-maintained because the

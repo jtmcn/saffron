@@ -3137,20 +3137,20 @@ written down as one.
 (`alwaysBlocking`/`blockingWhenElevated`/`advisory`) and the rebuttal roles
 (`disputes`/`concedes`, `confirms`/`withdraws`) are closed by `sh:in` in
 `ontology/shapes/saffron-shapes.ttl` and enforced by the blocking `shacl` gate.
-None is among the five sets Phase A generates, because `CONTEXT.md` does not
-enumerate any of them — so `test_vocabulary_agrees_with_context` cannot see them
-and `ontology/render.py` does not write them.
+None is among the generated sets, because `CONTEXT.md` does not enumerate any of
+them — so `test_vocabulary_agrees_with_context` cannot see them and
+`ontology/render.py` does not write them.
 
-They are therefore in exactly the state the five were in before Phase A: a closed
-set with one hand-maintained copy per file, and no check that the copies agree.
-The difference is that the second copy has not been written yet, so nothing has
-drifted. This is a deferred decision, not a live defect.
+They are therefore in exactly the state the generated sets were in before Phase
+A: a closed set with one hand-maintained copy per file, and no check that the
+copies agree. The difference is that the second copy has not been written yet,
+so nothing has drifted. This is a deferred decision, not a live defect.
 
 **Done looks like** a decision, in writing: either `CONTEXT.md` enumerates them
 and they join `CLOSED_SETS`, `SETS` and `SHAPE_SETS` — three lines and a
 regenerate — or a stated reason why they are shape-internal and not vocabulary,
 of the kind §4 already gives for repo-defined gate names. The reason matters more
-than the choice; `test_the_generator_and_the_cross_check_name_the_same_five_sets`
+than the choice; `test_the_generator_and_the_cross_check_name_the_same_sets`
 will hold whichever way it goes.
 
 ---

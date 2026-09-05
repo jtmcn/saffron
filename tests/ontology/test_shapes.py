@@ -179,3 +179,32 @@ def test_a_batch_still_running_has_no_stop_reason_and_that_is_legal(shapes_graph
     )
     conforms, _, text = validate(data, shacl_graph=shapes_graph, advanced=True)
     assert conforms, text
+
+
+def test_a_reason_that_claims_the_class_is_still_refused_by_the_enumeration(
+    shapes_graph,
+):
+    """The one case where `sh:in` is the constraint doing the work. Measured:
+    deleting `sh:in` from `BatchShape` left every case above passing, because
+    `sh:class` alone rejects them — `CANCELLED` is undeclared, and `EXHAUSTED`
+    and `ORPHANED` are typed `EndState`. So the test named for the enumeration
+    survived its own mutant. A value that declares itself a `BatchStopReason`
+    clears `sh:class`, which leaves the enumeration as the only thing that can
+    refuse it — and refusing it is what closes the set.
+    """
+    data = rdflib.Graph()
+    data.parse(VOCABULARY, format="turtle")
+    data.parse(
+        data=f"""@prefix saffron: <{NS}> .
+        @prefix : <https://saffron.dev/data/> .
+        :CANCELLED a saffron:BatchStopReason .
+        :b a saffron:Batch ; saffron:budgetUsd 50.0 ;
+           saffron:endedBecause :CANCELLED .""",
+        format="turtle",
+    )
+    conforms, results, text = validate(data, shacl_graph=shapes_graph, advanced=True)
+    assert not conforms, text
+    # On the component, not the message: `sh:class` rejecting this would read as
+    # a pass to a membership check on the text, which is the trap above.
+    components = set(results.objects(None, SH.sourceConstraintComponent))
+    assert components == {SH.InConstraintComponent}, text
