@@ -1723,22 +1723,25 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-05, a tenth time, and the churn is the practice
-    rather than a problem: this test exists to be re-anchored, and every spec
-    that lands *or retires* moves it by construction.
+    """Re-measured 2026-09-05, an eleventh time. `SA-0055` merged and retired,
+    so the live corpus is empty and the queue this repo would run tonight is
+    nothing.
 
-    The batch stack merged and its seven specs retired to `done/`, so the live
-    corpus is one spec with no dependencies: `SA-0055`, a candidate, and
-    nothing refused. The weakest shape this anchor has taken — a single root
-    and an empty refusal list — and worth saying why it is kept anyway. It is
-    the *only* assertion that the real corpus parses at all: `build_queue` runs
-    over the committed files rather than fixtures, so a spec whose frontmatter
-    stops loading fails here and in no other test.
+    An empty queue is the weakest thing this anchor could assert, and "0 == 0"
+    is exactly the shape that passes when the scan is broken — so what it
+    asserts now is not the emptiness but *why* it is empty: the top level holds
+    no spec, `done/` holds many, and `discover_specs` globs non-recursively, so
+    a retired corpus is invisible to a scan pointed at its parent. That is a
+    real property with a real failure mode — a recursive glob would offer forty
+    shipped specs as tonight's work — and it is the one this file can still
+    measure while nothing is in flight.
+
+    It re-anchors to a candidate list again the moment a spec is filed.
 
     The dependency-chain assertion this carried through nine anchorings is gone
-    with the chain that justified it. `test_a_parent_with_no_task_names_that_
-    rather_than_a_state` pins that behaviour on fixtures, where it belongs and
-    where it does not move every time a spec merges.
+    with the chain that justified it, and the corpus-parses property it briefly
+    carried belongs to `test_no_real_spec_is_refused_on_its_own_acceptance_
+    criteria`, which moves `done/` up and scans all of it.
 
     Note what this does *not* exercise. `_fake_gh([])` means `open_prs` is
     empty, so the open-pull-request overlap refusal never runs here — which is
@@ -1754,12 +1757,14 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         directory, repo_id, ledger, repo_slug="joel/saffron", gh=_fake_gh([])
     )
 
-    assert [c.spec.id for c in candidates] == ["SA-0055"]
+    assert candidates == []
     assert refusals == []
-    # Not a bare count: an empty corpus would also give one candidate and no
-    # refusals if `discover_specs` silently found nothing, and that is the way
-    # this assertion could go quiet without changing.
-    assert len(list(directory.glob("*.md"))) == 1
+    # Why it is empty, not merely that it is. Nothing in flight at the top
+    # level, plenty shipped one directory down, and the scan sees only the
+    # first — the non-recursive glob, which is the whole reason `done/`
+    # retires a spec rather than deleting it.
+    assert list(directory.glob("*.md")) == []
+    assert len(list((directory / "done").glob("*.md"))) > 30
 
 
 def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger):
