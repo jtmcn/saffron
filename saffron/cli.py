@@ -10,11 +10,13 @@ import tempfile
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from saffron import preflight
+from saffron.batch import run_batch
 from saffron.cell.session import _SHA as _RESOLVED_SHA
-from saffron.cell.session import CellSpec, run_one_cell
+from saffron.cell.session import CellOutcome, CellSpec, run_one_cell
 from saffron.events import Event, EventLog, Preflight, describe
 from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
@@ -99,6 +101,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     queue_parser.add_argument("--repo", type=Path, default=Path.cwd())
 
+    batch_parser = subcommands.add_parser(
+        "batch", help="run one repo's night, unattended (§4.2.1)"
+    )
+    batch_parser.add_argument("--repo", type=Path, default=Path.cwd())
+    # Sized against the queue (§7.1's own recommendation), not against
+    # capacity — this is not the per-task ceiling `saffron cell --budget`
+    # overrides, it is the whole night's.
+    batch_parser.add_argument("--budget", type=float, default=50.0)
+    # `HH:MM`, resolved to its next occurrence by `_resolve_until` — a
+    # duration would need no "which day" question at all, and a time of day
+    # is the shape an operator actually types before going to bed.
+    batch_parser.add_argument("--until", type=str, default=None)
+
     reconcile_parser = subcommands.add_parser(
         "reconcile",
         help="ask GitHub what happened to this repo's open pull requests",
@@ -135,6 +150,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "cell":
             return _run_cell(args, ledger, out_dir)
+
+        if args.command == "batch":
+            return _batch(args, ledger, out_dir)
 
         if args.command == "queue":
             return _queue(args, ledger)
@@ -516,6 +534,104 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     return CELL_EXIT.get(outcome.state, 1)
 
 
+def _batch_runner(
+    resolved: QueueResolution,
+    *,
+    repo: Path,
+    ledger: Ledger,
+    out_dir: Path,
+    url: str,
+) -> Callable[[Candidate], CellOutcome]:
+    """What turns a candidate into a cell (`run_batch`'s own phrase for the
+    callable it takes with no default) — `_run_cell`'s shape, reused rather
+    than reimplemented: the same `_resolve_stacked_on` call, the same
+    `CellSpec` construction, the same `run_one_cell` call and, on
+    `READY_FOR_REVIEW`, the same `package_phase.package` call.
+
+    Two things differ from the attended path, and only two. The spec comes
+    from a candidate the scan already resolved, not a path an operator
+    typed — `resolved.mirror`, `resolved.base_sha` and `resolved.repo_id` are
+    this run's own, paid for once by `_resolve_queue` rather than once per
+    task. And the ceilings come straight off the spec's own fields: a batch
+    has no per-task flag to override them with, so there is nothing for
+    `_ceilings` to arbitrate.
+
+    `outcome.state` is overwritten with the packaging result's own state when
+    packaging runs, so the `CellOutcome` this hands back to `run_batch`
+    reflects what actually happened to the task — `MERGE_FAILED` included —
+    rather than the pre-packaging `READY_FOR_REVIEW` every packaged task
+    would otherwise report to the breaker.
+    """
+
+    def run(candidate: Candidate) -> CellOutcome:
+        spec = candidate.spec
+        task_dir = out_dir / spec.id
+        event_log = EventLog(task_dir)
+
+        def emit(event: Event) -> None:
+            line = describe(event)
+            if line:
+                print(line)
+            event_log.append(event)
+
+        stacked_on, target_branch = _resolve_stacked_on(
+            ledger,
+            resolved.repo_id,
+            spec.depends_on,
+            mirror=resolved.mirror,
+            url=url,
+            spec_id=spec.id,
+            emit=emit,
+        )
+        if stacked_on is not None:
+            print(f"stacked on {target_branch} @ {stacked_on[:12]}")
+
+        cell_spec = CellSpec(
+            spec_id=spec.id,
+            spec_sha=candidate.spec_sha,
+            branch=f"saffron/{spec.id}",
+            base_sha=resolved.base_sha,
+            touches=spec.touches,
+            spec_type=spec.type,
+            body=spec.body,
+            forbidden=spec.forbidden,
+            acceptance=spec.acceptance,
+            risk=spec.risk,
+            stacked_on=stacked_on,
+            budget_usd=spec.budget_usd,
+            max_attempts=spec.max_attempts,
+            max_turns=spec.max_turns,
+        )
+        outcome = run_one_cell(
+            cell_spec,
+            repo=repo,
+            mirror=resolved.mirror,
+            ledger=ledger,
+            out_dir=out_dir,
+            emit=emit,
+        )
+        if outcome.state == "READY_FOR_REVIEW":
+            result = package_phase.package(
+                outcome,
+                spec=spec,
+                repo=repo,
+                mirror=resolved.mirror,
+                image=repo_image.cell_tag(repo),
+                ledger=ledger,
+                out_dir=out_dir,
+                token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+                parent_branch=target_branch,
+                emit=emit,
+            )
+            print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
+            outcome.state = result.state
+        else:
+            print(f"{spec.id:<10} {outcome.state}")
+        return outcome
+
+    return run
+
+
 @dataclass
 class QueueResolution:
     """What resolving one repo's queue over the pinned base produced —
@@ -638,6 +754,90 @@ def _resolve_queue(
         gh_failures=gh_failures,
         policy_unread=policy_unread,
     )
+
+
+def _resolve_until(until: str, now: datetime) -> datetime:
+    """`HH:MM` to its next occurrence from `now` — a time of day, not a
+    duration, so `06:30` resolved at 22:00 means tomorrow morning and `23:00`
+    resolved at 22:00 means tonight. A time no later than `now` always rolls
+    to tomorrow: the case an operator hits every night they ask for the
+    morning, since the hour they type is almost always earlier in the day
+    than the hour they are typing it."""
+    hour, minute = (int(part) for part in until.split(":"))
+    candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate <= now:
+        candidate += timedelta(days=1)
+    return candidate
+
+
+def _mirror_path(repo: Path, home: Path) -> Path:
+    """The same digest-named path `_resolve_queue` and `_run_cell` each
+    compute inline, factored out for the one caller that needs it a third
+    time: `_batch`'s readiness check, which fetches this run's own mirror
+    again rather than trusting the loop's default to have one."""
+    digest = hashlib.sha256(str(repo).encode()).hexdigest()[:12]
+    return home / "mirrors" / f"{repo.name}-{digest}.git"
+
+
+def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
+    """`saffron batch --repo . --budget 50 --until 06:30` — §4.2.1's night,
+    driven. Resolves the queue, asserting the batch-only premise `saffron
+    queue` refuses (`stamp_orphaned=True`: one batch runs at a time, so an
+    in-flight row found here is a corpse, not live work an operator is
+    watching); binds a real readiness check to this run's own paths and
+    token, never the loop's "proceed" default; builds the adapter that turns
+    a candidate into a cell (`_batch_runner`); and hands all three to
+    `saffron.batch.run_batch`, which owns the loop itself (`saffron/batch.py`
+    is forbidden here).
+
+    Exit codes are `run_batch`'s own four stop reasons, mapped per §4.2.1:
+    `0` for `DRAINED`, `BUDGET` and `UNTIL`, `2` for `INFRASTRUCTURE` —
+    never `1`, which is reserved for a task's own failure and a batch is not
+    a task. A readiness failure is a plain `INFRASTRUCTURE` from
+    `run_batch`'s point of view, so the step and detail it found are read
+    back out of the one `Readiness` this call recorded, not out of the stop
+    reason itself.
+    """
+    repo = args.repo.resolve()
+    until = _resolve_until(args.until, datetime.now()) if args.until else None
+
+    resolved = _resolve_queue(repo, args.home, ledger, stamp_orphaned=True)
+    url = package_phase.real_remote(repo)
+    runner = _batch_runner(resolved, repo=repo, ledger=ledger, out_dir=out_dir, url=url)
+
+    readiness_seen: list[preflight.Readiness] = []
+
+    def readiness_check() -> preflight.Readiness:
+        with tempfile.TemporaryDirectory() as scratch:
+            result = preflight.check_readiness(
+                repo,
+                _mirror_path(repo, args.home),
+                Path(scratch),
+                args.home,
+                token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+            )
+        readiness_seen.append(result)
+        return result
+
+    stop = run_batch(
+        resolved.candidates,
+        ledger,
+        args.budget,
+        until,
+        runner,
+        readiness_check=readiness_check,
+    )
+
+    if stop != "INFRASTRUCTURE":
+        print(f"batch: {stop}")
+        return 0
+
+    if readiness_seen and not readiness_seen[-1].ok:
+        failed = readiness_seen[-1]
+        print(f"batch: readiness failed at {failed.step}: {failed.detail}")
+    else:
+        print("batch: infrastructure failed")
+    return 2
 
 
 def _queue(args: argparse.Namespace, ledger: Ledger) -> int:

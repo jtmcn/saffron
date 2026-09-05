@@ -8,6 +8,7 @@ import inspect
 import json
 import subprocess
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ from saffron.events import PhaseStart, Preflight, describe, read_log
 from saffron.ledger import Ledger
 from saffron.phases import package
 from saffron.reconcile import ReconcileResult
+from saffron.scheduler import Candidate
 from tests.conftest import HostToolExecInTest
 from tests.test_replay import target  # noqa: F401 — a pytest fixture, used by name
 
@@ -2086,19 +2088,18 @@ def test_told_not_to_stamp_it_leaves_an_in_flight_task_alone(tmp_path):
     ledger.close()
 
 
-def _queue_calls(name, *, keyword=None, value=None):
-    """Whether `cli._queue`'s body contains a call to `name` — and, if a
-    `keyword` is given, a literal keyword argument matching `value`.
+def _source_calls(fn, name, *, keyword=None, value=None):
+    """Whether `fn`'s body contains a call to `name` — and, if a `keyword` is
+    given, a literal keyword argument matching `value`.
 
     AST over `inspect.getsource`, not a substring search — a comment or a
     docstring merely naming `name` must not satisfy this — and not a call
-    into the real function either: this is a structural check that the
-    *printing* command still routes through the extraction, precisely so
-    that reverting the extraction (and nothing else) makes it false. This
-    file's own `test_no_signature_in_the_package_still_takes_a_watch` is the
-    precedent for reading source this way rather than importing and calling
-    it."""
-    tree = ast.parse(inspect.getsource(cli._queue))
+    into the real function either: this is a structural check that a
+    *caller* still routes through the named function, precisely so that
+    reverting that routing (and nothing else) makes it false. This file's own
+    `test_no_signature_in_the_package_still_takes_a_watch` is the precedent
+    for reading source this way rather than importing and calling it."""
+    tree = ast.parse(inspect.getsource(fn))
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -2112,6 +2113,10 @@ def _queue_calls(name, *, keyword=None, value=None):
             if kw.arg == keyword and isinstance(kw.value, ast.Constant):
                 return kw.value.value == value
     return False
+
+
+def _queue_calls(name, *, keyword=None, value=None):
+    return _source_calls(cli._queue, name, keyword=keyword, value=value)
 
 
 def test_the_printed_queue_is_unchanged_by_the_extraction(tmp_path, capsys):
@@ -2236,3 +2241,362 @@ def test_a_resolution_that_changed_nothing_still_says_so(capsys):
     cli._print_reconcile_summary(ReconcileResult())
 
     assert "reconcile: nothing moved" in capsys.readouterr().out
+
+
+def _fake_batch_resolution(tmp_path, *, repo_id=None, candidates=None):
+    """The empty-queue `QueueResolution` every `saffron batch` witness below
+    needs when it fakes `_resolve_queue` out entirely — real fields, no real
+    scan, so `run_batch` (real or faked in turn) has something to iterate
+    over that is never more than the caller asked for."""
+    return cli.QueueResolution(
+        repo_id=repo_id,
+        mirror=tmp_path / "m.git",
+        base_sha="a" * 40,
+        repo_slug=None,
+        exported=tmp_path,
+        candidates=candidates or [],
+        refusals=[],
+        reconciled=cli.ReconcileResult(),
+        gh_failures=[],
+        policy_unread=[],
+    )
+
+
+def test_saffron_batch_runs_a_night_with_the_defaults_4_2_1_fixes(
+    tmp_path, monkeypatch
+):
+    """The command runs a night against one repo, resolving its queue
+    through `_resolve_queue` — the function `SA-0051` extracted — and
+    handing it to `run_batch`. Its two defaults are the ones §4.2.1 fixes:
+    `--repo` defaults to the working directory, matching the attended
+    `saffron cell` beside it, and `--budget` defaults to 50, sized against
+    the queue rather than against capacity."""
+    home = tmp_path / "home"
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict = {}
+
+    def _fake_resolve_queue(repo, home_arg, ledger, *, stamp_orphaned):
+        captured["repo"] = repo
+        return _fake_batch_resolution(tmp_path)
+
+    def _fake_run_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        captured["candidates"] = candidates
+        captured["budget_usd"] = budget_usd
+        captured["until"] = until
+        return "DRAINED"
+
+    monkeypatch.setattr(cli, "_resolve_queue", _fake_resolve_queue)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(cli, "run_batch", _fake_run_batch)
+
+    assert main(["--home", str(home), "batch"]) == 0
+
+    assert captured["repo"] == tmp_path.resolve()
+    assert captured["budget_usd"] == 50.0
+    assert captured["until"] is None
+
+
+def test_the_batch_scan_asks_for_the_stamping_the_attended_one_refuses():
+    """§4.2.1's batch-scan premise: one batch runs at a time, so an
+    in-flight row found while scanning tonight's queue is a corpse a dead
+    scan left behind, not live work an operator is watching, and is stamped
+    `ORPHANED` before the queue is filtered — `stamp_orphaned=True`.
+    `saffron queue` asserts the opposite argument for the opposite reason
+    (`test_looking_at_the_queue_still_never_stamps_a_corpse`); the behaviour
+    itself was proven where `_resolve_queue` was built, not here."""
+    assert _source_calls(
+        cli._batch, "_resolve_queue", keyword="stamp_orphaned", value=True
+    )
+
+
+def test_a_deadline_earlier_than_now_resolves_to_tomorrow():
+    """`06:30` is a time of day, not a duration: resolved at 22:00 the same
+    night it means 06:30 *tomorrow*, not a window that closed sixteen hours
+    ago. The case an operator hits every night they ask for the morning.
+    `23:00` resolved at the same 22:00 is still tonight, the other half of
+    the same rule."""
+    now = datetime(2026, 9, 5, 22, 0)
+
+    assert cli._resolve_until("06:30", now) == datetime(2026, 9, 6, 6, 30)
+    assert cli._resolve_until("23:00", now) == datetime(2026, 9, 5, 23, 0)
+
+
+def test_the_batch_command_offers_no_concurrency_or_multi_repo_flag(capsys):
+    """Neither a concurrency flag nor a multi-repo flag exists on `batch`
+    itself. §4.2.1 refuses both by name — a flag for a knob with one
+    position is the same defect in a command that item 18 found in a
+    dataclass.
+
+    Read off `batch --help`'s own usage line, not off a generic "unknown
+    argument" `SystemExit` — that `SystemExit` fires just as readily for an
+    unrecognized *subcommand*, so it would pass just as green if `batch`
+    did not exist at all. `--help` exits `0` only when `batch` is a real
+    subcommand parsed by its own parser (an unknown subcommand exits `2`
+    instead, `saffron: error: argument command: invalid choice`), so the
+    zero here is itself proof that `batch`'s own argument set — not some
+    other command's — was read.
+    """
+    with pytest.raises(SystemExit) as excinfo:
+        main(["batch", "--help"])
+    assert excinfo.value.code == 0
+
+    out = capsys.readouterr().out
+    assert "--concurrency" not in out
+    assert "--repos" not in out
+    # The positive control: the three flags §4.2.1 does name are there.
+    assert "--repo" in out
+    assert "--budget" in out
+    assert "--until" in out
+
+
+def test_the_three_ordinary_stop_reasons_all_exit_zero(tmp_path, monkeypatch):
+    """Draining, running out of budget, and reaching the deadline are the
+    same answer to "did the night make it": a batch that drains with three
+    failed tasks still did its job, and the individual outcomes are the
+    morning queue's business, not this exit code's."""
+    home = tmp_path / "home"
+
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+
+    for reason in ("DRAINED", "BUDGET", "UNTIL"):
+        monkeypatch.setattr(cli, "run_batch", lambda *a, _r=reason, **k: _r)
+        assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 0
+
+
+def test_infrastructure_and_a_failed_readiness_both_exit_two(tmp_path, monkeypatch):
+    """The breaker firing and a readiness failure that takes the whole
+    night are the same exit code — both say the infrastructure failed,
+    which is what an unattended caller reads to decide whether tomorrow is
+    worth attempting."""
+    home = tmp_path / "home"
+
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+
+    # The breaker: `run_batch` itself says `INFRASTRUCTURE`, no readiness
+    # check ever recorded.
+    with monkeypatch.context() as m:
+        m.setattr(cli, "run_batch", lambda *a, **k: "INFRASTRUCTURE")
+        assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 2
+
+    # A readiness failure: the real `run_batch` runs, calls the real
+    # readiness check, and stops before any candidate.
+    with monkeypatch.context() as m:
+        m.setattr(
+            cli.preflight,
+            "check_readiness",
+            lambda *a, **k: preflight.Readiness(False, "auth", "boom"),
+        )
+        assert (
+            main(["--home", str(home / "two"), "batch", "--repo", str(tmp_path)]) == 2
+        )
+
+
+def test_a_batch_never_exits_one_whatever_stopped_it(tmp_path, monkeypatch):
+    """§4.2.1 reserves `1` rather than reusing it: a batch is not a task, and
+    letting `1` mean something here would merge two vocabularies that answer
+    different questions. Walked across all four stop reasons."""
+    home = tmp_path / "home"
+
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+
+    for reason in ("DRAINED", "BUDGET", "UNTIL", "INFRASTRUCTURE"):
+        monkeypatch.setattr(cli, "run_batch", lambda *a, _r=reason, **k: _r)
+        assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) != 1
+
+
+def test_the_night_is_given_a_real_readiness_check_not_the_loops_default(
+    tmp_path, monkeypatch
+):
+    """`run_batch`'s own default is to proceed — the right default for a
+    loop that cannot know a repo's paths or hold its token, and the wrong
+    one for a night. `saffron batch` passes a real callable, bound to this
+    run's own repo, mirror path, home and token, so an expired token at
+    22:00 does not buy a night of clean-looking nothing."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-real")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+
+    seen: dict = {}
+
+    def _fake_check_readiness(repo_arg, mirror_path, scratch, home_arg, *, token):
+        seen.update(repo=repo_arg, mirror_path=mirror_path, home=home_arg, token=token)
+        return preflight.Readiness(True)
+
+    monkeypatch.setattr(cli.preflight, "check_readiness", _fake_check_readiness)
+
+    captured: dict = {}
+
+    def _fake_run_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        captured.update(kwargs)
+        return "DRAINED"
+
+    monkeypatch.setattr(cli, "run_batch", _fake_run_batch)
+
+    assert main(["--home", str(home), "batch", "--repo", str(repo)]) == 0
+
+    readiness_check = captured["readiness_check"]
+    from saffron import batch as batch_module
+
+    assert readiness_check is not batch_module._always_ready
+
+    readiness_check()
+
+    assert seen["repo"] == repo.resolve()
+    assert seen["token"] == "sk-real"
+    assert Path(seen["home"]) == home
+    assert seen["mirror_path"] == cli._mirror_path(repo.resolve(), home)
+
+
+def test_a_readiness_failure_names_the_step_that_failed(tmp_path, monkeypatch, capsys):
+    """An expired token and a full disk are the same exit code and
+    different mornings — the result carries the step precisely so a caller
+    need not guess which."""
+    home = tmp_path / "home"
+
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(
+        cli.preflight,
+        "check_readiness",
+        lambda *a, **k: preflight.Readiness(False, "auth", "token invalid"),
+    )
+
+    result = main(["--home", str(home), "batch", "--repo", str(tmp_path)])
+
+    assert result == 2
+    out = capsys.readouterr().out
+    assert "auth" in out
+    assert "token invalid" in out
+
+
+def test_the_adapter_stacks_a_child_on_its_parents_branch(tmp_path, monkeypatch):
+    """The adapter this command hands the loop resolves what each candidate
+    stacks on, exactly as the attended path already does: a child runs cut
+    from its parent's real branch head, never the pinned `base_sha`."""
+    repo = _local_origin(tmp_path)
+    head = _push_parent_branch(repo, "saffron/SY-9000")
+    mirror, url = _mirror_of(tmp_path, repo)
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, url)
+    parent = _seed_task(ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW")
+    ledger.record_push(parent, "d" * 40)
+
+    resolved = cli.QueueResolution(
+        repo_id=repo_id,
+        mirror=mirror,
+        base_sha="a" * 40,
+        repo_slug=None,
+        exported=tmp_path,
+        candidates=[],
+        refusals=[],
+        reconciled=cli.ReconcileResult(),
+        gh_failures=[],
+        policy_unread=[],
+    )
+    runner = cli._batch_runner(
+        resolved, repo=repo, ledger=ledger, out_dir=tmp_path / "out", url=url
+    )
+
+    captured: dict = {}
+
+    def _capture(cell_spec, **_kwargs):
+        captured["spec"] = cell_spec
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli, "run_one_cell", _capture)
+
+    candidate = Candidate(
+        path=Path("SY-1.md"),
+        spec=intake.Spec(
+            id="SY-1",
+            title="t",
+            type="chore",
+            touches=["src/**"],
+            depends_on=["SY-9000"],
+        ),
+        spec_sha="s" * 64,
+        task_id=None,
+    )
+
+    with pytest.raises(SystemExit):
+        runner(candidate)
+
+    assert captured["spec"].stacked_on == head != "d" * 40
+    ledger.close()
+
+
+def test_the_adapter_stacks_on_the_first_dependency_only(tmp_path, monkeypatch):
+    """K=1: a second dependency is still not a stacking base. The adapter
+    must not widen that rule just because it is new code doing an old job —
+    `depends_on[1]`'s own resolvable, waiting task and its real pushed
+    branch must not leak into the result."""
+    repo = _local_origin(tmp_path)
+    _push_parent_branch(repo, "saffron/SY-2")
+    mirror, url = _mirror_of(tmp_path, repo)
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, url)
+    second = _seed_task(ledger, repo_id, spec_id="SY-2", state="READY_FOR_REVIEW")
+    ledger.record_push(second, "b" * 40)
+
+    resolved = cli.QueueResolution(
+        repo_id=repo_id,
+        mirror=mirror,
+        base_sha="a" * 40,
+        repo_slug=None,
+        exported=tmp_path,
+        candidates=[],
+        refusals=[],
+        reconciled=cli.ReconcileResult(),
+        gh_failures=[],
+        policy_unread=[],
+    )
+    runner = cli._batch_runner(
+        resolved, repo=repo, ledger=ledger, out_dir=tmp_path / "out", url=url
+    )
+
+    captured: dict = {}
+
+    def _capture(cell_spec, **_kwargs):
+        captured["spec"] = cell_spec
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli, "run_one_cell", _capture)
+
+    candidate = Candidate(
+        path=Path("SY-1.md"),
+        spec=intake.Spec(
+            id="SY-1",
+            title="t",
+            type="chore",
+            touches=["src/**"],
+            depends_on=["SY-1-parent", "SY-2"],
+        ),
+        spec_sha="s" * 64,
+        task_id=None,
+    )
+
+    with pytest.raises(SystemExit):
+        runner(candidate)
+
+    assert captured["spec"].stacked_on is None
+    ledger.close()
