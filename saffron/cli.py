@@ -665,7 +665,7 @@ class QueueResolution:
     policy_unread: list[str]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class PinnedBase:
     """The tree one night is pinned to — one fact about one repo, carried
     together rather than as three adjacent parameters. `check_readiness`
@@ -673,10 +673,10 @@ class PinnedBase:
     `Readiness`; this is what a caller hands back to `_resolve_queue` so the
     derivation happens once per run, not once per caller.
 
-    Not three positional fields for the reason `check_readiness` itself is
-    keyword-only about `scratch`/`home`: this repo's history has an instance
-    of adjacent same-typed parameters transposing and type-checking cleanly
-    anyway."""
+    `kw_only` for the reason `check_readiness` itself is keyword-only about
+    `scratch`/`home`: `url` and `base_sha` are adjacent and both `str`, and
+    positionally `PinnedBase(mirror, base_sha, url)` type-checks cleanly and
+    puts the URL in `base_sha` — measured, before the keyword-only was added."""
 
     mirror: Path
     url: str
@@ -933,11 +933,11 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     candidates: list[Candidate] = []
     runner: Callable[[Candidate], CellOutcome] = _no_candidate_should_run
     if readiness.ok:
-        # Readiness already paid for these three reads; a passing `Readiness`
-        # always carries all three (`preflight.check_readiness`'s own
-        # contract), so this narrows what the type checker otherwise sees as
-        # `Path | None` / `str | None` rather than deriving them a second
-        # time.
+        # Readiness already paid for these three reads. `Readiness` declares
+        # all three optional and enforces nothing; what makes this safe is
+        # that `check_readiness`'s only success return sets all three, which
+        # `test_a_passing_readiness_carries_the_base_it_pinned` pins. These
+        # narrow `Path | None` for the type checker — they are not the check.
         assert readiness.mirror is not None
         assert readiness.url is not None
         assert readiness.base_sha is not None

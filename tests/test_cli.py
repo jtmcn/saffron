@@ -2185,9 +2185,16 @@ def test_told_not_to_stamp_it_leaves_an_in_flight_task_alone(tmp_path):
     ledger.close()
 
 
-def _source_calls(fn, name, *, keyword=None, value=None):
+def _source_calls(fn, name, *, keyword=None, value=None, present=False):
     """Whether `fn`'s body contains a call to `name` — and, if a `keyword` is
     given, a literal keyword argument matching `value`.
+
+    `present=True` asks a different question: is the keyword passed *at all*,
+    whatever the node. The `value` form matches only an `ast.Constant`, so
+    `f(pinned=None)` is seen and `f(pinned=derived)` is not — which inverts
+    the usual intent, since a variable is exactly what a regression would
+    pass. Use `present` to assert a call site does not route through an
+    argument; use `value` to assert which literal it routes with.
 
     AST over `inspect.getsource`, not a substring search — a comment or a
     docstring merely naming `name` must not satisfy this — and not a call
@@ -2207,13 +2214,19 @@ def _source_calls(fn, name, *, keyword=None, value=None):
         if keyword is None:
             return True
         for kw in node.keywords:
-            if kw.arg == keyword and isinstance(kw.value, ast.Constant):
+            if kw.arg != keyword:
+                continue
+            if present:
+                return True
+            if isinstance(kw.value, ast.Constant):
                 return kw.value.value == value
     return False
 
 
-def _queue_calls(name, *, keyword=None, value=None):
-    return _source_calls(cli._queue, name, keyword=keyword, value=value)
+def _queue_calls(name, *, keyword=None, value=None, present=False):
+    return _source_calls(
+        cli._queue, name, keyword=keyword, value=value, present=present
+    )
 
 
 def test_the_printed_queue_is_unchanged_by_the_extraction(tmp_path, capsys):
@@ -2258,8 +2271,14 @@ def test_the_printed_queue_is_unchanged_by_sharing_the_base(tmp_path, capsys):
     output, byte for byte."""
     # The sharing mechanism exists — `_resolve_queue` now has a `pinned`
     # parameter to *not* use — and `_queue` still never reaches for it.
+    #
+    # `present=`, not `value=`: the literal form only sees an `ast.Constant`,
+    # so it caught the harmless `pinned=None` and missed `pinned=derived`,
+    # which is the regression this line is here for. Measured — a `_queue`
+    # that derived its own base and passed it down left this assertion green
+    # and the output byte-identical.
     assert inspect.signature(cli._resolve_queue).parameters["pinned"].default is None
-    assert not _queue_calls("_resolve_queue", keyword="pinned")
+    assert not _queue_calls("_resolve_queue", keyword="pinned", present=True)
 
     repo = _repo_with_spec(
         tmp_path,
@@ -2590,7 +2609,6 @@ def test_the_night_is_given_a_real_readiness_check_not_the_loops_default(
     monkeypatch.setattr(
         cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
     )
-    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
 
     seen: dict = {}
 
@@ -3089,7 +3107,7 @@ def test_readiness_still_runs_before_the_scan_it_now_feeds(tmp_path, monkeypatch
     assert pinned.base_sha == found.base_sha
 
 
-def test_a_failed_readiness_still_scans_nothing(tmp_path, monkeypatch):
+def test_a_failed_readiness_still_scans_nothing(tmp_path, monkeypatch, capsys):
     """A readiness failure still means no scan at all — not a scan given a
     half-built base. The three derivation calls run once, for readiness, and
     `_resolve_queue` never runs at all."""
@@ -3142,13 +3160,28 @@ def test_a_failed_readiness_still_scans_nothing(tmp_path, monkeypatch):
 
     assert main(["--home", str(home), "batch", "--repo", str(repo)]) == 2
     assert counts == {"mirror": 1, "remote": 1, "fetch": 1}
+    # The exit code alone does not distinguish "readiness stopped the night"
+    # from "something raised on the way to the scan": deleting the `readiness
+    # .ok` guard makes the narrowing assert below it raise, which `main` also
+    # reports as 2, with the scan still unreached. Measured — without this
+    # line the test survived the mutant of the property it names. The printed
+    # reason is what says *which* stop happened, and it is also the only
+    # account an operator gets at 7am.
+    assert "readiness failed at default_branch" in capsys.readouterr().out
 
 
 def test_a_night_pins_its_base_once(tmp_path, monkeypatch):
     """One night fetches the mirror once. `ensure_mirror`, `real_remote` and
-    `fetch_default_branch` each run exactly once across the whole `saffron
-    batch` command, end to end — the defect itself, and the only witness that
-    measures it."""
+    `fetch_default_branch` each run exactly once — the defect itself, and the
+    only witness that measures it.
+
+    Across `_batch` and the scan, with readiness stood in for: the stand-in
+    makes the three calls the real `check_readiness` makes, so the readiness
+    half of each count comes from the fake and the scan half comes from the
+    production `_resolve_queue`. That is the half this spec can move —
+    `saffron/preflight.py` is `forbidden` here — but it means a second
+    derivation added *inside* `check_readiness` would not be seen. Said
+    plainly rather than left as "end to end", which claimed more."""
     repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-one-night")
     home = tmp_path / "home"
 
