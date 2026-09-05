@@ -126,8 +126,9 @@ def reconcile(
 ) -> ReconcileResult:
     """Bring one repo's `tasks.state` into line with what GitHub decided,
     and — only when `stamp_orphaned=True` asserts §4.2.1's batch-scan
-    premise — stamp any corpse a dead scan left behind. Defaults to `False`:
-    no command in this version of Saffron is a batch scan."""
+    premise — stamp any corpse a dead scan left behind. Defaults to `False`,
+    which is what `saffron queue` and `saffron reconcile` want; `saffron
+    batch` is the one caller that passes `True`."""
     result = ReconcileResult()
     rows = ledger.tasks_by_repo(repo_id)
 

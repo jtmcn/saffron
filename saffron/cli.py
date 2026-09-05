@@ -1,4 +1,5 @@
-"""`saffron` — batch, run, queue, ratify, gc. v0 implements `replay`."""
+"""`saffron` — cell, batch, queue, reconcile, watch, replay. `ratify` and
+`gc` are still unbuilt (§4.2.1, §4.5)."""
 
 from __future__ import annotations
 
@@ -108,11 +109,11 @@ def main(argv: list[str] | None = None) -> int:
     # Sized against the queue (§7.1's own recommendation), not against
     # capacity — this is not the per-task ceiling `saffron cell --budget`
     # overrides, it is the whole night's.
-    batch_parser.add_argument("--budget", type=float, default=50.0)
+    batch_parser.add_argument("--budget", type=_night_budget, default=50.0)
     # `HH:MM`, resolved to its next occurrence by `_resolve_until` — a
     # duration would need no "which day" question at all, and a time of day
     # is the shape an operator actually types before going to bed.
-    batch_parser.add_argument("--until", type=str, default=None)
+    batch_parser.add_argument("--until", type=_clock_time, default=None)
 
     reconcile_parser = subcommands.add_parser(
         "reconcile",
@@ -756,6 +757,40 @@ def _resolve_queue(
     )
 
 
+def _clock_time(value: str) -> str:
+    """`--until`, rejected by argparse rather than discovered downstream.
+
+    A malformed value reached `_resolve_until` and died in `int()` — and
+    `main`'s catch-all reports that as exit `2`, "infrastructure failed", for
+    an operator's typo. Measured: `6:30pm` raised `invalid literal for int()`,
+    `06:30:00` "too many values to unpack", `0630` "not enough values". The
+    empty string was worse than any of them: `--until ""` is falsy, so it
+    silently meant *no deadline at all*, turning an eight-hour night into an
+    unbounded one — reachable from a shell variable that went unset in the
+    plist.
+    """
+    try:
+        hour, minute = (int(part) for part in value.split(":"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected HH:MM, got {value!r}") from None
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        raise argparse.ArgumentTypeError(f"not a time of day: {value!r}")
+    return value
+
+
+def _night_budget(value: str) -> float:
+    """`--budget`, likewise. A negative or zero budget opened a `batches` row,
+    stopped immediately at `BUDGET`, printed `batch: BUDGET` and exited 0 — a
+    night that ran nothing and reported success."""
+    try:
+        budget = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected a number, got {value!r}") from None
+    if budget <= 0:
+        raise argparse.ArgumentTypeError(f"must be greater than 0, got {budget:g}")
+    return budget
+
+
 def _resolve_until(until: str, now: datetime) -> datetime:
     """`HH:MM` to its next occurrence from `now` — a time of day, not a
     duration, so `06:30` resolved at 22:00 means tomorrow morning and `23:00`
@@ -779,6 +814,51 @@ def _mirror_path(repo: Path, home: Path) -> Path:
     return home / "mirrors" / f"{repo.name}-{digest}.git"
 
 
+def _no_candidate_should_run(candidate: Candidate) -> CellOutcome:
+    """The runner a night gets when readiness already failed.
+
+    `run_batch` takes the runner before it knows whether it will use one, and
+    an unready night has no candidates to give it — so reaching this is a bug
+    in the ordering above, not an operator's problem."""
+    raise AssertionError(
+        f"readiness failed, yet {candidate.spec.id} was started anyway"
+    )
+
+
+def _print_batch_plan(
+    resolved: QueueResolution, *, budget_usd: float, until: datetime | None
+) -> None:
+    """What the night is about to attempt, and what its scan could not check.
+
+    `saffron queue` prints the refusals; this printed only the gaps, so a spec
+    refused at gate 0 — a dead `depends_on` parent, protected `touches`, a
+    dangling `saffron:retired-by` marker — vanished from the night with no
+    line in the log and no ledger row. "An empty queue" and "three specs all
+    refused" produced byte-identical output.
+
+    The header is the unattended twin of `_run_cell`'s `ceilings:` line: at
+    7am the log has to say what the night set out to do before it says what
+    became of it.
+    """
+    deadline = until.strftime("%Y-%m-%d %H:%M") if until is not None else "none"
+    print(
+        f"batch: {len(resolved.candidates)} candidate(s), "
+        f"budget ${budget_usd:.2f}, until {deadline}"
+    )
+    for candidate in resolved.candidates:
+        print(f"  {candidate.spec.id:<10} priority={candidate.spec.priority}")
+
+    print(f"refusals: {len(resolved.refusals)}")
+    for refusal in resolved.refusals:
+        # The export is already deleted and a dangling marker names a path
+        # outside it anyway, so the raw path is the honest answer here —
+        # `_print_queue` relativises because it has a root worth relativising
+        # against.
+        print(f"  {refusal.path}: {refusal.reason}")
+
+    _print_scan_gaps(resolved.repo_slug, resolved.gh_failures, resolved.policy_unread)
+
+
 def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     """`saffron batch --repo . --budget 50 --until 06:30` — §4.2.1's night,
     driven. Resolves the queue, asserting the batch-only premise `saffron
@@ -799,52 +879,65 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     reason itself.
     """
     repo = args.repo.resolve()
-    until = _resolve_until(args.until, datetime.now()) if args.until else None
+    until = (
+        _resolve_until(args.until, datetime.now()) if args.until is not None else None
+    )
 
-    resolved = _resolve_queue(repo, args.home, ledger, stamp_orphaned=True)
+    # Readiness first, and before the scan — §4.4's own order, step 1 ahead of
+    # step 4. Run after it, `Readiness`'s `mirror`, `origin` and
+    # `default_branch` steps were unreachable from this command: the scan does
+    # the same three things unguarded and raises first, `main` prints a
+    # traceback, and no `batches` row exists at all for the night that was
+    # attempted. Which is the outcome the readiness-close inside `run_batch`
+    # was written to prevent.
+    with tempfile.TemporaryDirectory() as scratch:
+        readiness = preflight.check_readiness(
+            repo,
+            _mirror_path(repo, args.home),
+            scratch=Path(scratch),
+            home=args.home,
+            token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+        )
 
-    # The night says what its own scan could not check. `_resolve_queue`
-    # leaves reporting to its caller, and the attended caller discharges that
-    # by printing all three; unreported here, a night whose `gh` never ran
-    # looks identical in the morning to one whose refusals all passed — the
-    # scan quietly did less than it appears to have done, on the one path
-    # where nobody is awake to notice.
-    _print_reconcile_summary(resolved.reconciled)
-    _print_scan_gaps(resolved.repo_slug, resolved.gh_failures, resolved.policy_unread)
+    candidates: list[Candidate] = []
+    runner: Callable[[Candidate], CellOutcome] = _no_candidate_should_run
+    if readiness.ok:
+        resolved = _resolve_queue(repo, args.home, ledger, stamp_orphaned=True)
 
-    url = package_phase.real_remote(repo)
-    runner = _batch_runner(resolved, repo=repo, ledger=ledger, out_dir=out_dir, url=url)
+        # The night says what its own scan could not check. `_resolve_queue`
+        # leaves reporting to its caller, and the attended caller discharges
+        # that by printing all three; unreported here, a night whose `gh`
+        # never ran looks identical in the morning to one whose refusals all
+        # passed — the scan quietly did less than it appears to have done, on
+        # the one path where nobody is awake to notice.
+        _print_reconcile_summary(resolved.reconciled)
+        _print_batch_plan(resolved, budget_usd=args.budget, until=until)
 
-    readiness_seen: list[preflight.Readiness] = []
-
-    def readiness_check() -> preflight.Readiness:
-        with tempfile.TemporaryDirectory() as scratch:
-            result = preflight.check_readiness(
-                repo,
-                _mirror_path(repo, args.home),
-                Path(scratch),
-                args.home,
-                token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
-            )
-        readiness_seen.append(result)
-        return result
+        url = package_phase.real_remote(repo)
+        runner = _batch_runner(
+            resolved, repo=repo, ledger=ledger, out_dir=out_dir, url=url
+        )
+        candidates = resolved.candidates
 
     stop = run_batch(
-        resolved.candidates,
+        candidates,
         ledger,
         args.budget,
         until,
         runner,
-        readiness_check=readiness_check,
+        # Already measured, above, before the scan that depends on it. The
+        # loop still calls this — it is what makes the batch row close
+        # `INFRASTRUCTURE` and exist at all — but the answer is the one this
+        # command took, not a second probe of the same host.
+        readiness_check=lambda: readiness,
     )
 
     if stop != "INFRASTRUCTURE":
         print(f"batch: {stop}")
         return 0
 
-    if readiness_seen and not readiness_seen[-1].ok:
-        failed = readiness_seen[-1]
-        print(f"batch: readiness failed at {failed.step}: {failed.detail}")
+    if not readiness.ok:
+        print(f"batch: readiness failed at {readiness.step}: {readiness.detail}")
     else:
         print("batch: infrastructure failed")
     return 2

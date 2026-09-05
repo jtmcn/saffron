@@ -197,7 +197,7 @@ max_turns: 60                   # per-turn ceiling; the flags override all three
 risk: standard                  # standard | elevated (§5.6)
 ---
 
-**`budget_usd` is a best-effort bound, and saying so here is backlog item 44's decision rather than an apology.** The supervisor gates a turn on what has been spent *so far*, and a turn's cost is not knowable until it ends — so a task admitted just under its ceiling can finish over it, measured at 6.5% on `SA-0031`. Charging a worst-case estimate instead would mean *guessing* the bound, which is the defect item 56 argues against for size predicates and is worse here: a guess that refuses a legitimate turn costs more than the overshoot it prevents. **The enforceable ceiling is the batch's, checked between tasks** (§4.2.1), because between tasks nothing is mid-flight — which is exactly why a bound holds there and cannot inside a turn. Unattended, one task running $1.17 over is not the exposure; a night spending unboundedly is.
+**`budget_usd` is a best-effort bound, and saying so here is backlog item 44's decision rather than an apology.** The supervisor gates a turn on what has been spent *so far*, and a turn's cost is not knowable until it ends — so a task admitted just under its ceiling can finish over it, measured at 6.5% on `SA-0031`. Charging a worst-case estimate instead would mean *guessing* the bound, which is the defect item 56 argues against for size predicates and is worse here: a guess that refuses a legitimate turn costs more than the overshoot it prevents. **The enforceable ceiling is the batch's, checked between tasks** (§4.2.1), because between tasks nothing is mid-flight — which is exactly why a bound holds there and cannot inside a turn. Strictly the batch's bound is best-effort too, since it admits a task on that task's *declared* ceiling: a night can end at most one task's overshoot above its budget. Bounded by one overshoot rather than unbounded is the whole distinction. Unattended, one task running $1.17 over is not the exposure; a night spending unboundedly is.
 
 **`forbidden` and `protected` bind both the plan and the diff, and this paragraph has been wrong in each direction once.** It said they bound the diff until `SA-0011` leaned on it; it said they bound only the plan until `SA-0024` closed that. Three places read them now: `agents/artifacts.py` rejects a plan whose *declared* `files_to_change` matches one, `agents/context.py` prints them into the prompt, and the `scope` gate (§5.4) fails any changed file matching either — independently of `touches`, under its own `forbidden` and `protected` failure codes.
 
@@ -301,7 +301,7 @@ repos        (repo_id, name, origin, mirror_path, policy_sha, image_tag,
               image_built_at, enabled)
 runs         (run_id, batch_id, repo_id, base_sha, preflight, started_at,
               ended_at, status)
-tasks        (task_id, run_id, spec_id, spec_sha, state, priority, risk, branch,
+tasks        (task_id, run_id, spec_id, spec_sha, state, risk, branch, policy_sha,
               parent_task_id, worktree, volume, budget_usd, spent_usd_est, updated_at)
 attempts     (attempt_id, task_id, phase, n, session_id, model, started_at,
               ended_at, subtype, terminal_reason, num_turns, cost_usd_est)

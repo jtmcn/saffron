@@ -22,7 +22,7 @@ from saffron.events import PhaseStart, Preflight, describe, read_log
 from saffron.ledger import Ledger
 from saffron.phases import package
 from saffron.reconcile import ReconcileResult
-from saffron.scheduler import Candidate
+from saffron.scheduler import Candidate, Refusal
 from tests.conftest import HostToolExecInTest
 from tests.test_replay import target  # noqa: F401 — a pytest fixture, used by name
 
@@ -2245,6 +2245,15 @@ def test_a_resolution_that_changed_nothing_still_says_so(capsys):
     assert "reconcile: nothing moved" in capsys.readouterr().out
 
 
+def _readiness_passes(monkeypatch):
+    """Readiness now runs *before* the scan (§4.4 step 1 ahead of step 4), so
+    a test that fakes `_resolve_queue` and not this one never reaches the
+    scan at all."""
+    monkeypatch.setattr(
+        cli.preflight, "check_readiness", lambda *a, **k: preflight.Readiness(True)
+    )
+
+
 def _fake_batch_resolution(tmp_path, *, repo_id=None, candidates=None):
     """The empty-queue `QueueResolution` every `saffron batch` witness below
     needs when it fakes `_resolve_queue` out entirely — real fields, no real
@@ -2288,6 +2297,7 @@ def test_saffron_batch_runs_a_night_with_the_defaults_4_2_1_fixes(
         captured["until"] = until
         return "DRAINED"
 
+    _readiness_passes(monkeypatch)
     monkeypatch.setattr(cli, "_resolve_queue", _fake_resolve_queue)
     monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
     monkeypatch.setattr(cli, "run_batch", _fake_run_batch)
@@ -2352,11 +2362,17 @@ def test_the_batch_command_offers_no_concurrency_or_multi_repo_flag(capsys):
     assert "--until" in out
 
 
-def test_the_three_ordinary_stop_reasons_all_exit_zero(tmp_path, monkeypatch):
+def test_the_three_ordinary_stop_reasons_all_exit_zero(tmp_path, monkeypatch, capsys):
     """Draining, running out of budget, and reaching the deadline are the
     same answer to "did the night make it": a batch that drains with three
     failed tasks still did its job, and the individual outcomes are the
-    morning queue's business, not this exit code's."""
+    morning queue's business, not this exit code's.
+
+    The printed line is asserted alongside the code. An exit status is not
+    what an operator reads at 7am — it is gone by then, and `launchd` keeps
+    only the log. Replacing `print(f"batch: {stop}")` with `pass` left the
+    whole suite green, so the one line that says how the night ended was
+    guarded by nothing."""
     home = tmp_path / "home"
 
     monkeypatch.setattr(
@@ -2367,6 +2383,7 @@ def test_the_three_ordinary_stop_reasons_all_exit_zero(tmp_path, monkeypatch):
     for reason in ("DRAINED", "BUDGET", "UNTIL"):
         monkeypatch.setattr(cli, "run_batch", lambda *a, _r=reason, **k: _r)
         assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 0
+        assert f"batch: {reason}" in capsys.readouterr().out
 
 
 def test_infrastructure_and_a_failed_readiness_both_exit_two(tmp_path, monkeypatch):
@@ -2436,8 +2453,8 @@ def test_the_night_is_given_a_real_readiness_check_not_the_loops_default(
 
     seen: dict = {}
 
-    def _fake_check_readiness(repo_arg, mirror_path, scratch, home_arg, *, token):
-        seen.update(repo=repo_arg, mirror_path=mirror_path, home=home_arg, token=token)
+    def _fake_check_readiness(repo_arg, mirror_path, *, scratch, home, token):
+        seen.update(repo=repo_arg, mirror_path=mirror_path, home=home, token=token)
         return preflight.Readiness(True)
 
     monkeypatch.setattr(cli.preflight, "check_readiness", _fake_check_readiness)
@@ -2453,10 +2470,11 @@ def test_the_night_is_given_a_real_readiness_check_not_the_loops_default(
     assert main(["--home", str(home), "batch", "--repo", str(repo)]) == 0
 
     readiness_check = captured["readiness_check"]
-    from saffron import batch as batch_module
-
-    assert readiness_check is not batch_module._always_ready
-
+    # There is no longer a permissive default to be "not" — `run_batch`
+    # requires the argument, so a caller that forgot cannot start a night at
+    # all. What is left to check is that the one supplied is bound to this
+    # run's own paths and token, which is what makes it a gate rather than a
+    # formality.
     readiness_check()
 
     assert seen["repo"] == repo.resolve()
@@ -2490,7 +2508,7 @@ def test_a_readiness_failure_names_the_step_that_failed(tmp_path, monkeypatch, c
 
 
 def test_the_adapter_packages_a_ready_task_and_reports_what_packaging_made_of_it(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, capsys
 ):
     """`run_one_cell` stops at `READY_FOR_REVIEW`; the branch is pushed and the
     pull request opened by `package_phase.package`, which the attended path
@@ -2538,6 +2556,7 @@ def test_the_adapter_packages_a_ready_task_and_reports_what_packaging_made_of_it
 
     def _package(*args, **kwargs):
         packaged["called"] = True
+        packaged.update(kwargs)
         return SimpleNamespace(state="MERGE_FAILED", pr_url=None, note="pushed, no PR")
 
     monkeypatch.setattr(cli.package_phase, "package", _package)
@@ -2553,6 +2572,12 @@ def test_the_adapter_packages_a_ready_task_and_reports_what_packaging_made_of_it
 
     assert packaged.get("called") is True
     assert returned.state == "MERGE_FAILED"
+    # The line the operator reads. Replacing it with `pass` left the suite
+    # green, and this is the only place a task's fate is rendered at all.
+    printed = capsys.readouterr().out
+    assert "SY-1" in printed
+    assert "MERGE_FAILED" in printed
+    assert "pushed, no PR" in printed
     ledger.close()
 
 
@@ -2576,6 +2601,7 @@ def test_a_night_says_what_its_own_scan_could_not_check(tmp_path, monkeypatch, c
         gh_failures=["gh: command not found"],
         policy_unread=["policy.yaml: no such file"],
     )
+    _readiness_passes(monkeypatch)
     monkeypatch.setattr(cli, "_resolve_queue", lambda *a, **k: resolved)
     monkeypatch.setattr(cli.package_phase, "real_remote", lambda _repo: "u")
     monkeypatch.setattr(cli, "_batch_runner", lambda *a, **k: lambda _c: None)
@@ -2706,3 +2732,289 @@ def test_the_adapter_stacks_on_the_first_dependency_only(tmp_path, monkeypatch):
 
     assert captured["spec"].stacked_on is None
     ledger.close()
+
+
+def test_the_night_cannot_start_without_a_readiness_gate():
+    """The loop used to bind a permissive stub, so a caller who simply forgot
+    the argument got a vacuous §4.4 step 1 and a night that could start on an
+    expired token. It is now required, which is a stronger guarantee than any
+    assertion about which callable was passed: forgetting is a TypeError."""
+    import inspect
+
+    from saffron.batch import run_batch
+
+    parameter = inspect.signature(run_batch).parameters["readiness_check"]
+    assert parameter.default is inspect.Parameter.empty
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+
+
+def test_the_adapter_packages_a_stacked_child_against_its_parents_branch(
+    tmp_path, monkeypatch
+):
+    """`SA-0026`'s whole point: the sha and the branch travel together or
+    neither does. The stacking witness above pins `CellSpec.stacked_on` — the
+    sha — and nothing pinned `parent_branch`, the half that decides what the
+    pull request targets. Mutating it to `None` left all of `test_cli.py`
+    green while every night silently opened its stacked children against
+    `main`."""
+    repo = _local_origin(tmp_path)
+    head = _push_parent_branch(repo, "saffron/SY-9000")
+    mirror, url = _mirror_of(tmp_path, repo)
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, url)
+    parent = _seed_task(ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW")
+    ledger.record_push(parent, "d" * 40)
+
+    resolved = cli.QueueResolution(
+        repo_id=repo_id,
+        mirror=mirror,
+        base_sha="a" * 40,
+        repo_slug=None,
+        exported=tmp_path,
+        candidates=[],
+        refusals=[],
+        reconciled=cli.ReconcileResult(),
+        gh_failures=[],
+        policy_unread=[],
+    )
+    runner = cli._batch_runner(
+        resolved, repo=repo, ledger=ledger, out_dir=tmp_path / "out", url=url
+    )
+
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-1", state="READY_FOR_REVIEW")
+    monkeypatch.setattr(
+        cli,
+        "run_one_cell",
+        lambda *a, **k: CellOutcome(
+            state="READY_FOR_REVIEW",
+            task_id=task_id,
+            run_id=1,
+            task_dir=tmp_path / "out" / "SY-1",
+        ),
+    )
+
+    packaged: dict = {}
+
+    def _package(*args, **kwargs):
+        packaged.update(kwargs)
+        return SimpleNamespace(state="READY_FOR_REVIEW", pr_url="u", note=None)
+
+    monkeypatch.setattr(cli.package_phase, "package", _package)
+
+    candidate = Candidate(
+        path=Path("SY-1.md"),
+        spec=intake.Spec(
+            id="SY-1",
+            title="t",
+            type="chore",
+            touches=["src/**"],
+            depends_on=["SY-9000"],
+        ),
+        spec_sha="s" * 64,
+        task_id=task_id,
+    )
+    runner(candidate)
+
+    assert packaged["parent_branch"] == "saffron/SY-9000"
+    assert head  # the parent's branch really exists, so this is not a typo
+    ledger.close()
+
+
+def test_an_unstacked_task_is_packaged_against_no_parent(tmp_path, monkeypatch):
+    """The other half: a candidate with no `depends_on` must target the
+    default branch, so `parent_branch` has to be `None` rather than a stale
+    value carried from a previous candidate."""
+    repo = _local_origin(tmp_path)
+    mirror, url = _mirror_of(tmp_path, repo)
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, url)
+
+    resolved = cli.QueueResolution(
+        repo_id=repo_id,
+        mirror=mirror,
+        base_sha="a" * 40,
+        repo_slug=None,
+        exported=tmp_path,
+        candidates=[],
+        refusals=[],
+        reconciled=cli.ReconcileResult(),
+        gh_failures=[],
+        policy_unread=[],
+    )
+    runner = cli._batch_runner(
+        resolved, repo=repo, ledger=ledger, out_dir=tmp_path / "out", url=url
+    )
+
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-2", state="READY_FOR_REVIEW")
+    monkeypatch.setattr(
+        cli,
+        "run_one_cell",
+        lambda *a, **k: CellOutcome(
+            state="READY_FOR_REVIEW",
+            task_id=task_id,
+            run_id=1,
+            task_dir=tmp_path / "out" / "SY-2",
+        ),
+    )
+
+    packaged: dict = {}
+
+    def _package(*args, **kwargs):
+        packaged.update(kwargs)
+        return SimpleNamespace(state="READY_FOR_REVIEW", pr_url="u", note=None)
+
+    monkeypatch.setattr(cli.package_phase, "package", _package)
+
+    runner(
+        Candidate(
+            path=Path("SY-2.md"),
+            spec=intake.Spec(id="SY-2", title="t", type="chore", touches=["src/**"]),
+            spec_sha="s" * 64,
+            task_id=task_id,
+        )
+    )
+
+    assert packaged["parent_branch"] is None
+    ledger.close()
+
+
+def test_readiness_is_probed_before_the_scan_that_depends_on_it(tmp_path, monkeypatch):
+    """§4.4's order, step 1 ahead of step 4. Run after the scan, `Readiness`'s
+    `mirror`, `origin` and `default_branch` steps were unreachable from this
+    command: the scan does those same three things unguarded and raises
+    first, so `main` printed a traceback and no `batches` row existed at all
+    for the night that was attempted — the outcome `run_batch`'s
+    readiness-close was written to prevent."""
+    home = tmp_path / "home"
+    order: list[str] = []
+
+    def _readiness(*_a, **_k):
+        order.append("readiness")
+        return preflight.Readiness(False, "mirror", "could not fetch")
+
+    def _scan(*_a, **_k):
+        order.append("scan")
+        raise AssertionError("the scan ran despite readiness failing")
+
+    monkeypatch.setattr(cli.preflight, "check_readiness", _readiness)
+    monkeypatch.setattr(cli, "_resolve_queue", _scan)
+
+    assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 2
+    assert order == ["readiness"]
+
+
+def test_an_unready_night_still_leaves_a_row_saying_it_was_attempted(
+    tmp_path, monkeypatch, capsys
+):
+    """A readiness failure before the scan must still reach `run_batch`, which
+    is what opens and closes the `batches` row. Otherwise the night that could
+    not start is a night with no record it was tried."""
+    home = tmp_path / "home"
+    monkeypatch.setattr(
+        cli.preflight,
+        "check_readiness",
+        lambda *a, **k: preflight.Readiness(False, "auth", "token expired"),
+    )
+    monkeypatch.setattr(cli, "_resolve_queue", lambda *a, **k: pytest.fail("scanned"))
+
+    ledger_path = home / "ledger.db"
+    assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 2
+
+    ledger = Ledger(ledger_path)
+    row = ledger._db.execute(
+        "SELECT status, ended_at FROM batches ORDER BY batch_id DESC LIMIT 1"
+    ).fetchone()
+    ledger.close()
+    assert row["status"] == "INFRASTRUCTURE"
+    assert row["ended_at"] is not None
+    assert "readiness failed at auth: token expired" in capsys.readouterr().out
+
+
+def test_a_night_names_the_specs_its_scan_refused(tmp_path, monkeypatch, capsys):
+    """`saffron queue` prints refusals; this printed only the gaps, so a spec
+    refused at gate 0 — a dead `depends_on` parent, protected `touches`, a
+    dangling `saffron:retired-by` marker — vanished with no line in the log
+    and no ledger row. "An empty queue" and "three specs all refused" produced
+    byte-identical output at 7am."""
+    resolved = cli.QueueResolution(
+        repo_id=1,
+        mirror=tmp_path / "m.git",
+        base_sha="a" * 40,
+        repo_slug="jtmcn/saffron",
+        exported=tmp_path,
+        candidates=[],
+        refusals=[
+            Refusal(path=tmp_path / "SY-7.md", reason="depends_on SY-9000 is unknown")
+        ],
+        reconciled=cli.ReconcileResult(),
+        gh_failures=[],
+        policy_unread=[],
+    )
+    _readiness_passes(monkeypatch)
+    monkeypatch.setattr(cli, "_resolve_queue", lambda *a, **k: resolved)
+    monkeypatch.setattr(cli.package_phase, "real_remote", lambda _repo: "u")
+    monkeypatch.setattr(cli, "_batch_runner", lambda *a, **k: lambda _c: None)
+    monkeypatch.setattr(cli, "run_batch", lambda *a, **k: "DRAINED")
+
+    args = argparse.Namespace(
+        repo=tmp_path, home=tmp_path / "home", budget=50.0, until=None
+    )
+    ledger = Ledger(tmp_path / "l.db")
+    assert cli._batch(args, ledger, tmp_path / "out") == 0
+    ledger.close()
+
+    printed = capsys.readouterr().out
+    assert "refusals: 1" in printed
+    assert "depends_on SY-9000 is unknown" in printed
+
+
+def test_a_night_says_what_it_set_out_to_do_before_what_became_of_it(
+    tmp_path, monkeypatch, capsys
+):
+    """The unattended twin of `_run_cell`'s `ceilings:` line. Without it the
+    log's first word about the night is its last."""
+    _readiness_passes(monkeypatch)
+    monkeypatch.setattr(
+        cli,
+        "_resolve_queue",
+        lambda *a, **k: _fake_batch_resolution(tmp_path),
+    )
+    monkeypatch.setattr(cli.package_phase, "real_remote", lambda _repo: "u")
+    monkeypatch.setattr(cli, "_batch_runner", lambda *a, **k: lambda _c: None)
+    monkeypatch.setattr(cli, "run_batch", lambda *a, **k: "DRAINED")
+
+    args = argparse.Namespace(
+        repo=tmp_path,
+        home=tmp_path / "home",
+        budget=25.0,
+        until=None,
+    )
+    ledger = Ledger(tmp_path / "l.db")
+    assert cli._batch(args, ledger, tmp_path / "out") == 0
+    ledger.close()
+
+    printed = capsys.readouterr().out
+    assert "budget $25.00" in printed
+    assert "until none" in printed
+
+
+@pytest.mark.parametrize("value", ["6:30pm", "06:30:00", "0630", "", "25:00", "06:99"])
+def test_a_malformed_until_is_a_usage_error_not_an_infrastructure_failure(value):
+    """These all reached `_resolve_until` and died in `int()`, which `main`
+    reports as exit 2 — "infrastructure failed" — for an operator's typo. The
+    empty string was worse: falsy, so `--until ""` silently meant no deadline
+    at all, turning an eight-hour night unbounded. Reachable from a shell
+    variable that went unset in the plist."""
+    with pytest.raises(SystemExit) as exit_info:
+        main(["batch", "--until", value])
+    assert exit_info.value.code == 2  # argparse's usage exit, not main's catch-all
+
+
+@pytest.mark.parametrize("value", ["-50", "0"])
+def test_a_budget_that_can_buy_nothing_is_refused(value):
+    """`--budget -50` opened a `batches` row, stopped at `BUDGET` immediately,
+    printed `batch: BUDGET` and exited 0 — a night that ran nothing and
+    reported success."""
+    with pytest.raises(SystemExit):
+        main(["batch", "--budget", value])

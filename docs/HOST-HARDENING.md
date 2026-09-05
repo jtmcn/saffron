@@ -134,23 +134,51 @@ launchctl list | grep saffron          # loaded, with its exit status
 launchctl start dev.saffron.batch      # fire it once, now, to prove the paths
 ```
 
-Three things about it are deliberate.
+Five things about it are deliberate.
 
-**Absolute paths everywhere.** `launchd` runs with almost no environment and no
-login shell, so `uv`, the repository and the secrets file are all named in
-full. A relative path here fails at 22:00 with nobody reading the error.
+**Absolute paths everywhere, and `bash -c` rather than `-lc`.** `launchd` runs
+with almost no environment, so `uv`, the repository and the secrets file are
+all named in full. A relative path here fails at 22:00 with nobody reading the
+error. A *login* shell would undo the point of that by sourcing
+`~/.bash_profile`, making the night depend on whatever the operator's dotfiles
+happen to say that week.
 
 **The token is read at fire time and reaches exactly this process.** Same rule
 `CLAUDE.md` states for running one cell by hand, and for the same reason:
 `.envrc` would export it into every shell in the directory and from there into
 any session started in one. `launchctl setenv` would be worse still — it puts
-the credential in every process the user launches.
+the credential in every process the user launches. It is not passed on the
+command line either, so it never appears in the process table.
 
-**The two log files catch almost nothing, on purpose.** A night's real record
-is the ledger and the batch tree; these only hold what dies before either
-exists — a wrong path, a missing `uv`, an unreadable secrets file. If you are
-reading them for anything else, something is wrong with the batch's own
-reporting rather than with the job.
+**`set -a` around the secrets file, and `chmod 600` on it.** `source` alone
+sets a *shell* variable; unless `~/.secrets` writes `export`, the value never
+reaches `uv`'s environment and every night dies at `readiness failed at auth`
+— an hour after you have gone to bed, having done nothing. `set -a` exports
+whatever the file assigns, so the file's own style stops mattering.
+
+**`PYTHONUNBUFFERED=1`, because the log is the night's only account.** Python
+block-buffers stdout into a file redirect, and `launchctl unload`, logout and
+shutdown all send SIGTERM. Measured: a process killed that way leaves a
+**0-byte** log, and the same process with `PYTHONUNBUFFERED=1` leaves its
+output intact. Without this, an interrupted night loses the entire record of
+what it had done up to that point.
+
+**The two log files are the night's human-readable account.** Every line
+`saffron batch` prints lands there: the plan it set out with — candidate count,
+budget, deadline — each task's outcome, the specs the scan refused, whatever
+the scan could not check, and the final `batch: <stop>`. Nothing else renders
+any of it; the ledger and the batch tree hold the structured record, but there
+is no morning-queue command yet to read them back. **This is the file to open
+at 7am.**
+
+**`--until` is a "start no new task after" bound, not a kill.** The deadline is
+checked between candidates; a cell already running at 06:30 runs to its own
+ceilings. So the wall-clock end of a night is the deadline plus at most one
+task. Related, and a consequence of `launchd` running missed jobs: if the Mac
+was asleep at 22:00 and wakes at 09:00, the job fires *then*, and `--until
+06:30` resolves to 06:30 the following morning — a 21-hour daytime window
+against the same budget. The budget, not the clock, is the ceiling that
+actually holds.
 
 Unloading is `launchctl unload ~/Library/LaunchAgents/dev.saffron.batch.plist`,
 and it is what to do before a night you do not want — editing the plist while
