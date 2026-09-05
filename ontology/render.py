@@ -52,6 +52,7 @@ _WIDTH = 83
 # it does not own.
 SETS = {
     "Terminal state": ("TerminalState", "comma"),
+    "Batch stop reason": ("BatchStopReason", "or-comma"),
     "Severity": ("Severity", "or-comma"),
     "Risk tier": ("RiskTier", "or-plain"),
     "Gate role": ("GateRole", "comma"),
@@ -172,6 +173,7 @@ SHAPE_SETS = {
     "saffron:GateRoleShape": "GateRole",
     "saffron:TerminalStateShape": "TerminalState",
     "sh:path saffron:riskTier": "RiskTier",
+    "sh:path saffron:endedBecause": "BatchStopReason",
     "sh:path saffron:severity": "Severity",
 }
 _PER_LINE = 3

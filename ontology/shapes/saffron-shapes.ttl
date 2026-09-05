@@ -53,10 +53,19 @@ saffron:AttemptShape a sh:NodeShape ;
 
 # A batch is not a run: budget is a batch property, base_sha is a run property.
 # Rev 4 left them sharing a table, which is the defect these two shapes forbid.
+#
+# `endedBecause` has minCount 0 on purpose. `batches.status` is nullable and
+# NULL means *still running* — the one state §6's morning queue must tell from a
+# night that stopped, and the axiom a CHECK constraint cannot state, since it
+# can only say which strings are legal and not that absence is meaningful.
 saffron:BatchShape a sh:NodeShape ;
     sh:targetClass saffron:Batch ;
     sh:property [ sh:path saffron:budgetUsd ; sh:minCount 1 ; sh:maxCount 1 ] ;
-    sh:property [ sh:path saffron:baseSha ; sh:maxCount 0 ] .
+    sh:property [ sh:path saffron:baseSha ; sh:maxCount 0 ] ;
+    sh:property [ sh:path saffron:endedBecause ; sh:minCount 0 ; sh:maxCount 1 ;
+        sh:class saffron:BatchStopReason ;
+        sh:in ( saffron:DRAINED saffron:BUDGET saffron:UNTIL
+            saffron:INFRASTRUCTURE ) ] .
 
 saffron:RunShape a sh:NodeShape ;
     sh:targetClass saffron:Run ;

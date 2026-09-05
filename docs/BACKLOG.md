@@ -59,9 +59,9 @@ rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
 ### Tier 3 — real, not urgent
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
-**56**, **57**, **61**, **62**, **63**, **64**, **65**, **68**.
+**56**, **57**, **61**, **62**, **63**, **64**, **68**. (**65** is done.)
 
-**What this ordering costs, stated plainly:** tiers 2 and 3 hold 26 of the 33
+**What this ordering costs, stated plainly:** tiers 2 and 3 hold 25 of the 32
 open items, including every ontology item and every operator-visibility spec
 there is already a full plan for. That is the deliberate consequence of ranking
 by the milestone rather than by what is nearest to hand.
@@ -3583,6 +3583,27 @@ same fix.
 ---
 
 ## 65. The batch's four stop reasons are a closed set that lives only in SQL
+
+**Status: done** — `saffron:BatchStopReason` in the vocabulary, `CONTEXT.md`
+regenerated, and `saffron:BatchShape` closing the set with `sh:in`.
+
+Four readers now have to agree, and a test fails on each direction of drift:
+the vocabulary, `CONTEXT.md`'s **Batch stop reason** entry (generated, not
+hand-copied), `batch.StopReason`, and the `CHECK` on `batches.status` — the
+last parsed out of `SCHEMA` rather than restated, because a copy of the four in
+a test drifts exactly the way the constraint drifted from the vocabulary. That
+is the specific hole this item named: a fifth reason added in SQL alone.
+
+The shape carries one axiom the `CHECK` cannot state. `minCount 0`: a batch
+with no stop reason is legal *precisely while it is in flight*, which is the
+NULL-means-running distinction §6's morning queue reads. A constraint can say
+which strings are legal; it cannot say that absence means something.
+
+Worth recording because it is the confusion the class exists to prevent: the
+shape rejects `EXHAUSTED` and `ORPHANED` as stop reasons. They are *task* end
+states, they share a column type and a naming style with these four, and
+`saffron batch` maps three of the four to exit `0` — so reading one set as the
+other misreports a night.
 
 **Tier 3.** Found reviewing `SA-0045` (PR #115), and again reviewing `SA-0049`.
 
