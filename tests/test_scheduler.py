@@ -1723,15 +1723,15 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-04, an eighth time, and the churn is the practice
+    """Re-measured 2026-09-04, a ninth time, and the churn is the practice
     rather than a problem: this test exists to be re-anchored, and every spec
     that lands *or retires* moves it by construction.
 
     With `SA-0052` and `SA-0053` retired to `done/`, the live corpus is exactly
     one thing: the batch stack. `SA-0045` is its only root and its only
     candidate, and `SA-0046` -> `SA-0048` -> `SA-0049` -> `SA-0050` ->
-    `SA-0051` is one linear chain five deep, each refused for the parent above
-    it having no task at its current `spec_sha`. That is the shape §4.2.1 says
+    `SA-0051` -> `SA-0054` is one linear chain six deep, each refused for the
+    parent above it having no task at its current `spec_sha`. That is the shape §4.2.1 says
     a stack presents on its first night, before anything has run, and it is the
     strongest form this anchor has taken: one root, and every other spec
     refused for exactly one reason.
@@ -1760,6 +1760,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         ("SA-0049", "SA-0048"),
         ("SA-0050", "SA-0049"),
         ("SA-0051", "SA-0050"),
+        ("SA-0054", "SA-0051"),
     ]
     assert len(refusals) == len(chain)
     for refusal, (child, parent) in zip(refusals, chain, strict=True):
