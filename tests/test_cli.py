@@ -1,21 +1,28 @@
 """The operator's only entry point, so it gets at least one end-to-end test."""
 
 import argparse
+import ast
 import functools
 import hashlib
+import inspect
 import json
 import subprocess
 import tempfile
+from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from saffron import cli, intake
+from saffron import cli, intake, preflight
 from saffron.cell import session
+from saffron.cell.session import CellOutcome
 from saffron.cli import main
 from saffron.events import PhaseStart, Preflight, describe, read_log
 from saffron.ledger import Ledger
 from saffron.phases import package
+from saffron.reconcile import ReconcileResult
+from saffron.scheduler import Candidate, Refusal
 from tests.conftest import HostToolExecInTest
 from tests.test_replay import target  # noqa: F401 — a pytest fixture, used by name
 
@@ -1099,12 +1106,71 @@ def test_a_missing_token_fails_before_the_image_is_built(tmp_path, monkeypatch):
         raise SystemExit(0)
 
     # The mirror is the first thing `_run_cell` touches; nothing may run.
-    monkeypatch.setattr("saffron.cli.git_mirror.ensure_mirror", _reached)
+    # Patched at the canonical module, not through `cli`'s own namespace:
+    # the hoist into `preflight.prepare_mirror` moved the call site, and a
+    # dotted string through `saffron.cli` would have to keep tracking where
+    # the call lives rather than what it calls.
+    monkeypatch.setattr("saffron.repos.mirror.ensure_mirror", _reached)
     with pytest.raises(RuntimeError, match="CLAUDE_CODE_OAUTH_TOKEN is unset"):
         cli._run_cell(
             _namespace(repo, tmp_path), Ledger(tmp_path / "l.db"), tmp_path / "out"
         )
     assert not reached
+
+
+def test_one_cell_still_prepares_itself_in_order_after_the_hoist(tmp_path, monkeypatch):
+    """`_run_cell`'s own preparation, unchanged in order by the hoist into
+    `preflight.prepare_mirror`: the token refusal still fires before the
+    mirror is ever touched, and the mirror fetch, the non-forge origin
+    refusal and the default-branch pin all still happen before a cell
+    starts (`SA-0048`) — asserted on the order calls land in, not on the
+    exit code alone."""
+    order: list[str] = []
+
+    def _mk(name, result):
+        def _fn(*_a, **_k):
+            order.append(name)
+            return result
+
+        return _fn
+
+    monkeypatch.setattr(
+        preflight.git_mirror, "ensure_mirror", _mk("mirror", tmp_path / "m")
+    )
+    monkeypatch.setattr(
+        preflight.package_phase,
+        "real_remote",
+        _mk("real_remote", "https://github.com/o/r.git"),
+    )
+    monkeypatch.setattr(preflight.package_phase, "github_slug", _mk("origin", "o/r"))
+    monkeypatch.setattr(
+        preflight.package_phase,
+        "fetch_default_branch",
+        _mk("default_branch", ("main", "a" * 40)),
+    )
+
+    def _started(*_a, **_k):
+        order.append("cell")
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli, "run_one_cell", _started)
+
+    repo = _repo_with_commit(tmp_path / "repo")
+    with pytest.raises(SystemExit):
+        cli._run_cell(
+            _namespace(repo, tmp_path), Ledger(tmp_path / "l.db"), tmp_path / "out"
+        )
+
+    assert order == ["mirror", "real_remote", "origin", "default_branch", "cell"]
+
+    # And the token refusal still fires before any of it: nothing above ran.
+    order.clear()
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    with pytest.raises(RuntimeError, match="CLAUDE_CODE_OAUTH_TOKEN is unset"):
+        cli._run_cell(
+            _namespace(repo, tmp_path), Ledger(tmp_path / "l2.db"), tmp_path / "out"
+        )
+    assert order == []
 
 
 def test_a_spec_whose_touches_are_protected_refuses_before_the_cell_starts(
@@ -1866,6 +1932,254 @@ def test_queue_says_the_refusals_did_not_run_when_gh_is_not_installed(
     assert "did not run" in out
 
 
+def test_resolving_a_queue_is_one_function_over_the_pinned_base(tmp_path, monkeypatch):
+    """`_resolve_queue` does what `_queue` did inline, and in the same order:
+    the mirror, the pinned base, the reconcile, the slug, the export, and the
+    scan over that export — never the working copy, which is what makes an
+    unpushed spec a draft rather than tonight's work."""
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-resolve-order")
+    # Committed, never pushed — the pinned-base witness. A `_resolve_queue`
+    # that scanned the working copy would see this too.
+    (repo / ".saffron" / "specs" / "SY-2.md").write_text(
+        _A_SPEC.replace("SY-1", "SY-2")
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "unpushed")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    # A task at a spec id the queue's own directory need not carry — reconcile
+    # scans every row in the repo, not just this scan's candidates, so this is
+    # a clean witness that reconcile ran without disturbing SY-1's own status.
+    task_id = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-9",
+        state="READY_FOR_REVIEW",
+        pr_url="https://github.com/o/r/pull/1",
+    )
+
+    order = []
+    real_ensure = cli.git_mirror.ensure_mirror
+    real_fetch = cli.package_phase.fetch_default_branch
+    real_reconcile = cli.reconcile
+    real_slug = cli.package_phase.github_slug
+    real_export = cli.git_mirror.export_saffron_dir
+    real_build = cli.build_queue
+
+    def _ensure(*a, **k):
+        order.append("mirror")
+        return real_ensure(*a, **k)
+
+    def _fetch(*a, **k):
+        order.append("base")
+        return real_fetch(*a, **k)
+
+    def _reconcile(*a, **k):
+        order.append("reconcile")
+        return real_reconcile(*a, **k)
+
+    def _slug(*a, **k):
+        order.append("slug")
+        return real_slug(*a, **k)
+
+    def _export(*a, **k):
+        order.append("export")
+        return real_export(*a, **k)
+
+    def _build(*a, **k):
+        order.append("scan")
+        return real_build(*a, **k)
+
+    monkeypatch.setattr(cli.git_mirror, "ensure_mirror", _ensure)
+    monkeypatch.setattr(cli.package_phase, "fetch_default_branch", _fetch)
+    monkeypatch.setattr(cli, "reconcile", _reconcile)
+    monkeypatch.setattr(cli.package_phase, "github_slug", _slug)
+    monkeypatch.setattr(cli.git_mirror, "export_saffron_dir", _export)
+    monkeypatch.setattr(cli, "build_queue", _build)
+    monkeypatch.setattr(cli, "run_gh", _fake_gh_says_merged)
+
+    resolved = cli._resolve_queue(repo, home, ledger, stamp_orphaned=False)
+
+    assert order == ["mirror", "base", "reconcile", "slug", "export", "scan"]
+    assert resolved.repo_id == repo_id
+    assert [c.spec.id for c in resolved.candidates] == ["SY-1"]
+    assert resolved.reconciled.merged == [task_id]
+    # The local origin here has no GitHub slug to resolve.
+    assert resolved.repo_slug is None
+    ledger.close()
+
+
+def test_the_stamping_premise_is_a_required_argument(tmp_path):
+    """A default here would decide the premise for whichever caller forgets
+    to think about it — so there is no default to fall back on."""
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-stamp-required")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+
+    # `getattr` with a name built at runtime, not a direct call: a static
+    # type checker would catch a missing required keyword argument at the
+    # call site, but the whole point of this witness is that the *runtime*
+    # enforces it too — there is no default `stamp_orphaned` value for a
+    # caller to fall back on.
+    attr = "_resolve" + "_queue"
+    resolve_queue = getattr(cli, attr)
+    with pytest.raises(TypeError):
+        resolve_queue(repo, home, ledger)  # no stamp_orphaned given
+
+    ledger.close()
+
+
+def test_told_to_stamp_it_orphans_an_in_flight_task_and_re_queues_it(tmp_path):
+    """Told to stamp, it stamps: a task left in an in-flight state is
+    recorded orphaned and re-queues by the ordinary rule (`ORPHANED` is in
+    `scheduler.REQUEUE_STATES`)."""
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-stamp-yes")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    task_id = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-1",
+        state="IMPLEMENTING",
+        spec_sha=hashlib.sha256(_A_SPEC.encode()).hexdigest(),
+    )
+
+    resolved = cli._resolve_queue(repo, home, ledger, stamp_orphaned=True)
+
+    row = ledger._db.execute(
+        "SELECT state FROM tasks WHERE task_id = ?", (task_id,)
+    ).fetchone()
+    assert row["state"] == "ORPHANED"
+    assert task_id in resolved.reconciled.orphaned
+    assert len(resolved.candidates) == 1
+    assert resolved.candidates[0].task_id == task_id
+    ledger.close()
+
+
+def test_told_not_to_stamp_it_leaves_an_in_flight_task_alone(tmp_path):
+    """Told not to stamp, it leaves an in-flight task exactly as it found
+    it — the existing behaviour of the attended command, and the reason the
+    argument exists rather than a constant."""
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-stamp-no")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    task_id = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-1",
+        state="IMPLEMENTING",
+        spec_sha=hashlib.sha256(_A_SPEC.encode()).hexdigest(),
+    )
+
+    resolved = cli._resolve_queue(repo, home, ledger, stamp_orphaned=False)
+
+    row = ledger._db.execute(
+        "SELECT state FROM tasks WHERE task_id = ?", (task_id,)
+    ).fetchone()
+    assert row["state"] == "IMPLEMENTING"
+    assert resolved.reconciled.orphaned == []
+    assert len(resolved.candidates) == 1
+    assert resolved.candidates[0].task_id is None
+    ledger.close()
+
+
+def _source_calls(fn, name, *, keyword=None, value=None):
+    """Whether `fn`'s body contains a call to `name` — and, if a `keyword` is
+    given, a literal keyword argument matching `value`.
+
+    AST over `inspect.getsource`, not a substring search — a comment or a
+    docstring merely naming `name` must not satisfy this — and not a call
+    into the real function either: this is a structural check that a
+    *caller* still routes through the named function, precisely so that
+    reverting that routing (and nothing else) makes it false. This file's own
+    `test_no_signature_in_the_package_still_takes_a_watch` is the precedent
+    for reading source this way rather than importing and calling it."""
+    tree = ast.parse(inspect.getsource(fn))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        called = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+        if called != name:
+            continue
+        if keyword is None:
+            return True
+        for kw in node.keywords:
+            if kw.arg == keyword and isinstance(kw.value, ast.Constant):
+                return kw.value.value == value
+    return False
+
+
+def _queue_calls(name, *, keyword=None, value=None):
+    return _source_calls(cli._queue, name, keyword=keyword, value=value)
+
+
+def test_the_printed_queue_is_unchanged_by_the_extraction(tmp_path, capsys):
+    """The attended command prints what it printed before — the candidates,
+    the refusals, the reconcile summary, and the two lines that say a slug or
+    a policy could not be read — asserted against the current output rather
+    than against the fact that output happened. And it prints it by way of
+    the extraction, not a second, inline copy of the same sequence — the
+    defect a copy would eventually drift into."""
+    repo = _repo_with_spec(
+        tmp_path,
+        spec_text=_A_SPEC,
+        dirname="repo-unchanged-output",
+        extra_specs={"SY-3.md": "no frontmatter at all\n"},
+    )
+    home = tmp_path / "home"
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    out = capsys.readouterr().out
+    assert out == (
+        "reconcile: nothing moved\n"
+        "queue: 1 candidate(s)\n"
+        "  SY-1       priority=3  .saffron/specs/SY-1.md\n"
+        "refusals: 1\n"
+        "  .saffron/specs/SY-3.md: spec has no YAML frontmatter block\n"
+        "note: no GitHub slug could be read from the remote — the "
+        "open-pull-request and touches-overlap refusals did not run, so the "
+        "refusal list above is incomplete\n"
+    )
+    assert _queue_calls("_resolve_queue"), (
+        "the printed queue must come from `_resolve_queue`, not a second "
+        "copy of its sequence"
+    )
+
+
+def test_looking_at_the_queue_still_never_stamps_a_corpse(tmp_path):
+    """The existing guarantee, re-asserted at the level where it could
+    regress: the extraction is what put a stamping switch within reach of
+    this path for the first time, and `queue` must still never flip it —
+    which means passing `stamp_orphaned=False` at the call site, not relying
+    on a default that does not exist."""
+    repo = _repo_with_spec(
+        tmp_path, spec_text=_A_SPEC, dirname="repo-queue-never-stamps"
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-1", state="IMPLEMENTING")
+    ledger.close()
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    assert _task_state(home, task_id) == "IMPLEMENTING"
+    assert _queue_calls("_resolve_queue", keyword="stamp_orphaned", value=False), (
+        "`saffron queue` must pass `stamp_orphaned=False` explicitly — the "
+        "switch the extraction put within `_queue`'s reach"
+    )
+
+
 def test_the_plan_checkpoint_still_rejects_what_the_refusal_could_not_decide(
     tmp_path,
 ):
@@ -1904,3 +2218,803 @@ def test_the_plan_checkpoint_still_rejects_what_the_refusal_could_not_decide(
         validate_plan(
             raw, touches=touches, forbidden=[], protected=protected, spec_type="docs"
         )
+
+
+def test_an_orphan_only_resolution_names_the_rows_it_stamped(capsys):
+    """`orphaned` counted toward "something moved" — suppressing the "nothing
+    moved" line — while having no bucket of its own, so a resolution that only
+    orphaned printed nothing whatsoever. `ReconcileResult`'s own docstring
+    promises "task ids, not bare counts, so an operator can trace exactly
+    which row moved and why", and this was the one bucket that did not.
+
+    `saffron queue` never orphans, so the only caller that reaches this line
+    is the unattended night — the one with nobody watching it happen."""
+    cli._print_reconcile_summary(ReconcileResult(orphaned=[7, 9]))
+
+    printed = capsys.readouterr().out
+    assert "reconcile: task 7 → ORPHANED" in printed
+    assert "reconcile: task 9 → ORPHANED" in printed
+    assert "nothing moved" not in printed
+
+
+def test_a_resolution_that_changed_nothing_still_says_so(capsys):
+    """The other half: silence must not read as "there was nothing to ask
+    about"."""
+    cli._print_reconcile_summary(ReconcileResult())
+
+    assert "reconcile: nothing moved" in capsys.readouterr().out
+
+
+def _readiness_passes(monkeypatch):
+    """Readiness now runs *before* the scan (§4.4 step 1 ahead of step 4), so
+    a test that fakes `_resolve_queue` and not this one never reaches the
+    scan at all."""
+    monkeypatch.setattr(
+        cli.preflight, "check_readiness", lambda *a, **k: preflight.Readiness(True)
+    )
+
+
+def _fake_batch_resolution(tmp_path, *, repo_id=None, candidates=None):
+    """The empty-queue `QueueResolution` every `saffron batch` witness below
+    needs when it fakes `_resolve_queue` out entirely — real fields, no real
+    scan, so `run_batch` (real or faked in turn) has something to iterate
+    over that is never more than the caller asked for."""
+    return cli.QueueResolution(
+        repo_id=repo_id,
+        mirror=tmp_path / "m.git",
+        base_sha="a" * 40,
+        repo_slug=None,
+        exported=tmp_path,
+        candidates=candidates or [],
+        refusals=[],
+        reconciled=cli.ReconcileResult(),
+        gh_failures=[],
+        policy_unread=[],
+    )
+
+
+def test_saffron_batch_runs_a_night_with_the_defaults_4_2_1_fixes(
+    tmp_path, monkeypatch
+):
+    """The command runs a night against one repo, resolving its queue
+    through `_resolve_queue` — the function `SA-0051` extracted — and
+    handing it to `run_batch`. Its two defaults are the ones §4.2.1 fixes:
+    `--repo` defaults to the working directory, matching the attended
+    `saffron cell` beside it, and `--budget` defaults to 50, sized against
+    the queue rather than against capacity."""
+    home = tmp_path / "home"
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict = {}
+
+    def _fake_resolve_queue(repo, home_arg, ledger, *, stamp_orphaned):
+        captured["repo"] = repo
+        return _fake_batch_resolution(tmp_path)
+
+    def _fake_run_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        captured["candidates"] = candidates
+        captured["budget_usd"] = budget_usd
+        captured["until"] = until
+        return "DRAINED"
+
+    _readiness_passes(monkeypatch)
+    monkeypatch.setattr(cli, "_resolve_queue", _fake_resolve_queue)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(cli, "run_batch", _fake_run_batch)
+
+    assert main(["--home", str(home), "batch"]) == 0
+
+    assert captured["repo"] == tmp_path.resolve()
+    assert captured["budget_usd"] == 50.0
+    assert captured["until"] is None
+
+
+def test_the_batch_scan_asks_for_the_stamping_the_attended_one_refuses():
+    """§4.2.1's batch-scan premise: one batch runs at a time, so an
+    in-flight row found while scanning tonight's queue is a corpse a dead
+    scan left behind, not live work an operator is watching, and is stamped
+    `ORPHANED` before the queue is filtered — `stamp_orphaned=True`.
+    `saffron queue` asserts the opposite argument for the opposite reason
+    (`test_looking_at_the_queue_still_never_stamps_a_corpse`); the behaviour
+    itself was proven where `_resolve_queue` was built, not here."""
+    assert _source_calls(
+        cli._batch, "_resolve_queue", keyword="stamp_orphaned", value=True
+    )
+
+
+def test_a_deadline_earlier_than_now_resolves_to_tomorrow():
+    """`06:30` is a time of day, not a duration: resolved at 22:00 the same
+    night it means 06:30 *tomorrow*, not a window that closed sixteen hours
+    ago. The case an operator hits every night they ask for the morning.
+    `23:00` resolved at the same 22:00 is still tonight, the other half of
+    the same rule."""
+    now = datetime(2026, 9, 5, 22, 0)
+
+    assert cli._resolve_until("06:30", now) == datetime(2026, 9, 6, 6, 30)
+    assert cli._resolve_until("23:00", now) == datetime(2026, 9, 5, 23, 0)
+
+
+def test_the_batch_command_offers_no_concurrency_or_multi_repo_flag(capsys):
+    """Neither a concurrency flag nor a multi-repo flag exists on `batch`
+    itself. §4.2.1 refuses both by name — a flag for a knob with one
+    position is the same defect in a command that item 18 found in a
+    dataclass.
+
+    Read off `batch --help`'s own usage line, not off a generic "unknown
+    argument" `SystemExit` — that `SystemExit` fires just as readily for an
+    unrecognized *subcommand*, so it would pass just as green if `batch`
+    did not exist at all. `--help` exits `0` only when `batch` is a real
+    subcommand parsed by its own parser (an unknown subcommand exits `2`
+    instead, `saffron: error: argument command: invalid choice`), so the
+    zero here is itself proof that `batch`'s own argument set — not some
+    other command's — was read.
+    """
+    with pytest.raises(SystemExit) as excinfo:
+        main(["batch", "--help"])
+    assert excinfo.value.code == 0
+
+    out = capsys.readouterr().out
+    assert "--concurrency" not in out
+    assert "--repos" not in out
+    # The positive control: the three flags §4.2.1 does name are there.
+    assert "--repo" in out
+    assert "--budget" in out
+    assert "--until" in out
+
+
+def test_the_three_ordinary_stop_reasons_all_exit_zero(tmp_path, monkeypatch, capsys):
+    """Draining, running out of budget, and reaching the deadline are the
+    same answer to "did the night make it": a batch that drains with three
+    failed tasks still did its job, and the individual outcomes are the
+    morning queue's business, not this exit code's.
+
+    The printed line is asserted alongside the code. An exit status is not
+    what an operator reads at 7am — it is gone by then, and `launchd` keeps
+    only the log. Replacing `print(f"batch: {stop}")` with `pass` left the
+    whole suite green, so the one line that says how the night ended was
+    guarded by nothing."""
+    home = tmp_path / "home"
+
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+
+    for reason in ("DRAINED", "BUDGET", "UNTIL"):
+        monkeypatch.setattr(cli, "run_batch", lambda *a, _r=reason, **k: _r)
+        assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 0
+        assert f"batch: {reason}" in capsys.readouterr().out
+
+
+def test_infrastructure_and_a_failed_readiness_both_exit_two(tmp_path, monkeypatch):
+    """The breaker firing and a readiness failure that takes the whole
+    night are the same exit code — both say the infrastructure failed,
+    which is what an unattended caller reads to decide whether tomorrow is
+    worth attempting."""
+    home = tmp_path / "home"
+
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+
+    # The breaker: `run_batch` itself says `INFRASTRUCTURE`, no readiness
+    # check ever recorded.
+    with monkeypatch.context() as m:
+        m.setattr(cli, "run_batch", lambda *a, **k: "INFRASTRUCTURE")
+        assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 2
+
+    # A readiness failure: the real `run_batch` runs, calls the real
+    # readiness check, and stops before any candidate.
+    with monkeypatch.context() as m:
+        m.setattr(
+            cli.preflight,
+            "check_readiness",
+            lambda *a, **k: preflight.Readiness(False, "auth", "boom"),
+        )
+        assert (
+            main(["--home", str(home / "two"), "batch", "--repo", str(tmp_path)]) == 2
+        )
+
+
+def test_a_batch_never_exits_one_whatever_stopped_it(tmp_path, monkeypatch):
+    """§4.2.1 reserves `1` rather than reusing it: a batch is not a task, and
+    letting `1` mean something here would merge two vocabularies that answer
+    different questions. Walked across all four stop reasons."""
+    home = tmp_path / "home"
+
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+
+    for reason in ("DRAINED", "BUDGET", "UNTIL", "INFRASTRUCTURE"):
+        monkeypatch.setattr(cli, "run_batch", lambda *a, _r=reason, **k: _r)
+        assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) != 1
+
+
+def test_the_night_is_given_a_real_readiness_check_not_the_loops_default(
+    tmp_path, monkeypatch
+):
+    """`run_batch`'s own default is to proceed — the right default for a
+    loop that cannot know a repo's paths or hold its token, and the wrong
+    one for a night. `saffron batch` passes a real callable, bound to this
+    run's own repo, mirror path, home and token, so an expired token at
+    22:00 does not buy a night of clean-looking nothing."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-real")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+
+    seen: dict = {}
+
+    def _fake_check_readiness(repo_arg, mirror_path, *, scratch, home, token):
+        seen.update(repo=repo_arg, mirror_path=mirror_path, home=home, token=token)
+        return preflight.Readiness(True)
+
+    monkeypatch.setattr(cli.preflight, "check_readiness", _fake_check_readiness)
+
+    captured: dict = {}
+
+    def _fake_run_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        captured.update(kwargs)
+        return "DRAINED"
+
+    monkeypatch.setattr(cli, "run_batch", _fake_run_batch)
+
+    assert main(["--home", str(home), "batch", "--repo", str(repo)]) == 0
+
+    readiness_check = captured["readiness_check"]
+    # There is no longer a permissive default to be "not" — `run_batch`
+    # requires the argument, so a caller that forgot cannot start a night at
+    # all. What is left to check is that the one supplied is bound to this
+    # run's own paths and token, which is what makes it a gate rather than a
+    # formality.
+    readiness_check()
+
+    assert seen["repo"] == repo.resolve()
+    assert seen["token"] == "sk-real"
+    assert Path(seen["home"]) == home
+    assert seen["mirror_path"] == cli._mirror_path(repo.resolve(), home)
+
+
+def test_a_readiness_failure_names_the_step_that_failed(tmp_path, monkeypatch, capsys):
+    """An expired token and a full disk are the same exit code and
+    different mornings — the result carries the step precisely so a caller
+    need not guess which."""
+    home = tmp_path / "home"
+
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(
+        cli.preflight,
+        "check_readiness",
+        lambda *a, **k: preflight.Readiness(False, "auth", "token invalid"),
+    )
+
+    result = main(["--home", str(home), "batch", "--repo", str(tmp_path)])
+
+    assert result == 2
+    out = capsys.readouterr().out
+    assert "auth" in out
+    assert "token invalid" in out
+
+
+def test_the_adapter_packages_a_ready_task_and_reports_what_packaging_made_of_it(
+    tmp_path, monkeypatch, capsys
+):
+    """`run_one_cell` stops at `READY_FOR_REVIEW`; the branch is pushed and the
+    pull request opened by `package_phase.package`, which the attended path
+    calls afterwards and the loop cannot call at all. Without this the night
+    runs to completion and opens nothing — backlog item 45's failure mode by
+    construction rather than by accident.
+
+    And the outcome handed back carries what packaging made of the task, not
+    what the cell left behind: `run_batch` reads `outcome.state` to drive the
+    breaker and the batch record, so a `MERGE_FAILED` reported as
+    `READY_FOR_REVIEW` misstates the night in the one column that says why it
+    ended.
+    """
+    repo = _local_origin(tmp_path)
+    mirror, url = _mirror_of(tmp_path, repo)
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, url)
+
+    resolved = cli.QueueResolution(
+        repo_id=repo_id,
+        mirror=mirror,
+        base_sha="a" * 40,
+        repo_slug=None,
+        exported=tmp_path,
+        candidates=[],
+        refusals=[],
+        reconciled=cli.ReconcileResult(),
+        gh_failures=[],
+        policy_unread=[],
+    )
+    runner = cli._batch_runner(
+        resolved, repo=repo, ledger=ledger, out_dir=tmp_path / "out", url=url
+    )
+
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-1", state="READY_FOR_REVIEW")
+    outcome = CellOutcome(
+        state="READY_FOR_REVIEW",
+        task_id=task_id,
+        run_id=1,
+        task_dir=tmp_path / "out" / "SY-1",
+    )
+    monkeypatch.setattr(cli, "run_one_cell", lambda *a, **k: outcome)
+
+    packaged: dict = {}
+
+    def _package(*args, **kwargs):
+        packaged["called"] = True
+        packaged.update(kwargs)
+        return SimpleNamespace(state="MERGE_FAILED", pr_url=None, note="pushed, no PR")
+
+    monkeypatch.setattr(cli.package_phase, "package", _package)
+
+    candidate = Candidate(
+        path=Path("SY-1.md"),
+        spec=intake.Spec(id="SY-1", title="t", type="chore", touches=["src/**"]),
+        spec_sha="s" * 64,
+        task_id=task_id,
+    )
+
+    returned = runner(candidate)
+
+    assert packaged.get("called") is True
+    assert returned.state == "MERGE_FAILED"
+    # The line the operator reads. Replacing it with `pass` left the suite
+    # green, and this is the only place a task's fate is rendered at all.
+    printed = capsys.readouterr().out
+    assert "SY-1" in printed
+    assert "MERGE_FAILED" in printed
+    assert "pushed, no PR" in printed
+    ledger.close()
+
+
+def test_a_night_says_what_its_own_scan_could_not_check(tmp_path, monkeypatch, capsys):
+    """A `gh` that could not start means the open-pull-request and
+    touches-overlap refusals never ran, and an unreadable `policy.yaml` at
+    `base_sha` means the protected-path refusal never ran. The attended
+    command says so; unsaid here, a degraded night is indistinguishable in the
+    morning from one whose refusals all passed, on the one path where nobody
+    is awake to notice.
+    """
+    resolved = cli.QueueResolution(
+        repo_id=1,
+        mirror=tmp_path / "m.git",
+        base_sha="a" * 40,
+        repo_slug="jtmcn/saffron",
+        exported=tmp_path,
+        candidates=[],
+        refusals=[],
+        reconciled=cli.ReconcileResult(),
+        gh_failures=["gh: command not found"],
+        policy_unread=["policy.yaml: no such file"],
+    )
+    _readiness_passes(monkeypatch)
+    monkeypatch.setattr(cli, "_resolve_queue", lambda *a, **k: resolved)
+    monkeypatch.setattr(cli.package_phase, "real_remote", lambda _repo: "u")
+    monkeypatch.setattr(cli, "_batch_runner", lambda *a, **k: lambda _c: None)
+    monkeypatch.setattr(cli, "run_batch", lambda *a, **k: "DRAINED")
+
+    args = argparse.Namespace(
+        repo=tmp_path, home=tmp_path / "home", budget=50.0, until=None
+    )
+    ledger = Ledger(tmp_path / "l.db")
+    assert cli._batch(args, ledger, tmp_path / "out") == 0
+    ledger.close()
+
+    printed = capsys.readouterr().out
+    assert "gh could not be run" in printed
+    assert "policy.yaml at this base_sha could not be read" in printed
+
+
+def test_the_adapter_stacks_a_child_on_its_parents_branch(tmp_path, monkeypatch):
+    """The adapter this command hands the loop resolves what each candidate
+    stacks on, exactly as the attended path already does: a child runs cut
+    from its parent's real branch head, never the pinned `base_sha`."""
+    repo = _local_origin(tmp_path)
+    head = _push_parent_branch(repo, "saffron/SY-9000")
+    mirror, url = _mirror_of(tmp_path, repo)
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, url)
+    parent = _seed_task(ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW")
+    ledger.record_push(parent, "d" * 40)
+
+    resolved = cli.QueueResolution(
+        repo_id=repo_id,
+        mirror=mirror,
+        base_sha="a" * 40,
+        repo_slug=None,
+        exported=tmp_path,
+        candidates=[],
+        refusals=[],
+        reconciled=cli.ReconcileResult(),
+        gh_failures=[],
+        policy_unread=[],
+    )
+    runner = cli._batch_runner(
+        resolved, repo=repo, ledger=ledger, out_dir=tmp_path / "out", url=url
+    )
+
+    captured: dict = {}
+
+    def _capture(cell_spec, **_kwargs):
+        captured["spec"] = cell_spec
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli, "run_one_cell", _capture)
+
+    candidate = Candidate(
+        path=Path("SY-1.md"),
+        spec=intake.Spec(
+            id="SY-1",
+            title="t",
+            type="chore",
+            touches=["src/**"],
+            depends_on=["SY-9000"],
+        ),
+        spec_sha="s" * 64,
+        task_id=None,
+    )
+
+    with pytest.raises(SystemExit):
+        runner(candidate)
+
+    assert captured["spec"].stacked_on == head != "d" * 40
+    ledger.close()
+
+
+def test_the_adapter_stacks_on_the_first_dependency_only(tmp_path, monkeypatch):
+    """K=1: a second dependency is still not a stacking base. The adapter
+    must not widen that rule just because it is new code doing an old job —
+    `depends_on[1]`'s own resolvable, waiting task and its real pushed
+    branch must not leak into the result."""
+    repo = _local_origin(tmp_path)
+    _push_parent_branch(repo, "saffron/SY-2")
+    mirror, url = _mirror_of(tmp_path, repo)
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, url)
+    second = _seed_task(ledger, repo_id, spec_id="SY-2", state="READY_FOR_REVIEW")
+    ledger.record_push(second, "b" * 40)
+
+    resolved = cli.QueueResolution(
+        repo_id=repo_id,
+        mirror=mirror,
+        base_sha="a" * 40,
+        repo_slug=None,
+        exported=tmp_path,
+        candidates=[],
+        refusals=[],
+        reconciled=cli.ReconcileResult(),
+        gh_failures=[],
+        policy_unread=[],
+    )
+    runner = cli._batch_runner(
+        resolved, repo=repo, ledger=ledger, out_dir=tmp_path / "out", url=url
+    )
+
+    captured: dict = {}
+
+    def _capture(cell_spec, **_kwargs):
+        captured["spec"] = cell_spec
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli, "run_one_cell", _capture)
+
+    candidate = Candidate(
+        path=Path("SY-1.md"),
+        spec=intake.Spec(
+            id="SY-1",
+            title="t",
+            type="chore",
+            touches=["src/**"],
+            depends_on=["SY-1-parent", "SY-2"],
+        ),
+        spec_sha="s" * 64,
+        task_id=None,
+    )
+
+    with pytest.raises(SystemExit):
+        runner(candidate)
+
+    assert captured["spec"].stacked_on is None
+    ledger.close()
+
+
+def test_the_night_cannot_start_without_a_readiness_gate():
+    """The loop used to bind a permissive stub, so a caller who simply forgot
+    the argument got a vacuous §4.4 step 1 and a night that could start on an
+    expired token. It is now required, which is a stronger guarantee than any
+    assertion about which callable was passed: forgetting is a TypeError."""
+    import inspect
+
+    from saffron.batch import run_batch
+
+    parameter = inspect.signature(run_batch).parameters["readiness_check"]
+    assert parameter.default is inspect.Parameter.empty
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+
+
+def test_the_adapter_packages_a_stacked_child_against_its_parents_branch(
+    tmp_path, monkeypatch
+):
+    """`SA-0026`'s whole point: the sha and the branch travel together or
+    neither does. The stacking witness above pins `CellSpec.stacked_on` — the
+    sha — and nothing pinned `parent_branch`, the half that decides what the
+    pull request targets. Mutating it to `None` left all of `test_cli.py`
+    green while every night silently opened its stacked children against
+    `main`."""
+    repo = _local_origin(tmp_path)
+    head = _push_parent_branch(repo, "saffron/SY-9000")
+    mirror, url = _mirror_of(tmp_path, repo)
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, url)
+    parent = _seed_task(ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW")
+    ledger.record_push(parent, "d" * 40)
+
+    resolved = cli.QueueResolution(
+        repo_id=repo_id,
+        mirror=mirror,
+        base_sha="a" * 40,
+        repo_slug=None,
+        exported=tmp_path,
+        candidates=[],
+        refusals=[],
+        reconciled=cli.ReconcileResult(),
+        gh_failures=[],
+        policy_unread=[],
+    )
+    runner = cli._batch_runner(
+        resolved, repo=repo, ledger=ledger, out_dir=tmp_path / "out", url=url
+    )
+
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-1", state="READY_FOR_REVIEW")
+    monkeypatch.setattr(
+        cli,
+        "run_one_cell",
+        lambda *a, **k: CellOutcome(
+            state="READY_FOR_REVIEW",
+            task_id=task_id,
+            run_id=1,
+            task_dir=tmp_path / "out" / "SY-1",
+        ),
+    )
+
+    packaged: dict = {}
+
+    def _package(*args, **kwargs):
+        packaged.update(kwargs)
+        return SimpleNamespace(state="READY_FOR_REVIEW", pr_url="u", note=None)
+
+    monkeypatch.setattr(cli.package_phase, "package", _package)
+
+    candidate = Candidate(
+        path=Path("SY-1.md"),
+        spec=intake.Spec(
+            id="SY-1",
+            title="t",
+            type="chore",
+            touches=["src/**"],
+            depends_on=["SY-9000"],
+        ),
+        spec_sha="s" * 64,
+        task_id=task_id,
+    )
+    runner(candidate)
+
+    assert packaged["parent_branch"] == "saffron/SY-9000"
+    assert head  # the parent's branch really exists, so this is not a typo
+    ledger.close()
+
+
+def test_an_unstacked_task_is_packaged_against_no_parent(tmp_path, monkeypatch):
+    """The other half: a candidate with no `depends_on` must target the
+    default branch, so `parent_branch` has to be `None` rather than a stale
+    value carried from a previous candidate."""
+    repo = _local_origin(tmp_path)
+    mirror, url = _mirror_of(tmp_path, repo)
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, url)
+
+    resolved = cli.QueueResolution(
+        repo_id=repo_id,
+        mirror=mirror,
+        base_sha="a" * 40,
+        repo_slug=None,
+        exported=tmp_path,
+        candidates=[],
+        refusals=[],
+        reconciled=cli.ReconcileResult(),
+        gh_failures=[],
+        policy_unread=[],
+    )
+    runner = cli._batch_runner(
+        resolved, repo=repo, ledger=ledger, out_dir=tmp_path / "out", url=url
+    )
+
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-2", state="READY_FOR_REVIEW")
+    monkeypatch.setattr(
+        cli,
+        "run_one_cell",
+        lambda *a, **k: CellOutcome(
+            state="READY_FOR_REVIEW",
+            task_id=task_id,
+            run_id=1,
+            task_dir=tmp_path / "out" / "SY-2",
+        ),
+    )
+
+    packaged: dict = {}
+
+    def _package(*args, **kwargs):
+        packaged.update(kwargs)
+        return SimpleNamespace(state="READY_FOR_REVIEW", pr_url="u", note=None)
+
+    monkeypatch.setattr(cli.package_phase, "package", _package)
+
+    runner(
+        Candidate(
+            path=Path("SY-2.md"),
+            spec=intake.Spec(id="SY-2", title="t", type="chore", touches=["src/**"]),
+            spec_sha="s" * 64,
+            task_id=task_id,
+        )
+    )
+
+    assert packaged["parent_branch"] is None
+    ledger.close()
+
+
+def test_readiness_is_probed_before_the_scan_that_depends_on_it(tmp_path, monkeypatch):
+    """§4.4's order, step 1 ahead of step 4. Run after the scan, `Readiness`'s
+    `mirror`, `origin` and `default_branch` steps were unreachable from this
+    command: the scan does those same three things unguarded and raises
+    first, so `main` printed a traceback and no `batches` row existed at all
+    for the night that was attempted — the outcome `run_batch`'s
+    readiness-close was written to prevent."""
+    home = tmp_path / "home"
+    order: list[str] = []
+
+    def _readiness(*_a, **_k):
+        order.append("readiness")
+        return preflight.Readiness(False, "mirror", "could not fetch")
+
+    def _scan(*_a, **_k):
+        order.append("scan")
+        raise AssertionError("the scan ran despite readiness failing")
+
+    monkeypatch.setattr(cli.preflight, "check_readiness", _readiness)
+    monkeypatch.setattr(cli, "_resolve_queue", _scan)
+
+    assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 2
+    assert order == ["readiness"]
+
+
+def test_an_unready_night_still_leaves_a_row_saying_it_was_attempted(
+    tmp_path, monkeypatch, capsys
+):
+    """A readiness failure before the scan must still reach `run_batch`, which
+    is what opens and closes the `batches` row. Otherwise the night that could
+    not start is a night with no record it was tried."""
+    home = tmp_path / "home"
+    monkeypatch.setattr(
+        cli.preflight,
+        "check_readiness",
+        lambda *a, **k: preflight.Readiness(False, "auth", "token expired"),
+    )
+    monkeypatch.setattr(cli, "_resolve_queue", lambda *a, **k: pytest.fail("scanned"))
+
+    ledger_path = home / "ledger.db"
+    assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 2
+
+    ledger = Ledger(ledger_path)
+    row = ledger._db.execute(
+        "SELECT status, ended_at FROM batches ORDER BY batch_id DESC LIMIT 1"
+    ).fetchone()
+    ledger.close()
+    assert row["status"] == "INFRASTRUCTURE"
+    assert row["ended_at"] is not None
+    assert "readiness failed at auth: token expired" in capsys.readouterr().out
+
+
+def test_a_night_names_the_specs_its_scan_refused(tmp_path, monkeypatch, capsys):
+    """`saffron queue` prints refusals; this printed only the gaps, so a spec
+    refused at gate 0 — a dead `depends_on` parent, protected `touches`, a
+    dangling `saffron:retired-by` marker — vanished with no line in the log
+    and no ledger row. "An empty queue" and "three specs all refused" produced
+    byte-identical output at 7am."""
+    resolved = cli.QueueResolution(
+        repo_id=1,
+        mirror=tmp_path / "m.git",
+        base_sha="a" * 40,
+        repo_slug="jtmcn/saffron",
+        exported=tmp_path,
+        candidates=[],
+        refusals=[
+            Refusal(path=tmp_path / "SY-7.md", reason="depends_on SY-9000 is unknown")
+        ],
+        reconciled=cli.ReconcileResult(),
+        gh_failures=[],
+        policy_unread=[],
+    )
+    _readiness_passes(monkeypatch)
+    monkeypatch.setattr(cli, "_resolve_queue", lambda *a, **k: resolved)
+    monkeypatch.setattr(cli.package_phase, "real_remote", lambda _repo: "u")
+    monkeypatch.setattr(cli, "_batch_runner", lambda *a, **k: lambda _c: None)
+    monkeypatch.setattr(cli, "run_batch", lambda *a, **k: "DRAINED")
+
+    args = argparse.Namespace(
+        repo=tmp_path, home=tmp_path / "home", budget=50.0, until=None
+    )
+    ledger = Ledger(tmp_path / "l.db")
+    assert cli._batch(args, ledger, tmp_path / "out") == 0
+    ledger.close()
+
+    printed = capsys.readouterr().out
+    assert "refusals: 1" in printed
+    assert "depends_on SY-9000 is unknown" in printed
+
+
+def test_a_night_says_what_it_set_out_to_do_before_what_became_of_it(
+    tmp_path, monkeypatch, capsys
+):
+    """The unattended twin of `_run_cell`'s `ceilings:` line. Without it the
+    log's first word about the night is its last."""
+    _readiness_passes(monkeypatch)
+    monkeypatch.setattr(
+        cli,
+        "_resolve_queue",
+        lambda *a, **k: _fake_batch_resolution(tmp_path),
+    )
+    monkeypatch.setattr(cli.package_phase, "real_remote", lambda _repo: "u")
+    monkeypatch.setattr(cli, "_batch_runner", lambda *a, **k: lambda _c: None)
+    monkeypatch.setattr(cli, "run_batch", lambda *a, **k: "DRAINED")
+
+    args = argparse.Namespace(
+        repo=tmp_path,
+        home=tmp_path / "home",
+        budget=25.0,
+        until=None,
+    )
+    ledger = Ledger(tmp_path / "l.db")
+    assert cli._batch(args, ledger, tmp_path / "out") == 0
+    ledger.close()
+
+    printed = capsys.readouterr().out
+    assert "budget $25.00" in printed
+    assert "until none" in printed
+
+
+@pytest.mark.parametrize("value", ["6:30pm", "06:30:00", "0630", "", "25:00", "06:99"])
+def test_a_malformed_until_is_a_usage_error_not_an_infrastructure_failure(value):
+    """These all reached `_resolve_until` and died in `int()`, which `main`
+    reports as exit 2 — "infrastructure failed" — for an operator's typo. The
+    empty string was worse: falsy, so `--until ""` silently meant no deadline
+    at all, turning an eight-hour night unbounded. Reachable from a shell
+    variable that went unset in the plist."""
+    with pytest.raises(SystemExit) as exit_info:
+        main(["batch", "--until", value])
+    assert exit_info.value.code == 2  # argparse's usage exit, not main's catch-all
+
+
+@pytest.mark.parametrize("value", ["-50", "0"])
+def test_a_budget_that_can_buy_nothing_is_refused(value):
+    """`--budget -50` opened a `batches` row, stopped at `BUDGET` immediately,
+    printed `batch: BUDGET` and exited 0 — a night that ran nothing and
+    reported success."""
+    with pytest.raises(SystemExit):
+        main(["batch", "--budget", value])

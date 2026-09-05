@@ -1,7 +1,7 @@
 """The ledger — SQLite, one file, WAL, authoritative for state (DESIGN.md §4.1).
 
-Seven of the ten tables. `batches` and `decisions` wait for a scheduler and an
-operator to have something to put in them.
+Eight of the nine tables. `decisions` waits for an operator to have something
+to put in it.
 """
 
 from __future__ import annotations
@@ -23,9 +23,30 @@ CREATE TABLE IF NOT EXISTS repos (
     enabled     INTEGER NOT NULL DEFAULT 1
 );
 
+-- One night's window and how it ended (§4.2.1). Timestamps are TEXT, matching
+-- every other timestamp this module writes (`datetime('now')`, sortable as
+-- text) rather than inventing a second representation. `budget_usd` is known
+-- at start and required; `ended_at` and the running spend estimate are unset
+-- while the batch is still going, so both of those columns are nullable.
+-- `status` is one of the four stop reasons — `DRAINED`, `BUDGET`, `UNTIL`,
+-- `INFRASTRUCTURE`, one per stop condition (§4.2.1) — and the CHECK is
+-- satisfied by NULL, so a still-running batch's row is neither a violation
+-- nor a fifth reason. No `concurrency`: §4.2.1 defers it until K has a second
+-- position.
+CREATE TABLE IF NOT EXISTS batches (
+    batch_id      INTEGER PRIMARY KEY,
+    started_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at      TEXT,
+    budget_usd    REAL NOT NULL,
+    spent_usd_est REAL,
+    until_ts      TEXT,
+    status        TEXT CHECK (status IN ('DRAINED', 'BUDGET', 'UNTIL', 'INFRASTRUCTURE'))
+);
+
 CREATE TABLE IF NOT EXISTS runs (
     run_id     INTEGER PRIMARY KEY,
     repo_id    INTEGER NOT NULL REFERENCES repos(repo_id),
+    batch_id   INTEGER REFERENCES batches(batch_id),
     base_sha   TEXT NOT NULL,
     preflight  TEXT,
     started_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -45,6 +66,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     pushed_sha TEXT,
     pr_url     TEXT,
     spent_usd_est REAL NOT NULL DEFAULT 0.0,
+    policy_sha TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -147,12 +169,22 @@ class Ledger:
             row["name"]
             for row in self._db.execute("PRAGMA table_info(tasks)").fetchall()
         }
-        for column in ("pushed_sha", "pr_url"):
+        for column in ("pushed_sha", "pr_url", "policy_sha"):
             if column not in existing:
                 self._db.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
         if "spent_usd_est" not in existing:
             self._db.execute(
                 "ALTER TABLE tasks ADD COLUMN spent_usd_est REAL NOT NULL DEFAULT 0.0"
+            )
+        # Same trap, this time on `runs`: `batches` arriving in `SCHEMA` does
+        # not retrofit `batch_id` onto a `runs` table that already exists.
+        runs_existing = {
+            row["name"]
+            for row in self._db.execute("PRAGMA table_info(runs)").fetchall()
+        }
+        if "batch_id" not in runs_existing:
+            self._db.execute(
+                "ALTER TABLE runs ADD COLUMN batch_id INTEGER REFERENCES batches(batch_id)"
             )
         # The backfill the old schema comment promised. A ledger written before
         # `attempts` existed holds a *task_id* in `gate_results.attempt_id`, and
@@ -322,10 +354,18 @@ class Ledger:
             )
         )
 
-    def create_run(self, repo_id: int, base_sha: str) -> int:
+    def create_run(
+        self, repo_id: int, base_sha: str, batch_id: int | None = None
+    ) -> int:
+        """`batch_id` defaults to `None` — a run created outside a batch (or
+        by `saffron/replay.py`, which calls this with no `batch_id` at all)
+        leaves the column NULL rather than inventing a batch that did not
+        happen. Nothing passes a real value yet; the batch loop that will is
+        `SA-0050`."""
         cursor = self._db.execute(
-            "INSERT INTO runs (repo_id, base_sha, status) VALUES (?, ?, 'RUNNING')",
-            (repo_id, base_sha),
+            """INSERT INTO runs (repo_id, base_sha, batch_id, status)
+               VALUES (?, ?, ?, 'RUNNING')""",
+            (repo_id, base_sha, batch_id),
         )
         self._db.commit()
         return _inserted_id(cursor)
@@ -337,6 +377,129 @@ class Ledger:
         )
         self._db.commit()
 
+    def create_batch(self, budget_usd: float, until_ts: str | None = None) -> int:
+        """Opens one night's window (§4.2.1). `status`, `ended_at` and
+        `spent_usd_est` stay NULL until `close_batch` — none of the three is
+        known yet, and NULL is what "not yet measured" means for a batch still
+        going, the same distinction `ended_at` already draws on `runs`.
+
+        `until_ts` goes through `datetime(?)` so it lands in the one spelling
+        this module writes — `YYYY-MM-DD HH:MM:SS`, UTC, sortable as text. An
+        ISO `T` string stored verbatim is neither: `'2026-09-06 23:00:00' <
+        '2026-09-06T06:00:00'` is true, so an `ended_at` at 23:00 would sort
+        before an `until_ts` of 06:30 the same night."""
+        cursor = self._db.execute(
+            "INSERT INTO batches (budget_usd, until_ts) VALUES (?, datetime(?))",
+            (budget_usd, until_ts),
+        )
+        self._db.commit()
+        return _inserted_id(cursor)
+
+    def close_batch(self, batch_id: int, status: str) -> None:
+        """`finish_run`'s shape, one table over: one UPDATE, status and end
+        together, then commit. The spend is derived through `batch_spend`
+        rather than repeated in SQL, so the close and the reader can never
+        become two spellings of one sum that drift apart. A `status` outside
+        §4.2.1's four stop reasons is refused by the CHECK on `batches` — this
+        surfaces `sqlite3.IntegrityError` rather than swallowing it.
+
+        `with self._db:` because of that raise: a failed UPDATE has already had
+        sqlite3 issue an implicit BEGIN, and without the rollback the write
+        lock is held until this connection next commits — every other process
+        on the ledger gets `database is locked`. The read and the write share
+        the transaction too, so a cost landing between them cannot be omitted
+        from the figure stored."""
+        with self._db:
+            spent = self.batch_spend(batch_id)
+            cursor = self._db.execute(
+                """UPDATE batches
+                      SET status = ?, ended_at = datetime('now'), spent_usd_est = ?
+                    WHERE batch_id = ?""",
+                (status, spent, batch_id),
+            )
+            # A batch_id matching nothing updates nothing and would close
+            # cleanly, leaving the real row open — `open_attempt`'s guard,
+            # for the same reason.
+            if cursor.rowcount != 1:
+                raise ValueError(f"no batch {batch_id} to close")
+
+    def attach_run_to_batch(self, run_id: int, batch_id: int) -> None:
+        """`create_run` accepts a `batch_id`, but the only call that mints a
+        run (`run_one_cell`, in `saffron/cell/**`) passes none — this stamps
+        it on after the row already exists, the shape `record_push` and
+        `set_task_package` already use on `tasks`: the row exists, then the
+        fact about it arrives.
+
+        Raises on a run that does not exist. The two sides were asymmetric: an
+        unknown `batch_id` hits the foreign key, an unknown `run_id` matched
+        zero rows and returned cleanly — and a stamp that silently does not
+        land is exactly what makes `batch_spend` under-count, the budget gate
+        never fire, and the night overspend."""
+        with self._db:
+            cursor = self._db.execute(
+                "UPDATE runs SET batch_id = ? WHERE run_id = ?",
+                (batch_id, run_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(f"no run {run_id} to attach to batch {batch_id}")
+
+    def max_run_id(self) -> int:
+        """The high-water mark on `runs.run_id`.
+
+        Read immediately before a candidate runs, so a run minted by a call
+        that then raised can be told apart from every run that already
+        existed. `saffron/batch.py` needs it and may not reach past this
+        class for it."""
+        row = self._db.execute(
+            "SELECT COALESCE(MAX(run_id), 0) AS high_water FROM runs"
+        ).fetchone()
+        return int(row["high_water"])
+
+    def attach_orphan_runs_to_batch(self, batch_id: int, since_run_id: int) -> int:
+        """Stamp any unattached run minted after `since_run_id`, returning how
+        many. Answers "the runner raised — did it leave a billed run behind?"
+
+        Scoped to `run_id > since_run_id` rather than every `batch_id IS NULL`
+        row: a ledger accumulates plenty of those from `saffron cell` and
+        `replay.py`, both of which pass no batch on purpose, and sweeping all
+        of them would fold an unrelated past run's spend into tonight's
+        budget."""
+        with self._db:
+            cursor = self._db.execute(
+                """UPDATE runs SET batch_id = ?
+                    WHERE run_id > ? AND batch_id IS NULL""",
+                (batch_id, since_run_id),
+            )
+            return cursor.rowcount
+
+    def batch_spend(self, batch_id: int) -> float:
+        """The same join `close_batch` derives through:
+        `batches` -> `runs.batch_id` -> `tasks.run_id` -> `attempts.cost_usd_est`,
+        summed and coalesced to 0.0 — never read off `tasks.spent_usd_est`,
+        which is only as fresh as the last `set_task_state` and would silently
+        omit the turn that just closed (`task_spend`'s docstring, one level
+        down)."""
+        row = self._db.execute(
+            """SELECT COALESCE(SUM(a.cost_usd_est), 0.0) AS spent
+                 FROM attempts a
+                 JOIN tasks t ON t.task_id = a.task_id
+                 JOIN runs r ON r.run_id = t.run_id
+                WHERE r.batch_id = ?""",
+            (batch_id,),
+        ).fetchone()
+        return float(row["spent"])
+
+    def batch_runs(self, batch_id: int) -> list[sqlite3.Row]:
+        """Every run a batch is made of, so a night can be walked from its own
+        row. The column already round-trips through `create_run`, but no
+        method had projected it until now, and `queue_lines` does not."""
+        return list(
+            self._db.execute(
+                "SELECT * FROM runs WHERE batch_id = ? ORDER BY run_id",
+                (batch_id,),
+            )
+        )
+
     def create_task(
         self,
         run_id: int,
@@ -345,11 +508,17 @@ class Ledger:
         branch: str,
         risk: str = "standard",
         budget_usd: float | None = None,
+        policy_sha: str | None = None,
     ) -> int:
+        """`policy_sha` is the declaration the cell's gates ran under — read
+        from the export at `base_sha` (§5.4) — and defaults to `None`: every
+        caller that predates this parameter (`saffron/replay.py` included)
+        still records a task, just one that cannot say what it ran under."""
         cursor = self._db.execute(
-            """INSERT INTO tasks (run_id, spec_id, spec_sha, state, risk, branch, budget_usd)
-               VALUES (?, ?, ?, 'QUEUED', ?, ?, ?)""",
-            (run_id, spec_id, spec_sha, risk, branch, budget_usd),
+            """INSERT INTO tasks
+                   (run_id, spec_id, spec_sha, state, risk, branch, budget_usd, policy_sha)
+               VALUES (?, ?, ?, 'QUEUED', ?, ?, ?, ?)""",
+            (run_id, spec_id, spec_sha, risk, branch, budget_usd, policy_sha),
         )
         self._db.commit()
         return _inserted_id(cursor)
@@ -437,6 +606,28 @@ class Ledger:
             "UPDATE tasks SET pushed_sha = ?, updated_at = datetime('now') "
             "WHERE task_id = ?",
             (pushed_sha, task_id),
+        )
+        self._db.commit()
+
+    def task_policy_sha(self, task_id: int) -> str | None:
+        """What this task is currently on record as having run under — the
+        base_sha declaration `create_task` recorded, or whatever PACKAGE last
+        wrote over it with `record_policy`. PACKAGE reads this back to decide
+        whether a re-verification ran under a different declaration."""
+        row = self._db.execute(
+            "SELECT policy_sha FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        return row["policy_sha"] if row is not None else None
+
+    def record_policy(self, task_id: int, policy_sha: str) -> None:
+        """PACKAGE's own write-back (§5.7, backlog item 16): issued only when
+        re-verification ran under a declaration different from the one this
+        task is on record for — never unconditionally, which would satisfy
+        the letter of "rewrites when it differs" while doing it every time."""
+        self._db.execute(
+            "UPDATE tasks SET policy_sha = ?, updated_at = datetime('now') "
+            "WHERE task_id = ?",
+            (policy_sha, task_id),
         )
         self._db.commit()
 

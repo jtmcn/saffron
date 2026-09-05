@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.saffron.batch</string>
+
+  <!-- Absolute paths throughout: launchd runs with almost no environment and
+       no shell, so `uv`, the repo and the token file are all named in full.
+       Edit the three marked YOURNAME paths before loading this. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <!-- `-c`, not `-lc`: a login shell sources ~/.bash_profile and makes an
+         unattended night depend on the operator's dotfiles, which is what
+         naming every path in full is for. -->
+    <string>-c</string>
+    <!-- The token is read from the secrets file at fire time and reaches
+         exactly this process, which is the same rule CLAUDE.md states for
+         running a cell by hand: never direnv, never `.env`, never exported
+         into a shell where a Claude Code session could inherit it.
+
+         `set -a` because `source` alone only sets a shell variable: unless
+         ~/.secrets uses `export`, the value never reaches `uv`'s environment
+         and every night dies at `readiness failed at auth`. The file wants
+         `chmod 600`. It is not on the command line, so it never reaches the
+         process table. -->
+    <string>set -a &amp;&amp; . /Users/YOURNAME/.secrets &amp;&amp; set +a &amp;&amp; exec /opt/homebrew/bin/uv run saffron batch --repo /Users/YOURNAME/Code/saffron --budget 50 --until 06:30</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/YOURNAME/Code/saffron</string>
+
+  <!-- Python block-buffers stdout into a file redirect, and launchd sends
+       SIGTERM on `unload`, logout and shutdown — measured: a night killed
+       that way leaves a 0-byte log, losing the whole record of what it had
+       done. This is the difference between the log below being the night's
+       account and being empty. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+  </dict>
+
+  <!-- 22:00 nightly. `launchd`, not cron: it runs a missed job after a wake
+       instead of silently skipping a sleeping Mac (DESIGN.md §4.4). -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>22</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+
+  <!-- These are the night's human-readable account, not a scrap heap. Every
+       line `saffron batch` prints lands here: the plan it set out with, each
+       task's outcome, the refusals, what the scan could not check, and the
+       final `batch: <stop>`. Nothing else renders any of it — there is no
+       morning-queue command yet — so this is the file to read at 7am. -->
+  <key>StandardOutPath</key>
+  <string>/Users/YOURNAME/.saffron/batch.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOURNAME/.saffron/batch.err.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

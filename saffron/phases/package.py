@@ -673,7 +673,7 @@ def package(
         mirror, fetch_head, out_dir / "package" / f"{spec.id}-gates"
     )
     try:
-        policy, _ = load_policy(gates_dir)
+        policy, policy_sha = load_policy(gates_dir)
     except PolicyError as exc:
         # `_drive_cell`'s wrap, one phase later: the path it reports is a
         # batch-tree export, and unnamed it sends the operator to their own
@@ -761,9 +761,16 @@ def package(
         # child's own baseline has to include the parent's commits, closing
         # the gap BACKLOG item 33 named as this spec's to fix.
         if needs_reverification(target_head, tree_base):
+            # The second declaration becomes real here: re-verification runs
+            # under whatever `fetch_head` declares, not what cell start
+            # recorded (item 16). See `record_policy` for why it is guarded.
+            if ledger.task_policy_sha(outcome.task_id) != policy_sha:
+                ledger.record_policy(outcome.task_id, policy_sha)
             # A gate that errored raises out of `reverify`: infrastructure, and
             # never this task's MERGE_FAILED. The gates are the export the
-            # policy above was read from — one commit, both halves.
+            # policy above was read from — one commit, both halves. The record
+            # stands across that raise on purpose: it is what re-verification
+            # ran under, not what it concluded.
             new, gates = reverify(
                 mirror=mirror,
                 packaged_sha=pushed,

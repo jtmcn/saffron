@@ -1,5 +1,5 @@
-"""Per-run readiness: two probes, neither of which trusts a component that
-reported success.
+"""Per-run readiness: two in-cell probes, neither of which trusts a component
+that reported success, plus the ordered host-side checks §4.2.1 adds on top.
 
 N1 rests on the first. The second rests on the fact that a proxy which started
 is not a proxy which works — one that came up with no route out cost a whole
@@ -11,16 +11,34 @@ without ever traversing the proxy. Measured, not assumed (Appendix G).
 
 A named host process can be tolerated per invocation — an accepted risk, not a
 fix, and reported on every run so it cannot go quiet (Appendix G).
+
+`check_readiness` is the third thing here: "preflight is what a task already
+does, hoisted, plus two" (§4.2.1) — auth, mirror fetch, origin refusal,
+default-branch pin, policy validation, disk headroom, in that order, stopping
+at the first failure and naming it. `saffron cell` calls `prepare_mirror`
+alone, never `check_readiness` — the auth-validity probe and the disk check
+are reached through the readiness entry point, whose first caller is a batch
+loop (`SA-0050`), not the attended path.
 """
 
 from __future__ import annotations
 
+import enum
 import os
 import re
+import shutil
 import socket
 import subprocess
+import urllib.error
+import urllib.request
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
 
 from saffron.cell import proxy, runtime
+from saffron.phases import package as package_phase
+from saffron.repos import mirror as git_mirror
+from saffron.repos.policy import PolicyError, load_policy
 
 _LSOF = ("lsof", "-nP", "-iTCP", "-sTCP:LISTEN")
 
@@ -264,3 +282,237 @@ def _last_line(done: runtime.Completed) -> str:
             if line.strip():
                 return line.strip()
     return "the probe printed nothing"
+
+
+# The agent's own credential, checked against the same host
+# `assert_proxy_reaches_upstream` probes.
+#
+# `anthropic-version` is required and is checked BEFORE the credential —
+# measured against the live endpoint, 2026-09-05, both tokens
+# (`docs/evidence/2026-09-05-token-probe-request-shape.md`). Without it a
+# *valid* token gets `400 anthropic-version: header is required`, and so does
+# a revoked one: the header is validated first, so the response says nothing
+# about the credential at all. That is why this constant is not decoration.
+# `anthropic-beta` is not required; the OAuth token authenticates on
+# `anthropic-version` alone.
+_TOKEN_PROBE_URL = f"https://{proxy.UPSTREAM_HOST}/v1/models"
+_TOKEN_PROBE_HEADERS = {"anthropic-version": "2023-06-01"}
+
+
+class TokenVerdict(enum.Enum):
+    """Three answers, because two of them are not the same kind of fact. A
+    credential the host rejected is a reason to stop and say so; one the probe
+    could not reach is infrastructure that failed, and naming the credential
+    for it accuses the wrong thing (`error` != `fail`)."""
+
+    VALID = "valid"
+    INVALID = "invalid"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class TokenCheck:
+    """`Readiness`'s shape one level down: the verdict, and what produced it."""
+
+    verdict: TokenVerdict
+    detail: str | None = None
+
+
+def validate_claude_token(token: str, *, timeout_s: float = 20) -> TokenCheck:
+    """Whether `token` authenticates against the host the proxy allowlists.
+
+    Three verdicts, never a boolean. A 401 or 403 is INVALID. Anything else
+    the probe could not turn into a verdict — a network it could not reach, a
+    moved endpoint, a 500 — is UNKNOWN, which still refuses to proceed
+    ("could not tell" is not a pass) but refuses while naming the right cause.
+    An earlier boolean form collapsed both directions: dropped wifi reported
+    the credential as dead, and a 404 from a moved endpoint reported it as
+    live.
+
+    This is the *opposite* verdict from `assert_proxy_reaches_upstream` on
+    the very same host: that probe treats a 401 as success, because what it
+    establishes is the route, not the credential — "the route is what is
+    being established, not a credential" (its own docstring). This probe
+    exists precisely because Appendix J found the other side of that coin: a
+    cell whose token the route accepts a connection for, and answers 401 to,
+    never says so — it returns `subtype: "success"`, `is_error: true`,
+    `total_cost_usd: 0.0`, and an expired token at 22:00 buys a night of
+    clean-looking nothing. A 401 or 403 here is exactly the failure this
+    function exists to catch, not the pass it is one door over.
+
+    The boolean form of this function never caught it. Without
+    `anthropic-version` the endpoint answers `400` to every token, valid or
+    revoked, because it validates the header before the credential — and
+    `exc.code not in (401, 403)` read `400` as a pass. It accepted any string
+    at all, which is Appendix J's failure reproduced inside the check written
+    against it.
+    """
+    request = urllib.request.Request(
+        _TOKEN_PROBE_URL,
+        headers={"Authorization": f"Bearer {token}", **_TOKEN_PROBE_HEADERS},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_s):
+            return TokenCheck(TokenVerdict.VALID)
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            return TokenCheck(TokenVerdict.INVALID, f"HTTP {exc.code}")
+        return TokenCheck(
+            TokenVerdict.UNKNOWN, f"HTTP {exc.code} from {_TOKEN_PROBE_URL}"
+        )
+    except urllib.error.URLError as exc:
+        return TokenCheck(TokenVerdict.UNKNOWN, f"{_TOKEN_PROBE_URL}: {exc.reason}")
+
+
+# 10 GiB: room for a night's mirrors, worktrees and agent-state volumes for
+# K concurrent cells plus one cell-image pull, with slack left over for
+# whatever else the same disk is holding. Chosen against §4.5's endgame —
+# "two weeks and the disk is full" — not against comfort: `saffron gc`
+# reclaims the leak; this only refuses to run blind past it while gc is
+# deferred (§4.2.1).
+_MIN_FREE_BYTES = 10 * 1024**3
+
+
+def disk_headroom_ok(path: Path, *, min_free_bytes: int = _MIN_FREE_BYTES) -> bool:
+    """Free space on the filesystem holding `path` — the batch tree
+    (`--home`), which is where mirrors, worktrees, and the cell runtime's own
+    volumes actually accumulate, not `/` and not the checkout being tasked.
+
+    Raises rather than reading as a pass it cannot back up: a headroom check
+    that could not run is not a headroom check that passed —
+    `host_probe_ports` draws the identical line for a missing `lsof`.
+    """
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError as exc:
+        raise RuntimeError(
+            f"disk headroom at {path} could not be checked ({exc})"
+        ) from exc
+    return usage.free >= min_free_bytes
+
+
+def prepare_mirror(repo: Path, mirror_path: Path) -> tuple[Path, str, str]:
+    """`ensure_mirror`, the non-forge origin refusal, and the default-branch
+    pin — the three per-task reads `_run_cell` already paid for (§4.2.1),
+    factored out so `check_readiness` can run them once per run while
+    `saffron cell` keeps paying them once per task, in exactly the order and
+    with exactly the failure modes it always has: raises, and does not
+    recover.
+    """
+    mirror = git_mirror.ensure_mirror(repo, mirror_path)
+    url = package_phase.real_remote(repo)
+    # Read for its refusal, not its value: `package` needs the slug and only
+    # reaches it after the budget is spent, so a non-GitHub origin fails here
+    # for the same reason an unreachable one does (§5.1).
+    package_phase.github_slug(url)
+    # The remote's default-branch head, not the invoking checkout's: a task's
+    # base must not depend on where the operator was standing (§5.7).
+    _, base_sha = package_phase.fetch_default_branch(mirror, url)
+    return mirror, url, base_sha
+
+
+@dataclass(frozen=True)
+class Readiness:
+    """One run's readiness — never a bare boolean, so a caller can skip the
+    repo and say why (§4.4 step 1) instead of discovering the reason by
+    reading a traceback the first cell raised."""
+
+    ok: bool
+    step: str | None = None
+    detail: str | None = None
+    mirror: Path | None = None
+    url: str | None = None
+    base_sha: str | None = None
+
+
+def check_readiness(
+    repo: Path,
+    mirror_path: Path,
+    *,
+    scratch: Path,
+    home: Path,
+    token: str | None,
+    validate_token: Callable[[str], TokenCheck] = validate_claude_token,
+) -> Readiness:
+    """§4.2.1, followed to the letter: auth, mirror fetch, origin refusal,
+    default-branch pin, policy validation, disk headroom — in that order,
+    stopping at the first failure and naming it.
+
+    Not called by `saffron cell` (`_run_cell` calls `prepare_mirror` alone):
+    this is the once-per-run entry point a batch loop calls (`SA-0050`), and
+    it is the only path that reaches the network-bound `validate_token` probe
+    or touches the disk at all.
+
+    `scratch` is **emptied** — `export_saffron_dir` rmtree's it first. It and
+    `home` are keyword-only for that reason: they were two adjacent positional
+    `Path`s, and transposing them type-checks cleanly and deletes the ledger.
+
+    The three preparation steps are spelled out here rather than delegated to
+    `prepare_mirror`, which runs the identical sequence: one `except` around a
+    call could not say *which* step failed, and naming it is this function's
+    whole contract. Keep the two in step — `test_readiness_and_prepare_mirror_
+    run_the_same_three_steps_in_the_same_order` fails if they drift.
+    """
+    stripped_token = (token or "").strip()
+    if not stripped_token:
+        return Readiness(False, "auth", "CLAUDE_CODE_OAUTH_TOKEN is unset")
+    checked = validate_token(stripped_token)
+    if checked.verdict is TokenVerdict.INVALID:
+        return Readiness(
+            False, "auth", f"CLAUDE_CODE_OAUTH_TOKEN was rejected ({checked.detail})"
+        )
+    if checked.verdict is TokenVerdict.UNKNOWN:
+        return Readiness(
+            False,
+            "auth",
+            f"CLAUDE_CODE_OAUTH_TOKEN could not be checked ({checked.detail})",
+        )
+
+    try:
+        mirror = git_mirror.ensure_mirror(repo, mirror_path)
+    except git_mirror.GitError as exc:
+        return Readiness(False, "mirror", str(exc))
+
+    try:
+        url = package_phase.real_remote(repo)
+        package_phase.github_slug(url)
+    except package_phase.PackageError as exc:
+        return Readiness(False, "origin", str(exc))
+
+    try:
+        _, base_sha = package_phase.fetch_default_branch(mirror, url)
+    except package_phase.PackageError as exc:
+        return Readiness(False, "default_branch", str(exc))
+
+    # Best-effort about a repo with no `.saffron/` at this `base_sha` at all —
+    # the same absence-is-not-unreadability distinction `cli._protected_paths`
+    # and `cli._protected_paths_at` already draw. A policy that is *present*
+    # and broken is a different fact and fails readiness (§4.2.1's "plus
+    # two"'s other half).
+    try:
+        exported = git_mirror.export_saffron_dir(mirror, base_sha, scratch)
+    except git_mirror.GitError:
+        exported = None
+    if exported is not None and (exported / ".saffron" / "policy.yaml").is_file():
+        try:
+            load_policy(exported)
+        except PolicyError as exc:
+            return Readiness(False, "policy", str(exc))
+
+    # `disk_headroom_ok` raises rather than reading an unrunnable check as a
+    # pass, which is right and is not this function's contract: §4.4 step 1
+    # skips a repo that fails preflight rather than taking the batch down, so
+    # every failure here arrives as a named `Readiness`, never as an exception
+    # a caller must know to catch.
+    try:
+        headroom = disk_headroom_ok(home)
+    except RuntimeError as exc:
+        return Readiness(False, "disk", str(exc))
+    if not headroom:
+        return Readiness(
+            False,
+            "disk",
+            f"fewer than {_MIN_FREE_BYTES / 1024**3:g}GiB free on {home}",
+        )
+
+    return Readiness(True, mirror=mirror, url=url, base_sha=base_sha)

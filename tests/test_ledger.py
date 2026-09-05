@@ -493,7 +493,8 @@ def test_a_ledger_that_predates_spent_usd_est_keeps_its_rows(tmp_path):
     EXISTS` does not alter, and no migration may lose a row."""
     path = tmp_path / "old.db"
     before = SCHEMA.replace("    spent_usd_est REAL NOT NULL DEFAULT 0.0,\n", "")
-    assert "spent_usd_est" not in before  # otherwise this test proves nothing
+    tasks_columns = before.split("CREATE TABLE IF NOT EXISTS tasks")[1].split(");")[0]
+    assert "spent_usd_est" not in tasks_columns  # otherwise this test proves nothing
     old = sqlite3.connect(path)
     old.executescript(before)
     old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')")
@@ -589,6 +590,214 @@ def test_a_ledger_that_predates_attempts_gains_the_reference(tmp_path):
     ledger.close()
 
 
+def test_the_batches_table_carries_exactly_the_fields_4_2_1_names(ledger):
+    """§4.2.1: `(batch_id, started_at, ended_at, budget_usd, spent_usd_est,
+    until_ts, status)` and no others — `concurrency` waits until K has a
+    second position."""
+    columns = {
+        row["name"]
+        for row in ledger._db.execute("PRAGMA table_info(batches)").fetchall()
+    }
+    assert columns == {
+        "batch_id",
+        "started_at",
+        "ended_at",
+        "budget_usd",
+        "spent_usd_est",
+        "until_ts",
+        "status",
+    }
+
+
+def test_a_batch_status_outside_the_four_stop_reasons_is_rejected(ledger):
+    """One row per stop condition — `DRAINED`, `BUDGET`, `UNTIL`,
+    `INFRASTRUCTURE` — and nothing else. No `create_batch` method exists yet
+    (the spec that adds the loop adds it with its caller), so this goes
+    through `ledger._db` directly."""
+    for status in ("DRAINED", "BUDGET", "UNTIL", "INFRASTRUCTURE"):
+        ledger._db.execute(
+            "INSERT INTO batches (budget_usd, status) VALUES (50, ?)", (status,)
+        )
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger._db.execute(
+            "INSERT INTO batches (budget_usd, status) VALUES (50, 'CRASHED')"
+        )
+
+
+def test_a_run_created_outside_a_batch_has_a_null_batch_id(ledger):
+    """`runs.batch_id` is nullable, and a run minted with no `batch_id`
+    argument leaves it NULL rather than inventing a batch that did not
+    happen."""
+    repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+    row = ledger._db.execute(
+        "SELECT batch_id FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    assert row["batch_id"] is None
+
+
+def test_a_run_created_inside_a_batch_carries_its_batch_id(ledger):
+    """The other half, and the one that makes the parameter load-bearing.
+    Without it, discarding the caller's `batch_id` at the INSERT — binding
+    `None` unconditionally — keeps every other test in this change green while
+    defeating the only reason the column exists: grouping a run into the batch
+    that ran it (§4.2.1). Raw `batches` insert because no `create_batch` method
+    exists yet; the spec that adds the loop adds it with its caller."""
+    repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    cursor = ledger._db.execute("INSERT INTO batches (budget_usd) VALUES (50)")
+    batch_id = cursor.lastrowid
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=batch_id)
+    row = ledger._db.execute(
+        "SELECT batch_id FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    assert row["batch_id"] == batch_id
+
+
+def test_a_batch_still_running_has_no_status_yet(ledger):
+    """The schema comment says the CHECK is satisfied by NULL, so a row for a
+    batch that has not stopped is neither a violation nor a fifth reason.
+    Nothing asserted it, and `NOT NULL` on `status` would keep every other
+    test here green while making an in-flight batch unrecordable — which is
+    the row `SA-0049` writes at start and completes at stop."""
+    ledger._db.execute("INSERT INTO batches (budget_usd) VALUES (50)")
+    row = ledger._db.execute(
+        "SELECT status, ended_at, spent_usd_est FROM batches"
+    ).fetchone()
+    assert row["status"] is None
+    assert row["ended_at"] is None
+
+
+def test_a_ledger_built_by_the_previous_schema_gains_batch_id(tmp_path):
+    """`CREATE TABLE IF NOT EXISTS` does not alter, so a database that already
+    holds `runs` needs the guarded `ALTER TABLE` this module already uses for
+    `pushed_sha` and `pr_url` — this time on `runs`, not `tasks`."""
+    path = tmp_path / "old.db"
+    before = SCHEMA.replace(
+        "    batch_id   INTEGER REFERENCES batches(batch_id),\n", ""
+    )
+    runs_columns = before.split("CREATE TABLE IF NOT EXISTS runs")[1].split(");")[0]
+    assert "batch_id" not in runs_columns  # otherwise this test proves nothing
+    old = sqlite3.connect(path)
+    old.executescript(before)
+    old.execute("DROP TABLE batches")  # the previous schema never had it either
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    columns = {
+        row["name"] for row in ledger._db.execute("PRAGMA table_info(runs)").fetchall()
+    }
+    assert "batch_id" in columns
+    ledger.close()
+
+
+def test_a_ledger_built_by_the_previous_schema_still_opens_and_writes(tmp_path):
+    """The property that makes this safe to land on a database holding every
+    task this repo has run: a ledger written before `batches` existed opens,
+    reads, and accepts a new run."""
+    path = tmp_path / "old.db"
+    before = SCHEMA.replace(
+        "    batch_id   INTEGER REFERENCES batches(batch_id),\n", ""
+    )
+    runs_columns = before.split("CREATE TABLE IF NOT EXISTS runs")[1].split(");")[0]
+    assert "batch_id" not in runs_columns  # otherwise this test proves nothing
+    old = sqlite3.connect(path)
+    old.executescript(before)
+    old.execute("DROP TABLE batches")
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    run_id = ledger.create_run(1, base_sha="b" * 40)
+    row = ledger._db.execute(
+        "SELECT batch_id FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    assert row["batch_id"] is None
+    ledger.close()
+
+
+def _schema_without_policy_sha() -> str:
+    """`tasks` minus `policy_sha` — the shape a ledger written before this
+    change actually has. Shared by the migration test below and the
+    no-backfill test, rather than building the fixture twice."""
+    before = SCHEMA.replace("    policy_sha TEXT,\n", "")
+    # `repos` carries its own, unrelated `policy_sha` column (§4.1), so scope
+    # the check to `tasks`. Asserting absence of the literal `replace` just
+    # searched for cannot fail — `repos` spells it with two spaces and `tasks`
+    # with one, so a reflow of either would make the replace a silent no-op.
+    tasks_columns = before.split("CREATE TABLE IF NOT EXISTS tasks")[1].split(");")[0]
+    assert "policy_sha" not in tasks_columns  # otherwise this test proves nothing
+    return before
+
+
+def test_a_ledger_built_by_the_previous_schema_gains_policy_sha(tmp_path):
+    """`tasks` carries a nullable `policy_sha`, added the way a column on an
+    existing table has to be — the guarded `ALTER TABLE` this module already
+    uses, never `CREATE TABLE IF NOT EXISTS`, which does not alter."""
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.executescript(_schema_without_policy_sha())
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    columns = {
+        row["name"] for row in ledger._db.execute("PRAGMA table_info(tasks)").fetchall()
+    }
+    assert "policy_sha" in columns
+    ledger.close()
+
+
+def test_an_existing_task_is_not_backfilled_with_a_policy_sha(tmp_path):
+    """A task row created before this change reads back with a NULL
+    `policy_sha`, never a value invented for a task nobody observed."""
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.executescript(_schema_without_policy_sha())
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.execute(
+        "INSERT INTO tasks (run_id, spec_id, spec_sha, state) "
+        "VALUES (1, 'SA-0016', 's', 'QUEUED')"
+    )
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    row = ledger._db.execute("SELECT policy_sha FROM tasks").fetchone()
+    assert row["policy_sha"] is None
+    ledger.close()
+
+
+def test_the_schema_adds_no_column_that_nothing_reads(ledger):
+    """§4.2.1's two explicit cuts: `batches` has no `concurrency`, and `tasks`
+    gains no `priority` — both would be item 18's pattern wearing a schema, a
+    column written at scan and read by nobody."""
+    batches_columns = {
+        row["name"]
+        for row in ledger._db.execute("PRAGMA table_info(batches)").fetchall()
+    }
+    tasks_columns = {
+        row["name"] for row in ledger._db.execute("PRAGMA table_info(tasks)").fetchall()
+    }
+    # A table that doesn't exist trivially satisfies "has no such column" —
+    # assert `batches` actually landed before asserting what it left out, or
+    # this passes just as well against the schema this spec starts from.
+    assert batches_columns == {
+        "batch_id",
+        "started_at",
+        "ended_at",
+        "budget_usd",
+        "spent_usd_est",
+        "until_ts",
+        "status",
+    }
+    assert "concurrency" not in batches_columns
+    assert "priority" not in tasks_columns
+
+
 def test_an_attempt_against_no_task_raises_rather_than_naming_another(ledger, task):
     """`lastrowid` reports the connection's previous insert, so a select that
     matched nothing still hands back an id — one that exists, belongs to another
@@ -598,3 +807,276 @@ def test_an_attempt_against_no_task_raises_rather_than_naming_another(ledger, ta
     with pytest.raises(ValueError):
         ledger.open_attempt(90210)
     assert [row["attempt_id"] for row in ledger.attempts(task_id)] == [real]
+
+
+def test_an_opened_batch_is_in_flight_with_no_stop_reason(ledger):
+    """A batch can be opened. The row carries its budget and its until, and
+    is in flight: no status and no end — §4.2.1's four stop reasons describe
+    how a batch *ended*, and a batch that has not ended has none of them."""
+    batch_id = ledger.create_batch(budget_usd=50, until_ts="2026-09-06T06:00:00")
+    row = ledger._db.execute(
+        "SELECT budget_usd, until_ts, status, ended_at, spent_usd_est FROM batches"
+        " WHERE batch_id = ?",
+        (batch_id,),
+    ).fetchone()
+    assert row["budget_usd"] == 50
+    # Normalised, not stored verbatim — see the sortability test below.
+    assert row["until_ts"] == "2026-09-06 06:00:00"
+    assert row["status"] is None
+    assert row["ended_at"] is None
+    assert row["spent_usd_est"] is None
+
+
+def test_an_until_sorts_against_the_timestamps_it_will_be_compared_with(ledger):
+    """`until_ts` is the only timestamp a caller supplies, and the schema
+    comment promises every one of them is `datetime('now')`-shaped and
+    "sortable as text". Stored verbatim it was neither: an ISO `T` string
+    sorts *after* a space-separated one for the same night, so an `ended_at`
+    of 23:00 compared as text against an `until_ts` of 06:30 says the batch
+    ended before its own deadline.
+
+    Nothing compares them in SQL yet — the loop compares in Python — which is
+    exactly why this is pinned now rather than after §6 renders the window."""
+    batch_id = ledger.create_batch(budget_usd=50, until_ts="2026-09-06T06:30:00")
+    ledger.close_batch(batch_id, "UNTIL")
+    row = ledger._db.execute(
+        "SELECT until_ts, ended_at FROM batches WHERE batch_id = ?", (batch_id,)
+    ).fetchone()
+
+    # Both spellings agree, so text order is time order.
+    assert row["until_ts"] == "2026-09-06 06:30:00"
+    assert row["ended_at"] < row["until_ts"]
+    later = ledger._db.execute(
+        "SELECT ? < ? AS ordered", ("2026-09-06 06:30:00", "2026-09-06 23:00:00")
+    ).fetchone()
+    assert later["ordered"] == 1
+
+
+def test_closing_a_batch_records_its_stop_reason_and_end(ledger):
+    """Modelled on `finish_run`, which does the same for a run and is the
+    shape this repo already uses."""
+    batch_id = ledger.create_batch(budget_usd=50)
+    ledger.close_batch(batch_id, "DRAINED")
+    row = ledger._db.execute(
+        "SELECT status, ended_at FROM batches WHERE batch_id = ?", (batch_id,)
+    ).fetchone()
+    assert row["status"] == "DRAINED"
+    assert row["ended_at"] is not None
+
+
+def test_closing_a_batch_with_an_invented_stop_reason_is_refused(ledger):
+    """The CHECK already says so; this proves the writer surfaces it instead
+    of swallowing it."""
+    batch_id = ledger.create_batch(budget_usd=50)
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.close_batch(batch_id, "CRASHED")
+
+
+def test_closing_a_batch_derives_and_stores_its_spend(ledger):
+    """The spend it writes is the reader's return value bound as a
+    parameter, never a second copy of the join: `batches` -> `runs.batch_id`
+    -> `tasks.run_id` -> `attempts.cost_usd_est`.
+
+    A second batch's own attempts are also recorded, in the same ledger,
+    before the first is closed — the CHECK, the `WHERE r.batch_id = ?`
+    filter this exercises, is the only thing standing between one night's
+    stored spend and a running total of every night the ledger has ever
+    seen. Dropping it would still sum only the rows that exist in a fresh
+    fixture; it would not still sum only the first batch's rows."""
+    batch_id = ledger.create_batch(budget_usd=50)
+    repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=batch_id)
+    task_id = ledger.create_task(
+        run_id, spec_id="SA-0001", spec_sha="s" * 40, branch="saffron/SA-0001"
+    )
+    for cost in (0.25, 0.50):
+        attempt_id = ledger.open_attempt(task_id)
+        ledger.close_attempt(
+            attempt_id,
+            session_id="s-1",
+            subtype="success",
+            terminal_reason=None,
+            num_turns=1,
+            cost_usd_est=cost,
+        )
+
+    other_batch = ledger.create_batch(budget_usd=50)
+    other_run = ledger.create_run(repo_id, base_sha="b" * 40, batch_id=other_batch)
+    other_task = ledger.create_task(
+        other_run, spec_id="SA-0002", spec_sha="t" * 40, branch="saffron/SA-0002"
+    )
+    other_attempt = ledger.open_attempt(other_task)
+    ledger.close_attempt(
+        other_attempt,
+        session_id="s-2",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=9.00,
+    )
+
+    ledger.close_batch(batch_id, "DRAINED")
+    row = ledger._db.execute(
+        "SELECT spent_usd_est FROM batches WHERE batch_id = ?", (batch_id,)
+    ).fetchone()
+    assert row["spent_usd_est"] == 0.75
+
+
+def test_a_batch_closed_with_no_runs_stores_zero_not_null(ledger):
+    """The empty sum is a real answer about a night that spent nothing, and
+    NULL is reserved for the batch still running."""
+    batch_id = ledger.create_batch(budget_usd=50)
+    ledger.close_batch(batch_id, "DRAINED")
+    row = ledger._db.execute(
+        "SELECT spent_usd_est FROM batches WHERE batch_id = ?", (batch_id,)
+    ).fetchone()
+    assert row["spent_usd_est"] == 0.0
+
+
+def test_a_batchs_runs_are_readable_from_the_batch(ledger):
+    """A reader returns the runs a batch is made of, so a night can be
+    walked from its own row — through the new reader, never raw SQL."""
+    batch_id = ledger.create_batch(budget_usd=50)
+    repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    first = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=batch_id)
+    second = ledger.create_run(repo_id, base_sha="b" * 40, batch_id=batch_id)
+    other_batch = ledger.create_batch(budget_usd=50)
+    ledger.create_run(repo_id, base_sha="c" * 40, batch_id=other_batch)
+
+    rows = ledger.batch_runs(batch_id)
+
+    assert [r["run_id"] for r in rows] == [first, second]
+
+
+def test_a_run_can_be_attached_to_its_batch_after_the_fact(ledger):
+    """`create_run` accepts a batch id, but the only call that mints a run
+    passes none — this stamps the fact on after the row already exists, the
+    shape `record_push` and `set_task_package` already use on `tasks`."""
+    repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+    batch_id = ledger.create_batch(budget_usd=50)
+
+    ledger.attach_run_to_batch(run_id, batch_id)
+
+    row = ledger._db.execute(
+        "SELECT batch_id FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    assert row["batch_id"] == batch_id
+    assert [r["run_id"] for r in ledger.batch_runs(batch_id)] == [run_id]
+
+
+def test_a_running_batchs_spend_is_readable_before_it_closes(ledger):
+    """The same derivation the close performs is readable while the batch is
+    still running, so the loop's budget gate reads its spend back rather
+    than keeping a tally.
+
+    A second, unrelated batch also has attempts recorded against it in the
+    same ledger, so this only passes if `batch_spend` actually filters by
+    `batch_id` rather than summing every attempt the ledger has ever seen."""
+    batch_id = ledger.create_batch(budget_usd=50)
+    repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=batch_id)
+    task_id = ledger.create_task(
+        run_id, spec_id="SA-0001", spec_sha="s" * 40, branch="saffron/SA-0001"
+    )
+    attempt_id = ledger.open_attempt(task_id)
+    ledger.close_attempt(
+        attempt_id,
+        session_id="s-1",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=1.25,
+    )
+
+    other_batch = ledger.create_batch(budget_usd=50)
+    other_run = ledger.create_run(repo_id, base_sha="b" * 40, batch_id=other_batch)
+    other_task = ledger.create_task(
+        other_run, spec_id="SA-0002", spec_sha="t" * 40, branch="saffron/SA-0002"
+    )
+    other_attempt = ledger.open_attempt(other_task)
+    ledger.close_attempt(
+        other_attempt,
+        session_id="s-2",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=9.00,
+    )
+
+    assert ledger.batch_spend(batch_id) == 1.25
+    row = ledger._db.execute(
+        "SELECT status, ended_at FROM batches WHERE batch_id = ?", (batch_id,)
+    ).fetchone()
+    assert row["status"] is None
+    assert row["ended_at"] is None
+
+
+def test_attaching_a_run_that_does_not_exist_raises_rather_than_passing(ledger):
+    """The stamp that decides whether a night's spend is measurable at all.
+
+    An unknown `batch_id` already hit the foreign key; an unknown `run_id`
+    matched zero rows and returned cleanly. That asymmetry is the shape of the
+    failure the method exists to prevent — `runs.batch_id` written by nobody,
+    every join through it empty, and `batch_spend` reporting 0.0 for a night
+    that really spent, so the budget gate never fires."""
+    batch_id = ledger.create_batch(budget_usd=50)
+    with pytest.raises(ValueError, match="no run 9999"):
+        ledger.attach_run_to_batch(9999, batch_id)
+
+
+def test_closing_a_batch_that_does_not_exist_raises_rather_than_passing(ledger):
+    """Same hole one table over: a silent close leaves the real row open, and
+    an open row is the one state that cannot be told from a night still
+    running."""
+    with pytest.raises(ValueError, match="no batch 9999"):
+        ledger.close_batch(9999, "DRAINED")
+
+
+def test_a_refused_stop_reason_leaves_no_write_lock_behind(ledger, tmp_path):
+    """`close_batch` is documented to surface `IntegrityError` on a status
+    outside the four stop reasons — and a failed UPDATE has already had
+    sqlite3 issue an implicit BEGIN. Without the rollback the connection holds
+    the write lock until it next commits, and every other process on the
+    ledger gets `database is locked`: `saffron reconcile`, the morning
+    `saffron queue`."""
+    batch_id = ledger.create_batch(budget_usd=50)
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.close_batch(batch_id, "NOT_A_STOP_REASON")
+
+    assert ledger._db.in_transaction is False
+    # A second connection can still write, which is the fact that matters.
+    other = sqlite3.connect(tmp_path / "ledger.db", timeout=1)
+    other.execute("UPDATE batches SET budget_usd = 51 WHERE batch_id = ?", (batch_id,))
+    other.commit()
+    other.close()
+
+
+def test_the_high_water_mark_is_the_greatest_run_id(ledger):
+    """`saffron/batch.py` reads this immediately before a candidate runs, so a
+    run minted by a call that then raised can be told from one that already
+    existed. It was reaching into `ledger._db` for it."""
+    assert ledger.max_run_id() == 0
+    repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+    assert ledger.max_run_id() == run_id
+
+
+def test_only_runs_minted_after_the_mark_are_swept_into_the_batch(ledger):
+    """The sweep is scoped to `run_id > since_run_id`, not to every
+    `batch_id IS NULL` row: a ledger accumulates plenty of those from
+    `saffron cell` and `replay.py`, and folding them in would charge an
+    unrelated past run's spend to tonight's budget."""
+    repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    stale = ledger.create_run(repo_id, base_sha="a" * 40)  # an earlier attended run
+    batch_id = ledger.create_batch(budget_usd=50)
+    high_water = ledger.max_run_id()
+    minted = ledger.create_run(repo_id, base_sha="b" * 40)  # what the crash left
+
+    assert ledger.attach_orphan_runs_to_batch(batch_id, high_water) == 1
+    attached = {row["run_id"] for row in ledger.batch_runs(batch_id)}
+    assert attached == {minted}
+    stale_row = ledger._db.execute(
+        "SELECT batch_id FROM runs WHERE run_id = ?", (stale,)
+    ).fetchone()
+    assert stale_row["batch_id"] is None

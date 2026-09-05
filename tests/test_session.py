@@ -2264,6 +2264,53 @@ def test_the_task_row_carries_the_specs_own_sha_not_the_policys(tmp_path, monkey
         ledger.close()
 
 
+def test_a_task_records_the_policy_its_gates_ran_under(monkeypatch, tmp_path):
+    """The session records, at cell start, the policy its gates will run
+    under — read from the export at `base_sha` that the gate executables
+    already resolve against, never from the working copy (§5.4, backlog
+    item 16). `base_policy` is `_stub_the_export`'s knob for making the two
+    diverge, reused here rather than a new export double."""
+    cell = _stub_the_runtime(monkeypatch)
+    base_policy = "gates: {}\nprotected:\n  - x\n"
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        base_policy=base_policy,
+    )
+    row = ledger._db.execute(
+        "SELECT policy_sha FROM tasks WHERE task_id = ?", (outcome.task_id,)
+    ).fetchone()
+    assert row["policy_sha"] == hashlib.sha256(base_policy.encode()).hexdigest()
+
+
+def test_the_repo_level_policy_sha_is_still_written(monkeypatch, tmp_path):
+    """`repos.policy_sha` answers a different question — what the repo
+    declared when it was last seen — and `upsert_repo`'s callers depend on
+    it; recording `tasks.policy_sha` alongside it must not stop that write.
+    Both are asserted from the one call, at the one hash: a `tasks` row
+    with no `policy_sha` column at all is what this test would see with its
+    own source reverted, which is what makes it more than a restatement of
+    behaviour the diff never touched."""
+    cell = _stub_the_runtime(monkeypatch)
+    base_policy = "gates: {}\n"
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        base_policy=base_policy,
+    )
+    expected = hashlib.sha256(base_policy.encode()).hexdigest()
+    (repo_row,) = ledger._db.execute("SELECT policy_sha FROM repos").fetchall()
+    task_row = ledger._db.execute(
+        "SELECT policy_sha FROM tasks WHERE task_id = ?", (outcome.task_id,)
+    ).fetchone()
+    assert repo_row["policy_sha"] == expected
+    assert task_row["policy_sha"] == expected
+
+
 def test_the_cell_env_carries_the_proxy_and_the_state_dir(monkeypatch):
     """§5.1's per-task block: without these the cell has full egress and the
     agent writes its session state into the tree the scope gate walks."""

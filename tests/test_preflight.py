@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import subprocess
+import types
 from pathlib import Path
 
 import pytest
@@ -320,6 +322,384 @@ def test_a_cell_is_not_made_to_proxy_its_own_loopback():
     assert status.group(1) == "401"
 
 
+def _stub_prepare(monkeypatch, *, exported: Path) -> None:
+    """Every step `check_readiness` runs before "policy", stubbed to pass —
+    so a test can fail exactly one later step without reaching git or the
+    network for the earlier ones."""
+    monkeypatch.setattr(preflight.git_mirror, "ensure_mirror", lambda repo, path: path)
+    monkeypatch.setattr(
+        preflight.package_phase,
+        "real_remote",
+        lambda repo: "https://github.com/o/r.git",
+    )
+    monkeypatch.setattr(preflight.package_phase, "github_slug", lambda url: "o/r")
+    monkeypatch.setattr(
+        preflight.package_phase,
+        "fetch_default_branch",
+        lambda mirror, url: ("main", "a" * 40),
+    )
+    monkeypatch.setattr(
+        preflight.git_mirror,
+        "export_saffron_dir",
+        lambda mirror, sha, scratch: exported,
+    )
+
+
+@pytest.mark.parametrize(
+    ("target", "boom", "step"),
+    [
+        ("ensure_mirror", preflight.git_mirror.GitError("fetch failed"), "mirror"),
+        ("real_remote", preflight.package_phase.PackageError("no remote"), "origin"),
+        (
+            "github_slug",
+            preflight.package_phase.PackageError("not a forge remote"),
+            "origin",
+        ),
+        (
+            "fetch_default_branch",
+            preflight.package_phase.PackageError("no head"),
+            "default_branch",
+        ),
+    ],
+)
+def test_a_failing_preparation_step_is_named_not_raised(
+    monkeypatch, tmp_path, target, boom, step
+):
+    """§4.4 step 1 skips a repo that fails preflight rather than taking the
+    batch down, so every one of these has to arrive as a named `Readiness`.
+    Each of the four was caught by a branch no test drove: stubbing all of
+    them to succeed, as every other test here does, leaves the `except` arms
+    dead and deleting one changes nothing the suite can see."""
+    exported = tmp_path / "export"
+    (exported / ".saffron").mkdir(parents=True)
+    _stub_prepare(monkeypatch, exported=exported)
+
+    owner = (
+        preflight.git_mirror if target == "ensure_mirror" else preflight.package_phase
+    )
+
+    def _raise(*_a, **_k):
+        raise boom
+
+    monkeypatch.setattr(owner, target, _raise)
+
+    result = preflight.check_readiness(
+        tmp_path / "repo",
+        tmp_path / "mirror",
+        scratch=tmp_path / "scratch",
+        home=tmp_path / "home",
+        token="tok",
+        validate_token=lambda token: preflight.TokenCheck(preflight.TokenVerdict.VALID),
+    )
+
+    assert result.ok is False
+    assert result.step == step
+
+
+def test_a_disk_check_that_cannot_run_is_named_not_raised(monkeypatch, tmp_path):
+    """`disk_headroom_ok` raises rather than reading an unrunnable check as a
+    pass — correct, and not this function's contract. Unguarded, that raise
+    left `check_readiness` as a bare exception, which is the one failure a
+    caller cannot skip a repo on."""
+    exported = tmp_path / "export"
+    (exported / ".saffron").mkdir(parents=True)
+    _stub_prepare(monkeypatch, exported=exported)
+
+    def _boom(_path):
+        raise OSError("no such file or directory")
+
+    monkeypatch.setattr(preflight.shutil, "disk_usage", _boom)
+
+    result = preflight.check_readiness(
+        tmp_path / "repo",
+        tmp_path / "mirror",
+        scratch=tmp_path / "scratch",
+        home=tmp_path / "home",
+        token="tok",
+        validate_token=lambda token: preflight.TokenCheck(preflight.TokenVerdict.VALID),
+    )
+
+    assert result.ok is False
+    assert result.step == "disk"
+
+
+def test_readiness_runs_its_checks_in_the_order_4_2_1_gives(monkeypatch, tmp_path):
+    """§4.2.1: auth, mirror fetch, origin refusal, default-branch pin, policy
+    validation, disk headroom — asserted on the order calls land in, and on
+    the result naming what passed rather than a bare boolean."""
+    order: list[str] = []
+
+    def _mk(name, result):
+        def _fn(*_a, **_k):
+            order.append(name)
+            return result
+
+        return _fn
+
+    exported = tmp_path / "exported"
+    (exported / ".saffron").mkdir(parents=True)
+    (exported / ".saffron" / "policy.yaml").write_text("gates: {}\n")
+
+    monkeypatch.setattr(
+        preflight.git_mirror, "ensure_mirror", _mk("mirror", tmp_path / "m")
+    )
+    monkeypatch.setattr(preflight.package_phase, "real_remote", _mk("real_remote", "u"))
+    monkeypatch.setattr(preflight.package_phase, "github_slug", _mk("origin", "o/r"))
+    monkeypatch.setattr(
+        preflight.package_phase,
+        "fetch_default_branch",
+        _mk("default_branch", ("main", "a" * 40)),
+    )
+    monkeypatch.setattr(
+        preflight.git_mirror, "export_saffron_dir", _mk("export", exported)
+    )
+    monkeypatch.setattr(preflight, "load_policy", _mk("policy", (object(), "sha")))
+    monkeypatch.setattr(preflight, "disk_headroom_ok", _mk("disk", True))
+
+    def _auth(token):
+        order.append("auth")
+        return preflight.TokenCheck(preflight.TokenVerdict.VALID)
+
+    result = preflight.check_readiness(
+        tmp_path / "repo",
+        tmp_path / "mirror",
+        scratch=tmp_path / "scratch",
+        home=tmp_path / "home",
+        token="tok",
+        validate_token=_auth,
+    )
+
+    assert result.ok
+    assert (
+        order.index("auth")
+        < order.index("mirror")
+        < order.index("real_remote")
+        < order.index("origin")
+        < order.index("default_branch")
+        < order.index("export")
+        < order.index("policy")
+        < order.index("disk")
+    )
+
+
+def test_a_policy_that_does_not_load_fails_readiness(monkeypatch, tmp_path):
+    """The other half of §4.2.1's "plus two": a policy that declares a gate
+    whose executable is missing fails readiness before the night starts,
+    rather than being discovered by the first cell after an image build."""
+    exported = tmp_path / "exported"
+    (exported / ".saffron").mkdir(parents=True)
+    (exported / ".saffron" / "policy.yaml").write_text("gates:\n  lint: {}\n")
+    _stub_prepare(monkeypatch, exported=exported)
+
+    result = preflight.check_readiness(
+        tmp_path / "repo",
+        tmp_path / "mirror",
+        scratch=tmp_path / "scratch",
+        home=tmp_path / "home",
+        token="tok",
+        validate_token=lambda token: preflight.TokenCheck(preflight.TokenVerdict.VALID),
+    )
+
+    assert result.ok is False
+    assert result.step == "policy"
+    assert result.detail is not None and "lint" in result.detail
+
+
+def test_a_present_but_invalid_token_fails_readiness(monkeypatch, tmp_path):
+    """Presence alone is what the guard checks today; Appendix J measured the
+    failure that hides behind it. The validity probe here is injected, so
+    this never reaches the network."""
+
+    def _unreached(*_a, **_k):
+        raise AssertionError("readiness moved past an invalid token")
+
+    monkeypatch.setattr(preflight.git_mirror, "ensure_mirror", _unreached)
+
+    result = preflight.check_readiness(
+        tmp_path / "repo",
+        tmp_path / "mirror",
+        scratch=tmp_path / "scratch",
+        home=tmp_path / "home",
+        token="sk-expired",
+        validate_token=lambda token: preflight.TokenCheck(
+            preflight.TokenVerdict.INVALID, "HTTP 401"
+        ),
+    )
+
+    assert result.ok is False
+    assert result.step == "auth"
+
+
+def test_a_whitespace_token_fails_readiness(monkeypatch, tmp_path):
+    """An empty or whitespace token fails, not merely an absent one — the
+    distinction the existing presence check already makes with `strip()`."""
+
+    def _unreached(_token):
+        raise AssertionError("a validity probe ran against an empty token")
+
+    result = preflight.check_readiness(
+        tmp_path / "repo",
+        tmp_path / "mirror",
+        scratch=tmp_path / "scratch",
+        home=tmp_path / "home",
+        token="   ",
+        validate_token=_unreached,
+    )
+
+    assert result.ok is False
+    assert result.step == "auth"
+
+
+def test_a_check_that_cannot_run_is_a_failure_not_a_pass(monkeypatch, tmp_path):
+    """The rule `host_probe_ports` already follows, one check over: a
+    headroom check that cannot even run must not read as a pass."""
+
+    def _boom(_path):
+        raise OSError("no such file or directory")
+
+    monkeypatch.setattr(preflight.shutil, "disk_usage", _boom)
+
+    with pytest.raises(RuntimeError, match="could not be checked"):
+        preflight.disk_headroom_ok(tmp_path)
+
+
+def test_insufficient_disk_headroom_fails_readiness(monkeypatch, tmp_path):
+    """Checked on the filesystem holding the batch tree — the one holding the
+    mirrors, worktrees and the runtime's own volumes — against the named
+    constant, not against `/` and not skipped."""
+    exported = tmp_path / "exported"
+    exported.mkdir()
+    _stub_prepare(monkeypatch, exported=exported)
+
+    seen: dict[str, Path] = {}
+
+    def _fake_usage(path):
+        seen["path"] = Path(path)
+        return types.SimpleNamespace(total=0, used=0, free=0)
+
+    monkeypatch.setattr(preflight.shutil, "disk_usage", _fake_usage)
+    home = tmp_path / "home"
+
+    result = preflight.check_readiness(
+        tmp_path / "repo",
+        tmp_path / "mirror",
+        scratch=tmp_path / "scratch",
+        home=home,
+        token="tok",
+        validate_token=lambda token: preflight.TokenCheck(preflight.TokenVerdict.VALID),
+    )
+
+    assert result.ok is False
+    assert result.step == "disk"
+    assert seen["path"] == home
+
+
+@contextlib.contextmanager
+def _answering(code: int):
+    """A real server on loopback answering one status, and the request it got.
+
+    The probe's verdict is what decides whether a night runs at all, so it is
+    exercised against a socket rather than a monkeypatched `urlopen` — the
+    mock cannot show that the header survives into the request, and the branch
+    that reads `exc.code` is the one that was untested."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    received: dict[str, str] = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            received["path"] = self.path
+            # Case-folded: `urllib` capitalises header names on the way out
+            # (`anthropic-version` becomes `Anthropic-version`) and HTTP is
+            # case-insensitive about them, so the wire is fine either way.
+            received.update({k.lower(): v for k, v in self.headers.items()})
+            self.send_response(code)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, format, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/v1/models", received
+    finally:
+        server.shutdown()
+
+
+@pytest.mark.parametrize(
+    ("code", "verdict"),
+    [
+        (200, preflight.TokenVerdict.VALID),
+        (401, preflight.TokenVerdict.INVALID),
+        (403, preflight.TokenVerdict.INVALID),
+        # 400 is the measured answer to a request missing `anthropic-version`,
+        # for a valid token and a revoked one alike. Reading it as VALID is
+        # what made the boolean form accept any string at all.
+        (400, preflight.TokenVerdict.UNKNOWN),
+        (404, preflight.TokenVerdict.UNKNOWN),
+        (500, preflight.TokenVerdict.UNKNOWN),
+    ],
+)
+def test_the_token_probe_reads_each_status_as_its_own_verdict(
+    monkeypatch, code, verdict
+):
+    """The 401/403 discrimination is the whole function, and it was covered by
+    nothing: the previous test raised `URLError` from a fake `urlopen`, so only
+    the unreachable branch ran and `exc.code not in (401, 403)` could be
+    mutated to `not in (999,)` — a probe that accepts an expired token — with
+    the entire suite still green.
+
+    404 and 500 are UNKNOWN, not VALID: a moved endpoint must not read as a
+    live credential, which is the direction the boolean form got wrong."""
+    with _answering(code) as (url, received):
+        monkeypatch.setattr(preflight, "_TOKEN_PROBE_URL", url)
+        checked = preflight.validate_claude_token("tok-123")
+
+    assert checked.verdict is verdict
+    # The headers arrived, rather than merely being constructed.
+    assert received["authorization"] == "Bearer tok-123"
+    assert received["path"] == "/v1/models"
+    # Measured 2026-09-05: without this the endpoint answers 400 to every
+    # token, valid or revoked, because it checks the header before the
+    # credential — so the probe would say nothing about the credential at all.
+    assert received["anthropic-version"] == "2023-06-01"
+
+
+def test_a_probe_that_cannot_reach_the_host_does_not_accuse_the_credential(
+    monkeypatch,
+):
+    """`error` != `fail`: dropped wifi at 22:00 is not a dead token. The
+    boolean form returned `False` for both, so `check_readiness` told the
+    morning queue the credential was bad when the network was."""
+    import socket
+
+    # A socket bound and closed: the port is real, chosen by the OS, and
+    # nothing is listening on it — a connection error rather than a status,
+    # without reaching the network.
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    dead_port = probe.getsockname()[1]
+    probe.close()
+
+    monkeypatch.setattr(
+        preflight, "_TOKEN_PROBE_URL", f"http://127.0.0.1:{dead_port}/v1/models"
+    )
+    checked = preflight.validate_claude_token("tok-123", timeout_s=5)
+
+    assert checked.verdict is preflight.TokenVerdict.UNKNOWN
+    assert checked.detail is not None and str(dead_port) in checked.detail
+
+
+def test_the_probe_url_is_the_host_the_proxy_allowlists():
+    """The probe and the proxy must name one host: a token validated against
+    somewhere the cell cannot reach proves nothing about the night ahead."""
+    assert preflight._TOKEN_PROBE_URL.startswith(f"https://{proxy.UPSTREAM_HOST}/")
+    assert preflight._TOKEN_PROBE_URL.endswith("/v1/models")
+
+
 def test_the_probe_script_itself_answers_a_401(tmp_path):
     """The script, executed — not its output, fabricated. Every other test here
     asserts the pass *condition*; this one runs `_UPSTREAM_PROBE` against a real
@@ -354,3 +734,61 @@ def test_the_probe_script_itself_answers_a_401(tmp_path):
     status = preflight._STATUS.search(done.stdout)
     assert status is not None, done.stdout
     assert status.group(1) == "401"
+
+
+def test_readiness_and_prepare_mirror_run_the_same_three_steps_in_the_same_order(
+    monkeypatch, tmp_path
+):
+    """`check_readiness` spells out the sequence `prepare_mirror` already runs,
+    because one `except` around a call to it could not name the failing step.
+    Two copies thirty lines apart drift silently, and each has its own order
+    test that never meets the other — this is the one that makes them meet."""
+
+    def _record(into):
+        def _mk(name, result):
+            def _fn(*_a, **_k):
+                into.append(name)
+                return result
+
+            return _fn
+
+        return _mk
+
+    def _install(into):
+        mk = _record(into)
+        monkeypatch.setattr(
+            preflight.git_mirror, "ensure_mirror", mk("mirror", tmp_path / "m")
+        )
+        monkeypatch.setattr(
+            preflight.package_phase, "real_remote", mk("real_remote", "u")
+        )
+        monkeypatch.setattr(preflight.package_phase, "github_slug", mk("origin", "o/r"))
+        monkeypatch.setattr(
+            preflight.package_phase,
+            "fetch_default_branch",
+            mk("default_branch", ("main", "a" * 40)),
+        )
+
+    prepared: list[str] = []
+    _install(prepared)
+    preflight.prepare_mirror(tmp_path / "repo", tmp_path / "mirror")
+
+    ready: list[str] = []
+    _install(ready)
+    monkeypatch.setattr(
+        preflight.git_mirror,
+        "export_saffron_dir",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(preflight, "disk_headroom_ok", lambda *_a, **_k: True)
+    preflight.check_readiness(
+        tmp_path / "repo",
+        tmp_path / "mirror",
+        scratch=tmp_path / "scratch",
+        home=tmp_path / "home",
+        token="tok",
+        validate_token=lambda _t: preflight.TokenCheck(preflight.TokenVerdict.VALID),
+    )
+
+    assert prepared == ["mirror", "real_remote", "origin", "default_branch"]
+    assert ready == prepared

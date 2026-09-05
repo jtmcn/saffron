@@ -1,4 +1,5 @@
-"""`saffron` — batch, run, queue, ratify, gc. v0 implements `replay`."""
+"""`saffron` — cell, batch, queue, reconcile, watch, replay. `ratify` and
+`gc` are still unbuilt (§4.2.1, §4.5)."""
 
 from __future__ import annotations
 
@@ -9,10 +10,14 @@ import subprocess
 import tempfile
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
+from saffron import preflight
+from saffron.batch import run_batch
 from saffron.cell.session import _SHA as _RESOLVED_SHA
-from saffron.cell.session import CellSpec, run_one_cell
+from saffron.cell.session import CellOutcome, CellSpec, run_one_cell
 from saffron.events import Event, EventLog, Preflight, describe
 from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
@@ -97,6 +102,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     queue_parser.add_argument("--repo", type=Path, default=Path.cwd())
 
+    batch_parser = subcommands.add_parser(
+        "batch", help="run one repo's night, unattended (§4.2.1)"
+    )
+    batch_parser.add_argument("--repo", type=Path, default=Path.cwd())
+    # Sized against the queue (§7.1's own recommendation), not against
+    # capacity — this is not the per-task ceiling `saffron cell --budget`
+    # overrides, it is the whole night's.
+    batch_parser.add_argument("--budget", type=_night_budget, default=50.0)
+    # `HH:MM`, resolved to its next occurrence by `_resolve_until` — a
+    # duration would need no "which day" question at all, and a time of day
+    # is the shape an operator actually types before going to bed.
+    batch_parser.add_argument("--until", type=_clock_time, default=None)
+
     reconcile_parser = subcommands.add_parser(
         "reconcile",
         help="ask GitHub what happened to this repo's open pull requests",
@@ -133,6 +151,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "cell":
             return _run_cell(args, ledger, out_dir)
+
+        if args.command == "batch":
+            return _batch(args, ledger, out_dir)
 
         if args.command == "queue":
             return _queue(args, ledger)
@@ -382,17 +403,15 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     spec, spec_sha = load_spec(args.spec)
 
     digest = hashlib.sha256(str(repo).encode()).hexdigest()[:12]
-    mirror = git_mirror.ensure_mirror(
+    # `preflight.prepare_mirror`: the mirror fetch, the non-forge origin
+    # refusal (read for its refusal, not its value — `package` needs the slug
+    # and only reaches it after the budget is spent, §5.1) and the
+    # default-branch pin (the remote's head, not the invoking checkout's,
+    # §5.7) — hoisted so a batch can pay for them once per run (§4.2.1),
+    # while a single `saffron cell` still pays for them here, per task.
+    mirror, url, base_sha = preflight.prepare_mirror(
         repo, args.home / "mirrors" / f"{repo.name}-{digest}.git"
     )
-    url = package_phase.real_remote(repo)
-    # Read for its refusal, not its value: `package` needs the slug and only
-    # reaches it after the budget is spent, so a non-GitHub origin fails here
-    # for the same reason an unreachable one does (§5.1).
-    package_phase.github_slug(url)
-    # The remote's default-branch head, not the invoking checkout's: a task's
-    # base must not depend on where the operator was standing (§5.7).
-    _, base_sha = package_phase.fetch_default_branch(mirror, url)
     # The same string `resolve_repo_id`'s own callers already have in hand —
     # this repo's own ledger holds the SSH form (`git@github.com:...`), not
     # the https one, so whatever `real_remote` returned above is the form to
@@ -516,20 +535,169 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     return CELL_EXIT.get(outcome.state, 1)
 
 
-def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
-    """`saffron queue --repo .` — the scan a batch would run tonight.
+def _batch_runner(
+    resolved: QueueResolution,
+    *,
+    repo: Path,
+    ledger: Ledger,
+    out_dir: Path,
+    url: str,
+) -> Callable[[Candidate], CellOutcome]:
+    """What turns a candidate into a cell (`run_batch`'s own phrase for the
+    callable it takes with no default) — `_run_cell`'s shape, reused rather
+    than reimplemented: the same `_resolve_stacked_on` call, the same
+    `CellSpec` construction, the same `run_one_cell` call and, on
+    `READY_FOR_REVIEW`, the same `package_phase.package` call.
 
-    No longer writes nothing: `reconcile`'s pull-request half runs first, so
-    the scan filters on current state. Still no cell, and never `ORPHANED` —
-    this is not a batch scan; an operator can run it at will, mid-phase
-    included. `resolve_repo_id`, never `upsert_repo`: an unseen repo gets
-    `None`, which both `build_queue` and `reconcile` treat as nothing to do.
+    Two things differ from the attended path, and only two. The spec comes
+    from a candidate the scan already resolved, not a path an operator
+    typed — `resolved.mirror`, `resolved.base_sha` and `resolved.repo_id` are
+    this run's own, paid for once by `_resolve_queue` rather than once per
+    task. And the ceilings come straight off the spec's own fields: a batch
+    has no per-task flag to override them with, so there is nothing for
+    `_ceilings` to arbitrate.
+
+    `outcome.state` is overwritten with the packaging result's own state when
+    packaging runs, so the `CellOutcome` this hands back to `run_batch`
+    reflects what actually happened to the task — `MERGE_FAILED` included —
+    rather than the pre-packaging `READY_FOR_REVIEW` every packaged task
+    would otherwise report to the breaker.
     """
-    repo = args.repo.resolve()
+
+    def run(candidate: Candidate) -> CellOutcome:
+        spec = candidate.spec
+        task_dir = out_dir / spec.id
+        event_log = EventLog(task_dir)
+
+        def emit(event: Event) -> None:
+            line = describe(event)
+            if line:
+                print(line)
+            event_log.append(event)
+
+        stacked_on, target_branch = _resolve_stacked_on(
+            ledger,
+            resolved.repo_id,
+            spec.depends_on,
+            mirror=resolved.mirror,
+            url=url,
+            spec_id=spec.id,
+            emit=emit,
+        )
+        if stacked_on is not None:
+            print(f"stacked on {target_branch} @ {stacked_on[:12]}")
+
+        cell_spec = CellSpec(
+            spec_id=spec.id,
+            spec_sha=candidate.spec_sha,
+            branch=f"saffron/{spec.id}",
+            base_sha=resolved.base_sha,
+            touches=spec.touches,
+            spec_type=spec.type,
+            body=spec.body,
+            forbidden=spec.forbidden,
+            acceptance=spec.acceptance,
+            risk=spec.risk,
+            stacked_on=stacked_on,
+            budget_usd=spec.budget_usd,
+            max_attempts=spec.max_attempts,
+            max_turns=spec.max_turns,
+        )
+        outcome = run_one_cell(
+            cell_spec,
+            repo=repo,
+            mirror=resolved.mirror,
+            ledger=ledger,
+            out_dir=out_dir,
+            emit=emit,
+        )
+        if outcome.state == "READY_FOR_REVIEW":
+            result = package_phase.package(
+                outcome,
+                spec=spec,
+                repo=repo,
+                mirror=resolved.mirror,
+                image=repo_image.cell_tag(repo),
+                ledger=ledger,
+                out_dir=out_dir,
+                token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+                parent_branch=target_branch,
+                emit=emit,
+            )
+            print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
+            outcome.state = result.state
+        else:
+            print(f"{spec.id:<10} {outcome.state}")
+        return outcome
+
+    return run
+
+
+@dataclass
+class QueueResolution:
+    """What resolving one repo's queue over the pinned base produced —
+    everything either caller needs, not just what `_print_queue` reads.
+
+    `_queue`'s printer wants `candidates`, `refusals`, `reconciled`,
+    `exported` and the two "could not read" lists (`gh_failures`,
+    `policy_unread`), plus `repo_slug` for the note about which refusals
+    could not run. A batch scan (`SA-0054`) additionally wants `mirror`,
+    `base_sha` and `repo_id` — the pinned tree and the ledger identity this
+    resolution was computed against — so it is cheaper to carry them here
+    than to have that caller re-derive them from a function that already
+    had them.
+
+    `exported` is **already deleted** by the time a caller reads it: the
+    export is a `TemporaryDirectory` closed before this is returned. It is
+    carried for the paths derived from it during the scan, never to be opened
+    afterwards — `mirror`, beside it, *is* live, and the two read alike.
+    """
+
+    repo_id: int | None
+    mirror: Path
+    base_sha: str
+    repo_slug: str | None
+    exported: Path
+    candidates: list[Candidate]
+    refusals: list[Refusal]
+    reconciled: ReconcileResult
+    gh_failures: list[str]
+    policy_unread: list[str]
+
+
+def _resolve_queue(
+    repo: Path,
+    home: Path,
+    ledger: Ledger,
+    *,
+    stamp_orphaned: bool,
+) -> QueueResolution:
+    """Resolve one repo's queue over its pinned `base_sha` — the mirror, the
+    pinned base, the reconcile, the slug, the export, and the scan over that
+    export, never the working copy. This is the resolving half of the scan a
+    batch would run tonight; printing it is the caller's job.
+
+    `stamp_orphaned` is required, not defaulted, because the two callers this
+    function exists for disagree about it and a default would decide for
+    whichever one forgets to think about it. `True` asserts §4.2.1's
+    batch-scan premise — one batch runs at a time, so an in-flight task found
+    here is a corpse a dead scan left behind, and `reconcile` records it
+    `ORPHANED` before this resolution filters. `False` is what `saffron
+    queue` passes: an operator can run this at will, mid-phase included, and
+    must never have a live task stamped a corpse for having been looked at.
+
+    This writes to the ledger, which a function named for resolving a queue
+    does not obviously do: `reconcile`'s pull-request half runs first, so the
+    scan filters on current state rather than yesterday's.
+
+    `resolve_repo_id`, never `upsert_repo`: an unseen repo gets `None`, which
+    both `build_queue` and `reconcile` treat as nothing to do.
+    """
+    repo = repo.resolve()
 
     digest = hashlib.sha256(str(repo).encode()).hexdigest()[:12]
     mirror = git_mirror.ensure_mirror(
-        repo, args.home / "mirrors" / f"{repo.name}-{digest}.git"
+        repo, home / "mirrors" / f"{repo.name}-{digest}.git"
     )
     url = package_phase.real_remote(repo)
     _, base_sha = package_phase.fetch_default_branch(mirror, url)
@@ -540,7 +708,9 @@ def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
     policy_unread: list[str] = []
     reconciled = ReconcileResult()
     if repo_id is not None:
-        reconciled = reconcile(ledger, repo_id, gh=_guarded_gh(gh_failures))
+        reconciled = reconcile(
+            ledger, repo_id, gh=_guarded_gh(gh_failures), stamp_orphaned=stamp_orphaned
+        )
 
     # Unlike `_run_cell`, a slug that cannot be read is not this command's
     # failure — it just means two of `build_queue`'s refusals cannot run, and
@@ -573,8 +743,225 @@ def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
             gh=_guarded_gh(gh_failures),
         )
 
-    _print_reconcile_summary(reconciled)
-    _print_queue(candidates, refusals, repo_slug, exported, gh_failures, policy_unread)
+    return QueueResolution(
+        repo_id=repo_id,
+        mirror=mirror,
+        base_sha=base_sha,
+        repo_slug=repo_slug,
+        exported=exported,
+        candidates=candidates,
+        refusals=refusals,
+        reconciled=reconciled,
+        gh_failures=gh_failures,
+        policy_unread=policy_unread,
+    )
+
+
+def _clock_time(value: str) -> str:
+    """`--until`, rejected by argparse rather than discovered downstream.
+
+    A malformed value reached `_resolve_until` and died in `int()` — and
+    `main`'s catch-all reports that as exit `2`, "infrastructure failed", for
+    an operator's typo. Measured: `6:30pm` raised `invalid literal for int()`,
+    `06:30:00` "too many values to unpack", `0630` "not enough values". The
+    empty string was worse than any of them: `--until ""` is falsy, so it
+    silently meant *no deadline at all*, turning an eight-hour night into an
+    unbounded one — reachable from a shell variable that went unset in the
+    plist.
+    """
+    try:
+        hour, minute = (int(part) for part in value.split(":"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected HH:MM, got {value!r}") from None
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        raise argparse.ArgumentTypeError(f"not a time of day: {value!r}")
+    return value
+
+
+def _night_budget(value: str) -> float:
+    """`--budget`, likewise. A negative or zero budget opened a `batches` row,
+    stopped immediately at `BUDGET`, printed `batch: BUDGET` and exited 0 — a
+    night that ran nothing and reported success."""
+    try:
+        budget = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected a number, got {value!r}") from None
+    if budget <= 0:
+        raise argparse.ArgumentTypeError(f"must be greater than 0, got {budget:g}")
+    return budget
+
+
+def _resolve_until(until: str, now: datetime) -> datetime:
+    """`HH:MM` to its next occurrence from `now` — a time of day, not a
+    duration, so `06:30` resolved at 22:00 means tomorrow morning and `23:00`
+    resolved at 22:00 means tonight. A time no later than `now` always rolls
+    to tomorrow: the case an operator hits every night they ask for the
+    morning, since the hour they type is almost always earlier in the day
+    than the hour they are typing it."""
+    hour, minute = (int(part) for part in until.split(":"))
+    candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate <= now:
+        candidate += timedelta(days=1)
+    return candidate
+
+
+def _mirror_path(repo: Path, home: Path) -> Path:
+    """The same digest-named path `_resolve_queue` and `_run_cell` each
+    compute inline, factored out for the one caller that needs it a third
+    time: `_batch`'s readiness check, which fetches this run's own mirror
+    again rather than trusting the loop's default to have one."""
+    digest = hashlib.sha256(str(repo).encode()).hexdigest()[:12]
+    return home / "mirrors" / f"{repo.name}-{digest}.git"
+
+
+def _no_candidate_should_run(candidate: Candidate) -> CellOutcome:
+    """The runner a night gets when readiness already failed.
+
+    `run_batch` takes the runner before it knows whether it will use one, and
+    an unready night has no candidates to give it — so reaching this is a bug
+    in the ordering above, not an operator's problem."""
+    raise AssertionError(
+        f"readiness failed, yet {candidate.spec.id} was started anyway"
+    )
+
+
+def _print_batch_plan(
+    resolved: QueueResolution, *, budget_usd: float, until: datetime | None
+) -> None:
+    """What the night is about to attempt, and what its scan could not check.
+
+    `saffron queue` prints the refusals; this printed only the gaps, so a spec
+    refused at gate 0 — a dead `depends_on` parent, protected `touches`, a
+    dangling `saffron:retired-by` marker — vanished from the night with no
+    line in the log and no ledger row. "An empty queue" and "three specs all
+    refused" produced byte-identical output.
+
+    The header is the unattended twin of `_run_cell`'s `ceilings:` line: at
+    7am the log has to say what the night set out to do before it says what
+    became of it.
+    """
+    deadline = until.strftime("%Y-%m-%d %H:%M") if until is not None else "none"
+    print(
+        f"batch: {len(resolved.candidates)} candidate(s), "
+        f"budget ${budget_usd:.2f}, until {deadline}"
+    )
+    for candidate in resolved.candidates:
+        print(f"  {candidate.spec.id:<10} priority={candidate.spec.priority}")
+
+    print(f"refusals: {len(resolved.refusals)}")
+    for refusal in resolved.refusals:
+        # The export is already deleted and a dangling marker names a path
+        # outside it anyway, so the raw path is the honest answer here —
+        # `_print_queue` relativises because it has a root worth relativising
+        # against.
+        print(f"  {refusal.path}: {refusal.reason}")
+
+    _print_scan_gaps(resolved.repo_slug, resolved.gh_failures, resolved.policy_unread)
+
+
+def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
+    """`saffron batch --repo . --budget 50 --until 06:30` — §4.2.1's night,
+    driven. Resolves the queue, asserting the batch-only premise `saffron
+    queue` refuses (`stamp_orphaned=True`: one batch runs at a time, so an
+    in-flight row found here is a corpse, not live work an operator is
+    watching); binds a real readiness check to this run's own paths and
+    token, never the loop's "proceed" default; builds the adapter that turns
+    a candidate into a cell (`_batch_runner`); and hands all three to
+    `saffron.batch.run_batch`, which owns the loop itself (`saffron/batch.py`
+    is forbidden here).
+
+    Exit codes are `run_batch`'s own four stop reasons, mapped per §4.2.1:
+    `0` for `DRAINED`, `BUDGET` and `UNTIL`, `2` for `INFRASTRUCTURE` —
+    never `1`, which is reserved for a task's own failure and a batch is not
+    a task. A readiness failure is a plain `INFRASTRUCTURE` from
+    `run_batch`'s point of view, so the step and detail it found are read
+    back out of the one `Readiness` this call recorded, not out of the stop
+    reason itself.
+    """
+    repo = args.repo.resolve()
+    until = (
+        _resolve_until(args.until, datetime.now()) if args.until is not None else None
+    )
+
+    # Readiness first, and before the scan — §4.4's own order, step 1 ahead of
+    # step 4. Run after it, `Readiness`'s `mirror`, `origin` and
+    # `default_branch` steps were unreachable from this command: the scan does
+    # the same three things unguarded and raises first, `main` prints a
+    # traceback, and no `batches` row exists at all for the night that was
+    # attempted. Which is the outcome the readiness-close inside `run_batch`
+    # was written to prevent.
+    with tempfile.TemporaryDirectory() as scratch:
+        readiness = preflight.check_readiness(
+            repo,
+            _mirror_path(repo, args.home),
+            scratch=Path(scratch),
+            home=args.home,
+            token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+        )
+
+    candidates: list[Candidate] = []
+    runner: Callable[[Candidate], CellOutcome] = _no_candidate_should_run
+    if readiness.ok:
+        resolved = _resolve_queue(repo, args.home, ledger, stamp_orphaned=True)
+
+        # The night says what its own scan could not check. `_resolve_queue`
+        # leaves reporting to its caller, and the attended caller discharges
+        # that by printing all three; unreported here, a night whose `gh`
+        # never ran looks identical in the morning to one whose refusals all
+        # passed — the scan quietly did less than it appears to have done, on
+        # the one path where nobody is awake to notice.
+        _print_reconcile_summary(resolved.reconciled)
+        _print_batch_plan(resolved, budget_usd=args.budget, until=until)
+
+        url = package_phase.real_remote(repo)
+        runner = _batch_runner(
+            resolved, repo=repo, ledger=ledger, out_dir=out_dir, url=url
+        )
+        candidates = resolved.candidates
+
+    stop = run_batch(
+        candidates,
+        ledger,
+        args.budget,
+        until,
+        runner,
+        # Already measured, above, before the scan that depends on it. The
+        # loop still calls this — it is what makes the batch row close
+        # `INFRASTRUCTURE` and exist at all — but the answer is the one this
+        # command took, not a second probe of the same host.
+        readiness_check=lambda: readiness,
+    )
+
+    if stop != "INFRASTRUCTURE":
+        print(f"batch: {stop}")
+        return 0
+
+    if not readiness.ok:
+        print(f"batch: readiness failed at {readiness.step}: {readiness.detail}")
+    else:
+        print("batch: infrastructure failed")
+    return 2
+
+
+def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
+    """`saffron queue --repo .` — print what `_resolve_queue` found tonight.
+
+    Still no cell, and never `ORPHANED` — this is not a batch scan; an
+    operator can run it at will, mid-phase included. `stamp_orphaned=False`
+    asserts exactly that: `_resolve_queue`'s own docstring names the premise
+    this passes on.
+    """
+    resolved = _resolve_queue(args.repo, args.home, ledger, stamp_orphaned=False)
+
+    _print_reconcile_summary(resolved.reconciled)
+    _print_queue(
+        resolved.candidates,
+        resolved.refusals,
+        resolved.repo_slug,
+        resolved.exported,
+        resolved.gh_failures,
+        resolved.policy_unread,
+    )
     return 0
 
 
@@ -672,6 +1059,12 @@ def _print_reconcile_summary(result: ReconcileResult) -> None:
         ("MERGED", result.merged),
         ("REJECTED", result.rejected),
         ("CHANGES_REQUESTED", result.changes_requested),
+        # `orphaned` counted toward "something moved" below while having no
+        # line of its own, so a resolution that only orphaned printed nothing
+        # at all — not the ids, not "nothing moved". `saffron queue` never
+        # orphans, so the only caller that reaches this is the unattended
+        # night, which is the one with nobody watching.
+        ("ORPHANED", result.orphaned),
     )
     for label, ids in buckets:
         for task_id in ids:
@@ -727,6 +1120,24 @@ def _print_queue(
         except ValueError:
             shown = refusal.path
         print(f"  {shown}: {refusal.reason}")
+    _print_scan_gaps(repo_slug, gh_failures, policy_unread)
+
+
+def _print_scan_gaps(
+    repo_slug: str | None,
+    gh_failures: list[str],
+    policy_unread: Sequence[str] = (),
+) -> None:
+    """Which of the scan's refusals never ran, for either caller.
+
+    Shared by `queue` and `batch` rather than living inside `_print_queue`,
+    because the unattended caller is the one that needs it most and prints no
+    queue at all. A night whose `gh` could not start never checked the open
+    pull request or touches-overlap refusals, and a night whose `policy.yaml`
+    could not be read at `base_sha` never checked the protected list — in both
+    cases the scan resolved fewer refusals than it appears to have, and in the
+    morning there is nothing else to say so.
+    """
     if repo_slug is None:
         _print_skipped(
             "no GitHub slug could be read from the remote", _GH_REFUSALS_SKIPPED
