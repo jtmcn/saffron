@@ -18,6 +18,7 @@ that text mode would otherwise normalize away.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,6 +48,14 @@ class MutationResult:
     position. `displaced` and `offset` together are what `apply_mutant`
     promises the caller in exchange for the obligation to restore.
 
+    `applied_digest` is a digest of the whole file as `apply_mutant` left it,
+    and it is what `restore_mutant` checks before writing. A span check cannot
+    do this job: for a deletion mutant the written span is empty, so comparing
+    it to `replace` compares `b""` to `b""` and cannot fail — the refusal was
+    dead in exactly the configuration the schema defaults to. Whole-file also
+    refuses a second restore, which a span check accepts and which
+    double-inserts the displaced bytes.
+
     `ok=False` is not a weaker `ok=True` — a mutant that does not apply must
     read as "this mutant did not apply", not as "the witness survived", and a
     reason that names the file and the text is what makes that reading
@@ -56,6 +65,7 @@ class MutationResult:
     ok: bool
     displaced: bytes | None = None
     offset: int | None = None
+    applied_digest: str | None = None
     reason: str = ""
 
 
@@ -71,6 +81,11 @@ def _resolve_target(tree: Path, file: str) -> Path | None:
     """
     candidate = Path(file)
     if candidate.is_absolute():
+        # Refused whether or not it lands inside the tree. `file` is
+        # repo-relative by contract, and the `relative_to` check below already
+        # catches an absolute path pointing *outside* — so this branch exists
+        # for the absolute path that points inside, which is a spec-authoring
+        # error rather than an escape and would otherwise be applied silently.
         return None
     tree_resolved = tree.resolve()
     target = (tree_resolved / candidate).resolve()
@@ -102,7 +117,7 @@ def apply_mutant(tree: Path, mutant: Mutant) -> MutationResult:
     if target is None:
         return MutationResult(
             ok=False,
-            reason=f"mutant path {mutant.file!r} escapes the tree it is applied to",
+            reason=f"mutant path {mutant.file!r} is not a relative path inside the tree",
         )
 
     try:
@@ -132,7 +147,12 @@ def apply_mutant(tree: Path, mutant: Mutant) -> MutationResult:
     replace = mutant.replace.encode()
     new_content = content[:offset] + replace + content[offset + len(find) :]
     target.write_bytes(new_content)
-    return MutationResult(ok=True, displaced=find, offset=offset)
+    return MutationResult(
+        ok=True,
+        displaced=find,
+        offset=offset,
+        applied_digest=hashlib.sha256(new_content).hexdigest(),
+    )
 
 
 def restore_mutant(tree: Path, mutant: Mutant, result: MutationResult) -> None:
@@ -144,26 +164,37 @@ def restore_mutant(tree: Path, mutant: Mutant, result: MutationResult) -> None:
     file "matches" at every position and therefore names none, and even a
     non-empty `replace` could coincidentally already appear elsewhere in the
     file, which would make a search-based restore ambiguous in exactly the
-    cases `apply_mutant` itself refuses to be. The byte range `apply_mutant`
-    actually wrote is checked against `mutant.replace` before anything is
-    written back, so a mismatch here — the tree having moved since `apply_
-    mutant` ran — is a refusal, not a corrupted restore.
+    cases `apply_mutant` itself refuses to be.
+
+    The whole file is checked against the digest `apply_mutant` recorded,
+    before anything is written back, so a tree that moved since then is a
+    refusal rather than a corrupted restore. Not the written span against
+    `mutant.replace`: for a deletion mutant that span is empty and the
+    comparison is `b"" != b""`, which cannot fire — measured, and it spliced
+    the displaced bytes into unrelated content instead of refusing. The
+    digest also refuses a second restore, where the span check accepted one
+    and inserted `displaced` twice.
     """
-    if not result.ok or result.displaced is None or result.offset is None:
+    if (
+        not result.ok
+        or result.displaced is None
+        or result.offset is None
+        or result.applied_digest is None
+    ):
         raise MutationError("cannot restore a mutant that was not applied")
 
     target = _resolve_target(tree, mutant.file)
     if target is None:
         raise MutationError(
-            f"mutant path {mutant.file!r} escapes the tree it is applied to"
+            f"mutant path {mutant.file!r} is not a relative path inside the tree"
         )
 
     content = target.read_bytes()
-    replace = mutant.replace.encode()
-    start, end = result.offset, result.offset + len(replace)
-    if content[start:end] != replace:
+    if hashlib.sha256(content).hexdigest() != result.applied_digest:
         raise MutationError(
             f"{mutant.file}: cannot restore — the tree has moved since apply_mutant ran"
         )
 
+    start = result.offset
+    end = start + len(mutant.replace.encode())
     target.write_bytes(content[:start] + result.displaced + content[end:])

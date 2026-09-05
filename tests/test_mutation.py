@@ -140,3 +140,68 @@ def test_restoring_across_the_tree_boundary_also_refuses(tmp_path):
     with pytest.raises(MutationError):
         restore_mutant(tree, mutant, fake_result)
     assert outside.read_text() == "x\n"
+
+
+@pytest.mark.parametrize("replace", ["", "max(x, 1)"])
+def test_restoring_into_a_tree_that_moved_is_refused_not_spliced(tmp_path, replace):
+    """The refusal was dead for `replace=""` — the schema default and the
+    ordinary deletion mutant — because it compared the written span against
+    `replace`, and for a deletion that span is empty: `b"" != b""` cannot
+    fire. Measured before the fix: instead of refusing, it spliced the
+    displaced bytes into unrelated content at the recorded offset, giving
+    `b'COMPLETmax(x, 0)ELY DIFFERENT CONTENT ENTIRELY\\n'`.
+
+    Parametrized over both because the non-empty case passed and the empty
+    case did not, and a single-case test here would have gone on passing for
+    the half that already worked.
+    """
+    target = tmp_path / "a.py"
+    target.write_bytes(b"return max(x, 0)\n")
+    mutant = Mutant(file="a.py", find="max(x, 0)", replace=replace)
+    result = apply_mutant(tmp_path, mutant)
+    assert result.ok
+
+    # Something else rewrites the file between apply and restore.
+    moved = b"COMPLETELY DIFFERENT CONTENT ENTIRELY\n"
+    target.write_bytes(moved)
+
+    with pytest.raises(MutationError, match="the tree has moved"):
+        restore_mutant(tmp_path, mutant, result)
+    assert target.read_bytes() == moved, "refused, and wrote nothing"
+
+
+@pytest.mark.parametrize("replace", ["", "max(x, 1)"])
+def test_restoring_twice_is_refused_rather_than_inserting_twice(tmp_path, replace):
+    """A second restore used to be accepted, because after the first one the
+    written span no longer held `replace` only by coincidence — for a deletion
+    mutant it held nothing, matched, and `displaced` went in again."""
+    target = tmp_path / "a.py"
+    original = b"return max(x, 0)\n"
+    target.write_bytes(original)
+    mutant = Mutant(file="a.py", find="max(x, 0)", replace=replace)
+    result = apply_mutant(tmp_path, mutant)
+
+    restore_mutant(tmp_path, mutant, result)
+    assert target.read_bytes() == original
+
+    with pytest.raises(MutationError, match="the tree has moved"):
+        restore_mutant(tmp_path, mutant, result)
+    assert target.read_bytes() == original, "still the original, not doubled"
+
+
+def test_an_absolute_path_is_refused_even_inside_the_tree(tmp_path):
+    """`mutant.file` is repo-relative by contract. The `relative_to` check
+    already refuses an absolute path pointing *outside*, so the `is_absolute`
+    branch exists for the one pointing inside — measured: without it that path
+    resolves and applies silently, and the escape witness stays green either
+    way, so it was passing on the outside case alone."""
+    target = tmp_path / "a.py"
+    target.write_bytes(b"return max(x, 0)\n")
+
+    result = apply_mutant(
+        tmp_path, Mutant(file=str(target), find="max(x, 0)", replace="0")
+    )
+
+    assert result.ok is False
+    assert "not a relative path" in result.reason
+    assert target.read_bytes() == b"return max(x, 0)\n"
