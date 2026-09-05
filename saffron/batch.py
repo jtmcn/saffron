@@ -17,7 +17,7 @@ multi-repo (v2, §9), and stamping a corpse `ORPHANED` (that is the batch
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from saffron.cell.session import CellOutcome
@@ -38,57 +38,6 @@ ABORT_STATES = frozenset({"GATE_ERROR", "PREFLIGHT_FAILED", "RATE_LIMITED"})
 _BREAKER_THRESHOLD = 2
 
 
-def _max_run_id(ledger: Ledger) -> int:
-    """The high-water mark on `runs.run_id`, read just before a candidate's
-    call so a raise from it can be told apart from every run that already
-    existed."""
-    row = ledger._db.execute(
-        "SELECT COALESCE(MAX(run_id), 0) AS m FROM runs"
-    ).fetchone()
-    return int(row["m"])
-
-
-def _attach_runs_minted_since(ledger: Ledger, batch_id: int, high_water: int) -> None:
-    """Sweep in any run a raising `runner` minted before it died.
-
-    `run_one_cell` creates `run_id`/`task_id` (session.py, around the mirror
-    read) *before* opening the try block whose only handler re-raises the
-    original exception untouched — so a crash after one or more attempts have
-    already billed real `cost_usd_est` (a runtime dying mid-REPAIR, say)
-    still reaches `run_batch` as a bare exception with no `run_id` on it.
-    `attach_run_to_batch` can only be called with a `run_id`, and the normal
-    per-candidate call (below) has none to give it on this path.
-
-    Scoped to `run_id > high_water` — recorded immediately before the call —
-    rather than every row with `batch_id IS NULL`: a ledger accumulates
-    plenty of those from `saffron cell` and `replay.py`, both of which pass
-    no batch on purpose, and sweeping all of them would silently fold a past
-    unrelated run's spend into tonight's batch. Under K=1 nothing else can
-    mint a run while one candidate's call is in flight, so `run_id >
-    high_water` is exactly the set — zero or one row — that this call
-    produced, never a stale orphan from outside it.
-    """
-    rows = ledger._db.execute(
-        "SELECT run_id FROM runs WHERE run_id > ? AND batch_id IS NULL",
-        (high_water,),
-    ).fetchall()
-    for row in rows:
-        ledger.attach_run_to_batch(row["run_id"], batch_id)
-
-
-def _always_ready() -> Readiness:
-    """The real default for `readiness_check`: no additional gate requested.
-
-    Unlike the runner (below), a real readiness probe *is* reachable from
-    here — `preflight.check_readiness` needs nothing this module is forbidden
-    to touch — but it needs repo-specific paths and a token this loop has no
-    reason to carry, so the default that costs nothing is "proceed". A real
-    caller (`SA-0051`) passes its own callable, typically
-    `preflight.check_readiness` bound to the run's own paths.
-    """
-    return Readiness(ok=True)
-
-
 def run_batch(
     candidates: Sequence[Candidate],
     ledger: Ledger,
@@ -97,7 +46,8 @@ def run_batch(
     runner: Callable[[Candidate], CellOutcome],
     *,
     clock: Callable[[], datetime] = datetime.now,
-    readiness_check: Callable[[], Readiness] = _always_ready,
+    readiness_check: Callable[[], Readiness],
+    emit: Callable[[str], None] = print,
 ) -> StopReason:
     """Drive one night against one repo's already-sorted candidates.
 
@@ -114,17 +64,70 @@ def run_batch(
     itself would pass no stacked-on parent for any candidate, cutting every
     child of a stack from `base_sha` and failing its own gates the moment it
     ran (§4.2.1). `SA-0051` owns `cli.py` and supplies the real adapter;
-    every test here supplies a fake instead. `clock` and `readiness_check` do
-    take real, usable defaults — `datetime.now` and "proceed" respectively —
-    because neither needs anything forbidden to be real.
+    every test here supplies a fake instead. `readiness_check` takes no default
+    either, and for a related reason: `check_readiness` needs repo paths and a
+    token this signature never receives, so no *real* default is constructible
+    here. The permissive stub that stood in its place meant a caller who
+    forgot the argument got a vacuous gate and a night that starts on an
+    expired token — which is precisely what §4.4 step 1 exists to prevent. A
+    night with no readiness gate is now something a caller has to say out
+    loud. `clock` keeps its real default, because `datetime.now` is one.
 
     Returns the stop reason itself, one of `DRAINED`, `BUDGET`, `UNTIL`,
     `INFRASTRUCTURE` — never a boolean or an exit code. `SA-0051` owns the
     mapping to an exit code.
     """
-    until_ts = until.isoformat() if until is not None else None
+    # UTC, and space-separated: `batches.started_at` is `datetime('now')`,
+    # which is both. A naive local `isoformat()` matched neither, so the two
+    # columns of one row were not comparable.
+    until_ts = (
+        until.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        if until is not None
+        else None
+    )
     batch_id = ledger.create_batch(budget_usd, until_ts=until_ts)
 
+    stopped: StopReason | None = None
+    try:
+        stopped = _drive(
+            candidates,
+            ledger,
+            budget_usd,
+            until,
+            runner,
+            batch_id=batch_id,
+            clock=clock,
+            readiness_check=readiness_check,
+            emit=emit,
+        )
+        return stopped
+    finally:
+        if stopped is None:
+            # Nothing below returned a reason, so nothing below closed the
+            # row: a readiness probe that raised (it does real network and
+            # disk work), a `BaseException` the per-candidate handler does
+            # not catch, or an operator's Ctrl-C at 3am. An open row is the
+            # one state indistinguishable from a night still running, and it
+            # is what §6's morning queue reads.
+            ledger.close_batch(batch_id, "INFRASTRUCTURE")
+
+
+def _drive(
+    candidates: Sequence[Candidate],
+    ledger: Ledger,
+    budget_usd: float,
+    until: datetime | None,
+    runner: Callable[[Candidate], CellOutcome],
+    *,
+    batch_id: int,
+    clock: Callable[[], datetime],
+    readiness_check: Callable[[], Readiness],
+    emit: Callable[[str], None],
+) -> StopReason:
+    """`run_batch`'s body, split out so every exit closes the batch row.
+
+    Every `return` here is paired with a `close_batch`; anything that leaves
+    without returning is the caller's `finally` to deal with."""
     readiness = readiness_check()
     if not readiness.ok:
         # §4.4 step 1: a readiness failure ends the night before any task
@@ -152,10 +155,10 @@ def run_batch(
             ledger.close_batch(batch_id, "INFRASTRUCTURE")
             return "INFRASTRUCTURE"
 
-        high_water = _max_run_id(ledger)
+        high_water = ledger.max_run_id()
         try:
             outcome = runner(candidate)
-        except Exception:
+        except Exception as exc:
             # Driving one cell can raise from outside the block that would
             # catch it — an unreadable policy at base, a runtime that will
             # not start, a mirror that will not fetch, or a crash well into
@@ -168,7 +171,12 @@ def run_batch(
             # never gets, so its spend still counts against the budget gate
             # rather than vanishing behind a NULL `batch_id` forever.
             consecutive_aborts += 1
-            _attach_runs_minted_since(ledger, batch_id, high_water)
+            # Bound and reported: by the time `run_batch` returns the
+            # exception is gone, and an unattended night that died from a
+            # runtime that would not start otherwise leaves the operator a
+            # stop reason and no traceback anywhere.
+            emit(f"{candidate.spec.id:<10} raised {type(exc).__name__}: {exc}")
+            ledger.attach_orphan_runs_to_batch(batch_id, high_water)
             continue
 
         # `create_run` mints the row with no `batch_id` (`run_one_cell`,
@@ -185,6 +193,15 @@ def run_batch(
             # `GATE_ERROR` and `PREFLIGHT_FAILED` themselves, and the counter
             # would never reach two.
             consecutive_aborts = 0
+
+    if consecutive_aborts >= _BREAKER_THRESHOLD:
+        # The breaker is consulted before a task, so a queue whose last
+        # candidates all aborted falls out of the loop with the count
+        # standing. Reporting `DRAINED` there would exit 0, and launchd would
+        # record a successful night in which every task died of one global
+        # condition.
+        ledger.close_batch(batch_id, "INFRASTRUCTURE")
+        return "INFRASTRUCTURE"
 
     ledger.close_batch(batch_id, "DRAINED")
     return "DRAINED"

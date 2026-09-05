@@ -23,6 +23,13 @@ def repo_id(ledger):
     return ledger.upsert_repo("thermal-edge", "/o", "/m.git", policy_sha="p" * 64)
 
 
+def _ready() -> Readiness:
+    """No readiness gate for this test. Named rather than defaulted: the loop
+    used to bind a permissive stub, so a caller who simply forgot got a
+    vacuous §4.4 step 1 and a night that could start on an expired token."""
+    return Readiness(ok=True)
+
+
 def _candidate(spec_id: str, *, budget_usd: float = 10.0) -> Candidate:
     return Candidate(
         path=Path(f"{spec_id}.md"),
@@ -133,7 +140,14 @@ def test_a_drained_queue_runs_every_candidate_once_in_order(ledger, repo_id):
     runs = [_spend(ledger, repo_id, 1.0) for _ in candidates]
     runner = FakeRunner([_outcome(state="READY_FOR_REVIEW", run_id=r) for r in runs])
 
-    reason = run_batch(candidates, ledger, budget_usd=50.0, until=None, runner=runner)
+    reason = run_batch(
+        candidates,
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+    )
 
     assert reason == "DRAINED"
     assert runner.calls == candidates
@@ -146,7 +160,9 @@ def test_a_drained_queue_runs_every_candidate_once_in_order(ledger, repo_id):
 def test_an_empty_queue_drains_immediately(ledger):
     runner = FakeRunner([])
 
-    reason = run_batch([], ledger, budget_usd=50.0, until=None, runner=runner)
+    reason = run_batch(
+        [], ledger, budget_usd=50.0, until=None, runner=runner, readiness_check=_ready
+    )
 
     assert reason == "DRAINED"
     assert runner.calls == []
@@ -156,7 +172,14 @@ def test_the_budget_gate_is_one_comparison_before_each_task(ledger, repo_id):
     candidates = [_candidate("TE-0001", budget_usd=20.0)]
     runner = FakeRunner([])
 
-    reason = run_batch(candidates, ledger, budget_usd=5.0, until=None, runner=runner)
+    reason = run_batch(
+        candidates,
+        ledger,
+        budget_usd=5.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+    )
 
     assert reason == "BUDGET"
     assert runner.calls == []
@@ -181,7 +204,12 @@ def test_a_task_overshooting_its_own_budget_does_not_stop_the_batch(ledger, repo
     )
 
     reason = run_batch(
-        [overshooting, second], ledger, budget_usd=30.0, until=None, runner=runner
+        [overshooting, second],
+        ledger,
+        budget_usd=30.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
     )
 
     assert reason == "DRAINED"
@@ -195,7 +223,13 @@ def test_the_until_deadline_is_read_from_an_injected_clock(ledger, repo_id):
     clock = FakeClock([datetime(2026, 9, 5, 6, 30)])
 
     reason = run_batch(
-        candidates, ledger, budget_usd=50.0, until=deadline, runner=runner, clock=clock
+        candidates,
+        ledger,
+        budget_usd=50.0,
+        until=deadline,
+        runner=runner,
+        clock=clock,
+        readiness_check=_ready,
     )
 
     assert reason == "UNTIL"
@@ -213,7 +247,13 @@ def test_the_clock_is_checked_before_a_task_still_inside_the_window(ledger, repo
     clock = FakeClock([datetime(2026, 9, 5, 1, 0)])
 
     reason = run_batch(
-        candidates, ledger, budget_usd=50.0, until=deadline, runner=runner, clock=clock
+        candidates,
+        ledger,
+        budget_usd=50.0,
+        until=deadline,
+        runner=runner,
+        clock=clock,
+        readiness_check=_ready,
     )
 
     assert reason == "DRAINED"
@@ -238,7 +278,14 @@ def test_two_consecutive_aborts_fire_the_breaker(ledger, repo_id):
         ]
     )
 
-    reason = run_batch(candidates, ledger, budget_usd=50.0, until=None, runner=runner)
+    reason = run_batch(
+        candidates,
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+    )
 
     assert reason == "INFRASTRUCTURE"
     assert runner.calls == candidates[:2]
@@ -248,10 +295,18 @@ def test_two_consecutive_aborts_fire_the_breaker(ledger, repo_id):
 
 
 def test_an_exhausted_task_between_two_aborts_resets_the_breaker(ledger, repo_id):
+    """A fourth candidate, and it is the whole test.
+
+    With three, this passed with the reset deleted: the breaker is only
+    consulted *before* a task, so the count ran 1 -> 1 -> 2 with no fourth
+    candidate for the standing 2 to block, and the queue drained either way.
+    The fourth is what makes the reset observable — it is the task a standing
+    count would refuse, and `runner.calls` is what says it was not refused."""
     candidates = [
         _candidate("TE-0001"),
         _candidate("TE-0002"),
         _candidate("TE-0003"),
+        _candidate("TE-0004"),
     ]
     runs = [_spend(ledger, repo_id, 1.0) for _ in candidates]
     runner = FakeRunner(
@@ -259,12 +314,23 @@ def test_an_exhausted_task_between_two_aborts_resets_the_breaker(ledger, repo_id
             _outcome(state="GATE_ERROR", run_id=runs[0]),
             _outcome(state="EXHAUSTED", run_id=runs[1]),
             _outcome(state="RATE_LIMITED", run_id=runs[2]),
+            _outcome(state="READY_FOR_REVIEW", run_id=runs[3]),
         ]
     )
 
-    reason = run_batch(candidates, ledger, budget_usd=50.0, until=None, runner=runner)
+    reason = run_batch(
+        candidates,
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+    )
 
-    # The breaker never reaches two in a row, so the queue drains.
+    # The breaker never reaches two in a row, so the queue drains — and every
+    # candidate ran, including the fourth. Without the reset the count stands
+    # at two by the third, the fourth is refused, and this is INFRASTRUCTURE
+    # after three calls.
     assert reason == "DRAINED"
     assert runner.calls == candidates
 
@@ -280,12 +346,24 @@ def _assert_closed(ledger, reason, expected):
 def test_every_stop_path_closes_the_batch_row_with_its_reason(ledger, repo_id):
     # One test, all four stop reasons — a parametrized test would leave no
     # bare node id for the host to check this witness against.
-    drained = run_batch([], ledger, budget_usd=50.0, until=None, runner=FakeRunner([]))
+    drained = run_batch(
+        [],
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=FakeRunner([]),
+        readiness_check=_ready,
+    )
     _assert_closed(ledger, drained, "DRAINED")
 
     over_budget = [_candidate("TE-0001", budget_usd=100.0)]
     budget = run_batch(
-        over_budget, ledger, budget_usd=5.0, until=None, runner=FakeRunner([])
+        over_budget,
+        ledger,
+        budget_usd=5.0,
+        until=None,
+        runner=FakeRunner([]),
+        readiness_check=_ready,
     )
     _assert_closed(ledger, budget, "BUDGET")
 
@@ -297,6 +375,7 @@ def test_every_stop_path_closes_the_batch_row_with_its_reason(ledger, repo_id):
         until=deadline,
         runner=FakeRunner([]),
         clock=FakeClock([deadline]),
+        readiness_check=_ready,
     )
     _assert_closed(ledger, until_reason, "UNTIL")
 
@@ -316,7 +395,14 @@ def test_each_run_is_attached_to_the_batch_it_ran_under(ledger, repo_id):
     run_id = _spend(ledger, repo_id, 1.0)
     runner = FakeRunner([_outcome(state="READY_FOR_REVIEW", run_id=run_id)])
 
-    reason = run_batch([candidate], ledger, budget_usd=50.0, until=None, runner=runner)
+    reason = run_batch(
+        [candidate],
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+    )
 
     assert reason == "DRAINED"
     row = ledger._db.execute(
@@ -349,7 +435,14 @@ def test_a_runner_that_raises_still_closes_the_batch_row(ledger, repo_id):
     candidates = [_candidate("TE-0001"), _candidate("TE-0002"), _candidate("TE-0003")]
     runner = FakeRunner([RuntimeError("mirror will not fetch"), RuntimeError("boom")])
 
-    reason = run_batch(candidates, ledger, budget_usd=50.0, until=None, runner=runner)
+    reason = run_batch(
+        candidates,
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+    )
 
     assert reason == "INFRASTRUCTURE"
     # Only the two raising candidates were tried — the breaker fired before a
@@ -373,7 +466,14 @@ def test_a_crash_after_real_spend_still_counts_against_the_next_budget_gate(
     expensive_second = _candidate("TE-0002", budget_usd=20.0)
     candidates = [_candidate("TE-0001"), expensive_second]
 
-    reason = run_batch(candidates, ledger, budget_usd=50.0, until=None, runner=crashing)
+    reason = run_batch(
+        candidates,
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=crashing,
+        readiness_check=_ready,
+    )
 
     assert reason == "BUDGET"
     assert crashing.calls == [candidates[0]]
@@ -384,3 +484,144 @@ def test_a_crash_after_real_spend_still_counts_against_the_next_budget_gate(
         "SELECT batch_id FROM runs ORDER BY run_id DESC LIMIT 1"
     ).fetchone()
     assert minted_run["batch_id"] == batch_id
+
+
+def test_a_readiness_probe_that_raises_still_closes_the_batch_row(ledger, repo_id):
+    """`readiness_check` was called outside every handler, and the real one
+    does network and disk work. A raise there left `status` and `ended_at`
+    NULL — the one state that cannot be told from a night still running, and
+    the state §6's morning queue reads."""
+
+    def _explodes() -> Readiness:
+        raise OSError("mirror fetch died")
+
+    with pytest.raises(OSError, match="mirror fetch died"):
+        run_batch(
+            [_candidate("TE-0001")],
+            ledger,
+            budget_usd=50.0,
+            until=None,
+            runner=FakeRunner([]),
+            readiness_check=_explodes,
+        )
+
+    row = _batch_row(ledger, _latest_batch_id(ledger))
+    assert row["status"] == "INFRASTRUCTURE"
+    assert row["ended_at"] is not None
+
+
+def test_an_interrupted_night_closes_its_row_rather_than_leaving_it_open(
+    ledger, repo_id
+):
+    """`except Exception` does not catch `BaseException`, so an operator's
+    Ctrl-C at 3am propagated straight through — and `run_one_cell`'s own
+    outermost handler is deliberately `except BaseException` for the same
+    reason. The interrupt must still stop the night; it must not leave a
+    corpse behind while doing it."""
+
+    def _interrupted(_candidate):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        run_batch(
+            [_candidate("TE-0001")],
+            ledger,
+            budget_usd=50.0,
+            until=None,
+            runner=_interrupted,
+            readiness_check=_ready,
+        )
+
+    row = _batch_row(ledger, _latest_batch_id(ledger))
+    assert row["status"] == "INFRASTRUCTURE"
+    assert row["ended_at"] is not None
+
+
+def test_a_queue_whose_last_tasks_all_abort_is_not_a_clean_drain(ledger, repo_id):
+    """The breaker is consulted before a task, so a queue whose final
+    candidates all abort falls out of the loop with the count standing and
+    used to report `DRAINED` — which the command maps to exit 0, so launchd
+    would record a successful night in which every task died of one global
+    condition."""
+    candidates = [_candidate("TE-0001"), _candidate("TE-0002")]
+    runs = [_spend(ledger, repo_id, 1.0) for _ in candidates]
+    runner = FakeRunner(
+        [
+            _outcome(state="GATE_ERROR", run_id=runs[0]),
+            _outcome(state="PREFLIGHT_FAILED", run_id=runs[1]),
+        ]
+    )
+
+    reason = run_batch(
+        candidates,
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+    )
+
+    assert reason == "INFRASTRUCTURE"
+    assert runner.calls == candidates  # both ran; the verdict is about the exit
+    assert _batch_row(ledger, _latest_batch_id(ledger))["status"] == "INFRASTRUCTURE"
+
+
+def test_a_runner_that_raises_says_what_died(ledger, repo_id):
+    """The exception was swallowed whole — not bound, not printed, not
+    recorded. By the time `run_batch` returned it was gone, so an unattended
+    night that died from a runtime that would not start left the operator a
+    stop reason and no traceback anywhere."""
+    lines: list[str] = []
+
+    def _explodes(_candidate):
+        raise RuntimeError("cell runtime would not start")
+
+    reason = run_batch(
+        [_candidate("TE-0001")],
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=_explodes,
+        readiness_check=_ready,
+        emit=lines.append,
+    )
+
+    assert reason == "DRAINED"
+    assert any("cell runtime would not start" in line for line in lines)
+    assert any("RuntimeError" in line for line in lines)
+    assert any("TE-0001" in line for line in lines)
+
+
+def test_the_until_stored_is_utc_not_the_operators_wall_clock(
+    ledger, repo_id, monkeypatch
+):
+    """`_resolve_until` hands over a *naive local* datetime, and
+    `isoformat()` stored the operator's wall clock while `started_at` beside
+    it is `datetime('now')` in UTC — one row, two timestamps, eight hours
+    apart in this timezone and not comparable.
+
+    Pinned with a fixed TZ rather than the host's: on a machine already in UTC
+    the two spellings coincide and the bug is invisible."""
+    import time
+
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    time.tzset()
+    try:
+        # 06:30 Pacific on 2026-09-06 is 13:30 UTC (PDT, UTC-7).
+        deadline = datetime(2026, 9, 6, 6, 30)
+        run_batch(
+            [],
+            ledger,
+            budget_usd=50.0,
+            until=deadline,
+            runner=FakeRunner([]),
+            readiness_check=_ready,
+        )
+    finally:
+        # monkeypatch restores the variable; only tzset re-reads it.
+        monkeypatch.undo()
+        time.tzset()
+
+    row = _batch_row(ledger, _latest_batch_id(ledger))
+    assert row["until_ts"] == "2026-09-06 13:30:00"
+    assert row["started_at"] < row["until_ts"]
