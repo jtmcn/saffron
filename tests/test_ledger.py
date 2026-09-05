@@ -723,10 +723,12 @@ def _schema_without_policy_sha() -> str:
     change actually has. Shared by the migration test below and the
     no-backfill test, rather than building the fixture twice."""
     before = SCHEMA.replace("    policy_sha TEXT,\n", "")
-    # `repos` carries its own, unrelated `policy_sha` column (§4.1) — this
-    # checks only that `tasks`'s copy of the exact line is gone, otherwise
-    # this test proves nothing.
-    assert "    policy_sha TEXT,\n" not in before
+    # `repos` carries its own, unrelated `policy_sha` column (§4.1), so scope
+    # the check to `tasks`. Asserting absence of the literal `replace` just
+    # searched for cannot fail — `repos` spells it with two spaces and `tasks`
+    # with one, so a reflow of either would make the replace a silent no-op.
+    tasks_columns = before.split("CREATE TABLE IF NOT EXISTS tasks")[1].split(");")[0]
+    assert "policy_sha" not in tasks_columns  # otherwise this test proves nothing
     return before
 
 
