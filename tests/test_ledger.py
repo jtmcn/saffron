@@ -807,3 +807,180 @@ def test_an_attempt_against_no_task_raises_rather_than_naming_another(ledger, ta
     with pytest.raises(ValueError):
         ledger.open_attempt(90210)
     assert [row["attempt_id"] for row in ledger.attempts(task_id)] == [real]
+
+
+def test_an_opened_batch_is_in_flight_with_no_stop_reason(ledger):
+    """A batch can be opened. The row carries its budget and its until, and
+    is in flight: no status and no end — §4.2.1's four stop reasons describe
+    how a batch *ended*, and a batch that has not ended has none of them."""
+    batch_id = ledger.create_batch(budget_usd=50, until_ts="2026-09-06T06:00:00")
+    row = ledger._db.execute(
+        "SELECT budget_usd, until_ts, status, ended_at, spent_usd_est FROM batches"
+        " WHERE batch_id = ?",
+        (batch_id,),
+    ).fetchone()
+    assert row["budget_usd"] == 50
+    assert row["until_ts"] == "2026-09-06T06:00:00"
+    assert row["status"] is None
+    assert row["ended_at"] is None
+    assert row["spent_usd_est"] is None
+
+
+def test_closing_a_batch_records_its_stop_reason_and_end(ledger):
+    """Modelled on `finish_run`, which does the same for a run and is the
+    shape this repo already uses."""
+    batch_id = ledger.create_batch(budget_usd=50)
+    ledger.close_batch(batch_id, "DRAINED")
+    row = ledger._db.execute(
+        "SELECT status, ended_at FROM batches WHERE batch_id = ?", (batch_id,)
+    ).fetchone()
+    assert row["status"] == "DRAINED"
+    assert row["ended_at"] is not None
+
+
+def test_closing_a_batch_with_an_invented_stop_reason_is_refused(ledger):
+    """The CHECK already says so; this proves the writer surfaces it instead
+    of swallowing it."""
+    batch_id = ledger.create_batch(budget_usd=50)
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.close_batch(batch_id, "CRASHED")
+
+
+def test_closing_a_batch_derives_and_stores_its_spend(ledger):
+    """The spend it writes is the reader's return value bound as a
+    parameter, never a second copy of the join: `batches` -> `runs.batch_id`
+    -> `tasks.run_id` -> `attempts.cost_usd_est`.
+
+    A second batch's own attempts are also recorded, in the same ledger,
+    before the first is closed — the CHECK, the `WHERE r.batch_id = ?`
+    filter this exercises, is the only thing standing between one night's
+    stored spend and a running total of every night the ledger has ever
+    seen. Dropping it would still sum only the rows that exist in a fresh
+    fixture; it would not still sum only the first batch's rows."""
+    batch_id = ledger.create_batch(budget_usd=50)
+    repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=batch_id)
+    task_id = ledger.create_task(
+        run_id, spec_id="SA-0001", spec_sha="s" * 40, branch="saffron/SA-0001"
+    )
+    for cost in (0.25, 0.50):
+        attempt_id = ledger.open_attempt(task_id)
+        ledger.close_attempt(
+            attempt_id,
+            session_id="s-1",
+            subtype="success",
+            terminal_reason=None,
+            num_turns=1,
+            cost_usd_est=cost,
+        )
+
+    other_batch = ledger.create_batch(budget_usd=50)
+    other_run = ledger.create_run(repo_id, base_sha="b" * 40, batch_id=other_batch)
+    other_task = ledger.create_task(
+        other_run, spec_id="SA-0002", spec_sha="t" * 40, branch="saffron/SA-0002"
+    )
+    other_attempt = ledger.open_attempt(other_task)
+    ledger.close_attempt(
+        other_attempt,
+        session_id="s-2",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=9.00,
+    )
+
+    ledger.close_batch(batch_id, "DRAINED")
+    row = ledger._db.execute(
+        "SELECT spent_usd_est FROM batches WHERE batch_id = ?", (batch_id,)
+    ).fetchone()
+    assert row["spent_usd_est"] == 0.75
+
+
+def test_a_batch_closed_with_no_runs_stores_zero_not_null(ledger):
+    """The empty sum is a real answer about a night that spent nothing, and
+    NULL is reserved for the batch still running."""
+    batch_id = ledger.create_batch(budget_usd=50)
+    ledger.close_batch(batch_id, "DRAINED")
+    row = ledger._db.execute(
+        "SELECT spent_usd_est FROM batches WHERE batch_id = ?", (batch_id,)
+    ).fetchone()
+    assert row["spent_usd_est"] == 0.0
+
+
+def test_a_batchs_runs_are_readable_from_the_batch(ledger):
+    """A reader returns the runs a batch is made of, so a night can be
+    walked from its own row — through the new reader, never raw SQL."""
+    batch_id = ledger.create_batch(budget_usd=50)
+    repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    first = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=batch_id)
+    second = ledger.create_run(repo_id, base_sha="b" * 40, batch_id=batch_id)
+    other_batch = ledger.create_batch(budget_usd=50)
+    ledger.create_run(repo_id, base_sha="c" * 40, batch_id=other_batch)
+
+    rows = ledger.batch_runs(batch_id)
+
+    assert [r["run_id"] for r in rows] == [first, second]
+
+
+def test_a_run_can_be_attached_to_its_batch_after_the_fact(ledger):
+    """`create_run` accepts a batch id, but the only call that mints a run
+    passes none — this stamps the fact on after the row already exists, the
+    shape `record_push` and `set_task_package` already use on `tasks`."""
+    repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+    batch_id = ledger.create_batch(budget_usd=50)
+
+    ledger.attach_run_to_batch(run_id, batch_id)
+
+    row = ledger._db.execute(
+        "SELECT batch_id FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    assert row["batch_id"] == batch_id
+    assert [r["run_id"] for r in ledger.batch_runs(batch_id)] == [run_id]
+
+
+def test_a_running_batchs_spend_is_readable_before_it_closes(ledger):
+    """The same derivation the close performs is readable while the batch is
+    still running, so the loop's budget gate reads its spend back rather
+    than keeping a tally.
+
+    A second, unrelated batch also has attempts recorded against it in the
+    same ledger, so this only passes if `batch_spend` actually filters by
+    `batch_id` rather than summing every attempt the ledger has ever seen."""
+    batch_id = ledger.create_batch(budget_usd=50)
+    repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=batch_id)
+    task_id = ledger.create_task(
+        run_id, spec_id="SA-0001", spec_sha="s" * 40, branch="saffron/SA-0001"
+    )
+    attempt_id = ledger.open_attempt(task_id)
+    ledger.close_attempt(
+        attempt_id,
+        session_id="s-1",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=1.25,
+    )
+
+    other_batch = ledger.create_batch(budget_usd=50)
+    other_run = ledger.create_run(repo_id, base_sha="b" * 40, batch_id=other_batch)
+    other_task = ledger.create_task(
+        other_run, spec_id="SA-0002", spec_sha="t" * 40, branch="saffron/SA-0002"
+    )
+    other_attempt = ledger.open_attempt(other_task)
+    ledger.close_attempt(
+        other_attempt,
+        session_id="s-2",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=9.00,
+    )
+
+    assert ledger.batch_spend(batch_id) == 1.25
+    row = ledger._db.execute(
+        "SELECT status, ended_at FROM batches WHERE batch_id = ?", (batch_id,)
+    ).fetchone()
+    assert row["status"] is None
+    assert row["ended_at"] is None

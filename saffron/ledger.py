@@ -361,7 +361,7 @@ class Ledger:
         by `saffron/replay.py`, which calls this with no `batch_id` at all)
         leaves the column NULL rather than inventing a batch that did not
         happen. Nothing passes a real value yet; the batch loop that will is
-        `SA-0049`."""
+        `SA-0050`."""
         cursor = self._db.execute(
             """INSERT INTO runs (repo_id, base_sha, batch_id, status)
                VALUES (?, ?, ?, 'RUNNING')""",
@@ -376,6 +376,74 @@ class Ledger:
             (status, run_id),
         )
         self._db.commit()
+
+    def create_batch(self, budget_usd: float, until_ts: str | None = None) -> int:
+        """Opens one night's window (§4.2.1). `status`, `ended_at` and
+        `spent_usd_est` stay NULL until `close_batch` — none of the three is
+        known yet, and NULL is what "not yet measured" means for a batch still
+        going, the same distinction `ended_at` already draws on `runs`."""
+        cursor = self._db.execute(
+            "INSERT INTO batches (budget_usd, until_ts) VALUES (?, ?)",
+            (budget_usd, until_ts),
+        )
+        self._db.commit()
+        return _inserted_id(cursor)
+
+    def close_batch(self, batch_id: int, status: str) -> None:
+        """`finish_run`'s shape, one table over: one UPDATE, status and end
+        together, then commit. The spend is derived through `batch_spend`
+        rather than repeated in SQL, so the close and the reader can never
+        become two spellings of one sum that drift apart. A `status` outside
+        §4.2.1's four stop reasons is refused by the CHECK on `batches` — this
+        surfaces `sqlite3.IntegrityError` rather than swallowing it."""
+        spent = self.batch_spend(batch_id)
+        self._db.execute(
+            """UPDATE batches
+                  SET status = ?, ended_at = datetime('now'), spent_usd_est = ?
+                WHERE batch_id = ?""",
+            (status, spent, batch_id),
+        )
+        self._db.commit()
+
+    def attach_run_to_batch(self, run_id: int, batch_id: int) -> None:
+        """`create_run` accepts a `batch_id`, but the only call that mints a
+        run (`run_one_cell`, in `saffron/cell/**`) passes none — this stamps
+        it on after the row already exists, the shape `record_push` and
+        `set_task_package` already use on `tasks`: the row exists, then the
+        fact about it arrives."""
+        self._db.execute(
+            "UPDATE runs SET batch_id = ? WHERE run_id = ?",
+            (batch_id, run_id),
+        )
+        self._db.commit()
+
+    def batch_spend(self, batch_id: int) -> float:
+        """The same join `close_batch` derives through:
+        `batches` -> `runs.batch_id` -> `tasks.run_id` -> `attempts.cost_usd_est`,
+        summed and coalesced to 0.0 — never read off `tasks.spent_usd_est`,
+        which is only as fresh as the last `set_task_state` and would silently
+        omit the turn that just closed (`task_spend`'s docstring, one level
+        down)."""
+        row = self._db.execute(
+            """SELECT COALESCE(SUM(a.cost_usd_est), 0.0) AS spent
+                 FROM attempts a
+                 JOIN tasks t ON t.task_id = a.task_id
+                 JOIN runs r ON r.run_id = t.run_id
+                WHERE r.batch_id = ?""",
+            (batch_id,),
+        ).fetchone()
+        return float(row["spent"])
+
+    def batch_runs(self, batch_id: int) -> list[sqlite3.Row]:
+        """Every run a batch is made of, so a night can be walked from its own
+        row. The column already round-trips through `create_run`, but no
+        method had projected it until now, and `queue_lines` does not."""
+        return list(
+            self._db.execute(
+                "SELECT * FROM runs WHERE batch_id = ? ORDER BY run_id",
+                (batch_id,),
+            )
+        )
 
     def create_task(
         self,
