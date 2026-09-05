@@ -1685,6 +1685,75 @@ def test_watch_passes_its_flags_through_to_the_follower(tmp_path, monkeypatch):
     assert seen == {"verbose": True, "interval": 0.25}
 
 
+def test_watch_no_follow_hands_the_follower_a_poll_that_stops(tmp_path, monkeypatch):
+    """`--no-follow` reaches `follow` as the poll that ends it, and without
+    the flag nothing is passed at all — the real default stays bound in
+    `follow`'s own signature rather than being respelled here.
+
+    Stubbed deliberately, beside the end-to-end witness below: unwire this
+    and that one does not fail, it *hangs*, following a finished log for
+    ever. This says which line broke.
+    """
+    from saffron import watch
+
+    seen = {}
+
+    def fake_follow(task_dir, *, verbose=False, interval=1.0, sleep=None):
+        seen["sleep"] = sleep
+        return iter(())
+
+    monkeypatch.setattr(cli, "follow", fake_follow)
+
+    assert cli.main(["--home", str(tmp_path), "watch", "SY-1", "--no-follow"]) == 0
+    assert seen["sleep"] is watch.once
+
+    assert cli.main(["--home", str(tmp_path), "watch", "SY-1"]) == 0
+    assert seen["sleep"] is None
+
+
+def test_watch_prints_the_lines_the_follower_yields(tmp_path, capsys):
+    """The rendered lines actually reach stdout.
+
+    Nothing else asserts this: both witnesses above stub `follow` with an
+    empty iterator, so `print(line)` in `_watch` can be deleted outright with
+    the whole suite still green — the one thing an operator runs this command
+    for, untested. Driven end to end through the real `follow` and the real
+    `EventLog`, with `--no-follow` for a finite run.
+    """
+    from saffron.events import EventLog, Teardown, describe
+
+    task_dir = tmp_path / "batches" / "v0" / "SY-1"
+    log = EventLog(task_dir)
+    events = [
+        Teardown(timestamp=1.0, spec_id="SY-1", step="start", ok=True),
+        Teardown(timestamp=2.0, spec_id="SY-1", step="network", ok=True),
+    ]
+    for event in events:
+        log.append(event)
+
+    assert cli.main(["--home", str(tmp_path), "watch", "SY-1", "--no-follow"]) == 0
+
+    printed = capsys.readouterr().out.splitlines()
+    assert printed == [describe(event) for event in events]
+
+
+@pytest.mark.parametrize("interval", ["0", "-1"])
+def test_watch_refuses_a_poll_interval_that_never_waits(tmp_path, interval, capsys):
+    """A poll interval that is not a wait dies at parse time, with a usage
+    message and before a single line is printed.
+
+    `0` busy-loops re-reading the log at full CPU; a negative reaches
+    `time.sleep`, which raises only *after* the whole log has been rendered —
+    and `main`'s catch-all turns that into exit `2`, infrastructure failed,
+    for what is a mistyped flag. Argparse's own usage exit is the same one
+    every other malformed argv already gets.
+    """
+    with pytest.raises(SystemExit):
+        cli.main(["--home", str(tmp_path), "watch", "SY-1", "--interval", interval])
+
+    assert "--interval" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("command", ["queue", "reconcile"])
 def test_an_in_flight_task_survives_being_looked_at(tmp_path, command):
     """`ORPHANED` is in `scheduler.REQUEUE_STATES`, so a row stamped while

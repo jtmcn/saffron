@@ -8,6 +8,8 @@ author imagined the writer emits.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from saffron import watch
@@ -234,3 +236,90 @@ def test_an_unknown_task_names_the_directory_it_looked_in(tmp_path):
         list(watch.follow(missing))
 
     assert str(missing) in str(excinfo.value)
+
+
+def test_a_payload_that_is_not_an_object_is_dropped_and_the_rest_survive(tmp_path):
+    """`read_log` type-checks nothing, so a corrupt line can hand `describe`
+    a `str` where it expects a mapping — and `describe` raises
+    `AttributeError` on it. One such line must cost its own line and no
+    more: raised, it ends the whole follow, and `main`'s catch-all reports
+    the per-line corruption `read_log` exists to tolerate as exit `2`,
+    infrastructure failed.
+
+    Written straight to the file rather than built as an `Agent` and
+    appended, following the partial-line witness above and for the same
+    reason: `Agent.event` is annotated `dict | None`, so the constructor is
+    the one path this shape cannot arrive by. `read_log` is where it gets in,
+    because `cls(**obj)` checks no types at all.
+    """
+    task_dir = tmp_path / "SY-6"
+    log = EventLog(task_dir)
+    whole = Teardown(timestamp=1.0, spec_id="SY-6", step="start", ok=True)
+    after = Teardown(timestamp=3.0, spec_id="SY-6", step="network", ok=True)
+    log.append(whole)
+    events_path = task_dir / "events.jsonl"
+    with events_path.open("a") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "kind": "Agent",
+                    "timestamp": 2.0,
+                    "spec_id": "SY-6",
+                    "raw": False,
+                    "event": "not an object",
+                }
+            )
+            + "\n"
+        )
+    log.append(after)
+
+    lines = list(watch.follow(task_dir, sleep=_once))
+
+    assert lines == [describe(whole), describe(after)]
+
+
+def test_a_malformed_payload_is_dropped_by_the_unfiltered_view_too(tmp_path):
+    """`--all` reaches every line `_is_noise` hides, but not one `describe`
+    cannot render at all. The asymmetry is the point: a filtered line is
+    still a line, and this one is a crash."""
+    task_dir = tmp_path / "SY-7"
+    log = EventLog(task_dir)
+    kept = Teardown(timestamp=2.0, spec_id="SY-7", step="start", ok=True)
+    task_dir.mkdir(parents=True, exist_ok=True)
+    with (task_dir / "events.jsonl").open("a") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "kind": "Agent",
+                    "timestamp": 1.0,
+                    "spec_id": "SY-7",
+                    "raw": False,
+                    "event": ["also", "not"],
+                }
+            )
+            + "\n"
+        )
+    log.append(kept)
+
+    lines = list(watch.follow(task_dir, verbose=True, sleep=_once))
+
+    assert lines == [describe(kept)]
+
+
+def test_the_no_follow_poll_stops_after_one_pass(tmp_path):
+    """`watch.once` is what `--no-follow` hands `follow`: it renders what is
+    on disk and stops, without waiting for a line that may never come. Not
+    finish detection — it never asks whether the task ended, which is why it
+    needs no teardown event to be reliable."""
+    task_dir = tmp_path / "SY-8"
+    log = EventLog(task_dir)
+    events = [
+        Teardown(timestamp=1.0, spec_id="SY-8", step="start", ok=True),
+        Teardown(timestamp=2.0, spec_id="SY-8", step="network", ok=True),
+    ]
+    for event in events:
+        log.append(event)
+
+    lines = list(watch.follow(task_dir, sleep=watch.once))
+
+    assert lines == [describe(event) for event in events]

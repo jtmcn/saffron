@@ -32,7 +32,7 @@ from saffron.scheduler import (
     retirement_refusal,
     run_gh,
 )
-from saffron.watch import UnknownTask, follow
+from saffron.watch import UnknownTask, follow, once
 
 DEFAULT_HOME = Path.home() / ".saffron"
 
@@ -113,7 +113,18 @@ def main(argv: list[str] | None = None) -> int:
         help="keep every line, including the token counter and bare tool "
         "acknowledgements the default view drops",
     )
-    watch_parser.add_argument("--interval", type=float, default=1.0)
+    watch_parser.add_argument(
+        "--interval",
+        type=_poll_interval,
+        default=1.0,
+        help="seconds to wait between polls of the log (default: 1.0)",
+    )
+    watch_parser.add_argument(
+        "--no-follow",
+        action="store_true",
+        help="print what the log already holds and exit, rather than "
+        "following it until interrupted",
+    )
 
     args = parser.parse_args(argv)
     out_dir_arg = getattr(args, "out", None)
@@ -586,6 +597,21 @@ def _reconcile(args: argparse.Namespace, ledger: Ledger) -> int:
     return 0
 
 
+def _poll_interval(value: str) -> float:
+    """`--interval`, rejected by argparse rather than discovered by `_watch`.
+
+    A negative reaches `time.sleep`, which raises after the whole log has
+    already been printed — and `main`'s catch-all reports that as exit `2`,
+    infrastructure failed, for a mistyped flag. `0` busy-loops re-reading the
+    file at full CPU. Both die here instead, with a usage message, the way
+    every other malformed argv already does.
+    """
+    seconds = float(value)
+    if seconds <= 0:
+        raise argparse.ArgumentTypeError(f"must be greater than 0, not {value}")
+    return seconds
+
+
 def _watch(args: argparse.Namespace, out_dir: Path) -> int:
     """`saffron watch SY-1` — follow one task's `events.jsonl`, rendered
     exactly as the attended terminal that ran it would have printed each
@@ -596,9 +622,16 @@ def _watch(args: argparse.Namespace, out_dir: Path) -> int:
     is how a watcher comes to read a directory nothing writes.
     """
     task_dir = out_dir / args.task
+    # `--no-follow` is this same loop with a poll that says stop the first
+    # time round. Passed as a kwarg rather than a flag through `follow`, so
+    # the real default stays bound in `follow`'s own signature.
+    poll = {"sleep": once} if args.no_follow else {}
     try:
-        for line in follow(task_dir, verbose=args.all, interval=args.interval):
-            print(line)
+        for line in follow(task_dir, verbose=args.all, interval=args.interval, **poll):
+            # Flushed: stdout is block-buffered off a tty, and a `tail -f`
+            # shaped command that shows nothing until 8 KB accumulates is one
+            # nobody pipes twice.
+            print(line, flush=True)
     except UnknownTask:
         print(f"watch: no task directory at {task_dir}")
         # `0`/`1`/`2` belong to *running* a task (reviewable, did not make

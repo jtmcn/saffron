@@ -56,7 +56,7 @@ rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
 ### Tier 3 — real, not urgent
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
-**56**, **57**.
+**56**, **57**, **61**, **62**, **63**.
 
 **What this ordering costs, stated plainly:** tiers 2 and 3 hold 22 of the 29
 open items, including every ontology item and every operator-visibility spec
@@ -3402,6 +3402,89 @@ most of the fix.
 **Not** relaxing the schema to make `severity` optional. The severity is what
 `_describe` counts and what decides whether a finding blocks; a report whose
 findings have no severity is not a report that can be acted on.
+
+---
+
+## 61. `describe` raises on a payload `read_log` hands back unchecked
+
+**Tier 3.** Found reviewing `SA-0053` (PR #119), and fixed *around* rather than
+fixed: `saffron/events.py` was `forbidden` to that spec.
+
+`read_log` type-checks nothing — it is `cls(**obj)` onto a plain dataclass — so
+a corrupt or hand-edited line round-trips into `Agent(event='not an object')`
+and `describe` raises `AttributeError` on `.get`. Measured:
+
+```
+read_log tolerates it: [Agent(timestamp=1.0, spec_id='T1', raw=False, event='x', …)]
+describe RAISED: AttributeError 'str' object has no attribute 'get'
+```
+
+That is per-line corruption defeating the per-line tolerance `read_log`'s own
+docstring promises, and it takes the whole caller down with it. `watch.py`
+guards its own call (`_is_malformed`), so the follower is safe; every other
+caller of `describe` is not.
+
+**Done looks like** `read_log` refusing to build an event whose field is the
+wrong type at all — the drop it already performs for a missing field, extended
+to a present one of the wrong shape — so no caller has to guard. The producer
+side is already guarded (`implement.py:255` checks `isinstance(event, dict)`),
+so nothing hostile reaches this today; a hand-edited log does.
+
+**Not** each caller repeating `watch.py`'s guard. That is the duplication the
+guard exists to make unnecessary once, and `describe`'s contract should be
+"any `Event`" or it is not the single renderer this repo relies on it being.
+
+---
+
+## 62. A follower re-reads the whole log every poll, so watching a night is O(n²)
+
+**Tier 3.** Measured 2026-09-04 while reviewing `SA-0053` (PR #119), and named
+in a `ponytail:` beside the call.
+
+`watch.follow` calls `read_log` once per poll and slices past what it has
+already seen. `read_log` has no offset — it reads and parses the entire file —
+so following costs O(n²) over a night. Measured: **5.7s for one `read_log`** on
+a 37 MB / 160k-line log, past which the default 1s interval falls permanently
+behind and pegs a core re-parsing what it already rendered. `events.py`'s own
+`ponytail:` names "tens of MB a night" as the ceiling, so this is inside the
+range the log is designed for.
+
+**Done looks like** `read_log` taking a byte offset and returning the position
+it stopped at, with `follow` holding that between polls. The truncated-final-
+line tolerance has to survive it: a partial line at the offset boundary must
+leave the offset *before* it, or the next poll resumes mid-object and drops
+every line after.
+
+**Not** having the follower parse the file itself. A second parser beside
+`read_log` is the same defect as a second renderer beside `describe`, which is
+the thing `SA-0053` was written to avoid.
+
+---
+
+## 63. `describe` renders three agent payload fields unclipped, straight to a terminal
+
+**Tier 3.** Found reviewing `SA-0053` (PR #119). Not a regression — the
+attended terminal has had this exposure since `SA-0029` — but that PR added a
+*second* consumer, which is what makes it worth filing.
+
+`_describe_agent_event` clips `text` at 160 characters and `tool_use` at 120.
+Its `error`, `rate_limit` and fallback branches clip nothing and strip nothing.
+An `Agent` event carrying `{"type": "error", "error": "\x1b[2J\x1b]0;…\x07" +
+"A"*5000}` renders with the escape bytes intact, which reaches the operator's
+terminal as a screen clear and a title change. The content is authored inside a
+cell, and CLAUDE.md's governing line is that a cell is untrusted.
+
+`saffron watch` makes it worse in one specific way: it can replay a finished
+cell's output into a fresh terminal, long after the run, for an operator who
+was not watching when it happened.
+
+**Done looks like** the three unclipped branches clipped like the other two,
+and C0 control characters other than nothing at all stripped in `describe` —
+once, where the single renderer is, not in each caller.
+
+**Not** escaping in `watch.py`. That is a second renderer by another name, and
+it would leave the attended terminal — the one that reads this output during a
+live run — still exposed.
 
 ---
 

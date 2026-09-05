@@ -56,12 +56,32 @@ def _is_noise(event: Event) -> bool:
     hiding it is how a night dies `RATE_LIMITED` with nothing on screen to
     say so.
     """
-    if not isinstance(event, Agent) or event.raw or event.event is None:
+    if not isinstance(event, Agent) or event.raw or not isinstance(event.event, dict):
         return False
     payload = event.event
     if payload.get("type") == _BARE_ACK:
         return True
     return payload.get("subtype") == _TOKEN_COUNTER
+
+
+def _is_malformed(event: Event) -> bool:
+    """An `Agent` whose payload survived `read_log` without being an object.
+
+    `read_log` type-checks nothing — it is `cls(**obj)` onto a plain
+    dataclass — so a corrupt or hand-edited line puts a `str` where
+    `describe` expects a mapping, and `describe` raises `AttributeError` on
+    it. Dropped here rather than allowed to reach it: one such line would
+    otherwise end the whole follow through `main`'s catch-all as exit `2`,
+    "infrastructure failed", for exactly the per-line corruption `read_log`
+    exists to tolerate. `saffron/events.py` is forbidden to this spec, so
+    `describe` still carries the hole for every other caller — item 61.
+    """
+    return (
+        isinstance(event, Agent)
+        and not event.raw
+        and event.event is not None
+        and not isinstance(event.event, dict)
+    )
 
 
 def render_line(event: Event, *, verbose: bool = False) -> str | None:
@@ -72,7 +92,13 @@ def render_line(event: Event, *, verbose: bool = False) -> str | None:
     of the two noisy shapes `_is_noise` names. The filter is a default, never
     a deletion: `verbose=True` is how every dropped line stays reachable,
     because it is still the record of what the agent actually did.
+
+    A malformed payload is dropped under `verbose` too, and that asymmetry is
+    deliberate: `_is_noise` hides a line that renders fine, while
+    `_is_malformed` names one `describe` cannot render at all.
     """
+    if _is_malformed(event):
+        return None
     if not verbose and _is_noise(event):
         return None
     return describe(event) or None
@@ -85,6 +111,18 @@ def _sleep_and_continue(seconds: float) -> bool:
     iterations inside the loop body would be exactly that pretense."""
     time.sleep(seconds)
     return True
+
+
+def once(_seconds: float) -> bool:
+    """The `--no-follow` poll: render what is on disk, then stop.
+
+    Not finish *detection*, which is out of scope and unbuildable as asked —
+    a killed cell emits no teardown event to detect. This needs none, because
+    it never waits for a next line: it answers the spec's third problem (a
+    finished task's log readable as something other than raw JSON) rather
+    than the first.
+    """
+    return False
 
 
 class UnknownTask(LookupError):
@@ -130,6 +168,10 @@ def follow(
         raise UnknownTask(task_dir)
     seen = 0
     while True:
+        # ponytail: every poll re-reads and re-parses the whole file, so a
+        # follow costs O(n²) over a night. Measured: 5.7s for one `read_log`
+        # on a 37 MB / 160k-line log, past which a 1s interval falls
+        # permanently behind. `read_log` has no offset — item 62.
         events = read_log(task_dir)
         for event in events[seen:]:
             line = render_line(event, verbose=verbose)
