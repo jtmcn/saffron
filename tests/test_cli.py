@@ -10,11 +10,13 @@ import subprocess
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from saffron import cli, intake, preflight
 from saffron.cell import session
+from saffron.cell.session import CellOutcome
 from saffron.cli import main
 from saffron.events import PhaseStart, Preflight, describe, read_log
 from saffron.ledger import Ledger
@@ -2485,6 +2487,110 @@ def test_a_readiness_failure_names_the_step_that_failed(tmp_path, monkeypatch, c
     out = capsys.readouterr().out
     assert "auth" in out
     assert "token invalid" in out
+
+
+def test_the_adapter_packages_a_ready_task_and_reports_what_packaging_made_of_it(
+    tmp_path, monkeypatch
+):
+    """`run_one_cell` stops at `READY_FOR_REVIEW`; the branch is pushed and the
+    pull request opened by `package_phase.package`, which the attended path
+    calls afterwards and the loop cannot call at all. Without this the night
+    runs to completion and opens nothing — backlog item 45's failure mode by
+    construction rather than by accident.
+
+    And the outcome handed back carries what packaging made of the task, not
+    what the cell left behind: `run_batch` reads `outcome.state` to drive the
+    breaker and the batch record, so a `MERGE_FAILED` reported as
+    `READY_FOR_REVIEW` misstates the night in the one column that says why it
+    ended.
+    """
+    repo = _local_origin(tmp_path)
+    mirror, url = _mirror_of(tmp_path, repo)
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, url)
+
+    resolved = cli.QueueResolution(
+        repo_id=repo_id,
+        mirror=mirror,
+        base_sha="a" * 40,
+        repo_slug=None,
+        exported=tmp_path,
+        candidates=[],
+        refusals=[],
+        reconciled=cli.ReconcileResult(),
+        gh_failures=[],
+        policy_unread=[],
+    )
+    runner = cli._batch_runner(
+        resolved, repo=repo, ledger=ledger, out_dir=tmp_path / "out", url=url
+    )
+
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-1", state="READY_FOR_REVIEW")
+    outcome = CellOutcome(
+        state="READY_FOR_REVIEW",
+        task_id=task_id,
+        run_id=1,
+        task_dir=tmp_path / "out" / "SY-1",
+    )
+    monkeypatch.setattr(cli, "run_one_cell", lambda *a, **k: outcome)
+
+    packaged: dict = {}
+
+    def _package(*args, **kwargs):
+        packaged["called"] = True
+        return SimpleNamespace(state="MERGE_FAILED", pr_url=None, note="pushed, no PR")
+
+    monkeypatch.setattr(cli.package_phase, "package", _package)
+
+    candidate = Candidate(
+        path=Path("SY-1.md"),
+        spec=intake.Spec(id="SY-1", title="t", type="chore", touches=["src/**"]),
+        spec_sha="s" * 64,
+        task_id=task_id,
+    )
+
+    returned = runner(candidate)
+
+    assert packaged.get("called") is True
+    assert returned.state == "MERGE_FAILED"
+    ledger.close()
+
+
+def test_a_night_says_what_its_own_scan_could_not_check(tmp_path, monkeypatch, capsys):
+    """A `gh` that could not start means the open-pull-request and
+    touches-overlap refusals never ran, and an unreadable `policy.yaml` at
+    `base_sha` means the protected-path refusal never ran. The attended
+    command says so; unsaid here, a degraded night is indistinguishable in the
+    morning from one whose refusals all passed, on the one path where nobody
+    is awake to notice.
+    """
+    resolved = cli.QueueResolution(
+        repo_id=1,
+        mirror=tmp_path / "m.git",
+        base_sha="a" * 40,
+        repo_slug="jtmcn/saffron",
+        exported=tmp_path,
+        candidates=[],
+        refusals=[],
+        reconciled=cli.ReconcileResult(),
+        gh_failures=["gh: command not found"],
+        policy_unread=["policy.yaml: no such file"],
+    )
+    monkeypatch.setattr(cli, "_resolve_queue", lambda *a, **k: resolved)
+    monkeypatch.setattr(cli.package_phase, "real_remote", lambda _repo: "u")
+    monkeypatch.setattr(cli, "_batch_runner", lambda *a, **k: lambda _c: None)
+    monkeypatch.setattr(cli, "run_batch", lambda *a, **k: "DRAINED")
+
+    args = argparse.Namespace(
+        repo=tmp_path, home=tmp_path / "home", budget=50.0, until=None
+    )
+    ledger = Ledger(tmp_path / "l.db")
+    assert cli._batch(args, ledger, tmp_path / "out") == 0
+    ledger.close()
+
+    printed = capsys.readouterr().out
+    assert "gh could not be run" in printed
+    assert "policy.yaml at this base_sha could not be read" in printed
 
 
 def test_the_adapter_stacks_a_child_on_its_parents_branch(tmp_path, monkeypatch):

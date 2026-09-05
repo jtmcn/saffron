@@ -802,6 +802,16 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     until = _resolve_until(args.until, datetime.now()) if args.until else None
 
     resolved = _resolve_queue(repo, args.home, ledger, stamp_orphaned=True)
+
+    # The night says what its own scan could not check. `_resolve_queue`
+    # leaves reporting to its caller, and the attended caller discharges that
+    # by printing all three; unreported here, a night whose `gh` never ran
+    # looks identical in the morning to one whose refusals all passed — the
+    # scan quietly did less than it appears to have done, on the one path
+    # where nobody is awake to notice.
+    _print_reconcile_summary(resolved.reconciled)
+    _print_scan_gaps(resolved.repo_slug, resolved.gh_failures, resolved.policy_unread)
+
     url = package_phase.real_remote(repo)
     runner = _batch_runner(resolved, repo=repo, ledger=ledger, out_dir=out_dir, url=url)
 
@@ -1017,6 +1027,24 @@ def _print_queue(
         except ValueError:
             shown = refusal.path
         print(f"  {shown}: {refusal.reason}")
+    _print_scan_gaps(repo_slug, gh_failures, policy_unread)
+
+
+def _print_scan_gaps(
+    repo_slug: str | None,
+    gh_failures: list[str],
+    policy_unread: Sequence[str] = (),
+) -> None:
+    """Which of the scan's refusals never ran, for either caller.
+
+    Shared by `queue` and `batch` rather than living inside `_print_queue`,
+    because the unattended caller is the one that needs it most and prints no
+    queue at all. A night whose `gh` could not start never checked the open
+    pull request or touches-overlap refusals, and a night whose `policy.yaml`
+    could not be read at `base_sha` never checked the protected list — in both
+    cases the scan resolved fewer refusals than it appears to have, and in the
+    morning there is nothing else to say so.
+    """
     if repo_slug is None:
         _print_skipped(
             "no GitHub slug could be read from the remote", _GH_REFUSALS_SKIPPED
