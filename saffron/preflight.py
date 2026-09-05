@@ -23,6 +23,7 @@ loop (`SA-0050`), not the attended path.
 
 from __future__ import annotations
 
+import enum
 import os
 import re
 import shutil
@@ -283,16 +284,47 @@ def _last_line(done: runtime.Completed) -> str:
     return "the probe printed nothing"
 
 
-# The agent's own credential, checked against the same host `assert_proxy_
-# reaches_upstream` probes. `Authorization: Bearer` is how the agent itself
-# presents this token once a cell starts (session.py forwards it verbatim).
+# The agent's own credential, checked against the same host
+# `assert_proxy_reaches_upstream` probes.
+#
+# UNMEASURED: `Authorization: Bearer` is inferred, not observed. `session.py`
+# forwards the environment variable; nothing here has seen what this endpoint
+# answers a subscription OAuth token presented this way, and an API key is not
+# an OAuth token. A valid token answering 401 skips every repo (§4.4 step 1),
+# so until `docs/evidence/` holds a real measurement the UNKNOWN verdict below
+# is what keeps that inference from reading as a dead credential.
 _TOKEN_PROBE_URL = f"https://{proxy.UPSTREAM_HOST}/v1/models"
 
 
-def validate_claude_token(token: str, *, timeout_s: float = 20) -> bool:
-    """`True` if `token` authenticates against the host the proxy allowlists;
-    `False` for anything else, including a host this probe could not reach —
-    "could not tell" is not a pass.
+class TokenVerdict(enum.Enum):
+    """Three answers, because two of them are not the same kind of fact. A
+    credential the host rejected is a reason to stop and say so; one the probe
+    could not reach is infrastructure that failed, and naming the credential
+    for it accuses the wrong thing (`error` != `fail`)."""
+
+    VALID = "valid"
+    INVALID = "invalid"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class TokenCheck:
+    """`Readiness`'s shape one level down: the verdict, and what produced it."""
+
+    verdict: TokenVerdict
+    detail: str | None = None
+
+
+def validate_claude_token(token: str, *, timeout_s: float = 20) -> TokenCheck:
+    """Whether `token` authenticates against the host the proxy allowlists.
+
+    Three verdicts, never a boolean. A 401 or 403 is INVALID. Anything else
+    the probe could not turn into a verdict — a network it could not reach, a
+    moved endpoint, a 500 — is UNKNOWN, which still refuses to proceed
+    ("could not tell" is not a pass) but refuses while naming the right cause.
+    An earlier boolean form collapsed both directions: dropped wifi reported
+    the credential as dead, and a 404 from a moved endpoint reported it as
+    live.
 
     This is the *opposite* verdict from `assert_proxy_reaches_upstream` on
     the very same host: that probe treats a 401 as success, because what it
@@ -309,12 +341,16 @@ def validate_claude_token(token: str, *, timeout_s: float = 20) -> bool:
         _TOKEN_PROBE_URL, headers={"Authorization": f"Bearer {token}"}
     )
     try:
-        urllib.request.urlopen(request, timeout=timeout_s)
-        return True
+        with urllib.request.urlopen(request, timeout=timeout_s):
+            return TokenCheck(TokenVerdict.VALID)
     except urllib.error.HTTPError as exc:
-        return exc.code not in (401, 403)
-    except urllib.error.URLError:
-        return False
+        if exc.code in (401, 403):
+            return TokenCheck(TokenVerdict.INVALID, f"HTTP {exc.code}")
+        return TokenCheck(
+            TokenVerdict.UNKNOWN, f"HTTP {exc.code} from {_TOKEN_PROBE_URL}"
+        )
+    except urllib.error.URLError as exc:
+        return TokenCheck(TokenVerdict.UNKNOWN, f"{_TOKEN_PROBE_URL}: {exc.reason}")
 
 
 # 10 GiB: room for a night's mirrors, worktrees and agent-state volumes for
@@ -381,11 +417,11 @@ class Readiness:
 def check_readiness(
     repo: Path,
     mirror_path: Path,
+    *,
     scratch: Path,
     home: Path,
-    *,
     token: str | None,
-    validate_token: Callable[[str], bool] = validate_claude_token,
+    validate_token: Callable[[str], TokenCheck] = validate_claude_token,
 ) -> Readiness:
     """§4.2.1, followed to the letter: auth, mirror fetch, origin refusal,
     default-branch pin, policy validation, disk headroom — in that order,
@@ -395,13 +431,30 @@ def check_readiness(
     this is the once-per-run entry point a batch loop calls (`SA-0050`), and
     it is the only path that reaches the network-bound `validate_token` probe
     or touches the disk at all.
+
+    `scratch` is **emptied** — `export_saffron_dir` rmtree's it first. It and
+    `home` are keyword-only for that reason: they were two adjacent positional
+    `Path`s, and transposing them type-checks cleanly and deletes the ledger.
+
+    The three preparation steps are spelled out here rather than delegated to
+    `prepare_mirror`, which runs the identical sequence: one `except` around a
+    call could not say *which* step failed, and naming it is this function's
+    whole contract. Keep the two in step — `test_readiness_and_prepare_mirror_
+    run_the_same_three_steps_in_the_same_order` fails if they drift.
     """
     stripped_token = (token or "").strip()
     if not stripped_token:
         return Readiness(False, "auth", "CLAUDE_CODE_OAUTH_TOKEN is unset")
-    if not validate_token(stripped_token):
+    checked = validate_token(stripped_token)
+    if checked.verdict is TokenVerdict.INVALID:
         return Readiness(
-            False, "auth", "CLAUDE_CODE_OAUTH_TOKEN is present but not valid"
+            False, "auth", f"CLAUDE_CODE_OAUTH_TOKEN was rejected ({checked.detail})"
+        )
+    if checked.verdict is TokenVerdict.UNKNOWN:
+        return Readiness(
+            False,
+            "auth",
+            f"CLAUDE_CODE_OAUTH_TOKEN could not be checked ({checked.detail})",
         )
 
     try:

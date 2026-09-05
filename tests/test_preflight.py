@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import subprocess
 import types
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 import pytest
@@ -387,10 +386,10 @@ def test_a_failing_preparation_step_is_named_not_raised(
     result = preflight.check_readiness(
         tmp_path / "repo",
         tmp_path / "mirror",
-        tmp_path / "scratch",
-        tmp_path / "home",
+        scratch=tmp_path / "scratch",
+        home=tmp_path / "home",
         token="tok",
-        validate_token=lambda token: True,
+        validate_token=lambda token: preflight.TokenCheck(preflight.TokenVerdict.VALID),
     )
 
     assert result.ok is False
@@ -414,10 +413,10 @@ def test_a_disk_check_that_cannot_run_is_named_not_raised(monkeypatch, tmp_path)
     result = preflight.check_readiness(
         tmp_path / "repo",
         tmp_path / "mirror",
-        tmp_path / "scratch",
-        tmp_path / "home",
+        scratch=tmp_path / "scratch",
+        home=tmp_path / "home",
         token="tok",
-        validate_token=lambda token: True,
+        validate_token=lambda token: preflight.TokenCheck(preflight.TokenVerdict.VALID),
     )
 
     assert result.ok is False
@@ -459,13 +458,13 @@ def test_readiness_runs_its_checks_in_the_order_4_2_1_gives(monkeypatch, tmp_pat
 
     def _auth(token):
         order.append("auth")
-        return True
+        return preflight.TokenCheck(preflight.TokenVerdict.VALID)
 
     result = preflight.check_readiness(
         tmp_path / "repo",
         tmp_path / "mirror",
-        tmp_path / "scratch",
-        tmp_path / "home",
+        scratch=tmp_path / "scratch",
+        home=tmp_path / "home",
         token="tok",
         validate_token=_auth,
     )
@@ -495,10 +494,10 @@ def test_a_policy_that_does_not_load_fails_readiness(monkeypatch, tmp_path):
     result = preflight.check_readiness(
         tmp_path / "repo",
         tmp_path / "mirror",
-        tmp_path / "scratch",
-        tmp_path / "home",
+        scratch=tmp_path / "scratch",
+        home=tmp_path / "home",
         token="tok",
-        validate_token=lambda token: True,
+        validate_token=lambda token: preflight.TokenCheck(preflight.TokenVerdict.VALID),
     )
 
     assert result.ok is False
@@ -519,10 +518,12 @@ def test_a_present_but_invalid_token_fails_readiness(monkeypatch, tmp_path):
     result = preflight.check_readiness(
         tmp_path / "repo",
         tmp_path / "mirror",
-        tmp_path / "scratch",
-        tmp_path / "home",
+        scratch=tmp_path / "scratch",
+        home=tmp_path / "home",
         token="sk-expired",
-        validate_token=lambda token: False,
+        validate_token=lambda token: preflight.TokenCheck(
+            preflight.TokenVerdict.INVALID, "HTTP 401"
+        ),
     )
 
     assert result.ok is False
@@ -539,8 +540,8 @@ def test_a_whitespace_token_fails_readiness(monkeypatch, tmp_path):
     result = preflight.check_readiness(
         tmp_path / "repo",
         tmp_path / "mirror",
-        tmp_path / "scratch",
-        tmp_path / "home",
+        scratch=tmp_path / "scratch",
+        home=tmp_path / "home",
         token="   ",
         validate_token=_unreached,
     )
@@ -582,10 +583,10 @@ def test_insufficient_disk_headroom_fails_readiness(monkeypatch, tmp_path):
     result = preflight.check_readiness(
         tmp_path / "repo",
         tmp_path / "mirror",
-        tmp_path / "scratch",
-        home,
+        scratch=tmp_path / "scratch",
+        home=home,
         token="tok",
-        validate_token=lambda token: True,
+        validate_token=lambda token: preflight.TokenCheck(preflight.TokenVerdict.VALID),
     )
 
     assert result.ok is False
@@ -593,24 +594,99 @@ def test_insufficient_disk_headroom_fails_readiness(monkeypatch, tmp_path):
     assert seen["path"] == home
 
 
-def test_the_token_probes_default_request_shape_is_asserted_not_sent(monkeypatch):
-    """With the probe injected everywhere else, the real one is exercised by
-    no test — Appendix H's vacuous pass, in the check written against it.
-    The URL and the header the default builds are asserted here without
-    ever sending the request."""
-    seen: dict[str, str] = {}
-    headers: dict[str, str] = {}
+@contextlib.contextmanager
+def _answering(code: int):
+    """A real server on loopback answering one status, and the request it got.
 
-    def _capture(request, timeout=None):
-        seen["url"] = request.full_url
-        headers.update(request.headers)
-        raise urllib.error.URLError("not actually sent")
+    The probe's verdict is what decides whether a night runs at all, so it is
+    exercised against a socket rather than a monkeypatched `urlopen` — the
+    mock cannot show that the header survives into the request, and the branch
+    that reads `exc.code` is the one that was untested."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
 
-    monkeypatch.setattr(urllib.request, "urlopen", _capture)
+    received: dict[str, str] = {}
 
-    assert preflight.validate_claude_token("tok-123") is False
-    assert seen["url"] == f"https://{proxy.UPSTREAM_HOST}/v1/models"
-    assert headers["Authorization"] == "Bearer tok-123"
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            received["path"] = self.path
+            received.update(self.headers)
+            self.send_response(code)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, format, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/v1/models", received
+    finally:
+        server.shutdown()
+
+
+@pytest.mark.parametrize(
+    ("code", "verdict"),
+    [
+        (200, preflight.TokenVerdict.VALID),
+        (401, preflight.TokenVerdict.INVALID),
+        (403, preflight.TokenVerdict.INVALID),
+        (404, preflight.TokenVerdict.UNKNOWN),
+        (500, preflight.TokenVerdict.UNKNOWN),
+    ],
+)
+def test_the_token_probe_reads_each_status_as_its_own_verdict(
+    monkeypatch, code, verdict
+):
+    """The 401/403 discrimination is the whole function, and it was covered by
+    nothing: the previous test raised `URLError` from a fake `urlopen`, so only
+    the unreachable branch ran and `exc.code not in (401, 403)` could be
+    mutated to `not in (999,)` — a probe that accepts an expired token — with
+    the entire suite still green.
+
+    404 and 500 are UNKNOWN, not VALID: a moved endpoint must not read as a
+    live credential, which is the direction the boolean form got wrong."""
+    with _answering(code) as (url, received):
+        monkeypatch.setattr(preflight, "_TOKEN_PROBE_URL", url)
+        checked = preflight.validate_claude_token("tok-123")
+
+    assert checked.verdict is verdict
+    # The header arrived, rather than merely being constructed.
+    assert received["Authorization"] == "Bearer tok-123"
+    assert received["path"] == "/v1/models"
+
+
+def test_a_probe_that_cannot_reach_the_host_does_not_accuse_the_credential(
+    monkeypatch,
+):
+    """`error` != `fail`: dropped wifi at 22:00 is not a dead token. The
+    boolean form returned `False` for both, so `check_readiness` told the
+    morning queue the credential was bad when the network was."""
+    import socket
+
+    # A socket bound and closed: the port is real, chosen by the OS, and
+    # nothing is listening on it — a connection error rather than a status,
+    # without reaching the network.
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    dead_port = probe.getsockname()[1]
+    probe.close()
+
+    monkeypatch.setattr(
+        preflight, "_TOKEN_PROBE_URL", f"http://127.0.0.1:{dead_port}/v1/models"
+    )
+    checked = preflight.validate_claude_token("tok-123", timeout_s=5)
+
+    assert checked.verdict is preflight.TokenVerdict.UNKNOWN
+    assert checked.detail is not None and str(dead_port) in checked.detail
+
+
+def test_the_probe_url_is_the_host_the_proxy_allowlists():
+    """The probe and the proxy must name one host: a token validated against
+    somewhere the cell cannot reach proves nothing about the night ahead."""
+    assert preflight._TOKEN_PROBE_URL.startswith(f"https://{proxy.UPSTREAM_HOST}/")
+    assert preflight._TOKEN_PROBE_URL.endswith("/v1/models")
 
 
 def test_the_probe_script_itself_answers_a_401(tmp_path):
@@ -647,3 +723,61 @@ def test_the_probe_script_itself_answers_a_401(tmp_path):
     status = preflight._STATUS.search(done.stdout)
     assert status is not None, done.stdout
     assert status.group(1) == "401"
+
+
+def test_readiness_and_prepare_mirror_run_the_same_three_steps_in_the_same_order(
+    monkeypatch, tmp_path
+):
+    """`check_readiness` spells out the sequence `prepare_mirror` already runs,
+    because one `except` around a call to it could not name the failing step.
+    Two copies thirty lines apart drift silently, and each has its own order
+    test that never meets the other — this is the one that makes them meet."""
+
+    def _record(into):
+        def _mk(name, result):
+            def _fn(*_a, **_k):
+                into.append(name)
+                return result
+
+            return _fn
+
+        return _mk
+
+    def _install(into):
+        mk = _record(into)
+        monkeypatch.setattr(
+            preflight.git_mirror, "ensure_mirror", mk("mirror", tmp_path / "m")
+        )
+        monkeypatch.setattr(
+            preflight.package_phase, "real_remote", mk("real_remote", "u")
+        )
+        monkeypatch.setattr(preflight.package_phase, "github_slug", mk("origin", "o/r"))
+        monkeypatch.setattr(
+            preflight.package_phase,
+            "fetch_default_branch",
+            mk("default_branch", ("main", "a" * 40)),
+        )
+
+    prepared: list[str] = []
+    _install(prepared)
+    preflight.prepare_mirror(tmp_path / "repo", tmp_path / "mirror")
+
+    ready: list[str] = []
+    _install(ready)
+    monkeypatch.setattr(
+        preflight.git_mirror,
+        "export_saffron_dir",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(preflight, "disk_headroom_ok", lambda *_a, **_k: True)
+    preflight.check_readiness(
+        tmp_path / "repo",
+        tmp_path / "mirror",
+        scratch=tmp_path / "scratch",
+        home=tmp_path / "home",
+        token="tok",
+        validate_token=lambda _t: preflight.TokenCheck(preflight.TokenVerdict.VALID),
+    )
+
+    assert prepared == ["mirror", "real_remote", "origin", "default_branch"]
+    assert ready == prepared
