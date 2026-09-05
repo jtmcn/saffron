@@ -117,6 +117,45 @@ document.
 
 Re-run both after any macOS update, and after installing anything.
 
+## 4a. Running the night unattended
+
+A batch is started by `launchd`, not by cron — §4.4 names it for one reason:
+`launchd` runs a job it missed once the machine wakes, while cron silently
+skips a Mac that was asleep at 22:00. A factory that quietly does nothing on
+the nights the lid was shut is worse than one that fails loudly.
+
+`docs/host/dev.saffron.batch.plist` is the job. It is a template, not a
+drop-in: edit the three `YOURNAME` paths, then
+
+```
+cp docs/host/dev.saffron.batch.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/dev.saffron.batch.plist
+launchctl list | grep saffron          # loaded, with its exit status
+launchctl start dev.saffron.batch      # fire it once, now, to prove the paths
+```
+
+Three things about it are deliberate.
+
+**Absolute paths everywhere.** `launchd` runs with almost no environment and no
+login shell, so `uv`, the repository and the secrets file are all named in
+full. A relative path here fails at 22:00 with nobody reading the error.
+
+**The token is read at fire time and reaches exactly this process.** Same rule
+`CLAUDE.md` states for running one cell by hand, and for the same reason:
+`.envrc` would export it into every shell in the directory and from there into
+any session started in one. `launchctl setenv` would be worse still — it puts
+the credential in every process the user launches.
+
+**The two log files catch almost nothing, on purpose.** A night's real record
+is the ledger and the batch tree; these only hold what dies before either
+exists — a wrong path, a missing `uv`, an unreadable secrets file. If you are
+reading them for anything else, something is wrong with the batch's own
+reporting rather than with the job.
+
+Unloading is `launchctl unload ~/Library/LaunchAgents/dev.saffron.batch.plist`,
+and it is what to do before a night you do not want — editing the plist while
+it is loaded changes nothing until it is reloaded.
+
 ## 5. What this does not cover
 
 The cell's own isolation — the internal network, the allowlisting proxy, the

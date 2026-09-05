@@ -93,7 +93,10 @@ repo. The unit of work, written by the operator.
 _Avoid_: "ticket", "issue", "story", "request", "prompt".
 
 **Task**: One spec being executed — a ledger row with a state, a branch, a budget,
-and a cell. A spec is the input; a task is the execution.
+and a cell. A spec is the input; a task is the execution. Its budget is a
+**best-effort** bound: a turn's cost is not knowable until the turn ends, so a
+task admitted under its ceiling can finish over it. The bound that is actually
+enforced is the batch's, checked between tasks (`DESIGN.md` §4.2.1).
 _Avoid_: "job", "work item", "unit".
 
 **Batch**: One night's execution, spanning every selected repo. One budget, one

@@ -191,11 +191,13 @@ envelope:                       # outer bound for DIAGNOSE; required for bugs
 touches:                        # optional for bugs — agent proposes, you ratify (§5.2)
 forbidden:                      # denied at the plan checkpoint and by `scope` — below
   - alembic/versions/**
-budget_usd: 12
+budget_usd: 12                  # best-effort; the enforceable ceiling is the batch's (§4.2.1)
 max_attempts: 4
 max_turns: 60                   # per-turn ceiling; the flags override all three
 risk: standard                  # standard | elevated (§5.6)
 ---
+
+**`budget_usd` is a best-effort bound, and saying so here is backlog item 44's decision rather than an apology.** The supervisor gates a turn on what has been spent *so far*, and a turn's cost is not knowable until it ends — so a task admitted just under its ceiling can finish over it, measured at 6.5% on `SA-0031`. Charging a worst-case estimate instead would mean *guessing* the bound, which is the defect item 56 argues against for size predicates and is worse here: a guess that refuses a legitimate turn costs more than the overshoot it prevents. **The enforceable ceiling is the batch's, checked between tasks** (§4.2.1), because between tasks nothing is mid-flight — which is exactly why a bound holds there and cannot inside a turn. Unattended, one task running $1.17 over is not the exposure; a night spending unboundedly is.
 
 **`forbidden` and `protected` bind both the plan and the diff, and this paragraph has been wrong in each direction once.** It said they bound the diff until `SA-0011` leaned on it; it said they bound only the plan until `SA-0024` closed that. Three places read them now: `agents/artifacts.py` rejects a plan whose *declared* `files_to_change` matches one, `agents/context.py` prints them into the prompt, and the `scope` gate (§5.4) fails any changed file matching either — independently of `touches`, under its own `forbidden` and `protected` failure codes.
 
@@ -365,6 +367,8 @@ Round-robin matters more than it looks. Straight priority ordering lets one repo
 Concurrency cap **K = 3**, and rev 10 settles what the arithmetic closes against. With a VM per cell there is no shared allocation to divide: three cells at `--memory 4g` draw 12GB against the whole Mac rather than against a fixed VM allocation, and nothing stands between batches. CPUs divide the same way — `--cpus 1` yields 2 vCPUs per cell (the calibration in §5.1), so K=3 is 6 vCPUs against a host of 11. A repo's fixture services run *inside* the cell, so 4g is the whole budget for a database, the toolchain and the test process together. This is the first number here likely to be wrong; K is the knob, and it turns down. Do not raise K: throughput is model-latency-bound most of the time, but gate suites are not, and oversubscribing makes gate timings flaky — which poisons the repair loop's only signal. **Rev 8 removed the second ceiling this paragraph used to close against.** It was the performance-core count, and no macOS runtime can pin a cell to one (Appendix G), so K is now bounded by memory and by measured gate-time variance rather than by a core enumeration that cannot be performed.
 
 ### 4.2.1 The first night's scheduler
+
+**Built, 2026-09-04.** Everything this section specifies now exists: `batches` and `runs.batch_id` in `ledger.py` with their writers (`create_batch`, `close_batch`, `attach_run_to_batch`, `batch_spend`, `batch_runs`), `tasks.policy_sha`, `check_readiness` in `preflight.py`, the loop in `batch.py`, the shared scan in `cli._resolve_queue`, and the command in `cli._batch`. The paragraphs below are written as design and now read as description; they are left in that voice deliberately, because each one argues for a decision the code makes and the argument is what a reader needs. Where a sentence says something "does not exist", read it as the state this section was written against. **What is still deferred is named as deferred and remains so:** `saffron gc` (§4.5), `tasks.priority`, K > 1, and every piece of gate 3's reserved-budget machinery.
 
 Everything above is the scheduler once the queue is deep. This is what v1 builds, decided against the queue that actually exists: two or three specs, ~45–60 min a task, an eight-hour window (§7.1). **Every piece cut below arbitrates contention, and at this depth there is none to arbitrate** — §4.2's own rule about second implementations, turned on the scheduler itself rather than on one of its gates. Each cut names the night it comes back.
 
