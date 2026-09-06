@@ -306,7 +306,7 @@ def run_suite(
     because it re-invokes `tests` and so cannot exist before `tests`'s own
     result does (§5.4.1). `mutate` is the one thing that turns it on: omitted
     (as every caller does today — no production caller can
-    supply one until `SA-0062`, which is `docs/BACKLOG.md` item 71), `witness` is
+    supply one until `SA-0061` wires a stub — `docs/BACKLOG.md` item 71), `witness` is
     left out of the suite exactly as it was before this function knew about
     it — no behaviour change for a caller that does not ask for it.
     """

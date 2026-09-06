@@ -15,8 +15,7 @@ worktree a task is being packaged from, so anything it does must be undone
 exactly: byte-identical, including a trailing newline or a CRLF line ending
 that text mode would otherwise normalize away.
 
-`host_mutator` (`SA-0060`) is the implementation a host tree gets — reached only from tests
-until `SA-0061` and `SA-0062` wire a cell run of
+`host_mutator` (`SA-0060`) is the host-tree implementation of
 `witness.Mutated` — a callable from a `Mutant` to a context manager that
 applies on entry and undoes on exit, the shape `saffron/gates/core/witness.py`
 now asks for instead of a bare `tree: Path` it would have to do its own file
@@ -215,11 +214,16 @@ def restore_mutant(tree: Path, mutant: Mutant, result: MutationResult) -> None:
 
 
 def host_mutator(tree: Path) -> Callable[[Mutant], AbstractContextManager[str | None]]:
-    """The one production implementation of `witness.Mutated`: a host `tree`,
+    """The host-tree implementation of `witness.Mutated`: a host `tree`,
     turned into a callable from a `Mutant` to a context manager that applies
     on entry and undoes on exit — `apply_mutant`/`restore_mutant` above,
     wrapped rather than reimplemented, so nothing about their behaviour
     changes.
+
+    Reached only from tests, and it stays that way for the whole sequence:
+    `SA-0061`'s stub lives in `session.py` and `SA-0062`'s `source_mutated` in
+    `worktree.py`, and this module is `forbidden` to both. A cell run gets its
+    own mutator rather than this one.
 
     Entering yields `None` when the mutant applied — it is now live in `tree`
     and will be undone on exit — or a `str` reason when it did not, exactly

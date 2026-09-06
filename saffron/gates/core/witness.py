@@ -59,7 +59,7 @@ RunTests = Callable[[list[str]], GateResult]
 # `revert.Reverted`, one noun over: a callable from a `Mutant` to a context
 # manager that applies it on entry and undoes it on exit. This gate performs
 # no file I/O of its own and holds no path — `saffron.mutation.host_mutator`
-# is the one production implementation, and a cell's volume can supply
+# is the host-tree implementation, and a cell's volume can supply
 # another without this module changing at all (`SA-0060`).
 #
 # Entering yields `None` when the mutant is now live and must be undone, or a
@@ -74,6 +74,18 @@ RunTests = Callable[[list[str]], GateResult]
 # the silent dirty tree this gate exists to refuse. And the exit must not
 # suppress: an exit returning `True` swallows a `KeyboardInterrupt` out of
 # `run_tests` and this gate then trips its own narrowing assert.
+#
+# And the third, which the `applied` flag below creates and which is the one
+# that can *understate* a dirty tree: a raise from `__enter__` must mean
+# nothing was changed. A mutator that writes and then raises on the way out of
+# entry is reported "could not apply" over a mutated tree — the flag has not
+# been set yet — where "could not restore" is the true and louder answer.
+# Unreachable from `host_mutator`, which returns before anything can raise
+# between the write and the yield; a container exec that applies the edit and
+# then loses the connection is exactly the shape that is not.
+#
+# All three bind every implementation, `SA-0061`'s stub included — it is the
+# first, not `SA-0062`'s.
 Mutated = Callable[[Mutant], AbstractContextManager[str | None]]
 
 
@@ -121,10 +133,10 @@ def witness_gate(
         # manager's exit is the one place a `BaseException` cannot route
         # around, unlike a `finally` this gate would have to write by hand
         # (`saffron.mutation._mutated` carries the history of what that hand
-        # gets wrong). `run_tests`'s own exception is still recorded rather
-        # than raised, so the `with` block ends normally and `mutate` always
-        # gets to restore before this gate decides anything; only a
-        # `BaseException` from `run_tests` skips straight through both.
+        # gets wrong). Only a `BaseException` from `run_tests` skips straight
+        # through both handlers — and `mutate`'s exit still restores on the
+        # way past. Why `run_tests`'s ordinary exception is recorded rather
+        # than raised is said where it is recorded, below.
         failed_to_run: Exception | None = None
         tests_result = None
         applied = False

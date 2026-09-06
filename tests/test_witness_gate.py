@@ -303,6 +303,13 @@ def test_a_tests_gate_that_raises_is_an_error_not_a_pass(tmp_path):
 
     assert result.status == "error"
     assert "the runner would not start" in result.summary
+    # *Which* failure it was, on the ordinary path. Under the mutant that
+    # raises the run's exception through the `with` instead of recording it,
+    # the outer handler says "could not restore" about a cleanly restored tree
+    # and this test passed anyway — the dual-failure test below only catches
+    # that when the exit also raises.
+    assert "could not be executed" in result.summary
+    assert "could not restore" not in result.summary
     # And the tree is still restored, because the `finally` ran before the
     # recorded failure was reported.
     assert (tmp_path / "a.py").read_text() == "def total(x):\n    return max(x, 0)\n"
@@ -614,7 +621,7 @@ def test_a_mutator_that_cannot_reach_the_tree_skips():
     assert not result.failures
 
 
-def test_a_mutator_that_fails_on_entry_is_not_reported_as_a_failed_restore(tmp_path):
+def test_a_mutator_that_fails_on_entry_is_not_reported_as_a_failed_restore():
     """ "Could not restore" is the loudest thing this gate says: its own
     docstring makes it mean a mutated tree is still out there and will ship in
     the diff. Saying it about a `mutate` that raised on *entry* — where nothing
@@ -628,7 +635,10 @@ def test_a_mutator_that_fails_on_entry_is_not_reported_as_a_failed_restore(tmp_p
     @contextlib.contextmanager
     def raises_on_entry(mutant):
         raise OSError("read-only volume")
-        yield None  # pragma: no cover — unreachable, satisfies the type
+        # Unreachable, and not decoration: the `yield` is what makes this a
+        # generator, which is what makes the raise land in `__enter__`
+        # rather than at the `mutate(mutant)` call.
+        yield None
 
     result = witness_gate(
         acceptance=[_criterion()],
@@ -642,7 +652,7 @@ def test_a_mutator_that_fails_on_entry_is_not_reported_as_a_failed_restore(tmp_p
     assert "read-only volume" in result.summary
 
 
-def test_a_failed_restore_is_still_reported_as_one(tmp_path):
+def test_a_failed_restore_is_still_reported_as_one():
     """The other side of the verb: once the mutant is applied, a raising exit
     *is* a failed restore and must keep saying so. A flag that always read
     "could not apply" would be as wrong as the one that always read "could not
@@ -664,7 +674,7 @@ def test_a_failed_restore_is_still_reported_as_one(tmp_path):
     assert "volume went away" in result.summary
 
 
-def test_a_run_failure_and_a_restore_failure_are_both_named(tmp_path):
+def test_a_run_failure_and_a_restore_failure_are_both_named():
     """What recording the run's exception actually buys. Deleting the inner
     `try/except` — letting `run_tests`'s exception propagate through the `with`
     and be caught by the outer handler — passed all 1437 tests: `mutate`
@@ -689,3 +699,38 @@ def test_a_run_failure_and_a_restore_failure_are_both_named(tmp_path):
     assert "could not restore" in result.summary
     assert "the run also failed" in result.summary
     assert "the runner would not start" in result.summary
+
+
+def test_a_later_criterion_failing_on_entry_is_not_blamed_on_an_earlier_one():
+    """`applied` resets per criterion, and hoisting it out of the loop passes
+    every other test in this file — measured. Under that mutant a spec whose
+    first criterion applies cleanly and whose second raises on entry reports
+    `could not restore` about a tree that is clean: the exact defect the flag
+    was added to remove, in the multi-criterion case, which is the ordinary
+    one.
+
+    A single-criterion test cannot see this, which is what makes it the most
+    valuable line here and the easiest to leave out."""
+    first = _criterion(witness="tests/t.py::one", file="a.py")
+    second = _criterion(witness="tests/t.py::two", file="b.py")
+
+    @contextlib.contextmanager
+    def clean_then_raising(mutant):
+        if mutant.file == "a.py":
+            yield None  # applies and restores without complaint
+            return
+        raise OSError("container exec lost its connection")
+        # Unreachable, and load-bearing: it makes this a generator, so the
+        # raise lands in `__enter__`.
+        yield None
+
+    result = witness_gate(
+        acceptance=[first, second],
+        mutate=clean_then_raising,
+        run_tests=lambda subset: _tests(status="fail", collected=(first.witness,)),
+    )
+
+    assert result.status == "error"
+    assert "b.py" in result.summary
+    assert "could not apply" in result.summary
+    assert "could not restore" not in result.summary
