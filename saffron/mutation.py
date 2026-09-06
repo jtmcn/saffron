@@ -14,11 +14,24 @@ reopened, on the way out — and the gate this feeds executes inside the
 worktree a task is being packaged from, so anything it does must be undone
 exactly: byte-identical, including a trailing newline or a CRLF line ending
 that text mode would otherwise normalize away.
+
+`host_mutator` (`SA-0060`) is the host-tree implementation of
+`witness.Mutated` — a callable from a `Mutant` to a context manager that
+applies on entry and undoes on exit, the shape `saffron/gates/core/witness.py`
+now asks for instead of a bare `tree: Path` it would have to do its own file
+I/O against. It is built entirely on `apply_mutant`/`restore_mutant` below,
+unchanged: this module still knows nothing about gates, `skip`, or `error` —
+it only turns "could not apply" into a yielded reason instead of a status, and
+"could not restore" into a raised exception, and leaves both readings to the
+gate that injects it.
 """
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -198,3 +211,75 @@ def restore_mutant(tree: Path, mutant: Mutant, result: MutationResult) -> None:
     start = result.offset
     end = start + len(mutant.replace.encode())
     target.write_bytes(content[:start] + result.displaced + content[end:])
+
+
+def host_mutator(tree: Path) -> Callable[[Mutant], AbstractContextManager[str | None]]:
+    """The host-tree implementation of `witness.Mutated`: a host `tree`,
+    turned into a callable from a `Mutant` to a context manager that applies
+    on entry and undoes on exit — `apply_mutant`/`restore_mutant` above,
+    wrapped rather than reimplemented, so nothing about their behaviour
+    changes.
+
+    Reached only from tests, and it stays that way for the whole sequence:
+    `SA-0061`'s stub lives in `session.py` and `SA-0062`'s `source_mutated` in
+    `worktree.py`, and this module is `forbidden` to both. A cell run gets its
+    own mutator rather than this one.
+
+    Entering yields `None` when the mutant applied — it is now live in `tree`
+    and will be undone on exit — or a `str` reason when it did not, exactly
+    `apply_mutant`'s own `reason`: the ordinary case an implementation written
+    differently from what the spec anticipated produces, never an exception
+    and never a status, because that reading belongs to the gate that injects
+    this, not to this module (§5.4.1).
+    """
+
+    def mutate(mutant: Mutant) -> AbstractContextManager[str | None]:
+        return _mutated(tree, mutant)
+
+    return mutate
+
+
+@contextlib.contextmanager
+def _mutated(tree: Path, mutant: Mutant) -> Iterator[str | None]:
+    """Apply `mutant` to `tree` for the block, and undo it on exit however
+    the block ends — a witness that died, one that survived, an inner
+    `error`, or an exception in flight.
+
+    The restore lives in this `finally`, not in a `finally` the gate writes,
+    because a context manager's exit is the one place a `BaseException`
+    cannot route around. And the `finally` below does not itself raise on a
+    failed restore — it *records* the failure and only raises it once the
+    `finally` has run to completion. That ordering is what a review round and
+    a swallowed interrupt bought here once already: an exception raised
+    *inside* a `finally` replaces whatever exception was already propagating
+    through it, so a `KeyboardInterrupt` in flight while `restore_mutant`
+    fails on a tree the caller corrupted would come out as `MutationError` or
+    `OSError` instead, with the interrupt demoted to `__context__`, where
+    nothing looks. Catching the restore failure *inside* the `finally`, then
+    checking it only in the code that runs after — which Python never reaches
+    while an exception is still propagating — is what keeps the `finally`
+    from raising at all in that case, so the interrupt continues on its own.
+    On an ordinary, exception-free exit, that same check does run, and a
+    failed restore is what raises here — the caller reads that as `error`,
+    the worse fact, and the tree is left mutated because nothing here can put
+    back what it could not read or write.
+    """
+    applied = apply_mutant(tree, mutant)
+    if not applied.ok:
+        yield applied.reason
+        return
+
+    failed_to_restore: MutationError | OSError | None = None
+    try:
+        yield None
+    finally:
+        try:
+            restore_mutant(tree, mutant, applied)
+        except (MutationError, OSError) as exc:
+            # `OSError` too: `restore_mutant` guards neither its read nor its
+            # write, so a caller that deletes the file raises
+            # `FileNotFoundError` from inside this `finally`.
+            failed_to_restore = exc
+
+    if failed_to_restore is not None:
+        raise failed_to_restore

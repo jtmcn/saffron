@@ -21,7 +21,7 @@ from saffron.cell import runtime as cell_runtime
 from saffron.cell.worktree import WORKTREE_MOUNT
 from saffron.gates.contract import GateResult, parse_gate_json
 from saffron.gates.core.revert import _argv_safe
-from saffron.gates.core.witness import witness_gate
+from saffron.gates.core.witness import Mutated, witness_gate
 from saffron.intake import Criterion
 
 _STDERR_TAIL = 800
@@ -176,7 +176,7 @@ def run_witness(
     gates: dict[str, Path],
     cwd: Path,
     acceptance: Sequence[Criterion],
-    tree: Path,
+    mutate: Mutated,
     tests_result: GateResult | None,
     timeout_s: float = 900,
     executor: GateExecutor | None = None,
@@ -287,7 +287,7 @@ def run_witness(
                 ),
             )
 
-    return witness_gate(acceptance=acceptance, tree=tree, run_tests=run_tests)
+    return witness_gate(acceptance=acceptance, mutate=mutate, run_tests=run_tests)
 
 
 def run_suite(
@@ -297,15 +297,16 @@ def run_suite(
     timeout_s: float = 900,
     executor: GateExecutor | None = None,
     acceptance: Sequence[Criterion] = (),
-    tree: Path | None = None,
+    mutate: Mutated | None = None,
 ) -> list[GateResult]:
     """Run every declared gate in declaration order.
 
     `witness` is not one of the declared gates above — it is a core gate,
     like `revert` — but it belongs in this list rather than beside it,
     because it re-invokes `tests` and so cannot exist before `tests`'s own
-    result does (§5.4.1). `tree` is the one thing that turns it on: omitted
-    (as every caller but the one that supplies it does today), `witness` is
+    result does (§5.4.1). `mutate` is the one thing that turns it on: omitted
+    (as every caller does today — no production caller can
+    supply one until `SA-0061` wires a stub — `docs/BACKLOG.md` item 71), `witness` is
     left out of the suite exactly as it was before this function knew about
     it — no behaviour change for a caller that does not ask for it.
     """
@@ -313,13 +314,13 @@ def run_suite(
         run_gate(name, executable, cwd, timeout_s=timeout_s, executor=executor)
         for name, executable in gates.items()
     ]
-    if tree is not None:
+    if mutate is not None:
         tests_result = next((r for r in results if r.gate == "tests"), None)
         witness_result = run_witness(
             gates=gates,
             cwd=cwd,
             acceptance=acceptance,
-            tree=tree,
+            mutate=mutate,
             tests_result=tests_result,
             timeout_s=timeout_s,
             executor=executor,
