@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -836,15 +837,27 @@ def test_an_until_sorts_against_the_timestamps_it_will_be_compared_with(ledger):
     ended before its own deadline.
 
     Nothing compares them in SQL yet — the loop compares in Python — which is
-    exactly why this is pinned now rather than after §6 renders the window."""
-    batch_id = ledger.create_batch(budget_usd=50, until_ts="2026-09-06T06:30:00")
+    exactly why this is pinned now rather than after §6 renders the window.
+
+    The deadline is computed from `now`, not written as a literal. It was a
+    literal — `2026-09-06T06:30:00` — and the assertion below is that
+    `ended_at` sorts before it, so the test passed until real time reached
+    06:30 UTC on that date and then failed on `main` for everyone. A test whose
+    green depends on the wall clock is a test with an expiry date, and this one
+    reached it inside the session that wrote it."""
+    deadline = datetime.now(UTC) + timedelta(days=1)
+    supplied = deadline.strftime("%Y-%m-%dT%H:%M:%S")  # the ISO `T` form
+    expected = deadline.strftime("%Y-%m-%d %H:%M:%S")  # what must be stored
+
+    batch_id = ledger.create_batch(budget_usd=50, until_ts=supplied)
     ledger.close_batch(batch_id, "UNTIL")
     row = ledger._db.execute(
         "SELECT until_ts, ended_at FROM batches WHERE batch_id = ?", (batch_id,)
     ).fetchone()
 
     # Both spellings agree, so text order is time order.
-    assert row["until_ts"] == "2026-09-06 06:30:00"
+    assert row["until_ts"] == expected
+    assert "T" not in row["until_ts"]
     assert row["ended_at"] < row["until_ts"]
     later = ledger._db.execute(
         "SELECT ? < ? AS ordered", ("2026-09-06 06:30:00", "2026-09-06 23:00:00")
