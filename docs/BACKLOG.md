@@ -41,8 +41,12 @@ evidence. That is the gate now, and it is one cheap spec away.
 
 ### Tier 1 — breaks at 03:00 with nobody watching
 
-**69**, **70**, **45**, **51** (with **49**/**50**, which its fix closes),
-**47**, **46**, **40**, **26**, **7**. (**59** is done — `SA-0052`, PR #118.)
+**71**, **69**, **70**, **45**, **51** (with **49**/**50**, which its fix
+closes), **47**, **46**, **40**, **26**, **7**. (**59** is done — `SA-0052`,
+PR #118.)
+
+**71 is first** because it is the one that makes item 69's three merged specs
+mean anything: until it lands, the gate they built runs on nothing.
 
 **69 is first**, and it is the only item here that is about the factory's
 ability to tell whether its own work is sound. Nine tests shipped in one
@@ -68,7 +72,7 @@ rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
 **56**, **57**, **61**, **62**, **63**, **64**, **69**. (**65** and **68** are
 done.)
 
-**What this ordering costs, stated plainly:** tiers 2 and 3 hold 24 of the 33
+**What this ordering costs, stated plainly:** tiers 2 and 3 hold 24 of the 34
 open items, including every ontology item and every operator-visibility spec
 there is already a full plan for. That is the deliberate consequence of ranking
 by the milestone rather than by what is nearest to hand.
@@ -3878,6 +3882,65 @@ ends. Three parts, and the third is the one to argue about:
 loop, and that is what makes termination structural (`saffron/batch.py`). A
 retry inside the loop reintroduces the "does the queue change" question the
 `for` was written to avoid.
+
+---
+
+## 71. `witness` is built, wired, and cannot run — the `tree` it needs does not exist in a cell
+
+**Tier 1.** Found reviewing `SA-0058` (PR #139), 2026-09-06. Item 69's chain
+built the gate over three specs and the headline problem is unchanged: nothing
+invokes it.
+
+**The shape defect, which is the real one.** `witness_gate` takes `tree: Path`
+and mutates it with host file I/O — `apply_mutant` calls `read_bytes` and
+`write_bytes` on a host path. During a cell run there is no such path:
+`saffron/cell/worktree.py` says it outright, *"Work happens on the volume, not
+a bind mount"*. So `run_suite(..., tree=...)` is not a parameter no caller
+supplies **yet**; it is one no production caller can ever supply.
+
+`revert` solved this and the solution is sitting one file over: it takes an
+injected `Reverted = Callable[[list[str]], AbstractContextManager[None]]` and
+mutates *through* the container. `witness_gate` takes a raw `Path` and does the
+writing itself.
+
+`SA-0058`'s spec anticipated exactly this — *"if wiring reveals the gate needs
+a different shape, that is a finding to file rather than an edit to make"* —
+and the finding was not filed. A review lens raised it as a blocker and
+withdrew it on the correct observation that `saffron/cell/**` is `forbidden`,
+which answers whether to *edit* and not whether to *record*. This item is the
+record that was owed.
+
+**The blocking level is decided in prose and contradicted in effect.**
+`contract.witness_blocking` returns `tier == "elevated"`, and its docstring
+says *"whichever caller decides what an attempt does with a blocking `witness`
+failure reads this"*. No caller does — grep finds only `tests/test_gates.py`.
+The caller that would is `session._blocking`, which is `failure.gate not in
+advisory_gates`, and `advisory_gates` adds only `size` at non-elevated tiers.
+So a `witness` failure is **blocking at `standard`**, the opposite of §5.4.1
+and of the function that exists to say so.
+
+**Done looks like** three things, and the first gates the others:
+
+- `witness_gate` taking an injected tree-mutation callable in `revert`'s shape,
+  so a cell run can supply it. Needs a spec owning `saffron/gates/core/
+  witness.py`.
+- `session._suite` passing `tree=` and `acceptance=`, and `advisory_gates`
+  gaining `witness` at non-elevated tiers — or `_blocking` consulting
+  `witness_blocking`. Needs `saffron/cell/session.py`, which is `elevate_on`.
+- PACKAGE's re-verification (`phases/package.py`) supplying the same, or the
+  two suites differ in shape and `suite_drift` does not compare across those
+  call sites, so nothing would say so.
+
+**Not** a reason to revert `SA-0058`. `run_witness`, the pre-flight probe and
+the ordering are sound and are what the fix builds on; what is missing is a
+seam only a spec that owns `witness.py` and `session.py` together can cut.
+
+**A note on how three specs produced this.** Each was scoped so its `forbidden`
+list kept it honest, and the seam that needed changing was outside all three.
+The chain could not have found this before `SA-0058` tried to wire it, which is
+an argument for wiring early rather than last — the spec that connects a
+mechanism to its caller is the one that discovers the mechanism cannot be
+connected.
 
 ---
 
