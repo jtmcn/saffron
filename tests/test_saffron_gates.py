@@ -6,6 +6,7 @@ imports nothing from saffron/ except the contract parser.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -14,6 +15,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+import yaml
 
 from saffron.gates.contract import parse_gate_json
 from saffron.repos.policy import load_policy
@@ -406,6 +408,90 @@ def test_shacl_errors_on_an_unparseable_data_graph_beside_valid_shapes(tmp_path)
     result = parse_gate_json(done.stdout, expected_gate="shacl")
     assert result.status == "error", result.summary
     assert result.tool, "a parse failure is not a reason to drop the tool identifier"
+
+
+def _rule_files():
+    return sorted((REPO / ".saffron" / "rules").glob("*.yml"))
+
+
+def _covers(glob: str, language: str, tmp_path) -> int:
+    """How many files in this repo a rule's path glob actually reaches.
+
+    Asked of ast-grep rather than of `fnmatch` or `Path.glob`: the question is
+    what *this* globber does, and a reimplementation that disagreed would pass
+    while the rule it certifies covers nothing. The probe carries the one glob
+    and a body matching every file of the language — `module` is the root node
+    of a Python parse — so the count is the scope's reach and nothing else.
+    """
+    probe = tmp_path / glob.replace("/", "_").replace("*", "x")
+    (probe / "rules").mkdir(parents=True)
+    (probe / "sgconfig.yml").write_text("ruleDirs:\n  - rules\n")
+    (probe / "rules" / "probe.yml").write_text(
+        yaml.safe_dump(
+            {
+                "id": "probe",
+                "language": language,
+                "severity": "error",
+                "message": "probe",
+                "files": [glob],
+                "rule": {"kind": "module"},
+            }
+        )
+    )
+    done = subprocess.run(
+        [
+            "ast-grep",
+            "scan",
+            "-c",
+            str(probe / "sgconfig.yml"),
+            "--no-ignore",
+            "hidden",
+            "--json=compact",
+            ".",
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    return len({m["file"] for m in json.loads(done.stdout)})
+
+
+def test_every_rules_path_scope_still_reaches_a_file(tmp_path):
+    """The gap the rule tests cannot close. `ast-grep test` runs rules against
+    snippets, which have no paths, so a `files:` glob that has gone stale — the
+    tree restructured to `src/saffron/`, a guarded file renamed — leaves the rule
+    matching nothing and reporting green, with every snippet still passing.
+    Measured: `files: ["src/saffron/**/*.py"]` reaches 0 files here.
+
+    `ignores:` too. A stale exemption fails loudly rather than silently, but it
+    names a file that is supposed to exist and is worth knowing has moved.
+    """
+    dead = []
+    for rule_file in _rule_files():
+        rule = yaml.safe_load(rule_file.read_text())
+        assert rule["language"] == "python", (
+            f"{rule_file.name} is not Python; `_covers` probes with `kind: module`, "
+            "which is Python's root node — give it the new language's root first"
+        )
+        for key in ("files", "ignores"):
+            for glob in rule.get(key) or []:
+                if _covers(glob, rule["language"], tmp_path) == 0:
+                    dead.append(f"{rule['id']}: {key}: {glob}")
+    assert not dead, "path scopes that reach no file in this repo: " + "; ".join(dead)
+
+
+def test_every_rule_is_verified_by_a_test_of_its_own():
+    """The `structure` gate counts `ast-grep test`'s passes against the rules on
+    disk, so a rule added without a test turns the gate to `error` for the whole
+    repo rather than reporting the one rule that is unguarded. This says which."""
+    tested = {
+        yaml.safe_load(p.read_text())["id"]
+        for p in (REPO / ".saffron" / "rule-tests").glob("*.yml")
+    }
+    declared = {yaml.safe_load(p.read_text())["id"] for p in _rule_files()}
+    assert declared - tested == set(), f"rules with no test: {declared - tested}"
+    assert tested - declared == set(), f"tests for no rule: {tested - declared}"
 
 
 def test_structure_names_its_tool_and_passes_on_this_repos_code():
