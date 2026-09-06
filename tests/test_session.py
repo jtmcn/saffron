@@ -1790,7 +1790,9 @@ def test_a_size_failure_at_standard_does_not_enter_the_repair_loop(
     # body, the queue line — has the effective tier and the advisory set to
     # render, rather than re-deriving them from `spec.risk` alone.
     assert outcome.effective_risk == "standard"
-    assert outcome.advisory_gates == ["size"]
+    # `witness` joins `size` here too: both are advisory at `standard`
+    # (§5.4.1's own level for `witness`, `contract.witness_blocking`).
+    assert outcome.advisory_gates == ["size", "witness"]
 
 
 _HIDDEN_DIFF = (
@@ -1963,9 +1965,10 @@ def test_a_declared_gate_with_blocking_false_does_not_repair(monkeypatch, tmp_pa
     assert not any(nf.gate == "lint" for nf in outcome.new_failures)
     (lint_result,) = [g for g in outcome.gates if g.gate == "lint"]
     assert lint_result.status == "fail"
-    # `size` is also advisory here — the spec is `standard` and nothing
-    # declared an `elevate_on` match — beside `lint`'s own `blocking: false`.
-    assert outcome.advisory_gates == ["lint", "size"]
+    # `size` and `witness` are also advisory here — the spec is `standard`
+    # and nothing declared an `elevate_on` match — beside `lint`'s own
+    # `blocking: false`.
+    assert outcome.advisory_gates == ["lint", "size", "witness"]
 
 
 def test_the_task_is_recorded_with_the_specs_declared_risk(monkeypatch, tmp_path):
@@ -3079,6 +3082,209 @@ def test_the_criteria_gate_skips_for_a_spec_that_declares_no_witnesses(
     )
     result = next(r for r in outcome.gates if r.gate == "criteria")
     assert result.status == "skip"
+
+
+# --- `witness` reaches a real attempt (SA-0061, `docs/BACKLOG.md` item 71) ---
+
+
+def test_a_cell_run_produces_a_witness_result(monkeypatch, tmp_path):
+    """The sentence three merged specs did not reach: before this wiring, no
+    attempt ever invoked `witness` at all. `_suite` now hands `run_suite` the
+    spec's acceptance criteria and a mutator, and the real `witness_gate`
+    machinery — not a scripted stand-in — is what this test drives, through a
+    `run_suite` fake that calls it exactly as `runner.run_suite` itself would.
+    """
+    from saffron.gates.core.witness import Mutated, witness_gate
+    from saffron.intake import Criterion, Mutant
+
+    criterion = Criterion(
+        claim="the guard rejects a negative amount",
+        witness="tests/test_x.py::test_guard",
+        mutant=Mutant(file="src/x.py", find="if amount < 0:", replace="if False:"),
+    )
+    captured: list[tuple] = []
+
+    def _run_suite(
+        gates,
+        cwd,
+        *,
+        timeout_s=900,
+        executor=None,
+        acceptance: Sequence[Criterion] = (),
+        mutate: Mutated | None = None,
+    ):
+        captured.append((acceptance, mutate))
+        assert mutate is not None  # `_suite` always supplies one
+        result = witness_gate(
+            acceptance=acceptance,
+            mutate=mutate,
+            run_tests=lambda subset: pytest.fail(
+                "the stub cannot reach the tree, so no test should ever run"
+            ),
+        )
+        return [result]
+
+    cell = _stub_the_runtime(monkeypatch)
+    monkeypatch.setattr("saffron.gates.runner.run_suite", _run_suite)
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(acceptance=[criterion]),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    (witness_result,) = [g for g in outcome.gates if g.gate == "witness"]
+    assert witness_result.status == "skip"
+    # Handed through on every call — the baseline suite and the head suite
+    # alike — never a plan the caller only remembers to pass once.
+    assert captured
+    assert all(acc == [criterion] for acc, _mutate in captured)
+    assert all(mutate is session.stub_mutator for _acc, mutate in captured)
+
+
+def test_the_stub_mutator_makes_the_result_an_honest_skip():
+    """The mutator supplied is a stub that reports it cannot reach the tree:
+    no mutant is applied, `run_tests` is never invoked, and `witness_gate`
+    reports the same honest `skip` `SA-0060` built and witnessed — never a
+    verdict this stub did not reach."""
+    from saffron.gates.core.witness import witness_gate
+    from saffron.intake import Criterion, Mutant
+
+    criterion = Criterion(
+        claim="the guard rejects a negative amount",
+        witness="tests/test_x.py::test_guard",
+        mutant=Mutant(file="src/x.py", find="if amount < 0:", replace="if False:"),
+    )
+    result = witness_gate(
+        acceptance=[criterion],
+        mutate=session.stub_mutator,
+        run_tests=lambda subset: pytest.fail(
+            "the stub cannot reach the tree, so no test should ever run"
+        ),
+    )
+    assert result.status == "skip"
+    assert result.failures == []
+
+
+def test_a_witness_failure_is_advisory_at_standard_and_blocking_when_elevated(
+    monkeypatch, tmp_path
+):
+    """§5.4.1's level, in effect rather than in prose: the identical new
+    `witness` failure ends a `standard` attempt clean and an `elevated` one
+    `EXHAUSTED` — agreeing with `contract.witness_blocking` rather than
+    defaulting to blocking at every tier for want of an entry in the
+    advisory set. `max_attempts=1` is what lets `repair_decision` resolve on
+    the first suite alone, so no repair turn is needed to tell the two
+    tiers apart."""
+    survived = Failure(file="t.py::test_guard", code="survived-mutant", message="m")
+    baseline_suite = [GateResult(gate="witness", status="skip")]
+    head_suite = [
+        GateResult(
+            gate="witness", status="fail", tool="pytest 8.0", failures=[survived]
+        )
+    ]
+
+    # The third leg is the one the level is read from `current_tier` for: a
+    # `standard` spec that an `elevate_on` path match elevates. Measured —
+    # `witness_blocking(spec.risk)` in place of the effective tier fails no
+    # behavioural test without it, so half of §5.6's rule went unguarded while
+    # the claim said "in effect". `size` already exercises this half.
+    for label, risk, policy, expected in (
+        ("standard", "standard", "gates: {}\n", "READY_FOR_REVIEW"),
+        ("elevated", "elevated", "gates: {}\n", "EXHAUSTED"),
+        (
+            "elevated-by-path",
+            "standard",
+            "gates: {}\nelevate_on:\n  - src/**\n",
+            "EXHAUSTED",
+        ),
+    ):
+        cell = _stub_the_runtime(
+            monkeypatch, suites=(baseline_suite, head_suite, head_suite)
+        )
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / label,
+            cell=cell,
+            turns=[_turn(_block(_PLAN)), _turn()],
+            spec=_spec(risk=risk, max_attempts=1),
+            policy=policy,
+        )
+        assert outcome.state == expected, label
+        if label == "elevated-by-path":
+            # The spec is still `standard`; the path match is what elevated the
+            # attempt, and the level must follow *that*.
+            assert outcome.effective_risk == "elevated"
+            # And the advisory set agrees. The other two tiers have this
+            # asserted elsewhere; the by-path case had only its outcome.
+            assert "witness" not in outcome.advisory_gates
+
+
+def test_a_skipped_witness_blocks_nothing_at_either_tier(monkeypatch, tmp_path):
+    """A `skip` carries no failures at all, so it cannot become a new failure
+    whichever tier's advisory set it falls into — the property the whole
+    sequence rests on: turning `witness` on cannot fail a task while the
+    mutator is a stub.
+
+    Driven through the real `witness_gate`, with the real `stub_mutator`
+    handed to it by `_suite` itself — not a canned `GateResult` a scripted
+    suite could produce whether or not any of this were wired at all. A
+    `run_suite` reverted to omitting `acceptance`/`mutate` shows up here as
+    a mismatched capture, not as an identical green.
+    """
+    from saffron.gates.core.witness import Mutated, witness_gate
+    from saffron.intake import Criterion, Mutant
+
+    criterion = Criterion(
+        claim="the guard rejects a negative amount",
+        witness="tests/test_x.py::test_guard",
+        mutant=Mutant(file="src/x.py", find="if amount < 0:", replace="if False:"),
+    )
+
+    def _make_run_suite(captured: list[tuple]):
+        def _run_suite(
+            gates,
+            cwd,
+            *,
+            timeout_s=900,
+            executor=None,
+            acceptance: Sequence[Criterion] = (),
+            mutate: Mutated | None = None,
+        ):
+            captured.append((acceptance, mutate))
+            assert mutate is not None, "the wiring must hand run_suite a mutator"
+            return [
+                witness_gate(
+                    acceptance=acceptance,
+                    mutate=mutate,
+                    run_tests=lambda subset: pytest.fail(
+                        "the stub cannot reach the tree, so no test should ever run"
+                    ),
+                )
+            ]
+
+        return _run_suite
+
+    for tier in ("standard", "elevated"):
+        captured: list[tuple] = []
+        cell = _stub_the_runtime(monkeypatch)
+        monkeypatch.setattr("saffron.gates.runner.run_suite", _make_run_suite(captured))
+
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / tier,
+            cell=cell,
+            turns=[_turn(_block(_PLAN)), _turn()],
+            spec=_spec(risk=tier, acceptance=[criterion]),
+        )
+        assert outcome.state == "READY_FOR_REVIEW", tier
+        (witness_result,) = [g for g in outcome.gates if g.gate == "witness"]
+        assert witness_result.status == "skip", tier
+        assert captured, tier
+        assert all(mutate is session.stub_mutator for _acc, mutate in captured), tier
+        assert all(list(acc) == [criterion] for acc, _mutate in captured), tier
 
 
 def _revert_tests(*names: str) -> list[GateResult]:
