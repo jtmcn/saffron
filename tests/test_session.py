@@ -3186,21 +3186,40 @@ def test_a_witness_failure_is_advisory_at_standard_and_blocking_when_elevated(
         )
     ]
 
-    for tier, expected in (
-        ("standard", "READY_FOR_REVIEW"),
-        ("elevated", "EXHAUSTED"),
+    # The third leg is the one the level is read from `current_tier` for: a
+    # `standard` spec that an `elevate_on` path match elevates. Measured —
+    # `witness_blocking(spec.risk)` in place of the effective tier fails no
+    # behavioural test without it, so half of §5.6's rule went unguarded while
+    # the claim said "in effect". `size` already exercises this half.
+    for label, risk, policy, expected in (
+        ("standard", "standard", "gates: {}\n", "READY_FOR_REVIEW"),
+        ("elevated", "elevated", "gates: {}\n", "EXHAUSTED"),
+        (
+            "elevated-by-path",
+            "standard",
+            "gates: {}\nelevate_on:\n  - src/**\n",
+            "EXHAUSTED",
+        ),
     ):
         cell = _stub_the_runtime(
             monkeypatch, suites=(baseline_suite, head_suite, head_suite)
         )
         outcome, _ledger = _drive(
             monkeypatch,
-            tmp_path / tier,
+            tmp_path / label,
             cell=cell,
             turns=[_turn(_block(_PLAN)), _turn()],
-            spec=_spec(risk=tier, max_attempts=1),
+            spec=_spec(risk=risk, max_attempts=1),
+            policy=policy,
         )
-        assert outcome.state == expected, tier
+        assert outcome.state == expected, label
+        if label == "elevated-by-path":
+            # The spec is still `standard`; the path match is what elevated the
+            # attempt, and the level must follow *that*.
+            assert outcome.effective_risk == "elevated"
+            # And the advisory set agrees. The other two tiers have this
+            # asserted elsewhere; the by-path case had only its outcome.
+            assert "witness" not in outcome.advisory_gates
 
 
 def test_a_skipped_witness_blocks_nothing_at_either_tier(monkeypatch, tmp_path):

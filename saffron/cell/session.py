@@ -981,8 +981,11 @@ def _drive_cell(
             # than re-derived here by hand: advisory at every tier that isn't
             # elevated, agreeing with the function written to say so instead
             # of defaulting to blocking for want of an entry in this set.
-            # `effective_risk` (forbidden here) returns plain `str`, but its
-            # only two values are exactly `RiskTier`'s — the cast names that,
+            # `effective_risk` returns a plain `str` — it is outside this
+            # spec's `touches`, a different mechanism from its `forbidden`
+            # list: `forbidden` denies a path, `touches` is the allow set the
+            # `scope` gate checks a diff against. Its only two values are
+            # exactly `RiskTier`'s, so the cast names that rather than
             # rather than widening `witness_blocking`'s own parameter.
             if not witness_blocking(cast(RiskTier, current_tier)):
                 advisory_gates.add("witness")
@@ -991,10 +994,11 @@ def _drive_cell(
             # baseline and head alike, and the subtraction cancels it.
             # ponytail: cancelled by identity, so a head-only artifact (a .pyc
             # for a file the task added) needs the repo's .gitignore — item 14.
-            # `acceptance`/`mutate` turn `witness` on (`runner.run_suite`'s own
-            # docstring): omitted, it is left out of the suite entirely, as
-            # every caller did before this spec. `stub_mutator` is honest
-            # rather than convenient — it cannot reach the tree, so `witness`
+            # `mutate` is what turns `witness` on — `run_suite` gates on it
+            # alone, as its own docstring says. Omitted, the gate is left out
+            # of the suite entirely, as every caller did before this spec.
+            # `stub_mutator` is honest rather than convenient — it cannot
+            # reach the tree, so `witness`
             # can only ever report `skip` here until `SA-0062` supplies a
             # mutator that can (`docs/BACKLOG.md` item 71).
             declared = run_suite(
