@@ -41,7 +41,7 @@ evidence. That is the gate now, and it is one cheap spec away.
 
 ### Tier 1 — breaks at 03:00 with nobody watching
 
-**73**, **71**, **69**, **70**, **45**, **51** (with **49**/**50**, which its fix
+**74**, **73**, **71**, **69**, **70**, **45**, **51** (with **49**/**50**, which its fix
 closes), **47**, **46**, **40**, **26**, **7**. (**59** is done — `SA-0052`,
 PR #118.)
 
@@ -72,7 +72,7 @@ rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
 **56**, **57**, **61**, **62**, **63**, **64**, **69**. (**65** and **68** are
 done.)
 
-**What this ordering costs, stated plainly:** tiers 2 and 3 hold 25 of the 36
+**What this ordering costs, stated plainly:** tiers 2 and 3 hold 25 of the 37
 open items, including every ontology item and every operator-visibility spec
 there is already a full plan for. That is the deliberate consequence of ranking
 by the milestone rather than by what is nearest to hand.
@@ -4075,6 +4075,57 @@ is wrong.
 **Not** a finding about `SA-0059`'s size. Nine files at `elevated` exhausting
 two attempts is a spec too large for one cell, which is separate and is why
 `EXHAUSTED` was the honest outcome.
+
+---
+
+## 74. An agent has no channel to record a fact it is forbidden to fix
+
+**Tier 1.** Found reviewing `SA-0061` (PR #150), 2026-09-06, and it is an
+instruction this repo has now given twice and cannot be obeyed.
+
+`SA-0058`'s spec said: *"if wiring reveals the gate needs a different shape,
+that is a finding to file rather than an edit to make."* Nothing was filed;
+that omission is item **71**. `SA-0061`'s spec therefore said it harder — *"and
+this time file it, in the pull request body and in `docs/BACKLOG.md`'s
+language"* — and wiring falsified four comments in files it could not touch.
+One reached the operator, as a review lens's `concern`. Three did not.
+
+**The instruction is unsatisfiable by construction.**
+`saffron/report/pr_body.py` assembles a pull request body entirely from the
+outcome: title, acceptance criteria, failures, the test diff, the disagreement
+table, lens findings, gates, provenance. **There is no agent-authored prose
+section anywhere in it.** The only text an agent writes that survives packaging
+is a rebuttal — which exists only when a lens raised a blocker — and its commit
+subjects, which no one reads as a findings channel.
+
+And `docs/BACKLOG.md` is `protected` in `policy.yaml`, so "in
+`docs/BACKLOG.md`'s language" cannot mean writing there either.
+
+So a spec asking an agent to *record* something is asking for a thing the
+system does not have, and every `forbidden` list makes that ask more likely:
+the tighter the scope, the more an agent sees that it may not fix.
+
+**Why this is Tier 1 rather than a nicety.** Every finding in items 70–73 came
+from a review round after the fact. The agent that wired the gate is the one
+that knew, at the moment it knew, which comment it had just falsified. That is
+the cheapest possible moment to record it and the system throws it away.
+
+**Done looks like** one of:
+
+- **A findings section in the pull request body**, filled from something the
+  agent writes — an artifact extracted and hashed at the moment it is produced,
+  the way `plan.json` already is (§5.3), never re-read from `/work`.
+- **Or a `notes` field on the outcome**, rendered by `pr_body.py` under a
+  heading that says these are the agent's own and unadjudicated.
+
+Either way it is untrusted text from a cell and must be rendered as such —
+`SA-0044`'s anti-theater reasoning applies: an agent that can write prose into
+a pull request body can write prose that sounds like a passing verdict. Clip
+it, mark it, and never let it near a status.
+
+**Not** a lens. §5.5's critics already produce findings and are adjudicated;
+this is the *implementer* saying "I saw a thing I was told not to touch", which
+is a different speaker and a different trust level.
 
 ---
 
