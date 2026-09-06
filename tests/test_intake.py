@@ -359,6 +359,52 @@ def test_a_criterion_stops_at_prose_that_is_not_its_continuation():
     assert spec.acceptance_criteria == ["first", "second"]
 
 
+def test_a_criterion_may_declare_the_edit_that_falsifies_it():
+    """A criterion without a `mutant` parses exactly as it does today — every
+    spec in this repo has none, and none may be rewritten to gain one."""
+    spec = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: feature\n"
+        "acceptance:\n"
+        "  - claim: the total is clamped at zero\n"
+        "    witness: tests/test_billing.py::test_never_negative\n"
+        "    mutant:\n"
+        "      file: saffron/billing.py\n"
+        "      find: 'max(total, 0)'\n"
+        "      replace: 'total'\n"
+        "  - claim: unrelated, no mutant declared\n"
+        "    witness: tests/test_billing.py::test_unrelated\n"
+        "---\n\nbody\n"
+    )
+    declared, undeclared = spec.acceptance
+    assert declared.mutant is not None
+    assert declared.mutant.file == "saffron/billing.py"
+    assert declared.mutant.find == "max(total, 0)"
+    assert declared.mutant.replace == "total"
+    assert undeclared.mutant is None
+
+
+def test_a_mutant_with_nothing_to_find_is_refused_at_parse():
+    """An empty `find` matches at every position in the file, so it is not a
+    weak mutant but an unrunnable one — refused here, not discovered at gate
+    time. A mutant naming no file is refused the same way."""
+    with pytest.raises(SpecError):
+        parse_spec(
+            "---\nid: TE-1\ntitle: t\ntype: feature\n"
+            "acceptance:\n"
+            "  - claim: c\n    witness: t.py::test_w\n"
+            "    mutant:\n      file: a.py\n      find: ''\n"
+            "---\n\nbody\n"
+        )
+    with pytest.raises(SpecError):
+        parse_spec(
+            "---\nid: TE-1\ntitle: t\ntype: feature\n"
+            "acceptance:\n"
+            "  - claim: c\n    witness: t.py::test_w\n"
+            "    mutant:\n      file: ''\n      find: x\n"
+            "---\n\nbody\n"
+        )
+
+
 def test_a_criterion_stops_at_a_subsection_of_its_own_section():
     """`_CRITERIA_SECTION` ends only at `##`, so an `###` subsection and its
     table sit inside the criteria span. Measured on SA-0001, whose last

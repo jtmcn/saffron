@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 SpecType = Literal["feature", "bug", "refactor", "test", "docs", "chore"]
 RiskTier = Literal["standard", "elevated"]
@@ -41,6 +41,44 @@ class SpecError(ValueError):
     """A spec that cannot be trusted to describe what it asks for."""
 
 
+class Mutant(BaseModel):
+    """The smallest edit that would falsify the claim beside it (§5.4.1).
+
+    Not a unified diff: a diff carries line numbers, and a mutant naming line
+    51 stops meaning anything the moment the implementation shifts by a line.
+    Exact text is stable under everything except a rewrite of the construct
+    itself, and a rewrite of the construct is a change the claim should
+    notice.
+
+    Only "empty" is judged here. A `find` that matches more than once, or not
+    at all, can only be judged against a tree, and `saffron/mutation.py` is
+    where that half lives — this module never reads the repo it describes.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    file: str
+    find: str
+    replace: str = ""
+
+    @field_validator("file")
+    @classmethod
+    def _file_is_named(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("mutant names no file")
+        return value
+
+    @field_validator("find")
+    @classmethod
+    def _find_is_not_empty(cls, value: str) -> str:
+        # An empty `find` matches at every position in the file, so it is not
+        # a weak mutant but an unrunnable one — refused here rather than
+        # discovered at gate time.
+        if not value:
+            raise ValueError("mutant find text is empty")
+        return value
+
+
 class Criterion(BaseModel):
     """One acceptance criterion and the witness the host checks it by.
 
@@ -58,6 +96,10 @@ class Criterion(BaseModel):
     """The criterion claims the change did *not* break this, so its witness is
     checked the opposite way — green at both sides. A new test can never
     preserve: it did not pass at base."""
+    mutant: Mutant | None = None
+    """The edit that would falsify `claim` (§5.4.1). Absent by default, and
+    every spec in this repo predates the field — an omitted `mutant` must
+    parse exactly as it did before this field existed."""
 
 
 class Spec(BaseModel):
