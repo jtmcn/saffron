@@ -1723,13 +1723,19 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-06, a thirteenth time. Item 69's three specs merged
-    and stayed at the top level; `SA-0059` — item 71's fix — joins them.
+    """Re-measured 2026-09-06, a fourteenth time. Item 69's three specs are
+    retired to `done/`, leaving `SA-0059` — item 71's fix — as the whole live
+    corpus.
 
-    Four roots, no chain: `SA-0059` declares no `depends_on`, because the seam
-    it cuts is what item 69's chain could not reach by splitting. That is the
-    shape a spec takes when it is deliberately *not* a layer, and it is worth
-    seeing here beside the three that were.
+    One root and no chain, which is what a spec looks like when it is
+    deliberately not a layer: `SA-0059` declares no `depends_on` because the
+    seam it cuts is the one item 69's chain could not reach by splitting.
+
+    Retiring the three is not tidying. `done/README.md` names the hazard: the
+    ledger filter keys on `spec_sha`, so a merged spec left at the top level
+    re-runs the moment anyone edits it, and nothing distinguishes a rewrite
+    from a typo fix. The `MERGED` rows filter them today; an edit is all it
+    takes.
 
     Kept from the eleventh because it is the part that does not churn: the
     non-recursive glob. `done/` holds forty-odd shipped specs one directory
@@ -1756,15 +1762,12 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         directory, repo_id, ledger, repo_slug="joel/saffron", gh=_fake_gh([])
     )
 
-    assert [c.spec.id for c in candidates] == ["SA-0056", "SA-0059"]
-    # Refused for the parent each actually declares, which is what separates a
-    # dependency refusal from a criterion-path one.
-    chain = [("SA-0057", "SA-0056"), ("SA-0058", "SA-0057")]
-    assert len(refusals) == len(chain)
-    for refusal, (child, parent) in zip(refusals, chain, strict=True):
-        assert refusal.path.name.startswith(child)
-        assert parent in refusal.reason
-        assert "depends_on" in refusal.reason
+    assert [c.spec.id for c in candidates] == ["SA-0059"]
+    assert refusals == []
+    # One file at the top level and forty-odd one directory down, which is the
+    # non-recursive glob doing the work `done/` depends on. Without this a
+    # scan that found nothing at all would satisfy the two assertions above.
+    assert len(list(directory.glob("*.md"))) == 1
     # And the retired corpus stays invisible: `discover_specs` globs
     # non-recursively, so forty-odd shipped specs one directory down are not
     # offered as tonight's work.

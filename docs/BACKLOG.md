@@ -3749,6 +3749,19 @@ down, never the scan handing them up.
 
 ## 69. The adequacy lens reads where only running can answer, and nine tests got through
 
+**Partly built, not done.** `SA-0056` (PR #135), `SA-0057` (#136) and `SA-0058`
+(#139) merged 2026-09-06 and built the whole mechanism: a `mutant` beside a
+claim, an applier, the `witness` gate, and the wiring. **It runs on nothing** —
+`witness_gate` mutates a host path and a cell's worktree has none, so
+`run_suite`'s `tree` parameter is one no production caller can supply. Item
+**71** is that seam and `SA-0059` is its fix; this item is not done until a
+`witness` result appears on a real attempt.
+
+Two things the chain produced that are worth having anyway: `mutation.py`'s
+applier, whose whole-file digest refuses a restore into a tree that moved, and
+`run_witness`'s pre-flight probe, which tells "this repo's `tests` gate cannot
+be filtered" apart from "the mutant killed its witness" and was not asked for.
+
 **Tier 1.** Measured across one session, 2026-09-05: the batch orchestration
 stack and the two pull requests after it.
 
