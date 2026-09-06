@@ -27,3 +27,11 @@ invalid:
   - 'result.tool = "ruff 0.16.3"'
   # Writing the field without ever spelling an assignment to it.
   - 'payload.setdefault("tool", "ruff 0.16.3")'
+  # Both quote styles, one per branch that matches on the key's text. Measured:
+  # with the regexes anchored on a literal `"`, these three walked past.
+  - "emit({'gate': 'lint', 'tool': 'ruff 0.16.3'})"
+  - "payload['tool'] = 'ruff 0.16.3'"
+  - "payload.setdefault('tool', 'ruff 0.16.3')"
+  # A default is neither an assignment nor a keyword argument, so every other
+  # branch missed it — and it is a plausible way to write it in a gate helper.
+  - 'def emit(payload, tool="ruff 0.16.3"): pass'

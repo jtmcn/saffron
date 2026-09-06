@@ -22,7 +22,7 @@ rule:
     # {"tool": "ruff 0.16.3"}
     - kind: pair
       all:
-        - has: { field: key, regex: '^"tool"$' }
+        - has: { field: key, regex: "^['\"]tool['\"]$" }
         - has: { field: value, kind: string }
     # payload["tool"] = "ruff 0.16.3"
     - kind: assignment
@@ -30,7 +30,7 @@ rule:
         - has:
             field: left
             kind: subscript
-            has: { field: subscript, regex: '^"tool"$' }
+            has: { field: subscript, regex: "^['\"]tool['\"]$" }
         - has: { field: right, kind: string }
     # GateResult(..., tool="ruff 0.16.3")
     - kind: keyword_argument
@@ -65,5 +65,12 @@ rule:
         - has:
             field: arguments
             all:
-              - has: { nthChild: 1, regex: '^"tool"$' }
+              - has: { nthChild: 1, regex: "^['\"]tool['\"]$" }
               - has: { nthChild: 2, kind: string }
+    # def emit(payload, tool="ruff 0.16.3") — a distinct node kind from both
+    # `assignment` and `keyword_argument`, so every branch above missed it, and
+    # a plausible way to write the defect in a gate helper. Measured: 0 matches.
+    - kind: default_parameter
+      all:
+        - has: { field: name, regex: '^tool$' }
+        - has: { field: value, kind: string }

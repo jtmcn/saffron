@@ -14,3 +14,6 @@ invalid:
   # An import the statement kinds above cannot see, because it is a call.
   - 'importlib.import_module("claude_agent_sdk")'
   - '__import__("claude_agent_sdk")'
+  # Both quote styles. Measured: with the regex anchored on a literal `"`, this
+  # walked past while the double-quoted twin above was caught.
+  - "importlib.import_module('claude_agent_sdk')"

@@ -14,6 +14,20 @@ snapshots:
       style: secondary
       start: 44
       end: 57
+  'def emit(payload, tool="ruff 0.16.3"): pass':
+    labels:
+    - source: tool="ruff 0.16.3"
+      style: primary
+      start: 18
+      end: 36
+    - source: tool
+      style: secondary
+      start: 18
+      end: 22
+    - source: '"ruff 0.16.3"'
+      style: secondary
+      start: 23
+      end: 36
   'emit({"gate": "lint", "tool": "ruff 0.16.3"})':
     labels:
     - source: '"tool": "ruff 0.16.3"'
@@ -25,6 +39,20 @@ snapshots:
       start: 22
       end: 28
     - source: '"ruff 0.16.3"'
+      style: secondary
+      start: 30
+      end: 43
+  'emit({''gate'': ''lint'', ''tool'': ''ruff 0.16.3''})':
+    labels:
+    - source: '''tool'': ''ruff 0.16.3'''
+      style: primary
+      start: 22
+      end: 43
+    - source: '''tool'''
+      style: secondary
+      start: 22
+      end: 28
+    - source: '''ruff 0.16.3'''
       style: secondary
       start: 30
       end: 43
@@ -54,6 +82,32 @@ snapshots:
       style: secondary
       start: 18
       end: 41
+  payload.setdefault('tool', 'ruff 0.16.3'):
+    labels:
+    - source: payload.setdefault('tool', 'ruff 0.16.3')
+      style: primary
+      start: 0
+      end: 41
+    - source: setdefault
+      style: secondary
+      start: 8
+      end: 18
+    - source: payload.setdefault
+      style: secondary
+      start: 0
+      end: 18
+    - source: '''tool'''
+      style: secondary
+      start: 19
+      end: 25
+    - source: '''ruff 0.16.3'''
+      style: secondary
+      start: 27
+      end: 40
+    - source: ('tool', 'ruff 0.16.3')
+      style: secondary
+      start: 18
+      end: 41
   payload["tool"] = "ruff 0.16.3":
     labels:
     - source: payload["tool"] = "ruff 0.16.3"
@@ -69,6 +123,24 @@ snapshots:
       start: 0
       end: 15
     - source: '"ruff 0.16.3"'
+      style: secondary
+      start: 18
+      end: 31
+  payload['tool'] = 'ruff 0.16.3':
+    labels:
+    - source: payload['tool'] = 'ruff 0.16.3'
+      style: primary
+      start: 0
+      end: 31
+    - source: '''tool'''
+      style: secondary
+      start: 8
+      end: 14
+    - source: payload['tool']
+      style: secondary
+      start: 0
+      end: 15
+    - source: '''ruff 0.16.3'''
       style: secondary
       start: 18
       end: 31

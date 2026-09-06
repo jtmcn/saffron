@@ -28,4 +28,4 @@ rule:
         - has: { field: function, regex: '(^|\.)import_module$|^__import__$' }
         - has:
             field: arguments
-            has: { nthChild: 1, regex: '^"claude_agent_sdk' }
+            has: { nthChild: 1, regex: "^['\"]claude_agent_sdk" }

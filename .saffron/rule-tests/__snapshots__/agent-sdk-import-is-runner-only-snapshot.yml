@@ -66,3 +66,21 @@ snapshots:
       style: secondary
       start: 24
       end: 42
+  importlib.import_module('claude_agent_sdk'):
+    labels:
+    - source: importlib.import_module('claude_agent_sdk')
+      style: primary
+      start: 0
+      end: 43
+    - source: importlib.import_module
+      style: secondary
+      start: 0
+      end: 23
+    - source: '''claude_agent_sdk'''
+      style: secondary
+      start: 24
+      end: 42
+    - source: '''claude_agent_sdk'''
+      style: secondary
+      start: 24
+      end: 42

@@ -23,3 +23,14 @@ invalid:
   # note ("call through RUNTIME") invites, and what every branch above missed.
   - 'RT = "container"'
   - 'self.runtime = "container"'
+  # Both quote styles, one per branch. Measured: with the regexes anchored on a
+  # literal `"`, every one of these walked past while its double-quoted twin
+  # above was caught — the rule caught the spellings its author happened to type.
+  - "subprocess.run(['container', 'run', '--rm', image])"
+  - "argv = ('container', 'run')"
+  - "RT = 'container'"
+  # A name binds to the binary without an assignment in sight. `session.py` calls
+  # its helpers by keyword throughout, so the first is what a refactor reaches for.
+  - 'start(runtime="container")'
+  - 'def start(binary="container"): pass'
+  - 'RUNTIMES = {"apple": "container"}'

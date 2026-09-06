@@ -27,7 +27,7 @@ rule:
     - kind: list
       has:
         nthChild: 1
-        regex: '^"([^"]*/)?container"$'
+        regex: "^['\"]([^'\"]*/)?container['\"]$"
     # subprocess.run(("container", "run")) — a tuple is an argv too. Guarded on
     # not being an element of a list, because `session.py:1797` holds
     # `[("container", name, ...)]`, which is labelled data rather than a call
@@ -36,11 +36,24 @@ rule:
       all:
         - has:
             nthChild: 1
-            regex: '^"([^"]*/)?container"$'
+            regex: "^['\"]([^'\"]*/)?container['\"]$"
         - not: { inside: { kind: list } }
     # RT = "container" — the indirection this rule's own note invites. Without
     # it, naming the binary once and calling through the local satisfies every
     # branch above while doing what Appendix G forbids. Measured: the one match
     # in scope is `RUNTIME` in the file already exempted.
     - kind: assignment
-      has: { field: right, regex: '^"([^"]*/)?container"$' }
+      has: { field: right, regex: "^['\"]([^'\"]*/)?container['\"]$" }
+    # The three other places a name binds to the binary, which the assignment
+    # branch above does not reach because none of them is an assignment:
+    # `start(runtime="container")`, `def start(binary="container")` and
+    # `RUNTIMES = {"apple": "container"}`. `session.py` calls its helpers by
+    # keyword throughout, so the first is the form a refactor reaches for.
+    # Measured: 0 matches in scope for all three. The *key* stays free — the
+    # tree has `{"container": ...}` as a label, which is a mention, not an argv.
+    - kind: keyword_argument
+      has: { field: value, regex: "^['\"]([^'\"]*/)?container['\"]$" }
+    - kind: default_parameter
+      has: { field: value, regex: "^['\"]([^'\"]*/)?container['\"]$" }
+    - kind: pair
+      has: { field: value, regex: "^['\"]([^'\"]*/)?container['\"]$" }
