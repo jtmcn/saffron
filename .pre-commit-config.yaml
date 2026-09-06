@@ -19,8 +19,10 @@ repos:
         # must trigger the hook that reads it.
         files: ^(.*\.py|pyproject\.toml)$
 
-  # Local for ty's reason: the `structure` gate parses ast-grep's JSON, so the
-  # hook and the gate must run the one version `pyproject.toml` pins.
+  # Local for ty's reason: the `structure` gate parses ast-grep's JSON, and the
+  # rule syntax is pre-1.0, so the hook runs the one version `pyproject.toml`
+  # pins. The gate takes whatever `ast-grep` is on PATH and reports the version
+  # it ran, exactly as `lint` takes `ruff`, so host skew is visible, not absent.
   # `test` before `scan`: a rule whose own invalid snippet no longer matches is
   # a rule that has stopped guarding anything, and it would otherwise report a
   # clean scan. The flags are the gate's, for the gate's reasons — see
@@ -34,7 +36,8 @@ repos:
         entry: >-
           sh -c 'uv run ast-grep test -c .saffron/sgconfig.yml
           && uv run ast-grep scan -c .saffron/sgconfig.yml
-          --no-ignore hidden --no-ignore dot --no-ignore exclude'
+          --no-ignore hidden --no-ignore dot --no-ignore exclude
+          --no-ignore global'
         pass_filenames: false
         files: ^(.*\.py|\.saffron/(sgconfig\.yml|rules/.*|rule-tests/.*))$
 

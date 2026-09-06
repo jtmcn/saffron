@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -429,6 +430,61 @@ def _rule_files():
     )
 
 
+def _scan_ignore_flags() -> list[str]:
+    """The `--no-ignore` values the gate actually passes, read from its source.
+
+    Read rather than restated: these decide which files the scan can see at all,
+    and a copy in this file would let the gate lose one while everything here
+    still certified the set the test wished for."""
+    found = re.findall(
+        r'"--no-ignore",\s*\n\s*"(\w+)"', (GATES / "structure.py").read_text()
+    )
+    assert len(found) >= 3, (
+        "found no `--no-ignore` pairs in the gate — this reader has gone stale "
+        f"against the gate's source, not the other way round (got {found})"
+    )
+    return found
+
+
+def test_the_hook_and_the_gate_scan_the_same_files():
+    """The hook's own comment says the flags are the gate's, for the gate's
+    reasons; nothing checked it. A hook that honours an ignore source the gate
+    refuses passes a commit the gate then fails, which is the disagreement the
+    comment warns about — and the reverse hides a violation until PACKAGE."""
+    hook = (REPO / ".pre-commit-config.yaml").read_text()
+    entry = hook[hook.index("id: ast-grep") :]
+    assert sorted(re.findall(r"--no-ignore (\w+)", entry)) == sorted(
+        _scan_ignore_flags()
+    )
+    # Both must name the config rather than let ast-grep walk up and find one.
+    assert entry.count("-c .saffron/sgconfig.yml") == 2, (
+        "the hook must pass `-c` to both `test` and `scan`"
+    )
+
+
+def test_a_rules_exemptions_are_the_three_named_files():
+    """The half of a rule that `ast-grep test` structurally cannot see, and that
+    reaching a file cannot certify either. Measured: widening the container
+    rule's `ignores` to `saffron/cell/**` leaves `ast-grep test` reporting
+    `3 passed; 0 failed` and the gate reporting `pass` on a tree carrying the
+    violation — a rule disarmed without a snippet changing.
+
+    Reach is not the check, because a wider glob reaches *more* files. These are
+    three named files and one test tree; they are not supposed to move without a
+    person saying so."""
+    exemptions = {
+        yaml.safe_load(p.read_text())["id"]: yaml.safe_load(p.read_text()).get(
+            "ignores"
+        )
+        for p in _rule_files()
+    }
+    assert exemptions == {
+        "container-runtime-is-runtime-only": ["saffron/cell/runtime.py"],
+        "agent-sdk-import-is-runner-only": ["images/agent_runner.py"],
+        "gate-tool-must-be-executed": ["tests/**"],
+    }
+
+
 def _covers(glob: str, language: str, tmp_path) -> int:
     """How many files in this repo a rule's path glob actually reaches.
 
@@ -437,6 +493,10 @@ def _covers(glob: str, language: str, tmp_path) -> int:
     while the rule it certifies covers nothing. The probe carries the one glob
     and a body matching every file of the language — `module` is the root node
     of a Python parse — so the count is the scope's reach and nothing else.
+
+    It walks with the gate's own ignore flags: a glob whose reach depended on a
+    source the gate refuses would be judged here by a different walk than the one
+    it is certifying.
     """
     probe = tmp_path / glob.replace("/", "_").replace("*", "x")
     # exist_ok: two rules may share a scope, and the probe built for it is the
@@ -461,8 +521,7 @@ def _covers(glob: str, language: str, tmp_path) -> int:
             "scan",
             "-c",
             str(probe / "sgconfig.yml"),
-            "--no-ignore",
-            "hidden",
+            *[a for f in _scan_ignore_flags() for a in ("--no-ignore", f)],
             "--json=compact",
             ".",
         ],
@@ -504,7 +563,12 @@ def test_every_rule_is_verified_by_a_test_of_its_own():
     repo rather than reporting the one rule that is unguarded. This says which."""
     tested = {
         yaml.safe_load(p.read_text())["id"]
-        for p in (REPO / ".saffron" / "rule-tests").glob("*.yml")
+        for p in (REPO / ".saffron" / "rule-tests").rglob("*")
+        # `_rule_files`' reasons, for the same globber: a test written as `.yaml`
+        # is one ast-grep runs and a `*.yml` glob would call absent. Snapshots
+        # carry the rule's own `id` and are excluded, or a rule whose test file
+        # was deleted would still read as verified by its leftover snapshot.
+        if p.suffix in (".yml", ".yaml") and "__snapshots__" not in p.parts
     }
     declared = {yaml.safe_load(p.read_text())["id"] for p in _rule_files()}
     assert declared - tested == set(), f"rules with no test: {declared - tested}"
@@ -767,18 +831,50 @@ def test_an_ignore_file_outside_the_diff_cannot_hide_a_violation(tmp_path, ignor
     `integrity.gate_config` routes it to a person. These two are not: `.ignore`
     buys nothing here, and `.git/info/exclude` never appears in a diff at all, so
     no policy list can reach it. The gate refuses both."""
-    gate = _rules_tree(tmp_path)
-    (tmp_path / "saffron" / "cell").mkdir(parents=True)
-    (tmp_path / "saffron" / "cell" / "bad.py").write_text(
+    _assert_hidden_violation_is_still_reported(tmp_path, ignore_file=ignore_file)
+
+
+def test_the_global_excludes_file_cannot_hide_a_violation(tmp_path, monkeypatch):
+    """`core.excludesFile` is the same defect one step further out of reach than
+    `.git/info/exclude`: it is not merely absent from the diff, it is not in the
+    repository at all, so no policy list can ever name it. Measured with the
+    gate's flags before `--no-ignore global` was among them: a tracked violating
+    file scanned clean because a file in `$HOME` said so.
+
+    The `.git` directory is load-bearing, not scaffolding — measured, the walker
+    consults the global excludes only for a tree that looks like a repository, so
+    without it this test passes against the unfixed gate and proves nothing."""
+    home = tmp_path / "home"
+    (home / ".config" / "git").mkdir(parents=True)
+    (home / ".config" / "git" / "ignore").write_text("saffron/cell/bad.py\n")
+    (home / ".gitconfig").write_text(
+        f"[core]\n\texcludesFile = {home / '.config' / 'git' / 'ignore'}\n"
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(home / ".gitconfig"))
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    _assert_hidden_violation_is_still_reported(repo)
+
+
+def _assert_hidden_violation_is_still_reported(root, ignore_file: str | None = None):
+    """Plant one violation the gate must report, plus optionally an in-tree ignore
+    file naming it, and assert the gate reports it anyway."""
+    gate = _rules_tree(root)
+    (root / "saffron" / "cell").mkdir(parents=True)
+    (root / "saffron" / "cell" / "bad.py").write_text(
         'subprocess.run(["container", "run"])\n'
     )
-    hidden = tmp_path / ignore_file
-    hidden.parent.mkdir(parents=True, exist_ok=True)
-    hidden.write_text("saffron/cell/bad.py\n")
+    if ignore_file is not None:
+        hidden = root / ignore_file
+        hidden.parent.mkdir(parents=True, exist_ok=True)
+        hidden.write_text("saffron/cell/bad.py\n")
 
     done = subprocess.run(
         [str(gate)],
-        cwd=tmp_path,
+        cwd=root,
         capture_output=True,
         text=True,
         timeout=120,

@@ -14,6 +14,7 @@ import pathlib
 import re
 import subprocess
 import sys
+from typing import NoReturn
 
 # Anchored on this file, not on the cwd, and passed to ast-grep as `-c` rather
 # than left to be discovered: a `sgconfig.yml` found by walking up from the cwd
@@ -25,7 +26,7 @@ CONFIG = pathlib.Path(__file__).resolve().parent.parent / "sgconfig.yml"
 RULES = CONFIG.parent / "rules"
 
 
-def emit(payload):
+def emit(payload) -> NoReturn:
     print(json.dumps(payload))
     sys.exit(0)
 
@@ -82,8 +83,6 @@ if tests.returncode != 0 or counted is None:
             "summary": f"rule tests did not pass (exit {tests.returncode})",
         }
     )
-# `elif`, not a second `if`: `emit` exits, but it is not annotated `NoReturn` and
-# the `types` gate is blocking, so only the branch narrows `counted` off `None`.
 elif int(counted.group(1)) != expected or int(counted.group(2)) != 0:
     emit(
         {
@@ -103,13 +102,21 @@ elif int(counted.group(1)) != expected or int(counted.group(2)) != 0:
 # until this flag was added. It does not disable the gitignore filter, so `.venv`
 # and `.claude/worktrees/` stay out.
 #
-# The other two are for a different reason. Measured, a violating *tracked* file
+# The other three are for a different reason. Measured, a violating *tracked* file
 # disappears from this scan if any ignore file names it: ast-grep walks with the
 # `ignore` crate, which has no notion of what git tracks. `.gitignore` is the one
-# such file this repo needs, and `integrity.gate_config` routes an edit to it to a
-# person. The other two sources buy nothing here and are refused outright:
-# `.ignore` is honoured even outside a repo, and `.git/info/exclude` never appears
-# in a diff at all, so no policy list can reach it.
+# such source this repo keeps — it is what holds `.venv` out — and it is reachable,
+# so `integrity.gate_config` routes an edit to it to a person. The rest are refused
+# outright, because no policy list can reach them: `.ignore` is honoured even
+# outside a repo, and `.git/info/exclude` and `core.excludesFile` never appear in a
+# diff at all — the last one is not even in the repository. Measured with
+# `core.excludesFile` naming a tracked violating file: scanned clean without
+# `global`, reported with it.
+#
+# `--no-ignore parent` is deliberately absent. Measured at ast-grep 0.45.3, with a
+# `.gitignore` one directory above the scan root and with and without a `.git`:
+# the file was reported either way, so the flag changes nothing and would be a
+# claim no test could falsify. Re-measure before adding it.
 proc = subprocess.run(
     [
         "ast-grep",
@@ -122,6 +129,8 @@ proc = subprocess.run(
         "dot",
         "--no-ignore",
         "exclude",
+        "--no-ignore",
+        "global",
         "--json=compact",
     ],
     capture_output=True,
@@ -133,12 +142,17 @@ proc = subprocess.run(
 try:
     matches = json.loads(proc.stdout)
 except json.JSONDecodeError:
+    matches = None
+# Valid JSON of the wrong shape is the same failure as no JSON: `{}` would
+# iterate its keys below and raise on `m.get`, writing a traceback and no
+# contract — the `PermissionError` defect one layer down.
+if not isinstance(matches, list):
     emit(
         {
             "gate": "structure",
             "status": "error",
             "tool": tool,
-            "summary": f"ast-grep emitted no JSON (exit {proc.returncode})",
+            "summary": f"ast-grep emitted no JSON array (exit {proc.returncode})",
         }
     )
 

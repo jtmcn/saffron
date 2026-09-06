@@ -24,6 +24,11 @@ elevate_on:
   - saffron/gates/**
   - saffron/cell/**
   - saffron/ledger.py
+  # The rules are the `structure` gate's substance, so a diff touching one is at
+  # least as worth a person's eye as one touching a gate's executable. `protected`
+  # does not reach them: `.saffron/**` is a glob, and `protected_touch_refusal`
+  # skips glob entries as undecidable — its own `ponytail:` note says so.
+  - .saffron/rules/**
 
 protected:
   - DESIGN.md
@@ -69,8 +74,9 @@ integrity:
   # ast-grep both walk with a gitignore filter that has no notion of what git
   # tracks, so one line naming a *tracked* file removes it from `lint`, `format`
   # and `structure` at once while it stays in the diff and in the commit. Nested
-  # ones count, hence `**/`; the other ignore sources the walkers honour are
-  # refused by the gates themselves, because they never appear in a diff.
+  # ones count, hence `**/`. `structure` refuses the sources no diff can reach —
+  # `.ignore`, `.git/info/exclude` and `core.excludesFile` — outright; the same
+  # half for ruff, and so for `lint` and `format`, is backlog item 71.
   gate_config:
     [
       "ontology/shapes/**",
