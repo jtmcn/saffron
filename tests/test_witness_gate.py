@@ -9,9 +9,11 @@ fake `run_tests` callable, against real files on disk so `apply_mutant` and
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from saffron.gates.contract import Failure, GateResult, GateStatus
+from saffron.gates.contract import Failure, GateResult, GateStatus, identity
 from saffron.gates.core.witness import witness_gate
 from saffron.intake import Criterion, Mutant
 
@@ -373,3 +375,38 @@ def test_a_deleted_file_is_an_error_not_an_escaping_oserror(tmp_path):
 
     assert result.status == "error"
     assert "a.py" in result.summary
+
+
+def test_a_blocking_witness_failure_is_an_ordinary_blocking_failure(tmp_path):
+    """A blocking `witness` failure needs no special case downstream: it is
+    an ordinary `GateResult` — it round-trips through the same JSON contract
+    every gate uses, and its failure's `identity()` is the same stable
+    4-tuple any other gate's blocking failure produces. It happens to invert
+    one comparison internally (a `pass` is the bad news); nothing about its
+    shape says so."""
+    _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
+    criterion = _criterion(claim="the total is clamped at zero", replace="0")
+
+    def run_tests(subset):
+        return _tests(status="pass", collected=(criterion.witness,))
+
+    result = witness_gate(acceptance=[criterion], tree=tmp_path, run_tests=run_tests)
+    assert result.status == "fail"
+
+    # Round-trips exactly like any other gate's result — no field only
+    # `witness` carries, nothing lost or added by serializing it.
+    round_tripped = GateResult.model_validate(json.loads(result.model_dump_json()))
+    assert round_tripped == result
+
+    # `identity()` reads it the same way it reads every gate's failure: by
+    # (gate, file, code, normalized message) — never by anything special to
+    # `witness` — and it is stable across two structurally-identical calls,
+    # which is what makes a repeat failure comparable to a baseline one.
+    again = witness_gate(
+        acceptance=[criterion],
+        tree=tmp_path,
+        run_tests=lambda subset: _tests(status="pass", collected=(criterion.witness,)),
+    )
+    assert identity("witness", result.failures[0]) == identity(
+        "witness", again.failures[0]
+    )

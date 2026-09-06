@@ -20,6 +20,8 @@ from typing import Protocol
 from saffron.cell import runtime as cell_runtime
 from saffron.cell.worktree import WORKTREE_MOUNT
 from saffron.gates.contract import GateResult, parse_gate_json
+from saffron.gates.core.witness import witness_gate
+from saffron.intake import Criterion
 
 _STDERR_TAIL = 800
 
@@ -163,18 +165,134 @@ def run_gate(
     return result
 
 
+def run_witness(
+    *,
+    gates: dict[str, Path],
+    cwd: Path,
+    acceptance: Sequence[Criterion],
+    tree: Path,
+    tests_result: GateResult | None,
+    timeout_s: float = 900,
+    executor: GateExecutor | None = None,
+) -> GateResult | None:
+    """`witness` (§5.4.1), wired to the repo's declared `tests` gate.
+
+    `None` when there is nothing for `witness` to run against: a repo that
+    declares no `tests` gate at all has no runner for `witness` to
+    re-invoke, and the caller leaves it out of the suite entirely — the same
+    shape `revert` already uses for the identical reason.
+
+    When at least one criterion declares a `mutant`, this first re-invokes
+    `tests` once on the *unmutated* tree, over a subset of exactly one node
+    id, before ever applying anything. That subset argument is `revert`'s
+    own contract obligation (`docs/BACKLOG.md`,
+    `saffron/gates/core/revert.py`), and a repo may not have met it: a
+    `tests` gate that cannot be filtered errors on every subset call,
+    indistinguishable — from inside `witness_gate` alone — from the
+    mutant-killed-its-own-witness trap that gate deliberately answers with
+    `error`. Told apart here, on a clean tree, before any mutant is applied.
+
+    The probe id is drawn from `tests_result.collected` — the plain,
+    no-subset run's own enumeration — never from a criterion's declared
+    `witness`. A criterion's `witness` is written by the operator and can be
+    stale (a typo, a renamed test, a moved file); probing with it cannot
+    tell "this repo's `tests` gate cannot be filtered" apart from "this one
+    criterion names a test that no longer exists", and reading the second as
+    the first would report `skip` for the whole gate on the strength of one
+    bad id, discarding every *other* declared criterion's real finding for
+    the night. A name `tests_result` itself enumerated carries no such risk:
+    it is known to exist whatever any criterion claims.
+
+    No readable enumeration to probe with (`tests_result` absent, or its
+    `collected` empty or unset) is its own `skip` — not proof of anything,
+    the same as `revert`'s identical "nothing to read" answer. A probe that
+    errors reports `witness` as `skip`, not `error`, and no mutant is ever
+    touched. A probe that answers (`pass` or `fail`) proves the subset
+    works, and only then is `witness_gate` invoked for real, once, over
+    every declared criterion — preserved exactly as `SA-0057` wrote it,
+    inner-`error`-discards-an-earlier-survivor included.
+    """
+    if "tests" not in gates:
+        return None
+
+    def run_tests(subset: list[str]) -> GateResult:
+        return run_gate(
+            "tests",
+            gates["tests"],
+            cwd,
+            timeout_s=timeout_s,
+            subset=subset,
+            executor=executor,
+        )
+
+    declared = [c for c in acceptance if c.mutant is not None]
+    if declared:
+        collected = tests_result.collected if tests_result is not None else None
+        if not collected:
+            return GateResult(
+                gate="witness",
+                status="skip",
+                summary=(
+                    "no readable test enumeration to probe subset support "
+                    "with — nothing to verify a mutant against"
+                ),
+            )
+        probe = run_tests([collected[0]])
+        if probe.status == "error":
+            return GateResult(
+                gate="witness",
+                status="skip",
+                summary=(
+                    "the repo's `tests` gate does not accept a subset "
+                    f"argument, so no mutant was applied — {probe.summary}"
+                ),
+            )
+
+    return witness_gate(acceptance=acceptance, tree=tree, run_tests=run_tests)
+
+
 def run_suite(
     gates: dict[str, Path],
     cwd: Path,
     *,
     timeout_s: float = 900,
     executor: GateExecutor | None = None,
+    acceptance: Sequence[Criterion] = (),
+    tree: Path | None = None,
 ) -> list[GateResult]:
-    """Run every declared gate in declaration order."""
-    return [
+    """Run every declared gate in declaration order.
+
+    `witness` is not one of the declared gates above — it is a core gate,
+    like `revert` — but it belongs in this list rather than beside it,
+    because it re-invokes `tests` and so cannot exist before `tests`'s own
+    result does (§5.4.1). `tree` is the one thing that turns it on: omitted
+    (as every caller but the one that supplies it does today), `witness` is
+    left out of the suite exactly as it was before this function knew about
+    it — no behaviour change for a caller that does not ask for it.
+    """
+    results = [
         run_gate(name, executable, cwd, timeout_s=timeout_s, executor=executor)
         for name, executable in gates.items()
     ]
+    if tree is not None:
+        tests_result = next((r for r in results if r.gate == "tests"), None)
+        witness_result = run_witness(
+            gates=gates,
+            cwd=cwd,
+            acceptance=acceptance,
+            tree=tree,
+            tests_result=tests_result,
+            timeout_s=timeout_s,
+            executor=executor,
+        )
+        if witness_result is not None:
+            # After `tests`, never beside it — its own result is what
+            # `witness` re-invokes, so a result that does not exist yet is
+            # one it cannot read. Inserted by position, not appended, so
+            # this holds whatever order the repo declared its gates in.
+            position = next(i for i, r in enumerate(results) if r.gate == "tests") + 1
+            results.insert(position, witness_result)
+    return results
 
 
 def _elapsed_ms(started: float) -> int:
