@@ -20,6 +20,7 @@ from typing import Protocol
 from saffron.cell import runtime as cell_runtime
 from saffron.cell.worktree import WORKTREE_MOUNT
 from saffron.gates.contract import GateResult, parse_gate_json
+from saffron.gates.core.revert import _argv_safe
 from saffron.gates.core.witness import witness_gate
 from saffron.intake import Criterion
 
@@ -165,6 +166,11 @@ def run_gate(
     return result
 
 
+# More than one, because a single sample deciding the whole gate is the
+# fragile part rather than the sample's identity.
+_PROBE_ATTEMPTS = 3
+
+
 def run_witness(
     *,
     gates: dict[str, Path],
@@ -237,14 +243,47 @@ def run_witness(
                     "with — nothing to verify a mutant against"
                 ),
             )
-        probe = run_tests([collected[0]])
-        if probe.status == "error":
+        # `_argv_safe`, and more than one candidate. `run_gate` builds
+        # `argv = [executable, *subset]` with no `--`, and this repo's own
+        # `tests` gate calls any collection line holding `::` a name — so a
+        # printed `--deselect=…` line is an option to whatever runs it.
+        # `revert` drops those for the same reason. Worse here than there: one
+        # sample decided the whole gate, so a single stray line bought a
+        # blanket `skip` and discarded every criterion's real finding.
+        candidates = [name for name in collected if _argv_safe(name)]
+        probe = None
+        for candidate in candidates[:_PROBE_ATTEMPTS]:
+            probe = run_tests([candidate])
+            if probe.status != "error":
+                break
+        if probe is None or probe.status == "error":
             return GateResult(
                 gate="witness",
                 status="skip",
                 summary=(
                     "the repo's `tests` gate does not accept a subset "
-                    f"argument, so no mutant was applied — {probe.summary}"
+                    "argument, so no mutant was applied — "
+                    + (
+                        probe.summary
+                        if probe is not None
+                        else "no usable id to probe with"
+                    )
+                ),
+            )
+        # Tolerating the argument is not honouring it. A `tests` gate that
+        # accepts a subset and runs everything anyway passes the probe above —
+        # and then an unrelated test failing under a mutant reads as "the
+        # witness died", which is the false confidence §5.4.1 exists to
+        # refuse, wearing a verification.
+        probed = probe.collected
+        if probed is None or set(probed) - {candidate}:
+            return GateResult(
+                gate="witness",
+                status="skip",
+                summary=(
+                    "the repo's `tests` gate accepted a subset argument and "
+                    "did not honour it, so a mutant's failure could not be "
+                    "attributed to its own witness"
                 ),
             )
 

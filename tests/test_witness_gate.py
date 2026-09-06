@@ -383,7 +383,21 @@ def test_a_blocking_witness_failure_is_an_ordinary_blocking_failure(tmp_path):
     every gate uses, and its failure's `identity()` is the same stable
     4-tuple any other gate's blocking failure produces. It happens to invert
     one comparison internally (a `pass` is the bad news); nothing about its
-    shape says so."""
+    shape says so.
+
+    **What this cannot assert, and why.** The claim this witnesses says the
+    failure "reaches the phase that reads gate results". No test here drives
+    that phase: `session._blocking` is a closure inside `run_one_cell`, and
+    `saffron/cell/**` is `forbidden` to this spec. Measured while reviewing —
+    inserting `if failure.gate == "witness": return False` into
+    `session._blocking`, the literal special case this claim forbids, fails
+    nothing in the whole suite.
+
+    So this guards the *shape* half and not the *reaches* half, and the
+    reaches half is currently false: `witness` is in no `advisory_gates` set,
+    so a failure blocks at every tier rather than at `elevated` only
+    (`docs/BACKLOG.md` item 71). Said here rather than left as an apparent
+    omission — the assertions below are real, and they are not the claim."""
     _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
     criterion = _criterion(claim="the total is clamped at zero", replace="0")
 
@@ -392,6 +406,13 @@ def test_a_blocking_witness_failure_is_an_ordinary_blocking_failure(tmp_path):
 
     result = witness_gate(acceptance=[criterion], tree=tmp_path, run_tests=run_tests)
     assert result.status == "fail"
+
+    # The failure's own fields, which nothing pinned: `identity()` is built
+    # from `(gate, file, code, message)`, so an empty `file` or `code` makes
+    # every survivor collide with every other and baseline subtraction cancel
+    # the wrong one. Both mutated freely before this.
+    assert result.failures[0].file == criterion.witness
+    assert result.failures[0].code == "survived-mutant"
 
     # Round-trips exactly like any other gate's result — no field only
     # `witness` carries, nothing lost or added by serializing it.

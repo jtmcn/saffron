@@ -242,3 +242,143 @@ def test_the_result_names_each_criterion_not_a_count(tmp_path):
     # And the tree is restored: both files are back to their originals.
     assert (tmp_path / "a.py").read_text() == "def total(x):\n    return max(x, 0)\n"
     assert (tmp_path / "b.py").read_text() == "def other(y):\n    return min(y, 10)\n"
+
+
+def test_a_tests_gate_that_ignores_the_subset_cannot_attribute_a_death(tmp_path):
+    """Tolerating the subset argument is not honouring it. A `tests` gate that
+    accepts the argument and runs everything anyway passed the probe — and then
+    an *unrelated* test failing under a mutant read as "the witness died",
+    reporting `pass`. That is the false confidence §5.4.1 exists to refuse,
+    wearing a verification.
+
+    Told apart by what the probe collected: a gate that honoured the filter
+    enumerates the one id it was given."""
+    (tmp_path / "a.py").write_text("def total(x):\n    return max(x, 0)\n")
+    criterion = _criterion()
+
+    # Answers `pass`, and reports every test it collected — the whole suite,
+    # not the one id it was handed.
+    tests = _gate_script(
+        tmp_path,
+        "tests",
+        'echo \'{"gate":"tests","status":"pass","tool":"pytest 8.3.2",'
+        f'"collected":["{criterion.witness}","tests/t.py::other"],'
+        '"failures":[],"summary":"2 passed"}\'\n',
+    )
+    tests_result = GateResult(
+        gate="tests",
+        status="pass",
+        tool="pytest 8.3.2",
+        collected=[criterion.witness, "tests/t.py::other"],
+    )
+
+    result = run_witness(
+        gates={"tests": tests},
+        cwd=tmp_path,
+        acceptance=[criterion],
+        tree=tmp_path,
+        tests_result=tests_result,
+    )
+
+    assert result is not None
+    assert result.status == "skip"
+    assert "did not honour" in result.summary
+    # No mutant was applied, so the tree is untouched.
+    assert (tmp_path / "a.py").read_text() == "def total(x):\n    return max(x, 0)\n"
+
+
+def test_a_collected_line_that_is_an_option_is_not_probed_with(tmp_path):
+    """`run_gate` builds `argv = [executable, *subset]` with no `--`, and this
+    repo's `tests` gate calls any collection line holding `::` a name. A
+    printed `--deselect=…` line is therefore an option to whatever runs it —
+    the measured attack `revert._argv_safe` exists for.
+
+    Worse here than in `revert`: one sample decided the whole gate, so a single
+    stray line bought a blanket `skip` and discarded every criterion's real
+    finding. The probe now skips unsafe names and tries more than one."""
+    (tmp_path / "a.py").write_text("def total(x):\n    return max(x, 0)\n")
+    criterion = _criterion()
+
+    tests = _gate_script(
+        tmp_path,
+        "tests",
+        'echo \'{"gate":"tests","status":"fail","tool":"pytest 8.3.2",'
+        f'"collected":["{criterion.witness}"],'
+        '"failures":[{"file":"'
+        f"{criterion.witness}"
+        '","code":"AssertionError","message":"boom"}],"summary":"1 failed"}\'\n',
+    )
+    # The poisoned line sorts first; the real id is behind it.
+    tests_result = GateResult(
+        gate="tests",
+        status="pass",
+        tool="pytest 8.3.2",
+        collected=[f"--deselect={criterion.witness}", criterion.witness],
+    )
+
+    result = run_witness(
+        gates={"tests": tests},
+        cwd=tmp_path,
+        acceptance=[criterion],
+        tree=tmp_path,
+        tests_result=tests_result,
+    )
+
+    assert result is not None
+    # It got past the probe on the safe id rather than skipping on the unsafe
+    # one, so a real verdict was reached.
+    assert result.status == "pass"
+
+
+def test_a_repo_with_no_tests_gate_has_no_witness_gate(tmp_path):
+    """`None`, not a `skip`: a repo that declares no `tests` gate has no runner
+    for `witness` to re-invoke, so it leaves the suite entirely — the shape
+    `revert` already uses. The docstring argued this at length and nothing
+    executed it."""
+    lint = _gate_script(
+        tmp_path,
+        "lint",
+        'echo \'{"gate":"lint","status":"pass","tool":"fixture 1.0",'
+        '"failures":[],"summary":"clean"}\'\n',
+    )
+
+    assert (
+        run_witness(
+            gates={"lint": lint},
+            cwd=tmp_path,
+            acceptance=[_criterion()],
+            tree=tmp_path,
+            tests_result=None,
+        )
+        is None
+    )
+
+
+def test_no_readable_enumeration_is_a_skip_with_no_mutant_applied(tmp_path):
+    """The other branch the docstring argued for and no test reached: nothing
+    to probe *with*. `skip`, and no mutant is touched — "not proof of
+    anything", the same as `revert`'s identical answer."""
+    (tmp_path / "a.py").write_text("def total(x):\n    return max(x, 0)\n")
+    tests = _gate_script(
+        tmp_path,
+        "tests",
+        'echo \'{"gate":"tests","status":"pass","tool":"pytest 8.3.2",'
+        '"failures":[],"summary":"ok"}\'\n',
+    )
+
+    for collected in (None, []):
+        result = run_witness(
+            gates={"tests": tests},
+            cwd=tmp_path,
+            acceptance=[_criterion()],
+            tree=tmp_path,
+            tests_result=GateResult(
+                gate="tests", status="pass", tool="pytest 8.3.2", collected=collected
+            ),
+        )
+        assert result is not None
+        assert result.status == "skip"
+        assert "nothing to verify" in result.summary
+        assert (
+            tmp_path / "a.py"
+        ).read_text() == "def total(x):\n    return max(x, 0)\n"

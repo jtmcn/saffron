@@ -110,9 +110,15 @@ def witness_blocking(tier: RiskTier) -> bool:
     claim guarded by nothing is exactly that.
 
     A pure fact about the tier, deliberately independent of `saffron.cell
-    .session`'s own `advisory_gates` set: whichever caller decides what an
-    attempt does with a blocking `witness` failure reads this, rather than
-    re-deriving the same two levels.
+    .session`'s own `advisory_gates` set.
+
+    **Nothing reads it yet, and the thing that will currently disagrees.**
+    `session._blocking` is `failure.gate not in advisory_gates`, and that set
+    gains only `size` at non-elevated tiers — so a `witness` failure blocks at
+    `standard` today, the opposite of what this returns. `saffron/cell/**` is
+    out of reach here; `docs/BACKLOG.md` item 71 carries the reconciliation.
+    This function is the level §5.4.1 fixes, written down where the fix can
+    reach for it, not a description of what happens now.
 
     This is the level, not a green light. Two things this decision is made in
     full knowledge of, neither of which this module can change (`witness.py`
