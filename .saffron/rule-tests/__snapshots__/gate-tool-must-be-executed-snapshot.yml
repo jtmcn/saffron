@@ -28,6 +28,32 @@ snapshots:
       style: secondary
       start: 30
       end: 43
+  payload.setdefault("tool", "ruff 0.16.3"):
+    labels:
+    - source: payload.setdefault("tool", "ruff 0.16.3")
+      style: primary
+      start: 0
+      end: 41
+    - source: setdefault
+      style: secondary
+      start: 8
+      end: 18
+    - source: payload.setdefault
+      style: secondary
+      start: 0
+      end: 18
+    - source: '"tool"'
+      style: secondary
+      start: 19
+      end: 25
+    - source: '"ruff 0.16.3"'
+      style: secondary
+      start: 27
+      end: 40
+    - source: ("tool", "ruff 0.16.3")
+      style: secondary
+      start: 18
+      end: 41
   payload["tool"] = "ruff 0.16.3":
     labels:
     - source: payload["tool"] = "ruff 0.16.3"
@@ -46,6 +72,24 @@ snapshots:
       style: secondary
       start: 18
       end: 31
+  result.tool = "ruff 0.16.3":
+    labels:
+    - source: result.tool = "ruff 0.16.3"
+      style: primary
+      start: 0
+      end: 27
+    - source: tool
+      style: secondary
+      start: 7
+      end: 11
+    - source: result.tool
+      style: secondary
+      start: 0
+      end: 11
+    - source: '"ruff 0.16.3"'
+      style: secondary
+      start: 14
+      end: 27
   tool = "ruff 0.16.3":
     labels:
     - source: tool = "ruff 0.16.3"

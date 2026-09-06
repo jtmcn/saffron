@@ -19,3 +19,13 @@ rule:
       has: { regex: '^claude_agent_sdk', stopBy: end }
     - kind: import_from_statement
       has: { field: module_name, regex: '^claude_agent_sdk' }
+    # importlib.import_module("claude_agent_sdk") — an import neither statement
+    # kind above can see, because it is a call. Measured: 0 matches in the tree,
+    # so the branch costs nothing and closes the obvious way around the other
+    # two. The module named as data stays valid; the call is what is forbidden.
+    - kind: call
+      all:
+        - has: { field: function, regex: '(^|\.)import_module$|^__import__$' }
+        - has:
+            field: arguments
+            has: { nthChild: 1, regex: '^"claude_agent_sdk' }

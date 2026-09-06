@@ -6,7 +6,20 @@ valid:
   # A mention is not a call. Both of these are live in the tree and must stay.
   - 'note = "apple/container routes the default gateway"'
   - 'd = {"container": "not an argv"}'
+  # session.py:1797, pinned. A tuple whose first element labels what was removed,
+  # inside a list — data, not an argv. It is what stops the tuple branch below
+  # from being written as the one-liner it looks like.
+  - 'removed = [("container", name, runtime.remove_container(name))]'
 invalid:
   - 'subprocess.run(["container", "run", "--rm", image])'
   - 'subprocess.Popen(["container", "exec", "-i", name])'
   - 'argv = ["container"]'
+  # The binary spelled as a path is the same argv.
+  - 'subprocess.run(["/usr/local/bin/container", "run", "--rm", image])'
+  # A tuple is an argv too, when it is not an element of a list.
+  - 'subprocess.run(("container", "run", "--rm", image))'
+  - 'argv = ("container", "run")'
+  # Naming the binary once and calling through the local: what the rule's own
+  # note ("call through RUNTIME") invites, and what every branch above missed.
+  - 'RT = "container"'
+  - 'self.runtime = "container"'

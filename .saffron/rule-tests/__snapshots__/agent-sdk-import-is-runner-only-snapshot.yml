@@ -1,5 +1,23 @@
 id: agent-sdk-import-is-runner-only
 snapshots:
+  __import__("claude_agent_sdk"):
+    labels:
+    - source: __import__("claude_agent_sdk")
+      style: primary
+      start: 0
+      end: 30
+    - source: __import__
+      style: secondary
+      start: 0
+      end: 10
+    - source: '"claude_agent_sdk"'
+      style: secondary
+      start: 11
+      end: 29
+    - source: '"claude_agent_sdk"'
+      style: secondary
+      start: 11
+      end: 29
   from claude_agent_sdk import ClaudeAgentOptions, query:
     labels:
     - source: from claude_agent_sdk import ClaudeAgentOptions, query
@@ -30,3 +48,21 @@ snapshots:
       style: secondary
       start: 7
       end: 30
+  importlib.import_module("claude_agent_sdk"):
+    labels:
+    - source: importlib.import_module("claude_agent_sdk")
+      style: primary
+      start: 0
+      end: 43
+    - source: importlib.import_module
+      style: secondary
+      start: 0
+      end: 23
+    - source: '"claude_agent_sdk"'
+      style: secondary
+      start: 24
+      end: 42
+    - source: '"claude_agent_sdk"'
+      style: secondary
+      start: 24
+      end: 42

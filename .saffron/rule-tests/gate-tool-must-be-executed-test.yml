@@ -8,9 +8,12 @@ valid:
   - 'toolchain = "uv 0.4.0"'
   - 'GateResult(gate="lint", status="pass", tool=tool)'
   - 'GateResult(gate="tests", tool=tests_result.tool)'
+  - 'result.tool = version.stdout.strip()'
+  - 'payload.setdefault("tool", tool)'
   # Near misses: a different field whose name merely starts the same way.
   - 'emit({"toolchain": "uv 0.4.0"})'
   - 'Config(tools="ruff")'
+  - 'options.setdefault("toolchain", "uv 0.4.0")'
   # The declaration is a type, not a value.
   - |
     class GateResult:
@@ -20,3 +23,7 @@ invalid:
   - 'payload["tool"] = "ruff 0.16.3"'
   - 'GateResult(gate="lint", status="pass", tool="ruff 0.16.3")'
   - 'tool = "ruff 0.16.3"'
+  # The attribute form, which a mutable `GateResult` is what invites.
+  - 'result.tool = "ruff 0.16.3"'
+  # Writing the field without ever spelling an assignment to it.
+  - 'payload.setdefault("tool", "ruff 0.16.3")'

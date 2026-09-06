@@ -14,11 +14,33 @@ files:
 ignores:
   - "saffron/cell/runtime.py"
 
-# The first element of an argv list, not the bare word: `proxy.py` and
-# `session.py` both discuss apple/container in comments, and a text search
-# cannot tell those from a call. This is why the rule is structural.
+# The binary as code, not the bare word: `proxy.py` and `session.py` both discuss
+# apple/container in comments, and a text search cannot tell those from a call.
+# This is why the rule is structural.
+# ponytail: a name the parser never reads is out of reach — `"contain" + "er"`
+# and `subprocess.run("container run", shell=True)` both walk past. The ceiling
+# is deliberate evasion; the branches below are the forms a refactor reaches for.
 rule:
-  kind: list
-  has:
-    nthChild: 1
-    regex: '^"container"$'
+  any:
+    # subprocess.run(["container", "run", ...]), and the same argv with the
+    # binary spelled as a path.
+    - kind: list
+      has:
+        nthChild: 1
+        regex: '^"([^"]*/)?container"$'
+    # subprocess.run(("container", "run")) — a tuple is an argv too. Guarded on
+    # not being an element of a list, because `session.py:1797` holds
+    # `[("container", name, ...)]`, which is labelled data rather than a call
+    # and is the only such tuple in the tree. Measured: 0 others in scope.
+    - kind: tuple
+      all:
+        - has:
+            nthChild: 1
+            regex: '^"([^"]*/)?container"$'
+        - not: { inside: { kind: list } }
+    # RT = "container" — the indirection this rule's own note invites. Without
+    # it, naming the binary once and calling through the local satisfies every
+    # branch above while doing what Appendix G forbids. Measured: the one match
+    # in scope is `RUNTIME` in the file already exempted.
+    - kind: assignment
+      has: { field: right, regex: '^"([^"]*/)?container"$' }

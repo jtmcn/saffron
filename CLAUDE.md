@@ -97,9 +97,10 @@ exception has a shape worth memorising: **core invokes declared gates, never too
 
 ### Layout
 
-- `saffron/cell/` — `runtime.py` is the **only** module that builds an `apple/container` argv
-  (Appendix G, gated); `session.py` drives one cell start to finish (v0.5's supervisor);
-  `worktree.py`, `proxy.py`.
+- `saffron/cell/` — `runtime.py` is the **only** module that spells the `apple/container`
+  binary in code, argv or bare name alike (Appendix G, gated; comments are deliberately
+  exempt); `session.py` drives one cell start to finish (v0.5's supervisor); `worktree.py`,
+  `proxy.py`.
 - `saffron/gates/` — `contract.py` is the gate JSON schema and the whole repo-agnostic
   surface; `runner.py` execs gates host-side (`LocalExecutor` / `CellExecutor`);
   `baseline.py` subtracts pre-existing failures; `core/` holds the host-side gates

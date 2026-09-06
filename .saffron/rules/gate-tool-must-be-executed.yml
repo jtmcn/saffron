@@ -13,6 +13,10 @@ note: |
 ignores:
   - "tests/**"
 
+# ponytail: a literal that reaches the field through a name or an expression —
+# `t = "ruff 1.0"` then `tool=t`, or `"ruff " + v` — is out of a structural
+# rule's reach. The branches below are the forms that write the literal *at* the
+# field, which is every way the defect has actually been written here.
 rule:
   any:
     # {"tool": "ruff 0.16.3"}
@@ -40,3 +44,26 @@ rule:
       all:
         - has: { field: left, kind: identifier, regex: '^tool$' }
         - has: { field: right, kind: string }
+    # result.tool = "ruff 0.16.3" — `GateResult` is a mutable model, so the
+    # attribute form is the one the type invites. Measured: 0 matches in the
+    # tree outside `tests/`.
+    - kind: assignment
+      all:
+        - has:
+            field: left
+            kind: attribute
+            has: { field: attribute, regex: '^tool$' }
+        - has: { field: right, kind: string }
+    # payload.setdefault("tool", "ruff 0.16.3") — writes the field without ever
+    # spelling an assignment to it. Measured: 0 matches in the tree.
+    - kind: call
+      all:
+        - has:
+            field: function
+            kind: attribute
+            has: { field: attribute, regex: '^setdefault$' }
+        - has:
+            field: arguments
+            all:
+              - has: { nthChild: 1, regex: '^"tool"$' }
+              - has: { nthChild: 2, kind: string }
