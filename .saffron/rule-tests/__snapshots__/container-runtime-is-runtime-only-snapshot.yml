@@ -1,0 +1,32 @@
+id: container-runtime-is-runtime-only
+snapshots:
+  argv = ["container"]:
+    labels:
+    - source: '["container"]'
+      style: primary
+      start: 7
+      end: 20
+    - source: '"container"'
+      style: secondary
+      start: 8
+      end: 19
+  subprocess.Popen(["container", "exec", "-i", name]):
+    labels:
+    - source: '["container", "exec", "-i", name]'
+      style: primary
+      start: 17
+      end: 50
+    - source: '"container"'
+      style: secondary
+      start: 18
+      end: 29
+  subprocess.run(["container", "run", "--rm", image]):
+    labels:
+    - source: '["container", "run", "--rm", image]'
+      style: primary
+      start: 15
+      end: 50
+    - source: '"container"'
+      style: secondary
+      start: 16
+      end: 27

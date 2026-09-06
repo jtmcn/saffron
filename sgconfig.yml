@@ -1,0 +1,9 @@
+# ast-grep's project root. The rules themselves live under `.saffron/` because
+# they are repo-shaped policy, not core code (§2.1) — and because `.saffron/**`
+# is already `protected` and in `integrity.gate_config`, so weakening one to go
+# green routes to a person, exactly as `ontology/shapes/**` does.
+ruleDirs:
+  - .saffron/rules
+
+testConfigs:
+  - testDir: .saffron/rule-tests

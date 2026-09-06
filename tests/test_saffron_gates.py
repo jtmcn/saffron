@@ -7,6 +7,7 @@ imports nothing from saffron/ except the contract parser.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -23,7 +24,14 @@ GATES = REPO / ".saffron" / "gates"
 
 def test_the_policy_parses():
     policy, _ = load_policy(REPO)
-    assert set(policy.gates) == {"format", "lint", "types", "tests", "shacl"}
+    assert set(policy.gates) == {
+        "format",
+        "lint",
+        "types",
+        "tests",
+        "shacl",
+        "structure",
+    }
 
 
 def test_the_type_checker_override_is_scoped_to_the_one_file_that_needs_it():
@@ -398,3 +406,134 @@ def test_shacl_errors_on_an_unparseable_data_graph_beside_valid_shapes(tmp_path)
     result = parse_gate_json(done.stdout, expected_gate="shacl")
     assert result.status == "error", result.summary
     assert result.tool, "a parse failure is not a reason to drop the tool identifier"
+
+
+def test_structure_names_its_tool_and_passes_on_this_repos_code():
+    done = subprocess.run(
+        [str(GATES / "structure")],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "pass", result.summary
+    assert result.tool and result.tool.startswith("ast-grep ")
+
+
+def _rules_tree(tmp_path) -> None:
+    """This repo's real rules, in a tree of their own. `ast-grep scan` resolves
+    `ruleDirs` against the `sgconfig.yml` beside it and does not walk upwards, so
+    a subject built in `tmp_path` gets no configuration by accident."""
+    shutil.copytree(REPO / ".saffron" / "rules", tmp_path / ".saffron" / "rules")
+    (tmp_path / "sgconfig.yml").write_text("ruleDirs:\n  - .saffron/rules\n")
+
+
+def test_structure_fails_on_code_its_rules_reject(tmp_path):
+    """A gate that has only ever passed is not known to be a gate."""
+    _rules_tree(tmp_path)
+    (tmp_path / "bad.py").write_text('emit({"gate": "lint", "tool": "ruff 9.9.9"})\n')
+    done = subprocess.run(
+        [str(GATES / "structure")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "fail", result.summary
+    assert len(result.failures) == 1
+    assert result.failures[0].file.endswith("bad.py")
+    assert result.failures[0].code == "gate-tool-must-be-executed"
+    # ast-grep counts lines from zero and every other gate here reports them from
+    # one, so an unconverted line reads as the line above the defect.
+    assert result.failures[0].line == 1
+
+
+def test_structure_scans_the_dot_directory_its_rules_most_need(tmp_path):
+    """Measured: a bare `ast-grep scan` walks past `.saffron/` because it is a
+    dot-directory, and `.saffron/gates/` is exactly where the `tool` rule matters
+    — a mutant planted there went unreported until `--no-ignore hidden`. The
+    subject is `.saffron/gates/`, not any hidden path, because that is the one
+    the omission actually silenced."""
+    _rules_tree(tmp_path)
+    (tmp_path / ".saffron" / "gates").mkdir(parents=True)
+    (tmp_path / ".saffron" / "gates" / "bad.py").write_text(
+        'emit({"gate": "lint", "tool": "ruff 9.9.9"})\n'
+    )
+    done = subprocess.run(
+        [str(GATES / "structure")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "fail", result.summary
+    assert [f.file for f in result.failures] == [".saffron/gates/bad.py"]
+
+
+def test_structure_errors_rather_than_passes_when_it_has_no_rules(tmp_path):
+    """`ast-grep scan` with no `sgconfig.yml` exits 3 and writes nothing to
+    stdout. Read as a verdict that would be a clean pass over every rule at once
+    — the founding defect of Appendix I. Charged to nobody instead (§5.4)."""
+    (tmp_path / "a.py").write_text("x = 1\n")
+    done = subprocess.run(
+        [str(GATES / "structure")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "error", result.summary
+    assert result.tool, "a scan failure is not a reason to drop the tool identifier"
+
+
+def _stub_ast_grep(tmp_path, version_body: str, scan_body: str = "echo '[]'"):
+    """An `ast-grep` on PATH whose version no string literal in the gate could
+    guess."""
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    (stub / "ast-grep").write_text(
+        f'#!/bin/sh\ncase "$1" in\n  --version) {version_body} ;;\n'
+        f"  *) {scan_body} ;;\nesac\n"
+    )
+    (stub / "ast-grep").chmod(0o755)
+    return {**os.environ, "PATH": f"{stub}:{os.environ['PATH']}"}
+
+
+def test_structure_reports_the_version_the_tool_printed_not_a_literal(tmp_path):
+    """The invariant `tool` exists for: obtained *by executing* the tool (§5.4,
+    Appendix H). This gate's own rules forbid the literal it would otherwise be,
+    which is a rule and not a test — asserting the prefix "ast-grep " cannot tell
+    an executed version from one written down."""
+    env = _stub_ast_grep(tmp_path, 'echo "ast-grep 9.9.9-stub"')
+    done = subprocess.run(
+        [str(GATES / "structure")],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.tool == "ast-grep 9.9.9-stub"
+
+
+def test_structure_errors_when_its_tool_runs_and_reports_no_version(tmp_path):
+    """A tool that runs and identifies nothing cannot produce the field that
+    separates a gate that ran from one that did not, so it is `error` — not a
+    pass carrying `tool: ""`, which is how the `shacl` gate first shipped."""
+    env = _stub_ast_grep(tmp_path, "exit 0")
+    done = subprocess.run(
+        [str(GATES / "structure")],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "error", result.summary
+    assert "no version" in result.summary

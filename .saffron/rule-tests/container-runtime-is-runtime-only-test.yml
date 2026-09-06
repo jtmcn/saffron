@@ -1,0 +1,12 @@
+id: container-runtime-is-runtime-only
+valid:
+  - 'subprocess.run([RUNTIME, "run", "--rm", image])'
+  - 'subprocess.run(["git", "status"])'
+  - '_run_argv([RUNTIME, "exec", "-i", name])'
+  # A mention is not a call. Both of these are live in the tree and must stay.
+  - 'note = "apple/container routes the default gateway"'
+  - 'd = {"container": "not an argv"}'
+invalid:
+  - 'subprocess.run(["container", "run", "--rm", image])'
+  - 'subprocess.Popen(["container", "exec", "-i", name])'
+  - 'argv = ["container"]'

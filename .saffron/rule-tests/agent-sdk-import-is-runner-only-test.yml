@@ -1,0 +1,12 @@
+id: agent-sdk-import-is-runner-only
+valid:
+  - 'import json'
+  - 'from pathlib import Path'
+  # The module named as data, which is how tests/test_image.py asserts the base
+  # image has it. Naming the SDK is fine; importing it here is not.
+  - 'run_in_cell(image, ["python", "-c", "import claude_agent_sdk"])'
+  - 'note = "claude_agent_sdk lives in the cell"'
+invalid:
+  - 'import claude_agent_sdk'
+  - 'from claude_agent_sdk import ClaudeAgentOptions, query'
+  - 'import claude_agent_sdk as sdk'

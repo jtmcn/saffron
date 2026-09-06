@@ -1,0 +1,42 @@
+id: gate-tool-must-be-executed
+language: python
+severity: error
+message: the `tool` field must be obtained by executing the tool, never a literal
+note: |
+  DESIGN.md §5.4, Appendix H. The `tool` field is what separates a gate that ran
+  and passed from one that never ran. A literal is indistinguishable from a real
+  version string in the ledger, so it reads as evidence while proving nothing.
+  Run the tool and use its reported version: `subprocess.run([t, "--version"])`.
+
+# Tests construct GateResult fixtures with literal tool strings by the dozen —
+# that is what a fixture is. The invariant is about gates, not their tests.
+ignores:
+  - "tests/**"
+
+rule:
+  any:
+    # {"tool": "ruff 0.16.3"}
+    - kind: pair
+      all:
+        - has: { field: key, regex: '^"tool"$' }
+        - has: { field: value, kind: string }
+    # payload["tool"] = "ruff 0.16.3"
+    - kind: assignment
+      all:
+        - has:
+            field: left
+            kind: subscript
+            has: { field: subscript, regex: '^"tool"$' }
+        - has: { field: right, kind: string }
+    # GateResult(..., tool="ruff 0.16.3")
+    - kind: keyword_argument
+      all:
+        - has: { field: name, regex: '^tool$' }
+        - has: { field: value, kind: string }
+    # tool = "ruff 0.16.3" — the plainest way to write the defect, and the one
+    # the other three branches missed. Every `tool =` in the tree derives from a
+    # call, so this costs nothing.
+    - kind: assignment
+      all:
+        - has: { field: left, kind: identifier, regex: '^tool$' }
+        - has: { field: right, kind: string }

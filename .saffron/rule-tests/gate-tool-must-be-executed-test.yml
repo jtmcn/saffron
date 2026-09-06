@@ -1,0 +1,22 @@
+id: gate-tool-must-be-executed
+valid:
+  - 'emit({"gate": "lint", "tool": tool})'
+  - 'emit({"gate": "lint", "tool": version.stdout.strip()})'
+  - 'payload["tool"] = tool'
+  - 'tool = version.stdout.strip()'
+  - 'tool = reported[0].strip() if reported else ""'
+  - 'toolchain = "uv 0.4.0"'
+  - 'GateResult(gate="lint", status="pass", tool=tool)'
+  - 'GateResult(gate="tests", tool=tests_result.tool)'
+  # Near misses: a different field whose name merely starts the same way.
+  - 'emit({"toolchain": "uv 0.4.0"})'
+  - 'Config(tools="ruff")'
+  # The declaration is a type, not a value.
+  - |
+    class GateResult:
+        tool: str | None = None
+invalid:
+  - 'emit({"gate": "lint", "tool": "ruff 0.16.3"})'
+  - 'payload["tool"] = "ruff 0.16.3"'
+  - 'GateResult(gate="lint", status="pass", tool="ruff 0.16.3")'
+  - 'tool = "ruff 0.16.3"'

@@ -1,0 +1,24 @@
+id: container-runtime-is-runtime-only
+language: python
+severity: error
+message: only saffron/cell/runtime.py may build a `container` argv
+note: |
+  DESIGN.md Appendix G. `runtime.py` is the one module that names the cell
+  runtime, so swapping apple/container for another runtime is one file's work.
+  It exports `RUNTIME`; call through it, or through the helpers in
+  `saffron/cell/runtime.py`, rather than spelling the binary here.
+
+files:
+  - "saffron/**/*.py"
+  - "images/**/*.py"
+ignores:
+  - "saffron/cell/runtime.py"
+
+# The first element of an argv list, not the bare word: `proxy.py` and
+# `session.py` both discuss apple/container in comments, and a text search
+# cannot tell those from a call. This is why the rule is structural.
+rule:
+  kind: list
+  has:
+    nthChild: 1
+    regex: '^"container"$'

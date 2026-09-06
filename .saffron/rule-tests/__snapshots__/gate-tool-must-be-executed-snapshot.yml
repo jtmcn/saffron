@@ -1,0 +1,62 @@
+id: gate-tool-must-be-executed
+snapshots:
+  GateResult(gate="lint", status="pass", tool="ruff 0.16.3"):
+    labels:
+    - source: tool="ruff 0.16.3"
+      style: primary
+      start: 39
+      end: 57
+    - source: tool
+      style: secondary
+      start: 39
+      end: 43
+    - source: '"ruff 0.16.3"'
+      style: secondary
+      start: 44
+      end: 57
+  'emit({"gate": "lint", "tool": "ruff 0.16.3"})':
+    labels:
+    - source: '"tool": "ruff 0.16.3"'
+      style: primary
+      start: 22
+      end: 43
+    - source: '"tool"'
+      style: secondary
+      start: 22
+      end: 28
+    - source: '"ruff 0.16.3"'
+      style: secondary
+      start: 30
+      end: 43
+  payload["tool"] = "ruff 0.16.3":
+    labels:
+    - source: payload["tool"] = "ruff 0.16.3"
+      style: primary
+      start: 0
+      end: 31
+    - source: '"tool"'
+      style: secondary
+      start: 8
+      end: 14
+    - source: payload["tool"]
+      style: secondary
+      start: 0
+      end: 15
+    - source: '"ruff 0.16.3"'
+      style: secondary
+      start: 18
+      end: 31
+  tool = "ruff 0.16.3":
+    labels:
+    - source: tool = "ruff 0.16.3"
+      style: primary
+      start: 0
+      end: 20
+    - source: tool
+      style: secondary
+      start: 0
+      end: 4
+    - source: '"ruff 0.16.3"'
+      style: secondary
+      start: 7
+      end: 20

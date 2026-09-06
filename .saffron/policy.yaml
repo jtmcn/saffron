@@ -10,6 +10,13 @@ gates:
   # parsed and nothing reads it, and a control that reads as present and is not
   # is the founding defect of Appendix I. Validation is milliseconds.
   shacl:  { blocking: true }
+  # Invariants that were prose in CLAUDE.md and enforced by nothing: which module
+  # may name the cell runtime, which file may import the Agent SDK, and that a
+  # gate's `tool` field is executed rather than written (Appendix G, §2.1, §5.4).
+  # Structural, not textual — each has a legitimate textual near-miss in the tree,
+  # so the `retired-vocabulary` pygrep hook's approach would false-positive on all
+  # three. Declared unconditionally, for the reason `shacl` gives above.
+  structure: { blocking: true }
 
 # Where a plausible-looking wrong change hurts most. Getting this right is most
 # of what onboarding actually means (DESIGN.md §5.6).

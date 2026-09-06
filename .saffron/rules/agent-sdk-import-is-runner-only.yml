@@ -1,0 +1,21 @@
+id: agent-sdk-import-is-runner-only
+language: python
+severity: error
+message: only images/agent_runner.py may import the Agent SDK
+note: |
+  DESIGN.md §2.1. `agent_runner.py` runs inside the cell and emits Saffron's own
+  event schema on stdout; the host never sees an SDK type. `pyproject.toml` does
+  not even declare claude-agent-sdk — an import here fails on the host and
+  couples the control plane to a vendor schema it deliberately does not know.
+
+ignores:
+  - "images/agent_runner.py"
+
+# Imports, not mentions: tests/test_image.py passes "import claude_agent_sdk" as
+# a string to `python -c` inside a cell, which is correct and must stay green.
+rule:
+  any:
+    - kind: import_statement
+      has: { regex: '^claude_agent_sdk', stopBy: end }
+    - kind: import_from_statement
+      has: { field: module_name, regex: '^claude_agent_sdk' }
