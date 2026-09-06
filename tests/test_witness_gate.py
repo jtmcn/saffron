@@ -44,8 +44,8 @@ def _write(tmp_path, name: str, text: str) -> None:
 def test_a_witness_that_dies_under_its_mutant_passes(tmp_path):
     """The gate applies the edit, invokes the repo's declared `tests` gate
     over exactly that one node id, and reads a `fail` as the answer it
-    wanted — the only gate in the system for which a failing test is the
-    passing result."""
+    wanted. The same inversion `revert` makes, at a granularity `revert`
+    cannot reach — not, as the spec claimed, the only one in the system."""
     _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
     criterion = _criterion()
 
@@ -63,7 +63,10 @@ def test_a_witness_that_survives_its_mutant_fails(tmp_path):
     """A witness that survives its mutant fails, and the failure names the
     criterion, the witness and the edit."""
     _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
-    criterion = _criterion(claim="the total is clamped at zero")
+    # `replace="0"`, not the helper's default `"x"`: `"x"` is a substring of
+    # `find`, so an assertion on it could not tell whether the message named
+    # the replacement at all.
+    criterion = _criterion(claim="the total is clamped at zero", replace="0")
 
     def run_tests(subset):
         return _tests(status="pass", collected=(criterion.witness,))
@@ -76,7 +79,14 @@ def test_a_witness_that_survives_its_mutant_fails(tmp_path):
     assert isinstance(failure, Failure)
     assert failure.file == criterion.witness  # the witness
     assert "the total is clamped at zero" in failure.message  # the criterion's claim
-    assert "max(x, 0)" in failure.message and "x" in failure.message  # the edit
+    # Both halves of the edit, and `replace` chosen so it is not a substring
+    # of `find`: with the default `replace="x"` the second assertion was a
+    # substring of the first and held whether or not the message named it —
+    # deleting `{mutant.replace!r}` from the message left this green.
+    assert "max(x, 0)" in failure.message  # what was there
+    replaced = "0"  # not a substring of `find`, unlike the helper's default
+    assert criterion.mutant is not None and criterion.mutant.replace == replaced
+    assert repr(replaced) in failure.message  # what replaced it
 
 
 def test_the_tree_is_unchanged_however_the_gate_ends(tmp_path):
@@ -149,6 +159,11 @@ def test_a_spec_with_no_mutants_skips(tmp_path):
     must not fail a task for a field its own spec predates."""
     criterion = Criterion(claim="unrelated", witness="tests/test_x.py::test_a")
 
+    # Asserted on the distinguishing phrase, not on "no" and "mutant" being
+    # present: deleting the early return entirely left this green, because the
+    # empty loop falls through to the terminal skip whose summary satisfies
+    # both words just as well. That is the exact failure this criterion warns
+    # about — a `skip` assertion passing for a different skip.
     result = witness_gate(
         acceptance=[criterion],
         tree=tmp_path,
@@ -156,7 +171,7 @@ def test_a_spec_with_no_mutants_skips(tmp_path):
     )
 
     assert result.status == "skip"
-    assert "no" in result.summary.lower() and "mutant" in result.summary.lower()
+    assert result.summary == "the spec declares no mutants"
 
 
 def test_two_criteria_do_not_see_each_others_mutants(tmp_path):
@@ -227,3 +242,63 @@ def test_the_tool_is_the_one_the_tests_gate_reported(tmp_path):
     result = witness_gate(acceptance=[criterion], tree=tmp_path, run_tests=run_tests)
 
     assert result.tool == "pytest 9.9.9"
+
+
+def test_a_tree_that_could_not_be_restored_is_an_error_not_a_pass(tmp_path):
+    """The one branch that leaves a mutant in the worktree the task is
+    packaged from, and it was guarded by nothing: mutating its `status` to
+    `"pass"` left all eight tests green, so the gate could report success on a
+    run whose mutant shipped in the diff.
+
+    `run_tests` writes to the file here — a formatter hook, a concurrent
+    write, the agent's own tooling — which is what makes `restore_mutant`'s
+    whole-file digest refuse. That refusal exists precisely so this branch can
+    fire; nothing exercised the caller's response to it."""
+    _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
+    criterion = _criterion()
+
+    def run_tests(subset):
+        (tmp_path / "a.py").write_text("something else entirely\n")
+        return _tests(status="fail", collected=(criterion.witness,))
+
+    result = witness_gate(acceptance=[criterion], tree=tmp_path, run_tests=run_tests)
+
+    assert result.status == "error"
+    assert "a.py" in result.summary
+    assert "restore" in result.summary
+
+
+def test_a_tests_gate_that_raises_is_an_error_not_a_pass(tmp_path):
+    """`except Exception` records rather than swallows — but nothing asserted
+    the status it records with. Mutating it to `"pass"` left eight green."""
+    _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
+    criterion = _criterion()
+
+    def run_tests(subset):
+        raise RuntimeError("the runner would not start")
+
+    result = witness_gate(acceptance=[criterion], tree=tmp_path, run_tests=run_tests)
+
+    assert result.status == "error"
+    assert "the runner would not start" in result.summary
+    # And the tree is still restored, because the `finally` ran before the
+    # recorded failure was reported.
+    assert (tmp_path / "a.py").read_text() == "def total(x):\n    return max(x, 0)\n"
+
+
+def test_an_inner_skip_is_not_counted_as_a_witness_that_died(tmp_path):
+    """`status == "fail"` is the death test, and `!= "pass"` would read a
+    `skip` as one — a witness that never ran, counted as a witness that
+    noticed. That is the "quietly buys nothing" defect this gate exists to
+    catch, one level up. The code gets it right; nothing held it there."""
+    _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
+    criterion = _criterion()
+
+    def run_tests(subset):
+        return _tests(status="skip", collected=())
+
+    result = witness_gate(acceptance=[criterion], tree=tmp_path, run_tests=run_tests)
+
+    assert result.status == "skip"
+    assert criterion.witness in result.summary
+    assert "skip" in result.summary

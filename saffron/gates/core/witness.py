@@ -1,7 +1,9 @@
 """The `witness` gate: does a claim's witness notice its own mutant? (§5.4.1)
 
-**A failing test is the passing result, and it is the only gate here for
-which that is true.** A criterion may declare a `mutant` — the smallest edit
+**A failing test is the passing result** — the same inversion `revert`
+already makes, at a granularity `revert` cannot reach: `revert` reverts whole
+files and asks whether the new tests test *anything*, this reverts one named
+edit and asks whether one witness tests *that thing*. A criterion may declare a `mutant` — the smallest edit
 that would falsify its `claim`. This gate applies that edit to the head tree,
 invokes the repo's declared `tests` gate over exactly the one witness node id
 the criterion names, and reads a `fail` as the answer it wanted: the witness
@@ -26,10 +28,10 @@ a defect: it is named in the summary and counted toward nothing, never
 silently bought as a `pass`.
 
 Every mutant is applied to a clean tree and restored before the next is
-touched, and before this gate returns on any exit path — `error`, `skip`,
-`pass`, or `fail` alike — so a survivor is attributable to the one criterion
-whose mutant produced it, and the tree this gate runs inside, the one a task
-is packaged from, is byte-identical once the gate is done.
+touched, and restoration is attempted on every exit path — `error`, `skip`,
+`pass` and `fail` alike. A restore that itself fails is reported as `error`
+with the tree left mutated: nothing further here can fix that, and reporting
+anything else would be the false `pass` this gate exists to refuse.
 """
 
 from __future__ import annotations
@@ -87,32 +89,58 @@ def witness_gate(
             unproven.append(_named(criterion, applied.reason))
             continue
 
+        # No `return` inside the `finally` below. One there discards whatever
+        # was in flight — measured: a `KeyboardInterrupt` raised by `run_tests`
+        # was swallowed and this gate returned an ordinary `GateResult`, so an
+        # operator's Ctrl-C during a mutated test run went nowhere. `except
+        # Exception` does not cover a `BaseException`, and ruff's B012 does not
+        # see a `return` nested inside a `try` inside a `finally`, so neither
+        # the type nor the linter catches it. `revert` uses this same
+        # record-then-return shape for the same reason.
+        failed_to_run: Exception | None = None
+        failed_to_restore: MutationError | None = None
+        tests_result = None
         try:
             try:
                 tests_result = run_tests([criterion.witness])
-            except Exception as exc:  # reported below, not swallowed
-                return GateResult(
-                    gate="witness",
-                    status="error",
-                    summary=(
-                        f"the `tests` gate could not be executed for "
-                        f"{criterion.witness}'s mutant — {exc}"
-                    ),
-                )
+            except Exception as exc:  # recorded, reported below, not swallowed
+                failed_to_run = exc
         finally:
             try:
                 restore_mutant(tree, mutant, applied)
             except MutationError as exc:
-                # The tree may now be left mutated — nothing further here can
-                # fix that, and pretending otherwise would be the false
-                # `pass`/`fail` this gate exists to refuse. `error`, charged
-                # to nobody, same as any other broken toolchain.
-                return GateResult(
-                    gate="witness",
-                    status="error",
-                    summary=f"could not restore {mutant.file} after its mutant — {exc}",
-                )
+                failed_to_restore = exc
 
+        # Restoration first: a tree left mutated is the worse fact, and it is
+        # the one that ships in the diff if nothing says so.
+        if failed_to_restore is not None:
+            return GateResult(
+                gate="witness",
+                status="error",
+                summary=(
+                    f"could not restore {mutant.file} after its mutant — "
+                    f"{failed_to_restore}"
+                ),
+            )
+        if failed_to_run is not None:
+            return GateResult(
+                gate="witness",
+                status="error",
+                summary=(
+                    f"the `tests` gate could not be executed for "
+                    f"{criterion.witness}'s mutant — {failed_to_run}"
+                ),
+            )
+        assert tests_result is not None  # both failure paths returned above
+
+        # ponytail: an inner `error` ends the attempt through
+        # `session.aborted_gates`, and a mutant that kills its witness by making
+        # a fixture raise produces exactly that — `.saffron/gates/tests.py`
+        # reports `error` when pytest exits non-zero with no `FAILED ` line to
+        # parse. `revert.py` met the identical trap and chose `fail` for its
+        # canonical case; this spec asked for `error`. Left as asked, and the
+        # disagreement is deliberate rather than overlooked — resolve it in
+        # `SA-0058` or the backlog, not by editing one of the two to match.
         if tests_result.status == "error":
             # Not `fail`: a runner that could not start under the mutant has
             # answered nothing about whether the witness guards its claim.
