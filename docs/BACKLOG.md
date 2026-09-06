@@ -69,10 +69,17 @@ rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
 ### Tier 3 — real, not urgent
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
-**56**, **57**, **61**, **62**, **63**, **64**, **69**, **75**. (**65** and
-**68** are done.)
+**56**, **57**, **61**, **62**, **63**, **64**, **69**, **75**, **76**, **77**.
+(**65** and **68** are done.)
 
-**What this ordering costs, stated plainly:** tiers 2 and 3 hold 26 of the 38
+**76 sits here rather than in tier 1** because `structure`, where the hole was
+found, is closed: it refuses every ignore source and states its own file set.
+What is left is the same change for ruff, which is a measurement rather than a
+risk — not, as an earlier draft of this note said, that `.gitignore` in
+`integrity.gate_config` already routes the edit to a person. That is the
+*tracked* half only: a `.gitignore` naming itself reaches no diff at all.
+
+**What this ordering costs, stated plainly:** tiers 2 and 3 hold 28 of the 40
 open items, including every ontology item and every operator-visibility spec
 there is already a full plan for. That is the deliberate consequence of ranking
 by the milestone rather than by what is nearest to hand.
@@ -4212,7 +4219,7 @@ passes against the unfixed gate.
 
 ---
 
-## 72. The `tool` invariant is gated for Python, and one gate is written in shell
+## 77. The `tool` invariant is gated for Python, and one gate is written in shell
 
 Found reviewing PR #145. `.saffron/rules/gate-tool-must-be-executed.yml` is
 `language: python`, and `.saffron/gates/format` builds its whole contract in `sh`.

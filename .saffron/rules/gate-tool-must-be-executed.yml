@@ -19,7 +19,7 @@ ignores:
 # field, which is every way the defect has actually been written here.
 # ponytail: this rule is `language: python`, and `.saffron/gates/format` builds
 # its whole contract in `sh`. A shell gate writing `tool="ruff 0.16.3"` is out of
-# reach until a `language: bash` rule exists — backlog item 72. CLAUDE.md's
+# reach until a `language: bash` rule exists — backlog item 77. CLAUDE.md's
 # `(gated)` says so rather than implying the invariant is covered everywhere.
 utils:
   # The field name matched on the string's *content*, not on its source text. A

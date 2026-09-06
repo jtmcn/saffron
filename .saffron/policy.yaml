@@ -83,7 +83,7 @@ integrity:
   # person, which is the tracked half only — a `.gitignore` naming itself is never
   # added and so reaches no diff. `structure` no longer needs this entry at all:
   # it refuses every ignore source and states its own file set with `--globs`.
-  # Doing the same for ruff, and so for `lint` and `format`, is backlog item 71.
+  # Doing the same for ruff, and so for `lint` and `format`, is backlog item 76.
   gate_config:
     [
       "ontology/shapes/**",

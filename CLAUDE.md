@@ -128,7 +128,7 @@ and its `r`/`f` prefix, and anchoring on those read only the spellings the autho
 
 - **The `tool` field** separates a gate that ran and passed from one that never ran. It must be
   obtained *by executing* the tool, never a string literal (§5.4, Appendix H). **(gated over
-  Python; `.saffron/gates/format` builds its contract in `sh`, which no rule reads — item 72)**
+  Python; `.saffron/gates/format` builds its contract in `sh`, which no rule reads — item 77)**
 - **`error` ≠ `fail`.** `fail` means the repo's code is wrong; `error` means the gate broke,
   aborts the attempt, and is charged to nobody. Never collapse them.
 - **Baseline subtraction counts.** Identities collide legitimately — one baseline failure

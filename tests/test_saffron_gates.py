@@ -1054,7 +1054,7 @@ def test_what_decides_which_files_a_gate_sees_is_routed_to_a_person():
 
     `structure` no longer depends on this entry — it refuses every ignore source
     and states its own file set with `--globs`. The entry stays for ruff, which
-    still walks with a gitignore filter (backlog item 71), and routing an edit to
+    still walks with a gitignore filter (backlog item 76), and routing an edit to
     a person is the tracked half of that only: see the self-naming `.gitignore`
     above, which reaches no diff at all."""
     policy, _ = load_policy(REPO)
