@@ -422,11 +422,21 @@ def test_structure_names_its_tool_and_passes_on_this_repos_code():
 
 
 def _rules_tree(tmp_path) -> None:
-    """This repo's real rules, in a tree of their own. `ast-grep scan` resolves
-    `ruleDirs` against the `sgconfig.yml` beside it and does not walk upwards, so
-    a subject built in `tmp_path` gets no configuration by accident."""
+    """This repo's real rules and their tests, in a tree of their own. `ast-grep`
+    resolves both against the `sgconfig.yml` beside it and does not walk upwards,
+    so a subject built in `tmp_path` gets no configuration by accident.
+
+    The rule tests come too: the gate verifies its own rules before scanning, so
+    a subject carrying rules without them is not the shape production runs.
+    """
     shutil.copytree(REPO / ".saffron" / "rules", tmp_path / ".saffron" / "rules")
-    (tmp_path / "sgconfig.yml").write_text("ruleDirs:\n  - .saffron/rules\n")
+    shutil.copytree(
+        REPO / ".saffron" / "rule-tests", tmp_path / ".saffron" / "rule-tests"
+    )
+    (tmp_path / "sgconfig.yml").write_text(
+        "ruleDirs:\n  - .saffron/rules\ntestConfigs:\n"
+        "  - testDir: .saffron/rule-tests\n"
+    )
 
 
 def test_structure_fails_on_code_its_rules_reject(tmp_path):
@@ -490,13 +500,62 @@ def test_structure_errors_rather_than_passes_when_it_has_no_rules(tmp_path):
     assert result.tool, "a scan failure is not a reason to drop the tool identifier"
 
 
+def test_structure_errors_when_a_rule_has_stopped_guarding(tmp_path):
+    """The gap `integrity` leaves. A rule weakened until its own invalid snippet
+    no longer matches leaves `ast-grep scan` exiting 0 — a clean report from a
+    rule guarding nothing — and `gate-config-changed` exempts a task whose spec
+    declared the `.saffron/**` touch. `fail` would charge the repo's code for a
+    broken control surface, so it is `error` (§5.4)."""
+    _rules_tree(tmp_path)
+    rule = tmp_path / ".saffron" / "rules" / "agent-sdk-import-is-runner-only.yml"
+    rule.write_text(rule.read_text().replace("claude_agent_sdk", "never_matches_this"))
+    (tmp_path / "bad.py").write_text("import claude_agent_sdk\n")
+
+    done = subprocess.run(
+        [str(GATES / "structure")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "error", result.summary
+    assert result.status != "pass", "a rule that guards nothing scans clean"
+
+
+def test_structure_errors_when_its_rules_are_verified_by_nothing(tmp_path):
+    """Measured: with `testConfigs` absent `ast-grep test` prints "Running 0
+    tests" and exits 0. Read as a verdict that is every rule verified at once
+    while nothing ran — so the gate counts the tests against the rules on disk
+    rather than trusting the exit status."""
+    _rules_tree(tmp_path)
+    shutil.rmtree(tmp_path / ".saffron" / "rule-tests")
+    (tmp_path / "sgconfig.yml").write_text("ruleDirs:\n  - .saffron/rules\n")
+
+    done = subprocess.run(
+        [str(GATES / "structure")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "error", result.summary
+    assert "0 of 3 rules verified" in result.summary
+
+
 def _stub_ast_grep(tmp_path, version_body: str, scan_body: str = "echo '[]'"):
     """An `ast-grep` on PATH whose version no string literal in the gate could
     guess."""
     stub = tmp_path / "bin"
     stub.mkdir()
+    # The `test` branch reports the rule count these tests run against, so the
+    # gate's own verification passes and the assertion below reaches `scan`.
+    # Left to the `*)` catch-all it would answer the count check with scan output.
+    rules = len(list((REPO / ".saffron" / "rules").glob("*.yml")))
     (stub / "ast-grep").write_text(
         f'#!/bin/sh\ncase "$1" in\n  --version) {version_body} ;;\n'
+        f'  test) echo "test result: ok. {rules} passed; 0 failed;" ;;\n'
         f"  *) {scan_body} ;;\nesac\n"
     )
     (stub / "ast-grep").chmod(0o755)

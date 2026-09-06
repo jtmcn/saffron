@@ -10,8 +10,12 @@ string passing `import claude_agent_sdk` to `python -c` (Appendix G, §2.1, §5.
 """
 
 import json
+import pathlib
+import re
 import subprocess
 import sys
+
+RULES = pathlib.Path(__file__).resolve().parent.parent / "rules"
 
 
 def emit(payload):
@@ -35,6 +39,42 @@ if not tool:
             "gate": "structure",
             "status": "error",
             "summary": "ast-grep reported no version",
+        }
+    )
+
+# The rules are checked before the code is. A rule weakened until its own invalid
+# snippet no longer matches leaves `scan` exiting 0 — a clean report from a rule
+# that has stopped guarding anything, which is the shape of Appendix I. `integrity`
+# fails a diff that touches `.saffron/**` (`gate-config-changed`), but that check
+# exempts a task whose spec declared the touch, and it cannot see a rule broken by
+# anything other than a diff. Milliseconds, so there is no reason to trust instead.
+tests = subprocess.run(["ast-grep", "test"], capture_output=True, text=True)
+# `ast-grep test` prints "Running 0 tests" and exits 0 when `testConfigs` is
+# missing or the directory is empty: measured. Exit status alone would read that
+# as every rule verified. Count them instead, against the rules on disk.
+counted = re.search(r"(\d+) passed; (\d+) failed", tests.stdout)
+expected = len(list(RULES.glob("*.yml")))
+if tests.returncode != 0 or counted is None:
+    emit(
+        {
+            "gate": "structure",
+            "status": "error",
+            "tool": tool,
+            "summary": f"rule tests did not pass (exit {tests.returncode})",
+        }
+    )
+# `elif`, not a second `if`: `emit` exits, but it is not annotated `NoReturn` and
+# the `types` gate is blocking, so only the branch narrows `counted` off `None`.
+elif int(counted.group(1)) != expected or int(counted.group(2)) != 0:
+    emit(
+        {
+            "gate": "structure",
+            "status": "error",
+            "tool": tool,
+            "summary": (
+                f"{counted.group(1)} of {expected} rules verified, "
+                f"{counted.group(2)} failed"
+            ),
         }
     )
 
