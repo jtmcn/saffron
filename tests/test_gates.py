@@ -13,8 +13,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from saffron.gates.contract import GateResult, witness_blocking
+from saffron.gates.core.witness import witness_gate
 from saffron.gates.runner import run_suite, run_witness
 from saffron.intake import Criterion, Mutant
+from saffron.mutation import host_mutator
 
 
 def _gate_script(tmp_path: Path, name: str, body: str) -> Path:
@@ -68,7 +70,7 @@ def test_the_witness_gate_runs_after_the_tests_it_re_invokes(tmp_path):
         {"tests": tests, "lint": lint},
         cwd=tmp_path,
         acceptance=[criterion],
-        tree=tmp_path,
+        mutate=host_mutator(tmp_path),
     )
 
     assert [r.gate for r in results] == ["tests", "witness", "lint"]
@@ -114,7 +116,7 @@ def test_a_tests_gate_that_takes_no_subset_skips_the_witness_gate(tmp_path):
         gates={"tests": tests},
         cwd=tmp_path,
         acceptance=[criterion],
-        tree=tmp_path,
+        mutate=host_mutator(tmp_path),
         tests_result=tests_result,
     )
 
@@ -171,7 +173,7 @@ def test_a_stale_witness_id_does_not_trigger_a_false_skip(tmp_path):
         gates={"tests": tests},
         cwd=tmp_path,
         acceptance=[stale],
-        tree=tmp_path,
+        mutate=host_mutator(tmp_path),
         tests_result=tests_result,
     )
 
@@ -225,7 +227,7 @@ def test_the_result_names_each_criterion_not_a_count(tmp_path):
         gates={"tests": tests},
         cwd=tmp_path,
         acceptance=[survivor, never_applies],
-        tree=tmp_path,
+        mutate=host_mutator(tmp_path),
         tests_result=tests_result,
     )
 
@@ -276,7 +278,7 @@ def test_a_tests_gate_that_ignores_the_subset_cannot_attribute_a_death(tmp_path)
         gates={"tests": tests},
         cwd=tmp_path,
         acceptance=[criterion],
-        tree=tmp_path,
+        mutate=host_mutator(tmp_path),
         tests_result=tests_result,
     )
 
@@ -320,7 +322,7 @@ def test_a_collected_line_that_is_an_option_is_not_probed_with(tmp_path):
         gates={"tests": tests},
         cwd=tmp_path,
         acceptance=[criterion],
-        tree=tmp_path,
+        mutate=host_mutator(tmp_path),
         tests_result=tests_result,
     )
 
@@ -347,7 +349,7 @@ def test_a_repo_with_no_tests_gate_has_no_witness_gate(tmp_path):
             gates={"lint": lint},
             cwd=tmp_path,
             acceptance=[_criterion()],
-            tree=tmp_path,
+            mutate=host_mutator(tmp_path),
             tests_result=None,
         )
         is None
@@ -371,7 +373,7 @@ def test_no_readable_enumeration_is_a_skip_with_no_mutant_applied(tmp_path):
             gates={"tests": tests},
             cwd=tmp_path,
             acceptance=[_criterion()],
-            tree=tmp_path,
+            mutate=host_mutator(tmp_path),
             tests_result=GateResult(
                 gate="tests", status="pass", tool="pytest 8.3.2", collected=collected
             ),
@@ -382,3 +384,63 @@ def test_no_readable_enumeration_is_a_skip_with_no_mutant_applied(tmp_path):
         assert (
             tmp_path / "a.py"
         ).read_text() == "def total(x):\n    return max(x, 0)\n"
+
+
+def test_the_wiring_passes_a_mutator_through_and_changes_no_verdict(tmp_path):
+    """`run_suite` and `run_witness` pass the callable through in place of a
+    path, and every existing caller and test still gets the same answers.
+    This is a refactor: calling `witness_gate` directly with a real
+    `host_mutator` and calling it through the wiring must produce the same
+    verdict, and gate ordering, the pre-flight probe and the unproven
+    accounting are all untouched."""
+    (tmp_path / "a.py").write_text("def total(x):\n    return max(x, 0)\n")
+
+    lint = _gate_script(
+        tmp_path,
+        "lint",
+        'echo \'{"gate":"lint","status":"pass","tool":"fixture 1.0",'
+        '"failures":[],"summary":"clean"}\'\n',
+    )
+    tests = _gate_script(
+        tmp_path,
+        "tests",
+        'echo \'{"gate":"tests","status":"fail","tool":"pytest 8.3.2",'
+        f'"collected":["{_criterion().witness}"],'
+        '"failures":[{"file":"'
+        f"{_criterion().witness}"
+        '","code":"AssertionError","message":"boom"}],"summary":"1 failed"}\'\n',
+    )
+    criterion = _criterion()
+
+    direct = witness_gate(
+        acceptance=[criterion],
+        mutate=host_mutator(tmp_path),
+        run_tests=lambda subset: GateResult(
+            gate="tests",
+            status="fail",
+            tool="pytest 8.3.2",
+            collected=list(subset),
+            failures=[],
+            summary="1 failed",
+        ),
+    )
+
+    results = run_suite(
+        {"tests": tests, "lint": lint},
+        cwd=tmp_path,
+        acceptance=[criterion],
+        mutate=host_mutator(tmp_path),
+    )
+
+    assert [r.gate for r in results] == ["tests", "witness", "lint"]
+    wired = next(r for r in results if r.gate == "witness")
+    assert wired.status == direct.status == "pass"
+
+    # Omitted, as every real caller does today (`saffron/cell/**` wires no
+    # mutator yet): `witness` is left out of the suite entirely, exactly as
+    # `mutate=None` behaved before this callable existed under that name.
+    unwired = run_suite({"tests": tests, "lint": lint}, cwd=tmp_path)
+    assert [r.gate for r in unwired] == ["tests", "lint"]
+
+    # And the tree the gate is packaged from is back to its original state.
+    assert (tmp_path / "a.py").read_text() == "def total(x):\n    return max(x, 0)\n"

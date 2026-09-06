@@ -3,7 +3,13 @@ from __future__ import annotations
 import pytest
 
 from saffron.intake import Mutant
-from saffron.mutation import MutationError, MutationResult, apply_mutant, restore_mutant
+from saffron.mutation import (
+    MutationError,
+    MutationResult,
+    apply_mutant,
+    host_mutator,
+    restore_mutant,
+)
 
 
 def test_applying_a_mutant_returns_what_it_displaced(tmp_path):
@@ -205,3 +211,68 @@ def test_an_absolute_path_is_refused_even_inside_the_tree(tmp_path):
     assert result.ok is False
     assert "not a relative path" in result.reason
     assert target.read_bytes() == b"return max(x, 0)\n"
+
+
+def test_the_host_mutator_applies_and_restores_byte_identically(tmp_path):
+    """A host tree gets a mutator with exactly today's behaviour: one
+    implementation of `witness.Mutated` built on `apply_mutant`/
+    `restore_mutant` unchanged, whole-file digest included. Driven directly
+    as the context manager `witness_gate` now asks for, rather than through
+    the applier functions themselves."""
+    target = tmp_path / "a.py"
+    # CRLF and no trailing newline, exactly the fixture `apply_mutant`/
+    # `restore_mutant`'s own byte-identical test uses.
+    original = b"def total():\r\n    return max(x, 0)\r\n    # no trailing nl"
+    target.write_bytes(original)
+    mutant = Mutant(file="a.py", find="max(x, 0)", replace="x")
+    mutate = host_mutator(tmp_path)
+
+    with mutate(mutant) as reason:
+        assert reason is None
+        assert target.read_bytes() != original
+
+    assert target.read_bytes() == original
+
+    # Refuses a restore into a tree that moved, rather than splicing —
+    # `restore_mutant`'s own whole-file digest guard, reached through the
+    # context manager's exit instead of a direct call.
+    with (
+        pytest.raises(MutationError, match="the tree has moved"),
+        mutate(mutant) as reason,
+    ):
+        assert reason is None
+        target.write_bytes(b"moved\n")
+    assert target.read_bytes() == b"moved\n", "left mutated, not spliced"
+
+    # A mutant that cannot apply reports its reason through the `as` binding,
+    # never an exception and never a restore attempt.
+    target.write_bytes(b"unrelated content\n")
+    with mutate(mutant) as reason:
+        assert reason is not None
+        assert "max(x, 0)" in reason
+    assert target.read_bytes() == b"unrelated content\n"
+
+
+def test_a_mutator_restores_before_a_clean_interrupt_propagates(tmp_path):
+    """`_mutated`'s restore attempt is not skipped for a `BaseException` in
+    flight when the file is otherwise fine — only a failed restore is what
+    may be silently dropped in favour of the interrupt (the digest-guard
+    tests above cover that). A `finally` that skipped `restore_mutant`
+    entirely whenever any exception was propagating — `except BaseException:
+    raise` before the restore attempt — would still let every other test in
+    this module pass, and would still let `KeyboardInterrupt` propagate here
+    too; only checking the file afterwards catches it."""
+    target = tmp_path / "a.py"
+    original = b"def total():\n    return max(x, 0)\n"
+    target.write_bytes(original)
+    mutant = Mutant(file="a.py", find="max(x, 0)", replace="x")
+    mutate = host_mutator(tmp_path)
+
+    with pytest.raises(KeyboardInterrupt), mutate(mutant) as reason:
+        assert reason is None
+        assert target.read_bytes() != original  # the mutant is live
+        raise KeyboardInterrupt
+
+    assert target.read_bytes() == original, (
+        "left mutated by a clean interrupt — the restore was skipped, not merely raced"
+    )

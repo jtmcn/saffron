@@ -13,11 +13,13 @@ noticed the mutant and died. A witness that stays green under its own mutant
 is asserting nothing, and that is the finding, not a pass.
 
 It is `revert`'s exception, not a new one (§2.1). This gate executes no
-tool: it applies a text edit the *spec* supplied — data, not code — via
-`saffron.mutation`, and then invokes a gate the repo already declared,
-through the same JSON contract every gate uses, with the subset argument
-`revert` established. It runs no runner, knows no framework, and parses no
-node id.
+tool: it applies a text edit the *spec* supplied — data, not code — through
+an injected `mutate` context manager, and then invokes a gate the repo
+already declared, through the same JSON contract every gate uses, with the
+subset argument `revert` established. It runs no runner, knows no framework,
+parses no node id, and does no file I/O of its own — `mutate` is a callable
+from a `Mutant` to a context manager, and holds whatever path it needs so
+this gate never has to (`SA-0060`).
 
 **`error` is not `fail`.** A `tests` gate that could not start under the
 mutant — collection crashed, the toolchain broke — has answered nothing
@@ -31,25 +33,42 @@ silently bought as a `pass`.
 
 Every mutant is applied to a clean tree and restored before the next is
 touched, and restoration is attempted on every exit path — `error`, `skip`,
-`pass` and `fail` alike. A restore that itself fails is reported as `error`
-with the tree left mutated: nothing further here can fix that, and reporting
-anything else would be the false `pass` this gate exists to refuse.
+`pass` and `fail` alike. Restoring is not this gate's own file I/O: it is
+whatever `mutate` does on the way out of its context manager, and this gate
+holds no path of its own to do it a second way. A restore that itself fails
+surfaces here as an ordinary exception out of that context manager, which
+this gate reports as `error` with the tree left mutated: nothing further
+here can fix that, and reporting anything else would be the false `pass`
+this gate exists to refuse.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from pathlib import Path
+from contextlib import AbstractContextManager
 
 from saffron.gates.contract import Failure, GateResult
-from saffron.intake import Criterion
-from saffron.mutation import MutationError, apply_mutant, restore_mutant
+from saffron.intake import Criterion, Mutant
 
 # Run the repo's declared `tests` gate over exactly this subset — never
 # discovered here; core knows nothing about which gate fills the role (§2.1).
 # The same shape `revert.py` declares, redeclared rather than imported: this
 # module owes `revert` a precedent, not a dependency.
 RunTests = Callable[[list[str]], GateResult]
+
+# `revert.Reverted`, one noun over: a callable from a `Mutant` to a context
+# manager that applies it on entry and undoes it on exit. This gate performs
+# no file I/O of its own and holds no path — `saffron.mutation.host_mutator`
+# is the one production implementation, and a cell's volume can supply
+# another without this module changing at all (`SA-0060`).
+#
+# Entering yields `None` when the mutant is now live and must be undone, or a
+# `str` reason when it could not be applied or the mutator could not reach
+# the tree at all — both are the identical non-committal outcome, "unproven",
+# never a task's problem. Anything the context manager *raises*, on entry or
+# on exit, is instead this gate's `error`: something broke, rather than
+# something the spec merely got wrong.
+Mutated = Callable[[Mutant], AbstractContextManager[str | None]]
 
 
 def _named(criterion: Criterion, reason: str) -> str:
@@ -59,20 +78,23 @@ def _named(criterion: Criterion, reason: str) -> str:
 def witness_gate(
     *,
     acceptance: Sequence[Criterion],
-    tree: Path,
+    mutate: Mutated,
     run_tests: RunTests,
 ) -> GateResult:
-    """Each criterion's mutant, applied, tested alone, and undone.
+    """Each criterion's mutant, applied through `mutate`, tested alone, and
+    undone.
 
     `skip` is the answer for a spec that declares no mutants — every spec
     that exists today, and this gate must not fail a task for a field its
     own spec predates — and for one whose every declared mutant failed to
-    apply: named in the summary, never counted as a witness that did its
-    job. `error` ends the attempt the moment the repo's `tests` gate could
-    not answer for one mutant; nothing already restored is undone, and
-    nothing not yet touched is applied. The one exception is a restore that
-    itself failed — `error` too, and it leaves the tree mutated, because
-    nothing here can put back what it could not read or write.
+    apply, or whose mutator could not reach the tree at all: named in the
+    summary, never counted as a witness that did its job. `error` ends the
+    attempt the moment the repo's `tests` gate could not answer for one
+    mutant; nothing already restored is undone, and nothing not yet touched
+    is applied. The one exception is a restore that itself failed — `error`
+    too, and it leaves the tree mutated, because nothing here can put back
+    what it could not read or write, and this gate has no path of its own to
+    try.
     """
     declared = [c for c in acceptance if c.mutant is not None]
     if not declared:
@@ -88,49 +110,37 @@ def witness_gate(
     for criterion in declared:
         mutant = criterion.mutant
         assert mutant is not None  # narrowed by the `declared` filter above
-        applied = apply_mutant(tree, mutant)
-        if not applied.ok:
-            unproven.append(_named(criterion, applied.reason))
-            continue
 
-        # No `return` inside the `finally` below. One there discards whatever
-        # was in flight — measured: a `KeyboardInterrupt` raised by `run_tests`
-        # was swallowed and this gate returned an ordinary `GateResult`, so an
-        # operator's Ctrl-C during a mutated test run went nowhere. `except
-        # Exception` does not cover a `BaseException`, and ruff's B012 does not
-        # see a `return` nested inside a `try` inside a `finally`, so neither
-        # the type nor the linter catches it. `revert` uses this same
-        # record-then-return shape for the same reason.
+        # `mutate`'s exit is where restoration happens now — a context
+        # manager's exit is the one place a `BaseException` cannot route
+        # around, unlike a `finally` this gate would have to write by hand
+        # (`saffron.mutation._mutated` carries the history of what that hand
+        # gets wrong). `run_tests`'s own exception is still recorded rather
+        # than raised, so the `with` block ends normally and `mutate` always
+        # gets to restore before this gate decides anything; only a
+        # `BaseException` from `run_tests` skips straight through both.
         failed_to_run: Exception | None = None
-        failed_to_restore: Exception | None = None
         tests_result = None
         try:
-            try:
-                tests_result = run_tests([criterion.witness])
-            except Exception as exc:  # recorded, reported below, not swallowed
-                failed_to_run = exc
-        finally:
-            try:
-                restore_mutant(tree, mutant, applied)
-            except (MutationError, OSError) as exc:
-                # `OSError` too: `restore_mutant` guards neither its read nor
-                # its write, so a `run_tests` that deletes the file raises
-                # `FileNotFoundError` from inside this `finally` — and an
-                # exception raised there *replaces* whatever was in flight.
-                # Measured: a Ctrl-C came out as `FileNotFoundError` with the
-                # interrupt demoted to `__context__`, where nothing looks. The
-                # `return` was half this bug; a `raise` is the other half.
-                failed_to_restore = exc
-
-        # Restoration first: a tree left mutated is the worse fact, and it is
-        # the one that ships in the diff if nothing says so.
-        if failed_to_restore is not None:
+            with mutate(mutant) as reason:
+                if reason is not None:
+                    unproven.append(_named(criterion, reason))
+                    continue
+                try:
+                    tests_result = run_tests([criterion.witness])
+                except Exception as exc:  # recorded, reported below, not swallowed
+                    failed_to_run = exc
+        except Exception as exc:
+            # Whatever `mutate` itself raised getting here — most likely a
+            # failed restore — is the worse fact, the one that ships in the
+            # diff if nothing says so. This gate does not know or care what
+            # exception type a given `mutate` implementation raises; that
+            # knowledge stays with whoever built it.
             return GateResult(
                 gate="witness",
                 status="error",
                 summary=(
-                    f"could not restore {mutant.file} after its mutant — "
-                    f"{failed_to_restore}"
+                    f"could not restore {mutant.file} after its mutant — {exc}"
                     + (
                         f" (the run also failed — {failed_to_run})"
                         if failed_to_run is not None
