@@ -15,7 +15,8 @@ worktree a task is being packaged from, so anything it does must be undone
 exactly: byte-identical, including a trailing newline or a CRLF line ending
 that text mode would otherwise normalize away.
 
-`host_mutator` (`SA-0060`) is the one production implementation of
+`host_mutator` (`SA-0060`) is the implementation a host tree gets — reached only from tests
+until `SA-0061` and `SA-0062` wire a cell run of
 `witness.Mutated` — a callable from a `Mutant` to a context manager that
 applies on entry and undoes on exit, the shape `saffron/gates/core/witness.py`
 now asks for instead of a bare `tree: Path` it would have to do its own file

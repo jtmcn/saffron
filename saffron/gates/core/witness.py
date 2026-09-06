@@ -68,6 +68,12 @@ RunTests = Callable[[list[str]], GateResult]
 # never a task's problem. Anything the context manager *raises*, on entry or
 # on exit, is instead this gate's `error`: something broke, rather than
 # something the spec merely got wrong.
+# Two obligations the type cannot carry, and `SA-0062`'s cell mutator is who
+# has to meet them. A yielded reason means *nothing was changed* — yielding one
+# after writing to the tree leaves it mutated and reported as merely unproven,
+# the silent dirty tree this gate exists to refuse. And the exit must not
+# suppress: an exit returning `True` swallows a `KeyboardInterrupt` out of
+# `run_tests` and this gate then trips its own narrowing assert.
 Mutated = Callable[[Mutant], AbstractContextManager[str | None]]
 
 
@@ -121,26 +127,45 @@ def witness_gate(
         # `BaseException` from `run_tests` skips straight through both.
         failed_to_run: Exception | None = None
         tests_result = None
+        applied = False
         try:
             with mutate(mutant) as reason:
                 if reason is not None:
                     unproven.append(_named(criterion, reason))
                     continue
+                # Past the reason check, so the tree really is mutated now.
+                # What this flag buys is the verb below: "could not restore"
+                # is the loudest thing this gate says — it means a mutated
+                # tree is still out there and will ship in the diff — and
+                # saying it about a `mutate` that failed on entry sends an
+                # operator hunting a poisoned worktree that does not exist.
+                applied = True
                 try:
                     tests_result = run_tests([criterion.witness])
-                except Exception as exc:  # recorded, reported below, not swallowed
+                except Exception as exc:
+                    # Recorded rather than raised, and not because `mutate`
+                    # needs the block to end normally — its own exit restores
+                    # either way. It buys attribution: a run that failed and a
+                    # restore that failed are different sentences, and when
+                    # both happen the operator gets both.
                     failed_to_run = exc
         except Exception as exc:
-            # Whatever `mutate` itself raised getting here — most likely a
-            # failed restore — is the worse fact, the one that ships in the
-            # diff if nothing says so. This gate does not know or care what
-            # exception type a given `mutate` implementation raises; that
-            # knowledge stays with whoever built it.
+            # Whatever `mutate` itself raised getting here is the worse fact,
+            # the one that ships in the diff if nothing says so. This gate does
+            # not know or care what exception type a given `mutate`
+            # implementation raises; that knowledge stays with whoever built
+            # it. `SA-0062`'s cell mutator enters through a container exec,
+            # which can fail routinely, so the entry case is not a corner.
+            verb = (
+                f"could not restore {mutant.file} after its mutant"
+                if applied
+                else f"could not apply {mutant.file}'s mutant"
+            )
             return GateResult(
                 gate="witness",
                 status="error",
                 summary=(
-                    f"could not restore {mutant.file} after its mutant — {exc}"
+                    f"{verb} — {exc}"
                     + (
                         f" (the run also failed — {failed_to_run})"
                         if failed_to_run is not None

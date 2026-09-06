@@ -612,3 +612,80 @@ def test_a_mutator_that_cannot_reach_the_tree_skips():
     assert criterion.witness in result.summary
     assert "not wired" in result.summary
     assert not result.failures
+
+
+def test_a_mutator_that_fails_on_entry_is_not_reported_as_a_failed_restore(tmp_path):
+    """ "Could not restore" is the loudest thing this gate says: its own
+    docstring makes it mean a mutated tree is still out there and will ship in
+    the diff. Saying it about a `mutate` that raised on *entry* — where nothing
+    was ever applied — sends an operator hunting a poisoned worktree that does
+    not exist.
+
+    Not a corner case for long. `SA-0062`'s cell mutator enters through a
+    container exec, which can fail routinely, so this wording lands on the
+    common path the moment that spec merges."""
+
+    @contextlib.contextmanager
+    def raises_on_entry(mutant):
+        raise OSError("read-only volume")
+        yield None  # pragma: no cover — unreachable, satisfies the type
+
+    result = witness_gate(
+        acceptance=[_criterion()],
+        mutate=raises_on_entry,
+        run_tests=lambda subset: _tests(status="fail", collected=()),
+    )
+
+    assert result.status == "error"
+    assert "could not apply" in result.summary
+    assert "could not restore" not in result.summary
+    assert "read-only volume" in result.summary
+
+
+def test_a_failed_restore_is_still_reported_as_one(tmp_path):
+    """The other side of the verb: once the mutant is applied, a raising exit
+    *is* a failed restore and must keep saying so. A flag that always read
+    "could not apply" would be as wrong as the one that always read "could not
+    restore"."""
+
+    @contextlib.contextmanager
+    def raises_on_exit(mutant):
+        yield None
+        raise OSError("volume went away")
+
+    result = witness_gate(
+        acceptance=[_criterion()],
+        mutate=raises_on_exit,
+        run_tests=lambda subset: _tests(status="fail", collected=()),
+    )
+
+    assert result.status == "error"
+    assert "could not restore" in result.summary
+    assert "volume went away" in result.summary
+
+
+def test_a_run_failure_and_a_restore_failure_are_both_named(tmp_path):
+    """What recording the run's exception actually buys. Deleting the inner
+    `try/except` — letting `run_tests`'s exception propagate through the `with`
+    and be caught by the outer handler — passed all 1437 tests: `mutate`
+    restores either way, so nothing observable changed except that the run's
+    failure vanished from the summary.
+
+    Two different subsystems failed and the operator gets both sentences."""
+
+    @contextlib.contextmanager
+    def raises_on_exit(mutant):
+        yield None
+        raise OSError("volume went away")
+
+    def run_tests(subset):
+        raise RuntimeError("the runner would not start")
+
+    result = witness_gate(
+        acceptance=[_criterion()], mutate=raises_on_exit, run_tests=run_tests
+    )
+
+    assert result.status == "error"
+    assert "could not restore" in result.summary
+    assert "the run also failed" in result.summary
+    assert "the runner would not start" in result.summary
