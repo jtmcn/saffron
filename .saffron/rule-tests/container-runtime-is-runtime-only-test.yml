@@ -34,3 +34,30 @@ invalid:
   - 'start(runtime="container")'
   - 'def start(binary="container"): pass'
   - 'RUNTIMES = {"apple": "container"}'
+  # The prefix, one per branch. A `string` node's text carries `r`/`f`/`b` and the
+  # triple-quoted form as well as its quotes, so a regex anchored on the quote
+  # character read only two of the spellings. Measured: with the rule matching the
+  # node's text, every one of these walked past — and `lint` and `format` passed
+  # them too, so unlike the single-quoted form there was no cross-gate luck left.
+  - 'subprocess.run([r"container", "run", "--rm", image])'
+  - 'subprocess.run([f"container", "run", "--rm", image])'
+  - 'subprocess.run(["""container""", "run", "--rm", image])'
+  - 'argv = (r"container", "run")'
+  - 'RT = r"container"'
+  - 'start(runtime=r"container")'
+  - 'def start(binary=r"container"): pass'
+  - 'RUNTIMES = {"apple": r"container"}'
+  - "subprocess.run([r'/usr/local/bin/container', 'run'])"
+  # An argv that prefixes the binary with a wrapper. Measured: `nthChild: 1` let
+  # every one of these past — `sudo`, `env`, `nice`, or any helper's own name.
+  - 'subprocess.run(["sudo", "container", "run"])'
+  - 'subprocess.run(["env", "X=1", r"container", "run"])'
+  # The binary as a plain call argument, and the function form of `RT =`. `which`
+  # is what a preflight check reaches for; a helper returning the name satisfies
+  # every argv branch while doing what Appendix G forbids.
+  - 'w = shutil.which("container")'
+  - 'subprocess.run("container")'
+  - 'def binary(): return "container"'
+  - 'def binary(): return r"container"'
+  # A set literal is neither a list nor a tuple.
+  - 'BINS = {"container"}'

@@ -4186,22 +4186,50 @@ result. Measured on `structure` before the fix — `fail` on the planted violati
 one line added, `pass` — and ruff documents the same walk (`--no-respect-gitignore`
 exists precisely because of it).
 
-`.gitignore` is now in `integrity.gate_config`, so an edit routes to a person on
-every gate at once, and that is the load-bearing half. What is left is per-gate
-and cheaper than it looks:
+`.gitignore` is in `integrity.gate_config`, which routes an edit to a person on
+every gate at once — but that is the *tracked* half only, and a later review round
+found the rest. A `.gitignore` naming both a violating tracked file and itself is
+never added by `git add -A`: it reaches no diff, no commit, and nothing
+`git status --porcelain -uall` reports, so no policy list can ever see it.
+Measured on `structure` before its second fix: violation committed, scan `pass`.
+Routing is not a substitute for refusing. What is left is per-gate:
 
-- **`lint` and `format`** should pass `--no-respect-gitignore` and name their own
-  exclusions, as `structure` does for `.ignore` and `.git/info/exclude`. The
-  reason to be careful rather than quick: `.venv/` and `.claude/worktrees/` are
+- **`lint` and `format`** should stop respecting any ignore source and name their
+  own exclusions, as `structure` now does with `--no-ignore vcs` and `--globs`.
+  The reason to measure rather than guess: `.venv/` and `.claude/worktrees/` are
   gitignored, and a scan that walks into either is slow and reports third-party
-  code. `structure` keeps the gitignore filter for exactly that reason and routes
-  instead; whether ruff can afford the same trade is a measurement, not a guess.
+  code. For `structure` that cost was 0.04s against 0.27s and zero new matches;
+  ruff's own walk is a separate measurement.
 - **`tests`** is a different question — pytest collects through its own config —
   and should be checked rather than assumed to share the defect.
 
 **Done looks like** a test per gate in the shape of
 `test_an_ignore_file_outside_the_diff_cannot_hide_a_violation`: a tracked file
-that violates, an ignore file naming it, and the gate still reporting `fail`.
+that violates, an ignore file naming it, and the gate still reporting `fail`. The
+`.git` directory in that fixture is load-bearing — the walker honours a
+`.gitignore` only in a tree that looks like a repository, so without one the test
+passes against the unfixed gate.
+
+---
+
+## 72. The `tool` invariant is gated for Python, and one gate is written in shell
+
+Found reviewing PR #145. `.saffron/rules/gate-tool-must-be-executed.yml` is
+`language: python`, and `.saffron/gates/format` builds its whole contract in `sh`.
+Measured: rewriting its `tool="ruff $(ruff --version | awk …)"` to
+`tool="ruff 0.16.3"` — the literal §5.4 exists to forbid — leaves `structure`
+reporting `pass`. Five of the six gates here are `sh` wrappers that `exec python3`
+and so are covered; `format` is the one authored in shell, and a target repo
+onboarding these rules may have more.
+
+The Python side of this is now closed as far as a structural rule reaches,
+including the contract serialized by hand as a single string — which is exactly
+the shape `format` uses, so it is what a new Python gate copies.
+
+**Done looks like** a `language: bash` rule in `.saffron/rules/` with its own
+`invalid` snippet for `tool="<literal>"`, and `ruleDirs` already loads it. Cheap;
+it is here rather than in #145 because the rule needs its own false-positive
+measurement against the five wrappers and `format`'s own `case` arms.
 
 ---
 

@@ -34,6 +34,10 @@ snapshots:
       style: primary
       start: 22
       end: 43
+    - source: tool
+      style: secondary
+      start: 23
+      end: 27
     - source: '"tool"'
       style: secondary
       start: 22
@@ -42,12 +46,34 @@ snapshots:
       style: secondary
       start: 30
       end: 43
+  'emit({"gate": "lint", r"tool": "ruff 0.16.3"})':
+    labels:
+    - source: 'r"tool": "ruff 0.16.3"'
+      style: primary
+      start: 22
+      end: 44
+    - source: tool
+      style: secondary
+      start: 24
+      end: 28
+    - source: r"tool"
+      style: secondary
+      start: 22
+      end: 29
+    - source: '"ruff 0.16.3"'
+      style: secondary
+      start: 31
+      end: 44
   'emit({''gate'': ''lint'', ''tool'': ''ruff 0.16.3''})':
     labels:
     - source: '''tool'': ''ruff 0.16.3'''
       style: primary
       start: 22
       end: 43
+    - source: tool
+      style: secondary
+      start: 23
+      end: 27
     - source: '''tool'''
       style: secondary
       start: 22
@@ -70,6 +96,10 @@ snapshots:
       style: secondary
       start: 0
       end: 18
+    - source: tool
+      style: secondary
+      start: 20
+      end: 24
     - source: '"tool"'
       style: secondary
       start: 19
@@ -96,6 +126,10 @@ snapshots:
       style: secondary
       start: 0
       end: 18
+    - source: tool
+      style: secondary
+      start: 20
+      end: 24
     - source: '''tool'''
       style: secondary
       start: 19
@@ -108,12 +142,46 @@ snapshots:
       style: secondary
       start: 18
       end: 41
+  payload.setdefault(r"tool", "ruff 0.16.3"):
+    labels:
+    - source: payload.setdefault(r"tool", "ruff 0.16.3")
+      style: primary
+      start: 0
+      end: 42
+    - source: setdefault
+      style: secondary
+      start: 8
+      end: 18
+    - source: payload.setdefault
+      style: secondary
+      start: 0
+      end: 18
+    - source: tool
+      style: secondary
+      start: 21
+      end: 25
+    - source: r"tool"
+      style: secondary
+      start: 19
+      end: 26
+    - source: '"ruff 0.16.3"'
+      style: secondary
+      start: 28
+      end: 41
+    - source: (r"tool", "ruff 0.16.3")
+      style: secondary
+      start: 18
+      end: 42
   payload["tool"] = "ruff 0.16.3":
     labels:
     - source: payload["tool"] = "ruff 0.16.3"
       style: primary
       start: 0
       end: 31
+    - source: tool
+      style: secondary
+      start: 9
+      end: 13
     - source: '"tool"'
       style: secondary
       start: 8
@@ -132,6 +200,10 @@ snapshots:
       style: primary
       start: 0
       end: 31
+    - source: tool
+      style: secondary
+      start: 9
+      end: 13
     - source: '''tool'''
       style: secondary
       start: 8
@@ -144,6 +216,39 @@ snapshots:
       style: secondary
       start: 18
       end: 31
+  payload[r"tool"] = "ruff 0.16.3":
+    labels:
+    - source: payload[r"tool"] = "ruff 0.16.3"
+      style: primary
+      start: 0
+      end: 32
+    - source: tool
+      style: secondary
+      start: 10
+      end: 14
+    - source: r"tool"
+      style: secondary
+      start: 8
+      end: 15
+    - source: payload[r"tool"]
+      style: secondary
+      start: 0
+      end: 16
+    - source: '"ruff 0.16.3"'
+      style: secondary
+      start: 19
+      end: 32
+  ? |
+    print('{"gate":"lint","status":"pass","tool":"ruff 0.16.3"}')
+  : labels:
+    - source: '''{"gate":"lint","status":"pass","tool":"ruff 0.16.3"}'''
+      style: primary
+      start: 6
+      end: 60
+    - source: '{"gate":"lint","status":"pass","tool":"ruff 0.16.3"}'
+      style: secondary
+      start: 7
+      end: 59
   result.tool = "ruff 0.16.3":
     labels:
     - source: result.tool = "ruff 0.16.3"
@@ -162,6 +267,17 @@ snapshots:
       style: secondary
       start: 14
       end: 27
+  ? |
+    sys.stdout.write('{"gate": "lint", "tool": "ruff 0.16.3"}')
+  : labels:
+    - source: '''{"gate": "lint", "tool": "ruff 0.16.3"}'''
+      style: primary
+      start: 17
+      end: 58
+    - source: '{"gate": "lint", "tool": "ruff 0.16.3"}'
+      style: secondary
+      start: 18
+      end: 57
   tool = "ruff 0.16.3":
     labels:
     - source: tool = "ruff 0.16.3"

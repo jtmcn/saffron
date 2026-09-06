@@ -23,9 +23,18 @@ rule:
     # kind above can see, because it is a call. Measured: 0 matches in the tree,
     # so the branch costs nothing and closes the obvious way around the other
     # two. The module named as data stays valid; the call is what is forbidden.
+    # Matched on the string's *content*, not on its source text: a `string` node's
+    # text carries its quotes and its prefix, so a regex anchored on `['"]` reads
+    # only the spelling its author typed. Measured, `import_module(r"…")` walked
+    # past while `lint` and `format` both passed it — ruff has no rule against a
+    # raw string and the formatter does not rewrite one. `string_content` carries
+    # neither, so every quote style and prefix is one case.
     - kind: call
       all:
         - has: { field: function, regex: '(^|\.)import_module$|^__import__$' }
         - has:
             field: arguments
-            has: { nthChild: 1, regex: "^['\"]claude_agent_sdk" }
+            has:
+              nthChild: 1
+              kind: string
+              has: { kind: string_content, regex: '^claude_agent_sdk' }

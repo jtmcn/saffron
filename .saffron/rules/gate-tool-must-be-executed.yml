@@ -17,12 +17,25 @@ ignores:
 # `t = "ruff 1.0"` then `tool=t`, or `"ruff " + v` — is out of a structural
 # rule's reach. The branches below are the forms that write the literal *at* the
 # field, which is every way the defect has actually been written here.
+# ponytail: this rule is `language: python`, and `.saffron/gates/format` builds
+# its whole contract in `sh`. A shell gate writing `tool="ruff 0.16.3"` is out of
+# reach until a `language: bash` rule exists — backlog item 72. CLAUDE.md's
+# `(gated)` says so rather than implying the invariant is covered everywhere.
+utils:
+  # The field name matched on the string's *content*, not on its source text. A
+  # `string` node's text carries its quotes and its prefix, so a regex anchored
+  # on `['"]` reads only the spelling its author typed: measured, `{r"tool": ...}`
+  # walked past while `lint` and `format` both passed it. `string_content` carries
+  # neither, so every quote style and prefix is one case.
+  tool-key:
+    kind: string
+    has: { kind: string_content, regex: '^tool$' }
 rule:
   any:
     # {"tool": "ruff 0.16.3"}
     - kind: pair
       all:
-        - has: { field: key, regex: "^['\"]tool['\"]$" }
+        - has: { field: key, matches: tool-key }
         - has: { field: value, kind: string }
     # payload["tool"] = "ruff 0.16.3"
     - kind: assignment
@@ -30,7 +43,7 @@ rule:
         - has:
             field: left
             kind: subscript
-            has: { field: subscript, regex: "^['\"]tool['\"]$" }
+            has: { field: subscript, matches: tool-key }
         - has: { field: right, kind: string }
     # GateResult(..., tool="ruff 0.16.3")
     - kind: keyword_argument
@@ -65,7 +78,7 @@ rule:
         - has:
             field: arguments
             all:
-              - has: { nthChild: 1, regex: "^['\"]tool['\"]$" }
+              - has: { nthChild: 1, matches: tool-key }
               - has: { nthChild: 2, kind: string }
     # def emit(payload, tool="ruff 0.16.3") — a distinct node kind from both
     # `assignment` and `keyword_argument`, so every branch above missed it, and
@@ -74,3 +87,10 @@ rule:
       all:
         - has: { field: name, regex: '^tool$' }
         - has: { field: value, kind: string }
+    # print('{"gate":"lint","tool":"ruff 0.16.3"}') — the contract serialized by
+    # hand, which is how `.saffron/gates/format` writes it in shell, so it is the
+    # shape a new Python gate copies rather than an evasion. Every branch above
+    # misses it: there is no `pair` node, only one string. Measured: 0 matches in
+    # the tree, and the field spelled as JSON is not a thing prose says.
+    - kind: string
+      has: { kind: string_content, regex: '"tool"\s*:\s*"' }

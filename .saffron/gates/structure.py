@@ -24,6 +24,7 @@ from typing import NoReturn
 # also `shacl.py`'s reason for resolving its own paths rather than trusting cwd.
 CONFIG = pathlib.Path(__file__).resolve().parent.parent / "sgconfig.yml"
 RULES = CONFIG.parent / "rules"
+RULE_TESTS = CONFIG.parent / "rule-tests"
 
 
 def emit(payload) -> NoReturn:
@@ -55,6 +56,36 @@ if not tool:
             "gate": "structure",
             "status": "error",
             "summary": "ast-grep reported no version",
+        }
+    )
+
+# A rule test that declares no `invalid` snippet certifies nothing, and says so
+# in the same words as one that does. Measured: delete a rule's `invalid:` list
+# and neuter its body, and `ast-grep test` reports `PASS <rule>` and counts it in
+# `3 passed; 0 failed` — a rule matching nothing satisfies every `valid` snippet
+# left behind — so the count below is satisfied while the rule guards nothing.
+# The `valid` snippets say what must not fire; only an `invalid` one says the rule
+# fires at all. Line-based because the gate is a stdlib script with no YAML
+# parser, which is also why `.saffron/rule-tests/` is a name it resolves itself; a
+# test asserts the config names this directory, the one thing the gate cannot
+# notice about itself.
+uncertified = sorted(
+    p.name
+    for p in RULE_TESTS.rglob("*")
+    if p.suffix in (".yml", ".yaml")
+    and "__snapshots__" not in p.parts
+    and not re.search(r"^invalid:\s*\n\s*-", p.read_text(), re.M)
+)
+if uncertified:
+    emit(
+        {
+            "gate": "structure",
+            "status": "error",
+            "tool": tool,
+            "summary": (
+                "rule tests declaring no `invalid` snippet, so certifying "
+                f"nothing: {', '.join(uncertified)}"
+            ),
         }
     )
 
@@ -102,16 +133,23 @@ elif int(counted.group(1)) != expected or int(counted.group(2)) != 0:
 # until this flag was added. It does not disable the gitignore filter, so `.venv`
 # and `.claude/worktrees/` stay out.
 #
-# The other three are for a different reason. Measured, a violating *tracked* file
-# disappears from this scan if any ignore file names it: ast-grep walks with the
-# `ignore` crate, which has no notion of what git tracks. `.gitignore` is the one
-# such source this repo keeps — it is what holds `.venv` out — and it is reachable,
-# so `integrity.gate_config` routes an edit to it to a person. The rest are refused
-# outright, because no policy list can reach them: `.ignore` is honoured even
-# outside a repo, and `.git/info/exclude` and `core.excludesFile` never appear in a
-# diff at all — the last one is not even in the repository. Measured with
-# `core.excludesFile` naming a tracked violating file: scanned clean without
-# `global`, reported with it.
+# The other four are one reason. Measured, a violating *tracked* file disappears
+# from this scan if any ignore file names it: ast-grep walks with the `ignore`
+# crate, which has no notion of what git tracks. Every such source is refused,
+# `.gitignore` included — an earlier version kept it and leaned on
+# `integrity.gate_config` to route an edit to a person, which closes the tracked
+# case only. Measured: a `.gitignore` naming both a tracked violating file and
+# *itself* is never added, so it appears in no diff, no commit, and nothing
+# `git status --porcelain -uall` reports, while the violation stays committed and
+# the scan reports clean. `.ignore` is honoured even outside a repo, and
+# `.git/info/exclude` and `core.excludesFile` cannot appear in a diff at all.
+#
+# What holds `.venv` out is `--globs` instead, which ast-grep documents as
+# overriding every other ignore source: the set of files scanned is now a property
+# of this gate rather than of whichever files happen to be on disk. Measured on
+# this tree: 0.04s with the globs, 0.27s scanning `.venv` too, and 0 matches
+# either way — so the cost is speed and a dependency's future false positive, not
+# a violation. Add to this list, never to a `.gitignore`.
 #
 # `--no-ignore parent` is deliberately absent. Measured at ast-grep 0.45.3, with a
 # `.gitignore` one directory above the scan root and with and without a `.git`:
@@ -131,6 +169,14 @@ proc = subprocess.run(
         "exclude",
         "--no-ignore",
         "global",
+        "--no-ignore",
+        "vcs",
+        "--globs",
+        "!.venv/**",
+        "--globs",
+        "!.claude/worktrees/**",
+        "--globs",
+        "!**/__pycache__/**",
         "--json=compact",
     ],
     capture_output=True,

@@ -120,11 +120,15 @@ The three marked **(gated)** are enforced by `.saffron/rules/`, run by the `stru
 a prek hook; the rest are still prose. Promote one when you find it broken — `ast-grep test`
 means a rule ships with the mutant that proves it fires. Both pass `-c .saffron/sgconfig.yml`
 rather than letting ast-grep find a config by walking, so the file naming the rules is inside
-the subtree `integrity` guards; a rule's `files:` glob is checked for reach by a test, because
-snippets have no paths.
+the subtree `integrity` guards, and both refuse every ignore source and state their own file
+set with `--globs`: a `.gitignore` naming itself reaches no diff, so routing an edit to a person
+cannot close that. A rule's `files:` glob is checked for reach by a test, its `ignores:` asserted
+exactly, and its regexes match a string's *content* — a `string` node's text carries its quotes
+and its `r`/`f` prefix, and anchoring on those read only the spellings the author typed.
 
 - **The `tool` field** separates a gate that ran and passed from one that never ran. It must be
-  obtained *by executing* the tool, never a string literal (§5.4, Appendix H). **(gated)**
+  obtained *by executing* the tool, never a string literal (§5.4, Appendix H). **(gated over
+  Python; `.saffron/gates/format` builds its contract in `sh`, which no rule reads — item 72)**
 - **`error` ≠ `fail`.** `fail` means the repo's code is wrong; `error` means the gate broke,
   aborts the attempt, and is charged to nobody. Never collapse them.
 - **Baseline subtraction counts.** Identities collide legitimately — one baseline failure

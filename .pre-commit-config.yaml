@@ -37,7 +37,9 @@ repos:
           sh -c 'uv run ast-grep test -c .saffron/sgconfig.yml
           && uv run ast-grep scan -c .saffron/sgconfig.yml
           --no-ignore hidden --no-ignore dot --no-ignore exclude
-          --no-ignore global'
+          --no-ignore global --no-ignore vcs
+          --globs "!.venv/**" --globs "!.claude/worktrees/**"
+          --globs "!**/__pycache__/**"'
         pass_filenames: false
         files: ^(.*\.py|\.saffron/(sgconfig\.yml|rules/.*|rule-tests/.*))$
 

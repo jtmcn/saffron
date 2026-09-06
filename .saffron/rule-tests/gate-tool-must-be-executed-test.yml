@@ -35,3 +35,18 @@ invalid:
   # A default is neither an assignment nor a keyword argument, so every other
   # branch missed it — and it is a plausible way to write it in a gate helper.
   - 'def emit(payload, tool="ruff 0.16.3"): pass'
+  # The prefix, one per branch that matches on the key. A `string` node's text
+  # carries `r`/`f`/`b` as well as its quotes, so anchoring on the quote read only
+  # the spellings its author typed — and unlike the single-quoted form, ruff
+  # neither lints nor reformats a raw string, so nothing else in the loop caught
+  # these either.
+  - 'emit({"gate": "lint", r"tool": "ruff 0.16.3"})'
+  - 'payload[r"tool"] = "ruff 0.16.3"'
+  - 'payload.setdefault(r"tool", "ruff 0.16.3")'
+  # The contract serialized by hand. `.saffron/gates/format` writes it exactly
+  # this way in shell, so it is the shape a new Python gate copies rather than an
+  # evasion — and there is no `pair` node in it for any branch above to see.
+  - |
+    print('{"gate":"lint","status":"pass","tool":"ruff 0.16.3"}')
+  - |
+    sys.stdout.write('{"gate": "lint", "tool": "ruff 0.16.3"}')

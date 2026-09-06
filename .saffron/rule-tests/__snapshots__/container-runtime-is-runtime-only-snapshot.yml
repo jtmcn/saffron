@@ -1,11 +1,29 @@
 id: container-runtime-is-runtime-only
 snapshots:
+  BINS = {"container"}:
+    labels:
+    - source: '{"container"}'
+      style: primary
+      start: 7
+      end: 20
+    - source: container
+      style: secondary
+      start: 9
+      end: 18
+    - source: '"container"'
+      style: secondary
+      start: 8
+      end: 19
   RT = "container":
     labels:
     - source: RT = "container"
       style: primary
       start: 0
       end: 16
+    - source: container
+      style: secondary
+      start: 6
+      end: 15
     - source: '"container"'
       style: secondary
       start: 5
@@ -16,26 +34,66 @@ snapshots:
       style: primary
       start: 0
       end: 16
+    - source: container
+      style: secondary
+      start: 6
+      end: 15
     - source: '''container'''
       style: secondary
       start: 5
       end: 16
+  RT = r"container":
+    labels:
+    - source: RT = r"container"
+      style: primary
+      start: 0
+      end: 17
+    - source: container
+      style: secondary
+      start: 7
+      end: 16
+    - source: r"container"
+      style: secondary
+      start: 5
+      end: 17
   'RUNTIMES = {"apple": "container"}':
     labels:
     - source: '"apple": "container"'
       style: primary
       start: 12
       end: 32
+    - source: container
+      style: secondary
+      start: 22
+      end: 31
     - source: '"container"'
       style: secondary
       start: 21
       end: 32
+  'RUNTIMES = {"apple": r"container"}':
+    labels:
+    - source: '"apple": r"container"'
+      style: primary
+      start: 12
+      end: 33
+    - source: container
+      style: secondary
+      start: 23
+      end: 32
+    - source: r"container"
+      style: secondary
+      start: 21
+      end: 33
   argv = ("container", "run"):
     labels:
     - source: ("container", "run")
       style: primary
       start: 7
       end: 27
+    - source: container
+      style: secondary
+      start: 9
+      end: 18
     - source: '"container"'
       style: secondary
       start: 8
@@ -46,36 +104,108 @@ snapshots:
       style: primary
       start: 7
       end: 27
+    - source: container
+      style: secondary
+      start: 9
+      end: 18
     - source: '''container'''
       style: secondary
       start: 8
       end: 19
+  argv = (r"container", "run"):
+    labels:
+    - source: (r"container", "run")
+      style: primary
+      start: 7
+      end: 28
+    - source: container
+      style: secondary
+      start: 10
+      end: 19
+    - source: r"container"
+      style: secondary
+      start: 8
+      end: 20
   argv = ["container"]:
     labels:
     - source: '["container"]'
       style: primary
       start: 7
       end: 20
+    - source: container
+      style: secondary
+      start: 9
+      end: 18
     - source: '"container"'
       style: secondary
       start: 8
       end: 19
+  'def binary(): return "container"':
+    labels:
+    - source: return "container"
+      style: primary
+      start: 14
+      end: 32
+    - source: container
+      style: secondary
+      start: 22
+      end: 31
+    - source: '"container"'
+      style: secondary
+      start: 21
+      end: 32
+  'def binary(): return r"container"':
+    labels:
+    - source: return r"container"
+      style: primary
+      start: 14
+      end: 33
+    - source: container
+      style: secondary
+      start: 23
+      end: 32
+    - source: r"container"
+      style: secondary
+      start: 21
+      end: 33
   'def start(binary="container"): pass':
     labels:
     - source: binary="container"
       style: primary
       start: 10
       end: 28
+    - source: container
+      style: secondary
+      start: 18
+      end: 27
     - source: '"container"'
       style: secondary
       start: 17
       end: 28
+  'def start(binary=r"container"): pass':
+    labels:
+    - source: binary=r"container"
+      style: primary
+      start: 10
+      end: 29
+    - source: container
+      style: secondary
+      start: 19
+      end: 28
+    - source: r"container"
+      style: secondary
+      start: 17
+      end: 29
   self.runtime = "container":
     labels:
     - source: self.runtime = "container"
       style: primary
       start: 0
       end: 26
+    - source: container
+      style: secondary
+      start: 16
+      end: 25
     - source: '"container"'
       style: secondary
       start: 15
@@ -86,36 +216,94 @@ snapshots:
       style: primary
       start: 6
       end: 25
+    - source: container
+      style: secondary
+      start: 15
+      end: 24
     - source: '"container"'
       style: secondary
       start: 14
       end: 25
+  start(runtime=r"container"):
+    labels:
+    - source: runtime=r"container"
+      style: primary
+      start: 6
+      end: 26
+    - source: container
+      style: secondary
+      start: 16
+      end: 25
+    - source: r"container"
+      style: secondary
+      start: 14
+      end: 26
   subprocess.Popen(["container", "exec", "-i", name]):
     labels:
     - source: '["container", "exec", "-i", name]'
       style: primary
       start: 17
       end: 50
+    - source: container
+      style: secondary
+      start: 19
+      end: 28
     - source: '"container"'
       style: secondary
       start: 18
       end: 29
+  subprocess.run("container"):
+    labels:
+    - source: ("container")
+      style: primary
+      start: 14
+      end: 27
+    - source: container
+      style: secondary
+      start: 16
+      end: 25
+    - source: '"container"'
+      style: secondary
+      start: 15
+      end: 26
   subprocess.run(("container", "run", "--rm", image)):
     labels:
     - source: ("container", "run", "--rm", image)
       style: primary
       start: 15
       end: 50
+    - source: container
+      style: secondary
+      start: 17
+      end: 26
     - source: '"container"'
       style: secondary
       start: 16
       end: 27
+  subprocess.run(["""container""", "run", "--rm", image]):
+    labels:
+    - source: '["""container""", "run", "--rm", image]'
+      style: primary
+      start: 15
+      end: 54
+    - source: container
+      style: secondary
+      start: 19
+      end: 28
+    - source: '"""container"""'
+      style: secondary
+      start: 16
+      end: 31
   subprocess.run(["/usr/local/bin/container", "run", "--rm", image]):
     labels:
     - source: '["/usr/local/bin/container", "run", "--rm", image]'
       style: primary
       start: 15
       end: 65
+    - source: /usr/local/bin/container
+      style: secondary
+      start: 17
+      end: 41
     - source: '"/usr/local/bin/container"'
       style: secondary
       start: 16
@@ -126,17 +314,109 @@ snapshots:
       style: primary
       start: 15
       end: 50
+    - source: container
+      style: secondary
+      start: 17
+      end: 26
     - source: '"container"'
       style: secondary
       start: 16
       end: 27
+  subprocess.run(["env", "X=1", r"container", "run"]):
+    labels:
+    - source: '["env", "X=1", r"container", "run"]'
+      style: primary
+      start: 15
+      end: 50
+    - source: container
+      style: secondary
+      start: 32
+      end: 41
+    - source: r"container"
+      style: secondary
+      start: 30
+      end: 42
+  subprocess.run(["sudo", "container", "run"]):
+    labels:
+    - source: '["sudo", "container", "run"]'
+      style: primary
+      start: 15
+      end: 43
+    - source: container
+      style: secondary
+      start: 25
+      end: 34
+    - source: '"container"'
+      style: secondary
+      start: 24
+      end: 35
   subprocess.run(['container', 'run', '--rm', image]):
     labels:
     - source: '[''container'', ''run'', ''--rm'', image]'
       style: primary
       start: 15
       end: 50
+    - source: container
+      style: secondary
+      start: 17
+      end: 26
     - source: '''container'''
       style: secondary
       start: 16
       end: 27
+  subprocess.run([f"container", "run", "--rm", image]):
+    labels:
+    - source: '[f"container", "run", "--rm", image]'
+      style: primary
+      start: 15
+      end: 51
+    - source: container
+      style: secondary
+      start: 18
+      end: 27
+    - source: f"container"
+      style: secondary
+      start: 16
+      end: 28
+  subprocess.run([r"container", "run", "--rm", image]):
+    labels:
+    - source: '[r"container", "run", "--rm", image]'
+      style: primary
+      start: 15
+      end: 51
+    - source: container
+      style: secondary
+      start: 18
+      end: 27
+    - source: r"container"
+      style: secondary
+      start: 16
+      end: 28
+  subprocess.run([r'/usr/local/bin/container', 'run']):
+    labels:
+    - source: '[r''/usr/local/bin/container'', ''run'']'
+      style: primary
+      start: 15
+      end: 51
+    - source: /usr/local/bin/container
+      style: secondary
+      start: 18
+      end: 42
+    - source: r'/usr/local/bin/container'
+      style: secondary
+      start: 16
+      end: 43
+  w = shutil.which("container"):
+    labels:
+    - source: ("container")
+      style: primary
+      start: 16
+      end: 29
+    - source: container
+      style: secondary
+      start: 18
+      end: 27
+    - source: '"container"'
+      style: secondary
+      start: 17
+      end: 28

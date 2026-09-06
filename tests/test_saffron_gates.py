@@ -430,6 +430,17 @@ def _rule_files():
     )
 
 
+def _rule_test_files():
+    """Every file ast-grep would load as a rule test. `_rule_files`' reasons, for
+    the same globber — minus `__snapshots__/`, which carries the rule's own `id`
+    and would let a rule whose test file was deleted still read as verified."""
+    return sorted(
+        p
+        for p in (REPO / ".saffron" / "rule-tests").rglob("*")
+        if p.suffix in (".yml", ".yaml") and "__snapshots__" not in p.parts
+    )
+
+
 def _scan_ignore_flags() -> list[str]:
     """The `--no-ignore` values the gate actually passes, read from its source.
 
@@ -446,16 +457,36 @@ def _scan_ignore_flags() -> list[str]:
     return found
 
 
+def _scan_globs() -> list[str]:
+    """The `--globs` the gate passes, read from its source for `_scan_ignore_flags`'
+    reason. These are the *only* thing holding a directory out of the scan now that
+    every ignore source is refused, so a copy of them here would let the gate lose
+    one while everything in this file still certified the set the test wished for.
+    """
+    found = re.findall(
+        r'"--globs",\s*\n\s*"([^"]+)"', (GATES / "structure.py").read_text()
+    )
+    assert found, (
+        "found no `--globs` in the gate — with `--no-ignore vcs` these are what "
+        "keep `.venv` out, so this reader has gone stale, not the gate"
+    )
+    return found
+
+
 def test_the_hook_and_the_gate_scan_the_same_files():
     """The hook's own comment says the flags are the gate's, for the gate's
     reasons; nothing checked it. A hook that honours an ignore source the gate
     refuses passes a commit the gate then fails, which is the disagreement the
-    comment warns about — and the reverse hides a violation until PACKAGE."""
+    comment warns about — and the reverse hides a violation until PACKAGE.
+
+    The globs count as much as the `--no-ignore` values: they are the whole of
+    what either one excludes."""
     hook = (REPO / ".pre-commit-config.yaml").read_text()
     entry = hook[hook.index("id: ast-grep") :]
     assert sorted(re.findall(r"--no-ignore (\w+)", entry)) == sorted(
         _scan_ignore_flags()
     )
+    assert sorted(re.findall(r'--globs "([^"]+)"', entry)) == sorted(_scan_globs())
     # Both must name the config rather than let ast-grep walk up and find one.
     assert entry.count("-c .saffron/sgconfig.yml") == 2, (
         "the hook must pass `-c` to both `test` and `scan`"
@@ -494,9 +525,10 @@ def _covers(glob: str, language: str, tmp_path) -> int:
     and a body matching every file of the language — `module` is the root node
     of a Python parse — so the count is the scope's reach and nothing else.
 
-    It walks with the gate's own ignore flags: a glob whose reach depended on a
-    source the gate refuses would be judged here by a different walk than the one
-    it is certifying.
+    It walks with the gate's own ignore flags *and* its globs: a glob whose reach
+    depended on a source the gate refuses — or on a directory only the gate's
+    globs hold out — would be judged here by a different walk than the one it is
+    certifying.
     """
     probe = tmp_path / glob.replace("/", "_").replace("*", "x")
     # exist_ok: two rules may share a scope, and the probe built for it is the
@@ -522,6 +554,7 @@ def _covers(glob: str, language: str, tmp_path) -> int:
             "-c",
             str(probe / "sgconfig.yml"),
             *[a for f in _scan_ignore_flags() for a in ("--no-ignore", f)],
+            *[a for g in _scan_globs() for a in ("--globs", g)],
             "--json=compact",
             ".",
         ],
@@ -561,18 +594,52 @@ def test_every_rule_is_verified_by_a_test_of_its_own():
     """The `structure` gate counts `ast-grep test`'s passes against the rules on
     disk, so a rule added without a test turns the gate to `error` for the whole
     repo rather than reporting the one rule that is unguarded. This says which."""
-    tested = {
-        yaml.safe_load(p.read_text())["id"]
-        for p in (REPO / ".saffron" / "rule-tests").rglob("*")
-        # `_rule_files`' reasons, for the same globber: a test written as `.yaml`
-        # is one ast-grep runs and a `*.yml` glob would call absent. Snapshots
-        # carry the rule's own `id` and are excluded, or a rule whose test file
-        # was deleted would still read as verified by its leftover snapshot.
-        if p.suffix in (".yml", ".yaml") and "__snapshots__" not in p.parts
-    }
+    tested = {yaml.safe_load(p.read_text())["id"] for p in _rule_test_files()}
     declared = {yaml.safe_load(p.read_text())["id"] for p in _rule_files()}
     assert declared - tested == set(), f"rules with no test: {declared - tested}"
     assert tested - declared == set(), f"tests for no rule: {tested - declared}"
+
+
+def test_every_rule_test_declares_a_snippet_that_must_fire():
+    """A rule test's `valid` snippets say what must *not* match; only an `invalid`
+    one says the rule matches anything at all. Measured: delete a rule's `invalid`
+    list and neuter its body, and `ast-grep test` reports `PASS <rule>` and counts
+    it in `3 passed; 0 failed` — a rule matching nothing satisfies every `valid`
+    snippet left — so the gate's count is satisfied by a rule guarding nothing.
+
+    The gate refuses this too, and for the same reason it counts rules rather than
+    trusting an exit status. This names the file; the gate can only turn `error`."""
+    for p in _rule_test_files():
+        assert yaml.safe_load(p.read_text()).get("invalid"), (
+            f"{p.name} declares no `invalid` snippet, so it certifies that the "
+            "rule does not fire on things it should not — never that it fires"
+        )
+
+
+def test_no_rules_regex_anchors_on_the_quote_its_author_typed():
+    """The defect two review rounds found in a different spelling each time. A
+    tree-sitter `string` node's text carries its quotes *and* its `r`/`f`/`b`
+    prefix, so a regex anchored on a quote character reads only the spellings its
+    author happened to type: `'container'` walked past in round 2, `r"container"`
+    in round 3, and ruff neither lints nor reformats a raw string, so nothing else
+    in the loop caught it either.
+
+    A regex belongs on the `string_content` child, which carries neither. This is
+    the class, not the two instances — the next prefix costs nothing to add."""
+    offenders = []
+    for p in _rule_files():
+        for regex in re.findall(r"regex:\s*(\S.*)", p.read_text()):
+            body = regex.strip().strip("'\"")
+            # The anti-pattern exactly: an anchor onto a quote character, however
+            # many spellings the class lists. Not any regex containing a quote —
+            # matching a `"tool":` *inside* a string's content is the fix, not
+            # the defect.
+            if re.match(r"\^(\[[^\]]*['\"][^\]]*\]|['\"])", body):
+                offenders.append(f"{p.name}: {regex.strip()}")
+    assert not offenders, (
+        "regexes anchored on a quote character, which read only the spellings "
+        "their author typed: " + "; ".join(offenders)
+    )
 
 
 def test_structure_names_its_tool_and_passes_on_this_repos_code():
@@ -782,6 +849,31 @@ def test_the_config_names_the_directories_the_gate_and_these_tests_count():
         "a config naming a different directory makes those two questions differ"
     )
     assert [t["testDir"] for t in config["testConfigs"]] == ["rule-tests"]
+    # The gate resolves this one itself too, to find the tests whose `invalid`
+    # lists it checks — the same two-sources-of-truth shape as `ruleDirs`.
+    assert '"rule-tests"' in (GATES / "structure.py").read_text()
+
+
+def test_structure_errors_when_a_rule_test_certifies_nothing(tmp_path):
+    """`ast-grep test` reports `PASS` for a rule whose body matches nothing, so
+    long as its `invalid` list is gone: every remaining `valid` snippet is
+    satisfied. Measured — `3 passed; 0 failed`, the gate's count met, and a tree
+    carrying the violation reported `pass`.
+
+    `error`, not `fail`: a control surface that cannot say whether it works is
+    charged to nobody, like the missing config and the unrunnable binary."""
+    gate = _rules_tree(tmp_path)
+    victim = tmp_path / ".saffron" / "rule-tests"
+    victim = next(p for p in victim.iterdir() if p.name.endswith("-test.yml"))
+    victim.write_text(re.split(r"^invalid:", victim.read_text(), flags=re.M)[0])
+
+    done = subprocess.run(
+        [str(gate)], cwd=tmp_path, capture_output=True, text=True, timeout=120
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "error", result.summary
+    assert victim.name in result.summary
+    assert result.tool, "the gate ran ast-grep; the identifier is obtainable"
 
 
 def test_structure_ignores_a_config_planted_where_ast_grep_would_find_one(tmp_path):
@@ -820,18 +912,60 @@ def test_structure_ignores_a_config_planted_where_ast_grep_would_find_one(tmp_pa
     assert [f.code for f in result.failures] == ["container-runtime-is-runtime-only"]
 
 
-@pytest.mark.parametrize("ignore_file", [".ignore", ".git/info/exclude"])
-def test_an_ignore_file_outside_the_diff_cannot_hide_a_violation(tmp_path, ignore_file):
+@pytest.mark.parametrize(
+    ("ignore_file", "pattern"),
+    [
+        (".gitignore", "saffron/cell/bad.py"),
+        # A nested one's patterns are relative to its own directory, not the root.
+        # Written root-relative it silences nothing and the case proves nothing.
+        ("saffron/.gitignore", "cell/bad.py"),
+        (".ignore", "saffron/cell/bad.py"),
+        (".git/info/exclude", "saffron/cell/bad.py"),
+    ],
+)
+def test_an_ignore_file_outside_the_diff_cannot_hide_a_violation(
+    tmp_path, ignore_file, pattern
+):
     """ast-grep walks with the `ignore` crate, which has no notion of what git
     tracks: one line naming a *tracked* file removes it from the scan while it
-    stays in the commit. Measured, in a real repository, on all three sources.
+    stays in the commit. Measured, in a real repository, on every source.
 
-    `.gitignore` is the one this repo needs — it is what keeps `.venv` and
-    `.claude/worktrees/` out — and an edit to it is in the diff, so
-    `integrity.gate_config` routes it to a person. These two are not: `.ignore`
-    buys nothing here, and `.git/info/exclude` never appears in a diff at all, so
-    no policy list can reach it. The gate refuses both."""
-    _assert_hidden_violation_is_still_reported(tmp_path, ignore_file=ignore_file)
+    `.gitignore` is here because routing an edit to a person is the tracked half
+    only — see the test below. The gate refuses all of them and states its own
+    file set with `--globs` instead, so what it scans is a property of the gate
+    rather than of whichever files happen to be on disk."""
+    _assert_hidden_violation_is_still_reported(
+        tmp_path, ignore_file=ignore_file, pattern=pattern
+    )
+
+
+def test_a_gitignore_that_names_itself_cannot_hide_a_tracked_violation(tmp_path):
+    """The half `integrity.gate_config` cannot close, and the reason `.gitignore`
+    is refused outright rather than routed.
+
+    A `.gitignore` naming both a tracked violating file and *itself* is never
+    added by `git add -A`, so it reaches no diff, no commit, and nothing
+    `git status --porcelain -uall` reports — which is `worktree.dirty_paths`, and
+    so every host-side check that could notice. Measured against the gate before
+    `--no-ignore vcs`: the violation stayed committed and the scan reported
+    `pass`. The `.git` directory is load-bearing — the walker consults a
+    `.gitignore` this way only for a tree that looks like a repository."""
+    root = tmp_path / "repo"
+    gate = _rules_tree(root)
+    (root / ".git").mkdir(parents=True)
+    (root / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    (root / "saffron" / "cell").mkdir(parents=True)
+    (root / "saffron" / "cell" / "bad.py").write_text(
+        'subprocess.run(["container", "run"])\n'
+    )
+    (root / "saffron" / "cell" / ".gitignore").write_text("bad.py\n.gitignore\n")
+
+    done = subprocess.run(
+        [str(gate)], cwd=root, capture_output=True, text=True, timeout=120
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "fail", result.summary
+    assert [f.file for f in result.failures] == ["saffron/cell/bad.py"]
 
 
 def test_the_global_excludes_file_cannot_hide_a_violation(tmp_path, monkeypatch):
@@ -859,10 +993,20 @@ def test_the_global_excludes_file_cannot_hide_a_violation(tmp_path, monkeypatch)
     _assert_hidden_violation_is_still_reported(repo)
 
 
-def _assert_hidden_violation_is_still_reported(root, ignore_file: str | None = None):
+def _assert_hidden_violation_is_still_reported(
+    root, ignore_file: str | None = None, pattern: str = "saffron/cell/bad.py"
+):
     """Plant one violation the gate must report, plus optionally an in-tree ignore
-    file naming it, and assert the gate reports it anyway."""
+    file naming it, and assert the gate reports it anyway.
+
+    The `.git` directory is load-bearing for the `.gitignore` cases, not
+    scaffolding: measured, the walker honours a `.gitignore` only in a tree that
+    looks like a repository, so without one those two cases pass against a gate
+    that has no `--no-ignore vcs` and prove nothing. `.ignore` is honoured either
+    way, which is its own reason for being refused."""
     gate = _rules_tree(root)
+    (root / ".git").mkdir(parents=True, exist_ok=True)
+    (root / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
     (root / "saffron" / "cell").mkdir(parents=True)
     (root / "saffron" / "cell" / "bad.py").write_text(
         'subprocess.run(["container", "run"])\n'
@@ -870,7 +1014,7 @@ def _assert_hidden_violation_is_still_reported(root, ignore_file: str | None = N
     if ignore_file is not None:
         hidden = root / ignore_file
         hidden.parent.mkdir(parents=True, exist_ok=True)
-        hidden.write_text("saffron/cell/bad.py\n")
+        hidden.write_text(f"{pattern}\n")
 
     done = subprocess.run(
         [str(gate)],
@@ -884,12 +1028,35 @@ def _assert_hidden_violation_is_still_reported(root, ignore_file: str | None = N
     assert [f.file for f in result.failures] == ["saffron/cell/bad.py"]
 
 
+def test_a_diff_touching_the_structure_surface_reaches_a_person():
+    """`elevate_on` carried the rules and not their tests, though the tests are
+    what prove a rule fires: deleting a rule's `invalid` list disarms it exactly
+    as weakening its body does. `protected` reaches neither — `.saffron/**` is a
+    glob, and `protected_touch_refusal` skips glob entries as undecidable — and
+    `gate-config-changed` carries a `not declared` exemption, so `elevate_on` is
+    the one that reaches a person unconditionally."""
+    policy, _ = load_policy(REPO)
+    for path in (
+        ".saffron/rules/container-runtime-is-runtime-only.yml",
+        ".saffron/rule-tests/container-runtime-is-runtime-only-test.yml",
+    ):
+        assert any(matches(path, p) for p in policy.elevate_on), (
+            f"{path} decides whether the `structure` gate guards anything"
+        )
+
+
 def test_what_decides_which_files_a_gate_sees_is_routed_to_a_person():
     """`integrity.gate_config` exists because the rules a gate enforces have to
     reach a human, not just the gate's own executable. What a gate can *see* is
     the same question one step earlier: `.gitignore` removes a tracked file from
-    `lint`, `format` and `structure` at once, and the config naming the rules
-    decides which rules run at all. Nested `.gitignore` files count too."""
+    `lint` and `format`, and the config naming the rules decides which rules run
+    at all. Nested `.gitignore` files count too.
+
+    `structure` no longer depends on this entry — it refuses every ignore source
+    and states its own file set with `--globs`. The entry stays for ruff, which
+    still walks with a gitignore filter (backlog item 71), and routing an edit to
+    a person is the tracked half of that only: see the self-naming `.gitignore`
+    above, which reaches no diff at all."""
     policy, _ = load_policy(REPO)
     for path in (
         ".gitignore",

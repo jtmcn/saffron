@@ -20,30 +20,44 @@ ignores:
 # ponytail: a name the parser never reads is out of reach — `"contain" + "er"`
 # and `subprocess.run("container run", shell=True)` both walk past. The ceiling
 # is deliberate evasion; the branches below are the forms a refactor reaches for.
+utils:
+  # The binary as a string literal, matched on the string's *content* rather than
+  # on its source text. A `string` node's text carries its quotes and its prefix,
+  # so a regex anchored on `['"]` reads only the spellings its author typed:
+  # measured, `r"container"` walked past all six branches at once while `lint`
+  # and `format` both passed it, since ruff has no rule against a raw string and
+  # the formatter does not rewrite one. `string_content` carries neither, so the
+  # quote style, the `r`/`f`/`b` prefix and the triple-quoted form are all one
+  # case. The optional prefix is the binary spelled as a path.
+  # ponytail: an escape splits the content into several nodes, so `"contain\x65r"`
+  # is out of reach — the same evasion ceiling the note above states.
+  binary-literal:
+    kind: string
+    has: { kind: string_content, regex: '^(.*/)?container$' }
 rule:
   any:
-    # subprocess.run(["container", "run", ...]), and the same argv with the
-    # binary spelled as a path.
+    # subprocess.run(["container", "run", ...]). Any element, not just the first:
+    # measured, `nthChild: 1` let every argv that prefixes the binary walk past —
+    # `["sudo", "container", "run"]`, and the same with `env` or a wrapper.
+    # `has:` reaches direct children only, which is what keeps the labelled
+    # `[("container", name, ...)]` at `session.py:1797` out: its list's child is
+    # a tuple, not a string.
     - kind: list
-      has:
-        nthChild: 1
-        regex: "^['\"]([^'\"]*/)?container['\"]$"
+      has: { matches: binary-literal }
     # subprocess.run(("container", "run")) — a tuple is an argv too. Guarded on
     # not being an element of a list, because `session.py:1797` holds
     # `[("container", name, ...)]`, which is labelled data rather than a call
     # and is the only such tuple in the tree. Measured: 0 others in scope.
     - kind: tuple
       all:
-        - has:
-            nthChild: 1
-            regex: "^['\"]([^'\"]*/)?container['\"]$"
+        - has: { matches: binary-literal }
         - not: { inside: { kind: list } }
     # RT = "container" — the indirection this rule's own note invites. Without
     # it, naming the binary once and calling through the local satisfies every
     # branch above while doing what Appendix G forbids. Measured: the one match
     # in scope is `RUNTIME` in the file already exempted.
     - kind: assignment
-      has: { field: right, regex: "^['\"]([^'\"]*/)?container['\"]$" }
+      has: { field: right, matches: binary-literal }
     # The three other places a name binds to the binary, which the assignment
     # branch above does not reach because none of them is an assignment:
     # `start(runtime="container")`, `def start(binary="container")` and
@@ -52,8 +66,20 @@ rule:
     # Measured: 0 matches in scope for all three. The *key* stays free — the
     # tree has `{"container": ...}` as a label, which is a mention, not an argv.
     - kind: keyword_argument
-      has: { field: value, regex: "^['\"]([^'\"]*/)?container['\"]$" }
+      has: { field: value, matches: binary-literal }
     - kind: default_parameter
-      has: { field: value, regex: "^['\"]([^'\"]*/)?container['\"]$" }
+      has: { field: value, matches: binary-literal }
     - kind: pair
-      has: { field: value, regex: "^['\"]([^'\"]*/)?container['\"]$" }
+      has: { field: value, matches: binary-literal }
+    # `return "container"` and `shutil.which("container")` — the function form of
+    # the `RT = "container"` indirection, and the binary as a plain call argument.
+    # `which` is what a preflight check reaches for, and a helper returning the
+    # name satisfies every branch above. Measured: 0 matches in scope.
+    - kind: return_statement
+      has: { matches: binary-literal }
+    - kind: argument_list
+      has: { matches: binary-literal }
+    # `BINS = {"container"}` — a set literal is neither a list nor a tuple, and
+    # its elements are direct children with no `field:` to name. Measured: 0.
+    - kind: set
+      has: { matches: binary-literal }

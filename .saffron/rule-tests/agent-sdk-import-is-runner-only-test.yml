@@ -17,3 +17,8 @@ invalid:
   # Both quote styles. Measured: with the regex anchored on a literal `"`, this
   # walked past while the double-quoted twin above was caught.
   - "importlib.import_module('claude_agent_sdk')"
+  # The prefix. A `string` node's text carries `r`/`f`/`b` as well as its quotes,
+  # so anchoring on the quote read only the spellings its author typed — and ruff
+  # neither lints nor reformats a raw string, so nothing else caught this either.
+  - 'importlib.import_module(r"claude_agent_sdk")'
+  - '__import__(r"claude_agent_sdk")'
