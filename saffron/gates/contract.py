@@ -12,6 +12,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from saffron.intake import RiskTier
+
 GateStatus = Literal["pass", "fail", "skip", "error"]
 
 _DIGITS = re.compile(r"\d+")
@@ -99,6 +101,38 @@ def identity(gate: str, failure: Failure) -> tuple[str, str, str, str]:
     with the same code.
     """
     return (gate, failure.file, failure.code, normalize_message(failure.message))
+
+
+def witness_blocking(tier: RiskTier) -> bool:
+    """§5.4.1's fixed answer for `witness`: advisory at `standard`, blocking
+    at `elevated` — `size`'s own two levels, for `size`'s own reason. An
+    elevated diff is where a plausible-looking wrong change hurts most, and a
+    claim guarded by nothing is exactly that.
+
+    A pure fact about the tier, deliberately independent of `saffron.cell
+    .session`'s own `advisory_gates` set.
+
+    **Nothing reads it yet, and the thing that will currently disagrees.**
+    `session._blocking` is `failure.gate not in advisory_gates`, and that set
+    gains only `size` at non-elevated tiers — so a `witness` failure blocks at
+    `standard` today, the opposite of what this returns. `saffron/cell/**` is
+    out of reach here; `docs/BACKLOG.md` item 71 carries the reconciliation.
+    This function is the level §5.4.1 fixes, written down where the fix can
+    reach for it, not a description of what happens now.
+
+    This is the level, not a green light. Two things this decision is made in
+    full knowledge of, neither of which this module can change (`witness.py`
+    and `mutation.py` are both out of reach here): a `tests` gate that errors
+    on a later criterion discards an earlier criterion's real survivor
+    finding in the same call (`witness_gate` returns on the first inner
+    `error`), and `witness` answers that same inner-`error` trap with `error`
+    where `revert` answers it with `skip` — a disagreement recorded, not
+    resolved, at `saffron/gates/core/witness.py`'s `ponytail:` comment. If
+    either turns out to make a blocking `witness` too likely to abort an
+    attempt on nothing, that is `docs/BACKLOG.md`'s to carry, not a reason to
+    silently soften the level here.
+    """
+    return tier == "elevated"
 
 
 def parse_gate_json(raw: str, expected_gate: str) -> GateResult:
