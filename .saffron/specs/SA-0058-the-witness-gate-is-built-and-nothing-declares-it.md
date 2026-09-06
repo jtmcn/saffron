@@ -78,6 +78,34 @@ acceptance:
   `saffron:CoreGateBlockingShape` is one of the two shape lists `CLAUDE.md`
   says stays hand-maintained precisely because the vocabulary cannot imply it.
 
+## Two things this spec decides by choosing a blocking level
+
+Both came out of `SA-0057`'s review rounds, and neither is visible from inside
+`saffron/gates/core/witness.py` — they are consequences of *turning the gate
+on*, which is what this spec does.
+
+**A survivor finding is discarded if a later criterion errors.** The gate
+returns on the first inner `error`, so a night where criterion 1's witness
+survived its mutant — a real blocking finding — and criterion 2's `tests` gate
+then reported `error` returns `error` with `failures: 0`. The finding is lost
+and the attempt aborts charged to nobody. That follows from
+`session.aborted_gates` and is the same trade `revert` makes; it matters here
+because a blocking level is what decides whether the lost finding would have
+stopped anything.
+
+**`witness` and `revert` disagree about the same trap, deliberately.** An inner
+`error` ends the attempt, and a mutant that kills its witness by making a
+fixture raise produces exactly that — `.saffron/gates/tests.py` reports `error`
+when pytest exits non-zero with no `FAILED ` line to parse. `revert` met this
+and chose `skip`, calling that choice "the whole gate's usability"; `SA-0057`
+asked for `error` and the `ponytail:` at that line names the disagreement.
+Choosing a blocking level without deciding this is choosing it by accident.
+
+Neither is this spec's to *fix* — `witness.py` is `forbidden` here. What this
+spec owes them is a blocking level chosen in full knowledge of both, and a note
+in the backlog if the answer is that the gate should not block until they are
+resolved.
+
 ## Out of scope
 
 **Declaring it in this repo's `.saffron/policy.yaml`.** `.saffron/**` is
