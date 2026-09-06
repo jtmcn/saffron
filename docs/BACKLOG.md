@@ -64,7 +64,7 @@ flywheel inert exactly where it was meant to compound.
 
 Operator visibility parts 2 and 3 — `SA-0032`–`SA-0039`, with the plan's Task 6
 rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
-**38**), plus **43**, **48**, **52**, **60**, **66**, **67**.
+**38**), plus **43**, **48**, **52**, **60**, **66**, **67**, **72**.
 
 ### Tier 3 — real, not urgent
 
@@ -72,7 +72,7 @@ rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
 **56**, **57**, **61**, **62**, **63**, **64**, **69**. (**65** and **68** are
 done.)
 
-**What this ordering costs, stated plainly:** tiers 2 and 3 hold 24 of the 34
+**What this ordering costs, stated plainly:** tiers 2 and 3 hold 25 of the 35
 open items, including every ontology item and every operator-visibility spec
 there is already a full plan for. That is the deliberate consequence of ranking
 by the milestone rather than by what is nearest to hand.
@@ -3941,6 +3941,75 @@ The chain could not have found this before `SA-0058` tried to wire it, which is
 an argument for wiring early rather than last — the spec that connects a
 mechanism to its caller is the one that discovers the mechanism cannot be
 connected.
+
+---
+
+## 72. `witness` and `mutant` exist in code and in no vocabulary, and the guard for that reads the vocabulary
+
+**Tier 2.** Found reviewing `SA-0056` and again reviewing `SA-0058`, 2026-09-06.
+
+Item 69's chain added a core gate and a term, and neither reached
+`ontology/saffron.ttl` or `CONTEXT.md`. Measured:
+
+```
+vocabulary declares:  census committed criteria integrity revert scope secrets size
+saffron/gates/core/:  census committed criteria integrity revert scope size witness
+```
+
+`secrets` is the ordinary direction — specified in the vocabulary, not yet
+built. **`witness` is the first core gate in the other direction: built, and in
+no vocabulary.** `mutant` is the same for a term: `CONTEXT.md` is authoritative
+for meaning and does not contain the word, though `DESIGN.md` §5.4.1 introduces
+it in bold as a defined term and a module is named after it.
+
+**The guard cannot fire, and `CLAUDE.md` promises it will.** That file says a
+new core gate "needs a blocking level in `saffron:CoreGateBlockingShape` … and
+a test names the shape and the file when you forget."
+`tests/ontology/test_shapes.py` does exactly that — over
+`vocabulary.subjects(rdf:type, saffron:CoreGate)`. A gate absent from the
+vocabulary is absent from that set, so the test passes and the promise is false
+for precisely the case it exists to catch. `CoreGateShape`'s `sh:in` does not
+reject it either, for the same reason.
+
+Beyond the ontology: `session._blocking` treats any gate outside
+`advisory_gates` as blocking at every tier, so an unvocabularied core gate
+defaults to the strictest level with nothing to catch it — which is half of
+item **71**.
+
+**Why nobody did it, and why that is the real finding.** This is the third
+occurrence of one shape: *the spec that introduces a term is `forbidden` from
+the vocabulary that would define it.*
+
+- item **65** — the four batch stop reasons; `ontology/` forbidden to `SA-0045`
+  and to every spec above it
+- **`mutant`** — flagged reviewing `SA-0056`, forbidden there and to `SA-0057`
+- **`witness`** — forbidden to `SA-0057` and to `SA-0058`
+
+Each `forbidden` list was right: a cell inventing vocabulary while implementing
+against it is how a term comes to mean whatever the implementation needed. The
+defect is that nothing then owns the entry, and three chains have now ended
+with a term the code uses and the glossary does not have.
+
+**A structural detail that decides who can fix it.** `ontology/` is *not* in
+`policy.yaml`'s `protected` list, so a cell may edit the vocabulary — but
+`CONTEXT.md` is protected, and it is *generated* from the vocabulary by
+`ontology.render`. `test_generated_surfaces_are_current` fails if the two
+disagree. So the two halves must move together and one of them a cell may not
+touch: this is an operator's edit, or a spec that declares `ontology/**` in
+`touches` and hands the render to the operator. Worth deciding once rather than
+per term.
+
+**Done looks like** `saffron:witness a saffron:CoreGate` with a blocking level
+in `saffron:SizeTierShape` — it moves with the tier exactly as `size` does, and
+it is the second such gate, so that shape's comment calling `size` "the one
+core gate a risk tier moves" needs amending too — a `mutant` entry in
+`CONTEXT.md`'s vocabulary, `uv run python -m ontology.render` re-run, and the
+closed-set tests green.
+
+**And a decision on the pattern**, which is worth more than the two entries:
+either the vocabulary stops being `forbidden` to the spec that introduces a
+term, or every such spec carries a follow-up filed when it is written rather
+than discovered three pull requests later.
 
 ---
 
