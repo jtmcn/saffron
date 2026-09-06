@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -607,8 +607,17 @@ def test_the_until_stored_is_utc_not_the_operators_wall_clock(
     monkeypatch.setenv("TZ", "America/Los_Angeles")
     time.tzset()
     try:
-        # 06:30 Pacific on 2026-09-06 is 13:30 UTC (PDT, UTC-7).
-        deadline = datetime(2026, 9, 6, 6, 30)
+        # Tomorrow at 06:30 Pacific, computed rather than written: a literal
+        # date makes `started_at < until_ts` below true only until the clock
+        # passes it, and this test was red within a day of being written.
+        deadline = (datetime.now() + timedelta(days=1)).replace(
+            hour=6, minute=30, second=0, microsecond=0
+        )
+        expected = (
+            deadline.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
+            if deadline.tzinfo
+            else deadline.astimezone().astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        )
         run_batch(
             [],
             ledger,
@@ -623,5 +632,10 @@ def test_the_until_stored_is_utc_not_the_operators_wall_clock(
         time.tzset()
 
     row = _batch_row(ledger, _latest_batch_id(ledger))
-    assert row["until_ts"] == "2026-09-06 13:30:00"
+    # The conversion, asserted against a value derived the same way rather than
+    # against a literal: 06:30 Pacific is 13:30 UTC, and what this pins is the
+    # seven-hour shift, not the date it happens on.
+    assert row["until_ts"] == expected
+    assert "T" not in row["until_ts"]
+    assert row["until_ts"].endswith(" 13:30:00")
     assert row["started_at"] < row["until_ts"]
