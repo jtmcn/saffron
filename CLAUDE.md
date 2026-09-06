@@ -28,8 +28,8 @@ make check                   # lint + test — the default target
 make fmt                     # ruff check --fix . && ruff format .
 uv run pytest                # cell-marked tests excluded by default (pyproject addopts)
 uv run pytest tests/test_session.py::test_name    # one test
-uv run ast-grep test                              # the structure rules' own tests
-uv run ast-grep scan --no-ignore hidden           # what the `structure` gate runs
+uv run ast-grep test -c .saffron/sgconfig.yml     # the structure rules' own tests
+.saffron/gates/structure                          # what the `structure` gate runs
 uv run pytest -m cell        # needs apple/container + the images below
 ```
 
@@ -118,7 +118,10 @@ exception has a shape worth memorising: **core invokes declared gates, never too
 
 The three marked **(gated)** are enforced by `.saffron/rules/`, run by the `structure` gate and
 a prek hook; the rest are still prose. Promote one when you find it broken — `ast-grep test`
-means a rule ships with the mutant that proves it fires.
+means a rule ships with the mutant that proves it fires. Both pass `-c .saffron/sgconfig.yml`
+rather than letting ast-grep find a config by walking, so the file naming the rules is inside
+the subtree `integrity` guards; a rule's `files:` glob is checked for reach by a test, because
+snippets have no paths.
 
 - **The `tool` field** separates a gate that ran and passed from one that never ran. It must be
   obtained *by executing* the tool, never a string literal (§5.4, Appendix H). **(gated)**

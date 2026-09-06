@@ -65,6 +65,12 @@ integrity:
   # `sh:in`, drop an `sh:property`, or delete a shape and its paired fixture, and
   # go green. Same argument as `conftest.py` two lines down — the rules a gate
   # enforces have to be routed to a person, not just the gate's own executable.
+  # `.gitignore` decides which files the gates can see at all. Measured: ruff and
+  # ast-grep both walk with a gitignore filter that has no notion of what git
+  # tracks, so one line naming a *tracked* file removes it from `lint`, `format`
+  # and `structure` at once while it stays in the diff and in the commit. Nested
+  # ones count, hence `**/`; the other ignore sources the walkers honour are
+  # refused by the gates themselves, because they never appear in a diff.
   gate_config:
     [
       "ontology/shapes/**",
@@ -74,6 +80,7 @@ integrity:
       "**/conftest.py",
       "**/ruff.toml",
       "**/.ruff.toml",
+      "**/.gitignore",
     ]
 
 thread_env: {}

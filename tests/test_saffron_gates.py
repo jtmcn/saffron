@@ -1,7 +1,10 @@
 """Saffron's own gates satisfy the contract they are declared against.
 
 This file is the §2.1 boundary test in miniature: it exercises .saffron/ and
-imports nothing from saffron/ except the contract parser.
+imports nothing from saffron/ except what reads a repo's own declarations — the
+contract parser, the policy loader, and the globber `integrity` judges paths
+with. A reimplementation of that globber here would agree with itself and with
+nothing that runs.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ import pytest
 import yaml
 
 from saffron.gates.contract import parse_gate_json
+from saffron.gates.core.scope import matches
 from saffron.repos.policy import load_policy
 
 REPO = Path(__file__).resolve().parent.parent
@@ -410,8 +414,19 @@ def test_shacl_errors_on_an_unparseable_data_graph_beside_valid_shapes(tmp_path)
     assert result.tool, "a parse failure is not a reason to drop the tool identifier"
 
 
+SGCONFIG = REPO / ".saffron" / "sgconfig.yml"
+
+
 def _rule_files():
-    return sorted((REPO / ".saffron" / "rules").glob("*.yml"))
+    """Every file ast-grep would load as a rule, which is not just `*.yml` at the
+    top level: measured, a rule directory is walked recursively and `.yaml` is
+    taken as readily as `.yml`. The gate counts them the same way, so a narrower
+    list here would certify rules it never sees."""
+    return sorted(
+        p
+        for p in (REPO / ".saffron" / "rules").rglob("*")
+        if p.suffix in (".yml", ".yaml")
+    )
 
 
 def _covers(glob: str, language: str, tmp_path) -> int:
@@ -424,7 +439,9 @@ def _covers(glob: str, language: str, tmp_path) -> int:
     of a Python parse — so the count is the scope's reach and nothing else.
     """
     probe = tmp_path / glob.replace("/", "_").replace("*", "x")
-    (probe / "rules").mkdir(parents=True)
+    # exist_ok: two rules may share a scope, and the probe built for it is the
+    # same probe. Without this the second one raises instead of reporting.
+    (probe / "rules").mkdir(parents=True, exist_ok=True)
     (probe / "sgconfig.yml").write_text("ruleDirs:\n  - rules\n")
     (probe / "rules" / "probe.yml").write_text(
         yaml.safe_dump(
@@ -507,10 +524,13 @@ def test_structure_names_its_tool_and_passes_on_this_repos_code():
     assert result.tool and result.tool.startswith("ast-grep ")
 
 
-def _rules_tree(tmp_path) -> None:
-    """This repo's real rules and their tests, in a tree of their own. `ast-grep`
-    resolves both against the `sgconfig.yml` beside it and does not walk upwards,
-    so a subject built in `tmp_path` gets no configuration by accident.
+def _rules_tree(tmp_path) -> Path:
+    """This repo's whole `structure` surface — the rules, their tests, the config
+    that names both, and the gate — in a tree of its own, and the gate to judge it
+    by. The gate resolves its config from its own location rather than from the
+    cwd, so a subject has to carry the gate it is measured with; that is also the
+    shape production runs, where `/work/.saffron/gates/` and the code under test
+    are one checkout.
 
     The rule tests come too: the gate verifies its own rules before scanning, so
     a subject carrying rules without them is not the shape production runs.
@@ -519,18 +539,17 @@ def _rules_tree(tmp_path) -> None:
     shutil.copytree(
         REPO / ".saffron" / "rule-tests", tmp_path / ".saffron" / "rule-tests"
     )
-    (tmp_path / "sgconfig.yml").write_text(
-        "ruleDirs:\n  - .saffron/rules\ntestConfigs:\n"
-        "  - testDir: .saffron/rule-tests\n"
-    )
+    shutil.copytree(REPO / ".saffron" / "gates", tmp_path / ".saffron" / "gates")
+    shutil.copy(SGCONFIG, tmp_path / ".saffron" / "sgconfig.yml")
+    return tmp_path / ".saffron" / "gates" / "structure"
 
 
 def test_structure_fails_on_code_its_rules_reject(tmp_path):
     """A gate that has only ever passed is not known to be a gate."""
-    _rules_tree(tmp_path)
+    gate = _rules_tree(tmp_path)
     (tmp_path / "bad.py").write_text('emit({"gate": "lint", "tool": "ruff 9.9.9"})\n')
     done = subprocess.run(
-        [str(GATES / "structure")],
+        [str(gate)],
         cwd=tmp_path,
         capture_output=True,
         text=True,
@@ -552,13 +571,12 @@ def test_structure_scans_the_dot_directory_its_rules_most_need(tmp_path):
     — a mutant planted there went unreported until `--no-ignore hidden`. The
     subject is `.saffron/gates/`, not any hidden path, because that is the one
     the omission actually silenced."""
-    _rules_tree(tmp_path)
-    (tmp_path / ".saffron" / "gates").mkdir(parents=True)
+    gate = _rules_tree(tmp_path)
     (tmp_path / ".saffron" / "gates" / "bad.py").write_text(
         'emit({"gate": "lint", "tool": "ruff 9.9.9"})\n'
     )
     done = subprocess.run(
-        [str(GATES / "structure")],
+        [str(gate)],
         cwd=tmp_path,
         capture_output=True,
         text=True,
@@ -570,12 +588,15 @@ def test_structure_scans_the_dot_directory_its_rules_most_need(tmp_path):
 
 
 def test_structure_errors_rather_than_passes_when_it_has_no_rules(tmp_path):
-    """`ast-grep scan` with no `sgconfig.yml` exits 3 and writes nothing to
-    stdout. Read as a verdict that would be a clean pass over every rule at once
-    — the founding defect of Appendix I. Charged to nobody instead (§5.4)."""
+    """`ast-grep` pointed at a `sgconfig.yml` that is not there exits non-zero and
+    writes nothing to stdout. Read as a verdict that would be a clean pass over
+    every rule at once — the founding defect of Appendix I. Charged to nobody
+    instead (§5.4). The gate carries its config path, so the subject is a gate
+    with its rules taken away rather than a bare directory."""
+    shutil.copytree(REPO / ".saffron" / "gates", tmp_path / ".saffron" / "gates")
     (tmp_path / "a.py").write_text("x = 1\n")
     done = subprocess.run(
-        [str(GATES / "structure")],
+        [str(tmp_path / ".saffron" / "gates" / "structure")],
         cwd=tmp_path,
         capture_output=True,
         text=True,
@@ -592,13 +613,13 @@ def test_structure_errors_when_a_rule_has_stopped_guarding(tmp_path):
     rule guarding nothing — and `gate-config-changed` exempts a task whose spec
     declared the `.saffron/**` touch. `fail` would charge the repo's code for a
     broken control surface, so it is `error` (§5.4)."""
-    _rules_tree(tmp_path)
+    gate = _rules_tree(tmp_path)
     rule = tmp_path / ".saffron" / "rules" / "agent-sdk-import-is-runner-only.yml"
     rule.write_text(rule.read_text().replace("claude_agent_sdk", "never_matches_this"))
     (tmp_path / "bad.py").write_text("import claude_agent_sdk\n")
 
     done = subprocess.run(
-        [str(GATES / "structure")],
+        [str(gate)],
         cwd=tmp_path,
         capture_output=True,
         text=True,
@@ -614,12 +635,12 @@ def test_structure_errors_when_its_rules_are_verified_by_nothing(tmp_path):
     tests" and exits 0. Read as a verdict that is every rule verified at once
     while nothing ran — so the gate counts the tests against the rules on disk
     rather than trusting the exit status."""
-    _rules_tree(tmp_path)
+    gate = _rules_tree(tmp_path)
     shutil.rmtree(tmp_path / ".saffron" / "rule-tests")
-    (tmp_path / "sgconfig.yml").write_text("ruleDirs:\n  - .saffron/rules\n")
+    (tmp_path / ".saffron" / "sgconfig.yml").write_text("ruleDirs:\n  - rules\n")
 
     done = subprocess.run(
-        [str(GATES / "structure")],
+        [str(gate)],
         cwd=tmp_path,
         capture_output=True,
         text=True,
@@ -627,7 +648,9 @@ def test_structure_errors_when_its_rules_are_verified_by_nothing(tmp_path):
     )
     result = parse_gate_json(done.stdout, expected_gate="structure")
     assert result.status == "error", result.summary
-    assert "0 of 3 rules verified" in result.summary
+    # Against the live rule count, not a number: a fourth rule is not a reason
+    # for this test to fail.
+    assert f"0 of {len(_rule_files())} rules verified" in result.summary
 
 
 def _stub_ast_grep(tmp_path, version_body: str, scan_body: str = "echo '[]'"):
@@ -638,7 +661,7 @@ def _stub_ast_grep(tmp_path, version_body: str, scan_body: str = "echo '[]'"):
     # The `test` branch reports the rule count these tests run against, so the
     # gate's own verification passes and the assertion below reaches `scan`.
     # Left to the `*)` catch-all it would answer the count check with scan output.
-    rules = len(list((REPO / ".saffron" / "rules").glob("*.yml")))
+    rules = len(_rule_files())
     (stub / "ast-grep").write_text(
         f'#!/bin/sh\ncase "$1" in\n  --version) {version_body} ;;\n'
         f'  test) echo "test result: ok. {rules} passed; 0 failed;" ;;\n'
@@ -682,3 +705,130 @@ def test_structure_errors_when_its_tool_runs_and_reports_no_version(tmp_path):
     result = parse_gate_json(done.stdout, expected_gate="structure")
     assert result.status == "error", result.summary
     assert "no version" in result.summary
+
+
+def test_the_config_names_the_directories_the_gate_and_these_tests_count():
+    """The gate cannot read YAML — it is a stdlib script — so it resolves
+    `.saffron/rules/` by name and asks ast-grep to load whatever the config says.
+    Two sources of truth for one question: repoint `ruleDirs` and the gate counts
+    rules that never ran. Nothing in the gate can notice, so the test does."""
+    config = yaml.safe_load(SGCONFIG.read_text())
+    assert config["ruleDirs"] == ["rules"], (
+        "the gate counts `.saffron/rules/*.yml` against what ast-grep loaded; "
+        "a config naming a different directory makes those two questions differ"
+    )
+    assert [t["testDir"] for t in config["testConfigs"]] == ["rule-tests"]
+
+
+def test_structure_ignores_a_config_planted_where_ast_grep_would_find_one(tmp_path):
+    """`sgconfig.yml` at the repo root is where a bare `ast-grep` looks first, and
+    it is outside `.saffron/**` — outside `protected` and outside
+    `integrity.gate_config`. Measured on the first cut of this gate: a root config
+    pointing `ruleDirs` at a copy of the rules re-scoped to a directory that does
+    not exist reported `pass` on a tree carrying all three violations, with
+    `ast-grep test` still reporting every rule verified. The gate passes `-c`
+    anchored on its own location, so the decoy is inert."""
+    gate = _rules_tree(tmp_path)
+    (tmp_path / "saffron" / "cell").mkdir(parents=True)
+    (tmp_path / "saffron" / "cell" / "bad.py").write_text(
+        'subprocess.run(["container", "run"])\n'
+    )
+
+    shutil.copytree(tmp_path / ".saffron" / "rules", tmp_path / "decoy-rules")
+    for rule in (tmp_path / "decoy-rules").glob("*.yml"):
+        body = yaml.safe_load(rule.read_text())
+        body["files"] = ["nowhere/**/*.py"]
+        rule.write_text(yaml.safe_dump(body))
+    shutil.copytree(tmp_path / ".saffron" / "rule-tests", tmp_path / "decoy-tests")
+    (tmp_path / "sgconfig.yml").write_text(
+        "ruleDirs:\n  - decoy-rules\ntestConfigs:\n  - testDir: decoy-tests\n"
+    )
+
+    done = subprocess.run(
+        [str(gate)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "fail", result.summary
+    assert [f.code for f in result.failures] == ["container-runtime-is-runtime-only"]
+
+
+@pytest.mark.parametrize("ignore_file", [".ignore", ".git/info/exclude"])
+def test_an_ignore_file_outside_the_diff_cannot_hide_a_violation(tmp_path, ignore_file):
+    """ast-grep walks with the `ignore` crate, which has no notion of what git
+    tracks: one line naming a *tracked* file removes it from the scan while it
+    stays in the commit. Measured, in a real repository, on all three sources.
+
+    `.gitignore` is the one this repo needs — it is what keeps `.venv` and
+    `.claude/worktrees/` out — and an edit to it is in the diff, so
+    `integrity.gate_config` routes it to a person. These two are not: `.ignore`
+    buys nothing here, and `.git/info/exclude` never appears in a diff at all, so
+    no policy list can reach it. The gate refuses both."""
+    gate = _rules_tree(tmp_path)
+    (tmp_path / "saffron" / "cell").mkdir(parents=True)
+    (tmp_path / "saffron" / "cell" / "bad.py").write_text(
+        'subprocess.run(["container", "run"])\n'
+    )
+    hidden = tmp_path / ignore_file
+    hidden.parent.mkdir(parents=True, exist_ok=True)
+    hidden.write_text("saffron/cell/bad.py\n")
+
+    done = subprocess.run(
+        [str(gate)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "fail", result.summary
+    assert [f.file for f in result.failures] == ["saffron/cell/bad.py"]
+
+
+def test_what_decides_which_files_a_gate_sees_is_routed_to_a_person():
+    """`integrity.gate_config` exists because the rules a gate enforces have to
+    reach a human, not just the gate's own executable. What a gate can *see* is
+    the same question one step earlier: `.gitignore` removes a tracked file from
+    `lint`, `format` and `structure` at once, and the config naming the rules
+    decides which rules run at all. Nested `.gitignore` files count too."""
+    policy, _ = load_policy(REPO)
+    for path in (
+        ".gitignore",
+        "saffron/cell/.gitignore",
+        ".saffron/sgconfig.yml",
+        ".saffron/rules/container-runtime-is-runtime-only.yml",
+    ):
+        assert any(matches(path, p) for p in policy.integrity.gate_config), (
+            f"{path} decides what a blocking gate can see and no gate_config "
+            "pattern covers it, so an agent can edit it and go green"
+        )
+
+
+def test_structure_errors_when_its_tool_is_present_but_not_runnable(tmp_path):
+    """`FileNotFoundError` is not the only way a tool fails to start. A file on
+    PATH without the execute bit raises `PermissionError`, and an uncaught one
+    writes a traceback to stderr and nothing to stdout — which `run_gate` reads
+    as a gate that produced no contract at all. The verdict is `error` either
+    way; caught, it also says which of the two happened.
+
+    The PATH carries no other ast-grep, deliberately: `execvp` treats a candidate
+    it cannot execute as a miss and keeps walking, so a stub in front of a real
+    binary is not a broken tool — it is a working one found second."""
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    (stub / "ast-grep").write_text("#!/bin/sh\necho 'ast-grep 0.0.0-stub'\n")
+    (stub / "ast-grep").chmod(0o644)
+    done = subprocess.run(
+        [str(GATES / "structure")],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env={**os.environ, "PATH": f"{stub}:/usr/bin:/bin"},
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "error", result.summary
+    assert "could not be run" in result.summary

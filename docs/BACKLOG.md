@@ -4176,6 +4176,35 @@ spec declares one. A target repo that does would pay it, and nothing says so.
 
 ---
 
+## 76. A gitignore entry removes a tracked file from `lint` and `format`
+
+Found reviewing the `structure` gate (PR #145), where the same hole was closed.
+ast-grep and ruff both walk with a gitignore filter that has no notion of what
+git *tracks*: one line in `.gitignore` naming a file that is committed removes it
+from the gate's view while it stays in the diff, in the index, and in the merged
+result. Measured on `structure` before the fix — `fail` on the planted violation,
+one line added, `pass` — and ruff documents the same walk (`--no-respect-gitignore`
+exists precisely because of it).
+
+`.gitignore` is now in `integrity.gate_config`, so an edit routes to a person on
+every gate at once, and that is the load-bearing half. What is left is per-gate
+and cheaper than it looks:
+
+- **`lint` and `format`** should pass `--no-respect-gitignore` and name their own
+  exclusions, as `structure` does for `.ignore` and `.git/info/exclude`. The
+  reason to be careful rather than quick: `.venv/` and `.claude/worktrees/` are
+  gitignored, and a scan that walks into either is slow and reports third-party
+  code. `structure` keeps the gitignore filter for exactly that reason and routes
+  instead; whether ruff can afford the same trade is a measurement, not a guess.
+- **`tests`** is a different question — pytest collects through its own config —
+  and should be checked rather than assumed to share the defect.
+
+**Done looks like** a test per gate in the shape of
+`test_an_ignore_file_outside_the_diff_cannot_hide_a_violation`: a tracked file
+that violates, an ignore file naming it, and the gate still reporting `fail`.
+
+---
+
 ## What is *not* here, deliberately
 
 DIAGNOSE and `SCOPE_REVIEW`, the scheduler's conflict sets and stacking, `saffron

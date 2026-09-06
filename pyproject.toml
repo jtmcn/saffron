@@ -21,8 +21,10 @@ saffron = "saffron.cli:main"
 # ty is pinned exactly, not floored: the `types` gate parses its JSON output
 # and it is pre-1.0 — a schema change on a routine resolve would turn a batch
 # red overnight rather than at review. ast-grep-cli is pinned for the same
-# reason and ships the same binary homebrew does; the `structure` gate parses
-# its JSON and its rule syntax is likewise pre-1.0.
+# reason: the `structure` gate parses its JSON and its rule syntax is likewise
+# pre-1.0. This is the version a cell gets, baked into /opt/venv; on the host the
+# gate takes whatever `ast-grep` is on PATH, exactly as `lint` takes `ruff`, and
+# reports the version it actually ran.
 dev = [
     "pytest>=8",
     "ruff>=0.16.3",

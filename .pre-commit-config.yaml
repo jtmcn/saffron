@@ -23,16 +23,20 @@ repos:
   # hook and the gate must run the one version `pyproject.toml` pins.
   # `test` before `scan`: a rule whose own invalid snippet no longer matches is
   # a rule that has stopped guarding anything, and it would otherwise report a
-  # clean scan. `--no-ignore hidden` because the walk skips `.saffron/` as a
-  # dot-directory, which is where the `tool` rule matters most.
+  # clean scan. The flags are the gate's, for the gate's reasons — see
+  # `.saffron/gates/structure.py`; a hook that scanned a different set of files
+  # than the gate would disagree with it at exactly the wrong moment.
   - repo: local
     hooks:
       - id: ast-grep
         name: ast-grep (the structure gate's rules)
         language: system
-        entry: sh -c 'uv run ast-grep test && uv run ast-grep scan --no-ignore hidden'
+        entry: >-
+          sh -c 'uv run ast-grep test -c .saffron/sgconfig.yml
+          && uv run ast-grep scan -c .saffron/sgconfig.yml
+          --no-ignore hidden --no-ignore dot --no-ignore exclude'
         pass_filenames: false
-        files: ^(.*\.py|sgconfig\.yml|\.saffron/(rules|rule-tests)/.*)$
+        files: ^(.*\.py|\.saffron/(sgconfig\.yml|rules/.*|rule-tests/.*))$
 
   # A retired term, not the whole `_Avoid_` list: most of those words are ordinary
   # English elsewhere. Only a word a settled decision killed outright is decidable
