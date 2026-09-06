@@ -3,8 +3,10 @@
 **A failing test is the passing result** — the same inversion `revert`
 already makes, at a granularity `revert` cannot reach: `revert` reverts whole
 files and asks whether the new tests test *anything*, this reverts one named
-edit and asks whether one witness tests *that thing*. A criterion may declare a `mutant` — the smallest edit
-that would falsify its `claim`. This gate applies that edit to the head tree,
+edit and asks whether one witness tests *that thing*.
+
+A criterion may declare a `mutant` — the smallest edit that would falsify
+its `claim`. This gate applies that edit to the head tree,
 invokes the repo's declared `tests` gate over exactly the one witness node id
 the criterion names, and reads a `fail` as the answer it wanted: the witness
 noticed the mutant and died. A witness that stays green under its own mutant
@@ -68,7 +70,9 @@ def witness_gate(
     apply: named in the summary, never counted as a witness that did its
     job. `error` ends the attempt the moment the repo's `tests` gate could
     not answer for one mutant; nothing already restored is undone, and
-    nothing not yet touched is applied.
+    nothing not yet touched is applied. The one exception is a restore that
+    itself failed — `error` too, and it leaves the tree mutated, because
+    nothing here can put back what it could not read or write.
     """
     declared = [c for c in acceptance if c.mutant is not None]
     if not declared:
@@ -98,7 +102,7 @@ def witness_gate(
         # the type nor the linter catches it. `revert` uses this same
         # record-then-return shape for the same reason.
         failed_to_run: Exception | None = None
-        failed_to_restore: MutationError | None = None
+        failed_to_restore: Exception | None = None
         tests_result = None
         try:
             try:
@@ -108,7 +112,14 @@ def witness_gate(
         finally:
             try:
                 restore_mutant(tree, mutant, applied)
-            except MutationError as exc:
+            except (MutationError, OSError) as exc:
+                # `OSError` too: `restore_mutant` guards neither its read nor
+                # its write, so a `run_tests` that deletes the file raises
+                # `FileNotFoundError` from inside this `finally` — and an
+                # exception raised there *replaces* whatever was in flight.
+                # Measured: a Ctrl-C came out as `FileNotFoundError` with the
+                # interrupt demoted to `__context__`, where nothing looks. The
+                # `return` was half this bug; a `raise` is the other half.
                 failed_to_restore = exc
 
         # Restoration first: a tree left mutated is the worse fact, and it is
@@ -120,6 +131,11 @@ def witness_gate(
                 summary=(
                     f"could not restore {mutant.file} after its mutant — "
                     f"{failed_to_restore}"
+                    + (
+                        f" (the run also failed — {failed_to_run})"
+                        if failed_to_run is not None
+                        else ""
+                    )
                 ),
             )
         if failed_to_run is not None:
@@ -137,10 +153,12 @@ def witness_gate(
         # `session.aborted_gates`, and a mutant that kills its witness by making
         # a fixture raise produces exactly that — `.saffron/gates/tests.py`
         # reports `error` when pytest exits non-zero with no `FAILED ` line to
-        # parse. `revert.py` met the identical trap and chose `fail` for its
-        # canonical case; this spec asked for `error`. Left as asked, and the
-        # disagreement is deliberate rather than overlooked — resolve it in
-        # `SA-0058` or the backlog, not by editing one of the two to match.
+        # parse. `revert.py` met the identical trap and chose **`skip`** — its
+        # own comment is emphatic that `error` "ends the attempt" and that this
+        # is "the whole gate's usability". This spec asked for `error`. Left as
+        # asked, and the disagreement is `error`-vs-`skip`, not
+        # `error`-vs-`fail` — resolve it in `SA-0058` or the backlog, not by
+        # editing one of the two to match.
         if tests_result.status == "error":
             # Not `fail`: a runner that could not start under the mutant has
             # answered nothing about whether the witness guards its claim.

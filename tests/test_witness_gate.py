@@ -9,6 +9,8 @@ fake `run_tests` callable, against real files on disk so `apply_mutant` and
 
 from __future__ import annotations
 
+import pytest
+
 from saffron.gates.contract import Failure, GateResult, GateStatus
 from saffron.gates.core.witness import witness_gate
 from saffron.intake import Criterion, Mutant
@@ -84,8 +86,10 @@ def test_a_witness_that_survives_its_mutant_fails(tmp_path):
     # substring of the first and held whether or not the message named it —
     # deleting `{mutant.replace!r}` from the message left this green.
     assert "max(x, 0)" in failure.message  # what was there
-    replaced = "0"  # not a substring of `find`, unlike the helper's default
-    assert criterion.mutant is not None and criterion.mutant.replace == replaced
+    # `repr`, and `replaced` read off the criterion rather than restated:
+    # asserting the fixture equals its own literal tests nothing.
+    assert criterion.mutant is not None
+    replaced = criterion.mutant.replace  # "0" — not a substring of `find`
     assert repr(replaced) in failure.message  # what replaced it
 
 
@@ -302,3 +306,70 @@ def test_an_inner_skip_is_not_counted_as_a_witness_that_died(tmp_path):
     assert result.status == "skip"
     assert criterion.witness in result.summary
     assert "skip" in result.summary
+
+
+def test_an_interrupt_during_a_mutated_run_is_not_swallowed(tmp_path):
+    """The regression test for this gate's own worst defect, and it needs two
+    things at once — which is why the original bug report overstated it.
+
+    The swallow lived in a `return` inside a `finally`. Reaching it required
+    the restore to *also* fail, because the `return` sat inside the `except`
+    that a failed restore triggers. A plain interrupt with a clean restore
+    always propagated. So the test corrupts the file **and** interrupts.
+
+    Measured: the whole restructure that fixed this passed against the
+    unfixed file — 11 green — so until this test existed the fix was itself a
+    claim guarded by nothing, in the pull request that builds the gate for
+    exactly that."""
+    _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
+    criterion = _criterion()
+
+    def interrupt_and_corrupt(subset):
+        (tmp_path / "a.py").write_text("something else entirely\n")
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        witness_gate(
+            acceptance=[criterion], tree=tmp_path, run_tests=interrupt_and_corrupt
+        )
+
+
+def test_a_restore_that_cannot_read_the_file_does_not_replace_the_interrupt(tmp_path):
+    """`restore_mutant` guards neither its read nor its write, so a deleted
+    file raises `OSError` from inside the `finally` — and an exception raised
+    there *replaces* whatever was in flight. Measured before the fix: a
+    `KeyboardInterrupt` came out as `FileNotFoundError` with the interrupt
+    demoted to `__context__`, where nothing looks, so an `except Exception` up
+    the stack would have swallowed what was a `BaseException`.
+
+    Catching `OSError` beside `MutationError` is what keeps the `finally` from
+    raising at all."""
+    _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
+    criterion = _criterion()
+
+    def interrupt_and_delete(subset):
+        (tmp_path / "a.py").unlink()
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        witness_gate(
+            acceptance=[criterion], tree=tmp_path, run_tests=interrupt_and_delete
+        )
+
+
+def test_a_deleted_file_is_an_error_not_an_escaping_oserror(tmp_path):
+    """The same hole without an interrupt: the `OSError` escaped the gate
+    entirely, so a caller expecting a `GateResult` got a traceback."""
+    _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
+    criterion = _criterion()
+
+    def delete_the_file(subset):
+        (tmp_path / "a.py").unlink()
+        return _tests(status="fail", collected=(criterion.witness,))
+
+    result = witness_gate(
+        acceptance=[criterion], tree=tmp_path, run_tests=delete_the_file
+    )
+
+    assert result.status == "error"
+    assert "a.py" in result.summary
