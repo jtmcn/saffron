@@ -130,7 +130,13 @@ def test_declaring_a_core_gate_in_the_vocabulary_alone_updates_both_surfaces(tmp
     assert "probe" in render.members("CoreGate", vocabulary=vocab)
 
     context_out = render.render_context(context, vocabulary=vocab)
-    assert "`revert`, `probe`." in context_out
+    # The tail is derived, not spelled. This assertion used to name `revert` as
+    # the gate `probe` follows, and declaring `witness` (item 72) broke it —
+    # a test pinned to the membership it is checking, which is the shape of
+    # defect this file exists to catch one level down.
+    ordered = render.members("CoreGate", vocabulary=vocab)
+    assert ordered[-1] == "probe", "the appended gate must render last"
+    assert f"`{ordered[-2]}`, `probe`." in context_out
     # The claim is that it propagates, so the un-mutated render must differ.
     assert render.render_context(context, vocabulary=VOCABULARY) == context
 
