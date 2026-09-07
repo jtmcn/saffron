@@ -61,9 +61,9 @@ acceptance:
       replace: "_NOTES_LIMIT = 4_000_000"
   - claim: >-
       The notes are extracted and hashed at the moment they are produced and
-      carried on the outcome, never re-read from `/work`. A file left in the
-      workspace is a claim, not a record — `plan.json` is the precedent and
-      the reason is the same one.
+      carried on the outcome, never re-read from the cell's workspace mount. A
+      file left there is a claim, not a record — the plan artifact is the
+      precedent and the reason is the same one.
     witness: tests/test_session.py::test_the_notes_artifact_is_hashed_when_it_is_produced
   - claim: >-
       A task that produced no notes renders exactly the body it renders
