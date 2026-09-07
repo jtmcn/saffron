@@ -164,5 +164,8 @@ limitation worth knowing rather than one worth hiding.
 
 **A ceiling, named.** The prompt withholds mutants, but this spec file is in the
 worktree you are working in, and `.saffron/**` is forbidden to *write*, not to
-read. Do not go looking. If you do read it, say so in your notes — which is,
-after all, the channel this spec exists to build.
+read — `forbidden` is the `scope` gate reading a diff, and it says nothing about
+reads. That is `docs/BACKLOG.md` item **80**, filed with this spec. Do not go
+looking. If you do read it, say so in your notes — which is, after all, the
+channel this spec exists to build, and the datapoint that moves item 80 to
+tier 1.

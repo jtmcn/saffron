@@ -80,8 +80,8 @@ rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
 ### Tier 3 — real, not urgent
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
-**56**, **57**, **61**, **62**, **63**, **64**, **69**, **75**, **76**, **77**.
-(**65** and **68** are done.)
+**56**, **57**, **61**, **62**, **63**, **64**, **69**, **75**, **76**, **77**,
+**80**. (**65** and **68** are done.)
 
 **76 sits here rather than in tier 1** because `structure`, where the hole was
 found, is closed: it refuses every ignore source and states its own file set.
@@ -4338,6 +4338,49 @@ either widened on an existing lens or given to a fourth, and measured against
 that diff rather than argued. Cheap to try, and it is the item that decides
 whether §9's "merge half of what it produces" is read off a number that means
 anything.
+
+---
+
+## 80. The mutant a witness is judged by is withheld from the prompt and left in the worktree
+
+Found writing `SA-0063`, 2026-09-06 — the first spec in this repo to declare a
+mutant, so the first for which this is reachable at all.
+
+`agents/context.py:76` hands the implementer each criterion's `witness` and
+`claim` and never its `mutant`. That is deliberate and `SA-0056` gives the
+reason: *"a cell is untrusted, and a mutant it authored is a mutant chosen to be
+killed."* A mutant it can merely *read* is the same defect one step removed —
+the test still gets written to kill that exact edit and nothing else.
+
+**But the spec is a file in the worktree the agent is working in.** `.saffron/**`
+is `forbidden`, and `forbidden` is the `scope` gate reading a diff: it says what
+an agent may not *change*. It says nothing about what an agent may read, and
+`cat .saffron/specs/SA-0063-*.md` is one turn.
+
+So the withholding is a prompt-level control standing in front of the
+anti-theater mechanism, and this repo's own governing line already settles what
+that is worth: prompts and in-agent hooks shape behaviour; they are never the
+boundary. The failure it admits is the exact one `witness` exists to refuse —
+the gate reports `pass` because the test killed the mutant, over a test written
+to kill that mutant and nothing else, and `run_witness`'s pre-flight probe
+cannot tell those apart because from outside they are identical.
+
+**Tier 3, and it moves on evidence rather than on argument.** No run has yet had
+a mutant to read, so the likelihood is unmeasured while the consequence is
+tier-1 shaped. `SA-0063` is the first run that could produce the datapoint, and
+its `## Notes for the agent` asks the implementer to say so if it reads the file
+— an honour system named as one, which is the measurement available before the
+fix exists. **A run that shows an agent reading its own spec moves this to tier
+1 without further argument.**
+
+**Done looks like** the copy of the spec the cell can reach not carrying
+`mutant:` at all. The host already reads its own authoritative copy — preflight
+exports `.saffron` from the mirror at `base_sha` — so the two readers are
+already distinct and only the worktree copy needs stripping. The alternative is
+not placing the spec in the worktree at all, which is cleaner and costs the
+agent a file it is otherwise given for context. What this needs is not code so
+much as a decision about which copy is authoritative for whom; either shape is
+cheap once that is settled.
 
 ---
 
