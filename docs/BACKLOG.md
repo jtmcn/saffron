@@ -41,7 +41,7 @@ evidence. That is the gate now, and it is one cheap spec away.
 
 ### Tier 1 — breaks at 03:00 with nobody watching
 
-**74**, **73**, **71**, **78**, **69**, **79**, **70**, **45**, **51** (with
+**74**, **73**, **71**, **78**, **69**, **79**, **80**, **70**, **45**, **51** (with
 **49**/**50**, which its fix closes), **47**, **46**, **40**, **26**, **7**.
 (**59** is done — `SA-0052`, PR #118.)
 
@@ -81,7 +81,8 @@ rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, **57**, **61**, **62**, **63**, **64**, **69**, **75**, **76**, **77**,
-**80**, **81**, **82**, **83**. (**65** and **68** are done.)
+**81**, **82**, **83**, **84**, **85**. (**65** and **68** are done; **80**
+moved to tier 1 when its evidence arrived.)
 
 **76 sits here rather than in tier 1** because `structure`, where the hole was
 found, is closed: it refuses every ignore source and states its own file set.
@@ -4365,8 +4366,14 @@ the gate reports `pass` because the test killed the mutant, over a test written
 to kill that mutant and nothing else, and `run_witness`'s pre-flight probe
 cannot tell those apart because from outside they are identical.
 
-**Tier 3, and it moves on evidence rather than on argument.** No run has yet had
-a mutant to read, so the likelihood is unmeasured while the consequence is
+**Tier 1 as of 2026-09-07 — the evidence arrived.** `SA-0064`'s implementer
+reasoned in its notes about a criterion's `mutant` field, which the prompt
+withholds and which the host's own copy of that spec no longer contained: it had
+read the worktree copy. Item **85** carries the measurement. The paragraph below
+is kept as filed, because what it predicted is what happened.
+
+~~Tier 3, and it moves on evidence rather than on argument.~~ No run had yet had
+a mutant to read, so the likelihood was unmeasured while the consequence is
 tier-1 shaped. `SA-0063` is the first run that could produce the datapoint, and
 its `## Notes for the agent` asks the implementer to say so if it reads the file
 — an honour system named as one, which is the measurement available before the
@@ -4521,6 +4528,77 @@ run at base at all: for a non-`preserves` witness the answer looks like no by
 construction — §5.4 already requires such a witness to fail at base — and the
 cheapest correct fix may be to not ask the question rather than to widen the
 answer.
+
+---
+
+## 84. `revert` judges a witness whose subject the spec forbids
+
+Received 2026-09-07 through the notes channel item **74** asked for — the first
+finding this repo has been handed by an implementer rather than by a lens or a
+person. `SA-0063` built the channel, `SA-0064` wired it, and this arrived in
+`SA-0064`'s own run, in its own words:
+
+> `revert` ran anyway, found that
+> `tests/test_session.py::test_a_protected_path_alone_asks_for_notes` depended
+> on none of this diff's own source files … and correctly flagged it as
+> theater. … it's a workaround for what reads like a gap in `revert_gate`: it
+> has no way to recognize "this witness's mutant is declared against a file
+> this spec forbids me from editing" and skip itself accordingly.
+
+`revert_gate` folds every declared acceptance witness into one question — does
+this test still pass with the diff's own source reverted — and a spec can make
+that question unanswerable. `SA-0064`'s criterion 2 was a deliberate coverage
+backfill for a predicate in `saffron/cell/session.py`, a file that spec
+`forbids`; only `saffron/phases/package.py` was in `touches`. The new test
+therefore depended on none of the diff's source, which is what `revert` calls
+theater, and here was the point.
+
+**The workaround shipped.** The test now also drives a real `package.package()`
+against a real git remote so that it depends on both, which satisfies the gate
+and leaves a test of one boolean predicate standing up a git remote to check it.
+That cost is in #160's diff and is the honest reason to fix this rather than
+argue it.
+
+The implementer bounds it itself: *"I don't think this generalizes beyond specs
+that split a claim's verifier (mutant) from its enforcement site (`touches`) the
+way this one does."* Narrow, then — but this is the second gate in two days to
+answer `fail`/`error` where the spec's own scope made the question unanswerable,
+and item **83** is the first. Same class: a gate that cannot say *unproven*
+says something worse.
+
+**Done looks like** `revert` skipping a witness whose subject lies outside the
+spec's `touches`, with a summary saying so. "This diff could not have made that
+test pass, because the spec did not let it near the code" is unproven, not
+theater, and `skip` is the status that already means it.
+
+---
+
+## 85. The host runs one copy of a spec and the cell reads another
+
+Measured 2026-09-07, on `SA-0064`'s second run.
+
+`saffron cell <path>` loads the spec with `load_spec(args.spec)` — the file the
+operator names, on disk, now. The cell's worktree is built from the mirror at
+`base_sha`, so it carries whatever `.saffron/specs/` holds on the default
+branch. Nothing compares them.
+
+They differed on this run, and it showed. The host's copy had criterion 2's
+mutant removed (item **83**, an hour earlier); `main`'s copy still carried it.
+The implementer's notes then reasoned about *"Criterion 2's spec-declared mutant
+lives in `saffron/cell/session.py`"* — a field `agents/context.py` withholds
+from the prompt by construction, and one the host's own copy no longer had. The
+agent was working from a contract the host was not judging it against.
+
+This is also the measurement item **80** asked for and it is what moves that
+item to tier 1: the prompt-level withholding of `mutant` is defeated by the
+worktree copy, and now demonstrably rather than in principle.
+
+**Done looks like** attended mode reporting the difference, or refusing it. Both
+copies are already in hand at preflight — `spec_sha` is computed host-side and
+`.saffron` is exported from `base_sha` regardless — so the check is a comparison
+of two strings the run already holds, not new machinery. Refusing may be too
+strong for an operator deliberately iterating on a spec, which is exactly what
+produced this; naming it in the preflight line is not.
 
 ---
 
