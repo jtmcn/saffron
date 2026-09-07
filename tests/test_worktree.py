@@ -1341,3 +1341,75 @@ def test_a_mutant_applied_in_a_real_cell_keeps_the_bytes_it_did_not_name(
         runtime.remove_container(container)
         runtime.remove_volume(volume)
         runtime.remove_volume(f"{volume}-state")
+
+
+def test_a_mutant_on_a_path_git_cannot_restore_applies_nothing(tmp_path, monkeypatch):
+    """The undo is `git checkout HEAD -- <file>`, so the precondition it
+    actually needs is *a regular file tracked at HEAD* — not merely a clean
+    one. A gitignored or untracked path is clean to `git status` and has
+    nothing at `HEAD` to come back from; a nonexistent one is the ordinary
+    case `gates/core/witness.py` calls "the spec anticipated a different
+    implementation", which `saffron.mutation.apply_mutant` answers with a
+    reason and `error` would wrongly charge to the attempt.
+    """
+    _repo_with_a_file(tmp_path, monkeypatch, "value = 1\n")
+    (tmp_path / ".gitignore").write_text("generated/\n")
+    _commit(tmp_path, "ignore generated")
+    (tmp_path / "generated").mkdir()
+    (tmp_path / "generated" / "g.py").write_bytes(b"value = 1\n")
+
+    for path in ("generated/g.py", "nope.py"):
+        mutant = Mutant(file=path, find="value = 1", replace="value = 2")
+        with worktree.source_mutated("c", mutant) as reason:
+            assert reason is not None, path
+            assert "HEAD" in reason, reason
+    assert (tmp_path / "generated" / "g.py").read_bytes() == b"value = 1\n"
+    assert _porcelain(tmp_path) == ""
+
+
+def test_a_symlinked_mutant_path_applies_nothing(tmp_path, monkeypatch):
+    """A symlink is a regular path to `cat` and to `>`, and *not* to
+    `git checkout`: the read follows it, the write follows it, and the undo
+    restores the link — which never changed — and exits 0. The mutation is
+    left behind on the file the link points at, reported as a clean success.
+
+    `saffron.mutation` never meets this because it writes bytes back to the
+    same path it read them from. Here the two halves resolve differently, so
+    the mode at `HEAD` has to be read rather than assumed.
+    """
+    _repo_with_a_file(tmp_path, monkeypatch, "value = 1\n")
+    (tmp_path / "src" / "alias.py").symlink_to("guard.py")
+    _commit(tmp_path, "a symlink beside the source")
+    mutant = Mutant(file="src/alias.py", find="value = 1", replace="value = 2")
+
+    with worktree.source_mutated("c", mutant) as reason:
+        assert reason is not None
+        assert "regular file" in reason
+
+    assert (tmp_path / "src" / "guard.py").read_bytes() == b"value = 1\n"
+    assert (tmp_path / "src" / "alias.py").is_symlink()
+    assert _porcelain(tmp_path) == ""
+
+
+def test_an_undo_that_exits_zero_without_restoring_still_raises(tmp_path, monkeypatch):
+    """`_restore_source` in this same module argues that an exit code is not
+    the guarantee it makes, and checks the tree afterwards. The undo here owes
+    the same: a tree this could not restore must not read as a witness doing
+    its job, and `git checkout` exiting 0 is not proof that it did.
+    """
+    _repo_with_a_file(tmp_path, monkeypatch, "value = 1\n")
+    mutant = Mutant(file="src/guard.py", find="value = 1", replace="value = 2")
+    real = worktree._git
+
+    def checkout_that_does_nothing(container, *args):
+        if args[0] == "checkout":
+            return runtime.Completed(0, "", "")
+        return real(container, *args)
+
+    monkeypatch.setattr(worktree, "_git", checkout_that_does_nothing)
+
+    with (
+        pytest.raises(runtime.CellRuntimeError, match="did not restore"),
+        worktree.source_mutated("c", mutant),
+    ):
+        pass

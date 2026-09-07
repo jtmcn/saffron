@@ -355,10 +355,11 @@ def _confined(file: str) -> bool:
     before anything is read or written, so an escaping mutant cannot be used
     to probe what exists outside the tree either.
 
-    ponytail: lexical, where the host half calls `Path.resolve()` — a symlink
-    *inside* the tree pointing out of it is still followed. Resolving needs a
-    round trip into the container per component; the ceiling is that a repo
-    whose own tracked symlinks escape gets no refusal here.
+    ponytail: lexical, where the host half calls `Path.resolve()`. A symlink
+    is not the hole that would otherwise leave, because `source_mutated`
+    refuses anything that is not a regular file tracked at `HEAD` — and git
+    tracks no path *through* a symlink, only the link itself. What is left is
+    a resolution git cannot represent either.
     """
     candidate = PurePosixPath(file)
     if candidate.is_absolute():
@@ -411,9 +412,11 @@ def _write_file(container: str, path: str, content: bytes) -> None:
     function never has to inspect the content of.
 
     ponytail: the whole script, payload included, is one argv string, and
-    Linux caps a single one at `MAX_ARG_STRLEN` (128 KiB) whatever `ARG_MAX`
-    is. Reasoned, not measured: that puts the ceiling near a 96 KiB source
-    file, above which every mutant on it is `error` rather than a verdict.
+    Linux caps a single one at `MAX_ARG_STRLEN` whatever `ARG_MAX` is.
+    Measured against `saffron/cell-base:python`: 131,000 bytes of argv run,
+    131,071 and above fail, so the cap is 131,072 and the ceiling is a source
+    file near 96 KiB, above which every mutant on it is `error` rather than a
+    verdict. The exec never starts, so `>` never truncates.
     """
     encoded = base64.b64encode(content).decode()
     script = f"printf '%s' {shlex.quote(encoded)} | base64 -d > {shlex.quote(path)}"
@@ -458,6 +461,30 @@ def source_mutated(container: str, mutant: Mutant) -> Iterator[str | None]:
     if not _confined(mutant.file):
         yield f"mutant path {mutant.file!r} is not a relative path inside the tree"
         return
+    # What the undo needs is not a *clean* path but a regular file tracked at
+    # `HEAD`, and one `ls-tree` is the only thing that answers both. A
+    # gitignored or untracked file is clean to `git status` and has nothing at
+    # `HEAD` to come back from. A symlink is worse than either: the read and
+    # the write follow it, `git checkout` restores the link — which never
+    # changed — and exits 0, so the mutation survives inside a success.
+    # `saffron.mutation` never meets that because it writes bytes back to the
+    # path it read them from; here the two halves resolve differently.
+    listed = _git(container, "ls-tree", "HEAD", "--", mutant.file)
+    if listed.returncode != 0:
+        raise runtime.CellRuntimeError(
+            f"ls-tree for {mutant.file}'s mutant failed: {listed.stderr.strip()}"
+        )
+    entry = listed.stdout.strip()
+    if not entry:
+        yield f"{mutant.file}: not tracked at HEAD, so the undo has nothing to restore"
+        return
+    if not entry.startswith(("100644", "100755")):
+        yield (
+            f"{mutant.file}: not a regular file at HEAD (mode "
+            f"{entry.split()[0]}) — `git checkout` would not undo a write "
+            "through it"
+        )
+        return
     dirty = _git(
         container,
         "status",
@@ -471,7 +498,7 @@ def source_mutated(container: str, mutant: Mutant) -> Iterator[str | None]:
         raise runtime.CellRuntimeError(
             f"status for {mutant.file}'s mutant failed: {dirty.stderr.strip()}"
         )
-    if dirty.stdout.strip("\0").strip():
+    if dirty.stdout.strip():
         # `revert` refuses the same way and says why: no evidence about
         # theater is worth destroying the agent's uncommitted work and
         # blinding the gate that would have caught it.
@@ -510,6 +537,20 @@ def source_mutated(container: str, mutant: Mutant) -> Iterator[str | None]:
             failed_to_undo = runtime.CellRuntimeError(
                 f"mutant undo for {mutant.file} failed: {done.stderr.strip()}"
             )
+        else:
+            # `_restore_source` above makes the same argument: an exit code is
+            # not the guarantee this function makes. The bytes are already in
+            # hand, so the check is a comparison rather than a digest.
+            try:
+                back = _read_file(container, mutant.file)
+            except runtime.CellRuntimeError as exc:
+                failed_to_undo = exc
+            else:
+                if back != content:
+                    failed_to_undo = runtime.CellRuntimeError(
+                        f"mutant undo for {mutant.file} exited 0 and did not "
+                        "restore the file"
+                    )
 
     if failed_to_undo is not None:
         raise failed_to_undo
