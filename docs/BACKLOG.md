@@ -4623,10 +4623,17 @@ notes are a new way into it.
 **`SA-0064`'s criterion 4 does not witness its own claim.** It reads *"a task
 that recorded nothing packages the body it packages today"* and names
 `test_the_pr_body_reports_the_effective_tier_not_the_specs_declared_one` as the
-witness, with `preserves: true`. Measured: make `_notes` render a heading over
+witness, with `preserves: true`. Measured at `0631855`: make `_notes` render
+a heading over
 empty notes and that test stays green — the only test that turns red is
 `test_notes_cannot_move_a_status_or_a_gate_result`, and it catches it
-incidentally, through an exact-prefix comparison aimed at something else. A
+incidentally, through an exact-prefix comparison aimed at something else.
+
+Watch the mutation itself: `        return ""` appears seven times in
+`pr_body.py` and only line 390 is `_notes`'s, so a first-occurrence replace
+lands in an unrelated function and reports a green suite that means nothing.
+It did, on the first attempt at this measurement — the number was right and
+the thing measured was not. A
 `preserves` witness is a keep-this-green contract rather than a real witness, so
 this is defensible as written; the property is nonetheless guarded by accident.
 
