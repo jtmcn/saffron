@@ -30,13 +30,27 @@ utils:
   tool-key:
     kind: string
     has: { kind: string_content, regex: '^tool$' }
+  # A value the parser can see is constant. In tree-sitter-python an f-string is
+  # a `string` node like any other, so `kind: string` alone read `f"ruff {v}"` —
+  # a version that *was* executed — as a literal, and this gate is blocking:
+  # measured, all eight branches failed the interpolated form of the very shape
+  # `.saffron/gates/format` writes in shell, with a message telling the author to
+  # do what they had done. An `interpolation` child is a direct child, and an
+  # f-string carrying one cannot be known at parse time.
+  # `f"ruff 0.16.3"` has no interpolation and stays caught, which is the point:
+  # the prefix is not what makes a string evidence.
+  # Deliberately *not* used by `container-runtime-is-runtime-only`, where
+  # `f"{prefix}/container"` does build the binary's name.
+  literal-string:
+    kind: string
+    not: { has: { kind: interpolation } }
 rule:
   any:
     # {"tool": "ruff 0.16.3"}
     - kind: pair
       all:
         - has: { field: key, matches: tool-key }
-        - has: { field: value, kind: string }
+        - has: { field: value, matches: literal-string }
     # payload["tool"] = "ruff 0.16.3"
     - kind: assignment
       all:
@@ -44,19 +58,19 @@ rule:
             field: left
             kind: subscript
             has: { field: subscript, matches: tool-key }
-        - has: { field: right, kind: string }
+        - has: { field: right, matches: literal-string }
     # GateResult(..., tool="ruff 0.16.3")
     - kind: keyword_argument
       all:
         - has: { field: name, regex: '^tool$' }
-        - has: { field: value, kind: string }
+        - has: { field: value, matches: literal-string }
     # tool = "ruff 0.16.3" — the plainest way to write the defect, and the one
     # the other three branches missed. Every `tool =` in the tree derives from a
     # call, so this costs nothing.
     - kind: assignment
       all:
         - has: { field: left, kind: identifier, regex: '^tool$' }
-        - has: { field: right, kind: string }
+        - has: { field: right, matches: literal-string }
     # result.tool = "ruff 0.16.3" — `GateResult` is a mutable model, so the
     # attribute form is the one the type invites. Measured: 0 matches in the
     # tree outside `tests/`.
@@ -66,7 +80,7 @@ rule:
             field: left
             kind: attribute
             has: { field: attribute, regex: '^tool$' }
-        - has: { field: right, kind: string }
+        - has: { field: right, matches: literal-string }
     # payload.setdefault("tool", "ruff 0.16.3") — writes the field without ever
     # spelling an assignment to it. Measured: 0 matches in the tree.
     - kind: call
@@ -79,18 +93,27 @@ rule:
             field: arguments
             all:
               - has: { nthChild: 1, matches: tool-key }
-              - has: { nthChild: 2, kind: string }
+              - has: { nthChild: 2, matches: literal-string }
     # def emit(payload, tool="ruff 0.16.3") — a distinct node kind from both
     # `assignment` and `keyword_argument`, so every branch above missed it, and
     # a plausible way to write the defect in a gate helper. Measured: 0 matches.
     - kind: default_parameter
       all:
         - has: { field: name, regex: '^tool$' }
-        - has: { field: value, kind: string }
+        - has: { field: value, matches: literal-string }
     # print('{"gate":"lint","tool":"ruff 0.16.3"}') — the contract serialized by
     # hand, which is how `.saffron/gates/format` writes it in shell, so it is the
     # shape a new Python gate copies rather than an evasion. Every branch above
     # misses it: there is no `pair` node, only one string. Measured: 0 matches in
     # the tree, and the field spelled as JSON is not a thing prose says.
+    #
+    # `literal-string` is deliberately not used here, and the closing `"` is what
+    # replaces it. An f-string splits into one `string_content` per literal run,
+    # so the chunk holding an interpolated value ends at the value's opening
+    # quote: measured, `f'{{"tool":"{v}"}}'` yields `{{"gate":…,"tool":"` with no
+    # closer, while `f'{{"tool":"ruff 0.16.3","x":"{v}"}}'` keeps the literal
+    # inside one chunk. Exempting the whole string for carrying an interpolation
+    # anywhere would let that second one — a literal `tool` in a serialized
+    # contract — walk past, so the test is on the value, not on the string.
     - kind: string
-      has: { kind: string_content, regex: '"tool"\s*:\s*"' }
+      has: { kind: string_content, regex: '"tool"\s*:\s*"[^"]*"' }

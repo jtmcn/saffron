@@ -18,6 +18,22 @@ valid:
   - |
     class GateResult:
         tool: str | None = None
+  # An interpolated version, one per branch. An f-string is a `string` node like
+  # any other, so before `literal-string` every one of these failed — correct
+  # code, blocked by a blocking gate, told to execute the tool it had executed.
+  - 'emit({"gate": "lint", "tool": f"ruff {version}"})'
+  - 'payload["tool"] = f"ruff {version}"'
+  - 'GateResult(gate="lint", status="pass", tool=f"ruff {version}")'
+  - 'tool = f"ruff {version}"'
+  - 'result.tool = f"ruff {version}"'
+  - 'payload.setdefault("tool", f"ruff {version}")'
+  - 'def emit(payload, tool=f"ruff {version}"): pass'
+  # The hand-serialized contract with the version interpolated into it — the
+  # direct Python translation of what `.saffron/gates/format` writes in shell.
+  - |
+    print(f'{{"gate":"lint","status":"pass","tool":"{version}"}}')
+  - |
+    print(f'{{"gate":"lint","tool":"ruff {version}"}}')
 invalid:
   - 'emit({"gate": "lint", "tool": "ruff 0.16.3"})'
   - 'payload["tool"] = "ruff 0.16.3"'
@@ -50,3 +66,9 @@ invalid:
     print('{"gate":"lint","status":"pass","tool":"ruff 0.16.3"}')
   - |
     sys.stdout.write('{"gate": "lint", "tool": "ruff 0.16.3"}')
+  # The prefix is not what makes a string evidence: an f-string with nothing
+  # interpolated *into the tool value* is still a literal. The second is the one
+  # a blanket "carries an interpolation, so exempt" fix would have let through.
+  - 'tool = f"ruff 0.16.3"'
+  - |
+    print(f'{{"gate":"lint","tool":"ruff 0.16.3","elapsed":"{elapsed}"}}')

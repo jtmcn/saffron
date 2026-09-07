@@ -249,6 +249,17 @@ snapshots:
       style: secondary
       start: 7
       end: 59
+  ? |
+    print(f'{{"gate":"lint","tool":"ruff 0.16.3","elapsed":"{elapsed}"}}')
+  : labels:
+    - source: f'{{"gate":"lint","tool":"ruff 0.16.3","elapsed":"{elapsed}"}}'
+      style: primary
+      start: 6
+      end: 69
+    - source: '{{"gate":"lint","tool":"ruff 0.16.3","elapsed":"'
+      style: secondary
+      start: 8
+      end: 56
   result.tool = "ruff 0.16.3":
     labels:
     - source: result.tool = "ruff 0.16.3"
@@ -292,3 +303,17 @@ snapshots:
       style: secondary
       start: 7
       end: 20
+  tool = f"ruff 0.16.3":
+    labels:
+    - source: tool = f"ruff 0.16.3"
+      style: primary
+      start: 0
+      end: 21
+    - source: tool
+      style: secondary
+      start: 0
+      end: 4
+    - source: f"ruff 0.16.3"
+      style: secondary
+      start: 7
+      end: 21
