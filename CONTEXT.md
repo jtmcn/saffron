@@ -222,10 +222,11 @@ in backticks. Three kinds, and the distinction is the core/repo boundary:
 - **Core gates** — `scope`, `size`, `secrets`, `integrity`, `census`, `committed`,
   `criteria`, `revert`, `witness`. Implemented in Saffron. Most read the diff;
   `committed` reads the worktree's status instead, and `census` and `criteria`
-  read other gates' results. `revert` is the one that runs something, and §2.1's
-  rule is shaped around it rather than broken by it: core invokes declared gates,
-  never tools (`DESIGN.md` §2.1). `witness` is the second gate a risk tier moves
-  (§5.4.1); the rest sit at the level §5.4 fixes for them.
+  read other gates' results. `revert` and `witness` are the two that run
+  something, and §2.1's rule is shaped around them rather than broken by them:
+  core invokes declared gates, never tools (`DESIGN.md` §2.1). `witness` is also
+  the second gate a risk tier moves (§5.4.1); the rest sit at the level §5.4
+  fixes for them.
 - **Contract gates** — the gate roles above. Declared in `policy.yaml`, implemented
   in the repo's `.saffron/gates/`.
 - **Repo-defined gates** — anything a repo adds against its own hard-to-fake
@@ -291,8 +292,10 @@ never fires.
 
 **Witness**: The test a spec's `acceptance:` entry names as the guard for its
 claim. One per criterion, declared by the spec author, never chosen by the agent.
-_Avoid_: "the test for it" — a witness is named in frontmatter and checked by the
-`witness` gate; an ordinary test that happens to cover the claim is not one.
+_Avoid_: "the test for it" — a witness is named in frontmatter, checked by the
+`criteria` gate for having run and turned green, and by the `witness` gate for
+failing on its criterion's mutant; an ordinary test that happens to cover the
+claim is not one.
 
 **Mutant**: A find-and-replace edit a criterion declares against its own subject,
 which its witness must fail on (`DESIGN.md` §5.4.1). Applied by the `witness` gate
