@@ -289,6 +289,20 @@ paying.
 _Avoid_: "byte-identical" — line numbers shift every attempt, so a byte comparison
 never fires.
 
+**Witness**: The test a spec's `acceptance:` entry names as the guard for its
+claim. One per criterion, declared by the spec author, never chosen by the agent.
+_Avoid_: "the test for it" — a witness is named in frontmatter and checked by the
+`witness` gate; an ordinary test that happens to cover the claim is not one.
+
+**Mutant**: A find-and-replace edit a criterion declares against its own subject,
+which its witness must fail on (`DESIGN.md` §5.4.1). Applied by the `witness` gate
+to ask whether the tests would notice the claim being broken. Withheld from the
+implementer's prompt on purpose: a mutant a cell chooses is a mutant chosen to be
+killed.
+_Avoid_: "mutation testing" for the gate as a whole — it runs one declared edit
+against one named witness, not a generated suite. _Avoid_ "mutant" for the tree
+the edit is applied to; that is the worktree, mutated.
+
 ---
 
 ## 5. Review
