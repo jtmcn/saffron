@@ -8,11 +8,12 @@ import shutil
 import time
 from collections.abc import Sequence
 from dataclasses import replace
+from functools import partial
 
 import pytest
 
 from saffron.agents import artifacts
-from saffron.cell import runtime, session
+from saffron.cell import runtime, session, worktree
 from saffron.events import Agent, describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
@@ -639,6 +640,7 @@ class _Cell:
         self.gate_paths: list[list[str]] = []
         self.order: list[str] = []
         self.reverted: list[list[str]] = []
+        self.mutated: list = []
 
 
 _DIFF = """diff --git a/src/x.py b/src/x.py
@@ -782,6 +784,18 @@ def _stub_the_runtime(
         yield
 
     monkeypatch.setattr("saffron.cell.worktree.source_reverted", _source_reverted)
+
+    @contextlib.contextmanager
+    def _source_mutated(_container, mutant):
+        # No git, no container, exactly as `_source_reverted` above stands in
+        # for `worktree.source_reverted`: records the mutant `witness_gate`
+        # was asked to apply and yields a reason rather than `None`, so the
+        # gate lands `skip` without ever calling `run_tests` — the real
+        # `source_mutated` is exercised directly in `tests/test_worktree.py`.
+        cell.mutated.append(mutant)
+        yield "no cell is running under this stub"
+
+    monkeypatch.setattr("saffron.cell.worktree.source_mutated", _source_mutated)
 
     def _commit_dirty(_container, message):
         cell.checkpointed.append(message)
@@ -3093,6 +3107,12 @@ def test_a_cell_run_produces_a_witness_result(monkeypatch, tmp_path):
     spec's acceptance criteria and a mutator, and the real `witness_gate`
     machinery — not a scripted stand-in — is what this test drives, through a
     `run_suite` fake that calls it exactly as `runner.run_suite` itself would.
+
+    The `skip` this lands on is `_stub_the_runtime`'s own fake
+    `worktree.source_mutated` reporting it cannot reach the tree — the same
+    shape `SA-0061`'s `stub_mutator` reported, but now it is `_suite`'s real
+    wiring to `worktree.source_mutated` producing it, not a bare identity
+    check against a function this attempt no longer calls.
     """
     from saffron.gates.core.witness import Mutated, witness_gate
     from saffron.intake import Criterion, Mutant
@@ -3141,7 +3161,80 @@ def test_a_cell_run_produces_a_witness_result(monkeypatch, tmp_path):
     # alike — never a plan the caller only remembers to pass once.
     assert captured
     assert all(acc == [criterion] for acc, _mutate in captured)
-    assert all(mutate is session.stub_mutator for _acc, mutate in captured)
+    # `_suite` binds the real cell mutator to this attempt's own container,
+    # not `stub_mutator` — proved by identity on `partial.func` and by the
+    # stubbed `worktree.source_mutated` actually having been reached with
+    # this criterion's own mutant.
+    assert all(
+        isinstance(mutate, partial) and mutate.func is worktree.source_mutated
+        for _acc, mutate in captured
+    )
+    assert all(mutate.args == ("saffron-cell-SY-1",) for _acc, mutate in captured)
+    assert cell.mutated == [criterion.mutant] * len(captured)
+
+
+def test_a_cell_run_supplies_the_real_mutator(monkeypatch, tmp_path):
+    """The cell run supplies `worktree.source_mutated` — bound to this
+    attempt's own container — in place of the stub, so `witness` reaches a
+    real verdict on a real attempt (`SA-0062`, `docs/BACKLOG.md` item 71).
+
+    Every spec in this repo declares no mutants — the default `_spec()`
+    fixture included — so that verdict is `skip` for want of anything to
+    check: the intended landing, and the difference from the previous `skip`
+    is that this one is a choice `witness_gate` makes on an empty
+    `declared` list, rather than a limitation of a mutator that could not
+    reach the tree. Driven the same way `test_a_cell_run_produces_a_witness_
+    result` is, through a `run_suite` fake that calls the real `witness_gate`
+    exactly as `runner.run_suite` itself would — not a canned `GateResult`
+    that would pass whether or not `_suite` supplied a real mutator at all.
+    """
+    from saffron.gates.core.witness import Mutated, witness_gate
+
+    captured: list[tuple] = []
+
+    def _run_suite(
+        gates,
+        cwd,
+        *,
+        timeout_s=900,
+        executor=None,
+        acceptance: Sequence = (),
+        mutate: Mutated | None = None,
+    ):
+        captured.append((acceptance, mutate))
+        assert mutate is not None  # `_suite` always supplies one
+        result = witness_gate(
+            acceptance=acceptance,
+            mutate=mutate,
+            run_tests=lambda subset: pytest.fail(
+                "no criterion here declares a mutant, so no test should ever run"
+            ),
+        )
+        return [result]
+
+    cell = _stub_the_runtime(monkeypatch)
+    monkeypatch.setattr("saffron.gates.runner.run_suite", _run_suite)
+
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    (witness_result,) = [g for g in outcome.gates if g.gate == "witness"]
+    assert witness_result.status == "skip"
+    assert witness_result.summary == "the spec declares no mutants"
+    assert captured
+    assert all(acc == [] for acc, _mutate in captured)
+    # `_suite` binds the real cell mutator, not the stub, to every call —
+    # baseline and head alike — whether or not `witness_gate` ever ends up
+    # calling it.
+    assert all(
+        isinstance(mutate, partial) and mutate.func is worktree.source_mutated
+        for _acc, mutate in captured
+    )
+    assert all(mutate.args == ("saffron-cell-SY-1",) for _acc, mutate in captured)
+    # And it never was called: the gate skipped on an empty `declared` list
+    # before `mutate` was ever reached, not because the mutator failed.
+    assert cell.mutated == []
 
 
 def test_the_stub_mutator_makes_the_result_an_honest_skip():
@@ -3226,13 +3319,16 @@ def test_a_skipped_witness_blocks_nothing_at_either_tier(monkeypatch, tmp_path):
     """A `skip` carries no failures at all, so it cannot become a new failure
     whichever tier's advisory set it falls into — the property the whole
     sequence rests on: turning `witness` on cannot fail a task while the
-    mutator is a stub.
+    mutator cannot reach the tree.
 
-    Driven through the real `witness_gate`, with the real `stub_mutator`
-    handed to it by `_suite` itself — not a canned `GateResult` a scripted
-    suite could produce whether or not any of this were wired at all. A
-    `run_suite` reverted to omitting `acceptance`/`mutate` shows up here as
-    a mismatched capture, not as an identical green.
+    Driven through the real `witness_gate`, with the real mutator `_suite`
+    itself binds to this attempt's container — `_stub_the_runtime`'s own
+    fake `worktree.source_mutated` stands in for the container round trip,
+    the same way it does for `worktree.source_reverted` — not a canned
+    `GateResult` a scripted suite could produce whether or not any of this
+    were wired at all. A `run_suite` reverted to omitting
+    `acceptance`/`mutate` shows up here as a mismatched capture, not as an
+    identical green.
     """
     from saffron.gates.core.witness import Mutated, witness_gate
     from saffron.intake import Criterion, Mutant
@@ -3283,7 +3379,10 @@ def test_a_skipped_witness_blocks_nothing_at_either_tier(monkeypatch, tmp_path):
         (witness_result,) = [g for g in outcome.gates if g.gate == "witness"]
         assert witness_result.status == "skip", tier
         assert captured, tier
-        assert all(mutate is session.stub_mutator for _acc, mutate in captured), tier
+        assert all(
+            isinstance(mutate, partial) and mutate.func is worktree.source_mutated
+            for _acc, mutate in captured
+        ), tier
         assert all(list(acc) == [criterion] for acc, _mutate in captured), tier
 
 

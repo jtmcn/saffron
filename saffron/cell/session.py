@@ -178,17 +178,18 @@ def terminal_for_rate_limit(status: str | None) -> str | None:
 
 @contextlib.contextmanager
 def stub_mutator(_mutant: Mutant) -> Iterator[str | None]:
-    """The mutator a cell run supplies today — `witness.Mutated`'s shape, with
-    no tree behind it at all (`docs/BACKLOG.md` item 71, `SA-0060`/`SA-0062`).
+    """The mutator a cell run supplied before `SA-0062` — `witness.Mutated`'s
+    shape, with no tree behind it at all (`docs/BACKLOG.md` item 71,
+    `SA-0060`/`SA-0061`).
 
     It reads no path, writes no byte, and reports the one honest thing it can:
     it cannot reach the tree. Entering yields a reason rather than `None`, so
     `witness_gate` never applies a mutant and never invokes `run_tests` —
-    `skip`, exactly as `SA-0060` built and witnessed that answer for. `SA-0062`
-    is what replaces this with a mutator that can actually reach a cell's
-    worktree; until then, every `witness` result this produces is `skip`,
-    which blocks nothing at any tier (§5.4.1) and is why turning the gate on
-    here is safe before that mutator exists.
+    `skip`, exactly as `SA-0060` built and witnessed that answer for.
+    ponytail: `worktree.source_mutated` is what `_suite` wires in its place
+    now, so this is unwired production code kept for its own test's sake —
+    `census` refuses a task that removes a test with no override, and that
+    test is this function's. It goes when that test does.
     """
     yield "no cell mutator is wired yet — the tree cannot be reached (SA-0062)"
 
@@ -994,19 +995,16 @@ def _drive_cell(
             # baseline and head alike, and the subtraction cancels it.
             # ponytail: cancelled by identity, so a head-only artifact (a .pyc
             # for a file the task added) needs the repo's .gitignore — item 14.
-            # `mutate` is what turns `witness` on — `run_suite` gates on it
-            # alone, as its own docstring says. Omitted, the gate is left out
-            # of the suite entirely, as every caller did before this spec.
-            # `stub_mutator` is honest rather than convenient — it cannot
-            # reach the tree, so `witness`
-            # can only ever report `skip` here until `SA-0062` supplies a
-            # mutator that can (`docs/BACKLOG.md` item 71).
+            # `mutate` is what turns `witness` on — omitted, `run_suite`
+            # leaves the gate out of the suite entirely. Bound to this cell's
+            # container it reaches a real verdict; the result still lands
+            # `skip` while no spec here declares a mutant (item 71).
             declared = run_suite(
                 gates,
                 cwd=repo,
                 executor=executor,
                 acceptance=spec.acceptance,
-                mutate=stub_mutator,
+                mutate=partial(worktree.source_mutated, container),
             )
 
             # Between `declared` (real `collected`/`failures` at head) and

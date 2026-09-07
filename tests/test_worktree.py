@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 import subprocess
 from pathlib import Path
@@ -9,6 +10,7 @@ import pytest
 
 from saffron.cell import proxy, runtime, worktree
 from saffron.gates.runner import CellExecutor, run_gate
+from saffron.intake import Mutant
 from saffron.phases import package as package_phase
 from saffron.repos import image
 from saffron.repos import mirror as mirror_ops
@@ -763,10 +765,14 @@ def _host_git(tmp_path, monkeypatch):
     """Point `worktree._git` at a real repo in `tmp_path` instead of a cell."""
 
     def exec_(_container, command, *, workdir=None, timeout_s=900):
-        done = subprocess.run(
-            command, cwd=tmp_path, capture_output=True, text=True, check=False
+        # Bytes then `runtime._decode`, exactly as `runtime._call` does it —
+        # not `text=True`. Universal-newline translation and a strict decode
+        # are both things production does not do, and a seam that does them
+        # hides every byte-fidelity defect in the code under test.
+        done = subprocess.run(command, cwd=tmp_path, capture_output=True, check=False)
+        return runtime.Completed(
+            done.returncode, runtime._decode(done.stdout), runtime._decode(done.stderr)
         )
-        return runtime.Completed(done.returncode, done.stdout, done.stderr)
 
     monkeypatch.setattr(worktree.runtime, "exec_", exec_)
 
@@ -1021,3 +1027,389 @@ def test_the_restore_ignores_work_the_gate_never_touched(tmp_path, monkeypatch):
     assert "docs/notes.md" in porcelain
     assert "docs/scratch.md" in porcelain
     assert "src/" not in porcelain
+
+
+# --- source_mutated, against a real git repo on the host (SA-0062) ---------
+#
+# `_git` is a one-function seam over `runtime.exec_`, so — exactly as the
+# `source_reverted` tests above do — these run the real
+# `_read_file`/`_write_file`/`source_mutated` against real git with no
+# container: `_host_git` points `worktree._git`'s underlying `runtime.exec_`
+# at a real repo in `tmp_path` instead.
+
+
+def _repo_with_a_file(tmp_path, monkeypatch, content):
+    """A committed repo holding one source file, ready for a mutant."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "guard.py").write_text(content)
+    _commit(tmp_path, "base")
+    _host_git(tmp_path, monkeypatch)
+
+
+def test_a_mutant_is_applied_and_undone_inside_the_cell(tmp_path, monkeypatch):
+    _repo_with_a_file(tmp_path, monkeypatch, "if amount < 0:\n    raise ValueError\n")
+    mutant = Mutant(file="src/guard.py", find="if amount < 0:", replace="if False:")
+    target = tmp_path / "src" / "guard.py"
+
+    with worktree.source_mutated("c", mutant) as reason:
+        assert reason is None
+        assert target.read_text() == "if False:\n    raise ValueError\n"
+
+    assert target.read_text() == "if amount < 0:\n    raise ValueError\n"
+    assert _porcelain(tmp_path) == ""
+
+
+def test_the_undo_restores_the_committed_file_not_a_byte_copy(tmp_path, monkeypatch):
+    """The undo is `git checkout` against `HEAD`, not a replay of the bytes
+    `_read_file` displaced — `revert`'s own restore works the same way, for
+    the same reason (`committed` guarantees the tree matches `HEAD`)."""
+    _repo_with_a_file(tmp_path, monkeypatch, "value = 1\n")
+    mutant = Mutant(file="src/guard.py", find="value = 1", replace="value = 2")
+
+    calls: list[tuple] = []
+    real = worktree._git
+
+    def spy(container, *args):
+        calls.append(args)
+        return real(container, *args)
+
+    monkeypatch.setattr(worktree, "_git", spy)
+
+    with worktree.source_mutated("c", mutant):
+        pass
+
+    assert ("checkout", "HEAD", "--", "src/guard.py") in calls
+    assert (tmp_path / "src" / "guard.py").read_text() == "value = 1\n"
+
+
+def test_a_find_that_does_not_match_once_applies_nothing(tmp_path, monkeypatch):
+    """Zero matches and two matches are both "not exactly once" — the same
+    rule `saffron.mutation.apply_mutant` follows for a host tree, matched
+    here rather than re-derived. A mutant that names two places names no
+    property, and picking one silently is how a check comes to measure
+    something other than what it claims."""
+    _repo_with_a_file(tmp_path, monkeypatch, "value = 1\nvalue = 1\n")
+    target = tmp_path / "src" / "guard.py"
+
+    twice = Mutant(file="src/guard.py", find="value = 1", replace="value = 2")
+    with worktree.source_mutated("c", twice) as reason:
+        assert reason is not None
+        assert "matches 2 times" in reason
+    assert target.read_text() == "value = 1\nvalue = 1\n"
+    assert _porcelain(tmp_path) == ""
+
+    absent = Mutant(file="src/guard.py", find="value = 9", replace="value = 2")
+    with worktree.source_mutated("c", absent) as reason:
+        assert reason is not None
+        assert "not found" in reason
+    assert target.read_text() == "value = 1\nvalue = 1\n"
+    assert _porcelain(tmp_path) == ""
+
+
+def test_a_failed_undo_raises_rather_than_reporting_a_verdict(tmp_path, monkeypatch):
+    """A tree `source_mutated` could not restore is the one outcome that must
+    not read as a witness doing its job — `witness_gate` turns this into
+    `error`, never `pass` or `fail`."""
+    _repo_with_a_file(tmp_path, monkeypatch, "value = 1\n")
+    mutant = Mutant(file="src/guard.py", find="value = 1", replace="value = 2")
+    real = worktree._git
+
+    def flaky(container, *args):
+        if args[0] == "checkout" and args[1] == "HEAD":
+            return runtime.Completed(1, "", "checkout exploded")
+        return real(container, *args)
+
+    monkeypatch.setattr(worktree, "_git", flaky)
+
+    with (
+        pytest.raises(runtime.CellRuntimeError, match="mutant undo"),
+        worktree.source_mutated("c", mutant),
+    ):
+        pass
+
+    # The half above left the mutation in place on purpose: its undo failed.
+    # Restore first — this half is about a failure to *read*, and a dirty tree
+    # would trip the uncommitted-work refusal before the read is ever reached.
+    subprocess.run(
+        ["git", "checkout", "HEAD", "--", "src/guard.py"], cwd=tmp_path, check=True
+    )
+
+    # A failure to *apply* raises the same way — never a yielded reason, which
+    # `witness_gate` would read as the ordinary "did not apply" case.
+    real_exec = worktree.runtime.exec_
+
+    def exploding_exec(container, command, *, workdir=None, timeout_s=900):
+        if command[:2] == ["sh", "-euc"] and command[2].startswith("base64 <"):
+            return runtime.Completed(1, "", "base64 exploded")
+        return real_exec(container, command, workdir=workdir, timeout_s=timeout_s)
+
+    monkeypatch.setattr(worktree.runtime, "exec_", exploding_exec)
+    with (
+        pytest.raises(runtime.CellRuntimeError, match="reading"),
+        worktree.source_mutated("c", mutant),
+    ):
+        raise AssertionError("the body must not run")
+
+
+def test_a_mutant_over_uncommitted_work_applies_nothing(tmp_path, monkeypatch):
+    """`witness` runs inside `run_suite`, and `committed` runs *after* it
+    (`cell/session.py`) — so the tree here may still be dirty, and the undo
+    restores `HEAD`. `revert` refuses the identical move for the identical
+    reason: restoring to `HEAD` would destroy the agent's uncommitted work and
+    hide it from the one gate whose job is to notice (`gates/core/revert.py`,
+    `docs/BACKLOG.md` item 78). A yielded reason lands `witness` on `skip`,
+    which is the honest answer when the evidence cannot be bought.
+    """
+    _repo_with_a_file(tmp_path, monkeypatch, "value = 1\n")
+    target = tmp_path / "src" / "guard.py"
+    target.write_text("value = 1\nagent_added = True\n")
+    mutant = Mutant(file="src/guard.py", find="value = 1", replace="value = 2")
+
+    with worktree.source_mutated("c", mutant) as reason:
+        assert reason is not None
+        assert "uncommitted" in reason
+
+    assert target.read_text() == "value = 1\nagent_added = True\n"
+    assert _porcelain(tmp_path) == "M src/guard.py"
+
+
+def test_a_write_that_fails_does_not_leave_the_file_truncated(tmp_path, monkeypatch):
+    """`> path` truncates before `base64 -d` writes a byte, so a failed exec
+    leaves the file empty or half-written while `witness_gate` reports "could
+    not apply" — the `applied` flag is not set yet. `gates/core/witness.py`
+    names this exact shape ("a raise from `__enter__` must mean nothing was
+    changed") and calls a container exec that loses the connection mid-write
+    the one implementation that can reach it.
+    """
+    _repo_with_a_file(tmp_path, monkeypatch, "value = 1\n")
+    target = tmp_path / "src" / "guard.py"
+    mutant = Mutant(file="src/guard.py", find="value = 1", replace="value = 2")
+    real_exec = worktree.runtime.exec_
+
+    def truncate_then_fail(container, command, *, workdir=None, timeout_s=900):
+        if command[:2] == ["sh", "-euc"] and "base64 -d" in command[2]:
+            target.write_text("")  # what `>` has already done by this point
+            return runtime.Completed(1, "", "exec connection lost")
+        return real_exec(container, command, workdir=workdir, timeout_s=timeout_s)
+
+    monkeypatch.setattr(worktree.runtime, "exec_", truncate_then_fail)
+
+    with (
+        pytest.raises(runtime.CellRuntimeError, match="writing"),
+        worktree.source_mutated("c", mutant),
+    ):
+        raise AssertionError("the body must not run")
+
+    assert target.read_text() == "value = 1\n"
+    assert _porcelain(tmp_path) == ""
+
+
+def test_a_failed_undo_does_not_replace_an_exception_in_flight(tmp_path, monkeypatch):
+    """An exception raised inside a `finally` replaces whatever was already
+    propagating through it — `saffron.mutation._mutated` records this defect
+    as already paid for once, and demoting a `KeyboardInterrupt` to
+    `__context__` puts it where nothing looks. Raise after the `finally`,
+    which Python never reaches while an exception is still in flight.
+    """
+    _repo_with_a_file(tmp_path, monkeypatch, "value = 1\n")
+    mutant = Mutant(file="src/guard.py", find="value = 1", replace="value = 2")
+    real = worktree._git
+
+    def flaky(container, *args):
+        if args[0] == "checkout":
+            return runtime.Completed(1, "", "checkout exploded")
+        return real(container, *args)
+
+    monkeypatch.setattr(worktree, "_git", flaky)
+
+    with pytest.raises(KeyboardInterrupt), worktree.source_mutated("c", mutant):
+        raise KeyboardInterrupt
+
+
+def test_a_mutant_path_outside_the_worktree_applies_nothing(tmp_path, monkeypatch):
+    """`Mutant.file`'s only validator is "not blank" (`intake.py`), and a cell
+    mounts more than the worktree — `/agent-state` among them. `..` in a
+    declared path is the shape that turns a check into an arbitrary write,
+    which is why `saffron.mutation._resolve_target` refuses it before either
+    half reads or writes a byte. The cell sibling owes the same refusal.
+    """
+    _repo_with_a_file(tmp_path, monkeypatch, "value = 1\n")
+    outside = tmp_path.parent / "outside.txt"
+    outside.write_text("secret = 1\n")
+
+    for escaping in ("../outside.txt", str(outside)):
+        mutant = Mutant(file=escaping, find="secret = 1", replace="secret = 2")
+        with worktree.source_mutated("c", mutant) as reason:
+            assert reason is not None, escaping
+            assert "inside the tree" in reason
+        assert outside.read_text() == "secret = 1\n"
+
+
+def test_a_mutation_leaves_bytes_it_did_not_name_alone(tmp_path, monkeypatch):
+    """`runtime.exec_` decodes with `errors="replace"`, so reading a file as
+    text and writing it back re-encodes every byte that was not valid UTF-8 as
+    U+FFFD. The tests then run against a file differing from `HEAD` in ways the
+    mutant never declared, which is the whole thing `saffron.mutation` reads
+    and writes raw bytes to prevent: "anything it does must be undone exactly:
+    byte-identical". A CRLF line ending is the same defect, cheaper to trip.
+    """
+    _repo_with_a_file(tmp_path, monkeypatch, "placeholder\n")
+    target = tmp_path / "src" / "guard.py"
+    target.write_bytes(b"# caf\xe9 (latin-1)\r\nvalue = 1\n")
+    _commit(tmp_path, "non-utf8 and a CRLF")
+    mutant = Mutant(file="src/guard.py", find="value = 1", replace="value = 2")
+
+    with worktree.source_mutated("c", mutant) as reason:
+        assert reason is None
+        assert target.read_bytes() == b"# caf\xe9 (latin-1)\r\nvalue = 2\n"
+
+    assert target.read_bytes() == b"# caf\xe9 (latin-1)\r\nvalue = 1\n"
+    assert _porcelain(tmp_path) == ""
+
+
+@pytest.mark.cell
+def test_a_mutant_applied_in_a_real_cell_keeps_the_bytes_it_did_not_name(
+    tmp_path, network
+):
+    """Every test above runs `source_mutated` through `_host_git`, which is a
+    host `subprocess` — so the one genuinely new mechanism here, a
+    `printf | base64 -d` line executed by the cell's own shell against a
+    volume-backed `/work`, has never actually run in a cell. `base64` is an
+    image dependency, `workdir` is ignored by the host seam, and acceptance
+    claim #1 ("the host never writes to the volume, because it cannot") is
+    the one thing a host-seamed test cannot assert about itself.
+    """
+    origin = tmp_path / "origin"
+    origin.mkdir(parents=True)
+    run = lambda *a: subprocess.run(a, cwd=origin, check=True, capture_output=True)  # noqa: E731
+    run("git", "init", "-q", "-b", "main")
+    run("git", "config", "user.email", "t@example.com")
+    run("git", "config", "user.name", "t")
+    # Neither survives a UTF-8 round trip: the byte is invalid UTF-8 and would
+    # come back U+FFFD, the CRLF is what universal-newline translation eats.
+    (origin / "guard.py").write_bytes(b"# caf\xe9\r\nif amount < 0:\n    raise\n")
+    run("git", "add", "guard.py")
+    run("git", "commit", "-qm", "first")
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=origin, capture_output=True, text=True
+    ).stdout.strip()
+
+    mirror = tmp_path / "m.git"
+    subprocess.run(
+        ["git", "clone", "--bare", "-q", str(origin), str(mirror)], check=True
+    )
+    volume = "saffron-test-mutant"
+    runtime.remove_volume(volume)
+    runtime.remove_volume(f"{volume}-state")
+    runtime.create_volume(volume)
+    container = "saffron-test-mutant-cell"
+    runtime.remove_container(container)
+
+    def bytes_in_cell(path):
+        done = runtime.exec_(
+            container,
+            ["sh", "-euc", f"base64 < {path}"],
+            workdir=worktree.WORKTREE_MOUNT,
+        )
+        assert done.returncode == 0, done.stderr
+        return base64.b64decode(done.stdout)
+
+    try:
+        worktree.prepare_worktree(
+            mirror=mirror,
+            volume=volume,
+            base_sha=base,
+            branch="saffron/test",
+            image=image.BASE_TAG,
+            container=container,
+            network=network,
+            env={},
+            gates_dir=_gates_dir(tmp_path),
+        )
+        mutant = Mutant(file="guard.py", find="if amount < 0:", replace="if False:")
+
+        with worktree.source_mutated(container, mutant) as reason:
+            assert reason is None, reason
+            assert bytes_in_cell("guard.py") == b"# caf\xe9\r\nif False:\n    raise\n"
+
+        assert bytes_in_cell("guard.py") == b"# caf\xe9\r\nif amount < 0:\n    raise\n"
+        assert worktree.dirty_paths(container) == []
+    finally:
+        runtime.remove_container(container)
+        runtime.remove_volume(volume)
+        runtime.remove_volume(f"{volume}-state")
+
+
+def test_a_mutant_on_a_path_git_cannot_restore_applies_nothing(tmp_path, monkeypatch):
+    """The undo is `git checkout HEAD -- <file>`, so the precondition it
+    actually needs is *a regular file tracked at HEAD* — not merely a clean
+    one. A gitignored or untracked path is clean to `git status` and has
+    nothing at `HEAD` to come back from; a nonexistent one is the ordinary
+    case `gates/core/witness.py` calls "the spec anticipated a different
+    implementation", which `saffron.mutation.apply_mutant` answers with a
+    reason and `error` would wrongly charge to the attempt.
+    """
+    _repo_with_a_file(tmp_path, monkeypatch, "value = 1\n")
+    (tmp_path / ".gitignore").write_text("generated/\n")
+    _commit(tmp_path, "ignore generated")
+    (tmp_path / "generated").mkdir()
+    (tmp_path / "generated" / "g.py").write_bytes(b"value = 1\n")
+
+    for path in ("generated/g.py", "nope.py"):
+        mutant = Mutant(file=path, find="value = 1", replace="value = 2")
+        with worktree.source_mutated("c", mutant) as reason:
+            assert reason is not None, path
+            assert "HEAD" in reason, reason
+    assert (tmp_path / "generated" / "g.py").read_bytes() == b"value = 1\n"
+    assert _porcelain(tmp_path) == ""
+
+
+def test_a_symlinked_mutant_path_applies_nothing(tmp_path, monkeypatch):
+    """A symlink is a regular path to `cat` and to `>`, and *not* to
+    `git checkout`: the read follows it, the write follows it, and the undo
+    restores the link — which never changed — and exits 0. The mutation is
+    left behind on the file the link points at, reported as a clean success.
+
+    `saffron.mutation` never meets this because it writes bytes back to the
+    same path it read them from. Here the two halves resolve differently, so
+    the mode at `HEAD` has to be read rather than assumed.
+    """
+    _repo_with_a_file(tmp_path, monkeypatch, "value = 1\n")
+    (tmp_path / "src" / "alias.py").symlink_to("guard.py")
+    _commit(tmp_path, "a symlink beside the source")
+    mutant = Mutant(file="src/alias.py", find="value = 1", replace="value = 2")
+
+    with worktree.source_mutated("c", mutant) as reason:
+        assert reason is not None
+        assert "regular file" in reason
+
+    assert (tmp_path / "src" / "guard.py").read_bytes() == b"value = 1\n"
+    assert (tmp_path / "src" / "alias.py").is_symlink()
+    assert _porcelain(tmp_path) == ""
+
+
+def test_an_undo_that_exits_zero_without_restoring_still_raises(tmp_path, monkeypatch):
+    """`_restore_source` in this same module argues that an exit code is not
+    the guarantee it makes, and checks the tree afterwards. The undo here owes
+    the same: a tree this could not restore must not read as a witness doing
+    its job, and `git checkout` exiting 0 is not proof that it did.
+    """
+    _repo_with_a_file(tmp_path, monkeypatch, "value = 1\n")
+    mutant = Mutant(file="src/guard.py", find="value = 1", replace="value = 2")
+    real = worktree._git
+
+    def checkout_that_does_nothing(container, *args):
+        if args[0] == "checkout":
+            return runtime.Completed(0, "", "")
+        return real(container, *args)
+
+    monkeypatch.setattr(worktree, "_git", checkout_that_does_nothing)
+
+    with (
+        pytest.raises(runtime.CellRuntimeError, match="did not restore"),
+        worktree.source_mutated("c", mutant),
+    ):
+        pass
