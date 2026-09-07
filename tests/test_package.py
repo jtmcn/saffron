@@ -655,6 +655,7 @@ def _cell_outcome(task_dir, task_id, run_id):
         agent_subjects=[],
         effective_risk="standard",
         advisory_gates=[],
+        notes="",
     )
 
 
@@ -1473,6 +1474,58 @@ def test_a_credential_in_a_finding_is_refused_before_anything_is_pushed(packagea
             ],
         )
     ]
+
+    result = package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+
+    assert result.state == "MERGE_FAILED"
+    assert "credential in the body" in result.note
+    # The same refusal, so the push never happened.
+    assert (
+        remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=packageable.work)
+        == ""
+    )
+    assert not any(
+        FAKE_KEY in text
+        for text in (
+            result.note,
+            str(dict(_state(packageable.ledger, packageable.task_id))),
+            (packageable.out_dir / "index.html").read_text(),
+        )
+    )
+
+
+def test_the_packaged_body_carries_the_implementers_notes(packageable):
+    """`render_pr_body` accepts `notes` and renders it correctly, and every
+    unit test of the renderer proves exactly that — against the renderer,
+    directly. None of them proves the one production call site, here in
+    `package()`, actually passes what `outcome.notes` holds: before this, the
+    parameter fell back to its default `""` for every real task, so a task
+    that recorded a finding and one that had nothing to say produced
+    byte-identical bodies (`SA-0063`'s own pull request among them)."""
+    packageable.outcome.notes = (
+        "I found a stray debug print left in f.txt while working on this; "
+        "touches did not cover the rest of the file, so I left it as-is."
+    )
+
+    package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **packageable.kwargs,
+    )
+
+    body = (packageable.outcome.task_dir / "pr_body.md").read_text()
+    assert "### Notes from the implementer" in body
+    assert "stray debug print left in f.txt" in body
+
+
+def test_a_credential_in_the_notes_refuses_the_package(packageable):
+    """The notes are a new way into the channel `find_credentials_in_text`
+    already scans over the *rendered* body — a credential the implementer
+    writes into its notes never appears in the diff, so the patch scan alone
+    would miss it, and that is exactly why the scan runs after rendering
+    rather than over the parts (§5.7). This proves the notes path is actually
+    inside that scan, not merely that the scan exists for other channels."""
+    packageable.outcome.notes = f"left a working example key {FAKE_KEY} in a comment"
 
     result = package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
 
