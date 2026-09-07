@@ -16,6 +16,17 @@ GitHub issues remain in use only for research/evidence records under
   `- [ ]` boxes), `## Out of scope`, `## Notes for the agent`. The acceptance
   criteria are load-bearing: each drives a gate check.
 - **Dependencies**: list blocked-by spec ids in `depends_on` (e.g. `[SA-0002, SA-0005]`).
+- **A spec that introduces a term files its vocabulary follow-up when it is
+  written.** `ontology/` is rightly `forbidden` to the spec implementing against
+  a term — a cell inventing vocabulary while implementing against it is how a
+  term comes to mean whatever the implementation needed. The defect is that
+  nothing then owns the entry: `witness`, `mutant` and the four batch stop
+  reasons each reached `main` with the code using a word the glossary did not
+  have (`docs/BACKLOG.md` items 65, 72). The follow-up cannot itself be a spec —
+  a cell cannot land it. `ontology/saffron.ttl` is editable by a cell, but
+  `CONTEXT.md` is `protected` and is generated from it, so the two halves cannot
+  move together inside a cell and the task is refused at intake. File it as a
+  backlog item marked **by hand**, in the same commit as the spec.
 
 ## Driving a spec
 
