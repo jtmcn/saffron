@@ -201,6 +201,38 @@ def hash_artifact(raw: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+# The notes extraction turn's own prompt (`docs/BACKLOG.md` items 71/75,
+# SA-0058/SA-0061/SA-0062): the cheapest moment the implementer will ever have
+# to say it saw a thing it was told not to touch. Built on `EXTRACTION_PROMPT`
+# rather than beside it: every rule that turn already states ("no tools", "the
+# last block wins") applies here unchanged, and repeating them by hand is how
+# the two drift.
+NOTES_PROMPT = (
+    "Extraction turn. Think back over this whole task. If you saw something "
+    "you were told not to touch — a path outside `touches`, a `forbidden` or "
+    "protected path, a comment or a signature you had to leave wrong to stay "
+    "inside scope — say so now, in your own words, in a paragraph or two. "
+    "Nobody adjudicates this and nothing acts on it; a person reads it later. "
+    "If there is nothing to report, reply with an empty <output></output> "
+    "block.\n\n" + EXTRACTION_PROMPT
+)
+
+
+def extract_notes(raw: str) -> str:
+    """The notes extraction turn's `<output>` block, verbatim.
+
+    Prose, not a schema: there is no `validate_plan`-shaped rule for free text
+    to fail, so nothing here is a `PlanRejected` and there is no re-prompt.
+    No block at all — a turn the provider walled, or one that crashed before
+    it could answer — reads the same as an empty one: "no notes", never a
+    rejection of a shape nobody asked this turn to have.
+    """
+    try:
+        return parse_output_block(raw).strip()
+    except ValueError:
+        return ""
+
+
 def _matches_any(path: str, patterns: list[str]) -> bool:
     """Same matcher scope_gate uses — a plan that clears this must also clear the gate."""
     return any(matches(path, pattern) for pattern in patterns)

@@ -2401,7 +2401,10 @@ def _rebuttable(monkeypatch, cell, *, rebut_commits):
 
 def _through_rebut(*rebut_turns):
     """Plan, implement, one lens filing a blocker, the other two filing
-    nothing, then the rebuttal's own turns."""
+    nothing, then the rebuttal's own turns. No notes turn: none of these
+    specs declares `forbidden`, and the default test policy declares no
+    `protected` either, so there is nothing this channel would be asked
+    about."""
     return [
         _turn(_block(_PLAN)),
         _turn(),
@@ -3639,3 +3642,93 @@ def test_the_recorded_proposal_carries_the_hash_of_its_own_raw_block(
     )
     record = json.loads((outcome.task_dir / "scope_proposal.json").read_text())
     assert record["sha256"] == artifacts.hash_artifact(record["raw"])
+
+
+def test_the_notes_artifact_is_hashed_when_it_is_produced(monkeypatch, tmp_path):
+    """Extracted and hashed the moment it is produced, and never re-read from
+    `/work` again — `plan.json` is the precedent and the reason is the same
+    one (§5.3). The notes turn is only asked for when there is something this
+    channel exists to catch — a declared `forbidden` list, here."""
+    cell = _stub_the_runtime(monkeypatch)
+    notes_text = (
+        "I found a hardcoded credential in config/legacy.py while working on "
+        "this; touches did not cover that file, so I left it as-is."
+    )
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            _turn(f"Noting something.\n<output>\n{notes_text}\n</output>"),
+        ],
+        spec=_spec(forbidden=["config/legacy.py"]),
+        policy="gates: {}\nprotected:\n  - DESIGN.md\n",
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert outcome.notes == notes_text
+    assert outcome.notes_sha256 == artifacts.hash_artifact(notes_text)
+    record = json.loads((outcome.task_dir / "notes.json").read_text())
+    assert record["raw"] == notes_text
+    assert record["sha256"] == artifacts.hash_artifact(record["raw"])
+
+
+def test_no_notes_turn_is_asked_for_when_nothing_could_have_been_denied(
+    monkeypatch, tmp_path
+):
+    """A spec with no `forbidden` list, against a repo with no `protected`
+    paths either, has nothing this channel was built to catch — asking anyway
+    would spend real money narrating "nothing to report" on the common case."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    # Plan, implement, and REVIEW's three lenses — no extra turn spent asking
+    # for notes nothing declared a `forbidden`/`protected` path against.
+    assert len(cell.turns) == 5
+    assert outcome.notes == ""
+    assert outcome.notes_sha256 == ""
+    assert not (outcome.task_dir / "notes.json").exists()
+
+
+def test_notes_are_empty_when_the_implementer_has_nothing_to_report(
+    monkeypatch, tmp_path
+):
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn("<output></output>")],
+        spec=_spec(forbidden=["config/legacy.py"]),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert outcome.notes == ""
+    assert outcome.notes_sha256 == ""
+    assert not (outcome.task_dir / "notes.json").exists()
+
+
+def test_the_notes_turn_is_skipped_once_the_task_is_over_budget(monkeypatch, tmp_path):
+    failing = Failure(file="a.py", code="E501", message="too long")
+    cell = _stub_the_runtime(
+        monkeypatch, suites=([], _results(failing), _results(failing))
+    )
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn()],
+        # Eligible on its own terms (a `forbidden` list is declared) but out
+        # of room — the budget guard, not the eligibility check, is what this
+        # proves.
+        spec=_spec(budget_usd=0.25, forbidden=["config/legacy.py"]),
+    )
+    assert outcome.state == "EXHAUSTED"
+    # No fourth turn was ever asked for: nothing left to spend it with.
+    assert len(cell.turns) == 3
+    assert outcome.notes == ""

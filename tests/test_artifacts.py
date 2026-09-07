@@ -7,6 +7,7 @@ from saffron.agents.artifacts import (
     PlanRejected,
     ScopeProposalNotSchema,
     ScopeProposalRefused,
+    extract_notes,
     extraction_kind,
     hash_artifact,
     parse_output_block,
@@ -37,6 +38,22 @@ def _plan(**overrides) -> str:
 def test_the_output_block_is_extracted_from_surrounding_prose():
     text = 'Here you go:\n<output>{"a": 1}</output>\nHope that helps.'
     assert parse_output_block(text) == '{"a": 1}'
+
+
+def test_extract_notes_returns_the_blocks_stripped_text():
+    raw = "some preamble\n<output>\n  Saw a hardcoded secret.  \n</output>"
+    assert extract_notes(raw) == "Saw a hardcoded secret."
+
+
+def test_extract_notes_is_empty_when_the_block_is_empty():
+    assert extract_notes("<output>\n\n</output>") == ""
+
+
+def test_extract_notes_is_empty_when_there_is_no_block_at_all():
+    """A turn the provider walled, or one that crashed before answering, must
+    read as "nothing to report" — not as a rejection of a shape nobody asked
+    this turn to have (there is no `PlanRejected` here at all)."""
+    assert extract_notes("no output tags in this response") == ""
 
 
 def test_missing_output_block_raises():
