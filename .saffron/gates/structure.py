@@ -59,6 +59,7 @@ if not tool:
         }
     )
 
+
 # A rule test that declares no `invalid` snippet certifies nothing, and says so
 # in the same words as one that does. Measured: delete a rule's `invalid:` list
 # and neuter its body, and `ast-grep test` reports `PASS <rule>` and counts it in
@@ -69,13 +70,42 @@ if not tool:
 # parser, which is also why `.saffron/rule-tests/` is a name it resolves itself; a
 # test asserts the config names this directory, the one thing the gate cannot
 # notice about itself.
-uncertified = sorted(
-    p.name
+def declares_invalid(text: str) -> bool:
+    """Does this rule test declare an `invalid` snippet, in any YAML spelling?
+
+    An earlier regex — `^invalid:\\s*\\n\\s*-` — demanded that the first `- `
+    follow `invalid:` immediately, so a comment under the key or a flow sequence
+    turned the gate to `error` with a summary saying the file declared nothing
+    while it plainly did. Both are one edit away: these files are densely
+    commented everywhere else. `error` aborts the attempt and is charged to
+    nobody, so a false one costs a task.
+    """
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        # Top-level only, as the regex's `^` was: a nested `invalid:` belongs to
+        # something else.
+        if not line.startswith("invalid:"):
+            continue
+        rest = line[len("invalid:") :].strip()
+        if rest.startswith("["):
+            # `invalid: ['import claude_agent_sdk']`, and `[]` for the empty one.
+            return bool(rest.strip("[] \t"))
+        # A block sequence, which comments and blank lines may precede.
+        for following in lines[i + 1 :]:
+            stripped = following.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            return stripped == "-" or stripped.startswith("- ")
+        return False
+    return False
+
+
+rule_tests = [
+    p
     for p in RULE_TESTS.rglob("*")
-    if p.suffix in (".yml", ".yaml")
-    and "__snapshots__" not in p.parts
-    and not re.search(r"^invalid:\s*\n\s*-", p.read_text(), re.M)
-)
+    if p.suffix in (".yml", ".yaml") and "__snapshots__" not in p.parts
+]
+uncertified = sorted(p.name for p in rule_tests if not declares_invalid(p.read_text()))
 if uncertified:
     emit(
         {
@@ -105,13 +135,61 @@ tests = subprocess.run(
 # readily as `.yml`, so a narrower count would read a rule it runs as absent.
 counted = re.search(r"(\d+) passed; (\d+) failed", tests.stdout)
 expected = sum(1 for p in RULES.rglob("*") if p.suffix in (".yml", ".yaml"))
-if tests.returncode != 0 or counted is None:
+# A floor, because the count check alone reads an empty `rules/` as satisfied:
+# `0 == 0`. Measured on a tree carrying a real violation, `rm .saffron/rules/*.yml`
+# reported `pass` — `ast-grep test` prints "Configuration not found!" for each
+# orphaned test and still exits 0, and a scan that loads no rules finds nothing.
+# That is the same clean-report-from-a-dead-control shape as the two checks
+# around it, reached without weakening a rule, editing the config, or writing an
+# ignore file. `integrity` routes the deletion to a person but does not block it,
+# and a target repo adopting this gate inherits none of these tests.
+if expected == 0:
     emit(
         {
             "gate": "structure",
             "status": "error",
             "tool": tool,
-            "summary": f"rule tests did not pass (exit {tests.returncode})",
+            "summary": f"no rules to scan with: {RULES} holds no .yml or .yaml",
+        }
+    )
+# A rule test with no rule left to name. The count check below cannot see this:
+# it recomputes `expected` from the rules on disk, so deleting one rule takes
+# both sides down together and 2 == 2. Measured, with one rule removed and its
+# test kept, `ast-grep test` prints "Configuration not found! <id>", counts only
+# the survivors and still exits 0 — a clean report over a rule that is gone.
+# ast-grep's test format is one `id:` per file, so the two counts are 1:1 by
+# construction, and an inequality means a rule was dropped or a test was.
+# ponytail: deleting a rule *and* its test together leaves nothing to count.
+# That shape is a two-file deletion under `.saffron/**`, which `integrity` puts
+# in front of a person; the floor above is what keeps the empty case from
+# reporting a pass.
+if len(rule_tests) != expected:
+    emit(
+        {
+            "gate": "structure",
+            "status": "error",
+            "tool": tool,
+            "summary": (
+                f"{expected} rules but {len(rule_tests)} rule tests: a rule or "
+                "its test was dropped, and `ast-grep test` counts only what is left"
+            ),
+        }
+    )
+if tests.returncode != 0 or counted is None:
+    # Name the rule that stopped guarding. This is the branch a weakened rule
+    # lands in, and `exit 4` alone leaves the 03:00 operator — whose only record
+    # is this summary — with nothing to look at. ast-grep prints `FAIL <id>` per
+    # rule and puts the remediation (`--update-all`) on stderr.
+    broke = ", ".join(re.findall(r"^FAIL (\S+)", tests.stdout, re.M)) or "none named"
+    emit(
+        {
+            "gate": "structure",
+            "status": "error",
+            "tool": tool,
+            "summary": (
+                f"rule tests did not pass (exit {tests.returncode}); "
+                f"failing rules: {broke}; {tests.stderr.strip()[-400:]}"
+            ),
         }
     )
 elif int(counted.group(1)) != expected or int(counted.group(2)) != 0:

@@ -616,6 +616,76 @@ def test_every_rule_test_declares_a_snippet_that_must_fire():
         )
 
 
+# The two spellings that carry an `invalid` snippet while an earlier `^invalid:\s*\n\s*-`
+# read neither. Both are one edit from what ships: these files are densely
+# commented everywhere except directly under `invalid:`.
+INVALID_DECLARED_ANYWAY = {
+    "a comment under the key": (
+        "invalid:\n  - ",
+        "invalid:\n  # the plainest form\n  - ",
+    ),
+    "a flow sequence": (
+        "invalid:\n  - ",
+        "invalid: ['import claude_agent_sdk']\nunused:\n  - ",
+    ),
+}
+
+
+@pytest.mark.parametrize("spelling", sorted(INVALID_DECLARED_ANYWAY))
+def test_the_gate_reads_an_invalid_snippet_in_any_yaml_spelling(tmp_path, spelling):
+    """The check above parses YAML; the gate is a stdlib script that reads lines,
+    and the two disagreed. Measured against the unfixed gate: both spellings below
+    turned it to `error` with a summary saying the file declared no `invalid`
+    snippet, while `yaml.safe_load` — and this file's own twin of the check — saw
+    one and stayed green, so the suite could not notice the divergence.
+
+    `error` aborts the attempt and is charged to nobody (§5.4), so a false one
+    costs a task and tells its operator something untrue about why."""
+    gate = _rules_tree(tmp_path)
+    victim = (
+        tmp_path
+        / ".saffron"
+        / "rule-tests"
+        / "agent-sdk-import-is-runner-only-test.yml"
+    )
+    old, new = INVALID_DECLARED_ANYWAY[spelling]
+    assert old in victim.read_text(), "the fixture no longer spells `invalid:` this way"
+    victim.write_text(victim.read_text().replace(old, new, 1))
+    assert yaml.safe_load(victim.read_text()).get("invalid"), (
+        "the mutant must still declare a snippet, or it is testing the wrong thing"
+    )
+    (tmp_path / "bad.py").write_text('emit({"gate": "lint", "tool": "ruff 9.9.9"})\n')
+
+    done = subprocess.run(
+        [str(gate)], cwd=tmp_path, capture_output=True, text=True, timeout=120
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "fail", result.summary
+    assert [f.code for f in result.failures] == ["gate-tool-must-be-executed"]
+
+
+def test_the_gate_still_refuses_an_invalid_list_that_is_empty(tmp_path):
+    """The mutant that proves the fix above is not a blanket yes. An `invalid:`
+    key with nothing under it certifies exactly what a missing one does."""
+    gate = _rules_tree(tmp_path)
+    victim = (
+        tmp_path
+        / ".saffron"
+        / "rule-tests"
+        / "agent-sdk-import-is-runner-only-test.yml"
+    )
+    victim.write_text(
+        re.split(r"^invalid:", victim.read_text(), flags=re.M)[0] + "invalid: []\n"
+    )
+
+    done = subprocess.run(
+        [str(gate)], cwd=tmp_path, capture_output=True, text=True, timeout=120
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "error", result.summary
+    assert victim.name in result.summary
+
+
 def test_no_rules_regex_anchors_on_the_quote_its_author_typed():
     """The defect two review rounds found in a different spelling each time. A
     tree-sitter `string` node's text carries its quotes *and* its `r`/`f`/`b`
@@ -765,9 +835,12 @@ def test_structure_errors_when_its_rules_are_verified_by_nothing(tmp_path):
     """Measured: with `testConfigs` absent `ast-grep test` prints "Running 0
     tests" and exits 0. Read as a verdict that is every rule verified at once
     while nothing ran — so the gate counts the tests against the rules on disk
-    rather than trusting the exit status."""
+    rather than trusting the exit status.
+
+    The rule tests stay on disk and only `testConfigs` goes: removing the files
+    instead would trip the 1:1 count beside this one, and this check is the one
+    that reads what `ast-grep test` actually ran rather than what is on disk."""
     gate = _rules_tree(tmp_path)
-    shutil.rmtree(tmp_path / ".saffron" / "rule-tests")
     (tmp_path / ".saffron" / "sgconfig.yml").write_text("ruleDirs:\n  - rules\n")
 
     done = subprocess.run(
@@ -874,6 +947,126 @@ def test_structure_errors_when_a_rule_test_certifies_nothing(tmp_path):
     assert result.status == "error", result.summary
     assert victim.name in result.summary
     assert result.tool, "the gate ran ast-grep; the identifier is obtainable"
+
+
+def test_structure_errors_when_every_rule_has_been_deleted(tmp_path):
+    """The cheapest route to the shape the two checks above exist to refuse, and
+    the one they both missed: no rule weakened, no config edited, no ignore file
+    written — just `rm .saffron/rules/*.yml`. Measured against the unfixed gate,
+    on this same tree carrying a real violation: `pass`, `0 violations`.
+
+    `ast-grep test` prints "Configuration not found!" for each orphaned test and
+    still exits 0, the count check compares `0 != 0` and is satisfied, and a scan
+    that loads no rules matches nothing. So the count needs a floor: the gate
+    cannot know how many rules the repo means to have, but it knows that none is
+    not a verdict. `integrity` routes the deletion to a person and does not block
+    it, and a repo adopting this gate inherits none of these tests."""
+    gate = _rules_tree(tmp_path)
+    for rule in (tmp_path / ".saffron" / "rules").glob("*.yml"):
+        rule.unlink()
+    (tmp_path / "bad.py").write_text('emit({"gate": "lint", "tool": "ruff 9.9.9"})\n')
+
+    done = subprocess.run(
+        [str(gate)], cwd=tmp_path, capture_output=True, text=True, timeout=120
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "error", result.summary
+    assert result.status != "pass", "a scan with no rules matches nothing"
+    assert result.tool, "an empty rule directory is not a reason to drop the tool"
+
+
+def test_structure_errors_when_one_rule_is_dropped_and_its_test_left(tmp_path):
+    """The floor above catches an empty rule directory; this catches one rule
+    short of it. The count check cannot: it recomputes `expected` from the rules
+    on disk, so deleting a rule takes both sides down together and `2 == 2`.
+
+    Measured: with the rule gone and its test kept, `ast-grep test` prints
+    "Configuration not found! <id>", counts only the survivors, and exits 0 — a
+    clean report over a rule that is not there. One `id:` per test file makes the
+    two counts 1:1, so an inequality is the signal."""
+    gate = _rules_tree(tmp_path)
+    dropped = tmp_path / ".saffron" / "rules" / "container-runtime-is-runtime-only.yml"
+    dropped.unlink()
+    (tmp_path / "saffron" / "cell").mkdir(parents=True)
+    (tmp_path / "saffron" / "cell" / "bad.py").write_text(
+        'subprocess.run(["container", "run"])\n'
+    )
+
+    done = subprocess.run(
+        [str(gate)], cwd=tmp_path, capture_output=True, text=True, timeout=120
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "error", result.summary
+    # Against the live counts, not a number: a fourth rule is not a reason to fail.
+    assert f"{len(_rule_files()) - 1} rules but {len(_rule_test_files())}" in (
+        result.summary
+    )
+
+
+def test_structure_names_the_rule_that_stopped_guarding(tmp_path):
+    """`rule tests did not pass (exit 4)` was the whole summary, and this summary
+    is the night's only human-readable record of why a task died. Measured: the
+    failing rule is in ast-grep's stdout as `FAIL <id>` and the remediation is on
+    its stderr, and the gate was discarding both."""
+    gate = _rules_tree(tmp_path)
+    rule = tmp_path / ".saffron" / "rules" / "agent-sdk-import-is-runner-only.yml"
+    rule.write_text(rule.read_text().replace("claude_agent_sdk", "never_matches_this"))
+
+    done = subprocess.run(
+        [str(gate)], cwd=tmp_path, capture_output=True, text=True, timeout=120
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "error", result.summary
+    assert "agent-sdk-import-is-runner-only" in result.summary, (
+        "the summary says a rule stopped guarding without saying which"
+    )
+    assert "container-runtime-is-runtime-only" not in result.summary, (
+        "naming every rule is the same as naming none"
+    )
+
+
+def test_structure_passes_a_tool_field_the_gate_interpolated(tmp_path):
+    """The `tool` rule is blocking, so a false positive costs a task and tells its
+    author to execute the tool they executed. In tree-sitter-python an f-string is
+    a `string` node like any other: measured against the unfixed rule, every one
+    of these — including the direct Python translation of what
+    `.saffron/gates/format` writes in shell — was reported as a literal."""
+    gate = _rules_tree(tmp_path)
+    (tmp_path / "good.py").write_text(
+        'emit({"gate": "lint", "tool": f"ruff {version}"})\n'
+        'payload["tool"] = f"ruff {version}"\n'
+        'GateResult(gate="lint", tool=f"ruff {version}")\n'
+        'tool = f"ruff {version}"\n'
+        'result.tool = f"ruff {version}"\n'
+        'payload.setdefault("tool", f"ruff {version}")\n'
+        'print(f\'{{"gate":"lint","tool":"{version}"}}\')\n'
+    )
+
+    done = subprocess.run(
+        [str(gate)], cwd=tmp_path, capture_output=True, text=True, timeout=120
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "pass", result.summary
+
+
+def test_the_tool_rule_still_reads_an_uninterpolated_f_string_as_a_literal(tmp_path):
+    """The mutant that keeps the fix above from being a blanket exemption. The
+    prefix is not what makes a string evidence: `f"ruff 0.16.3"` interpolates
+    nothing, and a serialized contract can carry a literal `tool` beside an
+    interpolated field — which is why the JSON branch tests the value rather than
+    the string."""
+    gate = _rules_tree(tmp_path)
+    (tmp_path / "bad.py").write_text(
+        'tool = f"ruff 0.16.3"\n'
+        'print(f\'{{"gate":"lint","tool":"ruff 0.16.3","took":"{elapsed}"}}\')\n'
+    )
+
+    done = subprocess.run(
+        [str(gate)], cwd=tmp_path, capture_output=True, text=True, timeout=120
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "fail", result.summary
+    assert [f.line for f in result.failures] == [1, 2], result.failures
 
 
 def test_structure_ignores_a_config_planted_where_ast_grep_would_find_one(tmp_path):

@@ -29,6 +29,7 @@ make fmt                     # ruff check --fix . && ruff format .
 uv run pytest                # cell-marked tests excluded by default (pyproject addopts)
 uv run pytest tests/test_session.py::test_name    # one test
 uv run ast-grep test -c .saffron/sgconfig.yml     # the structure rules' own tests
+uv run ast-grep test -c .saffron/sgconfig.yml --update-all   # after adding a snippet
 .saffron/gates/structure                          # what the `structure` gate runs
 uv run pytest -m cell        # needs apple/container + the images below
 ```
