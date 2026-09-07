@@ -10,6 +10,13 @@ gates:
   # parsed and nothing reads it, and a control that reads as present and is not
   # is the founding defect of Appendix I. Validation is milliseconds.
   shacl:  { blocking: true }
+  # Invariants that were prose in CLAUDE.md and enforced by nothing: which module
+  # may name the cell runtime, which file may import the Agent SDK, and that a
+  # gate's `tool` field is executed rather than written (Appendix G, §2.1, §5.4).
+  # Structural, not textual — each has a legitimate textual near-miss in the tree,
+  # so the `retired-vocabulary` pygrep hook's approach would false-positive on all
+  # three. Declared unconditionally, for the reason `shacl` gives above.
+  structure: { blocking: true }
 
 # Where a plausible-looking wrong change hurts most. Getting this right is most
 # of what onboarding actually means (DESIGN.md §5.6).
@@ -17,6 +24,17 @@ elevate_on:
   - saffron/gates/**
   - saffron/cell/**
   - saffron/ledger.py
+  # The rules are the `structure` gate's substance, so a diff touching one is at
+  # least as worth a person's eye as one touching a gate's executable. `protected`
+  # does not reach them: `.saffron/**` is a glob, and `protected_touch_refusal`
+  # skips glob entries as undecidable — its own `ponytail:` note says so.
+  - .saffron/rules/**
+  # The tests are as load-bearing as the rules, which is not obvious. Measured:
+  # delete a rule's `invalid:` list and neuter its body, and `ast-grep test`
+  # reports `3 passed; 0 failed` — a rule matching nothing satisfies every `valid`
+  # snippet that remains — so the gate certifies it and reports `pass` on a tree
+  # carrying the violation. The snippets are what prove a rule fires at all.
+  - .saffron/rule-tests/**
 
 protected:
   - DESIGN.md
@@ -58,6 +76,14 @@ integrity:
   # `sh:in`, drop an `sh:property`, or delete a shape and its paired fixture, and
   # go green. Same argument as `conftest.py` two lines down — the rules a gate
   # enforces have to be routed to a person, not just the gate's own executable.
+  # `.gitignore` decides which files ruff can see at all. Measured: it walks with
+  # a gitignore filter that has no notion of what git tracks, so one line naming a
+  # *tracked* file removes it from `lint` and `format` while it stays in the diff
+  # and in the commit. Nested ones count, hence `**/`. This routes the edit to a
+  # person, which is the tracked half only — a `.gitignore` naming itself is never
+  # added and so reaches no diff. `structure` no longer needs this entry at all:
+  # it refuses every ignore source and states its own file set with `--globs`.
+  # Doing the same for ruff, and so for `lint` and `format`, is backlog item 76.
   gate_config:
     [
       "ontology/shapes/**",
@@ -67,6 +93,7 @@ integrity:
       "**/conftest.py",
       "**/ruff.toml",
       "**/.ruff.toml",
+      "**/.gitignore",
     ]
 
 thread_env: {}

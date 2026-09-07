@@ -19,6 +19,30 @@ repos:
         # must trigger the hook that reads it.
         files: ^(.*\.py|pyproject\.toml)$
 
+  # Local for ty's reason: the `structure` gate parses ast-grep's JSON, and the
+  # rule syntax is pre-1.0, so the hook runs the one version `pyproject.toml`
+  # pins. The gate takes whatever `ast-grep` is on PATH and reports the version
+  # it ran, exactly as `lint` takes `ruff`, so host skew is visible, not absent.
+  # `test` before `scan`: a rule whose own invalid snippet no longer matches is
+  # a rule that has stopped guarding anything, and it would otherwise report a
+  # clean scan. The flags are the gate's, for the gate's reasons — see
+  # `.saffron/gates/structure.py`; a hook that scanned a different set of files
+  # than the gate would disagree with it at exactly the wrong moment.
+  - repo: local
+    hooks:
+      - id: ast-grep
+        name: ast-grep (the structure gate's rules)
+        language: system
+        entry: >-
+          sh -c 'uv run ast-grep test -c .saffron/sgconfig.yml
+          && uv run ast-grep scan -c .saffron/sgconfig.yml
+          --no-ignore hidden --no-ignore dot --no-ignore exclude
+          --no-ignore global --no-ignore vcs
+          --globs "!.venv/**" --globs "!.claude/worktrees/**"
+          --globs "!**/__pycache__/**"'
+        pass_filenames: false
+        files: ^(.*\.py|\.saffron/(sgconfig\.yml|rules/.*|rule-tests/.*))$
+
   # A retired term, not the whole `_Avoid_` list: most of those words are ordinary
   # English elsewhere. Only a word a settled decision killed outright is decidable
   # by grep. The excluded paths all state the vocabulary rules and so must quote

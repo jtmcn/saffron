@@ -34,4 +34,5 @@ ENV VIRTUAL_ENV=/opt/venv PATH="/opt/venv/bin:$PATH" UV_NO_SYNC=1
 RUN ruff --version && ty --version && pytest --version && git --version \
  && pgrep --version \
  && pyshacl --version \
+ && ast-grep --version \
  && cd /seed && UV_OFFLINE=1 uv run python -c "import pytest" && rm -rf /seed

@@ -20,11 +20,16 @@ saffron = "saffron.cli:main"
 # nothing under saffron/ imports either (the emitter is a later, conditional task).
 # ty is pinned exactly, not floored: the `types` gate parses its JSON output
 # and it is pre-1.0 — a schema change on a routine resolve would turn a batch
-# red overnight rather than at review.
+# red overnight rather than at review. ast-grep-cli is pinned for the same
+# reason: the `structure` gate parses its JSON and its rule syntax is likewise
+# pre-1.0. This is the version a cell gets, baked into /opt/venv; on the host the
+# gate takes whatever `ast-grep` is on PATH, exactly as `lint` takes `ruff`, and
+# reports the version it actually ran.
 dev = [
     "pytest>=8",
     "ruff>=0.16.3",
     "ty==0.0.77",
+    "ast-grep-cli==0.45.3",
     "pyoxigraph>=0.4",
     "pyshacl>=0.26",
     "rdflib>=7",

@@ -1,0 +1,168 @@
+id: agent-sdk-import-is-runner-only
+snapshots:
+  __import__("claude_agent_sdk"):
+    labels:
+    - source: __import__("claude_agent_sdk")
+      style: primary
+      start: 0
+      end: 30
+    - source: __import__
+      style: secondary
+      start: 0
+      end: 10
+    - source: claude_agent_sdk
+      style: secondary
+      start: 12
+      end: 28
+    - source: '"claude_agent_sdk"'
+      style: secondary
+      start: 11
+      end: 29
+    - source: '"claude_agent_sdk"'
+      style: secondary
+      start: 11
+      end: 29
+  __import__(r"claude_agent_sdk"):
+    labels:
+    - source: __import__(r"claude_agent_sdk")
+      style: primary
+      start: 0
+      end: 31
+    - source: __import__
+      style: secondary
+      start: 0
+      end: 10
+    - source: claude_agent_sdk
+      style: secondary
+      start: 13
+      end: 29
+    - source: r"claude_agent_sdk"
+      style: secondary
+      start: 11
+      end: 30
+    - source: r"claude_agent_sdk"
+      style: secondary
+      start: 11
+      end: 30
+  from claude_agent_sdk import ClaudeAgentOptions, query:
+    labels:
+    - source: from claude_agent_sdk import ClaudeAgentOptions, query
+      style: primary
+      start: 0
+      end: 54
+    - source: claude_agent_sdk
+      style: secondary
+      start: 5
+      end: 21
+  import claude_agent_sdk:
+    labels:
+    - source: import claude_agent_sdk
+      style: primary
+      start: 0
+      end: 23
+    - source: claude_agent_sdk
+      style: secondary
+      start: 7
+      end: 23
+  import claude_agent_sdk as sdk:
+    labels:
+    - source: import claude_agent_sdk as sdk
+      style: primary
+      start: 0
+      end: 30
+    - source: claude_agent_sdk as sdk
+      style: secondary
+      start: 7
+      end: 30
+  importlib.import_module("claude_agent_sdk"):
+    labels:
+    - source: importlib.import_module("claude_agent_sdk")
+      style: primary
+      start: 0
+      end: 43
+    - source: importlib.import_module
+      style: secondary
+      start: 0
+      end: 23
+    - source: claude_agent_sdk
+      style: secondary
+      start: 25
+      end: 41
+    - source: '"claude_agent_sdk"'
+      style: secondary
+      start: 24
+      end: 42
+    - source: '"claude_agent_sdk"'
+      style: secondary
+      start: 24
+      end: 42
+  importlib.import_module('claude_agent_sdk'):
+    labels:
+    - source: importlib.import_module('claude_agent_sdk')
+      style: primary
+      start: 0
+      end: 43
+    - source: importlib.import_module
+      style: secondary
+      start: 0
+      end: 23
+    - source: claude_agent_sdk
+      style: secondary
+      start: 25
+      end: 41
+    - source: '''claude_agent_sdk'''
+      style: secondary
+      start: 24
+      end: 42
+    - source: '''claude_agent_sdk'''
+      style: secondary
+      start: 24
+      end: 42
+  importlib.import_module(name="claude_agent_sdk"):
+    labels:
+    - source: importlib.import_module(name="claude_agent_sdk")
+      style: primary
+      start: 0
+      end: 48
+    - source: importlib.import_module
+      style: secondary
+      start: 0
+      end: 23
+    - source: claude_agent_sdk
+      style: secondary
+      start: 30
+      end: 46
+    - source: '"claude_agent_sdk"'
+      style: secondary
+      start: 29
+      end: 47
+    - source: name="claude_agent_sdk"
+      style: secondary
+      start: 24
+      end: 47
+    - source: name="claude_agent_sdk"
+      style: secondary
+      start: 24
+      end: 47
+  importlib.import_module(r"claude_agent_sdk"):
+    labels:
+    - source: importlib.import_module(r"claude_agent_sdk")
+      style: primary
+      start: 0
+      end: 44
+    - source: importlib.import_module
+      style: secondary
+      start: 0
+      end: 23
+    - source: claude_agent_sdk
+      style: secondary
+      start: 26
+      end: 42
+    - source: r"claude_agent_sdk"
+      style: secondary
+      start: 24
+      end: 43
+    - source: r"claude_agent_sdk"
+      style: secondary
+      start: 24
+      end: 43

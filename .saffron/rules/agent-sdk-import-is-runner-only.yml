@@ -1,0 +1,52 @@
+id: agent-sdk-import-is-runner-only
+language: python
+severity: error
+message: only images/agent_runner.py may import the Agent SDK
+note: |
+  DESIGN.md §2.1. `agent_runner.py` runs inside the cell and emits Saffron's own
+  event schema on stdout; the host never sees an SDK type. `pyproject.toml` does
+  not even declare claude-agent-sdk — an import here fails on the host and
+  couples the control plane to a vendor schema it deliberately does not know.
+
+ignores:
+  - "images/agent_runner.py"
+
+# Imports, not mentions: tests/test_image.py passes "import claude_agent_sdk" as
+# a string to `python -c` inside a cell, which is correct and must stay green.
+rule:
+  any:
+    - kind: import_statement
+      has: { regex: '^claude_agent_sdk', stopBy: end }
+    - kind: import_from_statement
+      has: { field: module_name, regex: '^claude_agent_sdk' }
+    # importlib.import_module("claude_agent_sdk") — an import neither statement
+    # kind above can see, because it is a call. Measured: 0 matches in the tree,
+    # so the branch costs nothing and closes the obvious way around the other
+    # two. The module named as data stays valid; the call is what is forbidden.
+    # Matched on the string's *content*, not on its source text: a `string` node's
+    # text carries its quotes and its prefix, so a regex anchored on `['"]` reads
+    # only the spelling its author typed. Measured, `import_module(r"…")` walked
+    # past while `lint` and `format` both passed it — ruff has no rule against a
+    # raw string and the formatter does not rewrite one. `string_content` carries
+    # neither, so every quote style and prefix is one case.
+    - kind: call
+      all:
+        - has: { field: function, regex: '(^|\.)import_module$|^__import__$' }
+        - has:
+            field: arguments
+            has:
+              any:
+                - kind: string
+                  nthChild: 1
+                  has: { kind: string_content, regex: '^claude_agent_sdk' }
+                # `import_module(name="claude_agent_sdk")` — a keyword_argument,
+                # not the first positional, so `nthChild: 1` alone walked past
+                # it. The other two rules already carry this branch for the same
+                # reason; the ceiling this rule states is deliberate evasion, and
+                # calling a parameter by its name is not that. Measured: 0
+                # matches in the tree, so the branch costs nothing.
+                - kind: keyword_argument
+                  has:
+                    field: value
+                    kind: string
+                    has: { kind: string_content, regex: '^claude_agent_sdk' }

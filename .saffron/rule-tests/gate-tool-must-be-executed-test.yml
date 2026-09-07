@@ -1,0 +1,74 @@
+id: gate-tool-must-be-executed
+valid:
+  - 'emit({"gate": "lint", "tool": tool})'
+  - 'emit({"gate": "lint", "tool": version.stdout.strip()})'
+  - 'payload["tool"] = tool'
+  - 'tool = version.stdout.strip()'
+  - 'tool = reported[0].strip() if reported else ""'
+  - 'toolchain = "uv 0.4.0"'
+  - 'GateResult(gate="lint", status="pass", tool=tool)'
+  - 'GateResult(gate="tests", tool=tests_result.tool)'
+  - 'result.tool = version.stdout.strip()'
+  - 'payload.setdefault("tool", tool)'
+  # Near misses: a different field whose name merely starts the same way.
+  - 'emit({"toolchain": "uv 0.4.0"})'
+  - 'Config(tools="ruff")'
+  - 'options.setdefault("toolchain", "uv 0.4.0")'
+  # The declaration is a type, not a value.
+  - |
+    class GateResult:
+        tool: str | None = None
+  # An interpolated version, one per branch. An f-string is a `string` node like
+  # any other, so before `literal-string` every one of these failed — correct
+  # code, blocked by a blocking gate, told to execute the tool it had executed.
+  - 'emit({"gate": "lint", "tool": f"ruff {version}"})'
+  - 'payload["tool"] = f"ruff {version}"'
+  - 'GateResult(gate="lint", status="pass", tool=f"ruff {version}")'
+  - 'tool = f"ruff {version}"'
+  - 'result.tool = f"ruff {version}"'
+  - 'payload.setdefault("tool", f"ruff {version}")'
+  - 'def emit(payload, tool=f"ruff {version}"): pass'
+  # The hand-serialized contract with the version interpolated into it — the
+  # direct Python translation of what `.saffron/gates/format` writes in shell.
+  - |
+    print(f'{{"gate":"lint","status":"pass","tool":"{version}"}}')
+  - |
+    print(f'{{"gate":"lint","tool":"ruff {version}"}}')
+invalid:
+  - 'emit({"gate": "lint", "tool": "ruff 0.16.3"})'
+  - 'payload["tool"] = "ruff 0.16.3"'
+  - 'GateResult(gate="lint", status="pass", tool="ruff 0.16.3")'
+  - 'tool = "ruff 0.16.3"'
+  # The attribute form, which a mutable `GateResult` is what invites.
+  - 'result.tool = "ruff 0.16.3"'
+  # Writing the field without ever spelling an assignment to it.
+  - 'payload.setdefault("tool", "ruff 0.16.3")'
+  # Both quote styles, one per branch that matches on the key's text. Measured:
+  # with the regexes anchored on a literal `"`, these three walked past.
+  - "emit({'gate': 'lint', 'tool': 'ruff 0.16.3'})"
+  - "payload['tool'] = 'ruff 0.16.3'"
+  - "payload.setdefault('tool', 'ruff 0.16.3')"
+  # A default is neither an assignment nor a keyword argument, so every other
+  # branch missed it — and it is a plausible way to write it in a gate helper.
+  - 'def emit(payload, tool="ruff 0.16.3"): pass'
+  # The prefix, one per branch that matches on the key. A `string` node's text
+  # carries `r`/`f`/`b` as well as its quotes, so anchoring on the quote read only
+  # the spellings its author typed — and unlike the single-quoted form, ruff
+  # neither lints nor reformats a raw string, so nothing else in the loop caught
+  # these either.
+  - 'emit({"gate": "lint", r"tool": "ruff 0.16.3"})'
+  - 'payload[r"tool"] = "ruff 0.16.3"'
+  - 'payload.setdefault(r"tool", "ruff 0.16.3")'
+  # The contract serialized by hand. `.saffron/gates/format` writes it exactly
+  # this way in shell, so it is the shape a new Python gate copies rather than an
+  # evasion — and there is no `pair` node in it for any branch above to see.
+  - |
+    print('{"gate":"lint","status":"pass","tool":"ruff 0.16.3"}')
+  - |
+    sys.stdout.write('{"gate": "lint", "tool": "ruff 0.16.3"}')
+  # The prefix is not what makes a string evidence: an f-string with nothing
+  # interpolated *into the tool value* is still a literal. The second is the one
+  # a blanket "carries an interpolation, so exempt" fix would have let through.
+  - 'tool = f"ruff 0.16.3"'
+  - |
+    print(f'{{"gate":"lint","tool":"ruff 0.16.3","elapsed":"{elapsed}"}}')

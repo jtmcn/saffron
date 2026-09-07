@@ -1,0 +1,12 @@
+# ast-grep's configuration, beside the rules it names rather than at the repo
+# root. The root is where it would be found by a bare `ast-grep` — and where a
+# second copy pointed at a decoy rule directory would be found first, leaving the
+# gate scanning rules nobody wrote while `integrity` saw no change to anything it
+# guards. Here, the file that decides which rules run is inside `.saffron/**`,
+# which is `protected` and in `integrity.gate_config`, exactly like the rules.
+# The gate and the prek hook both pass `-c`, so nothing is discovered by walking.
+ruleDirs:
+  - rules
+
+testConfigs:
+  - testDir: rule-tests

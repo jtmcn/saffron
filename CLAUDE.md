@@ -28,6 +28,9 @@ make check                   # lint + test — the default target
 make fmt                     # ruff check --fix . && ruff format .
 uv run pytest                # cell-marked tests excluded by default (pyproject addopts)
 uv run pytest tests/test_session.py::test_name    # one test
+uv run ast-grep test -c .saffron/sgconfig.yml     # the structure rules' own tests
+uv run ast-grep test -c .saffron/sgconfig.yml --update-all   # after adding a snippet
+.saffron/gates/structure                          # what the `structure` gate runs
 uv run pytest -m cell        # needs apple/container + the images below
 ```
 
@@ -95,9 +98,10 @@ exception has a shape worth memorising: **core invokes declared gates, never too
 
 ### Layout
 
-- `saffron/cell/` — `runtime.py` is the **only** module that names `apple/container`
-  (Appendix G); `session.py` drives one cell start to finish (v0.5's supervisor);
-  `worktree.py`, `proxy.py`.
+- `saffron/cell/` — `runtime.py` is the **only** module that spells the `apple/container`
+  binary in code, argv or bare name alike (Appendix G, gated over `saffron/` and `images/`;
+  comments and `.saffron/` are deliberately exempt); `session.py` drives one cell start to
+  finish (v0.5's supervisor); `worktree.py`, `proxy.py`.
 - `saffron/gates/` — `contract.py` is the gate JSON schema and the whole repo-agnostic
   surface; `runner.py` execs gates host-side (`LocalExecutor` / `CellExecutor`);
   `baseline.py` subtracts pre-existing failures; `core/` holds the host-side gates
@@ -106,15 +110,26 @@ exception has a shape worth memorising: **core invokes declared gates, never too
   `rebut.py`.
 - `saffron/agents/` — `context.py` injects `CONTEXT.md` sections per phase; `artifacts.py`
   the extraction turn and plan validation; `findings.py` anchors critic findings to the diff.
-- `images/agent_runner.py` — the **only** file permitted to touch Agent SDK types. It runs
+- `images/agent_runner.py` — the **only** file permitted to import the Agent SDK (gated). It runs
   inside the cell and emits Saffron's own event schema on stdout, one JSON line per event.
   The host never sees an SDK type.
 - `saffron/replay.py` — v0 only; v1 deletes it.
 
 ### Invariants worth knowing before editing
 
+The three marked **(gated)** are enforced by `.saffron/rules/`, run by the `structure` gate and
+a prek hook; the rest are still prose. Promote one when you find it broken — `ast-grep test`
+means a rule ships with the mutant that proves it fires. Both pass `-c .saffron/sgconfig.yml`
+rather than letting ast-grep find a config by walking, so the file naming the rules is inside
+the subtree `integrity` guards, and both refuse every ignore source and state their own file
+set with `--globs`: a `.gitignore` naming itself reaches no diff, so routing an edit to a person
+cannot close that. A rule's `files:` glob is checked for reach by a test, its `ignores:` asserted
+exactly, and its regexes match a string's *content* — a `string` node's text carries its quotes
+and its `r`/`f` prefix, and anchoring on those read only the spellings the author typed.
+
 - **The `tool` field** separates a gate that ran and passed from one that never ran. It must be
-  obtained *by executing* the tool, never a string literal (§5.4, Appendix H).
+  obtained *by executing* the tool, never a string literal (§5.4, Appendix H). **(gated over
+  Python; `.saffron/gates/format` builds its contract in `sh`, which no rule reads — item 77)**
 - **`error` ≠ `fail`.** `fail` means the repo's code is wrong; `error` means the gate broke,
   aborts the attempt, and is charged to nobody. Never collapse them.
 - **Baseline subtraction counts.** Identities collide legitimately — one baseline failure
