@@ -81,7 +81,7 @@ rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, **57**, **61**, **62**, **63**, **64**, **69**, **75**, **76**, **77**,
-**80**, **81**. (**65** and **68** are done.)
+**80**, **81**, **82**, **83**. (**65** and **68** are done.)
 
 **76 sits here rather than in tier 1** because `structure`, where the hole was
 found, is closed: it refuses every ignore source and states its own file set.
@@ -4426,6 +4426,101 @@ name already promises, and it is one loop. Keep the queue-shaped test for what
 it does cover — the ordering is what makes it blind, not the corpus, so a fixture
 that satisfies every dependency would work too and would cost more to maintain
 than the property is worth.
+
+---
+
+## 82. A mutant can pin the text a spec dictates or the text an agent writes, never both
+
+Found writing `SA-0064`, 2026-09-07, after `SA-0063` ran both halves of it.
+
+A `Mutant` names exact text and applies only when `find` matches exactly once.
+For a spec that builds code which does not exist yet, the operator writing the
+mutant cannot know the text the agent will produce. There are two ways out and
+each costs something.
+
+**Dictate the literal.** `SA-0063` did: it mandated an exact heading and an
+exact constant declaration so the mutants would match, and they did — *"2 of 2
+witness(es) died under their own mutant"*, the first real `witness` verdict this
+repo has produced. But the spec body **is** prompt text: `build_system_prompt`
+passes it as a substituted `{spec}` value, so every literal a spec pins is a
+literal the implementer reads. `SA-0063` went further and named them as
+mutant-pinned in its own `## Notes for the agent`, which is the same as handing
+the mutants over. Its verdict is therefore sound evidence that the *mechanism*
+works and no evidence that the *tests* are honest — a test written to kill a
+known mutant is the theater the gate exists to refuse.
+
+**Or pin what the code already determines.** `SA-0064` does: a field that
+exists, a parameter that exists, a predicate already written, so the natural
+spelling is close to forced and no disclosure is needed to make it match. The
+verdict then means something. The cost is that this only works where the change
+*edits* existing code. A spec creating something new has no such text to name.
+
+So the mechanism measures honestly where a change is an edit, and measures
+itself where a change is new — which is a real limit on the answer item **69**
+was built to give, and one nobody would find: the reasoning currently lives in
+two spec files' `## Notes for the agent` sections and nowhere a spec author
+looks.
+
+**Measured after this was written:** the second option does not work either,
+and item **83** is why — a mutant that matches at the base commit kills the task
+at baseline. So as things stand an author can have an honest mutant or a
+runnable spec, and 83 has to land before this item's advice is usable at all.
+
+**Done looks like** the constraint stated where an author meets it —
+`docs/agents/issue-tracker.md`'s conventions, beside the rest of the spec
+format — rather than a code change. Worth pairing with one cheap validator,
+though: `intake.py` could refuse at parse a mutant whose `find` text appears in
+the spec body it is declared in. That is one string search beside `Mutant`'s
+existing "not empty" check, and it catches exactly the mistake `SA-0063` made,
+which no reviewer caught either — both lenses that read that spec's diff missed
+it, and it was found only by reading the agent's own reasoning as it worked.
+
+---
+
+## 83. A mutant that matches at the base commit kills the task before it starts
+
+Measured 2026-09-07, running `SA-0064`. Exit 2, `PREFLIGHT_FAILED`, no agent
+turn bought and nothing exported:
+
+```
+baseline: … witness=error …
+baseline errored in ['witness'] — the toolchain is broken, not the code
+summary: the `tests` gate errored under
+  tests/test_session.py::test_a_protected_path_alone_asks_for_notes's mutant
+  — pytest exited 4 with no parsed failures
+```
+
+Declared mutants are applied at the **base commit** as well as at head.
+That criterion's mutant named text already in `saffron/cell/session.py`, so at
+base it applied cleanly — and then the gate ran the witness that mutant is
+supposed to kill, which does not exist at base, because writing it is the task.
+`pytest` exits 4 for a node id it cannot collect, the gate reads an exit it
+cannot parse as `error`, and `error` aborts the attempt (§5.4). Charged to
+nobody, which is the one mercy.
+
+**This is the ordinary shape of a bug-fix spec, not an exotic one.** A spec that
+edits existing code pins its mutant on existing code and declares a new witness
+for it. Every such spec dies at baseline. `SA-0063` survived only because both
+of its mutants named text that did not exist at base either — they matched zero
+times, the gate reported `skip`, and nothing ran. The mechanism has therefore
+never been exercised by a mutant that matches at base, and the first one to try
+it took the task down.
+
+It also closes off the escape route item **82** recommends. That item's advice —
+pin text the existing code already determines, so nothing has to be disclosed —
+produces exactly this combination. As things stand a spec author can have an
+honest mutant or a runnable spec.
+
+**Done looks like** a witness the suite cannot collect reported as `skip` rather
+than `error`: "there is no witness to kill" is unproven, not broken, and it is
+the *expected* state at base for every new test. `run_witness`'s pre-flight
+probe already exists to tell "this repo's `tests` gate cannot be filtered" apart
+from "the mutant killed its witness" (item **69**), and this is a third case it
+does not name. Worth deciding at the same time whether the witness gate should
+run at base at all: for a non-`preserves` witness the answer looks like no by
+construction — §5.4 already requires such a witness to fail at base — and the
+cheapest correct fix may be to not ask the question rather than to widen the
+answer.
 
 ---
 

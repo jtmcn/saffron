@@ -46,10 +46,6 @@ acceptance:
       only the both-true and both-false cases covered, so the repo-wide half
       was unwitnessed and could be deleted with the suite still green.
     witness: tests/test_session.py::test_a_protected_path_alone_asks_for_notes
-    mutant:
-      file: saffron/cell/session.py
-      find: " or bool(policy.protected)"
-      replace: ""
   - claim: >-
       A credential an implementer writes into its notes is caught by the same
       scan the rest of the body already goes through. The notes are a new way
@@ -112,11 +108,16 @@ way it leaks.
 
 `SA-0063` was the first spec to declare mutants and it made a mistake worth not
 repeating: it pinned literals the spec dictated, then restated them in prose
-here, which is the same as handing them over. This spec pins nothing. Every
-mutant it declares names text the *existing* code already determines — a field
-that exists, a parameter that exists, a predicate already written — so the
-natural spelling is close to forced and no disclosure is needed to make it
-match. Write the obvious thing and the mutants will find it.
+here, which is the same as handing them over. This spec pins nothing. What it
+declares names text the *existing* code already determines, so the natural
+spelling is close to forced and no disclosure is needed to make it match. Write
+the obvious thing and it will be found.
+
+This spec's first attempt declared a second mutant and never ran: exit 2 at
+baseline, because that mutant named text already present at the base commit,
+applied there, and the gate then ran a witness that does not exist until you
+write it. That is `docs/BACKLOG.md` item **83**, and it is why criterion 2
+carries no mutant — not because its claim is worth less.
 
 **Do not paper over criterion 3.** The scan that refuses a package when a
 credential reaches the body already runs. What is missing is a test that the
