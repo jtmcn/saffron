@@ -1769,7 +1769,12 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     assert [c.spec.id for c in candidates] == ["SA-0060"]
     # Refused for the parent each actually declares, which is what separates a
     # dependency refusal from a criterion-path one.
-    chain = [("SA-0061", "SA-0060"), ("SA-0062", "SA-0061"), ("SA-0063", "SA-0062")]
+    chain = [
+        ("SA-0061", "SA-0060"),
+        ("SA-0062", "SA-0061"),
+        ("SA-0063", "SA-0062"),
+        ("SA-0064", "SA-0063"),
+    ]
     assert len(refusals) == len(chain)
     for refusal, (child, parent) in zip(refusals, chain, strict=True):
         assert refusal.path.name.startswith(child)
