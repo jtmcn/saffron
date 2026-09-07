@@ -7,6 +7,7 @@ valid:
   - 'run_in_cell(image, ["python", "-c", "import claude_agent_sdk"])'
   - 'note = "claude_agent_sdk lives in the cell"'
   - 'importlib.import_module("json")'
+  - 'importlib.import_module(name="json")'
 invalid:
   - 'import claude_agent_sdk'
   - 'from claude_agent_sdk import ClaudeAgentOptions, query'
@@ -22,3 +23,6 @@ invalid:
   # neither lints nor reformats a raw string, so nothing else caught this either.
   - 'importlib.import_module(r"claude_agent_sdk")'
   - '__import__(r"claude_agent_sdk")'
+  # The parameter called by its name rather than by position — the shape
+  # `nthChild: 1` cannot see, and the one the other two rules already close.
+  - 'importlib.import_module(name="claude_agent_sdk")'

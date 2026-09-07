@@ -61,3 +61,5 @@ invalid:
   - 'def binary(): return r"container"'
   # A set literal is neither a list nor a tuple.
   - 'BINS = {"container"}'
+  # An augmented assignment is neither an `assignment` nor a `keyword_argument`.
+  - 'RT += "container"'

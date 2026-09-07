@@ -35,6 +35,18 @@ rule:
         - has:
             field: arguments
             has:
-              nthChild: 1
-              kind: string
-              has: { kind: string_content, regex: '^claude_agent_sdk' }
+              any:
+                - kind: string
+                  nthChild: 1
+                  has: { kind: string_content, regex: '^claude_agent_sdk' }
+                # `import_module(name="claude_agent_sdk")` — a keyword_argument,
+                # not the first positional, so `nthChild: 1` alone walked past
+                # it. The other two rules already carry this branch for the same
+                # reason; the ceiling this rule states is deliberate evasion, and
+                # calling a parameter by its name is not that. Measured: 0
+                # matches in the tree, so the branch costs nothing.
+                - kind: keyword_argument
+                  has:
+                    field: value
+                    kind: string
+                    has: { kind: string_content, regex: '^claude_agent_sdk' }

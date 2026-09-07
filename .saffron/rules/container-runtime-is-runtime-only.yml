@@ -8,6 +8,11 @@ note: |
   It exports `RUNTIME`; call through it, or through the helpers in
   `saffron/cell/runtime.py`, rather than spelling the binary here.
 
+# `tests/**` and `.saffron/**` are out of scope, and by naming the two trees the
+# invariant is about rather than by exemption: Appendix G governs what `saffron/`
+# ships, and a test that starts a real cell to probe it must spell the binary.
+# Said here because the other rule states its `tests/**` exemption outright, and
+# a scope that excludes something as a side effect reads like an oversight.
 files:
   - "saffron/**/*.py"
   - "images/**/*.py"
@@ -57,6 +62,11 @@ rule:
     # branch above while doing what Appendix G forbids. Measured: the one match
     # in scope is `RUNTIME` in the file already exempted.
     - kind: assignment
+      has: { field: right, matches: binary-literal }
+    # `RT += "container"` — a distinct node kind from `assignment`, which is the
+    # same argument this rule already makes for `keyword_argument` and
+    # `default_parameter` below. Measured: 0 matches in scope.
+    - kind: augmented_assignment
       has: { field: right, matches: binary-literal }
     # The three other places a name binds to the binary, which the assignment
     # branch above does not reach because none of them is an assignment:

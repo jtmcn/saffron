@@ -14,6 +14,20 @@ snapshots:
       style: secondary
       start: 8
       end: 19
+  RT += "container":
+    labels:
+    - source: RT += "container"
+      style: primary
+      start: 0
+      end: 17
+    - source: container
+      style: secondary
+      start: 7
+      end: 16
+    - source: '"container"'
+      style: secondary
+      start: 6
+      end: 17
   RT = "container":
     labels:
     - source: RT = "container"
