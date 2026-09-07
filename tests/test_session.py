@@ -3696,6 +3696,14 @@ def test_a_protected_path_alone_asks_for_notes(monkeypatch, tmp_path):
     suite still green. This spec declares no `forbidden` list at all; only
     the repo's `protected` list is what has to be enough.
 
+    The `package()` half below is not this test's claim and is not free:
+    `revert` requires every new test to fail with the diff's own source
+    reverted, and this claim's subject — `session.py`'s predicate — is a file
+    `SA-0064` forbids, so it is untouched by construction and the check cannot
+    be satisfied honestly. `docs/BACKLOG.md` item 84 is that gap, filed from
+    this run's own notes. Until it closes, the half stays and this docstring
+    is what says so.
+
     Proving `outcome.notes` alone is only half of what this task connects
     (`SA-0064`): the other half is `package()` actually forwarding it, on
     the one call site `saffron/phases/package.py` owns. So this also runs a
