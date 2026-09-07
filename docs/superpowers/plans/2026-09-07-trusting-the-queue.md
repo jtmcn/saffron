@@ -99,16 +99,28 @@ in the backlog's own words, and whether it goes through a cell or is done by han
 
 ### Housekeeping — first, one docs commit
 
-**Items:** 71, 74, 78. **By hand.**
+**Items:** 71, 74, 78. **By hand.** Done in this branch.
 
-Three Tier 1 items are closed on `main` and not marked: **74** by `SA-0063` and
-`SA-0064` (the notes channel; item 84 arrived through it), **71** by `SA-0060`
-through `SA-0062` (`SA-0063`'s run reported *"2 of 2 witness(es) died under their
-own mutant"*), and **78**'s code half by the two fixes on PR #154 (`4b533d5`,
-`290f070`: the dirty-tree guard and the truncation-safe write in
-`worktree.source_mutated`). Mark them. Add a line to the index's preamble saying
-Tier 1 is now sorted by what decides a pull request's soundness first and the
-night's honesty second, citing this file.
+Three Tier 1 items had moved on `main` without the index saying so. Verified
+against the code and the ledger before marking, and one claim this plan's first
+draft made did not hold:
+
+- **74 is done.** `SA-0063` built the notes channel and `SA-0064` connected the
+  production call; item 84 arrived through it, in `SA-0064`'s own `notes.json`.
+  Caveat: no pull request body carries a notes section yet, because `SA-0064`
+  packaged under `base_sha` code that predates its own wiring. The first task cut
+  from a base at or after `bb9fd74` is the measurement.
+- **71 is two-thirds done, not done.** `witness_gate` takes the injected mutator
+  and `session._suite` supplies it; the ledger holds real `pass` verdicts for
+  `SA-0063` and `SA-0064`. But PACKAGE's re-verification in
+  `saffron/phases/package.py` passes neither `acceptance=` nor `mutate=` to
+  `run_suite`, so `witness` is absent from that suite and `suite_drift` cannot
+  say so. The remainder is a by-hand fix and is listed under Track B.
+- **78 is done in code.** PR #154's own fixes made `source_mutated` yield a
+  reason on a dirty file and restore from `HEAD` before a failed write re-raises.
+  The `DESIGN.md` sentence is still owed and is listed under Track E.
+
+The index's preamble now records the re-sort and cites this file.
 
 ### A — Build the scoring harness before touching a lens
 
@@ -135,7 +147,7 @@ move.
 
 ### B — Make `witness` usable, then mandatory for bug-fix specs
 
-**Items:** 83, 85 (closing 80), 84, 82, 81. **By hand**: one host pull request
+**Items:** 83, 85 (closing 80), 84, 82, 81, 71 (remainder). **By hand**: one host pull request
 for the gate and preflight conditions, one docs pull request for 82's
 conventions. **Size:** two afternoons.
 
@@ -154,6 +166,10 @@ Four conditions, each already specified in its item:
 - **81.** Assert the criterion-path property directly over every spec
   `discover_specs` finds, with no ledger and no refusal ordering in front of it.
   One loop.
+- **71, the remainder.** PACKAGE's re-verification passes `acceptance=` and a
+  `worktree.source_mutated` bound to the package cell's container, so the two
+  suites have the same shape and `suite_drift` can compare them. Without it a
+  witness verdict is never re-run against the rebased head.
 
 Then state 82's constraint where an author meets it, in
 `docs/agents/issue-tracker.md` beside the rest of the spec format: a mutant pins

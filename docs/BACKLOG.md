@@ -28,6 +28,15 @@ coffee's cold* (§9). That target is what makes the tiers below mean anything,
 and it is the one thing to re-argue if the order looks wrong — the disagreement
 will be with the target, not with the sort.
 
+**Re-sorted 2026-09-07, toward the criterion's second half.** Every spec pull
+request of the preceding week needed a human review round after packaging, and
+the two worst diffs (#154, #160) drew the cleanest critic verdicts. So within
+tier 1 the items that decide whether a `READY_FOR_REVIEW` is *sound* now come
+before the ones that make a night *honest* about itself, and most of the latter
+are cheaper by hand than through a cell. The argument, the exit criterion, and
+which items go through a cell are in
+`docs/superpowers/plans/2026-09-07-trusting-the-queue.md`.
+
 ### Tier 0 — the milestone gate
 
 **58 is done** (merge `57b676c`, 2026-09-05), and with it **16** and half of
@@ -41,23 +50,22 @@ evidence. That is the gate now, and it is one cheap spec away.
 
 ### Tier 1 — breaks at 03:00 with nobody watching
 
-**74**, **73**, **71**, **78**, **69**, **79**, **80**, **70**, **45**, **51** (with
-**49**/**50**, which its fix closes), **47**, **46**, **40**, **26**, **7**.
+Soundness first: **79**, **69**, **80** (with **83**, **85**, **84**, **82**,
+**81** from tier 3, which are why 69's gate cannot yet be declared against
+safely), then the remainder of **71**. Honesty second: **73**, **70**, **45**,
+**51** (with **49**/**50**, which its fix closes), **47**, **46**, **40**,
+**26**, **7**, and the remainder of **78**.
+
+Closed since the 2026-09-04 sort, and left in place because their numbers are
+cited: **74** is done (`SA-0063`, `SA-0064`); **71** is two-thirds done and
+**78** is done in code — each item's own `Status` line says what is left.
 (**59** is done — `SA-0052`, PR #118.)
 
-**71 is first** because it is the one that makes item 69's three merged specs
-mean anything: until it lands, the gate they built runs on nothing.
-
-**69 is first**, and it is the only item here that is about the factory's
-ability to tell whether its own work is sound. Nine tests shipped in one
-session naming behaviour they did not guard, every one of them past the lens
-built to catch exactly that.
-
-**78 follows 71** because it is 71's own landing gone wrong: the mutator that
-seam exists to supply restores a file to `HEAD` without checking whether the
-agent had uncommitted work there, and destroys it. It sits above **45** and
-**51** — the other two that lose work in the dark — because it is the newest
-and the only one whose spec asserts the opposite of what the code does.
+**79 and 69 are first** because they are the only items here about the
+factory's ability to tell whether its own work is sound. Nine tests shipped in
+one session naming behaviour they did not guard, every one of them past the lens
+built to catch exactly that; and REVIEW filed no blocker on the one diff that
+destroyed a worktree.
 
 **79 is 69's sibling and no longer the only one of its kind.** 69 is the lens
 failing at a question only running can answer; 79 is a question no lens owns at
@@ -3919,6 +3927,18 @@ retry inside the loop reintroduces the "does the queue change" question the
 
 ## 71. `witness` is built, wired, and cannot run — the `tree` it needs does not exist in a cell
 
+**Status: two of the three below are done, 2026-09-07.** `SA-0060` (PR #148)
+gave `witness_gate` the injected mutator; `SA-0061` (#150) and `SA-0062` (#154)
+made `session._suite` pass `acceptance=` and a real `worktree.source_mutated`,
+and `advisory_gates` now reads `contract.witness_blocking`. Measured on real
+attempts: `SA-0063` and `SA-0064` each recorded `witness` as `pass` — *"2 of 2"*
+and *"1 of 1 witness(es) died under their own mutant"* — in the ledger's
+`gate_results`. **The third is open:** PACKAGE's re-verification
+(`phases/package.py`, the `run_suite` call under `re-verify:`) passes neither
+`acceptance=` nor `mutate=`, so `witness` is left out of that suite entirely and
+`suite_drift` has nothing to compare it against. A by-hand fix: the package
+cell's container is already in hand there.
+
 **Tier 1.** Found reviewing `SA-0058` (PR #139), 2026-09-06. Item 69's chain
 built the gate over three specs and the headline problem is unchanged: nothing
 invokes it.
@@ -4099,6 +4119,17 @@ two attempts is a spec too large for one cell, which is separate and is why
 
 ## 74. An agent has no channel to record a fact it is forbidden to fix
 
+**Status: done, 2026-09-07** — the first shape below. `SA-0063` (PR #158) built
+the channel: a `notes` artifact extracted and hashed at the moment it is
+produced, carried on the outcome, rendered by `pr_body.py` under a heading that
+names it as the implementer's own and unadjudicated, clipped and neutralized.
+`SA-0064` (PR #160) connected the one production call that had not passed it.
+The first finding to arrive through it is item **84**, in `SA-0064`'s own
+`notes.json`. One caveat worth stating: no pull request body has carried a notes
+section *yet* — `SA-0064` packaged under `base_sha` code that predates its own
+wiring, so #160's body has none. The first task to run from a base at or after
+`bb9fd74` is the measurement. Item **86** holds the rendering-side test gaps.
+
 **Tier 1.** Found reviewing `SA-0061` (PR #150), 2026-09-06, and it is an
 instruction this repo has now given twice and cannot be obeyed.
 
@@ -4253,6 +4284,15 @@ measurement against the five wrappers and `format`'s own `case` arms.
 ---
 
 ## 78. `witness` mutates before `committed` runs, and the spec that built it says the opposite
+
+**Status: done in code, open in `DESIGN.md`, 2026-09-07.** The two fixes on
+PR #154 itself (`4b533d5`, `290f070`): `worktree.source_mutated` yields a reason
+when the mutant's file is dirty — the shape `revert` uses, landing `witness` on
+`skip` — and a failed write restores from `HEAD` before it re-raises, so a
+truncation cannot outlive the failure. What is left is the third paragraph of
+"done looks like": the `run_suite`-before-`committed` ordering is load-bearing
+and written down nowhere. One sentence in §5.4, by hand — a gate that mutates
+the tree self-guards against dirtiness, because `committed` runs after it.
 
 Found reviewing PR #154 (`SA-0062`), 2026-09-06. The spec justifies a
 `git checkout HEAD` undo with *"the agent's work is committed by the time gates
