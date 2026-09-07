@@ -12,7 +12,7 @@ import base64
 import contextlib
 import shlex
 from collections.abc import Iterator, Mapping, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from saffron.cell import runtime
 from saffron.intake import Mutant
@@ -345,9 +345,45 @@ def source_reverted(
         _restore_source(container, paths)
 
 
-def _read_file(container: str, path: str) -> str:
-    """`path`'s content in the cell's working tree, right now — not `HEAD`,
-    so a mutation edits exactly what the tests about to run will see.
+def _confined(file: str) -> bool:
+    """Whether `file` names a path inside the worktree.
+
+    `saffron.mutation._resolve_target` is the host half of this refusal and
+    the reason is the same: a spec is data the operator writes, but `..` in a
+    declared path is the shape that turns a check into an arbitrary write, and
+    a cell mounts more than the worktree (`/agent-state` among them). Refused
+    before anything is read or written, so an escaping mutant cannot be used
+    to probe what exists outside the tree either.
+
+    ponytail: lexical, where the host half calls `Path.resolve()` — a symlink
+    *inside* the tree pointing out of it is still followed. Resolving needs a
+    round trip into the container per component; the ceiling is that a repo
+    whose own tracked symlinks escape gets no refusal here.
+    """
+    candidate = PurePosixPath(file)
+    if candidate.is_absolute():
+        return False
+    depth = 0
+    for part in candidate.parts:
+        if part == "..":
+            depth -= 1
+        elif part != ".":
+            depth += 1
+        if depth < 0:
+            return False
+    return depth > 0
+
+
+def _read_file(container: str, path: str) -> bytes:
+    """`path`'s bytes in the cell's working tree, right now — not `HEAD`, so a
+    mutation edits exactly what the tests about to run will see.
+
+    Bytes, and through `base64` rather than `cat`, because `runtime.exec_`
+    decodes with `errors="replace"`: read as text and written back, every byte
+    that was not valid UTF-8 returns as U+FFFD and a CRLF may not return at
+    all. The tests would then run against a file differing from `HEAD` in ways
+    the mutant never declared — the thing `saffron.mutation` handles raw bytes
+    to prevent, restated here because the failure mode is the same one.
 
     A non-zero exit here becomes `error` in `witness_gate`, not a yielded
     reason: `witness.Mutated`'s own docs call this out by name — `mutate`
@@ -355,15 +391,16 @@ def _read_file(container: str, path: str) -> str:
     host mutator, reading straight off disk, gets to tell "the file does not
     exist" apart from a live failure and this one does not need to.
     """
-    done = runtime.exec_(container, ["cat", path], workdir=WORKTREE_MOUNT)
+    script = f"base64 < {shlex.quote(path)}"
+    done = runtime.exec_(container, ["sh", "-euc", script], workdir=WORKTREE_MOUNT)
     if done.returncode != 0:
         raise runtime.CellRuntimeError(
             f"reading {path} for its mutant failed: {done.stderr.strip()}"
         )
-    return done.stdout
+    return base64.b64decode(done.stdout)
 
 
-def _write_file(container: str, path: str, content: str) -> None:
+def _write_file(container: str, path: str, content: bytes) -> None:
     """Write `content` to `path` inside the cell.
 
     `runtime.exec_` carries no stdin — only `exec_stream`, the agent's own
@@ -372,13 +409,25 @@ def _write_file(container: str, path: str, content: str) -> None:
     quote, a backslash, a newline. Base64 has no such character left, which
     is what makes one `printf | base64 -d` line safe for an edit this
     function never has to inspect the content of.
+
+    ponytail: the whole script, payload included, is one argv string, and
+    Linux caps a single one at `MAX_ARG_STRLEN` (128 KiB) whatever `ARG_MAX`
+    is. Reasoned, not measured: that puts the ceiling near a 96 KiB source
+    file, above which every mutant on it is `error` rather than a verdict.
     """
-    encoded = base64.b64encode(content.encode()).decode()
+    encoded = base64.b64encode(content).decode()
     script = f"printf '%s' {shlex.quote(encoded)} | base64 -d > {shlex.quote(path)}"
     done = runtime.exec_(container, ["sh", "-euc", script], workdir=WORKTREE_MOUNT)
     if done.returncode != 0:
+        # `>` truncated before `base64 -d` wrote a byte, so the file is empty
+        # or half-written *now*. `witness_gate` reports a raise from
+        # `__enter__` as "could not apply" — its `applied` flag is not set yet
+        # — so leaving the tree like this understates it exactly as that
+        # gate's own contract comment says it must not (`item 78`).
+        undo = _git(container, "checkout", "HEAD", "--", path)
+        restored = "restored from HEAD" if undo.returncode == 0 else "AND NOT RESTORED"
         raise runtime.CellRuntimeError(
-            f"writing {path}'s mutant failed: {done.stderr.strip()}"
+            f"writing {path}'s mutant failed ({restored}): {done.stderr.strip()}"
         )
 
 
@@ -390,22 +439,50 @@ def source_mutated(container: str, mutant: Mutant) -> Iterator[str | None]:
 
     Applies `mutant.find` -> `mutant.replace` to the working tree for the
     block. The undo is plain `git checkout HEAD -- <file>`, not a replay of
-    displaced bytes the way `saffron.mutation.host_mutator` restores: `
-    committed` guarantees the agent's work is committed before any gate
-    runs, so the file's content at `HEAD` already *is* what a mutated file
-    should return to, and none of that module's byte-offset-and-digest
-    bookkeeping has to cross into the container to say so.
+    displaced bytes the way `saffron.mutation.host_mutator` restores — so it
+    is only correct over a file that *is* at `HEAD`, and this refuses to run
+    otherwise. `SA-0062` claimed `committed` guaranteed that; it does not.
+    `committed_gate` runs after `run_suite`, which is where this is called
+    from, so the tree here may still be dirty (`docs/BACKLOG.md` item 78).
 
-    A `find` that is absent, or that matches more than once, applies nothing
-    and says so by yielding the reason instead of `None` — `apply_mutant`'s
-    own rule for the identical case, matched here rather than re-derived.
-    Nothing is read or written in that case, and the tree is left exactly as
-    it was. Any other failure to apply, or a failure to undo, raises
-    `runtime.CellRuntimeError`: `witness_gate` turns that into `error`, never
-    a verdict on the claim the mutant was meant to test.
+    Four things apply nothing and say so by yielding the reason instead of
+    `None`, leaving the tree exactly as it was: a path outside the worktree,
+    a file carrying uncommitted work, a `find` that is absent, and a `find`
+    that matches more than once. The last two are `apply_mutant`'s own rule
+    for the identical case, matched here rather than re-derived; the second
+    is `revert`'s, for the identical reason. Any other failure to apply, or a
+    failure to undo, raises `runtime.CellRuntimeError`: `witness_gate` turns
+    that into `error`, never a verdict on the claim the mutant was meant to
+    test.
     """
+    if not _confined(mutant.file):
+        yield f"mutant path {mutant.file!r} is not a relative path inside the tree"
+        return
+    dirty = _git(
+        container,
+        "status",
+        "--porcelain",
+        "-z",
+        "--untracked-files=all",
+        "--",
+        mutant.file,
+    )
+    if dirty.returncode != 0:
+        raise runtime.CellRuntimeError(
+            f"status for {mutant.file}'s mutant failed: {dirty.stderr.strip()}"
+        )
+    if dirty.stdout.strip("\0").strip():
+        # `revert` refuses the same way and says why: no evidence about
+        # theater is worth destroying the agent's uncommitted work and
+        # blinding the gate that would have caught it.
+        yield (
+            f"{mutant.file}: uncommitted changes — restoring to HEAD would "
+            "destroy them and hide them from `committed`"
+        )
+        return
     content = _read_file(container, mutant.file)
-    count = content.count(mutant.find)
+    find = mutant.find.encode()
+    count = content.count(find)
     if count == 0:
         yield f"{mutant.file}: find text not found: {mutant.find!r}"
         return
@@ -415,15 +492,27 @@ def source_mutated(container: str, mutant: Mutant) -> Iterator[str | None]:
             f"exactly once: {mutant.find!r}"
         )
         return
-    _write_file(container, mutant.file, content.replace(mutant.find, mutant.replace, 1))
+    _write_file(
+        container, mutant.file, content.replace(find, mutant.replace.encode(), 1)
+    )
+
+    # Recorded and raised *after* the `finally`, never inside it: an exception
+    # raised there replaces whatever was already propagating through, so a
+    # `KeyboardInterrupt` in flight would come out as `CellRuntimeError` with
+    # the interrupt demoted to `__context__`, where nothing looks.
+    # `saffron.mutation._mutated` carries the same shape for the same reason.
+    failed_to_undo: runtime.CellRuntimeError | None = None
     try:
         yield None
     finally:
         done = _git(container, "checkout", "HEAD", "--", mutant.file)
         if done.returncode != 0:
-            raise runtime.CellRuntimeError(
+            failed_to_undo = runtime.CellRuntimeError(
                 f"mutant undo for {mutant.file} failed: {done.stderr.strip()}"
             )
+
+    if failed_to_undo is not None:
+        raise failed_to_undo
 
 
 def changed_files(container: str, base_sha: str) -> list[str]:

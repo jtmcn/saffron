@@ -186,9 +186,10 @@ def stub_mutator(_mutant: Mutant) -> Iterator[str | None]:
     it cannot reach the tree. Entering yields a reason rather than `None`, so
     `witness_gate` never applies a mutant and never invokes `run_tests` —
     `skip`, exactly as `SA-0060` built and witnessed that answer for.
-    `worktree.source_mutated` is what `_suite` wires in its place now; kept
-    here, unwired, for its own test's sake — `census` refuses a task that
-    removes a test with no override, and that test is this function's.
+    ponytail: `worktree.source_mutated` is what `_suite` wires in its place
+    now, so this is unwired production code kept for its own test's sake —
+    `census` refuses a task that removes a test with no override, and that
+    test is this function's. It goes when that test does.
     """
     yield "no cell mutator is wired yet — the tree cannot be reached (SA-0062)"
 
@@ -994,17 +995,10 @@ def _drive_cell(
             # baseline and head alike, and the subtraction cancels it.
             # ponytail: cancelled by identity, so a head-only artifact (a .pyc
             # for a file the task added) needs the repo's .gitignore — item 14.
-            # `mutate` is what turns `witness` on — `run_suite` gates on it
-            # alone, as its own docstring says. Omitted, the gate is left out
-            # of the suite entirely, as every caller did before this spec.
-            # `worktree.source_mutated`, bound to this cell's own container,
-            # is what turns `witness` from a permanent `skip` into a real
-            # verdict on a real attempt (`SA-0062`, `docs/BACKLOG.md` item
-            # 71) — `stub_mutator` above is what every cell run supplied
-            # before this. Every spec in this repo still declares no
-            # mutants, so the result still lands `skip` here — now because
-            # there is nothing to check, not because the mutator cannot
-            # reach the tree.
+            # `mutate` is what turns `witness` on — omitted, `run_suite`
+            # leaves the gate out of the suite entirely. Bound to this cell's
+            # container it reaches a real verdict; the result still lands
+            # `skip` while no spec here declares a mutant (item 71).
             declared = run_suite(
                 gates,
                 cwd=repo,
