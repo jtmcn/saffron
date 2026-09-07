@@ -5,23 +5,34 @@ import hashlib
 import itertools
 import json
 import shutil
+import subprocess
 import time
 from collections.abc import Sequence
 from dataclasses import replace
 from functools import partial
+from types import SimpleNamespace
 
 import pytest
 
 from saffron.agents import artifacts
 from saffron.cell import runtime, session, worktree
+from saffron.cell.worktree import DIFF_FLAGS
 from saffron.events import Agent, describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
 from saffron.gates.core.committed import committed_gate
+from saffron.intake import parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement
+from saffron.phases import package as package_mod
 from saffron.repos import mirror
 from saffron.repos import policy as policy_mod
+
+
+def _git(repo, *args):
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+    ).stdout.strip()
 
 
 def _failure(gate, file, code, message="m"):
@@ -3672,6 +3683,135 @@ def test_the_notes_artifact_is_hashed_when_it_is_produced(monkeypatch, tmp_path)
     record = json.loads((outcome.task_dir / "notes.json").read_text())
     assert record["raw"] == notes_text
     assert record["sha256"] == artifacts.hash_artifact(record["raw"])
+
+
+def test_a_protected_path_alone_asks_for_notes(monkeypatch, tmp_path):
+    """`notes_worth_asking` is `bool(spec.forbidden) or bool(policy.protected)`
+    — an OR of a per-spec list and a repo-wide one. Only the both-true
+    (`test_the_notes_artifact_is_hashed_when_it_is_produced`, a declared
+    `forbidden` list) and both-false
+    (`test_no_notes_turn_is_asked_for_when_nothing_could_have_been_denied`)
+    cases were witnessed before this, so the repo-wide half of the OR could
+    be deleted — `notes_worth_asking = bool(spec.forbidden)` alone — with the
+    suite still green. This spec declares no `forbidden` list at all; only
+    the repo's `protected` list is what has to be enough.
+
+    Proving `outcome.notes` alone is only half of what this task connects
+    (`SA-0064`): the other half is `package()` actually forwarding it, on
+    the one call site `saffron/phases/package.py` owns. So this also runs a
+    real `package()` against a real remote, on the exact text this session
+    recorded — a test that stopped at `outcome.notes` would still pass with
+    that forwarding line gone, which is the silent failure this whole spec
+    exists to close."""
+    cell = _stub_the_runtime(monkeypatch)
+    notes_text = (
+        "I found something worth naming outside touches, near a protected path."
+    )
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            _turn(f"Noting something.\n<output>\n{notes_text}\n</output>"),
+        ],
+        # `_spec()`'s default `forbidden` is `[]` — nothing declared there —
+        # while the repo's own policy declares a protected path.
+        policy="gates: {}\nprotected:\n  - DESIGN.md\n",
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert outcome.notes == notes_text
+    assert outcome.notes_sha256 == artifacts.hash_artifact(notes_text)
+    record = json.loads((outcome.task_dir / "notes.json").read_text())
+    assert record["raw"] == notes_text
+
+    # A real remote and a real patch, exactly as `package()` sees them —
+    # not mocked, because the forwarding line this asserts against lives in
+    # `package.py` itself, and a mock of `render_pr_body` would prove
+    # nothing about whether `package()` actually calls it with `notes=`.
+    monkeypatch.setattr(package_mod, "github_slug", lambda _url: "o/r")
+    remote = tmp_path / "pkg-remote.git"
+    _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
+    work = tmp_path / "pkg-work"
+    work.mkdir()
+    _git(work, "init", "-q", "-b", "main")
+    _git(work, "config", "user.email", "t@example.com")
+    _git(work, "config", "user.name", "Test")
+    (work / "f.txt").write_text("a\n")
+    (work / ".saffron").mkdir()
+    (work / ".saffron" / "policy.yaml").write_text("gates: {}\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-qm", "base")
+    base = _git(work, "rev-parse", "HEAD")
+    _git(work, "remote", "add", "origin", str(remote))
+    _git(work, "push", "-q", "origin", "main")
+
+    _git(work, "checkout", "-q", "-b", "cell")
+    (work / "f.txt").write_text("a\nCELL\n")
+    _git(work, "commit", "-qam", "the agent's work")
+    patch_text = _git(work, "diff", *DIFF_FLAGS, f"{base}..HEAD") + "\n"
+    _git(work, "checkout", "-q", "main")
+
+    pkg_mirror = tmp_path / "pkg-mirror.git"
+    _git(tmp_path, "clone", "-q", "--mirror", str(work), str(pkg_mirror))
+    _git(pkg_mirror, "config", "user.email", "t@example.com")
+    _git(pkg_mirror, "config", "user.name", "Test")
+
+    pkg_out = tmp_path / "pkg-out"
+    task_dir = pkg_out / "SA-9"
+    task_dir.mkdir(parents=True)
+    (task_dir / "patch.diff").write_text(patch_text)
+    (task_dir / "patch.json").write_text(
+        json.dumps({"base_sha": base, "tree_base": base})
+    )
+
+    pkg_ledger = Ledger(tmp_path / "pkg.db")
+    repo_id = pkg_ledger.upsert_repo("pkg-work", str(remote), str(pkg_mirror), "sha")
+    run_id = pkg_ledger.create_run(repo_id, base)
+    task_id = pkg_ledger.create_task(run_id, "SA-9", "s" * 40, branch="saffron/SA-9")
+    pkg_ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+    pkg_ledger.finish_run(run_id, "COMPLETE")
+
+    pkg_outcome = SimpleNamespace(
+        state="READY_FOR_REVIEW",
+        task_id=task_id,
+        run_id=run_id,
+        task_dir=task_dir,
+        spent_usd=0.1,
+        attempts=1,
+        cell_head_sha="c" * 40,
+        gates=[],
+        new_failures=[],
+        reviews=[],
+        rebut_result=None,
+        agent_subjects=[],
+        effective_risk="standard",
+        advisory_gates=[],
+        # The exact text this session's own `notes_worth_asking` branch
+        # produced above — not a fresh literal, so this can only pass if
+        # both halves of the channel actually ran.
+        notes=outcome.notes,
+    )
+    pkg_spec = parse_spec(
+        "---\nid: SA-9\ntitle: package the notes\ntype: feature\nrisk: standard\n---\n"
+    )
+
+    package_mod.package(
+        pkg_outcome,
+        spec=pkg_spec,
+        repo=work,
+        mirror=pkg_mirror,
+        image="unused",
+        ledger=pkg_ledger,
+        out_dir=pkg_out,
+        token=None,
+        gh=lambda argv: subprocess.CompletedProcess(argv, 0, "https://x/pull/1\n", ""),
+    )
+    pkg_ledger.close()
+
+    body = (task_dir / "pr_body.md").read_text()
+    assert notes_text in body
 
 
 def test_no_notes_turn_is_asked_for_when_nothing_could_have_been_denied(

@@ -832,6 +832,11 @@ def package(
             verified_on=verified_on,
             effective_risk=outcome.effective_risk,
             advisory_gates=outcome.advisory_gates,
+            # The last hop `SA-0063` could not reach from `saffron/phases/**`
+            # (forbidden to that spec): extracted, validated and hashed on
+            # `outcome`, and otherwise never read — defaulting to `""` for a
+            # task that had nothing to say, and rendering nothing extra.
+            notes=outcome.notes,
         )
         body_path.write_text(body)
         # The body is the second cell-authored channel out: a claim or a
