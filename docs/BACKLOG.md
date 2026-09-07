@@ -81,7 +81,7 @@ rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, **57**, **61**, **62**, **63**, **64**, **69**, **75**, **76**, **77**,
-**80**. (**65** and **68** are done.)
+**80**, **81**. (**65** and **68** are done.)
 
 **76 sits here rather than in tier 1** because `structure`, where the hole was
 found, is closed: it refuses every ignore source and states its own file set.
@@ -4381,6 +4381,51 @@ not placing the spec in the worktree at all, which is cleaner and costs the
 agent a file it is otherwise given for context. What this needs is not code so
 much as a decision about which copy is authoritative for whom; either shape is
 cheap once that is settled.
+
+---
+
+## 81. The guard against a spec refused on its own criteria never sees 31 of 53 specs
+
+Found filing `SA-0063`, 2026-09-06. That spec shipped with `/work` in an
+acceptance claim; `_unmatched_criterion_path` reads it as a path token, no
+`touches` pattern of that spec matches it, and **a spec refused on its own
+acceptance criteria never runs.**
+
+`tests/test_scheduler.py::test_no_real_spec_is_refused_on_its_own_acceptance_criteria`
+is the test written for exactly that class — its docstring names `SA-0011` and
+`SA-0016` as the two it memorialises — and it passed throughout. Measured by
+reintroducing the token and running both: the queue smoke test fails, that one
+does not. What caught the defect was `test_saffron_queue_smoke_reproduces_this_
+repos_measured_queue` asserting an exact refusal *count*, which is luck: it
+fires only when the number moves, and it would have said nothing had the same
+defect arrived in a spec already being refused for something else.
+
+**The refusal ordering is what blinds it.** A `depends_on` no `MERGED` task
+satisfies is decided before `_refuse` reaches the criterion-path check, and the
+test supplies no ledger — deliberately, so that "nothing is filtered before
+`_refuse` runs and every spec reaches it". Every spec carrying a `depends_on`
+therefore refuses on the dependency and stops. Measured over the corpus the
+test itself builds (whole `done/` moved to top level): **53 specs, 31 preempted,
+22 examined.**
+
+The docstring states the blindness without noticing it: *"a `depends_on` refusal
+is the expected shape here, because the corpus is one long dependency chain with
+no tasks behind it; a refusal on anything else is the bug."* It is the expected
+shape, and it is also the thing that stops the check from ever running. So the
+test grows blinder as the corpus grows: every chained spec added is one more it
+cannot see.
+
+`SA-0011` declares `depends_on: []` and is examined. `SA-0016` declares
+`SA-0015` and is not — one of the two specs the test exists to remember is
+outside what it can reach.
+
+**Done looks like** the property asserted directly rather than through the queue:
+`_unmatched_criterion_path` over every spec `discover_specs` finds, with no
+ledger, no `gh`, and no refusal ordering in front of it. That is what the test's
+name already promises, and it is one loop. Keep the queue-shaped test for what
+it does cover — the ordering is what makes it blind, not the corpus, so a fixture
+that satisfies every dependency would work too and would cost more to maintain
+than the property is worth.
 
 ---
 
