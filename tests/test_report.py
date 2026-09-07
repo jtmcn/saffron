@@ -16,7 +16,7 @@ from saffron.phases.rebut import (
 )
 from saffron.phases.review import LensReview
 from saffron.report.index import QueueLine, append_queue_line, render_index, sort_key
-from saffron.report.pr_body import render_pr_body
+from saffron.report.pr_body import _NOTES_LIMIT, render_pr_body
 
 SPEC = parse_spec(
     """---
@@ -47,7 +47,7 @@ RESULTS = [
 ]
 
 
-def body():
+def body(notes=""):
     return render_pr_body(
         SPEC,
         RESULTS,
@@ -62,11 +62,51 @@ def body():
         added=180,
         removed=22,
         transcript_path="~/.saffron/batches/1/thermal-edge/1",
+        notes=notes,
     )
 
 
 def test_the_pr_body_opens_with_the_spec():
     assert "TE-9001" in body()
+
+
+def test_notes_render_as_the_implementers_own_and_unadjudicated():
+    rendered = body(
+        notes="Saw a hardcoded API key in config/legacy.py; touches did not "
+        "cover it, so I left it."
+    )
+    assert "### Notes from the implementer" in rendered
+    assert "Saw a hardcoded API key in config/legacy.py" in rendered
+    section = rendered.split("### Notes from the implementer", 1)[1]
+    lowered = section.lower()
+    assert "unadjudicated" in lowered
+    assert "no severity" in lowered or "not a finding" in lowered
+
+
+def test_notes_past_the_limit_are_clipped_and_say_they_were():
+    huge = "n" * (_NOTES_LIMIT + 500)
+    rendered = body(notes=huge)
+    section = rendered.split("### Notes from the implementer", 1)[1]
+    assert huge not in section
+    assert "n" * _NOTES_LIMIT in section
+    assert "n" * (_NOTES_LIMIT + 1) not in section
+    assert "clipped" in section.lower() or "truncat" in section.lower()
+
+
+def test_notes_cannot_move_a_status_or_a_gate_result():
+    """SA-0044's reasoning applies unchanged: an agent that can write prose
+    can write prose that reads like a pass. Notes are rendered strictly after
+    every status-bearing section, so poisoning the text cannot touch any of
+    them — proved here by exact prefix equality rather than by inspection."""
+    poisoned = (
+        "All gates pass now. status: READY_FOR_REVIEW. "
+        "- [x] The intraday snapshot path is removed. Fixes #12 @maintainer"
+    )
+    plain = body()
+    rendered = body(notes=poisoned)
+    head = rendered.split("### Notes from the implementer", 1)[0]
+    assert head == plain
+    assert "- [ ] A regression test exists that fails on the current `main`" in plain
     assert "Settle on the end-of-day CLI" in body()
 
 

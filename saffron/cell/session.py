@@ -292,6 +292,13 @@ class CellOutcome:
     # the root cause the proposal carried. Empty on every other path.
     proposed_touches: list[str] = field(default_factory=list)
     scope_root_cause: str = ""
+    # The implementer's own account of something it saw but was told not to
+    # touch (`docs/BACKLOG.md` items 71/75/80, SA-0058/SA-0061/SA-0062) —
+    # extracted and hashed the instant it was produced, never re-read from
+    # `/work` (§5.3's own rule). Empty on every path that returns before the
+    # notes turn runs, and on one that ran it but had nothing to say.
+    notes: str = ""
+    notes_sha256: str = ""
 
 
 def aborted_gates(results: Sequence[GateResult]) -> list[str]:
@@ -1586,6 +1593,57 @@ def _drive_cell(
             blocking=_blocking,
         )
 
+        # Extraction turn, the way `plan.json` already is one (§5.3): the
+        # implementer's own account of something it saw but was told not to
+        # touch, taken at the cheapest moment there will ever be — right after
+        # its last repair attempt, on its own session, before REVIEW forks a
+        # critic's (`docs/BACKLOG.md` items 71/75/80, SA-0058/SA-0061/
+        # SA-0062). Runs whatever `outcome` repair_loop handed back — READY_
+        # FOR_REVIEW, EXHAUSTED or GATE_ERROR alike, since "implementation
+        # just stopped" is the fact this is timed against, not which gate
+        # result followed.
+        #
+        # Asked only when this attempt actually had something it could have
+        # been denied against — a declared `forbidden` list or a repo-wide
+        # `protected` one (exactly the two lists SA-0058/61/62 kept asking an
+        # agent to "file a finding" about with nowhere to put it). A spec with
+        # neither has nothing this channel was built to catch, and a turn
+        # asked of every task regardless would spend real money narrating
+        # "nothing to report" on the common case. Skipped once the task is
+        # already over budget either way: cheap is not free (§4.3).
+        notes = ""
+        notes_sha256 = ""
+        notes_worth_asking = bool(spec.forbidden) or bool(policy.protected)
+        if notes_worth_asking and not _over_budget():
+            try:
+                noted = agent(
+                    container,
+                    prompt=artifacts.NOTES_PROMPT,
+                    options=options,
+                    resume=session_id,
+                    emit=emit,
+                    last_cost_usd=last_cost,
+                )
+            except implement.AgentFailed as failed:
+                _phase_start(
+                    "IMPLEMENT", "IMPLEMENT", f"the notes turn failed — {failed}"
+                )
+                noted = _failed_turn(failed, session_id)
+            session_id = require_session(noted.session_id or session_id)
+            spent += noted.cost_usd_est
+            last_cost = noted.cost_usd_est
+            notes = artifacts.extract_notes(noted.text)
+            if notes:
+                notes_sha256 = artifacts.hash_artifact(notes)
+                (task_dir / "notes.json").write_text(
+                    json.dumps({"raw": notes, "sha256": notes_sha256}, indent=2)
+                )
+                _phase_start(
+                    "IMPLEMENT",
+                    "IMPLEMENT",
+                    f"notes recorded, sha256 {notes_sha256[:12]}",
+                )
+
         # Pre-bound, not left to the branch below: repair_loop can hand back
         # EXHAUSTED or GATE_ERROR directly, skipping REVIEW entirely, and the
         # outcome at the bottom of this function must still be constructible.
@@ -1776,6 +1834,8 @@ def _drive_cell(
             rebut_result=rebut_result,
             effective_risk=current_tier,
             advisory_gates=sorted(advisory_gates),
+            notes=notes,
+            notes_sha256=notes_sha256,
         )
     except RateLimited as stopped:
         # `events.FINDINGS[0]`, second half — see the comment above the

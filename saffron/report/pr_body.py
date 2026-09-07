@@ -75,6 +75,7 @@ def render_pr_body(
     verified_on: str = "base",
     effective_risk: str | None = None,
     advisory_gates: Sequence[str] = (),
+    notes: str = "",
 ) -> str:
     """`effective_risk` is what the header reports — `elevated` when the spec
     says so *or* the diff crossed a `policy.elevate_on` path — never bare
@@ -85,7 +86,12 @@ def render_pr_body(
     `advisory_gates` names every gate result in `results` this attempt did not
     hold blocking — `size` at `standard`, a declared `blocking: false` gate at
     any tier — so its row can say so: a `fail` here is not a contradiction of
-    a green pull request, and unmarked it would read like one (§5.6)."""
+    a green pull request, and unmarked it would read like one (§5.6).
+
+    `notes` is the implementer's own extraction-turn text, if any (SA-0063,
+    `docs/BACKLOG.md` items 71/75) — untrusted cell-authored prose, rendered
+    last and clipped like every other such string here. Empty for every task
+    that produced none, which is every task before this channel existed."""
     risk = effective_risk if effective_risk is not None else spec.risk
     sections = [
         f"## {spec.id} — {spec.title}",
@@ -101,6 +107,12 @@ def render_pr_body(
         _gate_table(results, advisory_gates),
         _findings(reviews),
         _provenance(spec, base_sha, head_sha, transcript_path),
+        # Last, deliberately: every status, checklist and table above is fully
+        # rendered before this ever starts, so cell-authored prose here cannot
+        # be mistaken for having moved any of them (SA-0044's reasoning, held
+        # unchanged). Falsy when there is nothing to report, so a task with no
+        # notes renders a body byte-identical to one from before this existed.
+        _notes(notes),
     ]
     slot = sections.index(None)
     spent = sum(len(section) + 1 for section in sections if section)
@@ -357,6 +369,37 @@ def _gate_table(results: list[GateResult], advisory_gates: Sequence[str] = ()) -
         "",
     ]
     return "\n".join(lines)
+
+
+_NOTES_LIMIT = 4000
+
+
+def _notes(notes: str) -> str:
+    """The implementer's own account of something it saw but was not asked to
+    fix — a different speaker at a different trust level from §5.5's critics,
+    whose findings are anchored to the diff and adjudicated. This carries
+    neither: no anchor, no severity, no adjudication, and the heading exists
+    to say so at a glance.
+
+    Cell-authored text reaching GitHub, so it is neutralized exactly like
+    every other such string in this renderer, and clipped to a declared
+    ceiling — an agent that can write prose into a pull request body can
+    write a screenful of it, or an `@name`, or a `Fixes #12`."""
+    text = notes.strip()
+    if not text:
+        return ""
+    safe = neutralize(text)
+    clipped = ""
+    if len(safe) > _NOTES_LIMIT:
+        safe = safe[:_NOTES_LIMIT]
+        clipped = "\n\n… clipped at the notes ceiling; the rest was not kept.\n"
+    return (
+        "### Notes from the implementer\n\n"
+        "> The implementer's own account, unadjudicated: nobody has reviewed "
+        "this, it carries no severity, and it is not a finding.\n\n"
+        f"{safe}\n"
+        f"{clipped}"
+    )
 
 
 def _provenance(spec: Spec, base_sha: str, head_sha: str, transcript_path: str) -> str:
