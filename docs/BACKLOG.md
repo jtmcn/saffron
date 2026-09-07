@@ -83,13 +83,17 @@ flywheel inert exactly where it was meant to compound.
 
 Operator visibility parts 2 and 3 — `SA-0032`–`SA-0039`, with the plan's Task 6
 rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
-**38**), plus **43**, **48**, **52**, **60**, **66**, **67**, **72**.
+**38**), plus **43**, **48**, **52**, **60**, **66**, **67**, ~~**72**~~.
+
+**72 is done** (2026-09-07, by hand), taken ahead of Track A by operator
+decision because it was the one item whose defect was a guard that could not
+fire. Its number stays listed because item numbers are cited from `saffron/`.
 
 ### Tier 3 — real, not urgent
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, **57**, **61**, **62**, **63**, **64**, **69**, **75**, **76**, **77**,
-**81**, **82**, **83**, **84**, **85**, **86**. (**65** and **68** are done; **80**
+**81**, **82**, **83**, **84**, **85**, **86**, **87**. (**65** and **68** are done; **80**
 moved to tier 1 when its evidence arrived.)
 
 **76 sits here rather than in tier 1** because `structure`, where the hole was
@@ -3998,6 +4002,15 @@ connected.
 
 ## 72. `witness` and `mutant` exist in code and in no vocabulary, and the guard for that reads the vocabulary
 
+**Status:** **done**, by hand, 2026-09-07. `saffron:witness` is declared at
+`blockingWhenElevated` and named by `SizeTierShape`; `mutant` and `witness` are
+`CONTEXT.md` §4 entries and deliberately *not* vocabulary terms, because
+`test_no_dead_terms` rejects a class no shape reads. The guard now reads
+`saffron/gates/core/` off disk and was run against the unfixed tree, where it
+names `['witness']` — and declaring the triple then made `test_shapes` name
+`['witness']` too, which is `CLAUDE.md`'s promised guard firing for the first
+time on the case it was written for.
+
 **Tier 2.** Found reviewing `SA-0056` and again reviewing `SA-0058`, 2026-09-06.
 
 Item 69's chain added a core gate and a term, and neither reached
@@ -4058,10 +4071,37 @@ core gate a risk tier moves" needs amending too — a `mutant` entry in
 `CONTEXT.md`'s vocabulary, `uv run python -m ontology.render` re-run, and the
 closed-set tests green.
 
-**And a decision on the pattern**, which is worth more than the two entries:
-either the vocabulary stops being `forbidden` to the spec that introduces a
-term, or every such spec carries a follow-up filed when it is written rather
-than discovered three pull requests later.
+**The pattern, decided.** Of the two arms — either the vocabulary stops being
+`forbidden` to the spec that introduces a term, or every such spec carries a
+follow-up filed when it is written rather than discovered three pull requests
+later — the first is structurally unavailable, and that is measured rather than
+argued. `ontology/saffron.ttl` is neither `protected` nor in
+`integrity.gate_config`, so a cell may edit it; but the change is not complete
+until `ontology.render` rewrites `CONTEXT.md`, which *is* `protected`, and
+`protected_touch_refusal` runs at intake (`saffron/cli.py:441`). A spec
+declaring the regeneration is refused before a cell starts; one omitting it
+fails `scope` on an out-of-scope file, or lands a vocabulary its own derived
+surfaces contradict and fails `test_generated_surfaces_are_current`. That
+test's docstring already said so, and nobody had read it back to this item.
+
+So the second arm: `docs/agents/issue-tracker.md` now requires a spec that
+introduces a term to file its vocabulary follow-up, marked **by hand**, in the
+same commit as the spec.
+
+**One term left undecided, on purpose.** `notes` — item **74**'s channel,
+shipped in `SA-0063`/`SA-0064` — is in no vocabulary either. It is not a gate,
+and `DESIGN.md` does not bold it as a defined term the way §5.4.1 bolds
+**mutant**, so declaring it here would be the vocabulary-invention the
+`forbidden` lists exist to prevent. It is a candidate, not an omission; decide
+it when a document defines it.
+
+**Two brittle guards found while closing this**, both the same shape one level
+down — a test pinned to the membership it checks. `test_render`'s fixture
+asserted `` `revert`, `probe`. `` , naming the last core gate by hand, so
+declaring a ninth broke it; it now derives the tail from `render.members`. And
+`ontology.render` rewrites a closed set's enumeration but not the prose after
+it, so adding `witness` left a 90-character line in a file whose longest was 87
+— cosmetic, hand-rewrapped, and worth knowing before the next set grows.
 
 ---
 
@@ -4689,6 +4729,39 @@ and that empty notes render no heading — plus, separately worth deciding,
 whether `preserves` should require the operator to name what would falsify it
 the way `mutant` does for the other direction. The first is half an hour; the
 second is a design question and probably belongs beside item **82**.
+
+---
+
+## 87. Two prose claims about the core gate set went stale where no guard reaches
+
+Found reviewing item **72**'s own branch (#164), 2026-09-07. Neither is a live
+defect — both are sentences that were true when written and are now false, in
+the two places item 72's new guard cannot see. That guard compares
+`saffron/gates/core/*.py` against `ontology/saffron.ttl`; it reads no prose.
+
+`DESIGN.md` §7's risk table says *"The seven core gates never execute repo
+code — most read the diff, but `census` and `criteria` read other gates' results
+instead; any core gate that wants to *run* something belongs on the repo side"*.
+Nine now, and the second half is the larger error: `revert` and `witness` both
+invoke the repo's declared `tests` gate (§5.4.1 calls `witness` *"`revert`'s
+exception, not a new one"*), so the row's own rule reads as violated by two of
+the gates it governs rather than as the boundary it is. The distinction the row
+wants is *invokes a declared gate* versus *knows a tool*, which is §2.1's actual
+line.
+
+`saffron/gates/contract.py:113` still carries **"Nothing reads it yet, and the
+thing that will currently disagrees."** in `witness_blocking`'s docstring.
+`session.py:998` reads it — item **71**'s reconciliation landed and left the
+paragraph describing the world before it. This one costs something today: item
+72's commit message and `SizeTierShape`'s comment both cite
+`contract.witness_blocking` as the authority for `witness`'s blocking level, and
+a reader who follows the citation lands on a paragraph saying nothing reads it.
+
+**Done looks like** both sentences corrected by hand — `DESIGN.md` is
+`protected` and its §7 table is not generated, so neither is a cell's to touch.
+Worth deciding separately whether the `revert`/`witness` distinction deserves a
+`CONTEXT.md` §4 line of its own, since three files now state it in three
+wordings. Half an hour.
 
 ---
 

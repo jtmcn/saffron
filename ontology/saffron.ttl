@@ -70,9 +70,9 @@ saffron:RepoDefinedGate a owl:Class ; rdfs:subClassOf saffron:Gate ; rdfs:label 
 # named here and the gate is not. A repo-defined gate is neither: CONTEXT.md §4
 # says its name is not vocabulary, so none appears below.
 # Their blocking levels are core-supplied too, and belong here rather than in a
-# repo's policy: §5.4 fixes them, and `size` at `elevated` is the only one a tier
-# moves. A `policy.yaml` that declared otherwise would not be a different repo,
-# it would be wrong.
+# repo's policy: §5.4 fixes them, and `size` and `witness` are the two a tier
+# moves — both at `elevated`, for the same reason (§5.4.1). A `policy.yaml` that
+# declared otherwise would not be a different repo, it would be wrong.
 saffron:scope     a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
 saffron:size      a saffron:CoreGate ; saffron:blockingAt saffron:blockingWhenElevated .
 saffron:secrets   a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
@@ -81,6 +81,7 @@ saffron:census    a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking
 saffron:committed a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
 saffron:criteria  a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
 saffron:revert    a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .
+saffron:witness   a saffron:CoreGate ; saffron:blockingAt saffron:blockingWhenElevated .
 
 saffron:GateRole a owl:Class ; rdfs:label "gate role" ;
     rdfs:comment "A name in the contract. The repo supplies the executable; core supplies the meaning (§5.4)." .

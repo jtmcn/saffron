@@ -91,7 +91,7 @@ saffron:CoreGateShape a sh:NodeShape ;
     sh:targetClass saffron:CoreGate ;
     sh:in ( saffron:scope saffron:size saffron:secrets
             saffron:integrity saffron:census saffron:committed
-            saffron:criteria saffron:revert ) .
+            saffron:criteria saffron:revert saffron:witness ) .
 
 saffron:GateRoleShape a sh:NodeShape ;
     sh:targetClass saffron:GateRole ;
@@ -106,8 +106,8 @@ saffron:ContractGateShape a sh:NodeShape ;
     sh:property [ sh:path saffron:role ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class saffron:GateRole ] .
 
-# Core gates' blocking levels are core-supplied: §5.4 fixes them, and `size` at
-# `elevated` is the only one a tier moves. Stated as constraints rather than left
+# Core gates' blocking levels are core-supplied: §5.4 fixes them, and `size` and
+# `witness` are the two a tier moves. Stated as constraints rather than left
 # as triples in the vocabulary — an unenforced fact in this ontology is what the
 # dead-term test exists to delete, one level up. `sh:in` rather than
 # `sh:hasValue` because `sh:targetNode` targets its node in every graph including
@@ -118,11 +118,15 @@ saffron:CoreGateBlockingShape a sh:NodeShape ;
                   saffron:revert ;
     sh:property [ sh:path saffron:blockingAt ; sh:in ( saffron:alwaysBlocking ) ] .
 
-# The one core gate a risk tier moves, and the correction `SA-0001` forced on the
-# design: §5.4 had it always-blocking and §5.6 had it becoming blocking at
-# `elevated`, and both could not be true (Appendix B).
+# The two core gates a risk tier moves, and the correction `SA-0001` forced on
+# the design: §5.4 had `size` always-blocking and §5.6 had it becoming blocking
+# at `elevated`, and both could not be true (Appendix B). `witness` takes the
+# same two levels for the same reason (§5.4.1) — an elevated diff is where a
+# claim guarded by nothing hurts most, and `contract.witness_blocking` is the
+# function that says so. The shape's name is narrower than its target set; it is
+# kept because renaming a shape is a `shacl` gate diff for a cosmetic gain.
 saffron:SizeTierShape a sh:NodeShape ;
-    sh:targetNode saffron:size ;
+    sh:targetNode saffron:size, saffron:witness ;
     sh:property [ sh:path saffron:blockingAt ; sh:in ( saffron:blockingWhenElevated ) ] .
 
 # `coverage` is advisory at every tier — a design decision, not an oversight

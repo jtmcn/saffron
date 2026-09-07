@@ -220,11 +220,13 @@ meaning.
 in backticks. Three kinds, and the distinction is the core/repo boundary:
 
 - **Core gates** — `scope`, `size`, `secrets`, `integrity`, `census`, `committed`,
-  `criteria`, `revert`. Implemented in Saffron. Most read the diff; `committed`
-  reads the worktree's status instead, and `census` and `criteria` read other
-  gates' results. `revert` is the one that runs something, and §2.1's rule is
-  shaped around it rather than broken by it: core invokes declared gates, never
-  tools (`DESIGN.md` §2.1).
+  `criteria`, `revert`, `witness`. Implemented in Saffron. Most read the diff;
+  `committed` reads the worktree's status instead, and `census` and `criteria`
+  read other gates' results. `revert` and `witness` are the two that run
+  something, and §2.1's rule is shaped around them rather than broken by them:
+  core invokes declared gates, never tools (`DESIGN.md` §2.1). `witness` is also
+  the second gate a risk tier moves (§5.4.1); the rest sit at the level §5.4
+  fixes for them.
 - **Contract gates** — the gate roles above. Declared in `policy.yaml`, implemented
   in the repo's `.saffron/gates/`.
 - **Repo-defined gates** — anything a repo adds against its own hard-to-fake
@@ -287,6 +289,22 @@ the same identity as a new failure and counted the same way. The signal to stop
 paying.
 _Avoid_: "byte-identical" — line numbers shift every attempt, so a byte comparison
 never fires.
+
+**Witness**: The test a spec's `acceptance:` entry names as the guard for its
+claim. One per criterion, declared by the spec author, never chosen by the agent.
+_Avoid_: "the test for it" — a witness is named in frontmatter, checked by the
+`criteria` gate for having run and turned green, and by the `witness` gate for
+failing on its criterion's mutant; an ordinary test that happens to cover the
+claim is not one.
+
+**Mutant**: A find-and-replace edit a criterion declares against its own subject,
+which its witness must fail on (`DESIGN.md` §5.4.1). Applied by the `witness` gate
+to ask whether the tests would notice the claim being broken. Withheld from the
+implementer's prompt on purpose: a mutant a cell chooses is a mutant chosen to be
+killed.
+_Avoid_: "mutation testing" for the gate as a whole — it runs one declared edit
+against one named witness, not a generated suite. _Avoid_ "mutant" for the tree
+the edit is applied to; that is the worktree, mutated.
 
 ---
 

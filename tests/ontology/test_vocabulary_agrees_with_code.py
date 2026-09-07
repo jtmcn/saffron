@@ -7,9 +7,13 @@ it. `BatchStopReason` is closed *twice* on the code side — a `Literal` in
 `saffron/batch.py` and a SQL `CHECK` on `batches.status` — and both are checked,
 because they can drift from each other as easily as from the vocabulary.
 
-Core gates have no Python registry (they are discovered), and the terminal
-states the code names fall through to a documented default rather than a raise,
-so neither is a closed set on the code side and neither is checked here.
+Core gates were once excluded here on the grounds that they "have no Python
+registry (they are discovered)". That was true of the registry and false of the
+set: `saffron/gates/core/` is a directory, and reading it is what the last test
+below does. The sentence cost three pull requests with `witness` built and
+undeclared (docs/BACKLOG.md item 72). The terminal states the code names do
+still fall through to a documented default rather than a raise, so they are not
+a closed set on the code side and are not checked here.
 
 This reads the code; it does not make the code read the ontology. Nothing under
 `saffron/` imports a graph library or the generator, and `pyproject.toml` says so.
@@ -19,7 +23,7 @@ import re
 from typing import get_args
 
 import rdflib
-from ontology_paths import NS, VOCABULARY
+from ontology_paths import NS, ONTOLOGY, VOCABULARY
 
 from saffron.agents.findings import Severity
 from saffron.batch import StopReason
@@ -75,4 +79,49 @@ def test_the_stop_reasons_the_ledger_will_store_are_the_ones_the_vocabulary_decl
     in_sql = set(re.findall(r"'([A-Z_]+)'", found.group(1)))
     assert in_sql == _declared("BatchStopReason"), (
         "saffron:BatchStopReason and the CHECK on batches.status disagree"
+    )
+
+
+# `saffron/gates/core/` has no registry object — `session._suite` imports the
+# gates by name — but the directory is a closed set all the same. Treating it as
+# one is what this file previously declined to do, and `witness` shipped built
+# and undeclared for three pull requests as a result (docs/BACKLOG.md item 72).
+CORE_GATES = ONTOLOGY.parent / "saffron" / "gates" / "core"
+
+
+def _core_gate_modules() -> set[str]:
+    """The package's own two conventions, which nothing else enforces: one
+    module per gate, and no helper modules under `core/` (`mutation.py` sits at
+    `saffron/mutation.py` for this reason). A helper dropped here would demand a
+    vocabulary entry it should not have; a gate shipped as `core/foo/__init__
+    .py` would be invisible to this glob, which is item 72's hole reopened.
+    """
+    return {p.stem for p in CORE_GATES.glob("*.py") if not p.stem.startswith("_")}
+
+
+def test_every_core_gate_that_exists_is_declared_in_the_vocabulary():
+    """A core gate that is built and undeclared is invisible to its own guard.
+
+    Subset, not equality: `secrets` is declared and not yet built, which is the
+    ordinary direction — a gate specified before it exists. The direction this
+    rejects is the other one.
+    """
+    built = _core_gate_modules()
+    # A glob that finds nothing would satisfy the subset assertion trivially,
+    # which is the exact failure mode this test exists to end.
+    assert built, (
+        f"no core gate modules under {CORE_GATES} — if the package moved, this "
+        "assertion is the thing that noticed, and everything below it was "
+        "about to pass by measuring nothing"
+    )
+    undeclared = sorted(built - _declared("CoreGate"))
+    assert not undeclared, (
+        f"core gates that exist and the vocabulary does not declare: "
+        f"{undeclared}. A gate absent from ontology/saffron.ttl is absent from "
+        "vocabulary.subjects(rdf:type, saffron:CoreGate), so test_shapes walks "
+        "past it and CoreGateShape's sh:in does not reject it — the guard "
+        "CLAUDE.md promises cannot fire for precisely the case it exists to "
+        "catch. Declare the gate, give it a blocking level in "
+        "saffron:CoreGateBlockingShape (or saffron:SizeTierShape if a risk tier "
+        "moves it), and run `uv run python -m ontology.render`."
     )

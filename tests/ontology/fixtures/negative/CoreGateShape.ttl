@@ -3,5 +3,5 @@
 @prefix earl: <http://www.w3.org/ns/earl#> .
 @prefix : <https://saffron.dev/data/> .
 
-# A repo cannot mint a core gate; core implements the six it has.
+# A repo cannot mint a core gate; core implements the closed set the shape names.
 saffron:parallelism a saffron:CoreGate .
