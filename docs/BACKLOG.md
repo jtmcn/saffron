@@ -41,9 +41,9 @@ evidence. That is the gate now, and it is one cheap spec away.
 
 ### Tier 1 — breaks at 03:00 with nobody watching
 
-**74**, **73**, **71**, **69**, **70**, **45**, **51** (with **49**/**50**, which its fix
-closes), **47**, **46**, **40**, **26**, **7**. (**59** is done — `SA-0052`,
-PR #118.)
+**74**, **73**, **71**, **78**, **69**, **79**, **70**, **45**, **51** (with
+**49**/**50**, which its fix closes), **47**, **46**, **40**, **26**, **7**.
+(**59** is done — `SA-0052`, PR #118.)
 
 **71 is first** because it is the one that makes item 69's three merged specs
 mean anything: until it lands, the gate they built runs on nothing.
@@ -52,6 +52,17 @@ mean anything: until it lands, the gate they built runs on nothing.
 ability to tell whether its own work is sound. Nine tests shipped in one
 session naming behaviour they did not guard, every one of them past the lens
 built to catch exactly that.
+
+**78 follows 71** because it is 71's own landing gone wrong: the mutator that
+seam exists to supply restores a file to `HEAD` without checking whether the
+agent had uncommitted work there, and destroys it. It sits above **45** and
+**51** — the other two that lose work in the dark — because it is the newest
+and the only one whose spec asserts the opposite of what the code does.
+
+**79 is 69's sibling and no longer the only one of its kind.** 69 is the lens
+failing at a question only running can answer; 79 is a question no lens owns at
+all. Both bear on the same thing: whether a `0 blockers` line means the diff is
+sound or means nobody looked.
 
 Each fails in the dark or destroys work no one is awake to rescue. **45** loses
 a run's commits nightly; **51** switches the anti-theater gate off for one
@@ -4237,6 +4248,96 @@ the shape `format` uses, so it is what a new Python gate copies.
 `invalid` snippet for `tool="<literal>"`, and `ruleDirs` already loads it. Cheap;
 it is here rather than in #145 because the rule needs its own false-positive
 measurement against the five wrappers and `format`'s own `case` arms.
+
+---
+
+## 78. `witness` mutates before `committed` runs, and the spec that built it says the opposite
+
+Found reviewing PR #154 (`SA-0062`), 2026-09-06. The spec justifies a
+`git checkout HEAD` undo with *"the agent's work is committed by the time gates
+run — `committed` is what guarantees it"*. Measured: it does not.
+`cell/session.py:1008` calls `run_suite`, which holds `witness`;
+`committed_gate` is not called until `cell/session.py:1049`. `witness` runs
+first, on a tree that may still be dirty, and the host checkpoint is later
+still.
+
+So the undo restores to `HEAD` a file the agent may have edited and not
+committed. The uncommitted work is destroyed, and `committed` — the one gate
+whose job is to notice a dirty tree — then sees a clean one. This is the exact
+failure the sibling gate refuses to cause: `gates/core/revert.py:180` skips when
+its paths are dirty, because *"no evidence about theater is worth destroying the
+agent's uncommitted work and blinding the gate that would have caught it."*
+`worktree.source_mutated` performs the identical restore with no such check. The
+inconsistency is visible inside the new code: `_read_file` documents that it
+reads the working tree, *not* `HEAD`, and the undo then restores `HEAD`.
+
+A second shape in the same function. The write is `> path`, which truncates
+before `base64 -d` produces anything, so a non-zero exit raises out of
+`__enter__` over a file that is now mutated or empty. `gates/core/witness.py:79`
+states the contract that forbids this — *"a raise from `__enter__` must mean
+nothing was changed"* — and names this precise case as the one a host mutator
+cannot reach: *"a container exec that applies the edit and then loses the
+connection is exactly the shape that is not."* It adds that all three
+obligations *"bind every implementation"*. Flagged in advance, in a file the
+spec was forbidden to edit, and not met.
+
+Both are latent only until a spec declares a mutant, which `SA-0062`'s own
+*Out of scope* says is the next one.
+
+**Done looks like** `source_mutated` yielding a reason when the mutant's file is
+dirty — the shape `revert` already uses, landing `witness` on `skip` — and a
+failed write either restoring from `HEAD` before it re-raises or going through a
+temp file inside the cell, so a truncation cannot outlive the failure. Then the
+ordering itself: either `committed` moves ahead of `run_suite` in `_suite`, or
+`DESIGN.md` records that a gate which mutates must self-guard against dirtiness.
+Right now that ordering is load-bearing and written down nowhere, which is how a
+spec came to assert its opposite and pass review.
+
+---
+
+## 79. Three lenses read one diff and none asked what a failed write leaves behind
+
+Found 2026-09-06, comparing REVIEW's output on PR #154 against an independent
+review of the same `base..head`. REVIEW filed **0 blockers and 3 concerns** and
+the task reached `READY_FOR_REVIEW` at $8.70. The independent pass over the same
+range found the two defects in item **78**, both of which destroy or poison the
+worktree while reporting something else, and graded both critical. Two of
+REVIEW's three concerns match findings the independent pass graded *below* those
+two. Neither of the two was filed at any severity.
+
+The fact that makes this a remit gap rather than bad luck: **both were findable
+by reading.** Each is named in a comment already in the tree —
+`gates/core/revert.py:174` states the refusal and its reason,
+`gates/core/witness.py:79` names the `__enter__` shape and says the obligation
+binds every implementation. Neither needed a mutation run to surface. This is
+therefore not item **69**, which is the adequacy lens reaching for an answer only
+running can give. Here the answer was in the repository, and no lens was looking
+for it.
+
+§5.5's three lenses are correctness & data semantics, contract & schema, and
+test adequacy, **disjoint by construction** — which is the property that makes
+any single blocker route to REBUT without a vote. The cost of that choice is
+that the lenses do not backstop each other, so a question no lens owns is not
+covered thinly, it is invisible. *What does the failure path leave behind* is
+such a question. It is not correctness of the happy path, not schema, and not
+test adequacy.
+
+Worth recording alongside it, because it is cheaper to fix and may be the same
+cause: the adequacy concern that *was* filed describes `witness_gate` reporting a
+false `pass` where §5.4 requires `error`, which contradicts an acceptance
+criterion the same PR body renders as satisfied. §5.5 already holds that a lens
+filing everything as `concern` is as much a prompting defect as one that
+hallucinates; a finding contradicting a checked criterion is a candidate for
+`blocker`, and nothing currently says so.
+
+**Done looks like** PR #154's range kept as a known-bad diff with its two graded
+defects and the independent review beside it — the way Appendix L measured the
+critic against one — and REVIEW re-run against it after any lens change, scored
+on how many of the two it raises. The fix is a remit rather than machinery:
+either widened on an existing lens or given to a fourth, and measured against
+that diff rather than argued. Cheap to try, and it is the item that decides
+whether §9's "merge half of what it produces" is read off a number that means
+anything.
 
 ---
 
