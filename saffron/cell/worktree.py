@@ -8,11 +8,14 @@ collection, and the difference compounds across a four-attempt repair loop.
 
 from __future__ import annotations
 
+import base64
 import contextlib
+import shlex
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
 from saffron.cell import runtime
+from saffron.intake import Mutant
 
 WORKTREE_MOUNT = "/work"
 STATE_MOUNT = "/agent-state"
@@ -340,6 +343,87 @@ def source_reverted(
         yield
     finally:
         _restore_source(container, paths)
+
+
+def _read_file(container: str, path: str) -> str:
+    """`path`'s content in the cell's working tree, right now — not `HEAD`,
+    so a mutation edits exactly what the tests about to run will see.
+
+    A non-zero exit here becomes `error` in `witness_gate`, not a yielded
+    reason: `witness.Mutated`'s own docs call this out by name — `mutate`
+    "enters through a container exec, which can fail routinely" — where the
+    host mutator, reading straight off disk, gets to tell "the file does not
+    exist" apart from a live failure and this one does not need to.
+    """
+    done = runtime.exec_(container, ["cat", path], workdir=WORKTREE_MOUNT)
+    if done.returncode != 0:
+        raise runtime.CellRuntimeError(
+            f"reading {path} for its mutant failed: {done.stderr.strip()}"
+        )
+    return done.stdout
+
+
+def _write_file(container: str, path: str, content: str) -> None:
+    """Write `content` to `path` inside the cell.
+
+    `runtime.exec_` carries no stdin — only `exec_stream`, the agent's own
+    turn, does — so an argument is the only channel across, and a mutant's
+    `find`/`replace` can hold anything a shell would otherwise misread: a
+    quote, a backslash, a newline. Base64 has no such character left, which
+    is what makes one `printf | base64 -d` line safe for an edit this
+    function never has to inspect the content of.
+    """
+    encoded = base64.b64encode(content.encode()).decode()
+    script = f"printf '%s' {shlex.quote(encoded)} | base64 -d > {shlex.quote(path)}"
+    done = runtime.exec_(container, ["sh", "-euc", script], workdir=WORKTREE_MOUNT)
+    if done.returncode != 0:
+        raise runtime.CellRuntimeError(
+            f"writing {path}'s mutant failed: {done.stderr.strip()}"
+        )
+
+
+@contextlib.contextmanager
+def source_mutated(container: str, mutant: Mutant) -> Iterator[str | None]:
+    """`witness.Mutated`'s cell implementation (`DESIGN.md` §5.4.1) —
+    `source_reverted`'s sibling, in the same file: it runs git inside the
+    container and restores from a `finally`.
+
+    Applies `mutant.find` -> `mutant.replace` to the working tree for the
+    block. The undo is plain `git checkout HEAD -- <file>`, not a replay of
+    displaced bytes the way `saffron.mutation.host_mutator` restores: `
+    committed` guarantees the agent's work is committed before any gate
+    runs, so the file's content at `HEAD` already *is* what a mutated file
+    should return to, and none of that module's byte-offset-and-digest
+    bookkeeping has to cross into the container to say so.
+
+    A `find` that is absent, or that matches more than once, applies nothing
+    and says so by yielding the reason instead of `None` — `apply_mutant`'s
+    own rule for the identical case, matched here rather than re-derived.
+    Nothing is read or written in that case, and the tree is left exactly as
+    it was. Any other failure to apply, or a failure to undo, raises
+    `runtime.CellRuntimeError`: `witness_gate` turns that into `error`, never
+    a verdict on the claim the mutant was meant to test.
+    """
+    content = _read_file(container, mutant.file)
+    count = content.count(mutant.find)
+    if count == 0:
+        yield f"{mutant.file}: find text not found: {mutant.find!r}"
+        return
+    if count > 1:
+        yield (
+            f"{mutant.file}: find text matches {count} times, expected "
+            f"exactly once: {mutant.find!r}"
+        )
+        return
+    _write_file(container, mutant.file, content.replace(mutant.find, mutant.replace, 1))
+    try:
+        yield None
+    finally:
+        done = _git(container, "checkout", "HEAD", "--", mutant.file)
+        if done.returncode != 0:
+            raise runtime.CellRuntimeError(
+                f"mutant undo for {mutant.file} failed: {done.stderr.strip()}"
+            )
 
 
 def changed_files(container: str, base_sha: str) -> list[str]:

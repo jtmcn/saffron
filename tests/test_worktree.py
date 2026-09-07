@@ -9,6 +9,7 @@ import pytest
 
 from saffron.cell import proxy, runtime, worktree
 from saffron.gates.runner import CellExecutor, run_gate
+from saffron.intake import Mutant
 from saffron.phases import package as package_phase
 from saffron.repos import image
 from saffron.repos import mirror as mirror_ops
@@ -1021,3 +1022,121 @@ def test_the_restore_ignores_work_the_gate_never_touched(tmp_path, monkeypatch):
     assert "docs/notes.md" in porcelain
     assert "docs/scratch.md" in porcelain
     assert "src/" not in porcelain
+
+
+# --- source_mutated, against a real git repo on the host (SA-0062) ---------
+#
+# `_git` is a one-function seam over `runtime.exec_`, so — exactly as the
+# `source_reverted` tests above do — these run the real
+# `_read_file`/`_write_file`/`source_mutated` against real git with no
+# container: `_host_git` points `worktree._git`'s underlying `runtime.exec_`
+# at a real repo in `tmp_path` instead.
+
+
+def _repo_with_a_file(tmp_path, monkeypatch, content):
+    """A committed repo holding one source file, ready for a mutant."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "guard.py").write_text(content)
+    _commit(tmp_path, "base")
+    _host_git(tmp_path, monkeypatch)
+
+
+def test_a_mutant_is_applied_and_undone_inside_the_cell(tmp_path, monkeypatch):
+    _repo_with_a_file(tmp_path, monkeypatch, "if amount < 0:\n    raise ValueError\n")
+    mutant = Mutant(file="src/guard.py", find="if amount < 0:", replace="if False:")
+    target = tmp_path / "src" / "guard.py"
+
+    with worktree.source_mutated("c", mutant) as reason:
+        assert reason is None
+        assert target.read_text() == "if False:\n    raise ValueError\n"
+
+    assert target.read_text() == "if amount < 0:\n    raise ValueError\n"
+    assert _porcelain(tmp_path) == ""
+
+
+def test_the_undo_restores_the_committed_file_not_a_byte_copy(tmp_path, monkeypatch):
+    """The undo is `git checkout` against `HEAD`, not a replay of the bytes
+    `_read_file` displaced — `revert`'s own restore works the same way, for
+    the same reason (`committed` guarantees the tree matches `HEAD`)."""
+    _repo_with_a_file(tmp_path, monkeypatch, "value = 1\n")
+    mutant = Mutant(file="src/guard.py", find="value = 1", replace="value = 2")
+
+    calls: list[tuple] = []
+    real = worktree._git
+
+    def spy(container, *args):
+        calls.append(args)
+        return real(container, *args)
+
+    monkeypatch.setattr(worktree, "_git", spy)
+
+    with worktree.source_mutated("c", mutant):
+        pass
+
+    assert ("checkout", "HEAD", "--", "src/guard.py") in calls
+    assert (tmp_path / "src" / "guard.py").read_text() == "value = 1\n"
+
+
+def test_a_find_that_does_not_match_once_applies_nothing(tmp_path, monkeypatch):
+    """Zero matches and two matches are both "not exactly once" — the same
+    rule `saffron.mutation.apply_mutant` follows for a host tree, matched
+    here rather than re-derived. A mutant that names two places names no
+    property, and picking one silently is how a check comes to measure
+    something other than what it claims."""
+    _repo_with_a_file(tmp_path, monkeypatch, "value = 1\nvalue = 1\n")
+    target = tmp_path / "src" / "guard.py"
+
+    twice = Mutant(file="src/guard.py", find="value = 1", replace="value = 2")
+    with worktree.source_mutated("c", twice) as reason:
+        assert reason is not None
+        assert "matches 2 times" in reason
+    assert target.read_text() == "value = 1\nvalue = 1\n"
+    assert _porcelain(tmp_path) == ""
+
+    absent = Mutant(file="src/guard.py", find="value = 9", replace="value = 2")
+    with worktree.source_mutated("c", absent) as reason:
+        assert reason is not None
+        assert "not found" in reason
+    assert target.read_text() == "value = 1\nvalue = 1\n"
+    assert _porcelain(tmp_path) == ""
+
+
+def test_a_failed_undo_raises_rather_than_reporting_a_verdict(tmp_path, monkeypatch):
+    """A tree `source_mutated` could not restore is the one outcome that must
+    not read as a witness doing its job — `witness_gate` turns this into
+    `error`, never `pass` or `fail`."""
+    _repo_with_a_file(tmp_path, monkeypatch, "value = 1\n")
+    mutant = Mutant(file="src/guard.py", find="value = 1", replace="value = 2")
+    real = worktree._git
+
+    def flaky(container, *args):
+        if args[0] == "checkout" and args[1] == "HEAD":
+            return runtime.Completed(1, "", "checkout exploded")
+        return real(container, *args)
+
+    monkeypatch.setattr(worktree, "_git", flaky)
+
+    with (
+        pytest.raises(runtime.CellRuntimeError, match="mutant undo"),
+        worktree.source_mutated("c", mutant),
+    ):
+        pass
+
+    # A failure to *apply* raises the same way — never a yielded reason, which
+    # `witness_gate` would read as the ordinary "did not apply" case.
+    real_exec = worktree.runtime.exec_
+
+    def exploding_exec(container, command, *, workdir=None, timeout_s=900):
+        if command[:1] == ["cat"]:
+            return runtime.Completed(1, "", "cat exploded")
+        return real_exec(container, command, workdir=workdir, timeout_s=timeout_s)
+
+    monkeypatch.setattr(worktree.runtime, "exec_", exploding_exec)
+    with (
+        pytest.raises(runtime.CellRuntimeError, match="reading"),
+        worktree.source_mutated("c", mutant),
+    ):
+        raise AssertionError("the body must not run")
