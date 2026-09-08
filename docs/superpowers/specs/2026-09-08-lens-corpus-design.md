@@ -61,7 +61,19 @@ Eight fixtures, twelve declared defects. Two are shipped; ten are recovered.
 | SA-0054 | 123 | `fe39b41a..70091cd8` | 2 | item 69 — `parent_branch=None`; a `print` reduced to `pass` |
 | SA-0055 | 131 | `aa8dfd17..e5a7cbe9` | 2 | item 69 — `pinned=derived` invisible to an `ast.Constant` match; the `readiness.ok` guard deleted |
 | SA-0062 | 154 | `91b6eda8..78a25a23` | 2 | item 78, shipped |
-| SA-0064 | 160 | `3ba55621..2544fc05` | 2 | item 86 — neutralization on the notes path; criterion 4's witness |
+| SA-0063 | 158 | `132a2f8d..f76931df` | 2 | item 86 — neutralization on the notes path; criterion 4's witness |
+
+**SA-0063, not SA-0064** — corrected 2026-09-08, while writing the plan. Item 86
+was found reviewing SA-0064 and says both properties live in
+`tests/test_report.py`, so this table first named that spec. But the code the
+missing assertions guard is `_notes`, which **SA-0063** introduces: its diff
+touches `saffron/report/pr_body.py`, and SA-0064's touches `package.py`,
+`tests/test_package.py` and `tests/test_session.py` and never reaches
+`pr_body.py`. A finding outside the diff cannot anchor, and an unanchored
+finding is never seen — so declared against SA-0064 both defects would have
+scored zero forever and read as a lens failure. The anchor is
+`pr_body.py:377-395`, and item 86's own note that "only line 390 is `_notes`'s"
+is what confirms it.
 
 Item 69's ninth row, the SHACL `sh:in` deletion, is **excluded**: it is attached
 to backlog item 65 rather than to a spec, so it has no batch tree and no
