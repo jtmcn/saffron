@@ -5119,6 +5119,13 @@ see which did". A lens told fourteen gates ran and not one named a tool has
 structural reason to distrust them and dig harder — a bias in precisely the
 direction observed. Cheapest to test and the leading suspect.
 
+*Corrected and repaired 2026-09-08.* Production named **7 of 14**, not 14: the
+other seven are host-side core gates that execute nothing and report no tool
+there too, so the gap was 7 against 0. `gate_results` now carries a `tool`
+column, but the 14 rows predate it and a nullable column is null for every one —
+so the fixture was repaired instead, from the tools in the same run's
+`baseline.json`, by `docs/evidence/scripts/2026-09-08-sa0062-gate-tools.py`.
+
 **Budget and turns.** The original had $3.30 and 90 turns; the pass gave $4.00
 and 30. No lens came near either ceiling in either, so this is unlikely, but it
 is not held constant and the record says so.

@@ -399,3 +399,48 @@ def test_the_first_pass_s_published_costs_are_re_derivable_too(sa0062):
     record = RECORD_2026_09_07.read_text()
     assert f"${sum(costs):.2f}" in record
     assert f"${min(costs):.2f}–${max(costs):.2f}" in record
+
+
+# The gate summary a lens is shown, split the way production splits it: a
+# repo's declared gate executes a tool and reports its version (§5.4), while a
+# host-side core gate executes nothing and reports none. `revert` is core and
+# still names one — it re-invokes the `tests` runner and inherits its tool
+# (`revert.py:307`).
+GATES_NAMING_A_TOOL = {
+    "format": "ruff",
+    "lint": "ruff",
+    "types": "ty",
+    "tests": "pytest",
+    "shacl": "PySHACL",
+    "structure": "ast-grep",
+    "revert": "pytest",
+}
+GATES_NAMING_NO_TOOL = frozenset(
+    {"scope", "integrity", "size", "witness", "committed", "census", "criteria"}
+)
+
+
+def test_the_frozen_gate_summary_names_the_tools_the_original_run_named(sa0062):
+    """Item 88's confound, closed on the fixture that carried it.
+
+    `gates.txt` was rebuilt from `gate_results` rows that had no `tool` column,
+    so all 14 lines read `no tool reported` — and §5.4 makes `tool` exactly what
+    separates a gate that ran from one that never did. A lens told fourteen
+    gates ran and not one of them named a tool has structural reason to distrust
+    them and dig harder, which is the direction of every conclusion the first
+    pass drew. The tools are restored from `baseline.json` in the batch tree,
+    written by the same container in the same run.
+
+    Seven of the fourteen say `no tool reported` in production too, and this
+    pins that half as well: a later "fix" that invents a tool for a core gate
+    would be a second deviation, not a repair.
+    """
+    lines = {
+        line.split(":", 1)[0].removeprefix("- "): line
+        for line in sa0062.gates.splitlines()
+    }
+    assert set(lines) == set(GATES_NAMING_A_TOOL) | GATES_NAMING_NO_TOOL
+    for gate, tool in GATES_NAMING_A_TOOL.items():
+        assert f"({tool} " in lines[gate], lines[gate]
+    for gate in GATES_NAMING_NO_TOOL:
+        assert "(no tool reported)" in lines[gate], lines[gate]

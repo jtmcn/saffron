@@ -1,14 +1,14 @@
 - scope: pass (no tool reported) — 4 changed files within touches
 - integrity: pass (no tool reported) — 4 changed files clean of suppression and gate-config edits
 - size: pass (no tool reported) — 350 changed lines within the feature ceiling of 600
-- format: pass (no tool reported) — formatted
-- lint: pass (no tool reported) — 0 violations
-- types: pass (no tool reported) — no type errors
-- tests: fail (no tool reported) — 1 failed, 1481 passed, 2 skipped, 20 deselected in 21.22s
+- format: pass (ruff 0.16.3) — formatted
+- lint: pass (ruff 0.16.3) — 0 violations
+- types: pass (ty 0.0.77) — no type errors
+- tests: fail (pytest 9.1.1) — 1 failed, 1481 passed, 2 skipped, 20 deselected in 21.22s
 - witness: skip (no tool reported) — the spec declares no mutants
-- shacl: pass (no tool reported) — 0 violations across 2 graphs
-- structure: pass (no tool reported) — 0 violations
-- revert: pass (no tool reported) — 5 new test(s) failed without their source, as required
+- shacl: pass (PySHACL Version: 0.40.1) — 0 violations across 2 graphs
+- structure: pass (ast-grep 0.45.3) — 0 violations
+- revert: pass (pytest 9.1.1) — 5 new test(s) failed without their source, as required
 - committed: pass (no tool reported) — worktree clean
 - census: pass (no tool reported) — 1484 tests collected, none of 1479 removed
 - criteria: pass (no tool reported) — 5 criteria witnessed at head
