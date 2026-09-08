@@ -558,3 +558,22 @@ def test_every_dollar_figure_in_the_second_pass_record_is_re_derivable():
     # permitted: a record that stopped printing them would satisfy a subset.
     assert {f"${sum(costs):.2f}", f"${min(costs):.2f}", f"${max(costs):.2f}"} <= printed
     assert f"${min(costs):.2f}–${max(costs):.2f}" in record
+
+
+def test_a_fixture_declaring_no_defects_is_refused(sa0062, tmp_path):
+    """`score_pass` already refuses zero surviving runs because a table of
+    zeroes reads like a measurement. Zero defects is the same shape one level
+    out: it scores 0/0 and looks like a lens that found nothing."""
+    for name in (
+        "diff.patch",
+        "spec_body.md",
+        "gates.txt",
+        "context.md",
+        "recorded-findings.json",
+    ):
+        (tmp_path / name).write_text((sa0062.root / name).read_text())
+    text = (sa0062.root / "fixture.toml").read_text()
+    (tmp_path / "fixture.toml").write_text(text[: text.index("[[defects]]")])
+
+    with pytest.raises(lens_scoring.FixtureError, match="declares no defects"):
+        lens_scoring.load_fixture(tmp_path)
