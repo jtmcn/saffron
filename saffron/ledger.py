@@ -97,6 +97,10 @@ CREATE TABLE IF NOT EXISTS gate_results (
     run_id         INTEGER REFERENCES runs(run_id),
     gate           TEXT NOT NULL,
     status         TEXT NOT NULL,
+    -- What §5.4 makes the difference between a gate that ran and one that never
+    -- did, and what `review.gate_summary` shows a critic. Null for a host-side
+    -- core gate, which runs no tool (item 88).
+    tool           TEXT,
     duration_ms    INTEGER,
     summary        TEXT,
     CHECK ((attempt_id IS NULL) <> (run_id IS NULL))
@@ -186,6 +190,14 @@ class Ledger:
             self._db.execute(
                 "ALTER TABLE runs ADD COLUMN batch_id INTEGER REFERENCES batches(batch_id)"
             )
+        # And on `gate_results`. Before `_add_gate_result_reference`, so the
+        # rebuild below can copy the column rather than having to add it twice.
+        gate_existing = {
+            row["name"]
+            for row in self._db.execute("PRAGMA table_info(gate_results)").fetchall()
+        }
+        if "tool" not in gate_existing:
+            self._db.execute("ALTER TABLE gate_results ADD COLUMN tool TEXT")
         # The backfill the old schema comment promised. A ledger written before
         # `attempts` existed holds a *task_id* in `gate_results.attempt_id`, and
         # a new attempt's id starts at 1 in that same integer namespace — so
@@ -227,13 +239,14 @@ class Ledger:
                    run_id         INTEGER REFERENCES runs(run_id),
                    gate           TEXT NOT NULL,
                    status         TEXT NOT NULL,
+                   tool           TEXT,
                    duration_ms    INTEGER,
                    summary        TEXT,
                    CHECK ((attempt_id IS NULL) <> (run_id IS NULL))
                );
                INSERT INTO gate_results_new
                    SELECT gate_result_id, attempt_id, run_id, gate, status,
-                          duration_ms, summary FROM gate_results;
+                          tool, duration_ms, summary FROM gate_results;
                DROP TABLE gate_results;
                ALTER TABLE gate_results_new RENAME TO gate_results;
                COMMIT;"""
@@ -712,13 +725,15 @@ class Ledger:
     ) -> int:
         with self._db:
             cursor = self._db.execute(
-                """INSERT INTO gate_results (attempt_id, run_id, gate, status, duration_ms, summary)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO gate_results
+                       (attempt_id, run_id, gate, status, tool, duration_ms, summary)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     attempt_id,
                     run_id,
                     result.gate,
                     result.status,
+                    result.tool,
                     result.duration_ms,
                     result.summary,
                 ),
@@ -777,6 +792,7 @@ class Ledger:
                 GateResult(
                     gate=row["gate"],
                     status=row["status"],
+                    tool=row["tool"],
                     summary=row["summary"] or "",
                     duration_ms=row["duration_ms"],
                     failures=[

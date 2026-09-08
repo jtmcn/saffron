@@ -1093,3 +1093,49 @@ def test_only_runs_minted_after_the_mark_are_swept_into_the_batch(ledger):
         "SELECT batch_id FROM runs WHERE run_id = ?", (stale,)
     ).fetchone()
     assert stale_row["batch_id"] is None
+
+
+def test_the_tool_that_produced_a_result_round_trips(ledger, task):
+    """§5.4 makes `tool` what separates a gate that ran from one that never
+    did, and `review.gate_summary` shows it to a critic. A ledger that drops it
+    can only rebuild a summary saying no gate named a tool — which is what
+    `docs/evidence/fixtures/SA-0062/gates.txt` had to say (item 88)."""
+    run_id, _ = task
+    ledger.record_gate_result(
+        GateResult(gate="lint", status="pass", tool="ruff 0.16.3"), run_id=run_id
+    )
+    ledger.record_gate_result(GateResult(gate="scope", status="pass"), run_id=run_id)
+    lint, scope = ledger.baseline_results(run_id)
+    assert lint.tool == "ruff 0.16.3"
+    # A host-side core gate reports none, and None is not the empty string:
+    # `gate_summary` renders the absence as "no tool reported".
+    assert scope.tool is None
+
+
+def test_a_ledger_that_predates_the_tool_column_gains_it(tmp_path):
+    """`CREATE TABLE IF NOT EXISTS` is a no-op on a `gate_results` that already
+    exists, so the one ledger that matters keeps recording results with no tool
+    until the column is added by hand."""
+    path = tmp_path / "old.db"
+    before = SCHEMA.replace("    tool           TEXT,\n", "")
+    assert "tool           TEXT" not in before  # otherwise this proves nothing
+    old = sqlite3.connect(path)
+    old.executescript(before)
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r','o','/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.execute(
+        "INSERT INTO gate_results (run_id, gate, status) VALUES (1, 'tests', 'pass')"
+    )
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    ledger.record_gate_result(
+        GateResult(gate="lint", status="pass", tool="ruff 0.16.3"), run_id=1
+    )
+    # The row written before the column keeps its place and reports no tool;
+    # the one written after carries it.
+    tests, lint = ledger.baseline_results(1)
+    assert (tests.gate, tests.tool) == ("tests", None)
+    assert (lint.gate, lint.tool) == ("lint", "ruff 0.16.3")
+    ledger.close()
