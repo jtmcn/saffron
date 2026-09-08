@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/jtmcn/saffron/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jtmcn/saffron/actions/workflows/ci.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue)](pyproject.toml)
+[![License: MIT](https://img.shields.io/github/license/jtmcn/saffron)](LICENSE)
 
 A Python orchestrator that turns spec files into reviewable pull requests.
 
@@ -49,6 +50,7 @@ refusals: 5
 - [Status](#status)
 - [Documentation](#documentation)
 - [Contributing](#contributing)
+- [License](#license)
 
 ## Requirements
 
@@ -183,5 +185,9 @@ most on the first unattended night.
 
 Work is tracked as spec files in `.saffron/specs/`, not as issues; see
 [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
+
+## License
+
+[MIT](LICENSE) © Joel McNierney
 
 Agents working in this repo: read [CLAUDE.md](CLAUDE.md).
