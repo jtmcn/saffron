@@ -1,0 +1,472 @@
+diff --git a/saffron/cell/session.py b/saffron/cell/session.py
+index 754faa9..aa1a387 100644
+--- a/saffron/cell/session.py
++++ b/saffron/cell/session.py
+@@ -178,17 +178,17 @@ def terminal_for_rate_limit(status: str | None) -> str | None:
+ 
+ @contextlib.contextmanager
+ def stub_mutator(_mutant: Mutant) -> Iterator[str | None]:
+-    """The mutator a cell run supplies today — `witness.Mutated`'s shape, with
+-    no tree behind it at all (`docs/BACKLOG.md` item 71, `SA-0060`/`SA-0062`).
++    """The mutator a cell run supplied before `SA-0062` — `witness.Mutated`'s
++    shape, with no tree behind it at all (`docs/BACKLOG.md` item 71,
++    `SA-0060`/`SA-0061`).
+ 
+     It reads no path, writes no byte, and reports the one honest thing it can:
+     it cannot reach the tree. Entering yields a reason rather than `None`, so
+     `witness_gate` never applies a mutant and never invokes `run_tests` —
+-    `skip`, exactly as `SA-0060` built and witnessed that answer for. `SA-0062`
+-    is what replaces this with a mutator that can actually reach a cell's
+-    worktree; until then, every `witness` result this produces is `skip`,
+-    which blocks nothing at any tier (§5.4.1) and is why turning the gate on
+-    here is safe before that mutator exists.
++    `skip`, exactly as `SA-0060` built and witnessed that answer for.
++    `worktree.source_mutated` is what `_suite` wires in its place now; kept
++    here, unwired, for its own test's sake — `census` refuses a task that
++    removes a test with no override, and that test is this function's.
+     """
+     yield "no cell mutator is wired yet — the tree cannot be reached (SA-0062)"
+ 
+@@ -997,16 +997,20 @@ def _drive_cell(
+             # `mutate` is what turns `witness` on — `run_suite` gates on it
+             # alone, as its own docstring says. Omitted, the gate is left out
+             # of the suite entirely, as every caller did before this spec.
+-            # `stub_mutator` is honest rather than convenient — it cannot
+-            # reach the tree, so `witness`
+-            # can only ever report `skip` here until `SA-0062` supplies a
+-            # mutator that can (`docs/BACKLOG.md` item 71).
++            # `worktree.source_mutated`, bound to this cell's own container,
++            # is what turns `witness` from a permanent `skip` into a real
++            # verdict on a real attempt (`SA-0062`, `docs/BACKLOG.md` item
++            # 71) — `stub_mutator` above is what every cell run supplied
++            # before this. Every spec in this repo still declares no
++            # mutants, so the result still lands `skip` here — now because
++            # there is nothing to check, not because the mutator cannot
++            # reach the tree.
+             declared = run_suite(
+                 gates,
+                 cwd=repo,
+                 executor=executor,
+                 acceptance=spec.acceptance,
+-                mutate=stub_mutator,
++                mutate=partial(worktree.source_mutated, container),
+             )
+ 
+             # Between `declared` (real `collected`/`failures` at head) and
+diff --git a/saffron/cell/worktree.py b/saffron/cell/worktree.py
+index 771ee9a..c43c706 100644
+--- a/saffron/cell/worktree.py
++++ b/saffron/cell/worktree.py
+@@ -8,11 +8,14 @@ collection, and the difference compounds across a four-attempt repair loop.
+ 
+ from __future__ import annotations
+ 
++import base64
+ import contextlib
++import shlex
+ from collections.abc import Iterator, Mapping, Sequence
+ from pathlib import Path
+ 
+ from saffron.cell import runtime
++from saffron.intake import Mutant
+ 
+ WORKTREE_MOUNT = "/work"
+ STATE_MOUNT = "/agent-state"
+@@ -342,6 +345,87 @@ def source_reverted(
+         _restore_source(container, paths)
+ 
+ 
++def _read_file(container: str, path: str) -> str:
++    """`path`'s content in the cell's working tree, right now — not `HEAD`,
++    so a mutation edits exactly what the tests about to run will see.
++
++    A non-zero exit here becomes `error` in `witness_gate`, not a yielded
++    reason: `witness.Mutated`'s own docs call this out by name — `mutate`
++    "enters through a container exec, which can fail routinely" — where the
++    host mutator, reading straight off disk, gets to tell "the file does not
++    exist" apart from a live failure and this one does not need to.
++    """
++    done = runtime.exec_(container, ["cat", path], workdir=WORKTREE_MOUNT)
++    if done.returncode != 0:
++        raise runtime.CellRuntimeError(
++            f"reading {path} for its mutant failed: {done.stderr.strip()}"
++        )
++    return done.stdout
++
++
++def _write_file(container: str, path: str, content: str) -> None:
++    """Write `content` to `path` inside the cell.
++
++    `runtime.exec_` carries no stdin — only `exec_stream`, the agent's own
++    turn, does — so an argument is the only channel across, and a mutant's
++    `find`/`replace` can hold anything a shell would otherwise misread: a
++    quote, a backslash, a newline. Base64 has no such character left, which
++    is what makes one `printf | base64 -d` line safe for an edit this
++    function never has to inspect the content of.
++    """
++    encoded = base64.b64encode(content.encode()).decode()
++    script = f"printf '%s' {shlex.quote(encoded)} | base64 -d > {shlex.quote(path)}"
++    done = runtime.exec_(container, ["sh", "-euc", script], workdir=WORKTREE_MOUNT)
++    if done.returncode != 0:
++        raise runtime.CellRuntimeError(
++            f"writing {path}'s mutant failed: {done.stderr.strip()}"
++        )
++
++
++@contextlib.contextmanager
++def source_mutated(container: str, mutant: Mutant) -> Iterator[str | None]:
++    """`witness.Mutated`'s cell implementation (`DESIGN.md` §5.4.1) —
++    `source_reverted`'s sibling, in the same file: it runs git inside the
++    container and restores from a `finally`.
++
++    Applies `mutant.find` -> `mutant.replace` to the working tree for the
++    block. The undo is plain `git checkout HEAD -- <file>`, not a replay of
++    displaced bytes the way `saffron.mutation.host_mutator` restores: `
++    committed` guarantees the agent's work is committed before any gate
++    runs, so the file's content at `HEAD` already *is* what a mutated file
++    should return to, and none of that module's byte-offset-and-digest
++    bookkeeping has to cross into the container to say so.
++
++    A `find` that is absent, or that matches more than once, applies nothing
++    and says so by yielding the reason instead of `None` — `apply_mutant`'s
++    own rule for the identical case, matched here rather than re-derived.
++    Nothing is read or written in that case, and the tree is left exactly as
++    it was. Any other failure to apply, or a failure to undo, raises
++    `runtime.CellRuntimeError`: `witness_gate` turns that into `error`, never
++    a verdict on the claim the mutant was meant to test.
++    """
++    content = _read_file(container, mutant.file)
++    count = content.count(mutant.find)
++    if count == 0:
++        yield f"{mutant.file}: find text not found: {mutant.find!r}"
++        return
++    if count > 1:
++        yield (
++            f"{mutant.file}: find text matches {count} times, expected "
++            f"exactly once: {mutant.find!r}"
++        )
++        return
++    _write_file(container, mutant.file, content.replace(mutant.find, mutant.replace, 1))
++    try:
++        yield None
++    finally:
++        done = _git(container, "checkout", "HEAD", "--", mutant.file)
++        if done.returncode != 0:
++            raise runtime.CellRuntimeError(
++                f"mutant undo for {mutant.file} failed: {done.stderr.strip()}"
++            )
++
++
+ def changed_files(container: str, base_sha: str) -> list[str]:
+     """Changed paths, verbatim — they are matched against `touches`.
+ 
+diff --git a/tests/test_session.py b/tests/test_session.py
+index f5561e7..faa2cd2 100644
+--- a/tests/test_session.py
++++ b/tests/test_session.py
+@@ -8,11 +8,12 @@ import shutil
+ import time
+ from collections.abc import Sequence
+ from dataclasses import replace
++from functools import partial
+ 
+ import pytest
+ 
+ from saffron.agents import artifacts
+-from saffron.cell import runtime, session
++from saffron.cell import runtime, session, worktree
+ from saffron.events import Agent, describe
+ from saffron.gates.baseline import NewFailure
+ from saffron.gates.contract import Failure, GateResult
+@@ -639,6 +640,7 @@ class _Cell:
+         self.gate_paths: list[list[str]] = []
+         self.order: list[str] = []
+         self.reverted: list[list[str]] = []
++        self.mutated: list = []
+ 
+ 
+ _DIFF = """diff --git a/src/x.py b/src/x.py
+@@ -783,6 +785,18 @@ def _stub_the_runtime(
+ 
+     monkeypatch.setattr("saffron.cell.worktree.source_reverted", _source_reverted)
+ 
++    @contextlib.contextmanager
++    def _source_mutated(_container, mutant):
++        # No git, no container, exactly as `_source_reverted` above stands in
++        # for `worktree.source_reverted`: records the mutant `witness_gate`
++        # was asked to apply and yields a reason rather than `None`, so the
++        # gate lands `skip` without ever calling `run_tests` — the real
++        # `source_mutated` is exercised directly in `tests/test_worktree.py`.
++        cell.mutated.append(mutant)
++        yield "no cell is running under this stub"
++
++    monkeypatch.setattr("saffron.cell.worktree.source_mutated", _source_mutated)
++
+     def _commit_dirty(_container, message):
+         cell.checkpointed.append(message)
+         return True
+@@ -3093,6 +3107,12 @@ def test_a_cell_run_produces_a_witness_result(monkeypatch, tmp_path):
+     spec's acceptance criteria and a mutator, and the real `witness_gate`
+     machinery — not a scripted stand-in — is what this test drives, through a
+     `run_suite` fake that calls it exactly as `runner.run_suite` itself would.
++
++    The `skip` this lands on is `_stub_the_runtime`'s own fake
++    `worktree.source_mutated` reporting it cannot reach the tree — the same
++    shape `SA-0061`'s `stub_mutator` reported, but now it is `_suite`'s real
++    wiring to `worktree.source_mutated` producing it, not a bare identity
++    check against a function this attempt no longer calls.
+     """
+     from saffron.gates.core.witness import Mutated, witness_gate
+     from saffron.intake import Criterion, Mutant
+@@ -3141,7 +3161,80 @@ def test_a_cell_run_produces_a_witness_result(monkeypatch, tmp_path):
+     # alike — never a plan the caller only remembers to pass once.
+     assert captured
+     assert all(acc == [criterion] for acc, _mutate in captured)
+-    assert all(mutate is session.stub_mutator for _acc, mutate in captured)
++    # `_suite` binds the real cell mutator to this attempt's own container,
++    # not `stub_mutator` — proved by identity on `partial.func` and by the
++    # stubbed `worktree.source_mutated` actually having been reached with
++    # this criterion's own mutant.
++    assert all(
++        isinstance(mutate, partial) and mutate.func is worktree.source_mutated
++        for _acc, mutate in captured
++    )
++    assert all(mutate.args == ("saffron-cell-SY-1",) for _acc, mutate in captured)
++    assert cell.mutated == [criterion.mutant] * len(captured)
++
++
++def test_a_cell_run_supplies_the_real_mutator(monkeypatch, tmp_path):
++    """The cell run supplies `worktree.source_mutated` — bound to this
++    attempt's own container — in place of the stub, so `witness` reaches a
++    real verdict on a real attempt (`SA-0062`, `docs/BACKLOG.md` item 71).
++
++    Every spec in this repo declares no mutants — the default `_spec()`
++    fixture included — so that verdict is `skip` for want of anything to
++    check: the intended landing, and the difference from the previous `skip`
++    is that this one is a choice `witness_gate` makes on an empty
++    `declared` list, rather than a limitation of a mutator that could not
++    reach the tree. Driven the same way `test_a_cell_run_produces_a_witness_
++    result` is, through a `run_suite` fake that calls the real `witness_gate`
++    exactly as `runner.run_suite` itself would — not a canned `GateResult`
++    that would pass whether or not `_suite` supplied a real mutator at all.
++    """
++    from saffron.gates.core.witness import Mutated, witness_gate
++
++    captured: list[tuple] = []
++
++    def _run_suite(
++        gates,
++        cwd,
++        *,
++        timeout_s=900,
++        executor=None,
++        acceptance: Sequence = (),
++        mutate: Mutated | None = None,
++    ):
++        captured.append((acceptance, mutate))
++        assert mutate is not None  # `_suite` always supplies one
++        result = witness_gate(
++            acceptance=acceptance,
++            mutate=mutate,
++            run_tests=lambda subset: pytest.fail(
++                "no criterion here declares a mutant, so no test should ever run"
++            ),
++        )
++        return [result]
++
++    cell = _stub_the_runtime(monkeypatch)
++    monkeypatch.setattr("saffron.gates.runner.run_suite", _run_suite)
++
++    outcome, _ledger = _drive(
++        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
++    )
++    assert outcome.state == "READY_FOR_REVIEW"
++    (witness_result,) = [g for g in outcome.gates if g.gate == "witness"]
++    assert witness_result.status == "skip"
++    assert witness_result.summary == "the spec declares no mutants"
++    assert captured
++    assert all(acc == [] for acc, _mutate in captured)
++    # `_suite` binds the real cell mutator, not the stub, to every call —
++    # baseline and head alike — whether or not `witness_gate` ever ends up
++    # calling it.
++    assert all(
++        isinstance(mutate, partial) and mutate.func is worktree.source_mutated
++        for _acc, mutate in captured
++    )
++    assert all(mutate.args == ("saffron-cell-SY-1",) for _acc, mutate in captured)
++    # And it never was called: the gate skipped on an empty `declared` list
++    # before `mutate` was ever reached, not because the mutator failed.
++    assert cell.mutated == []
+ 
+ 
+ def test_the_stub_mutator_makes_the_result_an_honest_skip():
+@@ -3226,13 +3319,16 @@ def test_a_skipped_witness_blocks_nothing_at_either_tier(monkeypatch, tmp_path):
+     """A `skip` carries no failures at all, so it cannot become a new failure
+     whichever tier's advisory set it falls into — the property the whole
+     sequence rests on: turning `witness` on cannot fail a task while the
+-    mutator is a stub.
+-
+-    Driven through the real `witness_gate`, with the real `stub_mutator`
+-    handed to it by `_suite` itself — not a canned `GateResult` a scripted
+-    suite could produce whether or not any of this were wired at all. A
+-    `run_suite` reverted to omitting `acceptance`/`mutate` shows up here as
+-    a mismatched capture, not as an identical green.
++    mutator cannot reach the tree.
++
++    Driven through the real `witness_gate`, with the real mutator `_suite`
++    itself binds to this attempt's container — `_stub_the_runtime`'s own
++    fake `worktree.source_mutated` stands in for the container round trip,
++    the same way it does for `worktree.source_reverted` — not a canned
++    `GateResult` a scripted suite could produce whether or not any of this
++    were wired at all. A `run_suite` reverted to omitting
++    `acceptance`/`mutate` shows up here as a mismatched capture, not as an
++    identical green.
+     """
+     from saffron.gates.core.witness import Mutated, witness_gate
+     from saffron.intake import Criterion, Mutant
+@@ -3283,7 +3379,10 @@ def test_a_skipped_witness_blocks_nothing_at_either_tier(monkeypatch, tmp_path):
+         (witness_result,) = [g for g in outcome.gates if g.gate == "witness"]
+         assert witness_result.status == "skip", tier
+         assert captured, tier
+-        assert all(mutate is session.stub_mutator for _acc, mutate in captured), tier
++        assert all(
++            isinstance(mutate, partial) and mutate.func is worktree.source_mutated
++            for _acc, mutate in captured
++        ), tier
+         assert all(list(acc) == [criterion] for acc, _mutate in captured), tier
+ 
+ 
+diff --git a/tests/test_worktree.py b/tests/test_worktree.py
+index 6f980f1..dcefde1 100644
+--- a/tests/test_worktree.py
++++ b/tests/test_worktree.py
+@@ -9,6 +9,7 @@ import pytest
+ 
+ from saffron.cell import proxy, runtime, worktree
+ from saffron.gates.runner import CellExecutor, run_gate
++from saffron.intake import Mutant
+ from saffron.phases import package as package_phase
+ from saffron.repos import image
+ from saffron.repos import mirror as mirror_ops
+@@ -1021,3 +1022,121 @@ def test_the_restore_ignores_work_the_gate_never_touched(tmp_path, monkeypatch):
+     assert "docs/notes.md" in porcelain
+     assert "docs/scratch.md" in porcelain
+     assert "src/" not in porcelain
++
++
++# --- source_mutated, against a real git repo on the host (SA-0062) ---------
++#
++# `_git` is a one-function seam over `runtime.exec_`, so — exactly as the
++# `source_reverted` tests above do — these run the real
++# `_read_file`/`_write_file`/`source_mutated` against real git with no
++# container: `_host_git` points `worktree._git`'s underlying `runtime.exec_`
++# at a real repo in `tmp_path` instead.
++
++
++def _repo_with_a_file(tmp_path, monkeypatch, content):
++    """A committed repo holding one source file, ready for a mutant."""
++    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
++    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
++    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
++    (tmp_path / "src").mkdir()
++    (tmp_path / "src" / "guard.py").write_text(content)
++    _commit(tmp_path, "base")
++    _host_git(tmp_path, monkeypatch)
++
++
++def test_a_mutant_is_applied_and_undone_inside_the_cell(tmp_path, monkeypatch):
++    _repo_with_a_file(tmp_path, monkeypatch, "if amount < 0:\n    raise ValueError\n")
++    mutant = Mutant(file="src/guard.py", find="if amount < 0:", replace="if False:")
++    target = tmp_path / "src" / "guard.py"
++
++    with worktree.source_mutated("c", mutant) as reason:
++        assert reason is None
++        assert target.read_text() == "if False:\n    raise ValueError\n"
++
++    assert target.read_text() == "if amount < 0:\n    raise ValueError\n"
++    assert _porcelain(tmp_path) == ""
++
++
++def test_the_undo_restores_the_committed_file_not_a_byte_copy(tmp_path, monkeypatch):
++    """The undo is `git checkout` against `HEAD`, not a replay of the bytes
++    `_read_file` displaced — `revert`'s own restore works the same way, for
++    the same reason (`committed` guarantees the tree matches `HEAD`)."""
++    _repo_with_a_file(tmp_path, monkeypatch, "value = 1\n")
++    mutant = Mutant(file="src/guard.py", find="value = 1", replace="value = 2")
++
++    calls: list[tuple] = []
++    real = worktree._git
++
++    def spy(container, *args):
++        calls.append(args)
++        return real(container, *args)
++
++    monkeypatch.setattr(worktree, "_git", spy)
++
++    with worktree.source_mutated("c", mutant):
++        pass
++
++    assert ("checkout", "HEAD", "--", "src/guard.py") in calls
++    assert (tmp_path / "src" / "guard.py").read_text() == "value = 1\n"
++
++
++def test_a_find_that_does_not_match_once_applies_nothing(tmp_path, monkeypatch):
++    """Zero matches and two matches are both "not exactly once" — the same
++    rule `saffron.mutation.apply_mutant` follows for a host tree, matched
++    here rather than re-derived. A mutant that names two places names no
++    property, and picking one silently is how a check comes to measure
++    something other than what it claims."""
++    _repo_with_a_file(tmp_path, monkeypatch, "value = 1\nvalue = 1\n")
++    target = tmp_path / "src" / "guard.py"
++
++    twice = Mutant(file="src/guard.py", find="value = 1", replace="value = 2")
++    with worktree.source_mutated("c", twice) as reason:
++        assert reason is not None
++        assert "matches 2 times" in reason
++    assert target.read_text() == "value = 1\nvalue = 1\n"
++    assert _porcelain(tmp_path) == ""
++
++    absent = Mutant(file="src/guard.py", find="value = 9", replace="value = 2")
++    with worktree.source_mutated("c", absent) as reason:
++        assert reason is not None
++        assert "not found" in reason
++    assert target.read_text() == "value = 1\nvalue = 1\n"
++    assert _porcelain(tmp_path) == ""
++
++
++def test_a_failed_undo_raises_rather_than_reporting_a_verdict(tmp_path, monkeypatch):
++    """A tree `source_mutated` could not restore is the one outcome that must
++    not read as a witness doing its job — `witness_gate` turns this into
++    `error`, never `pass` or `fail`."""
++    _repo_with_a_file(tmp_path, monkeypatch, "value = 1\n")
++    mutant = Mutant(file="src/guard.py", find="value = 1", replace="value = 2")
++    real = worktree._git
++
++    def flaky(container, *args):
++        if args[0] == "checkout" and args[1] == "HEAD":
++            return runtime.Completed(1, "", "checkout exploded")
++        return real(container, *args)
++
++    monkeypatch.setattr(worktree, "_git", flaky)
++
++    with (
++        pytest.raises(runtime.CellRuntimeError, match="mutant undo"),
++        worktree.source_mutated("c", mutant),
++    ):
++        pass
++
++    # A failure to *apply* raises the same way — never a yielded reason, which
++    # `witness_gate` would read as the ordinary "did not apply" case.
++    real_exec = worktree.runtime.exec_
++
++    def exploding_exec(container, command, *, workdir=None, timeout_s=900):
++        if command[:1] == ["cat"]:
++            return runtime.Completed(1, "", "cat exploded")
++        return real_exec(container, command, workdir=workdir, timeout_s=timeout_s)
++
++    monkeypatch.setattr(worktree.runtime, "exec_", exploding_exec)
++    with (
++        pytest.raises(runtime.CellRuntimeError, match="reading"),
++        worktree.source_mutated("c", mutant),
++    ):
++        raise AssertionError("the body must not run")
