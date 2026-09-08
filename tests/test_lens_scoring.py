@@ -376,3 +376,26 @@ def test_every_run_of_the_first_pass_filed_an_anchored_blocker(sa0062):
         for run in _recorded_pass()
     ]
     assert per_run == [1, 2, 1]
+
+
+RECORD_2026_09_07 = (
+    Path(__file__).parent.parent
+    / "docs"
+    / "evidence"
+    / "2026-09-07-lens-scoring-first-pass.md"
+)
+
+
+def test_the_first_pass_s_published_costs_are_re_derivable_too(sa0062):
+    """The table was pinned to the data and the paragraph beside it was not.
+
+    That asymmetry published a wrong number: the per-lens range read
+    $0.36-$0.92, which is run 1's maximum rather than the pass's — run 3's
+    adequacy lens spent $1.01. The claim it supports (no lens came near the
+    $4.00 ceiling) survived, in the one paragraph whose subject is that the
+    budget is not the confound. Both figures now fail here when they drift.
+    """
+    costs = [r.cost_usd for run in _recorded_pass() for r in run]
+    record = RECORD_2026_09_07.read_text()
+    assert f"${sum(costs):.2f}" in record
+    assert f"${min(costs):.2f}–${max(costs):.2f}" in record

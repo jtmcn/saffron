@@ -1,12 +1,15 @@
 # The lenses, scored against a diff whose defects are already written down
 
 Backlog item **79**, Track A of `docs/superpowers/plans/2026-09-07-trusting-the-queue.md`.
-Measured 2026-09-07, `main` at `654330a`. **$5.70, three runs of three lenses**
+Measured 2026-09-07, on branch `joel/lens-scoring-harness` at `654330a` —
+not on `main`, which does not contain it. **$5.70, three runs of three lenses**
 over one fixture. Raw JSON, one file per run, in
 `docs/evidence/passes/2026-09-07-lens-scoring-first-pass/` — kept in the repo
 rather than left under `~/.saffron/`, because a table nobody but its author can
-re-derive is item 79's own complaint one level up. A test re-computes every
-number below from those three files.
+re-derive is item 79's own complaint one level up. Tests re-compute every number
+below from those three files: the table, and — since the per-lens range was
+first published as run 1's maximum rather than the pass's — the costs beside
+it.
 
 The question: item 79 says nobody knows what REVIEW would say about a diff with
 a known defect in it, because no such diff was kept. PR #154's range is now kept
@@ -79,9 +82,12 @@ blockers. A fourth lens would not have changed either.
 
 **The budget confound is absent; the gate-summary one is not.** Neither budget
 nor turns bound either run. The original had $3.30 and 90 turns and spent
-$0.52–$0.73 per lens; this pass gave $4.00 and 30 turns and spent $0.36–$0.92.
+$0.52–$0.73 per lens; this pass gave $4.00 and 30 turns and spent $0.36–$1.01.
 The parameters were not identical, and are reported rather than smoothed, but no
-lens came near either ceiling.
+lens came near either ceiling. *(Corrected 2026-09-08: the range read
+$0.36–$0.92, which is run 1's maximum, not the pass's — run 3's adequacy lens
+spent $1.01. The table beside this paragraph was pinned to the run JSON and the
+paragraph was not; both are now.)*
 
 The frozen `gates.txt` is a different matter. All 14 lines read `no tool
 reported`, because `gate_results` has no `tool` column to rebuild them from —
