@@ -171,6 +171,40 @@ def revert_gate(
             summary="the diff has no source outside the repo's declared test paths",
         )
 
+    # A criterion's `mutant.file` is the subject its claim is about (§5.4.1).
+    # If the subject is not in `source`, reverting `source` cannot change
+    # whether that witness passes, so "it passed without the diff's source" is
+    # not evidence of theater — it is the arithmetic of a question this gate
+    # cannot ask (item 84, received through the notes channel from `SA-0064`).
+    #
+    # Compared against `source`, not the spec's `touches`: `touches` is what a
+    # spec was *permitted* to change, and a spec permitted to change a file it
+    # then left alone leaves this gate equally unable to answer. `source` is
+    # the set about to be reverted, which is the thing the question is made of.
+    # A criterion declaring no mutant names no subject and is unaffected.
+    unreachable = sorted(
+        c.witness
+        for c in acceptance
+        if c.mutant is not None and c.witness in subset and c.mutant.file not in source
+    )
+    if unreachable:
+        subset = [name for name in subset if name not in set(unreachable)]
+        note += (
+            f" — {len(unreachable)} witness(es) whose subject this diff never "
+            f"touched: "
+            + ", ".join(
+                f"{c.witness} ({c.mutant.file})"
+                for c in acceptance
+                if c.mutant is not None and c.witness in unreachable
+            )
+        )
+    if not subset:
+        return GateResult(
+            gate="revert",
+            status="skip",
+            summary=f"no new test depends on source this diff changed{note}",
+        )
+
     # The restore checks out `HEAD`, not the tree as it stood a moment ago, so
     # an uncommitted edit to a source path does not survive this gate — and
     # `committed` runs next and would report the tree clean, which is the one

@@ -580,3 +580,68 @@ def test_the_dirty_read_happens_before_anything_is_reverted():
         run_tests=lambda subset: _tests(*subset, failed=tuple(subset)),
     )
     assert order == ["dirty", "revert"]
+
+
+def test_a_witness_whose_subject_the_diff_never_touched_is_skipped():
+    """BACKLOG item 84, and the first finding this repo received through the
+    notes channel rather than from a lens or a person.
+
+    `SA-0064`'s criterion 2 was a deliberate coverage backfill for a predicate
+    in `saffron/cell/session.py`, a file that spec `forbids`; only
+    `saffron/phases/package.py` was in `touches`. The new test therefore
+    depended on none of the diff's own source, `revert` called that theater,
+    and the workaround shipped: the test now stands up a real git remote so it
+    depends on both, leaving a test of one boolean predicate driving a network
+    to satisfy a gate.
+
+    "This diff could not have made that test pass, because it never touched the
+    code the claim is about" is unproven, not theater, and `skip` already means
+    that. The subject is the criterion's own `mutant.file`, compared against
+    `source` — the exact set about to be reverted — rather than against
+    `touches`: `touches` is what a spec was permitted to change, and a spec
+    permitted to change a file it then left alone leaves `revert` just as
+    unable to answer. A criterion declaring no mutant names no subject and is
+    judged exactly as before."""
+    witness = "tests/test_report.py::test_effective_tier"
+    criterion = Criterion(
+        claim="a task that recorded nothing packages the body it packages today",
+        witness=witness,
+        mutant={"file": "saffron/cell/session.py", "find": "a", "replace": "b"},
+    )
+
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", witness)],
+        acceptance=[criterion],
+        changed_files=["saffron/phases/package.py"],
+        test_paths=[_TESTS],
+        dirty=lambda: [],
+        reverted=_refuse,
+        run_tests=_refuse_run,
+    )
+    assert result.status == "skip"
+    assert "session.py" in result.summary
+
+
+def test_a_witness_whose_subject_the_diff_did_touch_is_still_judged():
+    """The guard above must not swallow the case the gate exists for."""
+    log: list = []
+    witness = "t.py::test_new"
+    criterion = Criterion(
+        claim="the total is clamped",
+        witness=witness,
+        mutant={"file": "pkg/a.py", "find": "a", "replace": "b"},
+    )
+
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", witness)],
+        acceptance=[criterion],
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        dirty=lambda: [],
+        reverted=lambda paths: _reverted(paths, log=log),
+        run_tests=lambda subset: _tests(*subset),
+    )
+    assert result.status == "fail"
+    assert [f.file for f in result.failures] == [witness]
