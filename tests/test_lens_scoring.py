@@ -86,6 +86,45 @@ def test_a_finding_on_the_defects_lines_without_its_words_is_not_the_defect(sa00
     assert scores["truncating-write"].seen is False
 
 
+def test_a_claim_about_the_write_is_not_credited_to_the_undo(sa0062):
+    """Both defects live in one call chain, so their ranges overlap and the
+    phrases are the only thing telling them apart. Verbatim from the first
+    scoring pass, run 1, where the fixture got this backwards: the contract
+    lens filed the truncating write as a blocker at the *call site* (418, not
+    `_write_file`'s own lines) and quoted `witness.py`'s "understate a dirty
+    tree". A `dirty` phrase on the undo scored that, and the pass reported the
+    write missed and the undo raised — both wrong."""
+    contract = _finding(
+        lens="contract",
+        line=418,
+        claim=(
+            "`source_mutated` writes the mutant via `_write_file`, whose script "
+            "(`printf ... | base64 -d > path`, line 377-378) truncates the "
+            "destination as part of opening the redirect before `base64 -d` "
+            "produces a byte. `witness.py`'s own contract comment (lines 78-85) "
+            "calls it the one case that can 'understate a dirty tree'."
+        ),
+    )
+    scores = lens_scoring.score_run(sa0062, _reviews(contract))
+    assert scores["truncating-write"].seen is True
+    assert scores["dirty-restore"].seen is False
+
+
+def test_a_claim_about_the_undo_is_not_credited_to_the_write(sa0062):
+    """The same boundary from the other side, verbatim from run 2."""
+    correctness = _finding(
+        line=422,
+        claim=(
+            "`source_mutated`'s undo is `git checkout HEAD -- <file>`, which "
+            "silently discards *any* uncommitted change to that file, not just "
+            "the mutation it applied."
+        ),
+    )
+    scores = lens_scoring.score_run(sa0062, _reviews(correctness))
+    assert scores["dirty-restore"].seen is True
+    assert scores["truncating-write"].seen is False
+
+
 def test_a_finding_with_the_defects_words_on_its_lines_is_seen(sa0062):
     hit = _finding(
         line=377,

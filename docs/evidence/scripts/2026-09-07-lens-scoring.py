@@ -33,14 +33,16 @@ import json
 import subprocess
 import sys
 import time
+from functools import partial
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from harness import lens_scoring  # noqa: E402
-from saffron.cell import runtime, session  # noqa: E402
+from saffron.cell import proxy, runtime, session  # noqa: E402
 from saffron.phases import implement, review  # noqa: E402
 from saffron.repos import mirror as mirror_ops  # noqa: E402
+
 
 # The fixture pins the tree, so `git show <head>:<path>` is exactly what the
 # cell's worktree holds — `anchor`'s own docstring names this as a satisfying
@@ -103,6 +105,19 @@ def main() -> int:
     created: set[str] = set()
     runs: list[list[review.LensReview]] = []
 
+    # The same wrapping `_drive_cell` builds, minus `record_attempts`: that one
+    # writes ledger rows, and a scoring pass is not a task. `stop_on_rejected`
+    # is kept — a pass that runs on through a closed provider window would
+    # score the lenses on turns that never happened, and n=3 is exactly the
+    # shape that would average such a run into looking merely weak.
+    agent = session.stop_on_rejected(
+        partial(
+            implement.run_agent,
+            timeout_s=session.TURN_TIMEOUT_S,
+            spec_id=f"{fixture.spec_id}-lensscore",
+        )
+    )
+
     try:
         session.cell_up(
             repo=args.repo,
@@ -132,7 +147,7 @@ def main() -> int:
                 prompts_dir=Path("saffron/agents/prompts").resolve(),
                 max_turns=args.max_turns,
                 budget_usd=args.budget_usd,
-                agent=implement.run_agent,
+                agent=agent,
                 spec_id=f"{fixture.spec_id}-lensscore-{index}",
                 emit=lambda event: None,
             )
@@ -141,15 +156,28 @@ def main() -> int:
             )
             runs.append(reviews)
     finally:
-        # Narrower than `_drive_cell`'s teardown on purpose: no ledger row to
-        # close and no outcome to stamp, so the only obligation is that nothing
-        # this run created outlives it.
-        for name in (container,):
-            runtime.remove_container(name)
-        for name in (volume, state):
-            runtime.remove_volume(name)
-        if network in created:
-            runtime.remove_network(network)
+        # `_drive_cell`'s teardown, minus the ledger row and the outcome stamp.
+        # The order is not a preference: the proxy is a container on this
+        # network, so a teardown that forgets `stop_proxy` cannot remove the
+        # network, and `remove_network` reports that by a return code nobody
+        # reads. Measured — the first run of this script left both behind and
+        # the next one died on "network saffron-cells already exists".
+        removed = [("container", container, runtime.remove_container(container))]
+        # Before the proxy goes, its log goes with it. A lens holds only
+        # Read/Glob/Grep, so a denial here is a finding about the harness.
+        for denied in proxy.denied_egress():
+            print(f"  proxy DENIED {denied}", file=sys.stderr)
+        for failed in proxy.failed_egress():
+            print(f"  proxy FAILED {failed}", file=sys.stderr)
+        proxy.stop_proxy()
+        removed.append(("network", network, runtime.remove_network(network)))
+        removed.append(("volume", volume, runtime.remove_volume(volume)))
+        removed.append(("volume", state, runtime.remove_volume(state)))
+        for kind, name, done in removed:
+            if done.returncode != 0 and name in created:
+                print(
+                    f"  SURVIVED {kind} {name}: {done.stderr.strip()}", file=sys.stderr
+                )
 
     scores = lens_scoring.score_passes(fixture, runs)
     table = lens_scoring.render_table(fixture, scores)

@@ -38,13 +38,25 @@ min_severity = "blocker"
 # uncommitted agent work and leaves `committed` — the gate whose job is to
 # notice a dirty tree — looking at a clean one. `revert.py:180` refuses to
 # cause exactly this. The docstring at 391-397 asserts the opposite premise.
-must_mention = ["uncommitted", "dirty", "not committed", "destroy"]
+#
+# CORRECTED after the first scoring pass, 2026-09-07. `dirty` and `destroy`
+# were here and both are too generic: run 1's contract lens described the
+# *other* defect and quoted `witness.py`'s phrase "understate a dirty tree",
+# which scored this one and reported the pass exactly backwards. What is
+# specific to this defect is whose work the undo throws away, so the phrases
+# now name that and nothing else.
+must_mention = ["uncommitted", "not committed", "not yet committed"]
 
 [[defects]]
 id = "truncating-write"
 file = "saffron/cell/worktree.py"
-lines = [366, 382]
-owner = "correctness"
+# 366-426, not 366-382: the write is in `_write_file`, but a lens reasoning
+# about what a failed write leaves behind anchors on the *call site* inside
+# `source_mutated`, which is where the missing try/finally is. All three runs
+# of the first pass filed it at 418. A range that stops at the callee scores
+# the defect missed while the lens is filing it as a blocker.
+lines = [366, 426]
+owner = "contract"
 min_severity = "blocker"
 # `> path` truncates before `base64 -d` writes anything, so a non-zero exit
 # raises out of __enter__ over a file that is now mutated or empty.
@@ -56,4 +68,9 @@ min_severity = "blocker"
 # raise is untested. That is a different claim: it is about the test, not about
 # what the raise leaves on disk. Separating the two is what these phrases are
 # for, and the calibration case is what proves they do.
-must_mention = ["truncat", "restore", "leaves the file", "partially", "empty file", "half-written"]
+# `truncat` carries the mechanism and every run of the first pass used it.
+# `restore` and `leaves the file` were here and are dropped: this range now
+# overlaps `dirty-restore`'s, whose claims talk about restoring from HEAD, so
+# a phrase about restoring cannot tell the two apart. The phrases are the only
+# discriminator between these two defects now, by design.
+must_mention = ["truncat", "partially written", "half-written"]

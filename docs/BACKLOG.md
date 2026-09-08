@@ -4378,6 +4378,25 @@ spec came to assert its opposite and pass review.
 
 ## 79. Three lenses read one diff and none asked what a failed write leaves behind
 
+**Status: measured 2026-09-07, and the diagnosis below is wrong on one point.**
+The known-bad diff this item asks for exists — `docs/evidence/fixtures/SA-0062/`,
+scored by `harness/lens_scoring.py` and re-runnable after any lens change. First
+pass, three runs, $5.70: `docs/evidence/2026-09-07-lens-scoring-first-pass.md`.
+
+Both defects **are** raised. The truncating write was filed 3/3, by the
+**contract** lens, reached through `witness.Mutated`'s own written contract; the
+undo-over-uncommitted-work 2/3 by correctness. So *what does the failure path
+leave behind* is not a question no lens owns — the run this item was written
+from is the one where the correctness lens spent itself on a UTF-8 concern
+instead, and a single sample read as a remit gap. What is real is the variance:
+run 1 of three would still have shipped this pull request green. The fix is
+therefore aimed at making run 1 look like run 2, not at widening a remit or
+adding a fourth lens, neither of which would have changed run 1. The paragraph
+below proposing the fourth lens is superseded; everything else in the item
+stands, including the `blocker`-for-a-contradicted-criterion suggestion at the
+end, which is untested.
+
+
 Found 2026-09-06, comparing REVIEW's output on PR #154 against an independent
 review of the same `base..head`. REVIEW filed **0 blockers and 3 concerns** and
 the task reached `READY_FOR_REVIEW` at $8.70. The independent pass over the same
