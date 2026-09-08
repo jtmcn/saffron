@@ -116,7 +116,7 @@ def witness_gate(
     try.
 
     `collected` is the set of node ids the repo's `tests` gate enumerated on
-    the unmutated tree. A criterion whose `witness` is not in it is `unproven`
+    the unmutated tree. A criterion whose `witness` is not in it is unproven
     and its mutant is never applied: there is no witness to kill, which is the
     expected state at base for every test the task has yet to write (item 83).
     Compared, never parsed — an opaque string against a list the `tests` gate
