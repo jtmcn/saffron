@@ -1,7 +1,7 @@
 [project]
 name = "saffron"
 version = "0.0.0"
-description = "Turns specs into reviewable pull requests"
+description = "A Python orchestrator that turns spec files into reviewable pull requests."
 requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
