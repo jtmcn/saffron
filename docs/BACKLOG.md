@@ -4408,6 +4408,12 @@ is now open as item 88: 3/3 here against 0/1 in production is larger than lens
 variance explains, and the frozen `gates.txt` reading `no tool reported` on all
 14 lines is the leading candidate.
 
+**Still owed by this item:** the independent review itself is not kept beside
+the fixture. `recorded-findings.json` holds REVIEW's *production* output, which
+is what `calibrate` needs; the independent grading survives only as declared
+phrases and severities in `fixture.toml`, sourced from item 78. "With the
+independent review beside it" is not yet literally true.
+
 Found 2026-09-06, comparing REVIEW's output on PR #154 against an independent
 review of the same `base..head`. REVIEW filed **0 blockers and 3 concerns** and
 the task reached `READY_FOR_REVIEW` at $8.70. The independent pass over the same

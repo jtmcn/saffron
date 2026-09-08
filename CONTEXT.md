@@ -479,6 +479,23 @@ to a gate. The direction that should always be travelled.
 
 _Avoid_: "automate", "harden", "codify", "promote up", "promote down".
 
+**Scoring run**: One execution of all three lenses over one fixture, in the
+harness (`harness/lens_scoring.py`). The qualifier is not optional: bare **run**
+is one repo's slice of a batch (§2), and the harness measures REVIEW rather than
+running a night.
+_Avoid_: bare "run" for one, "attempt" (that is a phase execution inside a task),
+"sample", "trial".
+
+**Scoring pass**: A set of scoring runs over one fixture, scored together and
+recorded under `docs/evidence/passes/`. Its n is part of its result — a k/n
+without its n is the shape item 69 charged the mutation-vs-lens record with.
+_Avoid_: bare "pass" — that is a gate status, and `_Avoid_` under **Attempt**
+already reserves it. Also "round", "sweep", "iteration".
+
+> These two are the only place Saffron reuses **run** and **pass**, and they are
+> qualified everywhere in prose for that reason. They name measurement of the
+> product, never the product: nothing under `saffron/` imports the harness.
+
 ---
 
 ## 10. Style

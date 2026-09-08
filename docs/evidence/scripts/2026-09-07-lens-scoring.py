@@ -40,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from harness import lens_scoring  # noqa: E402
 from saffron import events  # noqa: E402
-from saffron.cell import proxy, runtime, session  # noqa: E402
+from saffron.cell import session  # noqa: E402
 from saffron.phases import implement, review  # noqa: E402
 from saffron.repos import mirror as mirror_ops  # noqa: E402
 
@@ -69,8 +69,7 @@ def main() -> int:
         "--runs",
         type=int,
         default=3,
-        help="lens passes over the same diff. A score without its n is the "
-        "shape of claim item 69 charged the mutation-vs-lens record with.",
+        help="scored runs of the three lenses over the same diff (default 3).",
     )
     parser.add_argument(
         "--budget-usd",
@@ -191,31 +190,22 @@ def main() -> int:
                 )
                 break
     finally:
-        # `_drive_cell`'s teardown, minus the ledger row and the outcome stamp.
-        # The order is not a preference: the proxy is a container on this
-        # network, so a teardown that forgets `stop_proxy` cannot remove the
-        # network, and `remove_network` reports that by a return code nobody
-        # reads. Measured — the first run of this script left both behind and
-        # the next one died on "network saffron-cells already exists".
-        removed = [("container", container, runtime.remove_container(container))]
-        # Before the proxy goes, its log goes with it. A lens holds only
-        # Read/Glob/Grep, so a denial here is a finding about the harness.
-        for denied in proxy.denied_egress():
-            print(f"  proxy DENIED {denied}", file=sys.stderr)
-        for failed in proxy.failed_egress():
-            print(f"  proxy FAILED {failed}", file=sys.stderr)
-        proxy.stop_proxy()
-        removed.append(("network", network, runtime.remove_network(network)))
-        removed.append(("volume", volume, runtime.remove_volume(volume)))
-        removed.append(("volume", state, runtime.remove_volume(state)))
-        for kind, name, done in removed:
-            if done.returncode != 0 and name in created:
-                print(
-                    f"  SURVIVED {kind} {name}: {done.stderr.strip()}", file=sys.stderr
-                )
+        # The shared teardown, not a paraphrase of it: the order is load-bearing
+        # and this script is what proved it — its first run left the proxy and
+        # network behind and the next died on "network saffron-cells already
+        # exists". A lens holds only Read/Glob/Grep, so a DENIED line here is a
+        # finding about the harness.
+        session.cell_down(
+            network=network,
+            volume=volume,
+            state=state,
+            container=container,
+            created=created,
+            note=lambda _step, _ok, detail: print(f"  {detail}", file=sys.stderr),
+        )
 
     try:
-        scores = lens_scoring.score_passes(fixture, runs)
+        scores = lens_scoring.score_pass(fixture, runs)
     except lens_scoring.LensErrored as exc:
         print(f"nothing to score:\n{exc}", file=sys.stderr)
         return 1

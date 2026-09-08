@@ -221,10 +221,9 @@ def load_fixture(root: Path) -> Fixture:
     if not defects:
         raise FixtureError(f"{root}: declares no defects")
     # A phrase in two defects' lists credits one claim to both, so k/n stops
-    # being per-defect. Cheap and narrow: it catches a copied list, not the
-    # failure this fixture actually had — `dirty` was unique to its defect and
-    # still matched a claim about the other one. Only real claim text catches
-    # that, which is what the regression tests carry.
+    # being per-defect. Narrow: it catches a copied list, not this fixture's own
+    # failure — `dirty` was unique and still matched the other defect's claim,
+    # which only the regression tests' real claim text catches.
     for defect in defects:
         for other in defects:
             shared = set(defect.must_mention) & set(other.must_mention)
@@ -295,7 +294,7 @@ def score_run(fixture: Fixture, reviews: Sequence[LensReview]) -> dict[str, Matc
     return {d.id: match(d, findings) for d in fixture.defects}
 
 
-def score_passes(
+def score_pass(
     fixture: Fixture, runs: Sequence[Sequence[LensReview]]
 ) -> dict[str, Score]:
     """k/n across the runs of one pass.

@@ -173,7 +173,7 @@ def test_a_pass_counts_runs_that_saw_it_not_findings_that_matched(sa0062):
     that saw it — otherwise a verbose lens outscores an accurate one."""
     twice = _reviews(_finding(line=422), _finding(line=423))
     silent = _reviews()
-    passes = lens_scoring.score_passes(sa0062, [twice, silent, silent])
+    passes = lens_scoring.score_pass(sa0062, [twice, silent, silent])
     assert passes["dirty-restore"].seen == 1
     assert passes["dirty-restore"].runs == 3
 
@@ -205,7 +205,7 @@ def test_a_run_with_an_errored_lens_is_dropped_from_n_and_counted(sa0062):
     falls to what was actually scored and the drop is carried to the table."""
     good = _reviews(_finding(line=422))
     broke = [LensReview(lens="contract", error="max turns")]
-    passes = lens_scoring.score_passes(sa0062, [good, broke, good])
+    passes = lens_scoring.score_pass(sa0062, [good, broke, good])
     assert passes["dirty-restore"].runs == 2
     assert passes["dirty-restore"].seen == 2
     assert passes["dirty-restore"].errored == 1
@@ -216,7 +216,7 @@ def test_a_pass_with_nothing_left_to_score_is_not_a_table_of_zeroes(sa0062):
     """`0/0` renders like a measurement and is not one. Covers `--runs 0` and a
     pass every run of which errored."""
     with pytest.raises(lens_scoring.LensErrored, match="no run survived"):
-        lens_scoring.score_passes(sa0062, [])
+        lens_scoring.score_pass(sa0062, [])
 
 
 def test_two_defects_may_not_share_a_phrase(sa0062, tmp_path):
@@ -280,7 +280,7 @@ def test_the_first_passs_published_table_is_re_derivable(sa0062):
     the repo, a predicate change that silently moves a published number fails
     here instead of being noticed by nobody.
     """
-    scores = lens_scoring.score_passes(sa0062, _recorded_pass())
+    scores = lens_scoring.score_pass(sa0062, _recorded_pass())
     assert (scores["dirty-restore"].seen, scores["dirty-restore"].graded) == (2, 2)
     assert (scores["truncating-write"].seen, scores["truncating-write"].graded) == (
         3,

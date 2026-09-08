@@ -157,9 +157,21 @@ the lens reviews; it does not care how the cell was built. The harness builds on
 at the recorded head, drives the three lenses, and writes a table of raised/missed
 per defect. Score before and after every change in Track C.
 
-Nothing in this track changes the product. Its first output is a record: the
-scoring table with the lenses as they are today, so Track C has a baseline to
-move.
+Nothing in this track changes the product, with one amendment. Its first output
+is a record: the scoring table with the lenses as they are today, so Track C has
+a baseline to move.
+
+*Amended 2026-09-08.* The harness needs a cell at a recorded commit, so bringing
+one up and tearing it down moved out of `_drive_cell` into `session.cell_up` and
+`session.cell_down` — pure moves, no behaviour change, and the alternative was a
+paraphrase of an order found by spike (Appendix I). Product code changed; what
+the product *does* did not. Read the sentence as barring new behaviour, not
+every line under `saffron/`.
+
+*Delivered so far: item 79 only.* The corpus is one fixture,
+`docs/evidence/fixtures/SA-0062/`. Item 69's nine vacuous tests and item 86's two
+unwitnessed properties are still to come, and `load_fixture` takes a single root,
+so aggregating across fixtures is unbuilt. The track stays open on those two.
 
 ### B — Make `witness` usable, then mandatory for bug-fix specs
 
