@@ -4628,10 +4628,31 @@ route, `context.witnesses_block` handing it to the implementer and
 `criteria_section` to the critic.
 
 Measured against this repo's 54 specs: one refusal, `SA-0063`, which is the
-spec this item was written about and the exact mutant it describes. No other
-spec trips it, and no length threshold was needed — a `find` short enough to
-appear in prose by accident already fails the match-exactly-once rule and is an
-unusable mutant.
+spec this item was written about and the exact mutant it describes.
+
+**Read that number with its denominator.** Only **two** of the 54 declare a
+mutant at all (`SA-0063` and `SA-0064`), so the check has fired on the only two
+chances it has had. "One refusal in 54" invites a false-positive rate this
+corpus cannot support. No length threshold was added, and whether one is needed
+is *not* measured: the argument for going without is that a `find` must match
+exactly once in its file, so a very short one is already an unusable mutant —
+and that argument thins as the text gets longer. A rough count over this corpus
+finds dozens of backticked identifier-shaped spans quoted verbatim in a spec
+body that would each match exactly once in a file that spec's `touches` covers,
+so collisions are not obviously rare. If it starts biting, the tree-aware half
+belongs beside `saffron/mutation.py`, which is the module that may read the
+repo — `intake.py` deliberately cannot, so it cannot tell a `find` naming text
+that already exists at base (disclosing nothing, since the implementer can read
+the file) from one naming text the spec invents.
+
+**Corrected in review of #167**, along with two defects that review found: the
+check compared a mutant against its *own* claim only, while `witnesses_block`
+hands the implementer every claim — a sibling claim disclosed just as well and
+nothing refused it; and the refusal removed a spec from `_retired_ids`' credit,
+so retiring `SA-0063` to `done/` — the documented next step — would have
+stranded `SA-0064`, whose parent it is. A disclosed mutant now raises
+`DisclosedMutantError`, which carries the parsed spec, and a retirement still
+credits a spec refused on policy rather than on shape.
 
 One consequence worth knowing before the check meets a spec someone is waiting
 on: an unparseable spec leaves the scanned set, so its dependents refuse with

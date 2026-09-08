@@ -470,6 +470,30 @@ def test_a_mutant_a_claim_discloses_is_refused_too():
         )
 
 
+def test_a_mutant_a_sibling_claim_discloses_is_refused_too():
+    """`witnesses_block` hands the implementer *every* claim, not the one
+    beside the mutant.
+
+    So a criterion can pin text that the criterion below it spells out, and the
+    implementer reads both. Checking a mutant against its own claim alone
+    leaves that open, which is the same hole one criterion over.
+    """
+    with pytest.raises(SpecError, match="the claim for"):
+        parse_spec(
+            "---\nid: TE-1\ntitle: t\ntype: feature\n"
+            "acceptance:\n"
+            "  - claim: the ceiling is declared\n"
+            "    witness: tests/test_billing.py::test_declared\n"
+            "    mutant:\n"
+            "      file: saffron/billing.py\n"
+            "      find: 'CEILING = 60'\n"
+            "      replace: 'CEILING = 0'\n"
+            "  - claim: nothing else changes, and CEILING = 60 stays put\n"
+            "    witness: tests/test_billing.py::test_unchanged\n"
+            "---\n\nbody\n"
+        )
+
+
 def test_a_mutant_pinning_text_the_code_determines_parses():
     """The shape item 82 recommends and `SA-0064` used: pin what the existing
     code already determines, so the natural spelling is close to forced and no

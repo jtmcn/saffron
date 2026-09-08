@@ -526,10 +526,18 @@ def _retired_ids(directory: Path) -> tuple[frozenset[str], list[DiscoveryFailure
     # `discover_specs` globs non-recursively, so this reads `done/` alone and
     # cannot turn it into a second scan directory.
     shipped, unparseable = discover_specs(retired)
+    # A spec refused on *policy* read cleanly and declares a trustworthy id, so
+    # retiring it still credits its dependents: `DiscoveryFailure.spec` is set
+    # only for that case (item 82's disclosed mutant). Without this, adding an
+    # intake rule silently withdraws the `done/` credit from every spec already
+    # retired that the new rule happens to refuse — and `done/` exists for the
+    # dependency the ledger cannot state.
+    credited = {discovered.spec.id for discovered in shipped}
+    credited |= {f.spec.id for f in unparseable if f.spec is not None}
     # `README.md` is a permanent resident, not a spec that stopped parsing —
     # it is the file this directory's meaning is written in.
-    stopped = [f for f in unparseable if f.path.name != "README.md"]
-    return frozenset(discovered.spec.id for discovered in shipped), stopped
+    stopped = [f for f in unparseable if f.path.name != "README.md" and f.spec is None]
+    return frozenset(credited), stopped
 
 
 def _dependency_refusal(

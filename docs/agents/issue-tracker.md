@@ -46,6 +46,14 @@ GitHub issues remain in use only for research/evidence records under
   `SA-0063` — both lenses that read the diff missed it, and it was found only by
   reading the agent's own reasoning as it worked.
 
+  *That check is a tripwire, not a boundary*, and writing to it as though the
+  channel were shut is the mistake it invites. A paraphrase evades it entirely —
+  "declare a module-scope constant named CEILING, set to 60" discloses the
+  spelling without containing it — and the cell can read the spec file directly
+  in any case: `.saffron/**` is forbidden to *write*, not to *read*
+  (`docs/BACKLOG.md` item 80). It catches the literal, which is the shape
+  `SA-0063` took; the honest mutant is still the author's job.
+
   *Pinning what the code determines does work*, and is what `SA-0064` did: a
   field that exists, a parameter that exists, a predicate already written, so
   the natural spelling is close to forced and no disclosure is needed to make

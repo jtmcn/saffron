@@ -1679,6 +1679,49 @@ def test_a_retired_parent_is_never_itself_offered_as_a_candidate(tmp_path, ledge
     assert [r for r in refusals if r.path.name == "b.md"] == []
 
 
+def test_a_retired_parent_refused_on_policy_still_credits_its_child(tmp_path, ledger):
+    """A spec refused for *disclosing its own mutant* read cleanly — it has an
+    id, and `done/` says its work is in `main`.
+
+    The two refusals are not the same fact. A file that does not parse declares
+    no id, so it can credit nothing and the refusal has to stand. A spec item
+    82 refuses parsed fine and is being kept out of the *queue*; withdrawing
+    its `done/` credit as well would strand every child it already shipped for.
+    `SA-0063` is the live case — merged, pending retirement, and the one spec
+    in this repo that rule refuses.
+
+    Without the distinction, adding any intake rule silently revokes the
+    retirement credit of every spec already in `done/` that the new rule
+    happens to refuse, and `done/` exists precisely for the dependency the
+    ledger cannot state.
+    """
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
+    (directory / "done").mkdir()
+    (directory / "done" / "b.md").write_text(
+        "---\nid: TE-0\ntitle: t\ntype: feature\npriority: 3\n"
+        "depends_on: []\ntouches: [b.py]\nforbidden: []\n"
+        "budget_usd: 5\nmax_attempts: 2\nrisk: standard\n"
+        "acceptance:\n"
+        "  - claim: the module declares CEILING = 60\n"
+        "    witness: tests/test_b.py::test_declared\n"
+        "    mutant:\n"
+        "      file: b.py\n"
+        "      find: 'CEILING = 60'\n"
+        "      replace: 'CEILING = 0'\n"
+        "---\n\nbody\n"
+    )
+    repo_id = _repo(ledger)
+
+    candidates, refusals = build_queue(directory, repo_id, ledger)
+
+    assert "TE-1" in [c.spec.id for c in candidates]
+    assert [r for r in refusals if r.path.name == "a.md"] == []
+    # And it is still not offered as a candidate itself: crediting the
+    # dependency is not the same as admitting the spec.
+    assert "TE-0" not in [c.spec.id for c in candidates]
+
+
 def test_an_unreadable_retired_spec_is_refused_by_path_not_only_by_silence(
     tmp_path, ledger
 ):
@@ -1808,9 +1851,13 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     # spec also dictates, and `SA-0063` is the spec item 82 was written about —
     # it mandated the exact heading its own mutant pins so the mutant would
     # match. It is the only one of this repo's 54 specs the check refuses.
-    # A discovery failure sorts ahead of the parsed candidates, so it is first.
-    assert refusals[0].path.name.startswith("SA-0063")
-    assert "mutant names text this spec also puts in body" in refusals[0].reason
+    #
+    # Selected by name, not by index. `build_queue` does put discovery
+    # failures ahead of candidate refusals, but nothing states that as a
+    # contract, and a check that reads `refusals[0]` goes blind the day the
+    # order changes — which is `d41a613`'s own subject, one commit below this.
+    disclosed = next(r for r in refusals if r.path.name.startswith("SA-0063"))
+    assert "mutant names text this spec also puts in body" in disclosed.reason
 
     # Refused for the parent each actually declares, which is what separates a
     # dependency refusal from a criterion-path one.
@@ -1827,10 +1874,13 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         ("SA-0064", "SA-0063"),
     ]
     assert len(refusals) == len(chain) + 1
-    for refusal, (child, parent) in zip(refusals[1:], chain, strict=True):
-        assert refusal.path.name.startswith(child)
-        assert parent in refusal.reason
-        assert "depends_on" in refusal.reason
+    by_child = {
+        child: next(r for r in refusals if r.path.name.startswith(child))
+        for child, _ in chain
+    }
+    for child, parent in chain:
+        assert parent in by_child[child].reason
+        assert "depends_on" in by_child[child].reason
     # And the retired corpus stays invisible: `discover_specs` globs
     # non-recursively, so forty-odd shipped specs one directory down are not
     # offered as tonight's work.
