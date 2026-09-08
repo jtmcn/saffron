@@ -1,0 +1,50 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.5328054,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "blocker",
+        "file": "saffron/cell/worktree.py",
+        "line": 422,
+        "claim": "`source_mutated`'s undo is `git checkout HEAD -- <file>`, which silently discards *any* uncommitted change to that file, not just the mutation it applied \u2014 and its own docstring (line 394) justifies this by claiming `committed` guarantees the tree is already committed before any gate runs. That guarantee is not actually enforced: in `session.py`, `commit_dirty` is only invoked on the `AgentFailed`/crash paths (session.py:1452-1455, 1573-1576), never after an ordinary successful repair turn, and `committed_gate` itself is computed (session.py:1049) only *after* `declared = run_suite(...)` (session.py:1008) has already run `witness`/`source_mutated` and reverted with `git checkout HEAD --`. If the mutant's target file happens to hold uncommitted implementer edits when a repair attempt's gate suite runs \u2014 plausible, since a criterion's mutant typically names the very source file the task is editing \u2014 that work is destroyed by the checkout before `committed_gate` even samples `dirty_paths`, and because the checkout erases the evidence, `committed` can then report `pass` (clean) even though real work was just lost. No existing test exercises a dirty target file at mutation time (`tests/test_worktree.py`'s fixtures always commit and stay clean before calling `source_mutated`), so nothing here would catch it, and the failure mode is currently dormant only because no spec in this repo yet declares a mutant.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.3579243,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "saffron/cell/worktree.py",
+        "line": 418,
+        "claim": "`_write_file` (the call that actually truncates and rewrites `mutant.file` via `> path` inside the container) runs before the `try/finally` that restores from `HEAD`, unlike `source_reverted` a few lines above it (341-345) which wraps its own mutating call in the same `try` that guarantees a restore. If the write's shell pipeline opens/truncates the destination and then fails partway (disk pressure, the exec losing the connection after the redirect took effect, etc.), `_write_file` raises before `source_mutated` ever reaches `yield None`, so `witness_gate`'s `applied` flag (witness.py lines 78-85, 142-154) is still `False` and the failure is reported as \"could not apply {file}'s mutant\" \u2014 the message that means nothing was touched \u2014 when the file may in fact be left mutated with no restore attempted. witness.py's own docstring names this exact case as the one obligation `host_mutator` satisfies for free but a 'container exec that applies the edit and then loses the connection' does not, and calls a mutated tree reported this way 'the silent dirty tree this gate exists to refuse.' The docstring on `source_mutated` (403-405) claims 'any other failure to apply... raises... never a verdict on the claim' but does not honor the stronger invariant witness.py documents: a raise from entry must mean nothing changed. The gates cannot see this because it requires the write to fail after partially succeeding, a case none of the added tests exercise (they only fail `_read_file` or the undo `_git checkout`, never `_write_file` itself).",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.6119142000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "tests/test_worktree.py",
+        "line": 1049,
+        "claim": "Every mutant used against `source_mutated` across this file (lines 1049, 1065, 1092, 1099, 1112) has `find`/`replace` text drawn only from identifiers, digits and punctuation like `:`/`<`/`=` \u2014 none contains a quote, backslash, or `$`/backtick. `worktree._write_file`'s own docstring names quotes and backslashes by name as exactly what base64-encoding the content exists to make safe for the `printf \u2026 | base64 -d` shell line. Replacing `_write_file`'s body with `script = f\"printf '%s' '{content}' > {shlex.quote(path)}\"` (dropping the base64 round trip and interpolating `content` raw inside a naive single-quoted shell string) would pass every test in this file unchanged, since no fixture's mutated content contains a `'`, yet it would corrupt or fail on any real Python source line containing a string literal (`raise ValueError(\"bad\")`, `x = 'y'`), which is the ordinary shape of the source this mutator is meant to edit. No test would catch that regression.",
+        "anchored": true
+      }
+    ]
+  }
+]

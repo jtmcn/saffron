@@ -1,0 +1,50 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.44650709999999993,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/cell/worktree.py",
+        "line": 358,
+        "claim": "`_read_file` gets the file's content via `runtime.exec_(container, [\"cat\", path], ...)`, whose `Completed.stdout` is produced by `runtime.py`'s `_decode`, which decodes with `errors=\"replace\"` (`saffron/cell/runtime.py:111-114`). Any byte in the target file that is not valid UTF-8 is silently turned into U+FFFD before `_write_file` re-encodes and writes the content back (line 376), permanently altering unrelated bytes in the file for the duration of the mutated window even though the intended edit is only `mutant.find` -> `mutant.replace`. `apply_mutant` (`saffron/mutation.py`), the host implementation this one is meant to parallel, works on raw bytes end-to-end and has no such lossy round trip, so a repo whose source is not pure UTF-8 (a real possibility in production target repos, unlike the ASCII-only fixtures `tests/test_worktree.py` uses) gets a different, corrupting mutation behavior under the cell mutator than under the host one, which can turn a legitimate mutant application into spurious tree corruption and a false `error` from the `tests` gate rather than a real witness verdict.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.5025405,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "saffron/cell/worktree.py",
+        "line": 418,
+        "claim": "`source_mutated` writes the mutant via `_write_file`, whose script (`printf ... | base64 -d > path`, line 377-378) truncates the destination as part of opening the redirect before `base64 -d` produces a byte. If that exec fails after the shell has already opened/truncated the file (disk pressure, a killed exec, any non-zero exit from `base64 -d`), `_write_file` raises before `source_mutated` ever reaches `try: yield None` \u2014 this is a raise from `__enter__`, so `witness_gate` (saffron/gates/core/witness.py:142-175) never sets `applied=True` and reports 'could not apply', while the tree has actually been left mutated (truncated) with no restore attempted (the `finally`'s `git checkout HEAD` never runs because `__exit__` is never invoked on a `__enter__` failure). `witness.py`'s own contract comment (lines 78-85) names exactly this shape as reachable for a container-exec mutator and calls it the one case that can 'understate a dirty tree' \u2014 the obligation this implementation was supposed to meet is documented but not honored, and no test in the diff exercises a `_write_file` failure to catch it.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.9169020000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "tests/test_worktree.py",
+        "line": 1049,
+        "claim": "Every `source_mutated` test builds a `Mutant` whose `find`/`replace` is plain identifier-and-operator text (\"if amount < 0:\", \"value = 1\") with no quote, backslash, `$`, or embedded newline \u2014 exactly the class of character `_write_file`'s own docstring (worktree.py:366-382) says base64-encoding exists to survive, since a mutant's find/replace is drawn from real source text that routinely contains string-literal quotes. Replacing `_write_file`'s body with a naive `script = f\"printf '%s' '{content}' > {shlex.quote(path)}\"` (dropping base64 and shlex-quoting the content directly) would keep every test in this file green, since none of their fixtures contain a `'`, yet it would break \u2014 producing a shell syntax error or silently truncated write \u2014 on the realistic mutants (e.g. a `find` over a line containing a string literal) the mechanism is meant to support once a spec actually declares one.",
+        "anchored": true
+      }
+    ]
+  }
+]

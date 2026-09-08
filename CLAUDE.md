@@ -113,6 +113,11 @@ exception has a shape worth memorising: **core invokes declared gates, never too
 - `images/agent_runner.py` — the **only** file permitted to import the Agent SDK (gated). It runs
   inside the cell and emits Saffron's own event schema on stdout, one JSON line per event.
   The host never sees an SDK type.
+- `harness/` — measures Saffron rather than shipping in it: `lens_scoring.py`
+  scores REVIEW against a fixture whose defects are declared
+  (`docs/evidence/fixtures/`). Not imported by `saffron/`, and the drivers that
+  spend money live in `docs/evidence/scripts/` so the part that can be wrong in
+  silence is the part with tests.
 - `saffron/replay.py` — v0 only; v1 deletes it.
 
 ### Invariants worth knowing before editing

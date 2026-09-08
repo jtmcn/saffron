@@ -1,0 +1,89 @@
+# PR #154 (`SA-0062`), the known-bad diff of BACKLOG item 79.
+#
+# REVIEW filed 0 blockers and 3 concerns here and the task reached
+# READY_FOR_REVIEW at $8.70. The independent pass over the same range found the
+# two defects below and graded both critical. Neither was filed at any severity.
+#
+# Provenance, all four inputs frozen rather than rebuilt per pass — the thing
+# being measured is the lens prompt, so nothing else may vary:
+#   diff.patch      git diff 91b6eda..78a25a2, asserted byte-identical to the
+#                   recorded ~/.saffron/batches/v0/SA-0062/patch.diff
+#   spec_body.md    the spec at base, plus context.criteria_section, the way
+#                   session.py's REVIEW call assembles it (`spec_body=`, at
+#                   both call sites). Cited by symbol: the line numbers here
+#                   went stale on the branch that wrote them.
+#   gates.txt       review.gate_summary over the ledger's 14 gate_results rows.
+#                   DEVIATION, and a live confound rather than a footnote:
+#                   gate_results has no `tool` column, so all 14 lines read
+#                   "no tool reported" where the original named tools. §5.4
+#                   makes `tool` what separates a gate that ran from one that
+#                   never did, and `gate_summary` exists so "a critic told a
+#                   gate passed should be able to see which did". A lens told
+#                   fourteen gates ran and none naming a tool has reason to
+#                   distrust them and dig harder — which biases toward *more*
+#                   findings, the direction of every conclusion drawn here.
+#   context.md      CONTEXT.md at base. `_SAFFRON_ROOT / "CONTEXT.md"` in
+#                   session.py reads the host's working copy, so this is that
+#                   file as it stood, not a mirror export.
+
+spec_id = "SA-0062"
+pr = 154
+base_sha = "91b6eda8092fb60a909259177fd348ab0b1a0230"
+# Full, not abbreviated: `_read_head_at` runs `git show <head_sha>:<path>`,
+# and an abbreviation is one collision away from ambiguous. `render_table`
+# truncates it for display.
+head_sha = "78a25a23752a577de97108b794a5dfb77c6d9d33"
+source = "docs/BACKLOG.md item 78, missed by REVIEW per item 79"
+
+# The score the frozen recorded-findings.json must produce. Asserted before any
+# paid pass is scored: a predicate that cannot reproduce the one run we know the
+# answer to may not be trusted with a run we do not.
+recorded_seen = 0
+recorded_graded = 0
+
+[[defects]]
+id = "dirty-restore"
+file = "saffron/cell/worktree.py"
+lines = [386, 426]
+owner = "correctness"
+min_severity = "blocker"
+# The undo is `git checkout HEAD -- <file>` with no dirty check, so it destroys
+# uncommitted agent work and leaves `committed` — the gate whose job is to
+# notice a dirty tree — looking at a clean one. `revert.py:180` refuses to
+# cause exactly this. The docstring at 391-397 asserts the opposite premise.
+#
+# CORRECTED after the first scoring pass, 2026-09-07. `dirty` and `destroy`
+# were here and both are too generic: run 1's contract lens described the
+# *other* defect and quoted `witness.py`'s phrase "understate a dirty tree",
+# which scored this one and reported the pass exactly backwards. What is
+# specific to this defect is whose work the undo throws away, so the phrases
+# now name that and nothing else.
+must_mention = ["uncommitted", "not committed", "not yet committed"]
+
+[[defects]]
+id = "truncating-write"
+file = "saffron/cell/worktree.py"
+# 366-426, not 366-382: the write is in `_write_file`, but a lens reasoning
+# about what a failed write leaves behind anchors on the *call site* inside
+# `source_mutated`, which is where the missing try/finally is. All three runs
+# of the first pass filed it at 418. A range that stops at the callee scores
+# the defect missed while the lens is filing it as a blocker.
+lines = [366, 426]
+owner = "contract"
+min_severity = "blocker"
+# `> path` truncates before `base64 -d` writes anything, so a non-zero exit
+# raises out of __enter__ over a file that is now mutated or empty.
+# `witness.py:79` states the contract this breaks — "a raise from `__enter__`
+# must mean nothing was changed" — and names this precise shape as the one a
+# host mutator cannot reach.
+#
+# The adequacy lens filed a concern at line 379, inside this range, saying the
+# raise is untested. That is a different claim: it is about the test, not about
+# what the raise leaves on disk. Separating the two is what these phrases are
+# for, and the calibration case is what proves they do.
+# `truncat` carries the mechanism and every run of the first pass used it.
+# `restore` and `leaves the file` were here and are dropped: this range now
+# overlaps `dirty-restore`'s, whose claims talk about restoring from HEAD, so
+# a phrase about restoring cannot tell the two apart. The phrases are the only
+# discriminator between these two defects now, by design.
+must_mention = ["truncat", "partially written", "half-written"]

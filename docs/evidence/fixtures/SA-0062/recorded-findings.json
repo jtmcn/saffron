@@ -1,0 +1,50 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.7283703000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/cell/worktree.py",
+        "line": 358,
+        "claim": "`_read_file` gets file content via `runtime.exec_`, whose `Completed.stdout` is produced by `_decode()` in runtime.py (`data.decode(\"utf-8\", errors=\"replace\")`) \u2014 any byte in the source file that is not valid UTF-8 is silently replaced with U+FFFD before `source_mutated` ever sees the content. `_write_file` (line 376-378) then re-encodes that already-lossy `str` with `.encode()` and overwrites the whole file, so any file that isn't clean UTF-8 (a Latin-1-declared source file, a stray non-UTF-8 byte in a docstring or fixture) gets silently corrupted outside the intended find/replace span for the whole duration of the mutated block. The sibling host implementation this spec is explicitly modeled on (`saffron/mutation.py`) reads and writes raw bytes for exactly this reason ('byte-identical, including a trailing newline or a CRLF line ending that text mode would otherwise normalize away') but that invariant is dropped here without comment \u2014 it happens to hold for this repo's own ASCII/UTF-8 source (where gates and tests pass) but is not guaranteed for an arbitrary target repo in production.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.5233029,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/gates/runner.py",
+        "line": 308,
+        "claim": "run_suite's docstring still says \"no production caller can supply one until `SA-0061` wires a stub\" \u2014 but this diff's session.py now binds `worktree.source_mutated` as a real, production `mutate` on every cell run, so the claim is false the moment this merges. `saffron/gates/**` is forbidden to this spec, so the file is correctly left untouched, but the spec itself anticipates exactly this case (\"that is a finding to file rather than a signature to edit from this side\") \u2014 the docstring should be updated in a follow-up so a reader of run_suite's contract isn't told the opposite of what session.py now does.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.7255547999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cell/worktree.py",
+        "line": 379,
+        "claim": "The 'failure to apply raises' acceptance criterion is only tested for the read half of apply (`_read_file`, via the 'cat exploded' case in `test_a_failed_undo_raises_rather_than_reporting_a_verdict`), never for `_write_file`'s own non-zero-exit branch here. Deleting the `if done.returncode != 0: raise ...` block at lines 379-382 keeps every test in `tests/test_worktree.py` and `tests/test_session.py` green, since none of them ever makes the `sh -euc` write script fail \u2014 but a real write failure (disk full, a `base64 -d` error, a permission problem) would then be silently treated as an applied mutant, and `witness_gate` would proceed to run tests against a tree that was never actually mutated, able to report a false `pass` instead of the required `error`.",
+        "anchored": true
+      }
+    ]
+  }
+]

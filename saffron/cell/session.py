@@ -754,6 +754,163 @@ def run_one_cell(
     return outcome
 
 
+def cell_up(
+    *,
+    repo: Path,
+    mirror: Path,
+    tree_base: str,
+    branch: str,
+    network: str,
+    volume: str,
+    state: str,
+    container: str,
+    gates_dir: Path,
+    thread_env: Mapping[str, str],
+    created: set[str],
+    note: Callable[[str, str], None],
+) -> None:
+    """Bring a cell up: network, proxy, image, isolation asserts, worktree.
+
+    Extracted from `_drive_cell` so a second caller cannot get a *nearly*
+    isolated cell. The order is load-bearing and was found by spike rather than
+    reasoned — the proxy before any container, the host-port probe before the
+    worktree — so a paraphrase of it somewhere else is the shape Appendix I
+    describes: every mechanism reports success and applies to a different
+    container. One copy, and the callers differ only in what they do after it.
+
+    `created` is the caller's leak ledger, appended to in place, so a failure
+    part-way leaves the caller holding exactly what may survive. `note` takes
+    the progress lines: `_drive_cell` sends them to `Preflight` events, and a
+    harness may simply print them.
+
+    Nothing bound here outlives the call — the proxy address, the built image
+    tag and the probed port list are all consumed before it returns.
+    """
+    from saffron import preflight
+    from saffron.cell import proxy, runtime, worktree
+    from saffron.repos import image
+
+    # Inside the guarantee, not above it: a leftover network from a SIGKILLed
+    # run makes `create_network` the first thing that raises on a re-run.
+    runtime.remove_network(network)
+    runtime.remove_volume(volume)
+    runtime.remove_volume(state)
+    created.add(network)
+    runtime.create_network(network)
+
+    # First of everything: on apple/container 1.3.0 a container on the
+    # internal network before the proxy leaves it no route out (evidence
+    # 2026-08-28), and a dead route found here costs one container start
+    # rather than an image build and an attempt (§5.1.1).
+    note("proxy_starting", "starting the proxy")
+    proxy_ip = proxy.start_proxy(network)
+    note("proxy_addr", f"proxy at {proxy_ip}")
+    answered = preflight.assert_proxy_reaches_upstream(
+        image.BASE_TAG, network, proxy_ip
+    )
+    note("egress", f"proxy reaches {proxy.UPSTREAM_HOST} ({answered})")
+
+    # The cell runs the repo's own image, never the base: the base carries
+    # no toolchain, so every gate would error before the agent is reached.
+    note("image", f"building {image.cell_tag(repo)}")
+    cell_image = image.build_cell_image(repo)
+
+    # Probed from the base image, not the repo's. The probe runs `python`,
+    # and core must not require an interpreter inside every target repo's
+    # image — a Rust repo could then never start a cell (§2.1). What the
+    # probe establishes is a property of the network, which both images
+    # join identically.
+    # The port count is the operator's evidence that enumeration ran: a
+    # probe covering nothing is what a silent failure looks like. The
+    # tolerated listeners print every run, including when there are none —
+    # an exception that goes quiet is the invisibility it was granted around.
+    ports, tolerated = preflight.host_probe_ports()
+    note(
+        "ports",
+        f"probing {len(ports)} host ports at "
+        + ", ".join(preflight.probe_addresses())
+        + "; tolerating "
+        + (", ".join(tolerated) or "nothing"),
+    )
+    # The list the operator was just shown, not a second one taken now. No
+    # cell exists yet, and none will until this returns.
+    preflight.assert_host_is_unreachable(image.BASE_TAG, network, ports)
+
+    created.add(volume)
+    runtime.create_volume(volume)
+    # The state volume and the container are recorded inside, each against
+    # its own create: an ephemeral seed container runs between them.
+    worktree.prepare_worktree(
+        created=created,
+        mirror=mirror,
+        volume=volume,
+        # The tree's base, already resolved — `prepare_worktree` does
+        # not re-derive it. `base_sha` still pins the gates and policy.
+        base_sha=tree_base,
+        branch=branch,
+        image=cell_image,
+        container=container,
+        network=network,
+        env=cell_env(proxy_ip, thread_env),
+        gates_dir=gates_dir,
+        state_volume=state,
+    )
+    note("cell_up", f"{container} up, worktree at {tree_base[:8]}")
+
+
+def cell_down(
+    *,
+    network: str,
+    volume: str,
+    state: str,
+    container: str,
+    created: set[str],
+    note: Callable[[str, bool, str], None],
+) -> None:
+    """Take a cell down: container, proxy log, proxy, network, volumes.
+
+    `cell_up`'s pair, extracted for the same reason — a second caller cannot get
+    a *nearly* complete teardown. The order is load-bearing: the proxy is a
+    container on this network, so stopping it after `remove_network` leaves both
+    behind, and `remove_network` reports that only through a return code. The
+    harness paraphrased this block once and its first run died on "network
+    saffron-cells already exists".
+
+    `created` is the caller's leak ledger, read here rather than written: a
+    non-zero exit is a leak only for something this caller made. `note` takes
+    (step, ok, detail) — `_drive_cell` sends them to `Teardown` events, a
+    harness may simply print them.
+
+    A non-zero exit is reported, never raised — callers run this from a
+    `finally`. `CellRuntimeError` still escapes if the runtime binary itself
+    cannot be executed, as it did before this was extracted.
+    """
+    from saffron.cell import proxy, runtime
+
+    removed = [("container", container, runtime.remove_container(container))]
+    # Before the proxy goes: its log goes with it.
+    for denied in proxy.denied_egress():
+        note("proxy_denied", False, f"proxy DENIED {denied}")
+    # Not a denial: an allowed CONNECT the proxy could not open. Reported apart
+    # because the fix is the network, not the allowlist.
+    for failed in proxy.failed_egress():
+        note("proxy_failed", False, f"proxy FAILED {failed}")
+    proxy.stop_proxy()
+    removed.append(("network", network, runtime.remove_network(network)))
+    # Volumes go too, or the same spec_id cannot be re-run.
+    removed.append(("volume", volume, runtime.remove_volume(volume)))
+    removed.append(("volume", state, runtime.remove_volume(state)))
+    # Pre-cleaning tolerates absence; here a non-zero exit is a leak, and a
+    # silent one is what let the state volume survive teardown unnoticed.
+    for kind, name, done in removed:
+        if done.returncode != 0 and name in created:
+            note(
+                "survived",
+                False,
+                f"{kind} {name} survived — {done.stderr.strip()[:160]}",
+            )
+
+
 def _drive_cell(
     spec: CellSpec,
     *,
@@ -765,9 +922,8 @@ def _drive_cell(
     exported: dict,
 ) -> CellOutcome:
     """`run_one_cell`'s whole body. `exported` is teardown's way out."""
-    from saffron import preflight
     from saffron.agents import artifacts, context
-    from saffron.cell import proxy, runtime, worktree
+    from saffron.cell import runtime, worktree
     from saffron.gates.contract import witness_blocking
     from saffron.gates.core.census import census_gate
     from saffron.gates.core.committed import committed_gate
@@ -777,7 +933,6 @@ def _drive_cell(
     from saffron.gates.core.scope import scope_gate
     from saffron.gates.core.size import size_gate
     from saffron.gates.runner import CellExecutor, run_gate, run_suite
-    from saffron.repos import image
     from saffron.repos import mirror as mirror_ops
     from saffron.repos.policy import PolicyError, effective_risk, load_policy
 
@@ -880,72 +1035,20 @@ def _drive_cell(
     spent = 0.0
 
     try:
-        # Inside the guarantee, not above it: a leftover network from a SIGKILLed
-        # run makes `create_network` the first thing that raises on a re-run.
-        runtime.remove_network(network)
-        runtime.remove_volume(volume)
-        runtime.remove_volume(state)
-        created.add(network)
-        runtime.create_network(network)
-
-        # First of everything: on apple/container 1.3.0 a container on the
-        # internal network before the proxy leaves it no route out (evidence
-        # 2026-08-28), and a dead route found here costs one container start
-        # rather than an image build and an attempt (§5.1.1).
-        _preflight("proxy_starting", "starting the proxy")
-        proxy_ip = proxy.start_proxy(network)
-        _preflight("proxy_addr", f"proxy at {proxy_ip}")
-        answered = preflight.assert_proxy_reaches_upstream(
-            image.BASE_TAG, network, proxy_ip
-        )
-        _preflight("egress", f"proxy reaches {proxy.UPSTREAM_HOST} ({answered})")
-
-        # The cell runs the repo's own image, never the base: the base carries
-        # no toolchain, so every gate would error before the agent is reached.
-        _preflight("image", f"building {image.cell_tag(repo)}")
-        cell_image = image.build_cell_image(repo)
-
-        # Probed from the base image, not the repo's. The probe runs `python`,
-        # and core must not require an interpreter inside every target repo's
-        # image — a Rust repo could then never start a cell (§2.1). What the
-        # probe establishes is a property of the network, which both images
-        # join identically.
-        # The port count is the operator's evidence that enumeration ran: a
-        # probe covering nothing is what a silent failure looks like. The
-        # tolerated listeners print every run, including when there are none —
-        # an exception that goes quiet is the invisibility it was granted around.
-        ports, tolerated = preflight.host_probe_ports()
-        _preflight(
-            "ports",
-            f"probing {len(ports)} host ports at "
-            + ", ".join(preflight.probe_addresses())
-            + "; tolerating "
-            + (", ".join(tolerated) or "nothing"),
-        )
-        # The list the operator was just shown, not a second one taken now. No
-        # cell exists yet, and none will until this returns.
-        preflight.assert_host_is_unreachable(image.BASE_TAG, network, ports)
-
-        created.add(volume)
-        runtime.create_volume(volume)
-        # The state volume and the container are recorded inside, each against
-        # its own create: an ephemeral seed container runs between them.
-        worktree.prepare_worktree(
-            created=created,
+        cell_up(
+            repo=repo,
             mirror=mirror,
-            volume=volume,
-            # The tree's base, already resolved — `prepare_worktree` does
-            # not re-derive it. `base_sha` still pins the gates and policy.
-            base_sha=spec.tree_base,
+            tree_base=spec.tree_base,
             branch=spec.branch,
-            image=cell_image,
-            container=container,
             network=network,
-            env=cell_env(proxy_ip, policy.thread_env),
+            volume=volume,
+            state=state,
+            container=container,
             gates_dir=gates_dir,
-            state_volume=state,
+            thread_env=policy.thread_env,
+            created=created,
+            note=_preflight,
         )
-        _preflight("cell_up", f"{container} up, worktree at {spec.tree_base[:8]}")
 
         executor = CellExecutor(container)
 
@@ -1877,7 +1980,7 @@ def _drive_cell(
         raise
     finally:
 
-        def _teardown(step: str, *, ok: bool = True, detail: str = "") -> None:
+        def _teardown(step: str, ok: bool = True, detail: str = "") -> None:
             emit(
                 Teardown(
                     timestamp=time.time(),
@@ -1889,33 +1992,19 @@ def _drive_cell(
             )
 
         _teardown("start")
-        # First, and on every path the exception one included: the export execs
-        # inside the cell, so it must precede the container's removal as well as
-        # the volume's. An EXHAUSTED run with commits is worth reading too.
+        # Before `cell_down`, on every path the exception one included: the
+        # export execs inside the cell, so it must precede the container's
+        # removal as well as the volume's. An EXHAUSTED run with commits is
+        # worth reading too.
         if container in created:
             exported["head_sha"], exported["subjects"] = export_patch(
                 container, spec, task_dir, emit
             )
-        removed = [("container", container, runtime.remove_container(container))]
-        # Before the proxy goes: its log goes with it.
-        for denied in proxy.denied_egress():
-            _teardown("proxy_denied", ok=False, detail=f"proxy DENIED {denied}")
-        # Not a denial: an allowed CONNECT the proxy could not open. Reported
-        # apart because the fix is the network, not the allowlist.
-        for failed in proxy.failed_egress():
-            _teardown("proxy_failed", ok=False, detail=f"proxy FAILED {failed}")
-        proxy.stop_proxy()
-        removed.append(("network", network, runtime.remove_network(network)))
-        # Volumes go too, or the same spec_id cannot be re-run.
-        removed.append(("volume", volume, runtime.remove_volume(volume)))
-        removed.append(("volume", state, runtime.remove_volume(state)))
-        # Pre-cleaning tolerates absence; here a non-zero exit is a leak, and
-        # a silent one is what let the state volume survive teardown unnoticed.
-        # Reported, never raised: this is a `finally`.
-        for kind, name, done in removed:
-            if done.returncode != 0 and name in created:
-                _teardown(
-                    "survived",
-                    ok=False,
-                    detail=f"{kind} {name} survived — {done.stderr.strip()[:160]}",
-                )
+        cell_down(
+            network=network,
+            volume=volume,
+            state=state,
+            container=container,
+            created=created,
+            note=_teardown,
+        )

@@ -35,6 +35,16 @@ elevate_on:
   # snippet that remains — so the gate certifies it and reports `pass` on a tree
   # carrying the violation. The snippets are what prove a rule fires at all.
   - .saffron/rule-tests/**
+  # The scorer decides whether a lens change looks better, and its predicate is
+  # authored from the runs it grades — the tuning risk `calibrate` exists for and
+  # does not fully cover.
+  - harness/**
+  # The lever the sentence above describes is here, not in `harness/`: every line
+  # range and phrase is declared in a fixture, and the published numbers are
+  # re-derived from a pass's run JSON. Widen a range, drop a phrase or edit a run
+  # and the matching assertion, and `make check` is green on a moved number.
+  - docs/evidence/fixtures/**
+  - docs/evidence/passes/**
 
 protected:
   - DESIGN.md

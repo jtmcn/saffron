@@ -50,11 +50,12 @@ evidence. That is the gate now, and it is one cheap spec away.
 
 ### Tier 1 — breaks at 03:00 with nobody watching
 
-Soundness first: **79**, **69**, **80** (with **83**, **85**, **84**, **82**,
-**81** from tier 3, which are why 69's gate cannot yet be declared against
-safely), then the remainder of **71**. Honesty second: **73**, **70**, **45**,
-**51** (with **49**/**50**, which its fix closes), **47**, **46**, **40**,
-**26**, **7**, and the remainder of **78**.
+Soundness first: **79**, **88** (79's own harness, and what decides whether
+79's exit criterion can be read as an absolute), **69**, **80** (with **83**,
+**85**, **84**, **82**, **81** from tier 3, which are why 69's gate cannot yet
+be declared against safely), then the remainder of **71**. Honesty second:
+**73**, **70**, **45**, **51** (with **49**/**50**, which its fix closes),
+**47**, **46**, **40**, **26**, **7**, and the remainder of **78**.
 
 Closed since the 2026-09-04 sort, and left in place because their numbers are
 cited: **74** is done (`SA-0063`, `SA-0064`); **71** is two-thirds done and
@@ -68,9 +69,16 @@ built to catch exactly that; and REVIEW filed no blocker on the one diff that
 destroyed a worktree.
 
 **79 is 69's sibling and no longer the only one of its kind.** 69 is the lens
-failing at a question only running can answer; 79 is a question no lens owns at
-all. Both bear on the same thing: whether a `0 blockers` line means the diff is
-sound or means nobody looked.
+failing at a question only running can answer; 79 is the same lens answering it
+in two runs of three and not the third — measured, so the item's own "a question
+no lens owns" is retired in place. Both bear on the same thing: whether a
+`0 blockers` line means the diff is sound or means nobody looked.
+
+**88 is directly under 79** rather than filed behind it. The harness that
+measured 79 reads three times harsher than production on the same diff, so its
+absolute numbers steer nothing until that is explained — and 79's exit criterion
+is written against an absolute. Track C can start on the harness's *differences*
+between two prompts; it cannot be declared met on them.
 
 Each fails in the dark or destroys work no one is awake to rescue. **45** loses
 a run's commits nightly; **51** switches the anti-theater gate off for one
@@ -4378,6 +4386,41 @@ spec came to assert its opposite and pass review.
 
 ## 79. Three lenses read one diff and none asked what a failed write leaves behind
 
+**Status: measured 2026-09-07, and the diagnosis below is wrong on one point.**
+The known-bad diff this item asks for exists — `docs/evidence/fixtures/SA-0062/`,
+scored by `harness/lens_scoring.py` and re-runnable after any lens change. First
+pass, three runs, $5.70: `docs/evidence/2026-09-07-lens-scoring-first-pass.md`.
+
+Both defects **are** raised. The truncating write was filed 3/3, by the
+**contract** lens, reached through `witness.Mutated`'s own written contract; the
+undo-over-uncommitted-work 2/3 by correctness. So *what does the failure path
+leave behind* is not a question no lens owns — the run this item was written
+from is the one where the correctness lens spent itself on a UTF-8 concern
+instead, and a single sample read as a remit gap. What is real is the variance
+in *which* defect a run raises and at what grade: run 1 missed the undo, run 3
+filed the truncating write as a concern, run 2 filed both as blockers. The fix is
+therefore aimed at that spread, not at widening a remit or adding a fourth lens,
+neither of which would have changed run 1. The paragraph below proposing the
+fourth lens is superseded; everything else in the item stands, including the
+`blocker`-for-a-contradicted-criterion suggestion at the end, which is untested.
+
+**Corrected 2026-09-08.** This block first read "run 1 of three would still have
+shipped this pull request green", which the pass's own data contradicts: anchored
+blockers per run are 1, 2, 1 — run 1's contract lens filed the truncating write
+as a blocker at `worktree.py:418` — and §5.5 routes any single anchored blocker
+to REBUT. All three runs would have blocked, against zero on the production run
+of the same range. The number came from `dirty-restore`'s 2/3, a per-defect score
+applied to a per-pull-request claim. The gap it hides is the interesting one and
+is now open as item 88: 3/3 here against 0/1 in production is larger than lens
+variance explains, and the frozen `gates.txt` reading `no tool reported` on all
+14 lines is the leading candidate.
+
+**Still owed by this item:** the independent review itself is not kept beside
+the fixture. `recorded-findings.json` holds REVIEW's *production* output, which
+is what `calibrate` needs; the independent grading survives only as declared
+phrases and severities in `fixture.toml`, sourced from item 78. "With the
+independent review beside it" is not yet literally true.
+
 Found 2026-09-06, comparing REVIEW's output on PR #154 against an independent
 review of the same `base..head`. REVIEW filed **0 blockers and 3 concerns** and
 the task reached `READY_FOR_REVIEW` at $8.70. The independent pass over the same
@@ -4762,6 +4805,48 @@ a reader who follows the citation lands on a paragraph saying nothing reads it.
 Worth deciding separately whether the `revert`/`witness` distinction deserves a
 `CONTEXT.md` §4 line of its own, since three files now state it in three
 wordings. Half an hour.
+
+---
+
+## 88. The scoring harness reads a lens three times as harsh as production, and the fixture is a suspect
+
+**Tier 1**, directly under 79 — it is 79's own measuring instrument, and 79's
+exit criterion is written against an absolute this item puts in doubt.
+**Found 2026-09-07**, in the first lens-scoring pass
+(`docs/evidence/2026-09-07-lens-scoring-first-pass.md`). Over PR #154's exact
+range, the harness's three runs filed anchored blockers 1, 2, 1 — every run
+would have routed to REBUT (§5.5). The production run over the same range filed
+**zero** blockers and three concerns, and reached `READY_FOR_REVIEW`. Same diff,
+same three lenses, same prompts.
+
+A harness that reads a lens as much harsher than production cannot score a
+prompt change: the number it moves is not the number the night produces. This
+is the harness's own version of item 79, and it sits under Track A rather than
+Track C.
+
+Three candidates, in the order they are worth eliminating:
+
+**The frozen `gates.txt`.** All 14 lines read `no tool reported`, because
+`gate_results` has no `tool` column to rebuild them from. §5.4 makes `tool`
+exactly what separates a gate that ran from one that never did, and
+`review.gate_summary` exists so "a critic told a gate passed should be able to
+see which did". A lens told fourteen gates ran and not one named a tool has
+structural reason to distrust them and dig harder — a bias in precisely the
+direction observed. Cheapest to test and the leading suspect.
+
+**Budget and turns.** The original had $3.30 and 90 turns; the pass gave $4.00
+and 30. No lens came near either ceiling in either, so this is unlikely, but it
+is not held constant and the record says so.
+
+**Genuine run-to-run variance**, of which the pass has n=3 over one fixture.
+
+**Done looks like** a `tool` column on `gate_results`, or a fixture whose
+`gates.txt` is captured at review time rather than rebuilt from the ledger —
+then one more pass, and the blocker count compared against production's zero.
+Until that is settled, the harness's absolute numbers steer nothing; only its
+*differences* between two prompts over the same fixture do, which is what Track
+C actually needs. Worth saying in the plan, because item 79's exit criterion is
+written against an absolute.
 
 ---
 
