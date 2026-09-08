@@ -6,11 +6,12 @@ from pathlib import Path
 import pytest
 
 from saffron.cell import runtime
-from saffron.intake import load_spec
+from saffron.intake import discover_specs, load_spec
 from saffron.ledger import Ledger
 from saffron.scheduler import (
     DONE_STATES,
     REQUEUE_STATES,
+    _unmatched_criterion_path,
     build_queue,
     retirement_refusal,
 )
@@ -1784,6 +1785,47 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     # non-recursively, so forty-odd shipped specs one directory down are not
     # offered as tonight's work.
     assert len(list((directory / "done").glob("*.md"))) > 30
+
+
+def test_no_real_spec_names_a_criterion_path_its_touches_do_not_cover(tmp_path):
+    """BACKLOG item 81: the property asserted directly, over every spec, with
+    no ledger and no refusal ordering in front of it.
+
+    The item's own diagnosis does not reproduce and is corrected in the
+    backlog. It claims `_refuse` decides an unsatisfied `depends_on` *before*
+    the criterion-path check, blinding
+    `test_no_real_spec_is_refused_on_its_own_acceptance_criteria` to every
+    chained spec — "53 specs, 31 preempted, 22 examined". The order is the
+    other way round: `scheduler.py:687` is the criterion-path check and the
+    `depends_on` loop is at 697. Measured 2026-09-08 by planting an uncoverable
+    path in each spec in turn and reading what the queue refuses it for: of the
+    32 specs carrying a markdown criteria section, **28 report the
+    criterion-path refusal** and 4 stop on an earlier one. `SA-0016`, named in
+    that test as one of the two it memorialises, is among the 28.
+
+    What is left of the item is still worth this test. That check reaches the
+    property only because of an ordering nothing pins, and it asserts something
+    weaker — that no refusal is a criterion-path refusal — so it goes silently
+    blind the day the order changes. This asserts the property itself. The
+    queue-shaped test keeps its own job, which is that the queue refuses
+    nothing unexpected.
+    """
+    directory = _real_corpus(tmp_path)
+    for path in sorted((directory / "done").glob("*.md")):
+        shutil.move(str(path), directory / path.name)
+
+    specs, failures = discover_specs(directory)
+    assert not failures, f"the corpus no longer parses: {failures}"
+    # A loop that examined nothing would pass silently, which is the failure
+    # mode this test exists to close rather than a stricter form of it.
+    assert len(specs) > 40, f"only {len(specs)} specs scanned"
+
+    named = {
+        found.spec.id: token
+        for found in specs
+        if (token := _unmatched_criterion_path(found.spec)) is not None
+    }
+    assert named == {}
 
 
 def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger):

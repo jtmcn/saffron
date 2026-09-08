@@ -4516,6 +4516,33 @@ cheap once that is settled.
 
 ## 81. The guard against a spec refused on its own criteria never sees 31 of 53 specs
 
+**Status: the diagnosis is wrong, the fix landed anyway, 2026-09-08.** The
+ordering claim below does not hold and did not hold when this was filed:
+`scheduler.py:687` is the criterion-path check and the `depends_on` loop is at
+697, so the dependency is decided *after*, not before. Measured by planting an
+uncoverable path in each spec in turn and reading what the queue refuses it
+for — of the 32 specs carrying a markdown criteria section, **28 report the
+criterion-path refusal** and 4 stop on an earlier one. `SA-0016`, named below
+as a spec the guard cannot reach, is among the 28: it is caught.
+
+The "53 specs, 31 preempted, 22 examined" figure appears to have counted specs
+that carry a `depends_on` (32 of 54 today) rather than specs whose refusal
+preempted the check. That is the number a reader would get by reasoning from
+the ordering rather than by running it, which is what `CLAUDE.md`'s rule is
+about.
+
+What survives is the weaker complaint, and it is real:
+`test_no_real_spec_is_refused_on_its_own_acceptance_criteria` reaches the
+property only because of an ordering nothing pins, and it asserts something
+weaker — that no refusal is a criterion-path refusal — so it goes silently
+blind the day the order changes. So the item's **Done looks like** is
+implemented as written:
+`test_no_real_spec_names_a_criterion_path_its_touches_do_not_cover` runs
+`_unmatched_criterion_path` over every spec `discover_specs` finds, with no
+ledger and no refusal ordering in front of it, and refuses to pass on a corpus
+it did not actually scan.
+
+
 Found filing `SA-0063`, 2026-09-06. That spec shipped with `/work` in an
 acceptance claim; `_unmatched_criterion_path` reads it as a path token, no
 `touches` pattern of that spec matches it, and **a spec refused on its own
