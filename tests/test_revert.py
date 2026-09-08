@@ -645,3 +645,36 @@ def test_a_witness_whose_subject_the_diff_did_touch_is_still_judged():
     )
     assert result.status == "fail"
     assert [f.file for f in result.failures] == [witness]
+
+
+def test_a_mutant_naming_a_test_file_does_not_exempt_its_witness():
+    """The exemption above must not be buyable with one line of frontmatter.
+
+    `source` excludes the repo's declared test paths wholesale, so a subject
+    inside them is outside `source` for every diff there will ever be. Read
+    naively that makes such a witness permanently unreachable and permanently
+    skipped — a standing pass from the anti-theater gate, bought by pointing
+    `mutant.file` at a test. `_argv_safe` above names the same buyable-`skip`
+    shape from the other direction. The subject being a test says nothing
+    about whether the witness leans on the source being reverted, so it is
+    still judged, and here it is theater and reported as such.
+    """
+    witness = "t.py::test_new"
+    criterion = Criterion(
+        claim="the total is clamped",
+        witness=witness,
+        mutant={"file": "tests/test_thing.py", "find": "a", "replace": "b"},
+    )
+
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", witness)],
+        acceptance=[criterion],
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        dirty=lambda: [],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=lambda subset: _tests(*subset),
+    )
+    assert result.status == "fail"
+    assert [f.file for f in result.failures] == [witness]

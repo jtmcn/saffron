@@ -182,21 +182,30 @@ def revert_gate(
     # then left alone leaves this gate equally unable to answer. `source` is
     # the set about to be reverted, which is the thing the question is made of.
     # A criterion declaring no mutant names no subject and is unaffected.
+    #
+    # A subject inside `test_paths` is *not* exempt, though it is outside
+    # `source` by construction: `source` excludes the test paths wholesale, so
+    # exempting a test-file subject would drop that witness from every revert
+    # run there will ever be — one line of frontmatter buying a standing pass
+    # from the anti-theater gate, which is `_argv_safe`'s buyable-`skip` shape
+    # again. The subject being a test says nothing about whether the witness
+    # leans on the source about to be reverted, so it stays judged.
     unreachable = sorted(
-        c.witness
-        for c in acceptance
-        if c.mutant is not None and c.witness in subset and c.mutant.file not in source
+        {
+            (c.witness, c.mutant.file)
+            for c in acceptance
+            if c.mutant is not None
+            and c.witness in subset
+            and c.mutant.file not in source
+            and not any(matches(c.mutant.file, pat) for pat in test_paths)
+        }
     )
     if unreachable:
-        subset = [name for name in subset if name not in set(unreachable)]
+        exempt = {witness for witness, _ in unreachable}
+        subset = [name for name in subset if name not in exempt]
         note += (
-            f" — {len(unreachable)} witness(es) whose subject this diff never "
-            f"touched: "
-            + ", ".join(
-                f"{c.witness} ({c.mutant.file})"
-                for c in acceptance
-                if c.mutant is not None and c.witness in unreachable
-            )
+            f" — {len(exempt)} witness(es) whose subject this diff never "
+            f"touched: " + ", ".join(f"{w} ({f})" for w, f in unreachable)
         )
     if not subset:
         return GateResult(
