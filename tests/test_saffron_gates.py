@@ -1238,6 +1238,24 @@ def test_a_diff_touching_the_structure_surface_reaches_a_person():
         )
 
 
+def test_a_diff_moving_a_published_lens_score_reaches_a_person():
+    """`elevate_on` carried `harness/**` and named the tuning risk in its own
+    comment — a widened line range moves a published number — while every line
+    range, every phrase and every recorded run sat in `docs/evidence/`, which
+    it did not reach. `protected` does not either. The scorer is the code; the
+    fixture and the pass JSON are the inputs it is authored from, and
+    `calibrate` explicitly does not cover them (`harness/lens_scoring.py`).
+    """
+    policy, _ = load_policy(REPO)
+    for path in (
+        "docs/evidence/fixtures/SA-0062/fixture.toml",
+        "docs/evidence/passes/2026-09-07-lens-scoring-first-pass/run-1.json",
+    ):
+        assert any(matches(path, p) for p in policy.elevate_on), (
+            f"{path} decides what the harness's published numbers say"
+        )
+
+
 def test_what_decides_which_files_a_gate_sees_is_routed_to_a_person():
     """`integrity.gate_config` exists because the rules a gate enforces have to
     reach a human, not just the gate's own executable. What a gate can *see* is
