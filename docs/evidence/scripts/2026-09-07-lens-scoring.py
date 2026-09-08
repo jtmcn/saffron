@@ -39,6 +39,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from harness import lens_scoring  # noqa: E402
+from saffron import events  # noqa: E402
 from saffron.cell import proxy, runtime, session  # noqa: E402
 from saffron.phases import implement, review  # noqa: E402
 from saffron.repos import mirror as mirror_ops  # noqa: E402
@@ -71,7 +72,22 @@ def main() -> int:
         help="lens passes over the same diff. A score without its n is the "
         "shape of claim item 69 charged the mutation-vs-lens record with.",
     )
-    parser.add_argument("--budget-usd", type=float, default=4.0)
+    parser.add_argument(
+        "--budget-usd",
+        type=float,
+        default=4.0,
+        help="per lens, the way `run_review` spends it — so the pass ceiling "
+        "is this times three lenses times --runs. Bounded for real by "
+        "--max-spend-usd.",
+    )
+    parser.add_argument(
+        "--max-spend-usd",
+        type=float,
+        default=12.0,
+        help="the pass stops between runs once it has spent this. The "
+        "per-lens budget bounds a lens, not a night: at the defaults it "
+        "leaves a $36 ceiling on a command whose measured cost is $5.70.",
+    )
     parser.add_argument("--max-turns", type=int, default=30)
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
@@ -149,12 +165,31 @@ def main() -> int:
                 budget_usd=args.budget_usd,
                 agent=agent,
                 spec_id=f"{fixture.spec_id}-lensscore-{index}",
-                emit=lambda event: None,
+                # `run_review` emits one `PhaseStart` per lens carrying
+                # `_describe`, and it is the only progress this command has
+                # over the ~8 minutes a run takes.
+                emit=lambda event: print(f"  {events.describe(event)}"),
             )
             (out_dir / f"run-{index}.json").write_text(
                 json.dumps([r.as_dict() for r in reviews], indent=2)
             )
             runs.append(reviews)
+            for review_ in reviews:
+                if review_.error:
+                    # Not a miss: `score_run` drops the whole run. Said here
+                    # too, because by the table it is one line of arithmetic.
+                    print(
+                        f"  ERRORED {review_.lens}: {review_.error}",
+                        file=sys.stderr,
+                    )
+            spent = sum(r.cost_usd for run in runs for r in run)
+            if spent >= args.max_spend_usd and index < args.runs:
+                print(
+                    f"stopping after run {index}: ${spent:.2f} reaches "
+                    f"--max-spend-usd ${args.max_spend_usd:.2f}",
+                    file=sys.stderr,
+                )
+                break
     finally:
         # `_drive_cell`'s teardown, minus the ledger row and the outcome stamp.
         # The order is not a preference: the proxy is a container on this
@@ -179,11 +214,15 @@ def main() -> int:
                     f"  SURVIVED {kind} {name}: {done.stderr.strip()}", file=sys.stderr
                 )
 
-    scores = lens_scoring.score_passes(fixture, runs)
+    try:
+        scores = lens_scoring.score_passes(fixture, runs)
+    except lens_scoring.LensErrored as exc:
+        print(f"nothing to score:\n{exc}", file=sys.stderr)
+        return 1
     table = lens_scoring.render_table(fixture, scores)
     (out_dir / "table.md").write_text(table + "\n")
     spent = sum(r.cost_usd for run in runs for r in run)
-    print(f"\n{table}\n\n${spent:.2f} over {args.runs} runs — raw JSON in {out_dir}")
+    print(f"\n{table}\n\n${spent:.2f} over {len(runs)} runs — raw JSON in {out_dir}")
     return 0
 
 

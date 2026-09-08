@@ -52,6 +52,17 @@ class FixtureError(ValueError):
     """The fixture cannot be read, or declares something unscoreable."""
 
 
+class LensErrored(ValueError):
+    """A run carried a lens that did not run, so the run is not a sample.
+
+    `error` is not `fail` (§5.4): a lens that crashed, blew its turn ceiling or
+    returned something that is not the schema has said nothing about the diff.
+    Averaging it in reads as the lens looking and finding nothing, which is the
+    one thing `review.run_lens`'s own comment forbids — and it lands as a miss,
+    understating exactly what a pass exists to measure.
+    """
+
+
 class CalibrationError(AssertionError):
     """The predicate no longer reproduces a score that is already known.
 
@@ -150,9 +161,23 @@ class Score:
     """What one defect got across a pass of `runs` runs."""
 
     runs: int
+    """Runs actually scored. Never the number requested — a run with an
+    errored lens is dropped, and n has to say so."""
     seen: int
     graded: int
     matches: tuple[Match, ...]
+    errored: int = 0
+    """Runs dropped because a lens in them did not run. Rendered beside the
+    table: a pass quietly averaging four runs as three is the shape of claim
+    item 69 charged the mutation-vs-lens record with."""
+
+
+def _required(table: dict, key: str, where: str):
+    """A missing key is a malformed fixture, not a crash. `KeyError` from
+    inside a loader reads as a bug in the loader."""
+    if key not in table:
+        raise FixtureError(f"{where}: no {key}")
+    return table[key]
 
 
 def load_fixture(root: Path) -> Fixture:
@@ -164,6 +189,7 @@ def load_fixture(root: Path) -> Fixture:
     raw = tomllib.loads(declaration.read_text())
     defects = []
     for entry in raw.get("defects", ()):
+        where = f"{declaration}: defect {entry.get('id', '?')!r}"
         phrases = tuple(p.lower() for p in entry.get("must_mention", ()))
         if not phrases:
             # An empty list would make `any()` false for every finding, so the
@@ -173,35 +199,50 @@ def load_fixture(root: Path) -> Fixture:
                 f"{entry.get('id', '?')}: must_mention is empty, so no finding "
                 "could ever match it"
             )
-        if entry["min_severity"] not in SEVERITY_RANK:
+        severity = _required(entry, "min_severity", where)
+        if severity not in SEVERITY_RANK:
             raise FixtureError(
-                f"{entry['id']}: min_severity {entry['min_severity']!r} is not "
+                f"{where}: min_severity {severity!r} is not "
                 f"one of {sorted(SEVERITY_RANK)}"
             )
-        lines = tuple(entry["lines"])
+        lines = tuple(_required(entry, "lines", where))
         if len(lines) != 2 or lines[0] > lines[1]:
-            raise FixtureError(f"{entry['id']}: lines must be [low, high]")
+            raise FixtureError(f"{where}: lines must be [low, high]")
         defects.append(
             Defect(
-                id=entry["id"],
-                file=entry["file"],
+                id=_required(entry, "id", where),
+                file=_required(entry, "file", where),
                 lines=(lines[0], lines[1]),
-                owner=entry["owner"],
-                min_severity=entry["min_severity"],
+                owner=_required(entry, "owner", where),
+                min_severity=severity,
                 must_mention=phrases,
             )
         )
     if not defects:
         raise FixtureError(f"{root}: declares no defects")
+    # A phrase in two defects' lists credits one claim to both, so k/n stops
+    # being per-defect. Cheap and narrow: it catches a copied list, not the
+    # failure this fixture actually had — `dirty` was unique to its defect and
+    # still matched a claim about the other one. Only real claim text catches
+    # that, which is what the regression tests carry.
+    for defect in defects:
+        for other in defects:
+            shared = set(defect.must_mention) & set(other.must_mention)
+            if other.id != defect.id and shared:
+                raise FixtureError(
+                    f"{declaration}: {defect.id} and {other.id} both declare "
+                    f"{sorted(shared)}, so a claim carrying it scores both"
+                )
+    where = str(declaration)
     return Fixture(
         root=root,
-        spec_id=raw["spec_id"],
-        pr=raw["pr"],
-        base_sha=raw["base_sha"],
-        head_sha=raw["head_sha"],
+        spec_id=_required(raw, "spec_id", where),
+        pr=_required(raw, "pr", where),
+        base_sha=_required(raw, "base_sha", where),
+        head_sha=_required(raw, "head_sha", where),
         source=raw.get("source", ""),
-        recorded_seen=raw["recorded_seen"],
-        recorded_graded=raw["recorded_graded"],
+        recorded_seen=_required(raw, "recorded_seen", where),
+        recorded_graded=_required(raw, "recorded_graded", where),
         defects=tuple(defects),
     )
 
@@ -239,7 +280,17 @@ def match(defect: Defect, findings: Sequence[Finding]) -> Match:
 
 
 def score_run(fixture: Fixture, reviews: Sequence[LensReview]) -> dict[str, Match]:
-    """One run of every lens, scored against every declared defect."""
+    """One run of every lens, scored against every declared defect.
+
+    Refuses a run in which any lens errored, rather than scoring what is left:
+    the lens that owns a defect is often the only one that would have raised
+    it, so a run missing that lens scores the defect missed for a reason that
+    is not about the lens prompt at all.
+    """
+    errored = [r for r in reviews if r.error]
+    if errored:
+        detail = "; ".join(f"{r.lens}: {r.error}" for r in errored)
+        raise LensErrored(f"{fixture.spec_id}: {detail}")
     findings = [f for review in reviews for f in review.findings]
     return {d.id: match(d, findings) for d in fixture.defects}
 
@@ -252,14 +303,30 @@ def score_passes(
     k counts *runs that saw it*, never findings that matched: two matching
     findings in one run are one run that saw it, or a verbose lens outscores an
     accurate one.
+
+    A run with an errored lens is dropped and counted, never scored as a miss
+    (`LensErrored`). If that leaves nothing, this raises rather than returning
+    `0/0`: a table of zeroes over zero runs reads like a measurement.
     """
-    scored = [score_run(fixture, run) for run in runs]
+    scored = []
+    errored = 0
+    for run in runs:
+        try:
+            scored.append(score_run(fixture, run))
+        except LensErrored:
+            errored += 1
+    if not scored:
+        raise LensErrored(
+            f"{fixture.spec_id}: no run survived scoring — {len(runs)} run(s), "
+            f"{errored} with an errored lens. Nothing here is a measurement."
+        )
     return {
         d.id: Score(
-            runs=len(runs),
+            runs=len(scored),
             seen=sum(s[d.id].seen for s in scored),
             graded=sum(s[d.id].graded for s in scored),
             matches=tuple(s[d.id] for s in scored),
+            errored=errored,
         )
         for d in fixture.defects
     }
@@ -269,9 +336,20 @@ def calibrate(fixture: Fixture) -> None:
     """Score the fixture's own recorded findings and check the known answer.
 
     Called before a paid pass, and again as a test in `make check`. The failure
-    it is built to catch is a predicate loosened until a lens looks better:
-    widen a line range or drop a phrase far enough and the run item 79 grades
+    it is built to catch is a predicate loosened until a lens looks better: a
+    range widened or a phrase dropped far enough that the run item 79 grades
     0 of 2 starts scoring above it.
+
+    Its reach is exactly the lines the recorded findings landed on, and that is
+    narrower than it sounds. On `SA-0062` the three recorded findings sit at
+    `worktree.py:358`, `worktree.py:379` and `runner.py:308`, so this asserts
+    one thing: that the adequacy concern at 379 — inside `truncating-write`'s
+    range, about the test rather than about what the raise leaves on disk —
+    does not match its phrases. Nothing recorded lands in `dirty-restore`'s
+    range at all, so that defect's predicate is **unconstrained here** and its
+    guard is the pair of regression tests carrying real claim text instead. A
+    fixture whose defects are all missed by the run it was built from can only
+    be calibrated where that run happened to look.
     """
     scored = score_run(fixture, fixture.recorded_reviews())
     seen = sum(m.seen for m in scored.values())
@@ -314,4 +392,11 @@ def render_table(fixture: Fixture, scores: dict[str, Score]) -> str:
             f"| {score.seen}/{score.runs} | {score.graded}/{score.runs} "
             f"| {', '.join(landed) or '—'} |"
         )
+    dropped = max((s.errored for s in scores.values()), default=0)
+    if dropped:
+        lines += [
+            "",
+            f"**{dropped} run(s) dropped**: a lens errored, so the run says "
+            "nothing about the diff and is not in any n above.",
+        ]
     return "\n".join(lines)

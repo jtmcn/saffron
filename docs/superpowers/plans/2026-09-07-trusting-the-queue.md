@@ -82,8 +82,24 @@ the record rather than felt.
    backlog item graded critical;
 2. every declared mutant is killed by its named witness on the first attempt — no
    survivor, and no `skip` for a reason the spec author could have avoided; and
-3. REVIEW raises at least one of the two graded defects on the known-bad diff
-   from PR #154 (Track A's harness), re-run after any lens change.
+3. REVIEW grades **both** of PR #154's defects in **3 of 3 runs** on Track A's
+   harness, re-run after any lens change.
+
+   *Tightened 2026-09-08, after Track A's baseline pass met the original.* It
+   read "at least one of the two graded defects", which the lenses as they stand
+   already do in 3/3 runs before Track C touches a prompt — a criterion a
+   baseline satisfies steers nothing. The pass's finding was that the failure is
+   variance, not remit: run 1 missed the undo, run 3 graded the truncating write
+   a concern, run 2 got both. Requiring both defects in every run is the smallest
+   threshold that has to move for that spread to close, and it is the number the
+   harness already prints.
+
+   Read it as a *difference* between two prompts over one fixture, never as an
+   absolute: backlog item 88 has the harness filing blockers 1, 2, 1 where
+   production over the same range filed zero, and until that is explained an
+   absolute count off this fixture is not production's count. If item 88 turns
+   out to be the frozen `gates.txt`, re-baseline before reading this criterion
+   as met.
 
 Until the count is met, a batch night is a batch of pull requests each owed a
 human round. Size nights by how many rounds you will do in the morning, not by

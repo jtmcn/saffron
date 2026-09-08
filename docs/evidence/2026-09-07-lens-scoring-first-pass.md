@@ -2,8 +2,11 @@
 
 Backlog item **79**, Track A of `docs/superpowers/plans/2026-09-07-trusting-the-queue.md`.
 Measured 2026-09-07, `main` at `654330a`. **$5.70, three runs of three lenses**
-over one fixture. Raw JSON, one file per run, under
-`~/.saffron/lens-scoring/SA-0062-20260907T225001/`.
+over one fixture. Raw JSON, one file per run, in
+`docs/evidence/passes/2026-09-07-lens-scoring-first-pass/` — kept in the repo
+rather than left under `~/.saffron/`, because a table nobody but its author can
+re-derive is item 79's own complaint one level up. A test re-computes every
+number below from those three files.
 
 The question: item 79 says nobody knows what REVIEW would say about a diff with
 a known defect in it, because no such diff was kept. PR #154's range is now kept
@@ -46,8 +49,20 @@ of this pass filed **both** defects as blockers, and the truncating write was
 raised in all three runs. The lenses as they stand today do own the question.
 What they do not do is answer it reliably, and the original run — the single
 sample item 79 was written from — happens to be the one where the correctness
-lens spent itself on a UTF-8 concern instead. Two of the three runs here would
-have produced a REVIEW that blocked the pull request.
+lens spent itself on a UTF-8 concern instead.
+
+**All three runs would have blocked the pull request**, against zero blockers on
+the production run of the same range. Anchored blockers per run are 1, 2, 1 —
+every finding in this pass anchored — and §5.5 routes any single anchored blocker
+to REBUT. *(Corrected 2026-09-08: this paragraph first read "two of the three",
+taking the number from `dirty-restore`'s 2/3 and applying a per-defect score to a
+per-pull-request claim, two lines under a per-run table that already said run 1
+filed the truncating write as a blocker. A test named for the count now pins it
+to the data.)*
+
+That gap — 3/3 here against 0/1 in production, on the same diff — is larger than
+this pass can explain, and it is the reason the `gates.txt` deviation below is a
+confound and not a footnote.
 
 **The owner in item 79 is wrong, and it changes Track C.** The item proposes
 widening the *correctness* lens's remit, or giving the question to a fourth
@@ -55,15 +70,28 @@ lens. Measured: the **contract** lens raised the truncating write 3/3, reaching
 it through `witness.Mutated`'s written contract — *"a raise from `__enter__`
 must mean nothing was changed"* — which is squarely its own remit, not a stretch
 of it. The correctness lens owns the other defect, 2/3. Neither question is
-homeless. Track C should be re-aimed at the variance, not at the remit: the
-cheap intervention is whatever makes run 1 look like run 2, and adding a fourth
-lens would not have changed run 1.
+homeless. Track C should be re-aimed at the variance, not at the remit — and
+the variance that is left, once every run turns out to have blocked, is narrower
+than "run 1 was green" made it sound: it is *which* defect a run raises and at
+what grade. Run 1 missed the undo entirely; run 3 filed the truncating write as
+a concern. Both are one lens-session away from run 2, which filed both as
+blockers. A fourth lens would not have changed either.
 
-**A `preserves`-style confound is absent here and worth noting.** Neither budget
+**The budget confound is absent; the gate-summary one is not.** Neither budget
 nor turns bound either run. The original had $3.30 and 90 turns and spent
 $0.52–$0.73 per lens; this pass gave $4.00 and 30 turns and spent $0.36–$0.92.
-The parameters were not identical, and are reported rather than smoothed, but
-no lens came near either ceiling.
+The parameters were not identical, and are reported rather than smoothed, but no
+lens came near either ceiling.
+
+The frozen `gates.txt` is a different matter. All 14 lines read `no tool
+reported`, because `gate_results` has no `tool` column to rebuild them from —
+and §5.4 makes `tool` precisely what separates a gate that ran from one that
+never did. A lens told that fourteen gates ran and not one of them named a tool
+has structural reason to distrust the gates and dig harder. That biases toward
+*more* findings, which is the direction of every conclusion here, including the
+3/3-versus-0 gap above. It is the leading candidate for that gap and this pass
+cannot separate it from lens variance. A second pass over a fixture whose gate
+summary names its tools would.
 
 ## The fixture was wrong twice, and the pass is what found it
 
@@ -87,22 +115,43 @@ truncates.
 
 Both corrections were made **after** seeing the runs, which is the tuning risk
 the harness was designed around, so the safeguards are stated rather than
-assumed. The calibration case is unchanged and still holds: the predicate scores
-the fixture's own recorded `findings.json` at 0 seen / 0 graded, the answer item
-79 already wrote down, and the driver refuses to score a pass when it does not.
-The correction made `dirty-restore` **stricter** (3/3 → 2/3) and moved
-`truncating-write` only because all three runs had in fact raised it. Two
-regression tests now carry the real claim text from runs 1 and 2 and assert each
-defect is credited to itself and not the other; re-introducing the `dirty`
-phrase fails one of them.
+assumed — and one of them was first stated too broadly.
+
+**Calibration does not reach either correction, and this record originally
+claimed it did.** The calibration case is unchanged and still holds: the
+predicate scores the fixture's own recorded `findings.json` at 0 seen / 0
+graded, and the driver refuses to score a pass when it does not. But its reach
+is exactly the lines those three recorded findings landed on — `worktree.py:358`,
+`worktree.py:379`, `runner.py:308` — so it asserts one thing: that the adequacy
+concern at 379 does not match `truncating-write`'s phrases. **Nothing recorded
+lands in `dirty-restore`'s range at all**, so dropping `dirty` could not have
+moved calibration, and neither could widening `truncating-write` past 382.
+Measured, not reasoned: calibration passes on the pre-correction fixture, on the
+shipped one, and on the shipped one with `dirty` put back. A fixture built from a
+run that missed both defects can only be calibrated where that run happened to
+look.
+
+**What actually guards the corrections is the regression tests**, which carry
+verbatim claim text from runs 1 and 2 and assert each defect is credited to
+itself and not the other; re-introducing `dirty` fails one of them. Beside them,
+a test re-derives this record's whole table from the committed run JSONs, so a
+predicate change that silently moves a published number fails in `make check`.
+Those are authored from the same runs that motivated the correction, which is
+worth saying plainly rather than dressing up as independent.
+
+The arithmetic the corrections claim does hold: `dirty-restore` went **stricter**
+(3/3 → 2/3), and `truncating-write` moved only because all three runs had in fact
+raised it — scored against the pre-correction fixture the pass reads 3/3 and 0/3,
+close to the exact inverse.
 
 ## Deviations
 
 - The frozen `gates.txt` is rebuilt from the ledger's `gate_results` rows, which
   have no `tool` column, so all 14 lines read `no tool reported` where the
-  original named tools. Recorded in `fixture.toml`.
-- `context.md` is `CONTEXT.md` at base. `session.py:1133` reads the host's
-  working copy at run time, which is not recoverable after the fact.
+  original named tools. Recorded in `fixture.toml`, and treated as a confound
+  above rather than only listed here.
+- `context.md` is `CONTEXT.md` at base. `session.py` reads the host's working
+  copy at run time, which is not recoverable after the fact.
 - The driver's first two attempts failed and cost nothing: `run_review` needs an
   `agent` already bound with `spec_id`, and the first teardown forgot
   `proxy.stop_proxy()`, which left the proxy container attached and made

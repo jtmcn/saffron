@@ -1,0 +1,58 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.8508353999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "blocker",
+        "file": "saffron/cell/worktree.py",
+        "line": 422,
+        "claim": "`source_mutated`'s undo (`git checkout HEAD -- mutant.file`) assumes the file's pre-mutation content already equals HEAD, per the docstring's claim (lines 393-395) that `committed` guarantees the agent's work is committed before any gate runs. That guarantee does not hold: in `session.py`, `committed_gate(worktree.dirty_paths(container))` is computed at line 1049, *after* `declared = run_suite(...)` (which runs `witness`/`source_mutated`) at line 1008, and `commit_dirty` is only ever invoked on the two `except implement.AgentFailed` crash paths (session.py:1451-1455, 1573-1576) \u2014 never after an ordinary successful IMPLEMENT/REPAIR turn. `committed` failing (and routing to REPAIR) is the designed, ordinary way a dirty tree is caught, which means the tree is routinely dirty exactly when `_suite`/`witness` runs. `_read_file` (line 358) deliberately reads the live, possibly-dirty working tree rather than HEAD, but the `finally` undo checks that same file back out to HEAD \u2014 so if `mutant.file` had uncommitted agent edits when `source_mutated` ran, those edits are silently discarded (replaced by HEAD's content, not just the injected mutant), and `committed_gate`, computed afterward against the now-cleaned tree, will see nothing wrong and report `pass`, hiding the loss entirely. This is unreachable by any current test because no spec in this repo declares a mutant yet, but it is the very first thing that will happen once one does.",
+        "anchored": true
+      },
+      {
+        "lens": "correctness",
+        "severity": "note",
+        "file": "saffron/cell/worktree.py",
+        "line": 358,
+        "claim": "`_read_file` returns `runtime.exec_(...).stdout`, which `saffron.cell.runtime._decode` produces with `errors=\"replace\"` (runtime.py:112-114); `_write_file` (line 376) then re-encodes that string with plain `.encode()`. For a source file that is not valid UTF-8, this silently substitutes U+FFFD for the original bytes before writing the mutated file back, unlike `saffron.mutation.apply_mutant`, which this module is described as the byte-for-byte sibling of and which operates on raw bytes throughout. The final `git checkout HEAD` undo still restores the original bytes exactly, so this only corrupts the file transiently during the mutated test run, and it is consistent with how the rest of this module (e.g. `export_patch`, `read_at_head`) already handles cell output, so it is unlikely to matter in practice.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.46493819999999997,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/cell/worktree.py",
+        "line": 418,
+        "claim": "`_write_file` is called outside the `try/finally` that performs the `git checkout HEAD` undo (the `finally` only wraps the later `yield None` at line 419-426). `witness.Mutated`'s own contract (saffron/gates/core/witness.py, lines 71-85) explicitly names this exact shape as the one obligation a raise-from-`__enter__` must satisfy \u2014 'nothing was changed' \u2014 and calls out a container exec that 'applies the edit and then loses the connection' as precisely the non-unreachable case a cell mutator must handle. `_write_file`'s shell script redirects with `> path`, which truncates/opens the destination before `base64 -d` runs; if the exec call fails partway (timeout, dropped connection, disk pressure) after truncation has occurred, `_write_file` raises `CellRuntimeError` before `source_mutated` ever reaches its `try/finally`, so no restore is attempted and `witness_gate` (line 174, `applied` still False) reports 'could not apply' \u2014 the quieter message the contract says is wrong for a tree that was, in fact, written to. No test exercises this exact interleaving: `test_a_failed_undo_raises_rather_than_reporting_a_verdict` only covers `_read_file` failing (nothing written yet) and the undo `git checkout` failing (after a successful write), not a write that fails after partially truncating the file.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 1.0136319,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cell/worktree.py",
+        "line": 379,
+        "claim": "Acceptance criterion 4 requires that 'a failure to apply or to undo raises rather than reporting a verdict', but the new tests only exercise two of the three failure sites: `_read_file` failing (simulated by making `cat` exit non-zero) and the undo `git checkout HEAD` failing. No test ever makes `_write_file`'s exec (the base64-decode-and-redirect step) return non-zero, so the raise at worktree.py:379-382 is dead as far as the suite is concerned. Deleting that `if done.returncode != 0: raise ...` block (turning a failed write into a silent no-op) would leave every test in tests/test_worktree.py and tests/test_session.py green, yet `source_mutated` would then yield `None` (claiming the mutant was applied) even when the tree was never actually mutated \u2014 exactly the false-verdict the criterion says must never happen, and gates cannot see it because it only manifests as a real container write failing, which the suite never triggers.",
+        "anchored": true
+      }
+    ]
+  }
+]

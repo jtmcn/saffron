@@ -9,6 +9,7 @@ is about, whose answer is already written down.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -70,7 +71,7 @@ def test_the_calibration_case_reproduces_the_run_it_was_built_from(sa0062):
 
 def test_a_finding_on_the_defects_lines_without_its_words_is_not_the_defect(sa0062):
     """The collision this predicate exists to survive. The adequacy lens filed a
-    concern at worktree.py:379 — inside `truncating-write`'s 366-382 — saying
+    concern at worktree.py:379 — inside `truncating-write`'s 366-426 — saying
     the raise is untested. That is a claim about the test, not about what the
     raise leaves on disk. Positional matching alone scores it a hit."""
     adequacy = _finding(
@@ -187,3 +188,122 @@ def test_calibrate_refuses_a_predicate_that_moved(sa0062, monkeypatch):
 
 def test_calibrate_passes_on_the_fixture_as_shipped(sa0062):
     lens_scoring.calibrate(sa0062)
+
+
+def test_an_errored_lens_is_never_scored_as_a_lens_that_found_nothing(sa0062):
+    """`error` is not `fail` (§5.4), and `run_lens`'s own comment says a lens
+    that did not run must never read as a lens that found nothing. Scoring the
+    survivors would land the missing lens's defect as a miss — a number about
+    the harness wearing the shape of a number about the prompt."""
+    broke = LensReview(lens="correctness", error="not the schema: nope")
+    with pytest.raises(lens_scoring.LensErrored, match="not the schema"):
+        lens_scoring.score_run(sa0062, [broke])
+
+
+def test_a_run_with_an_errored_lens_is_dropped_from_n_and_counted(sa0062):
+    """Dropped, not fatal: one bad lens must not throw away a paid pass. But n
+    falls to what was actually scored and the drop is carried to the table."""
+    good = _reviews(_finding(line=422))
+    broke = [LensReview(lens="contract", error="max turns")]
+    passes = lens_scoring.score_passes(sa0062, [good, broke, good])
+    assert passes["dirty-restore"].runs == 2
+    assert passes["dirty-restore"].seen == 2
+    assert passes["dirty-restore"].errored == 1
+    assert "1 run(s) dropped" in lens_scoring.render_table(sa0062, passes)
+
+
+def test_a_pass_with_nothing_left_to_score_is_not_a_table_of_zeroes(sa0062):
+    """`0/0` renders like a measurement and is not one. Covers `--runs 0` and a
+    pass every run of which errored."""
+    with pytest.raises(lens_scoring.LensErrored, match="no run survived"):
+        lens_scoring.score_passes(sa0062, [])
+
+
+def test_two_defects_may_not_share_a_phrase(sa0062, tmp_path):
+    """A shared phrase credits one claim to both defects, so k/n stops being
+    per-defect. Narrow by construction: it catches a copied list, not the
+    failure this fixture had — `dirty` was unique and still matched a claim
+    about the other defect."""
+    declaration = (FIXTURE / "fixture.toml").read_text()
+    (tmp_path / "fixture.toml").write_text(
+        declaration.replace(
+            'must_mention = ["truncat"', 'must_mention = ["uncommitted"'
+        )
+    )
+    with pytest.raises(lens_scoring.FixtureError, match="both declare"):
+        lens_scoring.load_fixture(tmp_path)
+
+
+def test_a_fixture_missing_a_key_is_a_fixture_error_not_a_keyerror(sa0062, tmp_path):
+    """A `KeyError` out of a loader reads as a bug in the loader."""
+    declaration = (FIXTURE / "fixture.toml").read_text()
+    (tmp_path / "fixture.toml").write_text(
+        declaration.replace('owner = "correctness"', "")
+    )
+    with pytest.raises(lens_scoring.FixtureError, match="no owner"):
+        lens_scoring.load_fixture(tmp_path)
+
+
+PASS_2026_09_07 = (
+    Path(__file__).parent.parent
+    / "docs"
+    / "evidence"
+    / "passes"
+    / "2026-09-07-lens-scoring-first-pass"
+)
+
+
+def _recorded_pass() -> list[list[LensReview]]:
+    runs = []
+    for index in (1, 2, 3):
+        rows = json.loads((PASS_2026_09_07 / f"run-{index}.json").read_text())
+        runs.append(
+            [
+                LensReview(
+                    lens=row["lens"],
+                    findings=[Finding(**f) for f in row["findings"]],
+                    cost_usd=row.get("cost_usd", 0.0),
+                    error=row.get("error"),
+                )
+                for row in rows
+            ]
+        )
+    return runs
+
+
+def test_the_first_passs_published_table_is_re_derivable(sa0062):
+    """The evidence record's numbers, recomputed from the pass's own JSON.
+
+    The raw runs used to live only under `~/.saffron/`, which made the table in
+    `docs/evidence/2026-09-07-lens-scoring-first-pass.md` unreproducible by
+    anyone but its author — item 79's own complaint, one level up. With them in
+    the repo, a predicate change that silently moves a published number fails
+    here instead of being noticed by nobody.
+    """
+    scores = lens_scoring.score_passes(sa0062, _recorded_pass())
+    assert (scores["dirty-restore"].seen, scores["dirty-restore"].graded) == (2, 2)
+    assert (scores["truncating-write"].seen, scores["truncating-write"].graded) == (
+        3,
+        2,
+    )
+    assert all(s.runs == 3 and s.errored == 0 for s in scores.values())
+
+
+def test_every_run_of_the_first_pass_filed_an_anchored_blocker(sa0062):
+    """The claim the evidence record got wrong, pinned to the data.
+
+    The doc read "two of the three runs would have blocked", taking it from
+    `dirty-restore`'s 2/3. Anchored blockers per run are 1, 2, 1: run 1's
+    contract lens filed the truncating write as a blocker at 418. §5.5 routes
+    any single anchored blocker to REBUT, so no run of this pass was green,
+    against 0 blockers on the production run of the same range.
+    """
+    per_run = [
+        sum(
+            f.severity == "blocker" and f.anchored
+            for review in run
+            for f in review.findings
+        )
+        for run in _recorded_pass()
+    ]
+    assert per_run == [1, 2, 1]

@@ -9,17 +9,30 @@
 #   diff.patch      git diff 91b6eda..78a25a2, asserted byte-identical to the
 #                   recorded ~/.saffron/batches/v0/SA-0062/patch.diff
 #   spec_body.md    the spec at base, plus context.criteria_section, the way
-#                   session.py:1665 assembles it
+#                   session.py's REVIEW call assembles it (`spec_body=`, at
+#                   both call sites). Cited by symbol: the line numbers here
+#                   went stale on the branch that wrote them.
 #   gates.txt       review.gate_summary over the ledger's 14 gate_results rows.
-#                   DEVIATION: gate_results has no `tool` column, so every line
-#                   reads "no tool reported" where the original named tools.
-#   context.md      CONTEXT.md at base. session.py:1133 reads the host's working
-#                   copy, so this is that file as it stood, not a mirror export.
+#                   DEVIATION, and a live confound rather than a footnote:
+#                   gate_results has no `tool` column, so all 14 lines read
+#                   "no tool reported" where the original named tools. §5.4
+#                   makes `tool` what separates a gate that ran from one that
+#                   never did, and `gate_summary` exists so "a critic told a
+#                   gate passed should be able to see which did". A lens told
+#                   fourteen gates ran and none naming a tool has reason to
+#                   distrust them and dig harder — which biases toward *more*
+#                   findings, the direction of every conclusion drawn here.
+#   context.md      CONTEXT.md at base. `_SAFFRON_ROOT / "CONTEXT.md"` in
+#                   session.py reads the host's working copy, so this is that
+#                   file as it stood, not a mirror export.
 
 spec_id = "SA-0062"
 pr = 154
 base_sha = "91b6eda8092fb60a909259177fd348ab0b1a0230"
-head_sha = "78a25a23"
+# Full, not abbreviated: `_read_head_at` runs `git show <head_sha>:<path>`,
+# and an abbreviation is one collision away from ambiguous. `render_table`
+# truncates it for display.
+head_sha = "78a25a23752a577de97108b794a5dfb77c6d9d33"
 source = "docs/BACKLOG.md item 78, missed by REVIEW per item 79"
 
 # The score the frozen recorded-findings.json must produce. Asserted before any

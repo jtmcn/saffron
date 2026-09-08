@@ -35,6 +35,11 @@ elevate_on:
   # snippet that remains — so the gate certifies it and reports `pass` on a tree
   # carrying the violation. The snippets are what prove a rule fires at all.
   - .saffron/rule-tests/**
+  # The scorer decides whether a lens change looks better, and its predicate is
+  # authored from the runs it grades — the tuning risk `calibrate` exists for and
+  # does not fully cover. A diff that widens a line range is a diff that moves a
+  # published number.
+  - harness/**
 
 protected:
   - DESIGN.md
