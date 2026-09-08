@@ -24,6 +24,12 @@ rule nobody checked is item 79 one level up.
 same function `_drive_cell` calls — proxy first, host ports probed, egress
 asserted — because a lens measured inside a weaker cell is measuring something
 else (Appendix I).
+
+Which is also why it must not run while a batch is live: the container and
+volume names are its own, but the proxy and the `saffron-cells` network are
+shared, and `cell_up` removes the network on the way in while `cell_down` stops
+the proxy on the way out. A scoring pass fired during a night takes both from
+under it.
 """
 
 from __future__ import annotations
@@ -36,7 +42,8 @@ import time
 from functools import partial
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT))
 
 from harness import lens_scoring  # noqa: E402
 from saffron import events  # noqa: E402
@@ -159,7 +166,10 @@ def main() -> int:
                 spec_body=fixture.spec_body,
                 gates=fixture.gates,
                 context_md=fixture.context_md,
-                prompts_dir=Path("saffron/agents/prompts").resolve(),
+                # Off the script's own root, not the CWD: a relative resolve
+                # puts the failure inside the run loop, after an image build
+                # and a container start.
+                prompts_dir=ROOT / "saffron" / "agents" / "prompts",
                 max_turns=args.max_turns,
                 budget_usd=args.budget_usd,
                 agent=agent,
