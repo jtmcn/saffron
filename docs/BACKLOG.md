@@ -3939,7 +3939,15 @@ retry inside the loop reintroduces the "does the queue change" question the
 
 ## 71. `witness` is built, wired, and cannot run — the `tree` it needs does not exist in a cell
 
-**Status: two of the three below are done, 2026-09-07.** `SA-0060` (PR #148)
+**Status: done, 2026-09-08.** The third landed: `phases/package.py`'s
+re-verification now passes `acceptance=` and a `worktree.source_mutated` bound
+to each package cell's own container, on both the baseline and the head suite,
+so the two suites have the same shape and `suite_drift` can compare `witness`
+across the two call sites. Safe to pass only because item 83 landed first: a
+witness whose test does not exist at the rebased base is `unproven` there rather
+than an abort.
+
+**Prior status: two of the three below were done, 2026-09-07.** `SA-0060` (PR #148)
 gave `witness_gate` the injected mutator; `SA-0061` (#150) and `SA-0062` (#154)
 made `session._suite` pass `acceptance=` and a real `worktree.source_mutated`,
 and `advisory_gates` now reads `contract.witness_blocking`. Measured on real
@@ -4240,7 +4248,11 @@ agrees with `contract.witness_blocking`. Four statements written while that was
   will currently disagrees.** … a `witness` failure blocks at `standard`
   today."* Both halves. `session._blocking` now reads it.
 - `saffron/gates/runner.py` — *"no production caller can supply one until
-  `SA-0061` wires a stub"*. `SA-0061` is merged.
+  `SA-0061` wires a stub"*. `SA-0061` is merged. **Corrected 2026-09-08 (#166)**,
+  out of order with the other three: that branch added `package.reverify` as a
+  second production caller supplying `mutate`, and leaving a comment known to be
+  false in a file the same diff edits is worse than closing a quarter of this
+  item early. The other three still want the single pass below.
 - `tests/test_witness_gate.py` — *"the reaches half is currently false:
   `witness` is in no `advisory_gates` set, so a failure blocks at every tier"*.
 - `tests/test_witness_gate.py` — *"inserting `if failure.gate == "witness":
@@ -4516,6 +4528,53 @@ cheap once that is settled.
 
 ## 81. The guard against a spec refused on its own criteria never sees 31 of 53 specs
 
+**Status: the diagnosis is wrong, the fix landed anyway, 2026-09-08.** The
+ordering claim below does not hold and did not hold when this was filed:
+`scheduler.py:687` is the criterion-path check and the `depends_on` loop is at
+697, so the dependency is decided *after*, not before. Measured by planting
+`saffron/nowhere/invented.py` in each spec's first checklist box in turn and
+reading what the queue refuses it for — of the **30** specs whose criteria
+`_criteria_texts` reads from the markdown checklist, **28 report the
+criterion-path refusal**. `SA-0016`, named below as a spec the guard cannot
+reach, is among the 28: it is caught. The remaining two are probe-dependent
+rather than a second class — `SA-0021` stops on an earlier `depends_on`
+refusal, and `SA-0001` is not refused at all because its own
+`forbidden: saffron/**` reads the planted token as a citation.
+
+**This paragraph first shipped with the denominator wrong, as 32 of which 4
+stopped earlier — caught in review of #166.** 32 is the count of specs carrying
+a `depends_on`, which is the very coincidence the next paragraph accuses the
+original item of. A corrected measurement that reproduces the error it corrects
+is worth recording rather than quietly fixing: the number was reasoned from the
+population the item named instead of read off the run.
+
+The "53 specs, 31 preempted, 22 examined" figure appears to have counted specs
+that carry a `depends_on` (32 of 54 today) rather than specs whose refusal
+preempted the check. That is the number a reader would get by reasoning from
+the ordering rather than by running it, which is what `CLAUDE.md`'s rule is
+about.
+
+What survives is the weaker complaint, and it is real:
+`test_no_real_spec_is_refused_on_its_own_acceptance_criteria` reaches the
+property only because of an ordering nothing pins, and it asserts something
+weaker — that no refusal is a criterion-path refusal — so it goes silently
+blind the day the order changes. So the item's **Done looks like** is
+implemented as written:
+`test_no_real_spec_names_a_criterion_path_its_touches_do_not_cover` runs
+`_unmatched_criterion_path` over every spec `discover_specs` finds, with no
+ledger and no refusal ordering in front of it, and refuses to pass on a corpus
+it did not actually scan.
+
+**Its first version scanned 49 of the 54, and the wording here said 54.** It
+was built on `_real_corpus`, which copies `done/` alone — so the specs still
+live at the top of `.saffron/specs` were outside it, which is exactly the set a
+fresh defect appears in first. Caught in review of #166 and widened; the mutant
+is `saffron/nowhere/invented.py` planted in `SA-0060`, which the retired-only
+corpus passes blind. The discovery failures are no longer asserted empty
+either: a spec that does not parse cannot be asked this question, and item 82's
+validator makes exactly one such spec on the branch stacked above this one.
+
+
 Found filing `SA-0063`, 2026-09-06. That spec shipped with `/work` in an
 acceptance claim; `_unmatched_criterion_path` reads it as a path token, no
 `touches` pattern of that spec matches it, and **a spec refused on its own
@@ -4560,6 +4619,48 @@ than the property is worth.
 ---
 
 ## 82. A mutant can pin the text a spec dictates or the text an agent writes, never both
+
+**Status: done, 2026-09-08.** The constraint is stated where an author meets it
+— `docs/agents/issue-tracker.md`'s conventions, beside the rest of the spec
+format — and `intake.py` refuses at parse a mutant whose `find` text appears in
+the spec's body **or in its own claim**: a claim is prompt text by the same
+route, `context.witnesses_block` handing it to the implementer and
+`criteria_section` to the critic.
+
+Measured against this repo's 54 specs: one refusal, `SA-0063`, which is the
+spec this item was written about and the exact mutant it describes.
+
+**Read that number with its denominator.** Only **two** of the 54 declare a
+mutant at all (`SA-0063` and `SA-0064`), so the check has fired on the only two
+chances it has had. "One refusal in 54" invites a false-positive rate this
+corpus cannot support. No length threshold was added, and whether one is needed
+is *not* measured: the argument for going without is that a `find` must match
+exactly once in its file, so a very short one is already an unusable mutant —
+and that argument thins as the text gets longer. A rough count over this corpus
+finds dozens of backticked identifier-shaped spans quoted verbatim in a spec
+body that would each match exactly once in a file that spec's `touches` covers,
+so collisions are not obviously rare. If it starts biting, the tree-aware half
+belongs beside `saffron/mutation.py`, which is the module that may read the
+repo — `intake.py` deliberately cannot, so it cannot tell a `find` naming text
+that already exists at base (disclosing nothing, since the implementer can read
+the file) from one naming text the spec invents.
+
+**Corrected in review of #167**, along with two defects that review found: the
+check compared a mutant against its *own* claim only, while `witnesses_block`
+hands the implementer every claim — a sibling claim disclosed just as well and
+nothing refused it; and the refusal removed a spec from `_retired_ids`' credit,
+so retiring `SA-0063` to `done/` — the documented next step — would have
+stranded `SA-0064`, whose parent it is. A disclosed mutant now raises
+`DisclosedMutantError`, which carries the parsed spec, and a retirement still
+credits a spec refused on policy rather than on shape.
+
+One consequence worth knowing before the check meets a spec someone is waiting
+on: an unparseable spec leaves the scanned set, so its dependents refuse with
+*"depends_on X is not among the specs in this directory"* — a dangling
+reference rather than an unmerged dependency. `SA-0064` reads that way in the
+queue today. The cascade is `discover_specs`' designed shape, but the sentence
+points at the wrong fact.
+
 
 Found writing `SA-0064`, 2026-09-07, after `SA-0063` ran both halves of it.
 
@@ -4609,6 +4710,24 @@ it, and it was found only by reading the agent's own reasoning as it worked.
 
 ## 83. A mutant that matches at the base commit kills the task before it starts
 
+**Status: done, 2026-09-08 (#166).** `run_witness` hoists
+`tests_result.collected` and hands it to `witness_gate`, which sets a criterion
+aside as unproven *before* `mutate` when its witness is not in that list —
+nothing is written for a question that cannot be answered. Compared, never
+parsed: an opaque string against a list the repo's own `tests` gate produced,
+so the gate still knows no framework (§2.1). Answered per criterion, unlike
+`run_witness`'s subset probe, which must condemn the whole gate.
+
+**On the question this item asked to settle at the same time** — whether the
+witness gate should run at base at all, since §5.4 already requires a
+non-`preserves` witness to fail there: it still runs. Not asking is only
+correct for the `preserves` case read backwards, and the gate has a second job
+at base that survives the argument — a mutant that matches at base is exactly
+what item 82's advice produces, and a spec whose mutant matches nothing there
+is a spec whose mutant is pinned on text the task itself invents. Skipping the
+base run would lose both signals to save a pass that now costs nothing. Left
+running deliberately, recorded here rather than reopened.
+
 Measured 2026-09-07, running `SA-0064`. Exit 2, `PREFLIGHT_FAILED`, no agent
 turn bought and nothing exported:
 
@@ -4656,6 +4775,23 @@ answer.
 
 ## 84. `revert` judges a witness whose subject the spec forbids
 
+**Status: done, 2026-09-08 (#166), against `source` rather than the
+`touches` this item's *Done looks like* names.** `revert` sets aside a
+criterion whose `mutant.file` is not among the source files the diff changed,
+and says which in the summary. The divergence is deliberate: `touches` is what
+a spec was *permitted* to change, and a spec permitted to change a file it then
+left alone leaves the gate equally unable to answer, so `source` — the set
+about to be reverted — is what the question is actually made of. `SA-0064`, the
+case that filed this, is set aside under either rule.
+
+**One narrowing the first implementation lacked, added in review.** `source`
+excludes the repo's declared test paths wholesale, so a subject inside them is
+outside `source` for every diff there will ever be: exempting it would have
+given any criterion whose `mutant.file` names a test file a standing pass from
+the anti-theater gate, bought with one line of frontmatter — `_argv_safe`'s
+buyable-`skip` shape from the other side. A test subject says nothing about
+whether the witness leans on the source being reverted, so it stays judged.
+
 Received 2026-09-07 through the notes channel item **74** asked for — the first
 finding this repo has been handed by an implementer rather than by a lens or a
 person. `SA-0063` built the channel, `SA-0064` wired it, and this arrived in
@@ -4697,6 +4833,13 @@ theater, and `skip` is the status that already means it.
 ---
 
 ## 85. The host runs one copy of a spec and the cell reads another
+
+**Status: done, 2026-09-08 (#166).** `spec_drift` compares the two copies
+the run already holds and reports through `Preflight`. It never refuses: an
+operator iterating on a spec is exactly what produced this. Absence is silent —
+the first version reported a spec with no copy at base, which is the ordinary
+shape of an attended run and the *absence* of the hazard rather than an
+instance of it, and it would have printed on nearly every run.
 
 Measured 2026-09-07, on `SA-0064`'s second run.
 

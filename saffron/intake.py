@@ -41,6 +41,22 @@ class SpecError(ValueError):
     """A spec that cannot be trusted to describe what it asks for."""
 
 
+class DisclosedMutantError(SpecError):
+    """A spec that reads cleanly but gives its own mutant away (item 82).
+
+    Carries the parsed spec, which the plain `SpecError` cannot: the
+    frontmatter validated and the id is trustworthy, so this refusal is about
+    admitting the spec as a *candidate*, not about being unable to read it.
+    `scheduler._retired_ids` needs exactly that distinction — a spec refused
+    here and then retired to `done/` still credits its dependents, where a file
+    that does not parse declares no id to credit.
+    """
+
+    def __init__(self, message: str, spec: Spec) -> None:
+        super().__init__(message)
+        self.spec = spec
+
+
 class Mutant(BaseModel):
     """The smallest edit that would falsify the claim beside it (§5.4.1).
 
@@ -170,9 +186,56 @@ def parse_spec(text: str) -> Spec:
     # model_validate, not Spec(**fields): a non-string frontmatter key (`1:`,
     # or an unquoted `on:`) makes ** raise TypeError past this guard.
     try:
-        return Spec.model_validate({**fields, **reserved})
+        spec = Spec.model_validate({**fields, **reserved})
     except ValidationError as exc:
         raise SpecError(f"spec frontmatter is invalid: {exc}") from exc
+
+    # Item 82: a mutant the spec itself spells out is a mutant handed to the
+    # implementer. The body *is* prompt text — `build_system_prompt` passes it
+    # as the substituted `{spec}` value — and so is a claim, which
+    # `context.witnesses_block` gives the implementer and `criteria_section`
+    # gives the critic. A test written to kill a known edit is the theater
+    # `witness` exists to refuse, and its verdict then measures the disclosure
+    # rather than the tests. `SA-0063` did exactly this and no reviewer caught
+    # it: both lenses that read the diff missed it.
+    #
+    # Refused at parse, where it costs nothing, and against *every* claim
+    # rather than the criterion's own: `witnesses_block` hands the implementer
+    # the whole list, so a sibling claim spelling out this mutant's text
+    # discloses it just as completely.
+    #
+    # No length threshold. Whether one is needed has not been measured — this
+    # corpus declares two mutants in 54 specs, so the check has fired on the
+    # only two chances it has had, which is not evidence about how often it
+    # would fire on an honest one. The reasoning for going without is that a
+    # `find` has to match exactly once in its file, so a very short one is
+    # already unusable; that argument thins as the text gets longer, and
+    # `docs/BACKLOG.md` item 82 carries what to do if it starts biting.
+    claims = [(c.witness, c.claim) for c in spec.acceptance]
+    for criterion in spec.acceptance:
+        if criterion.mutant is None:
+            continue
+        find = criterion.mutant.find
+        where = "body" if find in body else None
+        if where is None:
+            for witness, claim in claims:
+                if find in claim:
+                    where = (
+                        "its own claim"
+                        if witness == criterion.witness
+                        else f"the claim for {witness}"
+                    )
+                    break
+        if where is not None:
+            raise DisclosedMutantError(
+                f"{criterion.witness}'s mutant names text this spec also "
+                f"puts in {where} ({find!r}); the "
+                "implementer reads that, so the witness would be written "
+                "to kill a known edit. Pin text the existing code already "
+                "determines, or declare a witness and no mutant",
+                spec,
+            )
+    return spec
 
 
 def load_spec(path: Path) -> tuple[Spec, str]:
@@ -217,6 +280,10 @@ class DiscoveryFailure:
 
     path: Path
     reason: str
+    spec: Spec | None = None
+    """Set when the file parsed and was refused on policy rather than shape —
+    `DisclosedMutantError`. The id is readable, which is the whole difference
+    for `scheduler._retired_ids`."""
 
 
 def discover_specs(
@@ -238,6 +305,9 @@ def discover_specs(
     for path in sorted(directory.glob("*.md"), key=lambda p: p.name):
         try:
             spec, spec_sha = load_spec(path)
+        except DisclosedMutantError as exc:
+            failures.append(DiscoveryFailure(path=path, reason=str(exc), spec=exc.spec))
+            continue
         except SpecError as exc:
             failures.append(DiscoveryFailure(path=path, reason=str(exc)))
             continue

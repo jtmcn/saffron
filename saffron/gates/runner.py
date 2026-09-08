@@ -232,8 +232,12 @@ def run_witness(
         )
 
     declared = [c for c in acceptance if c.mutant is not None]
+    # Hoisted out of the `if` below because `witness_gate` takes it too: the
+    # probe asks whether this repo's `tests` gate honours a subset at all, and
+    # the same enumeration answers, per criterion, whether a named witness even
+    # exists in this tree (item 83).
+    collected = tests_result.collected if tests_result is not None else None
     if declared:
-        collected = tests_result.collected if tests_result is not None else None
         if not collected:
             return GateResult(
                 gate="witness",
@@ -287,7 +291,12 @@ def run_witness(
                 ),
             )
 
-    return witness_gate(acceptance=acceptance, mutate=mutate, run_tests=run_tests)
+    return witness_gate(
+        acceptance=acceptance,
+        mutate=mutate,
+        run_tests=run_tests,
+        collected=collected,
+    )
 
 
 def run_suite(
@@ -304,11 +313,13 @@ def run_suite(
     `witness` is not one of the declared gates above — it is a core gate,
     like `revert` — but it belongs in this list rather than beside it,
     because it re-invokes `tests` and so cannot exist before `tests`'s own
-    result does (§5.4.1). `mutate` is the one thing that turns it on: omitted
-    (as every caller does today — no production caller can
-    supply one until `SA-0061` wires a stub — `docs/BACKLOG.md` item 71), `witness` is
-    left out of the suite exactly as it was before this function knew about
-    it — no behaviour change for a caller that does not ask for it.
+    result does (§5.4.1). `mutate` is the one thing that turns it on: omitted,
+    `witness` is left out of the suite exactly as it was before this function
+    knew about it — no behaviour change for a caller that does not ask for it.
+    Two production callers supply one today, `session._suite` and
+    `package.reverify`, and both pass `acceptance` beside it; the sentence
+    here once said no production caller could, which `SA-0061` falsified and
+    `docs/BACKLOG.md` item 75 records.
     """
     results = [
         run_gate(name, executable, cwd, timeout_s=timeout_s, executor=executor)

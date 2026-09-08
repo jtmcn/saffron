@@ -734,3 +734,78 @@ def test_a_later_criterion_failing_on_entry_is_not_blamed_on_an_earlier_one():
     assert "b.py" in result.summary
     assert "could not apply" in result.summary
     assert "could not restore" not in result.summary
+
+
+def test_a_witness_the_suite_cannot_collect_is_unproven_not_an_error(tmp_path):
+    """BACKLOG item 83, measured on `SA-0064`: exit 2, `PREFLIGHT_FAILED`, no
+    agent turn bought. A bug-fix spec pins its mutant on code that exists at
+    base and names the witness it is about to write. At base that mutant
+    applies cleanly, the gate invokes a node id that does not exist yet,
+    pytest exits 4, and `error` aborts the attempt before the task starts.
+
+    "There is no witness to kill" is unproven, not broken, and it is the
+    *expected* state at base for every new test. The set of ids the `tests`
+    gate itself enumerated is the generic way to know: an opaque string
+    compared against a list, no framework knowledge, and it answers per
+    criterion rather than condemning the whole gate the way the subset probe
+    must."""
+    _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
+    unwritten = _criterion(witness="tests/test_billing.py::test_not_written_yet")
+    ran: list[list[str]] = []
+    mutated: list[str] = []
+
+    def run_tests(subset):
+        ran.append(subset)
+        return _tests(status="fail")
+
+    def mutate(mutant):
+        mutated.append(mutant.file)
+        return host_mutator(tmp_path)(mutant)
+
+    result = witness_gate(
+        acceptance=[unwritten],
+        mutate=mutate,
+        run_tests=run_tests,
+        collected=["tests/test_billing.py::test_something_else"],
+    )
+
+    assert result.status == "skip"
+    assert "test_not_written_yet" in result.summary
+    # The mutant is never applied: the tree is never touched for a question
+    # that cannot be answered, and nothing has to be restored.
+    assert mutated == []
+    assert ran == []
+    assert (tmp_path / "a.py").read_text() == "def total(x):\n    return max(x, 0)\n"
+
+
+def test_a_collected_witness_is_still_run(tmp_path):
+    """The guard above must not swallow the ordinary case."""
+    _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
+    criterion = _criterion()
+
+    def run_tests(subset):
+        return _tests(status="fail", collected=(criterion.witness,))
+
+    result = witness_gate(
+        acceptance=[criterion],
+        mutate=host_mutator(tmp_path),
+        run_tests=run_tests,
+        collected=[criterion.witness, "tests/test_other.py::test_x"],
+    )
+    assert result.status == "pass"
+
+
+def test_an_unknown_enumeration_checks_nothing(tmp_path):
+    """`collected=None` means the caller had no enumeration to offer, which is
+    not evidence a witness is missing. Every existing caller and every test
+    written before this field predates it, and must behave exactly as before."""
+    _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
+    criterion = _criterion()
+
+    def run_tests(subset):
+        return _tests(status="fail")
+
+    result = witness_gate(
+        acceptance=[criterion], mutate=host_mutator(tmp_path), run_tests=run_tests
+    )
+    assert result.status == "pass"

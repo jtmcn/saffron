@@ -6,11 +6,12 @@ from pathlib import Path
 import pytest
 
 from saffron.cell import runtime
-from saffron.intake import load_spec
+from saffron.intake import discover_specs, load_spec
 from saffron.ledger import Ledger
 from saffron.scheduler import (
     DONE_STATES,
     REQUEUE_STATES,
+    _unmatched_criterion_path,
     build_queue,
     retirement_refusal,
 )
@@ -78,6 +79,41 @@ def _real_corpus(tmp_path, *, promote=frozenset()):
         if load_spec(path)[0].id in promote:
             shutil.move(str(path), specs / path.name)
     return specs
+
+
+def _every_retired_spec_at_top_level(tmp_path):
+    """`_real_corpus` with every retired spec promoted.
+
+    `promote=` names ids and this caller wants all of them: a spec left in
+    `done/` is never scanned. Retired specs only — `_real_corpus` copies
+    `done/`, so the specs still live at the top of `.saffron/specs` are not
+    here. `_every_live_spec_flattened` is the one that sees those.
+    """
+    directory = _real_corpus(tmp_path)
+    for path in sorted((directory / "done").glob("*.md")):
+        shutil.move(str(path), directory / path.name)
+    return directory
+
+
+def _every_live_spec_flattened(tmp_path):
+    """Every spec file this repo has, retired or not, in one scannable
+    directory.
+
+    `_real_corpus` copies `done/` alone, which silently leaves out whichever
+    specs are at the top of `.saffron/specs` right now — the five most recent,
+    and the likeliest to carry a defect nobody has met yet. A check claiming to
+    hold over *every* spec cannot be built on a corpus that omits them.
+    `README.md` is dropped for `_real_corpus`'s own reason: `discover_specs`
+    globs `*.md` and reports it as a failure, correctly and irrelevantly.
+    """
+    directory = tmp_path / "specs"
+    directory.mkdir()
+    for path in list(REAL_SPECS.glob("*.md")) + list(
+        (REAL_SPECS / "done").glob("*.md")
+    ):
+        if path.name != "README.md":
+            shutil.copy(path, directory / path.name)
+    return directory
 
 
 def _repo(ledger, origin="/o"):
@@ -1643,6 +1679,49 @@ def test_a_retired_parent_is_never_itself_offered_as_a_candidate(tmp_path, ledge
     assert [r for r in refusals if r.path.name == "b.md"] == []
 
 
+def test_a_retired_parent_refused_on_policy_still_credits_its_child(tmp_path, ledger):
+    """A spec refused for *disclosing its own mutant* read cleanly — it has an
+    id, and `done/` says its work is in `main`.
+
+    The two refusals are not the same fact. A file that does not parse declares
+    no id, so it can credit nothing and the refusal has to stand. A spec item
+    82 refuses parsed fine and is being kept out of the *queue*; withdrawing
+    its `done/` credit as well would strand every child it already shipped for.
+    `SA-0063` is the live case — merged, pending retirement, and the one spec
+    in this repo that rule refuses.
+
+    Without the distinction, adding any intake rule silently revokes the
+    retirement credit of every spec already in `done/` that the new rule
+    happens to refuse, and `done/` exists precisely for the dependency the
+    ledger cannot state.
+    """
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
+    (directory / "done").mkdir()
+    (directory / "done" / "b.md").write_text(
+        "---\nid: TE-0\ntitle: t\ntype: feature\npriority: 3\n"
+        "depends_on: []\ntouches: [b.py]\nforbidden: []\n"
+        "budget_usd: 5\nmax_attempts: 2\nrisk: standard\n"
+        "acceptance:\n"
+        "  - claim: the module declares CEILING = 60\n"
+        "    witness: tests/test_b.py::test_declared\n"
+        "    mutant:\n"
+        "      file: b.py\n"
+        "      find: 'CEILING = 60'\n"
+        "      replace: 'CEILING = 0'\n"
+        "---\n\nbody\n"
+    )
+    repo_id = _repo(ledger)
+
+    candidates, refusals = build_queue(directory, repo_id, ledger)
+
+    assert "TE-1" in [c.spec.id for c in candidates]
+    assert [r for r in refusals if r.path.name == "a.md"] == []
+    # And it is still not offered as a candidate itself: crediting the
+    # dependency is not the same as admitting the spec.
+    assert "TE-0" not in [c.spec.id for c in candidates]
+
+
 def test_an_unreadable_retired_spec_is_refused_by_path_not_only_by_silence(
     tmp_path, ledger
 ):
@@ -1767,23 +1846,100 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     )
 
     assert [c.spec.id for c in candidates] == ["SA-0060"]
+    # `SA-0063` no longer parses, and that is a finding rather than a
+    # regression: item 82's validator refuses a mutant whose `find` text the
+    # spec also dictates, and `SA-0063` is the spec item 82 was written about —
+    # it mandated the exact heading its own mutant pins so the mutant would
+    # match. It is the only one of this repo's 54 specs the check refuses.
+    #
+    # Selected by name, not by index. `build_queue` does put discovery
+    # failures ahead of candidate refusals, but nothing states that as a
+    # contract, and a check that reads `refusals[0]` goes blind the day the
+    # order changes — which is `d41a613`'s own subject, one commit below this.
+    disclosed = next(r for r in refusals if r.path.name.startswith("SA-0063"))
+    assert "mutant names text this spec also puts in body" in disclosed.reason
+
     # Refused for the parent each actually declares, which is what separates a
     # dependency refusal from a criterion-path one.
     chain = [
         ("SA-0061", "SA-0060"),
         ("SA-0062", "SA-0061"),
-        ("SA-0063", "SA-0062"),
+        # Its parent is `SA-0063`, which is now unparseable and therefore not
+        # in the scanned set at all — so this reads as a dangling reference
+        # rather than an unmerged dependency. The cascade is the designed
+        # shape (`discover_specs`: a malformed spec is a refusal candidate
+        # downstream, never a reason for the scan to raise), but the sentence
+        # a reader gets does point at the wrong fact, and that is worth
+        # knowing before the check meets a spec someone is waiting on.
         ("SA-0064", "SA-0063"),
     ]
-    assert len(refusals) == len(chain)
-    for refusal, (child, parent) in zip(refusals, chain, strict=True):
-        assert refusal.path.name.startswith(child)
-        assert parent in refusal.reason
-        assert "depends_on" in refusal.reason
+    assert len(refusals) == len(chain) + 1
+    by_child = {
+        child: next(r for r in refusals if r.path.name.startswith(child))
+        for child, _ in chain
+    }
+    for child, parent in chain:
+        assert parent in by_child[child].reason
+        assert "depends_on" in by_child[child].reason
     # And the retired corpus stays invisible: `discover_specs` globs
     # non-recursively, so forty-odd shipped specs one directory down are not
     # offered as tonight's work.
     assert len(list((directory / "done").glob("*.md"))) > 30
+
+
+def test_no_real_spec_names_a_criterion_path_its_touches_do_not_cover(tmp_path):
+    """BACKLOG item 81: the property asserted directly, over every spec, with
+    no ledger and no refusal ordering in front of it.
+
+    The item's own diagnosis does not reproduce and is corrected in the
+    backlog. It claims `_refuse` decides an unsatisfied `depends_on` *before*
+    the criterion-path check, blinding
+    `test_no_real_spec_is_refused_on_its_own_acceptance_criteria` to every
+    chained spec — "53 specs, 31 preempted, 22 examined". The order is the
+    other way round: `scheduler.py:687` is the criterion-path check and the
+    `depends_on` loop is at 697. Measured 2026-09-08 by planting
+    `saffron/nowhere/invented.py` in each spec's first checklist box in turn
+    and reading what the queue refuses it for: of the **30** specs whose
+    criteria `_criteria_texts` reads from the markdown checklist, **28 report
+    the criterion-path refusal**. `SA-0016`, named in that test as one of the
+    two it memorialises, is among the 28. The other two are probe-dependent
+    rather than a second class: `SA-0021` stops on an earlier `depends_on`
+    refusal, and `SA-0001` is not refused at all because its own `forbidden:
+    saffron/**` covers the planted token, which is this check's documented
+    citation escape.
+
+    What is left of the item is still worth this test. That check reaches the
+    property only because of an ordering nothing pins, and it asserts something
+    weaker — that no refusal is a criterion-path refusal — so it goes silently
+    blind the day the order changes. This asserts the property itself. The
+    queue-shaped test keeps its own job, which is that the queue refuses
+    nothing unexpected.
+
+    Over *every* spec, which is not what the first version of this test did:
+    it was built on `_real_corpus`, which copies `done/` alone, so it scanned
+    49 of 54 and never saw the specs still at the top of `.saffron/specs` —
+    the five most recent, and the likeliest to carry a defect nobody has met.
+    Measured: planting `saffron/nowhere/invented.py` in `SA-0060`'s first
+    acceptance claim fails this test and passed the retired-only corpus.
+    """
+    directory = _every_live_spec_flattened(tmp_path)
+
+    specs, _ = discover_specs(directory)
+    # A loop that examined nothing would pass silently, which is the failure
+    # mode this test exists to close rather than a stricter form of it. The
+    # count is the guard, and it is also why the discovery failures are
+    # dropped rather than asserted empty: a spec that does not parse cannot be
+    # asked this question — unproven, not broken, the same distinction items
+    # 83 and 84 turn on — while a corpus that stopped parsing *wholesale*
+    # takes `len(specs)` down through this floor and fails here.
+    assert len(specs) > 45, f"only {len(specs)} specs scanned"
+
+    named = {
+        found.spec.id: token
+        for found in specs
+        if (token := _unmatched_criterion_path(found.spec)) is not None
+    }
+    assert named == {}
 
 
 def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger):
@@ -1797,11 +1953,7 @@ def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger
     corpus is one long dependency chain with no tasks behind it; a refusal on
     anything else is the bug.
     """
-    # Every spec at top level: a spec left in `done/` is never scanned, and
-    # this check wants each one to reach `_refuse`.
-    directory = _real_corpus(tmp_path)
-    for path in sorted((directory / "done").glob("*.md")):
-        shutil.move(str(path), directory / path.name)
+    directory = _every_retired_spec_at_top_level(tmp_path)
 
     _, refusals = build_queue(
         directory, None, ledger, repo_slug="joel/saffron", gh=_fake_gh([])

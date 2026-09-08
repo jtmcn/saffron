@@ -16,14 +16,16 @@ import json
 import re
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 from saffron.cell.worktree import DIFF_FLAGS
 from saffron.events import Event, EventLog, PhaseStart, describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import GateResult, split_lines
+from saffron.intake import Criterion
 from saffron.phases.rebut import sustained_blockers, unkept_fixes
 from saffron.phases.review import anchored_concerns
 from saffron.report import index as index_report
@@ -452,6 +454,7 @@ def reverify(
     policy,
     gates_dir: Path,
     image: str,
+    acceptance: Sequence[Criterion],
 ) -> tuple[list[NewFailure], list[GateResult]]:
     """Run the suite on the packaged commit, in a cell. Returns the new
     failures *and* the head results, because the body's gate table has to show
@@ -470,6 +473,18 @@ def reverify(
     longer exists, and comparing against it would charge this task with the
     default branch's own drift. So a fresh baseline at `new_base_sha`, the head
     suite at `packaged_sha`, and the usual subtraction (§4.4 steps 2-3).
+
+    `acceptance` is passed through for the same reason `session._suite` passes
+    it: without it — and without a `mutate` — `run_suite` leaves `witness` out
+    of the suite entirely, so the two suites differ in *shape* and
+    `suite_drift` has nothing to compare across the two call sites (item 71).
+    Required rather than defaulted, for the reason `CLAUDE.md` gives for cell
+    creation's `network`/`env`: an omission here is silent, `suite_drift`
+    compares head against base *within* one call and so sees both suites lose
+    `witness` together, and a caller that forgets is item 71 all over again.
+    A witness whose test does not exist at `new_base_sha` is `unproven` there
+    rather than an abort, which is item 83's fix and is what makes passing this
+    here safe.
     """
     from saffron.cell import runtime, worktree
     from saffron.cell.session import aborted_gates
@@ -521,6 +536,11 @@ def reverify(
                 policy.gate_executables(Path(worktree.GATES_MOUNT)),
                 cwd=mirror,
                 executor=runner.CellExecutor(container),
+                acceptance=acceptance,
+                # Bound to *this* cell's container, the way `session._suite`
+                # binds it to its own: a mutator pointed at any other tree
+                # would edit something this suite is not judging.
+                mutate=partial(worktree.source_mutated, container),
             )
             # error != fail (§5.4): a gate that broke must abort the package,
             # not net to an empty diff against an equally-broken baseline.
@@ -778,6 +798,7 @@ def package(
                 policy=policy,
                 gates_dir=gates_dir,
                 image=image,
+                acceptance=spec.acceptance,
             )
             verified_on = "packaged"
             # The same advisory rule the repair loop applies, for the same

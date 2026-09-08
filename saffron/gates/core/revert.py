@@ -171,6 +171,49 @@ def revert_gate(
             summary="the diff has no source outside the repo's declared test paths",
         )
 
+    # A criterion's `mutant.file` is the subject its claim is about (§5.4.1).
+    # If the subject is not in `source`, reverting `source` cannot change
+    # whether that witness passes, so "it passed without the diff's source" is
+    # not evidence of theater — it is the arithmetic of a question this gate
+    # cannot ask (item 84, received through the notes channel from `SA-0064`).
+    #
+    # Compared against `source`, not the spec's `touches`: `touches` is what a
+    # spec was *permitted* to change, and a spec permitted to change a file it
+    # then left alone leaves this gate equally unable to answer. `source` is
+    # the set about to be reverted, which is the thing the question is made of.
+    # A criterion declaring no mutant names no subject and is unaffected.
+    #
+    # A subject inside `test_paths` is *not* exempt, though it is outside
+    # `source` by construction: `source` excludes the test paths wholesale, so
+    # exempting a test-file subject would drop that witness from every revert
+    # run there will ever be — one line of frontmatter buying a standing pass
+    # from the anti-theater gate, which is `_argv_safe`'s buyable-`skip` shape
+    # again. The subject being a test says nothing about whether the witness
+    # leans on the source about to be reverted, so it stays judged.
+    unreachable = sorted(
+        {
+            (c.witness, c.mutant.file)
+            for c in acceptance
+            if c.mutant is not None
+            and c.witness in subset
+            and c.mutant.file not in source
+            and not any(matches(c.mutant.file, pat) for pat in test_paths)
+        }
+    )
+    if unreachable:
+        exempt = {witness for witness, _ in unreachable}
+        subset = [name for name in subset if name not in exempt]
+        note += (
+            f" — {len(exempt)} witness(es) whose subject this diff never "
+            f"touched: " + ", ".join(f"{w} ({f})" for w, f in unreachable)
+        )
+    if not subset:
+        return GateResult(
+            gate="revert",
+            status="skip",
+            summary=f"no new test depends on source this diff changed{note}",
+        )
+
     # The restore checks out `HEAD`, not the tree as it stood a moment ago, so
     # an uncommitted edit to a source path does not survive this gate — and
     # `committed` runs next and would report the tree clean, which is the one

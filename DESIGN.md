@@ -885,6 +885,21 @@ how the *pair* responds to perturbation. Reading examines one object while the
 defect lives in the relation between two, which is why §5.5.1's lens cannot
 answer this and says so in its own prompt.
 
+**The spec may not disclose its own mutant.** A mutant is only evidence if the
+implementer has not read it. The spec body *is* prompt text — `build_system_prompt`
+substitutes it as `{spec}` — and so is every claim, which `witnesses_block` hands
+the implementer and `criteria_section` hands the critic. So `parse_spec` refuses a
+mutant whose `find` text appears in the body or in any claim, before a cell starts
+(`docs/BACKLOG.md` item 82; measured on `SA-0063`, which dictated the heading its
+own mutant pinned and produced this repo's first `witness` verdict — sound
+evidence the mechanism works and none that the tests were honest). The refusal is
+a policy one: the spec parsed, so it keeps its id and a retirement to `done/`
+still credits its dependents. It follows that a mutant pins text the existing code
+already determines, and a spec creating new code declares a witness and no mutant,
+accepting a `skip` — a real limit on the answer this gate gives, not a rule of
+thumb. This is a tripwire and not a boundary: paraphrase evades it, and item 80
+notes the cell can read the spec file itself.
+
 **What the gate does.** A spec's `acceptance:` already pairs a claim with the
 witness that guards it. Each entry may additionally declare a **mutant**: the
 smallest edit that breaks the claim while leaving the code syntactically whole.
