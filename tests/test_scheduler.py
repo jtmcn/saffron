@@ -6,7 +6,12 @@ from pathlib import Path
 import pytest
 
 from saffron.cell import runtime
-from saffron.intake import discover_specs, load_spec
+from saffron.intake import (
+    DisclosedMutantError,
+    SpecError,
+    discover_specs,
+    load_spec,
+)
 from saffron.ledger import Ledger
 from saffron.scheduler import (
     DONE_STATES,
@@ -76,7 +81,18 @@ def _real_corpus(tmp_path, *, promote=frozenset()):
     shutil.copytree(REAL_SPECS / "done", done)
     (done / "README.md").unlink()
     for path in sorted(done.glob("*.md")):
-        if load_spec(path)[0].id in promote:
+        # A retired spec the loader refuses still has to be sorted, and the
+        # two refusals differ exactly as they do in `_retired_ids`: one
+        # refused on policy carries its parsed spec and so declares an id,
+        # while one refused on shape declares none and cannot be named in
+        # `promote` at all. `SA-0063` is the live case (item 82).
+        try:
+            spec = load_spec(path)[0]
+        except DisclosedMutantError as exc:
+            spec = exc.spec
+        except SpecError:
+            continue
+        if spec.id in promote:
             shutil.move(str(path), specs / path.name)
     return specs
 
@@ -1845,35 +1861,23 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         directory, repo_id, ledger, repo_slug="joel/saffron", gh=_fake_gh([])
     )
 
-    assert [c.spec.id for c in candidates] == ["SA-0060"]
-    # `SA-0063` no longer parses, and that is a finding rather than a
-    # regression: item 82's validator refuses a mutant whose `find` text the
-    # spec also dictates, and `SA-0063` is the spec item 82 was written about —
-    # it mandated the exact heading its own mutant pins so the mutant would
-    # match. It is the only one of this repo's 54 specs the check refuses.
-    #
-    # Selected by name, not by index. `build_queue` does put discovery
-    # failures ahead of candidate refusals, but nothing states that as a
-    # contract, and a check that reads `refusals[0]` goes blind the day the
-    # order changes — which is `d41a613`'s own subject, one commit below this.
-    disclosed = next(r for r in refusals if r.path.name.startswith("SA-0063"))
-    assert "mutant names text this spec also puts in body" in disclosed.reason
+    # `SA-0064` is admissible because its parent `SA-0063` is retired to
+    # `done/`, not because anything in the ledger says so. That spec discloses
+    # its own mutant, so item 82 will not parse it — but a spec refused on
+    # *policy* still declares an id, so `_retired_ids` credits the retirement.
+    # Before it was retired this read the other way round: `SA-0063` sat at top
+    # level as a discovery failure and `SA-0064` was refused for a parent that
+    # looked absent, which is the cascade that made the distinction necessary.
+    assert [c.spec.id for c in candidates] == ["SA-0060", "SA-0064"]
+    assert [r for r in refusals if r.path.name.startswith("SA-0063")] == []
 
     # Refused for the parent each actually declares, which is what separates a
     # dependency refusal from a criterion-path one.
     chain = [
         ("SA-0061", "SA-0060"),
         ("SA-0062", "SA-0061"),
-        # Its parent is `SA-0063`, which is now unparseable and therefore not
-        # in the scanned set at all — so this reads as a dangling reference
-        # rather than an unmerged dependency. The cascade is the designed
-        # shape (`discover_specs`: a malformed spec is a refusal candidate
-        # downstream, never a reason for the scan to raise), but the sentence
-        # a reader gets does point at the wrong fact, and that is worth
-        # knowing before the check meets a spec someone is waiting on.
-        ("SA-0064", "SA-0063"),
     ]
-    assert len(refusals) == len(chain) + 1
+    assert len(refusals) == len(chain)
     by_child = {
         child: next(r for r in refusals if r.path.name.startswith(child))
         for child, _ in chain
@@ -1961,4 +1965,11 @@ def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger
 
     assert refusals, "the corpus refuses nothing, so this asserts nothing"
     assert [r for r in refusals if "acceptance criteria name" in r.reason] == []
-    assert all("depends_on" in r.reason for r in refusals)
+    # One legitimate non-`depends_on` refusal, named rather than waved through
+    # by a loose predicate: `SA-0063` discloses its own mutant (item 82). This
+    # helper promotes it *out* of `done/`, where production keeps it, so the
+    # refusal is an artifact of the arrangement — naming the single spec it may
+    # apply to keeps a second one from slipping in behind it.
+    disclosed = [r for r in refusals if "mutant names text" in r.reason]
+    assert [r.path.name[:7] for r in disclosed] == ["SA-0063"]
+    assert all("depends_on" in r.reason for r in refusals if r not in disclosed)
