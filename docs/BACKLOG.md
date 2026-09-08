@@ -50,11 +50,12 @@ evidence. That is the gate now, and it is one cheap spec away.
 
 ### Tier 1 — breaks at 03:00 with nobody watching
 
-Soundness first: **79**, **69**, **80** (with **83**, **85**, **84**, **82**,
-**81** from tier 3, which are why 69's gate cannot yet be declared against
-safely), then the remainder of **71**. Honesty second: **73**, **70**, **45**,
-**51** (with **49**/**50**, which its fix closes), **47**, **46**, **40**,
-**26**, **7**, and the remainder of **78**.
+Soundness first: **79**, **88** (79's own harness, and what decides whether
+79's exit criterion can be read as an absolute), **69**, **80** (with **83**,
+**85**, **84**, **82**, **81** from tier 3, which are why 69's gate cannot yet
+be declared against safely), then the remainder of **71**. Honesty second:
+**73**, **70**, **45**, **51** (with **49**/**50**, which its fix closes),
+**47**, **46**, **40**, **26**, **7**, and the remainder of **78**.
 
 Closed since the 2026-09-04 sort, and left in place because their numbers are
 cited: **74** is done (`SA-0063`, `SA-0064`); **71** is two-thirds done and
@@ -72,6 +73,12 @@ failing at a question only running can answer; 79 is the same lens answering it
 in two runs of three and not the third — measured, so the item's own "a question
 no lens owns" is retired in place. Both bear on the same thing: whether a
 `0 blockers` line means the diff is sound or means nobody looked.
+
+**88 is directly under 79** rather than filed behind it. The harness that
+measured 79 reads three times harsher than production on the same diff, so its
+absolute numbers steer nothing until that is explained — and 79's exit criterion
+is written against an absolute. Track C can start on the harness's *differences*
+between two prompts; it cannot be declared met on them.
 
 Each fails in the dark or destroys work no one is awake to rescue. **45** loses
 a run's commits nightly; **51** switches the anti-theater gate off for one
@@ -4803,6 +4810,8 @@ wordings. Half an hour.
 
 ## 88. The scoring harness reads a lens three times as harsh as production, and the fixture is a suspect
 
+**Tier 1**, directly under 79 — it is 79's own measuring instrument, and 79's
+exit criterion is written against an absolute this item puts in doubt.
 **Found 2026-09-07**, in the first lens-scoring pass
 (`docs/evidence/2026-09-07-lens-scoring-first-pass.md`). Over PR #154's exact
 range, the harness's three runs filed anchored blockers 1, 2, 1 — every run
