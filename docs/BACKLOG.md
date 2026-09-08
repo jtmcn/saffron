@@ -4565,6 +4565,15 @@ implemented as written:
 ledger and no refusal ordering in front of it, and refuses to pass on a corpus
 it did not actually scan.
 
+**Its first version scanned 49 of the 54, and the wording here said 54.** It
+was built on `_real_corpus`, which copies `done/` alone — so the specs still
+live at the top of `.saffron/specs` were outside it, which is exactly the set a
+fresh defect appears in first. Caught in review of #166 and widened; the mutant
+is `saffron/nowhere/invented.py` planted in `SA-0060`, which the retired-only
+corpus passes blind. The discovery failures are no longer asserted empty
+either: a spec that does not parse cannot be asked this question, and item 82's
+validator makes exactly one such spec on the branch stacked above this one.
+
 
 Found filing `SA-0063`, 2026-09-06. That spec shipped with `/work` in an
 acceptance claim; `_unmatched_criterion_path` reads it as a path token, no

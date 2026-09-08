@@ -81,16 +81,38 @@ def _real_corpus(tmp_path, *, promote=frozenset()):
     return specs
 
 
-def _every_spec_at_top_level(tmp_path):
+def _every_retired_spec_at_top_level(tmp_path):
     """`_real_corpus` with every retired spec promoted.
 
-    `promote=` names ids, and both callers below want all of them: a spec left
-    in `done/` is never scanned, and each of these checks wants every spec to
-    reach the code under test.
+    `promote=` names ids and this caller wants all of them: a spec left in
+    `done/` is never scanned. Retired specs only — `_real_corpus` copies
+    `done/`, so the specs still live at the top of `.saffron/specs` are not
+    here. `_every_live_spec_flattened` is the one that sees those.
     """
     directory = _real_corpus(tmp_path)
     for path in sorted((directory / "done").glob("*.md")):
         shutil.move(str(path), directory / path.name)
+    return directory
+
+
+def _every_live_spec_flattened(tmp_path):
+    """Every spec file this repo has, retired or not, in one scannable
+    directory.
+
+    `_real_corpus` copies `done/` alone, which silently leaves out whichever
+    specs are at the top of `.saffron/specs` right now — the five most recent,
+    and the likeliest to carry a defect nobody has met yet. A check claiming to
+    hold over *every* spec cannot be built on a corpus that omits them.
+    `README.md` is dropped for `_real_corpus`'s own reason: `discover_specs`
+    globs `*.md` and reports it as a failure, correctly and irrelevantly.
+    """
+    directory = tmp_path / "specs"
+    directory.mkdir()
+    for path in list(REAL_SPECS.glob("*.md")) + list(
+        (REAL_SPECS / "done").glob("*.md")
+    ):
+        if path.name != "README.md":
+            shutil.copy(path, directory / path.name)
     return directory
 
 
@@ -1827,14 +1849,25 @@ def test_no_real_spec_names_a_criterion_path_its_touches_do_not_cover(tmp_path):
     blind the day the order changes. This asserts the property itself. The
     queue-shaped test keeps its own job, which is that the queue refuses
     nothing unexpected.
-    """
-    directory = _every_spec_at_top_level(tmp_path)
 
-    specs, failures = discover_specs(directory)
-    assert not failures, f"the corpus no longer parses: {failures}"
+    Over *every* spec, which is not what the first version of this test did:
+    it was built on `_real_corpus`, which copies `done/` alone, so it scanned
+    49 of 54 and never saw the specs still at the top of `.saffron/specs` —
+    the five most recent, and the likeliest to carry a defect nobody has met.
+    Measured: planting `saffron/nowhere/invented.py` in `SA-0060`'s first
+    acceptance claim fails this test and passed the retired-only corpus.
+    """
+    directory = _every_live_spec_flattened(tmp_path)
+
+    specs, _ = discover_specs(directory)
     # A loop that examined nothing would pass silently, which is the failure
-    # mode this test exists to close rather than a stricter form of it.
-    assert len(specs) > 40, f"only {len(specs)} specs scanned"
+    # mode this test exists to close rather than a stricter form of it. The
+    # count is the guard, and it is also why the discovery failures are
+    # dropped rather than asserted empty: a spec that does not parse cannot be
+    # asked this question — unproven, not broken, the same distinction items
+    # 83 and 84 turn on — while a corpus that stopped parsing *wholesale*
+    # takes `len(specs)` down through this floor and fails here.
+    assert len(specs) > 45, f"only {len(specs)} specs scanned"
 
     named = {
         found.spec.id: token
@@ -1855,7 +1888,7 @@ def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger
     corpus is one long dependency chain with no tasks behind it; a refusal on
     anything else is the bug.
     """
-    directory = _every_spec_at_top_level(tmp_path)
+    directory = _every_retired_spec_at_top_level(tmp_path)
 
     _, refusals = build_queue(
         directory, None, ledger, repo_slug="joel/saffron", gh=_fake_gh([])
