@@ -3922,3 +3922,52 @@ def test_cell_down_stops_the_proxy_before_removing_its_network(monkeypatch):
 
     assert calls.index("stop_proxy") < calls.index("remove_network")
     assert calls.index("remove_container") < calls.index("stop_proxy")
+
+
+def _spec_export(tmp_path, name: str, text: str):
+    """A `gates_dir` shaped the way `export_saffron_dir` leaves one."""
+    specs = tmp_path / ".saffron" / "specs"
+    specs.mkdir(parents=True, exist_ok=True)
+    (specs / name).write_text(text)
+    return tmp_path
+
+
+def test_a_spec_the_host_runs_and_the_cell_reads_are_compared(tmp_path):
+    """BACKLOG item 85, measured on `SA-0064`'s second run. `saffron cell
+    <path>` loads the spec the operator names, on disk, now; the cell's
+    worktree carries whatever `.saffron/specs/` held at base. Nothing compared
+    them, and they differed: the host's copy had criterion 2's mutant removed
+    an hour earlier, `main`'s still carried it, and the implementer's notes
+    reasoned about a mutant the host was no longer judging it against.
+
+    Both copies are already in hand — `spec_sha` is computed host-side and
+    `.saffron` is exported from the mirror regardless — so this is a
+    comparison of two strings the run already holds."""
+    gates_dir = _spec_export(tmp_path, "SA-0062-a.md", "at base\n")
+    drift = session.spec_drift(
+        gates_dir, "SA-0062", hashlib.sha256(b"on host\n").hexdigest()
+    )
+    assert drift is not None
+    assert "SA-0062-a.md" in drift
+
+
+def test_a_spec_that_matches_at_base_reports_nothing(tmp_path):
+    gates_dir = _spec_export(tmp_path, "SA-0062-a.md", "same\n")
+    assert (
+        session.spec_drift(gates_dir, "SA-0062", hashlib.sha256(b"same\n").hexdigest())
+        is None
+    )
+
+
+def test_a_spec_absent_at_base_is_silent(tmp_path):
+    """A spec written on the host and never pushed is the ordinary shape of an
+    attended run, and it is the *absence* of what item 85 is about: with no
+    copy in the worktree there is no second contract for the agent to read.
+
+    Caught by `test_watch_output_matches_the_golden_fixture`, which is what a
+    golden fixture is for — this reported on the fake spec of every recorded
+    session, which is to say on almost every `saffron cell`, and a line that
+    prints when nothing is wrong is how an operator learns to skip the one that
+    matters."""
+    gates_dir = _spec_export(tmp_path, "SA-0099-other.md", "unrelated\n")
+    assert session.spec_drift(gates_dir, "SA-0062", "deadbeef") is None

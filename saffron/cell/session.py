@@ -8,6 +8,7 @@ scheduler.py, and this file goes the way replay.py went.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -82,6 +83,51 @@ def _default_emit(event: Event, *, log: EventLog) -> None:
     if line:
         print(line)
     log.append(event)
+
+
+def spec_drift(gates_dir: Path, spec_id: str, spec_sha: str) -> str | None:
+    """The spec the host is judging against, versus the one the cell can read.
+
+    `saffron cell <path>` loads the file the operator names, on disk, now.
+    The cell's worktree is built from the mirror, so it carries whatever
+    `.saffron/specs/` held at that commit. Nothing compared them, and on
+    `SA-0064`'s second run they differed: the host's copy had a criterion's
+    mutant removed an hour earlier and the mirror's still carried it, so the
+    implementer reasoned about a contract the host was not judging it against
+    (item 85). It is also the measurement item 80 asked for — the prompt-level
+    withholding of `mutant` is defeated by the worktree copy, demonstrably
+    rather than in principle.
+
+    Reported, never refused: an operator iterating on a spec is exactly what
+    produced this, and refusing would stop the workflow that found it.
+
+    Both bytes are already in hand — `spec_sha` is sha256 over the host file
+    and `.saffron` is exported from the mirror regardless — so this reads one
+    more file and hashes it the same way `load_spec` does.
+
+    ponytail: compared at `base_sha`, the commit the export is taken at, while
+    the worktree is built at `tree_base`. The two are the same for every
+    unstacked run, which is every run that has happened; a stacked run could
+    differ again in the worktree and this would not say so.
+    """
+    specs = gates_dir / ".saffron" / "specs"
+    found = sorted(specs.rglob(f"{spec_id}*.md")) if specs.is_dir() else []
+    if not found:
+        # Silence, not a line. A spec written on the host and not yet pushed is
+        # the ordinary shape of an attended run, and it is the *absence* of the
+        # hazard: with no copy in the worktree there is no second contract for
+        # the agent to read. Reporting it would print on almost every
+        # `saffron cell`, and a line that prints when nothing is wrong is how an
+        # operator learns to skip the one that matters.
+        return None
+    at_base = hashlib.sha256(found[0].read_bytes()).hexdigest()
+    if at_base == spec_sha:
+        return None
+    return (
+        f"{spec_id}: the host runs {spec_sha[:12]} and the cell's worktree "
+        f"carries {at_base[:12]} ({found[0].name}) — the agent can read a "
+        "contract this run is not judging it against"
+    )
 
 
 def critic_budget(budget_usd: float, spent: float) -> float:
@@ -988,6 +1034,9 @@ def _drive_cell(
     # Cell-side, and from the read-only mount rather than /work: an in-cell
     # edit to a gate — committed or not — never reaches the runner (§5.4).
     gates = policy.gate_executables(Path(worktree.GATES_MOUNT))
+
+    if drift := spec_drift(gates_dir, spec.spec_id, spec.spec_sha):
+        _preflight("spec_drift", drift)
 
     # §4.1: `origin` is the real remote, `mirror_path` the local mirror. v0
     # stored the mirror's source in both, so nothing downstream knew where a
