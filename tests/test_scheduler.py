@@ -81,6 +81,19 @@ def _real_corpus(tmp_path, *, promote=frozenset()):
     return specs
 
 
+def _every_spec_at_top_level(tmp_path):
+    """`_real_corpus` with every retired spec promoted.
+
+    `promote=` names ids, and both callers below want all of them: a spec left
+    in `done/` is never scanned, and each of these checks wants every spec to
+    reach the code under test.
+    """
+    directory = _real_corpus(tmp_path)
+    for path in sorted((directory / "done").glob("*.md")):
+        shutil.move(str(path), directory / path.name)
+    return directory
+
+
 def _repo(ledger, origin="/o"):
     return ledger.upsert_repo("r", origin, "/m.git", policy_sha="p" * 64)
 
@@ -1797,11 +1810,16 @@ def test_no_real_spec_names_a_criterion_path_its_touches_do_not_cover(tmp_path):
     `test_no_real_spec_is_refused_on_its_own_acceptance_criteria` to every
     chained spec — "53 specs, 31 preempted, 22 examined". The order is the
     other way round: `scheduler.py:687` is the criterion-path check and the
-    `depends_on` loop is at 697. Measured 2026-09-08 by planting an uncoverable
-    path in each spec in turn and reading what the queue refuses it for: of the
-    32 specs carrying a markdown criteria section, **28 report the
-    criterion-path refusal** and 4 stop on an earlier one. `SA-0016`, named in
-    that test as one of the two it memorialises, is among the 28.
+    `depends_on` loop is at 697. Measured 2026-09-08 by planting
+    `saffron/nowhere/invented.py` in each spec's first checklist box in turn
+    and reading what the queue refuses it for: of the **30** specs whose
+    criteria `_criteria_texts` reads from the markdown checklist, **28 report
+    the criterion-path refusal**. `SA-0016`, named in that test as one of the
+    two it memorialises, is among the 28. The other two are probe-dependent
+    rather than a second class: `SA-0021` stops on an earlier `depends_on`
+    refusal, and `SA-0001` is not refused at all because its own `forbidden:
+    saffron/**` covers the planted token, which is this check's documented
+    citation escape.
 
     What is left of the item is still worth this test. That check reaches the
     property only because of an ordering nothing pins, and it asserts something
@@ -1810,9 +1828,7 @@ def test_no_real_spec_names_a_criterion_path_its_touches_do_not_cover(tmp_path):
     queue-shaped test keeps its own job, which is that the queue refuses
     nothing unexpected.
     """
-    directory = _real_corpus(tmp_path)
-    for path in sorted((directory / "done").glob("*.md")):
-        shutil.move(str(path), directory / path.name)
+    directory = _every_spec_at_top_level(tmp_path)
 
     specs, failures = discover_specs(directory)
     assert not failures, f"the corpus no longer parses: {failures}"
@@ -1839,11 +1855,7 @@ def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger
     corpus is one long dependency chain with no tasks behind it; a refusal on
     anything else is the bug.
     """
-    # Every spec at top level: a spec left in `done/` is never scanned, and
-    # this check wants each one to reach `_refuse`.
-    directory = _real_corpus(tmp_path)
-    for path in sorted((directory / "done").glob("*.md")):
-        shutil.move(str(path), directory / path.name)
+    directory = _every_spec_at_top_level(tmp_path)
 
     _, refusals = build_queue(
         directory, None, ledger, repo_slug="joel/saffron", gh=_fake_gh([])
