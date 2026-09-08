@@ -420,3 +420,70 @@ def test_a_criterion_stops_at_a_subsection_of_its_own_section():
         "| Q1 | which criteria failed |\n"
     )
     assert spec.acceptance_criteria == ["No file under `saffron/` is changed"]
+
+
+def test_a_mutant_whose_find_text_the_spec_dictates_is_refused():
+    """BACKLOG item 82, and the mistake `SA-0063` made. A `Mutant` applies only
+    where `find` matches exactly once, so for a spec that builds code which
+    does not exist yet the operator cannot know the text the agent will
+    produce. `SA-0063` solved that by mandating the literal in its own body —
+    and the body *is* prompt text: `build_system_prompt` passes it as the
+    substituted `{spec}` value, so every literal a spec pins is a literal the
+    implementer reads.
+
+    Its verdict ("2 of 2 witnesses died under their own mutant") is therefore
+    sound evidence that the mechanism works and no evidence that the tests are
+    honest: a test written to kill a known mutant is the theater the gate
+    exists to refuse. No reviewer caught it — both lenses that read that diff
+    missed it, and it was found only by reading the agent's own reasoning as it
+    worked. One string search catches it at parse, before money is spent."""
+    with pytest.raises(SpecError, match="mutant"):
+        parse_spec(
+            "---\nid: TE-1\ntitle: t\ntype: feature\n"
+            "acceptance:\n"
+            "  - claim: the constant is declared\n"
+            "    witness: tests/test_billing.py::test_declared\n"
+            "    mutant:\n"
+            "      file: saffron/billing.py\n"
+            "      find: 'CEILING = 60'\n"
+            "      replace: 'CEILING = 0'\n"
+            "---\n\nDeclare `CEILING = 60` at module scope.\n"
+        )
+
+
+def test_a_mutant_a_claim_discloses_is_refused_too():
+    """A claim is prompt text by the same route: `context.witnesses_block`
+    hands the implementer each criterion's claim, and `criteria_section`
+    appends them for the critic. Disclosing there is the same defect one field
+    over."""
+    with pytest.raises(SpecError, match="mutant"):
+        parse_spec(
+            "---\nid: TE-1\ntitle: t\ntype: feature\n"
+            "acceptance:\n"
+            "  - claim: the module declares CEILING = 60\n"
+            "    witness: tests/test_billing.py::test_declared\n"
+            "    mutant:\n"
+            "      file: saffron/billing.py\n"
+            "      find: 'CEILING = 60'\n"
+            "      replace: 'CEILING = 0'\n"
+            "---\n\nbody\n"
+        )
+
+
+def test_a_mutant_pinning_text_the_code_determines_parses():
+    """The shape item 82 recommends and `SA-0064` used: pin what the existing
+    code already determines, so the natural spelling is close to forced and no
+    disclosure is needed to make it match. The verdict then means something."""
+    spec = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: feature\n"
+        "acceptance:\n"
+        "  - claim: the total is clamped at zero\n"
+        "    witness: tests/test_billing.py::test_never_negative\n"
+        "    mutant:\n"
+        "      file: saffron/billing.py\n"
+        "      find: 'max(total, 0)'\n"
+        "      replace: 'total'\n"
+        "---\n\nThe clamp in `billing.total` is the subject; do not restate it.\n"
+    )
+    declared = spec.acceptance[0]
+    assert declared.mutant is not None

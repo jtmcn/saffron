@@ -4620,6 +4620,27 @@ than the property is worth.
 
 ## 82. A mutant can pin the text a spec dictates or the text an agent writes, never both
 
+**Status: done, 2026-09-08.** The constraint is stated where an author meets it
+— `docs/agents/issue-tracker.md`'s conventions, beside the rest of the spec
+format — and `intake.py` refuses at parse a mutant whose `find` text appears in
+the spec's body **or in its own claim**: a claim is prompt text by the same
+route, `context.witnesses_block` handing it to the implementer and
+`criteria_section` to the critic.
+
+Measured against this repo's 54 specs: one refusal, `SA-0063`, which is the
+spec this item was written about and the exact mutant it describes. No other
+spec trips it, and no length threshold was needed — a `find` short enough to
+appear in prose by accident already fails the match-exactly-once rule and is an
+unusable mutant.
+
+One consequence worth knowing before the check meets a spec someone is waiting
+on: an unparseable spec leaves the scanned set, so its dependents refuse with
+*"depends_on X is not among the specs in this directory"* — a dangling
+reference rather than an unmerged dependency. `SA-0064` reads that way in the
+queue today. The cascade is `discover_specs`' designed shape, but the sentence
+points at the wrong fact.
+
+
 Found writing `SA-0064`, 2026-09-07, after `SA-0063` ran both halves of it.
 
 A `Mutant` names exact text and applies only when `find` matches exactly once.

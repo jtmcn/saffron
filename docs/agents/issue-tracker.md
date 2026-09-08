@@ -28,6 +28,36 @@ GitHub issues remain in use only for research/evidence records under
   move together inside a cell and the task is refused at intake. File it as a
   backlog item marked **by hand**, in the same commit as the spec.
 
+- **A mutant pins text the existing code already determines; a spec that
+  creates new code declares a witness and no mutant.** A `mutant` names exact
+  text and applies only where `find` matches exactly once (§5.4.1), so for code
+  that does not exist yet the operator cannot know the spelling the agent will
+  produce. There are only two ways out and one of them is barred.
+
+  *Dictating the literal does not work.* `SA-0063` mandated an exact heading so
+  its mutants would match, and they did — the first real `witness` verdict this
+  repo produced. But the body **is** prompt text: `build_system_prompt` passes
+  it as the substituted `{spec}` value, so every literal a spec pins is a
+  literal the implementer reads, and a test written to kill a known edit is the
+  theater `witness` exists to refuse. That verdict is sound evidence the
+  mechanism works and no evidence the tests are honest. `intake.py` now refuses
+  it at parse: a mutant whose `find` appears in the spec's body or in its own
+  claim is a `SpecError` before any money is spent. No reviewer caught
+  `SA-0063` — both lenses that read the diff missed it, and it was found only by
+  reading the agent's own reasoning as it worked.
+
+  *Pinning what the code determines does work*, and is what `SA-0064` did: a
+  field that exists, a parameter that exists, a predicate already written, so
+  the natural spelling is close to forced and no disclosure is needed to make
+  it match. The verdict then means something.
+
+  So a spec whose change is an **edit** declares a mutant, and one whose change
+  is **new** declares a witness alone and accepts that `witness` will report
+  `skip`. That is a real limit on the answer item 69 was built to give
+  (`docs/BACKLOG.md` item 82) rather than a rule of thumb — say which of the two
+  a spec is when it is written, in `## Notes for the agent`, so a reviewer can
+  tell an honest `skip` from a missing mutant.
+
 ## Driving a spec
 
 ```

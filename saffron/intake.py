@@ -170,9 +170,36 @@ def parse_spec(text: str) -> Spec:
     # model_validate, not Spec(**fields): a non-string frontmatter key (`1:`,
     # or an unquoted `on:`) makes ** raise TypeError past this guard.
     try:
-        return Spec.model_validate({**fields, **reserved})
+        spec = Spec.model_validate({**fields, **reserved})
     except ValidationError as exc:
         raise SpecError(f"spec frontmatter is invalid: {exc}") from exc
+
+    # Item 82: a mutant the spec itself spells out is a mutant handed to the
+    # implementer. The body *is* prompt text — `build_system_prompt` passes it
+    # as the substituted `{spec}` value — and so is a claim, which
+    # `context.witnesses_block` gives the implementer and `criteria_section`
+    # gives the critic. A test written to kill a known edit is the theater
+    # `witness` exists to refuse, and its verdict then measures the disclosure
+    # rather than the tests. `SA-0063` did exactly this and no reviewer caught
+    # it: both lenses that read the diff missed it.
+    #
+    # Refused at parse, where it costs nothing. A `find` short enough to appear
+    # in prose by accident is already an unusable mutant — it has to match
+    # exactly once in its file — so no length threshold is needed to keep this
+    # from firing on an honest spec.
+    for criterion in spec.acceptance:
+        if criterion.mutant is None:
+            continue
+        for where, text in (("body", body), ("its own claim", criterion.claim)):
+            if criterion.mutant.find in text:
+                raise SpecError(
+                    f"{criterion.witness}'s mutant names text this spec also "
+                    f"puts in {where} ({criterion.mutant.find!r}); the "
+                    "implementer reads that, so the witness would be written "
+                    "to kill a known edit. Pin text the existing code already "
+                    "determines, or declare a witness and no mutant"
+                )
+    return spec
 
 
 def load_spec(path: Path) -> tuple[Spec, str]:

@@ -1803,16 +1803,31 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     )
 
     assert [c.spec.id for c in candidates] == ["SA-0060"]
+    # `SA-0063` no longer parses, and that is a finding rather than a
+    # regression: item 82's validator refuses a mutant whose `find` text the
+    # spec also dictates, and `SA-0063` is the spec item 82 was written about —
+    # it mandated the exact heading its own mutant pins so the mutant would
+    # match. It is the only one of this repo's 54 specs the check refuses.
+    # A discovery failure sorts ahead of the parsed candidates, so it is first.
+    assert refusals[0].path.name.startswith("SA-0063")
+    assert "mutant names text this spec also puts in body" in refusals[0].reason
+
     # Refused for the parent each actually declares, which is what separates a
     # dependency refusal from a criterion-path one.
     chain = [
         ("SA-0061", "SA-0060"),
         ("SA-0062", "SA-0061"),
-        ("SA-0063", "SA-0062"),
+        # Its parent is `SA-0063`, which is now unparseable and therefore not
+        # in the scanned set at all — so this reads as a dangling reference
+        # rather than an unmerged dependency. The cascade is the designed
+        # shape (`discover_specs`: a malformed spec is a refusal candidate
+        # downstream, never a reason for the scan to raise), but the sentence
+        # a reader gets does point at the wrong fact, and that is worth
+        # knowing before the check meets a spec someone is waiting on.
         ("SA-0064", "SA-0063"),
     ]
-    assert len(refusals) == len(chain)
-    for refusal, (child, parent) in zip(refusals, chain, strict=True):
+    assert len(refusals) == len(chain) + 1
+    for refusal, (child, parent) in zip(refusals[1:], chain, strict=True):
         assert refusal.path.name.startswith(child)
         assert parent in refusal.reason
         assert "depends_on" in refusal.reason
