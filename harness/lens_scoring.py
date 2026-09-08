@@ -30,12 +30,12 @@ from __future__ import annotations
 
 import json
 import tomllib
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from saffron.agents.findings import Finding, Severity
-from saffron.phases.review import LensReview
+from saffron.phases.review import LENSES, LensReview
 
 # `note` < `concern` < `blocker`, the order `_describe` already renders them in.
 SEVERITY_RANK: dict[Severity, int] = {"note": 0, "concern": 1, "blocker": 2}
@@ -60,6 +60,9 @@ class LensErrored(ValueError):
     Averaging it in reads as the lens looking and finding nothing, which is the
     one thing `review.run_lens`'s own comment forbids — and it lands as a miss,
     understating exactly what a pass exists to measure.
+
+    A lens simply *absent* from the run is the same silence by a shorter route,
+    and is refused the same way.
     """
 
 
@@ -135,15 +138,7 @@ class Fixture:
         path = self.root / "recorded-findings.json"
         if not path.is_file():
             raise FixtureError(f"{self.spec_id}: {path} is missing")
-        return [
-            LensReview(
-                lens=row["lens"],
-                findings=[Finding(**f) for f in row["findings"]],
-                cost_usd=row.get("cost_usd", 0.0),
-                error=row.get("error"),
-            )
-            for row in json.loads(path.read_text())
-        ]
+        return reviews_from_json(path.read_text())
 
 
 @dataclass(frozen=True)
@@ -161,8 +156,8 @@ class Score:
     """What one defect got across a pass of `runs` runs."""
 
     runs: int
-    """Runs actually scored. Never the number requested — a run with an
-    errored lens is dropped, and n has to say so."""
+    """Runs actually scored. Never the number requested — a run whose lenses
+    did not all run is dropped, and n has to say so."""
     seen: int
     graded: int
     matches: tuple[Match, ...]
@@ -170,6 +165,24 @@ class Score:
     """Runs dropped because a lens in them did not run. Rendered beside the
     table: a pass quietly averaging four runs as three is the shape of claim
     item 69 charged the mutation-vs-lens record with."""
+
+
+def reviews_from_json(text: str) -> list[LensReview]:
+    """One run, read back from what `LensReview.as_dict` wrote.
+
+    Shared with anything replaying a recorded pass rather than duplicated
+    there: the predicate is what a replay is testing, and a second hand-rolled
+    parser drifts from `as_dict`'s shape without either side noticing.
+    """
+    return [
+        LensReview(
+            lens=row["lens"],
+            findings=[Finding(**f) for f in row["findings"]],
+            cost_usd=row.get("cost_usd", 0.0),
+            error=row.get("error"),
+        )
+        for row in json.loads(text)
+    ]
 
 
 def _required(table: dict, key: str, where: str):
@@ -220,17 +233,36 @@ def load_fixture(root: Path) -> Fixture:
         )
     if not defects:
         raise FixtureError(f"{root}: declares no defects")
+    # `score_run` keys on `id`, so a repeated one silently drops a declared
+    # defect and `render_table` prints two rows carrying the survivor's score.
+    ids = [d.id for d in defects]
+    repeated = sorted({d for d in ids if ids.count(d) > 1})
+    if repeated:
+        raise FixtureError(
+            f"{declaration}: defect id {repeated} declared twice — the second "
+            "would overwrite the first and the table would print both rows"
+        )
     # A phrase in two defects' lists credits one claim to both, so k/n stops
-    # being per-defect. Narrow: it catches a copied list, not this fixture's own
-    # failure — `dirty` was unique and still matched the other defect's claim,
-    # which only the regression tests' real claim text catches.
+    # being per-defect. Containment rather than equality, because the phrases
+    # are substrings of a claim: `committed` in one list and `uncommitted` in
+    # the other credits the first with every claim matching the second. Still
+    # narrow — it catches a copied or overlapping list, not this fixture's own
+    # failure, where `dirty` was unique to one defect and still matched the
+    # other's claim. Only the regression tests' real claim text catches that.
     for defect in defects:
         for other in defects:
-            shared = set(defect.must_mention) & set(other.must_mention)
-            if other.id != defect.id and shared:
+            if other.id == defect.id:
+                continue
+            shared = sorted(
+                repr(a) if a == b else f"{a!r} inside {b!r}"
+                for a in defect.must_mention
+                for b in other.must_mention
+                if a in b or b in a
+            )
+            if shared:
                 raise FixtureError(
                     f"{declaration}: {defect.id} and {other.id} both declare "
-                    f"{sorted(shared)}, so a claim carrying it scores both"
+                    f"{', '.join(shared)}, so a claim carrying it scores both"
                 )
     where = str(declaration)
     return Fixture(
@@ -278,24 +310,43 @@ def match(defect: Defect, findings: Sequence[Finding]) -> Match:
     )
 
 
-def score_run(fixture: Fixture, reviews: Sequence[LensReview]) -> dict[str, Match]:
+def score_run(
+    fixture: Fixture,
+    reviews: Sequence[LensReview],
+    expect: Collection[str] = tuple(LENSES),
+) -> dict[str, Match]:
     """One run of every lens, scored against every declared defect.
 
-    Refuses a run in which any lens errored, rather than scoring what is left:
-    the lens that owns a defect is often the only one that would have raised
-    it, so a run missing that lens scores the defect missed for a reason that
-    is not about the lens prompt at all.
+    Refuses a run in which any lens errored *or is absent*, rather than scoring
+    what is left: the lens that owns a defect is often the only one that would
+    have raised it, so a run missing that lens scores the defect missed for a
+    reason that is not about the lens prompt at all. An earlier revision
+    checked only `error`, which left the same silence by the shorter route —
+    `score_run(fixture, [])` scored every defect missed, and three of those
+    rendered as a complete table of zeroes over n=3.
+
+    `expect` defaults to today's lens set, so a caller is guarded without
+    saying anything. A pass recorded before a lens was added or dropped must
+    name the set it actually ran, or it is scored against a remit it never had.
     """
     errored = [r for r in reviews if r.error]
     if errored:
         detail = "; ".join(f"{r.lens}: {r.error}" for r in errored)
         raise LensErrored(f"{fixture.spec_id}: {detail}")
+    missing = sorted(set(expect) - {r.lens for r in reviews})
+    if missing:
+        raise LensErrored(
+            f"{fixture.spec_id}: no result for {', '.join(missing)}, so this "
+            "run says nothing about the defects those lenses own"
+        )
     findings = [f for review in reviews for f in review.findings]
     return {d.id: match(d, findings) for d in fixture.defects}
 
 
 def score_pass(
-    fixture: Fixture, runs: Sequence[Sequence[LensReview]]
+    fixture: Fixture,
+    runs: Sequence[Sequence[LensReview]],
+    expect: Collection[str] = tuple(LENSES),
 ) -> dict[str, Score]:
     """k/n across the runs of one pass.
 
@@ -303,15 +354,15 @@ def score_pass(
     findings in one run are one run that saw it, or a verbose lens outscores an
     accurate one.
 
-    A run with an errored lens is dropped and counted, never scored as a miss
-    (`LensErrored`). If that leaves nothing, this raises rather than returning
-    `0/0`: a table of zeroes over zero runs reads like a measurement.
+    A run with an errored or absent lens is dropped and counted, never scored
+    as a miss (`LensErrored`). If that leaves nothing, this raises rather than
+    returning `0/0`: a table of zeroes over zero runs reads like a measurement.
     """
     scored = []
     errored = 0
     for run in runs:
         try:
-            scored.append(score_run(fixture, run))
+            scored.append(score_run(fixture, run, expect))
         except LensErrored:
             errored += 1
     if not scored:

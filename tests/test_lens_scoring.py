@@ -9,14 +9,13 @@ is about, whose answer is already written down.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
 from harness import lens_scoring
 from saffron.agents.findings import Finding, Severity
-from saffron.phases.review import LensReview
+from saffron.phases.review import LENSES, LensReview
 
 FIXTURE = Path(__file__).parent.parent / "docs" / "evidence" / "fixtures" / "SA-0062"
 
@@ -48,7 +47,13 @@ def _finding(
 
 
 def _reviews(*findings: Finding) -> list[LensReview]:
-    return [LensReview(lens="correctness", findings=list(findings))]
+    """A *complete* run — every lens `score_run` expects, the findings hung on
+    the first. Complete because a run missing a lens is refused, and a helper
+    that quietly returned one lens would exempt every test below from that."""
+    return [
+        LensReview(lens=lens, findings=list(findings) if lens == "correctness" else [])
+        for lens in LENSES
+    ]
 
 
 def test_the_fixture_carries_its_frozen_inputs(sa0062):
@@ -212,6 +217,43 @@ def test_a_run_with_an_errored_lens_is_dropped_from_n_and_counted(sa0062):
     assert "1 run(s) dropped" in lens_scoring.render_table(sa0062, passes)
 
 
+def test_a_run_missing_a_lens_is_not_a_sample_either(sa0062):
+    """`error` is not the only way a lens says nothing about the diff.
+
+    An earlier revision checked `error` alone, so `score_run(fixture, [])`
+    scored every defect missed and `score_pass` rendered three of those as a
+    complete table of zeroes over n=3 — the measurement its own docstring says
+    it refuses, reached by a route that never sets `error`. Unreachable from
+    today's driver, which always returns one result per lens; reachable the
+    moment `LENSES` changes under Track C, which is what this harness is for.
+    """
+    with pytest.raises(lens_scoring.LensErrored, match="no result for"):
+        lens_scoring.score_run(sa0062, [])
+    partial = [LensReview(lens="correctness", findings=[_finding()])]
+    with pytest.raises(lens_scoring.LensErrored, match="adequacy, contract"):
+        lens_scoring.score_run(sa0062, partial)
+    # And the pass drops such a run rather than dying on it, exactly as it
+    # drops an errored one.
+    dropped = lens_scoring.score_pass(sa0062, [_reviews(_finding()), partial])
+    assert dropped["dirty-restore"].runs == 1
+    assert dropped["dirty-restore"].errored == 1
+
+
+def test_a_pass_recorded_before_a_lens_moved_names_the_set_it_ran(sa0062):
+    """The escape hatch the default needs. `expect` defaults to today's lens
+    set so a caller is guarded without saying anything; a pass recorded under a
+    different set is scored against the set it actually ran, or it is refused
+    for a change made after it was measured."""
+    two_lenses = [
+        LensReview(lens="correctness", findings=[_finding()]),
+        LensReview(lens="contract", findings=[]),
+    ]
+    scores = lens_scoring.score_run(
+        sa0062, two_lenses, expect=("correctness", "contract")
+    )
+    assert scores["dirty-restore"].seen is True
+
+
 def test_a_pass_with_nothing_left_to_score_is_not_a_table_of_zeroes(sa0062):
     """`0/0` renders like a measurement and is not one. Covers `--runs 0` and a
     pass every run of which errored."""
@@ -234,6 +276,33 @@ def test_two_defects_may_not_share_a_phrase(sa0062, tmp_path):
         lens_scoring.load_fixture(tmp_path)
 
 
+def test_one_defects_phrase_may_not_contain_anothers(sa0062, tmp_path):
+    """The same collision by containment rather than equality. The phrases are
+    substrings of a claim, so `committed` on one defect swallows every claim
+    matching the other's `uncommitted` — an equality check sees two different
+    strings and passes it."""
+    declaration = (FIXTURE / "fixture.toml").read_text()
+    (tmp_path / "fixture.toml").write_text(
+        declaration.replace('must_mention = ["truncat"', 'must_mention = ["committed"')
+    )
+    with pytest.raises(lens_scoring.FixtureError, match="inside"):
+        lens_scoring.load_fixture(tmp_path)
+
+
+def test_a_defect_id_may_not_be_declared_twice(sa0062, tmp_path):
+    """`score_run` keys on `id`, so the second declaration overwrites the first
+    and a declared defect is scored by nobody — while `render_table`, which
+    walks `fixture.defects`, prints two rows carrying the survivor's numbers
+    under names that look different. It also disables the shared-phrase check
+    between the two, which skips a defect against itself."""
+    declaration = (FIXTURE / "fixture.toml").read_text()
+    (tmp_path / "fixture.toml").write_text(
+        declaration.replace('id = "truncating-write"', 'id = "dirty-restore"')
+    )
+    with pytest.raises(lens_scoring.FixtureError, match="declared twice"):
+        lens_scoring.load_fixture(tmp_path)
+
+
 def test_a_fixture_missing_a_key_is_a_fixture_error_not_a_keyerror(sa0062, tmp_path):
     """A `KeyError` out of a loader reads as a bug in the loader."""
     declaration = (FIXTURE / "fixture.toml").read_text()
@@ -253,25 +322,23 @@ PASS_2026_09_07 = (
 )
 
 
+# The three lenses this pass actually ran. Named rather than left to the
+# default: if Track C adds or drops one, this record is still a table these
+# three produced, and scoring it against a later set would refuse it for a
+# change made long after it was measured.
+PASS_2026_09_07_LENSES = ("correctness", "contract", "adequacy")
+
+
 def _recorded_pass() -> list[list[LensReview]]:
-    runs = []
-    for index in (1, 2, 3):
-        rows = json.loads((PASS_2026_09_07 / f"run-{index}.json").read_text())
-        runs.append(
-            [
-                LensReview(
-                    lens=row["lens"],
-                    findings=[Finding(**f) for f in row["findings"]],
-                    cost_usd=row.get("cost_usd", 0.0),
-                    error=row.get("error"),
-                )
-                for row in rows
-            ]
+    return [
+        lens_scoring.reviews_from_json(
+            (PASS_2026_09_07 / f"run-{index}.json").read_text()
         )
-    return runs
+        for index in (1, 2, 3)
+    ]
 
 
-def test_the_first_passs_published_table_is_re_derivable(sa0062):
+def test_the_first_pass_s_published_table_is_re_derivable(sa0062):
     """The evidence record's numbers, recomputed from the pass's own JSON.
 
     The raw runs used to live only under `~/.saffron/`, which made the table in
@@ -280,7 +347,9 @@ def test_the_first_passs_published_table_is_re_derivable(sa0062):
     the repo, a predicate change that silently moves a published number fails
     here instead of being noticed by nobody.
     """
-    scores = lens_scoring.score_pass(sa0062, _recorded_pass())
+    scores = lens_scoring.score_pass(
+        sa0062, _recorded_pass(), expect=PASS_2026_09_07_LENSES
+    )
     assert (scores["dirty-restore"].seen, scores["dirty-restore"].graded) == (2, 2)
     assert (scores["truncating-write"].seen, scores["truncating-write"].graded) == (
         3,
