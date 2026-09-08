@@ -127,17 +127,25 @@ def test_a_tests_gate_that_takes_no_subset_skips_the_witness_gate(tmp_path):
     assert (tmp_path / "a.py").read_text() == original
 
 
-def test_a_stale_witness_id_does_not_trigger_a_false_skip(tmp_path):
+def test_a_stale_witness_id_does_not_discard_another_criterions_finding(tmp_path):
     """The subset-capability probe must never be drawn from a criterion's own
     declared `witness` — that id is operator-written and can be stale (a
     typo, a renamed test, a moved file). Probing with it would read "this one
     criterion's id no longer exists" as "this repo's `tests` gate cannot be
     filtered at all" and `skip` the whole gate without ever really trying —
     which would be silently wrong for a repo whose `tests` gate handles
-    subset filtering perfectly well. A probe drawn from a genuinely collected
-    id makes no such mistake: it lets `witness_gate` actually run, and
-    whatever it then finds for the stale id — here, its own documented
-    `error`, never a false `skip` — is a real answer, not a premature one."""
+    subset filtering perfectly well.
+
+    This asserted `error` for the stale id until item **83**. `witness.py`'s
+    own comment had recorded that `error`-vs-`skip` as unresolved and said to
+    settle it in the backlog rather than by editing one side to match; 83 is
+    that resolution, measured on a real run that exited 2 before buying a
+    turn. A witness the suite never collected is **unproven**, not broken.
+
+    What the test protects is unchanged and is now asserted directly rather
+    than through the status: one bad id must not cost another criterion its
+    real verdict. The stale one is named in the summary, the sound one still
+    survives its mutant, and that survival is still a `fail`."""
     (tmp_path / "a.py").write_text("def total(x):\n    return max(x, 0)\n")
     stale = _criterion(
         witness="tests/test_gone.py::test_does_not_exist_anymore",
@@ -169,10 +177,19 @@ def test_a_stale_witness_id_does_not_trigger_a_false_skip(tmp_path):
         collected=["tests/test_other.py::test_unrelated"],
     )
 
+    # A second criterion whose witness the suite did collect, and whose mutant
+    # it survives: the real finding that must not be lost to the stale id.
+    sound = _criterion(
+        witness="tests/test_other.py::test_unrelated",
+        file="a.py",
+        find="return max",
+        replace="return  max",
+    )
+
     result = run_witness(
         gates={"tests": tests},
         cwd=tmp_path,
-        acceptance=[stale],
+        acceptance=[stale, sound],
         mutate=host_mutator(tmp_path),
         tests_result=tests_result,
     )
@@ -180,10 +197,12 @@ def test_a_stale_witness_id_does_not_trigger_a_false_skip(tmp_path):
     # The old, buggy probe (drawn from `stale.witness` itself) would have
     # errored immediately and reported `witness` as `skip` without ever
     # calling `witness_gate`. The fixed probe succeeds on the real canary, so
-    # `witness_gate` genuinely runs — and it is `stale`'s own id that then
-    # fails inside it, surfacing as `error`, not a false `skip`.
+    # `witness_gate` genuinely runs — and the stale id is now set aside by
+    # name instead of aborting the attempt for everyone else.
     assert result is not None
-    assert result.status == "error"
+    assert result.status == "fail"
+    assert "test_does_not_exist_anymore" in result.summary
+    assert [f.file for f in result.failures] == [sound.witness]
 
 
 def test_the_result_names_each_criterion_not_a_count(tmp_path):

@@ -98,6 +98,7 @@ def witness_gate(
     acceptance: Sequence[Criterion],
     mutate: Mutated,
     run_tests: RunTests,
+    collected: Sequence[str] | None = None,
 ) -> GateResult:
     """Each criterion's mutant, applied through `mutate`, tested alone, and
     undone.
@@ -113,6 +114,18 @@ def witness_gate(
     too, and it leaves the tree mutated, because nothing here can put back
     what it could not read or write, and this gate has no path of its own to
     try.
+
+    `collected` is the set of node ids the repo's `tests` gate enumerated on
+    the unmutated tree. A criterion whose `witness` is not in it is `unproven`
+    and its mutant is never applied: there is no witness to kill, which is the
+    expected state at base for every test the task has yet to write (item 83).
+    Compared, never parsed — an opaque string against a list the `tests` gate
+    itself produced, so this stays a gate that knows no framework (§2.1). It
+    answers per criterion, unlike the subset probe in `run_witness`, which must
+    condemn the whole gate because one bad id cannot be told apart from a
+    `tests` gate that refuses subsets at all. `None` means the caller had no
+    enumeration to offer, which is not evidence about any witness: every
+    criterion is tried, exactly as before this argument existed.
     """
     declared = [c for c in acceptance if c.mutant is not None]
     if not declared:
@@ -128,6 +141,12 @@ def witness_gate(
     for criterion in declared:
         mutant = criterion.mutant
         assert mutant is not None  # narrowed by the `declared` filter above
+
+        # Before `mutate`, so nothing is written for a question that cannot be
+        # answered and nothing has to be restored (item 83).
+        if collected is not None and criterion.witness not in collected:
+            unproven.append(_named(criterion, "no such witness in this tree"))
+            continue
 
         # `mutate`'s exit is where restoration happens now — a context
         # manager's exit is the one place a `BaseException` cannot route

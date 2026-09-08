@@ -232,8 +232,12 @@ def run_witness(
         )
 
     declared = [c for c in acceptance if c.mutant is not None]
+    # Hoisted out of the `if` below because `witness_gate` takes it too: the
+    # probe asks whether this repo's `tests` gate honours a subset at all, and
+    # the same enumeration answers, per criterion, whether a named witness even
+    # exists in this tree (item 83).
+    collected = tests_result.collected if tests_result is not None else None
     if declared:
-        collected = tests_result.collected if tests_result is not None else None
         if not collected:
             return GateResult(
                 gate="witness",
@@ -287,7 +291,12 @@ def run_witness(
                 ),
             )
 
-    return witness_gate(acceptance=acceptance, mutate=mutate, run_tests=run_tests)
+    return witness_gate(
+        acceptance=acceptance,
+        mutate=mutate,
+        run_tests=run_tests,
+        collected=collected,
+    )
 
 
 def run_suite(
