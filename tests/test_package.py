@@ -11,7 +11,7 @@ from saffron.agents.findings import Finding
 from saffron.events import describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
-from saffron.intake import Spec, parse_spec
+from saffron.intake import Criterion, Spec, parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import rebut
 from saffron.phases.package import (
@@ -2552,3 +2552,68 @@ def test_fetch_parent_branch_names_a_commit_the_mirror_cannot_reach(
 
     with pytest.raises(ParentGone, match="cannot reach"):
         fetch_parent_branch(mirror, "unused://", "parent")
+
+
+def test_reverification_runs_the_same_suite_shape_the_session_ran(
+    tmp_path, monkeypatch
+):
+    """BACKLOG item 71's remaining third. PACKAGE's re-verification passed
+    neither `acceptance=` nor `mutate=`, so `run_suite` left `witness` out of
+    that suite entirely — the two suites differed in *shape*, and `suite_drift`
+    compares gate names, so nothing could say so. A witness verdict was
+    therefore never re-run against the rebased head.
+
+    Driven with the cell lifecycle stubbed: what is being pinned is the
+    arguments the suite is invoked with, and a real cell would test
+    `run_suite` rather than this. `tests/test_package_cell.py` covers the
+    real-container path.
+    """
+    from saffron.cell import runtime, worktree
+    from saffron.gates import runner
+    from saffron.phases import package as pkg
+
+    calls: list[dict] = []
+
+    def fake_run_suite(gates, cwd, **kwargs):
+        calls.append(kwargs)
+        return [GateResult(gate="tests", status="pass", tool="pytest 8.3.2")]
+
+    for name in ("create_network", "create_volume"):
+        monkeypatch.setattr(runtime, name, lambda *a, **k: None)
+    for name in ("remove_container", "remove_volume", "remove_network"):
+        monkeypatch.setattr(runtime, name, lambda *a, **k: None)
+    monkeypatch.setattr(worktree, "prepare_worktree", lambda **k: None)
+    monkeypatch.setattr(runner, "run_suite", fake_run_suite)
+
+    criterion = Criterion(
+        claim="the total is clamped",
+        witness="tests/test_billing.py::test_clamped",
+        mutant={"file": "pkg/a.py", "find": "a", "replace": "b"},
+    )
+    new, head = pkg.reverify(
+        mirror=tmp_path,
+        packaged_sha="a" * 40,
+        new_base_sha="b" * 40,
+        policy=_Policy(),
+        gates_dir=tmp_path,
+        image="img",
+        acceptance=[criterion],
+    )
+
+    assert len(calls) == 2, "both the baseline and the head suite must run"
+    for kwargs in calls:
+        # Both halves, not just head: a baseline missing `witness` subtracts
+        # nothing from a head that has it.
+        assert list(kwargs["acceptance"]) == [criterion]
+        assert callable(kwargs["mutate"])
+    assert new == []
+    assert head
+
+
+class _Policy:
+    """The two members `reverify` reads off a policy."""
+
+    thread_env: dict = {}
+
+    def gate_executables(self, _root):
+        return {"tests": _root / "tests"}

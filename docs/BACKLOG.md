@@ -3939,7 +3939,15 @@ retry inside the loop reintroduces the "does the queue change" question the
 
 ## 71. `witness` is built, wired, and cannot run — the `tree` it needs does not exist in a cell
 
-**Status: two of the three below are done, 2026-09-07.** `SA-0060` (PR #148)
+**Status: done, 2026-09-08.** The third landed: `phases/package.py`'s
+re-verification now passes `acceptance=` and a `worktree.source_mutated` bound
+to each package cell's own container, on both the baseline and the head suite,
+so the two suites have the same shape and `suite_drift` can compare `witness`
+across the two call sites. Safe to pass only because item 83 landed first: a
+witness whose test does not exist at the rebased base is `unproven` there rather
+than an abort.
+
+**Prior status: two of the three below were done, 2026-09-07.** `SA-0060` (PR #148)
 gave `witness_gate` the injected mutator; `SA-0061` (#150) and `SA-0062` (#154)
 made `session._suite` pass `acceptance=` and a real `worktree.source_mutated`,
 and `advisory_gates` now reads `contract.witness_blocking`. Measured on real
