@@ -44,6 +44,7 @@ def test_reverification_runs_the_suite_inside_a_cell(tmp_path, capsys):
         policy=policy,
         gates_dir=mirror_ops.export_saffron_dir(mirror, head, tmp_path / "gates"),
         image=tag,
+        acceptance=[],
     )
     assert new_failures == []
     # The head results are returned, not just the subtraction: the body's gate
@@ -86,6 +87,7 @@ def test_the_reverification_cell_carries_no_credential(tmp_path, monkeypatch):
             policy=policy,
             gates_dir=tmp_path / "gates",
             image="unused",
+            acceptance=[],
         )
     # Exact: the declared gate env and nothing else. `cell_env` would add
     # CLAUDE_CONFIG_DIR and the proxy variables, and fail here.

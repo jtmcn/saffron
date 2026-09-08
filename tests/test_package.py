@@ -258,6 +258,7 @@ def test_reverify_execs_the_gates_from_the_mount_never_the_applied_tree(
         policy=Policy(gates={"tests": GateDeclaration()}),
         gates_dir=tmp_path / "gates",
         image="img",
+        acceptance=[],
     )
     assert (new, head) == ([], [])
     assert asked == [["/gates/.saffron/gates/tests"]] * 2

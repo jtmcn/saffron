@@ -454,7 +454,7 @@ def reverify(
     policy,
     gates_dir: Path,
     image: str,
-    acceptance: Sequence[Criterion] = (),
+    acceptance: Sequence[Criterion],
 ) -> tuple[list[NewFailure], list[GateResult]]:
     """Run the suite on the packaged commit, in a cell. Returns the new
     failures *and* the head results, because the body's gate table has to show
@@ -478,6 +478,10 @@ def reverify(
     it: without it — and without a `mutate` — `run_suite` leaves `witness` out
     of the suite entirely, so the two suites differ in *shape* and
     `suite_drift` has nothing to compare across the two call sites (item 71).
+    Required rather than defaulted, for the reason `CLAUDE.md` gives for cell
+    creation's `network`/`env`: an omission here is silent, `suite_drift`
+    compares head against base *within* one call and so sees both suites lose
+    `witness` together, and a caller that forgets is item 71 all over again.
     A witness whose test does not exist at `new_base_sha` is `unproven` there
     rather than an abort, which is item 83's fix and is what makes passing this
     here safe.
