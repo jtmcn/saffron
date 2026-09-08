@@ -1,0 +1,50 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.6801758999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/cell/worktree.py",
+        "line": 358,
+        "claim": "`_read_file` gets a mutant's target file content via `runtime.exec_(['cat', path])`, whose output passes through `runtime._decode`, which decodes as UTF-8 with `errors=\"replace\"` (`saffron/cell/runtime.py:111-114`) \u2014 any byte in the file that is not valid UTF-8 silently becomes U+FFFD. `_write_file` (line 376) then re-encodes that Python `str` with `content.encode()` and writes it back over the whole file, so every non-UTF-8 byte anywhere in the file \u2014 not just inside `mutant.find`/`replace` \u2014 is permanently replaced for the duration the mutant is live and the `tests` gate runs against it. `saffron/mutation.py`'s `apply_mutant`/`restore_mutant`, which this function's own docstring (lines 391-397) claims parity with, was built specifically to read and write raw bytes rather than text for this exact reason (`saffron/mutation.py:11-16`); the git-based undo removes the need for byte-exact restoration, but does nothing to protect the fidelity of the tree while the mutant is applied and the witness test runs against it. A repo file that is valid but not UTF-8 (a legacy-encoded fixture, a stray non-UTF-8 byte in a docstring or string literal) would be silently corrupted during the mutated run, producing a wrong `witness` verdict (`error` or a spurious `pass`/`fail`) unrelated to the mutant itself. This is unreachable today only because no spec in this repo declares a mutant yet.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.4307961,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "saffron/cell/worktree.py",
+        "line": 418,
+        "claim": "`_write_file` (called here, outside the `try/finally`) writes via a shell pipeline ending in `> path` (line ~377-378), and a shell truncates the destination file the moment it opens that redirection \u2014 before the `base64 -d` decode that fills it ever runs or succeeds. If the write's exec then returns non-zero for any reason after that point (missing `base64` in the cell image, ENOSPC, a killed process), `_write_file` raises `CellRuntimeError` and `source_mutated.__enter__` propagates it without ever reaching the `try:`/`finally:` at lines 419-426, so the `git checkout HEAD` undo never runs. `witness_gate` (saffron/gates/core/witness.py lines ~171-175) has not yet set `applied=True` at that point, so it reports 'could not apply {file}'s mutant' \u2014 but the file may already be truncated to empty on disk, which is exactly the tree left mutated with no restore attempted that witness.py's own contract comment (lines ~78-85) names as the one outcome the cell mutator must not produce ('a container exec that applies the edit and then loses the connection is exactly the shape that is not [unreachable]'). The diff's own tests only ever fail the `cat`/`checkout` calls outright (never a truncate-then-fail write), so this path is untested and the gates cannot see it.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.49166699999999997,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cell/worktree.py",
+        "line": 380,
+        "claim": "The `CellRuntimeError` raised when the write step of a mutant's apply fails (the `printf | base64 -d > path` exec returning non-zero) is never exercised by any test. `tests/test_worktree.py`'s `test_a_failed_undo_raises_rather_than_reporting_a_verdict` only drives the read-stage failure (`cat exploded`) and the undo-stage failure (`checkout HEAD` failing); no test makes the write exec fail. Replacing the raise at this line with a yielded reason (e.g. `yield f\"{mutant.file}: could not write mutant\"; return`) would silently turn a real apply failure into an ordinary 'unproven' outcome instead of `witness_gate`'s `error`, and every existing test \u2014 including `test_a_failed_undo_raises_rather_than_reporting_a_verdict`, which never reaches this branch \u2014 would still pass. This is exactly the case `saffron/gates/core/witness.py`'s own comment calls out as reachable for the cell mutator and not for `host_mutator` (a container exec that can lose the connection after writing), yet acceptance criterion 4 ('a failure to apply ... raises') is only witnessed for the read half of apply, not the write half.",
+        "anchored": true
+      }
+    ]
+  }
+]

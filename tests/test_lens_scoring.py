@@ -9,6 +9,7 @@ is about, whose answer is already written down.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -444,3 +445,112 @@ def test_the_frozen_gate_summary_names_the_tools_the_original_run_named(sa0062):
         assert f"({tool} " in lines[gate], lines[gate]
     for gate in GATES_NAMING_NO_TOOL:
         assert "(no tool reported)" in lines[gate], lines[gate]
+
+
+PASS_2026_09_08 = (
+    Path(__file__).parent.parent
+    / "docs"
+    / "evidence"
+    / "passes"
+    / "2026-09-08-lens-scoring-second-pass"
+)
+
+RECORD_2026_09_08 = (
+    Path(__file__).parent.parent
+    / "docs"
+    / "evidence"
+    / "2026-09-08-lens-scoring-second-pass.md"
+)
+
+
+def _second_pass() -> list[list[LensReview]]:
+    return [
+        lens_scoring.reviews_from_json(
+            (PASS_2026_09_08 / f"run-{index}.json").read_text()
+        )
+        for index in (1, 2, 3)
+    ]
+
+
+def test_the_second_pass_s_published_table_is_re_derivable(sa0062):
+    """Item 88's pass, scored by the same predicate as the first.
+
+    The fixture it ran against is this repository's shipped one, so a predicate
+    change moves both published tables or neither — which is the property that
+    makes the two comparable at all.
+    """
+    scores = lens_scoring.score_pass(
+        sa0062, _second_pass(), expect=PASS_2026_09_07_LENSES
+    )
+    assert (scores["dirty-restore"].seen, scores["dirty-restore"].graded) == (1, 1)
+    assert (scores["truncating-write"].seen, scores["truncating-write"].graded) == (
+        2,
+        2,
+    )
+    assert all(s.runs == 3 and s.errored == 0 for s in scores.values())
+
+
+def test_naming_the_gates_tools_moved_the_blocker_count_by_zero():
+    """Item 88's answer, and the one number the item turns on.
+
+    The frozen `gates.txt` said `no tool reported` on all 14 lines, which was
+    the leading suspect for a harness filing blockers where production filed
+    none. With the tools restored the per-run counts are 1, 1, 2 against the
+    first pass's 1, 2, 1 — four either way, and every run of both would route to
+    REBUT under §5.5 against production's zero. A later pass that reads the
+    suspect as still open fails here.
+    """
+
+    def per_run(runs):
+        return [
+            sum(
+                f.severity == "blocker" and f.anchored
+                for review in run
+                for f in review.findings
+            )
+            for run in runs
+        ]
+
+    assert per_run(_second_pass()) == [1, 1, 2]
+    assert sum(per_run(_second_pass())) == sum(per_run(_recorded_pass()))
+    # Not "most runs": every run of both passes filed at least one.
+    assert all(count > 0 for count in per_run(_second_pass()))
+
+
+# The two figures in the second-pass record that no run JSON can produce: the
+# per-lens budget both passes gave, and the one production gave. Named here
+# because the record's "no lens came near either ceiling" argument compares
+# measured spend against them, and a test that let any unrecognised dollar
+# figure through would not be checking that argument at all.
+DECLARED_BUDGETS = frozenset({"$4.00", "$3.30"})
+
+
+def test_every_dollar_figure_in_the_second_pass_record_is_re_derivable():
+    """Stronger than "the total appears somewhere", which is what the first
+    pass's equivalent asserts — and measured: mutating this record's headline
+    total from $4.84 to $4.85 leaves that assertion passing, because $4.84 also
+    sits in the comparison table two sections down. The first pass published a
+    wrong per-lens range through exactly that gap: a table pinned to the data
+    and the paragraph beside it not.
+
+    So the direction is reversed. Every `$N.NN` the record prints must be one
+    this pass's JSON produces, the first pass's JSON produces, or a budget
+    declared above — and a figure that drifts fails whichever sentence it is in.
+    """
+    costs = [r.cost_usd for run in _second_pass() for r in run]
+    per_run = [sum(r.cost_usd for r in run) for run in _second_pass()]
+    derivable = {
+        f"${sum(costs):.2f}",
+        f"${min(costs):.2f}",
+        f"${max(costs):.2f}",
+        f"${sum(r.cost_usd for run in _recorded_pass() for r in run):.2f}",
+        *(f"${cost:.2f}" for cost in per_run),
+    } | DECLARED_BUDGETS
+
+    record = RECORD_2026_09_08.read_text()
+    printed = set(re.findall(r"\$\d+\.\d{2}", record))
+    assert printed <= derivable, printed - derivable
+    # And the ones the readings actually argue from are present, not merely
+    # permitted: a record that stopped printing them would satisfy a subset.
+    assert {f"${sum(costs):.2f}", f"${min(costs):.2f}", f"${max(costs):.2f}"} <= printed
+    assert f"${min(costs):.2f}–${max(costs):.2f}" in record

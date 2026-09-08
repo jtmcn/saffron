@@ -101,6 +101,21 @@ the record rather than felt.
    out to be the frozen `gates.txt`, re-baseline before reading this criterion
    as met.
 
+   *Item 88 answered, 2026-09-08: it was **not** the `gates.txt`. With the
+   tools restored and every other input held, blockers per run are 1, 1, 2
+   against 1, 2, 1 — the same four, and every run of both blocks. No
+   re-baseline is owed on that account, and "read it as a difference" is now the
+   measured instruction rather than the cautious one.*
+
+   *What the second pass did move is this criterion's own number.
+   `dirty-restore` went 2/3 → 1/3 and `truncating-write` 3/3 → 2/3 seen, on an
+   input change with no mechanism to make either defect harder to see. So "both
+   defects in 3 of 3 runs" sits on the noisiest statistic the harness prints:
+   two passes of the unmodified lenses disagree by a third on it while agreeing
+   exactly on the blocker count. Before Track C reads this criterion as met,
+   raise n or require the same margin over two passes — a single 3/3 is within
+   the spread already measured on a fixture nobody touched.*
+
 Until the count is met, a batch night is a batch of pull requests each owed a
 human round. Size nights by how many rounds you will do in the morning, not by
 budget.
