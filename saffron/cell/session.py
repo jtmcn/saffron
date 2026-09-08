@@ -858,6 +858,59 @@ def cell_up(
     note("cell_up", f"{container} up, worktree at {tree_base[:8]}")
 
 
+def cell_down(
+    *,
+    network: str,
+    volume: str,
+    state: str,
+    container: str,
+    created: set[str],
+    note: Callable[[str, bool, str], None],
+) -> None:
+    """Take a cell down: container, proxy log, proxy, network, volumes.
+
+    `cell_up`'s pair, extracted for the same reason — a second caller cannot get
+    a *nearly* complete teardown. The order is load-bearing: the proxy is a
+    container on this network, so stopping it after `remove_network` leaves both
+    behind, and `remove_network` reports that only through a return code. The
+    harness paraphrased this block once and its first run died on "network
+    saffron-cells already exists".
+
+    `created` is the caller's leak ledger, read here rather than written: a
+    non-zero exit is a leak only for something this caller made. `note` takes
+    (step, ok, detail) — `_drive_cell` sends them to `Teardown` events, a
+    harness may simply print them.
+
+    A non-zero exit is reported, never raised — callers run this from a
+    `finally`. `CellRuntimeError` still escapes if the runtime binary itself
+    cannot be executed, as it did before this was extracted.
+    """
+    from saffron.cell import proxy, runtime
+
+    removed = [("container", container, runtime.remove_container(container))]
+    # Before the proxy goes: its log goes with it.
+    for denied in proxy.denied_egress():
+        note("proxy_denied", False, f"proxy DENIED {denied}")
+    # Not a denial: an allowed CONNECT the proxy could not open. Reported apart
+    # because the fix is the network, not the allowlist.
+    for failed in proxy.failed_egress():
+        note("proxy_failed", False, f"proxy FAILED {failed}")
+    proxy.stop_proxy()
+    removed.append(("network", network, runtime.remove_network(network)))
+    # Volumes go too, or the same spec_id cannot be re-run.
+    removed.append(("volume", volume, runtime.remove_volume(volume)))
+    removed.append(("volume", state, runtime.remove_volume(state)))
+    # Pre-cleaning tolerates absence; here a non-zero exit is a leak, and a
+    # silent one is what let the state volume survive teardown unnoticed.
+    for kind, name, done in removed:
+        if done.returncode != 0 and name in created:
+            note(
+                "survived",
+                False,
+                f"{kind} {name} survived — {done.stderr.strip()[:160]}",
+            )
+
+
 def _drive_cell(
     spec: CellSpec,
     *,
@@ -870,7 +923,7 @@ def _drive_cell(
 ) -> CellOutcome:
     """`run_one_cell`'s whole body. `exported` is teardown's way out."""
     from saffron.agents import artifacts, context
-    from saffron.cell import proxy, runtime, worktree
+    from saffron.cell import runtime, worktree
     from saffron.gates.contract import witness_blocking
     from saffron.gates.core.census import census_gate
     from saffron.gates.core.committed import committed_gate
@@ -1927,7 +1980,7 @@ def _drive_cell(
         raise
     finally:
 
-        def _teardown(step: str, *, ok: bool = True, detail: str = "") -> None:
+        def _teardown(step: str, ok: bool = True, detail: str = "") -> None:
             emit(
                 Teardown(
                     timestamp=time.time(),
@@ -1939,33 +1992,19 @@ def _drive_cell(
             )
 
         _teardown("start")
-        # First, and on every path the exception one included: the export execs
-        # inside the cell, so it must precede the container's removal as well as
-        # the volume's. An EXHAUSTED run with commits is worth reading too.
+        # Before `cell_down`, on every path the exception one included: the
+        # export execs inside the cell, so it must precede the container's
+        # removal as well as the volume's. An EXHAUSTED run with commits is
+        # worth reading too.
         if container in created:
             exported["head_sha"], exported["subjects"] = export_patch(
                 container, spec, task_dir, emit
             )
-        removed = [("container", container, runtime.remove_container(container))]
-        # Before the proxy goes: its log goes with it.
-        for denied in proxy.denied_egress():
-            _teardown("proxy_denied", ok=False, detail=f"proxy DENIED {denied}")
-        # Not a denial: an allowed CONNECT the proxy could not open. Reported
-        # apart because the fix is the network, not the allowlist.
-        for failed in proxy.failed_egress():
-            _teardown("proxy_failed", ok=False, detail=f"proxy FAILED {failed}")
-        proxy.stop_proxy()
-        removed.append(("network", network, runtime.remove_network(network)))
-        # Volumes go too, or the same spec_id cannot be re-run.
-        removed.append(("volume", volume, runtime.remove_volume(volume)))
-        removed.append(("volume", state, runtime.remove_volume(state)))
-        # Pre-cleaning tolerates absence; here a non-zero exit is a leak, and
-        # a silent one is what let the state volume survive teardown unnoticed.
-        # Reported, never raised: this is a `finally`.
-        for kind, name, done in removed:
-            if done.returncode != 0 and name in created:
-                _teardown(
-                    "survived",
-                    ok=False,
-                    detail=f"{kind} {name} survived — {done.stderr.strip()[:160]}",
-                )
+        cell_down(
+            network=network,
+            volume=volume,
+            state=state,
+            container=container,
+            created=created,
+            note=_teardown,
+        )

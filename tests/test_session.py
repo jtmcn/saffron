@@ -3880,3 +3880,45 @@ def test_the_notes_turn_is_skipped_once_the_task_is_over_budget(monkeypatch, tmp
     # No fourth turn was ever asked for: nothing left to spend it with.
     assert len(cell.turns) == 3
     assert outcome.notes == ""
+
+
+def test_cell_down_stops_the_proxy_before_removing_its_network(monkeypatch):
+    """The order is the leak the harness found, not a preference.
+
+    The proxy is a container on this network, so `remove_network` before
+    `stop_proxy` cannot succeed — and it reports that only through a return code
+    nobody reads, so both survive and the next start dies on "network
+    saffron-cells already exists". One copy of the order, one test on it.
+    """
+    from saffron.cell import session
+
+    calls: list[str] = []
+
+    def record(name, result=None):
+        def fake(*_a, **_k):
+            calls.append(name)
+            return (
+                result
+                if result is not None
+                else subprocess.CompletedProcess([], 0, "", "")
+            )
+
+        return fake
+
+    monkeypatch.setattr("saffron.cell.proxy.denied_egress", lambda: [])
+    monkeypatch.setattr("saffron.cell.proxy.failed_egress", lambda: [])
+    monkeypatch.setattr("saffron.cell.proxy.stop_proxy", record("stop_proxy"))
+    for name in ("remove_container", "remove_network", "remove_volume"):
+        monkeypatch.setattr(f"saffron.cell.runtime.{name}", record(name))
+
+    session.cell_down(
+        network="n",
+        volume="v",
+        state="s",
+        container="c",
+        created=set(),
+        note=lambda *_a: None,
+    )
+
+    assert calls.index("stop_proxy") < calls.index("remove_network")
+    assert calls.index("remove_container") < calls.index("stop_proxy")
