@@ -33,10 +33,13 @@ above, where that driver holds one cell up for as many runs as `--runs`
 requests (its own docstring puts one run at ~8 minutes).
 
 This module holds no scoring logic — `harness/corpus.py` is the predicate,
-linted and tested; this file only spends money and cannot be unit-tested
-without a cell.
+linted and tested; this file only spends money. It cannot be run against a
+real cell in a test, but its wiring is not therefore unchecked:
+`tests/test_corpus.py` drives `main` with `cell_up`, `cell_down`, `run_review`
+and the gate runner replaced, which is what holds the probe path below to the
+gate contract.
 
-Three ways it differs from the single-fixture driver:
+Four ways it differs from the single-fixture driver:
 
 **It calibrates the whole corpus before the first cell.** One bad fixture
 found after fixture six has already run is a bad fixture found expensively.
@@ -52,6 +55,12 @@ this driver is meant to be run, so copying that guard here would give a
 ceiling that reads as active and is not. `--max-spend-usd` below is instead
 checked once per fixture, after that fixture's cell is already down, so a trip
 never leaves a cell running and never costs a fixture already on disk.
+
+**It reports a second number.** Every adequacy finding carrying a vacuity
+probe has that edit applied at the fixture's head, inside the cell that is
+already up, and the repo's declared `tests` gate asked whether anything
+notices. A probe that survives is the finding confirmed (`CONTEXT.md`), and
+the table says so under the recall line. `--skip-probes` turns it off.
 """
 
 from __future__ import annotations
@@ -66,11 +75,37 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 
-from harness import corpus, lens_scoring  # noqa: E402
+from harness import corpus, lens_scoring, probe_check  # noqa: E402
 from saffron import events  # noqa: E402
-from saffron.cell import session  # noqa: E402
+from saffron.cell import session, worktree  # noqa: E402
+from saffron.gates import runner  # noqa: E402
+from saffron.gates.contract import GateResult  # noqa: E402
 from saffron.phases import implement, review  # noqa: E402
 from saffron.repos import mirror as mirror_ops  # noqa: E402
+from saffron.repos.policy import load_policy  # noqa: E402
+
+
+def _tests_gate_in_cell(
+    container: str, executable: Path, cwd: Path, subset: list[str]
+) -> GateResult:
+    """The repo's *declared* `tests` gate, run inside the fixture's own cell.
+
+    Never a tool: core invokes declared gates (§2.1), so a probe's suite is
+    whatever `.saffron/policy.yaml` names at the fixture's head commit, read
+    back through the JSON contract. `executable` is cell-side (`/gates/...`)
+    and `cwd` a host path `CellExecutor` ignores — the same shape
+    `phases/package.py` gives its re-verify suite, matched deliberately.
+
+    Module level and bound with `partial`, not a closure over the fixture
+    loop: a closure there captures the loop's `container` by name.
+    """
+    return runner.run_gate(
+        "tests",
+        executable,
+        cwd,
+        subset=subset,
+        executor=runner.CellExecutor(container),
+    )
 
 
 # Same function as the single-fixture driver, copied rather than imported: it
@@ -146,6 +181,14 @@ def main() -> int:
         help="skip cell_up entirely — no cell, no spend — and score "
         "whatever run-*.json already exists under --out for each fixture.",
     )
+    parser.add_argument(
+        "--skip-probes",
+        action="store_true",
+        help="do not apply the adequacy lens's vacuity probes, and report "
+        "recall alone. They are the only part of a pass that runs the "
+        "fixture's declared `tests` gate — once for a baseline, then once per "
+        "probe — so a re-run interested only in recall should not wait on it.",
+    )
     args = parser.parse_args()
 
     fixtures = corpus.load_corpus(args.fixtures)
@@ -170,6 +213,11 @@ def main() -> int:
         mirror = mirror_ops.ensure_mirror(args.repo, args.home / "mirrors" / "self")
 
     total_spent = 0.0
+    # ponytail: this invocation's probes only, where recall below is re-derived
+    # from every run JSON on disk. A `--skip-existing` resume therefore reports
+    # the second number for the fixtures it ran and recall for all of them; the
+    # verdicts are printed per probe as they land, and are not written to --out.
+    probe_results: dict[str, list[probe_check.ProbeResult]] = {}
     for i, fixture in enumerate(fixtures):
         out = args.out / fixture.spec_id
         if args.score_only:
@@ -182,6 +230,18 @@ def main() -> int:
         # is always set — spelled out for the type checker, not the reader.
         assert mirror is not None
         out.mkdir(parents=True, exist_ok=True)
+
+        # Hoisted out of the `cell_up` call it used to be spelled inside: the
+        # probes below need the same export, because the policy declaring the
+        # `tests` gate has to come from the commit its executables came from.
+        gates_dir = mirror_ops.export_saffron_dir(
+            mirror, fixture.head_sha, out / "gates"
+        )
+        # Cell-side, off the read-only `/gates` mount rather than `/work`, so
+        # nothing REVIEW's cell wrote can reach the gate a probe is judged by
+        # (§5.4) — `cell/session.py`'s own suite resolves them the same way.
+        policy, _ = load_policy(gates_dir)
+        gates = policy.gate_executables(Path(worktree.GATES_MOUNT))
 
         slug = f"lenscorpus-{fixture.spec_id.lower()}"
         network, volume = "saffron-cells", f"saffron-wt-{slug}"
@@ -210,13 +270,12 @@ def main() -> int:
                 volume=volume,
                 state=state,
                 container=container,
-                gates_dir=mirror_ops.export_saffron_dir(
-                    mirror, fixture.head_sha, out / "gates"
-                ),
+                gates_dir=gates_dir,
                 thread_env={},
                 created=created,
                 note=lambda step, detail: print(f"  {step}: {detail}"),
             )
+            probes = []
             for index in range(1, args.runs + 1):
                 print(f"{fixture.spec_id} run {index}/{args.runs}")
                 reviews = review.run_review(
@@ -240,6 +299,12 @@ def main() -> int:
                     json.dumps([r.as_dict() for r in reviews], indent=2)
                 )
                 total_spent += sum(r.cost_usd for r in reviews)
+                probes += [
+                    finding.probe
+                    for review_ in reviews
+                    for finding in review_.findings
+                    if finding.probe is not None
+                ]
                 for review_ in reviews:
                     if review_.error:
                         # Not a miss: `score_run` drops the whole run. Said
@@ -249,6 +314,36 @@ def main() -> int:
                             f"  ERRORED {review_.lens}: {review_.error}",
                             file=sys.stderr,
                         )
+
+            # Inside the cell that is already up, and at `tree_base=head_sha`
+            # — `/work` is the fixture's head, which is the only tree
+            # `source_mutated` will apply an edit to (it refuses six cases by
+            # yielding a reason, and `check_probe` reads each as `unproven`).
+            # After every run, so `--runs 3` pays for one baseline, not three.
+            if probes and not args.skip_probes:
+                print(f"  {len(probes)} vacuity probe(s) to apply")
+                # Unguarded `gates["tests"]`: measured, not assumed — all eight
+                # shipped fixtures' head commits declare a `tests` gate.
+                run_tests = partial(
+                    _tests_gate_in_cell, container, gates["tests"], mirror
+                )
+                baseline = run_tests([])
+                probe_results[fixture.spec_id] = [
+                    probe_check.check_probe(
+                        probe,
+                        baseline=baseline,
+                        mutate=partial(worktree.source_mutated, container),
+                        run_tests=run_tests,
+                        # This repo's test root as a path prefix, which is not
+                        # `policy.integrity.test_paths` — those are globs
+                        # (`tests/**`) and `check_probe` compares prefixes. An
+                        # edit to a test satisfies the number by construction.
+                        test_paths=("tests/",),
+                    )
+                    for probe in probes
+                ]
+                for result in probe_results[fixture.spec_id]:
+                    print(f"  probe {result.verdict}: {result.reason}")
         finally:
             # The shared teardown, not a paraphrase of it — see module
             # docstring and `session.cell_down`'s own.
@@ -285,7 +380,17 @@ def main() -> int:
     except lens_scoring.LensErrored as exc:
         print(f"nothing to score:\n{exc}", file=sys.stderr)
         return 1
-    table = corpus.render_corpus_table(fixtures, scored, corpus.anchored_blockers(runs))
+    table = corpus.render_corpus_table(
+        fixtures,
+        scored,
+        corpus.anchored_blockers(runs),
+        # `None`, not an empty score: a pass that applied no probe found out
+        # nothing about the adequacy lens, and "0 of 0" under the table would
+        # read as though it had.
+        probes=None
+        if args.score_only or args.skip_probes
+        else corpus.score_probes(probe_results),
+    )
     (args.out / "table.md").write_text(table + "\n")
     print(
         f"\n{table}\n\n${total_spent:.2f} spent this invocation — raw JSON in {args.out}"

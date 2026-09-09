@@ -21,6 +21,7 @@ from harness.lens_scoring import (
     load_fixture,
     score_pass,
 )
+from harness.probe_check import ProbeResult
 from saffron.phases.review import LENSES, LensReview
 
 
@@ -107,6 +108,57 @@ def score_corpus(
     return CorpusScore(per_fixture=per_fixture, dropped=tuple(dropped))
 
 
+@dataclass(frozen=True)
+class ProbeScore:
+    """The corpus's second number: how many vacuity probes survived their suite."""
+
+    survived: int
+    killed: int
+    unproven: int
+
+    @property
+    def asked(self) -> int:
+        """Probes that produced an answer. Never the number filed — an
+        `unproven` probe says nothing about the lens, so it is in no
+        denominator, exactly as a dropped run is in no n."""
+        return self.survived + self.killed
+
+
+def score_probes(results: Mapping[str, Sequence[ProbeResult]]) -> ProbeScore:
+    """One aggregate over every fixture's probes.
+
+    Probes, never findings: a finding whose lens was never asked for an edit
+    carries no probe and is not a probe that failed.
+    """
+    flat = [r for rs in results.values() for r in rs]
+    return ProbeScore(
+        survived=sum(r.verdict == "survived" for r in flat),
+        killed=sum(r.verdict == "killed" for r in flat),
+        unproven=sum(r.verdict == "unproven" for r in flat),
+    )
+
+
+def render_probe_summary(score: ProbeScore) -> str:
+    """The second line, and what it is not.
+
+    Rendered under the declared-recall aggregate, never beside it: the two are
+    not comparable. Recall is over every lens's declared defects; this is one
+    lens's vacuity capability, and it is a lower bound — a `killed` probe may
+    be a test doing its job or a probe that broke the program, and only a
+    person reading the itemised failures can tell.
+    """
+    return (
+        f"**{score.survived} verified "
+        f"{'vacuity' if score.survived == 1 else 'vacuities'}** — adequacy-lens "
+        f"findings whose named edit left the fixture's suite green. {score.survived} of "
+        f"{score.asked} probe(s) that answered survived; {score.unproven} "
+        f"unproven and in no denominator. Not comparable with the recall line "
+        f"above: one lens, and a lower bound — a killed probe may have broken "
+        f"the program rather than been noticed, which is adjudicated per probe "
+        f"and not computed."
+    )
+
+
 def anchored_blockers(
     runs: Mapping[str, Sequence[Sequence[LensReview]]],
 ) -> dict[str, list[int]]:
@@ -132,11 +184,17 @@ def render_corpus_table(
     fixtures: Sequence[Fixture],
     score: CorpusScore,
     blockers: Mapping[str, list[int]],
+    probes: ProbeScore | None = None,
 ) -> str:
     """The pass as markdown, for pasting into a `docs/evidence/` record.
 
     The aggregate leads, because it is the number Track C reads; the per-fixture
     rows are under it so a moved aggregate can be attributed.
+
+    `probes` is `None` when the pass asked none — a scoring-only re-run, or
+    `--skip-probes`. Rendering `0 of 0` there would read as a lens that
+    verified nothing, which is not what a pass that never applied a probe
+    found out.
     """
     lines = [
         f"**{score.graded}/{score.declared} declared defects graded** "
@@ -158,6 +216,8 @@ def render_corpus_table(
                 f"| {entry.seen}/{entry.runs} | {entry.graded}/{entry.runs} "
                 f"| {counts} |"
             )
+    if probes is not None:
+        lines += ["", render_probe_summary(probes)]
     if score.dropped:
         lines += [
             "",

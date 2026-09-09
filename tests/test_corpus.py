@@ -1,13 +1,21 @@
+import contextlib
+import importlib.util
+import shutil
 import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from harness import corpus, lens_scoring, recovery
+from harness import corpus, lens_scoring, probe_check, recovery
 from harness.lens_scoring import LensReview
 from saffron.agents.findings import Finding
+from saffron.gates import runner
 from saffron.gates.contract import GateResult
+from saffron.intake import Mutant
 from saffron.ledger import Ledger
+from saffron.phases import review
 from saffron.phases.review import LENSES
 
 REPO = Path(__file__).parent.parent
@@ -310,3 +318,186 @@ def test_the_predicate_reproduces_every_fixture_s_recorded_answer():
     0 seen / 0 graded — and a predicate loosened until a missed defect starts
     scoring fails here before any money is spent."""
     corpus.calibrate_corpus(corpus.load_corpus(FIXTURES))
+
+
+def test_the_second_number_counts_probes_not_findings():
+    """A finding with no probe is not a probe that failed — it is a finding
+    from a lens that was never asked for one. Contract and correctness
+    findings are 10 of pass 1's 18 unmatched, and none of them owes an edit."""
+    results = {
+        "SA-0063": [
+            probe_check.ProbeResult("survived", ""),
+            probe_check.ProbeResult("killed", "", ("t",)),
+        ],
+        "SA-0045": [probe_check.ProbeResult("unproven", "find text not found")],
+    }
+    score = corpus.score_probes(results)
+    assert (score.survived, score.killed, score.unproven) == (1, 1, 1)
+
+
+def test_the_rendered_table_says_what_the_second_number_is_not():
+    """A capability number beside a recall number will be read as comparable
+    unless the table says otherwise, and it is not: it covers one lens."""
+    results = {"SA-0063": [probe_check.ProbeResult("survived", "")]}
+    rendered = corpus.render_probe_summary(corpus.score_probes(results))
+    assert "1 verified" in rendered
+    assert "adequacy" in rendered
+
+
+def test_an_unproven_probe_is_in_no_denominator():
+    """The same rule as a dropped run one level out. A probe that never applied
+    says nothing about the lens, so counting it against the lens would report
+    the harness's own refusals as a capability score."""
+    results = {"SA-0045": [probe_check.ProbeResult("unproven", "not tracked at HEAD")]}
+    rendered = corpus.render_probe_summary(corpus.score_probes(results))
+    assert "0 of 0" in rendered
+    assert "1 unproven" in rendered
+
+
+DRIVER = REPO / "docs" / "evidence" / "scripts" / "2026-09-08-lens-corpus.py"
+
+
+def _load_driver():
+    """The dated driver, imported by path — `tests/test_agent_runner.py`'s
+    idiom for the same reason: the filename is not an identifier."""
+    spec = importlib.util.spec_from_file_location("lens_corpus_driver", DRIVER)
+    assert spec and spec.loader, f"no import spec for {DRIVER}"
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+PROBE = Mutant(file="saffron/gates/core/scope.py", find="== 0", replace="== 1")
+
+
+def _drive(tmp_path, monkeypatch, *extra_argv):
+    """One fixture through the driver's `main`, with every path into a cell
+    replaced: no container, no token, no spend.
+
+    Returns the rendered table, the `run_gate` calls, the containers `cell_up`
+    was asked for, and what was mutated where. The calls are the assertion
+    that matters — a probe is answered by the repo's *declared* gate through
+    the runner, in the cell it was applied in, or it is not answered at all.
+    """
+    driver = _load_driver()
+
+    fixtures = tmp_path / "fixtures"
+    shutil.copytree(FIXTURES / "SA-0045", fixtures / "SA-0045", dirs_exist_ok=True)
+    out = tmp_path / "out"
+
+    reviews = [
+        LensReview(
+            lens=lens,
+            findings=[
+                Finding(
+                    lens="adequacy",
+                    severity="concern",
+                    file="saffron/gates/core/scope.py",
+                    line=1,
+                    claim="nothing in the suite would notice this",
+                    anchored=True,
+                    probe=PROBE,
+                )
+            ]
+            if lens == "adequacy"
+            else [],
+        )
+        for lens in LENSES
+    ]
+
+    calls, cells, mutated = [], [], []
+
+    def gate(name, executable, cwd, *, subset=None, executor=None, **_unused):
+        calls.append((name, executable, subset, executor))
+        return GateResult(gate=name, status="pass", tool="stub tests gate")
+
+    @contextlib.contextmanager
+    def mutate(container, mutant):
+        """`source_mutated`'s clean case — applied, nothing refused. The one
+        call in this path that writes inside a cell, so which cell it was
+        handed is recorded rather than assumed."""
+        mutated.append((container, mutant))
+        yield None
+
+    monkeypatch.setattr(driver.mirror_ops, "ensure_mirror", lambda repo, dest: dest)
+    # The worktree's own `.saffron/`, so `load_policy` reads a real policy
+    # declaring real gates rather than a stub that could not be wrong.
+    monkeypatch.setattr(
+        driver.mirror_ops, "export_saffron_dir", lambda mirror, sha, dest: REPO
+    )
+    monkeypatch.setattr(
+        driver.session, "cell_up", lambda **kwargs: cells.append(kwargs["container"])
+    )
+    monkeypatch.setattr(driver.session, "cell_down", lambda **kwargs: None)
+    monkeypatch.setattr(review, "run_review", lambda *a, **kwargs: reviews)
+    monkeypatch.setattr(driver.worktree, "source_mutated", mutate)
+    monkeypatch.setattr(driver.runner, "run_gate", gate)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "lens-corpus",
+            "--fixtures",
+            str(fixtures),
+            "--out",
+            str(out),
+            "--repo",
+            str(REPO),
+            *extra_argv,
+        ],
+    )
+
+    assert driver.main() == 0
+    return SimpleNamespace(
+        table=(out / "table.md").read_text(),
+        calls=calls,
+        cells=cells,
+        mutated=mutated,
+    )
+
+
+def test_the_driver_answers_a_probe_through_the_declared_tests_gate(
+    tmp_path, monkeypatch
+):
+    """The wiring, not the shape of a mock: an adequacy finding carrying a
+    probe must be applied in the container REVIEW just ran in, and reach
+    `run_gate` twice — a baseline and the probe — naming the repo's declared
+    `tests` gate at its cell-side path, over the whole suite."""
+    pass_ = _drive(tmp_path, monkeypatch)
+    cell = "saffron-cell-lenscorpus-sa-0045"
+
+    assert pass_.cells == [cell]
+    # The cell was brought up at `tree_base=fixture.head_sha`, so this is the
+    # only tree the edit means anything against.
+    assert pass_.mutated == [(cell, PROBE)]
+    assert [name for name, _e, _s, _x in pass_.calls] == ["tests", "tests"]
+    # `/gates`, never `/work`: an in-cell edit to a gate cannot reach the
+    # runner that judges the probe (§5.4).
+    assert {e for _n, e, _s, _x in pass_.calls} == {Path("/gates/.saffron/gates/tests")}
+    # The whole suite both times — a probe asks whether *anything* notices.
+    assert [subset for _n, _e, subset, _x in pass_.calls] == [[], []]
+    assert all(isinstance(x, runner.CellExecutor) for _n, _e, _s, x in pass_.calls)
+    assert {x.container for _n, _e, _s, x in pass_.calls} == {cell}
+    assert "1 verified" in pass_.table
+
+
+def test_skip_probes_runs_the_lenses_and_reaches_no_gate(tmp_path, monkeypatch):
+    """A recall-only re-run still costs a cell — the lenses are the spend —
+    but applies nothing and reports no second number. Absent, not zero: a pass
+    that asked no probe found nothing out about the adequacy lens."""
+    pass_ = _drive(tmp_path, monkeypatch, "--skip-probes")
+
+    assert pass_.cells == ["saffron-cell-lenscorpus-sa-0045"]
+    assert (pass_.calls, pass_.mutated) == ([], [])
+    assert "verified vacuit" not in pass_.table
+
+
+def test_score_only_re_scores_a_finished_pass_and_starts_no_cell(tmp_path, monkeypatch):
+    """`--score-only`'s existing promise, now that it also decides whether the
+    second number is rendered: it must start no cell and apply no probe, and
+    the table it re-renders from the run JSON must not claim `0 of 0`."""
+    _drive(tmp_path, monkeypatch)  # a pass, so there is a run-1.json to score
+    pass_ = _drive(tmp_path, monkeypatch, "--score-only")
+
+    assert (pass_.cells, pass_.calls, pass_.mutated) == ([], [], [])
+    assert "verified vacuit" not in pass_.table
