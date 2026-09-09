@@ -99,6 +99,15 @@ has structural reason to distrust the gates and dig harder. That biases toward
 cannot separate it from lens variance. A second pass over a fixture whose gate
 summary names its tools would.
 
+*(Corrected 2026-09-08: "where the original named tools", below, overstated what
+the deviation was. Production named **7 of 14** — `scope`, `integrity`, `size`,
+`committed`, `census` and `criteria` are host-side core gates that execute
+nothing and report no tool, in production as here, and `witness` inherits the
+`tests` tool but skipped a spec that declares no mutants. The gap this pass
+could not separate from variance is 7 named against 0, not 14 against 0. The
+tools are restored in the fixture and the second pass measures what that moves:
+`docs/evidence/2026-09-08-lens-scoring-second-pass.md`.)*
+
 ## The fixture was wrong twice, and the pass is what found it
 
 Both errors were in the predicate's declaration, not in its code, and both would
@@ -154,8 +163,9 @@ close to the exact inverse.
 
 - The frozen `gates.txt` is rebuilt from the ledger's `gate_results` rows, which
   have no `tool` column, so all 14 lines read `no tool reported` where the
-  original named tools. Recorded in `fixture.toml`, and treated as a confound
-  above rather than only listed here.
+  original named 7. Recorded in `fixture.toml`, and treated as a confound
+  above rather than only listed here. *(Corrected 2026-09-08: read "named
+  tools", which reads as all 14.)*
 - `context.md` is `CONTEXT.md` at base. `session.py` reads the host's working
   copy at run time, which is not recoverable after the fact.
 - The driver's first two attempts failed and cost nothing: `run_review` needs an

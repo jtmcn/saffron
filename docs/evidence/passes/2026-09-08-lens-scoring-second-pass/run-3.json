@@ -1,0 +1,50 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.5344158,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "blocker",
+        "file": "saffron/cell/worktree.py",
+        "line": 422,
+        "claim": "source_mutated's undo (`git checkout HEAD -- <file>`) is justified by the docstring's claim (lines 393-395) that `committed` guarantees the agent's work is already committed before any gate runs, so HEAD is what the file should return to. That guarantee does not hold at this point: in saffron/cell/session.py, `committed_gate` (line 1049) is computed strictly after `declared = run_suite(...)` (line 1008, which invokes this mutator), and no unconditional host-side commit happens between a normal IMPLEMENT/REPAIR turn finishing and `_run_gates` being called (session.py's host checkpoint-commit only fires on the AgentFailed exception path, e.g. lines 1451-1455 and 1573-1576). If a criterion's mutant targets a file the agent has genuinely left uncommitted at that point, applying the mutant and then checking out HEAD in the `finally` silently discards the agent's real uncommitted edits along with the mutation, and the subsequent `committed_gate` call sees a clean tree and reports nothing wrong \u2014 turning real data loss into an undetected false-clean result. This is latent today only because no spec declares a mutant yet, but the spec explicitly anticipates the next spec doing so.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.46678619999999993,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "saffron/cell/worktree.py",
+        "line": 418,
+        "claim": "`_write_file` (the call that actually mutates the tracked file) runs before the `try:` at line 419, so if it raises \u2014 which it does whenever the container's `sh -euc 'printf ... | base64 -d > path'` exits non-zero after the shell has already truncated `path` for the redirect \u2014 the `finally`'s `git checkout HEAD -- <file>` at lines 421-424 never executes. The exception then propagates straight out of `source_mutated`'s `__enter__`, and `witness_gate` (saffron/gates/core/witness.py lines 143-154, 164-187) sets `applied=False` and reports 'could not apply {file}'s mutant' \u2014 exactly the case that same module's own comment on the `Mutated` protocol (lines 78-85) calls out by name as forbidden: 'a raise from `__enter__` must mean nothing was changed... a container exec that applies the edit and then loses the connection is exactly the shape that is not [unreachable]'. The result is a truncated/corrupted worktree file left unrestored while the gate's own message claims nothing was applied \u2014 the 'silent dirty tree this gate exists to refuse'. None of the new tests in tests/test_worktree.py exercise a write failure (only read-failure and undo-failure are covered), so this gap is invisible to the suite.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.6801138,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "tests/test_worktree.py",
+        "line": 1133,
+        "claim": "`test_a_failed_undo_raises_rather_than_reporting_a_verdict` claims (comment at line 1128) that \"a failure to *apply* raises the same way\", but `exploding_exec` only fails the `cat` command (the read half of apply, in `_read_file`); it never fails the `sh -euc ...` write command that `_write_file` (worktree.py:366-382) issues to actually mutate the file. Deleting the `if done.returncode != 0: raise ...` check in `_write_file` (worktree.py:379-382) \u2014 so a failed write silently falls through to `yield None` instead of raising `CellRuntimeError` \u2014 would keep every test in this diff green, yet violate acceptance criterion 4 (\"a failure to apply ... raises rather than reporting a verdict\") for exactly the path (`_write_file`) that performs the actual mutation, since no test drives `runtime.exec_` to return non-zero for the `sh` command the way it already does for `cat`.",
+        "anchored": true
+      }
+    ]
+  }
+]

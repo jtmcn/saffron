@@ -610,6 +610,26 @@ def test_the_batches_table_carries_exactly_the_fields_4_2_1_names(ledger):
     }
 
 
+def test_the_gate_results_table_carries_exactly_the_fields_4_1_names(ledger):
+    """§4.1's listing is what a spec cites, and `tool` reached the table on
+    2026-09-08 (item 88) while the listing did not — nothing was watching the
+    two agree. Now something is."""
+    columns = {
+        row["name"]
+        for row in ledger._db.execute("PRAGMA table_info(gate_results)").fetchall()
+    }
+    assert columns == {
+        "gate_result_id",
+        "attempt_id",
+        "run_id",
+        "gate",
+        "status",
+        "tool",
+        "duration_ms",
+        "summary",
+    }
+
+
 def test_a_batch_status_outside_the_four_stop_reasons_is_rejected(ledger):
     """One row per stop condition — `DRAINED`, `BUDGET`, `UNTIL`,
     `INFRASTRUCTURE` — and nothing else. No `create_batch` method exists yet
@@ -1093,3 +1113,98 @@ def test_only_runs_minted_after_the_mark_are_swept_into_the_batch(ledger):
         "SELECT batch_id FROM runs WHERE run_id = ?", (stale,)
     ).fetchone()
     assert stale_row["batch_id"] is None
+
+
+def test_the_tool_that_produced_a_result_round_trips(ledger, task):
+    """§5.4 makes `tool` what separates a gate that ran from one that never
+    did, and `review.gate_summary` shows it to a critic. A ledger that drops it
+    can only rebuild a summary saying no gate named a tool — which is what
+    `docs/evidence/fixtures/SA-0062/gates.txt` had to say (item 88)."""
+    run_id, _ = task
+    ledger.record_gate_result(
+        GateResult(gate="lint", status="pass", tool="ruff 0.16.3"), run_id=run_id
+    )
+    ledger.record_gate_result(GateResult(gate="scope", status="pass"), run_id=run_id)
+    lint, scope = ledger.baseline_results(run_id)
+    assert lint.tool == "ruff 0.16.3"
+    # A host-side core gate reports none, and None is not the empty string:
+    # `gate_summary` renders the absence as "no tool reported".
+    assert scope.tool is None
+
+
+def test_a_ledger_that_predates_the_tool_column_gains_it(tmp_path):
+    """`CREATE TABLE IF NOT EXISTS` is a no-op on a `gate_results` that already
+    exists, so the one ledger that matters keeps recording results with no tool
+    until the column is added by hand."""
+    path = tmp_path / "old.db"
+    before = SCHEMA.replace("    tool           TEXT,\n", "")
+    assert before != SCHEMA  # otherwise this proves nothing
+    old = sqlite3.connect(path)
+    old.executescript(before)
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r','o','/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.execute(
+        "INSERT INTO gate_results (run_id, gate, status) VALUES (1, 'tests', 'pass')"
+    )
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    ledger.record_gate_result(
+        GateResult(gate="lint", status="pass", tool="ruff 0.16.3"), run_id=1
+    )
+    # The row written before the column keeps its place and reports no tool;
+    # the one written after carries it.
+    tests, lint = ledger.baseline_results(1)
+    assert (tests.gate, tests.tool) == ("tests", None)
+    assert (lint.gate, lint.tool) == ("lint", "ruff 0.16.3")
+    ledger.close()
+
+
+def test_a_ledger_that_predates_both_migrations_opens_and_keeps_its_rows(tmp_path):
+    """The one ledger that exists needed both, and the order is load-bearing:
+    the `tool` ALTER runs first so `_add_gate_result_reference`'s rebuild can
+    copy the column instead of adding it twice. Run the two the other way round
+    and the rebuild's `SELECT ... tool ...` hits a table that has not got it —
+    an exit-code-2 open failure that every other test in this file survives,
+    because each strips one migration and leaves the other satisfied."""
+    path = tmp_path / "old.db"
+    no_tool = SCHEMA.replace("    tool           TEXT,\n", "")
+    before = no_tool.replace(
+        "attempt_id     INTEGER REFERENCES attempts(attempt_id),",
+        "attempt_id     INTEGER,",
+    )
+    # Each strip has to bite, or this proves only that the other one works.
+    assert no_tool != SCHEMA and "REFERENCES attempts" not in before
+    old = sqlite3.connect(path)
+    old.executescript(before)
+    old.execute("DROP TABLE attempts")
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r','o','/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.execute(
+        """INSERT INTO tasks (run_id, spec_id, spec_sha, state, branch)
+           VALUES (1, 'SA-0001', 's', 'READY_FOR_REVIEW', 'saffron/SA-0001')"""
+    )
+    old.execute(
+        "INSERT INTO gate_results (run_id, gate, status, summary) "
+        "VALUES (1, 'tests', 'pass', '1481 passed')"
+    )
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    # The rebuild copied the pre-existing row through both migrations, and the
+    # column it gained on the way is null for it — which is what item 88 found.
+    (tests,) = ledger.baseline_results(1)
+    assert (tests.gate, tests.tool, tests.summary) == ("tests", None, "1481 passed")
+    ledger.record_gate_result(
+        GateResult(gate="lint", status="pass", tool="ruff 0.16.3"), run_id=1
+    )
+    _, lint = ledger.baseline_results(1)
+    assert lint.tool == "ruff 0.16.3"
+    # And the rebuild delivered the constraint it exists for.
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.record_gate_result(
+            GateResult(gate="types", status="pass"), attempt_id=90210
+        )
+    ledger.close()

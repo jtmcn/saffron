@@ -1,0 +1,50 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.47555519999999996,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/cell/worktree.py",
+        "line": 407,
+        "claim": "`_read_file` gets file content via `runtime.exec_(['cat', path])`, whose `stdout` is produced by `runtime._decode`, which does `data.decode('utf-8', errors='replace')` (saffron/cell/runtime.py:114) \u2014 any byte in the file that is not valid UTF-8 is irreversibly turned into U+FFFD before `source_mutated` ever sees it. `_write_file` (worktree.py:376-382) then re-encodes and rewrites the *entire file*, not just the matched span, baking that substitution into the tree the tests run against. `saffron/mutation.py`'s docstring (lines 11-16) explicitly designed the host mutator around raw bytes for exactly this reason ('anything it does must be undone exactly: byte-identical'), and `source_mutated`'s own docstring claims parity with that module's exact-match rule but silently drops its byte-fidelity guarantee. The undo (`git checkout HEAD`) is unaffected since it doesn't depend on the read bytes, but a file containing any non-UTF-8 byte would have unrelated content corrupted for the duration of the mutated block, producing a witness verdict that reflects encoding damage rather than the declared mutant \u2014 and no gate checks for this.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.5124534000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/cell/worktree.py",
+        "line": 356,
+        "claim": "`_read_file`'s docstring justifies turning any unreadable-file case (including a `mutant.file` that does not exist) into a raised `CellRuntimeError` \u2014 `error`, which aborts the whole attempt \u2014 on the claim that 'the host mutator, reading straight off disk, gets to tell \"the file does not exist\" apart from a live failure and this one does not need to.' That is not what `saffron/mutation.py`'s `apply_mutant` actually does: it wraps `target.read_bytes()` in a bare `except OSError`, returning `ok=False` with a reason for *any* read failure \u2014 file missing, permission denied, whatever \u2014 identical in kind to the 'find not found' case, which `witness_gate` treats as the ordinary unproven/`skip` outcome, exactly as DESIGN.md \u00a75.4.1 describes ('the gate reports `skip` for a criterion whose `find` text is absent'). So for the identical failure mode \u2014 a mutant naming a file the tree does not have, e.g. after a rename the spec's mutant was never updated for \u2014 the host implementation of `witness.Mutated` reports `skip` (charged to nobody) while this cell implementation reports `error` (ends the attempt). The two are supposed to be interchangeable implementations of one callable per this spec's own framing ('Two implementations of one callable is the design'), and no test in this diff exercises a nonexistent `mutant.file` to surface the divergence \u2014 `test_a_find_that_does_not_match_once_applies_nothing` only covers a file that exists but whose `find` text doesn't.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.5661122999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "tests/test_worktree.py",
+        "line": 1107,
+        "claim": "`test_a_failed_undo_raises_rather_than_reporting_a_verdict` claims (via its trailing comment at lines 1128-1129) to also prove 'a failure to apply raises the same way', but its apply-failure case only fails `_read_file` (the `cat` in `exploding_exec`, line 1132-1134) \u2014 before any write has happened. It never exercises `_write_file` (worktree.py lines 366-382) itself failing, which is exactly the scenario `witness.py`'s own docstring calls out as unique to a container mutator and reachable ('a container exec that applies the edit and then loses the connection is exactly the shape that is not [unreachable]', witness.py lines 83-85): a write whose `> path` redirection has already truncated the file before the pipeline fails, leaving a mutated/corrupted tree with `applied` never set, `witness_gate` reporting 'could not apply' rather than 'could not restore', and no `git checkout HEAD` attempted because `source_mutated` (worktree.py line 418) calls `_write_file` outside the `try` that guards the restore in its `finally` (lines 419-426). Weakening `_write_file`'s error handling (e.g. swallowing a nonzero `exec_` return instead of raising, worktree.py lines 379-382) would leave every test in this diff green while this documented, consequential failure mode goes unverified.",
+        "anchored": true
+      }
+    ]
+  }
+]

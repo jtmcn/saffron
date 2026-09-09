@@ -12,16 +12,27 @@
 #                   session.py's REVIEW call assembles it (`spec_body=`, at
 #                   both call sites). Cited by symbol: the line numbers here
 #                   went stale on the branch that wrote them.
-#   gates.txt       review.gate_summary over the ledger's 14 gate_results rows.
-#                   DEVIATION, and a live confound rather than a footnote:
-#                   gate_results has no `tool` column, so all 14 lines read
-#                   "no tool reported" where the original named tools. §5.4
-#                   makes `tool` what separates a gate that ran from one that
-#                   never did, and `gate_summary` exists so "a critic told a
-#                   gate passed should be able to see which did". A lens told
-#                   fourteen gates ran and none naming a tool has reason to
-#                   distrust them and dig harder — which biases toward *more*
-#                   findings, the direction of every conclusion drawn here.
+#   gates.txt       review.gate_summary over the ledger's 14 gate_results rows,
+#                   with each tool spliced back in from the same run's
+#                   baseline.json — the batch tree's other record of that suite,
+#                   written by the same container. Seven lines name a tool and
+#                   seven say "no tool reported", which is the shape production
+#                   had: six host-side core gates execute nothing and report
+#                   none, `revert` inherits the tool of the `tests` re-run it
+#                   performs (revert_gate), and `witness` inherits the same way
+#                   but skipped here, this spec declaring no mutants.
+#                   CORRECTED 2026-09-08 (BACKLOG item 88), and it was the
+#                   first pass's live confound rather than a footnote: the rows
+#                   carried no tool, so all 14 lines read "no tool reported".
+#                   §5.4 makes `tool` what separates a gate that ran from one
+#                   that never did, and `gate_summary` exists so "a critic told
+#                   a gate passed should be able to see which did" — a lens told
+#                   fourteen gates ran and not one naming a tool has reason to
+#                   distrust them and dig harder, which biases toward *more*
+#                   findings, the direction of every conclusion the first pass
+#                   drew. `gate_results` has the column now; these 14 rows
+#                   predate it, which is why the tools come from the baseline
+#                   suite and not from them.
 #   context.md      CONTEXT.md at base. `_SAFFRON_ROOT / "CONTEXT.md"` in
 #                   session.py reads the host's working copy, so this is that
 #                   file as it stood, not a mirror export.
