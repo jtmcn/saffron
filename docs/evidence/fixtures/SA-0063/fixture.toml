@@ -46,23 +46,48 @@ recorded_graded = 0
 # `return ""`), `notes-neutralization-unwitnessed` to the `neutralize` call
 # and everything downstream of it (391-402).
 #
-# Declared over the source (`pr_body.py`), not over `tests/test_report.py`,
-# though this diff touches both and either would anchor. Checked
-# (`grep '^file = ' docs/evidence/fixtures/*/fixture.toml`) rather than
-# assumed: source-anchoring is this corpus's norm, not an exception SA-0063
-# breaks from — SA-0048, SA-0050, SA-0054's pair, SA-0055's pair and
-# SA-0062's pair all declare over source too. SA-0045 and SA-0046 are the
-# only fixtures declared over a test file, because their property (a schema
-# line's exact text) is a fact about what the test constructs, not about the
-# source under test. SA-0063's two are missing-assertion defects instead,
-# and a lens reasoning about what a test fails to guard anchors on the
-# unguarded code doing the guarding — the same reason the other
-# source-anchored defects are, not a choice unique to this fixture.
+# Both defects were declared over the source (`pr_body.py`) alone, on the
+# reasoning that a lens reasoning about what a test fails to guard anchors on
+# the unguarded code doing the guarding. Source-anchoring was this corpus's
+# norm when they were written: of the ten locations the eight fixtures then
+# declared, only SA-0045's and SA-0046's named a test file, because their
+# property (a schema line's exact text) is a fact about what the test
+# constructs. But the reasoning was wrong as a prediction about *this* defect,
+# and pass 1 measured it wrong — so this fixture is now the third, and the
+# count above is history rather than a grep a reader can re-run to it. See
+# `notes-neutralization-unwitnessed` below.
 
 [[defects]]
 id = "notes-neutralization-unwitnessed"
-file = "saffron/report/pr_body.py"
-lines = [391, 402]
+# CORRECTED AFTER SEEING RUNS, and legitimate only because pass 1 is the
+# declared-disposable calibration pass whose numbers are discarded. Pass 1's
+# adequacy lens filed this defect at blocker severity, carrying `neutraliz`
+# and naming its own mutation (`safe = neutralize(text)` -> `safe = text` at
+# pr_body.py:391, applied at f76931df with the suite still green at 1502) —
+# and scored zero, because it anchored `tests/test_report.py:108` and a
+# defect declaring one file cannot match a finding on the other. **That run
+# is not in this repo**: `recorded-findings.json` beside this file is a
+# different run and does not carry the finding (no `neutraliz` in it), so the
+# paragraph above is a claim with a named location — the operator's pass-1
+# `--out` directory — not a fact a reader can re-check here. Adding a
+# location because a lens anchored there is the tuning risk the two-pass
+# design exists to prevent, so it lands BEFORE pass 2 and never between
+# passes. The second range is derived from the post-image, not from the
+# finding's line: `git show f76931d:tests/test_report.py` puts
+# `test_notes_cannot_move_a_status_or_a_gate_result` at 96 (`def`) through
+# 110 — the last line is the pre-existing `Settle on the end-of-day CLI`
+# assert, a context line in hunk `@@ -62,11 +62,51 @@` that the insertion
+# left inside this test's body rather than its original one.
+#
+# Scoped to this defect alone, not to the sibling: measured, that same claim
+# carries the substring `heading`, which is one of
+# `empty-notes-heading-unwitnessed`'s phrases. Giving both defects the test
+# file would let one finding score both, and phrases are the only
+# discriminator once two defects share a location.
+locations = [
+  { file = "saffron/report/pr_body.py", lines = [391, 402] },
+  { file = "tests/test_report.py", lines = [96, 110] },
+]
 owner = "adequacy"
 min_severity = "blocker"
 # `_notes` defangs an `@mention` and a `Fixes #12` via `neutralize(text)`
@@ -80,8 +105,7 @@ must_mention = ["neutraliz", "@mention", "defang"]
 
 [[defects]]
 id = "empty-notes-heading-unwitnessed"
-file = "saffron/report/pr_body.py"
-lines = [388, 390]
+locations = [{ file = "saffron/report/pr_body.py", lines = [388, 390] }]
 owner = "adequacy"
 min_severity = "blocker"
 # `if not text: return ""` (line 390) is what keeps `_notes` from rendering

@@ -448,12 +448,17 @@ def source_mutated(container: str, mutant: Mutant) -> Iterator[str | None]:
     `committed_gate` runs after `run_suite`, which is where this is called
     from, so the tree here may still be dirty (`docs/BACKLOG.md` item 78).
 
-    Four things apply nothing and say so by yielding the reason instead of
+    Six things apply nothing and say so by yielding the reason instead of
     `None`, leaving the tree exactly as it was: a path outside the worktree,
-    a file carrying uncommitted work, a `find` that is absent, and a `find`
-    that matches more than once. The last two are `apply_mutant`'s own rule
-    for the identical case, matched here rather than re-derived; the second
-    is `revert`'s, for the identical reason. Any other failure to apply, or a
+    a path not tracked at `HEAD`, a path tracked as something other than a
+    regular file, a file carrying uncommitted work, a `find` that is absent,
+    and a `find` that matches more than once. The last two are `apply_mutant`'s
+    own rule for the identical case, matched here rather than re-derived; the
+    uncommitted-work one is `revert`'s, for the identical reason; the two
+    `ls-tree` ones are this function's own, and the comment below says why a
+    symlink is worse than an untracked path. (This sentence said "four" and
+    omitted the `ls-tree` pair, which the code has refused since the paragraph
+    below it was written.) Any other failure to apply, or a
     failure to undo, raises `runtime.CellRuntimeError`: `witness_gate` turns
     that into `error`, never a verdict on the claim the mutant was meant to
     test.

@@ -17,6 +17,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from saffron.gates.contract import split_lines
+from saffron.intake import Mutant
 
 Severity = Literal["blocker", "concern", "note"]
 
@@ -37,6 +38,12 @@ class Finding(BaseModel):
     line: int
     claim: str
     anchored: bool = False
+    probe: Mutant | None = None
+    """The edit this finding says would keep the tests green (a *vacuity
+    probe*, `CONTEXT.md`). Required of the adequacy lens on the way in and
+    optional here on purpose: every fixture recorded before this field existed
+    is rebuilt through `Finding(**f)`, and `calibrate_corpus` runs that before
+    every paid pass."""
 
 
 @dataclass(frozen=True)

@@ -5271,6 +5271,73 @@ it is a pure refactor of the most load-bearing function in the control plane,
 the suite guarding it is 1562 tests, and a cell's own diff here would be the
 hardest this repo has asked a critic to read.
 
+## 91. The 2026-09-09 mutation spike is evidence that lives nowhere `docs/evidence/` can see
+
+**Done, 2026-09-09** — `docs/evidence/2026-09-09-adequacy-probe-spike.md`. The
+`f9f007c4` pair reproduces to the recorded `1250 passed` exactly; the
+`f76931df`/`91f56c69` pair is transcribed from the review reproduction, not
+re-run, and the file says so.
+
+**Tier 3 — real, not urgent.** Nothing fails; the risk is that a number
+outlives the record that justified it.
+
+Four mutations the adequacy lens named in pass 1 were applied at their fixture
+heads and the suite run: `pr_body.py:391` at `f76931df` (1502 passed),
+`batch.py:72` at `91f56c69` (1292 passed), and two at `f9f007c4` (1250 passed
+each). All four stayed green, which is what makes them verified-real vacuities
+rather than plausible ones, and they are the whole evidential basis for
+`docs/superpowers/specs/2026-09-09-mutation-verified-capability-design.md`.
+
+At the time this item was filed, that record existed only in a session ledger
+under a scratch directory — a spec arguing from a measurement nobody can
+re-read is the shape item 87 is about, one level out. Two of the four had
+already been independently reproduced during review (`f76931df` and
+`91f56c69`, both to the exact figure); the `f9f007c4` pair had been reproduced
+by nobody.
+
+The fix was small: land the four rows, their commands and outputs where any
+exist, under `docs/evidence/`, reproducing the two nobody had re-run. Done, in
+the "Done" line above — see `docs/evidence/2026-09-09-adequacy-probe-spike.md`
+for the full per-row provenance, including which two remain transcribed from
+the review reproduction rather than re-run for that file. It was a
+**precondition of the plan** that spec leads to, not of the spec itself —
+filed here because a precondition recorded only inside the document that
+depends on it is a claim, not a record.
+
+## 92. Four things the corpus's probe path ships knowing, recorded only in scratch
+
+**Tier 3 — real, not urgent.** All four were found by review on the branch that
+built the vacuity-probe path, judged not to block it, and written down in that
+branch's SDD workspace — which is git-ignored session scratch. Item 91's own
+body makes the argument: a thing recorded only inside the document that depends
+on it is a claim, not a record. This is that argument applied to itself.
+
+1. **A fixture that files no probe still pays a baseline suite run.** The guard
+   is `if not args.skip_probes:`, and `_apply_probes` runs the baseline before
+   it discovers the probe list is empty. Measured at ~15.6s per fixture, so at
+   most a couple of minutes across a pass — the one-line fix is `if probes:`
+   before the baseline.
+2. **No test drives the real `CellExecutor` path.** Every driver test replaces
+   `run_gate`, so the contract is pinned but the exec is not. One fixture has
+   since run end to end against a real cell, which is evidence rather than
+   coverage; a `-m cell` test is the durable version.
+3. **`tests/test_corpus.py` covers two things** — `harness/corpus.py`'s
+   predicate and a dated evidence driver — at ~750 lines. A
+   `tests/test_lens_corpus_driver.py` split is mechanical.
+4. **`TEST_PATHS = ("tests/",)` is this repo's layout, hardcoded in the
+   driver.** `check_probe` requires the argument so it cannot be silently
+   absent, and the prefixes are normalised, so the guard holds for the eight
+   shipped fixtures. But `--fixtures` points wherever it is told, and
+   `src/tests/test_x.py` would pass it. `policy.integrity.test_paths` is the
+   right source and is globs (`tests/**`) where this compares prefixes, so it
+   is a translation rather than a substitution.
+
+Also open and *not* in this list because it is already in the design spec: the
+in-cell suite runs 5.5x faster than the same tree on the host, and nobody has
+explained it. `probes.json` now records the gate's tool, collected count and
+summary per verdict, so the next pass can say whether the suite that answered
+was the whole one.
+
 ---
 
 ## What is *not* here, deliberately

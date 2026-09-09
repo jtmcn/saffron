@@ -113,6 +113,21 @@ array. Each element has exactly these fields:
   green while the real behaviour breaks, and why the gates did not catch it.
   Two or three sentences, concrete enough that a reader can check it at that
   line by making the edit you named.
+- `probe` (object) — the edit from your `claim`, as data rather than prose, with exactly
+  three string fields: `file` (repository-relative), `find` (the exact text as it appears in
+  the file today), and `replace` (what it becomes; `""` to delete). `find` must appear in
+  that file **exactly once** — if the text you want to change appears twice, widen it with
+  surrounding lines until it is unique, or the probe is discarded unapplied.
+
+  **`file` must be source, not a test.** Your `claim` may name an edit to either, and often
+  the clearest explanation is the test-side one — keep that in the prose. But a probe that
+  deletes an assertion proves nothing that can be checked, so the field takes the source-side
+  edit: the one that breaks the behaviour while the tests stay green.
+
+  Make it the *whole* edit. If removing the text you named leaves the surrounding code
+  broken — an argument with nothing to bind to, a name with no definition — widen `find` to
+  cover the collateral change too. A probe that crashes the program is discarded, and your
+  finding goes uncounted with it.
 
 An empty array is a real answer, and it is the honest one when you find nothing.
 The host reconciles every finding against the diff and drops any it cannot

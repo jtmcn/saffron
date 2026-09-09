@@ -23,8 +23,7 @@ recorded_graded = 0
 
 [[defects]]
 id = "reflow-defeats-guard"
-file = "tests/test_ledger.py"
-lines = [639, 686]
+locations = [{ file = "tests/test_ledger.py", lines = [639, 686] }]
 owner = "adequacy"
 min_severity = "blocker"
 # The two migration tests build `before = SCHEMA.replace(<exact line>, "")`

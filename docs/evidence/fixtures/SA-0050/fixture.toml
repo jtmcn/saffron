@@ -28,8 +28,7 @@ recorded_graded = 0
 
 [[defects]]
 id = "breaker-reset-unguarded"
-file = "saffron/batch.py"
-lines = [130, 190]
+locations = [{ file = "saffron/batch.py", lines = [130, 190] }]
 owner = "adequacy"
 min_severity = "blocker"
 # `run_batch`'s per-candidate loop resets `consecutive_aborts = 0` in the
