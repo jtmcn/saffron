@@ -314,6 +314,24 @@ def test_every_shipped_fixture_declares_a_non_empty_source():
         assert fixture.source.strip(), fixture.spec_id
 
 
+def test_every_shipped_fixture_is_ready_for_a_probe_pass():
+    """The spec's own precondition, as a test rather than a sentence.
+
+    Every change that moves the baseline — the schema field, the prompt
+    paragraph, the `Defect` locations — lands before pass 2 or not at all.
+    This asserts the state a pass-2 run requires, so a half-landed change
+    fails here rather than producing a number nobody can compare.
+    """
+    assert review.reported_model("adequacy") is not review.reported_model("correctness")
+    prompt = REPO / "saffron" / "agents" / "prompts" / "review-adequacy.md"
+    assert "`probe` (object)" in prompt.read_text()
+    for fixture in corpus.load_corpus(FIXTURES):
+        for defect in fixture.defects:
+            assert defect.locations, (
+                f"{fixture.spec_id}/{defect.id} declares no location"
+            )
+
+
 def test_the_predicate_reproduces_every_fixture_s_recorded_answer():
     """`calibrate`'s guard, over all eight. Every declared defect is one a lens
     should have raised and did not, so every fixture's recorded answer is
