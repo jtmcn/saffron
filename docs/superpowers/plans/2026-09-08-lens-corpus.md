@@ -22,7 +22,7 @@
 
 ## The corpus, as recovered
 
-Every recorded `head_sha` is gone from live history. Head is the ledger's `pushed_sha`; base is the first ancestor where `git diff base..head` is byte-identical to the batch tree's `patch.diff`. All eight verified 2026-09-08.
+Every recorded `head_sha` is gone from live history. Head is the ledger's `pushed_sha`; base is `patch.json`'s recorded `tree_base`, verified by byte-identity against the batch tree's `patch.diff`. All eight verified 2026-09-08. *(Corrected 2026-09-08: this first read "base is the first ancestor where the diff is byte-identical", and an ancestry walk was built to find it. `patch.json` records both `base_sha` and `tree_base`, and `tree_base` is the right base in all eight — the walk rediscovered what the record already stated. It survives only as a fallback no shipped fixture needs.)*
 
 | Spec | PR | base..head | Defects |
 |---|---|---|---|
@@ -524,13 +524,25 @@ recorded in `patch.json` is gone from live history — the branch was deleted
 after merge — so a fixture's range is recovered rather than read off:
 
     head  the ledger's `pushed_sha` for the task
-    base  the first ancestor of that head where `git diff base..head` is
-          byte-identical to the batch tree's recorded `patch.diff`
+    base  `patch.json`'s recorded `tree_base`, verified by byte-identity
+          against the recorded `patch.diff`
 
-Byte-identity is the acceptance test, not a heuristic. Four of the eight
-fixtures need the walk because their recorded `tree_base` is not an ancestor of
-their head at all: they were stacked pull requests, and SA-0048's true base is
-SA-0046's head (backlog item 33, visible in the archive).
+Byte-identity is the acceptance test, not a heuristic: a range that cannot
+reproduce the recorded patch exactly fails loudly rather than shipping an
+approximation.
+
+`base_sha` is the wrong field and reading it was the original error here.
+`patch.json` records both, and `tree_base` is the base the patch was cut
+against — `session.py` exports `worktree.export_patch(container,
+spec.tree_base)`, so it is definitionally the patch's base. The two differ in
+exactly the four fixtures that were stacked pull requests, where SA-0048's
+`tree_base` is SA-0046's head. Backlog item 33 says the record exists precisely
+so this read can be made correct; the batch tree was right, the reader was not.
+
+An ancestry walk is kept as a fallback for a spec whose `tree_base` fails
+verification. No shipped fixture needs it, and every declared base is its head's
+first parent, so `WALK_DEPTH` is unexercised — note that beside the constant so
+nobody tunes it blind.
 
 The `[[defects]]` blocks are deliberately NOT generated. The backlog row is the
 only place the mutation that proves a defect is written down, and a generated
@@ -595,7 +607,8 @@ def splice_tools(
     Base and head ran the same binaries from the same cell image in the same
     run, so a version string in the baseline suite is the version string at
     head. `revert` skipped at base and inherits the tool of the `tests` re-run
-    it performs (`revert.py:307`); every other miss is a host-side core gate
+    it performs (`revert.py:244`, `:350`, `:370`); every other miss is a
+    host-side core gate
     that executes nothing, and None renders as "no tool reported".
     """
     tools = {row["gate"]: row["tool"] for row in baseline if row["tool"]}
