@@ -222,10 +222,10 @@ def _lens_agent(*texts, record=None, costs=None):
     return run
 
 
-def _run_lens(agent, **kwargs):
+def _run_lens(agent, lens="correctness", **kwargs):
     return review.run_lens(
         "cell",
-        lens="correctness",
+        lens=lens,
         system_prompt="s",
         max_turns=20,
         budget_usd=kwargs.pop("budget_usd", 2.0),
@@ -302,6 +302,25 @@ def test_a_reprompt_does_not_fire_without_meaningful_budget_left():
     assert "re-prompt" not in result.error
     assert result.cost_usd == pytest.approx(1.5)
     assert len(record) == 1
+
+
+def test_an_adequacy_lens_report_becomes_a_finding_that_holds_its_probe():
+    """The feature's spine, driven end to end for the one lens that has it:
+    the block through `_parse_report`'s per-lens model, `model_dump()`, and
+    `Finding(**kwargs)`'s coercion of the nested edit. Every other `run_lens`
+    test is a `correctness` lens, which never carries the field at all, so
+    this path was covered only in pieces."""
+    probe = {"file": "src/gap.py", "find": 'tz="UTC"', "replace": "tz=None"}
+    result = _run_lens(_lens_agent(_block([_finding(probe=probe)])), lens="adequacy")
+
+    assert result.error is None
+    (finding,) = result.findings
+    assert finding.lens == "adequacy"
+    assert finding.probe == Mutant(**probe)
+    # And out the far side: `reviews_from_json` rebuilds this before every
+    # paid pass, so a probe that does not survive `as_dict` is a probe the
+    # corpus driver never sees.
+    assert result.as_dict()["findings"][0]["probe"] == probe
 
 
 def test_the_blast_radius_lens_is_not_declared():
