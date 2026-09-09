@@ -1,0 +1,107 @@
+# PR #158 (`SA-0063`), the two known-bad tests item 86 found reviewing
+# `SA-0064` by mutation rather than by reading: both live in
+# `tests/test_report.py`, which this diff carries outside its own `touches`,
+# so neither run of `SA-0063` itself could have closed them.
+#
+# Parsing this spec with today's `intake.parse_spec` raises
+# `DisclosedMutantError`: item 82's disclosure check exists *because of* this
+# spec (it dictated an exact heading and constant so its own witnesses would
+# match, and named the mutants in its own "Notes for the agent" section) and
+# postdates it by several days. `recover_fixture` catches the error and uses
+# `exc.spec` — the same parsed spec `discover_specs` keeps for a refusal on
+# policy rather than shape (`intake.py:308`) — so `spec_body.md` here is the
+# real spec text REVIEW actually saw, not a stand-in.
+#
+# Provenance, all four inputs frozen rather than rebuilt per pass:
+#   diff.patch      git diff 132a2f8..f76931d, asserted byte-identical to the
+#                   recorded ~/.saffron/batches/v0/SA-0063/patch.diff
+#   spec_body.md    the spec at base (see above), plus
+#                   context.criteria_section, the way session.py's REVIEW
+#                   call assembles it (`spec_body=`).
+#   gates.txt       review.gate_summary over the ledger's gate_results rows,
+#                   tools spliced back in from the same run's baseline.json.
+#   context.md      CONTEXT.md at base.
+
+spec_id = "SA-0063"
+pr = 158
+base_sha = "132a2f8def97980230ff83f1d6244f8d230725d5"
+head_sha = "f76931df2af02b5de376401a9ee75f1cfffd641e"
+source = "docs/BACKLOG.md item 86: the notes channel's two rendering-side safety properties are unwitnessed"
+
+# Neither review lens filed anything in this range; the recorded run is 0/0.
+# (The run did file two real blockers elsewhere, about `notes` never reaching
+# `render_pr_body` at all — a different, undeclared defect, out of scope here.)
+recorded_seen = 0
+recorded_graded = 0
+
+# The two defects used to share one range — `_notes`, lines 377-395 — leaving
+# position zero no discriminating power, and their phrases ("empty"/"heading"
+# vs. "neutraliz"/"@mention"/"defang") were softer than SA-0062's pair, with
+# no regression test carrying real lens text to catch a collision. `_notes`'s
+# own docstring (377-387) says "the heading exists to say so at a glance"
+# about the *implementer-notes* heading, not the empty-notes-heading defect —
+# quoting it would double-score against the wrong defect — so both ranges
+# start after the docstring closes. Split: `empty-notes-heading-unwitnessed`
+# to the guard clause (388-390: `text = notes.strip()` through the early
+# `return ""`), `notes-neutralization-unwitnessed` to the `neutralize` call
+# and everything downstream of it (391-402).
+#
+# Declared over the source (`pr_body.py`), not over `tests/test_report.py`,
+# though this diff touches both and either would anchor. Checked
+# (`grep '^file = ' docs/evidence/fixtures/*/fixture.toml`) rather than
+# assumed: source-anchoring is this corpus's norm, not an exception SA-0063
+# breaks from — SA-0048, SA-0050, SA-0054's pair, SA-0055's pair and
+# SA-0062's pair all declare over source too. SA-0045 and SA-0046 are the
+# only fixtures declared over a test file, because their property (a schema
+# line's exact text) is a fact about what the test constructs, not about the
+# source under test. SA-0063's two are missing-assertion defects instead,
+# and a lens reasoning about what a test fails to guard anchors on the
+# unguarded code doing the guarding — the same reason the other
+# source-anchored defects are, not a choice unique to this fixture.
+
+[[defects]]
+id = "notes-neutralization-unwitnessed"
+file = "saffron/report/pr_body.py"
+lines = [391, 402]
+owner = "adequacy"
+min_severity = "blocker"
+# `_notes` defangs an `@mention` and a `Fixes #12` via `neutralize(text)`
+# (line 391) — measured: `_notes("ping @maintainer and Fixes #12")` comes
+# back with zero-width joiners in both. But
+# `test_notes_cannot_move_a_status_or_a_gate_result` feeds exactly that
+# string in and asserts only that the *head* of the rendered body is
+# unchanged; it never looks inside the notes section itself. Deleting the
+# `neutralize` call leaves that test green — the one place a cell's own
+# output reaches GitHub without crossing `pr_body.neutralize`'s stated
+# boundary is asserted nowhere. Range starts at the `neutralize` call itself
+# (391) rather than the docstring above it, disjoint from the other defect's
+# range and clear of the docstring's unrelated "heading" sentence.
+must_mention = ["neutraliz", "@mention", "defang"]
+
+[[defects]]
+id = "empty-notes-heading-unwitnessed"
+file = "saffron/report/pr_body.py"
+lines = [388, 390]
+owner = "adequacy"
+min_severity = "blocker"
+# `if not text: return ""` (line 390) is what keeps `_notes` from rendering
+# a heading over nothing. Stated in SA-0063's own terms, not paraphrased from
+# item 86 (which names a different spec's criterion and witness — SA-0064's,
+# not this one's): SA-0063's own criterion 4 claims exactly this property
+# ("an empty [notes channel] must not add a heading over nothing"),
+# `preserves: true`, witness `test_the_pr_body_opens_with_the_spec` — but
+# that test only asserts `"TE-9001" in body()`, nothing about whether a
+# notes heading is present, so SA-0063 introduces `_notes` and nothing this
+# diff adds to `tests/test_report.py` would notice a heading rendered over
+# empty notes.
+#
+# Measured directly (checked out f76931d in an isolated worktree, deleted
+# the `if not text: return ""` line, ran `pytest tests/test_report.py`): 64
+# of 65 tests stay green, including the named witness. The one that turns
+# red is `test_notes_cannot_move_a_status_or_a_gate_result` — and only by
+# accident, because it compares `body()` (now itself carrying an empty notes
+# heading under the mutant) against `rendered.split(...)[0]` (which has
+# none), not because it was written to guard this property. Range is the
+# guard clause alone (388-390), disjoint from the neutralization defect's
+# range and clear of the docstring's unrelated "heading" sentence.
+must_mention = ["empty", "heading", "no notes"]

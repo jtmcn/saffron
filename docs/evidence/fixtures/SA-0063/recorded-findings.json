@@ -1,0 +1,50 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.4440531,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "blocker",
+        "file": "saffron/phases/package.py",
+        "line": 815,
+        "claim": "The production packaging path never forwards `outcome.notes` into `render_pr_body`: the call at lines 815-835 passes `spec`, `gates`, `outcome.new_failures`, `outcome.reviews`, `outcome.rebut_result`, etc., but no `notes=outcome.notes` kwarg, so `render_pr_body`'s `notes` parameter (pr_body.py line 78) silently falls back to its default `\"\"` for every real task. `_drive_cell` in session.py computes, hashes, and writes `notes`/`notes_sha256` onto `CellOutcome` (session.py lines 295-299, 1836-1837) and `_notes()` in pr_body.py renders it correctly when given text directly (as the unit tests in test_report.py exercise), but no code path reads `outcome.notes` outside session.py itself \u2014 grepping the repo for `outcome.notes` or `notes=` outside `session.py` turns up nothing. The result is that acceptance criterion 1 (\"An implementer's notes reach the pull request body\") is unmet in every actual packaged pull request even though every unit test for the pieces in isolation passes: the notes turn runs, spends money, writes `notes.json` to `task_dir`, and is then silently dropped on the floor before rendering \u2014 a default (`notes=\"\"`) standing in for real, already-computed data, indistinguishable from a task that genuinely had nothing to report.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.47296530000000003,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "saffron/phases/package.py",
+        "line": 815,
+        "claim": "The only production call to `render_pr_body` (the one that writes `pr_body.md` and is pushed as the actual PR body) never passes `notes=outcome.notes`. `render_pr_body`'s new `notes` parameter defaults to `\"\"`, so this call silently renders every real task's PR body with no notes section, even when `outcome.notes` was populated, extracted, hashed and written to `notes.json` by `_drive_cell`. Acceptance criterion 1 ('An implementer's notes reach the pull request body...') is therefore never satisfied for any task run through the normal pipeline \u2014 only `tests/test_report.py`, which calls `render_pr_body` directly with an explicit `notes=` argument, exercises the rendering; nothing exercises `package.py`'s own call site with a non-empty `outcome.notes`, so gates and the suite cannot see the missing wire.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.4015959,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cell/session.py",
+        "line": 1616,
+        "claim": "`notes_worth_asking = bool(spec.forbidden) or bool(policy.protected)` is exercised only with both operands true (`test_the_notes_artifact_is_hashed_when_it_is_produced`, which sets both `spec.forbidden` and `policy.protected`) or both false (`test_no_notes_turn_is_asked_for_when_nothing_could_have_been_denied`, default spec and default `gates: {}\\n` policy). No test sets `policy.protected` non-empty while `spec.forbidden` stays empty. Replacing the line with `notes_worth_asking = bool(spec.forbidden)` \u2014 dropping the protected-path trigger the design comment two lines above calls out by name (\"a declared `forbidden` list or a repo-wide `protected` one\") \u2014 leaves the whole suite green, so the repo-wide half of the eligibility rule this feature is built around is unwitnessed.",
+        "anchored": true
+      }
+    ]
+  }
+]

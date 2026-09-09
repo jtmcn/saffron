@@ -103,8 +103,8 @@ fire. Its number stays listed because item numbers are cited from `saffron/`.
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, **57**, **61**, **62**, **63**, **64**, **69**, **75**, **76**, **77**,
-**81**, **82**, **83**, **84**, **85**, **86**, **87**. (**65** and **68** are done; **80**
-moved to tier 1 when its evidence arrived.)
+**81**, **82**, **83**, **84**, **85**, **86**, **87**, **89**. (**65** and **68**
+are done; **80** moved to tier 1 when its evidence arrived.)
 
 **76 sits here rather than in tier 1** because `structure`, where the hole was
 found, is closed: it refuses every ignore source and states its own file set.
@@ -5168,6 +5168,55 @@ written against an absolute. *Done as written, 2026-09-08: the column, the
 repaired fixture and the pass. The comparison came back unchanged, so the
 closing sentence is the operative one rather than the fallback it was written
 as.*
+
+---
+
+## 89. `DIFF_FLAGS` pins less of the diff's shape than its own comment claims
+
+Found building the lens-corpus harness's byte-identity check (2026-09-08),
+which had to reproduce `export_patch`'s output on a host it does not control
+and, in doing so, needed three flags `saffron/cell/worktree.py` does not set.
+
+`worktree.py:127`'s comment over `DIFF_FLAGS` says it pins "the shape of every
+diff the host reads" against config the agent can write inside its own
+worktree (§2). The five flags at `worktree.py:131-144` back that for
+`diff.srcPrefix`/`dstPrefix`/`noprefix`/`mnemonicPrefix`, `diff.external`,
+`diff.textconv` and rename detection — but not for `core.abbrev`,
+`diff.context` or `diff.algorithm`, none of which any flag or `-c` override
+here touches. An agent that runs `git config diff.context 40` (or
+`core.abbrev`, or `diff.algorithm patience`) before its own commits changes
+`export_patch`'s bytes with nothing in this module noticing, which is a
+narrower guarantee than the comment states.
+
+**Severity is low, and worth saying plainly rather than implying.**
+`core.abbrev` and `diff.algorithm` are cosmetic here: nothing host-side parses
+an `index` line's hash or cares which algorithm chose a hunk boundary.
+`diff.context` has the one real effect — `saffron/agents/findings.py`'s
+`parse_diff` puts every line a hunk's declared range covers into
+`hunk_lines` (`findings.py:79`), context lines included, and `_is_anchored`
+(`findings.py:135`) tries `hunk_lines` first. A wider context widens what a
+finding may anchor to. The blast radius is capped two ways: `facts.tokens`,
+the second anchoring target, is collected only from `+`/`-` lines
+(`_consume_hunk`, `findings.py:102-110`), which no context setting moves; and
+the merged commit still comes from git objects, never from the archived
+`patch.diff` — nothing about this lets unreviewed code into the tree it did
+not already reach some other way. What it can do is nudge a finding onto a
+line it would not otherwise have reached, and leave the archived patch a
+record of what an agent chose to show rather than what the range actually
+contains.
+
+`harness/recovery.py`'s `pinned_diff` is the worked example: reproducing a
+recorded patch on an arbitrary host needed `--abbrev=7 --unified=3
+--diff-algorithm=myers` on top of `DIFF_FLAGS` and its two `-c` overrides, all
+three measured against every one of this repo's own recorded patches rather
+than assumed.
+
+**Done looks like** `DIFF_FLAGS` (or `_git`'s `-c` overrides) gaining the same
+three pins `pinned_diff` already carries — an explicit `--unified=<n>` matters
+most, since it is the one with anchoring consequences; `--abbrev`/
+`--diff-algorithm` close the comment's claim rather than a live hazard. Cite
+`harness/recovery.py`'s `pinned_diff` for the exact flags and the measurement
+behind each.
 
 ---
 

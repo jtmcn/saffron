@@ -136,6 +136,16 @@ def lens_prompt(
     )
 
 
+def _from_report(lens: str, report: _Report, cost_usd: float) -> LensReview:
+    return LensReview(
+        lens,
+        findings=[
+            Finding(lens=lens, **reported.model_dump()) for reported in report.findings
+        ],
+        cost_usd=cost_usd,
+    )
+
+
 def run_lens(
     container: str,
     *,
@@ -144,10 +154,19 @@ def run_lens(
     max_turns: int,
     budget_usd: float,
     agent: Callable[..., implement.AttemptResult],
+    spec_id: str,
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
 ) -> LensReview:
-    """One lens, one fresh session. `resume` is never passed, deliberately: the
-    critic must not see the implementer's transcript or its own earlier runs."""
+    """One lens, one fresh session — never the implementer's and never another
+    lens's, so the critic judges only the diff in front of it (§5.5).
+
+    The single exception: output that is not the schema resumes that same
+    session once, to repair the *shape* of the turn that just ran — mirroring
+    `session.py`'s `PlanNotSchema` re-prompt. That turn still sees only its
+    own prior output, over the same diff; it is not exposed to the
+    implementer's transcript or to another lens's, so the isolation this
+    docstring is otherwise about still holds.
+    """
     options = implement.agent_options(
         system_prompt=system_prompt,
         max_turns=max_turns,
@@ -164,16 +183,55 @@ def run_lens(
     try:
         report = _Report.model_validate(json.loads(parse_output_block(attempt.text)))
     except (ValueError, ValidationError) as exc:
-        return LensReview(
-            lens, cost_usd=attempt.cost_usd_est, error=f"not the schema: {exc}"
+        remaining = budget_usd - attempt.cost_usd_est
+        # A retry given less than the turn that just failed spent cannot
+        # finish, so it is refused rather than started.
+        if remaining < attempt.cost_usd_est or not attempt.session_id:
+            return LensReview(
+                lens, cost_usd=attempt.cost_usd_est, error=f"not the schema: {exc}"
+            )
+        emit(
+            PhaseStart(
+                timestamp=time.time(),
+                spec_id=spec_id,
+                phase="REVIEW",
+                label="REVIEW",
+                detail=f"{lens}: not the schema, re-prompting once — {exc}",
+            )
         )
-    return LensReview(
-        lens,
-        findings=[
-            Finding(lens=lens, **reported.model_dump()) for reported in report.findings
-        ],
-        cost_usd=attempt.cost_usd_est,
-    )
+        retry_options = implement.agent_options(
+            system_prompt=system_prompt,
+            max_turns=max_turns,
+            budget_usd=remaining,
+            tools=REVIEW_TOOLS,
+        )
+        try:
+            retry = agent(
+                container,
+                prompt=f"{exc}\n\n{EXTRACTION_PROMPT}",
+                options=retry_options,
+                resume=attempt.session_id,
+                emit=emit,
+                last_cost_usd=attempt.cost_usd_est,
+            )
+        except implement.AgentFailed as failed:
+            cost = attempt.cost_usd_est + (
+                failed.attempt.cost_usd_est if failed.attempt else 0.0
+            )
+            return LensReview(
+                lens, cost_usd=cost, error=f"re-prompted once, then {failed}"
+            )
+        total_cost = attempt.cost_usd_est + retry.cost_usd_est
+        try:
+            report = _Report.model_validate(json.loads(parse_output_block(retry.text)))
+        except (ValueError, ValidationError) as exc2:
+            return LensReview(
+                lens,
+                cost_usd=total_cost,
+                error=f"not the schema, even after a re-prompt: {exc2}",
+            )
+        return _from_report(lens, report, total_cost)
+    return _from_report(lens, report, attempt.cost_usd_est)
 
 
 def run_review(
@@ -213,6 +271,7 @@ def run_review(
             max_turns=max_turns,
             budget_usd=budget_usd,
             agent=agent,
+            spec_id=spec_id,
             emit=emit,
         )
         review.findings = anchor(review.findings, diff, read_head=read_head)

@@ -670,6 +670,9 @@ FAMILIES: tuple[_Family, ...] = (
     # `run_review`, not the supervisor, and `SA-0031` migrates `phases/*.py`
     # by reading this table — so the file it has to edit has to appear in it.
     _Family("REVIEW: (per-lens)", "phases/review.py:run_review", PhaseStart),
+    # A lens's own re-prompt line, not the supervisor's or `run_review`'s: it
+    # fires from inside `run_lens`, one turn before the per-lens line above.
+    _Family("REVIEW: not the schema", "phases/review.py:run_lens", PhaseStart),
     _Family("REBUT:", _S, PhaseStart),
     _Family("REBUT: (verdict)", "phases/rebut.py:run_rebut", PhaseStart),
     _Family("teardown", _S, Teardown),

@@ -1,0 +1,32 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.6464747999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.6070098000000002,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.5097246,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "tests/test_package.py",
+        "line": 1695,
+        "claim": "This is the only witness for PACKAGE writing `policy_sha` on a differing declaration, and acceptance criterion 3 explicitly requires that a recorded sha of NULL counts as 'different' and gets written \u2014 yet this test overwrites the fixture's naturally-NULL `policy_sha` (packageable's `create_task` call passes no `policy_sha`) with a non-NULL `old_sha` before calling `package()`. Changing `saffron/phases/package.py:771` from `if ledger.task_policy_sha(outcome.task_id) != policy_sha:` to `if (recorded := ledger.task_policy_sha(outcome.task_id)) is not None and recorded != policy_sha:` keeps both this test and the no-op test (`test_reverifying_under_an_unchanged_policy_issues_no_policy_write`, which also seeds a non-NULL value) green, while a task that never had a `policy_sha` recorded (every pre-existing task, and the exact gap backlog item 16 exists to close) would silently never get one written on re-verification. No gate catches this: `criteria` only checks that a witness exists per checklist item, not that it exercises every clause of item 3.",
+        "anchored": true
+      }
+    ]
+  }
+]

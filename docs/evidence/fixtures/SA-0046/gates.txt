@@ -1,0 +1,12 @@
+- scope: pass (no tool reported) — 6 changed files within touches
+- integrity: pass (no tool reported) — 6 changed files clean of suppression and gate-config edits
+- size: pass (no tool reported) — 251 changed lines within the feature ceiling of 600
+- format: pass (ruff 0.16.3) — formatted
+- lint: pass (ruff 0.16.3) — 0 violations
+- types: pass (ty 0.0.77) — no type errors
+- tests: pass (pytest 9.1.1) — 1256 passed, 2 skipped, 20 deselected in 14.39s
+- shacl: pass (PySHACL Version: 0.40.1) — 0 violations across 2 graphs
+- revert: pass (pytest 9.1.1) — 6 new test(s) failed without their source, as required
+- committed: pass (no tool reported) — worktree clean
+- census: pass (no tool reported) — 1258 tests collected, none of 1252 removed
+- criteria: pass (no tool reported) — 6 criteria witnessed at head

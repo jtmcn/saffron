@@ -1,0 +1,58 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.7848989999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "blocker",
+        "file": "saffron/batch.py",
+        "line": 119,
+        "claim": "The comment on this except-clause (lines 124-126) asserts a raise from `runner` is 'never charged to a task, because no task was ever started for it' \u2014 but `run_one_cell` (saffron/cell/session.py) creates `run_id`/`task_id` at lines 824-839, opens the phase loop's try block at line 855, and only its outermost `except BaseException: ... raise` (session.py:1765-1775) is what actually reaches this except-clause. That try block spans `plan_checkpoint` and every later phase, so a crash after one or more attempts have already opened and closed with real `cost_usd_est` (e.g. a runtime dying mid-REPAIR) still propagates as a raised exception. Because `run_batch` never learns that run's `run_id` on this path, `attach_run_to_batch` is never called, the run's `batch_id` stays NULL forever, and `ledger.batch_spend` (which sums attempts joined through `runs.batch_id`) permanently excludes real, already-spent money from the budget gate at line 108 \u2014 letting the batch admit further candidates against a budget that is actually already partly consumed. No test here catches this because `FakeRunner` raises a bare exception with no ledger rows behind it at all, unlike the real failure mode.",
+        "anchored": true
+      },
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 113,
+        "claim": "The breaker is only evaluated before starting the next candidate (line 113), while the counter itself is updated after each candidate returns (lines 136-143). If the two (or more) candidates that trigger the threshold are the last ones in `candidates`, the loop exits normally at line 145 and closes the batch as `DRAINED` instead of `INFRASTRUCTURE`, even though the standing abort count reached the threshold. This silently misreports why the night ended in the one column (`batches.status`) the design says exists precisely to distinguish 'the toolchain is broken' from an ordinary drain \u2014 no test exercises a queue whose trailing candidates are the ones that trip the breaker.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.7243665,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 87,
+        "claim": "`until.isoformat()` writes `until_ts` in `YYYY-MM-DDTHH:MM:SS` form (ISO with a 'T'), while every other timestamp this schema stores (`started_at`, `ended_at`, and every `datetime('now')` call elsewhere in ledger.py) is SQLite's `YYYY-MM-DD HH:MM:SS` (space-separated). The schema's own comment on `batches` (ledger.py ~line 27-30) states timestamps are TEXT 'matching every other timestamp this module writes ... rather than inventing a second representation' \u2014 this line does exactly that. Nothing in this diff or the passing suite reads `until_ts` back for a string comparison against another timestamp column, so no gate or test can see it, but a future lexicographic comparison (e.g. `until_ts < datetime('now')` in a recovery or report query) will misorder because `'T' (0x54) > ' ' (0x20)` at the same character position for an otherwise-identical date-time.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.6409050000000002,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "tests/test_batch.py",
+        "line": 305,
+        "claim": "This is the only test that verifies `attach_run_to_batch` is called with the right arguments, and it runs against a fresh ledger where this is the first batch ever created (batch_id=1) and the first run ever created (run_id=1). Because both ids are 1, swapping the call at saffron/batch.py:134 to `ledger.attach_run_to_batch(batch_id, outcome.run_id)` would still update `runs.batch_id` to 1 where `run_id = 1` \u2014 an identical result \u2014 so the test would keep passing while the argument order (and thus every real night, where run_id and batch_id differ) would be silently wrong. The test never exercises a case where run_id != batch_id, so it cannot actually confirm which id lands in which column.",
+        "anchored": true
+      }
+    ]
+  }
+]

@@ -1,0 +1,40 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.3911585999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.8026431,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.3493254,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/ledger.py",
+        "line": 367,
+        "claim": "No test ever calls `create_run` with a non-`None` `batch_id`; every new test (`test_a_run_created_outside_a_batch_has_a_null_batch_id`, `test_a_ledger_built_by_the_previous_schema_still_opens_and_writes`) only exercises the default-`None` path. Replacing the tuple `(repo_id, base_sha, batch_id)` at this INSERT with `(repo_id, base_sha, None)` \u2014 i.e. silently discarding the caller's `batch_id` argument entirely \u2014 would keep every test in this diff green while defeating the entire reason the parameter and column exist (grouping a run into the batch that ran it, per \u00a74.2.1). The suite's own `test_a_batch_status_outside_the_four_stop_reasons_is_rejected` shows raw `batches` rows can already be inserted via `ledger._db` in a test, so a counterpart asserting a real `batch_id` round-trips through `create_run` was reachable but wasn't written.",
+        "anchored": true
+      },
+      {
+        "lens": "adequacy",
+        "severity": "note",
+        "file": "tests/test_ledger.py",
+        "line": 617,
+        "claim": "The CHECK-constraint test only inserts rows with a concrete status; it never inserts a `batches` row with `status` omitted (NULL), which the schema comment (ledger.py:33) states is deliberately legal for a still-running batch. Adding `NOT NULL` to the `status` column definition would keep this test passing (every value it inserts is non-NULL) while breaking the documented in-flight-batch case that SA-0049 will rely on.",
+        "anchored": true
+      }
+    ]
+  }
+]

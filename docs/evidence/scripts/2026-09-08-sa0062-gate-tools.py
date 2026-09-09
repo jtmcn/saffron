@@ -51,6 +51,8 @@ from saffron.gates.contract import GateResult  # noqa: E402
 from saffron.ledger import Ledger  # noqa: E402
 from saffron.phases import review  # noqa: E402
 
+from harness.recovery import splice_tools  # noqa: E402
+
 # The parenthetical `gate_summary` writes, and the only thing this script may
 # move. Anchored on the whole line so a changed status or summary cannot hide
 # inside the part being replaced.
@@ -117,21 +119,7 @@ def main() -> int:
         finally:
             ledger.close()
 
-    spliced = [
-        result.model_copy(
-            # `revert` executes the `tests` runner and reports its tool
-            # (`revert_gate`); it skipped at base, so the lookup misses it.
-            # `witness` inherits the same way but skipped here too, and every
-            # other miss is a core gate that runs no tool — None is what
-            # `gate_summary` renders as "no tool reported".
-            update={
-                "tool": tools.get(
-                    result.gate, tools.get("tests") if result.gate == "revert" else None
-                )
-            }
-        )
-        for result in results
-    ]
+    spliced = splice_tools(results, baseline)
     # No advisory gate failed — every declared gate is `blocking: true` in the
     # policy at head, and `tests` is the only failure — so the advisory argument
     # cannot reach the rendered text and the empty set is not a simplification.

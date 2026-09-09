@@ -1,0 +1,39 @@
+# PR #115 (`SA-0045`), one of item 69's nine known-bad tests: nine tests
+# shipped naming a behaviour they did not guard, found only by running a
+# mutation against each. REVIEW passed this diff; the mutation did not.
+#
+# Provenance, all four inputs frozen rather than rebuilt per pass:
+#   diff.patch      git diff 2e563cf..f9f007c, asserted byte-identical to the
+#                   recorded ~/.saffron/batches/v0/SA-0045/patch.diff
+#   spec_body.md    the spec at base, plus context.criteria_section, the way
+#                   session.py's REVIEW call assembles it (`spec_body=`).
+#   gates.txt       review.gate_summary over the ledger's gate_results rows,
+#                   tools spliced back in from the same run's baseline.json.
+#   context.md      CONTEXT.md at base.
+
+spec_id = "SA-0045"
+pr = 115
+base_sha = "2e563cf06b2df892451badf2f7f3ede3d483e499"
+head_sha = "f9f007c4b97aa6d72d9f1254be6766624c502986"
+source = "docs/BACKLOG.md item 69: reflow one SCHEMA line — both migration guards assert what `replace` removed"
+
+# Neither review lens filed anything in this range; the recorded run is 0/0.
+recorded_seen = 0
+recorded_graded = 0
+
+[[defects]]
+id = "reflow-defeats-guard"
+file = "tests/test_ledger.py"
+lines = [639, 686]
+owner = "adequacy"
+min_severity = "blocker"
+# The two migration tests build `before = SCHEMA.replace(<exact line>, "")`
+# and then self-check with `assert <same exact substring> not in before`.
+# Both checks share one hardcoded literal, so reflowing the real `batch_id`
+# column's line in `ledger.py` (collapsed whitespace, wrapped differently)
+# makes `.replace()` a silent no-op *and* the self-check pass anyway — the
+# same stale text fails to match either place, so neither notices `before`
+# never had the column removed. The range covers both tests plus the
+# constructed `before` string between them; the mutation named in item 69's
+# row is exactly this reflow, and it left the suite green.
+must_mention = ["replace", "whitespace", "reflow"]

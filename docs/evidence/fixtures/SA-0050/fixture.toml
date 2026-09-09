@@ -1,0 +1,49 @@
+# PR #121 (`SA-0050`), one of item 69's nine known-bad tests, found by
+# deleting the breaker's reset line.
+#
+# `base` never carries this spec in its own tree either — same shape as
+# `SA-0048`: the spec was revised on main (`5177edb`, folding SA-0049,
+# SA-0050 and SA-0051 into one review round) after `base` was cut, so
+# `recover_fixture` reads it off that commit rather than off `base`.
+#
+# Provenance, all four inputs frozen rather than rebuilt per pass:
+#   diff.patch      git diff 5c10386..91f56c6, asserted byte-identical to the
+#                   recorded ~/.saffron/batches/v0/SA-0050/patch.diff
+#   spec_body.md    the spec as revised on main at 5177edb (see above), plus
+#                   context.criteria_section, the way session.py's REVIEW
+#                   call assembles it (`spec_body=`).
+#   gates.txt       review.gate_summary over the ledger's gate_results rows,
+#                   tools spliced back in from the same run's baseline.json.
+#   context.md      CONTEXT.md at base.
+
+spec_id = "SA-0050"
+pr = 121
+base_sha = "5c103860dbd4eda4921f2cd00b7bfcd2bb5c2857"
+head_sha = "91f56c695e6993c6fd857535a01f4cede01d6c5d"
+source = "docs/BACKLOG.md item 69: delete the breaker reset; suite green"
+
+# Neither review lens filed anything in this range; the recorded run is 0/0.
+recorded_seen = 0
+recorded_graded = 0
+
+[[defects]]
+id = "breaker-reset-unguarded"
+file = "saffron/batch.py"
+lines = [130, 190]
+owner = "adequacy"
+min_severity = "blocker"
+# `run_batch`'s per-candidate loop resets `consecutive_aborts = 0` in the
+# `else` branch of `if outcome.state in ABORT_STATES:` (line 187) — the whole
+# reason the breaker can recover from an isolated blip rather than tripping
+# on any two aborts over a long night. The test named for this property,
+# `test_an_exhausted_task_between_two_aborts_resets_the_breaker`
+# (`tests/test_batch.py:250` at this head), stops one candidate short of
+# testing it: three candidates with an `EXHAUSTED` middle, but
+# `_BREAKER_THRESHOLD = 2` means the count is only 1 before the third either
+# way, so the test passes under the mutant regardless of the reset — it would
+# need a fourth candidate, the one a standing count of 2 would refuse, to
+# bite. (Main later added that fourth candidate — `54394dd`, after this
+# fixture's head — but the fixture is scored against the suite at `91f56c6`,
+# where the gap is real.) Range is the whole loop body: the reset's meaning
+# depends on the threshold check and both `+= 1` sites around it.
+must_mention = ["reset", "consecutive", "breaker"]

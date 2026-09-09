@@ -6,6 +6,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The lens fixtures assert their frozen inputs reproduce from `base_sha`,
+      # and five of those commits are unreachable from main — squash-merged pull
+      # requests — so no clone depth reaches them. `refs/fixtures/*` is what keeps
+      # them alive; deleting one makes that fixture unverifiable. Measured: this
+      # fetch alone is enough, the checkout stays shallow.
+      - run: git fetch origin "refs/fixtures/*:refs/fixtures/*"
       - uses: astral-sh/setup-uv@v5
       - run: uvx prek run --all-files
       - run: uv run pytest -q

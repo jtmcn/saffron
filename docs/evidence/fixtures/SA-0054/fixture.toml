@@ -1,0 +1,78 @@
+# PR #123 (`SA-0054`), two of item 69's nine known-bad tests, both found in
+# the same diff: the loop and the scan an unattended night runs.
+#
+# `base` never carries this spec in its own tree either, same shape as
+# `SA-0048`/`SA-0050`: `recover_fixture` reads it off `fdcbbad`, the one
+# commit that touches it before this head's own commit date, rather than off
+# `base`.
+#
+# Provenance, all four inputs frozen rather than rebuilt per pass:
+#   diff.patch      git diff fe39b41..70091cd, asserted byte-identical to the
+#                   recorded ~/.saffron/batches/v0/SA-0054/patch.diff
+#   spec_body.md    the spec as it stood at fdcbbad (see above), plus
+#                   context.criteria_section, the way session.py's REVIEW
+#                   call assembles it (`spec_body=`).
+#   gates.txt       review.gate_summary over the ledger's gate_results rows,
+#                   tools spliced back in from the same run's baseline.json.
+#   context.md      CONTEXT.md at base.
+
+spec_id = "SA-0054"
+pr = 123
+base_sha = "fe39b41a643e66e3f2ef0850b4852f7b0872a0ce"
+head_sha = "70091cd84b34a21478427393e5d1b24212784d96"
+source = "docs/BACKLOG.md item 69: `parent_branch=None`; 76/76 green — every stacked child would target `main`"
+
+# One recorded finding lands inside a declared range: an adequacy concern
+# anchored at cli.py:600, inside `parent-branch-unpinned`'s 590-600. It does
+# not score — see that defect's own comment for the measured reason.
+# Nothing lands inside `stop-line-unwitnessed`'s 790-805. recorded_seen and
+# recorded_graded are 0/0, and `calibrate` confirms it.
+recorded_seen = 0
+recorded_graded = 0
+
+[[defects]]
+id = "parent-branch-unpinned"
+file = "saffron/cli.py"
+lines = [590, 600]
+owner = "adequacy"
+min_severity = "blocker"
+# `_batch_runner`'s `package_phase.package(...)` call passes
+# `parent_branch=target_branch` (line 596) so a stacked child targets the
+# task it actually stacks on rather than `main`. No test in the suite runs a
+# dependent task through `_batch_runner` and inspects which branch its
+# package call named, so hardcoding `parent_branch=None` here left all 76
+# tests green — every one either runs a task with no dependency, or asserts
+# something else about the same call.
+#
+# The recorded run's adequacy lens did file a concern anchored at line 600,
+# inside this range: "...the `if outcome.state == "READY_FOR_REVIEW":`
+# branch (lines 586-600) ... is never exercised anywhere in this diff.
+# Deleting line 600 entirely (or the whole `if` block) would leave all 1307
+# tests green." Measured, not assumed — read straight from
+# `recorded-findings.json`. It does not score, and the reason is phrase, not
+# position: the claim is that the *whole block* goes unexercised, one level
+# more general than this defect's claim that the *value* `parent_branch` is
+# pinned to goes unwitnessed — a lens making that claim would say the same
+# thing whether `parent_branch` were right, wrong, or missing entirely, so it
+# does not single out this line the way `dirty-restore`'s range needed to
+# for the same reason (SA-0062). None of "parent_branch", "parent branch" or
+# "stacked" appear in it (it says "stacks" and "parents_branch" — different
+# substrings), so the exclusion is literal as well as principled, and
+# `calibrate` confirms the fixture's declared 0/0 still holds.
+must_mention = ["parent_branch", "parent branch", "stacked"]
+
+[[defects]]
+id = "stop-line-unwitnessed"
+file = "saffron/cli.py"
+lines = [790, 805]
+owner = "adequacy"
+min_severity = "blocker"
+# `_batch` prints `f"batch: {stop}"` (line 796) — the one line that puts the
+# night's own stop reason (`DRAINED`, `BUDGET`, `UNTIL`, ...) in front of the
+# operator running it attended. `test_a_batch_never_exits_one_whatever_
+# stopped_it` walks all four stop reasons but only asserts the exit code;
+# `test_saffron_batch_runs_a_night_with_the_defaults_4_2_1_fixes` checks a
+# monkeypatched `run_batch`'s call args, not stdout. `capsys` is used
+# elsewhere in `test_cli.py` (queue and readiness-failure output), just never
+# on the path that reaches this line, so deleting it for `pass` moved nothing.
+must_mention = ["stdout", "printed", "capsys"]
