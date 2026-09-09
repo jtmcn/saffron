@@ -80,10 +80,15 @@ def pinned_diff(repo: Path, base: str, head: str) -> str:
     covered by `--src-prefix`/`--dst-prefix`, the diff itself, and the
     `-c diff.suppressBlankEmpty=false` override, respectively — verified,
     not assumed). `--abbrev=7`, `--unified=3` and `--diff-algorithm=myers`
-    close the remaining two: `7` and `3` are git's own historical defaults
-    and match every recorded patch's own index/hunk lines, not a value
-    chosen to make a test pass — if a future fixture's recorded patch used a
-    different width, this would need to know that width rather than guess.
+    close the remaining two — `7` is not "git's default", which is
+    `core.abbrev=auto` and scales with the repo's object count, but what
+    `auto` actually emitted: all 28 `index` lines across all eight recorded
+    patches are 7 hex digits on both sides. Pinning what was measured, not
+    what `auto` happens to be today, is what keeps this working after this
+    repo outgrows auto-7 — copying `auto` would silently start failing at
+    that point instead. `3` matches every recorded patch's hunk headers the
+    same way. If a future fixture's recorded patch used a different width,
+    this would need to know that width rather than guess.
     """
     return _git(
         repo,

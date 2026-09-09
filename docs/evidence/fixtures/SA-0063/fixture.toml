@@ -42,14 +42,17 @@ recorded_graded = 0
 # rather than weakening either phrase.
 #
 # Declared over the source (`pr_body.py`), not over `tests/test_report.py`,
-# though this diff touches both and either would anchor: these are
-# missing-assertion defects, and a lens reasoning about what a test fails to
-# guard anchors on the unguarded code doing the guarding — the property in
-# question is a fact about `_notes`, not about the test file's shape. SA-0045/
-# SA-0046/SA-0048/SA-0050/SA-0054's/SA-0055's pairs are declared over their
-# tests instead because their properties (a schema line's exact text, a
-# refusal code's membership) are facts about what the test constructs, not
-# about the source under test.
+# though this diff touches both and either would anchor. Checked
+# (`grep '^file = ' docs/evidence/fixtures/*/fixture.toml`) rather than
+# assumed: source-anchoring is this corpus's norm, not an exception SA-0063
+# breaks from — SA-0048, SA-0050, SA-0054's pair, SA-0055's pair and
+# SA-0062's pair all declare over source too. SA-0045 and SA-0046 are the
+# only fixtures declared over a test file, because their property (a schema
+# line's exact text) is a fact about what the test constructs, not about the
+# source under test. SA-0063's two are missing-assertion defects instead,
+# and a lens reasoning about what a test fails to guard anchors on the
+# unguarded code doing the guarding — the same reason the other
+# source-anchored defects are, not a choice unique to this fixture.
 
 [[defects]]
 id = "notes-neutralization-unwitnessed"

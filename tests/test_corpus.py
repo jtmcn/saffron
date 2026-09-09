@@ -247,6 +247,11 @@ def test_pinned_diff_survives_a_hostile_git_config(tmp_path, monkeypatch):
         "\tsuppressBlankEmpty = true\n"
     )
     monkeypatch.setenv("HOME", str(tmp_path))
+    # Either would point git at a config file that isn't the fake $HOME
+    # above, silently making the hostile settings never take effect and this
+    # test pass without testing anything.
+    monkeypatch.delenv("GIT_CONFIG_GLOBAL", raising=False)
+    monkeypatch.delenv("GIT_CONFIG_SYSTEM", raising=False)
 
     fixture = lens_scoring.load_fixture(FIXTURES / "SA-0045")
 
