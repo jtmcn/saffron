@@ -192,4 +192,5 @@ The five canonical roles, each label string equal to its name. See `docs/agents/
 
 ### Domain docs
 
-Single-context: `CONTEXT.md` at the root, ADRs under `docs/adr/`. See `docs/agents/domain.md`.
+Single-context: `CONTEXT.md` at the root. Decisions are principles and appendices in
+`DESIGN.md`, never ADRs (`CONTEXT.md` §11). See `docs/agents/domain.md`.
