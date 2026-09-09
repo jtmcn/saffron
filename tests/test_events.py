@@ -798,8 +798,8 @@ def test_the_table_did_not_quietly_lose_a_row():
 
     `SA-0030` and `SA-0031` migrate these call sites and will move this count.
     That is the point: moving it is a deliberate edit, not a silent one."""
-    assert len(FAMILIES) == 58
-    assert len({f.prefix for f in FAMILIES}) == 58
+    assert len(FAMILIES) == 59
+    assert len({f.prefix for f in FAMILIES}) == 59
 
 
 def test_the_duplicated_agent_renderer_still_matches_its_original():
