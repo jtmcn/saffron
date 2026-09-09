@@ -101,8 +101,9 @@ summary names its tools would.
 
 *(Corrected 2026-09-08: "where the original named tools", below, overstated what
 the deviation was. Production named **7 of 14** — `scope`, `integrity`, `size`,
-`witness`, `committed`, `census` and `criteria` are host-side core gates that
-execute nothing and report no tool, in production as here. The gap this pass
+`committed`, `census` and `criteria` are host-side core gates that execute
+nothing and report no tool, in production as here, and `witness` inherits the
+`tests` tool but skipped a spec that declares no mutants. The gap this pass
 could not separate from variance is 7 named against 0, not 14 against 0. The
 tools are restored in the fixture and the second pass measures what that moves:
 `docs/evidence/2026-09-08-lens-scoring-second-pass.md`.)*

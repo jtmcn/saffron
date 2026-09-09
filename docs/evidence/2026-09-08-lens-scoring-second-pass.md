@@ -90,10 +90,11 @@ number it should not read moved by a third.
   Recorded in `fixture.toml`; the splice is
   `docs/evidence/scripts/2026-09-08-sa0062-gate-tools.py`, which refuses to write
   if regeneration moves anything but a tool.
-- Seven of the fourteen lines still read `no tool reported`. They are host-side
-  core gates that execute nothing, and they read that way in production too —
-  the first pass's record and item 88 both overstated the deviation as all
-  fourteen, and both are corrected.
+- Seven of the fourteen lines still read `no tool reported`, and read that way
+  in production too: six are host-side core gates that execute nothing, and
+  `witness` inherits the `tests` tool but skipped, this spec declaring no
+  mutants. The first pass's record and item 88 both overstated the deviation as
+  all fourteen, and both are corrected.
 - Budget and turns are the first pass's ($4.00, 30), not production's ($3.30,
   90). Held constant across the two passes deliberately: matching production
   would have changed two inputs at once and made this pass unreadable.

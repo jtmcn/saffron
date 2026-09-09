@@ -406,7 +406,9 @@ def test_the_first_pass_s_published_costs_are_re_derivable_too(sa0062):
 # repo's declared gate executes a tool and reports its version (§5.4), while a
 # host-side core gate executes nothing and reports none. `revert` is core and
 # still names one — it re-invokes the `tests` runner and inherits its tool
-# (`revert.py:307`).
+# (`revert_gate`). `witness` inherits the same way (`witness_gate`); it is on
+# the no-tool list below because it *skipped* on this spec, which declares no
+# mutants, not because it executes nothing.
 GATES_NAMING_A_TOOL = {
     "format": "ruff",
     "lint": "ruff",

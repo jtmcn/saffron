@@ -17,9 +17,10 @@
 #                   baseline.json — the batch tree's other record of that suite,
 #                   written by the same container. Seven lines name a tool and
 #                   seven say "no tool reported", which is the shape production
-#                   had: a host-side core gate executes nothing and reports
-#                   none, and `revert` inherits the tool of the `tests` re-run
-#                   it performs (revert.py:307).
+#                   had: six host-side core gates execute nothing and report
+#                   none, `revert` inherits the tool of the `tests` re-run it
+#                   performs (revert_gate), and `witness` inherits the same way
+#                   but skipped here, this spec declaring no mutants.
 #                   CORRECTED 2026-09-08 (BACKLOG item 88), and it was the
 #                   first pass's live confound rather than a footnote: the rows
 #                   carried no tool, so all 14 lines read "no tool reported".

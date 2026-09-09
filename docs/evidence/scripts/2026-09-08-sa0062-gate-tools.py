@@ -15,11 +15,13 @@ gate's tool is the version of a binary in that cell image; base and head ran it
 from the same image, so the base suite's string is the head suite's string.
 
 Two gates need more than a lookup. `revert` skipped at base and passed at head,
-and it inherits the tool of the `tests` re-run it performs (`revert.py:307`), so
-it takes `tests`'s. `witness`, `census` and `criteria` set no tool at all — like
-`scope`, `integrity`, `size` and `committed`, they are host-side core gates that
-execute nothing. Seven of the fourteen lines say `no tool reported` in
-production too; only the other seven were the deviation.
+and it inherits the tool of the `tests` re-run it performs (`revert_gate`), so it
+takes `tests`'s. `witness` inherits the same way (`witness_gate`) but *skipped*
+here — the spec declares no mutants — so it reports none, and that is a status,
+not a gate that executes nothing. The other six misses are: `scope`, `integrity`,
+`size`, `committed`, `census` and `criteria` run no tool at all. Seven of the
+fourteen lines say `no tool reported` in production too; only the other seven
+were the deviation.
 
 Statuses and summaries are unchanged: the ledger's rows are already faithful —
 `green` in `session.py` is exactly the list that was recorded. The script
@@ -106,9 +108,10 @@ def main() -> int:
     spliced = [
         result.model_copy(
             # `revert` executes the `tests` runner and reports its tool
-            # (`revert.py:307`); it skipped at base, so the lookup misses it.
-            # Every other miss is a core gate that runs no tool, and None is
-            # what `gate_summary` renders as "no tool reported".
+            # (`revert_gate`); it skipped at base, so the lookup misses it.
+            # `witness` inherits the same way but skipped here too, and every
+            # other miss is a core gate that runs no tool — None is what
+            # `gate_summary` renders as "no tool reported".
             update={
                 "tool": tools.get(
                     result.gate, tools.get("tests") if result.gate == "revert" else None
