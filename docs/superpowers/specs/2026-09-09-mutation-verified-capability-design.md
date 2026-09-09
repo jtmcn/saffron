@@ -16,12 +16,12 @@ measured the gap directly: four mutations the adequacy lens named were applied a
 fixture heads and the suite ran green on all four, so at least four verified-real vacuities
 were found, only one of which was declared.
 
-The four. They are transcribed from that spike's own record, which is a session ledger rather
-than a file under `docs/evidence/`. Two have since been independently reproduced to the exact
-figure — `f76931df` and `91f56c69`; the `f9f007c4` pair has been reproduced by nobody.
-Landing all four under `docs/evidence/` is **`docs/BACKLOG.md` item 91**, and a precondition
-of the plan rather than of this spec — a number this document argues from should not live
-only in a scratch directory:
+The four are recorded in `docs/evidence/2026-09-09-adequacy-probe-spike.md`
+(`docs/BACKLOG.md` item 91, closed). `f76931df` and `91f56c69` are transcribed there from an
+independent reproduction during review, to the exact figure; the `f9f007c4` pair was
+reproduced again for that record and matches the original spike exactly. The original spike's
+own four runs, at the time it made this case, remain unrecorded — a precondition of the plan
+this spec leads to, not of this spec itself:
 
 | Mutation the lens named | Fixture head | Suite |
 |---|---|---|

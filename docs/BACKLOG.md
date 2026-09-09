@@ -5273,6 +5273,11 @@ hardest this repo has asked a critic to read.
 
 ## 91. The 2026-09-09 mutation spike is evidence that lives nowhere `docs/evidence/` can see
 
+**Done, 2026-09-09** — `docs/evidence/2026-09-09-adequacy-probe-spike.md`. The
+`f9f007c4` pair reproduces to the recorded `1250 passed` exactly; the
+`f76931df`/`91f56c69` pair is transcribed from the review reproduction, not
+re-run, and the file says so.
+
 **Tier 3 — real, not urgent.** Nothing fails; the risk is that a number
 outlives the record that justified it.
 
