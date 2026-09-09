@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from harness import corpus, lens_scoring, probe_check, recovery
 from harness.lens_scoring import LensReview
@@ -17,6 +18,7 @@ from saffron.intake import Mutant
 from saffron.ledger import Ledger
 from saffron.phases import review
 from saffron.phases.review import LENSES
+from saffron.repos.policy import Policy
 
 REPO = Path(__file__).parent.parent
 FIXTURES = REPO / "docs" / "evidence" / "fixtures"
@@ -370,7 +372,24 @@ def _load_driver():
 PROBE = Mutant(file="saffron/gates/core/scope.py", find="== 0", replace="== 1")
 
 
-def _drive(tmp_path, monkeypatch, *extra_argv):
+def _saffron_dir_without_a_tests_gate(root):
+    """A `.saffron/` export declaring one gate that is not `tests`.
+
+    `load_policy` checks every declared gate exists and is executable, so this
+    is a real policy over a real executable — the point is only that `tests` is
+    not among its roles.
+    """
+    gates = root / ".saffron" / "gates"
+    gates.mkdir(parents=True, exist_ok=True)
+    (root / ".saffron" / "policy.yaml").write_text(
+        "gates:\n  lint: { blocking: true }\n"
+    )
+    (gates / "lint").write_text("#!/bin/sh\nexit 0\n")
+    (gates / "lint").chmod(0o755)
+    return root
+
+
+def _drive(tmp_path, monkeypatch, *extra_argv, saffron_dir=None):
     """One fixture through the driver's `main`, with every path into a cell
     replaced: no container, no token, no spend.
 
@@ -420,10 +439,13 @@ def _drive(tmp_path, monkeypatch, *extra_argv):
         yield None
 
     monkeypatch.setattr(driver.mirror_ops, "ensure_mirror", lambda repo, dest: dest)
-    # The worktree's own `.saffron/`, so `load_policy` reads a real policy
-    # declaring real gates rather than a stub that could not be wrong.
+    # The worktree's own `.saffron/` by default, so `load_policy` reads a real
+    # policy declaring real gates rather than a stub that could not be wrong;
+    # `saffron_dir` swaps in another real export to vary what it declares.
     monkeypatch.setattr(
-        driver.mirror_ops, "export_saffron_dir", lambda mirror, sha, dest: REPO
+        driver.mirror_ops,
+        "export_saffron_dir",
+        lambda mirror, sha, dest: saffron_dir or REPO,
     )
     monkeypatch.setattr(
         driver.session, "cell_up", lambda **kwargs: cells.append(kwargs["container"])
@@ -501,3 +523,40 @@ def test_score_only_re_scores_a_finished_pass_and_starts_no_cell(tmp_path, monke
 
     assert (pass_.cells, pass_.calls, pass_.mutated) == ([], [], [])
     assert "verified vacuit" not in pass_.table
+
+
+def test_a_head_declaring_no_tests_gate_is_unproven_and_not_an_abort(
+    tmp_path, monkeypatch
+):
+    """`--fixtures` points wherever it is told, so "every shipped fixture's
+    head declares a `tests` gate" does not bound this input. A head that
+    declares none has said nothing about the adequacy lens: `unproven`, named
+    in the record, in no denominator — and the pass goes on to the next
+    fixture, where a `KeyError` would discard every fixture after it and the
+    table a paid pass had already earned."""
+    pass_ = _drive(
+        tmp_path,
+        monkeypatch,
+        saffron_dir=_saffron_dir_without_a_tests_gate(tmp_path / "no-tests-gate"),
+    )
+
+    assert (pass_.calls, pass_.mutated) == ([], [])
+    assert "0 of 0" in pass_.table
+    assert "1 unproven" in pass_.table
+    assert "SA-0045" in pass_.table
+
+
+def test_every_shipped_fixture_s_head_declares_a_tests_gate():
+    """What keeps the driver's `unproven` branch a fallback rather than the
+    path every fixture takes. Read from git at each fixture's own `head_sha`,
+    the commit the cell is brought up at — the policy the driver itself will
+    resolve `tests` from, not this checkout's."""
+    for fixture in corpus.load_corpus(FIXTURES):
+        raw = subprocess.run(
+            ["git", "show", f"{fixture.head_sha}:.saffron/policy.yaml"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        declared = Policy.model_validate(yaml.safe_load(raw)).gates
+        assert "tests" in declared, fixture.spec_id

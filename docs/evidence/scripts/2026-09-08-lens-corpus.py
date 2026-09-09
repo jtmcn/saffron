@@ -322,26 +322,42 @@ def main() -> int:
             # After every run, so `--runs 3` pays for one baseline, not three.
             if probes and not args.skip_probes:
                 print(f"  {len(probes)} vacuity probe(s) to apply")
-                # Unguarded `gates["tests"]`: measured, not assumed — all eight
-                # shipped fixtures' head commits declare a `tests` gate.
-                run_tests = partial(
-                    _tests_gate_in_cell, container, gates["tests"], mirror
-                )
-                baseline = run_tests([])
-                probe_results[fixture.spec_id] = [
-                    probe_check.check_probe(
-                        probe,
-                        baseline=baseline,
-                        mutate=partial(worktree.source_mutated, container),
-                        run_tests=run_tests,
-                        # This repo's test root as a path prefix, which is not
-                        # `policy.integrity.test_paths` — those are globs
-                        # (`tests/**`) and `check_probe` compares prefixes. An
-                        # edit to a test satisfies the number by construction.
-                        test_paths=("tests/",),
+                if "tests" not in gates:
+                    # No runner to ask, so nothing was learned about the lens:
+                    # `unproven`, in no denominator, and the pass continues.
+                    # `cell/session.py`'s witness wiring refuses on the same
+                    # test for the same reason. Every shipped fixture's head
+                    # declares a `tests` gate — pinned by a test, because
+                    # `--fixtures` points wherever it is told — so this is the
+                    # fallback, not the path a corpus pass takes.
+                    probe_results[fixture.spec_id] = [
+                        probe_check.ProbeResult(
+                            "unproven",
+                            f"{fixture.spec_id}'s head declares no `tests` "
+                            "gate, so nothing could answer the probe",
+                        )
+                        for _ in probes
+                    ]
+                else:
+                    run_tests = partial(
+                        _tests_gate_in_cell, container, gates["tests"], mirror
                     )
-                    for probe in probes
-                ]
+                    baseline = run_tests([])
+                    probe_results[fixture.spec_id] = [
+                        probe_check.check_probe(
+                            probe,
+                            baseline=baseline,
+                            mutate=partial(worktree.source_mutated, container),
+                            run_tests=run_tests,
+                            # This repo's test root as a path prefix, which is
+                            # not `policy.integrity.test_paths` — those are
+                            # globs (`tests/**`) and `check_probe` compares
+                            # prefixes. An edit to a test satisfies the number
+                            # by construction.
+                            test_paths=("tests/",),
+                        )
+                        for probe in probes
+                    ]
                 for result in probe_results[fixture.spec_id]:
                     print(f"  probe {result.verdict}: {result.reason}")
         finally:
