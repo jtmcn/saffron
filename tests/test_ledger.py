@@ -610,6 +610,26 @@ def test_the_batches_table_carries_exactly_the_fields_4_2_1_names(ledger):
     }
 
 
+def test_the_gate_results_table_carries_exactly_the_fields_4_1_names(ledger):
+    """§4.1's listing is what a spec cites, and `tool` reached the table on
+    2026-09-08 (item 88) while the listing did not — nothing was watching the
+    two agree. Now something is."""
+    columns = {
+        row["name"]
+        for row in ledger._db.execute("PRAGMA table_info(gate_results)").fetchall()
+    }
+    assert columns == {
+        "gate_result_id",
+        "attempt_id",
+        "run_id",
+        "gate",
+        "status",
+        "tool",
+        "duration_ms",
+        "summary",
+    }
+
+
 def test_a_batch_status_outside_the_four_stop_reasons_is_rejected(ledger):
     """One row per stop condition — `DRAINED`, `BUDGET`, `UNTIL`,
     `INFRASTRUCTURE` — and nothing else. No `create_batch` method exists yet

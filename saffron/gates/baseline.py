@@ -79,8 +79,9 @@ def suite_drift(head: list[GateResult], base: list[GateResult]) -> list[str]:
     gates are never examined. Benign while both suites come from the same
     policy-derived map, which is the only caller today.
 
-    ponytail: compared in memory, over this run's two suites. `gate_results` has
-    no `tool` column, so a later reconstruction from the ledger cannot do it.
+    ponytail: compared in memory, over this run's two suites. `gate_results`
+    carries a `tool` since item 88, so reconstructing this check from a recorded
+    run is now possible — it is simply not implemented.
     """
     before = {result.gate: result for result in base}
     drift = []

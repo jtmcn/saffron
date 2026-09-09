@@ -305,8 +305,8 @@ tasks        (task_id, run_id, spec_id, spec_sha, state, risk, branch, policy_sh
               parent_task_id, worktree, volume, budget_usd, spent_usd_est, updated_at)
 attempts     (attempt_id, task_id, phase, n, session_id, model, started_at,
               ended_at, subtype, terminal_reason, num_turns, cost_usd_est)
-gate_results (gate_result_id, attempt_id, run_id, gate, status, duration_ms,
-              summary)
+gate_results (gate_result_id, attempt_id, run_id, gate, status, tool,
+              duration_ms, summary)
 failures     (failure_id, gate_result_id, file, code, message, line)
 findings     (finding_id, task_id, lens, severity, file, line, claim, anchored,
               verdict, adjudication, rebuttal)
