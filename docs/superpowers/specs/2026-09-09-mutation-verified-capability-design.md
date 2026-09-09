@@ -147,13 +147,21 @@ Two changes follow, and neither is optional:
    test file is a fourth outcome (below), never a survival. The adequacy prompt's "or to the
    test" clause stays — it is right for a human reader adjudicating a finding — but the
    *field* is narrower than the prose, and the prompt must say so.
-2. **The vocabulary needs settling before the plan.** `CONTEXT.md` is authoritative for what
-   the words mean and is generated from `ontology/saffron.ttl`; a mutant a cell chooses under
-   an inverted verdict is a different thing from the `Mutant` that entry defines. Either the
-   entry is widened (edit the vocabulary, run `uv run python -m ontology.render`) or this gets
-   its own term. This spec does not choose, because the closed sets are enforced by
-   `tests/ontology/test_vocabulary_agrees_with_context.py` and the choice is the ontology's,
-   not a harness document's.
+2. **This gets its own term, not a widened `Mutant`.** A find-and-replace edit a *lens* names
+   under an inverted verdict is a different thing from the `Mutant` that entry defines, and
+   the sentence about a cell's mutant being chosen to be killed is a live design commitment
+   protecting the `witness` gate. Widening the word to cover both would delete its force
+   exactly where it still does work. The new term is **vacuity probe**, with an `_Avoid_`
+   line pointing back at `Mutant`, which is `CONTEXT.md`'s own idiom for a near-miss pair.
+
+   Checked rather than assumed: `Mutant` is **not** one of the six closed sets
+   (`tests/ontology/test_vocabulary_agrees_with_context.py`'s `CLOSED_SETS` names Terminal
+   state, Batch stop reason, Severity, Risk tier, Gate role and Core gates), and
+   `ontology.render.render_context` rewrites only those sets' backticked spans. So this entry
+   is hand-maintained prose: no `ontology/saffron.ttl` edit, no render step, and — the reason
+   it needs saying — no test that would catch the two terms drifting into each other later.
+   An earlier draft of this spec said the opposite, having read `CLAUDE.md`'s rule without
+   its "For the closed sets" qualifier.
 
 ## The schema change
 
@@ -203,21 +211,22 @@ of them.
 
 Two exposures the plan owes an answer to, named here so they are not discovered late. **A
 flaky test reads as `killed`** — one `tests` gate run per mutant, no repeats, and a mutant
-that survives is the positive result, so flake biases the number downward. **A mutant that
+that survives is the positive result, so flake biases the number downward. **A probe that
 breaks collection changes the suite**, which makes the subtraction untrustworthy rather than
-merely non-empty; `gates.baseline.suite_drift` exists for exactly that comparison and step 3
-as written does not call it.
+merely non-empty; step 3 as written does not compare `collected`, and the outcomes section
+below says it must.
 
-### The four outcomes, which are not two
+### Three computed verdicts, and a fourth a person writes
 
 - **survived** — no new failures against the baseline. A verified-real vacuity. Counted.
-- **killed** — new failures, and the mutant landed where the finding said it would. The tests
-  *do* notice; the finding was wrong about that. Counted, as a negative.
-- **unproven** — the mutant did not apply (any of `source_mutated`'s six refusals), the
-  `tests` gate could not answer, or the mutant targeted a test file. Named in the record,
-  counted toward neither.
-- **collateral** — new failures, but from breaking the program rather than the behaviour
-  under test. Named in the record, counted toward neither.
+- **killed** — new failures. The tests *may* have noticed, or the probe may have broken the
+  program; the record itemises the failures so a reader can tell. Counted, as a negative.
+- **unproven** — the probe did not apply (any of `source_mutated`'s six refusals), the
+  `tests` gate could not answer, the probe targeted a test file, or the suite's *collection*
+  drifted. Named in the record, counted toward neither.
+- **collateral** — not computed. What a person writes next to a `killed` they judge to be
+  program breakage rather than a test doing its job. See below for why it cannot be the
+  harness's call.
 
 `error` is not `fail`. A `tests` gate that could not start has said nothing about the
 mutant and is charged to nobody. Collapsing unproven into killed would let a mutant that
@@ -238,13 +247,33 @@ charges the lens for a vacuity that is real. Expressing that edit correctly need
 multi-line `find` spanning the collateral change — which the lens's prose does not produce
 and which no field yet asks it for.
 
-Distinguishing `collateral` from `killed` mechanically is the hardest open problem in this
-design, and the plan owes an answer rather than an assumption. The obvious candidates: refuse
-a mutated run whose *collection* differs from the baseline's (`gates.baseline.suite_drift`
-already computes exactly this, and a `ProgrammingError` at import or collection time is the
-shape it catches); or require the new failures to intersect the diff's own tests. Neither is
-obviously sufficient — the SA-0050 case fails at runtime inside two existing tests, not at
-collection — and this spec does not pretend otherwise.
+**`collateral` is adjudicated, not computed, and that is the answer rather than a deferral.**
+No mechanical test separates it from `killed` in general: the SA-0050 case fails at runtime
+inside two pre-existing tests, so it is indistinguishable by shape from a probe the tests
+genuinely noticed. Inventing a heuristic here would put a silently-wrong step inside the one
+number that exists because reading is not running.
+
+So the harness computes three verdicts and reports the fourth as an annotation:
+
+- The mutated run's `GateResult.collected` is compared against the baseline's, as a **set**.
+  A probe that changes what the suite collects has broken the program at import time, and
+  that is `unproven` — mechanical, sound, and it catches the whole syntax-error family.
+
+  A set difference, and deliberately not `subtract_baseline`'s counting rule: a node id is
+  unique in a suite, so a name that stopped being collected is a removal, where two failures
+  can share an identity legitimately. `census` already draws exactly this distinction on
+  exactly this field, and the two rules sit beside each other in `baseline.py` for that
+  reason. (`gates.baseline.suite_drift` is *not* the right tool here and an earlier draft
+  said it was: it compares one gate's `tool` identity against another's and catches a gate
+  that stopped running, across a suite of gates. It never looks at `collected`.)
+- Anything still failing is reported as `killed` **with its failure identities itemised** in
+  the record, so a person reads the kills rather than a count. The bucket is small — nine
+  unmatched adequacy findings in pass 1 — so this costs one screen, not a morning.
+- `collateral` is what a person writes next to a kill they judge to be program breakage.
+
+The number the corpus reports is therefore a **lower bound on capability**, and the record
+carries what it would take to raise it. That is the honest shape, and it is the one this repo
+takes everywhere else: name the limit rather than collapse it.
 
 ## Where it lives
 
@@ -255,6 +284,8 @@ collection — and this spec does not pretend otherwise.
 - `harness/corpus.py` — the second number joins the rendered table under the aggregate.
 - `saffron/agents/` + `saffron/phases/review.py` — the per-lens `_Reported` split.
 - `saffron/agents/prompts/review-adequacy.md` — one paragraph.
+- `CONTEXT.md` — the **vacuity probe** entry, hand-maintained prose beside `Mutant`, with an
+  `_Avoid_` line each way. No ontology edit and no render step; see above.
 - `docs/evidence/scripts/2026-09-08-lens-corpus.py` — calls the check while each fixture's
   cell is still up.
 
@@ -279,9 +310,16 @@ Stated here so it cannot be read as more than it is, wherever it is rendered:
 - **It is not a mutation-testing score.** One mutant per finding, chosen by the lens to make
   its own case, is not a sample of the mutation space and must never be reported as coverage.
 
-## Open, and deliberately not decided here
+## Caching: no
 
-Whether a *later* pass should re-verify a mutant whose fixture head has not moved, or cache
-the verdict. Caching is obviously cheaper and equally obviously the shape that lets a stale
-verdict outlive the code it was measured against. Left to the plan, where the cost of a
-re-run will be measured rather than estimated.
+A later pass re-verifies every probe, even where the fixture head has not moved. Caching is
+cheaper and is also the shape that lets a stale verdict outlive the code it was measured
+against — and the verdict here depends on the whole suite at that head, not just on the
+mutated line, so "the head has not moved" is not the invariant a cache would need.
+
+The cost is bounded and worth stating: the probes run inside a cell that a pass already
+brings up per fixture, so this adds no model spend and no image build. It adds suite runs —
+one baseline plus one per adequacy finding. Pass 1 filed ten adequacy findings across eight
+fixtures, and this repo's suite at the fixture heads runs 85-100 seconds, so the order is
+half an hour of wall clock added to a pass that already takes about eighty minutes. The plan
+measures that rather than inheriting this estimate.
