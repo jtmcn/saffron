@@ -36,6 +36,57 @@ def _result(status: GateStatus, failures: tuple[Failure, ...] = ()) -> GateResul
     )
 
 
+def test_a_verdict_records_which_suite_answered_it():
+    """`survived` means "no new failure against the baseline" — and a suite
+    that collected almost nothing is green too.
+
+    Measured, and the reason this exists: the first end-to-end run put the
+    in-cell suite at ~14s where the same tree at `f9f007c4` takes 78-87s on
+    the host, three times over (`docs/evidence/2026-09-09-adequacy-probe-spike.md`
+    and a clean run during review). Nothing in the record could adjudicate
+    that, because the verdict kept none of what the gate returned. The gate
+    hands back `tool`, `collected` and its own `summary` — pytest's
+    "N passed in Xs" line — and the verdict dropped all three.
+
+    Kept from the *mutated* run, not the baseline: it is the run the verdict
+    is about, and a probe whose suite shrank between the two is already
+    `unproven`.
+    """
+    answered = GateResult(
+        gate="tests",
+        status="pass",
+        summary="1250 passed, 20 deselected in 13.9s",
+        tool="pytest 8.4.1",
+        collected=[f"tests/test_x.py::test_{n}" for n in range(1250)],
+    )
+    got = probe_check.check_probe(
+        PROBE,
+        baseline=answered,
+        mutate=_applies(),
+        run_tests=lambda subset: answered,
+        test_paths=("tests/",),
+    )
+    assert got.verdict == "survived"
+    assert got.tool == "pytest 8.4.1"
+    assert got.collected == 1250
+    assert got.summary == "1250 passed, 20 deselected in 13.9s"
+
+
+def test_a_verdict_reached_without_a_suite_records_no_count():
+    """`None` is not `0`. A probe refused before any gate ran has no suite to
+    describe, and a `collected` of 0 would read as a suite that enumerated
+    nothing — which `GateResult`'s own docstring says is a different fact."""
+    got = probe_check.check_probe(
+        Mutant(file="tests/test_x.py", find="assert x", replace=""),
+        baseline=_result("pass"),
+        mutate=_applies(),
+        run_tests=lambda subset: pytest.fail("must not run"),
+        test_paths=("tests/",),
+    )
+    assert got.verdict == "unproven"
+    assert (got.tool, got.collected, got.summary) == (None, None, "")
+
+
 def _fail(name: str) -> Failure:
     return Failure(file="tests/test_report.py", line=1, code=name, message="boom")
 

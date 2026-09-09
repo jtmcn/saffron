@@ -337,25 +337,44 @@ baseline plus one per adequacy finding.
 **Measured 2026-09-09, one fixture end to end** (`SA-0045`, head `f9f007c4`, the plan's Task
 5 Step 4): the pass took **499.8s** and cost **$1.58**. The adequacy lens filed **two**
 probes. Probing began at 453.9s, the first probe's verdict landed at 483.5s and the second
-at 497.5s — so **14.0s per probe**, and the baseline is **~15.6s** by subtracting one probe
-interval from the first, which covers baseline plus probe 1. The whole probe phase was
-**45.9s of 499.8s, about 9%**.
+at 497.5s — so **14.0s per probe interval**, and the baseline is **~15.6s** by subtracting one
+probe interval from the first, which covers baseline plus probe 1. Probing spanned
+**43.6s of 499.8s, about 9%**.
+
+An interval is apply, `--collect-only`, run, undo and read-back — not the suite alone. The
+suite is the bulk of it but the record cannot say how much.
 
 One fixture, not eight, and one whose two probes are near the corpus mean of 1.25 adequacy
-findings per fixture in pass 1. Scaling that shape to eight fixtures puts the probes at
-roughly six minutes on a pass that already runs about eighty — not the half hour an earlier
-draft of this paragraph projected.
+findings per fixture in pass 1. Scaling that shape to eight fixtures puts probing at roughly
+six minutes on a pass that already runs about eighty.
 
-That draft was wrong for a reason worth recording. It scaled from five host suite runs
-timed at 78-104 seconds during this branch's review — but those ran while several review
-subagents were working on the same machine, so they measured contention as much as the
-suite. The `tests` gate's own comment at `f9f007c4` puts a full run there at **~36s**, and
-in-cell it is 14s including the `--collect-only` pass, on a host doing nothing else. A
-timing taken under unstated load is not a measurement of the thing it names.
+### The 5.5x nobody has explained
 
-**Still not recorded per probe: which suite answered.** A verdict of `survived` means "no new
-failure against the baseline", and nothing in `probes-*.json` says how many tests the gate
-collected to reach it. Both runs collecting the same set is checked — a drift makes the probe
-`unproven` — but both collecting *few* is not. Persisting the `GateResult`'s `collected`
-count and `tool` beside each verdict would close that, and is worth doing before the number is
-read as a capability score.
+That in-cell figure does not reconcile with the host, and this section previously claimed it
+did. **The same tree at `f9f007c4` runs its suite in 78-87 seconds on this machine, measured
+three times** — 87.23s and 77.68s in `docs/evidence/2026-09-09-adequacy-probe-spike.md`, both
+in a dedicated throwaway worktree, and a third clean run during review scaling to 78.0s. At
+that head `addopts` is `-m 'not cell'` with no xdist, so the host runs are serial. In-cell,
+the whole probe interval is 14.0s.
+
+A Linux VM on the same Mac should not be 5.5x faster at a CPU-bound Python suite. **The
+anomaly is unresolved and is recorded as open rather than explained.**
+
+An earlier draft of this paragraph explained it away twice over, and both explanations were
+wrong. It blamed the host figures on contention from concurrent review subagents — but the
+spike's two runs were sequential in their own worktree, which the record states. It then
+reached for the `tests` gate's own comment at that head, which says ~36s, to shrink the gap
+to 2.5x — a figure nobody on this branch measured, and the outlier against three that were.
+Inventing an explanation for an inconvenient measurement is the defect this whole document
+argues against, committed inside the section retracting an earlier instance of it.
+
+**What would settle it**, and what this change adds: every verdict now carries what answered
+it — the gate's `tool`, the count of node ids it enumerated, and its own summary line
+(pytest's "N passed in Xs"), persisted per probe in `probes-*.json`. A `survived` over a
+suite that collected almost nothing is green too, and until now nothing in the record could
+tell that from a real one. The next pass will say which it was.
+
+Until then the two `survived` verdicts from that run are **corroborated but not established
+by it**: both probes are exactly the two mutations the 2026-09-09 spike had already verified
+by hand at that head, at 1250 tests passing each. That agreement is real evidence the
+machinery works. It is not the same as the run having proved it.

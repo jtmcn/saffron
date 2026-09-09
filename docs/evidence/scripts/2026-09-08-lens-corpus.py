@@ -6,10 +6,10 @@ by a third between two runs that changed nothing relevant, while the corpus
 aggregate held. This is the driver that runs every fixture under one root and
 reports the aggregate.
 
-Nobody has run this driver yet. `docs/superpowers/plans/2026-09-08-lens-corpus.md`
-projects ~$13 and ~80 minutes at the defaults below, for a step it describes
-as expected rather than measured — see `--max-spend-usd`'s help for the one
-real cost number underneath that projection.
+Run once end to end, over one fixture: `SA-0045`, 2026-09-09, **$1.58 and
+499.8s**. `docs/superpowers/plans/2026-09-08-lens-corpus.md` projects ~$13 and
+~80 minutes for all eight at the defaults below, which that one fixture
+corroborates rather than confirms — see `--max-spend-usd`'s help.
 
     env CLAUDE_CODE_OAUTH_TOKEN=... uv run python \\
         docs/evidence/scripts/2026-09-08-lens-corpus.py \\
@@ -124,7 +124,8 @@ def _distinct(probes: list[Mutant]) -> list[Mutant]:
 
     `--runs 3` files the same probe three times. Applying it three times puts a
     raw total beside a recall line the run count normalises, and buys three
-    identical suite runs at ~80s each.
+    identical suite runs — measured at ~14s each in-cell, and wasteful at any
+    price.
     """
     return list({(p.file, p.find, p.replace): p for p in probes}.values())
 
@@ -146,6 +147,13 @@ def _write_probes(
                     "verdict": result.verdict,
                     "reason": result.reason,
                     "failures": list(result.failures),
+                    # What answered it. A `survived` over a suite that
+                    # collected almost nothing is green too, and without these
+                    # the record cannot tell the two apart — the first
+                    # end-to-end pass left exactly that question open.
+                    "tool": result.tool,
+                    "collected": result.collected,
+                    "summary": result.summary,
                 }
                 for probe, result in applied
             ],

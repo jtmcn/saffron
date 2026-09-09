@@ -633,7 +633,7 @@ def test_a_partial_resume_says_how_many_fixtures_its_number_covers(
 def test_the_same_probe_filed_by_every_run_is_applied_once(tmp_path, monkeypatch):
     """`--runs 3` files the same probe three times. Applying it three times
     would put a raw total beside a recall line the run count normalises, and
-    buy three identical suite runs at ~80s each."""
+    buy three identical suite runs of the same tree, wasteful at any price."""
     pass_ = _drive(tmp_path, monkeypatch, "--runs", "2")
 
     assert len(pass_.mutated) == 1
@@ -643,7 +643,8 @@ def test_the_same_probe_filed_by_every_run_is_applied_once(tmp_path, monkeypatch
 
 
 def test_every_probe_verdict_is_written_beside_the_run_json(tmp_path, monkeypatch):
-    """A pass costs ~$20 and ~80 minutes. Recall survives a crash because the
+    """A pass costs roughly $13 and an hour — scaled from the one fixture
+    measured end to end, at $1.58 and 500s. Recall survives a crash because the
     run JSON is on disk and `--score-only` re-derives it; a verdict that was
     only printed goes with the process."""
     pass_ = _drive(tmp_path, monkeypatch)

@@ -73,6 +73,24 @@ class ProbeResult:
     """The new failure identities behind a `killed`. Itemised rather than
     counted: telling a real kill from program breakage is a person's call and
     they cannot make it from a number."""
+    tool: str | None = None
+    """What the gate ran, as it reported it. `None` when no gate answered."""
+    collected: int | None = None
+    """How many node ids the gate enumerated on the mutated run. `None` when
+    no gate answered, or when the gate does not enumerate — never `0` for
+    either, because `GateResult.collected` makes `None` and `[]` different
+    facts and this count inherits that."""
+    summary: str = ""
+    """The gate's own one-line summary of the run — for this repo's `tests`
+    gate, pytest's "N passed in Xs".
+
+    These three exist because a `survived` verdict means "no new failure
+    against the baseline", and a suite that collected almost nothing is green
+    too. Without them nothing in the record can tell those apart: the first
+    end-to-end pass put the in-cell suite at ~14s where the same tree takes
+    78-87s on the host, and the verdict kept nothing that could adjudicate it
+    (`docs/superpowers/specs/2026-09-09-mutation-verified-capability-design.md`).
+    Taken from the *mutated* run, which is the one the verdict is about."""
 
 
 def _repo_relative(file: str) -> str | None:
@@ -154,19 +172,41 @@ def check_probe(
             f"the tests gate reported `{mutated.status}` under the probe: "
             f"{mutated.summary}",
         )
+    # From here a gate answered, so every verdict below carries what answered
+    # it. Passed by name rather than spread from a dict: a `dict[str, object]`
+    # splatted into a frozen dataclass types as filling the positional
+    # `failures`, which `ty` refuses and which would be a real bug if it did
+    # not.
+    tool = mutated.tool
+    collected = None if mutated.collected is None else len(mutated.collected)
+    summary = mutated.summary
+
     gone = _no_longer_collected(baseline, mutated)
     if gone:
         # Broke the program at import time. The subtraction below is
         # untrustworthy rather than merely non-empty.
         return ProbeResult(
-            "unproven", f"the probe stopped these collecting: {', '.join(gone)}"
+            "unproven",
+            f"the probe stopped these collecting: {', '.join(gone)}",
+            tool=tool,
+            collected=collected,
+            summary=summary,
         )
 
     new = subtract_baseline([mutated], [baseline])
     if not new:
-        return ProbeResult("survived", "no new failure against the baseline")
+        return ProbeResult(
+            "survived",
+            "no new failure against the baseline",
+            tool=tool,
+            collected=collected,
+            summary=summary,
+        )
     return ProbeResult(
         "killed",
         f"{len(new)} new failure(s) against the baseline",
         tuple(n.failure.code for n in new),
+        tool=tool,
+        collected=collected,
+        summary=summary,
     )
