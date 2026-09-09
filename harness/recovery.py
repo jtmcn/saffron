@@ -4,14 +4,19 @@
 recorded in `patch.json` is gone from live history — the branch was deleted
 after merge — so a fixture's range is recovered rather than read off:
 
-    head  the ledger's `pushed_sha` for the task
-    base  the first ancestor of that head where `git diff base..head` is
-          byte-identical to the batch tree's recorded `patch.diff`
+    head  the ledger's `pushed_sha` for the task that actually pushed one
+    base  `patch.json`'s own `tree_base`, verified by byte-identity against
+          the batch tree's recorded `patch.diff` before it is trusted
 
-Byte-identity is the acceptance test, not a heuristic. Four of the eight
-fixtures need the walk because their recorded `tree_base` is not an ancestor of
-their head at all: they were stacked pull requests, and SA-0048's true base is
-SA-0046's head (backlog item 33, visible in the archive).
+Byte-identity is the acceptance test, not a heuristic. `tree_base` is
+recorded beside `base_sha` precisely for a stacked child, where the patch is
+relative to the previous task's head rather than to `base_sha`
+(`docs/BACKLOG.md` item 33: "`SA-0022` records `tree_base` beside `base_sha`
+precisely so that read can be made correct"). The batch tree's own record was
+right on all eight shipped fixtures; reading `base_sha` instead of `tree_base`
+was this module's bug, not a gap in what got recorded. `recover_range`'s
+ancestry walk is kept only as a fallback for a `tree_base` that fails to
+verify — an inconsistency in the record, not the case any shipped fixture is.
 
 Shared by the two dated scripts under `docs/evidence/scripts/`: a Python
 module name cannot begin with a digit, so neither of those `2026-09-0*.py`
@@ -28,11 +33,17 @@ import subprocess
 from pathlib import Path
 
 from saffron.agents import context
+from saffron.cell.worktree import DIFF_FLAGS
 from saffron.gates.contract import GateResult
 from saffron.intake import DisclosedMutantError, parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import review
 
+# Bounds the fallback walk in `recover_range`. Exercised by none of the eight
+# shipped fixtures — each verifies on `tree_base` directly. Before that fix,
+# the candidate that verified sat at `rev-list`'s index 1 (the head's
+# immediate parent) in every one of the eight, so this stays an unmeasured
+# guess for anything more divergent rather than being cut to 1.
 WALK_DEPTH = 60
 
 FIXTURE_FILES = (
@@ -55,25 +66,84 @@ def _git(repo: Path, *args: str) -> str:
     ).stdout
 
 
+def pinned_diff(repo: Path, base: str, head: str) -> str:
+    """`git diff base..head`, pinned against every host git config measured
+    to move it — the only spelling of `git diff` this module allows for
+    comparing against a recorded `patch.diff`.
+
+    Starts from the cell's own export (`saffron/cell/worktree.py`'s
+    `DIFF_FLAGS` and its `_git`'s two `-c` overrides), which is not enough by
+    itself: measured against all eight shipped fixtures, `DIFF_FLAGS` plus
+    those two overrides still differs from the recorded patch under
+    `core.abbrev=12` or `diff.context=5` (`diff.noprefix=true`,
+    `diff.algorithm=patience` and `diff.suppressBlankEmpty=true` are already
+    covered by `--src-prefix`/`--dst-prefix`, the diff itself, and the
+    `-c diff.suppressBlankEmpty=false` override, respectively — verified,
+    not assumed). `--abbrev=7`, `--unified=3` and `--diff-algorithm=myers`
+    close the remaining two: `7` and `3` are git's own historical defaults
+    and match every recorded patch's own index/hunk lines, not a value
+    chosen to make a test pass — if a future fixture's recorded patch used a
+    different width, this would need to know that width rather than guess.
+    """
+    return _git(
+        repo,
+        "-c",
+        "core.quotePath=false",
+        "-c",
+        "diff.suppressBlankEmpty=false",
+        "diff",
+        *DIFF_FLAGS,
+        "--abbrev=7",
+        "--unified=3",
+        "--diff-algorithm=myers",
+        f"{base}..{head}",
+    )
+
+
+def _task_row(ledger: Ledger, spec_id: str) -> sqlite3.Row:
+    """The one ledger row for `spec_id` that actually pushed a branch.
+
+    A requeued spec can carry more than one row — `SA-0064` does: task 60,
+    `PREFLIGHT_FAILED` with `pushed_sha` NULL, and task 61, `MERGED` with a
+    real one. Filtered on `pushed_sha` rather than on `state == "MERGED"`:
+    `pushed_sha` is the one fact both `recover_range` (the branch to diff)
+    and `_reviewed_results` (the attempt whose gates ran) actually need, and
+    the failed attempt never has it — so the filter that picks the right row
+    is the same fact that explains why the other one was never a candidate.
+    """
+    rows = [
+        r for r in ledger.queue_lines() if r["spec_id"] == spec_id and r["pushed_sha"]
+    ]
+    if len(rows) != 1:
+        raise RecoveryError(
+            f"{len(rows)} tasks with a pushed_sha for {spec_id}, want 1"
+        )
+    return rows[0]
+
+
 def recover_range(spec_id: str, home: Path, repo: Path) -> tuple[str, str]:
     """`(base, head)` for a spec, verified against its recorded patch."""
-    recorded = (home / "batches" / "v0" / spec_id / "patch.diff").read_text()
+    batch_dir = home / "batches" / "v0" / spec_id
+    recorded = (batch_dir / "patch.diff").read_text()
     ledger = Ledger(home / "ledger.db")
     try:
-        rows = [r for r in ledger.queue_lines() if r["spec_id"] == spec_id]
+        head = _task_row(ledger, spec_id)["pushed_sha"]
     finally:
         ledger.close()
-    if len(rows) != 1:
-        raise RecoveryError(f"{len(rows)} tasks for {spec_id}, want 1")
-    head = rows[0]["pushed_sha"]
-    if not head:
-        raise RecoveryError(f"{spec_id} has no pushed_sha; its branch is unrecoverable")
+
+    tree_base = json.loads((batch_dir / "patch.json").read_text())["tree_base"]
+    if pinned_diff(repo, tree_base, head) == recorded:
+        return tree_base, head
+
+    # Fallback only: no shipped fixture reaches this line (see module and
+    # `WALK_DEPTH` docstrings).
     for candidate in _git(repo, "rev-list", f"--max-count={WALK_DEPTH}", head).split():
-        if _git(repo, "diff", f"{candidate}..{head}") == recorded:
+        if pinned_diff(repo, candidate, head) == recorded:
             return candidate, head
     raise RecoveryError(
-        f"{spec_id}: no ancestor within {WALK_DEPTH} of {head[:8]} reproduces the "
-        "recorded patch. The range is not recoverable and the fixture must not ship."
+        f"{spec_id}: neither the recorded tree_base ({tree_base[:8]}) nor any "
+        f"ancestor within {WALK_DEPTH} of {head[:8]} reproduces the recorded "
+        "patch. The range is not recoverable and the fixture must not ship."
     )
 
 
@@ -177,13 +247,11 @@ def _reviewed_results(
     reviewable, and REVIEW's own attempts run no gates — so the last attempt
     holding results is that suite.
     """
-    tasks = [r for r in ledger.queue_lines() if r["spec_id"] == spec_id]
-    if len(tasks) != 1:
-        raise RecoveryError(f"{len(tasks)} tasks in the ledger for {spec_id}, want 1")
-    for attempt in reversed(ledger.attempts(tasks[0]["task_id"])):
+    task = _task_row(ledger, spec_id)
+    for attempt in reversed(ledger.attempts(task["task_id"])):
         results = ledger.attempt_results(attempt["attempt_id"])
         if results:
-            return tasks[0], results
+            return task, results
     raise RecoveryError(f"{spec_id} has no attempt carrying gate results")
 
 

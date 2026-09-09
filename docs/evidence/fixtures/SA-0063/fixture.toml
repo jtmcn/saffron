@@ -40,6 +40,16 @@ recorded_graded = 0
 # `notes-neutralization-unwitnessed` to the `neutralize` call (line 391) and
 # `empty-notes-heading-unwitnessed` to the early `return ""` (line 390)
 # rather than weakening either phrase.
+#
+# Declared over the source (`pr_body.py`), not over `tests/test_report.py`,
+# though this diff touches both and either would anchor: these are
+# missing-assertion defects, and a lens reasoning about what a test fails to
+# guard anchors on the unguarded code doing the guarding — the property in
+# question is a fact about `_notes`, not about the test file's shape. SA-0045/
+# SA-0046/SA-0048/SA-0050/SA-0054's/SA-0055's pairs are declared over their
+# tests instead because their properties (a schema line's exact text, a
+# refusal code's membership) are facts about what the test constructs, not
+# about the source under test.
 
 [[defects]]
 id = "notes-neutralization-unwitnessed"
@@ -65,11 +75,21 @@ lines = [377, 395]
 owner = "adequacy"
 min_severity = "blocker"
 # `if not text: return ""` (line 390) is what keeps `_notes` from rendering
-# a heading over nothing. Measured at 0631855: making `_notes` render the
-# heading over empty notes anyway leaves
-# `test_the_pr_body_reports_the_effective_tier_not_the_specs_declared_one`
-# (the named `preserves` witness for this property) green — the only test
-# that turns red is `test_notes_cannot_move_a_status_or_a_gate_result`, and
-# only by accident: `return ""` appears seven times in `pr_body.py`, and a
-# first-occurrence mutation can land in an unrelated function entirely.
+# a heading over nothing. Stated in SA-0063's own terms, not paraphrased from
+# item 86 (which names a different spec's criterion and witness — SA-0064's,
+# not this one's): SA-0063's own criterion 4 claims exactly this property
+# ("an empty [notes channel] must not add a heading over nothing"),
+# `preserves: true`, witness `test_the_pr_body_opens_with_the_spec` — but
+# that test only asserts `"TE-9001" in body()`, nothing about whether a
+# notes heading is present, so SA-0063 introduces `_notes` and nothing this
+# diff adds to `tests/test_report.py` would notice a heading rendered over
+# empty notes.
+#
+# Measured directly (checked out f76931d in an isolated worktree, deleted
+# the `if not text: return ""` line, ran `pytest tests/test_report.py`): 64
+# of 65 tests stay green, including the named witness. The one that turns
+# red is `test_notes_cannot_move_a_status_or_a_gate_result` — and only by
+# accident, because it compares `body()` (now itself carrying an empty notes
+# heading under the mutant) against `rendered.split(...)[0]` (which has
+# none), not because it was written to guard this property.
 must_mention = ["empty", "heading", "no notes"]

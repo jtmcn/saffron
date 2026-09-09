@@ -7,9 +7,11 @@ from harness import corpus, lens_scoring, recovery
 from harness.lens_scoring import LensReview
 from saffron.agents.findings import Finding
 from saffron.gates.contract import GateResult
+from saffron.ledger import Ledger
 from saffron.phases.review import LENSES
 
-FIXTURES = Path(__file__).parent.parent / "docs" / "evidence" / "fixtures"
+REPO = Path(__file__).parent.parent
+FIXTURES = REPO / "docs" / "evidence" / "fixtures"
 
 
 @pytest.fixture
@@ -157,6 +159,49 @@ def test_splice_tools_leaves_a_host_side_gate_s_tool_none():
     assert spliced[0].tool is None
 
 
+def test_task_row_picks_the_run_that_pushed_a_branch_over_a_failed_requeue(
+    tmp_path,
+):
+    """I4's case, built hermetically rather than against `~/.saffron`:
+    `SA-0064`-shaped history is two task rows for one spec — an earlier
+    `PREFLIGHT_FAILED` attempt with `pushed_sha` NULL, and the `MERGED` retry
+    that actually pushed one. `_task_row` must return the second, not choke
+    on there being two."""
+    ledger = Ledger(tmp_path / "ledger.db")
+    repo_id = ledger.upsert_repo("r", "o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+
+    failed = ledger.create_task(run_id, "SA-0064", "s" * 40, branch="saffron/SA-0064")
+    ledger.set_task_state(failed, "PREFLIGHT_FAILED")
+
+    merged = ledger.create_task(run_id, "SA-0064", "s" * 40, branch="saffron/SA-0064")
+    ledger.record_push(merged, "b" * 40)
+    ledger.set_task_state(merged, "MERGED")
+
+    row = recovery._task_row(ledger, "SA-0064")
+    assert row["task_id"] == merged
+    assert row["pushed_sha"] == "b" * 40
+    ledger.close()
+
+
+def test_task_row_refuses_two_rows_that_both_pushed(tmp_path):
+    """Ambiguous on purpose: two real pushes for one spec is not a shape
+    `_task_row` has ever seen, and guessing which one REVIEW actually saw
+    would be exactly the "approximate range" this corpus refuses to ship."""
+    ledger = Ledger(tmp_path / "ledger.db")
+    repo_id = ledger.upsert_repo("r", "o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+
+    first = ledger.create_task(run_id, "SA-9999", "s" * 40, branch="saffron/SA-9999")
+    ledger.record_push(first, "b" * 40)
+    second = ledger.create_task(run_id, "SA-9999", "s" * 40, branch="saffron/SA-9999")
+    ledger.record_push(second, "c" * 40)
+
+    with pytest.raises(recovery.RecoveryError, match="2 tasks with a pushed_sha"):
+        recovery._task_row(ledger, "SA-9999")
+    ledger.close()
+
+
 def test_the_table_reports_the_aggregate_and_every_fixture(sa0062, one_defect_fixture):
     fixtures = [sa0062, one_defect_fixture]
     runs = {f.spec_id: [_run()] for f in fixtures}
@@ -169,16 +214,51 @@ def test_the_table_reports_the_aggregate_and_every_fixture(sa0062, one_defect_fi
 
 def test_every_shipped_fixture_reproduces_its_own_declared_range():
     """What makes the archaeology auditable rather than claimed. A fixture
-    whose `diff.patch` is not `git diff base..head` at the range its own
-    `fixture.toml` declares is grading a lens against a tree nobody has."""
+    whose `diff.patch` is not `pinned_diff(base, head)` at the range its own
+    `fixture.toml` declares is grading a lens against a tree nobody has.
+
+    Goes through `recovery.pinned_diff`, never a bare `git diff`: `core.
+    abbrev`, `diff.noprefix`, `diff.algorithm`, `diff.context` and `diff.
+    suppressBlankEmpty` each measurably change a bare diff's bytes, so a
+    literal `["git", "diff", ...]` here would make this test's own verdict
+    depend on whichever machine's `~/.gitconfig` happens to run it."""
     for fixture in corpus.load_corpus(FIXTURES):
-        live = subprocess.run(
-            ["git", "diff", f"{fixture.base_sha}..{fixture.head_sha}"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
+        live = recovery.pinned_diff(REPO, fixture.base_sha, fixture.head_sha)
         assert live == fixture.diff, fixture.spec_id
+
+
+def test_pinned_diff_survives_a_hostile_git_config(tmp_path, monkeypatch):
+    """C2's proof, kept as a regression rather than run once and discarded.
+
+    A fake `$HOME` carrying `core.abbrev=12`, `diff.noprefix=true`,
+    `diff.algorithm=patience`, `diff.context=5` and
+    `diff.suppressBlankEmpty=true` all at once — every host config setting
+    measured to move a bare `git diff` on this exact range. `pinned_diff`
+    must reproduce the recorded patch anyway; a bare `git diff` must not (the
+    failure `pinned_diff` exists to survive, asserted here so a future change
+    to the hostile config above cannot quietly stop testing anything)."""
+    (tmp_path / ".gitconfig").write_text(
+        "[core]\n"
+        "\tabbrev = 12\n"
+        "[diff]\n"
+        "\tnoprefix = true\n"
+        "\talgorithm = patience\n"
+        "\tcontext = 5\n"
+        "\tsuppressBlankEmpty = true\n"
+    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    fixture = lens_scoring.load_fixture(FIXTURES / "SA-0045")
+
+    pinned = recovery.pinned_diff(REPO, fixture.base_sha, fixture.head_sha)
+    assert pinned == fixture.diff
+
+    bare = subprocess.run(
+        ["git", "-C", str(REPO), "diff", f"{fixture.base_sha}..{fixture.head_sha}"],
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert bare != fixture.diff
 
 
 def test_every_shipped_fixture_s_spec_body_and_context_reproduce_from_git():
@@ -194,10 +274,9 @@ def test_every_shipped_fixture_s_spec_body_and_context_reproduce_from_git():
     that ran the batch and nowhere else. There is no hermetic check for
     those two files beyond the review this fixture already had.
     """
-    repo = Path(__file__).parent.parent
     for fixture in corpus.load_corpus(FIXTURES):
         spec_body = recovery.spec_body_at(
-            repo, fixture.base_sha, fixture.head_sha, fixture.spec_id
+            REPO, fixture.base_sha, fixture.head_sha, fixture.spec_id
         )
         assert spec_body == fixture.spec_body, fixture.spec_id
 
