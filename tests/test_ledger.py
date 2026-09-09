@@ -1118,7 +1118,7 @@ def test_a_ledger_that_predates_the_tool_column_gains_it(tmp_path):
     until the column is added by hand."""
     path = tmp_path / "old.db"
     before = SCHEMA.replace("    tool           TEXT,\n", "")
-    assert "tool           TEXT" not in before  # otherwise this proves nothing
+    assert before != SCHEMA  # otherwise this proves nothing
     old = sqlite3.connect(path)
     old.executescript(before)
     old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r','o','/m')")
@@ -1138,4 +1138,53 @@ def test_a_ledger_that_predates_the_tool_column_gains_it(tmp_path):
     tests, lint = ledger.baseline_results(1)
     assert (tests.gate, tests.tool) == ("tests", None)
     assert (lint.gate, lint.tool) == ("lint", "ruff 0.16.3")
+    ledger.close()
+
+
+def test_a_ledger_that_predates_both_migrations_opens_and_keeps_its_rows(tmp_path):
+    """The one ledger that exists needed both, and the order is load-bearing:
+    the `tool` ALTER runs first so `_add_gate_result_reference`'s rebuild can
+    copy the column instead of adding it twice. Run the two the other way round
+    and the rebuild's `SELECT ... tool ...` hits a table that has not got it —
+    an exit-code-2 open failure that every other test in this file survives,
+    because each strips one migration and leaves the other satisfied."""
+    path = tmp_path / "old.db"
+    no_tool = SCHEMA.replace("    tool           TEXT,\n", "")
+    before = no_tool.replace(
+        "attempt_id     INTEGER REFERENCES attempts(attempt_id),",
+        "attempt_id     INTEGER,",
+    )
+    # Each strip has to bite, or this proves only that the other one works.
+    assert no_tool != SCHEMA and "REFERENCES attempts" not in before
+    old = sqlite3.connect(path)
+    old.executescript(before)
+    old.execute("DROP TABLE attempts")
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r','o','/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.execute(
+        """INSERT INTO tasks (run_id, spec_id, spec_sha, state, branch)
+           VALUES (1, 'SA-0001', 's', 'READY_FOR_REVIEW', 'saffron/SA-0001')"""
+    )
+    old.execute(
+        "INSERT INTO gate_results (run_id, gate, status, summary) "
+        "VALUES (1, 'tests', 'pass', '1481 passed')"
+    )
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    # The rebuild copied the pre-existing row through both migrations, and the
+    # column it gained on the way is null for it — which is what item 88 found.
+    (tests,) = ledger.baseline_results(1)
+    assert (tests.gate, tests.tool, tests.summary) == ("tests", None, "1481 passed")
+    ledger.record_gate_result(
+        GateResult(gate="lint", status="pass", tool="ruff 0.16.3"), run_id=1
+    )
+    _, lint = ledger.baseline_results(1)
+    assert lint.tool == "ruff 0.16.3"
+    # And the rebuild delivered the constraint it exists for.
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.record_gate_result(
+            GateResult(gate="types", status="pass"), attempt_id=90210
+        )
     ledger.close()
