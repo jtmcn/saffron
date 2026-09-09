@@ -11,6 +11,7 @@ them, so every branch is reachable without a container.
 from __future__ import annotations
 
 import contextlib
+import inspect
 
 import pytest
 
@@ -55,10 +56,23 @@ def _refuses(reason: str):
     return mutate
 
 
+TEST_PATHS = ("tests/",)
+
+
+def _check(probe=PROBE, **kwargs):
+    """`check_probe` with the now-required `test_paths` supplied.
+
+    The default lives here and never in the code under test: a caller that
+    forgets the test-file refusal must get a `TypeError`, not a silent pass.
+    """
+    kwargs.setdefault("test_paths", TEST_PATHS)
+    return probe_check.check_probe(probe, **kwargs)
+
+
 def test_a_probe_that_leaves_the_suite_as_it_was_survived():
     """The positive result, and the inversion this module exists for: the tests
     did not notice, which is what the finding claimed."""
-    got = probe_check.check_probe(
+    got = _check(
         PROBE,
         baseline=_result("pass"),
         mutate=_applies(),
@@ -71,7 +85,7 @@ def test_a_probe_the_tests_notice_is_killed_and_names_what_failed():
     """A count is not enough. The record has to carry which tests died, because
     telling a real kill from program breakage is a person's call and they
     cannot make it from a number."""
-    got = probe_check.check_probe(
+    got = _check(
         PROBE,
         baseline=_result("pass"),
         mutate=_applies(),
@@ -85,7 +99,7 @@ def test_a_failure_already_at_the_baseline_is_not_a_kill():
     """Baseline subtraction counts. A fixture head carrying one pre-existing
     failure would otherwise read every probe as killed."""
     pre_existing = _result("fail", (_fail("test_flaky"),))
-    got = probe_check.check_probe(
+    got = _check(
         PROBE,
         baseline=pre_existing,
         mutate=_applies(),
@@ -98,7 +112,7 @@ def test_one_baseline_failure_cancels_one_head_failure_not_all_of_them():
     """Identities collide legitimately, so the subtraction counts rather than
     comparing sets — the opposite rule to `census`, and they sit beside each
     other in `baseline.py` for exactly this reason."""
-    got = probe_check.check_probe(
+    got = _check(
         PROBE,
         baseline=_result("fail", (_fail("test_a"),)),
         mutate=_applies(),
@@ -111,7 +125,7 @@ def test_one_baseline_failure_cancels_one_head_failure_not_all_of_them():
 def test_a_probe_that_did_not_apply_is_unproven_and_says_why():
     """`source_mutated` yields a reason rather than raising for the six cases it
     refuses. None of them is evidence about the lens."""
-    got = probe_check.check_probe(
+    got = _check(
         PROBE,
         baseline=_result("pass"),
         mutate=_refuses("find text not found: 'safe = neutralize(text)'"),
@@ -128,7 +142,7 @@ def test_a_tests_gate_that_errored_is_unproven_never_survived():
     not start has said nothing — and reading it as `survived` would count a
     broken toolchain as a verified vacuity, which is the number inflating
     itself."""
-    got = probe_check.check_probe(
+    got = _check(
         PROBE,
         baseline=_result("pass"),
         mutate=_applies(),
@@ -140,7 +154,7 @@ def test_a_tests_gate_that_errored_is_unproven_never_survived():
 def test_a_baseline_that_errored_is_unproven_without_running_the_probe():
     """Nothing to subtract from. Running the probe anyway would compare a real
     result against a non-result."""
-    got = probe_check.check_probe(
+    got = _check(
         PROBE,
         baseline=_result("error"),
         mutate=_applies(),
@@ -162,7 +176,7 @@ def test_a_probe_that_moves_the_collection_is_unproven_not_killed():
     baseline.collected = ["t.py::a", "t.py::b"]
     mutated = _result("fail", (_fail("t.py::a"),))
     mutated.collected = ["t.py::a"]
-    got = probe_check.check_probe(
+    got = _check(
         PROBE, baseline=baseline, mutate=_applies(), run_tests=lambda subset: mutated
     )
     assert got.verdict == "unproven"
@@ -178,7 +192,7 @@ def test_a_suite_that_collected_more_is_not_drift():
     baseline.collected = ["t.py::a"]
     mutated = _result("pass")
     mutated.collected = ["t.py::a", "t.py::b"]
-    got = probe_check.check_probe(
+    got = _check(
         PROBE, baseline=baseline, mutate=_applies(), run_tests=lambda subset: mutated
     )
     assert got.verdict == "survived"
@@ -192,26 +206,90 @@ def test_a_gate_that_enumerates_nothing_is_not_read_as_a_removal():
     baseline.collected = ["t.py::a"]
     mutated = _result("pass")
     mutated.collected = None
-    got = probe_check.check_probe(
+    got = _check(
         PROBE, baseline=baseline, mutate=_applies(), run_tests=lambda subset: mutated
     )
     assert got.verdict == "survived"
 
 
-def test_a_probe_aimed_at_a_test_file_is_refused_before_it_is_applied():
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "tests/test_report.py",
+        "./tests/test_report.py",
+        "saffron/../tests/test_report.py",
+    ],
+)
+def test_a_probe_aimed_at_a_test_file_is_refused_before_it_is_applied(spelling):
     """The number would otherwise be satisfiable by construction: the adequacy
     prompt offers an edit "to the source or to the test", and deleting an
     assertion survives trivially. Refused before `mutate`, so nothing is
-    written for a question that must not be asked."""
-    got = probe_check.check_probe(
-        Mutant(file="tests/test_report.py", find="assert head == plain", replace=""),
+    written for a question that must not be asked.
+
+    Three spellings, because the path is model-authored and a raw prefix test
+    refused only the first. Measured, not reasoned: `ls-tree HEAD -- <path>`
+    returns the same blob for all three, so `source_mutated` applies the edit
+    either way and a deleted assertion is counted as a verified vacuity.
+    """
+    got = _check(
+        Mutant(file=spelling, find="assert head == plain", replace=""),
         baseline=_result("pass"),
         mutate=_applies(),
         run_tests=lambda subset: pytest.fail("must not run a probe aimed at a test"),
-        test_paths=("tests/",),
     )
     assert got.verdict == "unproven"
     assert "test" in got.reason
+
+
+def test_a_probe_naming_a_path_outside_the_tree_never_reaches_the_cell():
+    """`_confined`'s refusal, made here so the normalisation above cannot be
+    read as a way in: a path that escapes normalises to nothing this module
+    can compare against a prefix, so it is `unproven` rather than compared."""
+    got = _check(
+        Mutant(file="../etc/passwd", find="root", replace="x"),
+        baseline=_result("pass"),
+        mutate=_applies(),
+        run_tests=lambda subset: pytest.fail("must not run an escaping probe"),
+    )
+    assert got.verdict == "unproven"
+    assert "inside the tree" in got.reason
+
+
+def test_test_paths_has_no_default_so_forgetting_it_is_a_typeerror():
+    """The one guard the design spec calls non-optional. A default of `()`
+    turns a caller that forgets it into a pass with no refusal at all, which
+    is indistinguishable from a pass where nothing aimed at a test."""
+    parameter = inspect.signature(probe_check.check_probe).parameters["test_paths"]
+    assert parameter.default is inspect.Parameter.empty
+
+
+def test_a_tests_gate_that_skipped_is_unproven_never_survived():
+    """`skip` is not `pass`. A `tests` gate that skipped ran no suite, so
+    reading it as `survived` counts a suite that never executed as a verified
+    vacuity — the same inflation the errored-gate branch refuses, and what
+    `witness_gate` already says about every status that is not a verdict."""
+    got = _check(
+        PROBE,
+        baseline=_result("pass"),
+        mutate=_applies(),
+        run_tests=lambda subset: _result("skip"),
+    )
+    assert got.verdict == "unproven"
+    assert "skip" in got.reason
+
+
+def test_a_baseline_that_skipped_is_unproven_without_running_the_probe():
+    """Nothing to subtract from, for the same reason an errored baseline is
+    nothing to subtract from: a skipped suite measured no failures, so every
+    probe against it would read as a kill of tests that never ran."""
+    got = _check(
+        PROBE,
+        baseline=_result("skip"),
+        mutate=_applies(),
+        run_tests=lambda subset: pytest.fail("must not run without a baseline"),
+    )
+    assert got.verdict == "unproven"
+    assert "skip" in got.reason
 
 
 def test_the_whole_suite_is_asked_not_a_subset():
@@ -219,7 +297,7 @@ def test_the_whole_suite_is_asked_not_a_subset():
     which asks one named witness. A subset here would answer a narrower
     question and read as the broader one."""
     asked: list[list[str]] = []
-    probe_check.check_probe(
+    _check(
         PROBE,
         baseline=_result("pass"),
         mutate=_applies(),

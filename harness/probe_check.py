@@ -20,6 +20,7 @@ reading is not running.
 
 from __future__ import annotations
 
+import posixpath
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -74,31 +75,65 @@ class ProbeResult:
     they cannot make it from a number."""
 
 
+def _repo_relative(file: str) -> str | None:
+    """`file` normalised, or `None` when it names nothing inside the tree.
+
+    The path is model-authored, so it is normalised before anything compares
+    it: `ls-tree HEAD --` resolves `tests/x.py`, `./tests/x.py` and
+    `a/../tests/x.py` to the same blob (measured 2026-09-09), so a raw prefix
+    test refuses one spelling of a test file and applies the other two.
+    """
+    normalised = posixpath.normpath(file)
+    escapes = normalised == ".." or normalised.startswith("../")
+    return None if posixpath.isabs(normalised) or escapes else normalised
+
+
+def _under(path: str, prefix: str) -> bool:
+    """Segment-wise containment: `tests/` covers `tests/test_x.py` and not
+    `tests_helpers/x.py`. Both sides normalised, or `tests/` would match
+    nothing after the left side lost its trailing slash."""
+    prefix = posixpath.normpath(prefix)
+    return path == prefix or path.startswith(prefix + "/")
+
+
 def check_probe(
-    mutant: Mutant,
+    probe: Mutant,
     *,
     baseline: GateResult,
     mutate: Mutated,
     run_tests: RunTests,
-    test_paths: Sequence[str] = (),
+    test_paths: Sequence[str],
 ) -> ProbeResult:
     """Apply one vacuity probe at the head tree and ask the repo's declared
-    `tests` gate."""
-    if test_paths and any(mutant.file.startswith(p) for p in test_paths):
+    `tests` gate.
+
+    `test_paths` carries no default: the refusal below is the one guard the
+    design spec calls non-optional, and a default would let a caller that
+    forgot it measure with no refusal at all, silently.
+    """
+    target = _repo_relative(probe.file)
+    if target is None:
+        return ProbeResult(
+            "unproven", f"{probe.file} is not a relative path inside the tree"
+        )
+    if any(_under(target, prefix) for prefix in test_paths):
         # The number is otherwise satisfiable by construction: the adequacy
         # prompt offers an edit "to the source or to the test", and deleting an
         # assertion survives trivially. Refused before `mutate`, so nothing is
         # written for a question that must not be asked.
         return ProbeResult(
-            "unproven", f"{mutant.file} is a test; a probe must target source"
+            "unproven", f"{probe.file} is a test; a probe must target source"
         )
-    if baseline.status == "error":
+    if baseline.status not in ("pass", "fail"):
+        # `error` or `skip`: a baseline that measured no failures would read
+        # every probe against it as a kill of tests that never ran.
         return ProbeResult(
             "unproven",
-            "the baseline tests gate errored, so there is nothing to subtract from",
+            f"the baseline tests gate reported `{baseline.status}`, so there "
+            "is nothing to subtract from",
         )
 
-    with mutate(mutant) as refusal:
+    with mutate(probe) as refusal:
         if refusal is not None:
             # One of `source_mutated`'s six refusals. None is evidence about
             # the lens, and the tree is untouched.
@@ -109,12 +144,15 @@ def check_probe(
         # callable this module does not control.
         mutated = run_tests([])
 
-    if mutated.status == "error":
+    if mutated.status not in ("pass", "fail"):
         # `error` is not `fail`, and here it is not `pass` either: reading a
         # gate that could not start as `survived` would count a broken
-        # toolchain as a verified vacuity.
+        # toolchain as a verified vacuity. `skip` the same — a suite that never
+        # ran noticed nothing, which is not the suite failing to notice.
         return ProbeResult(
-            "unproven", f"the tests gate errored under the probe: {mutated.summary}"
+            "unproven",
+            f"the tests gate reported `{mutated.status}` under the probe: "
+            f"{mutated.summary}",
         )
     gone = _no_longer_collected(baseline, mutated)
     if gone:
