@@ -1,11 +1,15 @@
 """Score REVIEW's lenses across the whole fixture corpus, not one fixture at a time.
 
-`docs/superpowers/plans/2026-09-08-lens-corpus.md` (~$13, ~80 minutes at the
-defaults below): a prompt change cannot be read through one fixture's noise —
+A prompt change cannot be read through one fixture's noise —
 `harness/corpus.py`'s own docstring cites a pass where per-defect scores moved
 by a third between two runs that changed nothing relevant, while the corpus
 aggregate held. This is the driver that runs every fixture under one root and
 reports the aggregate.
+
+Nobody has run this driver yet. `docs/superpowers/plans/2026-09-08-lens-corpus.md`
+projects ~$13 and ~80 minutes at the defaults below, for a step it describes
+as expected rather than measured — see `--max-spend-usd`'s help for the one
+real cost number underneath that projection.
 
     env CLAUDE_CODE_OAUTH_TOKEN=... uv run python \\
         docs/evidence/scripts/2026-09-08-lens-corpus.py \\
@@ -18,6 +22,15 @@ that script directly: same `_read_head_at`, same agent binding, same
 `cell_up`/`cell_down` order. That order was found by spike, not reasoned, and
 is copied here rather than paraphrased (Appendix I: every mechanism reports
 success and applies to a different container).
+
+**Do not run this while a batch is live**, for the same reason the
+single-fixture driver's docstring gives: the container and volume names below
+are this driver's own, but the proxy and the `saffron-cells` network are
+shared, and `cell_up` removes the network on the way in while `cell_down`
+stops the proxy on the way out. The exposure here is longer than the
+single-fixture driver's — eight sequential cells over roughly the ~80 minutes
+above, where that driver holds one cell up for as many runs as `--runs`
+requests (its own docstring puts one run at ~8 minutes).
 
 This module holds no scoring logic — `harness/corpus.py` is the predicate,
 linted and tested; this file only spends money and cannot be unit-tested
@@ -109,13 +122,16 @@ def main() -> int:
         default=20.0,
         help="the pass stops between fixtures once it has spent this in this "
         "invocation. At the defaults (8 fixtures, 3 lenses, --runs 1, "
-        "--budget-usd 4.0) the theoretical ceiling is $96 with no abort; "
-        "the plan that specced this driver measured a full pass at ~$13 "
-        "(docs/superpowers/plans/2026-09-08-lens-corpus.md). $20 leaves "
-        "about 50%% headroom over that measurement while stopping well "
-        "short of the theoretical max. On a trip: the pass stops, the "
-        "fixtures already written stay written, and --skip-existing "
-        "resumes it.",
+        "--budget-usd 4.0) the theoretical ceiling is $96 with no abort. "
+        "The one real measurement behind this driver's projected cost is "
+        "docs/evidence/2026-09-08-lens-scoring-second-pass.md: $4.838 over "
+        "three runs of one fixture (SA-0062), ~$1.61 per fixture-run; "
+        "times eight fixtures projects to ~$12.90 — nobody has run this "
+        "corpus driver itself, so that is an extrapolation, not a corpus "
+        "measurement. $20 leaves roughly 50%% headroom over that "
+        "projection while stopping well short of the theoretical max. On "
+        "a trip: the pass stops, the fixtures already written stay "
+        "written, and --skip-existing resumes it.",
     )
     parser.add_argument("--max-turns", type=int, default=30)
     parser.add_argument(
@@ -148,9 +164,9 @@ def main() -> int:
 
     mirror = None
     if not args.score_only:
-        # One mirror and one image build for the whole pass — `image.cell_tag`
-        # keys off the repo path, not the tree, so only the worktree changes
-        # per fixture (session.cell_up's own docstring).
+        # The mirror is built once for the whole pass. `cell_up` calls
+        # `image.build_cell_image` once per fixture inside it, expected to be
+        # a cache hit after the first — that cache behaviour is unmeasured.
         mirror = mirror_ops.ensure_mirror(args.repo, args.home / "mirrors" / "self")
 
     total_spent = 0.0
