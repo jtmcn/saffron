@@ -539,7 +539,7 @@ def test_the_stacking_parents_own_pull_request_is_not_an_overlap(tmp_path, ledge
 
 def test_a_third_partys_overlap_still_refuses_a_stacked_child(tmp_path, ledger):
     """The exemption above is `depends_on[0]`'s branch and nothing else —
-    K=1, the same one `cli._resolve_stacked_on` stacks on. Another task's
+    K=1, the same one `task._resolve_stacked_on` stacks on. Another task's
     pull request over the same file is the collision the check exists for."""
     directory = _spec_dir(tmp_path)
     _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
@@ -1460,7 +1460,7 @@ def test_a_parent_waiting_to_merge_is_admitted_for_stacking(tmp_path, ledger, st
     is in the next cell's baseline before it ever runs. §4.2's own rule admits
     these, and now the code does too. A dependent
     branches off the parent's branch instead of `base_sha`
-    (`cli._resolve_stacked_on`), so the gate that used to refuse them with
+    (`task._resolve_stacked_on`), so the gate that used to refuse them with
     "stacking is SA-0022" — a sentence describing machinery that did not
     exist yet — has nothing left to refuse."""
     directory = _spec_dir(tmp_path)

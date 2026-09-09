@@ -1070,7 +1070,7 @@ def test_only_the_line_no_kind_carries_writes_to_a_stream_outside_emit():
     `saffron/events.py`."""
     import ast
 
-    from saffron import cli as cli_module
+    from saffron import task as task_module
     from saffron.phases import package as package_module
 
     package_tree = ast.parse(Path(package_module.__file__).read_text())
@@ -1090,9 +1090,11 @@ def test_only_the_line_no_kind_carries_writes_to_a_stream_outside_emit():
         "`Path.write_text`, which this does not see."
     )
 
-    # Only the resolver: `cli.py` is the terminal-facing entry point and prints
-    # all over, legitimately. Its stacking lines are the two that must not.
-    cli_tree = ast.parse(Path(cli_module.__file__).read_text())
+    # Only the resolver: `run_task` beside it prints the task's own result
+    # lines, legitimately. The resolver's stacking lines are the two that must
+    # not — it took `_resolve_stacked_on` with it when the driver moved out of
+    # `cli.py`, and this assertion moved with the function, not the file.
+    cli_tree = ast.parse(Path(task_module.__file__).read_text())
     resolver = next(
         node
         for node in ast.walk(cli_tree)
@@ -1102,7 +1104,7 @@ def test_only_the_line_no_kind_carries_writes_to_a_stream_outside_emit():
         _stream_writes(resolver, allow=frozenset(), aliases=_write_aliases(cli_tree))
         == []
     ), (
-        "`cli._resolve_stacked_on` writes to a stream: its `unstacked:` lines "
+        "`task._resolve_stacked_on` writes to a stream: its `unstacked:` lines "
         "must be `Preflight` events through `emit`, so a stacking decision is "
         "recoverable the morning after."
     )

@@ -58,13 +58,18 @@ def run_batch(
     reads the batch's spend back through it rather than trusting a tally kept
     here, which is exactly what a caller cut mid-loop would lose.
 
-    `runner` takes no default. Building a real `CellSpec` from a `Candidate`
-    needs the ceilings resolver and the stacked-on resolver, both
-    `cli`-private and both forbidden to this spec — a loop that built one
-    itself would pass no stacked-on parent for any candidate, cutting every
-    child of a stack from `base_sha` and failing its own gates the moment it
-    ran (§4.2.1). `SA-0051` owns `cli.py` and supplies the real adapter;
-    every test here supplies a fake instead. `readiness_check` takes no default
+    `runner` takes no default, and the reason changed without the decision
+    changing. It used to be that no real default was *constructible*: building
+    a `CellSpec` from a `Candidate` needed the ceilings and stacked-on
+    resolvers, both `cli`-private and both forbidden to the spec that built
+    this loop, so a default that built one itself would pass no stacked-on
+    parent for any candidate, cutting every child of a stack from `base_sha`
+    and failing its own gates the moment it ran (§4.2.1). `task.run_task` is
+    now that driver and importable, so a real default *could* be written. It
+    is still not, for `readiness_check`'s reason rather than its own: every
+    test here supplies a fake runner, and a default would buy production
+    nothing — `cli` always passes the real one — while making a forgotten
+    argument silent instead of a `TypeError`. `readiness_check` takes no default
     either, and for a related reason: `check_readiness` needs repo paths and a
     token this signature never receives, so no *real* default is constructible
     here. The permissive stub that stood in its place meant a caller who

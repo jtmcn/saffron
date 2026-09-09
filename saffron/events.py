@@ -3,7 +3,7 @@
 `agent_runner.py` already does this one level down: it emits Saffron's own
 typed events as JSON lines out of the cell, and `implement._consume` renders
 them for the operator. Host-side the arrangement is inverted — 64 call sites
-across `cell/session.py`, `phases/*.py` and `cli.py` author prose straight into
+across `cell/session.py`, `phases/*.py` and `task.py` author prose straight into
 `watch()`, and the structure behind each line dies with the terminal scroll.
 
 This module is the fix: nine frozen dataclasses — one per kind, never one
@@ -559,7 +559,7 @@ class _Family:
 
 # The proof `SA-0029`'s nine kinds are sufficient for the 64 call sites across
 # `cell/session.py`, `phases/{implement,package,review,rebut}.py` and
-# `cli.py`. Grouped by rendered shape, not by literal call site: two call
+# `task.py`. Grouped by rendered shape, not by literal call site: two call
 # sites that print the same shape (both `SALVAGE: the session failed — …`
 # branches, both `agent: (raw) …` guards) are one row. Two rows can still
 # share a prefix and differ in kind — `budget:` is `Budget` when the ceiling
@@ -577,7 +577,7 @@ _EP = "cell/session.py:export_patch"
 _IA = "phases/implement.py:run_agent"
 _IC = "phases/implement.py:_consume"
 _PKG = "phases/package.py:package"
-_CLI = "cli.py:_resolve_stacked_on"
+_TASK = "task.py:_resolve_stacked_on"
 
 FAMILIES: tuple[_Family, ...] = (
     _Family("preflight: starting the proxy", _S, Preflight),
@@ -586,7 +586,7 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("preflight: building", _S, Preflight),
     _Family("preflight: probing", _S, Preflight),
     _Family("cell:", _S, Preflight),
-    _Family("unstacked:", _CLI, Preflight),
+    _Family("unstacked:", _TASK, Preflight),
     _Family("baseline: (joined gate=status)", _S, Baseline),
     _Family("baseline errored in", _S, Baseline),
     _Family("SCOPE: proposal refused", _PC, PhaseStart),
