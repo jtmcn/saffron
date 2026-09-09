@@ -151,3 +151,65 @@ def test_a_heading_it_cannot_read_is_refused(typo: str):
     )
     with pytest.raises(ValueError, match="an appendix heading this cannot read"):
         design_record.parse(mutant)
+
+
+def test_a_principle_number_claimed_twice_is_refused():
+    """`_PRINCIPLE` reads any numbered list inside an appendix whose first item
+    opens bold, so the wrong direction is two claims rather than none — and
+    `graph.value` picks one of them without saying it chose.
+    """
+    committed = DESIGN.read_text()
+    heading = "## Appendix G — rev 8: the cell runtime\n"
+    mutant = committed.replace(
+        heading,
+        heading + "\n1. **A numbered list that opens bold**, not a principle.\n",
+    )
+    assert mutant != committed, (
+        "the fixture heading was not found — has Appendix G moved?"
+    )
+    with pytest.raises(ValueError, match="2 values for"):
+        design_record.principles(design_record.parse(mutant))
+
+
+def test_a_rev_cell_that_contradicts_its_heading_is_refused():
+    """The `Rev` column is hand-written and every heading states its own rev, so
+    a typo'd cell has a second reading to disagree with. Without this it writes a
+    well-formed wrong triple: the shapes ask for *a* revision, not the right one.
+    """
+    committed = DESIGN.read_text()
+    mutant = committed.replace("| **G** | 8, 10 |", "| **G** | 9, 10 |")
+    assert mutant != committed, "the fixture row was not found — has the index moved?"
+    with pytest.raises(ValueError, match="the heading says rev 8"):
+        design_record.parse(mutant)
+
+
+def test_a_pipe_in_a_claim_keeps_the_row_three_cells_wide():
+    """A `|` would close its cell early, and the currency test compares render to
+    render — it stays green over a table that has silently lost a column."""
+    committed = DESIGN.read_text()
+    mutant = committed.replace(
+        "a third decision, and nobody made it.**",
+        "a third decision | nobody made it.**",
+    )
+    assert mutant != committed, (
+        "the fixture claim was not found — has principle 57 moved?"
+    )
+    row = next(
+        line
+        for line in design_record.render_principles(mutant).splitlines()
+        if line.startswith("| 57 | ")
+    )
+    assert r"\|" in row, row
+    assert row.count("|") - row.count(r"\|") == 4, row
+
+
+def test_a_drifted_table_header_is_refused():
+    """The header locates the span it rewrites. Matching it loosely would append
+    the rows below the stale ones; not matching it at all must say which file."""
+    committed = DESIGN.read_text()
+    mutant = committed.replace(
+        "| # | The claim | From |", "| # | The claim | Appendix |"
+    )
+    assert mutant != committed, "the fixture header was not found — has it drifted?"
+    with pytest.raises(ValueError, match="header under it"):
+        design_record.render_principles(mutant)

@@ -266,7 +266,9 @@ def test_no_citation_names_an_unlisted_document():
         (".saffron", 100),
         ("docs", 500),
         ("ontology", 20),
-        ("spikes", 5),
+        # 1, not the measured 5: all five are in one file, so any floor above
+        # one fails when a comment is edited rather than when the walk stops.
+        ("spikes", 1),
         ("images", 3),
     ],
 )

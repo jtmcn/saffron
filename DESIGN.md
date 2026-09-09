@@ -2674,15 +2674,15 @@ was never taken. It is not the same defect, and the difference is worth a number
 
 **What changed.** `CONTEXT.md` §11 had just named the genres a decision here is
 recorded in, and nothing carried them: the file's own architecture is that the
-vocabulary is authoritative for its closed sets, and §11 sat outside it.
-`saffron:Principle` and `saffron:RevisionAppendix` now exist, `PrincipleShape` and
-`RevisionAppendixShape` read them, and `ontology/design_record.py` parses the
+vocabulary is authoritative for its closed sets, and `CONTEXT.md` §11 sat outside
+it. `saffron:Principle` and `saffron:RevisionAppendix` now exist, `PrincipleShape`
+and `RevisionAppendixShape` read them, and `ontology/design_record.py` parses the
 appendices into that graph and renders the principle index above from it.
 
-**Two of §11's five genres are deliberately absent.** `EvidenceRecord` and
-`SpikeVerdict` have no shape or query reading them, and a term whose only reader is
-an `rdfs:comment` is what `tests/ontology/test_no_dead_terms.py` deletes — *"cheap
-to fake. Delete it; do not comment it."* Appendix O measured the full-`CONTEXT.md`
+**Two of `CONTEXT.md` §11's five genres are deliberately absent.** `EvidenceRecord`
+and `SpikeVerdict` have no shape or query reading them, and a term whose only
+reader is an `rdfs:comment` is what `tests/ontology/test_no_dead_terms.py` deletes
+— *"cheap to fake. Delete it; do not comment it."* Appendix O measured the full-`CONTEXT.md`
 expansion at roughly thirty terms and said coverage is downstream of readers, not
 independent of them. That holds here: these two join when something reads them.
 

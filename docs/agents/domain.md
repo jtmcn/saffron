@@ -14,7 +14,7 @@ How the engineering skills should consume this repo's domain documentation when 
 
 ```
 /
-├── CONTEXT.md                  ← the glossary; §11 names the decision-record genres
+├── CONTEXT.md                  ← the glossary; its §11 names the decision-record genres
 ├── DESIGN.md                   ← §-numbered design + revision appendices + principles
 ├── ontology/
 │   ├── saffron.ttl             ← authoritative for CONTEXT.md's six closed sets

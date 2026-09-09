@@ -227,16 +227,22 @@ def render_shapes(
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     vocabulary = root / "ontology" / "saffron.ttl"
-    for path, fn in (
-        (root / "CONTEXT.md", render_context),
-        (root / "ontology" / "shapes" / "saffron-shapes.ttl", render_shapes),
-    ):
-        path.write_text(fn(path.read_text(), vocabulary=vocabulary))
+    rendered = {
+        path: fn(path.read_text(), vocabulary=vocabulary)
+        for path, fn in (
+            (root / "CONTEXT.md", render_context),
+            (root / "ontology" / "shapes" / "saffron-shapes.ttl", render_shapes),
+        )
+    }
     # `DESIGN.md` renders from itself, not from the vocabulary, so it takes no
-    # `vocabulary=` and is not in the loop above. The direction is the opposite
-    # one: an appendix owns its prose, and the index is downstream of it.
+    # `vocabulary=` and is not in the comprehension above. The direction is the
+    # opposite one: an appendix owns its prose, and the index is downstream of it.
     design = root / "DESIGN.md"
-    design.write_text(design_record.render_principles(design.read_text()))
+    rendered[design] = design_record.render_principles(design.read_text())
+    # Nothing is written until every render succeeds: this one refuses a heading
+    # it cannot read, and a half-applied render leaves two surfaces current.
+    for path, text in rendered.items():
+        path.write_text(text)
 
 
 if __name__ == "__main__":

@@ -3,9 +3,9 @@
 `CONTEXT.md` §11 names the genres Saffron records a decision in. Two of them are
 modelled here — a **principle** and the **revision appendix** that contributed it
 — because those two have instances a document already carries and a surface that
-reads them. `EvidenceRecord` and `SpikeVerdict` are named in §11 and deliberately
-absent from the vocabulary: they have no reader yet, and a term with no reader is
-what `tests/ontology/test_no_dead_terms.py` deletes.
+reads them. `EvidenceRecord` and `SpikeVerdict` are named in `CONTEXT.md` §11 and
+deliberately absent from the vocabulary: they have no reader yet, and a term with
+no reader is what `tests/ontology/test_no_dead_terms.py` deletes.
 
 **`DESIGN.md` stays authoritative.** The prose is not stored in the vocabulary and
 is never written back to; this module reads it and renders one index from it. That
@@ -20,7 +20,6 @@ nothing under `saffron/` imports a graph library.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import rdflib
 
@@ -44,6 +43,9 @@ _PRINCIPLE = re.compile(r"^(\d+)\. \*\*")
 # The `Rev` column of the appendix index, which carries what a heading cannot:
 # Appendix G covers rev 8 and rev 10, and rev 10 appears in no title.
 _INDEX_ROW = re.compile(r"^\| \*\*([A-Z])\*\* \| ([0-9, ]+) \|")
+# Every appendix title states a rev, so the hand-written `Rev` cell above has
+# a second reading to agree with. It is the row that carries the extra ones.
+_HEADING_REVISION = re.compile(r"\brev (\d+)\b")
 
 
 def _claim(lines: list[str], start: int) -> str:
@@ -81,9 +83,18 @@ def parse(design: str) -> rdflib.Graph:
         if found := APPENDIX.match(line):
             letter = found.group(1)
             appendix = SAFFRON[f"Appendix{letter}"]
+            revisions = covers.get(letter, [])
+            stated = _HEADING_REVISION.search(line)
+            # A row with no letter is `RevisionAppendixShape`'s to refuse; this
+            # catches the typo'd cell, which is well-formed and wrong.
+            if stated and revisions and int(stated.group(1)) not in revisions:
+                raise ValueError(
+                    f"Appendix {letter}: the heading says rev {stated.group(1)}, "
+                    f"the index row says {revisions}"
+                )
             graph.add((appendix, rdflib.RDF.type, SAFFRON.RevisionAppendix))
             graph.add((appendix, SAFFRON.appendixLetter, rdflib.Literal(letter)))
-            for revision in covers.get(letter, []):
+            for revision in revisions:
                 graph.add((appendix, SAFFRON.coversRevision, rdflib.Literal(revision)))
             continue
         if (found := _PRINCIPLE.match(line)) and appendix is not None:
@@ -96,23 +107,36 @@ def parse(design: str) -> rdflib.Graph:
     return graph
 
 
+def _one(graph: rdflib.Graph, node: rdflib.term.Node, of: rdflib.URIRef) -> str:
+    """The single value of a property `PrincipleShape` says occurs exactly once.
+
+    Raised rather than ignored: a shape validates a graph someone remembered to
+    validate, and this renderer writes the file every spec cites. Two values is
+    the likelier direction — `_PRINCIPLE` reads any numbered list inside an
+    appendix whose first item opens bold — and `graph.value` would pick one.
+    """
+    found = list(graph.objects(node, of))
+    if len(found) != 1:
+        raise ValueError(f"{node}: {len(found)} values for {of}, expected exactly 1")
+    return str(found[0])
+
+
 def principles(graph: rdflib.Graph) -> list[tuple[int, str, str]]:
     """(number, claim, appendix letter), in number order."""
     rows = []
     for node in graph.subjects(rdflib.RDF.type, SAFFRON.Principle):
-        number = graph.value(node, SAFFRON.principleNumber)
-        claim = graph.value(node, SAFFRON.claim)
-        appendix = graph.value(node, SAFFRON.contributedBy)
-        letter = (
-            None if appendix is None else graph.value(appendix, SAFFRON.appendixLetter)
-        )
-        # Raised rather than ignored: `PrincipleShape` says these are mandatory,
-        # but a shape validates a graph someone remembered to validate, and this
-        # renderer writes the file every spec cites.
-        if number is None or claim is None or letter is None:
-            raise ValueError(f"{node}: missing a number, a claim, or an appendix")
-        rows.append((int(str(number)), str(claim), str(letter)))
+        number = _one(graph, node, SAFFRON.principleNumber)
+        claim = _one(graph, node, SAFFRON.claim)
+        appendix = _one(graph, node, SAFFRON.contributedBy)
+        letter = _one(graph, rdflib.URIRef(appendix), SAFFRON.appendixLetter)
+        rows.append((int(number), claim, letter))
     return sorted(rows)
+
+
+def _escaped(claim: str) -> str:
+    """A `|` inside a claim closes its cell early, and the currency test compares
+    render to render — it would stay green over a table that had lost a column."""
+    return claim.replace("|", r"\|")
 
 
 ANCHOR = "## Principles — an index"
@@ -122,9 +146,9 @@ _HEADER = "| # | The claim | From |\n|---|---|---|\n"
 def render_principles(text: str) -> str:
     """Rewrite the principle index's table body from `DESIGN.md`'s own appendices.
 
-    The span is the run of table rows after the header, which is why the header
-    is emitted rather than matched: a table whose header drifted would otherwise
-    have its rows appended below the old ones.
+    The header locates the span and is re-emitted rather than left in place, so
+    a drifted one is refused by name below. Matching it loosely instead would
+    append the new rows underneath the old ones.
     """
     rows = principles(parse(text))
     if not rows:
@@ -132,8 +156,12 @@ def render_principles(text: str) -> str:
     if text.count(ANCHOR) != 1:
         raise ValueError(f"{ANCHOR}: expected exactly one occurrence")
 
-    body = "".join(f"| {n} | {claim} | {letter} |\n" for n, claim, letter in rows)
-    start = text.index(_HEADER, text.index(ANCHOR))
+    body = "".join(
+        f"| {n} | {_escaped(claim)} | {letter} |\n" for n, claim, letter in rows
+    )
+    start = text.find(_HEADER, text.index(ANCHOR))
+    if start == -1:
+        raise ValueError(f"{ANCHOR}: no `{_HEADER.splitlines()[0]}` header under it")
     end = start + len(_HEADER)
     while end < len(text) and text[end] == "|":
         end = text.index("\n", end) + 1
@@ -143,12 +171,3 @@ def render_principles(text: str) -> str:
     if replaced and not all(ln.startswith("| ") for ln in replaced.splitlines()):
         raise ValueError("the span after the principle header is not a table body")
     return text[:start] + _HEADER + body + text[end:]
-
-
-def main() -> None:  # pragma: no cover - exercised through `ontology.render`
-    design = Path(__file__).resolve().parents[1] / "DESIGN.md"
-    design.write_text(render_principles(design.read_text()))
-
-
-if __name__ == "__main__":  # pragma: no cover
-    main()
