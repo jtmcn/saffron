@@ -184,13 +184,8 @@ def run_lens(
         report = _Report.model_validate(json.loads(parse_output_block(attempt.text)))
     except (ValueError, ValidationError) as exc:
         remaining = budget_usd - attempt.cost_usd_est
-        # "Meaningful" = at least what the failed turn itself cost. Anything
-        # less caps the retry below the turn it is meant to repair, so it
-        # would run out before it could even match the length of output that
-        # just failed to parse — not worth the extra call. A missing
-        # session_id (should not happen after a completed turn, but §5.3's
-        # rule is fatal-not-silent) folds into the same can't-usefully-retry
-        # branch rather than resuming into a fresh, memoryless session.
+        # A retry given less than the turn that just failed spent cannot
+        # finish, so it is refused rather than started.
         if remaining < attempt.cost_usd_est or not attempt.session_id:
             return LensReview(
                 lens, cost_usd=attempt.cost_usd_est, error=f"not the schema: {exc}"

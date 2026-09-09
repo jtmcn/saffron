@@ -281,15 +281,20 @@ def test_a_well_formed_first_output_never_reprompts():
 def test_a_reprompt_does_not_fire_without_meaningful_budget_left():
     """Constraint: nothing meaningful left after the first attempt means the
     schema error returns as-is, exactly as it did before this change existed.
-    "Meaningful" here is defined as at least what the failed turn itself
-    spent — the retry is scripted to blow up if called a second time, which
-    would surface as a StopIteration rather than an assertion failure."""
+
+    The discriminating case, not the degenerate one: budget 2.0, a first turn
+    that cost 1.5, leaving 0.5 remaining — budget is not exhausted (remaining
+    > 0), but it is less than what the failed turn itself spent, which is the
+    shipped rule (`remaining < attempt.cost_usd_est`). A `remaining <= 0`
+    rule would wrongly retry here, so this is what would catch that mutant.
+    The agent is scripted to blow up if called a second time, which would
+    surface as a StopIteration rather than a clean assertion failure."""
     record: list[dict] = []
-    agent = _lens_agent("not json", record=record, costs=[0.1])
-    result = _run_lens(agent, budget_usd=0.05)
+    agent = _lens_agent("not json", record=record, costs=[1.5])
+    result = _run_lens(agent, budget_usd=2.0)
     assert result.error and result.error.startswith("not the schema")
     assert "re-prompt" not in result.error
-    assert result.cost_usd == pytest.approx(0.1)
+    assert result.cost_usd == pytest.approx(1.5)
     assert len(record) == 1
 
 
