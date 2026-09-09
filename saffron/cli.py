@@ -8,7 +8,6 @@ import hashlib
 import os
 import subprocess
 import tempfile
-import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -16,19 +15,15 @@ from pathlib import Path
 
 from saffron import preflight
 from saffron.batch import run_batch
-from saffron.cell.session import _SHA as _RESOLVED_SHA
-from saffron.cell.session import CellOutcome, CellSpec, run_one_cell
-from saffron.events import Event, EventLog, Preflight, describe
+from saffron.cell.session import CellOutcome
 from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
 from saffron.reconcile import ReconcileResult, reconcile
 from saffron.replay import replay
-from saffron.repos import image as repo_image
 from saffron.repos import mirror as git_mirror
 from saffron.repos.policy import PolicyError, load_policy
 from saffron.scheduler import (
-    DEPENDENCY_WAITING_STATES,
     Candidate,
     GhRunner,
     Refusal,
@@ -37,6 +32,7 @@ from saffron.scheduler import (
     retirement_refusal,
     run_gh,
 )
+from saffron.task import PinnedBase, ResolvedCeilings, run_task, spec_ceilings
 from saffron.watch import UnknownTask, follow, once
 
 DEFAULT_HOME = Path.home() / ".saffron"
@@ -193,39 +189,41 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _ceilings(args: argparse.Namespace, spec: Spec) -> tuple[dict, str]:
+def _ceilings(args: argparse.Namespace, spec: Spec) -> ResolvedCeilings:
     """What bounds this run, and where each bound came from.
 
     The flag wins when it is given; the spec governs otherwise. Both are real
     inputs — the flag is how an operator overrides a spec they are re-running,
     and the spec is how the author states what the task should cost.
+
+    Three labels, not two. Calling a model default "spec" sends the operator
+    to grep a spec file for a line that is not in it — the same
+    not-given-is-given-the-default conflation this function exists to end,
+    moved from argparse to pydantic. `task.spec_ceilings` owns the two that
+    do not involve a flag, so the unattended path draws the same distinction
+    without an `argparse.Namespace` it has no use for.
+
+    Renders nothing: the line is `events.Ceilings` and `run_task` emits it, so
+    the attended and unattended paths cannot say different things about the
+    same three numbers.
     """
-    declared = {
-        "budget_usd": spec.budget_usd,
-        "max_attempts": spec.max_attempts,
-        "max_turns": spec.max_turns,
-    }
-    given = {
-        "budget_usd": args.budget,
-        "max_attempts": args.max_attempts,
-        "max_turns": args.max_turns,
-    }
-    chosen = {
-        name: given[name] if given[name] is not None else declared[name]
-        for name in declared
-    }
-
-    def _source(name: str) -> str:
-        # Three labels, not two. Calling a model default "(spec)" sends the
-        # operator to grep a spec file for a line that is not in it — the same
-        # not-given-is-given-the-default conflation this function exists to
-        # end, moved from argparse to pydantic.
-        if given[name] is not None:
-            return "flag"
-        return "spec" if name in spec.model_fields_set else "default"
-
-    line = ", ".join(f"{name}={chosen[name]} ({_source(name)})" for name in declared)
-    return chosen, line
+    declared = spec_ceilings(spec)
+    return ResolvedCeilings(
+        budget_usd=args.budget if args.budget is not None else declared.budget_usd,
+        max_attempts=(
+            args.max_attempts
+            if args.max_attempts is not None
+            else declared.max_attempts
+        ),
+        max_turns=(
+            args.max_turns if args.max_turns is not None else declared.max_turns
+        ),
+        budget_source="flag" if args.budget is not None else declared.budget_source,
+        attempts_source=(
+            "flag" if args.max_attempts is not None else declared.attempts_source
+        ),
+        turns_source="flag" if args.max_turns is not None else declared.turns_source,
+    )
 
 
 def _protected_paths(exported: Path, unread: list[str] | None = None) -> list[str]:
@@ -287,106 +285,6 @@ def _retirement_markers_at(mirror: Path, base_sha: str) -> list[tuple[str, str]]
         return git_mirror.retirement_markers(mirror, base_sha)
     except git_mirror.GitError:
         return []
-
-
-def _resolve_stacked_on(
-    ledger: Ledger,
-    repo_id: int | None,
-    depends_on: list[str],
-    *,
-    mirror: Path,
-    url: str,
-    spec_id: str,
-    emit: Callable[[Event], None] = lambda event: print(describe(event)),
-) -> tuple[str | None, str | None]:
-    """The tree sha `CellSpec.stacked_on` should carry and the branch name
-    `package()`'s stacking parameter should carry, or `(None, None)`
-    together for an ordinary unstacked cell — never one without the other,
-    since a worktree stacked on a sha whose pull request targets `main` is
-    exactly the defect this spec exists to close (`SA-0026`).
-
-    Only `depends_on[0]` is ever consulted — K=1. A spec naming a second,
-    unmerged parent does not stack on it too: nothing here orders one
-    batch's tasks against each other yet, so a grandchild (or a second
-    unmerged parent) is out of reach by design, not by oversight.
-
-    Among that one parent's task rows in this repo, across every `spec_sha`
-    it has ever carried (`Ledger.tasks_by_spec_id` — this attended path never
-    reads the parent's spec file, so it has no current sha to filter on, the
-    same reach `scheduler.build_queue`'s `merged_anywhere` already takes),
-    the newest row in a `scheduler.DEPENDENCY_WAITING_STATES` state is "the
-    parent's task": the same waiting-outranks-dead precedence
-    `scheduler._dependency_refusal` gives it. Not the *same* row, though —
-    that function reads only the parent's current `spec_sha`, and a parent
-    whose spec text moved after its pull request opened has a waiting row
-    here and none there. The branch is real either way; it is the gate, not
-    this resolver, that decides whether the dependent runs at all.
-    A parent merged, retired, dead, unrun, or never in the
-    ledger at all has no such row, and this function does not distinguish
-    why — every one of those needs no stacking (its work, if any, is already
-    on the default branch) or was never a candidate the gate should have
-    admitted, which is not this attended path's check to make.
-
-    **The ledger supplies the branch; the branch supplies the sha.** A row's
-    `pushed_sha` is written once, by PACKAGE, and every review fix an operator
-    commits by hand moves the branch past it — so the recorded sha is a tree
-    the parent's pull request may no longer show. Worse, nothing puts that
-    commit where the cell can read it: `ensure_mirror` fetches `+refs/*:refs/*`
-    from the operator's *local checkout* with `--prune`, so a parent branch the
-    operator does not happen to have locally is deleted from the mirror, and
-    the cell's own seed (`worktree.py`) fetches the mirror's default refspec.
-    Fetching the branch here fixes both — it is `fetch_default_branch`'s own
-    argument (`package.py`), one branch over.
-
-    `ParentGone` is an unstacked cell, not a failure: a parent branch that is
-    deleted has either merged, in which case its work is on the default branch
-    already, or been abandoned, in which case cutting from the default branch
-    is the safe answer. Neither is worth killing an attended run over.
-
-    A `pushed_sha` that is absent, empty, or not a resolved sha still yields
-    `(None, None)` rather than reaching `CellSpec`: `__post_init__`
-    (`SA-0022`) raises `ValueError` on anything else, and an operator's
-    `saffron cell` must not die on a row this attended path cannot fully
-    trust. A row with no `branch` recorded is treated the same way, since
-    the two values this returns travel together.
-    """
-    if repo_id is None or not depends_on:
-        return None, None
-    parent_id = depends_on[0]
-    rows = ledger.tasks_by_spec_id(repo_id, parent_id)
-    waiting = [row for row in rows if row["state"] in DEPENDENCY_WAITING_STATES]
-    if not waiting:
-        return None, None
-    newest = waiting[-1]
-    branch = newest["branch"]
-    # Refused here rather than left to the fetch: a row that evidences no push
-    # has no branch worth fetching, and "branch None is gone" would send an
-    # operator to look for a deleted ref instead of at the row.
-    if not branch or not _RESOLVED_SHA.fullmatch(newest["pushed_sha"] or ""):
-        emit(
-            Preflight(
-                timestamp=time.time(),
-                spec_id=spec_id,
-                step="unstacked",
-                detail=f"{parent_id}'s newest waiting task records no pushed branch",
-            )
-        )
-        return None, None
-    try:
-        head = package_phase.fetch_parent_branch(mirror, url, branch)
-    except package_phase.ParentGone as gone:
-        emit(
-            Preflight(
-                timestamp=time.time(),
-                spec_id=spec_id,
-                step="unstacked",
-                detail=str(gone),
-            )
-        )
-        return None, None
-    if not _RESOLVED_SHA.fullmatch(head):
-        return None, None
-    return head, branch
 
 
 def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
@@ -453,85 +351,24 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         print(f"{spec.id:<10} refused  {retirement}")
         return 1
 
-    # Printed, not merely applied: three ceilings govern a run and only one of
+    # Recorded, not merely applied: three ceilings govern a run and only one of
     # them appears in the exit. SA-0005 was stopped by the turn ceiling with
     # more than half its budget left, and nothing on the way in had said what
-    # any of the three were.
-    ceilings, in_force = _ceilings(args, spec)
-    print(f"ceilings: {in_force}")
+    # any of the three were. `run_task` emits it, so the unattended path — the
+    # one whose stdout is the night's only record — says it too.
+    ceilings = _ceilings(args, spec)
 
-    # Built once, here, and handed to every phase this command drives —
-    # `_resolve_stacked_on` below, `run_one_cell`, and `package()` — so a
-    # task's PACKAGE events land in the same `events.jsonl` as everything
-    # before them. `run_one_cell`'s own default (session.py's
-    # `_default_emit`) is this same shape; duplicated rather than imported,
-    # the way `_when` is duplicated across modules instead of reaching into a
-    # forbidden one.
-    task_dir = out_dir / spec.id
-    event_log = EventLog(task_dir)
-
-    def emit(event: Event) -> None:
-        line = describe(event)
-        if line:
-            print(line)
-        event_log.append(event)
-
-    # Resolved from `depends_on[0]`'s newest waiting task, or `(None, None)`
-    # together for an ordinary unstacked cell (`_resolve_stacked_on`,
-    # `SA-0026`) — the one place a `CellSpec` is built, so this is the only
-    # place either has to be read.
-    stacked_on, target_branch = _resolve_stacked_on(
-        ledger,
-        repo_id,
-        spec.depends_on,
-        mirror=mirror,
-        url=url,
-        spec_id=spec.id,
-        emit=emit,
+    outcome = run_task(
+        spec,
+        spec_sha,
+        ceilings=ceilings,
+        base=PinnedBase(mirror=mirror, url=url, base_sha=base_sha),
+        repo_id=repo_id,
+        repo=repo,
+        ledger=ledger,
+        out_dir=out_dir,
+        token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
     )
-    # Printed for the same reason the ceilings are: which tree a run was cut
-    # from is not recoverable from the exit code, and a stacked run that
-    # surprises an operator is one they cannot diagnose.
-    if stacked_on is not None:
-        print(f"stacked on {target_branch} @ {stacked_on[:12]}")
-
-    cell_spec = CellSpec(
-        spec_id=spec.id,
-        spec_sha=spec_sha,
-        branch=f"saffron/{spec.id}",
-        base_sha=base_sha,
-        touches=spec.touches,
-        spec_type=spec.type,
-        body=spec.body,
-        forbidden=spec.forbidden,
-        acceptance=spec.acceptance,
-        risk=spec.risk,
-        stacked_on=stacked_on,
-        **ceilings,
-    )
-    outcome = run_one_cell(
-        cell_spec, repo=repo, mirror=mirror, ledger=ledger, out_dir=out_dir, emit=emit
-    )
-    if outcome.state == "READY_FOR_REVIEW":
-        result = package_phase.package(
-            outcome,
-            spec=spec,
-            repo=repo,
-            mirror=mirror,
-            # Derived, not rebuilt: preflight already built this tag.
-            image=repo_image.cell_tag(repo),
-            ledger=ledger,
-            out_dir=out_dir,
-            token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
-            # `None` unless `stacked_on` is too: a stacked worktree must not
-            # reach a pull request that is not.
-            parent_branch=target_branch,
-            emit=emit,
-        )
-        print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
-        return CELL_EXIT.get(result.state, 1)
-
-    print(f"{spec.id:<10} {outcome.state}")
     return CELL_EXIT.get(outcome.state, 1)
 
 
@@ -544,10 +381,10 @@ def _batch_runner(
     url: str,
 ) -> Callable[[Candidate], CellOutcome]:
     """What turns a candidate into a cell (`run_batch`'s own phrase for the
-    callable it takes with no default) — `_run_cell`'s shape, reused rather
-    than reimplemented: the same `_resolve_stacked_on` call, the same
-    `CellSpec` construction, the same `run_one_cell` call and, on
-    `READY_FOR_REVIEW`, the same `package_phase.package` call.
+    callable it takes with no default) — the adapter, and only the adapter:
+    `task.run_task` is the driver both this and `_run_cell` go through, so
+    the two paths can no longer drift the way they did when each built a
+    `CellSpec` of its own.
 
     Two things differ from the attended path, and only two. The spec comes
     from a candidate the scan already resolved, not a path an operator
@@ -556,79 +393,26 @@ def _batch_runner(
     task. And the ceilings come straight off the spec's own fields: a batch
     has no per-task flag to override them with, so there is nothing for
     `_ceilings` to arbitrate.
-
-    `outcome.state` is overwritten with the packaging result's own state when
-    packaging runs, so the `CellOutcome` this hands back to `run_batch`
-    reflects what actually happened to the task — `MERGE_FAILED` included —
-    rather than the pre-packaging `READY_FOR_REVIEW` every packaged task
-    would otherwise report to the breaker.
     """
 
     def run(candidate: Candidate) -> CellOutcome:
         spec = candidate.spec
-        task_dir = out_dir / spec.id
-        event_log = EventLog(task_dir)
-
-        def emit(event: Event) -> None:
-            line = describe(event)
-            if line:
-                print(line)
-            event_log.append(event)
-
-        stacked_on, target_branch = _resolve_stacked_on(
-            ledger,
-            resolved.repo_id,
-            spec.depends_on,
-            mirror=resolved.mirror,
-            url=url,
-            spec_id=spec.id,
-            emit=emit,
-        )
-        if stacked_on is not None:
-            print(f"stacked on {target_branch} @ {stacked_on[:12]}")
-
-        cell_spec = CellSpec(
-            spec_id=spec.id,
-            spec_sha=candidate.spec_sha,
-            branch=f"saffron/{spec.id}",
-            base_sha=resolved.base_sha,
-            touches=spec.touches,
-            spec_type=spec.type,
-            body=spec.body,
-            forbidden=spec.forbidden,
-            acceptance=spec.acceptance,
-            risk=spec.risk,
-            stacked_on=stacked_on,
-            budget_usd=spec.budget_usd,
-            max_attempts=spec.max_attempts,
-            max_turns=spec.max_turns,
-        )
-        outcome = run_one_cell(
-            cell_spec,
+        # No flag can reach a batch's task, so the spec's own fields are the
+        # whole arbitration — `_ceilings`' other half.
+        ceilings = spec_ceilings(spec)
+        return run_task(
+            spec,
+            candidate.spec_sha,
+            ceilings=ceilings,
+            base=PinnedBase(
+                mirror=resolved.mirror, url=url, base_sha=resolved.base_sha
+            ),
+            repo_id=resolved.repo_id,
             repo=repo,
-            mirror=resolved.mirror,
             ledger=ledger,
             out_dir=out_dir,
-            emit=emit,
+            token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
         )
-        if outcome.state == "READY_FOR_REVIEW":
-            result = package_phase.package(
-                outcome,
-                spec=spec,
-                repo=repo,
-                mirror=resolved.mirror,
-                image=repo_image.cell_tag(repo),
-                ledger=ledger,
-                out_dir=out_dir,
-                token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
-                parent_branch=target_branch,
-                emit=emit,
-            )
-            print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
-            outcome.state = result.state
-        else:
-            print(f"{spec.id:<10} {outcome.state}")
-        return outcome
 
     return run
 
@@ -663,24 +447,6 @@ class QueueResolution:
     reconciled: ReconcileResult
     gh_failures: list[str]
     policy_unread: list[str]
-
-
-@dataclass(frozen=True, kw_only=True)
-class PinnedBase:
-    """The tree one night is pinned to — one fact about one repo, carried
-    together rather than as three adjacent parameters. `check_readiness`
-    already derives exactly these three values and returns them on
-    `Readiness`; this is what a caller hands back to `_resolve_queue` so the
-    derivation happens once per run, not once per caller.
-
-    `kw_only` for the reason `check_readiness` itself is keyword-only about
-    `scratch`/`home`: `url` and `base_sha` are adjacent and both `str`, and
-    positionally `PinnedBase(mirror, base_sha, url)` type-checks cleanly and
-    puts the URL in `base_sha` — measured, before the keyword-only was added."""
-
-    mirror: Path
-    url: str
-    base_sha: str
 
 
 def _resolve_queue(
@@ -867,9 +633,10 @@ def _print_batch_plan(
     line in the log and no ledger row. "An empty queue" and "three specs all
     refused" produced byte-identical output.
 
-    The header is the unattended twin of `_run_cell`'s `ceilings:` line: at
-    7am the log has to say what the night set out to do before it says what
-    became of it.
+    The header is the night's own twin of a task's `ceilings:` line — that
+    one is `events.Ceilings` now and both paths emit it; this is the batch
+    scoped fact beside it: at 7am the log has to say what the night set out to
+    do before it says what became of it.
     """
     deadline = until.strftime("%Y-%m-%d %H:%M") if until is not None else "none"
     print(

@@ -14,11 +14,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from saffron import cli, intake, preflight
+from saffron import cli, intake, preflight, task
 from saffron.cell import session
 from saffron.cell.session import CellOutcome
 from saffron.cli import main
-from saffron.events import PhaseStart, Preflight, describe, read_log
+from saffron.events import Ceilings, PhaseStart, Preflight, describe, read_log
 from saffron.ledger import Ledger
 from saffron.phases import package
 from saffron.reconcile import ReconcileResult
@@ -116,7 +116,7 @@ def test_the_exit_code_distinguishes_the_terminal_states(monkeypatch, tmp_path):
 
     states = iter(["READY_FOR_REVIEW", "EXHAUSTED", "PREFLIGHT_FAILED"])
     monkeypatch.setattr(
-        cli,
+        task,
         "run_one_cell",
         lambda *a, **k: session.CellOutcome(
             state=next(states), task_id=1, run_id=1, task_dir=tmp_path
@@ -132,7 +132,7 @@ def test_the_exit_code_distinguishes_the_terminal_states(monkeypatch, tmp_path):
     def _crash(*_a, **_k):
         raise session.CellSessionError("the turn returned no session_id")
 
-    monkeypatch.setattr(cli, "run_one_cell", _crash)
+    monkeypatch.setattr(task, "run_one_cell", _crash)
     assert cli.main(argv) == 2
 
 
@@ -235,7 +235,7 @@ def test_package_events_land_in_the_runs_own_log(monkeypatch, tmp_path):
             state="READY_FOR_REVIEW", pr_url="https://github.com/o/r/pull/1"
         )
 
-    monkeypatch.setattr(cli, "run_one_cell", _fake_run_one_cell)
+    monkeypatch.setattr(task, "run_one_cell", _fake_run_one_cell)
     monkeypatch.setattr(cli.package_phase, "package", _fake_package)
 
     home = tmp_path / "home"
@@ -284,7 +284,7 @@ def test_a_setup_failure_before_the_cell_exits_two_as_well(monkeypatch, tmp_path
         def _raise(*_a, _broke=broke, **_k):
             raise _broke
 
-        monkeypatch.setattr(cli, "run_one_cell", _raise)
+        monkeypatch.setattr(task, "run_one_cell", _raise)
         assert cli.main(argv) == 2
 
     # Including the ones no tuple would have named: an OSError, a sqlite3
@@ -294,7 +294,7 @@ def test_a_setup_failure_before_the_cell_exits_two_as_well(monkeypatch, tmp_path
         def _raise_other(*_a, _broke=broke, **_k):
             raise _broke
 
-        monkeypatch.setattr(cli, "run_one_cell", _raise_other)
+        monkeypatch.setattr(task, "run_one_cell", _raise_other)
         assert cli.main(argv) == 2
 
     # And the spec itself, which is read before `run_one_cell` is ever called.
@@ -325,7 +325,7 @@ def test_a_package_that_fails_and_one_that_breaks_exit_differently(
         lambda mirror, url: ("main", "a" * 40),
     )
     monkeypatch.setattr(
-        cli,
+        task,
         "run_one_cell",
         lambda *a, **k: session.CellOutcome(
             state="READY_FOR_REVIEW", task_id=1, run_id=1, task_dir=tmp_path
@@ -362,7 +362,7 @@ def test_a_non_github_origin_fails_before_the_cell_starts(tmp_path, monkeypatch)
         started = True
         raise SystemExit(0)
 
-    monkeypatch.setattr("saffron.cli.run_one_cell", _started)
+    monkeypatch.setattr("saffron.task.run_one_cell", _started)
     # Matched, not merely typed: a `fetch_default_branch` that reached gitlab
     # and failed raises the same class, and would pass a bare `raises`.
     with pytest.raises(package.PackageError, match="cannot read owner/repo"):
@@ -465,7 +465,7 @@ def test_a_spec_whose_touches_cannot_reach_its_own_marker_refuses_before_the_cel
         started = True
         raise SystemExit(0)
 
-    monkeypatch.setattr("saffron.cli.run_one_cell", _started)
+    monkeypatch.setattr("saffron.task.run_one_cell", _started)
     ledger = Ledger(tmp_path / "l.db")
 
     result = cli._run_cell(args, ledger, tmp_path / "out")
@@ -503,7 +503,7 @@ def _capture_cell_spec(monkeypatch, repo, tmp_path, namespace, capsys, ledger=No
         raise SystemExit(0)
 
     monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
-    monkeypatch.setattr("saffron.cli.run_one_cell", _capture)
+    monkeypatch.setattr("saffron.task.run_one_cell", _capture)
     with pytest.raises(SystemExit):
         cli._run_cell(namespace, ledger or Ledger(tmp_path / "l.db"), tmp_path / "out")
     return captured["spec"], capsys.readouterr().out
@@ -703,7 +703,7 @@ def test_a_stacked_worktree_passes_its_parents_branch_to_package(
 
     monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
     monkeypatch.setattr(
-        "saffron.cli.run_one_cell",
+        "saffron.task.run_one_cell",
         lambda cell_spec, **k: session.CellOutcome(
             state="READY_FOR_REVIEW", task_id=1, run_id=1, task_dir=tmp_path
         ),
@@ -744,7 +744,7 @@ def test_an_unstacked_worktree_passes_no_parent_branch_to_package(
 
     monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
     monkeypatch.setattr(
-        "saffron.cli.run_one_cell",
+        "saffron.task.run_one_cell",
         lambda cell_spec, **k: session.CellOutcome(
             state="READY_FOR_REVIEW", task_id=1, run_id=1, task_dir=tmp_path
         ),
@@ -777,7 +777,7 @@ def test_only_the_first_depends_on_entry_is_a_stacking_candidate(tmp_path):
     second = _seed_task(ledger, repo_id, spec_id="SY-2", state="READY_FOR_REVIEW")
     ledger.record_push(second, "b" * 40)
 
-    stacked_on, parent_branch = cli._resolve_stacked_on(
+    stacked_on, parent_branch = task._resolve_stacked_on(
         ledger,
         repo_id,
         ["SY-1", "SY-2"],
@@ -825,7 +825,7 @@ def test_which_of_a_parents_rows_supplies_the_sha_is_the_newest_waiting_one(
         if state == "READY_FOR_REVIEW":
             waiting_row = task_id
 
-    stacked_on, parent_branch = cli._resolve_stacked_on(
+    stacked_on, parent_branch = task._resolve_stacked_on(
         ledger,
         repo_id,
         ["SA-0013"],
@@ -844,7 +844,7 @@ def test_which_of_a_parents_rows_supplies_the_sha_is_the_newest_waiting_one(
     # same real branch resolve to nothing: it is the state that decides.
     assert waiting_row is not None
     ledger.set_task_state(waiting_row, "ORPHANED")
-    assert cli._resolve_stacked_on(
+    assert task._resolve_stacked_on(
         ledger,
         repo_id,
         ["SA-0013"],
@@ -882,7 +882,7 @@ def test_the_newest_of_several_waiting_rows_wins_not_the_first(tmp_path):
         )
         ledger.record_push(task_id, "1" * 40)
 
-    stacked_on, branch = cli._resolve_stacked_on(
+    stacked_on, branch = task._resolve_stacked_on(
         ledger,
         repo_id,
         ["SY-9"],
@@ -919,7 +919,7 @@ def test_an_unresolved_pushed_sha_yields_an_unstacked_cell_not_a_construction_er
     if bad_sha is not None:
         ledger.record_push(task_id, bad_sha)
 
-    stacked_on, parent_branch = cli._resolve_stacked_on(
+    stacked_on, parent_branch = task._resolve_stacked_on(
         ledger,
         repo_id,
         ["SY-9"],
@@ -949,7 +949,7 @@ def test_a_row_with_no_branch_recorded_resolves_unstacked(tmp_path):
     ledger._db.commit()
 
     seen = []
-    assert cli._resolve_stacked_on(
+    assert task._resolve_stacked_on(
         ledger,
         repo_id,
         ["SY-9"],
@@ -986,7 +986,7 @@ def test_a_parent_branch_that_is_gone_says_so_through_emit(tmp_path):
     ledger.record_push(task_id, "1" * 40)
 
     seen = []
-    assert cli._resolve_stacked_on(
+    assert task._resolve_stacked_on(
         ledger,
         repo_id,
         ["SY-9"],
@@ -1017,7 +1017,7 @@ def test_no_repo_id_or_no_depends_on_resolves_unstacked(tmp_path):
     ledger.record_push(task_id, "1" * 40)
 
     resolve = functools.partial(
-        cli._resolve_stacked_on,
+        task._resolve_stacked_on,
         mirror=mirror,
         url=url,
         spec_id="SY-9",
@@ -1083,7 +1083,7 @@ def test_the_base_is_the_remote_default_branch_not_the_checkout(tmp_path, monkey
     # A local-path origin, not shaped like a forge remote, so the preflight
     # slug is faked rather than the fixture contorted into a github.com URL.
     monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
-    monkeypatch.setattr("saffron.cli.run_one_cell", _capture)
+    monkeypatch.setattr("saffron.task.run_one_cell", _capture)
     with pytest.raises(SystemExit):
         cli._run_cell(
             _namespace(repo, tmp_path), Ledger(tmp_path / "l.db"), tmp_path / "out"
@@ -1153,7 +1153,7 @@ def test_one_cell_still_prepares_itself_in_order_after_the_hoist(tmp_path, monke
         order.append("cell")
         raise SystemExit(0)
 
-    monkeypatch.setattr(cli, "run_one_cell", _started)
+    monkeypatch.setattr(task, "run_one_cell", _started)
 
     repo = _repo_with_commit(tmp_path / "repo")
     with pytest.raises(SystemExit):
@@ -1198,7 +1198,7 @@ def test_a_spec_whose_touches_are_protected_refuses_before_the_cell_starts(
         started = True
         raise SystemExit(0)
 
-    monkeypatch.setattr("saffron.cli.run_one_cell", _started)
+    monkeypatch.setattr("saffron.task.run_one_cell", _started)
     ledger = Ledger(tmp_path / "l.db")
 
     result = cli._run_cell(args, ledger, tmp_path / "out")
@@ -1315,7 +1315,7 @@ def test_the_attended_run_says_the_protected_check_did_not_run(
     )
     monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
     monkeypatch.setattr(
-        "saffron.cli.run_one_cell",
+        "saffron.task.run_one_cell",
         lambda *_a, **_k: (_ for _ in ()).throw(SystemExit(0)),
     )
     ledger = Ledger(tmp_path / "l.db")
@@ -1343,7 +1343,7 @@ def test_a_repo_with_no_saffron_dir_is_absence_and_says_nothing(
     args = _namespace(repo, tmp_path)
     monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
     monkeypatch.setattr(
-        "saffron.cli.run_one_cell",
+        "saffron.task.run_one_cell",
         lambda *_a, **_k: (_ for _ in ()).throw(SystemExit(0)),
     )
     ledger = Ledger(tmp_path / "l.db")
@@ -1380,7 +1380,7 @@ def test_the_attended_run_does_not_refuse_a_path_its_own_forbidden_bars(
     monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
     reached = []
     monkeypatch.setattr(
-        "saffron.cli.run_one_cell",
+        "saffron.task.run_one_cell",
         lambda *_a, **_k: (reached.append(True), (_ for _ in ()).throw(SystemExit(0)))[
             0
         ],
@@ -2053,7 +2053,7 @@ def test_a_resolution_given_a_pinned_base_does_not_derive_one(tmp_path, monkeypa
         home,
         ledger,
         stamp_orphaned=False,
-        pinned=cli.PinnedBase(mirror=mirror, url=url, base_sha=base_sha),
+        pinned=task.PinnedBase(mirror=mirror, url=url, base_sha=base_sha),
     )
 
     assert counts == {"mirror": 0, "remote": 0, "fetch": 0}
@@ -2714,7 +2714,7 @@ def test_the_adapter_packages_a_ready_task_and_reports_what_packaging_made_of_it
         run_id=1,
         task_dir=tmp_path / "out" / "SY-1",
     )
-    monkeypatch.setattr(cli, "run_one_cell", lambda *a, **k: outcome)
+    monkeypatch.setattr(task, "run_one_cell", lambda *a, **k: outcome)
 
     packaged: dict = {}
 
@@ -2783,6 +2783,83 @@ def test_a_night_says_what_its_own_scan_could_not_check(tmp_path, monkeypatch, c
     assert "policy.yaml at this base_sha could not be read" in printed
 
 
+def test_the_unattended_path_records_the_ceilings_that_bound_each_task(
+    tmp_path, monkeypatch, capsys
+):
+    """A night keeps no record of what bounded each of its tasks.
+
+    `_run_cell` prints all three on the way in, for the reason `_ceilings`
+    exists: `SA-0005` died at the turn ceiling with more than half its budget
+    left and nothing said what any of the three were. The unattended path
+    never resolved them — it read the spec's fields straight into `CellSpec`,
+    correctly, and said nothing — so the one path whose stdout *is* the
+    night's only human-readable record was the one that kept no record.
+
+    `budget_usd` survives in `tasks.budget_usd`; `max_attempts` and
+    `max_turns` are in no column and in no event, and the `Budget` event
+    carries a `limit` only for the ceiling that actually fired. So a task
+    that ended any other way left both unrecoverable.
+    """
+    repo = _local_origin(tmp_path)
+    mirror, url = _mirror_of(tmp_path, repo)
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, url)
+
+    resolved = cli.QueueResolution(
+        repo_id=repo_id,
+        mirror=mirror,
+        base_sha="a" * 40,
+        repo_slug=None,
+        exported=tmp_path,
+        candidates=[],
+        refusals=[],
+        reconciled=cli.ReconcileResult(),
+        gh_failures=[],
+        policy_unread=[],
+    )
+    runner = cli._batch_runner(
+        resolved, repo=repo, ledger=ledger, out_dir=tmp_path / "out", url=url
+    )
+
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-1", state="EXHAUSTED")
+    monkeypatch.setattr(
+        task,
+        "run_one_cell",
+        lambda *a, **k: CellOutcome(
+            state="EXHAUSTED",
+            task_id=task_id,
+            run_id=1,
+            task_dir=tmp_path / "out" / "SY-1",
+        ),
+    )
+
+    # `max_turns` declared, the other two left to their model defaults: the
+    # three-label distinction `_ceilings` draws is the whole point of the
+    # record, so a fixture that declares all three or none would not show it.
+    candidate = Candidate(
+        path=Path("SY-1.md"),
+        spec=intake.Spec(
+            id="SY-1", title="t", type="chore", touches=["src/**"], max_turns=42
+        ),
+        spec_sha="s" * 64,
+        task_id=task_id,
+    )
+    runner(candidate)
+    ledger.close()
+
+    printed = capsys.readouterr().out
+    assert "ceilings:" in printed, "the night says nothing about what bound the task"
+    assert "max_turns=42 (spec)" in printed
+    assert "max_attempts=" in printed and "(default)" in printed
+
+    # Both halves of the record, not just the one a terminal scrolls away:
+    # `saffron watch` and any morning report read `events.jsonl`, so a line
+    # that printed and did not persist would leave the night's durable record
+    # exactly as empty as it was.
+    logged = [e for e in read_log(tmp_path / "out" / "SY-1") if isinstance(e, Ceilings)]
+    assert [(e.max_turns, e.turns_source) for e in logged] == [(42, "spec")]
+
+
 def test_the_adapter_stacks_a_child_on_its_parents_branch(tmp_path, monkeypatch):
     """The adapter this command hands the loop resolves what each candidate
     stacks on, exactly as the attended path already does: a child runs cut
@@ -2818,7 +2895,7 @@ def test_the_adapter_stacks_a_child_on_its_parents_branch(tmp_path, monkeypatch)
         captured["spec"] = cell_spec
         raise SystemExit(0)
 
-    monkeypatch.setattr(cli, "run_one_cell", _capture)
+    monkeypatch.setattr(task, "run_one_cell", _capture)
 
     candidate = Candidate(
         path=Path("SY-1.md"),
@@ -2876,7 +2953,7 @@ def test_the_adapter_stacks_on_the_first_dependency_only(tmp_path, monkeypatch):
         captured["spec"] = cell_spec
         raise SystemExit(0)
 
-    monkeypatch.setattr(cli, "run_one_cell", _capture)
+    monkeypatch.setattr(task, "run_one_cell", _capture)
 
     candidate = Candidate(
         path=Path("SY-1.md"),
@@ -2948,7 +3025,7 @@ def test_the_adapter_packages_a_stacked_child_against_its_parents_branch(
 
     task_id = _seed_task(ledger, repo_id, spec_id="SY-1", state="READY_FOR_REVIEW")
     monkeypatch.setattr(
-        cli,
+        task,
         "run_one_cell",
         lambda *a, **k: CellOutcome(
             state="READY_FOR_REVIEW",
@@ -3012,7 +3089,7 @@ def test_an_unstacked_task_is_packaged_against_no_parent(tmp_path, monkeypatch):
 
     task_id = _seed_task(ledger, repo_id, spec_id="SY-2", state="READY_FOR_REVIEW")
     monkeypatch.setattr(
-        cli,
+        task,
         "run_one_cell",
         lambda *a, **k: CellOutcome(
             state="READY_FOR_REVIEW",

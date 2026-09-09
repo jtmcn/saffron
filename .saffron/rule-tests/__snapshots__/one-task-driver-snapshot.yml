@@ -1,0 +1,32 @@
+id: one-task-driver
+snapshots:
+  outcome = run_one_cell(cell_spec, repo=repo, mirror=mirror):
+    labels:
+    - source: run_one_cell(cell_spec, repo=repo, mirror=mirror)
+      style: primary
+      start: 10
+      end: 59
+    - source: run_one_cell
+      style: secondary
+      start: 10
+      end: 22
+  outcome = saffron.cell.session.run_one_cell(cell_spec):
+    labels:
+    - source: saffron.cell.session.run_one_cell(cell_spec)
+      style: primary
+      start: 10
+      end: 54
+    - source: saffron.cell.session.run_one_cell
+      style: secondary
+      start: 10
+      end: 43
+  outcome = session.run_one_cell(cell_spec, repo=repo):
+    labels:
+    - source: session.run_one_cell(cell_spec, repo=repo)
+      style: primary
+      start: 10
+      end: 52
+    - source: session.run_one_cell
+      style: secondary
+      start: 10
+      end: 30
