@@ -528,21 +528,25 @@ what the factory produced; this is why the factory has the shape it has.
 **Principle**: A numbered lesson in one global sequence, stating what generalizes
 past the case that found it. Contributed by the revision appendix that found it,
 never renumbered, cited as "principle 34".
-_Avoid_: "lesson", "learning", "takeaway", and "rule" — a rule is enforced by a
-gate or a `CLAUDE.md` line, and a principle is enforced by nothing.
+_Avoid_: "lesson", "learning", "takeaway", and "rule" — **rule** already carries
+three senses here (a rule of conduct in `CLAUDE.md`, a numbered rule inside a
+`DESIGN.md` section such as §4.6.2b, and the rules a gate runs), so it cannot
+also carry this one.
 
 **Revision appendix**: A `DESIGN.md` appendix recording what a revision found —
 the live run, the spike, or the read-through, and what it cost. It carries the
 narrative a principle compresses. Cited by letter: "Appendix G". Usually one per
-revision, and not reliably so: Appendix G carries rev 8 and rev 10, because rev 10
-closed by spike the question rev 8 opened.
+revision, and not reliably so: a revision that *closes* an earlier revision's
+question lands in that question's appendix rather than opening its own. Appendix G
+carries rev 8 and rev 10, Appendix O rev 18 and rev 19.
 _Avoid_: "the changelog" (an appendix records what was *learned*, not what
 changed), "release notes", "the postmortem".
 
 **Evidence record**: A dated document under `docs/evidence/` holding what one run
 or one spike actually produced. The primary record — a measured fact beats a
 reasoned one, and this is where the measurement lives.
-_Avoid_: "the writeup", "the report", "the log" (that is a batch tree artifact).
+_Avoid_: "the writeup", "the report" (that is `saffron/report/`'s morning index),
+"the log" (that is a batch tree artifact).
 
 **Spike verdict**: A bounded document answering the one question a spike was run to
 answer, carrying the clause that would reopen it (`ontology/RATIONALE.md`). A

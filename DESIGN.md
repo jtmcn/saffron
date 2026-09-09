@@ -1446,7 +1446,7 @@ The appendices are ordered by *when* a thing was learned, which is the wrong ord
 for finding one. This is the other index. It is navigation, not authority: where it
 disagrees with an appendix, the appendix is right.
 
-| | Rev | The question it settles | Principles |
+| App. | Rev | The question it settles | Principles |
 |---|---|---|---|
 | **A** | 2 | Nine adversarial-review findings on rev 1 — DIAGNOSE proposes `touches`, `coverage` goes advisory, no vote over disjoint lenses | 1–9 |
 | **B** | 3 | Is a factory ontology worth building? (`SA-0001`, §4.6) | 10–11 |
@@ -1462,13 +1462,15 @@ disagrees with an appendix, the appendix is right.
 | **L** | 14 | The critic built, and measured against a known-bad diff rather than argued for | 50–51 |
 | **M** | 15 | What *running* the rejected gate found, beyond what reading it found — three corrections in twenty minutes | 52 |
 | **N** | 16 | What tree a task is about, and who may write the thing that judges it (backlog items 11 and 12) | 53–55 |
-| **O** | 18 | Is there an *operational* case for the ontology, beyond the analytical one `RATIONALE.md` closed? | 56 |
+| **O** | 18, 19 | Is there an *operational* case for the ontology, beyond the analytical one `RATIONALE.md` closed? Rev 19 ran the spike and closed it — *The result* | 56 |
 
-**Four revisions have no appendix, and none needs one.** Rev 1 is the document. Rev
-10 is inside Appendix G, which is why G carries two revisions and "one appendix per
-revision" is the wrong reading. Rev 17 is in §4.2.1 and §6 with
-`docs/evidence/2026-08-25-morning-queue-from-real-rows.md`; rev 19 is in the status
-line with `docs/evidence/2026-09-04-refusal-predicate-two-arms.md`.
+**Two revisions have no appendix, and neither needs one.** Rev 1 is the document.
+Rev 17 is in §4.2.1 and §6 with
+`docs/evidence/2026-08-25-morning-queue-from-real-rows.md`. Two more only look
+missing: rev 10 is inside Appendix G and rev 19 inside Appendix O, under *The
+result*. That is why those two rows carry two revisions each, and why "one appendix
+per revision" is the wrong reading — a revision that closes an earlier revision's
+question lands in that question's appendix rather than opening its own.
 
 The principles are one sequence across every appendix, allocated as a block when the
 appendix is written. That is why an appendix is coarse and chronological rather than
