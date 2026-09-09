@@ -493,7 +493,7 @@ def test_the_hook_and_the_gate_scan_the_same_files():
     )
 
 
-def test_a_rules_exemptions_are_the_three_named_files():
+def test_a_rules_exemptions_are_the_named_files():
     """The half of a rule that `ast-grep test` structurally cannot see, and that
     reaching a file cannot certify either. Measured: widening the container
     rule's `ignores` to `saffron/cell/**` leaves `ast-grep test` reporting
@@ -501,8 +501,9 @@ def test_a_rules_exemptions_are_the_three_named_files():
     violation — a rule disarmed without a snippet changing.
 
     Reach is not the check, because a wider glob reaches *more* files. These are
-    three named files and one test tree; they are not supposed to move without a
-    person saying so."""
+    four named files and one test tree; they are not supposed to move without a
+    person saying so. The count left this test's *name* when the fourth arrived,
+    so that adding a rule is one deliberate edit here rather than two."""
     exemptions = {
         yaml.safe_load(p.read_text())["id"]: yaml.safe_load(p.read_text()).get(
             "ignores"
@@ -513,6 +514,7 @@ def test_a_rules_exemptions_are_the_three_named_files():
         "container-runtime-is-runtime-only": ["saffron/cell/runtime.py"],
         "agent-sdk-import-is-runner-only": ["images/agent_runner.py"],
         "gate-tool-must-be-executed": ["tests/**"],
+        "one-task-driver": ["saffron/task.py"],
     }
 
 

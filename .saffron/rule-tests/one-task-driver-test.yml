@@ -1,0 +1,18 @@
+id: one-task-driver
+valid:
+  # What both commands do now: go through the one driver.
+  - 'outcome = run_task(spec, spec_sha, ceilings=c, base=b)'
+  - 'return run_task(spec, candidate.spec_sha, ceilings=c, base=b)'
+  # Naming the driver is fine; a second caller invoking it is not. Comments and
+  # docstrings are not parsed as calls at all, so the two shapes that *are*
+  # parsed and must stay green are a mention as data and an attribute read.
+  - 'note = "run_one_cell stops at READY_FOR_REVIEW"'
+  - 'wrapped = session.run_one_cell'
+invalid:
+  # The bare call — `cli._run_cell`'s, before the driver moved out.
+  - 'outcome = run_one_cell(cell_spec, repo=repo, mirror=mirror)'
+  # The qualified call, which the bare regex cannot see because the function
+  # field is an attribute node rather than an identifier. Measured: with only
+  # the first branch, this walked past.
+  - 'outcome = session.run_one_cell(cell_spec, repo=repo)'
+  - 'outcome = saffron.cell.session.run_one_cell(cell_spec)'

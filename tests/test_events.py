@@ -1,5 +1,5 @@
 """SA-0029/SA-0040: the host event vocabulary, its durable log, and
-`describe()` — the renderer that proves the nine kinds are sufficient for the
+`describe()` — the renderer that proves the ten kinds are sufficient for the
 64 `watch(...)` call sites. `SA-0030` is the first real producer — the tests
 from "The seam" heading down drive `saffron.cell.session.run_one_cell` for
 real (stubbed runtime, no network, no cell) and read back what it emitted.
@@ -27,6 +27,7 @@ from saffron.events import (
     Baseline,
     Budget,
     Ceiling,
+    Ceilings,
     Event,
     EventLog,
     GateResult,
@@ -422,9 +423,9 @@ def test_the_wire_keys_are_pinned_for_every_kind(tmp_path, event):
 
 
 def test_the_union_and_the_wire_table_cannot_drift(tmp_path):
-    """Both are hand-maintained lists of the same nine kinds."""
+    """Both are hand-maintained lists of the same ten kinds."""
     assert set(typing.get_args(Event)) == set(_KINDS.values())
-    assert len(_KINDS) == 9
+    assert len(_KINDS) == 10
     for cls in _KINDS.values():
         assert "kind" not in {f.name for f in dc_fields(cls)}, "would clobber the tag"
 
@@ -514,6 +515,20 @@ _CASES: list[tuple[Event, str]] = [
     (
         Preflight(timestamp=1.0, spec_id="x", step="cell_up", detail="c up"),
         "cell: c up",
+    ),
+    (
+        Ceilings(
+            timestamp=1.0,
+            spec_id="x",
+            budget_usd=5.0,
+            max_attempts=3,
+            max_turns=42,
+            budget_source="flag",
+            attempts_source="default",
+            turns_source="spec",
+        ),
+        "ceilings: budget_usd=5.0 (flag), max_attempts=3 (default), "
+        "max_turns=42 (spec)",
     ),
     (
         Preflight(timestamp=1.0, spec_id="x", step="unstacked", detail="gone"),
@@ -759,8 +774,8 @@ def test_the_table_did_not_quietly_lose_a_row():
 
     `SA-0030` and `SA-0031` migrate these call sites and will move this count.
     That is the point: moving it is a deliberate edit, not a silent one."""
-    assert len(FAMILIES) == 57
-    assert len({f.prefix for f in FAMILIES}) == 57
+    assert len(FAMILIES) == 58
+    assert len({f.prefix for f in FAMILIES}) == 58
 
 
 def test_the_duplicated_agent_renderer_still_matches_its_original():

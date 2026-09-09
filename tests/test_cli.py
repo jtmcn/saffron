@@ -2783,6 +2783,76 @@ def test_a_night_says_what_its_own_scan_could_not_check(tmp_path, monkeypatch, c
     assert "policy.yaml at this base_sha could not be read" in printed
 
 
+def test_the_unattended_path_records_the_ceilings_that_bound_each_task(
+    tmp_path, monkeypatch, capsys
+):
+    """A night keeps no record of what bounded each of its tasks.
+
+    `_run_cell` prints all three on the way in, for the reason `_ceilings`
+    exists: `SA-0005` died at the turn ceiling with more than half its budget
+    left and nothing said what any of the three were. The unattended path
+    never resolved them — it read the spec's fields straight into `CellSpec`,
+    correctly, and said nothing — so the one path whose stdout *is* the
+    night's only human-readable record was the one that kept no record.
+
+    `budget_usd` survives in `tasks.budget_usd`; `max_attempts` and
+    `max_turns` are in no column and in no event, and the `Budget` event
+    carries a `limit` only for the ceiling that actually fired. So a task
+    that ended any other way left both unrecoverable.
+    """
+    repo = _local_origin(tmp_path)
+    mirror, url = _mirror_of(tmp_path, repo)
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, url)
+
+    resolved = cli.QueueResolution(
+        repo_id=repo_id,
+        mirror=mirror,
+        base_sha="a" * 40,
+        repo_slug=None,
+        exported=tmp_path,
+        candidates=[],
+        refusals=[],
+        reconciled=cli.ReconcileResult(),
+        gh_failures=[],
+        policy_unread=[],
+    )
+    runner = cli._batch_runner(
+        resolved, repo=repo, ledger=ledger, out_dir=tmp_path / "out", url=url
+    )
+
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-1", state="EXHAUSTED")
+    monkeypatch.setattr(
+        task,
+        "run_one_cell",
+        lambda *a, **k: CellOutcome(
+            state="EXHAUSTED",
+            task_id=task_id,
+            run_id=1,
+            task_dir=tmp_path / "out" / "SY-1",
+        ),
+    )
+
+    # `max_turns` declared, the other two left to their model defaults: the
+    # three-label distinction `_ceilings` draws is the whole point of the
+    # record, so a fixture that declares all three or none would not show it.
+    candidate = Candidate(
+        path=Path("SY-1.md"),
+        spec=intake.Spec(
+            id="SY-1", title="t", type="chore", touches=["src/**"], max_turns=42
+        ),
+        spec_sha="s" * 64,
+        task_id=task_id,
+    )
+    runner(candidate)
+    ledger.close()
+
+    printed = capsys.readouterr().out
+    assert "ceilings:" in printed, "the night says nothing about what bound the task"
+    assert "max_turns=42 (spec)" in printed
+    assert "max_attempts=" in printed and "(default)" in printed
+
+
 def test_the_adapter_stacks_a_child_on_its_parents_branch(tmp_path, monkeypatch):
     """The adapter this command hands the loop resolves what each candidate
     stacks on, exactly as the attended path already does: a child runs cut

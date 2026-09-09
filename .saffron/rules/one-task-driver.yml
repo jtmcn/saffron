@@ -1,0 +1,38 @@
+id: one-task-driver
+language: python
+severity: error
+message: only saffron/task.py may call run_one_cell
+note: |
+  Driving one task was written twice — `cli._run_cell` and
+  `cli._batch_runner.run` — and the copies drifted: only the attended one
+  resolved and recorded the three ceilings, so the path that runs with nobody
+  watching kept no record of what bounded it. `task.run_task` is the one
+  driver; a second caller of `run_one_cell` is that defect starting over.
+  Call `run_task`, or move what you are building into `saffron/task.py`.
+
+# The two trees Appendix G's rule also governs, and for the same reason: this
+# is about what `saffron/` ships. `tests/**` drives `run_one_cell` directly to
+# witness the supervisor itself, which is correct and must stay green — the
+# rule names the trees it is about rather than exempting the tests, so a scope
+# that excludes something does not read as an oversight.
+files:
+  - "saffron/**/*.py"
+ignores:
+  - "saffron/task.py"
+
+# The call, not the name: `cli.py` imports nothing from `cell.session` now, but
+# a future reader may legitimately mention `run_one_cell` in a comment or a
+# docstring, and a text search cannot tell those from an invocation. Structural
+# for the reason `container-runtime-is-runtime-only` is.
+# ponytail: reached through an alias (`f = run_one_cell; f(...)`) or an
+# attribute on a rebound module, this walks past. The ceiling is deliberate
+# evasion; the two branches below are the forms a refactor reaches for.
+rule:
+  kind: call
+  has:
+    field: function
+    any:
+      - regex: '^run_one_cell$'
+      # `session.run_one_cell(...)` — the qualified form, which the bare regex
+      # above does not see because the function field is an attribute node.
+      - regex: '\.run_one_cell$'

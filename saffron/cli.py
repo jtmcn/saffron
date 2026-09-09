@@ -16,6 +16,7 @@ from pathlib import Path
 from saffron import preflight
 from saffron.batch import run_batch
 from saffron.cell.session import CellOutcome
+from saffron.events import CeilingSource
 from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
@@ -32,7 +33,7 @@ from saffron.scheduler import (
     retirement_refusal,
     run_gh,
 )
-from saffron.task import PinnedBase, run_task
+from saffron.task import PinnedBase, run_task, spec_ceilings
 from saffron.watch import UnknownTask, follow, once
 
 DEFAULT_HOME = Path.home() / ".saffron"
@@ -189,39 +190,38 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _ceilings(args: argparse.Namespace, spec: Spec) -> tuple[dict, str]:
+def _ceilings(
+    args: argparse.Namespace, spec: Spec
+) -> tuple[dict, dict[str, CeilingSource]]:
     """What bounds this run, and where each bound came from.
 
     The flag wins when it is given; the spec governs otherwise. Both are real
     inputs — the flag is how an operator overrides a spec they are re-running,
     and the spec is how the author states what the task should cost.
+
+    Three labels, not two. Calling a model default "spec" sends the operator
+    to grep a spec file for a line that is not in it — the same
+    not-given-is-given-the-default conflation this function exists to end,
+    moved from argparse to pydantic. `task.spec_ceilings` owns the two that
+    do not involve a flag, so the unattended path draws the same distinction
+    without an `argparse.Namespace` it has no use for.
+
+    Renders nothing: the line is `events.Ceilings` and `run_task` emits it, so
+    the attended and unattended paths cannot say different things about the
+    same three numbers.
     """
-    declared = {
-        "budget_usd": spec.budget_usd,
-        "max_attempts": spec.max_attempts,
-        "max_turns": spec.max_turns,
-    }
+    declared, sources = spec_ceilings(spec)
     given = {
         "budget_usd": args.budget,
         "max_attempts": args.max_attempts,
         "max_turns": args.max_turns,
     }
-    chosen = {
-        name: given[name] if given[name] is not None else declared[name]
-        for name in declared
-    }
-
-    def _source(name: str) -> str:
-        # Three labels, not two. Calling a model default "(spec)" sends the
-        # operator to grep a spec file for a line that is not in it — the same
-        # not-given-is-given-the-default conflation this function exists to
-        # end, moved from argparse to pydantic.
-        if given[name] is not None:
-            return "flag"
-        return "spec" if name in spec.model_fields_set else "default"
-
-    line = ", ".join(f"{name}={chosen[name]} ({_source(name)})" for name in declared)
-    return chosen, line
+    chosen = dict(declared)
+    for name, value in given.items():
+        if value is not None:
+            chosen[name] = value
+            sources[name] = "flag"
+    return chosen, sources
 
 
 def _protected_paths(exported: Path, unread: list[str] | None = None) -> list[str]:
@@ -349,17 +349,18 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         print(f"{spec.id:<10} refused  {retirement}")
         return 1
 
-    # Printed, not merely applied: three ceilings govern a run and only one of
+    # Recorded, not merely applied: three ceilings govern a run and only one of
     # them appears in the exit. SA-0005 was stopped by the turn ceiling with
     # more than half its budget left, and nothing on the way in had said what
-    # any of the three were.
-    ceilings, in_force = _ceilings(args, spec)
-    print(f"ceilings: {in_force}")
+    # any of the three were. `run_task` emits it, so the unattended path — the
+    # one whose stdout is the night's only record — says it too.
+    ceilings, ceiling_sources = _ceilings(args, spec)
 
     outcome = run_task(
         spec,
         spec_sha,
         ceilings=ceilings,
+        ceiling_sources=ceiling_sources,
         base=PinnedBase(mirror=mirror, url=url, base_sha=base_sha),
         repo_id=repo_id,
         repo=repo,
@@ -395,14 +396,14 @@ def _batch_runner(
 
     def run(candidate: Candidate) -> CellOutcome:
         spec = candidate.spec
+        # No flag can reach a batch's task, so the spec's own fields are the
+        # whole arbitration — `_ceilings`' other half.
+        ceilings, ceiling_sources = spec_ceilings(spec)
         return run_task(
             spec,
             candidate.spec_sha,
-            ceilings={
-                "budget_usd": spec.budget_usd,
-                "max_attempts": spec.max_attempts,
-                "max_turns": spec.max_turns,
-            },
+            ceilings=ceilings,
+            ceiling_sources=ceiling_sources,
             base=PinnedBase(
                 mirror=resolved.mirror, url=url, base_sha=resolved.base_sha
             ),

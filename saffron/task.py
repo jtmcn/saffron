@@ -35,7 +35,7 @@ from pathlib import Path
 
 from saffron.cell.session import _SHA as _RESOLVED_SHA
 from saffron.cell.session import CellOutcome, CellSpec, run_one_cell
-from saffron.events import Event, EventLog, Preflight, describe
+from saffron.events import Ceilings, CeilingSource, Event, EventLog, Preflight, describe
 from saffron.intake import Spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
@@ -59,6 +59,27 @@ class PinnedBase:
     mirror: Path
     url: str
     base_sha: str
+
+
+def spec_ceilings(spec: Spec) -> tuple[dict, dict[str, CeilingSource]]:
+    """The three ceilings a spec declares, and where each came from.
+
+    The half of `cli._ceilings` that has nothing to do with flags, so the
+    unattended path can say what bound a task without growing an `argparse`
+    dependency it has no use for. "spec" only where the author actually wrote
+    the field: `model_fields_set` is what separates a declared value from a
+    model default that happens to equal it.
+    """
+    values = {
+        "budget_usd": spec.budget_usd,
+        "max_attempts": spec.max_attempts,
+        "max_turns": spec.max_turns,
+    }
+    sources: dict[str, CeilingSource] = {
+        name: ("spec" if name in spec.model_fields_set else "default")
+        for name in values
+    }
+    return values, sources
 
 
 def _resolve_stacked_on(
@@ -166,6 +187,7 @@ def run_task(
     spec_sha: str,
     *,
     ceilings: dict,
+    ceiling_sources: dict[str, CeilingSource],
     base: PinnedBase,
     repo_id: int | None,
     repo: Path,
@@ -180,7 +202,13 @@ def run_task(
     `ceilings` arrives resolved — `{budget_usd, max_attempts, max_turns}` —
     because only the attended path has flags to arbitrate against the spec
     (`cli._ceilings`); a batch has none, so there is nothing to arbitrate and
-    no reason for `argparse` to reach this far.
+    no reason for `argparse` to reach this far. `ceiling_sources` travels with
+    it so the record can say *where* each value came from, which is the whole
+    of what makes the line worth printing: a number with no provenance sends
+    an operator to grep a spec file for a line that may not be in it.
+
+    Emitted here rather than by either caller, because being printed on one
+    path and not the other is the defect this module exists to end.
 
     `state` on the returned outcome is the *packaging* result's where
     packaging ran, so a caller reads what actually happened to the task —
@@ -200,6 +228,19 @@ def run_task(
             if line:
                 print(line)
             log.append(event)
+
+    emit(
+        Ceilings(
+            timestamp=time.time(),
+            spec_id=spec.id,
+            budget_usd=ceilings["budget_usd"],
+            max_attempts=ceilings["max_attempts"],
+            max_turns=ceilings["max_turns"],
+            budget_source=ceiling_sources["budget_usd"],
+            attempts_source=ceiling_sources["max_attempts"],
+            turns_source=ceiling_sources["max_turns"],
+        )
+    )
 
     # Resolved from `depends_on[0]`'s newest waiting task, or `(None, None)`
     # together for an ordinary unstacked cell (`_resolve_stacked_on`,

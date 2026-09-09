@@ -6,11 +6,11 @@ them for the operator. Host-side the arrangement is inverted — 64 call sites
 across `cell/session.py`, `phases/*.py` and `task.py` author prose straight into
 `watch()`, and the structure behind each line dies with the terminal scroll.
 
-This module is the fix: nine frozen dataclasses — one per kind, never one
+This module is the fix: ten frozen dataclasses — one per kind, never one
 class with a `type` string, so a future renderer knows what it holds — an
-`Event` union naming all nine, a tiny durable log, and `describe()`, which
+`Event` union naming all ten, a tiny durable log, and `describe()`, which
 turns one back into the prose above. `FAMILIES` below is the proof that the
-nine kinds are sufficient: one row per call-site shape, citing the file and
+ten kinds are sufficient: one row per call-site shape, citing the file and
 symbol it lives in (never a line number — DESIGN.md's own citation rule) and
 the kind `describe()` renders it from. Two shapes resisted typing outright and
 are named as `FINDINGS` instead of forced into a `message: str` — the escape
@@ -74,6 +74,9 @@ LineLabel = Literal[
 
 Ceiling = Literal["budget_usd", "max_attempts", "max_turns"]
 
+# Where a ceiling's value came from. Three, not two: see `Ceilings`.
+CeilingSource = Literal["flag", "spec", "default"]
+
 TerminalReason = Literal[
     # Cut off at the turn ceiling with no budget left to attempt a salvage turn.
     "cut_off_no_salvage_room",
@@ -100,6 +103,33 @@ class Preflight:
     spec_id: str
     step: str
     detail: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class Ceilings:
+    """What bounded this task, said on the way in — the three ceilings and
+    where each came from.
+
+    A tenth kind, and the reason is the one item 18 gives: `SA-0005` was
+    stopped by the turn ceiling with more than half its budget left, and
+    nothing on the way in had said what any of the three were. `Budget`
+    is the other half of that story and not this one — it fires when a
+    ceiling is *reached*, carrying only the one that fired, so a task that
+    ends any other way leaves no trace of what it was allowed.
+
+    `*_source` is three labels rather than two: calling a model default
+    "spec" sends an operator to grep a spec file for a line that is not in
+    it, which is the conflation `cli._ceilings` exists to end.
+    """
+
+    timestamp: float
+    spec_id: str
+    budget_usd: float
+    max_attempts: int
+    max_turns: int
+    budget_source: CeilingSource = "default"
+    attempts_source: CeilingSource = "default"
+    turns_source: CeilingSource = "default"
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,6 +297,7 @@ class Teardown:
 
 Event = (
     Preflight
+    | Ceilings
     | Baseline
     | PhaseStart
     | Attempt
@@ -281,6 +312,7 @@ _KINDS: dict[str, type[Event]] = {
     cls.__name__: cls
     for cls in (
         Preflight,
+        Ceilings,
         Baseline,
         PhaseStart,
         Attempt,
@@ -459,6 +491,17 @@ def describe(event: Event) -> str:
             return f"unstacked: {event.detail}"
         return f"preflight: {event.detail}"
 
+    if isinstance(event, Ceilings):
+        # The line `cli._run_cell` printed verbatim before this kind existed:
+        # `_ceilings` formatted it there and the unattended path had none.
+        return "ceilings: " + ", ".join(
+            (
+                f"budget_usd={event.budget_usd} ({event.budget_source})",
+                f"max_attempts={event.max_attempts} ({event.attempts_source})",
+                f"max_turns={event.max_turns} ({event.turns_source})",
+            )
+        )
+
     if isinstance(event, Baseline):
         # The real call site (`_drive_cell`) prints the joined gate-status
         # line unconditionally, then — only on a broken toolchain — a second
@@ -503,7 +546,7 @@ def describe(event: Event) -> str:
         # No call site prints one alone today — every printed line joins
         # several (`Baseline`) or reports only a count (`Attempt`). Still
         # rendered: a future consumer (a report page, `SA-0036`) reads one
-        # `GateResult` at a time, and "the nine kinds render" cannot mean
+        # `GateResult` at a time, and "the ten kinds render" cannot mean
         # "eight of them."
         return f"gates: {event.gate}={event.status}"
 
@@ -557,7 +600,7 @@ class _Family:
     kind: type
 
 
-# The proof `SA-0029`'s nine kinds are sufficient for the 64 call sites across
+# The proof this vocabulary's ten kinds are sufficient for the 64 call sites across
 # `cell/session.py`, `phases/{implement,package,review,rebut}.py` and
 # `task.py`. Grouped by rendered shape, not by literal call site: two call
 # sites that print the same shape (both `SALVAGE: the session failed — …`
@@ -578,6 +621,7 @@ _IA = "phases/implement.py:run_agent"
 _IC = "phases/implement.py:_consume"
 _PKG = "phases/package.py:package"
 _TASK = "task.py:_resolve_stacked_on"
+_RT = "task.py:run_task"
 
 FAMILIES: tuple[_Family, ...] = (
     _Family("preflight: starting the proxy", _S, Preflight),
@@ -587,6 +631,7 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("preflight: probing", _S, Preflight),
     _Family("cell:", _S, Preflight),
     _Family("unstacked:", _TASK, Preflight),
+    _Family("ceilings:", _RT, Ceilings),
     _Family("baseline: (joined gate=status)", _S, Baseline),
     _Family("baseline errored in", _S, Baseline),
     _Family("SCOPE: proposal refused", _PC, PhaseStart),
@@ -642,7 +687,7 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("PACKAGE: could not remove", _PKG, PhaseStart),
 )
 
-# The two call-site shapes `FAMILIES` above could not fit into the nine kinds
+# The two call-site shapes `FAMILIES` above could not fit into the ten kinds
 # without a `message: str` standing in for a shape of its own — named here
 # rather than forced, per this spec's own acceptance criteria.
 FINDINGS: tuple[tuple[str, str, str], ...] = (
