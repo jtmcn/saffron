@@ -196,6 +196,19 @@ The field makes that literal instead of aspirational. It is still a prompt chang
 therefore moves the baseline — so it **lands before pass 2, never between passes**, the same
 rule the `Defect` locations change followed.
 
+Three changes move the baseline, not two, and the third is easy to miss: the schema field,
+the prompt paragraph, and **`extra="forbid"` on `_Reported`**, which makes an unexpected key
+reject the whole report rather than be dropped. All three land together, before pass 2.
+
+`extra="forbid"` is what makes the schema exact enough to be worth requiring — a lens that
+answers `mutant` instead of `probe` must not read as a lens that answered — but it prices a
+malformed finding at the whole report: one re-prompt follows, carrying pydantic's own message
+(`f"{exc}\n\n{EXTRACTION_PROMPT}"`, so the missing field is named), and a second failure sets
+`LensReview.error`, which drops all three lenses' findings for that run. **Pass 2's drop rate
+is therefore newly sensitive to a schema the adequacy lens has never been asked for.** Watch
+it on the first fixture rather than at the end of the pass: a lens dropping there is a prompt
+problem to fix before seven more fixtures pay for it.
+
 ## What a run does, per fixture
 
 1. Run the `tests` gate on the unmutated head tree once. This is the baseline.
@@ -277,7 +290,7 @@ takes everywhere else: name the limit rather than collapse it.
 
 ## Where it lives
 
-- `harness/mutation_check.py` — new. Composes `source_mutated` and the `tests` gate, applies
+- `harness/probe_check.py` — new. Composes `source_mutated` and the `tests` gate, applies
   the three-way verdict, aggregates per fixture. It measures rather than gates, so `harness/`
   and not `saffron/gates/core/`, per CLAUDE.md's split — and it is the part that can be
   silently wrong, so it is the part with tests.
@@ -320,6 +333,14 @@ mutated line, so "the head has not moved" is not the invariant a cache would nee
 The cost is bounded and worth stating: the probes run inside a cell that a pass already
 brings up per fixture, so this adds no model spend and no image build. It adds suite runs —
 one baseline plus one per adequacy finding. Pass 1 filed ten adequacy findings across eight
-fixtures, and this repo's suite at the fixture heads runs 85-100 seconds, so the order is
-half an hour of wall clock added to a pass that already takes about eighty minutes. The plan
-measures that rather than inheriting this estimate.
+fixtures, and this repo's suite at the fixture heads runs **78-104 seconds** — five runs at
+fixture heads during this branch's review measured 78.0, 78.3, 82.7, 83.3 and 103.9 seconds,
+which straddles an earlier draft's quoted "85-100" at both ends. So the order is half an
+hour of wall clock added to a pass that already takes about eighty minutes.
+
+Those five runs are the review's, not a pass's. **The cost of the probes to a real pass is
+still unmeasured**, because the measurement spends money and needs a credential, so the
+operator runs it: the plan's Task 5 Step 4 records the baseline's wall clock, each probe's,
+and the probe count from one fixture end to end, and the figures replace this paragraph's
+estimate then. Until that lands, the half hour above is arithmetic over a measured suite
+time, not a measured pass.
