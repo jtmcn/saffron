@@ -35,7 +35,7 @@ Every recorded `head_sha` is gone from live history. Head is the ledger's `pushe
 | SA-0062 | 154 | `91b6eda8..78a25a23` | 2 (shipped) |
 | SA-0063 | 158 | `132a2f8d..f76931df` | 2 |
 
-**SA-0063, not SA-0064.** The design named SA-0064 for item 86's two defects. That is wrong and this plan corrects it: `_notes` is *introduced* by SA-0063, whose diff touches `saffron/report/pr_body.py`; SA-0064's diff touches `package.py`, `tests/test_package.py` and `tests/test_session.py` and never reaches `pr_body.py`. A finding outside the diff cannot anchor, and an unanchored finding is never seen — so declared against SA-0064 both defects would score zero forever and read as a lens failure.
+**SA-0063, not SA-0064.** The design named SA-0064 for item 86's two defects. That is wrong and this plan corrects it: `_notes` is *introduced* by SA-0063, whose diff touches `saffron/report/pr_body.py`; SA-0064's diff touches `package.py`, `tests/test_package.py` and `tests/test_session.py` and never reaches `pr_body.py`. SA-0064's diff never mentions `pr_body.py`, so a lens reviewing it has no reason to open the file — and SA-0064's first ledger row has no `pushed_sha` at all, so the recovery rule could not have produced that fixture in the first place.
 
 ---
 
@@ -211,8 +211,8 @@ def _finding(file, line, claim):
 
 def test_the_aggregate_counts_defects_and_not_fixtures(sa0062, one_defect_fixture):
     """A fixture carrying two defects is two observations. Averaging within it
-    first would throw one away, and the corpus is deliberately uneven — five
-    fixtures carry one defect and three carry two."""
+    first would throw one away, and the corpus is deliberately uneven — four
+    fixtures carry one defect and four carry two."""
     scored = corpus.score_corpus(
         [sa0062, one_defect_fixture],
         {sa0062.spec_id: [_run()], one_defect_fixture.spec_id: [_run()]},
@@ -870,7 +870,7 @@ Model it on `docs/evidence/scripts/2026-09-07-lens-scoring.py`, which stays exac
             )
 ```
 
-The image builds once — `image.cell_tag` keys off the repo path, not the tree — so each later fixture pays only for a worktree at its own head.
+`image.cell_tag` keys off the repo path, not the tree, so every fixture builds under the same tag — but `cell_up` calls `image.build_cell_image` unconditionally on every call, so each fixture still pays for a `container build`, expected to be a layer-cache hit after the first but unmeasured.
 
 - [ ] **Step 3: Score and render across fixtures**
 
@@ -933,6 +933,8 @@ Expected: ~$13, ~80 minutes. Do not start a batch while it runs — it takes the
 - [ ] **Step 2: Triage every miss by hand**
 
 For each defect scored 0, read that fixture's `run-1.json` and decide: did the lens miss it, or did the predicate fail to recognise a finding that describes it? Record the decision per defect. A finding that describes the defect in words the phrases do not contain is a **predicate** failure; silence, or a finding about something else, is a **lens** miss.
+
+A range edge can only ever *over*-credit, never under-credit, so a false hit is invisible to the miss-only procedure above: also read every **hit** whose finding lands within three lines of a declared range's edge, and check it actually describes that defect rather than a neighboring one caught by the edge.
 
 - [ ] **Step 3: Correct the predicates, and say so in the file**
 

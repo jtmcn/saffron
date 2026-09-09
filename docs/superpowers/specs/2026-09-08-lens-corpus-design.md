@@ -23,10 +23,14 @@ aggregating across fixtures is unbuilt. That is what this design adds.
 
 ## Decisions taken before the design
 
-**Wide and shallow: eight fixtures at n=1, not one fixture at n=3.** Twelve
-independent defect-observations for ~$13 a pass, against six for ~$5. Per
-dollar it buys more, and the aggregate over twelve defects has a far tighter
-error bar than any single k/3 — which is the whole complaint above.
+**Wide and shallow: eight fixtures at n=1, not one fixture at n=3.** Not because
+it buys more per dollar — it does not: $4.838 over three runs of SA-0062 alone
+is ~$1.61 per fixture-run, so eight fixtures at n=1 cost ~$12.90, close to the
+~$13 either way. The argument is independence. Six observations over one diff
+are 2 defects × 3 correlated repeats of the *same* diff and the *same* lens
+noise — roughly two independent units, which is exactly the resolution problem
+above. Twelve observations over eight diffs are twelve independent units, and
+the aggregate over them has a far tighter error bar than any single k/3.
 
 **Two passes to a trustworthy baseline, ~$26 once.** Pass 1's only job is to fix
 predicates: every miss read by hand, each one judged miss-or-mis-declared, the
@@ -69,11 +73,12 @@ was found reviewing SA-0064 and says both properties live in
 missing assertions guard is `_notes`, which **SA-0063** introduces: its diff
 touches `saffron/report/pr_body.py`, and SA-0064's touches `package.py`,
 `tests/test_package.py` and `tests/test_session.py` and never reaches
-`pr_body.py`. A finding outside the diff cannot anchor, and an unanchored
-finding is never seen — so declared against SA-0064 both defects would have
-scored zero forever and read as a lens failure. The anchor is
-`pr_body.py:377-395`, and item 86's own note that "only line 390 is `_notes`'s"
-is what confirms it.
+`pr_body.py`. SA-0064's diff never mentions `pr_body.py`, so a lens reviewing
+it has no reason to open the file at all — and separately, SA-0064's first
+ledger row has no `pushed_sha`, so the recovery rule (`head` = the ledger's
+`pushed_sha`) could not have produced that fixture in the first place. The
+anchor is `pr_body.py:377-395`, and item 86's own note that "only line 390 is
+`_notes`'s" is what confirms it.
 
 Item 69's ninth row, the SHACL `sh:in` deletion, is **excluded**: it is attached
 to backlog item 65 rather than to a spec, so it has no batch tree and no
@@ -90,20 +95,23 @@ Every `head_sha` recorded in `patch.json` is gone from live history — the bran
 was deleted after merge — so each fixture's range is recovered rather than read
 off. The rule is uniform:
 
-- **head** is the ledger's `pushed_sha` for the task.
-- **base** is the first ancestor of that head where `git diff base..head` is
-  **byte-identical** to the batch tree's recorded `patch.diff`.
+- **head** is the ledger's `pushed_sha` for the task that actually pushed one.
+- **base** is `patch.json`'s own `tree_base`, verified by **byte-identity**
+  against the batch tree's recorded `patch.diff` before it is trusted.
 
 Byte-identity is the acceptance test, not a heuristic: a fixture whose range
 cannot be reproduced exactly fails recovery loudly instead of shipping an
 approximate diff that would grade a lens against a tree it never saw.
 
-Four of the eight need the walk because `patch.json`'s recorded `tree_base` is
-not an ancestor of their head at all. The reason is worth recording: **SA-0048's
-true base is SA-0046's head**. These were stacked pull requests, and the batch
-tree recorded the base the task was cut against rather than the branch it was
-built on — backlog item **33**'s disagreement, visible in the archive. The walk
-is indifferent to the cause; the byte-identity check is what makes it safe.
+The batch tree's own record — `patch.json`'s `tree_base` — was right on all
+eight shipped fixtures, verified by byte-identity before it is trusted. The
+ancestry walk exists only as a fallback for a `tree_base` that fails to
+verify; it is not the case any shipped fixture is. The reason `tree_base` is
+recorded beside `base_sha` at all is worth recording: a stacked pull request's
+patch is relative to the previous task's head rather than to `base_sha`
+(backlog item **33**), and **SA-0048's true base is SA-0046's head** is the
+one instance of that shape in this corpus. The walk is indifferent to the
+cause; the byte-identity check is what makes it safe.
 
 ## Modules
 
@@ -141,9 +149,11 @@ is the repair: rerun the dropped fixture alone and score the pass again.
 
 ### `harness/lens_scoring.py` — two changes
 
-`load_fixture` refuses a fixture declaring zero defects. Today a `defects = []`
-would load and score `0/0`, which reads like a measurement — the same failure
-`score_pass` already refuses for zero surviving runs.
+`load_fixture` already refuses a fixture declaring zero defects (`FixtureError`,
+since its first commit) — a property already true, not a gap. What is missing
+is the test proving it, the same guard `score_pass` gets for zero surviving
+runs: run against a fixture with its `defects` emptied, a mutant that would
+otherwise load and score `0/0` silently.
 
 Nothing else moves. `score_pass`, `score_run`, `match`, `calibrate` and
 `render_table` are unchanged, so both recorded passes stay re-derivable by the
@@ -181,9 +191,12 @@ Two properties it needs that the single-fixture driver does not:
 `--skip-existing` re-run continues rather than restarting. A failure at fixture
 six must not cost the first five.
 
-**One image, eight cells.** `image.cell_tag` keys off the repo path, not the
-tree, so the image builds once and each fixture pays only for a worktree at its
-own head. Budget ~80 minutes of wall-clock for a pass, mostly cell starts.
+**Eight cells, one image tag.** `image.cell_tag` keys off the repo path, not
+the tree, so every fixture's `session.cell_up` builds under the same tag —
+but `cell_up` calls `image.build_cell_image` unconditionally on every call, so
+each fixture still pays for a `container build`. Expected to be a layer-cache
+hit after the first fixture, but that is unmeasured. Budget ~80 minutes of
+wall-clock for a pass, mostly cell starts.
 
 ## What replaces the exit criterion
 
