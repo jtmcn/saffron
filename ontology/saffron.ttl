@@ -169,3 +169,26 @@ saffron:Role a owl:Class .
 saffron:confirms a saffron:Role . saffron:withdraws a saffron:Role .
 saffron:agrees   a saffron:Role . saffron:disagrees a saffron:Role .
 saffron:disputes a saffron:Role . saffron:concedes  a saffron:Role .
+
+## The design record — CONTEXT.md §11. Not part of the run record: nothing here
+## projects from a §4.1 table and no scheduling decision reads it, so §1.4's
+## non-goal is untouched. What it models is the document, and the reader that
+## earns it is `ontology/design_record.py`, which renders DESIGN.md's principle
+## index from these two classes.
+##
+## §11 names five genres. `EvidenceRecord` and `SpikeVerdict` are deliberately
+## not declared: they have no shape or query reading them yet, and a term whose
+## only reader is an rdfs:comment is what the dead-term test deletes. They join
+## when something reads them, not when someone writes a definition.
+
+saffron:Principle a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "principle" ;
+    rdfs:comment "A numbered lesson in one global sequence. The number is an address — DESIGN.md, CONTEXT.md, the backlog and docs/evidence/ all cite it — so it is a property here rather than an ordering." .
+saffron:RevisionAppendix a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "revision appendix" .
+
+saffron:principleNumber a owl:DatatypeProperty ; rdfs:domain saffron:Principle ; rdfs:range xsd:integer .
+saffron:claim a owl:DatatypeProperty ; rdfs:domain saffron:Principle ; rdfs:range xsd:string .
+saffron:contributedBy a owl:ObjectProperty ; rdfs:domain saffron:Principle ; rdfs:range saffron:RevisionAppendix ;
+    rdfs:comment "Exactly one. A principle is allocated its number by the appendix that found it, which is why the sequence stays contiguous without a registry." .
+saffron:appendixLetter a owl:DatatypeProperty ; rdfs:domain saffron:RevisionAppendix ; rdfs:range xsd:string .
+saffron:coversRevision a owl:DatatypeProperty ; rdfs:domain saffron:RevisionAppendix ; rdfs:range xsd:integer ;
+    rdfs:comment "One or more. Appendix G covers rev 8 and rev 10 and Appendix O rev 18 and rev 19, because a revision that closes an earlier revision's question lands in that question's appendix." .

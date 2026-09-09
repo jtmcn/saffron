@@ -202,3 +202,26 @@ saffron:EnvelopeShape a sh:NodeShape ;
     sh:property [ sh:path [ sh:inversePath earl:subject ] ;
         sh:qualifiedValueShape [ sh:class saffron:GateResult ] ;
         sh:qualifiedMaxCount 0 ] .
+
+# The design record (CONTEXT.md §11). These constrain a document rather than a
+# ledger row, which is the one thing §4.6 says a shape is for: an axiom the
+# thing being described cannot state about itself. Markdown cannot say "every
+# principle was contributed by exactly one appendix".
+saffron:PrincipleShape a sh:NodeShape ;
+    sh:targetClass saffron:Principle ;
+    sh:property [ sh:path saffron:principleNumber ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:datatype xsd:integer ; sh:minInclusive 1 ] ;
+    sh:property [ sh:path saffron:claim ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:datatype xsd:string ; sh:minLength 12 ] ;
+    sh:property [ sh:path saffron:contributedBy ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:class saffron:RevisionAppendix ] .
+
+# Contiguity of the sequence is *not* here: SHACL constrains a focus node, not a
+# set, so "1..N with no gaps" has no shape form. `tests/ontology/test_design_
+# record.py` holds it, and says that this is why.
+saffron:RevisionAppendixShape a sh:NodeShape ;
+    sh:targetClass saffron:RevisionAppendix ;
+    sh:property [ sh:path saffron:appendixLetter ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:datatype xsd:string ; sh:pattern "^[A-Z]$" ] ;
+    sh:property [ sh:path saffron:coversRevision ; sh:minCount 1 ;
+        sh:datatype xsd:integer ; sh:minInclusive 1 ] .

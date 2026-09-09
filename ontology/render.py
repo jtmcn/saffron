@@ -12,6 +12,8 @@ from pathlib import Path
 
 import rdflib
 
+from ontology import design_record
+
 NS = "https://saffron.dev/ns#"
 
 # What counts as a member, and the *only* definition of it: the cross-check in
@@ -230,6 +232,11 @@ def main() -> None:
         (root / "ontology" / "shapes" / "saffron-shapes.ttl", render_shapes),
     ):
         path.write_text(fn(path.read_text(), vocabulary=vocabulary))
+    # `DESIGN.md` renders from itself, not from the vocabulary, so it takes no
+    # `vocabulary=` and is not in the loop above. The direction is the opposite
+    # one: an appendix owns its prose, and the index is downstream of it.
+    design = root / "DESIGN.md"
+    design.write_text(design_record.render_principles(design.read_text()))
 
 
 if __name__ == "__main__":

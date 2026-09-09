@@ -1,0 +1,7 @@
+@prefix saffron: <https://saffron.dev/ns#> .
+@prefix : <https://saffron.dev/data/> .
+
+# An appendix covering no revision. The index's Rev column would render empty
+# and nothing would say which run found what the appendix contains.
+:a a saffron:RevisionAppendix ;
+    saffron:appendixLetter "P" .

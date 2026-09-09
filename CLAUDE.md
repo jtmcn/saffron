@@ -11,7 +11,10 @@ closed sets `tests/ontology/test_vocabulary_agrees_with_context.py` names,
 `uv run python -m ontology.render`. Two shape lists stay hand-maintained because the
 vocabulary cannot imply them — a new core gate needs a blocking level in
 `saffron:CoreGateBlockingShape`, a new terminal state a place in `saffron:TaskShape`'s
-endedInState — and a test names the shape and the file when you forget.
+endedInState — and a test names the shape and the file when you forget. The same
+command also rewrites `DESIGN.md`'s principle index, and that one runs the other way:
+the appendices are authoritative and the index is their render, so a new principle is
+written into its appendix and never into the table (Appendix P).
 
 > Saffron is also a *target repo* of itself (`.saffron/`), so this file is the standing
 > instruction surface for agents running in a cell here (§8). Budget: ~200 lines. If it grows
