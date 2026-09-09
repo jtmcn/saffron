@@ -584,6 +584,21 @@ def test_the_driver_answers_a_probe_through_the_declared_tests_gate(
     assert "1 verified" in pass_.table
 
 
+def test_a_fixture_that_files_no_probe_pays_for_no_baseline(tmp_path, monkeypatch):
+    """The baseline exists to be subtracted from a probe's result, so with no
+    probe to ask there is nothing for it to answer — and it is a whole suite
+    run, ~15.6s measured, per fixture that files none. Still probed, though:
+    `probes.json` is written `[]`, which is what separates a fixture that had
+    nothing to apply from one nobody asked."""
+    pass_ = _drive(tmp_path, monkeypatch, probes=())
+
+    assert pass_.calls == []
+    assert pass_.mutated == []
+    assert json.loads((pass_.out / "SA-0045" / "probes.json").read_text()) == []
+    # Probed, so it is in the fixture count the second number covers.
+    assert "over 1 fixture(s) probed" in pass_.table
+
+
 def test_skip_probes_runs_the_lenses_and_reaches_no_gate(tmp_path, monkeypatch):
     """A recall-only re-run still costs a cell — the lenses are the spend —
     but applies nothing and reports no second number. Absent, not zero: a pass

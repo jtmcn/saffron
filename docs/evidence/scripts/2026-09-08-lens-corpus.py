@@ -190,6 +190,11 @@ def _apply_probes(
         for probe in pending:
             landed(probe, probe_check.ProbeResult("unproven", reason))
 
+    if not probes:
+        # Before the baseline, which is a whole suite run (~15.6s measured) to
+        # answer nothing. The `[]` written above is still the coverage record.
+        return []
+
     if "tests" not in gates:
         # Every shipped fixture's head declares a `tests` gate (pinned by a
         # test), so this is the fallback, not the path a pass takes.
