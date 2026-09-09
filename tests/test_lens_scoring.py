@@ -260,6 +260,48 @@ def test_a_range_belongs_to_its_own_file_and_not_to_the_others(tmp_path):
     )
 
 
+def test_sa0063s_real_claim_scores_the_neutralization_defect_and_not_its_sibling():
+    """The widening's own guard, and it has to be this rather than `calibrate`.
+
+    `calibrate`'s docstring states the limit: a defect no recorded finding
+    reaches is "unconstrained here", and its guard is a regression test
+    carrying real claim text instead — which is why SA-0062 has a pair. Nothing
+    in SA-0063's `recorded-findings.json` lands in `tests/test_report.py`, so
+    the location added to `notes-neutralization-unwitnessed` is invisible to
+    calibration and would be guarded by nothing.
+
+    Verbatim from pass 1, SA-0063 run 1, adequacy. The synthetic claim the
+    other location tests use conveniently omits `heading`; this one carries it,
+    and `heading` is one of `empty-notes-heading-unwitnessed`'s phrases. Two
+    defects sharing a location have only phrases to tell them apart, so this is
+    where that gets checked against text a lens actually wrote.
+    """
+    sa0063 = lens_scoring.load_fixture(FIXTURE.parent / "SA-0063")
+    filed = _finding(
+        lens="adequacy",
+        file="tests/test_report.py",
+        line=108,
+        claim=(
+            "test_notes_cannot_move_a_status_or_a_gate_result puts '@maintainer' "
+            "and 'Fixes #12' into the notes text but only asserts that the body "
+            "content *before* the notes heading is unaffected (`head == plain`); "
+            "it never inspects the rendered notes section itself for the "
+            "zero-width neutralization `_notes` is supposed to apply. Replacing "
+            "`safe = neutralize(text)` with `safe = text` at "
+            "saffron/report/pr_body.py:391 leaves every notes test (including "
+            "this one and test_notes_render_as_the_implementers_own_and_"
+            "unadjudicated) green while '@maintainer' and 'Fixes #12' reach "
+            "GitHub verbatim in the notes section — the exact mention/auto-close "
+            "side effect acceptance criterion 2 requires be neutralized, and "
+            "nothing in the diff's tests would catch its silent removal."
+        ),
+    )
+    scores = lens_scoring.score_run(sa0063, _reviews(filed))
+    assert scores["notes-neutralization-unwitnessed"].seen is True
+    assert scores["notes-neutralization-unwitnessed"].graded is True
+    assert scores["empty-notes-heading-unwitnessed"].seen is False
+
+
 def test_a_defect_declaring_no_location_is_refused(tmp_path):
     """The same shape as the empty `must_mention` refusal: no location leaves
     `any()` false for every finding, so the defect scores a permanent, silent
@@ -277,6 +319,27 @@ def test_a_defect_written_in_the_single_location_form_is_refused(tmp_path):
         tmp_path, 'file = "saffron/report/pr_body.py"\nlines = [391, 402]'
     )
     with pytest.raises(lens_scoring.FixtureError, match="locations"):
+        lens_scoring.load_fixture(root)
+    # The half-converted fixture, which is the shape a hand edit actually
+    # leaves behind: `locations` added, the old key not deleted. Refused on
+    # either key alone, so the stray one cannot sit there meaning nothing.
+    half = _one_defect(
+        tmp_path / "half", f'locations = [{PR_BODY}]\nfile = "saffron/cli.py"'
+    )
+    with pytest.raises(lens_scoring.FixtureError, match="locations"):
+        lens_scoring.load_fixture(half)
+
+
+def test_a_locations_range_that_is_not_a_pair_is_a_fixture_error(tmp_path):
+    """A one-element `lines` reaches `lines[0] > lines[1]` and raises
+    `IndexError` without the length check — which is exactly the failure
+    `_required`'s own docstring says a loader must never produce, since a
+    `KeyError` or an `IndexError` out of a loader reads as a bug in the
+    loader rather than a malformed fixture."""
+    root = _one_defect(
+        tmp_path, 'locations = [{ file = "saffron/report/pr_body.py", lines = [391] }]'
+    )
+    with pytest.raises(lens_scoring.FixtureError, match="lines must be"):
         lens_scoring.load_fixture(root)
 
 

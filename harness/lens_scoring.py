@@ -257,7 +257,7 @@ def load_fixture(root: Path) -> Fixture:
                 )
             )
         if not locations:
-            # Same shape as the empty `must_mention` refusal below: nothing for
+            # Same shape as the empty `must_mention` refusal above: nothing for
             # `any()` to be true of, so the defect could never be seen.
             raise FixtureError(
                 f"{where}: declares no location, so no finding could ever "

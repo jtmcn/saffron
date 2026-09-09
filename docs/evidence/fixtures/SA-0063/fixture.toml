@@ -48,12 +48,14 @@ recorded_graded = 0
 #
 # Both defects were declared over the source (`pr_body.py`) alone, on the
 # reasoning that a lens reasoning about what a test fails to guard anchors on
-# the unguarded code doing the guarding. Source-anchoring is still this
-# corpus's norm — checked, `grep -o 'file = "[^"]*"' */fixture.toml`: only
-# SA-0045 and SA-0046 declare over a test file, because their property (a
-# schema line's exact text) is a fact about what the test constructs. But the
-# reasoning was wrong as a prediction about *this* defect, and pass 1 measured
-# it wrong. See `notes-neutralization-unwitnessed` below.
+# the unguarded code doing the guarding. Source-anchoring was this corpus's
+# norm when they were written: of the ten locations the eight fixtures then
+# declared, only SA-0045's and SA-0046's named a test file, because their
+# property (a schema line's exact text) is a fact about what the test
+# constructs. But the reasoning was wrong as a prediction about *this* defect,
+# and pass 1 measured it wrong — so this fixture is now the third, and the
+# count above is history rather than a grep a reader can re-run to it. See
+# `notes-neutralization-unwitnessed` below.
 
 [[defects]]
 id = "notes-neutralization-unwitnessed"
