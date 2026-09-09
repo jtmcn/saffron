@@ -16,7 +16,6 @@ from pathlib import Path
 from saffron import preflight
 from saffron.batch import run_batch
 from saffron.cell.session import CellOutcome
-from saffron.events import CeilingSource
 from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
@@ -33,7 +32,7 @@ from saffron.scheduler import (
     retirement_refusal,
     run_gh,
 )
-from saffron.task import PinnedBase, run_task, spec_ceilings
+from saffron.task import PinnedBase, ResolvedCeilings, run_task, spec_ceilings
 from saffron.watch import UnknownTask, follow, once
 
 DEFAULT_HOME = Path.home() / ".saffron"
@@ -190,9 +189,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _ceilings(
-    args: argparse.Namespace, spec: Spec
-) -> tuple[dict, dict[str, CeilingSource]]:
+def _ceilings(args: argparse.Namespace, spec: Spec) -> ResolvedCeilings:
     """What bounds this run, and where each bound came from.
 
     The flag wins when it is given; the spec governs otherwise. Both are real
@@ -210,18 +207,23 @@ def _ceilings(
     the attended and unattended paths cannot say different things about the
     same three numbers.
     """
-    declared, sources = spec_ceilings(spec)
-    given = {
-        "budget_usd": args.budget,
-        "max_attempts": args.max_attempts,
-        "max_turns": args.max_turns,
-    }
-    chosen = dict(declared)
-    for name, value in given.items():
-        if value is not None:
-            chosen[name] = value
-            sources[name] = "flag"
-    return chosen, sources
+    declared = spec_ceilings(spec)
+    return ResolvedCeilings(
+        budget_usd=args.budget if args.budget is not None else declared.budget_usd,
+        max_attempts=(
+            args.max_attempts
+            if args.max_attempts is not None
+            else declared.max_attempts
+        ),
+        max_turns=(
+            args.max_turns if args.max_turns is not None else declared.max_turns
+        ),
+        budget_source="flag" if args.budget is not None else declared.budget_source,
+        attempts_source=(
+            "flag" if args.max_attempts is not None else declared.attempts_source
+        ),
+        turns_source="flag" if args.max_turns is not None else declared.turns_source,
+    )
 
 
 def _protected_paths(exported: Path, unread: list[str] | None = None) -> list[str]:
@@ -354,13 +356,12 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # more than half its budget left, and nothing on the way in had said what
     # any of the three were. `run_task` emits it, so the unattended path — the
     # one whose stdout is the night's only record — says it too.
-    ceilings, ceiling_sources = _ceilings(args, spec)
+    ceilings = _ceilings(args, spec)
 
     outcome = run_task(
         spec,
         spec_sha,
         ceilings=ceilings,
-        ceiling_sources=ceiling_sources,
         base=PinnedBase(mirror=mirror, url=url, base_sha=base_sha),
         repo_id=repo_id,
         repo=repo,
@@ -398,12 +399,11 @@ def _batch_runner(
         spec = candidate.spec
         # No flag can reach a batch's task, so the spec's own fields are the
         # whole arbitration — `_ceilings`' other half.
-        ceilings, ceiling_sources = spec_ceilings(spec)
+        ceilings = spec_ceilings(spec)
         return run_task(
             spec,
             candidate.spec_sha,
             ceilings=ceilings,
-            ceiling_sources=ceiling_sources,
             base=PinnedBase(
                 mirror=resolved.mirror, url=url, base_sha=resolved.base_sha
             ),

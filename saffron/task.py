@@ -61,7 +61,34 @@ class PinnedBase:
     base_sha: str
 
 
-def spec_ceilings(spec: Spec) -> tuple[dict, dict[str, CeilingSource]]:
+@dataclass(frozen=True, kw_only=True)
+class ResolvedCeilings:
+    """The three ceilings that bound one task, each with where it came from.
+
+    One value rather than two parallel dicts keyed by the same three names,
+    and not a `dict` at all: `CellSpec` takes these three by keyword among
+    fourteen, and `CellSpec(**ceilings)` is a construction no type checker can
+    see into. Splatting an untyped mapping into the widest constructor in the
+    codebase is the drift this module was extracted to end, reintroduced one
+    layer down.
+
+    `kw_only` for `PinnedBase`'s reason: `max_attempts` and `max_turns` are
+    adjacent and both `int`, so positionally they swap cleanly and silently.
+
+    Distinct from `events.Ceilings`, which is this plus an envelope — the
+    event is what gets *recorded*, this is what gets *applied*, and only one
+    of the two belongs in a `CellSpec`.
+    """
+
+    budget_usd: float
+    max_attempts: int
+    max_turns: int
+    budget_source: CeilingSource
+    attempts_source: CeilingSource
+    turns_source: CeilingSource
+
+
+def spec_ceilings(spec: Spec) -> ResolvedCeilings:
     """The three ceilings a spec declares, and where each came from.
 
     The half of `cli._ceilings` that has nothing to do with flags, so the
@@ -70,16 +97,18 @@ def spec_ceilings(spec: Spec) -> tuple[dict, dict[str, CeilingSource]]:
     the field: `model_fields_set` is what separates a declared value from a
     model default that happens to equal it.
     """
-    values = {
-        "budget_usd": spec.budget_usd,
-        "max_attempts": spec.max_attempts,
-        "max_turns": spec.max_turns,
-    }
-    sources: dict[str, CeilingSource] = {
-        name: ("spec" if name in spec.model_fields_set else "default")
-        for name in values
-    }
-    return values, sources
+
+    def _source(name: str) -> CeilingSource:
+        return "spec" if name in spec.model_fields_set else "default"
+
+    return ResolvedCeilings(
+        budget_usd=spec.budget_usd,
+        max_attempts=spec.max_attempts,
+        max_turns=spec.max_turns,
+        budget_source=_source("budget_usd"),
+        attempts_source=_source("max_attempts"),
+        turns_source=_source("max_turns"),
+    )
 
 
 def _resolve_stacked_on(
@@ -186,8 +215,7 @@ def run_task(
     spec: Spec,
     spec_sha: str,
     *,
-    ceilings: dict,
-    ceiling_sources: dict[str, CeilingSource],
+    ceilings: ResolvedCeilings,
     base: PinnedBase,
     repo_id: int | None,
     repo: Path,
@@ -199,13 +227,12 @@ def run_task(
     """One task, start to finish: stack it if it has a parent, run its cell,
     and package the result if the cell came back reviewable.
 
-    `ceilings` arrives resolved — `{budget_usd, max_attempts, max_turns}` —
-    because only the attended path has flags to arbitrate against the spec
-    (`cli._ceilings`); a batch has none, so there is nothing to arbitrate and
-    no reason for `argparse` to reach this far. `ceiling_sources` travels with
-    it so the record can say *where* each value came from, which is the whole
-    of what makes the line worth printing: a number with no provenance sends
-    an operator to grep a spec file for a line that may not be in it.
+    `ceilings` arrives resolved, because only the attended path has flags to
+    arbitrate against the spec (`cli._ceilings`); a batch has none, so there is
+    nothing to arbitrate and no reason for `argparse` to reach this far. It
+    carries each value's provenance with it, which is the whole of what makes
+    the record worth keeping: a number with no source sends an operator to
+    grep a spec file for a line that may not be in it.
 
     Emitted here rather than by either caller, because being printed on one
     path and not the other is the defect this module exists to end.
@@ -232,12 +259,12 @@ def run_task(
         Ceilings(
             timestamp=time.time(),
             spec_id=spec.id,
-            budget_usd=ceilings["budget_usd"],
-            max_attempts=ceilings["max_attempts"],
-            max_turns=ceilings["max_turns"],
-            budget_source=ceiling_sources["budget_usd"],
-            attempts_source=ceiling_sources["max_attempts"],
-            turns_source=ceiling_sources["max_turns"],
+            budget_usd=ceilings.budget_usd,
+            max_attempts=ceilings.max_attempts,
+            max_turns=ceilings.max_turns,
+            budget_source=ceilings.budget_source,
+            attempts_source=ceilings.attempts_source,
+            turns_source=ceilings.turns_source,
         )
     )
 
@@ -274,7 +301,9 @@ def run_task(
         acceptance=spec.acceptance,
         risk=spec.risk,
         stacked_on=stacked_on,
-        **ceilings,
+        budget_usd=ceilings.budget_usd,
+        max_attempts=ceilings.max_attempts,
+        max_turns=ceilings.max_turns,
     )
     outcome = run_one_cell(
         cell_spec,
