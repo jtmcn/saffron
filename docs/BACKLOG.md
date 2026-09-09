@@ -50,16 +50,17 @@ evidence. That is the gate now, and it is one cheap spec away.
 
 ### Tier 1 — breaks at 03:00 with nobody watching
 
-Soundness first: **79**, **88** (79's own harness, and what decides whether
-79's exit criterion can be read as an absolute), **69**, **80** (with **83**,
-**85**, **84**, **82**, **81** from tier 3, which are why 69's gate cannot yet
-be declared against safely), then the remainder of **71**. Honesty second:
+Soundness first: **79**, **69**, **80** (with **83**, **85**, **84**, **82**,
+**81** from tier 3, which are why 69's gate cannot yet be declared against
+safely), then the remainder of **71**. Honesty second:
 **73**, **70**, **45**, **51** (with **49**/**50**, which its fix closes),
 **47**, **46**, **40**, **26**, **7**, and the remainder of **78**.
 
 Closed since the 2026-09-04 sort, and left in place because their numbers are
-cited: **74** is done (`SA-0063`, `SA-0064`); **71** is two-thirds done and
-**78** is done in code — each item's own `Status` line says what is left.
+cited: **74** is done (`SA-0063`, `SA-0064`); **88** is closed on a negative
+result (2026-09-08 — the gate summary was not the confound); **71** is
+two-thirds done and **78** is done in code — each item's own `Status` line says
+what is left.
 (**59** is done — `SA-0052`, PR #118.)
 
 **79 and 69 are first** because they are the only items here about the
@@ -74,10 +75,11 @@ in two runs of three and not the third — measured, so the item's own "a questi
 no lens owns" is retired in place. Both bear on the same thing: whether a
 `0 blockers` line means the diff is sound or means nobody looked.
 
-**88 is directly under 79** rather than filed behind it. The harness that
-measured 79 reads three times harsher than production on the same diff, so its
-absolute numbers steer nothing until that is explained — and 79's exit criterion
-is written against an absolute. Track C can start on the harness's *differences*
+**88 was directly under 79** rather than filed behind it, and is answered
+(2026-09-08) without moving the number. The harness still reads three times
+harsher than production on the same diff and the leading suspect explains none
+of it, so its absolute numbers steer nothing — and 79's exit criterion is
+written against an absolute. Track C can start on the harness's *differences*
 between two prompts; it cannot be declared met on them.
 
 Each fails in the dark or destroys work no one is awake to rescue. **45** loses
@@ -111,7 +113,7 @@ risk — not, as an earlier draft of this note said, that `.gitignore` in
 `integrity.gate_config` already routes the edit to a person. That is the
 *tracked* half only: a `.gitignore` naming itself reaches no diff at all.
 
-**What this ordering costs, stated plainly:** tiers 2 and 3 hold 28 of the 40
+**What this ordering costs, stated plainly:** tiers 2 and 3 hold 28 of the 39
 open items, including every ontology item and every operator-visibility spec
 there is already a full plan for. That is the deliberate consequence of ranking
 by the milestone rather than by what is nearest to hand.
