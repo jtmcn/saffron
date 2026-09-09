@@ -27,9 +27,13 @@ import rdflib
 NS = "https://saffron.dev/ns#"
 SAFFRON = rdflib.Namespace(NS)
 
-_APPENDIX = re.compile(r"^## Appendix ([A-Z]) — (.*)$")
+_APPENDIX = re.compile(r"^## Appendix ([A-Z]) — .*$")
+# A heading that opens an appendix without matching `_APPENDIX` would leave the
+# previous letter in hand and credit this appendix's principles to it — caught
+# only by the index reading stale, whose obvious fix regenerates the lie.
+_APPENDIX_OPENS = re.compile(r"^## Appendix\b")
 # A principle opens a line and its claim is the bolded lead. Three of the
-# fifty-six wrap before the closing `**`, so the claim is read to that marker
+# fifty-seven wrap before the closing `**`, so the claim is read to that marker
 # rather than to the end of the line.
 _PRINCIPLE = re.compile(r"^(\d+)\. \*\*")
 # The `Rev` column of the appendix index, which carries what a heading cannot:
@@ -67,6 +71,8 @@ def parse(design: str) -> rdflib.Graph:
 
     appendix: rdflib.URIRef | None = None
     for number, line in enumerate(lines):
+        if _APPENDIX_OPENS.match(line) and not _APPENDIX.match(line):
+            raise ValueError(f"{line!r}: an appendix heading this cannot read")
         if found := _APPENDIX.match(line):
             letter = found.group(1)
             appendix = SAFFRON[f"Appendix{letter}"]
@@ -108,14 +114,14 @@ ANCHOR = "## Principles — an index"
 _HEADER = "| # | The claim | From |\n|---|---|---|\n"
 
 
-def render_principles(text: str, *, graph: rdflib.Graph | None = None) -> str:
+def render_principles(text: str) -> str:
     """Rewrite the principle index's table body from `DESIGN.md`'s own appendices.
 
     The span is the run of table rows after the header, which is why the header
     is emitted rather than matched: a table whose header drifted would otherwise
     have its rows appended below the old ones.
     """
-    rows = principles(graph if graph is not None else parse(text))
+    rows = principles(parse(text))
     if not rows:
         raise ValueError("the design record parsed to no principles")
     if text.count(ANCHOR) != 1:

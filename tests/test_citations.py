@@ -10,8 +10,10 @@ name is checked against that document. An unqualified one is checked against
 `DESIGN.md`, per the convention the specs state — *"a bare `§` cites `DESIGN.md`"* —
 widened to include the citing file's own sections when that file numbers its own,
 because `CONTEXT.md` says "§4 and §5 *here*" about itself. That widening is the one
-hole left, and it is five citations wide: inside `CONTEXT.md`, a bare `§1`–`§11` is
-satisfied by either document.
+hole left, and it is six citations wide: in a document that numbers its own, a bare
+`§N` is satisfied by either that document or `DESIGN.md` — five inside `CONTEXT.md`
+and one inside `docs/HOST-HARDENING.md`. The count is asserted, not asserted-in-prose:
+adding a document to `NUMBERED` widens the hole and nothing else would say so.
 
 The rule matters more than it looks. Resolving every unqualified citation against
 the union of all three documents — the first version of this file — left **347**
@@ -205,6 +207,24 @@ def test_every_section_citation_resolves():
     ]
     assert not dangling, "citations to sections that do not exist:\n" + "\n".join(
         dangling
+    )
+
+
+def test_the_widening_stays_six_citations_wide():
+    """The docstring's "six citations wide" is the one hole left, and prose is
+    what this file exists to distrust: a document added to `NUMBERED` that
+    renumbers `1`-`N` widens it in silence and every other test stays green.
+    """
+    shadowed = [
+        f"{path.relative_to(ROOT)}:{line} cites §{number}"
+        for path, line, number, document in SECTION_CITATIONS
+        if document is None
+        if path.name in PER_DOCUMENT and path.name != DEFAULT
+        if number in PER_DOCUMENT[path.name] and number in PER_DOCUMENT[DEFAULT]
+    ]
+    assert len(shadowed) == 6, (
+        f"the widening is now {len(shadowed)} citations wide, not six — update the "
+        f"module docstring or narrow it:\n" + "\n".join(shadowed)
     )
 
 

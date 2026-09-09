@@ -5,7 +5,7 @@ How the engineering skills should consume this repo's domain documentation when 
 ## Before exploring, read these
 
 - **`CONTEXT.md`** at the repo root — the glossary. Saffron is single-context; there is no `CONTEXT-MAP.md` and there will not be one.
-- **`DESIGN.md`** — the decision record. Read the §-numbered section covering the area you're about to work in, and the revision appendix that last touched it. The numbered principles run in one global sequence across those appendices and are cited as "principle 34".
+- **`DESIGN.md`** — authoritative for what the system does (§1–9), and the appendices that carry the design record (`CONTEXT.md` §11). Read the §-numbered section covering the area you're about to work in, and the revision appendix that last touched it. The numbered principles run in one global sequence across those appendices and are cited as "principle 34".
 - **`docs/evidence/`** — the primary records, one dated document per live run or spike. When `DESIGN.md` says a revision *found* something, this is where it found it.
 
 **There is no `docs/adr/`, and creating one would be a defect.** `CONTEXT.md` §11 gives the reasoning: decisions here are addressed by citation (`§5.4`, `Appendix G`, `principle 34`), and a parallel tree would be a second address space for the same decisions. Every `ADR-NNNN` in `DESIGN.md` refers to *prior art's* decision records (Appendix D), never to one of Saffron's.
@@ -31,7 +31,7 @@ When your output names a domain concept (in an issue title, a refactor proposal,
 
 If the concept you need isn't in the glossary yet, that's a signal: either you're inventing language the project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).
 
-## Flag conflicts with the decision record
+## Flag conflicts with the design record
 
 If your output contradicts a principle, a revision appendix, or a `DESIGN.md` section, surface it explicitly rather than silently overriding:
 

@@ -176,7 +176,8 @@ saffron:disputes a saffron:Role . saffron:concedes  a saffron:Role .
 ## earns it is `ontology/design_record.py`, which renders DESIGN.md's principle
 ## index from these two classes.
 ##
-## §11 names five genres. `EvidenceRecord` and `SpikeVerdict` are deliberately
+## §11 names four genres Saffron records a decision in — ADR is the fifth entry
+## and disowns itself. `EvidenceRecord` and `SpikeVerdict` are deliberately
 ## not declared: they have no shape or query reading them yet, and a term whose
 ## only reader is an rdfs:comment is what the dead-term test deletes. They join
 ## when something reads them, not when someone writes a definition.
