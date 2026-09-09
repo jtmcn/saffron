@@ -7,10 +7,11 @@ once per candidate and stopping four ways — the queue drains, the budget is
 gone, `--until` hits, or the breaker fires.
 
 Deliberately not here: resolving the scan (`cli._queue` already does it and
-`cli.py` is forbidden to this module), building a `CellSpec` (needs two
-`cli`-private helpers — the ceilings resolver and the one that decides what a
-child stacks on — that only `cli._run_cell` has), concurrency (K=1, §4.2.1),
-multi-repo (v2, §9), and stamping a corpse `ORPHANED` (that is the batch
+`cli.py` is forbidden to this module), driving a task (`task.run_task` owns
+that, and both commands go through it — this loop takes it as `runner` rather
+than importing it, so what a night runs stays the caller's to say), concurrency
+(K=1, §4.2.1), multi-repo (v2, §9), and stamping a corpse `ORPHANED` (that is
+the batch
 *scan*'s job, not this loop's).
 """
 

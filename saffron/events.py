@@ -127,9 +127,15 @@ class Ceilings:
     budget_usd: float
     max_attempts: int
     max_turns: int
-    budget_source: CeilingSource = "default"
-    attempts_source: CeilingSource = "default"
-    turns_source: CeilingSource = "default"
+    # Required, not defaulted, for `GateResult.against`'s reason one class up:
+    # `"default"` is one of the three real labels, so a forgotten keyword would
+    # file a declared or flag-overridden ceiling as a model default,
+    # indistinguishably from an observed one — and send the operator to grep a
+    # spec file for a line that *is* in it. That is the conflation this kind
+    # exists to end, so it cannot be the thing a caller falls into by omission.
+    budget_source: CeilingSource
+    attempts_source: CeilingSource
+    turns_source: CeilingSource
 
 
 @dataclass(frozen=True, slots=True)
@@ -698,7 +704,7 @@ FINDINGS: tuple[tuple[str, str, str], ...] = (
         "`Terminal` is scoped to the five zero-commit ways one IMPLEMENT turn "
         "ends (backlog item 37); `Budget` carries a ceiling/value/limit triple, "
         "not an arbitrary outcome word and a session id. Typing this needs a "
-        "tenth kind, out of scope here.",
+        "eleventh kind, out of scope here.",
     ),
     (
         "re-verify: {label} suite at {sha}",

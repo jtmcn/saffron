@@ -633,9 +633,10 @@ def _print_batch_plan(
     line in the log and no ledger row. "An empty queue" and "three specs all
     refused" produced byte-identical output.
 
-    The header is the unattended twin of `_run_cell`'s `ceilings:` line: at
-    7am the log has to say what the night set out to do before it says what
-    became of it.
+    The header is the night's own twin of a task's `ceilings:` line — that
+    one is `events.Ceilings` now and both paths emit it; this is the batch
+    scoped fact beside it: at 7am the log has to say what the night set out to
+    do before it says what became of it.
     """
     deadline = until.strftime("%Y-%m-%d %H:%M") if until is not None else "none"
     print(

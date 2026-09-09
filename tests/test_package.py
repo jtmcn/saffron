@@ -1060,7 +1060,9 @@ def _stream_writes(scope, *, allow: frozenset[str], aliases=frozenset()) -> list
 def test_only_the_line_no_kind_carries_writes_to_a_stream_outside_emit():
     """The five sites nobody witnesses behaviourally — ParentGone, conflict,
     new-failures, LeaseRejected, the cleanup failure — plus the second
-    `unstacked:` site in `cli.py`, which no test drives at all. Reinstating the
+    `unstacked:` site in the stacking resolver, which no test drives at all
+    (it moved to `saffron/task.py` with `run_task`; this assertion followed the
+    function, not the file). Reinstating the
     defect on all six, line for line, left 1165 tests green under round 1's
     census because it recognised only the literal name `print`.
 

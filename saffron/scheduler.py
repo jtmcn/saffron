@@ -85,7 +85,7 @@ DEPENDENCY_MERGED = "MERGED"
 
 # Reached review and not landed, and §4.2 admits it outright: a dependent
 # stacks on this parent's branch instead of cutting from `base_sha`
-# (`CellSpec.stacked_on`, resolved by `cli._resolve_stacked_on`, `SA-0026`),
+# (`CellSpec.stacked_on`, resolved by `task._resolve_stacked_on`, `SA-0026`),
 # so these three no longer refuse — only `DEPENDENCY_DEAD_STATES` and the
 # fallthrough below still do.
 DEPENDENCY_WAITING_STATES = frozenset({"READY_FOR_REVIEW", "APPROVED", "MERGE_TRAIN"})
@@ -162,7 +162,7 @@ def _ancestor_branches(spec_id: str, parent_of: dict[str, str]) -> frozenset[str
     """Every branch a candidate's stack is cut from, K=1 walked transitively
     (backlog item 59). `parent_of` maps a spec id to its `depends_on[0]` —
     the sole stacking candidate at each link, the same slot
-    `cli._resolve_stacked_on` stacks on — built only from specs this scan
+    `task._resolve_stacked_on` stacks on — built only from specs this scan
     actually found, so a spec with no `depends_on` and a spec absent from the
     directory look identical here: neither is a key.
 
@@ -599,7 +599,7 @@ def _dependency_refusal(
     # Waiting outranks dead whatever the row order: a live task at
     # `READY_FOR_REVIEW` may still land, and a sibling row that did not is not
     # a fact about the one that might — so any row still waiting satisfies
-    # the dependency, not just the newest row overall. `cli._resolve_stacked_on`
+    # the dependency, not just the newest row overall. `task._resolve_stacked_on`
     # (`SA-0026`) is what turns "satisfies" into a real `CellSpec.stacked_on`;
     # this function only decides whether the dependent may run at all.
     if any(state in DEPENDENCY_WAITING_STATES for state in states):

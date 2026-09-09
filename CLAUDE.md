@@ -108,6 +108,9 @@ exception has a shape worth memorising: **core invokes declared gates, never too
   (`scope`, `integrity` read the diff; `census` reads other gates' results).
 - `saffron/phases/` — `implement.py` (plan checkpoint + repair turns), `review.py` (lenses),
   `rebut.py`.
+- `saffron/task.py` — `run_task` drives one task end to end, a cell *and* PACKAGE, and is the
+  **only** caller of `run_one_cell` (gated). `saffron cell` and `saffron batch` are adapters
+  over it; they built the same sixty lines twice until the copies drifted.
 - `saffron/agents/` — `context.py` injects `CONTEXT.md` sections per phase; `artifacts.py`
   the extraction turn and plan validation; `findings.py` anchors critic findings to the diff.
 - `images/agent_runner.py` — the **only** file permitted to import the Agent SDK (gated). It runs
@@ -122,7 +125,7 @@ exception has a shape worth memorising: **core invokes declared gates, never too
 
 ### Invariants worth knowing before editing
 
-The three marked **(gated)** are enforced by `.saffron/rules/`, run by the `structure` gate and
+The four marked **(gated)** are enforced by `.saffron/rules/`, run by the `structure` gate and
 a prek hook; the rest are still prose. Promote one when you find it broken — `ast-grep test`
 means a rule ships with the mutant that proves it fires. Both pass `-c .saffron/sgconfig.yml`
 rather than letting ast-grep find a config by walking, so the file naming the rules is inside
@@ -135,6 +138,9 @@ and its `r`/`f` prefix, and anchoring on those read only the spellings the autho
 - **The `tool` field** separates a gate that ran and passed from one that never ran. It must be
   obtained *by executing* the tool, never a string literal (§5.4, Appendix H). **(gated over
   Python; `.saffron/gates/format` builds its contract in `sh`, which no rule reads — item 77)**
+- **One module drives a task.** `saffron/task.py` is the only caller of `run_one_cell`; both
+  commands go through it. Two copies is what let the unattended path stop recording the
+  ceilings that bound each task. **(gated over `saffron/`)**
 - **`error` ≠ `fail`.** `fail` means the repo's code is wrong; `error` means the gate broke,
   aborts the attempt, and is charged to nobody. Never collapse them.
 - **Baseline subtraction counts.** Identities collide legitimately — one baseline failure

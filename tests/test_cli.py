@@ -18,7 +18,7 @@ from saffron import cli, intake, preflight, task
 from saffron.cell import session
 from saffron.cell.session import CellOutcome
 from saffron.cli import main
-from saffron.events import PhaseStart, Preflight, describe, read_log
+from saffron.events import Ceilings, PhaseStart, Preflight, describe, read_log
 from saffron.ledger import Ledger
 from saffron.phases import package
 from saffron.reconcile import ReconcileResult
@@ -2851,6 +2851,13 @@ def test_the_unattended_path_records_the_ceilings_that_bound_each_task(
     assert "ceilings:" in printed, "the night says nothing about what bound the task"
     assert "max_turns=42 (spec)" in printed
     assert "max_attempts=" in printed and "(default)" in printed
+
+    # Both halves of the record, not just the one a terminal scrolls away:
+    # `saffron watch` and any morning report read `events.jsonl`, so a line
+    # that printed and did not persist would leave the night's durable record
+    # exactly as empty as it was.
+    logged = [e for e in read_log(tmp_path / "out" / "SY-1") if isinstance(e, Ceilings)]
+    assert [(e.max_turns, e.turns_source) for e in logged] == [(42, "spec")]
 
 
 def test_the_adapter_stacks_a_child_on_its_parents_branch(tmp_path, monkeypatch):

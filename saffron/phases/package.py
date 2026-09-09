@@ -595,7 +595,7 @@ def package(
     resolved to before this parameter existed. Set, the pull request opens
     against that branch instead of the default one, and the patch's preimage
     check reads `tree_base` rather than `base_sha`: the two agree for an
-    unstacked task and diverge for a stacked one. `cli._resolve_stacked_on`
+    unstacked task and diverge for a stacked one. `task._resolve_stacked_on`
     (`SA-0026`) is what supplies it, from the same parent it stacked the
     worktree on.
     """

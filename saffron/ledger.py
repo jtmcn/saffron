@@ -330,11 +330,17 @@ class Ledger:
         beside the columns `tasks_by_spec` already carries (`SA-0026`).
 
         Spans every `spec_sha`, not just the one the spec has on disk today:
-        the caller this serves (`cli._resolve_stacked_on`) is the attended
-        `saffron cell` path, which never exports the parent's spec file and
-        so has no current sha to filter on — the same "merging is permanent"
-        reach `scheduler.build_queue`'s `merged_anywhere` already takes, for
-        the same reason.
+        the caller this serves (`task._resolve_stacked_on`) never reads the
+        parent's spec file, so it has no current sha to filter on — the same
+        "merging is permanent" reach `scheduler.build_queue`'s
+        `merged_anywhere` already takes, for the same reason.
+
+        Not a single-path artefact, and do not narrow it to one. The resolver
+        moved to `saffron/task.py` and now serves the unattended path too,
+        which *does* read spec files at scan time — but a parent whose spec
+        text moved after its pull request opened still has a waiting row here
+        and none at its current sha, and that row is the branch a child must
+        stack on.
 
         Every row, not the newest one per id: this repo's own ledger holds
         ten tasks at one `spec_id`/`spec_sha`, mixing `READY_FOR_REVIEW` with

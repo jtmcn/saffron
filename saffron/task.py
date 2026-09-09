@@ -215,13 +215,12 @@ def run_task(
     `MERGE_FAILED` included — rather than the pre-packaging
     `READY_FOR_REVIEW` every packaged task would otherwise report.
     """
-    task_dir = out_dir / spec.id
     if emit is None:
         # Print plus the task's own log, the shape `session._default_emit` and
         # `package()` both default to: a caller that passes nothing must still
         # get `events.jsonl`. A print-only default is the defect item 43 is
         # about, and is not this.
-        log = EventLog(task_dir)
+        log = EventLog(out_dir / spec.id)
 
         def emit(event: Event) -> None:
             line = describe(event)
@@ -255,9 +254,11 @@ def run_task(
         spec_id=spec.id,
         emit=emit,
     )
-    # Printed for the same reason the ceilings are: which tree a run was cut
-    # from is not recoverable from the exit code, and a stacked run that
-    # surprises an operator is one they cannot diagnose.
+    # Which tree a run was cut from is not recoverable from the exit code, and
+    # a stacked run that surprises an operator is one they cannot diagnose.
+    # ponytail: a `print`, so `events.jsonl` carries the *negative* stacking
+    # decision (`unstacked:`, a `Preflight`) and not the positive one, and no
+    # kind carries `CellSpec.stacked_on` at all. Backlog item 43.
     if stacked_on is not None:
         print(f"stacked on {target_branch} @ {stacked_on[:12]}")
 

@@ -72,6 +72,16 @@ def _read[E: Event](tmp_path, kind: type[E]) -> list[E]:
 
 _ONE_OF_EACH = [
     Preflight(timestamp=1.0, spec_id="SA-0029", step="proxy_start", detail="up"),
+    Ceilings(
+        timestamp=1.5,
+        spec_id="SA-0029",
+        budget_usd=5.0,
+        max_attempts=3,
+        max_turns=42,
+        budget_source="flag",
+        attempts_source="default",
+        turns_source="spec",
+    ),
     Baseline(timestamp=2.0, spec_id="SA-0029", aborted=("tests",)),
     PhaseStart(
         timestamp=3.0,
@@ -732,6 +742,20 @@ def test_describe_renders_every_kind_and_variant(event, expected):
     """AC1: `describe(event)` is the exact line the call site prints today,
     for every kind and every render branch — never a `type` string switch."""
     assert describe(event) == expected
+
+
+def test_every_kind_is_round_tripped_and_its_wire_keys_pinned():
+    """The guard `_CASES` has and `_ONE_OF_EACH` did not.
+
+    `test_every_family_has_a_kind_and_renders` forces a render case for every
+    kind, which is why `Ceilings` could not be added without one. Nothing
+    forced the same for `_ONE_OF_EACH`, so the tenth kind reached `main`
+    round-tripped by neither `test_round_trips_every_kind` nor
+    `test_the_wire_keys_are_pinned_for_every_kind` — its three `*_source` keys
+    unpinned, so renaming one would invalidate every `events.jsonl` already on
+    disk with the suite still green. Caught in review, not by a test; this is
+    the test."""
+    assert {type(event) for event in _ONE_OF_EACH} == set(_KINDS.values())
 
 
 def test_every_family_has_a_kind_and_renders():
