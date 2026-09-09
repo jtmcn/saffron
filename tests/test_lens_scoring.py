@@ -520,11 +520,13 @@ def test_naming_the_gates_tools_moved_the_blocker_count_by_zero():
 
 
 # The two figures in the second-pass record that no run JSON can produce: the
-# per-lens budget both passes gave, and the one production gave. Named here
-# because the record's "no lens came near either ceiling" argument compares
-# measured spend against them, and a test that let any unrecognised dollar
-# figure through would not be checking that argument at all.
-DECLARED_BUDGETS = frozenset({"$4.00", "$3.30"})
+# per-lens ceiling both passes gave (declared, `--lens-budget-usd`) and the one
+# production gave — which is *derived*, not declared: SA-0062's spec declares
+# `budget_usd: 12`, and $3.30 is the remainder `critic_budget()` left at REVIEW
+# time. Named here because the record's "no lens came near either ceiling"
+# argument compares measured spend against them, and a test that let any
+# unrecognised dollar figure through would not be checking that argument at all.
+LENS_CEILINGS = frozenset({"$4.00", "$3.30"})
 
 
 def test_every_dollar_figure_in_the_second_pass_record_is_re_derivable():
@@ -536,8 +538,8 @@ def test_every_dollar_figure_in_the_second_pass_record_is_re_derivable():
     and the paragraph beside it not.
 
     So the direction is reversed. Every `$N.NN` the record prints must be one
-    this pass's JSON produces, the first pass's JSON produces, or a budget
-    declared above — and a figure that drifts fails whichever sentence it is in.
+    this pass's JSON produces, the first pass's JSON produces, or a ceiling
+    named above — and a figure that drifts fails whichever sentence it is in.
     """
     costs = [r.cost_usd for run in _second_pass() for r in run]
     per_run = [sum(r.cost_usd for r in run) for run in _second_pass()]
@@ -547,7 +549,7 @@ def test_every_dollar_figure_in_the_second_pass_record_is_re_derivable():
         f"${max(costs):.2f}",
         f"${sum(r.cost_usd for run in _recorded_pass() for r in run):.2f}",
         *(f"${cost:.2f}" for cost in per_run),
-    } | DECLARED_BUDGETS
+    } | LENS_CEILINGS
 
     record = RECORD_2026_09_08.read_text()
     printed = set(re.findall(r"\$\d+\.\d{2}", record))

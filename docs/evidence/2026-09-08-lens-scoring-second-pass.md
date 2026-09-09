@@ -37,6 +37,10 @@ Per run, beside the first pass's:
 | 2 | missed | `blocker` | 1 | $1.60 |
 | 3 | `blocker` | `blocker` | 2 | $1.68 |
 
+The two tables count different things: run 1's blocker lands on no declared
+defect (`adequacy`, `tests/test_worktree.py:1107`), which is why three sightings
+sit beside four blockers.
+
 | Pass | Anchored blockers per run | Total | Cost |
 |---|---|---|---|
 | First (no tools) | 1, 2, 1 | 4 | $5.70 |
