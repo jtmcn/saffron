@@ -4,39 +4,26 @@ How the engineering skills should consume this repo's domain documentation when 
 
 ## Before exploring, read these
 
-- **`CONTEXT.md`** at the repo root, or
-- **`CONTEXT-MAP.md`** at the repo root if it exists: it points at one `CONTEXT.md` per context. Read each one relevant to the topic.
-- **`docs/adr/`**: read ADRs that touch the area you're about to work in. In multi-context repos, also check `src/<context>/docs/adr/` for context-scoped decisions.
+- **`CONTEXT.md`** at the repo root — the glossary. Saffron is single-context; there is no `CONTEXT-MAP.md` and there will not be one.
+- **`DESIGN.md`** — authoritative for what the system does (§1–9), and the appendices that carry the design record (`CONTEXT.md` §11). Read the §-numbered section covering the area you're about to work in, and the revision appendix that last touched it. The numbered principles run in one global sequence across those appendices and are cited as "principle 34".
+- **`docs/evidence/`** — the primary records, one dated document per live run or spike. When `DESIGN.md` says a revision *found* something, this is where it found it.
 
-If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
+**There is no `docs/adr/`, and creating one would be a defect.** `CONTEXT.md` §11 gives the reasoning: decisions here are addressed by citation (`§5.4`, `Appendix G`, `principle 34`), and a parallel tree would be a second address space for the same decisions. Every `ADR-NNNN` in `DESIGN.md` refers to *prior art's* decision records (Appendix D), never to one of Saffron's.
 
 ## File structure
 
-Single-context repo (most repos):
-
 ```
 /
-├── CONTEXT.md
-├── docs/adr/
-│   ├── 0001-event-sourced-orders.md
-│   └── 0002-postgres-for-write-model.md
-└── src/
+├── CONTEXT.md                  ← the glossary; its §11 names the decision-record genres
+├── DESIGN.md                   ← §-numbered design + revision appendices + principles
+├── ontology/
+│   ├── saffron.ttl             ← authoritative for CONTEXT.md's six closed sets
+│   └── RATIONALE.md            ← a spike verdict, not an ADR
+├── docs/evidence/              ← dated primary records, one per run or spike
+└── saffron/
 ```
 
-Multi-context repo (presence of `CONTEXT-MAP.md` at the root):
-
-```
-/
-├── CONTEXT-MAP.md
-├── docs/adr/                          ← system-wide decisions
-└── src/
-    ├── ordering/
-    │   ├── CONTEXT.md
-    │   └── docs/adr/                  ← context-specific decisions
-    └── billing/
-        ├── CONTEXT.md
-        └── docs/adr/
-```
+`CONTEXT.md`'s closed sets — `Terminal state`, `Batch stop reason`, `Severity`, `Risk tier`, `Gate role`, `Core gates` — are **generated**: their backticked spans render from `ontology/saffron.ttl` (`ontology/render.py:SETS`). Edit the vocabulary and run `uv run python -m ontology.render`; editing those spans in `CONTEXT.md` gets reverted, and a test fails first. Every other definition in the file is hand-written and edited in place.
 
 ## Use the glossary's vocabulary
 
@@ -44,11 +31,13 @@ When your output names a domain concept (in an issue title, a refactor proposal,
 
 If the concept you need isn't in the glossary yet, that's a signal: either you're inventing language the project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).
 
-## Flag ADR conflicts
+## Flag conflicts with the design record
 
-If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
+If your output contradicts a principle, a revision appendix, or a `DESIGN.md` section, surface it explicitly rather than silently overriding:
 
-> _Contradicts ADR-0007 (event-sourced orders), but worth reopening because…_
+> _Contradicts principle 34 (a green result and an absent result are the same bytes), but worth reopening because…_
+
+A principle is never renumbered and an appendix is never rewritten — a revision that overturns one says so in its own appendix.
 
 ## Keeping the model in sync
 

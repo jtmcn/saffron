@@ -32,6 +32,7 @@ is what makes two log lines, two prompts, and a ledger column quietly disagree.
 | 8 | Artifacts | — |
 | 9 | Flywheel | — |
 | 10 | Style | DIAGNOSE · IMPLEMENT · REVIEW |
+| 11 | Design record | — |
 
 ---
 
@@ -526,10 +527,55 @@ already reserves it. Also "round", "sweep", "iteration".
 
 ---
 
+## 11. Design record
+
+Where a decision Saffron made is written down. Every genre here is addressed by a
+citation rather than a path — "principle 34", "Appendix G", "§5.4" — because specs,
+prompts and evidence records all cite them, and a record addressed by path moves
+when the path does. Distinct from the **run record** (`DESIGN.md` §4.6), which is
+what the factory produced; this is why the factory has the shape it has.
+
+**Principle**: A numbered lesson in one global sequence, stating what generalizes
+past the case that found it. Contributed by the revision appendix that found it,
+never renumbered, cited as "principle 34".
+_Avoid_: "lesson", "learning", "takeaway", and "rule" — **rule** already carries
+three senses here (a rule of conduct in `CLAUDE.md`, a numbered rule inside a
+`DESIGN.md` section such as §4.6.2b, and the rules a gate runs), so it cannot
+also carry this one.
+
+**Revision appendix**: A `DESIGN.md` appendix recording what a revision found —
+the live run, the spike, or the read-through, and what it cost. It carries the
+narrative a principle compresses. Cited by letter: "Appendix G". Usually one per
+revision, and not reliably so: a revision that *closes* an earlier revision's
+question lands in that question's appendix rather than opening its own. Appendix G
+carries rev 8 and rev 10, Appendix O rev 18 and rev 19.
+_Avoid_: "the changelog" (an appendix records what was *learned*, not what
+changed), "release notes", "the postmortem".
+
+**Evidence record**: A dated document under `docs/evidence/` holding what one run
+or one spike actually produced. The primary record — a measured fact beats a
+reasoned one, and this is where the measurement lives.
+_Avoid_: "the writeup", "the report" (that is `saffron/report/`'s morning index),
+"the log" (that is a batch tree artifact).
+
+**Spike verdict**: A bounded document answering the one question a spike was run to
+answer, carrying the clause that would reopen it (`ontology/RATIONALE.md`). A
+verdict may be negative and still be the deliverable (principle 10).
+_Avoid_: "ADR", "the analysis", "the recommendation".
+
+**ADR**: Prior art's. The term appears in `DESIGN.md` only when citing another
+project's decision records (Appendix D), and `docs/adr/` does not exist here.
+**Saffron keeps no ADRs.** A decision becomes a principle, a revision appendix, a
+`DESIGN.md` subsection, or a settled naming decision below. A parallel `docs/adr/`
+tree would be a second address space for what §-numbers already address, and the
+first two records to disagree would do it undetectably.
+
+---
+
 ## Settled naming decisions
 
-Recorded because both were live ambiguities and both turned out to be design
-defects rather than word choices (`DESIGN.md` Appendix E).
+Recorded because each was a live ambiguity and each turned out to be a design
+defect rather than a word choice (`DESIGN.md` Appendix E).
 
 1. **run vs. batch** — *not* synonyms. A **batch** is one night across repos and
    owns the budget; a **run** is one repo's slice and owns `base_sha` and the
@@ -549,6 +595,15 @@ defects rather than word choices (`DESIGN.md` Appendix E).
    four-assertion spike; until then the word is **cell runtime**. Same shape as
    the two above: a word hiding a design defect rather than a word choice
    (`DESIGN.md` Appendix G, principle 32).
+
+4. **ADR vs. the design record** — Saffron keeps no ADRs, and never did. `CLAUDE.md`
+   and `docs/agents/domain.md` promised `docs/adr/` from the day the engineering
+   skills were given a repo config to read (`26ce379`); the directory was the
+   skill's own example structure, pasted, and no decision here ever went in one.
+   Meanwhile every `ADR-NNNN` in `DESIGN.md` cites *prior art's* records, so the
+   word already meant something else. Same shape as 3: a name that read as a
+   decision nobody had made, surviving because nothing greps for a promise
+   (principle 32). The genres are now named in §11.
 
 ## Open naming decisions
 

@@ -2,7 +2,7 @@
 
 An agentic software factory: spec files in, reviewed pull requests out, running unattended overnight on one Mac.
 
-**Status:** rev 19 — the vocabulary is authoritative for the run record's closed sets and generates them: `CONTEXT.md`'s enumerations and the shapes' `sh:in` lists render from `ontology/saffron.ttl`, so a set declared in one place reaches all three (§4.6). Two shape lists stay hand-maintained because the vocabulary cannot imply them — `CoreGateBlockingShape`'s blocking levels and `TaskShape`'s `endedInState` superset — and a test names the file when one is forgotten. **And Appendix O's spike ran and closed §1.4.** The refusal predicate built as shapes against the Python answered *no* on questions 1 and 4, so `ontology/` stays what §9's v2.5 says it is: a completed project. Two corrections landed with it — the appendix's premise that the predicate is "pure set containment" is wrong, four of its eight refusals being glob matching; and the spike's own first claim that glob matching is inexpressible in SHACL was false and is retracted (Appendix O *The result*, `docs/evidence/2026-09-04-refusal-predicate-two-arms.md`). A fourth defect the modelling found: `MERGE_TRAIN` is a state §3.3 shows a task entering and `scheduler.py` reads twice, and it is in neither `CONTEXT.md` nor the vocabulary. Prior: rev 18 `SA-0001` built and answered: five queries, five SQL equivalents, don't build the emitter (`ontology/RATIONALE.md`). The vocabulary is gated by `shacl` and cross-checked against `CONTEXT.md`'s closed sets; the *operational* question the RATIONALE never tested is stated in Appendix O and left to a spike, and §1.4's bullet stands until that spike runs. Prior: rev 17 the first night's scheduler decided against the queue that exists rather than the deep one §4.2 is written for (§4.2.1), and §6's ranking corrected against the real ledger after it sorted a sustained blocker last (`docs/evidence/2026-08-25-morning-queue-from-real-rows.md`). Prior: rev 16 the tree a task is cut from and the executables that judge it are both host-supplied, closing the two trust boundaries backlog items 11 and 12 left open (Appendix N). Prior: rev 15 the cell moved off the API key onto a Claude Code subscription token, and the ceiling reasoning corrected against a measured run (`docs/evidence/2026-08-21-subscription-turn-accounting.md`, Appendix M); rev 14 the critic built and measured against a known-bad diff (Appendix L); rev 13 three tasks run, one reviewed, and the review said no (Appendix K); rev 12 v0.5 run against a live model (Appendix J); rev 11 v0.5 built and reviewed (Appendix I); rev 10 the cell runtime chosen by spike (Appendix G); rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime named (Appendix G); rev 9 v0 built and replayed (Appendix H)
+**Status:** rev 20 — **the vocabulary covers the design record as well as the run record.** `CONTEXT.md` §11 named the genres a decision here is written in and nothing carried them; `saffron:Principle` and `saffron:RevisionAppendix` now do, with shapes as their readers and `DESIGN.md`'s generated principle index as the surface that renders from them (Appendix P). What §9's v2.5 closed is **the emitter** — the ledger→RDF projection — and it is deferred rather than finished: `ontology/RATIONALE.md` carries its own revisit clause and it will be asked again. "`ontology/` is a completed project" was shorthand for that verdict plus Appendix O's, and it read as a third and wider decision neither of them made — principle 57. §1.4 is untouched: no shape controls execution, and the design record projects from no §4.1 table. Prior: rev 19 — the vocabulary is authoritative for the run record's closed sets and generates them: `CONTEXT.md`'s enumerations and the shapes' `sh:in` lists render from `ontology/saffron.ttl`, so a set declared in one place reaches all three (§4.6). Two shape lists stay hand-maintained because the vocabulary cannot imply them — `CoreGateBlockingShape`'s blocking levels and `TaskShape`'s `endedInState` superset — and a test names the file when one is forgotten. **And Appendix O's spike ran and closed §1.4.** The refusal predicate built as shapes against the Python answered *no* on questions 1 and 4, so §1.4's bullet stands and no scheduling decision reads a triple. (Rev 20 narrows what that sentence originally claimed: it said `ontology/` was a completed project, which is not what either verdict decided.) Two corrections landed with it — the appendix's premise that the predicate is "pure set containment" is wrong, four of its eight refusals being glob matching; and the spike's own first claim that glob matching is inexpressible in SHACL was false and is retracted (Appendix O *The result*, `docs/evidence/2026-09-04-refusal-predicate-two-arms.md`). A fourth defect the modelling found: `MERGE_TRAIN` is a state §3.3 shows a task entering and `scheduler.py` reads twice, and it is in neither `CONTEXT.md` nor the vocabulary. Prior: rev 18 `SA-0001` built and answered: five queries, five SQL equivalents, don't build the emitter (`ontology/RATIONALE.md`). The vocabulary is gated by `shacl` and cross-checked against `CONTEXT.md`'s closed sets; the *operational* question the RATIONALE never tested is stated in Appendix O and left to a spike, and §1.4's bullet stands until that spike runs. Prior: rev 17 the first night's scheduler decided against the queue that exists rather than the deep one §4.2 is written for (§4.2.1), and §6's ranking corrected against the real ledger after it sorted a sustained blocker last (`docs/evidence/2026-08-25-morning-queue-from-real-rows.md`). Prior: rev 16 the tree a task is cut from and the executables that judge it are both host-supplied, closing the two trust boundaries backlog items 11 and 12 left open (Appendix N). Prior: rev 15 the cell moved off the API key onto a Claude Code subscription token, and the ceiling reasoning corrected against a measured run (`docs/evidence/2026-08-21-subscription-turn-accounting.md`, Appendix M); rev 14 the critic built and measured against a known-bad diff (Appendix L); rev 13 three tasks run, one reviewed, and the review said no (Appendix K); rev 12 v0.5 run against a live model (Appendix J); rev 11 v0.5 built and reviewed (Appendix I); rev 10 the cell runtime chosen by spike (Appendix G); rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime named (Appendix G); rev 9 v0 built and replayed (Appendix H)
 
 **Companion document:** `CONTEXT.md` — the controlled vocabulary. It is authoritative for what words mean; this document is authoritative for what the system does. Where they disagree, one of them has a bug.
 **Scope:** language- and stack-agnostic. Saffron develops *any* repo that can satisfy the gate contract (§5.4). First repo is Saffron itself; `thermal-edge` is the first external one.
@@ -1440,6 +1440,123 @@ And the other half of the layout — the part that lives in every target repo, a
 
 ---
 
+## Appendices — an index
+
+The appendices are ordered by *when* a thing was learned, which is the wrong order
+for finding one. This is the other index. It is navigation, not authority: where it
+disagrees with an appendix, the appendix is right.
+
+| App. | Rev | The question it settles | Principles |
+|---|---|---|---|
+| **A** | 2 | Nine adversarial-review findings on rev 1 — DIAGNOSE proposes `touches`, `coverage` goes advisory, no vote over disjoint lenses | 1–9 |
+| **B** | 3 | Is a factory ontology worth building? (`SA-0001`, §4.6) | 10–11 |
+| **C** | 4 | What makes Saffron language-blind: the gate contract, and the core/repo boundary it draws (§2.1, §5.4) | 12–14 |
+| **D** | 5 | What prior art does better — and the negative finding, that good process hygiene converges on near-zero verification | 15–24 |
+| **E** | 6 | Three defects `CONTEXT.md` found in this document by being written against it | 25–26 |
+| **F** | 7 | Nine more from an end-to-end read-through, including `coverage` blocking and advisory in the same document | 27–30 |
+| **G** | 8, 10 | The cell runtime. "Docker" was never a decision — rev 8 names the candidates, rev 10 chooses by spike | 31–33 |
+| **H** | 9 | What v0 found, being the first revision that ran: three merged pull requests replayed agent-free | 34–37 |
+| **I** | 11 | What building v0.5 found — including a cell whose every mechanism reported success against a different container | 38–41 |
+| **J** | 12 | What the first live runs found — four agent sessions in real cells, $2.47 | 42–44 |
+| **K** | 13 | The factory produced plausible, verified, broken code: three tasks green, one reviewed, verdict *do not merge* | 45–49 |
+| **L** | 14 | The critic built, and measured against a known-bad diff rather than argued for | 50–51 |
+| **M** | 15 | What *running* the rejected gate found, beyond what reading it found — three corrections in twenty minutes | 52 |
+| **N** | 16 | What tree a task is about, and who may write the thing that judges it (backlog items 11 and 12) | 53–55 |
+| **O** | 18, 19 | Is there an *operational* case for the ontology, beyond the analytical one `RATIONALE.md` closed? Rev 19 ran the spike and closed it — *The result* | 56 |
+| **P** | 20 | Should the appendices have been ADRs? No — and the phrase that kept the question alive was a summary of two verdicts that nobody decided | 57 |
+
+**Two revisions have no appendix, and neither needs one.** Rev 1 is the document.
+Rev 17 is in §4.2.1 and §6 with
+`docs/evidence/2026-08-25-morning-queue-from-real-rows.md`. Two more only look
+missing: rev 10 is inside Appendix G and rev 19 inside Appendix O, under *The
+result*. That is why those two rows carry two revisions each, and why "one appendix
+per revision" is the wrong reading — a revision that closes an earlier revision's
+question lands in that question's appendix rather than opening its own.
+
+The principles are one sequence across every appendix, allocated as a block when the
+appendix is written. That is why an appendix is coarse and chronological rather than
+one decision per file: per-decision documents written in parallel would each have to
+claim numbers from the same sequence.
+
+---
+
+## Principles — an index
+
+Every principle in one place, which the appendices cannot give you: each is stated
+where it was found, and finding one means knowing which revision found it.
+
+**This table is generated.** `uv run python -m ontology.render` rewrites it from the
+appendices below, so a principle cannot be added to one and missed by the other, and
+a hand edit here is discarded rather than kept. `ontology/design_record.py` parses
+it into `saffron:Principle` and `saffron:RevisionAppendix`; the shapes hold what
+Markdown cannot say about itself, and `tests/ontology/test_design_record.py` holds
+contiguity, which SHACL has no form for.
+
+The claim is the lead sentence. It is an index, not a substitute: a principle
+compresses an appendix, and the appendix is where the case that found it lives.
+
+| # | The claim | From |
+|---|---|---|
+| 1 | A gate that requires the human to already know the answer isn't a gate, it's a tax | A |
+| 2 | A dependency edge that can only be satisfied by a human action outside the batch will never be satisfied inside it | A |
+| 3 | A walking skeleton must contain the hard part | A |
+| 4 | Controls inside the untrusted zone are not controls | A |
+| 5 | Two safety mechanisms that make each other dead code mean you picked one without noticing | A |
+| 6 | A blocking metric gate teaches the cheapest way to satisfy it | A |
+| 7 | Resource limits that the runtime doesn't actually enforce produce flakiness you'll misattribute to the model | A |
+| 8 | Detection without reclamation is not a countermeasure | A |
+| 9 | A voting rule over disjoint voters never votes | A |
+| 10 | A design artifact can succeed by concluding "don't build it." | B |
+| 11 | Modelling pays before it ships | B |
+| 12 | A boundary is cheap; an abstraction layer is not | C |
+| 13 | When a check feels language-specific, separate the question from the vocabulary | C |
+| 14 | Generality is a claim, and claims need tests | C |
+| 15 | Treat agent output as claims; reconcile against a host-computed fact set | D |
+| 16 | Bound liveness on more axes than you think, and never let a bound destroy work | D |
+| 17 | Refuse before you spend | D |
+| 18 | Structured output is a separate, tool-less turn | D |
+| 19 | Retry idempotent infrastructure races; fail fast on everything that builds what the agent acts on | D |
+| 20 | Control files in the workspace are agent-visible and agent-writable | D |
+| 21 | `--force-with-lease` pinned to the checked-out SHA, and one writer per branch | D |
+| 22 | Source determines processing | D |
+| 23 | A living refusal record | D |
+| 24 | A glossary with explicit *Avoid:* lists | D |
+| 25 | A vocabulary is a test suite for a design, in the same way a spec is | E |
+| 26 | Directional words need a fixed referent | E |
+| 27 | An identity that includes a coordinate the change moves is not an identity | F |
+| 28 | A reconciler tuned to one producer silently disables another | F |
+| 29 | A rule with an unstated exception has been abandoned, not weakened | F |
+| 30 | Fixing half a contradiction leaves a contradiction | F |
+| 31 | A resource control means whatever the kernel reading it can see | G |
+| 32 | A product name in a design is an unmade decision wearing a decision's clothes | G |
+| 33 | A countermeasure written against an environment you have not run on is a hypothesis | G |
+| 34 | A green result and an absent result are the same bytes | H |
+| 35 | When identities can legitimately collide, subtraction has to count | H |
+| 36 | Partial results are not results | H |
+| 37 | Every harness that reports on something else needs the check it imposes | H |
+| 38 | A control and its subject are wired somewhere, and the wiring is the control | I |
+| 39 | Locating a tool proves a file exists; only running it proves a tool works | I |
+| 40 | A reviewer scoped to one task cannot see the seam between two | I |
+| 41 | A boundary leaks in both directions, and the second is harder to see | I |
+| 42 | A pipeline that verifies work and then discards it has not finished; it has failed expensively | J |
+| 43 | A configuration surface is an input, and every input from the workspace is a claim | J |
+| 44 | The path that has never run is the one your estimate is about | J |
+| 45 | A test written by the author of the code certifies agreement, not correctness | K |
+| 46 | Over-built for the rare case, under-built for the common one | K |
+| 47 | A proxy measure is gameable in exactly the direction the adversary wants | K |
+| 48 | Gates verify what you thought to check; the critic exists for what you did not | K |
+| 49 | A verification an agent can run itself is a verification it will have already passed | K |
+| 50 | A critic and a reviewer fail differently, and that is the argument for having both | L |
+| 51 | Two lenses reaching the same finding is a fact about the prompts, not about the finding | L |
+| 52 | When a check keeps needing a better heuristic, the question is in the wrong coordinate system | M |
+| 53 | A refusal that is loosened to make tests pass is a refusal that no longer exists | N |
+| 54 | A control applied at one call site is not applied; it is applied at one call site | N |
+| 55 | Where two outcomes deliberately share a state, that state cannot be the assertion | N |
+| 56 | A negative result answers the question it tested, and no other | O |
+| 57 | A summary of two decisions is a third decision, and nobody made it | P |
+
+---
+
 ## Appendix A — What changed in rev 2, and why
 
 Rev 1 was reviewed adversarially. Nine findings survived scrutiny; all are incorporated above. The ones worth remembering as *principles*, because they'll recur:
@@ -2525,3 +2642,55 @@ Answers and reasoning: `docs/superpowers/plans/2026-09-02-ontology-authoritative
 **One finding for the other side of the ledger.** This appendix's "for" case opens with three defects the vocabulary found in this document. There is a fourth: `MERGE_TRAIN` is a state §3.3's diagram shows a task entering and `scheduler.py` reads twice, and it is in neither `CONTEXT.md` nor `ontology/saffron.ttl`.
 
 56. **A negative result answers the question it tested, and no other.** `SA-0001` proved the queries were not worth an emitter. It proved nothing about whether the vocabulary is worth executing, because it never asked — and the honest response to "then let's make it operational" is a different experiment, not a re-reading of the first one.
+
+---
+
+## Appendix P — rev 20: the vocabulary covers the design record
+
+Three sessions in a row asked whether `DESIGN.md`'s appendices should be ADRs. The
+answer stayed no, and the third asking found the sentence that made the question
+worth repeating.
+
+**The finding is a phrase, not a design.** `DESIGN.md`'s status line said
+"`ontology/` stays what §9's v2.5 says it is: a completed project." Two verdicts
+sit behind that. `ontology/RATIONALE.md` closed **the emitter** — five queries,
+five SQL equivalents, don't build the ledger→RDF projection — and Appendix O closed
+**§1.4**, whether shapes control execution, on a spike that answered *no* on two of
+four questions. Neither closed the vocabulary to growth, and the vocabulary had
+never stopped growing: rev 19 made it authoritative for the closed sets and gave it
+a generator, and backlog item 52 queues `TaskState` and `InFlightState` for it.
+
+The shorthand read as a wider decision than either verdict made, and it did the
+thing a wrong summary does — it stopped work nobody had decided to stop. This is
+the same family as Appendix G's "Docker": a form of words standing where a decision
+was never taken. It is not the same defect, and the difference is worth a number.
+
+57. **A summary of two decisions is a third decision, and nobody made it.**
+    "Don't build the emitter" and "shapes do not control execution" are both true
+    and both narrow. Compressed to "a completed project" they became a claim about
+    scope that neither verdict supports, sitting in the status line where it is
+    read first and cited most. A summary is lossy in a direction — toward the
+    general — and the general version is the one that gets enforced.
+
+**What changed.** `CONTEXT.md` §11 had just named the genres a decision here is
+recorded in, and nothing carried them: the file's own architecture is that the
+vocabulary is authoritative for its closed sets, and `CONTEXT.md` §11 sat outside
+it. `saffron:Principle` and `saffron:RevisionAppendix` now exist, `PrincipleShape`
+and `RevisionAppendixShape` read them, and `ontology/design_record.py` parses the
+appendices into that graph and renders the principle index above from it.
+
+**Two of `CONTEXT.md` §11's five genres are deliberately absent.** `EvidenceRecord`
+and `SpikeVerdict` have no shape or query reading them, and a term whose only
+reader is an `rdfs:comment` is what `tests/ontology/test_no_dead_terms.py` deletes
+— *"cheap to fake. Delete it; do not comment it."* Appendix O measured the full-`CONTEXT.md`
+expansion at roughly thirty terms and said coverage is downstream of readers, not
+independent of them. That holds here: these two join when something reads them.
+
+**The direction is the opposite of `render.py`'s, and that asymmetry is the point.**
+A closed set is a decision the vocabulary owns, so `CONTEXT.md` renders from the
+`.ttl`. A principle is prose an appendix owns, so the graph is parsed *from*
+`DESIGN.md` and only the index renders back. Nothing writes prose into an appendix.
+
+**What the emitter's status is now.** Deferred, with the revisit clause
+`RATIONALE.md:22` already carried. Not finished, not refused — asked again when
+reconstructibility has to be enforced continuously rather than spot-checked.
