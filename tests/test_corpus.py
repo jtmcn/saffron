@@ -415,6 +415,9 @@ def _load_driver():
 
 
 PROBE = Mutant(file="saffron/gates/core/scope.py", find="== 0", replace="== 1")
+# A second, distinct probe on a second file. Distinct on all three fields so
+# `_distinct` cannot collapse the pair into one.
+PROBE_2 = Mutant(file="saffron/gates/core/census.py", find="!= 1", replace="!= 2")
 
 
 def _saffron_dir_without_a_tests_gate(root):
@@ -441,6 +444,7 @@ def _drive(
     saffron_dir=None,
     fixture_ids=("SA-0045",),
     mutate_raises=None,
+    probes=(PROBE,),
 ):
     """One fixture through the driver's `main`, with every path into a cell
     replaced: no container, no token, no spend.
@@ -451,8 +455,13 @@ def _drive(
     gate through the runner, in the cell it was applied in, or it is not
     answered at all.
 
-    `mutate_raises` makes `source_mutated` raise instead of yielding, which is
-    the one thing in this path that a real cell does routinely.
+    `mutate_raises` makes `source_mutated` raise instead of yielding on its
+    *first* call, which is the one thing in this path that a real cell does
+    routinely. First call rather than every call so a later probe in the same
+    fixture can be observed being attempted — or, once the tree's state is
+    unknown, observed not being.
+
+    `probes` is one adequacy finding each, so a fixture can file more than one.
     """
     driver = _load_driver()
 
@@ -468,12 +477,13 @@ def _drive(
                 Finding(
                     lens="adequacy",
                     severity="concern",
-                    file="saffron/gates/core/scope.py",
+                    file=probe.file,
                     line=1,
                     claim="nothing in the suite would notice this",
                     anchored=True,
-                    probe=PROBE,
+                    probe=probe,
                 )
+                for probe in probes
             ]
             if lens == "adequacy"
             else [],
@@ -493,7 +503,7 @@ def _drive(
         call in this path that writes inside a cell, so which cell it was
         handed is recorded rather than assumed."""
         mutated.append((container, mutant))
-        if mutate_raises is not None:
+        if mutate_raises is not None and len(mutated) == 1:
             raise mutate_raises
         yield None
 
@@ -664,6 +674,44 @@ def test_a_cell_that_failed_under_a_probe_is_unproven_not_the_end_of_the_pass(
     recorded = json.loads((pass_.out / "SA-0045" / "probes-1.json").read_text())
     assert [entry["verdict"] for entry in recorded] == ["unproven"]
     assert "argument list too long" in recorded[0]["reason"]
+
+
+def test_a_raise_stops_that_fixture_rather_than_probing_a_tree_it_cannot_trust(
+    tmp_path, monkeypatch
+):
+    """A raise out of `source_mutated` means the cell's tree may be mutated.
+
+    `source_mutated` raises *after* its `finally` when the undo fails, and in
+    that case the file is left mutated (`worktree.py`: "mutant undo for
+    {file} failed" and "exited 0 and did not restore the file"). A failed
+    *apply* is no safer — `_write_file`'s redirect truncates before `base64`
+    writes a byte, which is `SA-0062`'s own defect. Either way the tree's
+    state is unknown from here, and the two cases are told apart only by an
+    exception's message.
+
+    So a later probe scored against that tree could come back `survived` on an
+    edit nobody undid — inflating the one number this whole exercise produces,
+    with nothing in the record saying the tree was dirty. Stop at the fixture,
+    not at the pass: the cell is per-fixture, so the next one is trustworthy
+    again.
+    """
+    pass_ = _drive(
+        tmp_path,
+        monkeypatch,
+        probes=(PROBE, PROBE_2),
+        mutate_raises=CellRuntimeError("mutant undo for scope.py failed: no such file"),
+    )
+
+    # The second probe was never applied — the assertion that matters, because
+    # under the defect it was applied and scored against a dirty tree.
+    assert [mutant for _container, mutant in pass_.mutated] == [PROBE]
+
+    recorded = json.loads((pass_.out / "SA-0045" / "probes-1.json").read_text())
+    assert [entry["verdict"] for entry in recorded] == ["unproven", "unproven"]
+    assert "mutant undo for scope.py failed" in recorded[0]["reason"]
+    assert "unknown state" in recorded[1]["reason"]
+    assert "0 of 0" in pass_.table
+    assert "2 unproven" in pass_.table
 
 
 def test_a_head_declaring_no_tests_gate_is_unproven_and_not_an_abort(

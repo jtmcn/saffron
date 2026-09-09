@@ -214,7 +214,7 @@ def _apply_probes(
             )
         return [result for _probe, result in applied]
 
-    for probe in probes:
+    for index, probe in enumerate(probes):
         try:
             result = probe_check.check_probe(
                 probe,
@@ -224,9 +224,32 @@ def _apply_probes(
                 test_paths=TEST_PATHS,
             )
         except runtime.CellRuntimeError as exc:
-            result = probe_check.ProbeResult(
-                "unproven", f"the probe could not be applied or asked: {exc}"
+            # Stop this fixture rather than moving to the next probe: after a
+            # raise, the tree may be mutated. `source_mutated` raises *after*
+            # its `finally` when the undo failed, and says so in the message —
+            # but a failed *apply* is no safer, because `_write_file`'s
+            # redirect truncates before `base64` writes a byte (`SA-0062`).
+            # The two are told apart only by an exception's text, so neither
+            # is trusted. A probe scored against a tree carrying someone
+            # else's edit could read `survived` on an edit nobody undid, which
+            # inflates the one number this measures and says nothing about it.
+            # The cell is per-fixture, so the next fixture is clean again.
+            landed(
+                probe,
+                probe_check.ProbeResult(
+                    "unproven", f"the probe could not be applied or asked: {exc}"
+                ),
             )
+            for unasked in probes[index + 1 :]:
+                landed(
+                    unasked,
+                    probe_check.ProbeResult(
+                        "unproven",
+                        "an earlier probe left this cell's tree in an unknown "
+                        "state, so nothing after it in this fixture was asked",
+                    ),
+                )
+            break
         landed(probe, result)
     return [result for _probe, result in applied]
 
