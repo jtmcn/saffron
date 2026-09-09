@@ -54,8 +54,7 @@ recorded_graded = 0
 
 [[defects]]
 id = "dirty-restore"
-file = "saffron/cell/worktree.py"
-lines = [386, 426]
+locations = [{ file = "saffron/cell/worktree.py", lines = [386, 426] }]
 owner = "correctness"
 min_severity = "blocker"
 # The undo is `git checkout HEAD -- <file>` with no dirty check, so it destroys
@@ -73,13 +72,12 @@ must_mention = ["uncommitted", "not committed", "not yet committed"]
 
 [[defects]]
 id = "truncating-write"
-file = "saffron/cell/worktree.py"
 # 366-426, not 366-382: the write is in `_write_file`, but a lens reasoning
 # about what a failed write leaves behind anchors on the *call site* inside
 # `source_mutated`, which is where the missing try/finally is. All three runs
 # of the first pass filed it at 418. A range that stops at the callee scores
 # the defect missed while the lens is filing it as a blocker.
-lines = [366, 426]
+locations = [{ file = "saffron/cell/worktree.py", lines = [366, 426] }]
 owner = "contract"
 min_severity = "blocker"
 # `> path` truncates before `base64 -d` writes anything, so a non-zero exit

@@ -11,10 +11,10 @@ directory. The driver that builds a cell and spends money is
 importable from here, because the part that can be silently wrong is this part,
 and it is the part that gets tests.
 
-Two numbers per defect, not one. **seen** is anchored, in the declared file and
-line range, and mentioning one of the declared phrases, at any severity: did the
-lens look at this and say what it is? **graded** additionally requires the
-severity the independent review gave it. They answer different questions — Track
+Two numbers per defect, not one. **seen** is anchored, inside one of the
+declared locations, and mentioning one of the declared phrases, at any severity:
+did the lens look at this and say what it is? **graded** additionally requires
+the severity the independent review gave it. They answer different questions — Track
 C moves a prompt and wants to know whether the lens now sees the defect at all;
 item 79's exit criterion is about the grade — and one number would hide a lens
 that sees a critical defect and files it as a note.
@@ -76,12 +76,33 @@ class CalibrationError(AssertionError):
 
 
 @dataclass(frozen=True)
+class Location:
+    """One file, and the range inside *that* file a finding may anchor to.
+
+    Paired rather than a flat `files` list sharing one range: a line number
+    means nothing across two files, and a shared range would credit a finding
+    on the source at the test file's lines.
+    """
+
+    file: str
+    lines: tuple[int, int]
+
+    def holds(self, finding: Finding) -> bool:
+        low, high = self.lines
+        return finding.file == self.file and low <= finding.line <= high
+
+
+@dataclass(frozen=True)
 class Defect:
     """One defect a fixture declares, and the predicate that recognises it."""
 
     id: str
-    file: str
-    lines: tuple[int, int]
+    locations: tuple[Location, ...]
+    """Every place a finding about this defect may land. Plural because the
+    anchor file is not predictable for a vacuous-test defect: measured in pass
+    1, the adequacy lens filed SA-0045's on the source whose behaviour is
+    unguarded and SA-0050's on the test that fails to guard it — same lens,
+    same pass, opposite conventions."""
     owner: str
     """The lens whose remit this belongs to. Recorded, never enforced — a
     defect caught by the wrong lens is a fact about disjointness (§5.5) worth
@@ -218,14 +239,34 @@ def load_fixture(root: Path) -> Fixture:
                 f"{where}: min_severity {severity!r} is not "
                 f"one of {sorted(SEVERITY_RANK)}"
             )
-        lines = tuple(_required(entry, "lines", where))
-        if len(lines) != 2 or lines[0] > lines[1]:
-            raise FixtureError(f"{where}: lines must be [low, high]")
+        if "file" in entry or "lines" in entry:
+            # The pre-locations form. Read past silently and the defect would
+            # load with no location at all and score a permanent 0.
+            raise FixtureError(
+                f"{where}: file/lines on the defect is the single-location "
+                "form; declare locations = [{ file = ..., lines = [lo, hi] }]"
+            )
+        locations = []
+        for spot in _required(entry, "locations", where):
+            lines = tuple(_required(spot, "lines", where))
+            if len(lines) != 2 or lines[0] > lines[1]:
+                raise FixtureError(f"{where}: lines must be [low, high]")
+            locations.append(
+                Location(
+                    file=_required(spot, "file", where), lines=(lines[0], lines[1])
+                )
+            )
+        if not locations:
+            # Same shape as the empty `must_mention` refusal below: nothing for
+            # `any()` to be true of, so the defect could never be seen.
+            raise FixtureError(
+                f"{where}: declares no location, so no finding could ever "
+                "anchor inside it"
+            )
         defects.append(
             Defect(
                 id=_required(entry, "id", where),
-                file=_required(entry, "file", where),
-                lines=(lines[0], lines[1]),
+                locations=tuple(locations),
                 owner=_required(entry, "owner", where),
                 min_severity=severity,
                 must_mention=phrases,
@@ -283,10 +324,7 @@ def _sees(defect: Defect, finding: Finding) -> bool:
         # `anchor` already ruled this points at nothing the diff touched
         # (§5.5). Counting it would let a hallucinating lens score.
         return False
-    if finding.file != defect.file:
-        return False
-    low, high = defect.lines
-    if not low <= finding.line <= high:
+    if not any(spot.holds(finding) for spot in defect.locations):
         return False
     claim = finding.claim.lower()
     return any(phrase in claim for phrase in defect.must_mention)

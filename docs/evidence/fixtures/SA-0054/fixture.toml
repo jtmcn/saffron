@@ -32,8 +32,7 @@ recorded_graded = 0
 
 [[defects]]
 id = "parent-branch-unpinned"
-file = "saffron/cli.py"
-lines = [590, 600]
+locations = [{ file = "saffron/cli.py", lines = [590, 600] }]
 owner = "adequacy"
 min_severity = "blocker"
 # `_batch_runner`'s `package_phase.package(...)` call passes
@@ -63,8 +62,7 @@ must_mention = ["parent_branch", "parent branch", "stacked"]
 
 [[defects]]
 id = "stop-line-unwitnessed"
-file = "saffron/cli.py"
-lines = [790, 805]
+locations = [{ file = "saffron/cli.py", lines = [790, 805] }]
 owner = "adequacy"
 min_severity = "blocker"
 # `_batch` prints `f"batch: {stop}"` (line 796) — the one line that puts the

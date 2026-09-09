@@ -33,8 +33,7 @@ recorded_graded = 0
 
 [[defects]]
 id = "refusal-codes-unpinned"
-file = "saffron/preflight.py"
-lines = [295, 320]
+locations = [{ file = "saffron/preflight.py", lines = [295, 320] }]
 owner = "adequacy"
 min_severity = "blocker"
 # `validate_claude_token`'s `except urllib.error.HTTPError as exc: return

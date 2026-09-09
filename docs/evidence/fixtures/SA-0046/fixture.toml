@@ -23,8 +23,7 @@ recorded_graded = 0
 
 [[defects]]
 id = "reflow-defeats-guard"
-file = "tests/test_ledger.py"
-lines = [717, 773]
+locations = [{ file = "tests/test_ledger.py", lines = [717, 773] }]
 owner = "adequacy"
 min_severity = "blocker"
 # `_schema_without_policy_sha()` is `SCHEMA.replace("    policy_sha TEXT,\n", "")`

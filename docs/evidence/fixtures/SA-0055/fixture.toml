@@ -23,8 +23,7 @@ recorded_graded = 0
 
 [[defects]]
 id = "pinned-base-unwitnessed"
-file = "saffron/cli.py"
-lines = [685, 730]
+locations = [{ file = "saffron/cli.py", lines = [685, 730] }]
 owner = "adequacy"
 min_severity = "blocker"
 # `_resolve_queue`'s `if pinned is not None: ... else: <derive>` branch is
@@ -43,8 +42,7 @@ must_mention = ["ast.Constant", "keyword", "not a literal"]
 
 [[defects]]
 id = "readiness-guard-unwitnessed"
-file = "saffron/cli.py"
-lines = [930, 950]
+locations = [{ file = "saffron/cli.py", lines = [930, 950] }]
 owner = "adequacy"
 min_severity = "blocker"
 # `if readiness.ok:` gates the whole scan-and-run branch; deleting it leaves

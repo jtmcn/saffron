@@ -57,6 +57,51 @@ def _reviews(*findings: Finding) -> list[LensReview]:
     ]
 
 
+def _one_defect(root: Path, where: str) -> Path:
+    """A fixture declaring exactly one defect, whose location fields are written
+    verbatim by the caller. Written fresh rather than patched out of SA-0062's
+    text, because the location form is what is under test and a `str.replace`
+    over a shipped declaration hides it. `load_fixture` reads no frozen input,
+    so `fixture.toml` alone is a loadable fixture."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "fixture.toml").write_text(
+        "\n".join(
+            [
+                'spec_id = "SA-9999"',
+                "pr = 1",
+                f'base_sha = "{"a" * 40}"',
+                f'head_sha = "{"b" * 40}"',
+                "recorded_seen = 0",
+                "recorded_graded = 0",
+                "",
+                "[[defects]]",
+                'id = "only"',
+                'owner = "adequacy"',
+                'min_severity = "blocker"',
+                'must_mention = ["neutraliz"]',
+                where,
+                "",
+            ]
+        )
+    )
+    return root
+
+
+PR_BODY = '{ file = "saffron/report/pr_body.py", lines = [391, 402] }'
+TEST_REPORT = '{ file = "tests/test_report.py", lines = [96, 110] }'
+
+
+def _vacuity(*, file: str, line: int) -> Finding:
+    """SA-0063's real shape: one claim about one unwitnessed `neutralize` call,
+    which the adequacy lens may anchor on either side of."""
+    return _finding(
+        lens="adequacy",
+        file=file,
+        line=line,
+        claim="deleting the `neutralize` call leaves every current test green",
+    )
+
+
 def test_the_fixture_carries_its_frozen_inputs(sa0062):
     """A pass varies the prompt and nothing else, so the four inputs are files
     on disk rather than a rebuild from the ledger and the git history."""
@@ -160,18 +205,104 @@ def test_an_unanchored_finding_is_never_seen(sa0062):
     assert scores["dirty-restore"].seen is False
 
 
-def test_a_finding_in_another_file_is_not_seen(sa0062):
+def test_a_finding_in_a_file_no_location_declares_is_not_seen(sa0062, tmp_path):
+    """Locations widened the accepted file set; they did not open it. The
+    one-location case is what this asserted before locations existed and is
+    unchanged; the two-location case is the same property at the arity the
+    schema was added for. No mutant separates them — dropping the file check in
+    `Location.holds` fires both — so the second is arity coverage, not an
+    independent guard, and is written down as such rather than dressed up."""
     other = _finding(file="saffron/gates/runner.py", line=422)
     scores = lens_scoring.score_run(sa0062, _reviews(other))
     assert scores["dirty-restore"].seen is False
 
+    two = _one_defect(tmp_path, f"locations = [{PR_BODY}, {TEST_REPORT}]")
+    defect = lens_scoring.load_fixture(two).defects[0]
+    assert not lens_scoring._sees(defect, _vacuity(file="saffron/cli.py", line=100))
+
 
 def test_a_finding_outside_the_line_range_is_not_seen(sa0062):
     """worktree.py:358 is the correctness lens's real UTF-8 concern, eight lines
-    above `truncating-write`'s range and a different defect."""
+    above `truncating-write`'s range and a different defect. Unchanged by
+    locations — both of SA-0062's defects still declare exactly one — and the
+    cross-file half of the same property is
+    `test_a_range_belongs_to_its_own_file_and_not_to_the_others`."""
     scores = lens_scoring.score_run(sa0062, _reviews(_finding(line=358)))
     assert scores["dirty-restore"].seen is False
     assert scores["truncating-write"].seen is False
+
+
+def test_a_defect_may_declare_a_second_file_with_its_own_range(tmp_path):
+    """Measured, not supposed: the adequacy lens anchors a vacuous-test finding
+    sometimes on the source whose behaviour is unguarded (SA-0045) and
+    sometimes on the test that fails to guard it (SA-0050) — same lens, same
+    pass, opposite conventions. A defect naming one file cannot match a finding
+    on the other whatever its phrases say, so a defect declares locations."""
+    root = _one_defect(tmp_path, f"locations = [{PR_BODY}, {TEST_REPORT}]")
+    defect = lens_scoring.load_fixture(root).defects[0]
+    assert lens_scoring._sees(defect, _vacuity(file="tests/test_report.py", line=108))
+    assert lens_scoring._sees(
+        defect, _vacuity(file="saffron/report/pr_body.py", line=395)
+    )
+
+
+def test_a_range_belongs_to_its_own_file_and_not_to_the_others(tmp_path):
+    """Why a defect declares locations rather than a flat list of files sharing
+    one range: 108 is inside the test file's range and outside the source's,
+    and 395 is the reverse. One shared range would credit both."""
+    root = _one_defect(tmp_path, f"locations = [{PR_BODY}, {TEST_REPORT}]")
+    defect = lens_scoring.load_fixture(root).defects[0]
+    assert not lens_scoring._sees(
+        defect, _vacuity(file="saffron/report/pr_body.py", line=108)
+    )
+    assert not lens_scoring._sees(
+        defect, _vacuity(file="tests/test_report.py", line=395)
+    )
+
+
+def test_a_defect_declaring_no_location_is_refused(tmp_path):
+    """The same shape as the empty `must_mention` refusal: no location leaves
+    `any()` false for every finding, so the defect scores a permanent, silent
+    0."""
+    root = _one_defect(tmp_path, "locations = []")
+    with pytest.raises(lens_scoring.FixtureError, match="declares no location"):
+        lens_scoring.load_fixture(root)
+
+
+def test_a_defect_written_in_the_single_location_form_is_refused(tmp_path):
+    """`file`/`lines` on the defect itself is the shape every fixture used
+    before locations existed. Ignoring the pair silently would load a defect
+    with no location at all, so it is refused by name."""
+    root = _one_defect(
+        tmp_path, 'file = "saffron/report/pr_body.py"\nlines = [391, 402]'
+    )
+    with pytest.raises(lens_scoring.FixtureError, match="locations"):
+        lens_scoring.load_fixture(root)
+
+
+def test_a_location_missing_its_file_or_its_range_is_a_fixture_error(tmp_path):
+    """A location is two halves and neither is optional: with no `file` the
+    range would reach into any file, with no `lines` the file would match at
+    any line."""
+    no_file = _one_defect(tmp_path / "a", "locations = [{ lines = [391, 402] }]")
+    with pytest.raises(lens_scoring.FixtureError, match="no file"):
+        lens_scoring.load_fixture(no_file)
+    no_lines = _one_defect(
+        tmp_path / "b", 'locations = [{ file = "saffron/report/pr_body.py" }]'
+    )
+    with pytest.raises(lens_scoring.FixtureError, match="no lines"):
+        lens_scoring.load_fixture(no_lines)
+
+
+def test_a_locations_range_is_still_low_then_high(tmp_path):
+    """Inverted bounds leave `low <= line <= high` false for every line, the
+    silent-zero shape once more. The check moved with the field."""
+    root = _one_defect(
+        tmp_path,
+        'locations = [{ file = "saffron/report/pr_body.py", lines = [402, 391] }]',
+    )
+    with pytest.raises(lens_scoring.FixtureError, match="lines must be"):
+        lens_scoring.load_fixture(root)
 
 
 def test_a_pass_counts_runs_that_saw_it_not_findings_that_matched(sa0062):
