@@ -120,6 +120,12 @@ class ProbeScore:
     fixture in the table: recall is re-derived from every run JSON on disk, so
     a `--skip-existing` resume scores eight fixtures and probes three, and the
     summary has to say which set the second number covers."""
+    runs: int
+    """How many runs per fixture the probes were collected from. This is a
+    total, not a rate: `--runs 3` files three chances to name a distinct edge
+    where `--runs 1` files one, and only byte-identical edits collapse. Recall
+    above is averaged over runs, so without this the two numbers scale
+    differently and a reader compares passes that are not comparable."""
 
     @property
     def asked(self) -> int:
@@ -129,8 +135,14 @@ class ProbeScore:
         return self.survived + self.killed
 
 
-def score_probes(results: Mapping[str, Sequence[ProbeResult]]) -> ProbeScore:
+def score_probes(
+    results: Mapping[str, Sequence[ProbeResult]], *, runs: int
+) -> ProbeScore:
     """One aggregate over every fixture's probes.
+
+    `runs` is keyword and required for the same reason `check_probe`'s
+    `test_paths` is: a total whose run basis went unstated is the hole, so
+    forgetting it is a `TypeError` rather than a number nobody can place.
 
     Probes, never findings: a finding whose lens was never asked for an edit
     carries no probe and is not a probe that failed.
@@ -145,6 +157,7 @@ def score_probes(results: Mapping[str, Sequence[ProbeResult]]) -> ProbeScore:
         killed=sum(r.verdict == "killed" for r in flat),
         unproven=sum(r.verdict == "unproven" for r in flat),
         fixtures=len(results),
+        runs=runs,
     )
 
 
@@ -160,7 +173,9 @@ def render_probe_summary(score: ProbeScore) -> str:
     The fixture count is in the line for the same reason: a resumed pass
     probes fewer fixtures than it scores, and a number over three fixtures
     beside a recall line over eight is a comparison the document has to refuse
-    in writing rather than leave to the reader.
+    in writing rather than leave to the reader. The run count is there on that
+    same argument — this is a total over the runs, where recall is a rate over
+    them, so two passes at different `--runs` do not compare.
     """
     one = score.survived == 1
     return (
@@ -169,9 +184,11 @@ def render_probe_summary(score: ProbeScore) -> str:
         f"left the fixture's suite green. {score.survived} of {score.asked} "
         f"probe(s) that answered survived; {score.unproven} unproven and in no "
         f"denominator, over {score.fixtures} fixture(s) probed this invocation "
-        f"— which need not be every fixture in the table, since recall is "
-        f"re-derived from every run JSON on disk and a resumed pass probes only "
-        f"what it ran. Not comparable with the recall line above: one lens, and "
+        f"at {score.runs} run(s) each — which need not be every fixture in the "
+        f"table, since recall is re-derived from every run JSON on disk and a "
+        f"resumed pass probes only what it ran. A total over those runs, not a "
+        f"rate over them, so it does not compare with a pass at a different "
+        f"`--runs`. Not comparable with the recall line above either: one lens, and "
         f"a lower bound — a killed probe may have broken the program rather "
         f"than been noticed, which is adjudicated per probe and not computed."
     )

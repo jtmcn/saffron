@@ -62,7 +62,7 @@ already up, and the repo's declared `tests` gate asked whether anything
 notices. A probe that survives is the finding confirmed (`CONTEXT.md`), and
 the table says so under the recall line. `--skip-probes` turns it off.
 
-Every verdict lands in that fixture's `probes-1.json` as it is produced, for
+Every verdict lands in that fixture's `probes.json` as it is produced, for
 the same reason each run's JSON is written the moment the fixture lands: a
 raise inside a cell at fixture seven must not take the six before it with it.
 """
@@ -139,7 +139,7 @@ def _write_probes(
     is already written and `--score-only` re-derives it, where a verdict that
     was only printed is gone with the process.
     """
-    (out / "probes-1.json").write_text(
+    (out / "probes.json").write_text(
         json.dumps(
             [
                 {
@@ -147,10 +147,8 @@ def _write_probes(
                     "verdict": result.verdict,
                     "reason": result.reason,
                     "failures": list(result.failures),
-                    # What answered it. A `survived` over a suite that
-                    # collected almost nothing is green too, and without these
-                    # the record cannot tell the two apart — the first
-                    # end-to-end pass left exactly that question open.
+                    # What answered it: a `survived` over a suite that
+                    # collected almost nothing is green too.
                     "tool": result.tool,
                     "collected": result.collected,
                     "summary": result.summary,
@@ -188,38 +186,27 @@ def _apply_probes(
         _write_probes(out, applied)
         print(f"  probe {result.verdict}: {result.reason}")
 
+    def all_unproven(pending: list[Mutant], reason: str) -> None:
+        for probe in pending:
+            landed(probe, probe_check.ProbeResult("unproven", reason))
+
     if "tests" not in gates:
-        # No runner to ask, so nothing was learned about the lens: `unproven`,
-        # in no denominator, and the pass continues. `cell/session.py`'s
-        # witness wiring refuses on the same test for the same reason. Every
-        # shipped fixture's head declares a `tests` gate — pinned by a test,
-        # because `--fixtures` points wherever it is told — so this is the
-        # fallback, not the path a corpus pass takes.
-        for probe in probes:
-            landed(
-                probe,
-                probe_check.ProbeResult(
-                    "unproven",
-                    f"{spec_id}'s head declares no `tests` gate, so nothing "
-                    "could answer the probe",
-                ),
-            )
+        # Every shipped fixture's head declares a `tests` gate (pinned by a
+        # test), so this is the fallback, not the path a pass takes.
+        all_unproven(
+            probes,
+            f"{spec_id}'s head declares no `tests` gate, so nothing could "
+            "answer the probe",
+        )
         return [result for _probe, result in applied]
 
     run_tests = partial(_tests_gate_in_cell, container, gates["tests"], cwd)
-    # A container exec fails routinely (`worktree._write_file`'s `ponytail`
-    # names a real trigger: a source file near `MAX_ARG_STRLEN`). A raise at
-    # fixture seven of eight must cost that fixture's probes, not the pass.
+    # A container exec fails routinely, so a raise at fixture seven of eight
+    # must cost that fixture's probes, not the pass.
     try:
         baseline = run_tests([])
     except runtime.CellRuntimeError as exc:
-        for probe in probes:
-            landed(
-                probe,
-                probe_check.ProbeResult(
-                    "unproven", f"the baseline tests gate could not run: {exc}"
-                ),
-            )
+        all_unproven(probes, f"the baseline tests gate could not run: {exc}")
         return [result for _probe, result in applied]
 
     for index, probe in enumerate(probes):
@@ -232,39 +219,27 @@ def _apply_probes(
                 test_paths=TEST_PATHS,
             )
         except runtime.CellRuntimeError as exc:
-            # Stop this fixture rather than moving to the next probe: after a
-            # raise, the tree may be mutated. `source_mutated` raises *after*
-            # its `finally` when the undo failed, and says so in the message —
-            # but a failed *apply* is no safer, because `_write_file`'s
-            # redirect truncates before `base64` writes a byte (`SA-0062`).
-            # The two are told apart only by an exception's text, so neither
-            # is trusted. A probe scored against a tree carrying someone
-            # else's edit could read `survived` on an edit nobody undid, which
-            # inflates the one number this measures and says nothing about it.
-            # The cell is per-fixture, so the next fixture is clean again.
+            # After a raise the tree may be mutated: a failed undo and a failed
+            # apply (`SA-0062`) are told apart only by an exception's text, so
+            # neither is trusted. The cell is per-fixture, so stop at this one.
             landed(
                 probe,
                 probe_check.ProbeResult(
                     "unproven", f"the probe could not be applied or asked: {exc}"
                 ),
             )
-            for unasked in probes[index + 1 :]:
-                landed(
-                    unasked,
-                    probe_check.ProbeResult(
-                        "unproven",
-                        "an earlier probe left this cell's tree in an unknown "
-                        "state, so nothing after it in this fixture was asked",
-                    ),
-                )
+            all_unproven(
+                probes[index + 1 :],
+                "an earlier probe left this cell's tree in an unknown state, "
+                "so nothing after it in this fixture was asked",
+            )
             break
         landed(probe, result)
     return [result for _probe, result in applied]
 
 
-# Same function as the single-fixture driver, copied rather than imported: it
-# is three lines, and importing across `docs/evidence/scripts/` files would
-# couple two things meant to stay independently reproducible.
+# Copied from the single-fixture driver rather than imported: importing across
+# `docs/evidence/scripts/` would couple two independently reproducible files.
 def _read_head_at(repo: Path, head_sha: str):
     def read_head(path: str) -> str | None:
         done = subprocess.run(
@@ -347,9 +322,8 @@ def main() -> int:
 
     fixtures = corpus.load_corpus(args.fixtures)
 
-    # Before the first cell, before any money: one predicate that no longer
-    # reproduces its fixture's recorded answer is a bad fixture found for the
-    # price of a message, not a cell.
+    # Before any money: a predicate that no longer reproduces its fixture's
+    # recorded answer is a bad fixture found for the price of a message.
     try:
         corpus.calibrate_corpus(fixtures)
     except lens_scoring.CalibrationError as exc:
@@ -361,18 +335,14 @@ def main() -> int:
 
     mirror = None
     if not args.score_only:
-        # The mirror is built once for the whole pass. `cell_up` calls
-        # `image.build_cell_image` once per fixture inside it, expected to be
-        # a cache hit after the first — that cache behaviour is unmeasured.
+        # Once for the whole pass; `cell_up` rebuilds the image per fixture,
+        # expected to be a cache hit after the first — unmeasured.
         mirror = mirror_ops.ensure_mirror(args.repo, args.home / "mirrors" / "self")
 
     total_spent = 0.0
     # ponytail: this invocation's probes only, where recall below is re-derived
-    # from every run JSON on disk. A `--skip-existing` resume therefore reports
-    # the second number for the fixtures it ran and recall for all of them —
-    # the rendered summary names the fixture count so the two are not read as
-    # one denominator. Each fixture's verdicts also land in its own
-    # `probes-1.json`; nothing re-aggregates those across invocations yet.
+    # from every run JSON on disk. Nothing re-aggregates `probes.json` across
+    # invocations; the summary names the fixture count so the two are distinct.
     probe_results: dict[str, list[probe_check.ProbeResult]] = {}
     for i, fixture in enumerate(fixtures):
         out = args.out / fixture.spec_id
@@ -387,15 +357,13 @@ def main() -> int:
         assert mirror is not None
         out.mkdir(parents=True, exist_ok=True)
 
-        # Hoisted out of the `cell_up` call it used to be spelled inside: the
-        # probes below need the same export, because the policy declaring the
-        # `tests` gate has to come from the commit its executables came from.
+        # Hoisted out of `cell_up`: the probes need the same export, because
+        # the policy must come from the commit its executables came from.
         gates_dir = mirror_ops.export_saffron_dir(
             mirror, fixture.head_sha, out / "gates"
         )
-        # Cell-side, off the read-only `/gates` mount rather than `/work`, so
-        # nothing REVIEW's cell wrote can reach the gate a probe is judged by
-        # (§5.4) — `cell/session.py`'s own suite resolves them the same way.
+        # Off the read-only `/gates` mount, not `/work`: nothing REVIEW's cell
+        # wrote can reach the gate a probe is judged by (§5.4).
         policy, _ = load_policy(gates_dir)
         gates = policy.gate_executables(Path(worktree.GATES_MOUNT))
 
@@ -442,8 +410,7 @@ def main() -> int:
                     gates=fixture.gates,
                     context_md=fixture.context_md,
                     # Off the script's own root, not the CWD: a relative
-                    # resolve puts the failure inside the loop, after a cell
-                    # has already started.
+                    # resolve fails inside the loop, after a cell has started.
                     prompts_dir=ROOT / "saffron" / "agents" / "prompts",
                     max_turns=args.max_turns,
                     budget_usd=args.budget_usd,
@@ -463,19 +430,15 @@ def main() -> int:
                 ]
                 for review_ in reviews:
                     if review_.error:
-                        # Not a miss: `score_run` drops the whole run. Said
-                        # here too, because by the table it is one line of
-                        # arithmetic.
+                        # Not a miss: `score_run` drops the whole run.
                         print(
                             f"  ERRORED {review_.lens}: {review_.error}",
                             file=sys.stderr,
                         )
 
-            # After every run, so `--runs 3` pays for one baseline, not three,
-            # and — since `_distinct` collapses the repeats — one application
-            # per edit rather than three. The key is set whenever this fixture
-            # was probed at all, empty list included: that is what tells the
-            # table how many fixtures its second number covers.
+            # After every run, so `--runs 3` pays for one baseline and one
+            # application per distinct edit. The key is set whenever this
+            # fixture was probed, empty list included — that is `fixtures`.
             if not args.skip_probes:
                 probes = _distinct(probes)
                 print(f"  {len(probes)} vacuity probe(s) to apply")
@@ -499,9 +462,8 @@ def main() -> int:
                 note=lambda _s, _ok, d: print(f"  {d}", file=sys.stderr),
             )
 
-        # Between fixtures, after the cell for this one is already down: a
-        # trip here never leaves a cell running, and every fixture up to and
-        # including this one is already written to disk.
+        # Between fixtures, after this one's cell is down: a trip here never
+        # leaves a cell running, and every fixture so far is on disk.
         if total_spent >= args.max_spend_usd and i < len(fixtures) - 1:
             print(
                 f"stopping after {fixture.spec_id}: ${total_spent:.2f} "
@@ -527,15 +489,11 @@ def main() -> int:
         fixtures,
         scored,
         corpus.anchored_blockers(runs),
-        # `None`, not an empty score: a pass that applied no probe found out
-        # nothing about the adequacy lens, and "0 of 0" under the table would
-        # read as though it had. `not probe_results` is the third way to get
-        # there and the one that was missing — a `--skip-existing` resume that
-        # skipped every fixture probes nothing and would otherwise overwrite a
-        # real table with a zero nobody measured.
+        # `None`, not an empty score: a pass that applied no probe learned
+        # nothing, and "0 of 0" under the table would read as though it had.
         probes=None
         if args.score_only or args.skip_probes or not probe_results
-        else corpus.score_probes(probe_results),
+        else corpus.score_probes(probe_results, runs=args.runs),
     )
     (args.out / "table.md").write_text(table + "\n")
     print(

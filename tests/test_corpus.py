@@ -353,7 +353,7 @@ def test_the_second_number_counts_probes_not_findings():
         ],
         "SA-0045": [probe_check.ProbeResult("unproven", "find text not found")],
     }
-    score = corpus.score_probes(results)
+    score = corpus.score_probes(results, runs=1)
     assert (score.survived, score.killed, score.unproven) == (1, 1, 1)
 
 
@@ -361,7 +361,7 @@ def test_the_rendered_table_says_what_the_second_number_is_not():
     """A capability number beside a recall number will be read as comparable
     unless the table says otherwise, and it is not: it covers one lens."""
     results = {"SA-0063": [probe_check.ProbeResult("survived", "")]}
-    rendered = corpus.render_probe_summary(corpus.score_probes(results))
+    rendered = corpus.render_probe_summary(corpus.score_probes(results, runs=1))
     assert "1 verified" in rendered
     assert "adequacy" in rendered
 
@@ -371,7 +371,7 @@ def test_one_verified_vacuity_reads_as_one_finding():
     findings whose named edit" is a table a person pastes into an evidence
     record, and half-pluralised prose reads as a number nobody checked."""
     results = {"SA-0063": [probe_check.ProbeResult("survived", "")]}
-    rendered = corpus.render_probe_summary(corpus.score_probes(results))
+    rendered = corpus.render_probe_summary(corpus.score_probes(results, runs=1))
     assert "1 verified vacuity** — adequacy-lens finding whose named edit" in rendered
 
 
@@ -384,10 +384,21 @@ def test_the_second_number_names_how_many_fixtures_it_covered():
         "SA-0045": [probe_check.ProbeResult("survived", "")],
         "SA-0063": [],
     }
-    score = corpus.score_probes(results)
+    score = corpus.score_probes(results, runs=1)
     assert score.fixtures == 2
     assert "over 2 fixture(s) probed this invocation" in corpus.render_probe_summary(
         score
+    )
+
+
+def test_the_second_number_names_the_run_count_it_totals_over():
+    """A total, where recall beside it is a rate. `--runs 3` files three
+    chances to name a distinct edge and only byte-identical edits collapse, so
+    a summary that omits the run count invites a comparison between passes
+    that were not asked the same question."""
+    results = {"SA-0045": [probe_check.ProbeResult("survived", "")]}
+    assert "at 3 run(s) each" in corpus.render_probe_summary(
+        corpus.score_probes(results, runs=3)
     )
 
 
@@ -396,7 +407,7 @@ def test_an_unproven_probe_is_in_no_denominator():
     says nothing about the lens, so counting it against the lens would report
     the harness's own refusals as a capability score."""
     results = {"SA-0045": [probe_check.ProbeResult("unproven", "not tracked at HEAD")]}
-    rendered = corpus.render_probe_summary(corpus.score_probes(results))
+    rendered = corpus.render_probe_summary(corpus.score_probes(results, runs=1))
     assert "0 of 0" in rendered
     assert "1 unproven" in rendered
 
@@ -649,7 +660,7 @@ def test_every_probe_verdict_is_written_beside_the_run_json(tmp_path, monkeypatc
     only printed goes with the process."""
     pass_ = _drive(tmp_path, monkeypatch)
 
-    recorded = json.loads((pass_.out / "SA-0045" / "probes-1.json").read_text())
+    recorded = json.loads((pass_.out / "SA-0045" / "probes.json").read_text())
     assert [entry["verdict"] for entry in recorded] == ["survived"]
     assert recorded[0]["probe"] == PROBE.model_dump()
     assert recorded[0]["reason"]
@@ -672,7 +683,7 @@ def test_a_cell_that_failed_under_a_probe_is_unproven_not_the_end_of_the_pass(
 
     assert "0 of 0" in pass_.table
     assert "1 unproven" in pass_.table
-    recorded = json.loads((pass_.out / "SA-0045" / "probes-1.json").read_text())
+    recorded = json.loads((pass_.out / "SA-0045" / "probes.json").read_text())
     assert [entry["verdict"] for entry in recorded] == ["unproven"]
     assert "argument list too long" in recorded[0]["reason"]
 
@@ -707,7 +718,7 @@ def test_a_raise_stops_that_fixture_rather_than_probing_a_tree_it_cannot_trust(
     # under the defect it was applied and scored against a dirty tree.
     assert [mutant for _container, mutant in pass_.mutated] == [PROBE]
 
-    recorded = json.loads((pass_.out / "SA-0045" / "probes-1.json").read_text())
+    recorded = json.loads((pass_.out / "SA-0045" / "probes.json").read_text())
     assert [entry["verdict"] for entry in recorded] == ["unproven", "unproven"]
     assert "mutant undo for scope.py failed" in recorded[0]["reason"]
     assert "unknown state" in recorded[1]["reason"]
@@ -740,7 +751,7 @@ def test_every_shipped_fixture_s_head_declares_a_tests_gate():
     """What keeps the driver's `unproven` branch a fallback rather than the
     path every fixture takes. Read from git at each fixture's own `head_sha`,
     the commit the cell is brought up at — the policy the driver itself will
-    resolve `tests` from, not this checkout's."""
+    resolve `tests` from, not this worktree's."""
     for fixture in corpus.load_corpus(FIXTURES):
         raw = subprocess.run(
             ["git", "show", f"{fixture.head_sha}:.saffron/policy.yaml"],

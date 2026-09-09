@@ -30,9 +30,8 @@ from saffron.gates.baseline import subtract_baseline
 from saffron.gates.contract import GateResult
 from saffron.intake import Mutant
 
-# Redeclared rather than imported from `witness`/`revert`, which each redeclare
-# it from the other for the same reason: this module owes them a precedent, not
-# a dependency.
+# Redeclared rather than imported from `witness`/`revert`: this module owes
+# them a precedent, not a dependency.
 RunTests = Callable[[list[str]], GateResult]
 Mutated = Callable[[Mutant], AbstractContextManager[str | None]]
 
@@ -135,10 +134,8 @@ def check_probe(
             "unproven", f"{probe.file} is not a relative path inside the tree"
         )
     if any(_under(target, prefix) for prefix in test_paths):
-        # The number is otherwise satisfiable by construction: the adequacy
-        # prompt offers an edit "to the source or to the test", and deleting an
-        # assertion survives trivially. Refused before `mutate`, so nothing is
-        # written for a question that must not be asked.
+        # Otherwise satisfiable by construction — deleting an assertion
+        # survives trivially. Refused before `mutate`, so nothing is written.
         return ProbeResult(
             "unproven", f"{probe.file} is a test; a probe must target source"
         )
@@ -157,26 +154,19 @@ def check_probe(
             # the lens, and the tree is untouched.
             return ProbeResult("unproven", refusal)
         # The whole suite, never a subset, unlike `witness_gate`'s one named
-        # witness: a probe's question is whether *anything* notices. A
-        # function-local list, not a module-level constant handed to a
-        # callable this module does not control.
+        # witness: a probe's question is whether *anything* notices.
         mutated = run_tests([])
 
     if mutated.status not in ("pass", "fail"):
-        # `error` is not `fail`, and here it is not `pass` either: reading a
-        # gate that could not start as `survived` would count a broken
-        # toolchain as a verified vacuity. `skip` the same — a suite that never
-        # ran noticed nothing, which is not the suite failing to notice.
+        # `error` is not `fail`, and here not `pass` either. `skip` the same:
+        # a suite that never ran is not a suite that failed to notice.
         return ProbeResult(
             "unproven",
             f"the tests gate reported `{mutated.status}` under the probe: "
             f"{mutated.summary}",
         )
     # From here a gate answered, so every verdict below carries what answered
-    # it. Passed by name rather than spread from a dict: a `dict[str, object]`
-    # splatted into a frozen dataclass types as filling the positional
-    # `failures`, which `ty` refuses and which would be a real bug if it did
-    # not.
+    # it. By name, not splatted: `ty` reads a splat as filling `failures`.
     tool = mutated.tool
     collected = None if mutated.collected is None else len(mutated.collected)
     summary = mutated.summary

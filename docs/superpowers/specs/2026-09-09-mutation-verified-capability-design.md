@@ -370,7 +370,7 @@ argues against, committed inside the section retracting an earlier instance of i
 
 **What would settle it**, and what this change adds: every verdict now carries what answered
 it — the gate's `tool`, the count of node ids it enumerated, and its own summary line
-(pytest's "N passed in Xs"), persisted per probe in `probes-*.json`. A `survived` over a
+(pytest's "N passed in Xs"), persisted per probe in `probes.json`. A `survived` over a
 suite that collected almost nothing is green too, and until now nothing in the record could
 tell that from a real one. The next pass will say which it was.
 

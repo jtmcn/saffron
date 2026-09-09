@@ -93,7 +93,7 @@ class _Report(BaseModel):
     `findings: []` is the answer §5.5 asks for when there is no defect —
     distinguishable from a lens that emitted nothing at all."""
 
-    findings: list[dict]
+    findings: list[dict[str, object]]
 
 
 def _parse_report(lens: str, raw: str) -> list[_Reported]:

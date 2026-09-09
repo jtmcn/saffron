@@ -65,7 +65,11 @@ id = "notes-neutralization-unwitnessed"
 # and naming its own mutation (`safe = neutralize(text)` -> `safe = text` at
 # pr_body.py:391, applied at f76931df with the suite still green at 1502) —
 # and scored zero, because it anchored `tests/test_report.py:108` and a
-# defect declaring one file cannot match a finding on the other. Adding a
+# defect declaring one file cannot match a finding on the other. **That run
+# is not in this repo**: `recorded-findings.json` beside this file is a
+# different run and does not carry the finding (no `neutraliz` in it), so the
+# paragraph above is a claim with a named location — the operator's pass-1
+# `--out` directory — not a fact a reader can re-check here. Adding a
 # location because a lens anchored there is the tuning risk the two-pass
 # design exists to prevent, so it lands BEFORE pass 2 and never between
 # passes. The second range is derived from the post-image, not from the
