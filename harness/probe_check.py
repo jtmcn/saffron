@@ -50,6 +50,10 @@ def _no_longer_collected(baseline: GateResult, mutated: GateResult) -> list[str]
     `None` is not `[]` (`GateResult.collected`): a runner that does not
     enumerate has said nothing about which tests exist, which is not evidence
     that a probe removed one.
+
+    Not `suite_drift`, which answers a different question — whether a *gate*
+    stopped running or changed tool between two suites — and never reads
+    `collected`.
     """
     if baseline.collected is None or mutated.collected is None:
         return []
@@ -96,7 +100,7 @@ def check_probe(
 
     with mutate(mutant) as refusal:
         if refusal is not None:
-            # One of `source_mutated`'s refusals. None is evidence about
+            # One of `source_mutated`'s six refusals. None is evidence about
             # the lens, and the tree is untouched.
             return ProbeResult("unproven", refusal)
         # The whole suite, never a subset, unlike `witness_gate`'s one named
