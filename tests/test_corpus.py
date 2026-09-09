@@ -101,3 +101,39 @@ def test_a_directory_without_a_fixture_toml_is_not_a_fixture(tmp_path):
     (tmp_path / "notes").mkdir()
     (tmp_path / "notes" / "README.md").write_text("not a fixture")
     assert corpus.load_corpus(tmp_path) == []
+
+
+def test_anchored_blockers_are_counted_per_run_not_per_pass(sa0062):
+    """The number item 88 showed is stable across passes, and the only one
+    production can be compared against. Per run, because §5.5 routes any single
+    anchored blocker to REBUT — a total hides which runs would have blocked."""
+    blocking = _finding("saffron/cell/worktree.py", 418, "truncating write")
+    counts = corpus.anchored_blockers({sa0062.spec_id: [_run([blocking]), _run()]})
+    assert counts == {sa0062.spec_id: [1, 0]}
+
+
+def test_an_unanchored_blocker_is_not_counted(sa0062):
+    """Unanchored means reconciliation could not place it in the diff. It is
+    kept in the record because the drop rate is signal, but it would not have
+    routed the pull request anywhere."""
+    dropped = Finding(
+        lens="correctness",
+        severity="blocker",
+        file="x.py",
+        line=1,
+        claim="c",
+        anchored=False,
+    )
+    assert corpus.anchored_blockers({sa0062.spec_id: [_run([dropped])]}) == {
+        sa0062.spec_id: [0]
+    }
+
+
+def test_the_table_reports_the_aggregate_and_every_fixture(sa0062, one_defect_fixture):
+    fixtures = [sa0062, one_defect_fixture]
+    runs = {f.spec_id: [_run()] for f in fixtures}
+    table = corpus.render_corpus_table(
+        fixtures, corpus.score_corpus(fixtures, runs), corpus.anchored_blockers(runs)
+    )
+    assert "0/3" in table  # graded / declared, per defect
+    assert sa0062.spec_id in table and one_defect_fixture.spec_id in table
