@@ -531,9 +531,11 @@ never renumbered, cited as "principle 34".
 _Avoid_: "lesson", "learning", "takeaway", and "rule" — a rule is enforced by a
 gate or a `CLAUDE.md` line, and a principle is enforced by nothing.
 
-**Revision appendix**: A `DESIGN.md` appendix recording what one revision found —
+**Revision appendix**: A `DESIGN.md` appendix recording what a revision found —
 the live run, the spike, or the read-through, and what it cost. It carries the
-narrative a principle compresses. Cited by letter: "Appendix G".
+narrative a principle compresses. Cited by letter: "Appendix G". Usually one per
+revision, and not reliably so: Appendix G carries rev 8 and rev 10, because rev 10
+closed by spike the question rev 8 opened.
 _Avoid_: "the changelog" (an appendix records what was *learned*, not what
 changed), "release notes", "the postmortem".
 
