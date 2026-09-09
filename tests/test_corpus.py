@@ -2,9 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from harness import corpus, lens_scoring
+from harness import corpus, lens_scoring, recovery
 from harness.lens_scoring import LensReview
 from saffron.agents.findings import Finding
+from saffron.gates.contract import GateResult
 from saffron.phases.review import LENSES
 
 FIXTURES = Path(__file__).parent.parent / "docs" / "evidence" / "fixtures"
@@ -127,6 +128,32 @@ def test_an_unanchored_blocker_is_not_counted(sa0062):
     assert corpus.anchored_blockers({sa0062.spec_id: [_run([dropped])]}) == {
         sa0062.spec_id: [0]
     }
+
+
+def test_splice_tools_takes_a_gate_s_tool_from_the_same_named_baseline_row():
+    results = [GateResult(gate="tests", status="pass")]
+    baseline = [{"gate": "tests", "tool": "pytest 8.0.0"}]
+    spliced = recovery.splice_tools(results, baseline)
+    assert spliced[0].tool == "pytest 8.0.0"
+
+
+def test_splice_tools_gives_revert_the_tests_tool():
+    """`revert` skips at base and inherits the tool of the `tests` re-run it
+    performs (`revert.py:307`), so the lookup by its own name would miss."""
+    results = [GateResult(gate="revert", status="pass")]
+    baseline = [{"gate": "tests", "tool": "pytest 8.0.0"}]
+    spliced = recovery.splice_tools(results, baseline)
+    assert spliced[0].tool == "pytest 8.0.0"
+
+
+def test_splice_tools_leaves_a_host_side_gate_s_tool_none():
+    """A host-side core gate present in neither keeps `tool=None` — `None` is
+    what `gate_summary` renders as "no tool reported"; `""` is not the same
+    fact."""
+    results = [GateResult(gate="scope", status="pass")]
+    baseline = [{"gate": "tests", "tool": "pytest 8.0.0"}]
+    spliced = recovery.splice_tools(results, baseline)
+    assert spliced[0].tool is None
 
 
 def test_the_table_reports_the_aggregate_and_every_fixture(sa0062, one_defect_fixture):
