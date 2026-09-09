@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
+from harness import lens_scoring
+from saffron.agents.findings import Finding
 from saffron.gates.contract import GateResult
+from saffron.intake import Mutant
 from saffron.phases import implement, review
+from saffron.phases.review import LensReview
 
 PROMPTS = Path(review.__file__).resolve().parents[1] / "agents" / "prompts"
 CONTEXT_MD = (Path(review.__file__).resolve().parents[2] / "CONTEXT.md").read_text()
@@ -418,6 +424,65 @@ def test_the_adequacy_prompt_demands_a_checkable_mutation():
         "witness whose setup is the only input",
     ):
         assert shape in flat, shape
+
+
+def test_an_adequacy_finding_without_a_probe_is_not_the_schema():
+    """The field is required where it means something. An adequacy finding that
+    names no edit is the hunch about coverage the prompt already refuses — and
+    the corpus's second number cannot be computed from it."""
+    reported = {"file": "a.py", "line": 1, "severity": "concern", "claim": "c"}
+    with pytest.raises(ValidationError):
+        review.reported_model("adequacy").model_validate(reported)
+
+
+def test_a_correctness_finding_carries_no_probe_field_at_all():
+    """Only adequacy's defect class is expressible as an edit that keeps the
+    suite green. A timezone bug is not, so requiring one there would push the
+    lens toward manufacturing it — which its own prompt forbids."""
+    reported = {"file": "a.py", "line": 1, "severity": "concern", "claim": "c"}
+    assert review.reported_model("correctness").model_validate(reported)
+    with pytest.raises(ValidationError):
+        review.reported_model("correctness").model_validate(
+            reported | {"probe": {"file": "a.py", "find": "x", "replace": "y"}}
+        )
+
+
+def test_a_finding_recorded_before_probes_existed_still_loads():
+    """`lens_scoring.reviews_from_json` rebuilds every fixture's recorded
+    findings with `Finding(**f)`, and `calibrate_corpus` runs that before every
+    paid pass. A required `probe` on `Finding` would make eight shipped
+    fixtures unloadable and refuse to start every future pass."""
+    # Typed `Any`, like the `json.loads` result `reviews_from_json` unpacks the
+    # same way — a concrete `dict[str, str | int]` literal makes `ty` compare
+    # every field's type against the union of values actually present, not the
+    # per-key types the runtime dict lacks a static key for.
+    old: dict[str, Any] = {
+        "lens": "adequacy",
+        "severity": "note",
+        "file": "a.py",
+        "line": 1,
+        "claim": "c",
+    }
+    assert Finding(**old).probe is None
+
+
+def test_a_probe_survives_the_round_trip_through_as_dict():
+    """The host keeps what the lens said, or the corpus scores a pass against a
+    field that silently became `None` between the cell and the record."""
+    probe = Mutant(file="a.py", find="x", replace="y")
+    finding = Finding(
+        lens="adequacy", severity="note", file="a.py", line=1, claim="c", probe=probe
+    )
+    written = LensReview(lens="adequacy", findings=[finding]).as_dict()
+    assert written["findings"][0]["probe"] == {
+        "file": "a.py",
+        "find": "x",
+        "replace": "y",
+    }
+    assert (
+        lens_scoring.reviews_from_json(json.dumps([written]))[0].findings[0].probe
+        == probe
+    )
 
 
 def test_the_gate_results_reach_the_critic_with_the_tool_that_ran():

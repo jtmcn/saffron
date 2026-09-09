@@ -17,13 +17,14 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from saffron.agents import context
 from saffron.agents.artifacts import EXTRACTION_PROMPT, parse_output_block
 from saffron.agents.findings import Finding, Severity, anchor
 from saffron.events import Event, PhaseStart, describe
 from saffron.gates.contract import GateResult
+from saffron.intake import Mutant
 from saffron.phases import implement
 
 # The implementer holds Write/Edit/Bash; a critic that can run a command can
@@ -52,11 +53,13 @@ REVIEW_PROMPT = (
 
 
 class _Reported(BaseModel):
-    """One finding as the critic emits it.
+    """One finding as a critic emits it.
 
     No `lens` field: the host stamps that. A lens that names its own lens can
     file under someone else's remit, and the drop rate would still read clean.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     file: str
     line: int
@@ -64,11 +67,45 @@ class _Reported(BaseModel):
     claim: str
 
 
-class _Report(BaseModel):
-    """The whole block. `findings: []` is the answer §5.5 asks for when there is
-    no defect — distinguishable from a lens that emitted nothing at all."""
+class _ReportedWithProbe(_Reported):
+    """Adequacy's variant. The probe is required because the number it feeds is
+    only computable when every finding carries one — an optional field filled
+    sometimes and not others makes the measurement a phrasing lottery, which is
+    the failure the corpus exists to catch."""
 
-    findings: list[_Reported]
+    probe: Mutant
+
+
+_REPORTED: dict[str, type[_Reported]] = {"adequacy": _ReportedWithProbe}
+
+
+def reported_model(lens: str) -> type[_Reported]:
+    """The schema this lens's findings are validated against.
+
+    Per lens rather than one shape with an optional field: only adequacy's
+    prompt asks for an edit and only its defect class is expressible as one.
+    """
+    return _REPORTED.get(lens, _Reported)
+
+
+class _Report(BaseModel):
+    """The whole block, before a lens-specific model validates each finding.
+    `findings: []` is the answer §5.5 asks for when there is no defect —
+    distinguishable from a lens that emitted nothing at all."""
+
+    findings: list[dict]
+
+
+def _parse_report(lens: str, raw: str) -> list[_Reported]:
+    """The block plus each finding, validated against `reported_model(lens)`.
+
+    One parse rather than `_Report.model_validate` alone, because the finding
+    shape is per lens (Step 1): only adequacy's model demands `probe`, and only
+    `run_lens` knows which lens produced this text.
+    """
+    report = _Report.model_validate(json.loads(raw))
+    model = reported_model(lens)
+    return [model.model_validate(item) for item in report.findings]
 
 
 @dataclass
@@ -136,12 +173,10 @@ def lens_prompt(
     )
 
 
-def _from_report(lens: str, report: _Report, cost_usd: float) -> LensReview:
+def _from_report(lens: str, findings: list[_Reported], cost_usd: float) -> LensReview:
     return LensReview(
         lens,
-        findings=[
-            Finding(lens=lens, **reported.model_dump()) for reported in report.findings
-        ],
+        findings=[Finding(lens=lens, **reported.model_dump()) for reported in findings],
         cost_usd=cost_usd,
     )
 
@@ -181,7 +216,7 @@ def run_lens(
         cost = failed.attempt.cost_usd_est if failed.attempt else 0.0
         return LensReview(lens, cost_usd=cost, error=str(failed))
     try:
-        report = _Report.model_validate(json.loads(parse_output_block(attempt.text)))
+        findings = _parse_report(lens, parse_output_block(attempt.text))
     except (ValueError, ValidationError) as exc:
         remaining = budget_usd - attempt.cost_usd_est
         # A retry given less than the turn that just failed spent cannot
@@ -223,15 +258,15 @@ def run_lens(
             )
         total_cost = attempt.cost_usd_est + retry.cost_usd_est
         try:
-            report = _Report.model_validate(json.loads(parse_output_block(retry.text)))
+            findings = _parse_report(lens, parse_output_block(retry.text))
         except (ValueError, ValidationError) as exc2:
             return LensReview(
                 lens,
                 cost_usd=total_cost,
                 error=f"not the schema, even after a re-prompt: {exc2}",
             )
-        return _from_report(lens, report, total_cost)
-    return _from_report(lens, report, attempt.cost_usd_est)
+        return _from_report(lens, findings, total_cost)
+    return _from_report(lens, findings, attempt.cost_usd_est)
 
 
 def run_review(
