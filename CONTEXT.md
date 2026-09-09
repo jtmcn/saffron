@@ -304,7 +304,17 @@ implementer's prompt on purpose: a mutant a cell chooses is a mutant chosen to b
 killed.
 _Avoid_: "mutation testing" for the gate as a whole — it runs one declared edit
 against one named witness, not a generated suite. _Avoid_ "mutant" for the tree
-the edit is applied to; that is the worktree, mutated.
+the edit is applied to; that is the worktree, mutated. _Avoid_ "mutant" for the
+edit a lens names in a review finding; that is a vacuity probe.
+
+**Vacuity probe**: A find-and-replace edit a *lens* names to show that the tests would not
+notice the behaviour it describes breaking. Applied by the corpus harness inside a fixture's
+cell, never by a gate and never during a task. Its verdict is inverted from a `Mutant`'s: a
+vacuity probe that *survives* the suite is the finding confirmed, where a mutant that
+survives its witness is the finding.
+_Avoid_: "mutant" for one — a mutant is declared by a criterion, is withheld from the
+implementer, and must be killed. _Avoid_ "mutation testing" for the corpus number: one probe
+per finding, chosen by the lens to make its own case, is not a sample of the mutation space.
 
 ---
 
