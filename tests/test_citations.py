@@ -33,6 +33,7 @@ from pathlib import Path
 
 import pytest
 
+from ontology.design_record import APPENDIX
 from saffron.agents import context
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -79,7 +80,6 @@ SKIP_PATHS = (Path("docs") / "evidence" / "fixtures",)
 _FENCE = re.compile(r"^\s*```")
 _ANY_H2 = re.compile(r"^## ")
 _HEADING = re.compile(r"^#{2,5} (\d+(?:\.\d+)*[a-z]?)\.? ")
-_APPENDIX = re.compile(r"^## Appendix ([A-Z])\b")
 # A bolded numbered rule inside a section is an address too: `ontology/RATIONALE.md`
 # cites §4.6.2b, which is rule 2b inside §4.6 and no heading anywhere.
 _RULE = re.compile(r"^\*\*(\d+[a-z]?)\. ")
@@ -118,7 +118,7 @@ def addresses(document: Path) -> tuple[set[str], set[str]]:
         if heading := _HEADING.match(line):
             section = heading.group(1)
             sections.add(section)
-        elif appendix := _APPENDIX.match(line):
+        elif appendix := APPENDIX.match(line):
             appendices.add(appendix.group(1))
             section = None
         elif _ANY_H2.match(line):

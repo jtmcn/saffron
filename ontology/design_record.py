@@ -27,14 +27,19 @@ import rdflib
 NS = "https://saffron.dev/ns#"
 SAFFRON = rdflib.Namespace(NS)
 
-_APPENDIX = re.compile(r"^## Appendix ([A-Z]) — .*$")
-# A heading that opens an appendix without matching `_APPENDIX` would leave the
-# previous letter in hand and credit this appendix's principles to it — caught
-# only by the index reading stale, whose obvious fix regenerates the lie.
-_APPENDIX_OPENS = re.compile(r"^## Appendix\b")
-# A principle opens a line and its claim is the bolded lead. Three of the
-# fifty-seven wrap before the closing `**`, so the claim is read to that marker
-# rather than to the end of the line.
+# The two halves of "an appendix heading", and the *only* definitions of them:
+# `tests/test_citations.py` imports these rather than keeping its own copy. They
+# diverged once — a hyphen for the em dash matched `OPENS` and not `APPENDIX`,
+# and the loop carried the previous letter forward and credited it that
+# appendix's principles.
+APPENDIX = re.compile(r"^## Appendix ([A-Z]) — .*$")
+# Deliberately looser than the heading level and spacing `APPENDIX` accepts: what
+# it is for is catching a heading this file cannot read, so it must reach further
+# than the reader, not the same distance.
+APPENDIX_OPENS = re.compile(r"^#{2,}\s*Appendix\b")
+# A principle opens a line and its claim is the bolded lead. Three wrap before
+# the closing `**`, so the claim is read to that marker rather than to the end
+# of the line.
 _PRINCIPLE = re.compile(r"^(\d+)\. \*\*")
 # The `Rev` column of the appendix index, which carries what a heading cannot:
 # Appendix G covers rev 8 and rev 10, and rev 10 appears in no title.
@@ -71,9 +76,9 @@ def parse(design: str) -> rdflib.Graph:
 
     appendix: rdflib.URIRef | None = None
     for number, line in enumerate(lines):
-        if _APPENDIX_OPENS.match(line) and not _APPENDIX.match(line):
+        if APPENDIX_OPENS.match(line) and not APPENDIX.match(line):
             raise ValueError(f"{line!r}: an appendix heading this cannot read")
-        if found := _APPENDIX.match(line):
+        if found := APPENDIX.match(line):
             letter = found.group(1)
             appendix = SAFFRON[f"Appendix{letter}"]
             graph.add((appendix, rdflib.RDF.type, SAFFRON.RevisionAppendix))
