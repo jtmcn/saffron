@@ -1,5 +1,6 @@
 import contextlib
 import importlib.util
+import json
 import shutil
 import subprocess
 import sys
@@ -12,6 +13,7 @@ import yaml
 from harness import corpus, lens_scoring, probe_check, recovery
 from harness.lens_scoring import LensReview
 from saffron.agents.findings import Finding
+from saffron.cell.runtime import CellRuntimeError
 from saffron.gates import runner
 from saffron.gates.contract import GateResult
 from saffron.intake import Mutant
@@ -364,6 +366,31 @@ def test_the_rendered_table_says_what_the_second_number_is_not():
     assert "adequacy" in rendered
 
 
+def test_one_verified_vacuity_reads_as_one_finding():
+    """The noun agrees with the count. "1 verified vacuity — adequacy-lens
+    findings whose named edit" is a table a person pastes into an evidence
+    record, and half-pluralised prose reads as a number nobody checked."""
+    results = {"SA-0063": [probe_check.ProbeResult("survived", "")]}
+    rendered = corpus.render_probe_summary(corpus.score_probes(results))
+    assert "1 verified vacuity** — adequacy-lens finding whose named edit" in rendered
+
+
+def test_the_second_number_names_how_many_fixtures_it_covered():
+    """A resume probes what it ran and re-derives recall from every run JSON on
+    disk, so the two lines can cover different sets. A fixture probed with
+    nothing to apply is still covered — an empty list is coverage, an absent
+    key is not."""
+    results = {
+        "SA-0045": [probe_check.ProbeResult("survived", "")],
+        "SA-0063": [],
+    }
+    score = corpus.score_probes(results)
+    assert score.fixtures == 2
+    assert "over 2 fixture(s) probed this invocation" in corpus.render_probe_summary(
+        score
+    )
+
+
 def test_an_unproven_probe_is_in_no_denominator():
     """The same rule as a dropped run one level out. A probe that never applied
     says nothing about the lens, so counting it against the lens would report
@@ -407,19 +434,31 @@ def _saffron_dir_without_a_tests_gate(root):
     return root
 
 
-def _drive(tmp_path, monkeypatch, *extra_argv, saffron_dir=None):
+def _drive(
+    tmp_path,
+    monkeypatch,
+    *extra_argv,
+    saffron_dir=None,
+    fixture_ids=("SA-0045",),
+    mutate_raises=None,
+):
     """One fixture through the driver's `main`, with every path into a cell
     replaced: no container, no token, no spend.
 
     Returns the rendered table, the `run_gate` calls, the containers `cell_up`
-    was asked for, and what was mutated where. The calls are the assertion
-    that matters — a probe is answered by the repo's *declared* gate through
-    the runner, in the cell it was applied in, or it is not answered at all.
+    was asked for, what was mutated where, and the output root. The calls are
+    the assertion that matters — a probe is answered by the repo's *declared*
+    gate through the runner, in the cell it was applied in, or it is not
+    answered at all.
+
+    `mutate_raises` makes `source_mutated` raise instead of yielding, which is
+    the one thing in this path that a real cell does routinely.
     """
     driver = _load_driver()
 
     fixtures = tmp_path / "fixtures"
-    shutil.copytree(FIXTURES / "SA-0045", fixtures / "SA-0045", dirs_exist_ok=True)
+    for spec_id in fixture_ids:
+        shutil.copytree(FIXTURES / spec_id, fixtures / spec_id, dirs_exist_ok=True)
     out = tmp_path / "out"
 
     reviews = [
@@ -454,6 +493,8 @@ def _drive(tmp_path, monkeypatch, *extra_argv, saffron_dir=None):
         call in this path that writes inside a cell, so which cell it was
         handed is recorded rather than assumed."""
         mutated.append((container, mutant))
+        if mutate_raises is not None:
+            raise mutate_raises
         yield None
 
     monkeypatch.setattr(driver.mirror_ops, "ensure_mirror", lambda repo, dest: dest)
@@ -493,6 +534,7 @@ def _drive(tmp_path, monkeypatch, *extra_argv, saffron_dir=None):
         calls=calls,
         cells=cells,
         mutated=mutated,
+        out=out,
     )
 
 
@@ -541,6 +583,87 @@ def test_score_only_re_scores_a_finished_pass_and_starts_no_cell(tmp_path, monke
 
     assert (pass_.cells, pass_.calls, pass_.mutated) == ([], [], [])
     assert "verified vacuit" not in pass_.table
+
+
+def test_a_resume_that_ran_no_fixture_renders_no_second_number(tmp_path, monkeypatch):
+    """`table.md` is the artifact pasted into `docs/evidence/`, and a resume
+    rewrites it. Skipping every fixture applies no probe, so the second number
+    is absent — where "0 verified vacuities" would overwrite a real
+    measurement with a zero nobody measured, and recall (re-derived from the
+    run JSON on disk) would still be there beside it to make it look earned."""
+    first = _drive(tmp_path, monkeypatch)
+    assert "1 verified vacuity" in first.table
+
+    resumed = _drive(tmp_path, monkeypatch, "--skip-existing")
+    assert (resumed.cells, resumed.calls, resumed.mutated) == ([], [], [])
+    assert "verified vacuit" not in resumed.table
+    assert "declared defects graded" in resumed.table  # recall still rendered
+
+
+def test_a_partial_resume_says_how_many_fixtures_its_number_covers(
+    tmp_path, monkeypatch
+):
+    """The half-covered case: recall over two fixtures, probes over the one
+    this invocation ran. Both numbers are real; only their denominators
+    differ, and the rendered table has to say so rather than leave two
+    aggregates side by side looking comparable."""
+    _drive(tmp_path, monkeypatch)  # SA-0045 alone, so its run-1.json exists
+    resumed = _drive(
+        tmp_path,
+        monkeypatch,
+        "--skip-existing",
+        fixture_ids=("SA-0045", "SA-0063"),
+    )
+
+    assert resumed.cells == ["saffron-cell-lenscorpus-sa-0063"]
+    assert "across 2 fixture(s)" in resumed.table  # the recall line
+    assert "over 1 fixture(s) probed this invocation" in resumed.table
+
+
+def test_the_same_probe_filed_by_every_run_is_applied_once(tmp_path, monkeypatch):
+    """`--runs 3` files the same probe three times. Applying it three times
+    would put a raw total beside a recall line the run count normalises, and
+    buy three identical suite runs at ~80s each."""
+    pass_ = _drive(tmp_path, monkeypatch, "--runs", "2")
+
+    assert len(pass_.mutated) == 1
+    # A baseline and one probe, never a baseline and two.
+    assert [name for name, _e, _s, _x in pass_.calls] == ["tests", "tests"]
+    assert "1 of 1 probe(s)" in pass_.table
+
+
+def test_every_probe_verdict_is_written_beside_the_run_json(tmp_path, monkeypatch):
+    """A pass costs ~$20 and ~80 minutes. Recall survives a crash because the
+    run JSON is on disk and `--score-only` re-derives it; a verdict that was
+    only printed goes with the process."""
+    pass_ = _drive(tmp_path, monkeypatch)
+
+    recorded = json.loads((pass_.out / "SA-0045" / "probes-1.json").read_text())
+    assert [entry["verdict"] for entry in recorded] == ["survived"]
+    assert recorded[0]["probe"] == PROBE.model_dump()
+    assert recorded[0]["reason"]
+
+
+def test_a_cell_that_failed_under_a_probe_is_unproven_not_the_end_of_the_pass(
+    tmp_path, monkeypatch
+):
+    """`source_mutated` enters through a container exec, which fails routinely
+    — a source file near `MAX_ARG_STRLEN` is a named, real trigger. One raise
+    at fixture seven of eight must cost that fixture's probes, not every
+    verdict of the pass."""
+    pass_ = _drive(
+        tmp_path,
+        monkeypatch,
+        mutate_raises=CellRuntimeError(
+            "write for a probe failed: argument list too long"
+        ),
+    )
+
+    assert "0 of 0" in pass_.table
+    assert "1 unproven" in pass_.table
+    recorded = json.loads((pass_.out / "SA-0045" / "probes-1.json").read_text())
+    assert [entry["verdict"] for entry in recorded] == ["unproven"]
+    assert "argument list too long" in recorded[0]["reason"]
 
 
 def test_a_head_declaring_no_tests_gate_is_unproven_and_not_an_abort(

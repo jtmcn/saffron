@@ -61,6 +61,10 @@ probe has that edit applied at the fixture's head, inside the cell that is
 already up, and the repo's declared `tests` gate asked whether anything
 notices. A probe that survives is the finding confirmed (`CONTEXT.md`), and
 the table says so under the recall line. `--skip-probes` turns it off.
+
+Every verdict lands in that fixture's `probes-1.json` as it is produced, for
+the same reason each run's JSON is written the moment the fixture lands: a
+raise inside a cell at fixture seven must not take the six before it with it.
 """
 
 from __future__ import annotations
@@ -77,12 +81,19 @@ sys.path.insert(0, str(ROOT))
 
 from harness import corpus, lens_scoring, probe_check  # noqa: E402
 from saffron import events  # noqa: E402
-from saffron.cell import session, worktree  # noqa: E402
+from saffron.cell import runtime, session, worktree  # noqa: E402
 from saffron.gates import runner  # noqa: E402
 from saffron.gates.contract import GateResult  # noqa: E402
+from saffron.intake import Mutant  # noqa: E402
 from saffron.phases import implement, review  # noqa: E402
 from saffron.repos import mirror as mirror_ops  # noqa: E402
 from saffron.repos.policy import load_policy  # noqa: E402
+
+TEST_PATHS = ("tests/",)
+"""This repo's test root as a path prefix, which is not
+`policy.integrity.test_paths` — those are globs (`tests/**`) where
+`check_probe` compares normalised path prefixes. An edit to a test satisfies
+the number by construction, so `check_probe` requires this argument."""
 
 
 def _tests_gate_in_cell(
@@ -106,6 +117,118 @@ def _tests_gate_in_cell(
         subset=subset,
         executor=runner.CellExecutor(container),
     )
+
+
+def _distinct(probes: list[Mutant]) -> list[Mutant]:
+    """The edits a pass will apply, first-seen order, one per distinct edit.
+
+    `--runs 3` files the same probe three times. Applying it three times puts a
+    raw total beside a recall line the run count normalises, and buys three
+    identical suite runs at ~80s each.
+    """
+    return list({(p.file, p.find, p.replace): p for p in probes}.values())
+
+
+def _write_probes(
+    out: Path, applied: list[tuple[Mutant, probe_check.ProbeResult]]
+) -> None:
+    """The pass's second number, on disk rather than only in the terminal.
+
+    Rewritten after every probe: recall survives a crash because the run JSON
+    is already written and `--score-only` re-derives it, where a verdict that
+    was only printed is gone with the process.
+    """
+    (out / "probes-1.json").write_text(
+        json.dumps(
+            [
+                {
+                    "probe": probe.model_dump(),
+                    "verdict": result.verdict,
+                    "reason": result.reason,
+                    "failures": list(result.failures),
+                }
+                for probe, result in applied
+            ],
+            indent=2,
+        )
+    )
+
+
+def _apply_probes(
+    probes: list[Mutant],
+    *,
+    spec_id: str,
+    out: Path,
+    container: str,
+    gates: dict[str, Path],
+    cwd: Path,
+) -> list[probe_check.ProbeResult]:
+    """Every probe of one fixture, applied and asked, recorded as each lands.
+
+    Inside the cell that is already up, and at `tree_base=head_sha` — `/work`
+    is the fixture's head, which is the only tree `source_mutated` will apply
+    an edit to (it refuses six cases by yielding a reason, and `check_probe`
+    reads each as `unproven`).
+    """
+    applied: list[tuple[Mutant, probe_check.ProbeResult]] = []
+    # Written before the first probe too, so a fixture that was probed and had
+    # nothing to apply reads as `[]` rather than as a fixture nobody probed.
+    _write_probes(out, applied)
+
+    def landed(probe: Mutant, result: probe_check.ProbeResult) -> None:
+        applied.append((probe, result))
+        _write_probes(out, applied)
+        print(f"  probe {result.verdict}: {result.reason}")
+
+    if "tests" not in gates:
+        # No runner to ask, so nothing was learned about the lens: `unproven`,
+        # in no denominator, and the pass continues. `cell/session.py`'s
+        # witness wiring refuses on the same test for the same reason. Every
+        # shipped fixture's head declares a `tests` gate — pinned by a test,
+        # because `--fixtures` points wherever it is told — so this is the
+        # fallback, not the path a corpus pass takes.
+        for probe in probes:
+            landed(
+                probe,
+                probe_check.ProbeResult(
+                    "unproven",
+                    f"{spec_id}'s head declares no `tests` gate, so nothing "
+                    "could answer the probe",
+                ),
+            )
+        return [result for _probe, result in applied]
+
+    run_tests = partial(_tests_gate_in_cell, container, gates["tests"], cwd)
+    # A container exec fails routinely (`worktree._write_file`'s `ponytail`
+    # names a real trigger: a source file near `MAX_ARG_STRLEN`). A raise at
+    # fixture seven of eight must cost that fixture's probes, not the pass.
+    try:
+        baseline = run_tests([])
+    except runtime.CellRuntimeError as exc:
+        for probe in probes:
+            landed(
+                probe,
+                probe_check.ProbeResult(
+                    "unproven", f"the baseline tests gate could not run: {exc}"
+                ),
+            )
+        return [result for _probe, result in applied]
+
+    for probe in probes:
+        try:
+            result = probe_check.check_probe(
+                probe,
+                baseline=baseline,
+                mutate=partial(worktree.source_mutated, container),
+                run_tests=run_tests,
+                test_paths=TEST_PATHS,
+            )
+        except runtime.CellRuntimeError as exc:
+            result = probe_check.ProbeResult(
+                "unproven", f"the probe could not be applied or asked: {exc}"
+            )
+        landed(probe, result)
+    return [result for _probe, result in applied]
 
 
 # Same function as the single-fixture driver, copied rather than imported: it
@@ -215,8 +338,10 @@ def main() -> int:
     total_spent = 0.0
     # ponytail: this invocation's probes only, where recall below is re-derived
     # from every run JSON on disk. A `--skip-existing` resume therefore reports
-    # the second number for the fixtures it ran and recall for all of them; the
-    # verdicts are printed per probe as they land, and are not written to --out.
+    # the second number for the fixtures it ran and recall for all of them —
+    # the rendered summary names the fixture count so the two are not read as
+    # one denominator. Each fixture's verdicts also land in its own
+    # `probes-1.json`; nothing re-aggregates those across invocations yet.
     probe_results: dict[str, list[probe_check.ProbeResult]] = {}
     for i, fixture in enumerate(fixtures):
         out = args.out / fixture.spec_id
@@ -315,51 +440,22 @@ def main() -> int:
                             file=sys.stderr,
                         )
 
-            # Inside the cell that is already up, and at `tree_base=head_sha`
-            # — `/work` is the fixture's head, which is the only tree
-            # `source_mutated` will apply an edit to (it refuses six cases by
-            # yielding a reason, and `check_probe` reads each as `unproven`).
-            # After every run, so `--runs 3` pays for one baseline, not three.
-            if probes and not args.skip_probes:
+            # After every run, so `--runs 3` pays for one baseline, not three,
+            # and — since `_distinct` collapses the repeats — one application
+            # per edit rather than three. The key is set whenever this fixture
+            # was probed at all, empty list included: that is what tells the
+            # table how many fixtures its second number covers.
+            if not args.skip_probes:
+                probes = _distinct(probes)
                 print(f"  {len(probes)} vacuity probe(s) to apply")
-                if "tests" not in gates:
-                    # No runner to ask, so nothing was learned about the lens:
-                    # `unproven`, in no denominator, and the pass continues.
-                    # `cell/session.py`'s witness wiring refuses on the same
-                    # test for the same reason. Every shipped fixture's head
-                    # declares a `tests` gate — pinned by a test, because
-                    # `--fixtures` points wherever it is told — so this is the
-                    # fallback, not the path a corpus pass takes.
-                    probe_results[fixture.spec_id] = [
-                        probe_check.ProbeResult(
-                            "unproven",
-                            f"{fixture.spec_id}'s head declares no `tests` "
-                            "gate, so nothing could answer the probe",
-                        )
-                        for _ in probes
-                    ]
-                else:
-                    run_tests = partial(
-                        _tests_gate_in_cell, container, gates["tests"], mirror
-                    )
-                    baseline = run_tests([])
-                    probe_results[fixture.spec_id] = [
-                        probe_check.check_probe(
-                            probe,
-                            baseline=baseline,
-                            mutate=partial(worktree.source_mutated, container),
-                            run_tests=run_tests,
-                            # This repo's test root as a path prefix, which is
-                            # not `policy.integrity.test_paths` — those are
-                            # globs (`tests/**`) and `check_probe` compares
-                            # prefixes. An edit to a test satisfies the number
-                            # by construction.
-                            test_paths=("tests/",),
-                        )
-                        for probe in probes
-                    ]
-                for result in probe_results[fixture.spec_id]:
-                    print(f"  probe {result.verdict}: {result.reason}")
+                probe_results[fixture.spec_id] = _apply_probes(
+                    probes,
+                    spec_id=fixture.spec_id,
+                    out=out,
+                    container=container,
+                    gates=gates,
+                    cwd=mirror,
+                )
         finally:
             # The shared teardown, not a paraphrase of it — see module
             # docstring and `session.cell_down`'s own.
@@ -402,9 +498,12 @@ def main() -> int:
         corpus.anchored_blockers(runs),
         # `None`, not an empty score: a pass that applied no probe found out
         # nothing about the adequacy lens, and "0 of 0" under the table would
-        # read as though it had.
+        # read as though it had. `not probe_results` is the third way to get
+        # there and the one that was missing — a `--skip-existing` resume that
+        # skipped every fixture probes nothing and would otherwise overwrite a
+        # real table with a zero nobody measured.
         probes=None
-        if args.score_only or args.skip_probes
+        if args.score_only or args.skip_probes or not probe_results
         else corpus.score_probes(probe_results),
     )
     (args.out / "table.md").write_text(table + "\n")

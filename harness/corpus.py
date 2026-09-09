@@ -115,6 +115,11 @@ class ProbeScore:
     survived: int
     killed: int
     unproven: int
+    fixtures: int
+    """How many fixtures this invocation actually probed. Not always every
+    fixture in the table: recall is re-derived from every run JSON on disk, so
+    a `--skip-existing` resume scores eight fixtures and probes three, and the
+    summary has to say which set the second number covers."""
 
     @property
     def asked(self) -> int:
@@ -129,12 +134,17 @@ def score_probes(results: Mapping[str, Sequence[ProbeResult]]) -> ProbeScore:
 
     Probes, never findings: a finding whose lens was never asked for an edit
     carries no probe and is not a probe that failed.
+
+    A key with an empty list is a fixture that *was* probed and had nothing to
+    apply, which is coverage; a fixture missing from `results` was not probed
+    at all. That is the whole of `fixtures`.
     """
     flat = [r for rs in results.values() for r in rs]
     return ProbeScore(
         survived=sum(r.verdict == "survived" for r in flat),
         killed=sum(r.verdict == "killed" for r in flat),
         unproven=sum(r.verdict == "unproven" for r in flat),
+        fixtures=len(results),
     )
 
 
@@ -146,16 +156,24 @@ def render_probe_summary(score: ProbeScore) -> str:
     lens's vacuity capability, and it is a lower bound — a `killed` probe may
     be a test doing its job or a probe that broke the program, and only a
     person reading the itemised failures can tell.
+
+    The fixture count is in the line for the same reason: a resumed pass
+    probes fewer fixtures than it scores, and a number over three fixtures
+    beside a recall line over eight is a comparison the document has to refuse
+    in writing rather than leave to the reader.
     """
+    one = score.survived == 1
     return (
-        f"**{score.survived} verified "
-        f"{'vacuity' if score.survived == 1 else 'vacuities'}** — adequacy-lens "
-        f"findings whose named edit left the fixture's suite green. {score.survived} of "
-        f"{score.asked} probe(s) that answered survived; {score.unproven} "
-        f"unproven and in no denominator. Not comparable with the recall line "
-        f"above: one lens, and a lower bound — a killed probe may have broken "
-        f"the program rather than been noticed, which is adjudicated per probe "
-        f"and not computed."
+        f"**{score.survived} verified {'vacuity' if one else 'vacuities'}** — "
+        f"adequacy-lens {'finding' if one else 'findings'} whose named edit "
+        f"left the fixture's suite green. {score.survived} of {score.asked} "
+        f"probe(s) that answered survived; {score.unproven} unproven and in no "
+        f"denominator, over {score.fixtures} fixture(s) probed this invocation "
+        f"— which need not be every fixture in the table, since recall is "
+        f"re-derived from every run JSON on disk and a resumed pass probes only "
+        f"what it ran. Not comparable with the recall line above: one lens, and "
+        f"a lower bound — a killed probe may have broken the program rather "
+        f"than been noticed, which is adjudicated per probe and not computed."
     )
 
 
@@ -191,10 +209,10 @@ def render_corpus_table(
     The aggregate leads, because it is the number Track C reads; the per-fixture
     rows are under it so a moved aggregate can be attributed.
 
-    `probes` is `None` when the pass asked none — a scoring-only re-run, or
-    `--skip-probes`. Rendering `0 of 0` there would read as a lens that
-    verified nothing, which is not what a pass that never applied a probe
-    found out.
+    `probes` is `None` when the pass asked none — a scoring-only re-run,
+    `--skip-probes`, or a `--skip-existing` resume that ran no fixture at all.
+    Rendering `0 of 0` there would read as a lens that verified nothing, which
+    is not what a pass that never applied a probe found out.
     """
     lines = [
         f"**{score.graded}/{score.declared} declared defects graded** "
