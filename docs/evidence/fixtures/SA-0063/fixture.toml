@@ -34,12 +34,17 @@ source = "docs/BACKLOG.md item 86: the notes channel's two rendering-side safety
 recorded_seen = 0
 recorded_graded = 0
 
-# Both defects share one range — `_notes`, lines 377-395 — so the phrases are
-# their only discriminator, exactly as SA-0062's overlapping pair. Per the
-# controller ruling: if the phrase-collision tests fire, split
-# `notes-neutralization-unwitnessed` to the `neutralize` call (line 391) and
-# `empty-notes-heading-unwitnessed` to the early `return ""` (line 390)
-# rather than weakening either phrase.
+# The two defects used to share one range — `_notes`, lines 377-395 — leaving
+# position zero no discriminating power, and their phrases ("empty"/"heading"
+# vs. "neutraliz"/"@mention"/"defang") were softer than SA-0062's pair, with
+# no regression test carrying real lens text to catch a collision. `_notes`'s
+# own docstring (377-387) says "the heading exists to say so at a glance"
+# about the *implementer-notes* heading, not the empty-notes-heading defect —
+# quoting it would double-score against the wrong defect — so both ranges
+# start after the docstring closes. Split: `empty-notes-heading-unwitnessed`
+# to the guard clause (388-390: `text = notes.strip()` through the early
+# `return ""`), `notes-neutralization-unwitnessed` to the `neutralize` call
+# and everything downstream of it (391-402).
 #
 # Declared over the source (`pr_body.py`), not over `tests/test_report.py`,
 # though this diff touches both and either would anchor. Checked
@@ -57,7 +62,7 @@ recorded_graded = 0
 [[defects]]
 id = "notes-neutralization-unwitnessed"
 file = "saffron/report/pr_body.py"
-lines = [377, 395]
+lines = [391, 402]
 owner = "adequacy"
 min_severity = "blocker"
 # `_notes` defangs an `@mention` and a `Fixes #12` via `neutralize(text)`
@@ -68,13 +73,15 @@ min_severity = "blocker"
 # unchanged; it never looks inside the notes section itself. Deleting the
 # `neutralize` call leaves that test green — the one place a cell's own
 # output reaches GitHub without crossing `pr_body.neutralize`'s stated
-# boundary is asserted nowhere.
+# boundary is asserted nowhere. Range starts at the `neutralize` call itself
+# (391) rather than the docstring above it, disjoint from the other defect's
+# range and clear of the docstring's unrelated "heading" sentence.
 must_mention = ["neutraliz", "@mention", "defang"]
 
 [[defects]]
 id = "empty-notes-heading-unwitnessed"
 file = "saffron/report/pr_body.py"
-lines = [377, 395]
+lines = [388, 390]
 owner = "adequacy"
 min_severity = "blocker"
 # `if not text: return ""` (line 390) is what keeps `_notes` from rendering
@@ -94,5 +101,7 @@ min_severity = "blocker"
 # red is `test_notes_cannot_move_a_status_or_a_gate_result` — and only by
 # accident, because it compares `body()` (now itself carrying an empty notes
 # heading under the mutant) against `rendered.split(...)[0]` (which has
-# none), not because it was written to guard this property.
+# none), not because it was written to guard this property. Range is the
+# guard clause alone (388-390), disjoint from the neutralization defect's
+# range and clear of the docstring's unrelated "heading" sentence.
 must_mention = ["empty", "heading", "no notes"]

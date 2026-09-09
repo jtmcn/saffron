@@ -161,8 +161,9 @@ def render_corpus_table(
     if score.dropped:
         lines += [
             "",
-            f"**{len(score.dropped)} fixture(s) dropped** — a lens errored, so "
-            f"they say nothing about their diff and are in no n above: "
+            f"**{len(score.dropped)} fixture(s) dropped** — produced no scored "
+            f"run (a lens errored, or the fixture never ran), so they say "
+            f"nothing about their diff and are in no n above: "
             f"{', '.join(score.dropped)}.",
         ]
     return "\n".join(lines)

@@ -60,8 +60,8 @@ def _finding(file, line, claim):
 
 def test_the_aggregate_counts_defects_and_not_fixtures(sa0062, one_defect_fixture):
     """A fixture carrying two defects is two observations. Averaging within it
-    first would throw one away, and the corpus is deliberately uneven — five
-    fixtures carry one defect and three carry two."""
+    first would throw one away, and the corpus is deliberately uneven — four
+    fixtures carry one defect and four carry two."""
     scored = corpus.score_corpus(
         [sa0062, one_defect_fixture],
         {sa0062.spec_id: [_run()], one_defect_fixture.spec_id: [_run()]},
@@ -142,7 +142,7 @@ def test_splice_tools_takes_a_gate_s_tool_from_the_same_named_baseline_row():
 
 def test_splice_tools_gives_revert_the_tests_tool():
     """`revert` skips at base and inherits the tool of the `tests` re-run it
-    performs (`revert.py:307`), so the lookup by its own name would miss."""
+    performs (`revert.py:244`, `:350`/`:370`), so the lookup by its own name would miss."""
     results = [GateResult(gate="revert", status="pass")]
     baseline = [{"gate": "tests", "tool": "pytest 8.0.0"}]
     spliced = recovery.splice_tools(results, baseline)

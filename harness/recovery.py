@@ -158,7 +158,7 @@ def splice_tools(results: list[GateResult], baseline: list[dict]) -> list[GateRe
     Base and head ran the same binaries from the same cell image in the same
     run, so a version string in the baseline suite is the version string at
     head. `revert` skipped at base and inherits the tool of the `tests` re-run
-    it performs (`revert.py:307`); every other miss is a host-side core gate
+    it performs (`revert.py:244`, `:350`/`:370`); every other miss is a host-side core gate
     that executes nothing, and None renders as "no tool reported".
     """
     tools = {row["gate"]: row["tool"] for row in baseline if row["tool"]}

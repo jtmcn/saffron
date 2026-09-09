@@ -35,9 +35,15 @@ min_severity = "blocker"
 # `run_batch`'s per-candidate loop resets `consecutive_aborts = 0` in the
 # `else` branch of `if outcome.state in ABORT_STATES:` (line 187) — the whole
 # reason the breaker can recover from an isolated blip rather than tripping
-# on any two aborts over a long night. No test in the suite drives three
-# candidates where the middle one succeeds and the third would only pass with
-# the counter cleared, so deleting the reset left every test green. Range is
-# the whole loop body: the reset's meaning depends on the threshold check and
-# both `+= 1` sites around it.
+# on any two aborts over a long night. The test named for this property,
+# `test_an_exhausted_task_between_two_aborts_resets_the_breaker`
+# (`tests/test_batch.py:250` at this head), stops one candidate short of
+# testing it: three candidates with an `EXHAUSTED` middle, but
+# `_BREAKER_THRESHOLD = 2` means the count is only 1 before the third either
+# way, so the test passes under the mutant regardless of the reset — it would
+# need a fourth candidate, the one a standing count of 2 would refuse, to
+# bite. (Main later added that fourth candidate — `54394dd`, after this
+# fixture's head — but the fixture is scored against the suite at `91f56c6`,
+# where the gap is real.) Range is the whole loop body: the reset's meaning
+# depends on the threshold check and both `+= 1` sites around it.
 must_mention = ["reset", "consecutive", "breaker"]

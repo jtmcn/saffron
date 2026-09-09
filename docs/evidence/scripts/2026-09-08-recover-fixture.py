@@ -4,14 +4,15 @@
 recorded in `patch.json` is gone from live history — the branch was deleted
 after merge — so a fixture's range is recovered rather than read off:
 
-    head  the ledger's `pushed_sha` for the task
-    base  the first ancestor of that head where `git diff base..head` is
-          byte-identical to the batch tree's recorded `patch.diff`
+    head  the ledger's `pushed_sha` for the task that actually pushed one
+    base  `patch.json`'s own `tree_base`, verified by byte-identity against
+          the batch tree's recorded `patch.diff` before it is trusted
 
-Byte-identity is the acceptance test, not a heuristic. Four of the eight
-fixtures need the walk because their recorded `tree_base` is not an ancestor of
-their head at all: they were stacked pull requests, and SA-0048's true base is
-SA-0046's head (backlog item 33, visible in the archive).
+Byte-identity is the acceptance test, not a heuristic. The batch tree's own
+record was right on all eight shipped fixtures; the ancestry walk in
+`harness/recovery.py`'s `recover_range` is kept only as a fallback for a
+`tree_base` that fails to verify — an inconsistency in the record, not the
+case any shipped fixture is.
 
 The `[[defects]]` blocks are deliberately NOT generated. The backlog row is the
 only place the mutation that proves a defect is written down, and a generated
