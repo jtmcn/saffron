@@ -181,6 +181,35 @@ def test_every_shipped_fixture_reproduces_its_own_declared_range():
         assert live == fixture.diff, fixture.spec_id
 
 
+def test_every_shipped_fixture_s_spec_body_and_context_reproduce_from_git():
+    """Hermetic reproduction of two more frozen inputs, the same way the diff
+    is reproduced above: `spec_body.md` via `recovery.spec_body_at` (base
+    tree, the off-branch fallback, or a disclosed-mutant spec — whichever
+    this fixture needed) and `context.md` via a plain `git show`. Both need
+    only this repo's git history, so a regression in the spec-body fallback
+    fails here rather than shipping silently into a paid lens prompt.
+
+    `gates.txt` and `recorded-findings.json` are NOT covered here and cannot
+    be: both are read from `~/.saffron/batches`, which exists on the machine
+    that ran the batch and nowhere else. There is no hermetic check for
+    those two files beyond the review this fixture already had.
+    """
+    repo = Path(__file__).parent.parent
+    for fixture in corpus.load_corpus(FIXTURES):
+        spec_body = recovery.spec_body_at(
+            repo, fixture.base_sha, fixture.head_sha, fixture.spec_id
+        )
+        assert spec_body == fixture.spec_body, fixture.spec_id
+
+        context_md = subprocess.run(
+            ["git", "show", f"{fixture.base_sha}:CONTEXT.md"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert context_md == fixture.context_md, fixture.spec_id
+
+
 def test_every_shipped_fixture_declares_a_non_empty_source():
     """`source` is the backlog row a defect's range and phrases came from —
     the same row `recover_fixture` cannot fill in, because it names nothing

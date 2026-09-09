@@ -56,7 +56,7 @@ min_severity = "blocker"
 # `neutralize` call leaves that test green — the one place a cell's own
 # output reaches GitHub without crossing `pr_body.neutralize`'s stated
 # boundary is asserted nowhere.
-must_mention = ["neutraliz", "mention", "defang"]
+must_mention = ["neutraliz", "@mention", "defang"]
 
 [[defects]]
 id = "empty-notes-heading-unwitnessed"

@@ -143,6 +143,31 @@ def _spec_content_off_branch(repo: Path, head: str, spec_id: str) -> str:
     return _git(repo, "show", f"{sha}:{path}")
 
 
+def spec_body_at(repo: Path, base: str, head: str, spec_id: str) -> str:
+    """The exact `spec_body=` REVIEW was shown, rebuilt from git alone.
+
+    Exposed (not folded into `recover_fixture`) so a hermetic test can
+    reproduce a shipped `spec_body.md` from `base`/`head` the same way the
+    byte-identity test reproduces `diff.patch` — needing this repo's git
+    history and nothing under `~/.saffron`.
+    """
+    try:
+        spec_path = _spec_path_at(repo, base, spec_id)
+        spec_text = _git(repo, "show", f"{base}:{spec_path}")
+    except RecoveryError:
+        spec_text = _spec_content_off_branch(repo, head, spec_id)
+    try:
+        spec = parse_spec(spec_text)
+    except DisclosedMutantError as exc:
+        # Item 82's disclosure check postdates every spec recovered here — it
+        # exists *because of* SA-0063 — so it refuses a historical spec as a
+        # candidate for a new task, not as unreadable. `exc.spec` is the same
+        # parse `discover_specs` keeps for exactly this case (intake.py:308).
+        spec = exc.spec
+    # The way session.py's REVIEW call assembles `spec_body=` at both sites.
+    return spec.body + context.criteria_section(spec.acceptance)
+
+
 def _reviewed_results(
     ledger: Ledger, spec_id: str
 ) -> tuple[sqlite3.Row, list[GateResult]]:
@@ -193,21 +218,7 @@ def recover_fixture(spec_id: str, home: Path, repo: Path) -> dict[str, str]:
     # lens what it returns, and `load_fixture` reads the file verbatim.
     gates_txt = review.gate_summary(splice_tools(results, baseline))
 
-    try:
-        spec_path = _spec_path_at(repo, base, spec_id)
-        spec_text = _git(repo, "show", f"{base}:{spec_path}")
-    except RecoveryError:
-        spec_text = _spec_content_off_branch(repo, head, spec_id)
-    try:
-        spec = parse_spec(spec_text)
-    except DisclosedMutantError as exc:
-        # Item 82's disclosure check postdates every spec recovered here — it
-        # exists *because of* SA-0063 — so it refuses a historical spec as a
-        # candidate for a new task, not as unreadable. `exc.spec` is the same
-        # parse `discover_specs` keeps for exactly this case (intake.py:308).
-        spec = exc.spec
-    # The way session.py's REVIEW call assembles `spec_body=` at both sites.
-    spec_body = spec.body + context.criteria_section(spec.acceptance)
+    spec_body = spec_body_at(repo, base, head, spec_id)
 
     context_md = _git(repo, "show", f"{base}:CONTEXT.md")
 
