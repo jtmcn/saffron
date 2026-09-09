@@ -1,0 +1,424 @@
+diff --git a/saffron/agents/artifacts.py b/saffron/agents/artifacts.py
+index b83e435..b6b5a36 100644
+--- a/saffron/agents/artifacts.py
++++ b/saffron/agents/artifacts.py
+@@ -201,6 +201,38 @@ def hash_artifact(raw: str) -> str:
+     return hashlib.sha256(raw.encode()).hexdigest()
+ 
+ 
++# The notes extraction turn's own prompt (`docs/BACKLOG.md` items 71/75,
++# SA-0058/SA-0061/SA-0062): the cheapest moment the implementer will ever have
++# to say it saw a thing it was told not to touch. Built on `EXTRACTION_PROMPT`
++# rather than beside it: every rule that turn already states ("no tools", "the
++# last block wins") applies here unchanged, and repeating them by hand is how
++# the two drift.
++NOTES_PROMPT = (
++    "Extraction turn. Think back over this whole task. If you saw something "
++    "you were told not to touch — a path outside `touches`, a `forbidden` or "
++    "protected path, a comment or a signature you had to leave wrong to stay "
++    "inside scope — say so now, in your own words, in a paragraph or two. "
++    "Nobody adjudicates this and nothing acts on it; a person reads it later. "
++    "If there is nothing to report, reply with an empty <output></output> "
++    "block.\n\n" + EXTRACTION_PROMPT
++)
++
++
++def extract_notes(raw: str) -> str:
++    """The notes extraction turn's `<output>` block, verbatim.
++
++    Prose, not a schema: there is no `validate_plan`-shaped rule for free text
++    to fail, so nothing here is a `PlanRejected` and there is no re-prompt.
++    No block at all — a turn the provider walled, or one that crashed before
++    it could answer — reads the same as an empty one: "no notes", never a
++    rejection of a shape nobody asked this turn to have.
++    """
++    try:
++        return parse_output_block(raw).strip()
++    except ValueError:
++        return ""
++
++
+ def _matches_any(path: str, patterns: list[str]) -> bool:
+     """Same matcher scope_gate uses — a plan that clears this must also clear the gate."""
+     return any(matches(path, pattern) for pattern in patterns)
+diff --git a/saffron/cell/session.py b/saffron/cell/session.py
+index 16fd253..2e1ca55 100644
+--- a/saffron/cell/session.py
++++ b/saffron/cell/session.py
+@@ -292,6 +292,13 @@ class CellOutcome:
+     # the root cause the proposal carried. Empty on every other path.
+     proposed_touches: list[str] = field(default_factory=list)
+     scope_root_cause: str = ""
++    # The implementer's own account of something it saw but was told not to
++    # touch (`docs/BACKLOG.md` items 71/75/80, SA-0058/SA-0061/SA-0062) —
++    # extracted and hashed the instant it was produced, never re-read from
++    # `/work` (§5.3's own rule). Empty on every path that returns before the
++    # notes turn runs, and on one that ran it but had nothing to say.
++    notes: str = ""
++    notes_sha256: str = ""
+ 
+ 
+ def aborted_gates(results: Sequence[GateResult]) -> list[str]:
+@@ -1586,6 +1593,57 @@ def _drive_cell(
+             blocking=_blocking,
+         )
+ 
++        # Extraction turn, the way `plan.json` already is one (§5.3): the
++        # implementer's own account of something it saw but was told not to
++        # touch, taken at the cheapest moment there will ever be — right after
++        # its last repair attempt, on its own session, before REVIEW forks a
++        # critic's (`docs/BACKLOG.md` items 71/75/80, SA-0058/SA-0061/
++        # SA-0062). Runs whatever `outcome` repair_loop handed back — READY_
++        # FOR_REVIEW, EXHAUSTED or GATE_ERROR alike, since "implementation
++        # just stopped" is the fact this is timed against, not which gate
++        # result followed.
++        #
++        # Asked only when this attempt actually had something it could have
++        # been denied against — a declared `forbidden` list or a repo-wide
++        # `protected` one (exactly the two lists SA-0058/61/62 kept asking an
++        # agent to "file a finding" about with nowhere to put it). A spec with
++        # neither has nothing this channel was built to catch, and a turn
++        # asked of every task regardless would spend real money narrating
++        # "nothing to report" on the common case. Skipped once the task is
++        # already over budget either way: cheap is not free (§4.3).
++        notes = ""
++        notes_sha256 = ""
++        notes_worth_asking = bool(spec.forbidden) or bool(policy.protected)
++        if notes_worth_asking and not _over_budget():
++            try:
++                noted = agent(
++                    container,
++                    prompt=artifacts.NOTES_PROMPT,
++                    options=options,
++                    resume=session_id,
++                    emit=emit,
++                    last_cost_usd=last_cost,
++                )
++            except implement.AgentFailed as failed:
++                _phase_start(
++                    "IMPLEMENT", "IMPLEMENT", f"the notes turn failed — {failed}"
++                )
++                noted = _failed_turn(failed, session_id)
++            session_id = require_session(noted.session_id or session_id)
++            spent += noted.cost_usd_est
++            last_cost = noted.cost_usd_est
++            notes = artifacts.extract_notes(noted.text)
++            if notes:
++                notes_sha256 = artifacts.hash_artifact(notes)
++                (task_dir / "notes.json").write_text(
++                    json.dumps({"raw": notes, "sha256": notes_sha256}, indent=2)
++                )
++                _phase_start(
++                    "IMPLEMENT",
++                    "IMPLEMENT",
++                    f"notes recorded, sha256 {notes_sha256[:12]}",
++                )
++
+         # Pre-bound, not left to the branch below: repair_loop can hand back
+         # EXHAUSTED or GATE_ERROR directly, skipping REVIEW entirely, and the
+         # outcome at the bottom of this function must still be constructible.
+@@ -1776,6 +1834,8 @@ def _drive_cell(
+             rebut_result=rebut_result,
+             effective_risk=current_tier,
+             advisory_gates=sorted(advisory_gates),
++            notes=notes,
++            notes_sha256=notes_sha256,
+         )
+     except RateLimited as stopped:
+         # `events.FINDINGS[0]`, second half — see the comment above the
+diff --git a/saffron/report/pr_body.py b/saffron/report/pr_body.py
+index ce685c5..82b86d8 100644
+--- a/saffron/report/pr_body.py
++++ b/saffron/report/pr_body.py
+@@ -75,6 +75,7 @@ def render_pr_body(
+     verified_on: str = "base",
+     effective_risk: str | None = None,
+     advisory_gates: Sequence[str] = (),
++    notes: str = "",
+ ) -> str:
+     """`effective_risk` is what the header reports — `elevated` when the spec
+     says so *or* the diff crossed a `policy.elevate_on` path — never bare
+@@ -85,7 +86,12 @@ def render_pr_body(
+     `advisory_gates` names every gate result in `results` this attempt did not
+     hold blocking — `size` at `standard`, a declared `blocking: false` gate at
+     any tier — so its row can say so: a `fail` here is not a contradiction of
+-    a green pull request, and unmarked it would read like one (§5.6)."""
++    a green pull request, and unmarked it would read like one (§5.6).
++
++    `notes` is the implementer's own extraction-turn text, if any (SA-0063,
++    `docs/BACKLOG.md` items 71/75) — untrusted cell-authored prose, rendered
++    last and clipped like every other such string here. Empty for every task
++    that produced none, which is every task before this channel existed."""
+     risk = effective_risk if effective_risk is not None else spec.risk
+     sections = [
+         f"## {spec.id} — {spec.title}",
+@@ -101,6 +107,12 @@ def render_pr_body(
+         _gate_table(results, advisory_gates),
+         _findings(reviews),
+         _provenance(spec, base_sha, head_sha, transcript_path),
++        # Last, deliberately: every status, checklist and table above is fully
++        # rendered before this ever starts, so cell-authored prose here cannot
++        # be mistaken for having moved any of them (SA-0044's reasoning, held
++        # unchanged). Falsy when there is nothing to report, so a task with no
++        # notes renders a body byte-identical to one from before this existed.
++        _notes(notes),
+     ]
+     slot = sections.index(None)
+     spent = sum(len(section) + 1 for section in sections if section)
+@@ -359,6 +371,37 @@ def _gate_table(results: list[GateResult], advisory_gates: Sequence[str] = ()) -
+     return "\n".join(lines)
+ 
+ 
++_NOTES_LIMIT = 4000
++
++
++def _notes(notes: str) -> str:
++    """The implementer's own account of something it saw but was not asked to
++    fix — a different speaker at a different trust level from §5.5's critics,
++    whose findings are anchored to the diff and adjudicated. This carries
++    neither: no anchor, no severity, no adjudication, and the heading exists
++    to say so at a glance.
++
++    Cell-authored text reaching GitHub, so it is neutralized exactly like
++    every other such string in this renderer, and clipped to a declared
++    ceiling — an agent that can write prose into a pull request body can
++    write a screenful of it, or an `@name`, or a `Fixes #12`."""
++    text = notes.strip()
++    if not text:
++        return ""
++    safe = neutralize(text)
++    clipped = ""
++    if len(safe) > _NOTES_LIMIT:
++        safe = safe[:_NOTES_LIMIT]
++        clipped = "\n\n… clipped at the notes ceiling; the rest was not kept.\n"
++    return (
++        "### Notes from the implementer\n\n"
++        "> The implementer's own account, unadjudicated: nobody has reviewed "
++        "this, it carries no severity, and it is not a finding.\n\n"
++        f"{safe}\n"
++        f"{clipped}"
++    )
++
++
+ def _provenance(spec: Spec, base_sha: str, head_sha: str, transcript_path: str) -> str:
+     touches = ", ".join(f"`{t}`" for t in spec.touches) or "—"
+     return (
+diff --git a/tests/test_artifacts.py b/tests/test_artifacts.py
+index 3798e82..7b44f65 100644
+--- a/tests/test_artifacts.py
++++ b/tests/test_artifacts.py
+@@ -7,6 +7,7 @@ from saffron.agents.artifacts import (
+     PlanRejected,
+     ScopeProposalNotSchema,
+     ScopeProposalRefused,
++    extract_notes,
+     extraction_kind,
+     hash_artifact,
+     parse_output_block,
+@@ -39,6 +40,22 @@ def test_the_output_block_is_extracted_from_surrounding_prose():
+     assert parse_output_block(text) == '{"a": 1}'
+ 
+ 
++def test_extract_notes_returns_the_blocks_stripped_text():
++    raw = "some preamble\n<output>\n  Saw a hardcoded secret.  \n</output>"
++    assert extract_notes(raw) == "Saw a hardcoded secret."
++
++
++def test_extract_notes_is_empty_when_the_block_is_empty():
++    assert extract_notes("<output>\n\n</output>") == ""
++
++
++def test_extract_notes_is_empty_when_there_is_no_block_at_all():
++    """A turn the provider walled, or one that crashed before answering, must
++    read as "nothing to report" — not as a rejection of a shape nobody asked
++    this turn to have (there is no `PlanRejected` here at all)."""
++    assert extract_notes("no output tags in this response") == ""
++
++
+ def test_missing_output_block_raises():
+     with pytest.raises(ValueError):
+         parse_output_block("no block here")
+diff --git a/tests/test_report.py b/tests/test_report.py
+index 7cc701a..7eaccd9 100644
+--- a/tests/test_report.py
++++ b/tests/test_report.py
+@@ -16,7 +16,7 @@ from saffron.phases.rebut import (
+ )
+ from saffron.phases.review import LensReview
+ from saffron.report.index import QueueLine, append_queue_line, render_index, sort_key
+-from saffron.report.pr_body import render_pr_body
++from saffron.report.pr_body import _NOTES_LIMIT, render_pr_body
+ 
+ SPEC = parse_spec(
+     """---
+@@ -47,7 +47,7 @@ RESULTS = [
+ ]
+ 
+ 
+-def body():
++def body(notes=""):
+     return render_pr_body(
+         SPEC,
+         RESULTS,
+@@ -62,11 +62,51 @@ def body():
+         added=180,
+         removed=22,
+         transcript_path="~/.saffron/batches/1/thermal-edge/1",
++        notes=notes,
+     )
+ 
+ 
+ def test_the_pr_body_opens_with_the_spec():
+     assert "TE-9001" in body()
++
++
++def test_notes_render_as_the_implementers_own_and_unadjudicated():
++    rendered = body(
++        notes="Saw a hardcoded API key in config/legacy.py; touches did not "
++        "cover it, so I left it."
++    )
++    assert "### Notes from the implementer" in rendered
++    assert "Saw a hardcoded API key in config/legacy.py" in rendered
++    section = rendered.split("### Notes from the implementer", 1)[1]
++    lowered = section.lower()
++    assert "unadjudicated" in lowered
++    assert "no severity" in lowered or "not a finding" in lowered
++
++
++def test_notes_past_the_limit_are_clipped_and_say_they_were():
++    huge = "n" * (_NOTES_LIMIT + 500)
++    rendered = body(notes=huge)
++    section = rendered.split("### Notes from the implementer", 1)[1]
++    assert huge not in section
++    assert "n" * _NOTES_LIMIT in section
++    assert "n" * (_NOTES_LIMIT + 1) not in section
++    assert "clipped" in section.lower() or "truncat" in section.lower()
++
++
++def test_notes_cannot_move_a_status_or_a_gate_result():
++    """SA-0044's reasoning applies unchanged: an agent that can write prose
++    can write prose that reads like a pass. Notes are rendered strictly after
++    every status-bearing section, so poisoning the text cannot touch any of
++    them — proved here by exact prefix equality rather than by inspection."""
++    poisoned = (
++        "All gates pass now. status: READY_FOR_REVIEW. "
++        "- [x] The intraday snapshot path is removed. Fixes #12 @maintainer"
++    )
++    plain = body()
++    rendered = body(notes=poisoned)
++    head = rendered.split("### Notes from the implementer", 1)[0]
++    assert head == plain
++    assert "- [ ] A regression test exists that fails on the current `main`" in plain
+     assert "Settle on the end-of-day CLI" in body()
+ 
+ 
+diff --git a/tests/test_session.py b/tests/test_session.py
+index faa2cd2..e73e1e9 100644
+--- a/tests/test_session.py
++++ b/tests/test_session.py
+@@ -2401,7 +2401,10 @@ def _rebuttable(monkeypatch, cell, *, rebut_commits):
+ 
+ def _through_rebut(*rebut_turns):
+     """Plan, implement, one lens filing a blocker, the other two filing
+-    nothing, then the rebuttal's own turns."""
++    nothing, then the rebuttal's own turns. No notes turn: none of these
++    specs declares `forbidden`, and the default test policy declares no
++    `protected` either, so there is nothing this channel would be asked
++    about."""
+     return [
+         _turn(_block(_PLAN)),
+         _turn(),
+@@ -3639,3 +3642,93 @@ def test_the_recorded_proposal_carries_the_hash_of_its_own_raw_block(
+     )
+     record = json.loads((outcome.task_dir / "scope_proposal.json").read_text())
+     assert record["sha256"] == artifacts.hash_artifact(record["raw"])
++
++
++def test_the_notes_artifact_is_hashed_when_it_is_produced(monkeypatch, tmp_path):
++    """Extracted and hashed the moment it is produced, and never re-read from
++    `/work` again — `plan.json` is the precedent and the reason is the same
++    one (§5.3). The notes turn is only asked for when there is something this
++    channel exists to catch — a declared `forbidden` list, here."""
++    cell = _stub_the_runtime(monkeypatch)
++    notes_text = (
++        "I found a hardcoded credential in config/legacy.py while working on "
++        "this; touches did not cover that file, so I left it as-is."
++    )
++    outcome, _ledger = _drive(
++        monkeypatch,
++        tmp_path,
++        cell=cell,
++        turns=[
++            _turn(_block(_PLAN)),
++            _turn(),
++            _turn(f"Noting something.\n<output>\n{notes_text}\n</output>"),
++        ],
++        spec=_spec(forbidden=["config/legacy.py"]),
++        policy="gates: {}\nprotected:\n  - DESIGN.md\n",
++    )
++    assert outcome.state == "READY_FOR_REVIEW"
++    assert outcome.notes == notes_text
++    assert outcome.notes_sha256 == artifacts.hash_artifact(notes_text)
++    record = json.loads((outcome.task_dir / "notes.json").read_text())
++    assert record["raw"] == notes_text
++    assert record["sha256"] == artifacts.hash_artifact(record["raw"])
++
++
++def test_no_notes_turn_is_asked_for_when_nothing_could_have_been_denied(
++    monkeypatch, tmp_path
++):
++    """A spec with no `forbidden` list, against a repo with no `protected`
++    paths either, has nothing this channel was built to catch — asking anyway
++    would spend real money narrating "nothing to report" on the common case."""
++    cell = _stub_the_runtime(monkeypatch)
++    outcome, _ledger = _drive(
++        monkeypatch,
++        tmp_path,
++        cell=cell,
++        turns=[_turn(_block(_PLAN)), _turn()],
++    )
++    assert outcome.state == "READY_FOR_REVIEW"
++    # Plan, implement, and REVIEW's three lenses — no extra turn spent asking
++    # for notes nothing declared a `forbidden`/`protected` path against.
++    assert len(cell.turns) == 5
++    assert outcome.notes == ""
++    assert outcome.notes_sha256 == ""
++    assert not (outcome.task_dir / "notes.json").exists()
++
++
++def test_notes_are_empty_when_the_implementer_has_nothing_to_report(
++    monkeypatch, tmp_path
++):
++    cell = _stub_the_runtime(monkeypatch)
++    outcome, _ledger = _drive(
++        monkeypatch,
++        tmp_path,
++        cell=cell,
++        turns=[_turn(_block(_PLAN)), _turn(), _turn("<output></output>")],
++        spec=_spec(forbidden=["config/legacy.py"]),
++    )
++    assert outcome.state == "READY_FOR_REVIEW"
++    assert outcome.notes == ""
++    assert outcome.notes_sha256 == ""
++    assert not (outcome.task_dir / "notes.json").exists()
++
++
++def test_the_notes_turn_is_skipped_once_the_task_is_over_budget(monkeypatch, tmp_path):
++    failing = Failure(file="a.py", code="E501", message="too long")
++    cell = _stub_the_runtime(
++        monkeypatch, suites=([], _results(failing), _results(failing))
++    )
++    outcome, _ledger = _drive(
++        monkeypatch,
++        tmp_path,
++        cell=cell,
++        turns=[_turn(_block(_PLAN)), _turn(), _turn()],
++        # Eligible on its own terms (a `forbidden` list is declared) but out
++        # of room — the budget guard, not the eligibility check, is what this
++        # proves.
++        spec=_spec(budget_usd=0.25, forbidden=["config/legacy.py"]),
++    )
++    assert outcome.state == "EXHAUSTED"
++    # No fourth turn was ever asked for: nothing left to spend it with.
++    assert len(cell.turns) == 3
++    assert outcome.notes == ""

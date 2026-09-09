@@ -1,0 +1,48 @@
+# PR #117 (`SA-0048`), one of item 69's nine known-bad tests, found by
+# mutating `validate_claude_token`'s refusal codes.
+#
+# `base` is not this task's own git parent's ancestor in the ordinary sense —
+# it *is* the parent (`SA-0046`'s head, per item 33: this queue stacked
+# `SA-0048` directly on `SA-0046` rather than on main). The spec file itself
+# never lands in that tree at all: `SA-0048`'s spec was revised on main
+# (`c5b8838`, "L3 returned REVISE") between `SA-0046`'s head and this task's
+# run, so `recover_fixture` reads it off the latest commit that touched the
+# path before this head was authored, not off `base`'s own tree — the same
+# thing `saffron cell <path>` did, reading the file live off disk rather than
+# off the branch it built the diff on top of.
+#
+# Provenance, all four inputs frozen rather than rebuilt per pass:
+#   diff.patch      git diff c71eeca..64c7161, asserted byte-identical to the
+#                   recorded ~/.saffron/batches/v0/SA-0048/patch.diff
+#   spec_body.md    the spec as revised on main at c5b8838 (see above), plus
+#                   context.criteria_section, the way session.py's REVIEW
+#                   call assembles it (`spec_body=`).
+#   gates.txt       review.gate_summary over the ledger's gate_results rows,
+#                   tools spliced back in from the same run's baseline.json.
+#   context.md      CONTEXT.md at base.
+
+spec_id = "SA-0048"
+pr = 117
+base_sha = "c71eeca9c316a002bcc13534f1fa6f9820bd02d6"
+head_sha = "64c716142ca9674a299b3c8eba33882facc41388"
+source = "docs/BACKLOG.md item 69: `exc.code not in (401, 403)` -> `not in (999,)`; 89 tests green"
+
+# Neither review lens filed anything in this range; the recorded run is 0/0.
+recorded_seen = 0
+recorded_graded = 0
+
+[[defects]]
+id = "refusal-codes-unpinned"
+file = "saffron/preflight.py"
+lines = [295, 320]
+owner = "adequacy"
+min_severity = "blocker"
+# `validate_claude_token`'s `except urllib.error.HTTPError as exc: return
+# exc.code not in (401, 403)` is the one line the tuple lives on, but no test
+# reaches it with a real `HTTPError` — `test_the_token_probes_default_
+# request_shape_is_asserted_not_sent` (the one test that exercises the
+# default `urlopen`) raises `URLError`, not `HTTPError`, so the tuple's
+# membership is asserted by nothing. Mutating it to `(999,)` moved no test.
+# Range is the whole function so a claim landing on the docstring's own "401
+# or 403" wording still counts as having found it.
+must_mention = ["401", "403", "status code"]

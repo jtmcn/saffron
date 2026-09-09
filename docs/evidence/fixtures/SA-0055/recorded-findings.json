@@ -1,0 +1,32 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.4244061,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.346689,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 676,
+        "claim": "PinnedBase's docstring claims the class avoids 'three positional fields' precisely because this repo's history has an instance of adjacent same-typed parameters (Paths) transposing and still type-checking \u2014 the same rationale `check_readiness` used to make `scratch`/`home` keyword-only. But `PinnedBase` is declared as a plain `@dataclass(frozen=True)` with no `kw_only=True`, so `url` and `base_sha` (both `str`, adjacent fields at lines 682-683) remain constructible positionally, e.g. `PinnedBase(mirror, base_sha, url)` \u2014 a transposition `ty` would not catch, exactly the failure class the docstring says this shape prevents. Every call site in this diff happens to use keyword arguments, so nothing breaks today, but the documented safety property is not actually enforced by the type it describes.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.7407807000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  }
+]

@@ -1,0 +1,351 @@
+diff --git a/saffron/cell/session.py b/saffron/cell/session.py
+index a6546fb..9259a9e 100644
+--- a/saffron/cell/session.py
++++ b/saffron/cell/session.py
+@@ -833,6 +833,9 @@ def _drive_cell(
+         # against (§5.6). `_suite` below computes the real, per-attempt
+         # effective tier from the diff it already has.
+         risk=spec.risk,
++        # The declaration these gates actually ran under, read above from the
++        # export at base_sha — never the working copy (§5.4, backlog item 16).
++        policy_sha=policy_sha,
+     )
+ 
+     # Only what this run reached the creation of can leak. `volume rm` on a
+diff --git a/saffron/ledger.py b/saffron/ledger.py
+index f25003f..7219579 100644
+--- a/saffron/ledger.py
++++ b/saffron/ledger.py
+@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS tasks (
+     pushed_sha TEXT,
+     pr_url     TEXT,
+     spent_usd_est REAL NOT NULL DEFAULT 0.0,
++    policy_sha TEXT,
+     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+ );
+ 
+@@ -168,7 +169,7 @@ class Ledger:
+             row["name"]
+             for row in self._db.execute("PRAGMA table_info(tasks)").fetchall()
+         }
+-        for column in ("pushed_sha", "pr_url"):
++        for column in ("pushed_sha", "pr_url", "policy_sha"):
+             if column not in existing:
+                 self._db.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
+         if "spent_usd_est" not in existing:
+@@ -384,11 +385,17 @@ class Ledger:
+         branch: str,
+         risk: str = "standard",
+         budget_usd: float | None = None,
++        policy_sha: str | None = None,
+     ) -> int:
++        """`policy_sha` is the declaration the cell's gates ran under — read
++        from the export at `base_sha` (§5.4) — and defaults to `None`: every
++        caller that predates this parameter (`saffron/replay.py` included)
++        still records a task, just one that cannot say what it ran under."""
+         cursor = self._db.execute(
+-            """INSERT INTO tasks (run_id, spec_id, spec_sha, state, risk, branch, budget_usd)
+-               VALUES (?, ?, ?, 'QUEUED', ?, ?, ?)""",
+-            (run_id, spec_id, spec_sha, risk, branch, budget_usd),
++            """INSERT INTO tasks
++                   (run_id, spec_id, spec_sha, state, risk, branch, budget_usd, policy_sha)
++               VALUES (?, ?, ?, 'QUEUED', ?, ?, ?, ?)""",
++            (run_id, spec_id, spec_sha, risk, branch, budget_usd, policy_sha),
+         )
+         self._db.commit()
+         return _inserted_id(cursor)
+@@ -479,6 +486,28 @@ class Ledger:
+         )
+         self._db.commit()
+ 
++    def task_policy_sha(self, task_id: int) -> str | None:
++        """What this task is currently on record as having run under — the
++        base_sha declaration `create_task` recorded, or whatever PACKAGE last
++        wrote over it with `record_policy`. PACKAGE reads this back to decide
++        whether a re-verification ran under a different declaration."""
++        row = self._db.execute(
++            "SELECT policy_sha FROM tasks WHERE task_id = ?", (task_id,)
++        ).fetchone()
++        return row["policy_sha"] if row is not None else None
++
++    def record_policy(self, task_id: int, policy_sha: str) -> None:
++        """PACKAGE's own write-back (§5.7, backlog item 16): issued only when
++        re-verification ran under a declaration different from the one this
++        task is on record for — never unconditionally, which would satisfy
++        the letter of "rewrites when it differs" while doing it every time."""
++        self._db.execute(
++            "UPDATE tasks SET policy_sha = ?, updated_at = datetime('now') "
++            "WHERE task_id = ?",
++            (policy_sha, task_id),
++        )
++        self._db.commit()
++
+     def set_task_package(
+         self,
+         task_id: int,
+diff --git a/saffron/phases/package.py b/saffron/phases/package.py
+index c914dab..155363c 100644
+--- a/saffron/phases/package.py
++++ b/saffron/phases/package.py
+@@ -673,7 +673,7 @@ def package(
+         mirror, fetch_head, out_dir / "package" / f"{spec.id}-gates"
+     )
+     try:
+-        policy, _ = load_policy(gates_dir)
++        policy, policy_sha = load_policy(gates_dir)
+     except PolicyError as exc:
+         # `_drive_cell`'s wrap, one phase later: the path it reports is a
+         # batch-tree export, and unnamed it sends the operator to their own
+@@ -761,6 +761,15 @@ def package(
+         # child's own baseline has to include the parent's commits, closing
+         # the gap BACKLOG item 33 named as this spec's to fix.
+         if needs_reverification(target_head, tree_base):
++            # Two declarations can govern one task, and this is where the
++            # second one becomes real: re-verification is about to run under
++            # whatever `fetch_head` declares, which may not be what the
++            # session recorded at cell start (backlog item 16). Rewritten
++            # only when it actually differs — an unconditional write would
++            # satisfy "rewrites when it differs" while also firing when it
++            # doesn't, which is wrong and is what the no-op witness catches.
++            if ledger.task_policy_sha(outcome.task_id) != policy_sha:
++                ledger.record_policy(outcome.task_id, policy_sha)
+             # A gate that errored raises out of `reverify`: infrastructure, and
+             # never this task's MERGE_FAILED. The gates are the export the
+             # policy above was read from — one commit, both halves.
+diff --git a/tests/test_ledger.py b/tests/test_ledger.py
+index 88a69ef..39fede4 100644
+--- a/tests/test_ledger.py
++++ b/tests/test_ledger.py
+@@ -717,6 +717,57 @@ def test_a_ledger_built_by_the_previous_schema_still_opens_and_writes(tmp_path):
+     ledger.close()
+ 
+ 
++def _schema_without_policy_sha() -> str:
++    """`tasks` minus `policy_sha` — the shape a ledger written before this
++    change actually has. Shared by the migration test below and the
++    no-backfill test, rather than building the fixture twice."""
++    before = SCHEMA.replace("    policy_sha TEXT,\n", "")
++    # `repos` carries its own, unrelated `policy_sha` column (§4.1) — this
++    # checks only that `tasks`'s copy of the exact line is gone, otherwise
++    # this test proves nothing.
++    assert "    policy_sha TEXT,\n" not in before
++    return before
++
++
++def test_a_ledger_built_by_the_previous_schema_gains_policy_sha(tmp_path):
++    """`tasks` carries a nullable `policy_sha`, added the way a column on an
++    existing table has to be — the guarded `ALTER TABLE` this module already
++    uses, never `CREATE TABLE IF NOT EXISTS`, which does not alter."""
++    path = tmp_path / "old.db"
++    old = sqlite3.connect(path)
++    old.executescript(_schema_without_policy_sha())
++    old.commit()
++    old.close()
++
++    ledger = Ledger(path)
++    columns = {
++        row["name"] for row in ledger._db.execute("PRAGMA table_info(tasks)").fetchall()
++    }
++    assert "policy_sha" in columns
++    ledger.close()
++
++
++def test_an_existing_task_is_not_backfilled_with_a_policy_sha(tmp_path):
++    """A task row created before this change reads back with a NULL
++    `policy_sha`, never a value invented for a task nobody observed."""
++    path = tmp_path / "old.db"
++    old = sqlite3.connect(path)
++    old.executescript(_schema_without_policy_sha())
++    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')")
++    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
++    old.execute(
++        "INSERT INTO tasks (run_id, spec_id, spec_sha, state) "
++        "VALUES (1, 'SA-0016', 's', 'QUEUED')"
++    )
++    old.commit()
++    old.close()
++
++    ledger = Ledger(path)
++    row = ledger._db.execute("SELECT policy_sha FROM tasks").fetchone()
++    assert row["policy_sha"] is None
++    ledger.close()
++
++
+ def test_the_schema_adds_no_column_that_nothing_reads(ledger):
+     """§4.2.1's two explicit cuts: `batches` has no `concurrency`, and `tasks`
+     gains no `priority` — both would be item 18's pattern wearing a schema, a
+diff --git a/tests/test_package.py b/tests/test_package.py
+index 04af7d4..b7c8183 100644
+--- a/tests/test_package.py
++++ b/tests/test_package.py
+@@ -1,3 +1,4 @@
++import hashlib
+ import json
+ import subprocess
+ import subprocess as sp
+@@ -1669,6 +1670,107 @@ def test_a_policy_fault_at_the_default_branch_head_names_it(packageable):
+         )
+ 
+ 
++def test_reverifying_under_a_changed_policy_records_the_policy_it_used(
++    monkeypatch, packageable
++):
++    """PACKAGE rewrites `policy_sha` when re-verification runs under a
++    declaration different from the one recorded — which is what happens when
++    `policy.yaml`'s bytes differ between `base_sha` and `fetch_head`, not
++    merely because the base moved. Left NULL rather than seeded: `packageable`'s
++    `create_task` records no `policy_sha`, which is every pre-existing task and
++    the exact gap backlog item 16 exists to close, and NULL must count as
++    'different' just as a real prior declaration would — an implementation
++    that only rewrites a non-NULL mismatch (`recorded is not None and recorded
++    != policy_sha`) would leave this task's `policy_sha` NULL forever and
++    still pass a test that seeded a real value first. Pushed the way
++    `test_a_policy_fault_at_the_default_branch_head_names_it` is, not the
++    working-copy-only tests: the checkout's policy never reaches `fetch_head`.
++    `reverify` itself is faked, the way `test_a_re_verified_body_shows_the_
++    gates_that_re_ran` fakes it: no cell, no container, anywhere here."""
++    monkeypatch.setattr(
++        "saffron.phases.package.reverify",
++        lambda **_k: (
++            [],
++            [GateResult(gate="tests", status="pass", tool="t", summary="")],
++        ),
++    )
++    work = packageable.work
++    before = packageable.ledger._db.execute(
++        "SELECT policy_sha FROM tasks WHERE task_id = ?", (packageable.task_id,)
++    ).fetchone()
++    assert before["policy_sha"] is None  # otherwise this test proves nothing
++
++    (work / ".saffron" / "policy.yaml").write_text(
++        "gates:\n  tests: {}\nintegrity:\n  test_paths:\n    - f.txt\n"
++        "envelope_default: []\n"
++    )
++    git(work, "commit", "-qam", "widen the declaration")
++    git(work, "push", "-q", "origin", "main")
++    new_sha = hashlib.sha256(
++        (work / ".saffron" / "policy.yaml").read_bytes()
++    ).hexdigest()
++
++    result = package(
++        packageable.outcome,
++        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
++        **packageable.kwargs,
++    )
++
++    assert result.state == "READY_FOR_REVIEW"
++    row = packageable.ledger._db.execute(
++        "SELECT policy_sha FROM tasks WHERE task_id = ?", (packageable.task_id,)
++    ).fetchone()
++    assert row["policy_sha"] == new_sha
++
++
++def test_reverifying_under_an_unchanged_policy_issues_no_policy_write(
++    monkeypatch, packageable
++):
++    """The no-op branch has to be built, not inherited: an unconditional
++    write would satisfy "rewrites when it differs" while also firing here,
++    which is wrong — only asserting on the call, never on `updated_at`
++    (PACKAGE moves that column on every non-raising return anyway), can tell
++    the two implementations apart. `reverify` itself is faked: no cell, no
++    container, anywhere here."""
++    monkeypatch.setattr(
++        "saffron.phases.package.reverify",
++        lambda **_k: (
++            [],
++            [GateResult(gate="tests", status="pass", tool="t", summary="")],
++        ),
++    )
++    work = packageable.work
++    policy_sha = hashlib.sha256(
++        (work / ".saffron" / "policy.yaml").read_bytes()
++    ).hexdigest()
++    packageable.ledger._db.execute(
++        "UPDATE tasks SET policy_sha = ? WHERE task_id = ?",
++        (policy_sha, packageable.task_id),
++    )
++    packageable.ledger._db.commit()
++
++    # The base still moves — re-verification still runs — but `policy.yaml`
++    # itself is untouched, so its declaration is exactly what was recorded.
++    (work / "other.txt").write_text("main moved, policy untouched\n")
++    git(work, "add", "-A")
++    git(work, "commit", "-qm", "main moved")
++    git(work, "push", "-q", "origin", "main")
++
++    recorded: list = []
++    monkeypatch.setattr(
++        Ledger, "record_policy", lambda self, *a, **k: recorded.append(a)
++    )
++
++    result = package(
++        packageable.outcome,
++        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
++        **packageable.kwargs,
++    )
++
++    assert result.state == "READY_FOR_REVIEW"
++    assert recorded == []
++
++
+ def test_an_advisory_failure_after_the_rebase_does_not_fail_the_merge(
+     monkeypatch, packageable
+ ):
+diff --git a/tests/test_session.py b/tests/test_session.py
+index 58663c5..e6584b5 100644
+--- a/tests/test_session.py
++++ b/tests/test_session.py
+@@ -2264,6 +2264,53 @@ def test_the_task_row_carries_the_specs_own_sha_not_the_policys(tmp_path, monkey
+         ledger.close()
+ 
+ 
++def test_a_task_records_the_policy_its_gates_ran_under(monkeypatch, tmp_path):
++    """The session records, at cell start, the policy its gates will run
++    under — read from the export at `base_sha` that the gate executables
++    already resolve against, never from the working copy (§5.4, backlog
++    item 16). `base_policy` is `_stub_the_export`'s knob for making the two
++    diverge, reused here rather than a new export double."""
++    cell = _stub_the_runtime(monkeypatch)
++    base_policy = "gates: {}\nprotected:\n  - x\n"
++    outcome, ledger = _drive(
++        monkeypatch,
++        tmp_path,
++        cell=cell,
++        turns=[_turn(_block(_PLAN)), _turn()],
++        base_policy=base_policy,
++    )
++    row = ledger._db.execute(
++        "SELECT policy_sha FROM tasks WHERE task_id = ?", (outcome.task_id,)
++    ).fetchone()
++    assert row["policy_sha"] == hashlib.sha256(base_policy.encode()).hexdigest()
++
++
++def test_the_repo_level_policy_sha_is_still_written(monkeypatch, tmp_path):
++    """`repos.policy_sha` answers a different question — what the repo
++    declared when it was last seen — and `upsert_repo`'s callers depend on
++    it; recording `tasks.policy_sha` alongside it must not stop that write.
++    Both are asserted from the one call, at the one hash: a `tasks` row
++    with no `policy_sha` column at all is what this test would see with its
++    own source reverted, which is what makes it more than a restatement of
++    behaviour the diff never touched."""
++    cell = _stub_the_runtime(monkeypatch)
++    base_policy = "gates: {}\n"
++    outcome, ledger = _drive(
++        monkeypatch,
++        tmp_path,
++        cell=cell,
++        turns=[_turn(_block(_PLAN)), _turn()],
++        base_policy=base_policy,
++    )
++    expected = hashlib.sha256(base_policy.encode()).hexdigest()
++    (repo_row,) = ledger._db.execute("SELECT policy_sha FROM repos").fetchall()
++    task_row = ledger._db.execute(
++        "SELECT policy_sha FROM tasks WHERE task_id = ?", (outcome.task_id,)
++    ).fetchone()
++    assert repo_row["policy_sha"] == expected
++    assert task_row["policy_sha"] == expected
++
++
+ def test_the_cell_env_carries_the_proxy_and_the_state_dir(monkeypatch):
+     """§5.1's per-task block: without these the cell has full egress and the
+     agent writes its session state into the tree the scope gate walks."""

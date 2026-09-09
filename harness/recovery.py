@@ -29,7 +29,7 @@ from pathlib import Path
 
 from saffron.agents import context
 from saffron.gates.contract import GateResult
-from saffron.intake import parse_spec
+from saffron.intake import DisclosedMutantError, parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import review
 
@@ -114,6 +114,35 @@ def _spec_path_at(repo: Path, sha: str, spec_id: str) -> str:
     return matches[0]
 
 
+def _spec_content_off_branch(repo: Path, head: str, spec_id: str) -> str:
+    """A spec's text when `base`'s own tree never carries it.
+
+    `base` is the previous task's head for a stacked task, not main — main
+    kept reviewing specs while the queue drained, so a spec can be written
+    (and revised) on disk after its task's base was cut and still be what
+    `saffron cell` was pointed at. Found by the last commit, anywhere, that
+    touched the file before `head` was committed: a spec does not change
+    after review, so the latest revision at that moment is the one shown.
+    """
+    head_date = _git(repo, "log", "-1", "--format=%cI", head).strip()
+    log = _git(
+        repo,
+        "log",
+        "--all",
+        f"--before={head_date}",
+        "--name-only",
+        "--pretty=format:%H",
+        "--",
+        f":(glob).saffron/specs/**/{spec_id}-*.md",
+    ).strip()
+    if not log:
+        raise RecoveryError(
+            f"{spec_id}: no commit anywhere carries its spec before {head_date}"
+        )
+    sha, path = log.split("\n")[:2]
+    return _git(repo, "show", f"{sha}:{path}")
+
+
 def _reviewed_results(
     ledger: Ledger, spec_id: str
 ) -> tuple[sqlite3.Row, list[GateResult]]:
@@ -164,8 +193,19 @@ def recover_fixture(spec_id: str, home: Path, repo: Path) -> dict[str, str]:
     # lens what it returns, and `load_fixture` reads the file verbatim.
     gates_txt = review.gate_summary(splice_tools(results, baseline))
 
-    spec_path = _spec_path_at(repo, base, spec_id)
-    spec = parse_spec(_git(repo, "show", f"{base}:{spec_path}"))
+    try:
+        spec_path = _spec_path_at(repo, base, spec_id)
+        spec_text = _git(repo, "show", f"{base}:{spec_path}")
+    except RecoveryError:
+        spec_text = _spec_content_off_branch(repo, head, spec_id)
+    try:
+        spec = parse_spec(spec_text)
+    except DisclosedMutantError as exc:
+        # Item 82's disclosure check postdates every spec recovered here — it
+        # exists *because of* SA-0063 — so it refuses a historical spec as a
+        # candidate for a new task, not as unreadable. `exc.spec` is the same
+        # parse `discover_specs` keeps for exactly this case (intake.py:308).
+        spec = exc.spec
     # The way session.py's REVIEW call assembles `spec_body=` at both sites.
     spec_body = spec.body + context.criteria_section(spec.acceptance)
 

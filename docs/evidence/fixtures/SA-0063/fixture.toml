@@ -1,0 +1,75 @@
+# PR #158 (`SA-0063`), the two known-bad tests item 86 found reviewing
+# `SA-0064` by mutation rather than by reading: both live in
+# `tests/test_report.py`, which this diff carries outside its own `touches`,
+# so neither run of `SA-0063` itself could have closed them.
+#
+# Parsing this spec with today's `intake.parse_spec` raises
+# `DisclosedMutantError`: item 82's disclosure check exists *because of* this
+# spec (it dictated an exact heading and constant so its own witnesses would
+# match, and named the mutants in its own "Notes for the agent" section) and
+# postdates it by several days. `recover_fixture` catches the error and uses
+# `exc.spec` — the same parsed spec `discover_specs` keeps for a refusal on
+# policy rather than shape (`intake.py:308`) — so `spec_body.md` here is the
+# real spec text REVIEW actually saw, not a stand-in.
+#
+# Provenance, all four inputs frozen rather than rebuilt per pass:
+#   diff.patch      git diff 132a2f8..f76931d, asserted byte-identical to the
+#                   recorded ~/.saffron/batches/v0/SA-0063/patch.diff
+#   spec_body.md    the spec at base (see above), plus
+#                   context.criteria_section, the way session.py's REVIEW
+#                   call assembles it (`spec_body=`).
+#   gates.txt       review.gate_summary over the ledger's gate_results rows,
+#                   tools spliced back in from the same run's baseline.json.
+#   context.md      CONTEXT.md at base.
+
+spec_id = "SA-0063"
+pr = 158
+base_sha = "132a2f8def97980230ff83f1d6244f8d230725d5"
+head_sha = "f76931df2af02b5de376401a9ee75f1cfffd641e"
+source = "docs/BACKLOG.md item 86: the notes channel's two rendering-side safety properties are unwitnessed"
+
+# Neither review lens filed anything in this range; the recorded run is 0/0.
+# (The run did file two real blockers elsewhere, about `notes` never reaching
+# `render_pr_body` at all — a different, undeclared defect, out of scope here.)
+recorded_seen = 0
+recorded_graded = 0
+
+# Both defects share one range — `_notes`, lines 377-395 — so the phrases are
+# their only discriminator, exactly as SA-0062's overlapping pair. Per the
+# controller ruling: if the phrase-collision tests fire, split
+# `notes-neutralization-unwitnessed` to the `neutralize` call (line 391) and
+# `empty-notes-heading-unwitnessed` to the early `return ""` (line 390)
+# rather than weakening either phrase.
+
+[[defects]]
+id = "notes-neutralization-unwitnessed"
+file = "saffron/report/pr_body.py"
+lines = [377, 395]
+owner = "adequacy"
+min_severity = "blocker"
+# `_notes` defangs an `@mention` and a `Fixes #12` via `neutralize(text)`
+# (line 391) — measured: `_notes("ping @maintainer and Fixes #12")` comes
+# back with zero-width joiners in both. But
+# `test_notes_cannot_move_a_status_or_a_gate_result` feeds exactly that
+# string in and asserts only that the *head* of the rendered body is
+# unchanged; it never looks inside the notes section itself. Deleting the
+# `neutralize` call leaves that test green — the one place a cell's own
+# output reaches GitHub without crossing `pr_body.neutralize`'s stated
+# boundary is asserted nowhere.
+must_mention = ["neutraliz", "mention", "defang"]
+
+[[defects]]
+id = "empty-notes-heading-unwitnessed"
+file = "saffron/report/pr_body.py"
+lines = [377, 395]
+owner = "adequacy"
+min_severity = "blocker"
+# `if not text: return ""` (line 390) is what keeps `_notes` from rendering
+# a heading over nothing. Measured at 0631855: making `_notes` render the
+# heading over empty notes anyway leaves
+# `test_the_pr_body_reports_the_effective_tier_not_the_specs_declared_one`
+# (the named `preserves` witness for this property) green — the only test
+# that turns red is `test_notes_cannot_move_a_status_or_a_gate_result`, and
+# only by accident: `return ""` appears seven times in `pr_body.py`, and a
+# first-occurrence mutation can land in an unrelated function entirely.
+must_mention = ["empty", "heading", "no notes"]

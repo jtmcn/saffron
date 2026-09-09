@@ -1,0 +1,41 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.9263996999999998,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 1.1894049,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 768,
+        "claim": "`_resolve_queue`'s own docstring says printing its result is the caller's job, and its sibling `_queue` discharges that by printing `resolved.reconciled`, `resolved.gh_failures` and `resolved.policy_unread` (see `_queue`, which calls `_print_reconcile_summary` and `_print_queue` with exactly those three). `_batch` calls `_resolve_queue` here but never reads `resolved.reconciled`, `resolved.gh_failures` or `resolved.policy_unread` anywhere in its body \u2014 an unattended night where `gh` could not run (so the open-PR/touches-overlap refusals never checked) or `policy.yaml` could not be read at `base_sha` (so the protected-path prefilter never ran) produces no stdout/event trace at all, unlike the attended path with the same underlying scan. The operator reading the morning log has no way to tell 'these checks never ran' from 'these checks ran and found nothing', which is precisely the ambiguity `_resolve_queue`'s own comment about `policy_unread` says must never be collapsed.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.5024754,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 600,
+        "claim": "Neither `test_the_adapter_stacks_a_child_on_its_parents_branch` nor `test_the_adapter_stacks_on_the_first_dependency_only` ever reaches this line: both stub `run_one_cell` to raise `SystemExit` immediately, so `_batch_runner`'s `if outcome.state == \"READY_FOR_REVIEW\":` branch (lines 586-600) \u2014 the `package_phase.package` call and the `outcome.state = result.state` overwrite the docstring says exists so a packaged outcome like `MERGE_FAILED` reaches `run_batch` instead of a stale `READY_FOR_REVIEW` \u2014 is never exercised anywhere in this diff. Deleting line 600 entirely (or the whole `if` block) would leave all 1307 tests green. Since `run_batch`'s per-candidate loop reads `outcome.state` to drive the breaker and the batch record, a copy-paste slip in this new, parallel packaging call (parameter mismatch, wrong state propagated) has no witness that would catch it.",
+        "anchored": true
+      }
+    ]
+  }
+]

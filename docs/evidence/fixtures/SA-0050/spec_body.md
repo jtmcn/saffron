@@ -1,0 +1,146 @@
+
+## Context
+
+§4.2.1: *"K = 1, and the scheduler is a `for` loop over a sorted list."*
+Ordering is priority then FIFO, *"sorted once in memory"* — which is what
+`build_queue` already returns.
+
+*"A batch ends four ways, and says which. The queue drains, the budget is gone,
+`--until` hits, or the breaker fires."* The four are the `status` values
+`SA-0045` already put a `CHECK` on: `DRAINED`, `BUDGET`, `UNTIL`,
+`INFRASTRUCTURE`.
+
+Backlog item 58 is the standing item: nothing in Saffron runs more than one
+cell, so §9's v1 criterion — an unattended night — is structurally unreachable.
+Every mechanism up to the sort exists. The consumer does not.
+
+## Problem
+
+- **The queue is printed and abandoned.** `saffron queue` resolves candidates
+  and prints them. Nothing consumes the list.
+- **A batch has four ways to end and no way to say which.** The column exists
+  with its `CHECK`; no code path writes it.
+- **`runs.batch_id` connects nothing.** `create_run` does not take a batch, and
+  the only caller is inside `run_one_cell`, which this spec may not edit.
+- **Two consecutive aborts would burn the night to learn one fact.** Each
+  remaining task pays a preflight and a baseline suite to die of the same
+  global condition.
+
+## Out of scope
+
+**The command.** `saffron/cli.py` is `forbidden`. `SA-0051` adds
+`saffron batch`, its flags and its exit codes, and it is the spec that extracts
+the scan so `queue` and `batch` share one.
+
+**Resolving the queue.** `run_batch` takes the sorted candidates as an
+argument. `_queue` already resolves the mirror, exports `.saffron/` at
+`base_sha` and calls `build_queue` using four `cli`-private helpers; `cli.py`
+is `forbidden`, so re-deriving the scan here would mean copying them. Taking
+the resolved list is also what makes every witness above injectable.
+
+**Stamping a corpse `ORPHANED`.** §4.2.1 requires the *batch scan* to pass
+`reconcile(..., stamp_orphaned=True)` — deliberately not what `saffron queue`
+does, and its docstring says why. That belongs with the scan, which is
+`SA-0051`'s, and this spec never calls `reconcile`.
+
+**Concurrency.** K=1. No pool, no `--concurrency`, no reserved-budget
+arithmetic — §4.2.1 cuts all three and names the night each returns.
+
+**Multi-repo.** v2 (§9). `run_batch` takes one repo, so §4.4's per-repo
+baseline and skipped-repo lines have nothing to iterate yet.
+
+**`saffron gc` (§4.5).** Deferred at K=1. The disk *check* is not deferred with
+it and already landed in `SA-0048`.
+
+**Rendering the night.** `saffron/report/**` is `forbidden`.
+
+## Notes for the agent
+
+**The clock and the readiness check take real defaults bound as keywords — the
+cell runner does not, and this is the sentence that decides the spec.** It is a
+required callable from a candidate to that candidate's outcome, with no default
+at all. `run_one_cell` takes a `CellSpec`, not a `Candidate`, and the only code
+that builds one is `cli._run_cell` using two `cli`-private helpers this spec
+forbids: the ceilings resolver and the one that decides what a child stacks on.
+A loop that built a `CellSpec` itself would therefore pass no stacked-on parent
+for any candidate, cutting every child of a stack from `base_sha` — and §4.2.1
+says what follows: *"it builds against code that does not exist yet and fails
+its own gates."* That is a silent correctness bug no witness here could catch,
+because all of them run against a fake runner. `SA-0051` owns `cli.py` and
+supplies the adapter. An eight-hour window, a live
+token probe and a real cell are all untestable; a fake clock, a callable
+returning canned `CellOutcome`s and a stub readiness are not. **If a criterion
+above seems to need a real night, the seam is in the wrong place.**
+
+**Do not reuse `scheduler.REQUEUE_STATES` for the breaker.** It is the right
+list for a different question — what re-queues tomorrow — and it contains
+`CHANGES_REQUESTED` and `ORPHANED`, both of which a task *earned*. The breaker
+counts three states and they are worth naming in their own frozenset in this
+module, with a comment saying which set it is deliberately not.
+
+**Attach the run after the cell returns, not at creation.** `CellOutcome`
+carries `run_id`. `create_run` accepts a batch id and lives in
+`saffron/ledger.py`; the call that mints the run is in `run_one_cell`, in
+`saffron/cell/**`, and passes none. Both are `forbidden`, so the stamp is a ledger method `SA-0049` adds and this spec
+calls once per task. It is the shape `record_push` and `set_task_package`
+already use on `tasks`: the row exists, then the fact about it arrives.
+
+**Read the batch's spend back; do not keep a tally.** `task_spend`'s docstring
+is the instruction — *"a caller whose own tally lost a frame reads it back
+rather than reporting the gap"* — and `CellOutcome.spent_usd` is exactly such a
+tally: its own docstring says the field is defaulted because several early
+returns precede the binding. `SA-0049` exposes the batch's derived spend as a
+reader; the budget gate calls it.
+
+**The ledger is an ordinary argument, not a keyword with a default**, and the
+witnesses that involve money need scaffolding worth naming here. The spend is
+derived through `batches` to `runs` to `tasks` to `attempts`, so a fake runner
+returning a bare outcome leaves the budget gate reading zero. A test that wants
+the gate to see money has the fake runner write it — create the run, the task
+and a closed attempt — and return an outcome carrying that run id.
+
+**Say what the loop returns.** A stop reason is what `SA-0051` turns into an
+exit code, and the four are `DRAINED`, `BUDGET`, `UNTIL` and `INFRASTRUCTURE`.
+Return the reason itself rather than a boolean or an exit code: the command
+owns the mapping to a code, and §4.2.1 gives it three-to-one.
+
+**Order the checks and say so in one comment.** Before each task: the deadline,
+then the budget, then the breaker's standing count. The batch row is closed
+once, on whichever fired.
+
+**`saffron/batch.py` is a new file, and §10's layout does not list it.** That
+layout also lists `supervisor.py`, `gc.py` and `cell/database.py`, none of
+which exist, while the module it does name for this job — `scheduler.py` — is
+the scan, is `forbidden` here, and has an open pull request against it. A new
+module is right; `DESIGN.md` is protected and Task 8 corrects §10 by hand.
+
+**`risk: standard`, and it is a declaration rather than an oversight.**
+`saffron/batch.py` is in no `elevate_on` pattern, so `size` is advisory here.
+That is deliberate and it is why `SA-0049` exists as a separate spec: this is
+the widest piece of the batch work, and item 25 measured what the strictest
+ceiling does to the widest spec — `SA-0009`, 990 changed lines against a
+600-line `feature` ceiling, `EXHAUSTED` at $31.60 with nothing merged. Advisory
+is not permission to sprawl; the critic still reads the diff.
+
+**No new test may carry the `cell` marker.** `pyproject.toml` sets
+`addopts = "-m 'not cell'"` and the `tests` gate passes the same argv to
+`--collect-only`, so a cell-marked witness is never collected at head,
+`criteria` reports `witness-not-collected`, and the attempt is spent on a test
+that was correct. Nothing here needs a container — that is what the injected
+runner is for.
+
+**Nothing calls `run_batch` when this merges, and that is the plan.**
+`SA-0051` is the first caller. Do not add one: `saffron/cli.py` is `forbidden`,
+so wiring the command would fail `scope` on every attempt.
+## Acceptance criteria
+
+- [ ] A queue that drains runs every candidate once, in the order it was handed, through an injected runner, and returns DRAINED. An empty queue drains immediately rather than being a special case — a night with nothing to do ended by draining.
+- [ ] The budget gate is one comparison before each task — the batch's uncommitted budget against that task's own budget_usd — and a task that does not fit is never started. §4.2.1 at K=1: the reserved-budget machinery exists only to stop K tasks passing the gate on the same last $12, and at K=1 that race cannot occur. The stop reason is BUDGET.
+- [ ] A task admitted under the gate that then overshoots its own budget_usd does not stop the batch on that account. The batch ceiling is what binds; a task's ceiling is best-effort and enforced inside the cell, which is backlog item 44's decision and the reason the gate is checked before a task rather than after.
+- [ ] The deadline is read from an injected clock, never a bare wall-clock call inside the loop, and is compared before starting a task rather than during one. The stop reason is UNTIL. An eight-hour window is untestable any other way, and a test that has to wait is a test nobody runs.
+- [ ] Two consecutive aborts stop the batch as INFRASTRUCTURE and no further task is started. What counts is exactly GATE_ERROR, PREFLIGHT_FAILED and RATE_LIMITED — enumerated here, never taken from scheduler.REQUEUE_STATES, which also contains CHANGES_REQUESTED and ORPHANED and would count two states a task earned as aborts.
+- [ ] A state a task earned resets the counter, up to and including EXHAUSTED, so an EXHAUSTED between two aborts prevents the fire. §4.2.1 names this as the one most likely to be got wrong: "any terminal state" would reset on GATE_ERROR and PREFLIGHT_FAILED themselves, which are terminal, and the counter would never reach two.
+- [ ] A batches row is opened when the night starts and closed with the reason it stopped, through the writer SA-0049 added. Every stop path closes it, including the breaker and a readiness failure — a night that ends with no ended_at and no status is indistinguishable from one still running, which is the state §6's morning queue reads.
+- [ ] Each run the night produces is attached to the batch. create_run accepts a batch id and the only call that mints a run passes none, so without this stamp the column is written by nobody, every join through it returns nothing, and the spend SA-0049 derives is zero for every real night.
+- [ ] A readiness failure ends the night as INFRASTRUCTURE with the batch row opened and closed and no task started. §4.4 step 1 skips a repo that fails preflight rather than treating it as fatal; at one repo the skip is the whole night, and it has to leave a row behind or an expired token at 22:00 produces a night with no record that it was attempted.
+- [ ] A runner that raises rather than returning an outcome still closes the batch row, and the raise counts as an abort for the breaker. Driving one cell raises on an unreadable policy at base, on a runtime that will not start and on a mirror that will not fetch, all from outside the block that would catch them — the command is the only handler today, and a batch has none. Unhandled, the night ends with no end and no status, which is the one state that cannot be told from a night still running.

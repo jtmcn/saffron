@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -164,3 +165,35 @@ def test_the_table_reports_the_aggregate_and_every_fixture(sa0062, one_defect_fi
     )
     assert "0/3" in table  # graded / declared, per defect
     assert sa0062.spec_id in table and one_defect_fixture.spec_id in table
+
+
+def test_every_shipped_fixture_reproduces_its_own_declared_range():
+    """What makes the archaeology auditable rather than claimed. A fixture
+    whose `diff.patch` is not `git diff base..head` at the range its own
+    `fixture.toml` declares is grading a lens against a tree nobody has."""
+    for fixture in corpus.load_corpus(FIXTURES):
+        live = subprocess.run(
+            ["git", "diff", f"{fixture.base_sha}..{fixture.head_sha}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert live == fixture.diff, fixture.spec_id
+
+
+def test_every_shipped_fixture_declares_a_non_empty_source():
+    """`source` is the backlog row a defect's range and phrases came from —
+    the same row `recover_fixture` cannot fill in, because it names nothing
+    the ledger or batch tree records. `lens_scoring.load_fixture` reads it as
+    `raw.get("source", "")`, so nothing short of this test refuses a fixture
+    that shipped with the field still blank."""
+    for fixture in corpus.load_corpus(FIXTURES):
+        assert fixture.source.strip(), fixture.spec_id
+
+
+def test_the_predicate_reproduces_every_fixture_s_recorded_answer():
+    """`calibrate`'s guard, over all eight. Every declared defect is one a lens
+    should have raised and did not, so every fixture's recorded answer is
+    0 seen / 0 graded — and a predicate loosened until a missed defect starts
+    scoring fails here before any money is spent."""
+    corpus.calibrate_corpus(corpus.load_corpus(FIXTURES))

@@ -1,0 +1,38 @@
+# PR #116 (`SA-0046`), the same known-bad shape as `SA-0045` on a different
+# column: item 69's mutation table lists them as one row because the defect
+# is identical, on `policy_sha` rather than `batch_id`.
+#
+# Provenance, all four inputs frozen rather than rebuilt per pass:
+#   diff.patch      git diff a79b680..c71eeca, asserted byte-identical to the
+#                   recorded ~/.saffron/batches/v0/SA-0046/patch.diff
+#   spec_body.md    the spec at base, plus context.criteria_section, the way
+#                   session.py's REVIEW call assembles it (`spec_body=`).
+#   gates.txt       review.gate_summary over the ledger's gate_results rows,
+#                   tools spliced back in from the same run's baseline.json.
+#   context.md      CONTEXT.md at base.
+
+spec_id = "SA-0046"
+pr = 116
+base_sha = "a79b680b0ac84660f62aaf07002dee027597fd70"
+head_sha = "c71eeca9c316a002bcc13534f1fa6f9820bd02d6"
+source = "docs/BACKLOG.md item 69: reflow one SCHEMA line — both migration guards assert what `replace` removed"
+
+# Neither review lens filed anything in this range; the recorded run is 0/0.
+recorded_seen = 0
+recorded_graded = 0
+
+[[defects]]
+id = "reflow-defeats-guard"
+file = "tests/test_ledger.py"
+lines = [717, 773]
+owner = "adequacy"
+min_severity = "blocker"
+# `_schema_without_policy_sha()` is `SCHEMA.replace("    policy_sha TEXT,\n", "")`
+# plus the same self-check shape as SA-0045's pair — `assert "    policy_sha
+# TEXT,\n" not in before`, one hardcoded literal read twice. Reflowing the
+# real `policy_sha TEXT,` line in `ledger.py` makes the `.replace()` a no-op
+# and the assert pass on the same stale text, so the two tests that build on
+# it (`..._gains_policy_sha`, `..._not_backfilled_with_a_policy_sha`) run
+# against an unmodified schema and never exercise the `ALTER TABLE` path at
+# all. Range covers the shared builder and both tests that consume it.
+must_mention = ["replace", "whitespace", "reflow"]

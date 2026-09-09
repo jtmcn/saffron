@@ -13,7 +13,14 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from harness.lens_scoring import Fixture, LensErrored, Score, load_fixture, score_pass
+from harness.lens_scoring import (
+    Fixture,
+    LensErrored,
+    Score,
+    calibrate,
+    load_fixture,
+    score_pass,
+)
 from saffron.phases.review import LENSES, LensReview
 
 
@@ -31,6 +38,16 @@ def load_corpus(root: Path) -> list[Fixture]:
         if child.is_dir() and (child / "fixture.toml").is_file()
     ]
     return sorted(found, key=lambda fixture: fixture.spec_id)
+
+
+def calibrate_corpus(fixtures: Sequence[Fixture]) -> None:
+    """Every fixture's own recorded answer, before any money is spent.
+
+    Raises on the first failure rather than collecting them: a pass must not
+    start with one predicate known wrong, and the message names which.
+    """
+    for fixture in fixtures:
+        calibrate(fixture)
 
 
 @dataclass(frozen=True)

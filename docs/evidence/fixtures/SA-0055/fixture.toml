@@ -1,0 +1,58 @@
+# PR #131 (`SA-0055`), two of item 69's nine known-bad tests, both found in
+# the same diff: sharing one readiness check's pinned base between `saffron
+# batch`'s scan and its own preflight.
+#
+# Provenance, all four inputs frozen rather than rebuilt per pass:
+#   diff.patch      git diff aa8dfd1..e5a7cbe, asserted byte-identical to the
+#                   recorded ~/.saffron/batches/v0/SA-0055/patch.diff
+#   spec_body.md    the spec at base, plus context.criteria_section, the way
+#                   session.py's REVIEW call assembles it (`spec_body=`).
+#   gates.txt       review.gate_summary over the ledger's gate_results rows,
+#                   tools spliced back in from the same run's baseline.json.
+#   context.md      CONTEXT.md at base.
+
+spec_id = "SA-0055"
+pr = 131
+base_sha = "aa8dfd17e4ce13a20bbeb950e74bb459020ce746"
+head_sha = "e5a7cbe930e9b0f3e34e335094cb328a17d61655"
+source = "docs/BACKLOG.md item 69: `pinned=derived` invisible to an assertion matching only `ast.Constant`"
+
+# Neither review lens filed anything in either declared range; recorded 0/0.
+recorded_seen = 0
+recorded_graded = 0
+
+[[defects]]
+id = "pinned-base-unwitnessed"
+file = "saffron/cli.py"
+lines = [685, 730]
+owner = "adequacy"
+min_severity = "blocker"
+# `_resolve_queue`'s `if pinned is not None: ... else: <derive>` branch is
+# what lets `saffron batch` skip re-deriving a mirror, remote and base sha it
+# already paid for in readiness. `test_cli.py`'s own AST helper,
+# `_source_calls(..., keyword="pinned")`, only recognises a keyword whose
+# value is `isinstance(kw.value, ast.Constant)` — a literal — so it cannot
+# see a call passing `pinned=<some name>`, only `pinned=None` or a bare
+# omission. A caller that starts forwarding a *wrong* derived `PinnedBase`
+# (not `None`, not omitted, just mistaken) passes this check identically to
+# a correct one; the check can tell "a literal" from "not a literal", never
+# "the right value" from "the wrong one". LOW CONFIDENCE: I read this as the
+# mechanism the backlog row names, but did not run the mutation myself to
+# confirm which specific line it survives against.
+must_mention = ["ast.Constant", "keyword", "not a literal"]
+
+[[defects]]
+id = "readiness-guard-unwitnessed"
+file = "saffron/cli.py"
+lines = [930, 950]
+owner = "adequacy"
+min_severity = "blocker"
+# `if readiness.ok:` gates the whole scan-and-run branch; deleting it leaves
+# the three narrowing asserts (`readiness.mirror is not None`, etc.)
+# unconditional. On a failing readiness those fields are `None`, so the
+# asserts raise — an uncaught `AssertionError`, which `main()`'s own
+# top-level `except Exception` turns into exit 2, the same code the guarded
+# path already returns for a readiness failure (`INFRASTRUCTURE`). No test
+# distinguishes "refused cleanly" from "crashed into the same exit code", so
+# both versions of this function pass every test in the suite.
+must_mention = ["readiness", "guard", "exit 2"]

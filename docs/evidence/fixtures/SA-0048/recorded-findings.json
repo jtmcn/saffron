@@ -1,0 +1,41 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.7674953999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.6135045,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/preflight.py",
+        "line": 438,
+        "claim": "`check_readiness` wraps every other step's failure in a try/except and converts it to a named `Readiness(False, step, detail)`, but the disk-headroom step calls `disk_headroom_ok(home)` unguarded. `disk_headroom_ok` is documented and tested to *raise* `RuntimeError` rather than read a check-that-could-not-run as a pass (line ~318-333), and that raise is never caught here, so it propagates straight out of `check_readiness` as a bare exception. This directly contradicts the contract stated on `Readiness` itself two lines above (line ~373): 'never a bare boolean, so a caller can skip the repo and say why ... instead of discovering the reason by reading a traceback the first cell raised' \u2014 for exactly the disk-full/unreadable case that promise exists to cover, the caller gets the traceback anyway.",
+        "anchored": true
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.3932378999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/preflight.py",
+        "line": 415,
+        "claim": "None of the new tests trigger a `git_mirror.GitError` from `ensure_mirror` or a `package_phase.PackageError` from `real_remote`/`github_slug`/`fetch_default_branch` *inside* `check_readiness` and check the resulting `Readiness.step`. Every test that reaches this far in `check_readiness` (`test_readiness_runs_its_checks_in_the_order_4_2_1_gives`, and the `_stub_prepare` helper used by the policy/disk tests) stubs all three of these calls to succeed, so the `except git_mirror.GitError: return Readiness(False, \"mirror\", ...)` at line 409-410, the `except package_phase.PackageError: return Readiness(False, \"origin\", ...)` at line 415-416, and the `except package_phase.PackageError: return Readiness(False, \"default_branch\", ...)` at line 420-421 are dead code as far as the suite is concerned. Deleting any one of these three try/except blocks (letting the exception propagate uncaught, exactly the pre-existing `prepare_mirror` behaviour the Problem section calls out as the bug \u2014 \"the presence check raises, so there is no result a caller could record and step over\") would keep every test in `tests/test_preflight.py` and `tests/test_cli.py` green, even though it silently reintroduces, for three of the six readiness checks, the exact defect this spec exists to fix.",
+        "anchored": true
+      }
+    ]
+  }
+]
