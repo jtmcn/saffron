@@ -924,7 +924,10 @@ recorded.
 In `docs/BACKLOG.md`, mark item 91 done with a one-line pointer to the new file. In the spec,
 replace the sentence saying the record is a session ledger with a citation of the new file.
 
-- [ ] **Step 4: Measure what the probes cost a pass**
+- [x] **Step 4: Measure what the probes cost a pass** — run 2026-09-09 by the operator over
+      `SA-0045`: 499.8s, $1.58, two probes, 14.0s each, baseline ~15.6s, probe phase 9% of
+      the pass. Figures in the spec's "Caching: no"; raw log at
+      `~/.saffron/lens-scoring/step4/run.log`.
 
 Run one fixture end to end with a real cell — this needs `CLAUDE_CODE_OAUTH_TOKEN` scoped to
 the invocation and `SAFFRON_ALLOW_HOST_PROCESS=rapportd`, per `CLAUDE.md`. **Do not run this

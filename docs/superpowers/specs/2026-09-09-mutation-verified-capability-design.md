@@ -330,17 +330,32 @@ cheaper and is also the shape that lets a stale verdict outlive the code it was 
 against — and the verdict here depends on the whole suite at that head, not just on the
 mutated line, so "the head has not moved" is not the invariant a cache would need.
 
-The cost is bounded and worth stating: the probes run inside a cell that a pass already
-brings up per fixture, so this adds no model spend and no image build. It adds suite runs —
-one baseline plus one per adequacy finding. Pass 1 filed ten adequacy findings across eight
-fixtures, and this repo's suite at the fixture heads runs **78-104 seconds** — five runs at
-fixture heads during this branch's review measured 78.0, 78.3, 82.7, 83.3 and 103.9 seconds,
-which straddles an earlier draft's quoted "85-100" at both ends. So the order is half an
-hour of wall clock added to a pass that already takes about eighty minutes.
+The cost is bounded, and now measured. The probes run inside a cell a pass already brings up
+per fixture, so they add no model spend and no image build. They add suite runs — one
+baseline plus one per adequacy finding.
 
-Those five runs are the review's, not a pass's. **The cost of the probes to a real pass is
-still unmeasured**, because the measurement spends money and needs a credential, so the
-operator runs it: the plan's Task 5 Step 4 records the baseline's wall clock, each probe's,
-and the probe count from one fixture end to end, and the figures replace this paragraph's
-estimate then. Until that lands, the half hour above is arithmetic over a measured suite
-time, not a measured pass.
+**Measured 2026-09-09, one fixture end to end** (`SA-0045`, head `f9f007c4`, the plan's Task
+5 Step 4): the pass took **499.8s** and cost **$1.58**. The adequacy lens filed **two**
+probes. Probing began at 453.9s, the first probe's verdict landed at 483.5s and the second
+at 497.5s — so **14.0s per probe**, and the baseline is **~15.6s** by subtracting one probe
+interval from the first, which covers baseline plus probe 1. The whole probe phase was
+**45.9s of 499.8s, about 9%**.
+
+One fixture, not eight, and one whose two probes are near the corpus mean of 1.25 adequacy
+findings per fixture in pass 1. Scaling that shape to eight fixtures puts the probes at
+roughly six minutes on a pass that already runs about eighty — not the half hour an earlier
+draft of this paragraph projected.
+
+That draft was wrong for a reason worth recording. It scaled from five host suite runs
+timed at 78-104 seconds during this branch's review — but those ran while several review
+subagents were working on the same machine, so they measured contention as much as the
+suite. The `tests` gate's own comment at `f9f007c4` puts a full run there at **~36s**, and
+in-cell it is 14s including the `--collect-only` pass, on a host doing nothing else. A
+timing taken under unstated load is not a measurement of the thing it names.
+
+**Still not recorded per probe: which suite answered.** A verdict of `survived` means "no new
+failure against the baseline", and nothing in `probes-*.json` says how many tests the gate
+collected to reach it. Both runs collecting the same set is checked — a drift makes the probe
+`unproven` — but both collecting *few* is not. Persisting the `GateResult`'s `collected`
+count and `tool` beside each verdict would close that, and is worth doing before the number is
+read as a capability score.
