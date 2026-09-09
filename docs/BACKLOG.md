@@ -5288,17 +5288,21 @@ each). All four stayed green, which is what makes them verified-real vacuities
 rather than plausible ones, and they are the whole evidential basis for
 `docs/superpowers/specs/2026-09-09-mutation-verified-capability-design.md`.
 
-That record exists only in a session ledger under a scratch directory. The spec
-transcribes it and says so, but a spec that argues from a measurement nobody
-can re-read is the shape item 87 is about, one level out. Two of the four were
-independently reproduced during review (`f76931df` and `91f56c69`, both to the
-exact figure); the `f9f007c4` pair has been reproduced by nobody.
+At the time this item was filed, that record existed only in a session ledger
+under a scratch directory — a spec arguing from a measurement nobody can
+re-read is the shape item 87 is about, one level out. Two of the four had
+already been independently reproduced during review (`f76931df` and
+`91f56c69`, both to the exact figure); the `f9f007c4` pair had been reproduced
+by nobody.
 
-The fix is small: land the four rows, their commands and their outputs under
-`docs/evidence/`, reproducing the two nobody has re-run. It is a **precondition
-of the plan** that spec leads to, not of the spec itself — filed here because a
-precondition recorded only inside the document that depends on it is a claim,
-not a record.
+The fix was small: land the four rows, their commands and outputs where any
+exist, under `docs/evidence/`, reproducing the two nobody had re-run. Done, in
+the "Done" line above — see `docs/evidence/2026-09-09-adequacy-probe-spike.md`
+for the full per-row provenance, including which two remain transcribed from
+the review reproduction rather than re-run for that file. It was a
+**precondition of the plan** that spec leads to, not of the spec itself —
+filed here because a precondition recorded only inside the document that
+depends on it is a claim, not a record.
 
 ---
 

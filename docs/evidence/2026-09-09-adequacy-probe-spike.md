@@ -132,7 +132,8 @@ Matches the ledger's recorded `1250 passed` exactly. File restored and worktree 
 **Reported reproduced during review on 2026-09-09. Not re-run for this file.**
 
 **Recorded claim** (`~/.saffron/lens-scoring/corpus-calibration/SA-0050/run-1.json`, `adequacy`
-lens, `saffron/batch.py:72`, verbatim):
+lens; the finding itself anchors at `tests/test_batch.py:365`, and its text names the edit at
+`saffron/batch.py:72` — verbatim):
 
 > No test exercises the scoping condition `_attach_runs_minted_since` (batch.py:72) exists
 > for: excluding pre-existing `batch_id IS NULL` runs left behind by `saffron cell` or
@@ -176,7 +177,8 @@ the literal or the intended `91f56c69` run — those numbers are the spec's, not
 **Reported reproduced during review on 2026-09-09. Not re-run for this file.**
 
 **Recorded claim** (`~/.saffron/lens-scoring/corpus-calibration/SA-0063/run-1.json`, `adequacy`
-lens, `tests/test_report.py:108`, verbatim):
+lens; the finding itself anchors at `tests/test_report.py:108`, and its text names the edit at
+`saffron/report/pr_body.py:391` — verbatim):
 
 > test_notes_cannot_move_a_status_or_a_gate_result puts '@maintainer' and 'Fixes #12' into the
 > notes text but only asserts that the body content *before* the notes heading is unaffected
