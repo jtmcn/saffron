@@ -1440,6 +1440,43 @@ And the other half of the layout — the part that lives in every target repo, a
 
 ---
 
+## Appendices — an index
+
+The appendices are ordered by *when* a thing was learned, which is the wrong order
+for finding one. This is the other index. It is navigation, not authority: where it
+disagrees with an appendix, the appendix is right.
+
+| | Rev | The question it settles | Principles |
+|---|---|---|---|
+| **A** | 2 | Nine adversarial-review findings on rev 1 — DIAGNOSE proposes `touches`, `coverage` goes advisory, no vote over disjoint lenses | 1–9 |
+| **B** | 3 | Is a factory ontology worth building? (`SA-0001`, §4.6) | 10–11 |
+| **C** | 4 | What makes Saffron language-blind: the gate contract, and the core/repo boundary it draws (§2.1, §5.4) | 12–14 |
+| **D** | 5 | What prior art does better — and the negative finding, that good process hygiene converges on near-zero verification | 15–24 |
+| **E** | 6 | Three defects `CONTEXT.md` found in this document by being written against it | 25–26 |
+| **F** | 7 | Nine more from an end-to-end read-through, including `coverage` blocking and advisory in the same document | 27–30 |
+| **G** | 8, 10 | The cell runtime. "Docker" was never a decision — rev 8 names the candidates, rev 10 chooses by spike | 31–33 |
+| **H** | 9 | What v0 found, being the first revision that ran: three merged pull requests replayed agent-free | 34–37 |
+| **I** | 11 | What building v0.5 found — including a cell whose every mechanism reported success against a different container | 38–41 |
+| **J** | 12 | What the first live runs found — four agent sessions in real cells, $2.47 | 42–44 |
+| **K** | 13 | The factory produced plausible, verified, broken code: three tasks green, one reviewed, verdict *do not merge* | 45–49 |
+| **L** | 14 | The critic built, and measured against a known-bad diff rather than argued for | 50–51 |
+| **M** | 15 | What *running* the rejected gate found, beyond what reading it found — three corrections in twenty minutes | 52 |
+| **N** | 16 | What tree a task is about, and who may write the thing that judges it (backlog items 11 and 12) | 53–55 |
+| **O** | 18 | Is there an *operational* case for the ontology, beyond the analytical one `RATIONALE.md` closed? | 56 |
+
+**Four revisions have no appendix, and none needs one.** Rev 1 is the document. Rev
+10 is inside Appendix G, which is why G carries two revisions and "one appendix per
+revision" is the wrong reading. Rev 17 is in §4.2.1 and §6 with
+`docs/evidence/2026-08-25-morning-queue-from-real-rows.md`; rev 19 is in the status
+line with `docs/evidence/2026-09-04-refusal-predicate-two-arms.md`.
+
+The principles are one sequence across every appendix, allocated as a block when the
+appendix is written. That is why an appendix is coarse and chronological rather than
+one decision per file: per-decision documents written in parallel would each have to
+claim numbers from the same sequence.
+
+---
+
 ## Appendix A — What changed in rev 2, and why
 
 Rev 1 was reviewed adversarially. Nine findings survived scrutiny; all are incorporated above. The ones worth remembering as *principles*, because they'll recur:
