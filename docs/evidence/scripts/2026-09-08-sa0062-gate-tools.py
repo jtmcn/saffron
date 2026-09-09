@@ -39,7 +39,9 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -99,11 +101,21 @@ def main() -> int:
     if not tools:
         raise SystemExit(f"{batch_dir / 'baseline.json'} names no tool — nothing to do")
 
-    ledger = Ledger(args.home / "ledger.db")
-    try:
-        results = _reviewed_results(ledger, args.spec_id)
-    finally:
-        ledger.close()
+    # A copy, because `Ledger()` migrates on open and this script only reads.
+    # An evidence script must not move the audit trail's schema as a side
+    # effect of looking at it. The WAL siblings come too, or a copy taken
+    # before a checkpoint is missing the newest rows.
+    with tempfile.TemporaryDirectory() as tmp:
+        live = args.home / "ledger.db"
+        for suffix in ("", "-wal", "-shm"):
+            sibling = live.with_name(live.name + suffix)
+            if sibling.exists():
+                shutil.copy2(sibling, Path(tmp) / sibling.name)
+        ledger = Ledger(Path(tmp) / live.name)
+        try:
+            results = _reviewed_results(ledger, args.spec_id)
+        finally:
+            ledger.close()
 
     spliced = [
         result.model_copy(
