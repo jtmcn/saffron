@@ -96,7 +96,10 @@ def test_the_implementer_keeps_its_own_tools():
 def test_every_declared_lens_runs_once_and_never_resumes():
     """§5.5: the host drives the lens set, because a model asked to delegate
     produces a set that varies by task with no error when a lens is skipped.
-    And a resumed session would carry the implementer's transcript."""
+    And a resumed session would carry the implementer's transcript. (All
+    outputs here are well-formed, so this is the happy path specifically —
+    the schema-repair re-prompt's own single, narrow resume is covered by
+    the re-prompt tests below.)"""
     record: list[dict] = []
     reviews = _review(_block([]), _block([]), record=record)
     assert [r.lens for r in reviews] == list(review.LENSES)
@@ -163,17 +166,26 @@ def test_notes_are_excluded_from_the_number_the_queue_sorts_on():
 
 def test_output_that_is_not_the_schema_is_an_incomplete_review_not_a_clean_one():
     """§4.3 again: a lens that produced nothing and a lens that found nothing
-    must never be the same value."""
-    reviews = _review("I could not find anything wrong.", _block([]))
+    must never be the same value. Two malformed turns in a row (the retry
+    below also fails) so this exercises the terminal case, not the recovery."""
+    reviews = _review(
+        "I could not find anything wrong.",
+        "I could not find anything wrong.",
+        _block([]),
+    )
     assert reviews[0].error and reviews[0].error.startswith("not the schema")
-    assert reviews[0].cost_usd == 0.1  # a failed extraction still cost money
+    assert reviews[0].cost_usd == 0.2  # both attempts' cost, summed
     state, why = review.review_state(reviews)
     assert state == "REVIEWING"
     assert "correctness" in why
 
 
 def test_a_severity_the_vocabulary_does_not_have_is_not_the_schema():
-    reviews = _review(_block([_finding(severity="critical")]), _block([]))
+    reviews = _review(
+        _block([_finding(severity="critical")]),
+        _block([_finding(severity="critical")]),
+        _block([]),
+    )
     assert reviews[0].error
 
 
@@ -183,6 +195,102 @@ def test_a_lens_whose_session_failed_still_charges_what_it_spent():
     assert reviews[0].cost_usd == 0.4
     assert reviews[0].error
     assert review.review_state(reviews)[0] == "REVIEWING"
+
+
+def _lens_agent(*texts, record=None, costs=None):
+    """Like `_agent`, but scoped to one `run_lens` call rather than a whole
+    `run_review` pass, and with per-call cost control — the re-prompt tests
+    need the first and second attempt to carry distinct, summable costs."""
+    scripted = iter(texts)
+    cost_iter = iter(costs) if costs is not None else None
+
+    def run(container, *, prompt, options, **kwargs):
+        if record is not None:
+            record.append({"prompt": prompt, "options": options, "kwargs": kwargs})
+        text = next(scripted)
+        cost = next(cost_iter) if cost_iter is not None else 0.1
+        if isinstance(text, BaseException):
+            raise text
+        return _turn(text, cost=cost)
+
+    return run
+
+
+def _run_lens(agent, **kwargs):
+    return review.run_lens(
+        "cell",
+        lens="correctness",
+        system_prompt="s",
+        max_turns=20,
+        budget_usd=kwargs.pop("budget_usd", 2.0),
+        agent=agent,
+        spec_id="SY-1",
+        emit=lambda _e: None,
+        **kwargs,
+    )
+
+
+def test_a_malformed_first_output_is_reprompted_once_and_recovers():
+    """Mirrors `session.py`'s `PlanNotSchema` re-prompt (§5.3): same shape,
+    applied to a lens's own output instead of the plan turn's."""
+    record: list[dict] = []
+    agent = _lens_agent(
+        "I could not find anything wrong.",
+        _block([_finding()]),
+        record=record,
+        costs=[0.3, 0.2],
+    )
+    result = _run_lens(agent)
+    assert result.error is None
+    assert [f.claim for f in result.findings] == ["c"]
+    assert result.cost_usd == pytest.approx(0.5)  # both attempts, summed
+    assert len(record) == 2
+
+
+def test_the_reprompt_resumes_the_failed_session_with_the_error_in_its_prompt():
+    record: list[dict] = []
+    agent = _lens_agent("I could not find anything wrong.", _block([]), record=record)
+    _run_lens(agent)
+    assert len(record) == 2
+    assert record[0]["kwargs"].get("resume") is None
+    assert record[1]["kwargs"]["resume"] == "lens-1"  # `_turn`'s fixed session_id
+    assert "no <output> block in the response" in record[1]["prompt"]
+
+
+def test_a_lens_that_fails_twice_says_a_reprompt_was_attempted():
+    """One re-prompt, never a loop: a second bad turn is terminal, and the
+    error names that a re-prompt happened so a reader of the record can tell
+    one bad turn from two."""
+    agent = _lens_agent("still not json", "still not json either", costs=[0.3, 0.2])
+    result = _run_lens(agent)
+    assert result.error and result.error.startswith("not the schema")
+    assert "re-prompt" in result.error
+    assert result.cost_usd == pytest.approx(0.5)  # both attempts, summed
+
+
+def test_a_well_formed_first_output_never_reprompts():
+    """The happy path must cost exactly one call — a re-prompt that fires
+    when nothing is wrong would double the price of every clean review."""
+    record: list[dict] = []
+    agent = _lens_agent(_block([]), record=record)
+    result = _run_lens(agent)
+    assert result.error is None
+    assert len(record) == 1
+
+
+def test_a_reprompt_does_not_fire_without_meaningful_budget_left():
+    """Constraint: nothing meaningful left after the first attempt means the
+    schema error returns as-is, exactly as it did before this change existed.
+    "Meaningful" here is defined as at least what the failed turn itself
+    spent — the retry is scripted to blow up if called a second time, which
+    would surface as a StopIteration rather than an assertion failure."""
+    record: list[dict] = []
+    agent = _lens_agent("not json", record=record, costs=[0.1])
+    result = _run_lens(agent, budget_usd=0.05)
+    assert result.error and result.error.startswith("not the schema")
+    assert "re-prompt" not in result.error
+    assert result.cost_usd == pytest.approx(0.1)
+    assert len(record) == 1
 
 
 def test_the_blast_radius_lens_is_not_declared():
