@@ -194,6 +194,27 @@ saffron:TouchesShape a sh:NodeShape ;
     sh:property [ sh:path saffron:ratifiedBy ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class saffron:Operator ] .
 
+# A delegate acts only for the operator or another delegate, and each reaches the
+# operator, so every chain ends there (a subagent acts for the delegate that
+# started it). Never the operator, and never the agent of an attempt: a task's work
+# is done in a cell, where it is enforced. The ledger cannot tell a delegate from
+# the operator, so no projection of it yields one — this binds fixtures, not data.
+saffron:DelegateShape a sh:NodeShape ;
+    sh:targetClass saffron:Delegate ;
+    sh:not [ sh:class saffron:Operator ] ;
+    sh:property [ sh:path prov:actedOnBehalfOf ;
+        sh:or ( [ sh:class saffron:Operator ] [ sh:class saffron:Delegate ] ) ] ;
+    sh:property [ sh:path [ sh:oneOrMorePath prov:actedOnBehalfOf ] ;
+        sh:qualifiedValueShape [ sh:class saffron:Operator ] ;
+        sh:qualifiedMinCount 1 ] ;
+    # Both association forms, so the unqualified shortcut is no way around it.
+    sh:property [
+        sh:path [ sh:alternativePath (
+            ( [ sh:inversePath prov:agent ] [ sh:inversePath prov:qualifiedAssociation ] )
+            [ sh:inversePath prov:wasAssociatedWith ] ) ] ;
+        sh:qualifiedValueShape [ sh:class saffron:Attempt ] ;
+        sh:qualifiedMaxCount 0 ] .
+
 # An envelope is a reading bound and is never enforced against a diff (§3). It
 # may therefore never be a gate result's subject — the confusion the CONTEXT.md
 # rule against bare "scope" exists to prevent, stated where a machine can check.

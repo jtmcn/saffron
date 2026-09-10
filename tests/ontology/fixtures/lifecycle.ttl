@@ -11,11 +11,12 @@
     saffron:baseSha "3f9c1a2" .
 
 ## Agents
-:joel a saffron:Operator .
+:operator a saffron:Operator .
 :lens-correctness a saffron:CriticLens .
 :lens-contract    a saffron:CriticLens .
 :lens-blast       a saffron:CriticLens .
 :impl-t1 a saffron:ImplementerSession .
+:delegate-1 a saffron:Delegate ; prov:actedOnBehalfOf :operator .
 
 ## Gates, and the policy that declares them. Core gates are the vocabulary's own
 ## individuals — there is one implementation of each. Contract gates are this
@@ -43,7 +44,7 @@
 :env-t1 a saffron:Envelope .
 :scope-t1 a saffron:ScopeProposal ; prov:wasDerivedFrom :spec-t1 .
 :touches-t1 a saffron:TouchesSet ;
-    prov:wasDerivedFrom :scope-t1 ; saffron:ratifiedBy :joel .
+    prov:wasDerivedFrom :scope-t1 ; saffron:ratifiedBy :operator .
 :plan-t1 a saffron:Plan ; prov:wasDerivedFrom :spec-t1, :touches-t1 .
 
 :task-t1 a saffron:Task ; prov:wasInformedBy :run-1 ; prov:used :spec-t1 ;
@@ -97,7 +98,7 @@
     prov:qualifiedAssociation
       [ a prov:Association ; prov:agent :impl-t1 ; prov:hadRole saffron:disputes ] ,
       [ a prov:Association ; prov:agent :lens-correctness ; prov:hadRole saffron:confirms ] ,
-      [ a prov:Association ; prov:agent :joel ; prov:hadRole saffron:disagrees ] .
+      [ a prov:Association ; prov:agent :operator ; prov:hadRole saffron:disagrees ] .
 
 :pr-t1 a saffron:PullRequest ; prov:wasDerivedFrom :diff-t1-2 .
 
@@ -149,7 +150,7 @@
     prov:qualifiedAssociation
       [ a prov:Association ; prov:agent :impl-t1 ; prov:hadRole saffron:concedes ] ,
       [ a prov:Association ; prov:agent :lens-blast ; prov:hadRole saffron:withdraws ] ,
-      [ a prov:Association ; prov:agent :joel ; prov:hadRole saffron:agrees ] .
+      [ a prov:Association ; prov:agent :operator ; prov:hadRole saffron:agrees ] .
 :pr-t3 a saffron:PullRequest ; prov:wasDerivedFrom :diff-t3-1 .
 
 # All four gate statuses of CONTEXT.md §4 occur, because EARL's outcome values are
@@ -166,7 +167,7 @@
 # The operator's rejection, as an assertion in the same shape as a mypy failure:
 # ac-t3-1 failed, and nothing automatic had asserted on it. That gap is the
 # bucket-triage evidence Q1 exists to pull up.
-:adj-t3-1 a earl:Assertion ; earl:assertedBy :joel ; earl:subject :pr-t3 ;
+:adj-t3-1 a earl:Assertion ; earl:assertedBy :operator ; earl:subject :pr-t3 ;
     earl:test :ac-t3-1 ; earl:mode earl:manual ;
     earl:result [ earl:outcome earl:failed ] .
 

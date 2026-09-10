@@ -52,7 +52,7 @@ evidence. That is the gate now, and it is one cheap spec away.
 
 Soundness first: **79**, **69**, **93**, **94**, **80** (~~**83**~~, ~~**85**~~, ~~**84**~~,
 ~~**82**~~ and ~~**81**~~, pulled up from tier 3 as why 69's gate could not be
-declared against safely, are done — 2026-09-08). Honesty second:
+declared against safely, are done — 2026-09-08), then **97**. Honesty second:
 **73**, **70**, **45**, **51** (with **49**/**50**, which its fix closes),
 **47**, **46** (with **95**, which compounds it), **40**, ~~**26**~~, **7**, and
 the remainder of **78**.
@@ -105,7 +105,7 @@ where it was meant to compound.
 
 Operator visibility parts 2 and 3 — `SA-0032`–`SA-0039`, with the plan's Task 6
 rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
-**38**), plus **43**, **48**, **52**, **60**, **66**, **67**, ~~**72**~~.
+**38**), plus **43**, **48**, **52**, **60**, **66**, **67**, ~~**72**~~, **98**.
 
 **72 is done** (2026-09-07, by hand), taken ahead of Track A by operator
 decision because it was the one item whose defect was a guard that could not
@@ -115,7 +115,7 @@ fire. Its number stays listed because item numbers are cited from `saffron/`.
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, **57**, **61**, **62**, **63**, **64**, **69**, **75**, **76**, **77**,
-~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**.
+~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**.
 (**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
 is the same defect as filing one nowhere at all. **94** was filed here and moved
@@ -128,12 +128,13 @@ risk — not, as an earlier draft of this note said, that `.gitignore` in
 `integrity.gate_config` already routes the edit to a person. That is the
 *tracked* half only: a `.gitignore` naming itself reaches no diff at all.
 
-**What this ordering costs, stated plainly:** tiers 2 and 3 hold 34 of the 51
-open items the index ranks — recounted 2026-09-10 from each item's own `Status`
-line, not bumped per edit; **9** and **10**, each done bar a remnant, sit
-outside it — including every ontology item and every operator-visibility spec
-there is already a full plan for. That is the deliberate consequence of ranking
-by the milestone rather than by what is nearest to hand.
+**What this ordering costs, stated plainly:** tiers 2 and 3 hold 37 of the 55
+open items the index ranks, including every ontology item and every
+operator-visibility spec there is already a full plan for. That is the deliberate
+consequence of ranking by the milestone rather than by what is nearest to hand.
+(Recounted 2026-09-10 from each item's own `Status` line to 34 of 51, then items
+**97**–**100**, filed open that day, added — **97** to tier 1, the rest to these
+two. **9** and **10**, each done bar a remnant, sit outside the index.)
 
 ---
 
@@ -5570,6 +5571,102 @@ interpreter is not 3.14.
 Whichever lands is run against the pre-fix `witness.py` before it is trusted: a
 new guard proves itself on the unfixed code, and here the unfixed code is on
 record.
+
+---
+
+## 97. A delegate's review fixes reach a task's pull request and no gate, critic or record
+
+**Tier 1 — soundness.** Found naming the delegate (PR #189, 2026-09-10).
+`run-saffron-spec-loop` steps 2c–2e have a delegate check out `saffron/SA-NNNN`
+after PACKAGE, act on the in-cell critic's findings, run `make check` on the host,
+commit `review(SA-NNNN): …`, and push. The 2026-09-07 re-sort's premise — every
+spec pull request needed a human review round after packaging — is these commits.
+
+None of what judged the cell's work judges them:
+
+- **Gates.** The cell's gates ran from `/gates`, `.saffron/` exported read-only at
+  `base_sha`, with baseline subtraction (§5.1, §5.4). `make check` runs the
+  branch's own tests and lint configuration, so a fix can weaken the check it is
+  judged by.
+- **`scope`.** Nothing compares the fix against the ratified `touches` set.
+- **The critic.** The fix is never reviewed adversarially, and the next reader
+  sees the findings as addressed.
+- **The record.** The task's gate results describe the cell's diff, not the pull
+  request's head, and `DelegateShape` forbids recording a delegate's work as an
+  attempt — so nothing says who wrote the commits above the packaged ones. The
+  merge train, which would re-gate at merge, is not built (*What is not here*),
+  and the documented path is `gh pr ready` then `gh pr merge`.
+
+**Done looks like** a pull request whose head has moved past what PACKAGE pushed
+being visible as such — at minimum to `saffron reconcile` or the queue line, which
+needs the packaged head recorded (whether the ledger already holds it is the first
+thing to check). The fuller version runs the task's gates, from the same
+`base_sha` export, over the new head before `READY_FOR_REVIEW` is allowed to
+stand. Either way the review fix lands somewhere the record can see.
+
+---
+
+## 98. The spec loop hands untrusted critic output to a delegate holding the operator's push credentials
+
+**Tier 2.** Found alongside item **97**. `findings.json` is written by a model that
+read the implementer's diff, and the diff is cell output — untrusted by the one
+rule that governs everything (§2). Step 2c of `run-saffron-spec-loop` feeds each
+finding's `claim` to a delegate on the host, holding the operator's git identity,
+`gh` token and push access with no cell around it, and tells it to fix what the
+claim describes. A diff built to steer a lens can put instructions into finding
+text that a delegate then carries out outside any cell: the confused-deputy shape.
+The one line standing against it — "verify each claim against the code before
+acting on it" — is a prompt, and prompts shape behaviour; they are never the
+boundary.
+
+**Tier 2, not 1,** because the loop is attended: someone is at the keyboard. But
+attended is not reviewing each finding before the delegate acts on it, and the
+loop's value is that nobody has to.
+
+**Done looks like** the fix step running where the operator's credentials are not
+— a cell of its own, where a finding is input to an implementer rather than to a
+delegate — or, short of that, the delegate that reads findings holding no push or
+`gh` credential, with the push a separate step taken after the operator reads the
+diff.
+
+Not item 97: that is what the fix skips on the way out. This is what reaches the
+delegate on the way in.
+
+---
+
+## 99. `CLAUDE.md` and the spec-loop skill call marking a draft ready "ratifying" it
+
+**Tier 3.** Found naming the delegate. `CONTEXT.md` §6 reserves **Ratify** for what
+the operator does to a proposed `touches` set at `SCOPE_REVIEW`, and **Approve**
+for what the operator does to a pull request in GitHub. `CLAUDE.md` ("ratifying one
+means `gh pr ready <n>` before `gh pr merge`") and the spec-loop driver
+(`.claude/skills/run-saffron-spec-loop/driver.py:472`, whose output `SKILL.md:241`
+quotes) use it for `gh pr ready`, which
+is neither: it lifts PACKAGE's draft (§5.7) into review. The retired-vocabulary
+hook cannot see this — **ratify** is live vocabulary in the wrong sense, not a
+retired word.
+
+**Done looks like** `CLAUDE.md` and the driver saying "mark ready", and the skill's
+quoted output regenerated to match — or, if that act turns out to carry a judgement
+worth a word, an entry under `CONTEXT.md`'s open naming decisions rather than a
+third sense arriving in prose.
+
+---
+
+## 100. Nothing holds the operator's side of a rebuttal, or a manual assertion, to the operator
+
+**Tier 3.** Found reviewing PR #189. `RebuttalShape` puts the implementer's
+association on an `ImplementerSession` and the critic's on a `CriticLens`, and says
+nothing of the third: a rebuttal whose `agrees` association names a
+`saffron:Delegate` conforms. An `earl:Assertion` in `earl:manual` mode — the
+operator's rejection in `lifecycle.ttl` — may likewise be `earl:assertedBy` a
+delegate. `CONTEXT.md`'s **Delegate** entry says a judgement a delegate types is
+still the operator's; only ratification (`TouchesShape`) holds that in a shape.
+
+**Done looks like** a third qualified association in `RebuttalShape` — at most one,
+role in `( saffron:agrees saffron:disagrees )`, agent `sh:class saffron:Operator` —
+and a shape putting a manual assertion's `earl:assertedBy` on the operator, each
+with a negative fixture naming a delegate.
 
 ---
 
