@@ -1,3 +1,3 @@
 lens,adjudication,blockers
-https://saffron.dev/data/lens-blast,https://saffron.dev/ns#agrees,1
-https://saffron.dev/data/lens-correctness,https://saffron.dev/ns#disagrees,1
+urn:software-factory:data:lens-blast,urn:software-factory:ns#agrees,1
+urn:software-factory:data:lens-correctness,urn:software-factory:ns#disagrees,1

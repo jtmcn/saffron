@@ -96,11 +96,11 @@ def test_q4_excludes_a_merged_pr_whose_chain_is_broken(store):
     N5 is only a property if a change that fails it is visibly absent — a query
     that returned it anyway would be reporting reachability it never checked."""
     prs = {str(r["pr"]) for r in _solutions(store, query("Q4").read_text())}
-    assert "<https://saffron.dev/data/pr-t4>" not in prs
+    assert "<urn:software-factory:data:pr-t4>" not in prs
     merged = list(
         store.query(f"""
-        PREFIX saffron: <{NS}>
-        SELECT ?t WHERE {{ ?t saffron:endedInState saffron:MERGED }}""")
+        PREFIX factory: <{NS}>
+        SELECT ?t WHERE {{ ?t factory:endedInState factory:MERGED }}""")
     )
     assert len(merged) == 2, "both merged tasks are in the fixture"
 
@@ -114,15 +114,15 @@ def mutated(extra: str) -> ox.Store:
     store = ox.Store()
     for path in [VOCABULARY, FIXTURES / "lifecycle.ttl", *VENDOR]:
         store.bulk_load(path=str(path), format=ox.RdfFormat.TURTLE)
-    store.load(extra, format=ox.RdfFormat.TURTLE, base_iri="https://saffron.dev/data/")
+    store.load(extra, format=ox.RdfFormat.TURTLE, base_iri="urn:software-factory:data:")
     return store
 
 
 PREAMBLE = """
-@prefix saffron: <https://saffron.dev/ns#> .
+@prefix factory: <urn:software-factory:ns#> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
 @prefix earl: <http://www.w3.org/ns/earl#> .
-@prefix : <https://saffron.dev/data/> .
+@prefix : <urn:software-factory:data:> .
 """
 
 
@@ -132,8 +132,8 @@ def test_q3_a_red_advisory_gate_does_not_unseat_a_sole_blocking_failure():
     store = mutated(
         PREAMBLE
         + """
-        :gr-t2-1-cov a saffron:GateResult ; prov:wasGeneratedBy :suite-t2-1 ;
-            earl:assertedBy saffron:coverage ; earl:subject :diff-t2-1 ;
+        :gr-t2-1-cov a factory:GateResult ; prov:wasGeneratedBy :suite-t2-1 ;
+            earl:assertedBy factory:coverage ; earl:subject :diff-t2-1 ;
             earl:mode earl:automatic ; earl:result [ earl:outcome earl:failed ] .
         """
     )
@@ -141,7 +141,7 @@ def test_q3_a_red_advisory_gate_does_not_unseat_a_sole_blocking_failure():
         str(r["gate"]): r["soleFailures"].value
         for r in _solutions(store, query("Q3").read_text())
     }
-    assert rows["<https://saffron.dev/data/g-types>"] == "1"
+    assert rows["<urn:software-factory:data:g-types>"] == "1"
 
 
 def test_q3_a_gate_that_fired_in_another_run_still_never_fired_in_this_one():
@@ -150,13 +150,13 @@ def test_q3_a_gate_that_fired_in_another_run_still_never_fired_in_this_one():
     store = mutated(
         PREAMBLE
         + """
-        :run-2 a saffron:Run ; prov:used :policy-1 ; saffron:baseSha "aa11bb2" .
-        :task-x a saffron:Task ; prov:wasInformedBy :run-2 ; prov:used :spec-t2 ;
-            saffron:riskTier saffron:standard ; saffron:endedInState saffron:EXHAUSTED .
-        :ph-x a saffron:Phase ; prov:wasInformedBy :task-x .
-        :at-x a saffron:Attempt ; saffron:withinPhase :ph-x ; saffron:n 1 .
-        :suite-x a saffron:GateSuite ; prov:wasInformedBy :at-x .
-        :gr-x-nonet a saffron:GateResult ; prov:wasGeneratedBy :suite-x ;
+        :run-2 a factory:Run ; prov:used :policy-1 ; factory:baseSha "aa11bb2" .
+        :task-x a factory:Task ; prov:wasInformedBy :run-2 ; prov:used :spec-t2 ;
+            factory:riskTier factory:standard ; factory:endedInState factory:EXHAUSTED .
+        :ph-x a factory:Phase ; prov:wasInformedBy :task-x .
+        :at-x a factory:Attempt ; factory:withinPhase :ph-x ; factory:n 1 .
+        :suite-x a factory:GateSuite ; prov:wasInformedBy :at-x .
+        :gr-x-nonet a factory:GateResult ; prov:wasGeneratedBy :suite-x ;
             earl:assertedBy :g-nonet ; earl:subject :diff-t2-1 ;
             earl:mode earl:automatic ; earl:result [ earl:outcome earl:passed ] .
         """
@@ -167,8 +167,8 @@ def test_q3_a_gate_that_fired_in_another_run_still_never_fired_in_this_one():
         if r["everRan"].value == "false"
     }
     assert (
-        "<https://saffron.dev/data/run-1>",
-        "<https://saffron.dev/data/g-nonet>",
+        "<urn:software-factory:data:run-1>",
+        "<urn:software-factory:data:g-nonet>",
     ) in never_ran
 
 
@@ -178,17 +178,17 @@ def test_q4_a_rejected_task_reusing_the_spec_is_not_reconstructible():
     store = mutated(
         PREAMBLE
         + """
-        :task-t1b a saffron:Task ; prov:wasInformedBy :run-1 ; prov:used :spec-t1 ;
-            saffron:riskTier saffron:elevated ; saffron:endedInState saffron:REJECTED .
-        :ph-t1b a saffron:Phase ; prov:wasInformedBy :task-t1b .
-        :at-t1b a saffron:Attempt ; saffron:withinPhase :ph-t1b ; saffron:n 1 ;
+        :task-t1b a factory:Task ; prov:wasInformedBy :run-1 ; prov:used :spec-t1 ;
+            factory:riskTier factory:elevated ; factory:endedInState factory:REJECTED .
+        :ph-t1b a factory:Phase ; prov:wasInformedBy :task-t1b .
+        :at-t1b a factory:Attempt ; factory:withinPhase :ph-t1b ; factory:n 1 ;
             prov:generated :diff-t1b .
-        :diff-t1b a saffron:Diff ; prov:wasDerivedFrom :plan-t1 .
-        :pr-t1b a saffron:PullRequest ; prov:wasDerivedFrom :diff-t1b .
+        :diff-t1b a factory:Diff ; prov:wasDerivedFrom :plan-t1 .
+        :pr-t1b a factory:PullRequest ; prov:wasDerivedFrom :diff-t1b .
         """
     )
     prs = {str(r["pr"]) for r in _solutions(store, query("Q4").read_text())}
-    assert prs == {"<https://saffron.dev/data/pr-t1>"}
+    assert prs == {"<urn:software-factory:data:pr-t1>"}
 
 
 def test_q5_a_merged_task_with_no_cost_estimate_still_counts_as_accepted():
@@ -197,13 +197,13 @@ def test_q5_a_merged_task_with_no_cost_estimate_still_counts_as_accepted():
     store = mutated(
         PREAMBLE
         + """
-        :spec-t5 a saffron:Spec ; saffron:specType saffron:refactor ;
-            saffron:hasCriterion :ac-t5-1 .
-        :ac-t5-1 a saffron:AcceptanceCriterion .
-        :task-t5 a saffron:Task ; prov:wasInformedBy :run-1 ; prov:used :spec-t5 ;
-            saffron:riskTier saffron:standard ; saffron:endedInState saffron:MERGED .
-        :ph-t5 a saffron:Phase ; prov:wasInformedBy :task-t5 .
-        :at-t5 a saffron:Attempt ; saffron:withinPhase :ph-t5 ; saffron:n 1 .
+        :spec-t5 a factory:Spec ; factory:specType factory:refactor ;
+            factory:hasCriterion :ac-t5-1 .
+        :ac-t5-1 a factory:AcceptanceCriterion .
+        :task-t5 a factory:Task ; prov:wasInformedBy :run-1 ; prov:used :spec-t5 ;
+            factory:riskTier factory:standard ; factory:endedInState factory:MERGED .
+        :ph-t5 a factory:Phase ; prov:wasInformedBy :task-t5 .
+        :at-t5 a factory:Attempt ; factory:withinPhase :ph-t5 ; factory:n 1 .
         """
     )
     rows = {
@@ -211,7 +211,9 @@ def test_q5_a_merged_task_with_no_cost_estimate_still_counts_as_accepted():
         for r in _solutions(store, query("Q5").read_text())
     }
     assert (
-        rows[("<https://saffron.dev/ns#refactor>", "<https://saffron.dev/ns#standard>")]
+        rows[
+            ("<urn:software-factory:ns#refactor>", "<urn:software-factory:ns#standard>")
+        ]
         == "1"
     )
 
@@ -222,7 +224,7 @@ def test_q1_a_finding_without_a_mode_is_not_reported_as_silence():
     store = mutated(
         PREAMBLE
         + """
-        :finding-t3-2 a saffron:Finding ; saffron:severity saffron:concern ;
+        :finding-t3-2 a factory:Finding ; factory:severity factory:concern ;
             earl:assertedBy :lens-contract ; earl:subject :diff-t3-1 ;
             earl:test :ac-t3-1 ; earl:result [ earl:outcome earl:failed ] .
         """
@@ -238,8 +240,8 @@ def test_q3_a_red_size_at_standard_risk_does_not_unseat_a_sole_blocking_failure(
     store = mutated(
         PREAMBLE
         + """
-        :gr-t2-1-size a saffron:GateResult ; prov:wasGeneratedBy :suite-t2-1 ;
-            earl:assertedBy saffron:size ; earl:subject :diff-t2-1 ;
+        :gr-t2-1-size a factory:GateResult ; prov:wasGeneratedBy :suite-t2-1 ;
+            earl:assertedBy factory:size ; earl:subject :diff-t2-1 ;
             earl:mode earl:automatic ; earl:result [ earl:outcome earl:failed ] .
         """
     )
@@ -247,7 +249,7 @@ def test_q3_a_red_size_at_standard_risk_does_not_unseat_a_sole_blocking_failure(
         str(r["gate"]): r["soleFailures"].value
         for r in _solutions(store, query("Q3").read_text())
     }
-    assert rows["<https://saffron.dev/data/g-types>"] == "1"
+    assert rows["<urn:software-factory:data:g-types>"] == "1"
 
 
 def test_q3_a_red_size_at_elevated_risk_does_unseat_it():
@@ -256,8 +258,8 @@ def test_q3_a_red_size_at_elevated_risk_does_unseat_it():
     store = mutated(
         PREAMBLE
         + """
-        :gr-t1-1-size-red a saffron:GateResult ; prov:wasGeneratedBy :suite-t1-1 ;
-            earl:assertedBy saffron:size ; earl:subject :diff-t1-1 ;
+        :gr-t1-1-size-red a factory:GateResult ; prov:wasGeneratedBy :suite-t1-1 ;
+            earl:assertedBy factory:size ; earl:subject :diff-t1-1 ;
             earl:mode earl:automatic ; earl:result [ earl:outcome earl:failed ] .
         """
     )
@@ -265,7 +267,7 @@ def test_q3_a_red_size_at_elevated_risk_does_unseat_it():
         str(r["gate"]): r["soleFailures"].value
         for r in _solutions(store, query("Q3").read_text())
     }
-    assert rows["<https://saffron.dev/data/g-lint>"] == "0"
+    assert rows["<urn:software-factory:data:g-lint>"] == "0"
 
 
 def test_q4_a_merged_pr_reaching_its_spec_by_a_shortcut_is_not_end_to_end():
@@ -275,4 +277,4 @@ def test_q4_a_merged_pr_reaching_its_spec_by_a_shortcut_is_not_end_to_end():
     chains: dict[str, set[str]] = {}
     for row in _solutions(store, query("Q4").read_text()):
         chains.setdefault(str(row["pr"]), set()).add(str(row["kind"]))
-    assert len(chains["<https://saffron.dev/data/pr-t4>"]) < 9
+    assert len(chains["<urn:software-factory:data:pr-t4>"]) < 9

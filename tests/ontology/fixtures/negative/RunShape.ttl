@@ -1,7 +1,7 @@
-@prefix saffron: <https://saffron.dev/ns#> .
+@prefix factory: <urn:software-factory:ns#> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
 @prefix earl: <http://www.w3.org/ns/earl#> .
-@prefix : <https://saffron.dev/data/> .
+@prefix : <urn:software-factory:data:> .
 
 # A run carrying the budget. Budget is enforced at the batch.
-:r a saffron:Run ; saffron:baseSha "3f9c1a2" ; saffron:budgetUsd 50.0 .
+:r a factory:Run ; factory:baseSha "3f9c1a2" ; factory:budgetUsd 50.0 .

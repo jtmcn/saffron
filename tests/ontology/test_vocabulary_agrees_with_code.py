@@ -45,7 +45,7 @@ def test_the_severities_the_code_accepts_are_the_ones_the_vocabulary_declares():
         for s in graph.subjects(rdflib.RDF.type, rdflib.URIRef(f"{NS}Severity"))
     }
     assert declared == set(get_args(Severity)), (
-        "saffron:Severity and saffron/agents/findings.py disagree. A severity "
+        "factory:Severity and saffron/agents/findings.py disagree. A severity "
         "the vocabulary declares and the Literal omits cannot be written to the "
         "run record at all; the generator cannot reach Python, so this is a "
         "hand edit in findings.py."
@@ -57,7 +57,7 @@ def test_the_stop_reasons_the_loop_can_return_are_the_ones_the_vocabulary_declar
     to an exit code. A fifth reason here that the vocabulary does not know is a
     night whose ending has no name in `CONTEXT.md`."""
     assert _declared("BatchStopReason") == set(get_args(StopReason)), (
-        "saffron:BatchStopReason and saffron/batch.py disagree. The generator "
+        "factory:BatchStopReason and saffron/batch.py disagree. The generator "
         "cannot reach Python, so this is a hand edit in batch.py."
     )
 
@@ -78,7 +78,7 @@ def test_the_stop_reasons_the_ledger_will_store_are_the_ones_the_vocabulary_decl
     )
     in_sql = set(re.findall(r"'([A-Z_]+)'", found.group(1)))
     assert in_sql == _declared("BatchStopReason"), (
-        "saffron:BatchStopReason and the CHECK on batches.status disagree"
+        "factory:BatchStopReason and the CHECK on batches.status disagree"
     )
 
 
@@ -117,11 +117,11 @@ def test_every_core_gate_that_exists_is_declared_in_the_vocabulary():
     undeclared = sorted(built - _declared("CoreGate"))
     assert not undeclared, (
         f"core gates that exist and the vocabulary does not declare: "
-        f"{undeclared}. A gate absent from ontology/saffron.ttl is absent from "
-        "vocabulary.subjects(rdf:type, saffron:CoreGate), so test_shapes walks "
+        f"{undeclared}. A gate absent from ontology/factory.ttl is absent from "
+        "vocabulary.subjects(rdf:type, factory:CoreGate), so test_shapes walks "
         "past it and CoreGateShape's sh:in does not reject it — the guard "
         "CLAUDE.md promises cannot fire for precisely the case it exists to "
         "catch. Declare the gate, give it a blocking level in "
-        "saffron:CoreGateBlockingShape (or saffron:SizeTierShape if a risk tier "
+        "factory:CoreGateBlockingShape (or factory:SizeTierShape if a risk tier "
         "moves it), and run `uv run python -m ontology.render`."
     )

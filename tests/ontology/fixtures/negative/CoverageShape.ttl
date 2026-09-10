@@ -1,9 +1,9 @@
-@prefix saffron: <https://saffron.dev/ns#> .
+@prefix factory: <urn:software-factory:ns#> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
 @prefix earl: <http://www.w3.org/ns/earl#> .
-@prefix : <https://saffron.dev/data/> .
+@prefix : <urn:software-factory:data:> .
 
 # A policy declaring its coverage executable blocking. It is advisory at every tier.
-:g a saffron:Gate, saffron:ContractGate ; saffron:role saffron:coverage ;
-   saffron:blockingAt saffron:alwaysBlocking .
-saffron:coverage a saffron:GateRole . saffron:alwaysBlocking a saffron:BlockingLevel .
+:g a factory:Gate, factory:ContractGate ; factory:role factory:coverage ;
+   factory:blockingAt factory:alwaysBlocking .
+factory:coverage a factory:GateRole . factory:alwaysBlocking a factory:BlockingLevel .

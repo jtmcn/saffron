@@ -15,25 +15,25 @@
 # claim. Here they are three prov:Association nodes on one activity, which is
 # what makes "the implementer disputed and the operator sided with it" a query
 # rather than a manual read of two text columns.
-PREFIX saffron: <https://saffron.dev/ns#>
+PREFIX factory: <urn:software-factory:ns#>
 PREFIX prov:    <http://www.w3.org/ns/prov#>
 PREFIX earl:    <http://www.w3.org/ns/earl#>
 
 SELECT ?lens ?adjudication (COUNT(DISTINCT ?finding) AS ?blockers)
 WHERE {
-  ?finding a saffron:Finding ;
-           saffron:severity saffron:blocker ;
+  ?finding a factory:Finding ;
+           factory:severity factory:blocker ;
            earl:assertedBy ?lens .
-  ?lens a saffron:CriticLens .
+  ?lens a factory:CriticLens .
 
   OPTIONAL {
-    ?rebuttal a saffron:Rebuttal ;
+    ?rebuttal a factory:Rebuttal ;
               prov:used ?finding ;
               prov:qualifiedAssociation ?association .
     ?association prov:agent ?operator ;
                  prov:hadRole ?adjudication .
-    ?operator a saffron:Operator .
-    FILTER(?adjudication IN (saffron:agrees, saffron:disagrees))
+    ?operator a factory:Operator .
+    FILTER(?adjudication IN (factory:agrees, factory:disagrees))
   }
 }
 GROUP BY ?lens ?adjudication

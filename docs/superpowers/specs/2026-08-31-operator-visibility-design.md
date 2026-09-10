@@ -155,13 +155,13 @@ event log can say how far it got first.
 
 ### The `ORPHANED` disagreement, and which side this takes
 
-`ontology/saffron.ttl` splits `tasks.state` into two sets, and its reason for
+`ontology/factory.ttl` splits `tasks.state` into two sets, and its reason for
 the split is precisely this page's problem — `RATIONALE.md`: *"the state a
 task ends in is a wider set than the states that reach the operator, and
 `tasks.state` is one TEXT column for both."*
 
-`saffron:TerminalState` holds the nine states that reach the operator.
-`saffron:EndState` additionally holds `APPROVED`, `CHANGES_REQUESTED`,
+`factory:TerminalState` holds the nine states that reach the operator.
+`factory:EndState` additionally holds `APPROVED`, `CHANGES_REQUESTED`,
 `REJECTED`, `MERGED` — *"downstream of a judgement they already made"* — **and
 `ORPHANED`**. So the ontology says `ORPHANED` does not reach the operator.
 
@@ -540,7 +540,7 @@ nothing else would keep two tasks out of the same file.
   stays that way here. It is the input to the critic-ROI query (§4.6) and
   wants its own spec; a page that could write it is a different thing from a
   page that renders.
-- **An RDF class for the event log.** `ontology/saffron.ttl` keeps an explicit
+- **An RDF class for the event log.** `ontology/factory.ttl` keeps an explicit
   *"left unmodelled because nothing reads them"* list —
   `prov:wasInvalidatedBy` for `spec_sha` invalidation, tool-call granularity,
   DCAT — and the event log joins it. The ontology's discipline is to model

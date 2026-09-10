@@ -1,11 +1,11 @@
-@prefix saffron: <https://saffron.dev/ns#> .
+@prefix factory: <urn:software-factory:ns#> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
 @prefix earl: <http://www.w3.org/ns/earl#> .
-@prefix : <https://saffron.dev/data/> .
+@prefix : <urn:software-factory:data:> .
 
 # One finding, two lenses. Lenses are disjoint by construction (§5.5).
-:f a saffron:Finding ; saffron:severity saffron:blocker ;
+:f a factory:Finding ; factory:severity factory:blocker ;
    earl:assertedBy :lens-a, :lens-b ; earl:subject :d .
-:d a saffron:Diff, earl:TestSubject .
-:lens-a a saffron:CriticLens . :lens-b a saffron:CriticLens .
-saffron:blocker a saffron:Severity .
+:d a factory:Diff, earl:TestSubject .
+:lens-a a factory:CriticLens . :lens-b a factory:CriticLens .
+factory:blocker a factory:Severity .

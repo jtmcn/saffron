@@ -1,14 +1,15 @@
-@prefix saffron: <https://saffron.dev/ns#> .
+@prefix factory: <urn:software-factory:ns#> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
 @prefix earl: <http://www.w3.org/ns/earl#> .
-@prefix : <https://saffron.dev/data/> .
+@prefix : <urn:software-factory:data:> .
 
 # The implementer argued and no lens ever verdicted it (§5.6).
-:rb a saffron:Rebuttal ; prov:used :f ;
-   prov:qualifiedAssociation [ prov:agent :impl ; prov:hadRole saffron:disputes ] .
-:f a saffron:Finding ; saffron:severity saffron:blocker ; earl:mode earl:semiAuto ;
+:rb a factory:Rebuttal ; prov:used :f ;
+   prov:qualifiedAssociation [ prov:agent :impl ; prov:hadRole factory:disputes ] .
+:f a factory:Finding ; factory:severity factory:blocker ; earl:mode earl:semiAuto ;
    earl:assertedBy :lens ; earl:subject :d .
-:lens a saffron:CriticLens . :d a saffron:Diff, earl:TestSubject .
-saffron:blocker a saffron:Severity .
-:impl a saffron:ImplementerSession .
-saffron:disputes a saffron:Role .
+:lens a factory:CriticLens . :d a factory:Diff, earl:TestSubject .
+factory:blocker a factory:Severity .
+:impl a factory:ImplementerSession ; prov:actedOnBehalfOf :operator .
+:operator a factory:Operator .
+factory:disputes a factory:Role .

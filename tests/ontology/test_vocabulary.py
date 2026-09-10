@@ -1,8 +1,11 @@
-"""`ontology/saffron.ttl` exists, is valid Turtle, and parses offline."""
+"""`ontology/factory.ttl` exists, is valid Turtle, and parses offline."""
+
+import re
+import subprocess
 
 import pyoxigraph as ox
 import pytest
-from ontology_paths import NS, VENDOR, VOCABULARY
+from ontology_paths import NS, ONTOLOGY, VENDOR, VOCABULARY
 
 
 def test_vocabulary_parses_under_pyoxigraph():
@@ -28,6 +31,7 @@ def test_vendored_vocabularies_parse(path):
         ("GateSuite", "http://www.w3.org/ns/prov#Activity"),
         ("Spec", "http://www.w3.org/ns/prov#Entity"),
         ("PullRequest", "http://www.w3.org/ns/prov#Entity"),
+        ("Plan", "http://www.w3.org/ns/prov#Plan"),
         ("CriticLens", "http://www.w3.org/ns/prov#SoftwareAgent"),
         ("Operator", "http://www.w3.org/ns/prov#Person"),
         ("Delegate", "http://www.w3.org/ns/prov#SoftwareAgent"),
@@ -74,3 +78,39 @@ def test_rationale_is_within_its_cap_and_covers_every_query():
     for query in QUERIES:
         assert f"| {query.stem[:2]} " in rationale, f"no row for {query.stem}"
     assert "Bottom line" in rationale
+
+
+def test_the_vocabulary_is_the_factorys_and_nothing_still_names_saffron():
+    """The vocabulary describes the arrangement, not the program (CONTEXT.md
+    settled naming decision 6). The old names are spelled in halves so this file
+    does not find itself. `retired-by` is untouched: it is a marker in source the
+    scheduler reads, not a term."""
+    assert NS == "urn:software-factory:ns#"
+    # No left boundary: in a literal, `\n` glues the prefix to an `n`. A prefix
+    # declaration and an f-string field slipped past the letter-only form once.
+    old = re.compile(
+        "saffron"
+        + r"\.dev"
+        + "|"
+        + "saffron"
+        + r":(?!retired\b)[A-Za-z_{]"
+        + "|"
+        + r"(?i:prefix)\s+"
+        + "saffron"
+        + ":"
+        + "|"
+        + "saffron"
+        + r"(-shapes)?\.ttl"
+    )
+    root = ONTOLOGY.parent
+    listed = subprocess.run(
+        ["git", "ls-files", "-z"], capture_output=True, text=True, cwd=root, check=True
+    ).stdout.split("\0")
+    stale = []
+    for name in filter(None, listed):
+        try:
+            text = (root / name).read_text()
+        except (UnicodeDecodeError, IsADirectoryError, FileNotFoundError):
+            continue
+        stale += [f"{name}: {m.group()}" for m in old.finditer(text)]
+    assert not stale, stale[:20]

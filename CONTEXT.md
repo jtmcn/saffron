@@ -344,7 +344,10 @@ per finding, chosen by the lens to make its own case, is not a sample of the mut
 implementer's transcript.
 _Avoid_: "the reviewer" (that's the operator), "QA", "the checker".
 
-**Implementer**: The session that holds write tools during IMPLEMENT and REBUT.
+**Implementer**: The session that holds write tools during IMPLEMENT and REBUT. It
+acts on the operator's behalf, directly or through the delegate that started the
+task, and every diff it writes is written to the plan validated at the plan
+checkpoint. An attempt that ends in a scope proposal writes neither.
 _Avoid_: "the coder", "the writer", "the worker".
 
 **Lens**: One critic perspective with a bounded remit — correctness & data
@@ -634,6 +637,14 @@ defect rather than a word choice (`DESIGN.md` Appendix E).
    PROV-O puts `prov:hadPlan` on an association, and a plan binds no one who is
    not checked against it. Same shape as 3: a proper noun standing where a role
    was never named (principle 32).
+
+6. **`saffron:` vs. `factory:`** — the vocabulary's namespace carried the
+   program's name, and the vocabulary describes the arrangement: gates, cells,
+   target repos, the operator and their delegates — the **factory**. The prefix
+   is `factory:` and the IRI `urn:software-factory:ns#`, a URN so that it cannot
+   resolve (`DESIGN.md` §1.4). Every use was rewritten, dated records included.
+   `saffron:retired-by` was not: it is a marker in source that the scheduler
+   reads, not a vocabulary term, and shares only the spelling.
 
 ## Open naming decisions
 

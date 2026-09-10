@@ -1,11 +1,11 @@
-@prefix saffron: <https://saffron.dev/ns#> .
+@prefix factory: <urn:software-factory:ns#> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
-@prefix : <https://saffron.dev/data/> .
+@prefix : <urn:software-factory:data:> .
 
 # A delegate credited with a task's attempt. The run record holds what a cell did
 # under enforcement; a delegate's work is never part of it.
-:operator a saffron:Operator .
-:session a saffron:Delegate ; prov:actedOnBehalfOf :operator .
-:ph a saffron:Phase .
-:at a saffron:Attempt ; saffron:withinPhase :ph ; saffron:n 1 ;
+:operator a factory:Operator .
+:session a factory:Delegate ; prov:actedOnBehalfOf :operator .
+:ph a factory:Phase .
+:at a factory:Attempt ; factory:withinPhase :ph ; factory:n 1 ;
     prov:qualifiedAssociation [ prov:agent :session ] .

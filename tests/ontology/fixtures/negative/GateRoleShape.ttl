@@ -1,7 +1,7 @@
-@prefix saffron: <https://saffron.dev/ns#> .
+@prefix factory: <urn:software-factory:ns#> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
 @prefix earl: <http://www.w3.org/ns/earl#> .
-@prefix : <https://saffron.dev/data/> .
+@prefix : <urn:software-factory:data:> .
 
 # The contract closes at six roles. A seventh is a repo-defined gate.
-saffron:perf a saffron:GateRole .
+factory:perf a factory:GateRole .

@@ -3,7 +3,7 @@ from ontology_paths import ONTOLOGY, VOCABULARY
 
 from ontology import render
 
-SHAPES_FILE = ONTOLOGY / "shapes" / "saffron-shapes.ttl"
+SHAPES_FILE = ONTOLOGY / "shapes" / "factory-shapes.ttl"
 
 
 def test_members_are_returned_in_vocabulary_source_order(tmp_path):
@@ -16,12 +16,12 @@ def test_members_are_returned_in_vocabulary_source_order(tmp_path):
     declaring a ninth core gate would need a hand edit here. The real order is
     covered end to end by the zero-diff test.
     """
-    vocabulary = tmp_path / "saffron.ttl"
+    vocabulary = tmp_path / "factory.ttl"
     vocabulary.write_text(
-        "@prefix saffron: <https://saffron.dev/ns#> .\n"
-        "saffron:zulu a saffron:CoreGate .\n"
-        "saffron:alpha a saffron:CoreGate .\n"
-        "saffron:mike a saffron:CoreGate .\n"
+        "@prefix factory: <urn:software-factory:ns#> .\n"
+        "factory:zulu a factory:CoreGate .\n"
+        "factory:alpha a factory:CoreGate .\n"
+        "factory:mike a factory:CoreGate .\n"
     )
     assert render.members("CoreGate", vocabulary=vocabulary) == [
         "zulu",
@@ -105,11 +105,11 @@ def test_the_in_list_wraps_at_three_terms_per_line():
         vocabulary=VOCABULARY,
         _members={"CoreGate": ["a", "b", "c", "d"]},
     )
-    assert "sh:in ( saffron:a saffron:b saffron:c\n            saffron:d ) ." in out
+    assert "sh:in ( factory:a factory:b factory:c\n            factory:d ) ." in out
 
 
 def test_declaring_a_core_gate_in_the_vocabulary_alone_updates_both_surfaces(tmp_path):
-    """The measured defect, closed. Declaring `saffron:probe` in the vocabulary
+    """The measured defect, closed. Declaring `factory:probe` in the vocabulary
     alone fails four checks with no repair a cell can make; here one edit
     propagates to both derived surfaces.
 
@@ -118,14 +118,14 @@ def test_declaring_a_core_gate_in_the_vocabulary_alone_updates_both_surfaces(tmp
     gate name has to be one the repo has never seen.
 
     The generated sh:in entry is also what gives the new term a reader —
-    test_no_dead_terms regexes `saffron:<name>` over shapes/*.ttl — so this
+    test_no_dead_terms regexes `factory:<name>` over shapes/*.ttl — so this
     does not exempt the term from the dead-term rule, it satisfies it.
     """
     context = (ONTOLOGY.parent / "CONTEXT.md").read_text()
-    vocab = tmp_path / "saffron.ttl"
+    vocab = tmp_path / "factory.ttl"
     vocab.write_text(
         VOCABULARY.read_text()
-        + "\nsaffron:probe a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .\n"
+        + "\nfactory:probe a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking .\n"
     )
     assert "probe" in render.members("CoreGate", vocabulary=vocab)
 
@@ -141,7 +141,7 @@ def test_declaring_a_core_gate_in_the_vocabulary_alone_updates_both_surfaces(tmp
     assert render.render_context(context, vocabulary=VOCABULARY) == context
 
     shapes_out = render.render_shapes(SHAPES_FILE.read_text(), vocabulary=vocab)
-    assert "saffron:probe" in shapes_out
+    assert "factory:probe" in shapes_out
 
 
 def test_a_definition_whose_first_sentence_is_unterminated_is_refused():
@@ -210,16 +210,16 @@ def test_a_new_terminal_state_reaches_the_shape_that_closes_the_set(tmp_path):
     `TaskShape`'s endedInState list stays hand-maintained: it closes over
     `EndState`, a superset of the terminal states, so it is not one of the six.
     """
-    vocab = tmp_path / "saffron.ttl"
+    vocab = tmp_path / "factory.ttl"
     vocab.write_text(
         VOCABULARY.read_text()
-        + "\nsaffron:BUDGET_SPENT a saffron:TerminalState , saffron:EndState .\n"
+        + "\nfactory:BUDGET_SPENT a factory:TerminalState , factory:EndState .\n"
     )
     out = render.render_shapes(SHAPES_FILE.read_text(), vocabulary=vocab)
-    assert "saffron:BUDGET_SPENT" in out
+    assert "factory:BUDGET_SPENT" in out
     # It must land in the shape that closes the set, not merely somewhere.
-    head = out[out.index("saffron:TerminalStateShape") :]
-    assert "saffron:BUDGET_SPENT" in head[: head.index(" .")]
+    head = out[out.index("factory:TerminalStateShape") :]
+    assert "factory:BUDGET_SPENT" in head[: head.index(" .")]
 
 
 def test_severity_and_risk_tier_render_into_their_nested_property_shapes():
@@ -233,12 +233,12 @@ def test_severity_and_risk_tier_render_into_their_nested_property_shapes():
         _members={"Severity": ["blocker", "concern", "note", "wart"]},
     )
     assert (
-        "sh:in ( saffron:blocker saffron:concern saffron:note\n            saffron:wart ) ]"
+        "sh:in ( factory:blocker factory:concern factory:note\n            factory:wart ) ]"
         in out
     )
 
     def ended_in_state(text: str) -> str:
-        at = text.index("sh:path saffron:endedInState")
+        at = text.index("sh:path factory:endedInState")
         opened = text.index("sh:in (", at)
         return text[opened : text.index(")", opened)]
 
@@ -311,7 +311,7 @@ def test_a_definition_with_no_backticked_member_is_refused():
 
 
 def test_a_shape_anchor_that_is_not_unique_is_refused():
-    doubled = SHAPES_FILE.read_text() + "\nsaffron:CoreGateShape a sh:NodeShape .\n"
+    doubled = SHAPES_FILE.read_text() + "\nfactory:CoreGateShape a sh:NodeShape .\n"
     with pytest.raises(ValueError, match="exactly one occurrence"):
         render.render_shapes(
             doubled, vocabulary=VOCABULARY, _members={"CoreGate": ["scope"]}
@@ -322,11 +322,11 @@ def test_a_list_that_is_not_saffron_iris_is_refused():
     """The anchors are text, so the `sh:in` found after one is not guaranteed to
     be the list meant. Confirm before overwriting a file the `shacl` gate reads."""
     text = SHAPES_FILE.read_text().replace(
-        "saffron:CoreGateShape a sh:NodeShape ;",
-        'saffron:CoreGateShape a sh:NodeShape ;\n    sh:property [ sh:in ( "x" ) ] ;',
+        "factory:CoreGateShape a sh:NodeShape ;",
+        'factory:CoreGateShape a sh:NodeShape ;\n    sh:property [ sh:in ( "x" ) ] ;',
         1,
     )
-    with pytest.raises(ValueError, match="not saffron: IRIs"):
+    with pytest.raises(ValueError, match="not factory: IRIs"):
         render.render_shapes(
             text, vocabulary=VOCABULARY, _members={"CoreGate": ["scope"]}
         )

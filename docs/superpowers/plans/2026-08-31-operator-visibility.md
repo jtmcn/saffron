@@ -1640,7 +1640,7 @@ unable to answer for a row. This spec builds the query. It renders nothing.
       `REVIEWING` and `REPAIRING` and asserts the exact rendered count — not
       merely that it "is not 4", which passes on every wrong value but one
 - [ ] The count is **labelled with its phase**, not rendered as a bare `att`.
-      The ontology's `saffron:withinPhase` states the rule — *"'Attempt 3'
+      The ontology's `factory:withinPhase` states the rule — *"'Attempt 3'
       without a phase is ambiguous — name both (`CONTEXT.md` §2)"* — and this
       page is where the ambiguity is visible, since the number it shows and
       the number in the `attempts` table differ by design
@@ -2245,7 +2245,7 @@ Three protected documents no cell can correct. Each spec above leaves a
       contradicts §6's own `SA-0009 at $31.60`. Replace the example, or date it
       as historical.
 - [ ] **Step 4: Add a backlog item for `ORPHANED`'s classification.**
-      `ontology/saffron.ttl` files it as an `EndState` that does not reach the
+      `ontology/factory.ttl` files it as an `EndState` that does not reach the
       operator, on the rationale *"downstream of a judgement they already
       made"* — which fits the four post-decision states and not a crash.
       `_STATE_RANK` ranks it 2, among the states that need you. Record the
@@ -2396,7 +2396,7 @@ are measured against the agent's own plan before any money is spent on a diff no
 gate could pass. Budget a re-cut per part rather than treating one as a
 surprise.
 
-**Ontology alignment**, checked against `ontology/saffron.ttl` and
+**Ontology alignment**, checked against `ontology/factory.ttl` and
 `RATIONALE.md`: the `EndState` / `TerminalState` split reaches the page as a
 `SA-0035` criterion; `withinPhase`'s "name both" rule reaches it as another;
 `costUsdEst`'s "an estimate, and the suffix is not decoration" is a `SA-0037`

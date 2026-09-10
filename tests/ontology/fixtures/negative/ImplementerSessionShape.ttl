@@ -1,0 +1,12 @@
+@prefix factory: <urn:software-factory:ns#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix : <urn:software-factory:data:> .
+
+# An implementer's diff with no plan behind it. The plan checkpoint opens
+# IMPLEMENT, so no diff is written before a plan is validated.
+:operator a factory:Operator .
+:impl a factory:ImplementerSession ; prov:actedOnBehalfOf :operator .
+:ph a factory:Phase .
+:d a factory:Diff .
+:at a factory:Attempt ; factory:withinPhase :ph ; factory:n 1 ; prov:generated :d ;
+    prov:qualifiedAssociation [ prov:agent :impl ] .

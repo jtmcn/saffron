@@ -6,7 +6,7 @@
 > vocabulary and regenerates its derived surfaces is refused at plan time — the
 > point Task 3 writes down. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Declare `witness` in `ontology/saffron.ttl`, give `mutant` and
+**Goal:** Declare `witness` in `ontology/factory.ttl`, give `mutant` and
 `witness` entries in `CONTEXT.md`, make the guard that should have caught the
 omission read the filesystem instead of the vocabulary it is checking, and
 record the rule that stops this recurring a fourth time.
@@ -32,10 +32,10 @@ Track A by operator decision).
 
 - `DESIGN.md` section numbers are an API. Cite `§5.4.1` for `witness`; never
   renumber.
-- `ontology/saffron.ttl` is authoritative for the closed sets. `CONTEXT.md` and
-  `ontology/shapes/saffron-shapes.ttl` are **generated from it** for those sets
+- `ontology/factory.ttl` is authoritative for the closed sets. `CONTEXT.md` and
+  `ontology/shapes/factory-shapes.ttl` are **generated from it** for those sets
   — run `uv run python -m ontology.render`, never hand-edit a generated span.
-- **Every `saffron:` term must be referenced by a shape or a query**
+- **Every `factory:` term must be referenced by a shape or a query**
   (`tests/ontology/test_no_dead_terms.py`). A class with no reader ships dead
   and that test rejects it. This is why `mutant` gets a `CONTEXT.md` entry and
   **no** vocabulary triple.
@@ -53,13 +53,13 @@ Track A by operator decision).
 
 **Files:**
 - Modify: `tests/ontology/test_vocabulary_agrees_with_code.py:9-11` (docstring), append new test
-- Modify: `ontology/saffron.ttl:67-83` (comment + the `saffron:witness` triple)
-- Modify: `ontology/shapes/saffron-shapes.ttl:109-126` (two comments, `SizeTierShape` target)
-- Regenerated, do not hand-edit: `CONTEXT.md:222-223`, `ontology/shapes/saffron-shapes.ttl:90-94`
+- Modify: `ontology/factory.ttl:67-83` (comment + the `factory:witness` triple)
+- Modify: `ontology/shapes/factory-shapes.ttl:109-126` (two comments, `SizeTierShape` target)
+- Regenerated, do not hand-edit: `CONTEXT.md:222-223`, `ontology/shapes/factory-shapes.ttl:90-94`
 
 **Interfaces:**
 - Consumes: `ontology_paths.ONTOLOGY`, `ontology_paths.NS`, `ontology_paths.VOCABULARY`; the module-private `_declared(class_name: str) -> set[str]` already defined at `tests/ontology/test_vocabulary_agrees_with_code.py:29`.
-- Produces: `saffron:witness a saffron:CoreGate ; saffron:blockingAt saffron:blockingWhenElevated` — the triple Task 3's backlog note refers to. No Python symbol other tasks import.
+- Produces: `factory:witness a factory:CoreGate ; factory:blockingAt factory:blockingWhenElevated` — the triple Task 3's backlog note refers to. No Python symbol other tasks import.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -97,12 +97,12 @@ def test_every_core_gate_that_exists_is_declared_in_the_vocabulary():
     undeclared = sorted(built - _declared("CoreGate"))
     assert not undeclared, (
         f"core gates that exist and the vocabulary does not declare: "
-        f"{undeclared}. A gate absent from ontology/saffron.ttl is absent from "
-        "vocabulary.subjects(rdf:type, saffron:CoreGate), so test_shapes walks "
+        f"{undeclared}. A gate absent from ontology/factory.ttl is absent from "
+        "vocabulary.subjects(rdf:type, factory:CoreGate), so test_shapes walks "
         "past it and CoreGateShape's sh:in does not reject it — the guard "
         "CLAUDE.md promises cannot fire for precisely the case it exists to "
         "catch. Declare the gate, give it a blocking level in "
-        "saffron:CoreGateBlockingShape (or saffron:SizeTierShape if a risk tier "
+        "factory:CoreGateBlockingShape (or factory:SizeTierShape if a risk tier "
         "moves it), and run `uv run python -m ontology.render`."
     )
 ```
@@ -118,11 +118,11 @@ wrong and you have written another vacuous guard.
 
 - [ ] **Step 3: Declare `witness` in the vocabulary**
 
-In `ontology/saffron.ttl`, add one line after the `saffron:revert` line
+In `ontology/factory.ttl`, add one line after the `factory:revert` line
 (currently line 83), matching the existing column alignment:
 
 ```turtle
-saffron:witness   a saffron:CoreGate ; saffron:blockingAt saffron:blockingWhenElevated .
+factory:witness   a factory:CoreGate ; factory:blockingAt factory:blockingWhenElevated .
 ```
 
 In the comment block immediately above the gate list (currently lines 67–75),
@@ -154,7 +154,7 @@ entry also fixed the guard.
 
 - [ ] **Step 5: Give `witness` its blocking level**
 
-In `ontology/shapes/saffron-shapes.ttl`, replace the `SizeTierShape` block and
+In `ontology/shapes/factory-shapes.ttl`, replace the `SizeTierShape` block and
 its comment (currently lines 121–126) with:
 
 ```turtle
@@ -165,9 +165,9 @@ its comment (currently lines 121–126) with:
 # claim guarded by nothing hurts most, and `contract.witness_blocking` is the
 # function that says so. The shape's name is narrower than its target set; it is
 # kept because renaming a shape is a `shacl` gate diff for a cosmetic gain.
-saffron:SizeTierShape a sh:NodeShape ;
-    sh:targetNode saffron:size, saffron:witness ;
-    sh:property [ sh:path saffron:blockingAt ; sh:in ( saffron:blockingWhenElevated ) ] .
+factory:SizeTierShape a sh:NodeShape ;
+    sh:targetNode factory:size, factory:witness ;
+    sh:property [ sh:path factory:blockingAt ; sh:in ( factory:blockingWhenElevated ) ] .
 ```
 
 Then, in the `CoreGateBlockingShape` comment just above it (currently lines
@@ -221,7 +221,7 @@ a closed set on the code side and are not checked here.
 
 Run: `uv run pytest tests/ontology/ -v`
 Expected: PASS, including `test_no_dead_terms` (satisfied because both
-`CoreGateShape` and `SizeTierShape` now name `saffron:witness`),
+`CoreGateShape` and `SizeTierShape` now name `factory:witness`),
 `test_generated_surfaces_are_current`, and `test_shapes`.
 
 Run: `make check`
@@ -232,14 +232,14 @@ diff — if `shacl` errors with `pyshacl not on PATH` when run through
 - [ ] **Step 9: Commit**
 
 ```bash
-git add tests/ontology/test_vocabulary_agrees_with_code.py ontology/saffron.ttl ontology/shapes/saffron-shapes.ttl CONTEXT.md
+git add tests/ontology/test_vocabulary_agrees_with_code.py ontology/factory.ttl ontology/shapes/factory-shapes.ttl CONTEXT.md
 git commit -m "fix(ontology): a core gate absent from the vocabulary was absent from its own guard
 
 \`witness\` was built in SA-0057/SA-0058 and reached neither
-\`ontology/saffron.ttl\` nor \`CONTEXT.md\`. CLAUDE.md promises a test names the
+\`ontology/factory.ttl\` nor \`CONTEXT.md\`. CLAUDE.md promises a test names the
 shape and the file when a new core gate has no blocking level, and
 \`test_shapes\` does exactly that — over
-\`vocabulary.subjects(rdf:type, saffron:CoreGate)\`. A gate missing from the
+\`vocabulary.subjects(rdf:type, factory:CoreGate)\`. A gate missing from the
 vocabulary is missing from that set, so the guard passed and the promise was
 false for precisely the case it exists to catch.
 
@@ -270,9 +270,9 @@ docs/BACKLOG.md item 72."
 - [ ] **Step 1: Add the two entries**
 
 `CONTEXT.md` is authoritative for meaning; the vocabulary is authoritative only
-for the closed sets it encodes. Neither term gets a `saffron:` triple —
+for the closed sets it encodes. Neither term gets a `factory:` triple —
 `test_no_dead_terms` requires every term to be referenced by a shape or a query,
-and there is no shape for either, so a `saffron:Mutant` class would ship dead.
+and there is no shape for either, so a `factory:Mutant` class would ship dead.
 Insert after the **No-progress** entry:
 
 ```markdown
@@ -324,8 +324,8 @@ is named after it, and CONTEXT.md — authoritative for what the words mean — 
 not contain either it or \`witness\`. Adds both to §4.
 
 Neither becomes a vocabulary term. \`test_no_dead_terms\` requires every
-\`saffron:\` term to be read by a shape or a query, and there is no shape for
-either, so a \`saffron:Mutant\` class would ship dead in exactly the way that
+\`factory:\` term to be read by a shape or a query, and there is no shape for
+either, so a \`factory:Mutant\` class would ship dead in exactly the way that
 test exists to reject. \`witness\` the *gate* earns its triple because two shapes
 name it; \`witness\` the *term* and \`mutant\` earn a definition and nothing more.
 
@@ -349,7 +349,7 @@ docs/BACKLOG.md item 72."
 Item 72 offers two arms: stop forbidding the vocabulary to the spec that
 introduces a term, or make every such spec carry a follow-up filed at writing
 time. **The first arm is structurally unavailable**, and this was measured, not
-argued: `ontology/saffron.ttl` is neither `protected` nor in
+argued: `ontology/factory.ttl` is neither `protected` nor in
 `integrity.gate_config`, so a cell may edit it — but the change is only complete
 once `ontology.render` rewrites `CONTEXT.md`, which **is** `protected`, and
 `protected_touch_refusal` runs at intake (`saffron/cli.py:441`). A spec that
@@ -369,7 +369,7 @@ Append to the `## Conventions` list in `docs/agents/issue-tracker.md`, after the
   nothing then owns the entry: `witness`, `mutant` and the four batch stop
   reasons each reached `main` with the code using a word the glossary did not
   have (`docs/BACKLOG.md` items 65, 72). The follow-up cannot be a spec — a cell
-  cannot land it. `ontology/saffron.ttl` is editable by a cell, but
+  cannot land it. `ontology/factory.ttl` is editable by a cell, but
   `CONTEXT.md` is `protected` and is generated from it, so the two halves cannot
   move together inside a cell and the task is refused at intake. File it as a
   backlog item marked **by hand**, in the same commit as the spec.
@@ -382,7 +382,7 @@ and 19 use:
 
 ```markdown
 **Status:** **done**, by hand, on branch `joel/vocabulary-guard-reads-the-vocabulary`.
-`saffron:witness` is declared at `blockingWhenElevated` and named by
+`factory:witness` is declared at `blockingWhenElevated` and named by
 `SizeTierShape`; `mutant` and `witness` are `CONTEXT.md` §4 entries and
 deliberately not vocabulary terms (`test_no_dead_terms` would reject a class no
 shape reads). The guard now reads `saffron/gates/core/` off disk, and was run
@@ -395,7 +395,7 @@ decision actually taken:
 ```markdown
 **The pattern, decided.** Of the two arms, the first — stop forbidding the
 vocabulary to the spec that introduces the term — is structurally unavailable,
-and this is measured rather than argued. `ontology/saffron.ttl` is neither
+and this is measured rather than argued. `ontology/factory.ttl` is neither
 `protected` nor in `integrity.gate_config`, so a cell may edit it; but the
 change is not complete until `ontology.render` rewrites `CONTEXT.md`, which is
 `protected`, and `protected_touch_refusal` runs at intake
@@ -436,7 +436,7 @@ Three chains have now ended with the code using a word CONTEXT.md does not have
 spec that introduces a term left nobody holding the entry.
 
 Item 72 offered two arms. The first is structurally unavailable and this is
-measured, not argued: a cell may edit \`ontology/saffron.ttl\`, but the change is
+measured, not argued: a cell may edit \`ontology/factory.ttl\`, but the change is
 incomplete until \`ontology.render\` rewrites \`CONTEXT.md\`, which is
 \`protected\` — so the task is refused at intake, fails \`scope\`, or lands a
 vocabulary its own derived surfaces contradict. Takes the second arm: the
@@ -456,8 +456,8 @@ Closes docs/BACKLOG.md item 72."
 
 | Clause | Where |
 |---|---|
-| `saffron:witness a saffron:CoreGate` with a blocking level in `SizeTierShape` | Task 1, Steps 3 and 5 |
-| that shape's `size`-is-the-only-one comment amended | Task 1, Step 5 (and two more comments found: `saffron.ttl:67-75`, `CoreGateBlockingShape`) |
+| `factory:witness a factory:CoreGate` with a blocking level in `SizeTierShape` | Task 1, Steps 3 and 5 |
+| that shape's `size`-is-the-only-one comment amended | Task 1, Step 5 (and two more comments found: `factory.ttl:67-75`, `CoreGateBlockingShape`) |
 | a `mutant` entry in `CONTEXT.md` | Task 2, Step 1 |
 | `uv run python -m ontology.render` re-run, closed-set tests green | Task 1, Steps 6 and 8 |
 | "a decision on the pattern, worth more than the two entries" | Task 3 |
@@ -480,9 +480,9 @@ failures (`['witness']`, twice, from two different tests).
 `test_vocabulary_agrees_with_code.py:29` and is called, not redefined.
 `_core_gate_modules` and `CORE_GATES` are defined once in Task 1, Step 1 and
 referenced only there. `ONTOLOGY` is added to an existing import line rather
-than a new one. `saffron:witness` is spelled identically in the vocabulary
+than a new one. `factory:witness` is spelled identically in the vocabulary
 triple, both shape edits and the backlog status.
 
 **Risk noted, not resolved:** line numbers in this plan are from `main` at
-`1a167b6`. Task 1's edits shift `saffron-shapes.ttl` and `CONTEXT.md`, so use
+`1a167b6`. Task 1's edits shift `factory-shapes.ttl` and `CONTEXT.md`, so use
 the quoted text as the anchor, never the line number, from Step 5 onward.
