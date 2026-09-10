@@ -355,3 +355,110 @@ def test_the_whole_suite_is_asked_not_a_subset():
         run_tests=lambda subset: (asked.append(subset), _result("pass"))[1],
     )
     assert asked == [[]]
+
+
+def test_a_verdict_records_the_baseline_it_was_subtracted_from():
+    """Item 94: a baseline red or skipping in the cell cancels failures a
+    record of only the survivors cannot name. The shape is `SA-0063`'s."""
+    baseline = GateResult(
+        gate="tests",
+        status="fail",
+        summary="1 failed, 1499 passed, 2 skipped in 14.02s",
+        tool="pytest 8.4.1",
+        collected=[f"tests/test_x.py::test_{n}" for n in range(1502)],
+        failures=[_fail("test_only_red_in_the_cell")],
+    )
+    got = _check(
+        PROBE,
+        baseline=baseline,
+        mutate=_applies(),
+        run_tests=lambda subset: baseline,
+    )
+    assert got.verdict == "survived"
+    assert got.baseline == probe_check.BaselineRecord(
+        failures=("test_only_red_in_the_cell",),
+        tool="pytest 8.4.1",
+        collected=1502,
+        summary="1 failed, 1499 passed, 2 skipped in 14.02s",
+    )
+
+
+def test_a_kill_names_the_baselines_failures_beside_the_new_ones():
+    """`failures` is what the probe added and the baseline's what was already
+    red; item 94 asks whether a cancelled one would have caught the probe."""
+    got = _check(
+        PROBE,
+        baseline=_result("fail", (_fail("test_a"),)),
+        mutate=_applies(),
+        run_tests=lambda subset: _result("fail", (_fail("test_a"), _fail("test_b"))),
+    )
+    assert got.verdict == "killed"
+    assert got.failures == ("test_b",)
+    assert got.baseline == probe_check.BaselineRecord(
+        ("test_a",), "pytest 8.0.0", None, ""
+    )
+
+
+GREEN = probe_check.BaselineRecord(
+    failures=(), tool="pytest 8.0.0", collected=None, summary=""
+)
+
+
+def test_a_green_baseline_records_no_failures_rather_than_none():
+    """`()` is a baseline read and green, `None` no baseline in hand.
+    Collapsing them reads the baseline pass's ten verdicts as ten green ones."""
+    got = _check(
+        PROBE,
+        baseline=_result("pass"),
+        mutate=_applies(),
+        run_tests=lambda subset: _result("pass"),
+    )
+    assert got.verdict == "survived"
+    assert got.baseline == GREEN
+
+
+@pytest.mark.parametrize(
+    "probe",
+    [
+        Mutant(file="tests/test_report.py", find="assert x", replace=""),
+        Mutant(file="../outside.py", find="x", replace="y"),
+    ],
+    ids=["a test file", "outside the tree"],
+)
+def test_a_probe_refused_before_mutation_still_records_the_baseline_in_hand(probe):
+    """`None` means no baseline was in hand, on every path — a refusal that
+    dropped one would write a green baseline as never read."""
+    got = _check(
+        probe,
+        baseline=_result("pass"),
+        mutate=_applies(),
+        run_tests=lambda subset: pytest.fail("must not run a refused probe"),
+    )
+    assert got.verdict == "unproven"
+    assert got.baseline == GREEN
+
+
+@pytest.mark.parametrize("status", ["error", "skip"])
+def test_a_baseline_that_measured_nothing_records_none(status):
+    """`error` is not `fail`: a gate that did not run measured no failures,
+    so an empty tuple here would read as a baseline that was green."""
+    got = _check(
+        PROBE,
+        baseline=_result(status),
+        mutate=_applies(),
+        run_tests=lambda subset: pytest.fail("must not run without a baseline"),
+    )
+    assert got.verdict == "unproven"
+    assert got.baseline is None
+
+
+def test_the_baseline_field_is_additive_and_a_result_built_without_it_stands():
+    """`harness/corpus.py`'s callers build a `ProbeResult` positionally from
+    three values, and a pass already on disk is re-read that way."""
+    built = probe_check.ProbeResult("killed", "2 new failure(s)", ("test_a",))
+    assert (built.verdict, built.reason, built.failures) == (
+        "killed",
+        "2 new failure(s)",
+        ("test_a",),
+    )
+    assert built.baseline is None

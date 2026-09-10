@@ -80,6 +80,24 @@ SA-0046 and SA-0055 filed no probe and paid no baseline suite for it, which is
 `docs/BACKLOG.md` item 92.1 working in a pass for the first time. Both are still counted among
 the eight: an empty `probes.json` is coverage, an absent one is not.
 
+**Amended 2026-09-09: none of these ten verdicts records the baseline it was subtracted from,
+and none ever will.** `probes.json` kept only what survived the subtraction, so a `survived`
+computed against a baseline that was already red reads identically to one over a green suite.
+Measured on `SA-0063`'s head (`f76931df`): `1502 passed` on the host, `1 failed, 1499 passed,
+2 skipped` in the cell at the same 1502 collected. The subtraction cancels that failure
+correctly — no *new* failure — but whether it is the very test that would have caught the
+mutation is undecidable from this record, and if it is, the cancellation masks a kill. That is
+**2 of the 8 above**, and `docs/BACKLOG.md` item 94 is why no re-run can settle them: a probe
+is authored by the lens per run, so re-running yields different probes rather than an audit of
+these.
+
+Item 94 landed the same day and is entirely forward-looking. `ProbeResult` now carries the
+baseline's failure identities, tool, collected count and summary line, and `probes.json` writes
+them — from the *next* pass onward. The ten verdicts above carry no such key, which reads back
+as `None` rather than as a baseline that was green; a test pins that, so the distinction cannot
+quietly close. Read the `8` accordingly: it is a lower bound with two entries whose baseline
+nobody can inspect, not eight equally-evidenced vacuities.
+
 ### Cost
 
 Per fixture, read from each run's own JSON rather than derived by subtraction:
