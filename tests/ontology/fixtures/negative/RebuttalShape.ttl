@@ -10,5 +10,6 @@
    earl:assertedBy :lens ; earl:subject :d .
 :lens a saffron:CriticLens . :d a saffron:Diff, earl:TestSubject .
 saffron:blocker a saffron:Severity .
-:impl a saffron:ImplementerSession .
+:impl a saffron:ImplementerSession ; prov:actedOnBehalfOf :operator .
+:operator a saffron:Operator .
 saffron:disputes a saffron:Role .

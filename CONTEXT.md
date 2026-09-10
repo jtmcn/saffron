@@ -344,7 +344,10 @@ per finding, chosen by the lens to make its own case, is not a sample of the mut
 implementer's transcript.
 _Avoid_: "the reviewer" (that's the operator), "QA", "the checker".
 
-**Implementer**: The session that holds write tools during IMPLEMENT and REBUT.
+**Implementer**: The session that holds write tools during IMPLEMENT and REBUT. It
+acts on the operator's behalf, directly or through the delegate that started the
+task, and every attempt it works in carries the plan validated at the plan
+checkpoint.
 _Avoid_: "the coder", "the writer", "the worker".
 
 **Lens**: One critic perspective with a bounded remit — correctness & data

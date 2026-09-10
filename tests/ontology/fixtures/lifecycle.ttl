@@ -15,7 +15,7 @@
 :lens-correctness a saffron:CriticLens .
 :lens-contract    a saffron:CriticLens .
 :lens-blast       a saffron:CriticLens .
-:impl-t1 a saffron:ImplementerSession .
+:impl-t1 a saffron:ImplementerSession ; prov:actedOnBehalfOf :operator .
 :delegate-1 a saffron:Delegate ; prov:actedOnBehalfOf :operator .
 
 ## Gates, and the policy that declares them. Core gates are the vocabulary's own
@@ -53,10 +53,13 @@
 :ph-t1-implement a saffron:Phase ; prov:wasInformedBy :task-t1 .
 :at-t1-d1 a saffron:Attempt ; saffron:withinPhase :ph-t1-diagnose ; saffron:n 1 ;
     saffron:costUsdEst 0.40 ; prov:generated :scope-t1 .
+# The plan checkpoint opens attempt 1, so the attempt that writes the plan works to it.
 :at-t1-i1 a saffron:Attempt ; saffron:withinPhase :ph-t1-implement ; saffron:n 1 ;
-    saffron:costUsdEst 3.20 ; prov:generated :plan-t1, :diff-t1-1 .
+    saffron:costUsdEst 3.20 ; prov:generated :plan-t1, :diff-t1-1 ;
+    prov:qualifiedAssociation [ a prov:Association ; prov:agent :impl-t1 ; prov:hadPlan :plan-t1 ] .
 :at-t1-i2 a saffron:Attempt ; saffron:withinPhase :ph-t1-implement ; saffron:n 2 ;
-    saffron:costUsdEst 1.10 ; prov:generated :diff-t1-2 .
+    saffron:costUsdEst 1.10 ; prov:generated :diff-t1-2 ;
+    prov:qualifiedAssociation [ a prov:Association ; prov:agent :impl-t1 ; prov:hadPlan :plan-t1 ] .
 :diff-t1-1 a saffron:Diff ; prov:wasDerivedFrom :plan-t1 .
 :diff-t1-2 a saffron:Diff ; prov:wasRevisionOf :diff-t1-1 .
 

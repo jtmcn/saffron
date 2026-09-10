@@ -210,6 +210,20 @@ def test_a_reason_that_claims_the_class_is_still_refused_by_the_enumeration(
     assert components == {SH.InConstraintComponent}, text
 
 
+def _components(graph: str, shapes_graph) -> tuple[bool, set, str]:
+    data = rdflib.Graph()
+    data.parse(VOCABULARY, format="turtle")
+    data.parse(
+        data=f"""@prefix saffron: <{NS}> .
+        @prefix prov: <http://www.w3.org/ns/prov#> .
+        @prefix : <https://saffron.dev/data/> .
+        :operator a saffron:Operator . {graph}""",
+        format="turtle",
+    )
+    conforms, results, text = validate(data, shacl_graph=shapes_graph, advanced=True)
+    return conforms, set(results.objects(None, SH.sourceConstraintComponent)), text
+
+
 _ACTING = ":s a saffron:Delegate ; prov:actedOnBehalfOf :operator ."
 # Valid under AttemptShape, so only DelegateShape can refuse it.
 _ATTEMPT = ":ph a saffron:Phase . :at a saffron:Attempt ; saffron:withinPhase :ph ; saffron:n 1 ;"
@@ -285,15 +299,64 @@ def test_a_delegate_acts_for_the_operator_never_as_one_nor_in_an_attempt(
     """Asserted on the component, not on conformance: each case has to be refused
     by the constraint it names, or a sibling constraint rejecting it would hide a
     deleted one — the trap the enumeration test above records."""
-    data = rdflib.Graph()
-    data.parse(VOCABULARY, format="turtle")
-    data.parse(
-        data=f"""@prefix saffron: <{NS}> .
-        @prefix prov: <http://www.w3.org/ns/prov#> .
-        @prefix : <https://saffron.dev/data/> .
-        :operator a saffron:Operator . {graph}""",
-        format="turtle",
-    )
-    conforms, results, text = validate(data, shacl_graph=shapes_graph, advanced=True)
+    conforms, found, text = _components(graph, shapes_graph)
     assert conforms == (not components), text
-    assert set(results.objects(None, SH.sourceConstraintComponent)) == components, text
+    assert found == components, text
+
+
+_IMPL = ":i a saffron:ImplementerSession ; prov:actedOnBehalfOf :operator ."
+
+
+@pytest.mark.parametrize(
+    ("graph", "components"),
+    [
+        (
+            f"{_IMPL} :p a saffron:Plan . {_ATTEMPT} prov:qualifiedAssociation "
+            "[ prov:agent :i ; prov:hadPlan :p ] .",
+            set(),
+        ),
+        # A delegate that runs a cell stands between the implementer and the operator.
+        (
+            ":i a saffron:ImplementerSession ; prov:actedOnBehalfOf :d . "
+            ":d a saffron:Delegate ; prov:actedOnBehalfOf :operator .",
+            set(),
+        ),
+        # Work outside an attempt is not what the plan governs.
+        (f"{_IMPL} :work prov:qualifiedAssociation [ prov:agent :i ] .", set()),
+        (
+            ":i a saffron:ImplementerSession .",
+            {SH.QualifiedMinCountConstraintComponent},
+        ),
+        (
+            f"{_IMPL} {_ATTEMPT} prov:qualifiedAssociation [ prov:agent :i ] .",
+            {SH.QualifiedMaxCountConstraintComponent},
+        ),
+        # Any prov:Plan will not do: the plan is the one the host validated.
+        (
+            f"{_IMPL} :p a prov:Plan . {_ATTEMPT} prov:qualifiedAssociation "
+            "[ prov:agent :i ; prov:hadPlan :p ] .",
+            {SH.QualifiedMaxCountConstraintComponent},
+        ),
+        # The unqualified shortcut cannot carry a plan.
+        (
+            f"{_IMPL} {_ATTEMPT} prov:wasAssociatedWith :i .",
+            {SH.QualifiedMaxCountConstraintComponent},
+        ),
+    ],
+    ids=[
+        "planned",
+        "through-delegate",
+        "non-attempt",
+        "no-principal",
+        "unplanned-attempt",
+        "unvalidated-plan",
+        "unqualified-attempt",
+    ],
+)
+def test_the_implementer_acts_for_the_operator_and_works_each_attempt_to_its_plan(
+    graph, components, shapes_graph
+):
+    """On the component, for the reason the delegate's cases give."""
+    conforms, found, text = _components(graph, shapes_graph)
+    assert conforms == (not components), text
+    assert found == components, text

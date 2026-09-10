@@ -28,6 +28,7 @@ def test_vendored_vocabularies_parse(path):
         ("GateSuite", "http://www.w3.org/ns/prov#Activity"),
         ("Spec", "http://www.w3.org/ns/prov#Entity"),
         ("PullRequest", "http://www.w3.org/ns/prov#Entity"),
+        ("Plan", "http://www.w3.org/ns/prov#Plan"),
         ("CriticLens", "http://www.w3.org/ns/prov#SoftwareAgent"),
         ("Operator", "http://www.w3.org/ns/prov#Person"),
         ("Delegate", "http://www.w3.org/ns/prov#SoftwareAgent"),

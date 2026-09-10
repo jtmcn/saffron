@@ -1,0 +1,11 @@
+@prefix saffron: <https://saffron.dev/ns#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix : <https://saffron.dev/data/> .
+
+# An implementer's attempt with no plan behind it. The plan checkpoint opens
+# IMPLEMENT, so every attempt the implementer works in has one.
+:operator a saffron:Operator .
+:impl a saffron:ImplementerSession ; prov:actedOnBehalfOf :operator .
+:ph a saffron:Phase .
+:at a saffron:Attempt ; saffron:withinPhase :ph ; saffron:n 1 ;
+    prov:qualifiedAssociation [ prov:agent :impl ] .

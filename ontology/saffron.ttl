@@ -35,7 +35,8 @@ saffron:AcceptanceCriterion a owl:Class ;
     rdfs:subClassOf prov:Entity, earl:TestCriterion ;
     rdfs:label "acceptance criterion" ;
     rdfs:comment "First-class, so a gate and a lens can assert on the same criterion via earl:test." .
-saffron:Plan          a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "plan" .
+saffron:Plan          a owl:Class ; rdfs:subClassOf prov:Plan ; rdfs:label "plan" ;
+    rdfs:comment "plan.json: the how, where a spec is the what. Validated host-side at the plan checkpoint, so a control artifact rather than a claim." .
 saffron:ScopeProposal a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "scope proposal" .
 saffron:Diff          a owl:Class ; rdfs:subClassOf prov:Entity, earl:TestSubject ; rdfs:label "diff" .
 saffron:PullRequest   a owl:Class ; rdfs:subClassOf prov:Entity, earl:TestSubject ; rdfs:label "pull request" .
