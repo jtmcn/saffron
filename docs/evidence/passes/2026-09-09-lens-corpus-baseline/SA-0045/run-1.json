@@ -1,0 +1,60 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.3031956,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.9331773000000002,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/ledger.py",
+        "line": 3,
+        "claim": "The rewritten docstring says 'Eight of the ten tables. `decisions` waits...', but DESIGN.md \u00a74.1's schema block (the authoritative table list this docstring cites) names exactly nine tables total \u2014 batches, repos, runs, tasks, attempts, gate_results, failures, findings, decisions. Eight tables now exist plus decisions waiting accounts for all nine; there is no unnamed tenth table, so 'ten' is arithmetically wrong (it should say 'nine'). This isn't a new error, but the diff rewrote this exact sentence per its own instruction to fix the docstring, and left the wrong denominator \u2014 and specs in this repo (e.g. SA-0045's own Context section) quote this docstring verbatim as ground truth, so the inaccuracy propagates into future spec-writing.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.44157840000000004,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/ledger.py",
+        "line": 43,
+        "claim": "No test inserts a `batches` row without a `status` (i.e. NULL), even though the column comment (lines 31-35) explicitly relies on `status` being nullable so a still-running batch's row satisfies the CHECK. `test_a_batch_status_outside_the_four_stop_reasons_is_rejected` only ever supplies one of the four explicit values, never omits `status`. Adding `NOT NULL` to this column definition would keep every current test green (all inserts specify a status) while silently breaking the ability to record a batch before it has a stop reason, which is the entire point of the column per the comment above it.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/ledger.py",
+          "find": "    status        TEXT CHECK (status IN ('DRAINED', 'BUDGET', 'UNTIL', 'INFRASTRUCTURE'))",
+          "replace": "    status        TEXT NOT NULL CHECK (status IN ('DRAINED', 'BUDGET', 'UNTIL', 'INFRASTRUCTURE'))"
+        }
+      },
+      {
+        "lens": "adequacy",
+        "severity": "note",
+        "file": "saffron/ledger.py",
+        "line": 367,
+        "claim": "Every test that exercises `create_run`'s new `batch_id` parameter calls it with the default `None` and checks the column comes back NULL; no test ever passes a real integer and checks it round-trips into `runs.batch_id`. Hardcoding the bound value to `None` instead of `batch_id` in this tuple would leave all current tests passing (they only ever check the NULL case) while silently discarding any batch association once a caller starts passing one. This is explicitly flagged in the docstring as deferred to `SA-0049`, which is why it is a note rather than a concern \u2014 the next spec's own tests are the first thing that would actually pass a non-`None` value through this path.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/ledger.py",
+          "find": "            (repo_id, base_sha, batch_id),",
+          "replace": "            (repo_id, base_sha, None),"
+        }
+      }
+    ]
+  }
+]

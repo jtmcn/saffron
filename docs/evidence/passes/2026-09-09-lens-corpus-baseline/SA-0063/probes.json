@@ -1,0 +1,28 @@
+[
+  {
+    "probe": {
+      "file": "saffron/cell/session.py",
+      "find": "notes_worth_asking = bool(spec.forbidden) or bool(policy.protected)",
+      "replace": "notes_worth_asking = bool(spec.forbidden)"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1502,
+    "summary": "1 failed, 1499 passed, 2 skipped, 21 deselected in 18.88s"
+  },
+  {
+    "probe": {
+      "file": "saffron/cell/session.py",
+      "find": "            try:\n                noted = agent(\n                    container,\n                    prompt=artifacts.NOTES_PROMPT,\n                    options=options,\n                    resume=session_id,\n                    emit=emit,\n                    last_cost_usd=last_cost,\n                )\n            except implement.AgentFailed as failed:\n                _phase_start(\n                    \"IMPLEMENT\", \"IMPLEMENT\", f\"the notes turn failed \u2014 {failed}\"\n                )\n                noted = _failed_turn(failed, session_id)",
+      "replace": "            noted = agent(\n                container,\n                prompt=artifacts.NOTES_PROMPT,\n                options=options,\n                resume=session_id,\n                emit=emit,\n                last_cost_usd=last_cost,\n            )"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1502,
+    "summary": "1 failed, 1499 passed, 2 skipped, 21 deselected in 20.41s"
+  }
+]

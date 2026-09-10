@@ -1,0 +1,28 @@
+[
+  {
+    "probe": {
+      "file": "saffron/batch.py",
+      "find": "        ledger.attach_run_to_batch(outcome.run_id, batch_id)\n\n        if outcome.state in ABORT_STATES:\n            consecutive_aborts += 1\n        else:\n            # Any state a task earned resets the counter, `EXHAUSTED`\n            # included \u2014 \"any terminal state\" would also reset on\n            # `GATE_ERROR` and `PREFLIGHT_FAILED` themselves, and the counter\n            # would never reach two.\n            consecutive_aborts = 0",
+      "replace": "        if outcome.state in ABORT_STATES:\n            consecutive_aborts += 1\n        else:\n            ledger.attach_run_to_batch(outcome.run_id, batch_id)\n            # Any state a task earned resets the counter, `EXHAUSTED`\n            # included \u2014 \"any terminal state\" would also reset on\n            # `GATE_ERROR` and `PREFLIGHT_FAILED` themselves, and the counter\n            # would never reach two.\n            consecutive_aborts = 0"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1292,
+    "summary": "1290 passed, 2 skipped, 20 deselected in 13.43s"
+  },
+  {
+    "probe": {
+      "file": "saffron/batch.py",
+      "find": "        remaining = budget_usd - ledger.batch_spend(batch_id)\n        if candidate.spec.budget_usd > remaining:\n            ledger.close_batch(batch_id, \"BUDGET\")\n            return \"BUDGET\"\n\n        if consecutive_aborts >= _BREAKER_THRESHOLD:\n            ledger.close_batch(batch_id, \"INFRASTRUCTURE\")\n            return \"INFRASTRUCTURE\"",
+      "replace": "        if consecutive_aborts >= _BREAKER_THRESHOLD:\n            ledger.close_batch(batch_id, \"INFRASTRUCTURE\")\n            return \"INFRASTRUCTURE\"\n\n        remaining = budget_usd - ledger.batch_spend(batch_id)\n        if candidate.spec.budget_usd > remaining:\n            ledger.close_batch(batch_id, \"BUDGET\")\n            return \"BUDGET\""
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1292,
+    "summary": "1290 passed, 2 skipped, 20 deselected in 14.19s"
+  }
+]

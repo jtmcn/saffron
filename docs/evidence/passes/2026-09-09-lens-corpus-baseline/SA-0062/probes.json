@@ -1,0 +1,17 @@
+[
+  {
+    "probe": {
+      "file": "saffron/cell/worktree.py",
+      "find": "    done = runtime.exec_(container, [\"sh\", \"-euc\", script], workdir=WORKTREE_MOUNT)\n    if done.returncode != 0:\n        raise runtime.CellRuntimeError(\n            f\"writing {path}'s mutant failed: {done.stderr.strip()}\"\n        )",
+      "replace": "    done = runtime.exec_(container, [\"sh\", \"-euc\", script], workdir=WORKTREE_MOUNT)"
+    },
+    "verdict": "killed",
+    "reason": "1 new failure(s) against the baseline",
+    "failures": [
+      "tests/test_saffron_gates.py::test_the_fast_gates_name_their_tool_and_pass_on_a_clean_tree[lint]"
+    ],
+    "tool": "pytest 9.1.1",
+    "collected": 1484,
+    "summary": "2 failed, 1480 passed, 2 skipped, 20 deselected in 19.00s"
+  }
+]

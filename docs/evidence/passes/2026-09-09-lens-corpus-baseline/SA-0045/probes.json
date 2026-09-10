@@ -1,0 +1,28 @@
+[
+  {
+    "probe": {
+      "file": "saffron/ledger.py",
+      "find": "    status        TEXT CHECK (status IN ('DRAINED', 'BUDGET', 'UNTIL', 'INFRASTRUCTURE'))",
+      "replace": "    status        TEXT NOT NULL CHECK (status IN ('DRAINED', 'BUDGET', 'UNTIL', 'INFRASTRUCTURE'))"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1250,
+    "summary": "1248 passed, 2 skipped, 20 deselected in 13.04s"
+  },
+  {
+    "probe": {
+      "file": "saffron/ledger.py",
+      "find": "            (repo_id, base_sha, batch_id),",
+      "replace": "            (repo_id, base_sha, None),"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1250,
+    "summary": "1248 passed, 2 skipped, 20 deselected in 13.28s"
+  }
+]

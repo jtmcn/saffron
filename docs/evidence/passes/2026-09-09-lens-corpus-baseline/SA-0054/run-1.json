@@ -1,0 +1,50 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 1.2216495,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 1.0006041,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.6952074,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 600,
+        "claim": "No test in this diff ever drives `_batch_runner`'s adapter through a `READY_FOR_REVIEW` outcome, so the packaging branch at lines 586-600 \u2014 including the `outcome.state = result.state` overwrite the docstring calls out as necessary ('reflects what actually happened to the task \u2014 MERGE_FAILED included') \u2014 is never exercised. Both new adapter witnesses (`test_the_adapter_stacks_a_child_on_its_parents_branch` and `test_the_adapter_stacks_on_the_first_dependency_only`) stub `run_one_cell` to raise `SystemExit` immediately, short-circuiting before this branch is reached. Deleting the line `outcome.state = result.state` leaves every test in the suite green.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cli.py",
+          "find": "            print(f\"{spec.id:<10} {result.state}  {result.pr_url or result.note}\")\n            outcome.state = result.state",
+          "replace": "            print(f\"{spec.id:<10} {result.state}  {result.pr_url or result.note}\")"
+        }
+      },
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 799,
+        "claim": "The `.ok` check that distinguishes a readiness failure from an ordinary mid-loop breaker firing is only exercised at its two extremes: `test_infrastructure_and_a_failed_readiness_both_exit_two`'s breaker case fakes `run_batch` entirely (so `readiness_check` is never called and `readiness_seen` stays empty), and its readiness case makes `check_readiness` fail immediately. No witness runs the real `run_batch` with a readiness that succeeds and then lets the breaker fire from candidate aborts, which is the actual real-world 'breaker firing' case the acceptance criterion names. Widening the condition to `if readiness_seen:` (dropping `.ok`) would make a genuine mid-loop breaker print the nonsensical `batch: readiness failed at None: None` instead of `batch: infrastructure failed`, and every test in this diff would still pass.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cli.py",
+          "find": "    if readiness_seen and not readiness_seen[-1].ok:",
+          "replace": "    if readiness_seen:"
+        }
+      }
+    ]
+  }
+]

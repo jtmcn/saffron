@@ -1,0 +1,69 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.7282626,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.8523042,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 45,
+        "claim": "`_max_run_id` and `_attach_runs_minted_since` (line 71) reach past `Ledger`'s public surface into `ledger._db`, the private `sqlite3.Connection`, and hand-write SQL against the `runs` table's `run_id`/`batch_id` columns. Every other production module in the repo (session.py, scheduler.py, cli.py, reconcile.py, package.py) and every other line in this same file talks to the ledger exclusively through named methods (`create_batch`, `close_batch`, `attach_run_to_batch`, `batch_spend`); `batch.py` is the only non-`ledger.py` module that touches `_db` at all. This duplicates schema knowledge that is supposed to live solely in `ledger.py`, so a future change there (a column rename, a different run-id strategy, a non-SQLite backend) can silently break this sweep without anyone touching `batch.py`, and no gate here checks for it since `_db` is syntactically an ordinary attribute.",
+        "anchored": true,
+        "probe": null
+      },
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 71,
+        "claim": "Same boundary violation as line 45: raw SQL against `runs.batch_id IS NULL` reimplements what should be a `Ledger` query method. The comment block above it argues carefully for the `run_id > high_water` scoping, which is exactly the kind of invariant that belongs behind a named, tested `Ledger` method (as `attach_run_to_batch` already is) rather than inlined SQL a caller outside `ledger.py` is trusted to get right.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.5693558999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/batch.py",
+        "line": 178,
+        "claim": "No test checks that a run is attached to its batch when the outcome is an abort state (GATE_ERROR/PREFLIGHT_FAILED/RATE_LIMITED) rather than a state the task earned. Moving `ledger.attach_run_to_batch(outcome.run_id, batch_id)` from its current unconditional position into only the `else` branch (so it runs for earned states but not for aborts) keeps every test in test_batch.py green \u2014 the two abort tests (`test_two_consecutive_aborts_fire_the_breaker`, `test_an_exhausted_task_between_two_aborts_resets_the_breaker`) only assert on `runner.calls` and the returned reason, never on the `runs.batch_id` column \u2014 while silently breaking the acceptance criterion 'Each run the night produces is attached to the batch,' and specifically the runs whose cost the design notes say matters most: aborted tasks that still billed a preflight and a baseline suite before dying.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/batch.py",
+          "find": "        ledger.attach_run_to_batch(outcome.run_id, batch_id)\n\n        if outcome.state in ABORT_STATES:\n            consecutive_aborts += 1\n        else:\n            # Any state a task earned resets the counter, `EXHAUSTED`\n            # included \u2014 \"any terminal state\" would also reset on\n            # `GATE_ERROR` and `PREFLIGHT_FAILED` themselves, and the counter\n            # would never reach two.\n            consecutive_aborts = 0",
+          "replace": "        if outcome.state in ABORT_STATES:\n            consecutive_aborts += 1\n        else:\n            ledger.attach_run_to_batch(outcome.run_id, batch_id)\n            # Any state a task earned resets the counter, `EXHAUSTED`\n            # included \u2014 \"any terminal state\" would also reset on\n            # `GATE_ERROR` and `PREFLIGHT_FAILED` themselves, and the counter\n            # would never reach two.\n            consecutive_aborts = 0"
+        }
+      },
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 151,
+        "claim": "The acceptance criteria and the module's own comment specify a fixed check order before each task \u2014 deadline, then budget, then breaker \u2014 but no test constructs a candidate where two of the three conditions are simultaneously true, so nothing would notice if the budget and breaker checks were swapped. Moving the `consecutive_aborts >= _BREAKER_THRESHOLD` block above the `remaining =` / budget block keeps every existing test passing (none of them reach the breaker threshold and the budget ceiling on the same iteration) while changing which stop reason a batch reports when both conditions hold at once.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/batch.py",
+          "find": "        remaining = budget_usd - ledger.batch_spend(batch_id)\n        if candidate.spec.budget_usd > remaining:\n            ledger.close_batch(batch_id, \"BUDGET\")\n            return \"BUDGET\"\n\n        if consecutive_aborts >= _BREAKER_THRESHOLD:\n            ledger.close_batch(batch_id, \"INFRASTRUCTURE\")\n            return \"INFRASTRUCTURE\"",
+          "replace": "        if consecutive_aborts >= _BREAKER_THRESHOLD:\n            ledger.close_batch(batch_id, \"INFRASTRUCTURE\")\n            return \"INFRASTRUCTURE\"\n\n        remaining = budget_usd - ledger.batch_spend(batch_id)\n        if candidate.spec.budget_usd > remaining:\n            ledger.close_batch(batch_id, \"BUDGET\")\n            return \"BUDGET\""
+        }
+      }
+    ]
+  }
+]

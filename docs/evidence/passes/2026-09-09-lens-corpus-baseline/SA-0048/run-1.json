@@ -1,0 +1,56 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.5324379,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/preflight.py",
+        "line": 315,
+        "claim": "validate_claude_token's docstring promises 'False for anything else, including a host this probe could not reach \u2014 \"could not tell\" is not a pass', but the implementation returns True for every HTTPError code other than literally 401 or 403. A 500/502/529 (server error / overloaded) from the upstream is exactly a 'could not tell' outcome \u2014 it says nothing about the credential \u2014 yet it is reported as a valid, authenticated token. This is the same class of silent-success-on-indeterminate-result that Appendix J measured for the code this function exists to replace, just moved one level down.",
+        "anchored": true,
+        "probe": null
+      },
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/preflight.py",
+        "line": 431,
+        "claim": "check_readiness catches every git_mirror.GitError from export_saffron_dir and treats it identically to 'no .saffron at this base_sha', silently setting exported = None. But GitError is also raised by export_saffron_dir for genuine failures unrelated to absence \u2014 a bad archive invocation, a corrupted mirror, or a tar that fails to extract \u2014 and none of those get distinguished from the ordinary 'repo hasn't onboarded yet' case. The precedent this comment cites (cli._protected_paths_at) explicitly relies on a second, unguarded export_saffron_dir call later in the pipeline to catch a genuinely broken mirror; check_readiness is itself meant to be that authoritative once-per-run gate, so masking a real export failure here means a broken run can be reported ok=True instead of failing readiness with a nameable reason.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.9388058999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.4100028,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/preflight.py",
+        "line": 315,
+        "claim": "The entire point of `validate_claude_token` \u2014 per its own docstring and Appendix J \u2014 is that it must return `False` when the upstream answers 401/403 (the opposite verdict from `assert_proxy_reaches_upstream`, which treats 401 as a pass on the same host). No test in this diff ever exercises that branch: `test_a_present_but_invalid_token_fails_readiness` injects a fake `validate_token=lambda token: False` that bypasses the real function entirely, and `test_the_token_probes_default_request_shape_is_asserted_not_sent` only forces a `urllib.error.URLError` (a different except clause) to assert the request shape, never an `HTTPError`. Changing line 315 from `return exc.code not in (401, 403)` to `return True` \u2014 silently inverting the one behaviour this whole spec exists to add, so an expired token would again pass \u2014 leaves all 1264+ tests green.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/preflight.py",
+          "find": "        return exc.code not in (401, 403)",
+          "replace": "        return True"
+        }
+      }
+    ]
+  }
+]

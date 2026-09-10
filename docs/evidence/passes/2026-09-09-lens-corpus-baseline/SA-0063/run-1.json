@@ -1,0 +1,70 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 1.3243974,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/cell/session.py",
+        "line": 1617,
+        "claim": "When `repair_loop` already returned `EXHAUSTED` because `_repair()`'s own `_over_budget()` check (line 1552-1553) fired \u2014 i.e. the budget ceiling was hit with zero additional spend between that check and this one \u2014 the notes-eligibility check at line 1617 calls `_over_budget()` again with the identical `spent`/`spec.budget_usd` pair. `_over_budget()` (lines 1306-1321) is not idempotent: every call where it returns True also `emit()`s a `Budget` event. The result is two byte-identical `Budget` events recorded for a single real budget breach, back-to-back with no intervening turn, which is new: before this diff execution went straight from `repair_loop`'s `EXHAUSTED` return to constructing `CellOutcome` with no further budget check in between. Anyone reading the task's event/watch log (the mechanism the code's own comments say is how an operator tells EXHAUSTED-by-no-progress apart from EXHAUSTED-by-budget) now sees the ceiling reported as hit twice for what was one occurrence.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.4114784999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "saffron/phases/package.py",
+        "line": 834,
+        "claim": "`render_pr_body` is called here with every other outcome field (`reviews`, `rebut_result`, `advisory_gates`, ...) but never `notes=outcome.notes`, so the notes extracted, hashed and written to `notes.json` by `_drive_cell` never reach the packaged PR body in production \u2014 the default `notes=\"\"` on `render_pr_body` silently swallows them. Every acceptance criterion and every test exercises `render_pr_body` directly with an explicit `notes=` argument or `CellOutcome`/`session.py` in isolation, so no gate or test touches this call site, and the one channel this spec exists to build is wired everywhere except the one place that actually produces a pull request.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.6310340999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cell/session.py",
+        "line": 1616,
+        "claim": "`notes_worth_asking = bool(spec.forbidden) or bool(policy.protected)` is asserted by the docstring/comment to fire on *either* a declared `forbidden` list or a repo-wide `protected` one, but every test that exercises the notes turn (`test_the_notes_artifact_is_hashed_when_it_is_produced`, `test_the_notes_turn_is_skipped_once_the_task_is_over_budget`, and the skip test) sets `spec.forbidden` non-empty; none constructs a spec with an empty `forbidden` against a policy declaring `protected` paths to prove the `or bool(policy.protected)` half does anything. Deleting that clause so the line reads `notes_worth_asking = bool(spec.forbidden)` leaves all three notes-related tests green, silently disabling the channel for exactly the protected-path scenario item 75 was about.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cell/session.py",
+          "find": "notes_worth_asking = bool(spec.forbidden) or bool(policy.protected)",
+          "replace": "notes_worth_asking = bool(spec.forbidden)"
+        }
+      },
+      {
+        "lens": "adequacy",
+        "severity": "note",
+        "file": "saffron/cell/session.py",
+        "line": 1627,
+        "claim": "No test drives an `AgentFailed` through the new notes turn (every other agent call in this module \u2014 plan, repair, rebuttal \u2014 has at least one such test), so the `except implement.AgentFailed` branch that calls `_failed_turn` and checkpoints a phase-start message is asserted by nothing; removing the try/except entirely (letting the exception propagate) would not fail any existing test.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cell/session.py",
+          "find": "            try:\n                noted = agent(\n                    container,\n                    prompt=artifacts.NOTES_PROMPT,\n                    options=options,\n                    resume=session_id,\n                    emit=emit,\n                    last_cost_usd=last_cost,\n                )\n            except implement.AgentFailed as failed:\n                _phase_start(\n                    \"IMPLEMENT\", \"IMPLEMENT\", f\"the notes turn failed \u2014 {failed}\"\n                )\n                noted = _failed_turn(failed, session_id)",
+          "replace": "            noted = agent(\n                container,\n                prompt=artifacts.NOTES_PROMPT,\n                options=options,\n                resume=session_id,\n                emit=emit,\n                last_cost_usd=last_cost,\n            )"
+        }
+      }
+    ]
+  }
+]
