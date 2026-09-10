@@ -5518,8 +5518,10 @@ turning it on needs no fix-up first.
 `/opt/venv/bin/python` resolving to `/usr/local/bin/python3.12`:
 `images/cell-base.python.Dockerfile` is `FROM python:3.12-slim-bookworm`, and
 `pyproject.toml` says `requires-python = ">=3.12"` with no `.python-version`. The
-warning is PEP 765's, new in 3.14. The host heard it only because Homebrew's
-`python3` happens to be 3.14.7.
+warning is PEP 765's, new in 3.14. On the host, `uv run python` is uv's managed
+CPython 3.14.7 — nothing pins it lower — while bare `python3` is pyenv's 3.12.12.
+So `make check` runs on 3.14 and the cell on 3.12: the suite runs on two
+interpreters, and nothing records which.
 
 **So the obvious fix is the trap.** A compile gate declared in
 `.saffron/policy.yaml` runs in the cell, compiles this defect clean, and reports
