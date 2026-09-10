@@ -38,7 +38,8 @@ _CRITERIA_SECTION = re.compile(
 
 
 class SpecError(ValueError):
-    """A spec that cannot be trusted to describe what it asks for."""
+    """A spec that cannot be trusted to describe what it asks for, or a scan
+    directory that cannot be read as one."""
 
 
 class DisclosedMutantError(SpecError):
@@ -297,7 +298,20 @@ def discover_specs(
     Ordered by filename — never by `priority`, which the caller may also
     order by, and never by mtime, which is not stable across a checkout — so
     that a tie resolves the same way on every machine.
+
+    `Path.glob` is silent for a missing path and for a path that exists but
+    is not a directory, exactly as it is for a genuinely empty one — so
+    without a check here, an export that produced nothing (a wrong base
+    commit, a repo that never had the directory, a path assembled with the
+    wrong join) reaches the scheduler indistinguishable from a repo with no
+    specs. Only the third case is an ordinary night with no work in it; the
+    first two are faults and are refused rather than answered.
     """
+    if not directory.exists():
+        raise SpecError(f"spec directory {directory} does not exist")
+    if not directory.is_dir():
+        raise SpecError(f"spec directory {directory} is not a directory")
+
     specs: list[DiscoveredSpec] = []
     failures: list[DiscoveryFailure] = []
     # Sort on the name, not the `Path`: `PurePath.__lt__` compares
