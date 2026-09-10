@@ -86,13 +86,18 @@ def test_the_vocabulary_is_the_factorys_and_nothing_still_names_saffron():
     does not find itself. `retired-by` is untouched: it is a marker in source the
     scheduler reads, not a term."""
     assert NS == "urn:software-factory:ns#"
-    # No left boundary: in a literal, `\n` glues the prefix to an `n`.
+    # No left boundary: in a literal, `\n` glues the prefix to an `n`. A prefix
+    # declaration and an f-string field slipped past the letter-only form once.
     old = re.compile(
         "saffron"
         + r"\.dev"
         + "|"
         + "saffron"
-        + r":(?!retired)[A-Za-z_]"
+        + r":(?!retired\b)[A-Za-z_{]"
+        + "|"
+        + r"(?i:prefix)\s+"
+        + "saffron"
+        + ":"
         + "|"
         + "saffron"
         + r"(-shapes)?\.ttl"
