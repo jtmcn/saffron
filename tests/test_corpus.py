@@ -458,6 +458,7 @@ def _drive(
     saffron_dir=None,
     fixture_ids=("SA-0045",),
     mutate_raises=None,
+    baseline_raises=None,
     probes=(PROBE,),
 ):
     """One fixture through the driver's `main`, with every path into a cell
@@ -474,6 +475,8 @@ def _drive(
     routinely. First call rather than every call so a later probe in the same
     fixture can be observed being attempted — or, once the tree's state is
     unknown, observed not being.
+
+    `baseline_raises` makes the first `run_gate` call — the baseline — raise.
 
     `probes` is one adequacy finding each, so a fixture can file more than one.
     """
@@ -509,6 +512,8 @@ def _drive(
 
     def gate(name, executable, cwd, *, subset=None, executor=None, **_unused):
         calls.append((name, executable, subset, executor))
+        if baseline_raises is not None and len(calls) == 1:
+            raise baseline_raises
         return GateResult(gate=name, status="pass", tool="stub tests gate")
 
     @contextlib.contextmanager
@@ -684,6 +689,63 @@ def test_every_probe_verdict_is_written_beside_the_run_json(tmp_path, monkeypatc
     assert recorded[0]["reason"]
 
 
+def test_a_written_verdict_carries_the_baseline_it_was_subtracted_from(
+    tmp_path, monkeypatch
+):
+    """Item 94, at the JSON boundary where `None` and `()` could collapse: a
+    baseline read and green writes `[]`."""
+    pass_ = _drive(tmp_path, monkeypatch)
+
+    recorded = json.loads((pass_.out / "SA-0045" / "probes.json").read_text())
+    assert [entry["verdict"] for entry in recorded] == ["survived"]
+    assert recorded[0]["baseline_failures"] == []
+    assert recorded[0]["baseline_tool"] == "stub tests gate"
+
+
+BASELINE_KEYS = (
+    "baseline_failures",
+    "baseline_tool",
+    "baseline_collected",
+    "baseline_summary",
+)
+
+
+def test_a_probe_with_no_baseline_in_hand_writes_null_not_an_empty_list(
+    tmp_path, monkeypatch
+):
+    """The other spelling: a baseline suite that raised left nothing to
+    record, and every key says so rather than writing the green `[]`."""
+    pass_ = _drive(
+        tmp_path,
+        monkeypatch,
+        baseline_raises=CellRuntimeError("exec for the baseline failed"),
+    )
+
+    recorded = json.loads((pass_.out / "SA-0045" / "probes.json").read_text())
+    assert [entry["verdict"] for entry in recorded] == ["unproven"]
+    assert {key: recorded[0][key] for key in BASELINE_KEYS} == dict.fromkeys(
+        BASELINE_KEYS
+    )
+
+
+def test_a_probe_that_raised_still_records_the_baseline_it_was_checked_against(
+    tmp_path, monkeypatch
+):
+    """A raise out of `check_probe` comes after the baseline was read, and so
+    does every probe it stopped: `null` there would say it never was."""
+    pass_ = _drive(
+        tmp_path,
+        monkeypatch,
+        probes=(PROBE, PROBE_2),
+        mutate_raises=CellRuntimeError("write for a probe failed"),
+    )
+
+    recorded = json.loads((pass_.out / "SA-0045" / "probes.json").read_text())
+    assert [entry["verdict"] for entry in recorded] == ["unproven", "unproven"]
+    assert [entry["baseline_failures"] for entry in recorded] == [[], []]
+    assert {entry["baseline_tool"] for entry in recorded} == {"stub tests gate"}
+
+
 def test_a_cell_that_failed_under_a_probe_is_unproven_not_the_end_of_the_pass(
     tmp_path, monkeypatch
 ):
@@ -827,6 +889,26 @@ def test_the_baseline_s_probe_verdicts_are_re_derivable():
     assert (score.survived, score.killed, score.unproven) == (8, 2, 0)
     assert score.fixtures == 8
     assert "8 verified vacuities" in RECORD.read_text()
+
+
+def test_the_baseline_pass_s_verdicts_carry_no_baseline_and_never_will():
+    """Item 94's own statement, as a fact of the suite rather than only of the
+    prose: adding the field cannot retroactively populate a pass already run.
+
+    A probe is authored by the lens per run — `SA-0054`'s re-run named two
+    *different* edits — so re-running yields different probes rather than an
+    audit of these. The 2 of 8 verified vacuities that rest on a cell baseline
+    nobody can inspect stay that way permanently, and a reader must be able to
+    *say so* rather than read the missing key as a baseline that was green.
+    """
+    unrecorded = 0
+    for fixture in corpus.load_corpus(FIXTURES):
+        for entry in json.loads(
+            (BASELINE / fixture.spec_id / "probes.json").read_text()
+        ):
+            assert "baseline_failures" not in entry, fixture.spec_id
+            unrecorded += 1
+    assert unrecorded == 10
 
 
 def test_every_shipped_fixture_probed_at_baseline_has_a_probe_record():

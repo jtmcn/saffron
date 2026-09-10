@@ -61,6 +61,35 @@ def _no_longer_collected(baseline: GateResult, mutated: GateResult) -> list[str]
 
 
 @dataclass(frozen=True)
+class BaselineRecord:
+    """The suite a verdict is subtracted from, as it answered (item 94)."""
+
+    failures: tuple[str, ...]
+    """What was already red. `()` is a baseline that was read and was green."""
+    tool: str | None
+    collected: int | None
+    """On `GateResult.collected`'s terms: `None` for a gate that does not
+    enumerate, never `0`."""
+    summary: str
+    """The only field a baseline's skip count reaches."""
+
+    @classmethod
+    def of(cls, baseline: GateResult) -> BaselineRecord | None:
+        """`None` for an `error` or `skip`, which measured no failures — an
+        empty tuple there would read as a baseline that was green."""
+        if baseline.status not in ("pass", "fail"):
+            return None
+        return cls(
+            # ponytail: codes only, like `ProbeResult.failures`; the
+            # subtraction also keys on file and message.
+            failures=tuple(failure.code for failure in baseline.failures),
+            tool=baseline.tool,
+            collected=None if baseline.collected is None else len(baseline.collected),
+            summary=baseline.summary,
+        )
+
+
+@dataclass(frozen=True)
 class ProbeResult:
     """One probe, applied and asked."""
 
@@ -90,6 +119,9 @@ class ProbeResult:
     78-87s on the host, and the verdict kept nothing that could adjudicate it
     (`docs/superpowers/specs/2026-09-09-mutation-verified-capability-design.md`).
     Taken from the *mutated* run, which is the one the verdict is about."""
+    baseline: BaselineRecord | None = None
+    """The baseline in hand when the probe was checked. `None` only when there
+    was none, which is not a green one (`failures == ()`)."""
 
 
 def _repo_relative(file: str) -> str | None:
@@ -128,18 +160,25 @@ def check_probe(
     design spec calls non-optional, and a default would let a caller that
     forgot it measure with no refusal at all, silently.
     """
+    # Before any refusal, so a `None` baseline means the same thing whichever
+    # path returns: there was no baseline verdict to record.
+    record = BaselineRecord.of(baseline)
     target = _repo_relative(probe.file)
     if target is None:
         return ProbeResult(
-            "unproven", f"{probe.file} is not a relative path inside the tree"
+            "unproven",
+            f"{probe.file} is not a relative path inside the tree",
+            baseline=record,
         )
     if any(_under(target, prefix) for prefix in test_paths):
         # Otherwise satisfiable by construction — deleting an assertion
         # survives trivially. Refused before `mutate`, so nothing is written.
         return ProbeResult(
-            "unproven", f"{probe.file} is a test; a probe must target source"
+            "unproven",
+            f"{probe.file} is a test; a probe must target source",
+            baseline=record,
         )
-    if baseline.status not in ("pass", "fail"):
+    if record is None:
         # `error` or `skip`: a baseline that measured no failures would read
         # every probe against it as a kill of tests that never ran.
         return ProbeResult(
@@ -152,7 +191,7 @@ def check_probe(
         if refusal is not None:
             # One of `source_mutated`'s six refusals. None is evidence about
             # the lens, and the tree is untouched.
-            return ProbeResult("unproven", refusal)
+            return ProbeResult("unproven", refusal, baseline=record)
         # The whole suite, never a subset, unlike `witness_gate`'s one named
         # witness: a probe's question is whether *anything* notices.
         mutated = run_tests([])
@@ -164,6 +203,7 @@ def check_probe(
             "unproven",
             f"the tests gate reported `{mutated.status}` under the probe: "
             f"{mutated.summary}",
+            baseline=record,
         )
     # From here a gate answered, so every verdict below carries what answered
     # it. By name, not splatted: `ty` reads a splat as filling `failures`.
@@ -181,6 +221,7 @@ def check_probe(
             tool=tool,
             collected=collected,
             summary=summary,
+            baseline=record,
         )
 
     new = subtract_baseline([mutated], [baseline])
@@ -191,6 +232,7 @@ def check_probe(
             tool=tool,
             collected=collected,
             summary=summary,
+            baseline=record,
         )
     return ProbeResult(
         "killed",
@@ -199,4 +241,5 @@ def check_probe(
         tool=tool,
         collected=collected,
         summary=summary,
+        baseline=record,
     )
