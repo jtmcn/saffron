@@ -130,6 +130,17 @@ def _distinct(probes: list[Mutant]) -> list[Mutant]:
     return list({(p.file, p.find, p.replace): p for p in probes}.values())
 
 
+def _baseline_keys(record: probe_check.BaselineRecord | None) -> dict[str, object]:
+    """Flat, and `null` throughout when no baseline was in hand — never `[]`,
+    which is a baseline read and green."""
+    return {
+        "baseline_failures": None if record is None else list(record.failures),
+        "baseline_tool": None if record is None else record.tool,
+        "baseline_collected": None if record is None else record.collected,
+        "baseline_summary": None if record is None else record.summary,
+    }
+
+
 def _write_probes(
     out: Path, applied: list[tuple[Mutant, probe_check.ProbeResult]]
 ) -> None:
@@ -152,18 +163,8 @@ def _write_probes(
                     "tool": result.tool,
                     "collected": result.collected,
                     "summary": result.summary,
-                    # And what it was subtracted from (item 94). `null` is not
-                    # `[]`: a baseline nothing read, against one read and
-                    # green. A pass written before these keys carries neither,
-                    # and reads as the first.
-                    "baseline_failures": (
-                        None
-                        if result.baseline_failures is None
-                        else list(result.baseline_failures)
-                    ),
-                    "baseline_tool": result.baseline_tool,
-                    "baseline_collected": result.baseline_collected,
-                    "baseline_summary": result.baseline_summary,
+                    # And what it was subtracted from (item 94).
+                    **_baseline_keys(result.baseline),
                 }
                 for probe, result in applied
             ],
@@ -198,9 +199,15 @@ def _apply_probes(
         _write_probes(out, applied)
         print(f"  probe {result.verdict}: {result.reason}")
 
-    def all_unproven(pending: list[Mutant], reason: str) -> None:
+    def all_unproven(
+        pending: list[Mutant],
+        reason: str,
+        record: probe_check.BaselineRecord | None = None,
+    ) -> None:
         for probe in pending:
-            landed(probe, probe_check.ProbeResult("unproven", reason))
+            landed(
+                probe, probe_check.ProbeResult("unproven", reason, baseline=record)
+            )
 
     if not probes:
         # Before the baseline, which is a whole suite run (~15.6s measured) to
@@ -226,6 +233,9 @@ def _apply_probes(
         all_unproven(probes, f"the baseline tests gate could not run: {exc}")
         return [result for _probe, result in applied]
 
+    # Read before any probe, so every result below — raised or stopped — was
+    # checked against it and records it.
+    record = probe_check.BaselineRecord.of(baseline)
     for index, probe in enumerate(probes):
         try:
             result = probe_check.check_probe(
@@ -242,13 +252,16 @@ def _apply_probes(
             landed(
                 probe,
                 probe_check.ProbeResult(
-                    "unproven", f"the probe could not be applied or asked: {exc}"
+                    "unproven",
+                    f"the probe could not be applied or asked: {exc}",
+                    baseline=record,
                 ),
             )
             all_unproven(
                 probes[index + 1 :],
                 "an earlier probe left this cell's tree in an unknown state, "
                 "so nothing after it in this fixture was asked",
+                record,
             )
             break
         landed(probe, result)

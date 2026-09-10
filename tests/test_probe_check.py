@@ -358,21 +358,8 @@ def test_the_whole_suite_is_asked_not_a_subset():
 
 
 def test_a_verdict_records_the_baseline_it_was_subtracted_from():
-    """Item 94. A `survived` means "no new failure against the baseline", and
-    the baseline is the half the record dropped.
-
-    Measured, and the reason this exists: `SA-0063`'s head (`f76931df`) runs
-    `1502 passed` on the host and `1 failed, 1499 passed, 2 skipped` in the
-    cell at the same 1502 collected. The subtraction cancels that failure
-    correctly — no *new* failure — but whether it is in the very test that
-    would have caught the mutation is undecidable from a record that kept only
-    what survived the subtraction. Two of the baseline pass's eight verified
-    vacuities rest on a baseline of that kind.
-
-    The same three fields the mutated run already carries, mirrored: a
-    baseline that *skipped* the relevant test is the same defect wearing a
-    different hat, and only its summary line says so.
-    """
+    """Item 94: a baseline red or skipping in the cell cancels failures a
+    record of only the survivors cannot name. The shape is `SA-0063`'s."""
     baseline = GateResult(
         gate="tests",
         status="fail",
@@ -388,17 +375,17 @@ def test_a_verdict_records_the_baseline_it_was_subtracted_from():
         run_tests=lambda subset: baseline,
     )
     assert got.verdict == "survived"
-    assert got.baseline_failures == ("test_only_red_in_the_cell",)
-    assert got.baseline_tool == "pytest 8.4.1"
-    assert got.baseline_collected == 1502
-    assert got.baseline_summary == "1 failed, 1499 passed, 2 skipped in 14.02s"
+    assert got.baseline == probe_check.BaselineRecord(
+        failures=("test_only_red_in_the_cell",),
+        tool="pytest 8.4.1",
+        collected=1502,
+        summary="1 failed, 1499 passed, 2 skipped in 14.02s",
+    )
 
 
 def test_a_kill_names_the_baselines_failures_beside_the_new_ones():
-    """Both sets, and distinguishable. `failures` is what the probe added;
-    `baseline_failures` is what was already red — and the whole question item
-    94 asks is whether the cancelled one is the test that would have caught
-    the mutation. One list cannot answer it."""
+    """`failures` is what the probe added and the baseline's what was already
+    red; item 94 asks whether a cancelled one would have caught the probe."""
     got = _check(
         PROBE,
         baseline=_result("fail", (_fail("test_a"),)),
@@ -407,62 +394,71 @@ def test_a_kill_names_the_baselines_failures_beside_the_new_ones():
     )
     assert got.verdict == "killed"
     assert got.failures == ("test_b",)
-    assert got.baseline_failures == ("test_a",)
+    assert got.baseline == probe_check.BaselineRecord(
+        ("test_a",), "pytest 8.0.0", None, ""
+    )
 
 
-def test_a_green_baseline_is_empty_and_a_baseline_never_read_is_none():
-    """`None` is not `()`, and this pair is the whole reason the field is
-    auditable. `()` is a baseline that was read and was green; `None` is a
-    baseline nothing consulted — including every `probes.json` written before
-    this field existed. Collapsing them would read the baseline pass's eight
-    files as eight green baselines, which is the claim item 94 exists to
-    refuse."""
-    green = _check(
+GREEN = probe_check.BaselineRecord(
+    failures=(), tool="pytest 8.0.0", collected=None, summary=""
+)
+
+
+def test_a_green_baseline_records_no_failures_rather_than_none():
+    """`()` is a baseline read and green, `None` no baseline in hand.
+    Collapsing them reads the baseline pass's ten verdicts as ten green ones."""
+    got = _check(
         PROBE,
         baseline=_result("pass"),
         mutate=_applies(),
         run_tests=lambda subset: _result("pass"),
     )
-    assert green.verdict == "survived"
-    assert green.baseline_failures == ()
+    assert got.verdict == "survived"
+    assert got.baseline == GREEN
 
-    never_read = _check(
+
+@pytest.mark.parametrize(
+    "probe",
+    [
         Mutant(file="tests/test_report.py", find="assert x", replace=""),
+        Mutant(file="../outside.py", find="x", replace="y"),
+    ],
+    ids=["a test file", "outside the tree"],
+)
+def test_a_probe_refused_before_mutation_still_records_the_baseline_in_hand(probe):
+    """`None` means no baseline was in hand, on every path — a refusal that
+    dropped one would write a green baseline as never read."""
+    got = _check(
+        probe,
         baseline=_result("pass"),
         mutate=_applies(),
-        run_tests=lambda subset: pytest.fail("must not run a probe aimed at a test"),
+        run_tests=lambda subset: pytest.fail("must not run a refused probe"),
     )
-    assert never_read.verdict == "unproven"
-    assert never_read.baseline_failures is None
-    assert (never_read.baseline_tool, never_read.baseline_collected) == (None, None)
-    assert never_read.baseline_summary == ""
+    assert got.verdict == "unproven"
+    assert got.baseline == GREEN
 
 
-def test_an_errored_baseline_carries_no_identities_to_subtract():
-    """`error` is not `fail`. A gate that could not start measured no
-    failures, so an empty `baseline_failures` there would read as a baseline
-    that was green — the same collapse the test above refuses, reached by the
-    other door. The reason string already quotes the status."""
+@pytest.mark.parametrize("status", ["error", "skip"])
+def test_a_baseline_that_measured_nothing_records_none(status):
+    """`error` is not `fail`: a gate that did not run measured no failures,
+    so an empty tuple here would read as a baseline that was green."""
     got = _check(
         PROBE,
-        baseline=_result("error"),
+        baseline=_result(status),
         mutate=_applies(),
         run_tests=lambda subset: pytest.fail("must not run without a baseline"),
     )
     assert got.verdict == "unproven"
-    assert got.baseline_failures is None
+    assert got.baseline is None
 
 
-def test_the_baseline_fields_are_additive_and_a_result_built_without_them_stands():
-    """`harness/corpus.py`'s callers and `tests/test_corpus.py` build a
-    `ProbeResult` positionally from three values, and a pass already on disk
-    is re-read that way. The fields default rather than being required."""
+def test_the_baseline_field_is_additive_and_a_result_built_without_it_stands():
+    """`harness/corpus.py`'s callers build a `ProbeResult` positionally from
+    three values, and a pass already on disk is re-read that way."""
     built = probe_check.ProbeResult("killed", "2 new failure(s)", ("test_a",))
     assert (built.verdict, built.reason, built.failures) == (
         "killed",
         "2 new failure(s)",
         ("test_a",),
     )
-    assert built.baseline_failures is None
-    assert (built.baseline_tool, built.baseline_collected) == (None, None)
-    assert built.baseline_summary == ""
+    assert built.baseline is None

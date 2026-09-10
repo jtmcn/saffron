@@ -60,8 +60,8 @@ the remainder of **78**.
 Closed since the 2026-09-04 sort, and left in place because their numbers are
 cited: **74** is done (`SA-0063`, `SA-0064`); **88** is closed on a negative
 result (2026-09-08 — the gate summary was not the confound); **71** is
-two-thirds done and **78** is done in code — each item's own `Status` line says
-what is left.
+two-thirds done, **78** is done in code, and **94** has its recording half done
+and its explanation half open — each item's own `Status` line says what is left.
 (**59** is done — `SA-0052`, PR #118.)
 
 **93 and 94 sit with them** because they decide whether their numbers can be
@@ -5410,13 +5410,16 @@ instruction item 88 left on the one-fixture harness, now owed by its replacement
 
 ## 94. A probe's baseline failures are subtracted and then discarded
 
-**Status:** **done**, 2026-09-09, by hand — the recording half, which is what
-"done looks like" below specifies. `ProbeResult` carries `baseline_failures`,
-`baseline_tool`, `baseline_collected` and `baseline_summary`; `probes.json`
-writes all four. `None` is not `()` at the field and `null` is not `[]` on
-disk — a baseline nothing read against one read and green — and both spellings
-are pinned, because collapsing them reads the baseline pass's ten silent
-verdicts as ten green baselines.
+**Status:** **done bar the explanation**, 2026-09-09, by hand. The recording
+half, which is what "done looks like" below specifies, is done: `ProbeResult`
+carries a `BaselineRecord` — the baseline's failure identities, tool, collected
+count and summary line — and `probes.json` writes it as `baseline_failures`,
+`baseline_tool`, `baseline_collected` and `baseline_summary`. A `None` record
+is not one with no failures, and on disk `null` is not `[]`: no baseline in
+hand against one read and green. Every path records the baseline it had,
+refusals and a raise out of `check_probe` included, and both spellings are
+pinned, because collapsing them reads the baseline pass's ten silent verdicts
+as ten green baselines.
 
 **What is not done, and does not go quiet here:** the *explanation* for the two
 cell-only skips. `baseline_summary` is the line that will carry them from the
@@ -5425,8 +5428,8 @@ host reports `2 skipped` in the cell, and the unexplained 5.7x sits beside it.
 This item bought the record, not the reason.
 
 **The two unauditable vacuities stay unauditable, and that is now pinned rather
-than promised.** `test_the_baseline_passs_verdicts_carry_no_baseline_and_never_will`
-asserts every shipped verdict carries no baseline key and reads back as `None`.
+than promised.** `test_the_baseline_pass_s_verdicts_carry_no_baseline_and_never_will`
+asserts every shipped verdict carries no baseline key.
 The value was always entirely forward — the argument for landing it early.
 
 **Tier 1 — it bears on whether a `survived` verdict means anything.** Filed as
