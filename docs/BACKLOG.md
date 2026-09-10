@@ -5410,6 +5410,25 @@ instruction item 88 left on the one-fixture harness, now owed by its replacement
 
 ## 94. A probe's baseline failures are subtracted and then discarded
 
+**Status:** **done**, 2026-09-09, by hand — the recording half, which is what
+"done looks like" below specifies. `ProbeResult` carries `baseline_failures`,
+`baseline_tool`, `baseline_collected` and `baseline_summary`; `probes.json`
+writes all four. `None` is not `()` at the field and `null` is not `[]` on
+disk — a baseline nothing read against one read and green — and both spellings
+are pinned, because collapsing them reads the baseline pass's ten silent
+verdicts as ten green baselines.
+
+**What is not done, and does not go quiet here:** the *explanation* for the two
+cell-only skips. `baseline_summary` is the line that will carry them from the
+next pass onward; nothing yet says why a tree that runs `1502 passed` on the
+host reports `2 skipped` in the cell, and the unexplained 5.7x sits beside it.
+This item bought the record, not the reason.
+
+**The two unauditable vacuities stay unauditable, and that is now pinned rather
+than promised.** `test_the_baseline_passs_verdicts_carry_no_baseline_and_never_will`
+asserts every shipped verdict carries no baseline key and reads back as `None`.
+The value was always entirely forward — the argument for landing it early.
+
 **Tier 1 — it bears on whether a `survived` verdict means anything.** Filed as
 tier 3 on 2026-09-09 and moved the same day, when the measurement below turned it
 from an auditability gap into a correctness one.

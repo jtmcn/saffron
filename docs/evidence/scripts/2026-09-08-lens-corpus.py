@@ -152,6 +152,18 @@ def _write_probes(
                     "tool": result.tool,
                     "collected": result.collected,
                     "summary": result.summary,
+                    # And what it was subtracted from (item 94). `null` is not
+                    # `[]`: a baseline nothing read, against one read and
+                    # green. A pass written before these keys carries neither,
+                    # and reads as the first.
+                    "baseline_failures": (
+                        None
+                        if result.baseline_failures is None
+                        else list(result.baseline_failures)
+                    ),
+                    "baseline_tool": result.baseline_tool,
+                    "baseline_collected": result.baseline_collected,
+                    "baseline_summary": result.baseline_summary,
                 }
                 for probe, result in applied
             ],

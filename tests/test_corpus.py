@@ -684,6 +684,44 @@ def test_every_probe_verdict_is_written_beside_the_run_json(tmp_path, monkeypatc
     assert recorded[0]["reason"]
 
 
+def test_a_written_verdict_carries_the_baseline_it_was_subtracted_from(
+    tmp_path, monkeypatch
+):
+    """Item 94. `probes.json` kept only what survived the subtraction, so a
+    `survived` over a baseline that was already red read identically to one
+    over a green suite.
+
+    The JSON boundary is where `None` and `()` could collapse, and it is the
+    assertion that matters here: a baseline read and green writes `[]`, and a
+    verdict that read none writes `null`. `probe_check` holds the semantics;
+    this holds that they reach disk intact.
+    """
+    pass_ = _drive(tmp_path, monkeypatch)
+
+    recorded = json.loads((pass_.out / "SA-0045" / "probes.json").read_text())
+    assert [entry["verdict"] for entry in recorded] == ["survived"]
+    assert recorded[0]["baseline_failures"] == []
+    assert recorded[0]["baseline_tool"] == "stub tests gate"
+
+
+def test_a_probe_that_read_no_baseline_writes_null_not_an_empty_list(
+    tmp_path, monkeypatch
+):
+    """The other half of the pair, and the one a reader of the shipped
+    baseline depends on: `null` is a baseline nothing consulted, `[]` one
+    consulted and green. A refusal before the suite runs must not write the
+    green spelling."""
+    pass_ = _drive(
+        tmp_path,
+        monkeypatch,
+        mutate_raises=CellRuntimeError("write for a probe failed"),
+    )
+
+    recorded = json.loads((pass_.out / "SA-0045" / "probes.json").read_text())
+    assert [entry["verdict"] for entry in recorded] == ["unproven"]
+    assert recorded[0]["baseline_failures"] is None
+
+
 def test_a_cell_that_failed_under_a_probe_is_unproven_not_the_end_of_the_pass(
     tmp_path, monkeypatch
 ):
@@ -827,6 +865,35 @@ def test_the_baseline_s_probe_verdicts_are_re_derivable():
     assert (score.survived, score.killed, score.unproven) == (8, 2, 0)
     assert score.fixtures == 8
     assert "8 verified vacuities" in RECORD.read_text()
+
+
+def test_the_baseline_passs_verdicts_carry_no_baseline_and_never_will():
+    """Item 94's own statement, as a fact of the suite rather than only of the
+    prose: adding the field cannot retroactively populate a pass already run.
+
+    A probe is authored by the lens per run — `SA-0054`'s re-run named two
+    *different* edits — so re-running yields different probes rather than an
+    audit of these. The 2 of 8 verified vacuities that rest on a cell baseline
+    nobody can inspect stay that way permanently, and a reader must be able to
+    *say so* rather than read the missing key as a baseline that was green.
+    """
+    unrecorded = 0
+    for fixture in corpus.load_corpus(FIXTURES):
+        for entry in json.loads(
+            (BASELINE / fixture.spec_id / "probes.json").read_text()
+        ):
+            assert "baseline_failures" not in entry, fixture.spec_id
+            unrecorded += 1
+            # The reader's side: absent reads as `None`, never as `()`.
+            assert (
+                probe_check.ProbeResult(
+                    entry["verdict"],
+                    entry["reason"],
+                    tuple(entry.get("failures") or ()),
+                ).baseline_failures
+                is None
+            )
+    assert unrecorded == 10
 
 
 def test_every_shipped_fixture_probed_at_baseline_has_a_probe_record():
