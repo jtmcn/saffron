@@ -342,6 +342,25 @@ def test_discover_specs_on_an_empty_directory_returns_nothing(tmp_path):
     assert discover_specs(tmp_path) == ([], [])
 
 
+def test_discovery_refuses_a_directory_that_is_not_there(tmp_path):
+    """A wrong base commit, a repo that never had the directory, or a path
+    assembled with the wrong join all produce a missing path. `Path.glob`
+    would answer that exactly as it answers an empty directory, so the scan
+    must refuse rather than report an empty queue."""
+    with pytest.raises(SpecError, match="does not exist"):
+        discover_specs(tmp_path / "nope" / "nothing")
+
+
+def test_discovery_refuses_a_path_that_is_not_a_directory(tmp_path):
+    """The same silent nothing arriving by a different route: a caller handed
+    a file where it meant a directory has made the same class of mistake as
+    one handed nothing at all."""
+    path = tmp_path / "not-a-directory.md"
+    path.write_text("---\nid: TE-1\ntitle: t\ntype: chore\n---\n")
+    with pytest.raises(SpecError, match="not a directory"):
+        discover_specs(path)
+
+
 def test_a_criterion_stops_at_prose_that_is_not_its_continuation():
     """Joining continuation lines must not absorb whatever sits between two
     checklist items. A criterion's text is what a refusal gate scans for path
