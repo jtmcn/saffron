@@ -86,16 +86,18 @@ The ontology's `prov:Agent` is wider — it includes the operator (`DESIGN.md` �
 _Avoid_: "the AI", "the bot", "the LLM". "Model" means a model identifier.
 
 **Delegate**: A model session the operator starts on the host, outside any cell, to
-act on their behalf, under their git identity and credentials. Saffron neither
+act on their behalf, under their git identity and credentials. The factory neither
 starts nor constrains it, and none of its work is recorded as a task's — the ledger
 cannot tell it from the operator. It is never the operator: a ratification or
 approval it types is still the operator's judgement. Plural, unlike the operator; a
-delegate's subagents are delegates too.
+delegate's subagents are delegates too, and every chain of them ends at the
+operator.
 > PROV-O's word, and PROV-O would call the implementer one as well — it too acts
-> on the operator's behalf, and both can work to a plan. What separates them is
-> what holds them to it: the implementer's spec is enforced outside its cell and
-> recorded as attempts; a plan handed to a delegate binds only as far as the
-> delegate follows it, and nothing records whether it did.
+> on the operator's behalf, directly or through a delegate, and both can work to a
+> plan. What separates them is what holds them to it: the implementer's plan is a
+> control artifact, validated outside its cell, and its work is recorded as
+> attempts; a plan handed to a delegate binds only as far as the delegate follows
+> it, and nothing records whether it did.
 
 _Avoid_: "Claude Code" (a product standing for a role), "the assistant", "the
 agent" (that is inside a cell), bare "session", "surrogate", and "the critic" or

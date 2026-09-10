@@ -219,11 +219,17 @@ _ATTEMPT = ":ph a saffron:Phase . :at a saffron:Attempt ; saffron:withinPhase :p
     ("graph", "components"),
     [
         (f"{_ACTING} :work prov:qualifiedAssociation [ prov:agent :s ] .", set()),
-        (":s a saffron:Delegate .", {SH.MinCountConstraintComponent}),
+        (":s a saffron:Delegate .", {SH.QualifiedMinCountConstraintComponent}),
+        # A subagent acts for the delegate that started it; the chain still ends
+        # at the operator.
         (
             ":s a saffron:Delegate ; prov:actedOnBehalfOf :t . "
             ":t a saffron:Delegate ; prov:actedOnBehalfOf :operator .",
-            {SH.ClassConstraintComponent},
+            set(),
+        ),
+        (
+            ":s a saffron:Delegate ; prov:actedOnBehalfOf :x . :x a prov:SoftwareAgent .",
+            {SH.QualifiedMinCountConstraintComponent},
         ),
         (
             ":s a saffron:Delegate, saffron:Operator ; prov:actedOnBehalfOf :operator .",
@@ -252,7 +258,8 @@ _ATTEMPT = ":ph a saffron:Phase . :at a saffron:Attempt ; saffron:withinPhase :p
     ids=[
         "unplanned",
         "no-principal",
-        "delegate-principal",
+        "subagent",
+        "chain-without-operator",
         "is-operator",
         "planned",
         "ratifies",
