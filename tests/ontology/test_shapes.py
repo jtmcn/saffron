@@ -305,13 +305,16 @@ def test_a_delegate_acts_for_the_operator_never_as_one_nor_in_an_attempt(
 
 
 _IMPL = ":i a saffron:ImplementerSession ; prov:actedOnBehalfOf :operator ."
+_WROTE_DIFF = f":df a saffron:Diff . {_ATTEMPT} prov:generated :df ;"
+_PROPOSED = f":sp a saffron:ScopeProposal . {_ATTEMPT} prov:generated :sp ;"
+_NOT_ATTEMPT = ":df a saffron:Diff . :work prov:generated :df ;"
 
 
 @pytest.mark.parametrize(
     ("graph", "components"),
     [
         (
-            f"{_IMPL} :p a saffron:Plan . {_ATTEMPT} prov:qualifiedAssociation "
+            f"{_IMPL} :p a saffron:Plan . {_WROTE_DIFF} prov:qualifiedAssociation "
             "[ prov:agent :i ; prov:hadPlan :p ] .",
             set(),
         ),
@@ -322,35 +325,73 @@ _IMPL = ":i a saffron:ImplementerSession ; prov:actedOnBehalfOf :operator ."
             set(),
         ),
         # Work outside an attempt is not what the plan governs.
-        (f"{_IMPL} :work prov:qualifiedAssociation [ prov:agent :i ] .", set()),
+        (
+            f"{_IMPL} {_NOT_ATTEMPT} prov:qualifiedAssociation [ prov:agent :i ] .",
+            set(),
+        ),
+        # A scope proposal ends the attempt before any plan exists (§5.3.1).
+        (f"{_IMPL} {_PROPOSED} prov:qualifiedAssociation [ prov:agent :i ] .", set()),
         (
             ":i a saffron:ImplementerSession .",
             {SH.QualifiedMinCountConstraintComponent},
         ),
         (
-            f"{_IMPL} {_ATTEMPT} prov:qualifiedAssociation [ prov:agent :i ] .",
+            ":i a saffron:ImplementerSession ; prov:actedOnBehalfOf :x . "
+            ":x a prov:SoftwareAgent .",
+            {SH.OrConstraintComponent, SH.QualifiedMinCountConstraintComponent},
+        ),
+        # The operator is reachable, but through an agent that is no delegate.
+        (
+            ":i a saffron:ImplementerSession ; prov:actedOnBehalfOf :l . "
+            ":l a saffron:CriticLens ; prov:actedOnBehalfOf :operator .",
+            {SH.OrConstraintComponent},
+        ),
+        (
+            f"{_IMPL} {_WROTE_DIFF} prov:qualifiedAssociation [ prov:agent :i ] .",
             {SH.QualifiedMaxCountConstraintComponent},
         ),
         # Any prov:Plan will not do: the plan is the one the host validated.
         (
-            f"{_IMPL} :p a prov:Plan . {_ATTEMPT} prov:qualifiedAssociation "
+            f"{_IMPL} :p a prov:Plan . {_WROTE_DIFF} prov:qualifiedAssociation "
             "[ prov:agent :i ; prov:hadPlan :p ] .",
             {SH.QualifiedMaxCountConstraintComponent},
         ),
         # The unqualified shortcut cannot carry a plan.
         (
-            f"{_IMPL} {_ATTEMPT} prov:wasAssociatedWith :i .",
+            f"{_IMPL} {_WROTE_DIFF} prov:wasAssociatedWith :i .",
             {SH.QualifiedMaxCountConstraintComponent},
         ),
+        # PROV-O's chain axiom entails the shortcut from the qualified form, so
+        # a reasoner's output asserts both.
+        (
+            f"{_IMPL} :p a saffron:Plan . {_WROTE_DIFF} prov:wasAssociatedWith :i ; "
+            "prov:qualifiedAssociation [ prov:agent :i ; prov:hadPlan :p ] .",
+            set(),
+        ),
+        # Another agent's association, so only the shortcut's rule reads its plan.
+        (
+            f"{_IMPL} :p a prov:Plan . {_WROTE_DIFF} prov:wasAssociatedWith :i ; "
+            "prov:qualifiedAssociation [ prov:agent :other ; prov:hadPlan :p ] .",
+            {SH.QualifiedMaxCountConstraintComponent},
+        ),
+        (f"{_IMPL} {_NOT_ATTEMPT} prov:wasAssociatedWith :i .", set()),
+        (f"{_IMPL} {_PROPOSED} prov:wasAssociatedWith :i .", set()),
     ],
     ids=[
         "planned",
         "through-delegate",
         "non-attempt",
+        "scope-proposal",
         "no-principal",
-        "unplanned-attempt",
+        "non-operator-principal",
+        "lens-between",
+        "unplanned-diff",
         "unvalidated-plan",
-        "unqualified-attempt",
+        "unqualified-diff",
+        "entailed-shortcut",
+        "unqualified-beside-unvalidated-plan",
+        "unqualified-non-attempt",
+        "unqualified-scope-proposal",
     ],
 )
 def test_the_implementer_acts_for_the_operator_and_works_each_attempt_to_its_plan(

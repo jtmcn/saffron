@@ -16,6 +16,7 @@
 :lens-contract    a saffron:CriticLens .
 :lens-blast       a saffron:CriticLens .
 :impl-t1 a saffron:ImplementerSession ; prov:actedOnBehalfOf :operator .
+:impl-t3 a saffron:ImplementerSession ; prov:actedOnBehalfOf :operator .
 :delegate-1 a saffron:Delegate ; prov:actedOnBehalfOf :operator .
 
 ## Gates, and the policy that declares them. Core gates are the vocabulary's own
@@ -151,7 +152,7 @@
     earl:result [ earl:outcome earl:failed ] .
 :rebut-t3-1 a saffron:Rebuttal ; prov:used :finding-t3-1 ;
     prov:qualifiedAssociation
-      [ a prov:Association ; prov:agent :impl-t1 ; prov:hadRole saffron:concedes ] ,
+      [ a prov:Association ; prov:agent :impl-t3 ; prov:hadRole saffron:concedes ] ,
       [ a prov:Association ; prov:agent :lens-blast ; prov:hadRole saffron:withdraws ] ,
       [ a prov:Association ; prov:agent :operator ; prov:hadRole saffron:agrees ] .
 :pr-t3 a saffron:PullRequest ; prov:wasDerivedFrom :diff-t3-1 .

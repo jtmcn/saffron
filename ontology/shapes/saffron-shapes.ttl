@@ -215,26 +215,40 @@ saffron:DelegateShape a sh:NodeShape ;
         sh:qualifiedValueShape [ sh:class saffron:Attempt ] ;
         sh:qualifiedMaxCount 0 ] .
 
-# The implementer's chain of principals ends at the operator, as a delegate's
-# does, and every attempt it works in carries the plan the host validated.
+# The implementer acts for the operator, directly or through a delegate, and
+# every attempt of its that wrote a diff carries the plan the host validated. A
+# scope proposal or a rejected plan ends an attempt with no diff (§5.3, §5.3.1).
+# ponytail: any saffron:Plan satisfies it, not the task's own; tying them needs SPARQL.
 saffron:ImplementerSessionShape a sh:NodeShape ;
     sh:targetClass saffron:ImplementerSession ;
+    sh:property [ sh:path prov:actedOnBehalfOf ;
+        sh:or ( [ sh:class saffron:Operator ] [ sh:class saffron:Delegate ] ) ] ;
     sh:property [ sh:path [ sh:oneOrMorePath prov:actedOnBehalfOf ] ;
         sh:qualifiedValueShape [ sh:class saffron:Operator ] ;
         sh:qualifiedMinCount 1 ] ;
-    # No association with an attempt lacks a saffron:Plan; any prov:Plan will not do.
+    # No association with such an attempt lacks a saffron:Plan; any prov:Plan will not do.
     sh:property [ sh:path [ sh:inversePath prov:agent ] ;
         sh:qualifiedValueShape [ sh:and (
             [ sh:property [ sh:path [ sh:inversePath prov:qualifiedAssociation ] ;
-                sh:qualifiedValueShape [ sh:class saffron:Attempt ] ;
+                sh:qualifiedValueShape [ sh:class saffron:Attempt ;
+                    sh:property [ sh:path prov:generated ;
+                        sh:qualifiedValueShape [ sh:class saffron:Diff ] ;
+                        sh:qualifiedMinCount 1 ] ] ;
                 sh:qualifiedMinCount 1 ] ]
             [ sh:not [ sh:property [ sh:path prov:hadPlan ;
                 sh:qualifiedValueShape [ sh:class saffron:Plan ] ;
                 sh:qualifiedMinCount 1 ] ] ] ) ] ;
         sh:qualifiedMaxCount 0 ] ;
-    # The unqualified shortcut cannot carry a plan, so an implementer's attempt is qualified.
+    # The shortcut cannot carry a plan, so it stands only beside a qualified form
+    # that does — which PROV-O's chain axiom entails it from.
     sh:property [ sh:path [ sh:inversePath prov:wasAssociatedWith ] ;
-        sh:qualifiedValueShape [ sh:class saffron:Attempt ] ;
+        sh:qualifiedValueShape [ sh:class saffron:Attempt ;
+            sh:property [ sh:path prov:generated ;
+                sh:qualifiedValueShape [ sh:class saffron:Diff ] ;
+                sh:qualifiedMinCount 1 ] ;
+            sh:not [ sh:property [ sh:path ( prov:qualifiedAssociation prov:hadPlan ) ;
+                sh:qualifiedValueShape [ sh:class saffron:Plan ] ;
+                sh:qualifiedMinCount 1 ] ] ] ;
         sh:qualifiedMaxCount 0 ] .
 
 # An envelope is a reading bound and is never enforced against a diff (§3). It

@@ -346,8 +346,8 @@ _Avoid_: "the reviewer" (that's the operator), "QA", "the checker".
 
 **Implementer**: The session that holds write tools during IMPLEMENT and REBUT. It
 acts on the operator's behalf, directly or through the delegate that started the
-task, and every attempt it works in carries the plan validated at the plan
-checkpoint.
+task, and every diff it writes is written to the plan validated at the plan
+checkpoint. An attempt that ends in a scope proposal writes neither.
 _Avoid_: "the coder", "the writer", "the worker".
 
 **Lens**: One critic perspective with a bounded remit — correctness & data
