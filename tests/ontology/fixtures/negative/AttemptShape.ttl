@@ -1,7 +1,7 @@
-@prefix saffron: <https://saffron.dev/ns#> .
+@prefix factory: <urn:software-factory:ns#> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
 @prefix earl: <http://www.w3.org/ns/earl#> .
-@prefix : <https://saffron.dev/data/> .
+@prefix : <urn:software-factory:data:> .
 
 # An attempt number without a phase — "attempt 3" of what?
-:a a saffron:Attempt ; saffron:n 3 .
+:a a factory:Attempt ; factory:n 3 .

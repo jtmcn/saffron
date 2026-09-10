@@ -1,8 +1,8 @@
 run,gate,everRan,soleFailures
-https://saffron.dev/data/run-1,https://saffron.dev/data/g-lint,true,1
-https://saffron.dev/data/run-1,https://saffron.dev/data/g-types,true,1
-https://saffron.dev/data/run-1,https://saffron.dev/data/g-nonet,false,0
-https://saffron.dev/data/run-1,https://saffron.dev/data/g-tests,true,0
-https://saffron.dev/data/run-1,https://saffron.dev/ns#census,true,0
-https://saffron.dev/data/run-1,https://saffron.dev/ns#scope,true,0
-https://saffron.dev/data/run-1,https://saffron.dev/ns#size,true,0
+urn:software-factory:data:run-1,urn:software-factory:data:g-lint,true,1
+urn:software-factory:data:run-1,urn:software-factory:data:g-types,true,1
+urn:software-factory:data:run-1,urn:software-factory:data:g-nonet,false,0
+urn:software-factory:data:run-1,urn:software-factory:data:g-tests,true,0
+urn:software-factory:data:run-1,urn:software-factory:ns#census,true,0
+urn:software-factory:data:run-1,urn:software-factory:ns#scope,true,0
+urn:software-factory:data:run-1,urn:software-factory:ns#size,true,0

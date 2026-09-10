@@ -1,8 +1,8 @@
-@prefix saffron: <https://saffron.dev/ns#> .
+@prefix factory: <urn:software-factory:ns#> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
 @prefix earl: <http://www.w3.org/ns/earl#> .
-@prefix : <https://saffron.dev/data/> .
+@prefix : <urn:software-factory:data:> .
 
 # "chore" is not one of the three spec types.
-:s a saffron:Spec ; saffron:specType :chore ; saffron:hasCriterion :ac .
-:ac a saffron:AcceptanceCriterion .
+:s a factory:Spec ; factory:specType :chore ; factory:hasCriterion :ac .
+:ac a factory:AcceptanceCriterion .

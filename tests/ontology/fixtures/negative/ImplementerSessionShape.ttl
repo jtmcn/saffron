@@ -1,12 +1,12 @@
-@prefix saffron: <https://saffron.dev/ns#> .
+@prefix factory: <urn:software-factory:ns#> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
-@prefix : <https://saffron.dev/data/> .
+@prefix : <urn:software-factory:data:> .
 
 # An implementer's diff with no plan behind it. The plan checkpoint opens
 # IMPLEMENT, so no diff is written before a plan is validated.
-:operator a saffron:Operator .
-:impl a saffron:ImplementerSession ; prov:actedOnBehalfOf :operator .
-:ph a saffron:Phase .
-:d a saffron:Diff .
-:at a saffron:Attempt ; saffron:withinPhase :ph ; saffron:n 1 ; prov:generated :d ;
+:operator a factory:Operator .
+:impl a factory:ImplementerSession ; prov:actedOnBehalfOf :operator .
+:ph a factory:Phase .
+:d a factory:Diff .
+:at a factory:Attempt ; factory:withinPhase :ph ; factory:n 1 ; prov:generated :d ;
     prov:qualifiedAssociation [ prov:agent :impl ] .

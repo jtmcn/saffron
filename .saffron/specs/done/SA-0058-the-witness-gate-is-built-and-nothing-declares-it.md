@@ -75,7 +75,7 @@ acceptance:
   and read by nobody. `witness` exists and no attempt runs it.
 - **Its blocking level is undecided in code.** §5.4.1 fixes it as advisory at
   `standard` and blocking at `elevated`; nothing implements that, and
-  `saffron:CoreGateBlockingShape` is one of the two shape lists `CLAUDE.md`
+  `factory:CoreGateBlockingShape` is one of the two shape lists `CLAUDE.md`
   says stays hand-maintained precisely because the vocabulary cannot imply it.
 
 ## Two things this spec decides by choosing a blocking level

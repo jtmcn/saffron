@@ -51,7 +51,7 @@ is currently unenforceable, because nothing says what "reconstructible" means.
 
 ## Acceptance criteria
 
-- [ ] `ontology/saffron.ttl` exists, is valid Turtle, and parses under `pyoxigraph`
+- [ ] `ontology/factory.ttl` exists, is valid Turtle, and parses under `pyoxigraph`
       with no network access
 - [ ] Batches, runs, tasks, phases, attempts, and gate suites are modelled as
       `prov:Activity`; specs, `plan.json`, `scope.json`, diffs, gate output, and
@@ -65,9 +65,9 @@ is currently unenforceable, because nothing says what "reconstructible" means.
 - [ ] Acceptance criteria are first-class entities that a critic assessment can
       attach to individually
 - [ ] **No dead terms.** `tests/ontology/test_no_dead_terms.py` asserts that every
-      term in the `saffron:` namespace is referenced by at least one query in
+      term in the `factory:` namespace is referenced by at least one query in
       `ontology/queries/` or at least one shape in `ontology/shapes/`. A term that
-      exists only in `saffron.ttl` and the fixture graph is unjustified and must be
+      exists only in `factory.ttl` and the fixture graph is unjustified and must be
       deleted, not commented
 - [ ] SHACL shapes in `ontology/shapes/` constrain the vocabulary; every shape has
       at least one *negative* fixture that it correctly rejects
@@ -160,5 +160,5 @@ as a pytest. Do not add a script under `gates/`; that path is outside `touches` 
 would fail the `scope` gate.
 
 **On the `revert` gate.** Stashing the source hunks here means removing
-`saffron.ttl` and the shapes; the shape and query tests must fail without them.
+`factory.ttl` and the shapes; the shape and query tests must fail without them.
 Tests that pass against an empty graph will be caught.

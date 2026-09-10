@@ -1,4 +1,4 @@
-"""Every term in the `saffron:` namespace is referenced by a query or a shape.
+"""Every term in the `factory:` namespace is referenced by a query or a shape.
 
 The failure this exists to catch is an isomorphic re-encoding of the §4.1 ledger
 — one class per table, one property per column — which parses, validates, and is
@@ -14,7 +14,7 @@ from ontology_paths import NS, QUERIES, SHAPES, VOCABULARY
 
 # The hyphen is load-bearing: `no-network` is a gate role, and a regex that
 # stopped at the hyphen read its shape reference as a mention of `no`.
-TERM = re.compile(r"saffron:([A-Za-z_][A-Za-z0-9_-]*)")
+TERM = re.compile(r"factory:([A-Za-z_][A-Za-z0-9_-]*)")
 
 
 def terms_in(text: str) -> set[str]:
@@ -68,5 +68,5 @@ def test_the_check_would_catch_a_new_dead_term():
 
 
 def test_a_term_named_only_in_a_comment_is_still_dead():
-    assert terms_in("# saffron:Ghost is genuinely useful, honest") == set()
-    assert terms_in("saffron:Ghost a owl:Class .") == {"Ghost"}
+    assert terms_in("# factory:Ghost is genuinely useful, honest") == set()
+    assert terms_in("factory:Ghost a owl:Class .") == {"Ghost"}

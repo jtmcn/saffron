@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Declaring a core gate in `ontology/saffron.ttl` alone updates `CONTEXT.md` and the SHACL shapes from it, with every ontology check green — then run the experiment `DESIGN.md` Appendix O specifies, which decides whether anything further is built.
+**Goal:** Declaring a core gate in `ontology/factory.ttl` alone updates `CONTEXT.md` and the SHACL shapes from it, with every ontology check green — then run the experiment `DESIGN.md` Appendix O specifies, which decides whether anything further is built.
 
-**Architecture:** A generator reads `ontology/saffron.ttl` and rewrites two derived surfaces: the enumerations in `CONTEXT.md`'s closed-set definitions, and the `sh:in` lists in `ontology/shapes/saffron-shapes.ttl`. A drift test asserts the committed files equal the render. Nothing under `saffron/` imports the generator, and no runtime dependency is added.
+**Architecture:** A generator reads `ontology/factory.ttl` and rewrites two derived surfaces: the enumerations in `CONTEXT.md`'s closed-set definitions, and the `sh:in` lists in `ontology/shapes/factory-shapes.ttl`. A drift test asserts the committed files equal the render. Nothing under `saffron/` imports the generator, and no runtime dependency is added.
 
 **Tech Stack:** Python `>=3.12` (`pyproject.toml`; `[tool.ty.environment]` pins `3.12`, so the generator must not use 3.13+ syntax), `rdflib` and `pyoxigraph` (already dev-only deps), pytest, `uv`.
 
@@ -16,7 +16,7 @@
 - **`CONTEXT.md` is injected into agent prompts** by `saffron/agents/context.py`. Do not add marker comments, HTML, or any generator scaffolding to it — the file must read exactly as it does now to a human and to an agent. The generator locates its regions by the existing bold term.
 - **The `shacl` gate is blocking** (`.saffron/gates/shacl.py`) and validates every tracked `.ttl` against `ontology/shapes/`. A shapes file that fails SHACL fails the gate suite.
 - **Bare "suite" means the gate suite** (`CONTEXT.md`). The repo's own tests are always "the test suite".
-- **A new test is not trusted until it has been run against the unfixed code** — or, for one guarding a property already true, against a mutant that breaks it (CLAUDE.md). **A mutant must name a term that is undeclared everywhere.** `saffron:revert` is not one: `73c2b9f` (PR #112) declared it in all three surfaces, so appending it appends a duplicate triple and the test suite stays green — measured, `74 passed`. Every mutant below uses `saffron:probe`, which is declared nowhere.
+- **A new test is not trusted until it has been run against the unfixed code** — or, for one guarding a property already true, against a mutant that breaks it (CLAUDE.md). **A mutant must name a term that is undeclared everywhere.** `factory:revert` is not one: `73c2b9f` (PR #112) declared it in all three surfaces, so appending it appends a duplicate triple and the test suite stays green — measured, `74 passed`. Every mutant below uses `factory:probe`, which is declared nowhere.
 - **Commit subjects are lowercase `type(scope): what changed`**, written about the defect rather than the file.
 - **"Drift test", not "drift gate".** It is a pytest test riding the existing blocking `tests` gate, not a new `.saffron/gates/` executable. That choice is deliberate — it inherits the `tool` field by execution (`pytest --version`), which a hand-written gate would have to obtain itself (§5.4, Appendix H). The cost is that the operator sees "some test failed" rather than a distinct `gate` name in the ledger; if that matters later, promoting it is a separate task. The spec calls it a gate in the loose sense; this plan builds a test.
 - **Phase B is a gate.** Tasks 7+ do not exist until it returns, and its pass condition is `DESIGN.md` Appendix O's, not this plan's.
@@ -31,7 +31,7 @@
 | `tests/ontology/test_render.py` (create) | Unit tests for member extraction and both renderers. |
 | `tests/ontology/test_generated_surfaces_are_current.py` (create) | The drift test: committed files equal the render. |
 | `CONTEXT.md` (becomes generated; **no diff in Phase A**) | Five enumerations become generated. Prose untouched. A faithful generator changes zero bytes, which is Task 2's proof. |
-| `ontology/shapes/saffron-shapes.ttl` (becomes generated; **no diff in Phase A**), lines 81–90 | Two `sh:in` lists become generated. |
+| `ontology/shapes/factory-shapes.ttl` (becomes generated; **no diff in Phase A**), lines 81–90 | Two `sh:in` lists become generated. |
 | `CLAUDE.md` (modify) | One sentence: `CONTEXT.md` stops being authoritative for the five generated sets (spec part 6, Task 6). |
 | `.saffron/policy.yaml` (modify) | `ontology/render.py` joins `integrity.gate_config` (Task 4). |
 | `docs/superpowers/plans/2026-09-02-ontology-authoritative.md` | This plan; Phase B's answers are appended to it. |
@@ -51,7 +51,7 @@
 - Test: `tests/ontology/test_render.py`
 
 **Interfaces:**
-- Produces: `members(class_name: str, *, vocabulary: Path) -> list[str]` — IRI local names of every `?s a saffron:<class_name>`, ordered by first byte offset of `saffron:<name>` in the vocabulary text.
+- Produces: `members(class_name: str, *, vocabulary: Path) -> list[str]` — IRI local names of every `?s a factory:<class_name>`, ordered by first byte offset of `factory:<name>` in the vocabulary text.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -61,7 +61,7 @@ from ontology_paths import ONTOLOGY, VOCABULARY
 
 from ontology import render
 
-SHAPES_FILE = ONTOLOGY / "shapes" / "saffron-shapes.ttl"
+SHAPES_FILE = ONTOLOGY / "shapes" / "factory-shapes.ttl"
 
 
 def test_members_are_returned_in_vocabulary_source_order(tmp_path):
@@ -74,12 +74,12 @@ def test_members_are_returned_in_vocabulary_source_order(tmp_path):
     declaring a ninth core gate would need a hand edit here. The real order is
     covered end to end by the zero-diff test.
     """
-    vocabulary = tmp_path / "saffron.ttl"
+    vocabulary = tmp_path / "factory.ttl"
     vocabulary.write_text(
-        "@prefix saffron: <https://saffron.dev/ns#> .\n"
-        "saffron:zulu a saffron:CoreGate .\n"
-        "saffron:alpha a saffron:CoreGate .\n"
-        "saffron:mike a saffron:CoreGate .\n"
+        "@prefix factory: <urn:software-factory:ns#> .\n"
+        "factory:zulu a factory:CoreGate .\n"
+        "factory:alpha a factory:CoreGate .\n"
+        "factory:mike a factory:CoreGate .\n"
     )
     assert render.members("CoreGate", vocabulary=vocabulary) == [
         "zulu",
@@ -105,7 +105,7 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'ontology'`
 
 ```python
 # ontology/render.py
-"""Renders the surfaces derived from `ontology/saffron.ttl`.
+"""Renders the surfaces derived from `ontology/factory.ttl`.
 
 Dev-only and deliberately outside `saffron/`: `pyproject.toml` states that
 nothing under `saffron/` imports a graph library, and this module imports two.
@@ -118,11 +118,11 @@ from pathlib import Path
 
 import rdflib
 
-NS = "https://saffron.dev/ns#"
+NS = "urn:software-factory:ns#"
 
 
 def members(class_name: str, *, vocabulary: Path) -> list[str]:
-    """Local names of every instance of `saffron:<class_name>`, in the order
+    """Local names of every instance of `factory:<class_name>`, in the order
     they first appear in the vocabulary's own text.
 
     Source order, not graph order: rdflib iterates unordered, and the committed
@@ -136,7 +136,7 @@ def members(class_name: str, *, vocabulary: Path) -> list[str]:
     ]
 
     def first_offset(name: str) -> int:
-        found = re.search(rf"saffron:{re.escape(name)}\b", text)
+        found = re.search(rf"factory:{re.escape(name)}\b", text)
         return found.start() if found else len(text)
 
     return sorted(names, key=first_offset)
@@ -372,7 +372,7 @@ git commit -m "feat(ontology): the glossary's enumerations render from the vocab
 
 ### Task 3: Render the shapes' `sh:in` lists
 
-`ontology/shapes/saffron-shapes.ttl:81-90` is the third copy of two of these sets, and it is enforced by a **blocking** gate. Without this task, declaring a gate in the vocabulary still fails `test_shapes::test_the_lifecycle_graph_conforms` and the `shacl` gate.
+`ontology/shapes/factory-shapes.ttl:81-90` is the third copy of two of these sets, and it is enforced by a **blocking** gate. Without this task, declaring a gate in the vocabulary still fails `test_shapes::test_the_lifecycle_graph_conforms` and the `shacl` gate.
 
 **Files:**
 - Modify: `ontology/render.py`
@@ -399,7 +399,7 @@ def test_the_in_list_wraps_at_three_terms_per_line():
         vocabulary=VOCABULARY,
         _members={"CoreGate": ["a", "b", "c", "d"]},
     )
-    assert "sh:in ( saffron:a saffron:b saffron:c\n            saffron:d ) ." in out
+    assert "sh:in ( factory:a factory:b factory:c\n            factory:d ) ." in out
 ```
 
 - [ ] **Step 2: Run it and watch it fail**
@@ -435,11 +435,11 @@ def render_shapes(text: str, *, vocabulary: Path, _members=None) -> str:
             else members(class_name, vocabulary=vocabulary)
         )
         rows = [
-            " ".join(f"saffron:{n}" for n in names[i : i + _PER_LINE])
+            " ".join(f"factory:{n}" for n in names[i : i + _PER_LINE])
             for i in range(0, len(names), _PER_LINE)
         ]
         body = f"\n{_INDENT}".join(rows)
-        start = text.index(f"saffron:{shape}")
+        start = text.index(f"factory:{shape}")
         open_at = text.index("sh:in (", start)
         close_at = text.index(")", open_at)
         text = text[:open_at] + f"sh:in ( {body} " + text[close_at:]
@@ -493,13 +493,13 @@ from ontology_paths import ONTOLOGY, VOCABULARY
 from ontology import render
 
 CONTEXT = ONTOLOGY.parent / "CONTEXT.md"
-SHAPES_FILE = ONTOLOGY / "shapes" / "saffron-shapes.ttl"
+SHAPES_FILE = ONTOLOGY / "shapes" / "factory-shapes.ttl"
 
 
 def test_context_md_is_current_with_the_vocabulary():
     committed = CONTEXT.read_text()
     assert render.render_context(committed, vocabulary=VOCABULARY) == committed, (
-        "CONTEXT.md and ontology/saffron.ttl disagree. If the vocabulary is "
+        "CONTEXT.md and ontology/factory.ttl disagree. If the vocabulary is "
         "right, run `uv run python -m ontology.render`; if CONTEXT.md was hand-"
         "edited, that edit belongs in the vocabulary — regenerating discards it."
     )
@@ -508,7 +508,7 @@ def test_context_md_is_current_with_the_vocabulary():
 def test_the_shapes_are_current_with_the_vocabulary():
     committed = SHAPES_FILE.read_text()
     assert render.render_shapes(committed, vocabulary=VOCABULARY) == committed, (
-        "saffron-shapes.ttl and ontology/saffron.ttl disagree. If the "
+        "factory-shapes.ttl and ontology/factory.ttl disagree. If the "
         "vocabulary is right, run `uv run python -m ontology.render`; if the "
         "shapes were hand-edited, that edit belongs in the vocabulary."
     )
@@ -526,13 +526,13 @@ This guards a property that is already true, so it must be run against a mutant 
 ```bash
 git worktree add -q --detach /tmp/drift-check HEAD
 cd /tmp/drift-check
-printf '\nsaffron:probe a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .\n' >> ontology/saffron.ttl
+printf '\nfactory:probe a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking .\n' >> ontology/factory.ttl
 uv run pytest tests/ontology/test_generated_surfaces_are_current.py -v
 ```
 
 Expected: BOTH tests FAIL (2 of 2 in that file), each naming the regenerate command.
 
-**`probe`, not `revert`.** `saffron:revert` is already declared in all three surfaces (`73c2b9f`), so appending it appends a duplicate triple: measured on a worktree at this branch's HEAD, `tests/ontology/` reports **`74 passed`** and nothing fails. A mutant that does not mutate would let this test — the whole point of Phase A — be committed having never been seen to fail. `saffron:probe` is declared nowhere, and appending it fails four checks at HEAD (`test_no_dead_terms` ×2, `test_shapes::test_the_lifecycle_graph_conforms`, `test_vocabulary_agrees_with_context[Core gates-CoreGate]`), which is the design's measurement reproduced. Then:
+**`probe`, not `revert`.** `factory:revert` is already declared in all three surfaces (`73c2b9f`), so appending it appends a duplicate triple: measured on a worktree at this branch's HEAD, `tests/ontology/` reports **`74 passed`** and nothing fails. A mutant that does not mutate would let this test — the whole point of Phase A — be committed having never been seen to fail. `factory:probe` is declared nowhere, and appending it fails four checks at HEAD (`test_no_dead_terms` ×2, `test_shapes::test_the_lifecycle_graph_conforms`, `test_vocabulary_agrees_with_context[Core gates-CoreGate]`), which is the design's measurement reproduced. Then:
 
 ```bash
 git worktree remove --force /tmp/drift-check
@@ -545,10 +545,10 @@ git worktree remove --force /tmp/drift-check
 
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
-    vocabulary = root / "ontology" / "saffron.ttl"
+    vocabulary = root / "ontology" / "factory.ttl"
     for path, fn in (
         (root / "CONTEXT.md", render_context),
-        (root / "ontology" / "shapes" / "saffron-shapes.ttl", render_shapes),
+        (root / "ontology" / "shapes" / "factory-shapes.ttl", render_shapes),
     ):
         path.write_text(fn(path.read_text(), vocabulary=vocabulary))
 
@@ -583,7 +583,7 @@ git commit -m "feat(ontology): a closed set split across three files drifts sile
 
 ### Task 5: The success criterion, end to end
 
-Proves the thing the design exists to deliver. Verified by hand on a worktree at this branch's HEAD: appending `saffron:probe` alone fails four checks, and updating all three surfaces makes `tests/ontology/` green — the generated `sh:in` entry is itself the reader that satisfies `test_no_dead_terms`.
+Proves the thing the design exists to deliver. Verified by hand on a worktree at this branch's HEAD: appending `factory:probe` alone fails four checks, and updating all three surfaces makes `tests/ontology/` green — the generated `sh:in` entry is itself the reader that satisfies `test_no_dead_terms`.
 
 **Files:**
 - Test: `tests/ontology/test_render.py`
@@ -592,7 +592,7 @@ Proves the thing the design exists to deliver. Verified by hand on a worktree at
 
 ```python
 def test_declaring_a_core_gate_in_the_vocabulary_alone_updates_both_surfaces(tmp_path):
-    """The measured defect, closed. Declaring `saffron:probe` in the vocabulary
+    """The measured defect, closed. Declaring `factory:probe` in the vocabulary
     alone fails four checks with no repair a cell can make; here one edit
     propagates to both derived surfaces.
 
@@ -601,14 +601,14 @@ def test_declaring_a_core_gate_in_the_vocabulary_alone_updates_both_surfaces(tmp
     gate name has to be one the repo has never seen.
 
     The generated sh:in entry is also what gives the new term a reader —
-    test_no_dead_terms regexes `saffron:<name>` over shapes/*.ttl — so this
+    test_no_dead_terms regexes `factory:<name>` over shapes/*.ttl — so this
     does not exempt the term from the dead-term rule, it satisfies it.
     """
     context = (ONTOLOGY.parent / "CONTEXT.md").read_text()
-    vocab = tmp_path / "saffron.ttl"
+    vocab = tmp_path / "factory.ttl"
     vocab.write_text(
         VOCABULARY.read_text()
-        + "\nsaffron:probe a saffron:CoreGate ; saffron:blockingAt saffron:alwaysBlocking .\n"
+        + "\nfactory:probe a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking .\n"
     )
     assert "probe" in render.members("CoreGate", vocabulary=vocab)
 
@@ -618,7 +618,7 @@ def test_declaring_a_core_gate_in_the_vocabulary_alone_updates_both_surfaces(tmp
     assert render.render_context(context, vocabulary=VOCABULARY) == context
 
     shapes_out = render.render_shapes(SHAPES_FILE.read_text(), vocabulary=vocab)
-    assert "saffron:probe" in shapes_out
+    assert "factory:probe" in shapes_out
 ```
 
 - [ ] **Step 2: Run it**
@@ -645,9 +645,9 @@ Expected: a `pass` result, `no type errors`. Same reason, and not hypothetical: 
 
 - [ ] **Step 5: Record that `SA-0044`'s workaround is spent**
 
-`SA-0044` is a **completed** spec at `.saffron/specs/done/SA-0044-the-anti-theater-gate-is-unbuilt.md`. Its "Notes for the agent" tells the agent not to declare `saffron:revert` because the sides could not be reconciled from inside a cell, and it already said the operator would make the three edits together — which PR #112 did.
+`SA-0044` is a **completed** spec at `.saffron/specs/done/SA-0044-the-anti-theater-gate-is-unbuilt.md`. Its "Notes for the agent" tells the agent not to declare `factory:revert` because the sides could not be reconciled from inside a cell, and it already said the operator would make the three edits together — which PR #112 did.
 
-**Append one line; do not delete the paragraph.** Deleting it edits the record of why a shipped task was scoped as it was, which is exactly the kind of quiet history rewrite `docs/evidence/` exists to prevent. Add after the paragraph beginning **"Do not declare the gate in `ontology/saffron.ttl`."**:
+**Append one line; do not delete the paragraph.** Deleting it edits the record of why a shipped task was scoped as it was, which is exactly the kind of quiet history rewrite `docs/evidence/` exists to prevent. Add after the paragraph beginning **"Do not declare the gate in `ontology/factory.ttl`."**:
 
 > Discharged: PR #112 made the three edits by hand, and Phase A of `2026-09-02-ontology-authoritative.md` makes them one command.
 
@@ -674,7 +674,7 @@ Spec part 6 requires this and calls it the point: *"an authoritative file that i
 
 One sentence, after the existing pair — the budget is ~200 lines and the file is the standing instruction surface for cells:
 
-> For the five closed sets `tests/ontology/test_vocabulary_agrees_with_context.py` names, `ontology/saffron.ttl` is authoritative and `CONTEXT.md` is generated from it: edit the vocabulary and run `uv run python -m ontology.render`.
+> For the five closed sets `tests/ontology/test_vocabulary_agrees_with_context.py` names, `ontology/factory.ttl` is authoritative and `CONTEXT.md` is generated from it: edit the vocabulary and run `uv run python -m ontology.render`.
 
 - [ ] **Step 2: Correct a count the cross-check has had wrong since before this plan**
 
@@ -808,7 +808,7 @@ Appendix O's "for" case opens with *"The vocabulary found three defects in this
 document."* This run found a fourth: `MERGE_TRAIN` is a state §3.3's diagram
 shows a task entering and `scheduler.DONE_STATES` and
 `DEPENDENCY_WAITING_STATES` both read, and it is in neither `CONTEXT.md` nor
-`ontology/saffron.ttl`. That is evidence *for* the modelling exercise even as the
+`ontology/factory.ttl`. That is evidence *for* the modelling exercise even as the
 rule closes the operational question, and it wants fixing independently of this
 verdict — it is a sixth member of a closed set that Phase A's generator would
 otherwise propagate correctly.

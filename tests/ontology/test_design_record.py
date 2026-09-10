@@ -61,7 +61,7 @@ def test_the_contiguity_check_would_catch_a_gap():
     """The property above is already true, so the check is trusted by a mutant
     rather than by a red run (`CLAUDE.md`, and principle 34's habit)."""
     graph = _graph()
-    node = design_record.SAFFRON["principle-30"]
+    node = design_record.FACTORY["principle-30"]
     graph.remove((node, None, None))
     numbers = _numbers(graph)
     assert numbers != list(range(1, len(numbers) + 1))

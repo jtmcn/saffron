@@ -33,7 +33,7 @@ nothing.
 
 | Spec | Evidence the work is in `main` |
 |---|---|
-| `SA-0001` | `ontology/saffron.ttl`, `ontology/queries/` (5 `.rq`), `RATIONALE.md`, `shapes/`, six tests under `tests/ontology/` |
+| `SA-0001` | `ontology/factory.ttl`, `ontology/queries/` (5 `.rq`), `RATIONALE.md`, `shapes/`, six tests under `tests/ontology/` |
 | `SA-0002` | `saffron/gates/core/size.py`, `tests/test_size.py` |
 | `SA-0003` | `attempts` table in the ledger schema; 27 references in `saffron/ledger.py` |
 | `SA-0004` | `saffron/gates/core/integrity.py`, `tests/test_integrity.py` |
@@ -102,8 +102,8 @@ that would have refused or failed each of these never ran:
 |---|---|---|
 | `DESIGN.md` | `forbidden` | yes — §5.4 and §5.5.1 describe the gate |
 | `CONTEXT.md` | `forbidden` | yes — its *Notes for the agent* defer this to the operator |
-| `ontology/saffron.ttl` | not in `touches` | yes — same note |
-| `ontology/shapes/saffron-shapes.ttl` | not in `touches` | it is where the set is actually closed |
+| `ontology/factory.ttl` | not in `touches` | yes — same note |
+| `ontology/shapes/factory-shapes.ttl` | not in `touches` | it is where the set is actually closed |
 | `.saffron/specs/done/SA-0044-*.md` | `forbidden` (`.saffron/**`) | the retirement itself |
 | `.saffron/specs/done/README.md` | `forbidden` (`.saffron/**`) | this record |
 | `saffron/scheduler.py` | `forbidden` | no |

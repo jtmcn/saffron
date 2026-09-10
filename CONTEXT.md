@@ -638,6 +638,14 @@ defect rather than a word choice (`DESIGN.md` Appendix E).
    not checked against it. Same shape as 3: a proper noun standing where a role
    was never named (principle 32).
 
+6. **`saffron:` vs. `factory:`** — the vocabulary's namespace carried the
+   program's name, and the vocabulary describes the arrangement: gates, cells,
+   target repos, the operator and their delegates — the **factory**. The prefix
+   is `factory:` and the IRI `urn:software-factory:ns#`, a URN so that it cannot
+   resolve (`DESIGN.md` §1.4). Every use was rewritten, dated records included.
+   `saffron:retired-by` was not: it is a marker in source that the scheduler
+   reads, not a vocabulary term, and shares only the spelling.
+
 ## Open naming decisions
 
 Add here rather than resolving in prose elsewhere — an ambiguity that gets settled

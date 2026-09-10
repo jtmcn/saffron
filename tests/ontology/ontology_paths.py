@@ -4,9 +4,9 @@ from pathlib import Path
 
 ONTOLOGY = Path(__file__).resolve().parents[2] / "ontology"
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
-NS = "https://saffron.dev/ns#"
+NS = "urn:software-factory:ns#"
 
-VOCABULARY = ONTOLOGY / "saffron.ttl"
+VOCABULARY = ONTOLOGY / "factory.ttl"
 SHAPES = sorted((ONTOLOGY / "shapes").glob("*.ttl"))
 QUERIES = sorted((ONTOLOGY / "queries").glob("*.rq"))
 VENDOR = sorted((ONTOLOGY / "vendor").glob("*.ttl"))

@@ -61,7 +61,7 @@ starts borrowing the wrong one.
 Run:
 ```bash
 grep -n "CLOSED_SETS" -A 10 tests/ontology/test_vocabulary_agrees_with_context.py
-grep -rn "utant" ontology/saffron.ttl
+grep -rn "utant" ontology/factory.ttl
 ```
 
 Expected: `CLOSED_SETS` names Terminal state, Batch stop reason, Severity, Risk tier, Gate

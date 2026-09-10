@@ -1,7 +1,7 @@
-@prefix saffron: <https://saffron.dev/ns#> .
+@prefix factory: <urn:software-factory:ns#> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
 @prefix earl: <http://www.w3.org/ns/earl#> .
-@prefix : <https://saffron.dev/data/> .
+@prefix : <urn:software-factory:data:> .
 
 # An unratified touches set. Only a ratified one binds (§3).
-:tc a saffron:TouchesSet .
+:tc a factory:TouchesSet .

@@ -1,6 +1,6 @@
 # The ontology becomes authoritative — design
 
-The run record has a vocabulary (`ontology/saffron.ttl`) and a glossary
+The run record has a vocabulary (`ontology/factory.ttl`) and a glossary
 (`CONTEXT.md`). Where they overlap they are asserted equal, and a core gate
 declared on one side alone fails the test suite with no repair a cell can make.
 This design generates the glossary's run-record half from the vocabulary, and
@@ -23,11 +23,11 @@ implicit.
 
 - **Rule: a line beginning `` `**Term**` `` in `CONTEXT.md` lines 189–379
   (its §4 Verification, §5 Review, §6 Outcomes — that file's own numbering, not
-  `DESIGN.md`'s). Presence in the graph means a `saffron:` IRI local name **or
+  `DESIGN.md`'s). Presence in the graph means a `factory:` IRI local name **or
   an `rdfs:label`** matches, case- and separator-insensitively.** Under that
   rule: **32 definitions, 13 present, 19 absent.** By local name alone, 11 are
   present — `Implementer` and `Lens` are present only as `rdfs:label`s
-  (`saffron.ttl:53`, `:56`). The 19 absent: `Gate contract`, `` `tool` ``,
+  (`factory.ttl:53`, `:56`). The 19 absent: `Gate contract`, `` `tool` ``,
   `Status`, `Blocking / advisory`, `Baseline`, `New failure`, `Pre-existing
   failure`, `Repair`, `No-progress`, `Critic`, `Anchored`, `Verdict`,
   `Adjudication`, `Ratify`, `Approve`, `Trailing accept rate`, `Merge train`,
@@ -36,12 +36,12 @@ implicit.
   (`tests/ontology/test_no_dead_terms.py`), which excludes the ontology IRI:
   **92 terms**, of which **9 carry an `rdfs:comment`**. A tenth comment is on
   the ontology IRI, which that test says is not a term.
-- **The graph is the side that has already drifted.** `saffron.ttl:126`'s
+- **The graph is the side that has already drifted.** `factory.ttl:126`'s
   comment says *"CONTEXT.md §6 lists six of these and DESIGN.md §3.3 lists
   nine"*. `CONTEXT.md` now lists nine, and a test asserts it.
 - **Declaring one gate on one side alone breaks four checks, not one.**
-  Appending `saffron:probe a saffron:CoreGate ; saffron:blockingAt
-  saffron:alwaysBlocking .` to `ontology/saffron.ttl` at this branch's HEAD —
+  Appending `factory:probe a factory:CoreGate ; factory:blockingAt
+  factory:alwaysBlocking .` to `ontology/factory.ttl` at this branch's HEAD —
   which this branch leaves untouched — and running `tests/ontology/`: **`4 failed, 70 passed`** —
   `test_no_dead_terms::test_no_term_exists_without_a_reader`,
   `test_no_dead_terms::test_the_check_would_catch_a_new_dead_term`,
@@ -50,15 +50,15 @@ implicit.
   'probe'"*). Scoped to that last file alone it is `1 failed, 6 passed`; the
   first draft quoted the scoped number as if it were the directory's.
 - **`revert` is no longer the instance to measure on, and why that matters.**
-  The first draft measured with `saffron:revert`, which `73c2b9f` (PR #112) has
+  The first draft measured with `factory:revert`, which `73c2b9f` (PR #112) has
   since declared in all three surfaces by hand. So the defect is not
   hypothetical and was not cheap: closing one gate took three coordinated edits
   by the operator, which is the cost this design removes. A gate name that is
-  still undeclared everywhere — `saffron:probe` above — is what any mutant here
+  still undeclared everywhere — `factory:probe` above — is what any mutant here
   must use; re-running the first draft's `revert` mutant today appends a
   duplicate triple and the test suite stays green.
 - **The closed sets are closed in three places, not two.**
-  `ontology/shapes/saffron-shapes.ttl:81-90` re-enumerates core gates and gate
+  `ontology/shapes/factory-shapes.ttl:81-90` re-enumerates core gates and gate
   roles as SHACL `sh:in` lists, and `.saffron/gates/shacl.py` is a **blocking**
   repo-defined gate that validates every tracked `.ttl` against them.
 - **`saffron/` has two runtime dependencies**, `pydantic` and `pyyaml`.
@@ -145,7 +145,7 @@ control artifact. That is the same rule §2 states for everything that matters.
 cells ──▶ ledger.db  (SQL, write path, unchanged)
               │
               └─ emitter ──▶ run-record graph (N-Triples) ──▶ SPARQL ──▶ report
-ontology/saffron.ttl (vocabulary) ──▶ generator ──▶ CONTEXT.md (+ drift gate)
+ontology/factory.ttl (vocabulary) ──▶ generator ──▶ CONTEXT.md (+ drift gate)
 ```
 
 **The ledger stays the system of record.** RATIONALE's case was that SQL serves
@@ -186,7 +186,7 @@ into every agent prompt (`saffron/agents/context.py`), so a marker comment is
 prompt text, and the plan forbids scaffolding outright. The check is a pytest
 test on the blocking `tests` gate rather than a new gate executable — the plan
 gives the reason, and says which word it uses.
-**And the `sh:in` lists in `ontology/shapes/saffron-shapes.ttl`**,
+**And the `sh:in` lists in `ontology/shapes/factory-shapes.ttl`**,
 which are the third copy of the same closed sets and are enforced by a blocking
 gate — without them the success criterion in part 7 is unreachable. Migrate the
 five already-asserted sets first: a faithful generator produces a **zero-line
@@ -246,7 +246,7 @@ Phase B reopens the question.
 
 ## 5. Testing
 
-- **Generator:** the committed `CONTEXT.md` and `saffron-shapes.ttl` equal the
+- **Generator:** the committed `CONTEXT.md` and `factory-shapes.ttl` equal the
   render. First migration must be a zero-line diff (part 4, Phase A).
 - **Emitter (Phase C):** SHACL validation of emitted triples against the
   existing shapes; round trip from a known ledger fixture to the committed
@@ -262,10 +262,10 @@ Phase B reopens the question.
 ## 6. What stays open, and is stated rather than closed
 
 - **`Status` cannot be promoted.** `test_vocabulary_agrees_with_context.py`
-  asserts that `pass`/`fail`/`skip`/`error` are deliberately **not** `saffron:`
-  terms — EARL's outcomes stand for them, and the test fails if `saffron:pass`
+  asserts that `pass`/`fail`/`skip`/`error` are deliberately **not** `factory:`
+  terms — EARL's outcomes stand for them, and the test fails if `factory:pass`
   is added. It is in the 19 above and generating `CONTEXT.md`'s Status line
-  means generating from EARL, not from `saffron:`. **It does not block Phase
+  means generating from EARL, not from `factory:`. **It does not block Phase
   A** — `Status` is not one of the five cross-checked sets and nothing generates
   it — so this is settled only before anything tries to.
 - **The 56 `_Avoid_` lists stay hand-written, and are essentially
@@ -303,15 +303,15 @@ Phase B reopens the question.
   continuously"* — and §9 v2.5 is exactly where Appendix O's spike lives. This
   PR edits that existing sentence in place to name the spike, at **zero net
   lines**. No cap change, no `SA-0001` amendment.
-- **`SA-0044`'s note** not to declare `saffron:revert` is a workaround PR #112
+- **`SA-0044`'s note** not to declare `factory:revert` is a workaround PR #112
   discharged and Phase A retires. **Append that it was discharged; do not delete
   it.** `SA-0044` is a completed spec, and deleting the paragraph edits the
   record of why a shipped task was scoped as it was.
 
 ## 7. Success criterion
 
-**Phase A:** a new core gate is declared in `ontology/saffron.ttl` alone, and
-`CONTEXT.md` **and** `saffron-shapes.ttl` update from it with all four checks
+**Phase A:** a new core gate is declared in `ontology/factory.ttl` alone, and
+`CONTEXT.md` **and** `factory-shapes.ttl` update from it with all four checks
 green — `test_vocabulary_agrees_with_context`, both `test_no_dead_terms` cases,
 `test_shapes::test_the_lifecycle_graph_conforms` — and the blocking `shacl`
 gate passing. (The dead-term cases still require the new term to have a reader;

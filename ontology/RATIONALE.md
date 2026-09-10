@@ -27,7 +27,7 @@ continuously* rather than spot-checked — or if Appendix O's spike reopens §1.
 - **`earl:mode` is the axis §4.1 conflated.** `gate_results` and `findings` split on
   *how* an assertion was produced — deterministic versus not — which EARL states in
   one property over one class. That is the supertype `CONTEXT.md`'s open naming
-  decision calls unwritable in Saffron's own vocabulary. The operator's rejection
+  decision calls unwritable in the factory's own vocabulary. The operator's rejection
   fits that shape too, which is what makes Q1 a query rather than a monthly reread.
 - **Two documents disagree about which states are terminal.** `CONTEXT.md` §6 lists
   six, `DESIGN.md` §3.3 lists nine, and neither holds `ORPHANED`, which

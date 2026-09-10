@@ -158,7 +158,7 @@ Two changes follow, and neither is optional:
    (`tests/ontology/test_vocabulary_agrees_with_context.py`'s `CLOSED_SETS` names Terminal
    state, Batch stop reason, Severity, Risk tier, Gate role and Core gates), and
    `ontology.render.render_context` rewrites only those sets' backticked spans. So this entry
-   is hand-maintained prose: no `ontology/saffron.ttl` edit, no render step, and — the reason
+   is hand-maintained prose: no `ontology/factory.ttl` edit, no render step, and — the reason
    it needs saying — no test that would catch the two terms drifting into each other later.
    An earlier draft of this spec said the opposite, having read `CLAUDE.md`'s rule without
    its "For the closed sets" qualifier.

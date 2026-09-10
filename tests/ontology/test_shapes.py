@@ -95,15 +95,15 @@ def test_every_core_gate_declares_a_blocking_level(shapes_graph):
     missing = sorted(str(gate).removeprefix(NS) for gate in declared - covered)
     assert not missing, (
         f"core gates with no declared blocking level: {missing}. §5.4 fixes "
-        "these core-side, so add each to saffron:CoreGateBlockingShape (or "
-        "saffron:SizeTierShape if a risk tier moves it) in saffron-shapes.ttl."
+        "these core-side, so add each to factory:CoreGateBlockingShape (or "
+        "factory:SizeTierShape if a risk tier moves it) in factory-shapes.ttl."
     )
 
 
 def test_every_terminal_state_is_a_state_a_task_can_end_in(shapes_graph):
     """`TaskShape`'s endedInState list is a hand-maintained *superset* of the
     now-generated `TerminalStateShape` list, and nothing held the generated
-    subset inside it. Measured: declaring `saffron:BUDGET_SPENT` and running the
+    subset inside it. Measured: declaring `factory:BUDGET_SPENT` and running the
     renderer left `tests/ontology/` and the `shacl` gate green while a one-task
     graph was rejected — the shapes file saying a state reaches the operator and
     that no task may end in it. endedInState closes over `EndState`, a superset,
@@ -121,7 +121,7 @@ def test_every_terminal_state_is_a_state_a_task_can_end_in(shapes_graph):
     missing = sorted(str(state).removeprefix(NS) for state in terminal - accepted)
     assert not missing, (
         f"terminal states no task may end in: {missing}. Add each to "
-        "saffron:TaskShape's endedInState sh:in list in saffron-shapes.ttl — it "
+        "factory:TaskShape's endedInState sh:in list in factory-shapes.ttl — it "
         "closes over EndState, a superset, so the generator cannot write it."
     )
 
@@ -154,10 +154,10 @@ def test_a_night_stops_for_one_of_four_reasons_and_no_others(
     data = rdflib.Graph()
     data.parse(VOCABULARY, format="turtle")
     data.parse(
-        data=f"""@prefix saffron: <{NS}> .
-        @prefix : <https://saffron.dev/data/> .
-        :b a saffron:Batch ; saffron:budgetUsd 50.0 ;
-           saffron:endedBecause saffron:{reason} .""",
+        data=f"""@prefix factory: <{NS}> .
+        @prefix : <urn:software-factory:data:> .
+        :b a factory:Batch ; factory:budgetUsd 50.0 ;
+           factory:endedBecause factory:{reason} .""",
         format="turtle",
     )
     conforms, _, text = validate(data, shacl_graph=shapes_graph, advanced=True)
@@ -172,9 +172,9 @@ def test_a_batch_still_running_has_no_stop_reason_and_that_is_legal(shapes_graph
     data = rdflib.Graph()
     data.parse(VOCABULARY, format="turtle")
     data.parse(
-        data=f"""@prefix saffron: <{NS}> .
-        @prefix : <https://saffron.dev/data/> .
-        :b a saffron:Batch ; saffron:budgetUsd 50.0 .""",
+        data=f"""@prefix factory: <{NS}> .
+        @prefix : <urn:software-factory:data:> .
+        :b a factory:Batch ; factory:budgetUsd 50.0 .""",
         format="turtle",
     )
     conforms, _, text = validate(data, shacl_graph=shapes_graph, advanced=True)
@@ -195,11 +195,11 @@ def test_a_reason_that_claims_the_class_is_still_refused_by_the_enumeration(
     data = rdflib.Graph()
     data.parse(VOCABULARY, format="turtle")
     data.parse(
-        data=f"""@prefix saffron: <{NS}> .
-        @prefix : <https://saffron.dev/data/> .
-        :CANCELLED a saffron:BatchStopReason .
-        :b a saffron:Batch ; saffron:budgetUsd 50.0 ;
-           saffron:endedBecause :CANCELLED .""",
+        data=f"""@prefix factory: <{NS}> .
+        @prefix : <urn:software-factory:data:> .
+        :CANCELLED a factory:BatchStopReason .
+        :b a factory:Batch ; factory:budgetUsd 50.0 ;
+           factory:endedBecause :CANCELLED .""",
         format="turtle",
     )
     conforms, results, text = validate(data, shacl_graph=shapes_graph, advanced=True)
@@ -214,49 +214,49 @@ def _components(graph: str, shapes_graph) -> tuple[bool, set, str]:
     data = rdflib.Graph()
     data.parse(VOCABULARY, format="turtle")
     data.parse(
-        data=f"""@prefix saffron: <{NS}> .
+        data=f"""@prefix factory: <{NS}> .
         @prefix prov: <http://www.w3.org/ns/prov#> .
-        @prefix : <https://saffron.dev/data/> .
-        :operator a saffron:Operator . {graph}""",
+        @prefix : <urn:software-factory:data:> .
+        :operator a factory:Operator . {graph}""",
         format="turtle",
     )
     conforms, results, text = validate(data, shacl_graph=shapes_graph, advanced=True)
     return conforms, set(results.objects(None, SH.sourceConstraintComponent)), text
 
 
-_ACTING = ":s a saffron:Delegate ; prov:actedOnBehalfOf :operator ."
+_ACTING = ":s a factory:Delegate ; prov:actedOnBehalfOf :operator ."
 # Valid under AttemptShape, so only DelegateShape can refuse it.
-_ATTEMPT = ":ph a saffron:Phase . :at a saffron:Attempt ; saffron:withinPhase :ph ; saffron:n 1 ;"
+_ATTEMPT = ":ph a factory:Phase . :at a factory:Attempt ; factory:withinPhase :ph ; factory:n 1 ;"
 
 
 @pytest.mark.parametrize(
     ("graph", "components"),
     [
         (f"{_ACTING} :work prov:qualifiedAssociation [ prov:agent :s ] .", set()),
-        (":s a saffron:Delegate .", {SH.QualifiedMinCountConstraintComponent}),
+        (":s a factory:Delegate .", {SH.QualifiedMinCountConstraintComponent}),
         # A subagent acts for the delegate that started it; the chain still ends
         # at the operator.
         (
-            ":s a saffron:Delegate ; prov:actedOnBehalfOf :t . "
-            ":t a saffron:Delegate ; prov:actedOnBehalfOf :operator .",
+            ":s a factory:Delegate ; prov:actedOnBehalfOf :t . "
+            ":t a factory:Delegate ; prov:actedOnBehalfOf :operator .",
             set(),
         ),
         (
-            ":s a saffron:Delegate ; prov:actedOnBehalfOf :t . :t a saffron:Delegate .",
+            ":s a factory:Delegate ; prov:actedOnBehalfOf :t . :t a factory:Delegate .",
             {SH.QualifiedMinCountConstraintComponent},
         ),
         # One chain reaching the operator does not excuse another that does not.
         (
-            ":s a saffron:Delegate ; prov:actedOnBehalfOf :i . "
-            ":i a saffron:ImplementerSession ; prov:actedOnBehalfOf :operator .",
+            ":s a factory:Delegate ; prov:actedOnBehalfOf :i . "
+            ":i a factory:ImplementerSession ; prov:actedOnBehalfOf :operator .",
             {SH.OrConstraintComponent},
         ),
         (
-            f"{_ACTING} :s prov:actedOnBehalfOf saffron:scope .",
+            f"{_ACTING} :s prov:actedOnBehalfOf factory:scope .",
             {SH.OrConstraintComponent},
         ),
         (
-            ":s a saffron:Delegate, saffron:Operator ; prov:actedOnBehalfOf :operator .",
+            ":s a factory:Delegate, factory:Operator ; prov:actedOnBehalfOf :operator .",
             {SH.NotConstraintComponent},
         ),
         # A delegate may be handed a plan; nothing outside it holds it to one.
@@ -267,7 +267,7 @@ _ATTEMPT = ":ph a saffron:Phase . :at a saffron:Attempt ; saffron:withinPhase :p
         ),
         # Typing the command is not the judgement: ratification stays the operator's.
         (
-            f"{_ACTING} :tc a saffron:TouchesSet ; saffron:ratifiedBy :s .",
+            f"{_ACTING} :tc a factory:TouchesSet ; factory:ratifiedBy :s .",
             {SH.ClassConstraintComponent},
         ),
         (
@@ -304,24 +304,24 @@ def test_a_delegate_acts_for_the_operator_never_as_one_nor_in_an_attempt(
     assert found == components, text
 
 
-_IMPL = ":i a saffron:ImplementerSession ; prov:actedOnBehalfOf :operator ."
-_WROTE_DIFF = f":df a saffron:Diff . {_ATTEMPT} prov:generated :df ;"
-_PROPOSED = f":sp a saffron:ScopeProposal . {_ATTEMPT} prov:generated :sp ;"
-_NOT_ATTEMPT = ":df a saffron:Diff . :work prov:generated :df ;"
+_IMPL = ":i a factory:ImplementerSession ; prov:actedOnBehalfOf :operator ."
+_WROTE_DIFF = f":df a factory:Diff . {_ATTEMPT} prov:generated :df ;"
+_PROPOSED = f":sp a factory:ScopeProposal . {_ATTEMPT} prov:generated :sp ;"
+_NOT_ATTEMPT = ":df a factory:Diff . :work prov:generated :df ;"
 
 
 @pytest.mark.parametrize(
     ("graph", "components"),
     [
         (
-            f"{_IMPL} :p a saffron:Plan . {_WROTE_DIFF} prov:qualifiedAssociation "
+            f"{_IMPL} :p a factory:Plan . {_WROTE_DIFF} prov:qualifiedAssociation "
             "[ prov:agent :i ; prov:hadPlan :p ] .",
             set(),
         ),
         # A delegate that runs a cell stands between the implementer and the operator.
         (
-            ":i a saffron:ImplementerSession ; prov:actedOnBehalfOf :d . "
-            ":d a saffron:Delegate ; prov:actedOnBehalfOf :operator .",
+            ":i a factory:ImplementerSession ; prov:actedOnBehalfOf :d . "
+            ":d a factory:Delegate ; prov:actedOnBehalfOf :operator .",
             set(),
         ),
         # Work outside an attempt is not what the plan governs.
@@ -332,18 +332,18 @@ _NOT_ATTEMPT = ":df a saffron:Diff . :work prov:generated :df ;"
         # A scope proposal ends the attempt before any plan exists (§5.3.1).
         (f"{_IMPL} {_PROPOSED} prov:qualifiedAssociation [ prov:agent :i ] .", set()),
         (
-            ":i a saffron:ImplementerSession .",
+            ":i a factory:ImplementerSession .",
             {SH.QualifiedMinCountConstraintComponent},
         ),
         (
-            ":i a saffron:ImplementerSession ; prov:actedOnBehalfOf :x . "
+            ":i a factory:ImplementerSession ; prov:actedOnBehalfOf :x . "
             ":x a prov:SoftwareAgent .",
             {SH.OrConstraintComponent, SH.QualifiedMinCountConstraintComponent},
         ),
         # The operator is reachable, but through an agent that is no delegate.
         (
-            ":i a saffron:ImplementerSession ; prov:actedOnBehalfOf :l . "
-            ":l a saffron:CriticLens ; prov:actedOnBehalfOf :operator .",
+            ":i a factory:ImplementerSession ; prov:actedOnBehalfOf :l . "
+            ":l a factory:CriticLens ; prov:actedOnBehalfOf :operator .",
             {SH.OrConstraintComponent},
         ),
         (
@@ -364,7 +364,7 @@ _NOT_ATTEMPT = ":df a saffron:Diff . :work prov:generated :df ;"
         # PROV-O's chain axiom entails the shortcut from the qualified form, so
         # a reasoner's output asserts both.
         (
-            f"{_IMPL} :p a saffron:Plan . {_WROTE_DIFF} prov:wasAssociatedWith :i ; "
+            f"{_IMPL} :p a factory:Plan . {_WROTE_DIFF} prov:wasAssociatedWith :i ; "
             "prov:qualifiedAssociation [ prov:agent :i ; prov:hadPlan :p ] .",
             set(),
         ),

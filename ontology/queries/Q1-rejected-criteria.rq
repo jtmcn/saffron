@@ -17,22 +17,22 @@
 # §4.6 criticises — a gate and a lens asserting the same thing arrive from two
 # tables and must be UNIONed or coalesced by hand at every call site. Here both
 # are earl:Assertion and the join is one triple pattern.
-PREFIX saffron: <https://saffron.dev/ns#>
+PREFIX factory: <urn:software-factory:ns#>
 PREFIX prov:    <http://www.w3.org/ns/prov#>
 PREFIX earl:    <http://www.w3.org/ns/earl#>
 
 SELECT ?task ?criterion ?assertor ?mode
 WHERE {
-  ?task a saffron:Task ;
-        saffron:endedInState saffron:REJECTED ;
+  ?task a factory:Task ;
+        factory:endedInState factory:REJECTED ;
         prov:used ?spec .
-  ?spec saffron:hasCriterion ?criterion .
+  ?spec factory:hasCriterion ?criterion .
 
   # the operator's rejection, in the same shape as any other assertion
   ?rejection earl:test ?criterion ;
              earl:assertedBy ?operator ;
              earl:result/earl:outcome earl:failed .
-  ?operator a saffron:Operator .
+  ?operator a factory:Operator .
 
   # did anything automatic reach the same criterion? unbound means nothing did
   OPTIONAL {

@@ -1,8 +1,8 @@
-@prefix saffron: <https://saffron.dev/ns#> .
-@prefix : <https://saffron.dev/data/> .
+@prefix factory: <urn:software-factory:ns#> .
+@prefix : <urn:software-factory:data:> .
 
 # A principle no appendix contributed. Its number came from nowhere, which is
 # exactly how the sequence stops being contiguous without anyone noticing.
-:p a saffron:Principle ;
-    saffron:principleNumber 57 ;
-    saffron:claim "A claim of adequate length" .
+:p a factory:Principle ;
+    factory:principleNumber 57 ;
+    factory:claim "A claim of adequate length" .

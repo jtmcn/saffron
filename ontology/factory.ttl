@@ -1,0 +1,201 @@
+@prefix factory: <urn:software-factory:ns#> .
+@prefix prov:    <http://www.w3.org/ns/prov#> .
+@prefix earl:    <http://www.w3.org/ns/earl#> .
+@prefix owl:     <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+
+# The IRI is deliberately not resolvable: publishing the vocabulary is out of
+# scope (SA-0001), and PROV-O/EARL are vendored so nothing dereferences at all.
+factory: a owl:Ontology ;
+    rdfs:label "Software factory ontology" ;
+    rdfs:comment "A PROV-O/EARL projection of the run record (DESIGN.md §4.6). Derived, one-way, provisional." .
+
+## Activities — DESIGN.md §4.6. One activity per gate suite, never per gate: a
+## gate's execution is fully described by the assertion it produces.
+
+factory:Batch    a owl:Class ; rdfs:subClassOf prov:Activity ; rdfs:label "batch" .
+factory:Run      a owl:Class ; rdfs:subClassOf prov:Activity ; rdfs:label "run" .
+factory:Task     a owl:Class ; rdfs:subClassOf prov:Activity ; rdfs:label "task" .
+factory:Phase    a owl:Class ; rdfs:subClassOf prov:Activity ; rdfs:label "phase" .
+factory:Attempt  a owl:Class ; rdfs:subClassOf prov:Activity ; rdfs:label "attempt" .
+factory:GateSuite a owl:Class ; rdfs:subClassOf prov:Activity ; rdfs:label "gate suite" .
+
+# One per contested finding. It is an activity so the three judgements of §5.6 —
+# critic verdict, operator adjudication, implementer rebuttal — hang off it as
+# qualified associations carrying role and time, rather than three string columns.
+factory:Rebuttal a owl:Class ; rdfs:subClassOf prov:Activity ; rdfs:label "rebuttal" .
+
+factory:Batch owl:disjointWith factory:Run .
+
+## Entities
+
+factory:Spec               a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "spec" .
+factory:AcceptanceCriterion a owl:Class ;
+    rdfs:subClassOf prov:Entity, earl:TestCriterion ;
+    rdfs:label "acceptance criterion" ;
+    rdfs:comment "First-class, so a gate and a lens can assert on the same criterion via earl:test." .
+factory:Plan          a owl:Class ; rdfs:subClassOf prov:Plan ; rdfs:label "plan" ;
+    rdfs:comment "plan.json: the how, where a spec is the what. Validated host-side at the plan checkpoint, so a control artifact rather than a claim." .
+factory:ScopeProposal a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "scope proposal" .
+factory:Diff          a owl:Class ; rdfs:subClassOf prov:Entity, earl:TestSubject ; rdfs:label "diff" .
+factory:PullRequest   a owl:Class ; rdfs:subClassOf prov:Entity, earl:TestSubject ; rdfs:label "pull request" .
+factory:Policy        a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "policy" .
+
+# The envelope/touches split of §3: an envelope is a reading bound and is never
+# enforced against a diff; a touches set is, once ratified. Disjoint because the
+# spec frontmatter carries both and nothing else says they are different kinds.
+factory:Envelope   a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "envelope" .
+factory:TouchesSet a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "touches" .
+factory:Envelope owl:disjointWith factory:TouchesSet .
+
+## Agents
+
+factory:ImplementerSession a owl:Class ; rdfs:subClassOf prov:SoftwareAgent ; rdfs:label "implementer" .
+factory:CriticLens a owl:Class ;
+    rdfs:subClassOf prov:SoftwareAgent, earl:Assertor ;
+    rdfs:label "lens" ;
+    rdfs:comment "Lenses are disjoint by construction (§5.5) — which is why one blocker routes to REBUT and there is no vote." .
+factory:Operator a owl:Class ; rdfs:subClassOf prov:Person, earl:Assertor ; rdfs:label "operator" .
+
+# Acts on the operator's behalf under their git identity and credentials. None of
+# its work is a task's attempt, so the ledger cannot tell the two apart.
+factory:Delegate a owl:Class ; rdfs:subClassOf prov:SoftwareAgent ; rdfs:label "delegate" .
+factory:Delegate owl:disjointWith factory:Operator .
+
+factory:Gate a owl:Class ; rdfs:subClassOf prov:SoftwareAgent, earl:Assertor ; rdfs:label "gate" .
+factory:CoreGate        a owl:Class ; rdfs:subClassOf factory:Gate ; rdfs:label "core gate" .
+factory:ContractGate    a owl:Class ; rdfs:subClassOf factory:Gate ; rdfs:label "contract gate" .
+factory:RepoDefinedGate a owl:Class ; rdfs:subClassOf factory:Gate ; rdfs:label "repo-defined gate" .
+[] a owl:AllDisjointClasses ;
+   owl:members ( factory:CoreGate factory:ContractGate factory:RepoDefinedGate ) .
+
+# The core/repo boundary, as membership rather than prose. A core gate is
+# implemented in core, so there is one of each and it is named here. A
+# contract gate is a repo's executable for a core-supplied *role*, so the role is
+# named here and the gate is not. A repo-defined gate is neither: CONTEXT.md §4
+# says its name is not vocabulary, so none appears below.
+# Their blocking levels are core-supplied too, and belong here rather than in a
+# repo's policy: §5.4 fixes them, and `size` and `witness` are the two a tier
+# moves — both at `elevated`, for the same reason (§5.4.1). A `policy.yaml` that
+# declared otherwise would not be a different repo, it would be wrong.
+factory:scope     a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking .
+factory:size      a factory:CoreGate ; factory:blockingAt factory:blockingWhenElevated .
+factory:secrets   a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking .
+factory:integrity a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking .
+factory:census    a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking .
+factory:committed a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking .
+factory:criteria  a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking .
+factory:revert    a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking .
+factory:witness   a factory:CoreGate ; factory:blockingAt factory:blockingWhenElevated .
+
+factory:GateRole a owl:Class ; rdfs:label "gate role" ;
+    rdfs:comment "A name in the contract. The repo supplies the executable; core supplies the meaning (§5.4)." .
+factory:format a factory:GateRole . factory:lint a factory:GateRole .
+factory:types a factory:GateRole . factory:tests a factory:GateRole .
+factory:no-network a factory:GateRole . factory:coverage a factory:GateRole .
+
+## Assertions — a mypy failure and a blocker on an acceptance criterion are one
+## shape: an assertion, by an assertor, about a subject, with an outcome (§4.6).
+## The SQL schema splits them across two tables; earl:mode carries the only real
+## difference, which is how the assertion was produced, not what it is.
+
+factory:GateResult a owl:Class ; rdfs:subClassOf prov:Entity, earl:Assertion ; rdfs:label "gate result" .
+factory:Finding    a owl:Class ; rdfs:subClassOf prov:Entity, earl:Assertion ; rdfs:label "finding" .
+
+## Properties
+
+factory:hasCriterion a owl:ObjectProperty ; rdfs:domain factory:Spec ; rdfs:range factory:AcceptanceCriterion .
+factory:withinPhase  a owl:ObjectProperty ; rdfs:domain factory:Attempt ; rdfs:range factory:Phase ;
+    rdfs:comment "\"Attempt 3\" without a phase is ambiguous — name both (CONTEXT.md §2)." .
+factory:n            a owl:DatatypeProperty ; rdfs:domain factory:Attempt ; rdfs:range xsd:integer .
+factory:endedInState a owl:ObjectProperty ; rdfs:domain factory:Task ; rdfs:range factory:EndState .
+factory:riskTier     a owl:ObjectProperty ; rdfs:domain factory:Task ; rdfs:range factory:RiskTier .
+factory:specType     a owl:ObjectProperty ; rdfs:domain factory:Spec ; rdfs:range factory:SpecType .
+factory:costUsdEst   a owl:DatatypeProperty ; rdfs:domain factory:Attempt ; rdfs:range xsd:decimal ;
+    rdfs:comment "An estimate, and the suffix is not decoration (§4.1)." .
+factory:budgetUsd    a owl:DatatypeProperty ; rdfs:domain factory:Batch ; rdfs:range xsd:decimal .
+factory:endedBecause a owl:ObjectProperty ; rdfs:domain factory:Batch ; rdfs:range factory:BatchStopReason ;
+    rdfs:comment "Why a night stopped. Absent while it is still running — the distinction §6's morning queue reads." .
+factory:baseSha      a owl:DatatypeProperty ; rdfs:domain factory:Run ; rdfs:range xsd:string .
+factory:severity     a owl:ObjectProperty ; rdfs:domain factory:Finding ; rdfs:range factory:Severity .
+factory:blockingAt   a owl:ObjectProperty ; rdfs:domain factory:Gate ; rdfs:range factory:BlockingLevel .
+factory:declaresGate a owl:ObjectProperty ; rdfs:domain factory:Policy ; rdfs:range factory:Gate ;
+    rdfs:comment "Declared, not executed. The gap between this set and the gates a suite ran is what Q3 asks for." .
+factory:ratifiedBy   a owl:ObjectProperty ; rdfs:domain factory:TouchesSet ; rdfs:range factory:Operator .
+factory:role         a owl:ObjectProperty ; rdfs:domain factory:ContractGate ; rdfs:range factory:GateRole ;
+    rdfs:comment "Which contract role a repo's executable implements. A core gate has no role — it is the implementation." .
+
+## Enumerated values. Each set is an axiom the relational schema cannot state:
+## every one of these is a TEXT column in §4.1.
+
+factory:EndState a owl:Class ; rdfs:label "end state" ;
+    rdfs:comment "A state a task can finish in. Wider than the terminal states: it also holds what the operator's own decision produces, and ORPHANED, which no one chose." .
+factory:TerminalState a owl:Class ; rdfs:subClassOf factory:EndState ;
+    rdfs:comment "A state that reaches the operator (§3.3). Everything else is internal. CONTEXT.md §6 lists six of these and DESIGN.md §3.3 lists nine; §3.3 governs, see RATIONALE.md." .
+
+factory:SCOPE_REVIEW a factory:TerminalState . factory:PLAN_REJECTED a factory:TerminalState .
+factory:EXHAUSTED a factory:TerminalState . factory:READY_FOR_REVIEW a factory:TerminalState .
+factory:MERGE_FAILED a factory:TerminalState . factory:PREFLIGHT_FAILED a factory:TerminalState .
+factory:NOT_IMPLEMENTED a factory:TerminalState . factory:GATE_ERROR a factory:TerminalState .
+factory:RATE_LIMITED a factory:TerminalState .
+
+# What the operator's decision produces, plus the state a crash produces. None of
+# these reaches the operator — they are downstream of a judgement they already made.
+factory:APPROVED a factory:EndState . factory:CHANGES_REQUESTED a factory:EndState .
+factory:REJECTED a factory:EndState . factory:MERGED a factory:EndState .
+factory:ORPHANED a factory:EndState .
+
+factory:RiskTier a owl:Class .
+factory:standard a factory:RiskTier . factory:elevated a factory:RiskTier .
+
+## How a night ended (§4.2.1). Not a task's end state: these describe the batch,
+## and a batch that drained is not a batch that passed — every task in it may
+## have failed. INFRASTRUCTURE is the breaker, and it is the only one of the
+## four that says the machine rather than the work was wrong.
+factory:BatchStopReason a owl:Class .
+factory:DRAINED a factory:BatchStopReason . factory:BUDGET a factory:BatchStopReason .
+factory:UNTIL a factory:BatchStopReason . factory:INFRASTRUCTURE a factory:BatchStopReason .
+
+factory:SpecType a owl:Class .
+factory:feature a factory:SpecType . factory:bug a factory:SpecType . factory:refactor a factory:SpecType .
+
+factory:Severity a owl:Class .
+factory:blocker a factory:Severity . factory:concern a factory:Severity . factory:note a factory:Severity .
+
+factory:BlockingLevel a owl:Class .
+factory:alwaysBlocking a factory:BlockingLevel .
+factory:blockingWhenElevated a factory:BlockingLevel .
+factory:advisory a factory:BlockingLevel .
+
+## Roles on the qualified associations of a rebuttal (§5.6). Three judgements,
+## three vocabularies: the critic verdicts, the operator adjudicates, the
+## implementer rebuts. Never "the verdict" without saying whose.
+factory:Role a owl:Class .
+factory:confirms a factory:Role . factory:withdraws a factory:Role .
+factory:agrees   a factory:Role . factory:disagrees a factory:Role .
+factory:disputes a factory:Role . factory:concedes  a factory:Role .
+
+## The design record — CONTEXT.md §11. Not part of the run record: nothing here
+## projects from a §4.1 table and no scheduling decision reads it, so §1.4's
+## non-goal is untouched. What it models is the document, and the reader that
+## earns it is `ontology/design_record.py`, which renders DESIGN.md's principle
+## index from these two classes.
+##
+## `CONTEXT.md` §11 names four genres the factory records a decision in — ADR is the
+## fifth entry and disowns itself. `EvidenceRecord` and `SpikeVerdict` are
+## deliberately not declared: they have no shape or query reading them yet, and a
+## term whose only reader is an rdfs:comment is what the dead-term test deletes.
+## They join when something reads them, not when someone writes a definition.
+
+factory:Principle a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "principle" ;
+    rdfs:comment "A numbered lesson in one global sequence. The number is an address — DESIGN.md, CONTEXT.md, the backlog and docs/evidence/ all cite it — so it is a property here rather than an ordering." .
+factory:RevisionAppendix a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "revision appendix" .
+
+factory:principleNumber a owl:DatatypeProperty ; rdfs:domain factory:Principle ; rdfs:range xsd:integer .
+factory:claim a owl:DatatypeProperty ; rdfs:domain factory:Principle ; rdfs:range xsd:string .
+factory:contributedBy a owl:ObjectProperty ; rdfs:domain factory:Principle ; rdfs:range factory:RevisionAppendix ;
+    rdfs:comment "Exactly one. A principle is allocated its number by the appendix that found it, which is why the sequence stays contiguous without a registry." .
+factory:appendixLetter a owl:DatatypeProperty ; rdfs:domain factory:RevisionAppendix ; rdfs:range xsd:string .
+factory:coversRevision a owl:DatatypeProperty ; rdfs:domain factory:RevisionAppendix ; rdfs:range xsd:integer ;
+    rdfs:comment "One or more. Appendix G covers rev 8 and rev 10 and Appendix O rev 18 and rev 19, because a revision that closes an earlier revision's question lands in that question's appendix." .

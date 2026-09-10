@@ -14,13 +14,13 @@ from ontology_paths import ONTOLOGY, VOCABULARY
 from ontology import render
 
 CONTEXT = ONTOLOGY.parent / "CONTEXT.md"
-SHAPES_FILE = ONTOLOGY / "shapes" / "saffron-shapes.ttl"
+SHAPES_FILE = ONTOLOGY / "shapes" / "factory-shapes.ttl"
 
 
 def test_context_md_is_current_with_the_vocabulary():
     committed = CONTEXT.read_text()
     assert render.render_context(committed, vocabulary=VOCABULARY) == committed, (
-        "CONTEXT.md and ontology/saffron.ttl disagree. If the vocabulary is "
+        "CONTEXT.md and ontology/factory.ttl disagree. If the vocabulary is "
         "right, run `uv run python -m ontology.render`; if CONTEXT.md was hand-"
         "edited, that edit belongs in the vocabulary — regenerating discards it."
     )
@@ -29,7 +29,7 @@ def test_context_md_is_current_with_the_vocabulary():
 def test_the_shapes_are_current_with_the_vocabulary():
     committed = SHAPES_FILE.read_text()
     assert render.render_shapes(committed, vocabulary=VOCABULARY) == committed, (
-        "saffron-shapes.ttl and ontology/saffron.ttl disagree. If the "
+        "factory-shapes.ttl and ontology/factory.ttl disagree. If the "
         "vocabulary is right, run `uv run python -m ontology.render`; if the "
         "shapes were hand-edited, that edit belongs in the vocabulary."
     )

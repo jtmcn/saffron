@@ -1,6 +1,6 @@
 """The design record as a graph, parsed from `DESIGN.md`.
 
-`CONTEXT.md` §11 names the genres Saffron records a decision in. Two of them are
+`CONTEXT.md` §11 names the genres the factory records a decision in. Two of them are
 modelled here — a **principle** and the **revision appendix** that contributed it
 — because those two have instances a document already carries and a surface that
 reads them. `EvidenceRecord` and `SpikeVerdict` are named in `CONTEXT.md` §11 and
@@ -23,8 +23,8 @@ import re
 
 import rdflib
 
-NS = "https://saffron.dev/ns#"
-SAFFRON = rdflib.Namespace(NS)
+NS = "urn:software-factory:ns#"
+FACTORY = rdflib.Namespace(NS)
 
 # The two halves of "an appendix heading", and the *only* definitions of them:
 # `tests/test_citations.py` imports these rather than keeping its own copy. They
@@ -66,7 +66,7 @@ def _claim(lines: list[str], start: int) -> str:
 def parse(design: str) -> rdflib.Graph:
     """Every principle and revision appendix `DESIGN.md` declares."""
     graph = rdflib.Graph()
-    graph.bind("saffron", SAFFRON)
+    graph.bind("factory", FACTORY)
     lines = design.splitlines()
 
     covers: dict[str, list[int]] = {}
@@ -82,7 +82,7 @@ def parse(design: str) -> rdflib.Graph:
             raise ValueError(f"{line!r}: an appendix heading this cannot read")
         if found := APPENDIX.match(line):
             letter = found.group(1)
-            appendix = SAFFRON[f"Appendix{letter}"]
+            appendix = FACTORY[f"Appendix{letter}"]
             revisions = covers.get(letter, [])
             stated = _HEADING_REVISION.search(line)
             # A row with no letter is `RevisionAppendixShape`'s to refuse; this
@@ -92,18 +92,18 @@ def parse(design: str) -> rdflib.Graph:
                     f"Appendix {letter}: the heading says rev {stated.group(1)}, "
                     f"the index row says {revisions}"
                 )
-            graph.add((appendix, rdflib.RDF.type, SAFFRON.RevisionAppendix))
-            graph.add((appendix, SAFFRON.appendixLetter, rdflib.Literal(letter)))
+            graph.add((appendix, rdflib.RDF.type, FACTORY.RevisionAppendix))
+            graph.add((appendix, FACTORY.appendixLetter, rdflib.Literal(letter)))
             for revision in revisions:
-                graph.add((appendix, SAFFRON.coversRevision, rdflib.Literal(revision)))
+                graph.add((appendix, FACTORY.coversRevision, rdflib.Literal(revision)))
             continue
         if (found := _PRINCIPLE.match(line)) and appendix is not None:
             index = int(found.group(1))
-            node = SAFFRON[f"principle-{index}"]
-            graph.add((node, rdflib.RDF.type, SAFFRON.Principle))
-            graph.add((node, SAFFRON.principleNumber, rdflib.Literal(index)))
-            graph.add((node, SAFFRON.claim, rdflib.Literal(_claim(lines, number))))
-            graph.add((node, SAFFRON.contributedBy, appendix))
+            node = FACTORY[f"principle-{index}"]
+            graph.add((node, rdflib.RDF.type, FACTORY.Principle))
+            graph.add((node, FACTORY.principleNumber, rdflib.Literal(index)))
+            graph.add((node, FACTORY.claim, rdflib.Literal(_claim(lines, number))))
+            graph.add((node, FACTORY.contributedBy, appendix))
     return graph
 
 
@@ -124,11 +124,11 @@ def _one(graph: rdflib.Graph, node: rdflib.term.Node, of: rdflib.URIRef) -> str:
 def principles(graph: rdflib.Graph) -> list[tuple[int, str, str]]:
     """(number, claim, appendix letter), in number order."""
     rows = []
-    for node in graph.subjects(rdflib.RDF.type, SAFFRON.Principle):
-        number = _one(graph, node, SAFFRON.principleNumber)
-        claim = _one(graph, node, SAFFRON.claim)
-        appendix = _one(graph, node, SAFFRON.contributedBy)
-        letter = _one(graph, rdflib.URIRef(appendix), SAFFRON.appendixLetter)
+    for node in graph.subjects(rdflib.RDF.type, FACTORY.Principle):
+        number = _one(graph, node, FACTORY.principleNumber)
+        claim = _one(graph, node, FACTORY.claim)
+        appendix = _one(graph, node, FACTORY.contributedBy)
+        letter = _one(graph, rdflib.URIRef(appendix), FACTORY.appendixLetter)
         rows.append((int(number), claim, letter))
     return sorted(rows)
 

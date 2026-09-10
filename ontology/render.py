@@ -1,4 +1,4 @@
-"""Renders the surfaces derived from `ontology/saffron.ttl`.
+"""Renders the surfaces derived from `ontology/factory.ttl`.
 
 Dev-only and deliberately outside `saffron/`: `pyproject.toml` states that
 nothing under `saffron/` imports a graph library, and this module imports two.
@@ -14,7 +14,7 @@ import rdflib
 
 from ontology import design_record
 
-NS = "https://saffron.dev/ns#"
+NS = "urn:software-factory:ns#"
 
 # What counts as a member, and the *only* definition of it: the cross-check in
 # `test_vocabulary_agrees_with_context` imports this rather than keeping its own
@@ -25,7 +25,7 @@ MEMBER_TOKEN = re.compile(r"`([A-Za-z_][A-Za-z0-9_-]*)`")
 
 
 def members(class_name: str, *, vocabulary: Path) -> list[str]:
-    """Local names of every instance of `saffron:<class_name>`, in the order
+    """Local names of every instance of `factory:<class_name>`, in the order
     they first appear in the vocabulary's own text.
 
     Source order, not graph order: rdflib iterates unordered, and the committed
@@ -39,7 +39,7 @@ def members(class_name: str, *, vocabulary: Path) -> list[str]:
     ]
 
     def first_offset(name: str) -> int:
-        found = re.search(rf"saffron:{re.escape(name)}\b", text)
+        found = re.search(rf"factory:{re.escape(name)}\b", text)
         return found.start() if found else len(text)
 
     return sorted(names, key=first_offset)
@@ -166,18 +166,18 @@ def render_context(
     return text
 
 
-# Anchor in saffron-shapes.ttl -> the ontology class whose members fill the
+# Anchor in factory-shapes.ttl -> the ontology class whose members fill the
 # first `sh:in ( … )` after it. Anchored on text, not on a shape name, because
 # two of these lists are nested inside `sh:property [ … ]` blocks and
 # `TaskShape`'s own first `sh:in` is endedInState — a superset of the terminal
 # states, hand-maintained, which a shape-name anchor would have rewritten.
 SHAPE_SETS = {
-    "saffron:CoreGateShape": "CoreGate",
-    "saffron:GateRoleShape": "GateRole",
-    "saffron:TerminalStateShape": "TerminalState",
-    "sh:path saffron:riskTier": "RiskTier",
-    "sh:path saffron:endedBecause": "BatchStopReason",
-    "sh:path saffron:severity": "Severity",
+    "factory:CoreGateShape": "CoreGate",
+    "factory:GateRoleShape": "GateRole",
+    "factory:TerminalStateShape": "TerminalState",
+    "sh:path factory:riskTier": "RiskTier",
+    "sh:path factory:endedBecause": "BatchStopReason",
+    "sh:path factory:severity": "Severity",
 }
 _PER_LINE = 3
 _INDENT = " " * 12
@@ -206,7 +206,7 @@ def render_shapes(
         if not names:
             raise ValueError(f"{anchor}: a closed set rendered to no members")
         rows = [
-            " ".join(f"saffron:{n}" for n in names[i : i + _PER_LINE])
+            " ".join(f"factory:{n}" for n in names[i : i + _PER_LINE])
             for i in range(0, len(names), _PER_LINE)
         ]
         body = f"\n{_INDENT}".join(rows)
@@ -216,22 +216,22 @@ def render_shapes(
         open_at = text.index("sh:in (", start)
         close_at = text.index(")", open_at)
         # The anchors are text, so confirm what is being replaced is a list of
-        # `saffron:` IRIs before overwriting it in a file a blocking gate reads.
+        # `factory:` IRIs before overwriting it in a file a blocking gate reads.
         replaced = text[open_at + len("sh:in (") : close_at].split()
-        if not replaced or any(not w.startswith("saffron:") for w in replaced):
-            raise ValueError(f"{anchor}: the list after it is not saffron: IRIs")
+        if not replaced or any(not w.startswith("factory:") for w in replaced):
+            raise ValueError(f"{anchor}: the list after it is not factory: IRIs")
         text = text[:open_at] + f"sh:in ( {body} " + text[close_at:]
     return text
 
 
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
-    vocabulary = root / "ontology" / "saffron.ttl"
+    vocabulary = root / "ontology" / "factory.ttl"
     rendered = {
         path: fn(path.read_text(), vocabulary=vocabulary)
         for path, fn in (
             (root / "CONTEXT.md", render_context),
-            (root / "ontology" / "shapes" / "saffron-shapes.ttl", render_shapes),
+            (root / "ontology" / "shapes" / "factory-shapes.ttl", render_shapes),
         )
     }
     # `DESIGN.md` renders from itself, not from the vocabulary, so it takes no

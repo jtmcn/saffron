@@ -3182,7 +3182,7 @@ Until then the dropped names are named in the gate's summary — which makes the
 `DESIGN.md:259` shows a task entering it, `saffron/scheduler.py:67` has it in
 `DONE_STATES` and `:91` in `DEPENDENCY_WAITING_STATES`, and §4.2.1 names it twice
 — in the queue filter and in the list of parents that admit a dependent. It
-appears in **neither** `CONTEXT.md` nor `ontology/saffron.ttl`.
+appears in **neither** `CONTEXT.md` nor `ontology/factory.ttl`.
 
 Found by Appendix O's spike (rev 19), while counting what a shape form would need.
 It is the fourth defect the modelling exercise has found in these documents, which
@@ -3196,8 +3196,8 @@ in §3.3 and "done with the spec" to the scheduler, so it is plainly an `EndStat
 whether it is a `TerminalState` needs deciding rather than assuming, and that
 decision is exactly the one item this document keeps getting wrong.
 
-Phase A makes the propagation free once decided: `saffron:MERGE_TRAIN a
-saffron:EndState` in the vocabulary and `uv run python -m ontology.render` writes
+Phase A makes the propagation free once decided: `factory:MERGE_TRAIN a
+factory:EndState` in the vocabulary and `uv run python -m ontology.render` writes
 `CONTEXT.md` and the shapes. `TaskShape`'s `endedInState` list is the one hand
 edit, and `test_every_terminal_state_is_a_state_a_task_can_end_in` names the file
 if it is forgotten.
@@ -3207,7 +3207,7 @@ exit-code map and `report/index.py`'s `_STATE_RANK` both fall through to a
 documented default rather than raising, so an undeclared state degrades there
 rather than breaking. That is by design and stays.
 
-**Done looks like** `MERGE_TRAIN` declared once in `ontology/saffron.ttl`, the
+**Done looks like** `MERGE_TRAIN` declared once in `ontology/factory.ttl`, the
 derived surfaces regenerated, `TaskShape` updated, and a one-line note in §3.3 or
 §6 saying which of the two sets it joined and why.
 
@@ -3239,7 +3239,7 @@ declare it *into*, and the vocabulary has none: `EndState` and `TerminalState`
 model the states a task ends in, and nothing models the eight §4.2.1 names a
 task passes through. So:
 
-- `ontology/saffron.ttl` gains **`TaskState`** as a supertype over `EndState`
+- `ontology/factory.ttl` gains **`TaskState`** as a supertype over `EndState`
   and a new **`InFlightState`** — exactly §4.2.1's eight (`DRAFT`, `QUEUED`,
   `DIAGNOSING`, `IMPLEMENTING`, `GATING`, `REPAIRING`, `REVIEWING`,
   `REBUTTING`), every one of them a state where a cell is Saffron's to run.
@@ -3360,7 +3360,7 @@ written down as one.
 `SpecType` (`feature`/`bug`/`refactor`), `BlockingLevel`
 (`alwaysBlocking`/`blockingWhenElevated`/`advisory`) and the rebuttal roles
 (`disputes`/`concedes`, `confirms`/`withdraws`) are closed by `sh:in` in
-`ontology/shapes/saffron-shapes.ttl` and enforced by the blocking `shacl` gate.
+`ontology/shapes/factory-shapes.ttl` and enforced by the blocking `shacl` gate.
 None is among the generated sets, because `CONTEXT.md` does not enumerate any of
 them — so `test_vocabulary_agrees_with_context` cannot see them and
 `ontology/render.py` does not write them.
@@ -3814,8 +3814,8 @@ same fix.
 
 ## 65. The batch's four stop reasons are a closed set that lives only in SQL
 
-**Status: done** — `saffron:BatchStopReason` in the vocabulary, `CONTEXT.md`
-regenerated, and `saffron:BatchShape` closing the set with `sh:in`.
+**Status: done** — `factory:BatchStopReason` in the vocabulary, `CONTEXT.md`
+regenerated, and `factory:BatchShape` closing the set with `sh:in`.
 
 Four readers now have to agree, and a test fails on each direction of drift:
 the vocabulary, `CONTEXT.md`'s **Batch stop reason** entry (generated, not
@@ -3839,7 +3839,7 @@ other misreports a night.
 
 `DRAINED`, `BUDGET`, `UNTIL` and `INFRASTRUCTURE` are a closed set — a `CHECK`
 constraint on `batches.status` refuses anything else, and `batch.StopReason` is
-a `Literal` of the same four. They appear in neither `ontology/saffron.ttl` nor
+a `Literal` of the same four. They appear in neither `ontology/factory.ttl` nor
 `CONTEXT.md`.
 
 Every other closed set in this repo is generated from the vocabulary and
@@ -3852,7 +3852,7 @@ Deferring was correct in the layer that found it — `ontology/` and `CONTEXT.md
 were both `forbidden` to `SA-0045` and to every spec above it — but the
 deferral has no owner now.
 
-**Done looks like** a `saffron:BatchStopReason` class in the vocabulary with the
+**Done looks like** a `factory:BatchStopReason` class in the vocabulary with the
 four individuals, `uv run python -m ontology.render` re-run, and the closed-set
 test naming it alongside the other five. The `CHECK` constraint stays: the
 vocabulary is authoritative for the words, and the constraint is what enforces
@@ -4101,7 +4101,7 @@ ends. Three parts, and the third is the one to argue about:
 - **The stop reason.** `DRAINED` means the queue emptied. A queue that emptied
   with a task left mid-phase is not the same night, and §4.2.1's four reasons
   have no word for it. Either a fifth reason or `INFRASTRUCTURE` — and note a
-  fifth touches `saffron:BatchStopReason`, `CONTEXT.md`, `saffron:BatchShape`
+  fifth touches `factory:BatchStopReason`, `CONTEXT.md`, `factory:BatchShape`
   and the `CHECK` on `batches.status`, all of which item 65 made agree.
 - **The exit code.** `0` is "the night made it". This one did not.
 - **The breaker.** Less clear-cut. Counting every in-flight outcome as an abort
@@ -4199,7 +4199,7 @@ connected.
 
 ## 72. `witness` and `mutant` exist in code and in no vocabulary, and the guard for that reads the vocabulary
 
-**Status:** **done**, by hand, 2026-09-07. `saffron:witness` is declared at
+**Status:** **done**, by hand, 2026-09-07. `factory:witness` is declared at
 `blockingWhenElevated` and named by `SizeTierShape`; `mutant` and `witness` are
 `CONTEXT.md` §4 entries and deliberately *not* vocabulary terms, because
 `test_no_dead_terms` rejects a class no shape reads. The guard now reads
@@ -4211,7 +4211,7 @@ time on the case it was written for.
 **Tier 2.** Found reviewing `SA-0056` and again reviewing `SA-0058`, 2026-09-06.
 
 Item 69's chain added a core gate and a term, and neither reached
-`ontology/saffron.ttl` or `CONTEXT.md`. Measured:
+`ontology/factory.ttl` or `CONTEXT.md`. Measured:
 
 ```
 vocabulary declares:  census committed criteria integrity revert scope secrets size
@@ -4225,10 +4225,10 @@ for meaning and does not contain the word, though `DESIGN.md` §5.4.1 introduces
 it in bold as a defined term and a module is named after it.
 
 **The guard cannot fire, and `CLAUDE.md` promises it will.** That file says a
-new core gate "needs a blocking level in `saffron:CoreGateBlockingShape` … and
+new core gate "needs a blocking level in `factory:CoreGateBlockingShape` … and
 a test names the shape and the file when you forget."
 `tests/ontology/test_shapes.py` does exactly that — over
-`vocabulary.subjects(rdf:type, saffron:CoreGate)`. A gate absent from the
+`vocabulary.subjects(rdf:type, factory:CoreGate)`. A gate absent from the
 vocabulary is absent from that set, so the test passes and the promise is false
 for precisely the case it exists to catch. `CoreGateShape`'s `sh:in` does not
 reject it either, for the same reason.
@@ -4261,8 +4261,8 @@ touch: this is an operator's edit, or a spec that declares `ontology/**` in
 `touches` and hands the render to the operator. Worth deciding once rather than
 per term.
 
-**Done looks like** `saffron:witness a saffron:CoreGate` with a blocking level
-in `saffron:SizeTierShape` — it moves with the tier exactly as `size` does, and
+**Done looks like** `factory:witness a factory:CoreGate` with a blocking level
+in `factory:SizeTierShape` — it moves with the tier exactly as `size` does, and
 it is the second such gate, so that shape's comment calling `size` "the one
 core gate a risk tier moves" needs amending too — a `mutant` entry in
 `CONTEXT.md`'s vocabulary, `uv run python -m ontology.render` re-run, and the
@@ -4272,7 +4272,7 @@ closed-set tests green.
 `forbidden` to the spec that introduces a term, or every such spec carries a
 follow-up filed when it is written rather than discovered three pull requests
 later — the first is structurally unavailable, and that is measured rather than
-argued. `ontology/saffron.ttl` is neither `protected` nor in
+argued. `ontology/factory.ttl` is neither `protected` nor in
 `integrity.gate_config`, so a cell may edit it; but the change is not complete
 until `ontology.render` rewrites `CONTEXT.md`, which *is* `protected`, and
 `protected_touch_refusal` runs at intake (`saffron/cli.py:441`). A spec
@@ -5120,7 +5120,7 @@ second is a design question and probably belongs beside item **82**.
 Found reviewing item **72**'s own branch (#164), 2026-09-07. Neither is a live
 defect — both are sentences that were true when written and are now false, in
 the two places item 72's new guard cannot see. That guard compares
-`saffron/gates/core/*.py` against `ontology/saffron.ttl`; it reads no prose.
+`saffron/gates/core/*.py` against `ontology/factory.ttl`; it reads no prose.
 
 `DESIGN.md` §7's risk table says *"The seven core gates never execute repo
 code — most read the diff, but `census` and `criteria` read other gates' results
@@ -5658,13 +5658,13 @@ third sense arriving in prose.
 **Tier 3.** Found reviewing PR #189. `RebuttalShape` puts the implementer's
 association on an `ImplementerSession` and the critic's on a `CriticLens`, and says
 nothing of the third: a rebuttal whose `agrees` association names a
-`saffron:Delegate` conforms. An `earl:Assertion` in `earl:manual` mode — the
+`factory:Delegate` conforms. An `earl:Assertion` in `earl:manual` mode — the
 operator's rejection in `lifecycle.ttl` — may likewise be `earl:assertedBy` a
 delegate. `CONTEXT.md`'s **Delegate** entry says a judgement a delegate types is
 still the operator's; only ratification (`TouchesShape`) holds that in a shape.
 
 **Done looks like** a third qualified association in `RebuttalShape` — at most one,
-role in `( saffron:agrees saffron:disagrees )`, agent `sh:class saffron:Operator` —
+role in `( factory:agrees factory:disagrees )`, agent `sh:class factory:Operator` —
 and a shape putting a manual assertion's `earl:assertedBy` on the operator, each
 with a negative fixture naming a delegate.
 

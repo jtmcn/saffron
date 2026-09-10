@@ -17,13 +17,13 @@ How the engineering skills should consume this repo's domain documentation when 
 ├── CONTEXT.md                  ← the glossary; its §11 names the decision-record genres
 ├── DESIGN.md                   ← §-numbered design + revision appendices + principles
 ├── ontology/
-│   ├── saffron.ttl             ← authoritative for CONTEXT.md's six closed sets
+│   ├── factory.ttl             ← authoritative for CONTEXT.md's six closed sets
 │   └── RATIONALE.md            ← a spike verdict, not an ADR
 ├── docs/evidence/              ← dated primary records, one per run or spike
 └── saffron/
 ```
 
-`CONTEXT.md`'s closed sets — `Terminal state`, `Batch stop reason`, `Severity`, `Risk tier`, `Gate role`, `Core gates` — are **generated**: their backticked spans render from `ontology/saffron.ttl` (`ontology/render.py:SETS`). Edit the vocabulary and run `uv run python -m ontology.render`; editing those spans in `CONTEXT.md` gets reverted, and a test fails first. Every other definition in the file is hand-written and edited in place.
+`CONTEXT.md`'s closed sets — `Terminal state`, `Batch stop reason`, `Severity`, `Risk tier`, `Gate role`, `Core gates` — are **generated**: their backticked spans render from `ontology/factory.ttl` (`ontology/render.py:SETS`). Edit the vocabulary and run `uv run python -m ontology.render`; editing those spans in `CONTEXT.md` gets reverted, and a test fails first. Every other definition in the file is hand-written and edited in place.
 
 ## Use the glossary's vocabulary
 

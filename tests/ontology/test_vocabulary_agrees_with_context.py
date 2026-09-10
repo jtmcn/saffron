@@ -65,7 +65,7 @@ def test_the_two_documents_close_the_set_the_same_way(term, class_name):
     assert from_ontology, f"the ontology declares no {class_name}"
     assert from_context == from_ontology, (
         f"{term}: CONTEXT.md says {sorted(from_context)}, "
-        f"saffron:{class_name} says {sorted(from_ontology)}"
+        f"factory:{class_name} says {sorted(from_ontology)}"
     )
 
 
@@ -86,7 +86,7 @@ def test_the_gate_statuses_are_earl_outcomes_rather_than_saffron_terms():
     The check is that each status has an outcome standing for it *in the fixture
     graph*, not merely in this docstring — a mapping nothing exercises is the
     part that is cheap to fake — and that nobody quietly adds a competing
-    `saffron:` term for a status.
+    `factory:` term for a status.
     """
     statuses = context_enumeration("Status")
     assert statuses == {"pass", "fail", "skip", "error"}
@@ -94,7 +94,7 @@ def test_the_gate_statuses_are_earl_outcomes_rather_than_saffron_terms():
     vocabulary = rdflib.Graph().parse(VOCABULARY, format="turtle")
     for status in statuses:
         assert (rdflib.URIRef(f"{NS}{status}"), None, None) not in vocabulary, (
-            f"saffron:{status} duplicates an EARL outcome"
+            f"factory:{status} duplicates an EARL outcome"
         )
 
     earl = rdflib.Namespace("http://www.w3.org/ns/earl#")

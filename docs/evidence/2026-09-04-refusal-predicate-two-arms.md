@@ -34,58 +34,58 @@ correction is the finding.
 
 ```turtle
 @prefix sh:      <http://www.w3.org/ns/shacl#> .
-@prefix saffron: <https://saffron.dev/ns#> .
-@prefix sp:      <https://saffron.dev/spike#> .
+@prefix factory: <urn:software-factory:ns#> .
+@prefix sp:      <urn:software-factory:spike#> .
 
 # The refusal predicate of DESIGN.md §4.2 gate 0 and §4.2.1, as SHACL.
 # Written from the prose. saffron/scheduler.py was not read before this file.
 # A violation means REFUSE.
 
 sp:R1 a sh:NodeShape ;
-    sh:targetClass saffron:Task ;
+    sh:targetClass factory:Task ;
     sh:sparql [ a sh:SPARQLConstraint ;
         sh:message "R1: an open PR from another task already targets this spec" ;
         sh:prefixes sp: ;
         sh:select """
             SELECT $this WHERE {
-              $this <https://saffron.dev/spike#inState> ?s ;
-                    <https://saffron.dev/spike#forSpec> ?spec .
-              ?pr <https://saffron.dev/spike#targets> ?spec ;
-                  <https://saffron.dev/spike#isOpen> true ;
-                  <https://saffron.dev/spike#openedByTask> ?other .
+              $this <urn:software-factory:spike#inState> ?s ;
+                    <urn:software-factory:spike#forSpec> ?spec .
+              ?pr <urn:software-factory:spike#targets> ?spec ;
+                  <urn:software-factory:spike#isOpen> true ;
+                  <urn:software-factory:spike#openedByTask> ?other .
               FILTER (?other != $this)
             }
         """ ] .
 
 sp:R3 a sh:NodeShape ;
-    sh:targetClass saffron:Task ;
+    sh:targetClass factory:Task ;
     sh:sparql [ a sh:SPARQLConstraint ;
         sh:message "R3: the spec_sha moved under this task" ;
         sh:select """
             SELECT $this WHERE {
-              $this <https://saffron.dev/spike#inState> ?s ;
-                    <https://saffron.dev/spike#atSpecSha> ?was ;
-                    <https://saffron.dev/spike#forSpec> ?spec .
-              ?spec <https://saffron.dev/spike#currentSpecSha> ?now .
+              $this <urn:software-factory:spike#inState> ?s ;
+                    <urn:software-factory:spike#atSpecSha> ?was ;
+                    <urn:software-factory:spike#forSpec> ?spec .
+              ?spec <urn:software-factory:spike#currentSpecSha> ?now .
               FILTER (?was != ?now)
             }
         """ ] .
 
 sp:R6 a sh:NodeShape ;
-    sh:targetClass saffron:Task ;
+    sh:targetClass factory:Task ;
     sh:sparql [ a sh:SPARQLConstraint ;
         sh:message "R6: a depends_on parent will not merge as it stands" ;
         sh:select """
             SELECT $this WHERE {
-              $this <https://saffron.dev/spike#inState> ?s ;
-                    <https://saffron.dev/spike#forSpec> ?spec .
-              ?spec <https://saffron.dev/spike#dependsOn> ?parent .
-              ?ptask <https://saffron.dev/spike#forSpec> ?parent ;
-                     <https://saffron.dev/ns#endedInState> ?pstate .
+              $this <urn:software-factory:spike#inState> ?s ;
+                    <urn:software-factory:spike#forSpec> ?spec .
+              ?spec <urn:software-factory:spike#dependsOn> ?parent .
+              ?ptask <urn:software-factory:spike#forSpec> ?parent ;
+                     <urn:software-factory:ns#endedInState> ?pstate .
               FILTER (?pstate NOT IN (
-                <https://saffron.dev/ns#MERGED>,
-                <https://saffron.dev/ns#READY_FOR_REVIEW>,
-                <https://saffron.dev/ns#APPROVED>
+                <urn:software-factory:ns#MERGED>,
+                <urn:software-factory:ns#READY_FOR_REVIEW>,
+                <urn:software-factory:ns#APPROVED>
               ))
             }
         """ ] .
@@ -94,25 +94,25 @@ sp:R6 a sh:NodeShape ;
 # §4.2.1: "It matches globs, not strings." SHACL has no glob operator, so this
 # is the closest expressible approximation: treat a trailing `**` as a prefix.
 sp:R5 a sh:NodeShape ;
-    sh:targetClass saffron:Task ;
+    sh:targetClass factory:Task ;
     sh:sparql [ a sh:SPARQLConstraint ;
         sh:message "R5: an acceptance criterion names a path no touches pattern reaches" ;
         sh:select """
             SELECT $this WHERE {
-              $this <https://saffron.dev/spike#inState> ?s ;
-                    <https://saffron.dev/spike#forSpec> ?spec .
-              ?spec <https://saffron.dev/ns#hasCriterion> ?crit .
-              ?crit <https://saffron.dev/spike#namesPath> ?path .
+              $this <urn:software-factory:spike#inState> ?s ;
+                    <urn:software-factory:spike#forSpec> ?spec .
+              ?spec <urn:software-factory:ns#hasCriterion> ?crit .
+              ?crit <urn:software-factory:spike#namesPath> ?path .
               # Skipped when touches is empty: the documented shape for a bug
               # awaiting DIAGNOSE. NOT EXISTS is vacuously true on an empty set,
               # so the unguarded form refuses the whole bug class.
               FILTER EXISTS {
-                ?spec <https://saffron.dev/spike#declaresTouches> ?any .
-                ?any <https://saffron.dev/spike#pattern> ?anyp .
+                ?spec <urn:software-factory:spike#declaresTouches> ?any .
+                ?any <urn:software-factory:spike#pattern> ?anyp .
               }
               FILTER NOT EXISTS {
-                ?spec <https://saffron.dev/spike#declaresTouches> ?tw .
-                ?tw <https://saffron.dev/spike#pattern> ?pat .
+                ?spec <urn:software-factory:spike#declaresTouches> ?tw .
+                ?tw <urn:software-factory:spike#pattern> ?pat .
                 FILTER (STRSTARTS(?path, REPLACE(?pat, "\\\\*\\\\*$", "")))
               }
             }
@@ -123,25 +123,25 @@ sp:R5 a sh:NodeShape ;
 
 ```turtle
 @prefix sh:      <http://www.w3.org/ns/shacl#> .
-@prefix saffron: <https://saffron.dev/ns#> .
-@prefix sp:      <https://saffron.dev/spike#> .
+@prefix factory: <urn:software-factory:ns#> .
+@prefix sp:      <urn:software-factory:spike#> .
 @prefix owl:     <http://www.w3.org/2002/07/owl#> .
 
 sp:decls a owl:Ontology ;
-    sh:declare [ sh:prefix "sp" ; sh:namespace "https://saffron.dev/spike#" ] ;
-    sh:declare [ sh:prefix "saffron" ; sh:namespace "https://saffron.dev/ns#" ] .
+    sh:declare [ sh:prefix "sp" ; sh:namespace "urn:software-factory:spike#" ] ;
+    sh:declare [ sh:prefix "saffron" ; sh:namespace "urn:software-factory:ns#" ] .
 
 # R5, corrected: `scope._to_regex`'s translation table rebuilt in SPARQL at
 # validation time. Nothing is pre-translated in the graph and no emitter runs.
 sp:R5corrected a sh:NodeShape ;
-    sh:targetClass saffron:Task ;
+    sh:targetClass factory:Task ;
     sh:sparql [ a sh:SPARQLConstraint ;
         sh:message "R5: an acceptance criterion names a path no touches pattern reaches" ;
         sh:prefixes sp:decls ;
         sh:select """
             SELECT $this WHERE {
               $this sp:inState ?s ; sp:forSpec ?spec .
-              ?spec saffron:hasCriterion ?crit .
+              ?spec factory:hasCriterion ?crit .
               ?crit sp:namesPath ?path .
               FILTER EXISTS { ?spec sp:declaresTouches ?any . ?any sp:pattern ?anyp . }
               FILTER NOT EXISTS {
@@ -187,77 +187,77 @@ sp:R5corrected a sh:NodeShape ;
 ## The fixtures
 
 Twelve tasks, ten of them in flight (`sp:t6p` and `sp:t7p` carry
-`saffron:endedInState` and are the parents a dependency refusal reads).
+`factory:endedInState` and are the parents a dependency refusal reads).
 
 ```turtle
-@prefix saffron: <https://saffron.dev/ns#> .
-@prefix sp:      <https://saffron.dev/spike#> .
+@prefix factory: <urn:software-factory:ns#> .
+@prefix sp:      <urn:software-factory:spike#> .
 
 # Hand-authored in-flight tasks, one per refusal §4.2.1 states, plus the two
 # cases the prose says must NOT refuse. Authored from the prose.
 
-sp:policy a saffron:Policy ; sp:protectedPath "CONTEXT.md" , "DESIGN.md" .
+sp:policy a factory:Policy ; sp:protectedPath "CONTEXT.md" , "DESIGN.md" .
 sp:repo sp:preflightPassed true ; sp:retiredByPath "saffron/replay.py" .
 
 # R1 — an open PR from ANOTHER task already targets this spec.  REFUSE
-sp:s1 a saffron:Spec ; sp:currentSpecSha "s1a" ; sp:declaresTouches sp:tw1 .
-sp:tw1 a saffron:TouchesSet ; sp:pattern "saffron/a/**" .
-sp:t1 a saffron:Task ; sp:forSpec sp:s1 ; sp:atSpecSha "s1a" ; sp:inState sp:QUEUED .
-sp:t0 a saffron:Task ; sp:forSpec sp:s1 ; sp:atSpecSha "s1a" ; sp:inState sp:REVIEWING .
-sp:pr1 a saffron:PullRequest ; sp:targets sp:s1 ; sp:openedByTask sp:t0 ; sp:isOpen true .
+sp:s1 a factory:Spec ; sp:currentSpecSha "s1a" ; sp:declaresTouches sp:tw1 .
+sp:tw1 a factory:TouchesSet ; sp:pattern "saffron/a/**" .
+sp:t1 a factory:Task ; sp:forSpec sp:s1 ; sp:atSpecSha "s1a" ; sp:inState sp:QUEUED .
+sp:t0 a factory:Task ; sp:forSpec sp:s1 ; sp:atSpecSha "s1a" ; sp:inState sp:REVIEWING .
+sp:pr1 a factory:PullRequest ; sp:targets sp:s1 ; sp:openedByTask sp:t0 ; sp:isOpen true .
 
 # R1' — the re-queue case: the ONLY open PR is this task's own.  ADMIT
-sp:s9 a saffron:Spec ; sp:currentSpecSha "s9a" ; sp:declaresTouches sp:tw9 .
-sp:tw9 a saffron:TouchesSet ; sp:pattern "saffron/i/**" .
-sp:t9 a saffron:Task ; sp:forSpec sp:s9 ; sp:atSpecSha "s9a" ; sp:inState sp:QUEUED .
-sp:pr9 a saffron:PullRequest ; sp:targets sp:s9 ; sp:openedByTask sp:t9 ; sp:isOpen true .
+sp:s9 a factory:Spec ; sp:currentSpecSha "s9a" ; sp:declaresTouches sp:tw9 .
+sp:tw9 a factory:TouchesSet ; sp:pattern "saffron/i/**" .
+sp:t9 a factory:Task ; sp:forSpec sp:s9 ; sp:atSpecSha "s9a" ; sp:inState sp:QUEUED .
+sp:pr9 a factory:PullRequest ; sp:targets sp:s9 ; sp:openedByTask sp:t9 ; sp:isOpen true .
 
 # R3 — the spec_sha moved under the task.  REFUSE
-sp:s3 a saffron:Spec ; sp:currentSpecSha "bbb" ; sp:declaresTouches sp:tw3 .
-sp:tw3 a saffron:TouchesSet ; sp:pattern "saffron/c/**" .
-sp:t3 a saffron:Task ; sp:forSpec sp:s3 ; sp:atSpecSha "aaa" ; sp:inState sp:QUEUED .
+sp:s3 a factory:Spec ; sp:currentSpecSha "bbb" ; sp:declaresTouches sp:tw3 .
+sp:tw3 a factory:TouchesSet ; sp:pattern "saffron/c/**" .
+sp:t3 a factory:Task ; sp:forSpec sp:s3 ; sp:atSpecSha "aaa" ; sp:inState sp:QUEUED .
 
 # R6a — parent is EXHAUSTED: will not merge as it stands.  REFUSE
-sp:s6p a saffron:Spec ; sp:currentSpecSha "p" .
-sp:t6p a saffron:Task ; sp:forSpec sp:s6p ; sp:atSpecSha "p" ;
-       saffron:endedInState saffron:EXHAUSTED .
-sp:s6 a saffron:Spec ; sp:currentSpecSha "s6a" ; sp:dependsOn sp:s6p ; sp:declaresTouches sp:tw6 .
-sp:tw6 a saffron:TouchesSet ; sp:pattern "saffron/f/**" .
-sp:t6 a saffron:Task ; sp:forSpec sp:s6 ; sp:atSpecSha "s6a" ; sp:inState sp:QUEUED .
+sp:s6p a factory:Spec ; sp:currentSpecSha "p" .
+sp:t6p a factory:Task ; sp:forSpec sp:s6p ; sp:atSpecSha "p" ;
+       factory:endedInState factory:EXHAUSTED .
+sp:s6 a factory:Spec ; sp:currentSpecSha "s6a" ; sp:dependsOn sp:s6p ; sp:declaresTouches sp:tw6 .
+sp:tw6 a factory:TouchesSet ; sp:pattern "saffron/f/**" .
+sp:t6 a factory:Task ; sp:forSpec sp:s6 ; sp:atSpecSha "s6a" ; sp:inState sp:QUEUED .
 
 # R6b — parent at READY_FOR_REVIEW admits its dependent (stacked).  ADMIT
-sp:s7p a saffron:Spec ; sp:currentSpecSha "q" .
-sp:t7p a saffron:Task ; sp:forSpec sp:s7p ; sp:atSpecSha "q" ;
-       saffron:endedInState saffron:READY_FOR_REVIEW .
-sp:s7 a saffron:Spec ; sp:currentSpecSha "s7a" ; sp:dependsOn sp:s7p ; sp:declaresTouches sp:tw7 .
-sp:tw7 a saffron:TouchesSet ; sp:pattern "saffron/g/**" .
-sp:t7 a saffron:Task ; sp:forSpec sp:s7 ; sp:atSpecSha "s7a" ; sp:inState sp:QUEUED .
+sp:s7p a factory:Spec ; sp:currentSpecSha "q" .
+sp:t7p a factory:Task ; sp:forSpec sp:s7p ; sp:atSpecSha "q" ;
+       factory:endedInState factory:READY_FOR_REVIEW .
+sp:s7 a factory:Spec ; sp:currentSpecSha "s7a" ; sp:dependsOn sp:s7p ; sp:declaresTouches sp:tw7 .
+sp:tw7 a factory:TouchesSet ; sp:pattern "saffron/g/**" .
+sp:t7 a factory:Task ; sp:forSpec sp:s7 ; sp:atSpecSha "s7a" ; sp:inState sp:QUEUED .
 
 # R5a — a criterion naming a path NO touches pattern reaches.  REFUSE
-sp:s5 a saffron:Spec ; sp:currentSpecSha "s5a" ; sp:declaresTouches sp:tw5 ; saffron:hasCriterion sp:c5 .
-sp:tw5 a saffron:TouchesSet ; sp:pattern "saffron/gates/**" .
-sp:c5 a saffron:AcceptanceCriterion ; sp:namesPath "saffron/cli.py" .
-sp:t5 a saffron:Task ; sp:forSpec sp:s5 ; sp:atSpecSha "s5a" ; sp:inState sp:QUEUED .
+sp:s5 a factory:Spec ; sp:currentSpecSha "s5a" ; sp:declaresTouches sp:tw5 ; factory:hasCriterion sp:c5 .
+sp:tw5 a factory:TouchesSet ; sp:pattern "saffron/gates/**" .
+sp:c5 a factory:AcceptanceCriterion ; sp:namesPath "saffron/cli.py" .
+sp:t5 a factory:Task ; sp:forSpec sp:s5 ; sp:atSpecSha "s5a" ; sp:inState sp:QUEUED .
 
 # R5b — the false-refusal trap §4.2.1 names: the glob DOES match.  ADMIT
-sp:s8 a saffron:Spec ; sp:currentSpecSha "s8a" ; sp:declaresTouches sp:tw8 ; saffron:hasCriterion sp:c8 .
-sp:tw8 a saffron:TouchesSet ; sp:pattern "saffron/gates/core/**" .
-sp:c8 a saffron:AcceptanceCriterion ; sp:namesPath "saffron/gates/core/size.py" .
-sp:t8 a saffron:Task ; sp:forSpec sp:s8 ; sp:atSpecSha "s8a" ; sp:inState sp:QUEUED .
+sp:s8 a factory:Spec ; sp:currentSpecSha "s8a" ; sp:declaresTouches sp:tw8 ; factory:hasCriterion sp:c8 .
+sp:tw8 a factory:TouchesSet ; sp:pattern "saffron/gates/core/**" .
+sp:c8 a factory:AcceptanceCriterion ; sp:namesPath "saffron/gates/core/size.py" .
+sp:t8 a factory:Task ; sp:forSpec sp:s8 ; sp:atSpecSha "s8a" ; sp:inState sp:QUEUED .
 
 # R5c — a bug awaiting DIAGNOSE: touches is empty, so R5 is skipped.  ADMIT
-sp:s10 a saffron:Spec ; sp:currentSpecSha "s10a" ; saffron:specType saffron:bug ;
-       saffron:hasCriterion sp:c10 .
-sp:c10 a saffron:AcceptanceCriterion ; sp:namesPath "saffron/anything.py" .
-sp:t10 a saffron:Task ; sp:forSpec sp:s10 ; sp:atSpecSha "s10a" ; sp:inState sp:QUEUED .
+sp:s10 a factory:Spec ; sp:currentSpecSha "s10a" ; factory:specType factory:bug ;
+       factory:hasCriterion sp:c10 .
+sp:c10 a factory:AcceptanceCriterion ; sp:namesPath "saffron/anything.py" .
+sp:t10 a factory:Task ; sp:forSpec sp:s10 ; sp:atSpecSha "s10a" ; sp:inState sp:QUEUED .
 
 # R5d — a leading-** glob. Real glob matching says this MATCHES, so the spec is
 # satisfiable and must be ADMITted. §4.2.1: "a false refusal at gate 0 costs a
 # whole spec overnight with no cell started and nothing to notice until morning."
-sp:s11 a saffron:Spec ; sp:currentSpecSha "s11a" ; sp:declaresTouches sp:tw11 ; saffron:hasCriterion sp:c11 .
-sp:tw11 a saffron:TouchesSet ; sp:pattern "**/size.py" .
-sp:c11 a saffron:AcceptanceCriterion ; sp:namesPath "saffron/gates/core/size.py" .
-sp:t11 a saffron:Task ; sp:forSpec sp:s11 ; sp:atSpecSha "s11a" ; sp:inState sp:QUEUED .
+sp:s11 a factory:Spec ; sp:currentSpecSha "s11a" ; sp:declaresTouches sp:tw11 ; factory:hasCriterion sp:c11 .
+sp:tw11 a factory:TouchesSet ; sp:pattern "**/size.py" .
+sp:c11 a factory:AcceptanceCriterion ; sp:namesPath "saffron/gates/core/size.py" .
+sp:t11 a factory:Task ; sp:forSpec sp:s11 ; sp:atSpecSha "s11a" ; sp:inState sp:QUEUED .
 ```
 
 ### Scored
@@ -277,7 +277,7 @@ sp:t11 a saffron:Task ; sp:forSpec sp:s11 ; sp:atSpecSha "s11a" ; sp:inState sp:
 ## The vocabulary the predicate needs
 
 27 terms here plus `MERGE_TRAIN` = 28, against the vocabulary's 92 (`rdflib`
-subject count in the `saffron:` namespace, less the `owl:Ontology` node).
+subject count in the `factory:` namespace, less the `owl:Ontology` node).
 
 Nine of the 28 are the in-flight state class and its eight individuals; a
 modelling that read "has not ended" as the *absence* of `endedInState` would cut
@@ -285,14 +285,14 @@ the count to about 20. The number is doing rhetorical work in Q3, so its
 sensitivity to that choice is stated here rather than left for a reader to find.
 
 ```turtle
-@prefix saffron: <https://saffron.dev/ns#> .
-@prefix sp:      <https://saffron.dev/spike#> .
+@prefix factory: <urn:software-factory:ns#> .
+@prefix sp:      <urn:software-factory:spike#> .
 @prefix owl:     <http://www.w3.org/2002/07/owl#> .
 @prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
 
 # Spike vocabulary: the terms §4.2.1's refusal predicate needs and
-# ontology/saffron.ttl does not declare. Written from the prose of §4.2 gate 0
+# ontology/factory.ttl does not declare. Written from the prose of §4.2 gate 0
 # and §4.2.1, before reading saffron/scheduler.py. Counted for question 3.
 
 ## In-flight states. The vocabulary declares none: every state it has is an
@@ -305,33 +305,33 @@ sp:GATING a sp:InFlightState . sp:REPAIRING a sp:InFlightState .
 sp:REVIEWING a sp:InFlightState . sp:REBUTTING a sp:InFlightState .
 
 ## Identity and versioning of the thing being scheduled.
-sp:forSpec        a owl:ObjectProperty ; rdfs:domain saffron:Task ; rdfs:range saffron:Spec .
-sp:atSpecSha      a owl:DatatypeProperty ; rdfs:domain saffron:Task ; rdfs:range xsd:string .
-sp:currentSpecSha a owl:DatatypeProperty ; rdfs:domain saffron:Spec ; rdfs:range xsd:string .
-sp:inState        a owl:ObjectProperty ; rdfs:domain saffron:Task .
+sp:forSpec        a owl:ObjectProperty ; rdfs:domain factory:Task ; rdfs:range factory:Spec .
+sp:atSpecSha      a owl:DatatypeProperty ; rdfs:domain factory:Task ; rdfs:range xsd:string .
+sp:currentSpecSha a owl:DatatypeProperty ; rdfs:domain factory:Spec ; rdfs:range xsd:string .
+sp:inState        a owl:ObjectProperty ; rdfs:domain factory:Task .
 
 ## Declared blast radius, as patterns rather than paths.
-sp:declaresTouches a owl:ObjectProperty ; rdfs:domain saffron:Spec ; rdfs:range saffron:TouchesSet .
-sp:pattern         a owl:DatatypeProperty ; rdfs:domain saffron:TouchesSet ; rdfs:range xsd:string ;
+sp:declaresTouches a owl:ObjectProperty ; rdfs:domain factory:Spec ; rdfs:range factory:TouchesSet .
+sp:pattern         a owl:DatatypeProperty ; rdfs:domain factory:TouchesSet ; rdfs:range xsd:string ;
     rdfs:comment "A glob, not a path. §4.2.1: touches is glob-matched everywhere it is enforced." .
 
 ## Dependencies.
-sp:dependsOn a owl:ObjectProperty ; rdfs:domain saffron:Spec ; rdfs:range saffron:Spec .
+sp:dependsOn a owl:ObjectProperty ; rdfs:domain factory:Spec ; rdfs:range factory:Spec .
 
 ## Pull requests, which gate 0 reads and the run record does not relate.
-sp:targets      a owl:ObjectProperty ; rdfs:domain saffron:PullRequest ; rdfs:range saffron:Spec .
-sp:openedByTask a owl:ObjectProperty ; rdfs:domain saffron:PullRequest ; rdfs:range saffron:Task .
-sp:isOpen       a owl:DatatypeProperty ; rdfs:domain saffron:PullRequest ; rdfs:range xsd:boolean .
-sp:changedFile  a owl:DatatypeProperty ; rdfs:domain saffron:PullRequest ; rdfs:range xsd:string .
+sp:targets      a owl:ObjectProperty ; rdfs:domain factory:PullRequest ; rdfs:range factory:Spec .
+sp:openedByTask a owl:ObjectProperty ; rdfs:domain factory:PullRequest ; rdfs:range factory:Task .
+sp:isOpen       a owl:DatatypeProperty ; rdfs:domain factory:PullRequest ; rdfs:range xsd:boolean .
+sp:changedFile  a owl:DatatypeProperty ; rdfs:domain factory:PullRequest ; rdfs:range xsd:string .
 
 ## Criteria, protected paths, retirement markers, preflight.
-sp:namesPath      a owl:DatatypeProperty ; rdfs:domain saffron:AcceptanceCriterion ; rdfs:range xsd:string .
-sp:protectedPath  a owl:DatatypeProperty ; rdfs:domain saffron:Policy ; rdfs:range xsd:string .
+sp:namesPath      a owl:DatatypeProperty ; rdfs:domain factory:AcceptanceCriterion ; rdfs:range xsd:string .
+sp:protectedPath  a owl:DatatypeProperty ; rdfs:domain factory:Policy ; rdfs:range xsd:string .
 sp:retiredByPath  a owl:DatatypeProperty ; rdfs:range xsd:string .
 sp:preflightPassed a owl:DatatypeProperty ; rdfs:range xsd:boolean .
-sp:malformed      a owl:DatatypeProperty ; rdfs:domain saffron:Spec ; rdfs:range xsd:boolean .
-sp:retiredToDone  a owl:DatatypeProperty ; rdfs:domain saffron:Spec ; rdfs:range xsd:boolean .
-sp:declaresId     a owl:DatatypeProperty ; rdfs:domain saffron:Spec ; rdfs:range xsd:boolean .
+sp:malformed      a owl:DatatypeProperty ; rdfs:domain factory:Spec ; rdfs:range xsd:boolean .
+sp:retiredToDone  a owl:DatatypeProperty ; rdfs:domain factory:Spec ; rdfs:range xsd:boolean .
+sp:declaresId     a owl:DatatypeProperty ; rdfs:domain factory:Spec ; rdfs:range xsd:boolean .
 ```
 
 ## Which refusals were shaped

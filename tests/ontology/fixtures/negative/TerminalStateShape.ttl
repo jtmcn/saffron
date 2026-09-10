@@ -1,7 +1,7 @@
-@prefix saffron: <https://saffron.dev/ns#> .
+@prefix factory: <urn:software-factory:ns#> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
 @prefix earl: <http://www.w3.org/ns/earl#> .
-@prefix : <https://saffron.dev/data/> .
+@prefix : <urn:software-factory:data:> .
 
 # MERGED is what the operator's decision produces, not a state that reaches them.
-saffron:MERGED a saffron:TerminalState, saffron:EndState .
+factory:MERGED a factory:TerminalState, factory:EndState .
