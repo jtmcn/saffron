@@ -1868,7 +1868,10 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     # Before it was retired this read the other way round: `SA-0063` sat at top
     # level as a discovery failure and `SA-0064` was refused for a parent that
     # looked absent, which is the cascade that made the distinction necessary.
-    assert [c.spec.id for c in candidates] == ["SA-0060", "SA-0064"]
+    # `SA-0065` declares no parent at all, so it is admissible on arrival and
+    # sorts last on filename among the priority-1 specs. It is the first spec
+    # written to be run by a batch rather than by `saffron cell`.
+    assert [c.spec.id for c in candidates] == ["SA-0060", "SA-0064", "SA-0065"]
     assert [r for r in refusals if r.path.name.startswith("SA-0063")] == []
 
     # Refused for the parent each actually declares, which is what separates a
