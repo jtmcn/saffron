@@ -1709,6 +1709,13 @@ a `gh`-free scan, the same argument item 18 made for turn ceilings.
 
 ## 26. Discovery cannot tell an empty night from a missing directory
 
+**Status: `SA-0065` is written for this, 2026-09-09, and is deliberately the
+first spec a `saffron batch` will be asked to run.** Tier 0's gate is a night
+that *runs* something, and this item's own failure mode — an unattended night
+that ends having done nothing with no record saying why — is what such a night
+has to rule out. The spec scopes to `discover_specs` alone; the exit code item 26
+argues for is out of its scope and stated as such.
+
 `discover_specs` (`saffron/intake.py`, landing with `SA-0014` in PR #56) returns
 `(specs, failures)` and reaches the filesystem through `directory.glob("*.md")`.
 `Path.glob` yields nothing for a directory that does not exist and nothing for a
