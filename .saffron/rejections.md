@@ -60,10 +60,11 @@ it landed or `open`. New entries carry no backfill marker.
 
 - A `return` inside a `finally` swallowed the operator's Ctrl-C, in a core gate.
   **Bucket 1, and the gate does not exist.** ruff selects `B`, and B012 does not
-  see a `return` nested inside a `try` inside a `finally`. CPython does: this was
-  the only file under `saffron/` emitting
-  `SyntaxWarning: 'return' in a 'finally' block`. A gate that compiles `saffron/`
-  and fails on `SyntaxWarning` would have caught it for nothing. **Open, unfiled.**
+  see a `return` nested inside a `try` inside a `finally`. CPython 3.14 does: this
+  was the only file under `saffron/` emitting
+  `SyntaxWarning: 'return' in a 'finally' block`. **Open**, item 96 — which found
+  the obvious gate would pass in the cell, whose interpreter is 3.12 and has no
+  such warning.
 - The fix for the swallowed interrupt was itself unwitnessed — three branches
   mutated to `pass` with the file green.
   **Bucket 1** — `witness`.
@@ -168,9 +169,11 @@ answered by a `CLAUDE.md` line today, so the middle of the flywheel is not merel
 underused — it is disconnected. One sample is not a rate, but the count cannot
 grow while the bucket has no reader.
 
-**One bucket-1 destination is named here and filed nowhere**: a gate that compiles
-`saffron/` and fails on `SyntaxWarning`. CPython had already found the Ctrl-C
-defect and printed it; nothing was listening.
+**One bucket-1 destination was named here and filed nowhere**, and filing it (item
+96) found that the obvious version is a trap. CPython 3.14 names the Ctrl-C defect
+at compile time. Ruff's four `finally` rules don't, and neither do CPython 3.12 or
+3.13 — and the cell runs 3.12.14. A compile gate declared the ordinary way would
+pass the one defect it exists to catch.
 
 **`witness` is the flywheel working.** Five rejections about tests that guard
 nothing were answered by one gate, which is §8's `revert` precedent repeating.
