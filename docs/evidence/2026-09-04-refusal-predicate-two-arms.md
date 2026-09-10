@@ -12,6 +12,15 @@ fixtures fail it by design: six tasks have no `endedInState` and no `riskTier`,
 and eight `TouchesSet` nodes have no `ratifiedBy`. That is not a defect in the
 fixtures — it is Q3's finding in its sharpest form. B1 as written is unsatisfiable.
 
+**Amended 2026-09-10: the Turtle and SPARQL below are not the text that ran.** The
+vocabulary rename (PR #192, `CONTEXT.md` settled naming decision 6) rewrote every
+IRI and prefix here to `urn:software-factory:ns#`, `urn:software-factory:spike#`
+and `factory:`, and nothing was re-run afterwards. The results were measured on the
+program-named spelling this record carried on 2026-09-04; the rename changed names,
+not structure. It first left the corrected R5's `sh:declare` naming the old prefix
+while its query used the new one, which would not have parsed; that one declaration
+was brought into line with the rest in the same pass.
+
 ## What the first write-up got wrong
 
 The first version of this spike asserted that glob matching is **not expressible**
@@ -129,7 +138,7 @@ sp:R5 a sh:NodeShape ;
 
 sp:decls a owl:Ontology ;
     sh:declare [ sh:prefix "sp" ; sh:namespace "urn:software-factory:spike#" ] ;
-    sh:declare [ sh:prefix "saffron" ; sh:namespace "urn:software-factory:ns#" ] .
+    sh:declare [ sh:prefix "factory" ; sh:namespace "urn:software-factory:ns#" ] .
 
 # R5, corrected: `scope._to_regex`'s translation table rebuilt in SPARQL at
 # validation time. Nothing is pre-translated in the graph and no emitter runs.
