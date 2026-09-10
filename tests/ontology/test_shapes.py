@@ -210,7 +210,7 @@ def test_a_reason_that_claims_the_class_is_still_refused_by_the_enumeration(
     assert components == {SH.InConstraintComponent}, text
 
 
-_ACTING = ":s a saffron:Delegate ; prov:actedOnBehalfOf :joel ."
+_ACTING = ":s a saffron:Delegate ; prov:actedOnBehalfOf :operator ."
 # Valid under AttemptShape, so only DelegateShape can refuse it.
 _ATTEMPT = ":ph a saffron:Phase . :at a saffron:Attempt ; saffron:withinPhase :ph ; saffron:n 1 ;"
 
@@ -222,11 +222,11 @@ _ATTEMPT = ":ph a saffron:Phase . :at a saffron:Attempt ; saffron:withinPhase :p
         (":s a saffron:Delegate .", {SH.MinCountConstraintComponent}),
         (
             ":s a saffron:Delegate ; prov:actedOnBehalfOf :t . "
-            ":t a saffron:Delegate ; prov:actedOnBehalfOf :joel .",
+            ":t a saffron:Delegate ; prov:actedOnBehalfOf :operator .",
             {SH.ClassConstraintComponent},
         ),
         (
-            ":s a saffron:Delegate, saffron:Operator ; prov:actedOnBehalfOf :joel .",
+            ":s a saffron:Delegate, saffron:Operator ; prov:actedOnBehalfOf :operator .",
             {SH.NotConstraintComponent},
         ),
         # A delegate may be handed a plan; nothing outside it holds it to one.
@@ -272,7 +272,7 @@ def test_a_delegate_acts_for_the_operator_never_as_one_nor_in_an_attempt(
         data=f"""@prefix saffron: <{NS}> .
         @prefix prov: <http://www.w3.org/ns/prov#> .
         @prefix : <https://saffron.dev/data/> .
-        :joel a saffron:Operator . {graph}""",
+        :operator a saffron:Operator . {graph}""",
         format="turtle",
     )
     conforms, results, text = validate(data, shacl_graph=shapes_graph, advanced=True)

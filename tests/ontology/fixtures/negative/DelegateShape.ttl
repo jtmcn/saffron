@@ -4,8 +4,8 @@
 
 # A delegate credited with a task's attempt. The run record holds what a cell did
 # under enforcement; a delegate's work is never part of it.
-:joel a saffron:Operator .
-:session a saffron:Delegate ; prov:actedOnBehalfOf :joel .
+:operator a saffron:Operator .
+:session a saffron:Delegate ; prov:actedOnBehalfOf :operator .
 :ph a saffron:Phase .
 :at a saffron:Attempt ; saffron:withinPhase :ph ; saffron:n 1 ;
     prov:qualifiedAssociation [ prov:agent :session ] .
