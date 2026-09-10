@@ -82,39 +82,35 @@ the record rather than felt.
    backlog item graded critical;
 2. every declared mutant is killed by its named witness on the first attempt — no
    survivor, and no `skip` for a reason the spec author could have avoided; and
-3. REVIEW grades **both** of PR #154's defects in **3 of 3 runs** on Track A's
-   harness, re-run after any lens change.
+3. REVIEW grades at least **3** of the corpus's twelve declared defects — the
+   count `docs/evidence/2026-09-09-lens-corpus-baseline.md` measured — and no
+   fixture that graded a defect at baseline grades none.
 
-   *Tightened 2026-09-08, after Track A's baseline pass met the original.* It
-   read "at least one of the two graded defects", which the lenses as they stand
-   already do in 3/3 runs before Track C touches a prompt — a criterion a
-   baseline satisfies steers nothing. The pass's finding was that the failure is
-   variance, not remit: run 1 missed the undo, run 3 graded the truncating write
-   a concern, run 2 got both. Requiring both defects in every run is the smallest
-   threshold that has to move for that spread to close, and it is the number the
-   harness already prints.
+   *Rewritten 2026-09-09 onto the corpus.* It read "both of PR #154's defects in
+   3 of 3 runs", and its own revision note below had already recorded that
+   statistic moving by a third between two passes of unmodified lenses. The
+   corpus is eight fixtures and twelve defects, which is what it was built for.
 
-   Read it as a *difference* between two prompts over one fixture, never as an
-   absolute: backlog item 88 has the harness filing blockers 1, 2, 1 where
-   production over the same range filed zero, and until that is explained an
-   absolute count off this fixture is not production's count. If item 88 turns
-   out to be the frozen `gates.txt`, re-baseline before reading this criterion
-   as met.
+   **`B = 3`, and pass 1's `4/12` is not evidence against it.** The adequacy
+   prompt gained a required `probe` field between the two passes, adequacy owns
+   **10 of the 12** declared defects, and both defects in the `4 → 3` difference
+   are adequacy-owned. So the passes are one sample each of two configurations,
+   not two samples of one: `4 → 3` is confounded, not noise and not a measured
+   regression. `3` is the count under the prompt that runs from here on, which is
+   the only configuration this criterion can be written against. The same fact
+   bars the opposite claim — that requiring a probe cost adequacy nothing. It
+   went 3/10 to 2/10 across the change, n=1 each side, and that is filed rather
+   than guessed (`docs/BACKLOG.md` item 93).
 
-   *Item 88 answered, 2026-09-08: it was **not** the `gates.txt`. With the
-   tools restored and every other input held, blockers per run are 1, 1, 2
-   against 1, 2, 1 — the same four, and every run of both blocks. No
-   re-baseline is owed on that account, and "read it as a difference" is now the
-   measured instruction rather than the cautious one.*
+   **The corpus is close to a single-lens measurement**, and the criterion should
+   be read as one. Ten of twelve defects are adequacy's; `contract` and
+   `correctness` own one each. A prompt change to either moves at most 1/12 here.
 
-   *What the second pass did move is this criterion's own number.
-   `dirty-restore` went 2/3 → 1/3 and `truncating-write` 3/3 → 2/3 seen, on an
-   input change with no mechanism to make either defect harder to see. So "both
-   defects in 3 of 3 runs" sits on the noisiest statistic the harness prints:
-   two passes of the unmodified lenses disagree by a third on it while agreeing
-   exactly on the blocker count. Before Track C reads this criterion as met,
-   raise n or require the same margin over two passes — a single 3/3 is within
-   the spread already measured on a fixture nobody touched.*
+   Read it as a *difference* between two prompts, never as an absolute — the
+   instruction the one-fixture version carried, and it survives the rewrite for
+   the same reason. Item 88 is answered (2026-09-08): the harness reads harsher
+   than production and the `gates.txt` was not why, so an absolute count off
+   these fixtures is still not production's count.
 
 Until the count is met, a batch night is a batch of pull requests each owed a
 human round. Size nights by how many rounds you will do in the morning, not by

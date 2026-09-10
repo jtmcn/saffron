@@ -1,0 +1,28 @@
+[
+  {
+    "probe": {
+      "file": "saffron/cli.py",
+      "find": "            print(f\"{spec.id:<10} {result.state}  {result.pr_url or result.note}\")\n            outcome.state = result.state",
+      "replace": "            print(f\"{spec.id:<10} {result.state}  {result.pr_url or result.note}\")"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1309,
+    "summary": "1307 passed, 2 skipped, 20 deselected in 13.65s"
+  },
+  {
+    "probe": {
+      "file": "saffron/cli.py",
+      "find": "    if readiness_seen and not readiness_seen[-1].ok:",
+      "replace": "    if readiness_seen:"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1309,
+    "summary": "1307 passed, 2 skipped, 20 deselected in 14.02s"
+  }
+]

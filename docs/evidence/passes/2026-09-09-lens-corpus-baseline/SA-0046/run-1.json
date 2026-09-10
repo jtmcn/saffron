@@ -1,0 +1,33 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.515682,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/phases/package.py",
+        "line": 771,
+        "claim": "`record_policy` is committed to the ledger (via `Ledger.record_policy`'s own `self._db.commit()`) *before* `reverify` is called on line 776, whose own adjacent comment states a gate that errors 'raises out of `reverify`: infrastructure, and never this task's MERGE_FAILED.' If that raise happens, the task's `policy_sha` has already been durably rewritten to the fetch_head declaration even though no gate suite was ever confirmed to have completed under it \u2014 violating the stated invariant that an `error` 'aborts the attempt, is never charged to the task' (\u00a7 Status). The write should follow a successful `reverify` return, not precede the call, so an errored re-verification leaves no residue in the ledger. Tests only exercise `reverify` mocked to always succeed, so this ordering defect is invisible to the gate suite.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.5692602,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.6575394,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  }
+]

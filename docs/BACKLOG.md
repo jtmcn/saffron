@@ -50,7 +50,7 @@ evidence. That is the gate now, and it is one cheap spec away.
 
 ### Tier 1 — breaks at 03:00 with nobody watching
 
-Soundness first: **79**, **69**, **80** (with **83**, **85**, **84**, **82**,
+Soundness first: **79**, **69**, **93**, **80** (with **83**, **85**, **84**, **82**,
 **81** from tier 3, which are why 69's gate cannot yet be declared against
 safely), then the remainder of **71**. Honesty second:
 **73**, **70**, **45**, **51** (with **49**/**50**, which its fix closes),
@@ -62,6 +62,13 @@ result (2026-09-08 — the gate summary was not the confound); **71** is
 two-thirds done and **78** is done in code — each item's own `Status` line says
 what is left.
 (**59** is done — `SA-0052`, PR #118.)
+
+**93 sits with them** because it decides whether their numbers can be read.
+The corpus has a baseline (`3/12`, 2026-09-09), and the adequacy prompt changed
+between the only two passes there have ever been — so nobody knows the metric's
+resolution, and two passes disagree by 1 of 12. Until that is measured, a prompt
+change read off a single pass is the mistake item 88 left on the harness this
+corpus replaced.
 
 **79 and 69 are first** because they are the only items here about the
 factory's ability to tell whether its own work is sound. Nine tests shipped in
@@ -103,8 +110,11 @@ fire. Its number stays listed because item numbers are cited from `saffron/`.
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, **57**, **61**, **62**, **63**, **64**, **69**, **75**, **76**, **77**,
-**81**, **82**, **83**, **84**, **85**, **86**, **87**, **89**, **90**.
-(**65** and **68** are done; **80** moved to tier 1 when its evidence arrived.)
+**81**, **82**, **83**, **84**, **85**, **86**, **87**, **89**, **90**, **92**,
+**94**.
+(**65** and **68** are done; **80** moved to tier 1 when its evidence arrived.
+**91** is done — the spike record landed. **92** and **94** were appended
+un-indexed, which is the same defect as filing one nowhere at all.)
 
 **76 sits here rather than in tier 1** because `structure`, where the hole was
 found, is closed: it refuses every ignore source and states its own file set.
@@ -3932,6 +3942,13 @@ down, never the scan handing them up.
 
 ## 69. The adequacy lens reads where only running can answer, and nine tests got through
 
+**Its table is now a scored corpus, 2026-09-09, and that closes nothing here.**
+`docs/evidence/2026-09-09-lens-corpus-baseline.md` grades adequacy at **2 of the
+10 declared defects it owns**, and separately verifies **8 vacuity probes** whose
+named edit left the fixture's suite green — the first numbers this item's
+question has ever had. Both are measurements of the gap. The mechanism is still
+item **71**'s seam: a `witness` result on a real attempt is what closes this.
+
 **Partly built, not done.** `SA-0056` (PR #135), `SA-0057` (#136) and `SA-0058`
 (#139) merged 2026-09-06 and built the whole mechanism: a `mutant` beside a
 claim, an applier, the `witness` gate, and the wiring. **It runs on nothing** —
@@ -4542,6 +4559,14 @@ spec came to assert its opposite and pass review.
 
 ## 79. Three lenses read one diff and none asked what a failed write leaves behind
 
+**Track A is delivered, 2026-09-09.** The scored corpus exists and has a kept
+baseline: `docs/evidence/2026-09-09-lens-corpus-baseline.md`, eight fixtures,
+twelve declared defects, `3/12` graded. The exit criterion in
+`docs/superpowers/plans/2026-09-07-trusting-the-queue.md` is rewritten off this
+item's one fixture onto that corpus. **This item is not thereby closed**: it asks
+whether a lens owns the failure-path question, and a corpus that grades 3 of 12
+is a measurement of that gap rather than a closing of it.
+
 **Status: measured 2026-09-07, and the diagnosis below is wrong on one point.**
 The known-bad diff this item asks for exists — `docs/evidence/fixtures/SA-0062/`,
 scored by `harness/lens_scoring.py` and re-runnable after any lens change. First
@@ -5014,6 +5039,14 @@ produced this; naming it in the preflight line is not.
 
 ## 86. The notes channel's two rendering-side safety properties are unwitnessed
 
+**Still unwritten, 2026-09-09, and the corpus now says so with a number.** Both
+properties are `SA-0063`'s declared defects, and the baseline pass graded
+**neither** — every finding that fixture produced anchored in
+`saffron/cell/session.py` and `saffron/phases/package.py`, none in
+`saffron/report/pr_body.py` or `tests/test_report.py`. So no lens reached them,
+which is a measured miss rather than the assumed one. The two assertions are
+still owed.
+
 Found reviewing `SA-0064` (#160), 2026-09-07, by mutation rather than by
 reading. Both are gaps in what the suite *proves*, not live defects — I
 confirmed each behaviour holds today by hand. Both live in
@@ -5332,6 +5365,56 @@ in-cell suite runs 5.5x faster than the same tree on the host, and nobody has
 explained it. `probes.json` now records the gate's tool, collected count and
 summary per verdict, so the next pass can say whether the suite that answered
 was the whole one.
+
+---
+
+## 93. Requiring a probe may have cost the adequacy lens recall, and nothing measured it
+
+**Tier 1 — it bears on whether the corpus's own number means anything.** The
+adequacy prompt gained a required `probe` field
+(`saffron/agents/prompts/review-adequacy.md`) between pass 1 and the baseline
+pass. Adequacy owns **10 of the corpus's 12** declared defects, and it went
+**3/10 to 2/10** across that change — both defects in the difference are
+adequacy-owned (`SA-0063`'s pair). n=1 each side, so the drop is neither noise
+nor a measured regression: it is *confounded*, and
+`docs/evidence/2026-09-09-lens-corpus-baseline.md` claims neither reading.
+
+What makes it answerable: pass 1's runs are on disk, but re-scoring them cannot
+help — the prompt changes the *runs*, not the predicate that reads them. It needs
+a pass under each prompt at the same `--runs`, or a higher `--runs` under the
+current one to establish the spread first. The second is cheaper and comes first:
+at `--runs 1` over eight fixtures nobody knows this metric's resolution, and two
+passes disagreeing by 1 of 12 is all the evidence there is.
+
+Until then, no prompt change should be read off a single corpus pass — the same
+instruction item 88 left on the one-fixture harness, now owed by its replacement.
+
+---
+
+## 94. A probe's baseline failures are subtracted and then discarded
+
+**Tier 3 — real, not urgent, and it already cost two verdicts their audit.**
+`check_probe` holds the baseline `GateResult` to subtract from, and
+`probes.json` persists only what survives the subtraction (`failures`). So a
+`survived` over a head whose suite was already red cannot be checked by anyone
+reading the record.
+
+Measured at the baseline pass: `SA-0063`'s `tests` gate **fails at its own head**
+— `docs/evidence/fixtures/SA-0063/gates.txt` reads `tests: fail (pytest 9.1.1) —
+1 failed, 1499 passed, 2 skipped, 21 deselected`, the same shape both of its
+probe summaries report. The subtraction cancels it and both probes record
+`failures: []`, which is correct: no *new* failure. But whether that pre-existing
+failure is in the very test that would have caught the mutation is undecidable
+from the record, and if it is, the cancellation masks a kill. That is **2 of the
+baseline's 8 verified vacuities**.
+
+Done looks like: `ProbeResult` carries the baseline's failure identities beside
+the new ones, and `probes.json` writes them. Additive, and the value is already
+in `check_probe`'s hand — the same shape as the `tool`/`collected`/`summary`
+fields, which exist because a verdict that keeps nothing about the suite that
+answered it cannot be re-read. **Land it before pass 3**: adding the field cannot
+retroactively populate a pass already run, so this baseline's two stay
+unauditable whatever happens here.
 
 ---
 

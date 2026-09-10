@@ -6,10 +6,10 @@ by a third between two runs that changed nothing relevant, while the corpus
 aggregate held. This is the driver that runs every fixture under one root and
 reports the aggregate.
 
-Run once end to end, over one fixture: `SA-0045`, 2026-09-09, **$1.58 and
-499.8s**. `docs/superpowers/plans/2026-09-08-lens-corpus.md` projects ~$13 and
-~80 minutes for all eight at the defaults below, which that one fixture
-corroborates rather than confirms — see `--max-spend-usd`'s help.
+Run whole, over all eight fixtures: 2026-09-09, **$16.53** at the defaults below
+(`docs/evidence/2026-09-09-lens-corpus-baseline.md`). That supersedes the ~$13
+this docstring projected from a single fixture — see `--max-spend-usd`'s help,
+which carries what the projection cost in headroom.
 
     env CLAUDE_CODE_OAUTH_TOKEN=... uv run python \\
         docs/evidence/scripts/2026-09-08-lens-corpus.py \\
@@ -292,15 +292,15 @@ def main() -> int:
         help="the pass stops between fixtures once it has spent this in this "
         "invocation. At the defaults (8 fixtures, 3 lenses, --runs 1, "
         "--budget-usd 4.0) the theoretical ceiling is $96 with no abort. "
-        "The one real measurement behind this driver's projected cost is "
-        "docs/evidence/2026-09-08-lens-scoring-second-pass.md: $4.838 over "
-        "three runs of one fixture (SA-0062), ~$1.61 per fixture-run; "
-        "times eight fixtures projects to ~$12.90 — nobody has run this "
-        "corpus driver itself, so that is an extrapolation, not a corpus "
-        "measurement. $20 leaves roughly 50%% headroom over that "
-        "projection while stopping well short of the theoretical max. On "
-        "a trip: the pass stops, the fixtures already written stay "
-        "written, and --skip-existing resumes it.",
+        "Measured, not extrapolated, since 2026-09-09: a whole pass over "
+        "eight fixtures is $16.53 "
+        "(docs/evidence/2026-09-09-lens-corpus-baseline.md), against the "
+        "~$12.90 this help used to project from one fixture. So $20 leaves "
+        "about 21%% headroom rather than the 50%% the projection implied, "
+        "and the baseline's first invocation spent $17.31 of it — raise "
+        "this before adding fixtures. On a trip: the pass stops, the "
+        "fixtures already written stay written, and --skip-existing "
+        "resumes it.",
     )
     parser.add_argument("--max-turns", type=int, default=30)
     parser.add_argument(

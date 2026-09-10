@@ -1,6 +1,7 @@
 import contextlib
 import importlib.util
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,8 @@ from saffron.repos.policy import Policy
 
 REPO = Path(__file__).parent.parent
 FIXTURES = REPO / "docs" / "evidence" / "fixtures"
+BASELINE = REPO / "docs" / "evidence" / "passes" / "2026-09-09-lens-corpus-baseline"
+RECORD = REPO / "docs" / "evidence" / "2026-09-09-lens-corpus-baseline.md"
 
 
 @pytest.fixture
@@ -776,3 +779,94 @@ def test_every_shipped_fixture_s_head_declares_a_tests_gate():
         ).stdout
         declared = Policy.model_validate(yaml.safe_load(raw)).gates
         assert "tests" in declared, fixture.spec_id
+
+
+def test_the_baseline_pass_s_published_aggregate_is_re_derivable():
+    """The record's headline, re-derived from the runs beside it rather than
+    read from the prose. A record whose number nobody can recompute is the
+    defect `docs/BACKLOG.md` item 91 was filed for, one level up."""
+    fixtures = corpus.load_corpus(FIXTURES)
+    runs = {
+        f.spec_id: [
+            lens_scoring.reviews_from_json(p.read_text())
+            for p in sorted((BASELINE / f.spec_id).glob("run-*.json"))
+        ]
+        for f in fixtures
+    }
+    scored = corpus.score_corpus(fixtures, runs)
+    record = RECORD.read_text()
+    table = (BASELINE / "table.md").read_text()
+
+    # The whole rendered headline, not the `graded/declared` substring the plan
+    # suggested: this record discusses pass 1's `4/12` too, so a bare `in`
+    # matches whichever number is written anywhere and pins neither. Verified
+    # against a mutant that rewrote the headline alone and went unnoticed.
+    headline = table.splitlines()[0]
+    assert f"**{scored.graded}/{scored.declared} declared defects graded**" in headline
+    assert headline in record
+    assert scored.dropped == ()
+    assert (scored.graded, scored.declared) == (3, 12)
+
+
+def test_the_baseline_s_probe_verdicts_are_re_derivable():
+    """The second number, the same way. Hand-aggregated in the record because
+    no invocation printed it, which is exactly why it needs pinning: the eight
+    `probes.json` files are the source and the prose must agree with them."""
+    fixtures = corpus.load_corpus(FIXTURES)
+    results = {
+        f.spec_id: [
+            probe_check.ProbeResult(
+                p["verdict"], p["reason"], tuple(p.get("failures") or ())
+            )
+            for p in json.loads((BASELINE / f.spec_id / "probes.json").read_text())
+        ]
+        for f in fixtures
+    }
+    score = corpus.score_probes(results, runs=1)
+
+    assert (score.survived, score.killed, score.unproven) == (8, 2, 0)
+    assert score.fixtures == 8
+    assert "8 verified vacuities" in RECORD.read_text()
+
+
+def test_every_shipped_fixture_probed_at_baseline_has_a_probe_record():
+    """An empty `probes.json` is coverage and an absent one is not, so the
+    baseline directory has to carry a file for every fixture — including the
+    two that filed nothing, which is item 92.1's fix showing in a pass."""
+    empty = set()
+    for fixture in corpus.load_corpus(FIXTURES):
+        path = BASELINE / fixture.spec_id / "probes.json"
+        assert path.is_file(), fixture.spec_id
+        if not json.loads(path.read_text()):
+            empty.add(fixture.spec_id)
+    assert empty == {"SA-0046", "SA-0055"}
+
+
+def test_every_dollar_figure_in_the_baseline_record_is_one_a_run_produced():
+    """The strong form the second pass's record established. Every `$N.NN` the
+    record prints must be a per-lens cost from the run JSON, a per-fixture or
+    published total over them, a declared budget, or one of the two invocation
+    totals the driver printed — never a figure nobody can source."""
+    per_lens, per_fixture = set(), set()
+    for fixture in corpus.load_corpus(FIXTURES):
+        runs = json.loads((BASELINE / fixture.spec_id / "run-1.json").read_text())
+        costs = [r.get("cost_usd", r.get("cost_usd_est", 0.0)) for r in runs]
+        per_lens.update(f"${c:.2f}" for c in costs)
+        per_fixture.add(f"${sum(costs):.2f}")
+    published = sum(
+        sum(
+            r.get("cost_usd", r.get("cost_usd_est", 0.0))
+            for r in json.loads((BASELINE / f.spec_id / "run-1.json").read_text())
+        )
+        for f in corpus.load_corpus(FIXTURES)
+    )
+    # The two invocation totals the driver printed, and the discarded run's own
+    # cost — sourced from the archive outside the repo, so named here as the
+    # record names it rather than recomputed.
+    printed = {"$17.31", "$2.92", "$20.23", "$3.70", "$13.61"}
+    budgets = {"$4.0", "$20.0", "$1.61", "$12.90"}
+    allowed = per_lens | per_fixture | printed | budgets | {f"${published:.2f}"}
+
+    found = set(re.findall(r"\$\d+\.\d+", RECORD.read_text()))
+    assert found <= allowed, found - allowed
+    assert f"${published:.2f}" == "$16.53"

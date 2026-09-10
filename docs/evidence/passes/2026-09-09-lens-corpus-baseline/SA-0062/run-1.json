@@ -1,0 +1,66 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.9906539999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "blocker",
+        "file": "saffron/cell/worktree.py",
+        "line": 418,
+        "claim": "`_write_file` is called outside any exception-handling that can undo it: if the container exec behind it fails after the shell's `>` redirection has already opened/truncated the target (a timeout or dropped connection mid-write \u2014 exactly the case `saffron/gates/core/witness.py`'s docstring names as reachable for a cell mutator and 'not unreachable'), `_write_file` raises before `source_mutated` ever enters its `try/finally`. Because the raise happens before the generator's first `yield`, the `with mutate(mutant) as reason:` in `witness_gate` never calls `__exit__`, so no `git checkout HEAD` is ever issued for that file. `witness_gate` then reports this as 'could not apply' (its `applied` flag is still `False`), which is defined to mean nothing changed, when in fact the working tree may now hold a truncated/partial file that is never restored \u2014 and the next gate in `_suite`, `committed`, will see this as tree the agent left dirty, misattributing an infrastructure failure to the agent. `tests/test_worktree.py::test_a_failed_undo_raises_rather_than_reporting_a_verdict` only exercises a read (`cat`) failure, where nothing has been written yet, so this write-failure gap is untested.",
+        "anchored": true,
+        "probe": null
+      },
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/cell/worktree.py",
+        "line": 407,
+        "claim": "`source_mutated` passes `mutant.file` straight into `cat`, the base64 write script, and `git checkout HEAD --` with no containment check, unlike its sibling `saffron/mutation.py::apply_mutant`/`restore_mutant`, which explicitly resolve the path through `_resolve_target` and refuse anything absolute or escaping the tree via `..` before touching it. `Mutant.file` (`saffron/intake.py`) is only validated for non-emptiness, so an operator-authored spec with a mistyped or traversal-style `file` (e.g. into `/agent-state`) would be read from and written to outside `/work` inside the cell, something the parallel host implementation was deliberately built to refuse. Every fixture and test here uses a clean relative path, so nothing exercises this gap.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.5975834999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "saffron/cell/worktree.py",
+        "line": 418,
+        "claim": "`_write_file` is called before the generator's first `yield`, i.e. during `source_mutated`'s `__enter__`, not inside the `try/finally` that guards the undo. If the write's container exec fails after the shell has already truncated/partially written `mutant.file` (a routine container-exec failure per `_read_file`'s own docstring one function up), the exception propagates out of `__enter__` with `applied` still `False`, so `witness_gate` (saffron/gates/core/witness.py:171-175) reports 'could not apply' \u2014 the quiet, false-negative diagnosis \u2014 over a tree that is actually left mutated, with the `finally`'s `git checkout HEAD` never attempted at all. This is precisely the reachable failure `witness.py`'s own module comment (lines 78-85) calls out by name as the obligation 'SA-0062's cell mutator is who has to meet', and it is untested: the test suite only exercises `cat` (read) and `checkout` (undo) failing, never the write step failing mid-mutation.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.6704376000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cell/worktree.py",
+        "line": 379,
+        "claim": "`_write_file`'s failure path (a non-zero exit from the `sh -euc`/base64 write) is never exercised by any test, unlike its sibling failure sites: `test_a_failed_undo_raises_rather_than_reporting_a_verdict` in tests/test_worktree.py covers a failed undo and a failed `_read_file` (via a faked `cat` exit), and `test_a_find_that_does_not_match_once_applies_nothing` covers the ambiguous/absent-match branch, but no test ever makes the write step fail. Deleting the `if done.returncode != 0: raise ...` block in `_write_file` (lines 379-382) would leave a real write failure silently unreported \u2014 `source_mutated` would still `yield None`, telling `witness_gate` the mutant was applied when the tree was never actually changed \u2014 and the full test suite would stay green, since no test simulates this branch.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cell/worktree.py",
+          "find": "    done = runtime.exec_(container, [\"sh\", \"-euc\", script], workdir=WORKTREE_MOUNT)\n    if done.returncode != 0:\n        raise runtime.CellRuntimeError(\n            f\"writing {path}'s mutant failed: {done.stderr.strip()}\"\n        )",
+          "replace": "    done = runtime.exec_(container, [\"sh\", \"-euc\", script], workdir=WORKTREE_MOUNT)"
+        }
+      }
+    ]
+  }
+]
