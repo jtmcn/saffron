@@ -420,10 +420,19 @@ def _spec_path(spec_id: str, repo: Path) -> str:
 
     The glob stays as the fallback for a spec the scan cannot find: a pattern
     that may match nothing still beats recording no spec path at all.
+
+    That fallback covers a *missing* spec directory too, and states the
+    precondition rather than asking: `discover_specs` refuses a path that is
+    absent or not a directory (backlog item 26), which is right for a scan
+    whose emptiness the scheduler reads, and wrong here — this is a best-effort
+    `touches` entry, so it must not turn into the fault that stops a task.
     """
     from saffron.intake import discover_specs
 
-    found, _unparseable = discover_specs(repo / ".saffron" / "specs")
+    specs_dir = repo / ".saffron" / "specs"
+    if not specs_dir.is_dir():
+        return f".saffron/specs/{spec_id}-*.md"
+    found, _unparseable = discover_specs(specs_dir)
     for discovered in found:
         if discovered.spec.id == spec_id:
             return discovered.path.relative_to(repo).as_posix()

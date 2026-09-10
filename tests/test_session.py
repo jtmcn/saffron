@@ -3640,6 +3640,23 @@ def test_the_recorded_spec_path_is_the_real_file_not_a_name_guess(
     assert ".saffron/specs/no-id-in-this-name.md" in outcome.proposed_touches
 
 
+def test_a_repo_with_no_spec_directory_still_records_a_spec_path(monkeypatch, tmp_path):
+    """`_spec_path` states its own precondition rather than asking. Backlog item
+    26 makes `discover_specs` refuse a directory that is absent — right for the
+    scan whose emptiness the scheduler reads, and wrong for a best-effort
+    `touches` entry, which must not become the fault that stops a task. The
+    glob is what a spec the scan cannot find already gets."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PROPOSAL))]
+    )
+    assert not (tmp_path / "repo" / ".saffron" / "specs").exists()
+    assert any(
+        entry.startswith(".saffron/specs/") and entry.endswith("-*.md")
+        for entry in outcome.proposed_touches
+    )
+
+
 def test_the_recorded_proposal_carries_the_hash_of_its_own_raw_block(
     monkeypatch, tmp_path
 ):

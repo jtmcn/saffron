@@ -67,10 +67,12 @@ Only the third is a night with no work in it. The other two are faults, and the
 repo enforces this distinction everywhere else it appears: `error` is not
 `fail`, and a gate that never ran must not read like one that ran and passed.
 
-This is also the first spec a `saffron batch` has ever been asked to run, which
-is why it is this one. The failure mode item 26 describes — *the first
-unattended night ends having done nothing with no record saying why* — is the
-failure mode the night running this spec exists to rule out.
+This was the first spec a `saffron batch` was ever asked to run, which is why it
+is this one. The failure mode item 26 describes — *the first unattended night
+ends having done nothing with no record saying why* — is the failure mode such a
+night has to rule out. **That attempt ended `EXHAUSTED` on a boundary this spec
+drew wrong**, not on the work; see Out of scope. It is queued again because the
+boundary was corrected, not because the criteria changed.
 
 ## Problem
 
@@ -89,15 +91,29 @@ depends on.
 
 ## Out of scope
 
-**The caller, and the exit code.** Item 26 argues that a missing directory is an
-infrastructure fault worth exit `2`, and that argument is why refusing is right
-— but the change here is to `discover_specs` alone. `saffron/scheduler.py` and
-`saffron/cli.py` are both `forbidden`. Nothing regresses by leaving them:
-`scheduler.py`'s `done/` scan already guards its own call with `is_dir()` before
-reaching discovery, and `cli.py` carries a deliberate catch-all that maps an
-unexpected exception to exit `2` with a message rather than a traceback. If the
-exit code turns out wrong once this raises, that is a finding to file, not a
-file to edit.
+**Every caller, and the exit code.** Item 26 argues that a missing directory is
+an infrastructure fault worth exit `2`, and that argument is why refusing is
+right — but the change here is to `discover_specs` alone. `saffron/scheduler.py`,
+`saffron/cli.py` and `saffron/cell/session.py` are all `forbidden`, and all
+three now state their own preconditions:
+
+- `scheduler.py`'s `done/` scan checks `is_dir()` before reaching discovery.
+- `session.py`'s `_spec_path` does too, as of this spec's first attempt.
+- `cli.py` carries a deliberate catch-all mapping an unexpected exception to exit
+  `2` with a message rather than a traceback.
+
+**The three callers above are the whole list, and an earlier version of this
+paragraph named only two.** It asserted "nothing regresses" from a search of
+callers that had been truncated before it reached `saffron/cell/session.py`, so
+the boundary was drawn around a consumer the author did not know existed. The
+first attempt at this spec found it — three `tests/test_session.py` failures,
+recorded in that task's notes rather than worked around — and ended `EXHAUSTED`
+having correctly refused to edit a forbidden file to make the boundary true.
+`_spec_path` was then guarded by hand, which is what makes this paragraph's claim
+hold rather than merely repeat.
+
+If the exit code turns out wrong once this raises, that is still a finding to
+file, not a file to edit.
 
 **Widening what discovery validates.** A directory that exists, is a directory,
 and contains unreadable files or wrong permissions is not in scope. The three

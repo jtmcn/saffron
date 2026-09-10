@@ -1709,12 +1709,17 @@ a `gh`-free scan, the same argument item 18 made for turn ceilings.
 
 ## 26. Discovery cannot tell an empty night from a missing directory
 
-**Status: `SA-0065` is written for this, 2026-09-09, and is deliberately the
-first spec a `saffron batch` will be asked to run.** Tier 0's gate is a night
-that *runs* something, and this item's own failure mode — an unattended night
-that ends having done nothing with no record saying why — is what such a night
-has to rule out. The spec scopes to `discover_specs` alone; the exit code item 26
-argues for is out of its scope and stated as such.
+**Status: attempted by the first `saffron batch` ever to run a task, 2026-09-09,
+and `EXHAUSTED` on the spec's boundary rather than on the work.** `SA-0065`'s
+implementation was correct — the guard, both tests, `$0.97` of a `$5` ceiling —
+but making `discover_specs` refuse an absent directory breaks `_spec_path` in
+`saffron/cell/session.py`, a caller the spec's `forbidden` list excluded and its
+"Out of scope" section never named. The implementer found it, recorded it in the
+notes channel rather than working around it, and declined to edit a forbidden
+file; the no-progress breaker then stopped the task at attempt 2. `_spec_path`
+now states its own precondition, and the spec is queued again with a corrected
+boundary and unchanged criteria. The exit code item 26 argues for is still out of
+its scope.
 
 `discover_specs` (`saffron/intake.py`, landing with `SA-0014` in PR #56) returns
 `(specs, failures)` and reaches the filesystem through `directory.glob("*.md")`.
