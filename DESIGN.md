@@ -1241,6 +1241,10 @@ A factory producing the same quality in month six as month one is an expensive s
 2. **A line in the repo's `CLAUDE.md`** — if it's judgment the agent could apply given context. Second best.
 3. **A critic lens amendment** — if it's a defect class gates can't catch. Most expensive; use last.
 
+**An entry is four things**: the one line of *why*, the bucket, where it landed — a gate's name, a backlog item, or `open` — and the date and pull request it came from. The landing is not decoration: a bucket with no outcome cannot tell a rejection closed by a gate from one still waiting, which is the whole of the promote-toward-1 claim. A rejection that names a mechanism which does not exist becomes a spec rather than a rule, and carries no bucket; *exactly one of three* is the rule, and the exceptions are marked rather than forced into a bucket that does not fit.
+
+**A line written after the fact says so.** This repo's file was backfilled on 2026-09-09 from the commit history and the backlog — twenty-three rejections across nine specs — and every entry predating that day is marked as reconstructed. A record that does not say which of its lines were written at the time has the same defect as an estimate stored in a column named for a measurement (§4.1). The first reading is appended at the foot of the file, and each monthly reread appends its own.
+
 Reread the file monthly, not weekly. At 6–12 PRs a week you get 2–6 rejections; week-over-week accept rate on n≈8 swings ±20 points from two tasks and means nothing. This is a markdown file and a monthly habit, not a module with a taxonomy and a dashboard.
 
 **Promote toward bucket 1.** A rule's whole life should be a migration from lens (3) to `CLAUDE.md` (2) to gate (1) — each step cheaper, more reliable, and more permanent than the last. Say "promote to bucket 1", never "up" or "down": the buckets are printed 1, 2, 3 but ordered cheapest-first, so directional words point opposite ways depending on whether you mean the page or the cost.
