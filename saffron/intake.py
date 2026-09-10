@@ -38,7 +38,8 @@ _CRITERIA_SECTION = re.compile(
 
 
 class SpecError(ValueError):
-    """A spec that cannot be trusted to describe what it asks for."""
+    """A spec that cannot be trusted to describe what it asks for, or a scan
+    directory that cannot be read as one."""
 
 
 class DisclosedMutantError(SpecError):
