@@ -54,7 +54,8 @@ Soundness first: **79**, **69**, **93**, **94**, **80** (with **83**, **85**, **
 **81** from tier 3, which are why 69's gate cannot yet be declared against
 safely), then the remainder of **71**. Honesty second:
 **73**, **70**, **45**, **51** (with **49**/**50**, which its fix closes),
-**47**, **46**, **40**, **26**, **7**, and the remainder of **78**.
+**47**, **46** (with **95**, which compounds it), **40**, ~~**26**~~, **7**, and
+the remainder of **78**.
 
 Closed since the 2026-09-04 sort, and left in place because their numbers are
 cited: **74** is done (`SA-0063`, `SA-0064`); **88** is closed on a negative
@@ -95,8 +96,10 @@ Each fails in the dark or destroys work no one is awake to rescue. **45** loses
 a run's commits nightly; **51** switches the anti-theater gate off for one
 printed line; **47** feeds part 3 a column of zeros; **46** is the only account
 of a night nobody watched; **40** merges a diff over a ceiling it passed;
-**26** cannot tell an empty night from a missing directory; **7** leaves §8's
-flywheel inert exactly where it was meant to compound.
+**26** is done (`SA-0065`, PR #185, 2026-09-10) and its number stays listed
+because item numbers are cited; **95** is what that fix left open — the refusal
+reaches a terminal and never the ledger; **7** leaves §8's flywheel inert exactly
+where it was meant to compound.
 
 ### Tier 2 — the morning after
 
@@ -5447,6 +5450,42 @@ the argument for landing it early rather than the argument for deferring it.
 Worth pairing with it: the cell's own baseline summary line, and an explanation
 for the two cell-only skips. A `survived` over a baseline that skipped the
 relevant test is the same defect wearing a different hat.
+
+---
+
+## 95. A night that dies resolving its queue leaves no row to say it ever started
+
+**Tier 1 — honesty.** `SA-0065` (merged 2026-09-10) made `discover_specs` refuse
+a spec directory that is absent or is not a directory, so the silent empty queue
+item **26** describes now stops the night instead of draining it. Found by the
+review round on that task's own pull request: the refusal is visible in exactly
+one place, and it is not the audit trail.
+
+Traced rather than assumed. `_batch` calls `_resolve_queue` inside its
+`readiness.ok` branch (`saffron/cli.py:715`), and `run_batch` — the call whose own
+comment says it "is what makes the batch row close `INFRASTRUCTURE` and exist at
+all" — is not reached until line 735. A `SpecError` from discovery therefore
+propagates past it to the catch-all at `saffron/cli.py:172`, which wraps every
+subcommand, prints one line, and returns `2`. Correct exit code, and **no batch
+row, no `PREFLIGHT_FAILED`, no task row: nothing in `~/.saffron/ledger.db` records
+that a night began.**
+
+That lands the report in the one place item **46** already says is fragile: the
+batch's stdout is the night's only human-readable account, and under launchd
+without `PYTHONUNBUFFERED=1` SIGTERM discards it. So the failure mode `SA-0065`
+was written to make visible is visible on a terminal nobody is watching and
+invisible everywhere the morning looks.
+
+**Done looks like** an aborted resolution closing a batch row the way a failed
+readiness check already does — the state exists and `run_batch` already writes it
+for the readiness path, so this is about reaching it, not inventing it. The
+narrower version, if the row is judged wrong: `_batch` catching `SpecError` around
+`_resolve_queue` and routing it through the same `INFRASTRUCTURE` stop the
+readiness failure takes, rather than letting it reach a catch-all that cannot know
+a night was in progress.
+
+Not the same as item 26 and not closed by it: 26 was that nothing *refused* the
+directory. This is that the refusal is unrecorded.
 
 ---
 
