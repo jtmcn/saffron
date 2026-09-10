@@ -50,7 +50,7 @@ evidence. That is the gate now, and it is one cheap spec away.
 
 ### Tier 1 — breaks at 03:00 with nobody watching
 
-Soundness first: **79**, **69**, **93**, **80** (with **83**, **85**, **84**, **82**,
+Soundness first: **79**, **69**, **93**, **94**, **80** (with **83**, **85**, **84**, **82**,
 **81** from tier 3, which are why 69's gate cannot yet be declared against
 safely), then the remainder of **71**. Honesty second:
 **73**, **70**, **45**, **51** (with **49**/**50**, which its fix closes),
@@ -63,7 +63,9 @@ two-thirds done and **78** is done in code — each item's own `Status` line say
 what is left.
 (**59** is done — `SA-0052`, PR #118.)
 
-**93 sits with them** because it decides whether their numbers can be read.
+**93 and 94 sit with them** because they decide whether their numbers can be
+read at all: 93 is the metric's unknown resolution, and 94 is that 2 of the
+baseline's 8 verified vacuities rest on a cell baseline nobody can inspect.
 The corpus has a baseline (`3/12`, 2026-09-09), and the adequacy prompt changed
 between the only two passes there have ever been — so nobody knows the metric's
 resolution, and two passes disagree by 1 of 12. Until that is measured, a prompt
@@ -110,11 +112,11 @@ fire. Its number stays listed because item numbers are cited from `saffron/`.
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, **57**, **61**, **62**, **63**, **64**, **69**, **75**, **76**, **77**,
-**81**, **82**, **83**, **84**, **85**, **86**, **87**, **89**, **90**, **92**,
-**94**.
+**81**, **82**, **83**, **84**, **85**, **86**, **87**, **89**, **90**, **92**.
 (**65** and **68** are done; **80** moved to tier 1 when its evidence arrived.
-**91** is done — the spike record landed. **92** and **94** were appended
-un-indexed, which is the same defect as filing one nowhere at all.)
+**91** is done — the spike record landed. **92** was appended un-indexed, which
+is the same defect as filing one nowhere at all. **94** was filed here and moved
+to tier 1 the same day, when a host run turned it into a correctness item.)
 
 **76 sits here rather than in tier 1** because `structure`, where the hole was
 found, is closed: it refuses every ignore source and states its own file set.
@@ -5393,28 +5395,46 @@ instruction item 88 left on the one-fixture harness, now owed by its replacement
 
 ## 94. A probe's baseline failures are subtracted and then discarded
 
-**Tier 3 — real, not urgent, and it already cost two verdicts their audit.**
+**Tier 1 — it bears on whether a `survived` verdict means anything.** Filed as
+tier 3 on 2026-09-09 and moved the same day, when the measurement below turned it
+from an auditability gap into a correctness one.
+
+**The cell's baseline can be red for reasons the host is not, and nothing records
+which.** `SA-0063`'s head (`f76931df`) runs **`1502 passed`** on the host — run
+directly, in a detached worktree, 107.31s — where the cell reports `1 failed,
+1499 passed, 2 skipped` at the same 1502 collected. So one failure and two skips
+exist only in the cell, and the failure's identity is written nowhere: not in
+`gates.txt`, which carries the summary line only, and not in `probes.json`, which
+keeps only what survives the subtraction. Every `survived` in the corpus is
+computed against a baseline of that kind, and the two symptoms sit beside the
+unexplained 5.7x in the same place.
 `check_probe` holds the baseline `GateResult` to subtract from, and
 `probes.json` persists only what survives the subtraction (`failures`). So a
 `survived` over a head whose suite was already red cannot be checked by anyone
 reading the record.
 
-Measured at the baseline pass: `SA-0063`'s `tests` gate **fails at its own head**
-— `docs/evidence/fixtures/SA-0063/gates.txt` reads `tests: fail (pytest 9.1.1) —
-1 failed, 1499 passed, 2 skipped, 21 deselected`, the same shape both of its
-probe summaries report. The subtraction cancels it and both probes record
-`failures: []`, which is correct: no *new* failure. But whether that pre-existing
-failure is in the very test that would have caught the mutation is undecidable
-from the record, and if it is, the cancellation masks a kill. That is **2 of the
-baseline's 8 verified vacuities**.
+Measured at the baseline pass: the subtraction cancels that failure and both
+probes record `failures: []`, which is correct — no *new* failure. But whether it
+is in the very test that would have caught the mutation is undecidable from the
+record, and if it is, the cancellation masks a kill. That is **2 of the
+baseline's 8 verified vacuities**, and **no re-run can settle those two**: a probe
+is authored by the lens per run — `SA-0054`'s re-run named two *different* edits —
+so re-running yields different probes rather than an audit of these.
 
 Done looks like: `ProbeResult` carries the baseline's failure identities beside
 the new ones, and `probes.json` writes them. Additive, and the value is already
 in `check_probe`'s hand — the same shape as the `tool`/`collected`/`summary`
 fields, which exist because a verdict that keeps nothing about the suite that
-answered it cannot be re-read. **Land it before pass 3**: adding the field cannot
-retroactively populate a pass already run, so this baseline's two stay
-unauditable whatever happens here.
+answered it cannot be re-read. **Land it before the next pass, not before pass
+3**: item 93 needs a further pass to establish this metric's resolution, and that
+pass should not be spent producing more verdicts nobody can audit. Adding the
+field cannot retroactively populate a pass already run, so this baseline's two
+stay unauditable whatever happens here — the value is entirely forward, which is
+the argument for landing it early rather than the argument for deferring it.
+
+Worth pairing with it: the cell's own baseline summary line, and an explanation
+for the two cell-only skips. A `survived` over a baseline that skipped the
+relevant test is the same defect wearing a different hat.
 
 ---
 

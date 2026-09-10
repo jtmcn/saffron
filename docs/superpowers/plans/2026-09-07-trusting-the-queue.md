@@ -83,8 +83,23 @@ the record rather than felt.
 2. every declared mutant is killed by its named witness on the first attempt — no
    survivor, and no `skip` for a reason the spec author could have avoided; and
 3. REVIEW grades at least **3** of the corpus's twelve declared defects — the
-   count `docs/evidence/2026-09-09-lens-corpus-baseline.md` measured — and no
-   fixture that graded a defect at baseline grades none.
+   count `docs/evidence/2026-09-09-lens-corpus-baseline.md` measured — **over two
+   consecutive passes, or over one pass at a `--runs` high enough to state the
+   spread** — and no fixture that graded a defect at baseline grades none.
+
+   **`3` is one observation, and "at least 3" claims more than one observation
+   can carry.** The baseline is a single pass under the current prompt, so it
+   fixes the count and says nothing about its resolution. The margin clause is
+   the whole criterion, not a caution attached to it: a pass reporting 3 is not
+   evidence of anything until a second agrees, and a pass reporting 4 is not an
+   improvement until a second does too.
+
+   *This restores an instruction the 2026-09-09 rewrite of this criterion
+   dropped.* The one-fixture version it replaced already said "raise n or require
+   the same margin over two passes — a single 3/3 is within the spread already
+   measured on a fixture nobody touched". That sentence applied more directly to
+   `B` than to the number it was written for, and losing it is how the corpus
+   version briefly asserted a floor off n=1.
 
    *Rewritten 2026-09-09 onto the corpus.* It read "both of PR #154's defects in
    3 of 3 runs", and its own revision note below had already recorded that
@@ -111,6 +126,10 @@ the record rather than felt.
    the same reason. Item 88 is answered (2026-09-08): the harness reads harsher
    than production and the `gates.txt` was not why, so an absolute count off
    these fixtures is still not production's count.
+
+   **One more reason not to read the vacuity number as an absolute**: 2 of the
+   baseline's 8 verified vacuities rest on a cell baseline that was red for
+   reasons nobody recorded — the same tree is green on the host. Item **94**.
 
 Until the count is met, a batch night is a batch of pull requests each owed a
 human round. Size nights by how many rounds you will do in the morning, not by

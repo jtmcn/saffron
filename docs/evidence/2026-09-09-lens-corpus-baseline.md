@@ -137,10 +137,26 @@ The in-cell suite runs the *whole* suite, and that kills the leading explanation
 
 `survived` means "no new failure against the baseline", and a suite that collected almost
 nothing is green too — that was the open worry, and it is answered: 1250 to 1502 tests
-collected and run. The gap to the host's 78–87s at `f9f007c4` is **still unexplained**, and
-this record does not explain it. One hypothesis is dead, measured rather than argued. The
-comparison is also not controlled: those host figures were taken at one head and these are
-eight different heads.
+collected and run.
+
+**Measured on one tree, both ends, 2026-09-09.** The table above compares eight heads against
+host figures taken at one, which is not a controlled comparison. So `SA-0063`'s head
+(`f76931df`) was run on the host directly, in a detached worktree of its own:
+
+| | collected | elapsed |
+|---|---|---|
+| Host, `f76931df` | 1502 | **107.31s** |
+| Cell, `f76931df` | 1502 | **18.88s**, **20.41s** |
+
+**5.7x on the same tree at the same collection count**, and the gap is **still unexplained** —
+this record does not explain it. What it does retire is the two ways out that were still open:
+the suite is whole, and the comparison no longer rests on different heads.
+
+**The same run found a second symptom, and it is not about speed.** That tree is **green on the
+host — `1502 passed`** — while the cell reports `1 failed, 1499 passed, 2 skipped` at the same
+1502 collected. So one failure and two skips exist only in the cell. The failure's identity is
+recorded nowhere (Deviation 5), and the skips are unexplained. Every `survived` verdict in this
+corpus is computed against a baseline that may be red for reasons like that one.
 
 ## Deviations
 
@@ -165,15 +181,24 @@ eight different heads.
    the recall table and the vacuity number in this record come from different renderings. The
    two invocation tables are kept beside it as
    `table-invocation-1-sa0054-dropped.md` and `table-resume-sa0054.md`.
-5. **Two of the eight survivals cannot be checked from any record.** SA-0063's `tests` gate
-   **fails at its own head** — `docs/evidence/fixtures/SA-0063/gates.txt` records
+5. **Two of the eight survivals cannot be checked, by any means.** SA-0063's `tests` gate
+   fails **in the cell** at its own head — `docs/evidence/fixtures/SA-0063/gates.txt` records
    `tests: fail (pytest 9.1.1) — 1 failed, 1499 passed, 2 skipped, 21 deselected`, the same
    shape both probe summaries report. Baseline subtraction cancels it and both probes record
    `failures: []`, which is correct: no *new* failure. But `probes.json` persists only
-   post-subtraction failures, so whether that pre-existing failure is in the very test that
-   would have caught the mutation is undecidable here. If it is, the cancellation masks a kill
-   and those two are not vacuities. Bounded, not open-ended — the failure is established as a
-   property of the fixture head rather than a probe artifact — and filed.
+   post-subtraction failures, so whether that failure is in the very test that would have
+   caught the mutation is undecidable. If it is, the cancellation masks a kill and those two
+   are not vacuities.
+
+   **It is not a property of the tree.** An earlier draft of this line said it was, on the
+   strength of `gates.txt` alone. Measured instead: the same tree runs **`1502 passed`** on the
+   host. The failure exists only in the cell, which makes it a worse problem than a known-bad
+   head would have been, not a bounded one.
+
+   **And no re-run can settle it.** A probe is authored by the lens per run — `SA-0054`'s
+   re-run named two *different* edits — so re-running SA-0063 yields different probes rather
+   than an audit of these. `docs/BACKLOG.md` item 94 is therefore worth landing for the passes
+   that come after, and these two stay unauditable permanently.
 6. **Dated by production.** `docs/superpowers/plans/2026-09-08-lens-corpus.md` Task 9 names
    `2026-09-08-lens-corpus-baseline`; this is `2026-09-09`, the day it ran, matching how every
    other file under `docs/evidence/` is dated.
