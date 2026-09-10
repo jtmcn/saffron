@@ -82,7 +82,8 @@ holds the specs, the policy, the cell image, and the repo's own gates.
 _Avoid_: "the project", "the codebase", "the client repo".
 
 **Agent**: Any model session inside a cell, when the specific role doesn't matter.
-The ontology's `prov:Agent` is wider — it includes the operator (`DESIGN.md` §4.6).
+The ontology's `prov:Agent` is wider — it includes the operator and their delegates
+(`DESIGN.md` §4.6).
 _Avoid_: "the AI", "the bot", "the LLM". "Model" means a model identifier.
 
 **Delegate**: A model session the operator starts on the host, outside any cell, to

@@ -228,8 +228,18 @@ _ATTEMPT = ":ph a saffron:Phase . :at a saffron:Attempt ; saffron:withinPhase :p
             set(),
         ),
         (
-            ":s a saffron:Delegate ; prov:actedOnBehalfOf :x . :x a prov:SoftwareAgent .",
+            ":s a saffron:Delegate ; prov:actedOnBehalfOf :t . :t a saffron:Delegate .",
             {SH.QualifiedMinCountConstraintComponent},
+        ),
+        # One chain reaching the operator does not excuse another that does not.
+        (
+            ":s a saffron:Delegate ; prov:actedOnBehalfOf :i . "
+            ":i a saffron:ImplementerSession ; prov:actedOnBehalfOf :operator .",
+            {SH.OrConstraintComponent},
+        ),
+        (
+            f"{_ACTING} :s prov:actedOnBehalfOf saffron:scope .",
+            {SH.OrConstraintComponent},
         ),
         (
             ":s a saffron:Delegate, saffron:Operator ; prov:actedOnBehalfOf :operator .",
@@ -260,6 +270,8 @@ _ATTEMPT = ":ph a saffron:Phase . :at a saffron:Attempt ; saffron:withinPhase :p
         "no-principal",
         "subagent",
         "chain-without-operator",
+        "for-implementer",
+        "for-gate-too",
         "is-operator",
         "planned",
         "ratifies",

@@ -194,12 +194,16 @@ saffron:TouchesShape a sh:NodeShape ;
     sh:property [ sh:path saffron:ratifiedBy ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class saffron:Operator ] .
 
-# A delegate's chain of principals ends at the operator (a subagent acts for the
-# delegate that started it); it is never the operator, and never the agent of an
-# attempt: a task's work is done in a cell, where it is enforced.
+# A delegate acts only for the operator or another delegate, and each reaches the
+# operator, so every chain ends there (a subagent acts for the delegate that
+# started it). Never the operator, and never the agent of an attempt: a task's work
+# is done in a cell, where it is enforced. The ledger cannot tell a delegate from
+# the operator, so no projection of it yields one — this binds fixtures, not data.
 saffron:DelegateShape a sh:NodeShape ;
     sh:targetClass saffron:Delegate ;
     sh:not [ sh:class saffron:Operator ] ;
+    sh:property [ sh:path prov:actedOnBehalfOf ;
+        sh:or ( [ sh:class saffron:Operator ] [ sh:class saffron:Delegate ] ) ] ;
     sh:property [ sh:path [ sh:oneOrMorePath prov:actedOnBehalfOf ] ;
         sh:qualifiedValueShape [ sh:class saffron:Operator ] ;
         sh:qualifiedMinCount 1 ] ;

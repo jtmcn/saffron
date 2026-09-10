@@ -115,7 +115,7 @@ fire. Its number stays listed because item numbers are cited from `saffron/`.
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, **57**, **61**, **62**, **63**, **64**, **69**, **75**, **76**, **77**,
-~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**.
+~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**.
 (**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
 is the same defect as filing one nowhere at all. **94** was filed here and moved
@@ -128,12 +128,13 @@ risk — not, as an earlier draft of this note said, that `.gitignore` in
 `integrity.gate_config` already routes the edit to a person. That is the
 *tracked* half only: a `.gitignore` naming itself reaches no diff at all.
 
-**What this ordering costs, stated plainly:** tiers 2 and 3 hold 36 of the 54
-open items the index ranks — recounted 2026-09-10 from each item's own `Status`
-line to 34 of 51, then items **97**–**99**, filed open that day, added; **9**
-and **10**, each done bar a remnant, sit outside it — including every ontology item and every operator-visibility spec
-there is already a full plan for. That is the deliberate consequence of ranking
-by the milestone rather than by what is nearest to hand.
+**What this ordering costs, stated plainly:** tiers 2 and 3 hold 37 of the 55
+open items the index ranks, including every ontology item and every
+operator-visibility spec there is already a full plan for. That is the deliberate
+consequence of ranking by the milestone rather than by what is nearest to hand.
+(Recounted 2026-09-10 from each item's own `Status` line to 34 of 51, then items
+**97**–**100**, filed open that day, added — **97** to tier 1, the rest to these
+two. **9** and **10**, each done bar a remnant, sit outside the index.)
 
 ---
 
@@ -5638,15 +5639,34 @@ delegate on the way in.
 **Tier 3.** Found naming the delegate. `CONTEXT.md` §6 reserves **Ratify** for what
 the operator does to a proposed `touches` set at `SCOPE_REVIEW`, and **Approve**
 for what the operator does to a pull request in GitHub. `CLAUDE.md` ("ratifying one
-means `gh pr ready <n>` before `gh pr merge`") and
-`.claude/skills/run-saffron-spec-loop/SKILL.md:241` use it for `gh pr ready`, which
+means `gh pr ready <n>` before `gh pr merge`") and the spec-loop driver
+(`.claude/skills/run-saffron-spec-loop/driver.py:472`, whose output `SKILL.md:241`
+quotes) use it for `gh pr ready`, which
 is neither: it lifts PACKAGE's draft (§5.7) into review. The retired-vocabulary
 hook cannot see this — **ratify** is live vocabulary in the wrong sense, not a
 retired word.
 
-**Done looks like** both sentences saying "mark ready" — or, if that act turns out
-to carry a judgement worth a word, an entry under `CONTEXT.md`'s open naming
-decisions rather than a third sense arriving in prose.
+**Done looks like** `CLAUDE.md` and the driver saying "mark ready", and the skill's
+quoted output regenerated to match — or, if that act turns out to carry a judgement
+worth a word, an entry under `CONTEXT.md`'s open naming decisions rather than a
+third sense arriving in prose.
+
+---
+
+## 100. Nothing holds the operator's side of a rebuttal, or a manual assertion, to the operator
+
+**Tier 3.** Found reviewing PR #189. `RebuttalShape` puts the implementer's
+association on an `ImplementerSession` and the critic's on a `CriticLens`, and says
+nothing of the third: a rebuttal whose `agrees` association names a
+`saffron:Delegate` conforms. An `earl:Assertion` in `earl:manual` mode — the
+operator's rejection in `lifecycle.ttl` — may likewise be `earl:assertedBy` a
+delegate. `CONTEXT.md`'s **Delegate** entry says a judgement a delegate types is
+still the operator's; only ratification (`TouchesShape`) holds that in a shape.
+
+**Done looks like** a third qualified association in `RebuttalShape` — at most one,
+role in `( saffron:agrees saffron:disagrees )`, agent `sh:class saffron:Operator` —
+and a shape putting a manual assertion's `earl:assertedBy` on the operator, each
+with a negative fixture naming a delegate.
 
 ---
 
