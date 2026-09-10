@@ -57,6 +57,11 @@ saffron:CriticLens a owl:Class ;
     rdfs:comment "Lenses are disjoint by construction (§5.5) — which is why one blocker routes to REBUT and there is no vote." .
 saffron:Operator a owl:Class ; rdfs:subClassOf prov:Person, earl:Assertor ; rdfs:label "operator" .
 
+# Acts on the operator's behalf under their git identity and credentials. None of
+# its work is a task's attempt, so the ledger cannot tell the two apart.
+saffron:Delegate a owl:Class ; rdfs:subClassOf prov:SoftwareAgent ; rdfs:label "delegate" .
+saffron:Delegate owl:disjointWith saffron:Operator .
+
 saffron:Gate a owl:Class ; rdfs:subClassOf prov:SoftwareAgent, earl:Assertor ; rdfs:label "gate" .
 saffron:CoreGate        a owl:Class ; rdfs:subClassOf saffron:Gate ; rdfs:label "core gate" .
 saffron:ContractGate    a owl:Class ; rdfs:subClassOf saffron:Gate ; rdfs:label "contract gate" .

@@ -194,6 +194,21 @@ saffron:TouchesShape a sh:NodeShape ;
     sh:property [ sh:path saffron:ratifiedBy ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class saffron:Operator ] .
 
+# A delegate always has a principal, is never that principal, and is never the
+# agent of an attempt: a task's work is done in a cell, where it is enforced.
+saffron:DelegateShape a sh:NodeShape ;
+    sh:targetClass saffron:Delegate ;
+    sh:not [ sh:class saffron:Operator ] ;
+    sh:property [ sh:path prov:actedOnBehalfOf ; sh:minCount 1 ;
+        sh:class saffron:Operator ] ;
+    # Both association forms, so the unqualified shortcut is no way around it.
+    sh:property [
+        sh:path [ sh:alternativePath (
+            ( [ sh:inversePath prov:agent ] [ sh:inversePath prov:qualifiedAssociation ] )
+            [ sh:inversePath prov:wasAssociatedWith ] ) ] ;
+        sh:qualifiedValueShape [ sh:class saffron:Attempt ] ;
+        sh:qualifiedMaxCount 0 ] .
+
 # An envelope is a reading bound and is never enforced against a diff (§3). It
 # may therefore never be a gate result's subject — the confusion the CONTEXT.md
 # rule against bare "scope" exists to prevent, stated where a machine can check.

@@ -30,6 +30,7 @@ def test_vendored_vocabularies_parse(path):
         ("PullRequest", "http://www.w3.org/ns/prov#Entity"),
         ("CriticLens", "http://www.w3.org/ns/prov#SoftwareAgent"),
         ("Operator", "http://www.w3.org/ns/prov#Person"),
+        ("Delegate", "http://www.w3.org/ns/prov#SoftwareAgent"),
         ("GateResult", "http://www.w3.org/ns/earl#Assertion"),
         ("Finding", "http://www.w3.org/ns/earl#Assertion"),
         ("AcceptanceCriterion", "http://www.w3.org/ns/earl#TestCriterion"),

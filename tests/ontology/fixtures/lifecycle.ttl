@@ -16,6 +16,7 @@
 :lens-contract    a saffron:CriticLens .
 :lens-blast       a saffron:CriticLens .
 :impl-t1 a saffron:ImplementerSession .
+:delegate-1 a saffron:Delegate ; prov:actedOnBehalfOf :joel .
 
 ## Gates, and the policy that declares them. Core gates are the vocabulary's own
 ## individuals — there is one implementation of each. Contract gates are this

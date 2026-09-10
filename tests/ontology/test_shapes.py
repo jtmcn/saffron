@@ -208,3 +208,73 @@ def test_a_reason_that_claims_the_class_is_still_refused_by_the_enumeration(
     # a pass to a membership check on the text, which is the trap above.
     components = set(results.objects(None, SH.sourceConstraintComponent))
     assert components == {SH.InConstraintComponent}, text
+
+
+_ACTING = ":s a saffron:Delegate ; prov:actedOnBehalfOf :joel ."
+# Valid under AttemptShape, so only DelegateShape can refuse it.
+_ATTEMPT = ":ph a saffron:Phase . :at a saffron:Attempt ; saffron:withinPhase :ph ; saffron:n 1 ;"
+
+
+@pytest.mark.parametrize(
+    ("graph", "components"),
+    [
+        (f"{_ACTING} :work prov:qualifiedAssociation [ prov:agent :s ] .", set()),
+        (":s a saffron:Delegate .", {SH.MinCountConstraintComponent}),
+        (
+            ":s a saffron:Delegate ; prov:actedOnBehalfOf :t . "
+            ":t a saffron:Delegate ; prov:actedOnBehalfOf :joel .",
+            {SH.ClassConstraintComponent},
+        ),
+        (
+            ":s a saffron:Delegate, saffron:Operator ; prov:actedOnBehalfOf :joel .",
+            {SH.NotConstraintComponent},
+        ),
+        # A delegate may be handed a plan; nothing outside it holds it to one.
+        (
+            f"{_ACTING} :work prov:qualifiedAssociation "
+            "[ prov:agent :s ; prov:hadPlan :plan ] .",
+            set(),
+        ),
+        # Typing the command is not the judgement: ratification stays the operator's.
+        (
+            f"{_ACTING} :tc a saffron:TouchesSet ; saffron:ratifiedBy :s .",
+            {SH.ClassConstraintComponent},
+        ),
+        (
+            f"{_ACTING} {_ATTEMPT} prov:qualifiedAssociation [ prov:agent :s ] .",
+            {SH.QualifiedMaxCountConstraintComponent},
+        ),
+        (
+            f"{_ACTING} {_ATTEMPT} prov:wasAssociatedWith :s .",
+            {SH.QualifiedMaxCountConstraintComponent},
+        ),
+    ],
+    ids=[
+        "unplanned",
+        "no-principal",
+        "delegate-principal",
+        "is-operator",
+        "planned",
+        "ratifies",
+        "attempt",
+        "attempt-unqualified",
+    ],
+)
+def test_a_delegate_acts_for_the_operator_never_as_one_nor_in_an_attempt(
+    graph, components, shapes_graph
+):
+    """Asserted on the component, not on conformance: each case has to be refused
+    by the constraint it names, or a sibling constraint rejecting it would hide a
+    deleted one — the trap the enumeration test above records."""
+    data = rdflib.Graph()
+    data.parse(VOCABULARY, format="turtle")
+    data.parse(
+        data=f"""@prefix saffron: <{NS}> .
+        @prefix prov: <http://www.w3.org/ns/prov#> .
+        @prefix : <https://saffron.dev/data/> .
+        :joel a saffron:Operator . {graph}""",
+        format="turtle",
+    )
+    conforms, results, text = validate(data, shacl_graph=shapes_graph, advanced=True)
+    assert conforms == (not components), text
+    assert set(results.objects(None, SH.sourceConstraintComponent)) == components, text
