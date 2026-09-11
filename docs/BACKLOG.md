@@ -122,7 +122,7 @@ fire. Its number stays listed because item numbers are cited from `saffron/`.
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, **62**, **63**, **64**, **69**, **75**, **76**, **77**,
-~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**.
+~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, **107**, **108**.
 (**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
 is the same defect as filing one nowhere at all. **94** was filed here and moved
@@ -143,7 +143,10 @@ consequence of ranking by the milestone rather than by what is nearest to hand.
 **97**–**101**, filed open that day, added — **97** to tier 1, the rest to these
 two. **9** and **10**, each done bar a remnant, sit outside the index. Items
 **102**–**106** were filed open on 2026-09-12 from the reviews of stack #222 —
-**102** to tier 1, **103** and **104** to tier 2, **105** and **106** to tier 3.)
+**102** to tier 1, **103** and **104** to tier 2, **105** and **106** to tier 3.
+**107** and **108** were filed 2026-09-11 as 102 and 103, when running the suite
+on Linux turned "the runtime is one file behind a seam" into a claim with a test
+against it, and renumbered when #222's items landed first.)
 
 ---
 
@@ -5872,6 +5875,137 @@ target-repo directory and the marker accepted under both spellings until every
 onboarded repo has moved; the branch prefix changed only for tasks started after
 the change. Guard it the way #192 did — a test that fails on a stale spelling,
 run both ways.
+
+## 102. The runtime seam is one file, and widening it cannot be done from a cell
+
+**Tier 3.** Appendix G wrote the seam on purpose and it held: `saffron/cell/runtime.py`
+is 441 lines and the only module that names the cell runtime, kept there by
+`.saffron/rules/container-runtime-is-runtime-only.yml`. What no one checked is
+whether the factory can widen its own seam. It cannot, and the reason is
+structural rather than incidental.
+
+Splitting the module — a `CellRuntime` protocol and the selector in
+`runtime.py`, the `apple/container` argv-building in `saffron/cell/runtimes/apple.py` —
+moves the guarded code out from under the rule's exemption, which names the old
+path exactly. So the rule must change in the same commit, and it cannot:
+
+- `.saffron/**` is `protected` in this repository's own `policy.yaml`, and
+  `validate_plan` rejects a plan naming a concrete path under it. A cell is
+  refused at the plan checkpoint.
+- The exemption cannot be widened *ahead* of the move either.
+  `test_every_rules_path_scope_still_reaches_a_file` asserts that every
+  `ignores:` glob reaches a file that exists, so an exemption for a module that
+  has not been written yet fails before the spec is ever driven.
+- `test_a_rules_exemptions_are_the_named_files` pins all four exemptions by
+  value, and its own docstring says they "are not supposed to move without a
+  person saying so". That test is working exactly as designed. This item is the
+  person saying so.
+
+**Done looks like** a by-hand commit on the host, in the shape item **101**
+describes: the protocol and the move, the rule's exemption and its asserting
+test, and `tests/test_runtime.py` following the code, all together, with the
+suite green either side and no behaviour change for a host that has
+`apple/container`. Two things ride with it and neither can be deferred to the
+runtime that arrives second:
+
+- **The vocabulary follow-up.** `CONTEXT.md`'s **Cell runtime** entry says the
+  seam "stays the only module that names the product", which the move falsifies
+  — it becomes one module per product, and `runtime.py` becomes the selector
+  that names none. The entry's own closing clause, *a decision made by spike can
+  be remade by spike*, already anticipates a second answer, so the term survives
+  and one clause changes. `CONTEXT.md` is `protected` and is generated from
+  `ontology/factory.ttl` for its closed sets only; this is prose outside any of
+  them, so it is a hand edit that `ontology.render` leaves alone. Filed here
+  rather than on the spec because a cell cannot land the two halves together —
+  the defect `docs/agents/issue-tracker.md` records as items **65** and **72**.
+- **A paired rule for the second backend.** With the exemption moved, nothing
+  stops the next runtime's name being spelled anywhere under `saffron/`. The
+  rule ships with the mutant that proves it fires, and it cannot be written
+  before the module it guards exists, for the reach reason above. It belongs to
+  item **103**, not here, and is named here so the gap between the two commits
+  is a decision rather than an oversight.
+
+**`ontology/factory.ttl` needs nothing.** It is a projection of the run record
+(§4.6) and the cell runtime is not in it — no class, no property, no closed set.
+A term whose only reader would be a comment is what `test_no_dead_terms` deletes,
+so the runtime earns an entry when a query or a shape reads it, which would mean
+recording per task which runtime ran it. That is worth doing and is a ledger
+change, not a vocabulary one; it is named in **103**.
+
+## 103. A second cell runtime, and the four things a cloud host still lacks
+
+**Tier 3.** Measured 2026-09-11 in
+`docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md`, from a Linux
+cloud session. Depends on **102** — there is nowhere to put a second backend
+until the seam is split.
+
+Appendix G's fallback was Architecture A, a shared VM behind a Docker socket. On
+a container-hosted Linux runner that option is not available and not rejected:
+there is a `docker` client, no daemon, and no way to start one. **podman** is a
+third shape the appendix did not weigh — daemonless, so there is no socket to
+lack, driven by CLI shell-out and structured `inspect`, which is the interaction
+the seam is already written for.
+
+What the four assertions returned, and it is not a clean sweep:
+
+- **CPU visibility inverts the flag.** `--cpus` is a CFS quota and leaves
+  `nproc` reporting the whole machine — §5.1's oversubscription mode.
+  `--cpuset-cpus` satisfies the requirement. A podman arm carries offset 0 and a
+  different flag, not a recalibrated `CPU_OFFSET`.
+- **A struck requirement becomes reachable.** Appendix G struck rev 7's P-core
+  pinning because on macOS the mask indexes virtual CPUs. Principle 31 says a
+  control means what the kernel reading it can see, and here that is a real
+  Linux kernel indexing real cores. Reachable is not the same as worth having;
+  it is no longer impossible.
+- **The host-gateway hazard reproduces.** A host service on `0.0.0.0` is
+  reachable from inside an `--internal` cell; one on `127.0.0.1` is not.
+  `preflight.py`'s lsof enumeration is as necessary here as on macOS and works
+  unchanged.
+- **Two assertions returned nothing.** Egress-to-an-unlisted-host passed
+  vacuously — the session has no direct egress on any network, so the probe
+  established nothing about the one the cell was on. Proxy-reachable-by-IP was
+  inconclusive: the stand-in listener never accepted. Both need the real proxy
+  image and a host the session can reach but the allowlist would not.
+
+**The boundary this trades away, and it is the one Appendix G bought.** Podman
+keeps the honest CPU count, the internal network and `--cap-drop ALL`, and gives
+up the VM per cell. §5.1 declines `no-new-privileges` and seccomp *because* the
+VM is offered instead; with no VM that sentence has no subject and both come
+back on. A second runtime is a second safety argument — weaker, and stated as
+such in `DESIGN.md` rather than absorbed into the first.
+
+**Also for the seam, found by the same probe:** `DEFAULT_SUBNET` is not
+portable. `10.88.0.0/24` was refused as already in use on that host. The
+collision handling `create_network` already carries is the right shape; the
+constant is not.
+
+**And a ledger column.** Which runtime ran a task is exactly the fact that later
+explains a variance nobody can otherwise account for, the same argument that
+makes a gate result carry the tool version it actually ran (§5.4). It is also
+what would earn the cell runtime an entry in `ontology/factory.ttl`, which today
+has none and correctly so (**102**).
+
+**Done looks like** a podman backend behind **102**'s protocol, its paired
+structure rule and mutant, the spike grown a fourth arm so the assertions are
+reproducible rather than recorded, and `DESIGN.md` carrying the second safety
+argument. **Not** done by that alone: a cloud host still cannot start a cell.
+
+**What blocks it there regardless of runtime**, all four measured the same day:
+
+1. **No image can be pulled.** `docker.io`, `quay.io` and `public.ecr.aws` are
+   all refused with 403 by the session's egress policy, at the blob CDN.
+   `images/cell-base.python.Dockerfile` is `FROM python:3.12-slim-bookworm`, so
+   neither the base image nor this repository's own cell image can be built. An
+   egress policy, not a defect — a working runtime there has nothing to run.
+2. **No cgroup controllers.** `/sys/fs/cgroup` is a tmpfs with no
+   `cgroup.controllers`, so `--memory` is accepted and unenforced. §4.3's
+   ceiling would be a claim. A ceiling that is not enforced has to report as
+   absent rather than as set, which is its own change.
+3. **No `gh`.** PACKAGE cannot open the draft pull request and `reconcile`
+   cannot ask GitHub anything.
+4. **The host is reclaimed on idle**, taking `~/.saffron/ledger.db` and the
+   batch tree with it. Survivable for one attended task whose product is a pull
+   request; fatal for a night, whose product *is* the audit trail.
 
 ---
 
