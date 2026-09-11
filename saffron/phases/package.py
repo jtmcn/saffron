@@ -476,12 +476,11 @@ def reverify(
 
     `acceptance` is passed through for the same reason `session._suite` passes
     it: without it — and without a `mutate` — `run_suite` leaves `witness` out
-    of the suite entirely, so the two suites differ in *shape* and
-    `suite_drift` has nothing to compare across the two call sites (item 71).
-    Required rather than defaulted, for the reason `CLAUDE.md` gives for cell
-    creation's `network`/`env`: an omission here is silent, `suite_drift`
-    compares head against base *within* one call and so sees both suites lose
-    `witness` together, and a caller that forgets is item 71 all over again.
+    of the suite entirely, and PACKAGE's suite differs in *shape* from the one
+    the task was judged by (item 71). Required rather than defaulted, for the
+    reason `CLAUDE.md` gives for cell creation's `network`/`env`: an omission
+    here is silent. Nothing here calls `suite_drift`, so both suites losing
+    `witness` together would pass unremarked.
     A witness whose test does not exist at `new_base_sha` is `unproven` there
     rather than an abort, which is item 83's fix and is what makes passing this
     here safe.

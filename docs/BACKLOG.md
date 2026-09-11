@@ -4197,8 +4197,10 @@ retry inside the loop reintroduces the "does the queue change" question the
 **Status: done, 2026-09-08.** The third landed: `phases/package.py`'s
 re-verification now passes `acceptance=` and a `worktree.source_mutated` bound
 to each package cell's own container, on both the baseline and the head suite,
-so the two suites have the same shape and `suite_drift` can compare `witness`
-across the two call sites. Safe to pass only because item 83 landed first: a
+so the two suites have the same shape. (Corrected 2026-09-10: this said
+`suite_drift` could then compare `witness` across the two call sites. Nothing in
+PACKAGE calls `suite_drift`, so no comparison ran; the gate-suite stack named in
+item 97 closes that.) Safe to pass only because item 83 landed first: a
 witness whose test does not exist at the rebased base is `unproven` there rather
 than an abort.
 
@@ -5368,6 +5370,10 @@ behind each.
 
 ## 90. `_drive_cell` has doubled since it was born and is over half its module
 
+**Status:** open. The gate-suite stack (item 97) takes `_suite`'s assembly and
+the `current_tier`/`advisory_gates` pair out of `_drive_cell`; the rest of the
+phase sequence stays here.
+
 **Tier 3 — real, not urgent.** Nothing here fails at 03:00 and the function is
 green. **Found 2026-09-08**, by static analysis and not by a run: this is a
 measurement rather than a gap a live run exposed, and it is filed anyway
@@ -5691,6 +5697,11 @@ pushed, 10 of them over a rewritten history
 task's gates, from the same `base_sha` export, over the new head — and a
 *record*. A merge over a moved head is printed once, by whichever command saw
 it, and the row that becomes `MERGED` keeps no trace of the head it merged at.
+The re-gate's first half is the gate-suite stack begun 2026-09-10: one module
+that runs a gate suite on any tree and returns a suite comparison, adopted by the
+session and then by PACKAGE, so the re-gate is its third caller rather than a
+third hand-built suite (principle 54). The record stays this item's: a
+`gate_results` row needs an attempt or a run, and a re-gate has neither.
 
 **Tier 1 — soundness.** Found naming the delegate (PR #189, 2026-09-10).
 `run-saffron-spec-loop` steps 2c–2e have a delegate check out `saffron/SA-NNNN`

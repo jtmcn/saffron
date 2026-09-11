@@ -274,6 +274,15 @@ baseline subtracts and what `suite_drift` compares.
 _Avoid_: "gate run" for the suite either. One gate's execution is a **gate result**;
 every gate's is a **gate suite**; neither is a "run".
 
+**Suite comparison**: What judging a head gate suite against its baseline yields —
+one of three things, checked in this order: a gate `error`ed and the attempt
+aborts; the suites **drifted** (a gate stopped running, or its `tool` changed),
+so no subtraction is to be trusted; or the blocking new failures that remain.
+_Avoid_: "verdict" — that is the critic's confirm-or-withdraw of a finding.
+_Avoid_ also "the subtraction"
+for the whole: the subtraction produces only the third outcome, and it is not
+even attempted when either of the first two holds.
+
 **Status**: A gate result is `pass`, `fail`, `skip`, or `error`.
 - `skip` — the repo declares no such gate. Not a failure; nothing is wrong.
 - `fail` — the repo's code is wrong.
