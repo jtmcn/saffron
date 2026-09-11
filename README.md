@@ -101,7 +101,7 @@ Run one spec in one cell, attended. The token is scoped to the invocation delibe
 directory, and from there into any agent session started in one.
 
 ```sh
-CLAUDE_CODE_OAUTH_TOKEN=... uv run saffron cell .saffron/specs/SA-0060-the-gate-holds-a-path-it-should-not.md --repo .
+CLAUDE_CODE_OAUTH_TOKEN=... uv run saffron cell .saffron/specs/SA-NNNN-<slug>.md --repo .
 ```
 
 Follow a task's event log, or read a finished one:

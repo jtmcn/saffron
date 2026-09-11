@@ -49,6 +49,12 @@ nothing.
 | `SA-0009` | Split into `SA-0011` and `SA-0014`–`SA-0017`, then `SA-0020`; every criterion is in `main` — `discover_specs`, `tasks_by_spec`/`resolve_repo_id` without inserting, the refusal gate, `saffron queue`'s exit codes. Its last criterion, *"a test asserting `saffron queue` writes nothing at all"*, was **reversed on purpose** by `SA-0019`, which made the command reconcile before it scans |
 | `SA-0021` | `DESIGN.md` §5.3.1 and `CONTEXT.md`'s **Touches** entry, which now names both proposers of a scope. Implemented by hand because the cell could not: both documents are `protected`, which is why its task reads `PLAN_REJECTED` |
 | `SA-0044` | `saffron/gates/core/revert.py` (302 lines), `tests/test_revert.py` (19 tests), `source_reverted`/`_revert_source`/`_restore_source`/`_exists_at` in `saffron/cell/worktree.py` with ten host-git tests in `tests/test_worktree.py`, and the `_suite` wiring plus three tests in `tests/test_session.py`. **Retired in the same pull request that ships it** — see the paragraph below |
+| `SA-0060` | Cell task `MERGED`, PR #148; all six declared witnesses exist in `tests/test_witness_gate.py`, `tests/test_mutation.py` and `tests/test_gates.py` |
+| `SA-0061` | Cell task `MERGED`, PR #150; all four declared witnesses exist in `tests/test_session.py` |
+| `SA-0062` | Cell task `MERGED`, PR #154; all five declared witnesses exist in `tests/test_worktree.py` and `tests/test_session.py` |
+| `SA-0063` | Cell task `MERGED`, PR #158; retired in PR #173 without a row here. All five declared witnesses exist in `tests/test_report.py` and `tests/test_session.py` |
+| `SA-0064` | Cell task `MERGED`, PR #160; all four declared witnesses exist, and criterion 1's mutant still matches `saffron/phases/package.py` |
+| `SA-0065` | Cell task `MERGED`, PR #185; all three declared witnesses exist in `tests/test_intake.py` |
 
 **A fourth thing the ledger cannot say, found 2026-08-31.** `DONE_STATES` means
 the scan is finished with a spec, not that the work is — `EXHAUSTED`,

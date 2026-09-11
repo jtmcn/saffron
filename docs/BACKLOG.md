@@ -1715,7 +1715,11 @@ a `gh`-free scan, the same argument item 18 made for turn ceilings.
 
 ## 26. Discovery cannot tell an empty night from a missing directory
 
-**Status: attempted by the first `saffron batch` ever to run a task, 2026-09-09,
+**Status: done** — `SA-0065`, PR #185, 2026-09-10, on its second run with the
+corrected boundary. The refusal reaching a terminal and never the ledger is
+item **95**. The first attempt is kept as filed:
+
+**Attempted by the first `saffron batch` ever to run a task, 2026-09-09,
 and `EXHAUSTED` on the spec's boundary rather than on the work.** `SA-0065`'s
 implementation was correct — the guard, both tests, `$0.97` of a `$5` ceiling —
 but making `discover_specs` refuse an absent directory breaks `_spec_path` in
