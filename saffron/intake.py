@@ -153,6 +153,11 @@ class Spec(BaseModel):
     acceptance_criteria: list[str] = Field(default_factory=list)
     acceptance: list[Criterion] = Field(default_factory=list)
 
+    @property
+    def spec_type(self) -> SpecType:
+        """`type` under the name `CellSpec` and the gate suite read it by."""
+        return self.type
+
 
 def parse_spec(text: str) -> Spec:
     match = _FRONTMATTER.match(text)

@@ -268,13 +268,7 @@ def _reverify_stubbed(tmp_path):
         policy=Policy(gates={"tests": GateDeclaration()}),
         gates_dir=tmp_path / "gates",
         image="img",
-        spec=SimpleNamespace(
-            type="feature",
-            touches=["src/**"],
-            forbidden=[],
-            risk="standard",
-            acceptance=[],
-        ),
+        spec=Spec(id="SA-0005", title="t", type="feature", touches=["src/**"]),
     )
 
 
@@ -2000,6 +1994,8 @@ def test_a_re_verified_package_reports_the_tier_its_verifying_suite_ran_at(
 
     body = (packageable.outcome.task_dir / "pr_body.md").read_text()
     assert "risk `elevated`" in body
+    # On a copy: the cell's own outcome still says what the cell ran at.
+    assert packageable.outcome.effective_risk == "standard"
 
 
 def test_the_pr_body_reports_the_effective_tier_not_the_specs_declared_one(
@@ -2721,11 +2717,11 @@ def test_reverification_runs_the_same_suite_shape_the_session_ran(
         policy=Policy(gates={"tests": GateDeclaration()}),
         gates_dir=tmp_path,
         image="img",
-        spec=SimpleNamespace(
+        spec=Spec(
+            id="SA-0005",
+            title="t",
             type="feature",
             touches=["pkg/**"],
-            forbidden=[],
-            risk="standard",
             acceptance=[criterion],
         ),
     )

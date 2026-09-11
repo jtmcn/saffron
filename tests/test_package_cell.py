@@ -4,10 +4,10 @@ container build -t saffron/cell-base:python -f images/cell-base.python.Dockerfil
 """
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
+from saffron.intake import Spec
 from saffron.phases.package import reverify
 from saffron.repos import image as repo_image
 from saffron.repos import mirror as mirror_ops
@@ -17,9 +17,7 @@ pytestmark = pytest.mark.cell
 
 SAFFRON_ROOT = Path(__file__).resolve().parent.parent
 # Same sha on both sides, so the diff is empty and `scope` has nothing to judge.
-_SPEC = SimpleNamespace(
-    type="feature", touches=[], forbidden=[], risk="standard", acceptance=[]
-)
+_SPEC = Spec(id="SA-0005", title="t", type="feature")
 
 
 def test_reverification_runs_the_suite_inside_a_cell(tmp_path, capsys):

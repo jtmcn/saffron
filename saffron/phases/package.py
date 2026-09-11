@@ -26,7 +26,7 @@ from saffron.cell.worktree import DIFF_FLAGS
 from saffron.events import Event, EventLog, PhaseStart, describe
 from saffron.gates.contract import split_lines
 from saffron.gates.suite import CellTree, GateSuite, SuiteComparison
-from saffron.intake import Criterion
+from saffron.intake import Spec
 from saffron.phases.rebut import sustained_blockers, unkept_fixes
 from saffron.phases.review import anchored_concerns
 from saffron.report import index as index_report
@@ -447,17 +447,6 @@ def needs_reverification(fetch_head: str, base_sha: str) -> bool:
     return fetch_head != base_sha
 
 
-@dataclass(frozen=True)
-class _SuiteSpec:
-    """`intake.Spec` as the gate suite reads it: its `type` is `spec_type` there."""
-
-    risk: str
-    touches: list[str]
-    forbidden: list[str]
-    acceptance: list[Criterion]
-    spec_type: str
-
-
 def reverify(
     *,
     mirror: Path,
@@ -466,7 +455,7 @@ def reverify(
     policy,
     gates_dir: Path,
     image: str,
-    spec,
+    spec: Spec,
 ) -> SuiteComparison:
     """The whole gate suite on the packaged commit, judged against a fresh
     baseline at `new_base_sha`, each in its own gate-only cell (§5.7). The
@@ -490,13 +479,7 @@ def reverify(
 
     suite = GateSuite(
         gates=policy.gate_executables(Path(worktree.GATES_MOUNT)),
-        spec=_SuiteSpec(
-            risk=spec.risk,
-            touches=list(spec.touches),
-            forbidden=list(spec.forbidden),
-            acceptance=list(spec.acceptance),
-            spec_type=spec.type,
-        ),
+        spec=spec,
         policy=policy,
         # The diff a reviewer reads: the packaged commit over the tree it
         # merges onto, not over the tree the cell started from.
