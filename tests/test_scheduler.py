@@ -116,8 +116,8 @@ def _every_live_spec_flattened(tmp_path):
     directory.
 
     `_real_corpus` copies `done/` alone, which silently leaves out whichever
-    specs are at the top of `.saffron/specs` right now — the five most recent,
-    and the likeliest to carry a defect nobody has met yet. A check claiming to
+    specs are at the top of `.saffron/specs` right now — the most recent, and
+    the likeliest to carry a defect nobody has met yet. A check claiming to
     hold over *every* spec cannot be built on a corpus that omits them.
     `README.md` is dropped for `_real_corpus`'s own reason: `discover_specs`
     globs `*.md` and reports it as a failure, correctly and irrelevantly.
@@ -1818,7 +1818,12 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-06, a fifteenth time. `SA-0059` asked for item 71's
+    """Re-measured 2026-09-10, a sixteenth time: every spec still in the tree
+    has shipped and is retired, so the live queue is empty. The chain
+    below merged as PRs #148, #150 and #154. What survives is the property the
+    eleventh kept, the non-recursive glob.
+
+    Re-measured 2026-09-06, a fifteenth time. `SA-0059` asked for item 71's
     whole seam in one spec, reached `EXHAUSTED` at $26.75, and is replaced by
     the sequence it named as its own contingency: `SA-0060` -> `SA-0061` ->
     `SA-0062`.
@@ -1861,36 +1866,12 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         directory, repo_id, ledger, repo_slug="joel/saffron", gh=_fake_gh([])
     )
 
-    # `SA-0064` is admissible because its parent `SA-0063` is retired to
-    # `done/`, not because anything in the ledger says so. That spec discloses
-    # its own mutant, so item 82 will not parse it — but a spec refused on
-    # *policy* still declares an id, so `_retired_ids` credits the retirement.
-    # Before it was retired this read the other way round: `SA-0063` sat at top
-    # level as a discovery failure and `SA-0064` was refused for a parent that
-    # looked absent, which is the cascade that made the distinction necessary.
-    # `SA-0065` declares no parent at all, so it is admissible on arrival and
-    # sorts last on filename among the priority-1 specs. It is the first spec
-    # written to be run by a batch rather than by `saffron cell`.
-    assert [c.spec.id for c in candidates] == ["SA-0060", "SA-0064", "SA-0065"]
-    assert [r for r in refusals if r.path.name.startswith("SA-0063")] == []
-
-    # Refused for the parent each actually declares, which is what separates a
-    # dependency refusal from a criterion-path one.
-    chain = [
-        ("SA-0061", "SA-0060"),
-        ("SA-0062", "SA-0061"),
-    ]
-    assert len(refusals) == len(chain)
-    by_child = {
-        child: next(r for r in refusals if r.path.name.startswith(child))
-        for child, _ in chain
-    }
-    for child, parent in chain:
-        assert parent in by_child[child].reason
-        assert "depends_on" in by_child[child].reason
-    # And the retired corpus stays invisible: `discover_specs` globs
-    # non-recursively, so forty-odd shipped specs one directory down are not
-    # offered as tonight's work.
+    # A fresh ledger filters nothing, so a glob that recursed would offer every
+    # spec in `done/` here — which is what makes the empty queue a check.
+    assert candidates == []
+    assert refusals == []
+    # A precondition, not the glob check: `done/` is populated, so the empty
+    # queue above is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30
 
 
