@@ -1,0 +1,57 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.9139094999999998,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 170,
+        "claim": "The `except Exception:` handler treats every raise from `runner` as a breaker abort, but its own comment (lines 159-162) cites 'a crash well into REPAIR after real attempts already billed real money' and 'a runtime that will not start' as example raises \u2014 and tracing `session.py`'s outer handler (lines 1765-1775) shows that is exactly how an `ORPHANED` task is produced: `task_id`/`run_id` already exist (created at session.py:824-825, before the guarded try block), the handler stamps `ledger.set_task_state(task_id, 'ORPHANED')` and `ledger.finish_run(run_id, 'ABORTED')`, and only then re-raises. `ORPHANED` never returns as a normal `CellOutcome` from that path \u2014 it only ever reaches `run_batch` as a bare exception. Yet `ABORT_STATES`'s own comment (batch.py:30-33) explicitly calls `ORPHANED` a state 'a task *earned*', deliberately excluded from the abort set so it resets rather than grows the counter \u2014 the same treatment given `EXHAUSTED`. Because the only way `ORPHANED` reaches this loop is via the exception path, it is unconditionally counted as an abort (line 170) despite the file's own stated principle that it should reset the counter, so two unrelated single-cell crashes (a known real occurrence per session.py:856-857's 'a leftover network from a SIGKILLed run' comment) would fire the `INFRASTRUCTURE` breaker and stop an otherwise-healthy night, defeating the breaker's stated purpose (\u00a74.2.1: distinguishing a broken toolchain from flaky tasks).",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.6357126000000002,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 71,
+        "claim": "`_attach_runs_minted_since` sweeps in *any* row from `runs` with `run_id > high_water AND batch_id IS NULL`, with no `repo_id` filter, on the theory (stated at lines 66-69) that 'under K=1 nothing else can mint a run while one candidate's call is in flight, so run_id > high_water is exactly the set ... that this call produced, never a stale orphan from outside it.' That is only true if `run_batch` is the sole writer to `~/.saffron/ledger.db` for the whole window between reading `high_water` and the `except` block running. `ledger.py` turns on WAL mode specifically to support concurrent access, and CLAUDE.md documents `saffron cell` and `saffron replay` as commands an operator runs independently, both of which mint runs with `batch_id IS NULL` (per `create_run`'s own docstring). If either mints a run \u2014 for any repo \u2014 in that narrow window while this candidate's call is failing, that unrelated run's cost gets silently attributed to this batch, corrupting `batch_spend`/`close_batch`'s recorded spend and mixing another repo's run into a batch that is supposed to own one repo's slice. This holds in every test here (one sequential in-process `Ledger`) but is false wherever a second process touches the same ledger file, which the single-process test suite cannot exercise.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.5496705,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 45,
+        "claim": "`_attach_runs_minted_since` is scoped to `run_id > high_water` specifically so a crash sweeps in only the run *this* candidate's call minted, never a pre-existing orphan run left with `batch_id IS NULL` by an earlier `saffron cell` or `replay.py` invocation \u2014 the docstring says this in so many words. No test ever creates such a pre-existing orphan before calling `run_batch`, so nothing distinguishes this scoping from `_max_run_id` simply always returning 0 (which, combined with the unchanged `batch_id IS NULL` filter, would sweep every unattached historical run into tonight's batch on the very next crash). Every existing test starts from a fresh ledger where `_max_run_id` is already 0 at the point it matters, so `test_a_crash_after_real_spend_still_counts_against_the_next_budget_gate` passes identically whether the high-water mark is real or hard-coded to 0 \u2014 the exact contamination scenario the docstring warns about is asserted in prose but never exercised.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/batch.py",
+          "find": "    row = ledger._db.execute(\n        \"SELECT COALESCE(MAX(run_id), 0) AS m FROM runs\"\n    ).fetchone()\n    return int(row[\"m\"])",
+          "replace": "    return 0"
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,33 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.4695678000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.417789,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 668,
+        "claim": "PinnedBase's own docstring invokes the check_readiness/scratch-home history of adjacent same-typed parameters transposing and type-checking cleanly as the reason these three values are grouped into a class rather than passed as adjacent parameters ('Not three positional fields for the reason...'). But the class is declared `@dataclass(frozen=True)` without `kw_only=True`, so `url: str` and `base_sha: str` remain adjacent, same-typed, positionally-constructible fields \u2014 `PinnedBase(mirror, base_sha, url)` type-checks cleanly and silently swaps them, which is exactly the bug pattern the docstring cites as the reason for this design. The two current call sites happen to use keyword arguments, but nothing in the declared interface enforces that, so the documented protection is not actually structural.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.7860293999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  }
+]

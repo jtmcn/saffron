@@ -1035,3 +1035,37 @@ def test_the_spread_pass_s_per_run_totals_are_re_derivable():
     totals = " · ".join(f"{s.graded}/{s.declared}" for s in per_run if s is not None)
     assert totals in line
     assert line in SPREAD_RECORD.read_text()
+
+
+CLAUDE_MD = REPO / "docs" / "evidence" / "passes" / "2026-09-11-lens-corpus-claude-md"
+CLAUDE_MD_RECORD = REPO / "docs" / "evidence" / "2026-09-11-lens-corpus-claude-md.md"
+
+
+def test_the_claude_md_pass_s_per_run_totals_are_re_derivable():
+    """Task 10's number, recomputed from the runs beside it, never read off
+    prose. Unlike the spread pass, one run here is partial — SA-0054's
+    contract lens hit `error_max_turns` on run 1, so that fixture drops out of
+    run 1's own slice and its denominator is 10, not 12. The totals string
+    must come out that way on its own, not by assuming every fixture
+    contributes 12 declared defects to every run."""
+    fixtures = corpus.load_corpus(FIXTURES)
+    runs = {
+        f.spec_id: [
+            lens_scoring.reviews_from_json(p.read_text())
+            for p in sorted((CLAUDE_MD / f.spec_id).glob("run-*.json"))
+        ]
+        for f in fixtures
+    }
+    assert all(len(r) == 3 for r in runs.values())
+    per_run = corpus.graded_per_run(fixtures, runs)
+    line = next(
+        line
+        for line in (CLAUDE_MD / "table.md").read_text().splitlines()
+        if line.startswith("Per run")
+    )
+    totals = " · ".join(
+        "unscored" if s is None else f"{s.graded}/{s.declared}" for s in per_run
+    )
+    assert totals in line
+    assert totals == "1/10 · 4/12 · 4/12"
+    assert line in CLAUDE_MD_RECORD.read_text()

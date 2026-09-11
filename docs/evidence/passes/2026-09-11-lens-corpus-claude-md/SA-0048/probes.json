@@ -1,0 +1,40 @@
+[
+  {
+    "probe": {
+      "file": "saffron/preflight.py",
+      "find": "        return exc.code not in (401, 403)",
+      "replace": "        return True"
+    },
+    "verdict": "killed",
+    "reason": "1 new failure(s) against the baseline",
+    "failures": [
+      "tests/test_saffron_gates.py::test_the_fast_gates_name_their_tool_and_pass_on_a_clean_tree[lint]"
+    ],
+    "tool": "pytest 9.1.1",
+    "collected": 1266,
+    "summary": "1 failed, 1263 passed, 2 skipped, 20 deselected in 13.05s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1266,
+    "baseline_summary": "1264 passed, 2 skipped, 20 deselected in 14.03s"
+  },
+  {
+    "probe": {
+      "file": "saffron/preflight.py",
+      "find": "    except urllib.error.HTTPError as exc:\n        return exc.code not in (401, 403)",
+      "replace": "    except urllib.error.HTTPError as exc:\n        return True"
+    },
+    "verdict": "killed",
+    "reason": "1 new failure(s) against the baseline",
+    "failures": [
+      "tests/test_saffron_gates.py::test_the_fast_gates_name_their_tool_and_pass_on_a_clean_tree[lint]"
+    ],
+    "tool": "pytest 9.1.1",
+    "collected": 1266,
+    "summary": "1 failed, 1263 passed, 2 skipped, 20 deselected in 13.22s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1266,
+    "baseline_summary": "1264 passed, 2 skipped, 20 deselected in 14.03s"
+  }
+]

@@ -1,0 +1,57 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 1.1482904999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "blocker",
+        "file": "saffron/cell/worktree.py",
+        "line": 422,
+        "claim": "`source_mutated`'s undo unconditionally runs `git checkout HEAD -- mutant.file` with no check that the file was already dirty (uncommitted agent work) before the mutant was applied. Its own docstring's justification \u2014 'committed guarantees the agent's work is committed before any gate runs' \u2014 is false in general: `commit_dirty` is only invoked host-side on crash/salvage paths (session.py lines ~1452-1455, ~1573-1576), never unconditionally before the ordinary post-IMPLEMENT gate suite runs, which is exactly why `committed_gate` exists as a gate that can `fail` on a dirty tree (session.py line 1049). Its sibling, `revert_gate`, explicitly guards against this identical hazard by checking `dirty()` against the paths it is about to revert and skipping rather than restoring when there's a collision (`saffron/gates/core/revert.py` lines 174-189: 'restoring to HEAD would destroy them and hide them from `committed`'). `witness_gate`/`run_witness` (saffron/gates/runner.py, saffron/gates/core/witness.py) carry no equivalent `dirty` parameter or check at all. If a criterion's mutant targets a file the agent has edited but not yet committed (plausible, since the mutant necessarily targets the very file the implementation lives in), `source_mutated` will apply the mutant over the uncommitted content, then on exit silently overwrite the file with the stale `HEAD` version \u2014 permanently discarding the agent's real uncommitted work while making the tree look clean to the subsequent `committed_gate` check, so the loss is never surfaced. Every current spec declares no mutants so this path is dormant today, but the spec's own 'Out of scope' section says the very next spec is expected to declare one, making this a live landmine being merged now rather than a hypothetical.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.4996452,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "saffron/cell/worktree.py",
+        "line": 418,
+        "claim": "`witness.py` documents a third obligation on any `Mutated` implementation: 'a raise from `__enter__` must mean nothing was changed', and explicitly says this is *not* unreachable for a container-based mutator \u2014 'a container exec that applies the edit and then loses the connection is exactly the shape that is not [unreachable]' \u2014 unlike `host_mutator`, which is safe only because nothing can raise between its in-process write and its yield. `source_mutated` calls `_write_file` (which execs a shell script inside the container) at line 418, entirely outside the `try/finally` that begins on the next line, so if that single container exec fails after having opened/truncated or partially written the target file (a dropped connection, disk pressure, or a `base64 -d` decode fault mid-stream all surface as a non-zero `runtime.exec_` result), `_write_file` raises immediately with no restore attempted. Back in `witness_gate`, this raise occurs before `applied` is set to `True`, so the exception handler reports 'could not apply {file}'s mutant' \u2014 the message reserved for an untouched tree \u2014 when the tree may in fact be left mutated and dirty, exactly the understatement `witness.py`'s docstring calls out by name as the dangerous case. No test in this diff exercises a `_write_file` failure (only a `cat`/read failure and an undo/checkout failure are covered), so this gap in the documented contract ships unverified.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.7902948000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cell/worktree.py",
+        "line": 377,
+        "claim": "`_write_file`'s own docstring says the base64 round trip exists so a mutant's find/replace \"can hold anything a shell would otherwise misread: a quote, a backslash, a newline\" -- but no test in this diff ever gives it content or a `Mutant.replace` containing a quote, backslash, or newline. Every fixture (`\"if amount < 0:\"`, `\"value = 1\"`, `\"if False:\"`, `\"value = 2\"`) is shell-metacharacter-free, so replacing the base64 machinery with a naive single-quoted `printf` still passes every test in `tests/test_worktree.py` while breaking on any real mutant touching a Python string literal (e.g. `raise ValueError(\"bad amount\")`), which is the ordinary shape of source this gate is meant to mutate.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cell/worktree.py",
+          "find": "    encoded = base64.b64encode(content.encode()).decode()\n    script = f\"printf '%s' {shlex.quote(encoded)} | base64 -d > {shlex.quote(path)}\"\n    done = runtime.exec_(container, [\"sh\", \"-euc\", script], workdir=WORKTREE_MOUNT)",
+          "replace": "    script = f\"printf '%s' '{content}' > {shlex.quote(path)}\"\n    done = runtime.exec_(container, [\"sh\", \"-euc\", script], workdir=WORKTREE_MOUNT)"
+        }
+      }
+    ]
+  }
+]

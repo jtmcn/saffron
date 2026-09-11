@@ -1,0 +1,70 @@
+[
+  {
+    "probe": {
+      "file": "saffron/batch.py",
+      "find": "    row = ledger._db.execute(\n        \"SELECT COALESCE(MAX(run_id), 0) AS m FROM runs\"\n    ).fetchone()\n    return int(row[\"m\"])",
+      "replace": "    return 0"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1292,
+    "summary": "1290 passed, 2 skipped, 20 deselected in 13.51s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1292,
+    "baseline_summary": "1290 passed, 2 skipped, 20 deselected in 14.28s"
+  },
+  {
+    "probe": {
+      "file": "saffron/batch.py",
+      "find": "    consecutive_aborts = 0\n\n    for candidate in candidates:\n        # Before each task, in this order: the deadline, then the budget,\n        # then the breaker's standing count (\u00a74.2.1's ordering, named once\n        # here rather than re-derived at each check).\n        if until is not None and clock() >= until:\n            ledger.close_batch(batch_id, \"UNTIL\")\n            return \"UNTIL\"\n\n        remaining = budget_usd - ledger.batch_spend(batch_id)",
+      "replace": "    if until is not None and clock() >= until:\n        ledger.close_batch(batch_id, \"UNTIL\")\n        return \"UNTIL\"\n\n    consecutive_aborts = 0\n\n    for candidate in candidates:\n        # Before each task, in this order: the deadline, then the budget,\n        # then the breaker's standing count (\u00a74.2.1's ordering, named once\n        # here rather than re-derived at each check).\n        remaining = budget_usd - ledger.batch_spend(batch_id)"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1292,
+    "summary": "1290 passed, 2 skipped, 20 deselected in 13.61s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1292,
+    "baseline_summary": "1290 passed, 2 skipped, 20 deselected in 14.28s"
+  },
+  {
+    "probe": {
+      "file": "saffron/batch.py",
+      "find": "    consecutive_aborts = 0\n\n    for candidate in candidates:\n        # Before each task, in this order: the deadline, then the budget,\n        # then the breaker's standing count (\u00a74.2.1's ordering, named once\n        # here rather than re-derived at each check).\n        if until is not None and clock() >= until:\n            ledger.close_batch(batch_id, \"UNTIL\")\n            return \"UNTIL\"\n\n        remaining = budget_usd - ledger.batch_spend(batch_id)",
+      "replace": "    consecutive_aborts = 0\n\n    if until is not None and clock() >= until:\n        ledger.close_batch(batch_id, \"UNTIL\")\n        return \"UNTIL\"\n\n    for candidate in candidates:\n        remaining = budget_usd - ledger.batch_spend(batch_id)"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1292,
+    "summary": "1290 passed, 2 skipped, 20 deselected in 15.23s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1292,
+    "baseline_summary": "1290 passed, 2 skipped, 20 deselected in 14.28s"
+  },
+  {
+    "probe": {
+      "file": "saffron/batch.py",
+      "find": "    rows = ledger._db.execute(\n        \"SELECT run_id FROM runs WHERE run_id > ? AND batch_id IS NULL\",\n        (high_water,),\n    ).fetchall()",
+      "replace": "    rows = ledger._db.execute(\n        \"SELECT run_id FROM runs WHERE batch_id IS NULL\"\n    ).fetchall()"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1292,
+    "summary": "1290 passed, 2 skipped, 20 deselected in 13.99s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1292,
+    "baseline_summary": "1290 passed, 2 skipped, 20 deselected in 14.28s"
+  }
+]

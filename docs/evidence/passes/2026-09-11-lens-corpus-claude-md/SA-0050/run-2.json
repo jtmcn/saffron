@@ -1,0 +1,57 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.5331948000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 66,
+        "claim": "`_attach_runs_minted_since` sweeps in any row from `runs` with `run_id > high_water AND batch_id IS NULL`, with no filter on repo and no lock \u2014 its own comment justifies this by claiming 'under K=1 nothing else can mint a run while one candidate's call is in flight' (lines 66-69), but K=1 is a property of this loop's own scheduling, not an exclusive lock on the shared ledger. The documented, supported `saffron cell` command (CLAUDE.md) also calls `create_run` with `batch_id=None` and can be run by the operator at any time, including while a batch is executing; if it (or a second batch, or a run against a different repo) mints a run inside the narrow window between the `high_water` read and a crashing runner's raise, that unrelated run's cost gets silently folded into this batch's `batch_spend`, corrupting the budget gate and the batch's recorded spend without any gate or test (all of which run single-process and synchronous) ever observing it.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.2051247,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 66,
+        "claim": "`_attach_runs_minted_since` is scoped by `run_id > high_water AND batch_id IS NULL`, and the docstring justifies this scope by asserting 'Under K=1 nothing else can mint a run while one candidate's call is in flight' (lines 66-69). That is only true of this in-process loop; `runs.batch_id IS NULL` is also the steady-state left by `saffron cell` and `replay.py` (both documented in CLAUDE.md as ordinary, concurrently-usable commands) writing to the same shared `~/.saffron/ledger.db`. `high_water` is read via `_max_run_id`, which takes the MAX over the whole `runs` table with no repo scoping (line 46), and the window between that read and the runner's eventual exception spans the full duration of one cell's execution \u2014 long enough for an operator's manual `saffron cell` invocation against the same ledger file to mint an unrelated NULL-`batch_id` run with `run_id > high_water` in that window. On the next exception, that unrelated run gets swept into this batch's spend, silently corrupting `batch_spend` and the budget gate for a night the tests (all single-process, single ledger connection, no concurrent writer) cannot exercise.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.6036072,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/batch.py",
+        "line": 142,
+        "claim": "Both clock-related tests (`test_the_until_deadline_is_read_from_an_injected_clock` and `test_the_clock_is_checked_before_a_task_still_inside_the_window`) drive exactly one candidate through `run_batch`, so neither can tell 'the deadline is checked once, before the loop starts' apart from 'the deadline is checked before every task.' Moving the `if until is not None and clock() >= until:` block from inside the `for` loop to just before it (still returning UNTIL/closing the batch the same way) keeps every existing test green \u2014 each supplies only a single candidate \u2014 while breaking the acceptance criterion that the deadline is 'compared before starting a task rather than during one' for every task: a batch that crosses `--until` only after its first candidate starts would then run every remaining candidate unbounded, since inside the loop only the budget and breaker would still be checked.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/batch.py",
+          "find": "    consecutive_aborts = 0\n\n    for candidate in candidates:\n        # Before each task, in this order: the deadline, then the budget,\n        # then the breaker's standing count (\u00a74.2.1's ordering, named once\n        # here rather than re-derived at each check).\n        if until is not None and clock() >= until:\n            ledger.close_batch(batch_id, \"UNTIL\")\n            return \"UNTIL\"\n\n        remaining = budget_usd - ledger.batch_spend(batch_id)",
+          "replace": "    if until is not None and clock() >= until:\n        ledger.close_batch(batch_id, \"UNTIL\")\n        return \"UNTIL\"\n\n    consecutive_aborts = 0\n\n    for candidate in candidates:\n        # Before each task, in this order: the deadline, then the budget,\n        # then the breaker's standing count (\u00a74.2.1's ordering, named once\n        # here rather than re-derived at each check).\n        remaining = budget_usd - ledger.batch_spend(batch_id)"
+        }
+      }
+    ]
+  }
+]

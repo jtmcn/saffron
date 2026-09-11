@@ -1,0 +1,37 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.48426779999999997,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.6766352999999998,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.6325854,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "tests/test_package.py",
+        "line": 1701,
+        "claim": "test_reverifying_under_a_changed_policy_records_the_policy_it_used only exercises the 'differs' branch starting from a NULL recorded policy_sha (asserted at line 1701). It never exercises the mainline production case \u2014 a task whose policy_sha is already a real, non-NULL hash from session start (SA's own new create_task path) that then differs from fetch_head's. An implementation that writes only when the prior value `is None` (i.e. 'write once, never again') passes both this test and test_reverifying_under_an_unchanged_policy_issues_no_policy_write, since the latter also starts from a non-NULL value but one that happens to match. So the suite cannot tell 'rewrites whenever it differs' from 'writes only the first time', which is exactly the acceptance criterion this test claims to cover.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/phases/package.py",
+          "find": "if ledger.task_policy_sha(outcome.task_id) != policy_sha:",
+          "replace": "if ledger.task_policy_sha(outcome.task_id) is None:"
+        }
+      }
+    ]
+  }
+]

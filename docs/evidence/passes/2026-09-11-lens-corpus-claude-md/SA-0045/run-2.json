@@ -1,0 +1,47 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.32116140000000004,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.5452970999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "note",
+        "file": "saffron/ledger.py",
+        "line": 3,
+        "claim": "The docstring says 'Eight of the ten tables', but DESIGN.md \u00a74.1's schema block (the doc this line cites) enumerates only nine tables total \u2014 repos, batches, runs, tasks, attempts, gate_results, failures, findings, decisions \u2014 not ten. The diff was explicitly asked to fix this docstring's count and updated 'seven' to 'eight' but carried forward the same wrong denominator, so the promised table inventory still disagrees with its own cited authority. This is cosmetic and changes no behavior, which is why it's a note rather than a concern.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.2530995,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/ledger.py",
+        "line": 364,
+        "claim": "No test ever calls `create_run` with a non-`None` `batch_id` and checks that the value round-trips into the `runs` row \u2014 every call site in the diff (and in the existing suite) either omits the argument or passes `None`. The write path for the one thing this parameter exists to do \u2014 attach a run to a batch \u2014 is unexercised. Changing the INSERT to always bind `NULL` for `batch_id` regardless of the argument (silently dropping it) would keep every test in this diff green, since only the NULL-default path is asserted.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/ledger.py",
+          "find": "        cursor = self._db.execute(\n            \"\"\"INSERT INTO runs (repo_id, base_sha, batch_id, status)\n               VALUES (?, ?, ?, 'RUNNING')\"\"\",\n            (repo_id, base_sha, batch_id),\n        )",
+          "replace": "        cursor = self._db.execute(\n            \"\"\"INSERT INTO runs (repo_id, base_sha, batch_id, status)\n               VALUES (?, ?, NULL, 'RUNNING')\"\"\",\n            (repo_id, base_sha),\n        )"
+        }
+      }
+    ]
+  }
+]

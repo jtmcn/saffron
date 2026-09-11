@@ -1,0 +1,43 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.7980594000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "note",
+        "file": "saffron/phases/package.py",
+        "line": 771,
+        "claim": "record_policy commits the new policy_sha before reverify() runs; if the very next call raises PackageError because a gate errored (the comment two lines below: 'infrastructure, and never this task's MERGE_FAILED'), the ledger has already persisted a declaration for an attempt whose gate results are discarded as uncharged. This is self-correcting on the next PACKAGE retry (the same comparison re-fires if fetch_head has changed again, and is a no-op if it hasn't), so it does not produce a wrong final value, but it does mean the write is not actually ordered on the outcome it claims to describe.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.5542878,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/phases/package.py",
+        "line": 772,
+        "claim": "`ledger.record_policy` is called and committed *before* `reverify()` runs (line 776), not after. If `reverify` then raises `PackageError` because a gate errored (the existing `test_a_gate_that_errored_while_re_verifying_aborts_the_package` scenario), the task's `state` is deliberately left untouched \u2014 CLAUDE.md is explicit that an `error` 'aborts the attempt, and is charged to nobody' \u2014 yet with this change the task's `policy_sha` row has already been overwritten to the new declaration for an attempt that never completed. `record_policy`'s own docstring says it is 'issued only when re-verification ran under a declaration different from the one this task is on record for', which reads as 'after it ran', not 'about to run'; the code satisfies the differs-check but not the ordering its own docstring implies. The write is self-correcting on a later successful retry, but until then the ledger asserts a declaration for a verification that in fact errored and left no other trace.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.4836999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  }
+]

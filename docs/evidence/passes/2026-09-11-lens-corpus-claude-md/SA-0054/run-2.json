@@ -1,0 +1,47 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 1.0118958,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.9791273999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 768,
+        "claim": "`_resolve_queue` runs unconditionally and unguarded before `readiness_check` is ever invoked (it isn't even defined yet, let alone called, until line 774/786). `_resolve_queue` itself performs the same mirror fetch and default-branch pin (`git_mirror.ensure_mirror`, `package_phase.fetch_default_branch` in cli.py lines 662-666) that `check_readiness`'s 'mirror' and 'default_branch' steps exist to name and report. If the mirror can't be fetched or the origin is unreachable, `_resolve_queue` raises a bare `GitError`/`PackageError` that propagates straight to `main`'s generic exception handler, never reaching `readiness_check`, so the batch dies with an unstructured traceback instead of the 'batch: readiness failed at mirror: ...' message acceptance criterion 9 and `preflight.check_readiness`'s own docstring ('stopping at the first failure and naming it', 'the once-per-run entry point a batch loop calls') promise. The exit code (2) is still correct, but the step-naming contract this spec was written to satisfy is silently bypassed for exactly the infrastructure failures it was built to describe (mirror/origin/default-branch), and `test_a_readiness_failure_names_the_step_that_failed` never catches this because it mocks `_resolve_queue` to always succeed.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.48921780000000004,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/cli.py",
+        "line": 596,
+        "claim": "`test_the_adapter_stacks_a_child_on_its_parents_branch` and `test_the_adapter_stacks_on_the_first_dependency_only` are the two witnesses the spec names to pin stacking, but both stub `run_one_cell` to raise `SystemExit` immediately, so `_batch_runner`'s packaging branch (lines 586-600) never executes in either test. Neither test \u2014 nor any other in this diff \u2014 asserts that `target_branch` reaches `package_phase.package(..., parent_branch=target_branch, ...)` inside `_batch_runner`, unlike `_run_cell`'s own packaging call, which an existing test (`captured[\"parent_branch\"] == \"saffron/SY-9000\"`, test_cli.py:720) does pin. Replacing `parent_branch=target_branch` with `parent_branch=None` in `_batch_runner` reproduces exactly the SA-0026 defect the docstring calls out (a worktree stacked on a parent sha whose PR targets `main`) and both stacking tests, plus the whole suite, stay green.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cli.py",
+          "find": "                image=repo_image.cell_tag(repo),\n                ledger=ledger,\n                out_dir=out_dir,\n                token=os.environ.get(\"CLAUDE_CODE_OAUTH_TOKEN\"),\n                parent_branch=target_branch,",
+          "replace": "                image=repo_image.cell_tag(repo),\n                ledger=ledger,\n                out_dir=out_dir,\n                token=os.environ.get(\"CLAUDE_CODE_OAUTH_TOKEN\"),\n                parent_branch=None,"
+        }
+      }
+    ]
+  }
+]

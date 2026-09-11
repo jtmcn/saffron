@@ -1,0 +1,53 @@
+[
+  {
+    "probe": {
+      "file": "saffron/ledger.py",
+      "find": "        cursor = self._db.execute(\n            \"\"\"INSERT INTO runs (repo_id, base_sha, batch_id, status)\n               VALUES (?, ?, ?, 'RUNNING')\"\"\",\n            (repo_id, base_sha, batch_id),\n        )",
+      "replace": "        cursor = self._db.execute(\n            \"\"\"INSERT INTO runs (repo_id, base_sha, batch_id, status)\n               VALUES (?, ?, ?, 'RUNNING')\"\"\",\n            (repo_id, base_sha, None),\n        )"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1250,
+    "summary": "1248 passed, 2 skipped, 20 deselected in 14.30s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1250,
+    "baseline_summary": "1248 passed, 2 skipped, 20 deselected in 14.51s"
+  },
+  {
+    "probe": {
+      "file": "saffron/ledger.py",
+      "find": "        cursor = self._db.execute(\n            \"\"\"INSERT INTO runs (repo_id, base_sha, batch_id, status)\n               VALUES (?, ?, ?, 'RUNNING')\"\"\",\n            (repo_id, base_sha, batch_id),\n        )",
+      "replace": "        cursor = self._db.execute(\n            \"\"\"INSERT INTO runs (repo_id, base_sha, batch_id, status)\n               VALUES (?, ?, NULL, 'RUNNING')\"\"\",\n            (repo_id, base_sha),\n        )"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1250,
+    "summary": "1248 passed, 2 skipped, 20 deselected in 14.71s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1250,
+    "baseline_summary": "1248 passed, 2 skipped, 20 deselected in 14.51s"
+  },
+  {
+    "probe": {
+      "file": "saffron/ledger.py",
+      "find": "            (repo_id, base_sha, batch_id),",
+      "replace": "            (repo_id, base_sha, None),"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1250,
+    "summary": "1248 passed, 2 skipped, 20 deselected in 15.57s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1250,
+    "baseline_summary": "1248 passed, 2 skipped, 20 deselected in 14.51s"
+  }
+]

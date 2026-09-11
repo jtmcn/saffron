@@ -1,0 +1,70 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.4783602,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/cell/session.py",
+        "line": 1634,
+        "claim": "The notes turn overwrites `last_cost` with its own (necessarily small, tool-less extraction) cost via `last_cost = noted.cost_usd_est`. That variable is later handed to `run_rebut` as `last_cost_usd=last_cost` (line 1778), which `run_rebuttal` uses as the crash-fallback `cost_usd_est` for the REBUT implementer's main write-capable attempt (`saffron/phases/rebut.py:178`, consumed at `implement.py:326`) if that turn ends with no result event. This is exactly the mis-scaling the salvage-turn code at lines 1439-1444 explicitly guards against ('last_cost deliberately keeps the *implement* turn's figure... carrying it forward would... bill a crashed 120-turn repair turn the price of a git commit') \u2014 except here nothing preserves the pre-notes-turn figure, so a REBUT session that crashes right after a notes turn is charged the price of a one-line extraction reply instead of a real write turn. Existing REBUT tests all use specs with neither `forbidden` nor `protected` set (see the comment at test_session.py:2404-2406), so the notes turn never runs in front of REBUT in the test suite and this interaction is untested.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.17120159999999998,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "saffron/phases/package.py",
+        "line": 834,
+        "claim": "PACKAGE's call to `render_pr_body` (the only call site that produces the PR body actually pushed to GitHub) never passes `notes=outcome.notes`; `render_pr_body`'s new `notes` parameter defaults to `\"\"`, so `CellOutcome.notes`/`notes_sha256` are populated and hashed on every eligible task but silently dropped before the body is written at `body_path.write_text(body)` (line 836). The feature's own docstring at `saffron/report/pr_body.py:91-94` and acceptance criterion 1 promise the notes 'reach the pull request body', but no test in `tests/test_package.py` exercises this call with notes present, so the gap is invisible to the suite while every real task's notes are discarded in production.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.46573169999999997,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/report/pr_body.py",
+        "line": 391,
+        "claim": "No test verifies that `_notes()` actually defangs `@mentions` or `Fixes #NN` inside the notes section itself. The one test that puts such triggers in notes text (`test_notes_cannot_move_a_status_or_a_gate_result`, tests/test_report.py) only asserts the *head* of the body (everything before the notes heading) is unaffected \u2014 it never checks the notes section's own content. Deleting the `neutralize()` call (`safe = text` instead of `safe = neutralize(text)`) leaves every test in this diff green, yet ships a real `Fixes #12`/`@maintainer` straight into a PR body, exactly the defect AC2 exists to prevent. The repo's own established pattern for this (`test_a_finding_cannot_close_an_issue_or_notify_an_account`, tests/test_report.py:432) asserts `\"Fixes #1\" not in body` and `\"@someone\" not in body` directly \u2014 the new test never applies that same check to the poisoned text it already constructs.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/report/pr_body.py",
+          "find": "safe = neutralize(text)",
+          "replace": "safe = text"
+        }
+      },
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cell/session.py",
+        "line": 1616,
+        "claim": "The eligibility rule for asking the notes turn is `bool(spec.forbidden) or bool(policy.protected)`, but no test isolates the `protected`-only case (forbidden empty, protected non-empty), and the one test that sets both (`test_the_notes_artifact_is_hashed_when_it_is_produced`, tests/test_session.py) sets forbidden AND protected together, so it can't distinguish OR from AND. Changing the operator to `and` would make every existing notes test still pass (the forbidden-only tests never assert the turn count in the branch that would newly fail to trigger), silently disabling the channel for any repo that declares `protected` paths but whose spec has no `forbidden` list \u2014 the opposite of what the comment above the line claims.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cell/session.py",
+          "find": "notes_worth_asking = bool(spec.forbidden) or bool(policy.protected)",
+          "replace": "notes_worth_asking = bool(spec.forbidden) and bool(policy.protected)"
+        }
+      }
+    ]
+  }
+]

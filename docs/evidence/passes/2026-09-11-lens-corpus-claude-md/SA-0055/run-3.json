@@ -1,0 +1,37 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.3530685,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.6501636,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 1.0756404,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 964,
+        "claim": "No test exercises the value `_batch` passes as `url` to `_batch_runner` after this diff's change from a fresh `real_remote(repo)` call to `pinned.url`. Every test that reaches this line either mocks `run_batch` (so the built `runner` closure, which is the only thing that reads `url` via `_resolve_stacked_on`, is never invoked) or mocks `_batch_runner` itself. Swapping `url=pinned.url` for the type-correct but wrong `url=str(pinned.mirror)` would still pass scope/lint/types (str is still a str) and every test in this diff, including the mirror-derivation-count witness, because that witness only counts calls to `ensure_mirror`/`real_remote`/`fetch_default_branch`, not the value threaded into `_batch_runner`.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cli.py",
+          "find": "            resolved, repo=repo, ledger=ledger, out_dir=out_dir, url=pinned.url\n        )",
+          "replace": "            resolved, repo=repo, ledger=ledger, out_dir=out_dir, url=str(pinned.mirror)\n        )"
+        }
+      }
+    ]
+  }
+]

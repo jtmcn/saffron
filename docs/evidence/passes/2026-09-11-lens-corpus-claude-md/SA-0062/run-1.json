@@ -1,0 +1,52 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 1.0453763999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "blocker",
+        "file": "saffron/cell/worktree.py",
+        "line": 360,
+        "claim": "`_read_file` raises `CellRuntimeError` on any non-zero `cat` exit, including a plain 'file does not exist'. This turns a routine absence into an `error`, and the baseline `_suite([])` call in `saffron/cell/session.py` (line ~1097) invokes `witness_gate` against `spec.tree_base` \u2014 before IMPLEMENT has written anything. Any criterion whose `mutant.file` names a file the task is about to *create* (the ordinary shape of a fresh-feature criterion) will fail `cat` at baseline, `witness_gate` reports `status='error'` (worktree.py's own docstring at line ~404 and witness.py lines 164-187 confirm this path), `aborted_gates` in session.py (line 296-299) treats any `error` as an abort, and `baseline_aborted` sends the task straight to `PREFLIGHT_FAILED` (session.py lines 1119-1129) without ever running the agent. The host mutator this is meant to mirror (`saffron/mutation.py` lines 136-141) explicitly treats a missing/unreadable file as an ordinary `MutationResult(ok=False, ...)` \u2014 the same non-fatal 'unproven' outcome as a `find` that doesn't match \u2014 precisely to avoid this conflation. No test exercises `source_mutated` against a base tree that lacks the target file (`tests/test_worktree.py`'s fixtures always write the file before mutating it), so this is invisible to the suite and will only surface once a spec (the very next one per the task's own 'Out of scope' note) declares a mutant against new code.",
+        "anchored": true,
+        "probe": null
+      },
+      {
+        "lens": "correctness",
+        "severity": "note",
+        "file": "saffron/cell/worktree.py",
+        "line": 376,
+        "claim": "`_read_file` decodes the container's stdout as UTF-8 with `errors='replace'` (via `runtime._decode`), and `_write_file` re-encodes with plain `.encode()`. Unlike `saffron.mutation.apply_mutant`, which is deliberately byte-exact (`read_bytes`/`write_bytes`, matching on encoded bytes) so it never has to assume an encoding, this round-trip would silently replace any invalid UTF-8 byte elsewhere in the file with U+FFFD before writing it back, corrupting bytes outside the mutated span for a file that is not valid UTF-8. Low practical risk for ordinary Python source, so a note rather than a concern.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.5196819,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "saffron/cell/worktree.py",
+        "line": 418,
+        "claim": "The `Mutated` contract this module implements (documented at `saffron/gates/core/witness.py` lines 71-85) explicitly names the failure mode `source_mutated` must not produce: 'a raise from `__enter__` must mean nothing was changed... a container exec that applies the edit and then loses the connection is exactly the shape that is [reachable]' for a real cell mutator, unlike the unreachable case in `host_mutator`. Here `_write_file` (line 418) performs the container write and, if it raises for any reason after the container-side write actually succeeded but the host failed to observe a clean confirmation (a routine exec failure the same docstring calls out), the exception propagates out of `source_mutated` before the `try/finally` that owns the undo (`git checkout HEAD`, lines 419-426) is even entered \u2014 so no restore is attempted at all. `witness_gate` (witness.py lines 164-176) then reports this as 'could not apply' (the mild, unproven case) rather than 'could not restore', even though the tree may be left mutated, and no compensating checkout ever runs to clean it up. A later gate (or the packaged diff) can then see the mutant's text rather than the agent's own work, which is precisely the 'silent dirty tree this gate exists to refuse' that the docstring warns a real cell mutator is the one implementation actually exposed to.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 1.0836351,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  }
+]

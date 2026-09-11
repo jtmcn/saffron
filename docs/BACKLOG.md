@@ -729,7 +729,9 @@ diff against`). `mirror.file_at` reads `CLAUDE.md` at `base_sha` and
 extraction turns resume — and, now, into the three review lenses and the verdict lenses too,
 once the lens corpus's spread was measured
 (`docs/evidence/2026-09-11-lens-corpus-spread.md`,
-`docs/superpowers/plans/2026-09-10-claude-md-reaches-every-phase.md`).
+`docs/superpowers/plans/2026-09-10-claude-md-reaches-every-phase.md`). The corpus was re-run
+under the change on 2026-09-11: the per-run ranges overlap, so the decision rule reads no
+measurable difference at n=3 (`docs/evidence/2026-09-11-lens-corpus-claude-md.md`).
 
 `setting_sources: []` was set because a target repo's `.claude/` was configuring
 the agent working on it — measured, a planted subagent and skill both loaded out
