@@ -2942,6 +2942,11 @@ number the system reports as a ceiling and enforces as a suggestion.
 
 ## 45. An `EXHAUSTED` run that made commits pushes no branch, so its work survives only as a patch
 
+**Status: spec queued, 2026-09-10 — `SA-0069`, not yet run.** It touches
+`package.py`, which the gate-suite stack (PR #200 onward) is rewriting, so run it
+after that stack lands. The batch scan's overlap refusal holds it back until then
+anyway.
+
 `SA-0028` closed the door where an implement turn dies on its ceiling with
 *nothing* committed. This is the door beside it: commits exist, gates are red,
 the budget or the attempts are gone, and PACKAGE never runs — so nothing is
@@ -2970,6 +2975,10 @@ there is no branch to hand.
 
 **Decided 2026-09-04: it is evidence, not an operator's record.** So it takes
 a size cap and must come within the `secrets` gate's reach. **Tier 1.**
+
+**Status: the size half has a spec queued, 2026-09-10 — `SA-0068`, not yet run.**
+The `secrets` half stays open here, because the gate it would extend does not
+exist yet.
 
 The deciding argument is §9's v1 criterion. The defining property of the
 milestone is that *nobody was watching* — so a log reduced to bounded
@@ -3701,6 +3710,8 @@ findings have no severity is not a report that can be acted on.
 
 ## 61. `describe` raises on a payload `read_log` hands back unchecked
 
+**Status: spec queued with item 63, 2026-09-10 — `SA-0070`, not yet run.**
+
 **Tier 3.** Found reviewing `SA-0053` (PR #119), and fixed *around* rather than
 fixed: `saffron/events.py` was `forbidden` to that spec.
 
@@ -3756,6 +3767,8 @@ the thing `SA-0053` was written to avoid.
 ---
 
 ## 63. `describe` renders three agent payload fields unclipped, straight to a terminal
+
+**Status: spec queued with item 61, 2026-09-10 — `SA-0070`, not yet run.**
 
 **Tier 3.** Found reviewing `SA-0053` (PR #119). Not a regression — the
 attended terminal has had this exposure since `SA-0029` — but that PR added a
@@ -4072,6 +4085,18 @@ answer, and it is currently being guessed at.
 ---
 
 ## 70. A task lost to a provider error leaves the night reporting `DRAINED`, exit 0
+
+**Status: decided 2026-09-10, spec queued — `SA-0067`, not yet run.** A fifth
+stop reason, `INCOMPLETE`: it outranks `DRAINED`, `BUDGET` and `UNTIL`, and
+`INFRASTRUCTURE` outranks it. It exits 2 and leaves the breaker alone. **By hand
+first:** the vocabulary, `CONTEXT.md`, §4.2.1, `batch.StopReason` and the `CHECK`
+on `batches.status` have to land together in one commit.
+`tests/ontology/test_vocabulary_agrees_with_code.py` holds the three closed sets
+equal, and two of those files are `protected`. The `CHECK` also needs a table
+rebuild, because `CREATE TABLE IF NOT EXISTS` leaves an existing ledger's old
+`CHECK` in force. Without the rebuild, the first real `INCOMPLETE` night raises
+`IntegrityError` on the operator's ledger while every fresh-database test
+passes.
 
 **Tier 1.** Measured 2026-09-06, driving `SA-0057` — the first unattended run
 in this repo to lose a task to something other than its own code.
@@ -5493,6 +5518,8 @@ relevant test is the same defect wearing a different hat.
 ---
 
 ## 95. A night that dies resolving its queue leaves no row to say it ever started
+
+**Status: spec queued, 2026-09-10 — `SA-0066`, not yet run.**
 
 **Tier 1 — honesty.** `SA-0065` (merged 2026-09-10) made `discover_specs` refuse
 a spec directory that is absent or is not a directory, so the silent empty queue
