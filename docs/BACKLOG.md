@@ -2311,7 +2311,9 @@ stated intent all along, and is true for the first time.
 ## 34. A turn ceiling that fires with zero commits was total loss, and item 18's prompt was not enough
 
 **Status:** **done** — `SA-0028` (PR #87), 2026-09-01. The item's own
-closure paragraph is below.
+closure paragraph is below. Its one residual — the repair loop's own checkpoint
+letting a hook's refusal out as an infrastructure abort — closed by hand
+2026-09-10, on the salvage path's rule and with a test watched failing first.
 
 **Closed by `SA-0028`, 2026-09-01.** Item 18 closed `SA-0005`'s turn-ceiling gap
 by making `max_turns` a real, per-spec, printed ceiling and asking

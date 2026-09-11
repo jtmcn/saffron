@@ -1732,12 +1732,21 @@ def _drive_cell(
                 # boundary (§0). Real edits the turn never got to commit do not
                 # survive teardown otherwise — checkpointed here so the next
                 # attempt builds on them instead of redoing the same ground.
-                if worktree.dirty_paths(container):
-                    worktree.commit_dirty(
-                        container, f"checkpoint: host-committed — {failed}"
-                    )
+                try:
+                    if worktree.dirty_paths(container):
+                        worktree.commit_dirty(
+                            container, f"checkpoint: host-committed — {failed}"
+                        )
+                        _phase_start(
+                            "REPAIR",
+                            "REPAIR",
+                            "uncommitted work checkpointed by the host",
+                        )
+                except runtime.CellRuntimeError as broke:
+                    # A hook refusing the commit is the repo's code, not the
+                    # runtime (error ≠ fail) — the salvage checkpoint's rule.
                     _phase_start(
-                        "REPAIR", "REPAIR", "uncommitted work checkpointed by the host"
+                        "REPAIR", "REPAIR", f"the host checkpoint failed — {broke}"
                     )
             session_id = require_session(repaired.session_id or session_id)
             spent += repaired.cost_usd_est
