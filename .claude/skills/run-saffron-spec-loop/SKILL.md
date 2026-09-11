@@ -9,7 +9,9 @@ Drives every active spec through `saffron cell` → independent code review →
 fixes, then links the resulting pull requests into one GitHub stack for a
 final human review. **Nothing is merged.**
 
-All paths are relative to the repo root (`/Users/jm/Code/saffron`).
+All paths are relative to the repo root, wherever the clone lives. The driver
+resolves the root from its own location and refuses to guess when the skill
+directory has moved, so nothing here needs an absolute path.
 
 The driver is `.claude/skills/run-saffron-spec-loop/driver.py`. It does not run
 cells — `saffron cell` needs a credential scoped to its own invocation, so the
@@ -180,8 +182,9 @@ same failure: nothing about the task failed.
 
 ```bash
 python3 -c "
-import json
-for lens in json.load(open('/Users/jm/.saffron/batches/v0/SA-0028/findings.json')):
+import json, pathlib
+findings = pathlib.Path.home() / '.saffron/batches/v0/SA-0028/findings.json'
+for lens in json.loads(findings.read_text()):
     for f in lens['findings']:
         print(f\"--- {f['lens']} / {f['severity']} / {f['file']}:{f['line']}\")
         print(f['claim'])
