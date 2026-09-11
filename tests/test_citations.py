@@ -308,6 +308,36 @@ def test_saffron_keeps_no_adrs():
     )
 
 
+# A path rooted at the repo, which is what a rename or a spec's retirement breaks.
+_ROOTED_PATH = re.compile(
+    r"(?<![\w/~.-])((?:\.saffron|saffron|tests|docs|images|ontology|harness)/[\w./*<>-]*)"
+)
+# Container image tags share the `saffron/` prefix and are not paths.
+IMAGE_TAGS = {"saffron/cell-base", "saffron/proxy"}
+
+
+def test_every_path_claude_md_cites_exists():
+    """`CLAUDE.md` is every cell's instruction surface, and its example command
+    named `SA-0002`'s spec at the top level for weeks after it was retired to
+    `done/`. Specs retire by design, so a concrete spec path is stale on a
+    schedule; a placeholder (`SA-NNNN`, `<slug>`) is not, and only its
+    directory has to exist."""
+    cited = {
+        path.rstrip("./")
+        for path in _ROOTED_PATH.findall((ROOT / "CLAUDE.md").read_text())
+    }
+    assert cited >= IMAGE_TAGS, (
+        f"{sorted(IMAGE_TAGS - cited)} no longer in CLAUDE.md — drop from IMAGE_TAGS"
+    )
+    placeholders = {p for p in cited if "NNNN" in p or "<" in p}
+    missing = [
+        p
+        for p in sorted(cited - IMAGE_TAGS - placeholders)
+        if not (any(ROOT.glob(p)) if "*" in p else (ROOT / p).exists())
+    ] + [p for p in sorted(placeholders) if not (ROOT / p).parent.is_dir()]
+    assert missing == [], f"CLAUDE.md cites paths that do not exist: {missing}"
+
+
 def test_the_appendix_index_lists_every_appendix():
     """`DESIGN.md`'s index is a hand-written table over a set the file defines.
 
