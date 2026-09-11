@@ -23,7 +23,7 @@ from saffron.gates.contract import Failure, GateResult
 from saffron.gates.core.committed import committed_gate
 from saffron.intake import parse_spec
 from saffron.ledger import Ledger
-from saffron.phases import implement
+from saffron.phases import implement, review
 from saffron.phases import package as package_mod
 from saffron.repos import mirror
 from saffron.repos import policy as policy_mod
@@ -1237,11 +1237,12 @@ def test_the_review_lenses_do_not_yet_carry_claude_md(monkeypatch, tmp_path):
         turns=[_turn(_block(_PLAN)), _turn()],
         base_claude_md="base-commit rule\n",
     )
-    assert len(cell.system_prompts) > 2  # REVIEW ran
-    # Indices 0 and 1 are PLAN and IMPLEMENT, both resuming the same session
-    # on the same `options["system_prompt"]` — the first prompt that can be a
-    # lens's is index 2.
-    assert all("base-commit rule" not in p for p in cell.system_prompts[2:])
+    # By content, not position: PLAN and IMPLEMENT resume one session on the
+    # same prompt, so every prompt unlike theirs is a lens's.
+    implement_prompt = cell.system_prompts[0]
+    lens_prompts = [p for p in cell.system_prompts if p != implement_prompt]
+    assert len(lens_prompts) == len(review.LENSES)  # REVIEW ran, one session per lens
+    assert all("base-commit rule" not in p for p in lens_prompts)
 
 
 def test_no_commit_is_not_implemented(monkeypatch, tmp_path):
