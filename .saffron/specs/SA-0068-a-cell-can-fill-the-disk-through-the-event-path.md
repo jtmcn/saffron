@@ -31,9 +31,13 @@ max_turns: 50
 risk: standard
 acceptance:
   - claim: >-
-      A parsed cell event larger than the bound is persisted bounded. One `text`
-      event carrying five megabytes writes a line to `events.jsonl` no longer
-      than the bound plus a fixed envelope, not five megabytes. The raw path is
+      A parsed cell event larger than the bound is persisted bounded. What an
+      `Agent` line stores of the cell's event is at most the bound, counted in
+      characters of the event's JSON serialization, the unit the raw `line` is
+      already sliced in. The written line is then at most a small constant
+      multiple of that, because JSON escaping can multiply a character when it
+      is written, plus the envelope. It is not five megabytes. The witness feeds
+      five megabytes of ordinary text and five megabytes of `"`. The raw path is
       already bounded at capture, and wrapping the same payload in nine bytes of
       JSON walks straight past that bound. This closes that route.
     witness: tests/test_events.py::test_an_oversized_agent_event_is_bounded_on_disk
@@ -47,14 +51,18 @@ acceptance:
   - claim: >-
       The raw line and the parsed event are bounded by one value, not two
       constants that agree today. Two numbers for one decision is how the paths
-      drift, and the item names "one value, both paths" as the open half.
+      drift, and the item names "one value, both paths" as the open half. The
+      witness patches that one value in `saffron.events` to a small number and
+      shows that a raw line through `run_agent` and an oversized event through
+      `EventLog.append` are both cut at the patched value.
     witness: tests/test_implement.py::test_the_raw_line_and_the_event_are_bounded_by_one_value
   - claim: >-
       Only what is persisted is bounded. `run_agent` still reads the whole event
-      it parsed: the text it accumulates, the result it completes on, and the
-      rate limit it reports are the cell's full values, not the stored ones.
-      Bounding the host's own reading of a turn would be a behaviour change this
-      item did not ask for.
+      it parsed, while what reaches `events.jsonl` is bounded. The witness drives
+      `run_agent` with an `emit` that appends to a real `EventLog`, then asserts
+      both halves: the text it accumulates, the result it completes on and the
+      rate limit it reports are the cell's full values, and the line `read_log`
+      returns is bounded.
     witness: tests/test_implement.py::test_a_bounded_event_still_reaches_the_attempt_result_whole
   - claim: >-
       An event under the bound is still written verbatim.
@@ -66,7 +74,7 @@ acceptance:
     preserves: true
   - claim: >-
       `append` still never raises on a dict a cell authored, whatever its size
-      or depth.
+      or depth, and still does not write one it cannot copy.
     witness: tests/test_events.py::test_append_never_raises_on_a_dict_a_cell_authored
     preserves: true
 ---
@@ -109,7 +117,13 @@ is not built yet, so there is nothing to extend. That half stays on the item.
 
 **What the terminal shows.** `describe` already clips what it renders, and the
 clipping of its unclipped branches is `SA-0070`'s. This spec bounds what is
-stored, not what is printed.
+stored, not what is printed. Bounding in `EventLog.append` leaves the attended
+terminal unchanged, because every emit fan-out calls `describe` before it
+appends.
+
+**Other cell-authored strings.** `Terminal.detail` on a rejected plan and the
+detail of a REVIEW re-prompt also carry text that came out of a cell, and this
+spec does not bound them. The route it closes is the `Agent` event.
 
 **Rotation, compression, or a per-file cap.** `EventLog`'s own `ponytail:`
 names one file per task with no rotation. Bounding each event bounds each line,
@@ -117,31 +131,52 @@ which is the hole a single cell can open. A cap on the whole file is a different
 decision.
 
 **A new event kind.** Adding one is a vocabulary change (`CONTEXT.md` is
-forbidden here). If the bounded form needs somewhere to say it was cut, a field
-on `Agent` that round-trips through `read_log` is acceptable. So is a shape that
-uses the fields `Agent` already has.
+forbidden here).
 
 ## Notes for the agent
 
-**This spec restructures existing code, so its criteria carry witnesses and no
-mutants.** The constant may move, and a mutant pinned to its current spelling
-would stop matching the moment it did.
+**The bounding code is new, so its criteria carry witnesses and no mutants.**
+
+**Every new witness must fail with `events.py` and `implement.py` reverted, not
+merely be missing at base.** The `revert` gate re-runs each new witness against
+the reverted source and blocks any that still pass. The fourth criterion's
+first half is true today, which is why its witness must also assert the bounded
+line on disk. Resist extra tests such as "an event exactly at the bound is
+verbatim": that passes reverted. Import new names inside tests, not at module
+scope. A module-scope import of a name you add makes the reverted run a
+collection error, which `revert` reads as `skip`.
+
+**Keep every `Agent` field at its annotated type.** `event` stays a dict or
+`None`, never a string holding truncated JSON. A string under `event` is
+dropped by `saffron watch` and makes `describe` raise, and `SA-0070`, queued
+behind this spec, makes `read_log` drop any field of the wrong type, so a
+bounded event stored that way would vanish on read. If the bounded form needs a
+new field, give it a type and a default: `tests/test_watch.py` and
+`tests/test_session.py` build `Agent` and are outside `touches`. Say in the
+`Agent` docstring what `describe` renders for a bounded event. `saffron watch`
+shows the stored form, not what the attended terminal showed.
 
 **Where the bound belongs.** The item says bounding the event path needs
 `saffron/events.py`, and the first criterion's witness lives in
 `tests/test_events.py`. `implement.py` already imports from `events.py`, so the
-one value can live there and be imported back. The reverse would make core
-depend on a phase. The preserved test
+one value can live there, and `_quarantined` can read it from there at call
+time. The reverse would make core depend on a phase. The preserved test
 `test_a_line_that_is_not_an_event_is_bounded_at_capture` reads
 `implement.QUARANTINE_BYTES` by that name, so the name must stay reachable from
 `implement` wherever the value moves.
 
-**Measure the way the raw path measures.** The raw path slices the line, so its
-bound is in characters of the line. Bound the event on its serialized form, by
-the same unit, so "one value" means one thing.
+**Measure the event the way the first criterion says.** The unit is the length
+of `json.dumps(event.event)`, compared with the same value the raw `line` is
+sliced to. It is not the length of the whole written line: a raw line already
+at the bound would then be cut a second time by `append`.
 
-**`asdict` is the statement reading hostile input.** `EventLog.append`'s own
-comment measures it: `asdict` raises `RecursionError` on nesting that
-`json.loads` accepted. Whatever measures an event's size must sit inside the
-same `try`, or a deep enough dict escapes the never-raises contract the last
-preserved criterion holds.
+**`asdict` is the statement reading hostile input, and it stays on the path.**
+`EventLog.append`'s own comment measures it: `asdict` raises `RecursionError` on
+nesting that `json.loads` accepted. Whatever measures an event's size must sit
+inside the same `try`. The last preserved witness also asserts that a depth-1000
+event is *not* written, which holds only because `asdict` raises on it.
+Dropping `asdict` to avoid copying five megabytes before bounding is a natural
+optimisation, and it fails that witness.
+
+**The `size` gate counts tests.** A `bug` gets 300 changed lines, tests
+included. Keep test docstrings to the sentence that says why.
