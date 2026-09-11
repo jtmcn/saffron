@@ -197,9 +197,11 @@ class Attempt:
     # CONTEXT.md: "'Attempt 3' without a phase is ambiguous — name both."
     phase: Phase
     attempt: int
-    commits: int
+    # `None`, never `0`, where nothing was measured: a GATE or REBUT line knows
+    # neither the commits nor the spend (item 47).
+    commits: int | None
     # `_est` travels with any stored figure (DESIGN.md §4.1).
-    spent_usd_est: float
+    spent_usd_est: float | None
     new_failures: int | None = None
     decision: Literal["green", "no-progress", "exhausted", "repair"] | None = None
     aborted: tuple[str, ...] = ()
@@ -546,6 +548,8 @@ def describe(event: Event) -> str:
             )
         if event.new_failures is not None:
             return f"gates: {event.new_failures} new failures after the rebuttal"
+        if event.commits is None or event.spent_usd_est is None:
+            return f"{event.phase}: attempt {event.attempt}"
         return f"IMPLEMENT: {event.commits} commit(s), ${event.spent_usd_est:.2f} spent"
 
     if isinstance(event, GateResult):

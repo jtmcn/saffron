@@ -567,8 +567,8 @@ def attempt_event(
     """One `Attempt` line for a suite comparison, in GATE and REBUT alike.
 
     `commits`/`spent_usd_est` are not the suite's to know — the implement turn
-    holds them — so both are `0`: no render branch these lines reach reads them,
-    only the "IMPLEMENT: N commit(s)" line `_drive_cell` emits separately.
+    holds them — so both are `None`, the log's word for "not computed", never a
+    `0` a reader would take for a measurement (item 47).
     """
     if comparison.aborted:
         return Attempt(
@@ -576,8 +576,8 @@ def attempt_event(
             spec_id=spec_id,
             phase=phase,
             attempt=attempt,
-            commits=0,
-            spent_usd_est=0.0,
+            commits=None,
+            spent_usd_est=None,
             aborted=comparison.aborted,
         )
     if comparison.drift:
@@ -586,8 +586,8 @@ def attempt_event(
             spec_id=spec_id,
             phase=phase,
             attempt=attempt,
-            commits=0,
-            spent_usd_est=0.0,
+            commits=None,
+            spent_usd_est=None,
             drift=comparison.drift,
         )
     return Attempt(
@@ -595,8 +595,8 @@ def attempt_event(
         spec_id=spec_id,
         phase=phase,
         attempt=attempt,
-        commits=0,
-        spent_usd_est=0.0,
+        commits=None,
+        spent_usd_est=None,
         new_failures=len(comparison.new_failures),
         decision=decision,
     )
@@ -1737,9 +1737,14 @@ def _drive_cell(
                     not re-enter the repair loop. An errored gate is still
                     infrastructure and still not charged to the task (§5.4)."""
                     comparison = _judge()
+                    # The suite after the loop's last, so the gate count
+                    # continues rather than restarting at 1 (item 47).
                     emit(
                         attempt_event(
-                            comparison, spec_id=spec.spec_id, phase="REBUT", attempt=1
+                            comparison,
+                            spec_id=spec.spec_id,
+                            phase="REBUT",
+                            attempt=attempts + 1,
                         )
                     )
                     if comparison.aborted or comparison.drift:

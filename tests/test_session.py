@@ -16,7 +16,7 @@ import pytest
 from saffron.agents import artifacts
 from saffron.cell import runtime, session
 from saffron.cell.worktree import DIFF_FLAGS
-from saffron.events import Agent, describe
+from saffron.events import Agent, Attempt, describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
 from saffron.gates.suite import CellTree, SuiteComparison, SuiteRun
@@ -569,6 +569,18 @@ def test_suites_that_drifted_end_the_loop_without_charging_the_task():
     )
     assert state == "GATE_ERROR"
     assert repairs == []
+
+
+def test_a_gate_attempt_claims_no_commits_or_spend_it_never_measured():
+    """Item 47: every GATE and REBUT line said `commits=0, spent_usd_est=0.0`,
+    which a reader cannot tell from a measured zero. `None` is the log's own
+    word for "not computed"."""
+    for phase in ("GATE", "REBUT"):
+        event = session.attempt_event(
+            _judged(), spec_id="SA-TEST", phase=phase, attempt=2
+        )
+        assert event.commits is None
+        assert event.spent_usd_est is None
 
 
 class _Cell:
@@ -2491,6 +2503,40 @@ def test_gates_red_after_the_rebuttal_exhausts_and_keeps_the_diff(
     assert outcome.state == "EXHAUSTED"
     assert (tmp_path / "out" / "SY-1" / "patch.diff").read_text() == _ANCHORING_DIFF
     assert any("new failures after the rebuttal" in line for line in cell.watched)
+
+
+def test_the_gate_check_after_the_rebuttal_continues_the_gate_count(
+    monkeypatch, tmp_path
+):
+    """Item 47: the rebuttal's gate check said attempt 1 whatever the loop had
+    reached. It is the suite after the loop's last, so it carries the next
+    number: here the loop went red then green, so the rebuttal's is 3."""
+    failing = Failure(file="a.py", code="E501", message="too long")
+    cell = _stub_the_runtime(
+        monkeypatch, suites=([], _results(failing), [], []), patch=_ANCHORING_DIFF
+    )
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    events: list = []
+    _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            _turn(),  # the repair turn after attempt 1
+            _turn(_block(_BLOCKER)),
+            _turn(_block({"findings": []})),
+            _turn(_block({"findings": []})),
+            _turn("Fixed it."),
+            _turn(_block(_CLAIMED_FIX)),
+        ],
+        capture=events,
+    )
+    gates = [e for e in events if isinstance(e, Attempt) and e.phase == "GATE"]
+    (rebut,) = [e for e in events if isinstance(e, Attempt) and e.phase == "REBUT"]
+    assert [e.attempt for e in gates] == [1, 2]
+    assert rebut.attempt == 3
 
 
 def test_a_bound_firing_on_the_implement_turn_still_measures_the_worktree(

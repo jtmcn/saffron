@@ -54,7 +54,7 @@ Soundness first: **79**, **69**, **93**, **94**, **80** (~~**83**~~, ~~**85**~~,
 ~~**82**~~ and ~~**81**~~, pulled up from tier 3 as why 69's gate could not be
 declared against safely, are done — 2026-09-08), then **97**. Honesty second:
 **73**, **70**, **45**, **51** (with **49**/**50**, which its fix closes),
-**47**, **46** (with **95**, which compounds it), **40**, ~~**26**~~,
+~~**47**~~, **46** (with **95**, which compounds it), **40**, ~~**26**~~,
 **7** (IMPLEMENT done; lenses open behind **93**), and the remainder of **78**.
 
 Closed since the 2026-09-04 sort, and left in place because their numbers are
@@ -3055,6 +3055,13 @@ asked for, which is correct.
 
 
 ## 47. Every gate attempt in `events.jsonl` claims zero commits and zero spend, and part 3 is built to read it
+
+**Status:** **done**, by hand, 2026-09-11 — the gate-suite stack's last layer
+(item 97). `Attempt.commits`/`spent_usd_est` are `int | None`/`float | None`,
+required, and `None` on every GATE and REBUT line; only the IMPLEMENT turn
+measures them. The rebuttal's gate check carries the loop's final attempt + 1,
+continuing the gate count — decided over the ledger row's `n` and over keeping
+`1`. The IMPLEMENT row's spend is still the running total, not an increment.
 
 `cell/session.py` emits an `Attempt` for each GATE and REBUT decision with
 `commits=0, spent_usd_est=0.0` — four call sites — and the rebuttal-time gate
