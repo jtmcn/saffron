@@ -205,6 +205,15 @@ def export_saffron_dir(mirror: Path, sha: str, dest: Path) -> Path:
     return dest
 
 
+def file_at(mirror: Path, sha: str, path: str) -> str | None:
+    """`path` as it stood at `sha`, read from the bare mirror; `None` when that
+    tree has no such path. A bad `sha` raises: absent is an answer, unreadable is not."""
+    if not _git(mirror, "ls-tree", "--name-only", sha, "--", path):
+        return None
+    # strip=False: the file's own trailing newline is content.
+    return _git(mirror, "show", f"{sha}:{path}", strip=False)
+
+
 def retirement_markers(mirror: Path, sha: str) -> list[tuple[str, str]]:
     """Every `saffron:retired-by <SPEC-ID>` marker at `sha`, read straight
     from the bare mirror — no export, no checkout, no working tree.
