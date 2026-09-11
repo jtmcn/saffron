@@ -2757,9 +2757,12 @@ _answers_a_401` should carry the `cell` marker and say so.
 ## 42. A rebuttal lost to a trailing comma is recorded as a confirmed disagreement
 
 **Status: spec queued for the visible half, 2026-09-10 — `SA-0071`, not yet
-run.** The recording half is already right: `rebuttal.json` and the queue's counts
-tell an errored turn from an empty one. Whether a malformed rebuttal is worth a
-re-prompt stays open here.
+run.** The recording half is right only in `rebuttal.json`, and that is what stays
+open. The ledger writes no rebuttal for an errored turn or for an unanswered
+blocker, and `sustained_blockers` and `unkept_fixes` count both as zero. An
+earlier version of this line said the queue's counts already told them apart,
+and they do not (found reviewing `SA-0071`, 2026-09-11). Whether a malformed
+rebuttal is worth a re-prompt also stays open here.
 
 `phases/rebut.py:207` discards a rebuttal artifact that is not the schema and
 returns `RebuttalTurn(error=...)`. That is deliberate, and the comment says
@@ -5301,6 +5304,20 @@ as.*
 `pinned_diff`'s measured values rather than choosing new ones. Dropping the
 duplicate flags from `pinned_diff` afterwards is a harness change, left for
 later.
+
+**Found reviewing `SA-0072`, 2026-09-11, and outside it:**
+- **`--no-renames` is guarded by no test.** Removing it left all 1745 tests
+  green, because `_hostile_repo` never renames a file.
+- **Three more repo-local settings still move the pinned diff:**
+  - `diff.interHunkContext` merges two hunks into one. That has the same
+    anchoring effect as `diff.context`.
+  - `color.ui=always` puts escape codes on the `diff --git` line, so `scope`
+    errors on every attempt.
+  - `diff.ignoreSubmodules=all` hides a gitlink from the name-only listing, so
+    `scope` never sees a path outside `touches`.
+
+Each wants its own flag and its own witness. None is a value `pinned_diff`
+measured, which is why `SA-0072` leaves them out.
 
 Found building the lens-corpus harness's byte-identity check (2026-09-08),
 which had to reproduce `export_patch`'s output on a host it does not control

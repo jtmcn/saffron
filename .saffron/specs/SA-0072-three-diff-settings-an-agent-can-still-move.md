@@ -1,6 +1,6 @@
 ---
 id: SA-0072
-title: an agent's git config can still move the diff the host reads, because three of its settings are not pinned
+title: three git settings an agent can set in its worktree still move the diff the host reads
 type: bug
 priority: 3
 depends_on: []
@@ -42,13 +42,14 @@ acceptance:
       A worktree that configures its object-name abbreviation or its diff
       algorithm does not move the pinned diff's bytes either. Nothing host-side
       reads an `index` line's hash or cares which algorithm chose a hunk
-      boundary, so this is cosmetic today. It is what makes `DIFF_FLAGS`'s own
-      comment, "the shape of every diff the host reads", true rather than
-      mostly true.
+      boundary, so this is cosmetic today. Together with the first criterion it
+      closes the gap `harness/recovery.py`'s `pinned_diff` measured. Other
+      settings still move the pinned diff, and they are filed on backlog item
+      89 rather than handled here.
     witness: tests/test_scope.py::test_the_pinned_flags_beat_a_configured_abbrev_and_algorithm
   - claim: >-
-      The prefix, external-diff, textconv and rename pins still beat
-      repo-local config, as they do today.
+      The prefix, external-diff and textconv pins still beat repo-local config,
+      as they do today.
     witness: tests/test_scope.py::test_the_pinned_flags_beat_repo_local_config
     preserves: true
   - claim: >-
@@ -75,27 +76,37 @@ width matched every recorded patch's hunk headers, and why the abbreviation is
 pinned to what `auto` actually emitted rather than to `auto` itself. Use that
 function's values and read its docstring for why. Do not choose new ones.
 
+**Measured in review, 2026-09-11:** adding the three pins to `DIFF_FLAGS` left
+the whole suite passing (1745). No test outside `touches` compares bytes they
+change. `--name-only -z` accepts all three.
+
 ## Problem
 
 Worktree config is the agent's to write (§2), and `DIFF_FLAGS` exists because
-command-line flags beat `.git/config`. Its guarantee is narrower than it states,
-and the gap that matters is the context width, because of what a finding may
-anchor to.
+command-line flags beat `.git/config`. Three of the settings `pinned_diff`
+found it needed are not pinned where the cell's diff is taken, and the one that
+matters is the context width, because of what a finding may anchor to.
 
 ## Out of scope
 
+**Other settings that still move the pinned diff.** Review measured three more:
+`diff.interHunkContext` merges hunks, `color.ui=always` puts escape codes on the
+header line so `scope` errors, and `diff.ignoreSubmodules` hides a gitlink from
+the name-only listing. Each wants its own flag and its own witness, and none is
+a value `pinned_diff` measured. They are filed on backlog item 89.
+
+**The rename pin's test.** `--no-renames` is guarded by no test: removing it
+leaves the suite green. Adding one means widening `_hostile_repo`, which this
+spec asks you not to do. It is filed on backlog item 89.
+
 **`pinned_diff` itself.** Once `DIFF_FLAGS` carries the three pins,
 `pinned_diff` passes each twice. Git takes the last value, and the two are
-equal, so this is harmless. `harness/**` is forbidden. Drop the duplicates in a
-harness change, not here.
+equal, so this is harmless. Its docstring ("not enough by itself") also goes
+stale. `harness/**` is forbidden, so both are a later harness change.
 
-**`tests/test_package.py`'s own copy of the flags.** It builds fixture patches
-in a repo with no hostile config, so it does not share the defect, and it is
-forbidden here.
-
-**Other callers.** `DIFF_FLAGS` also feeds a `--name-only -z` listing in this
-module and PACKAGE's body diff. The three pins do not change a name-only listing,
-and PACKAGE's diff gains the same protection for free.
+**`tests/test_package.py`'s own copy of the flags, and the
+`docs/evidence/scripts/` that import `DIFF_FLAGS`.** Neither shares the defect
+or breaks, and both are forbidden here.
 
 ## Notes for the agent
 
@@ -104,11 +115,27 @@ criteria carry witnesses and no mutants.** A mutant would have to pin the
 spelling of a flag, and naming that spelling here would put the literal in the
 prompt you are reading.
 
+**Every new witness must fail with `worktree.py` reverted, not merely be missing
+at base.** The `revert` gate re-runs each new witness against the reverted
+source and blocks any that still pass. Both new criteria describe something the
+unpinned tuple gets wrong, so an honest test fails reverted.
+
 **Do not widen `_hostile_repo`.** Both preserved criteria read it, and adding
 the three settings to it changes their inputs. Build the new tests on a fixture
 of their own. The existing `_diff` helper takes flags and is reusable.
+
+**Write the new fixture's runner as a `def`, not a `lambda`.** `_hostile_repo`
+uses `run = lambda … # noqa: E731`. Copy that and you add a suppression, which
+fails `integrity` even inside `touches`. Drop the `# noqa` and ruff's `E731`
+fails `lint` instead.
 
 **Prove the pin, not the config.** A test that sets `diff.context` and checks
 that the output is narrow must also show the bare diff under the same config is
 wide, the way `test_hostile_worktree_config_bends_a_bare_diff` pairs with the
 pinned test. Otherwise it passes on a git that ignores the setting.
+
+**The algorithm half needs an input where the two algorithms disagree.** A
+simple edit gives the same hunks under patience and myers, and the pairing
+above then proves nothing. Build an edit where they differ, and have the test
+assert that the bare diff under `diff.algorithm=patience` is not the default
+one before it asserts the pinned one is.

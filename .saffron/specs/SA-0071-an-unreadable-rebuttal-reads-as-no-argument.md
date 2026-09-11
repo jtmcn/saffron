@@ -1,6 +1,6 @@
 ---
 id: SA-0071
-title: a rebuttal that could not be read renders in the pull request as an implementer who declined to argue
+title: a rebuttal turn that recorded nothing renders in the pull request as an implementer who declined to argue
 type: bug
 priority: 2
 depends_on: []
@@ -24,25 +24,27 @@ forbidden:
   - saffron/batch.py
   - saffron/task.py
   - saffron/replay.py
-budget_usd: 5
+budget_usd: 8
 max_attempts: 3
-max_turns: 40
+max_turns: 60
 risk: standard
 acceptance:
   - claim: >-
-      When the rebuttal turn recorded no rebuttal, every blocker's implementer
-      cell in the Disagreements table says the rebuttal was unreadable, in fixed
-      words, not `—`. And only then: a blocker that a turn which was read simply
-      did not answer still renders `—`. Today the two are the same dash, and
+      When `RebutResult.rebuttal.error` is set, every blocker's implementer cell
+      in the Disagreements table says, in fixed words, that no rebuttal was
+      recorded and points at `rebuttal.json`. It does not show `—`, and it never
+      shows the error's own text. And only then: a turn that was read, whether
+      it answered some blockers or returned an empty list, still renders `—` for
+      each blocker it did not answer. Today every case is the same dash, and
       beside a critic verdict of "confirmed: the implementer offered no
       argument" the dash reads as agreeing with it.
-    witness: tests/test_report.py::test_an_unreadable_rebuttal_is_not_rendered_as_no_answer
+    witness: tests/test_report.py::test_a_rebuttal_turn_that_recorded_nothing_is_not_rendered_as_no_answer
   - claim: >-
       The row says whether that turn moved HEAD. `rebuttal.json` already
-      records it, but the body is what gets read. An unreadable rebuttal from a
-      turn that moved HEAD may have fixed the blocker, so the reader needs to
+      records it, but the body is what gets read. A turn that recorded no
+      rebuttal and moved HEAD may have fixed the blocker, so the reader needs to
       know to look at the diff before believing the verdict.
-    witness: tests/test_report.py::test_an_unreadable_rebuttal_says_whether_the_turn_moved_head
+    witness: tests/test_report.py::test_a_rebuttal_turn_that_recorded_nothing_says_whether_it_moved_head
   - claim: >-
       Each row still carries its own blocker's rebuttal and verdict.
     witness: tests/test_report.py::test_disagreement_rows_attribute_the_right_rebuttal_to_the_right_blocker
@@ -68,13 +70,15 @@ turn's *arguments*. On the other blocker the critic then wrote `confirmed: The
 implementer offered no argument and made no visible change`, and that was false:
 there was an argument, and nothing survived to say so.
 
-`RebuttalTurn.error`'s own docstring promises the distinction: set when no
-rebuttal was recorded, "never the same value as 'argued nothing'". The record
-keeps that promise. `rebuttal.json` carries the error and `head_moved`, and
-`sustained_blockers` already counts an errored turn as zero. The pull request
-body breaks it. `_disagreements` builds its answers from
-`first_answers(rebut_result.rebuttal)`, which is empty for an errored turn, so
-every blocker renders `—` exactly as if the implementer had nothing to say.
+`RebuttalTurn.error`'s own docstring promises the distinction: it is set when no
+rebuttal was recorded, "never the same value as 'argued nothing'". It is set in
+two cases, output that was not the schema and a turn that failed outright, and
+both mean the same thing for the table: nothing the implementer said reached the
+record. `rebuttal.json` keeps the distinction, carrying both the error and
+`head_moved`. The pull request body breaks it. `_disagreements` builds its
+answers from `first_answers(rebut_result.rebuttal)`, which is empty for an
+errored turn, so every blocker renders `—` exactly as if the implementer had
+nothing to say.
 
 ## Problem
 
@@ -89,8 +93,10 @@ finding.
 separate question from whether the record should imply an answer that was never
 read. `saffron/phases/**` is forbidden for that reason.
 
-**The record.** `rebuttal.json`, the ledger and the queue's counts already tell
-an errored turn from an empty one. Only the body is wrong.
+**The ledger and the queue's counts.** They cannot tell an errored turn from
+an unanswered blocker either: the ledger writes no rebuttal for both, and
+`sustained_blockers` counts both as zero. Only `rebuttal.json` tells them
+apart. That is a separate item, filed on backlog item 42, and not this spec's.
 
 **The critic's verdict text.** The lens wrote what it saw. This spec makes the
 row beside it honest, not the verdict.
@@ -98,16 +104,28 @@ row beside it honest, not the verdict.
 ## Notes for the agent
 
 **This spec creates new code, so its new criteria carry witnesses and no
-mutants.** The branch that tells the two cases apart does not exist yet.
+mutants.** The branch that tells the cases apart does not exist yet.
 
-**Fixed words, never the error text.** `RebuttalTurn.error` can quote model
-output, since a validation error echoes the input it rejected. The body is a
-channel to GitHub. The full error already lives in `rebuttal.json`, so the body
-needs only enough to send the reader there. Assert in the first criterion's test
-that the error string does not appear in the body.
+**Every new witness must fail with `pr_body.py` reverted, not merely be missing
+at base.** The `revert` gate re-runs each new witness against the reverted
+source and blocks any that still pass. Both new criteria assert words base
+never renders, so an honest test fails reverted. Import new names inside tests,
+not at module scope. A module-scope import of a name you add makes the reverted
+run a collection error, which `revert` reads as `skip`.
 
-**The "only then" half is the one that can regress quietly.** The easy
-implementation keys on "no rebuttal for this finding" and marks every
-unanswered blocker unreadable, including on a turn that was read. The first
-criterion's test has to cover both cases in the same body, or that mistake
-passes.
+**Key on `error`, not on an empty list.** `RebuttalTurn(rebuttals=[])` with no
+error is a turn that was read and chose to answer nothing, and it must keep its
+dashes. Checking "no rebuttals" instead of `error` marks it as recording nothing.
+
+**One body per turn, so the first criterion's test renders several.** A body
+renders one `RebutResult`, and one turn either errored or was read. Render at
+least three in the same test: an errored turn, a read turn that answered
+blocker 1 and not blocker 2, and a read turn that returned an empty list. Give
+the errored turn a hostile error string, such as `SA-0040`'s trailing-comma
+message with a `|` and an `@name` in it, and assert that none of it reaches the
+body. The error can quote model output, and the body is a channel to GitHub.
+
+**A turn that recorded nothing and did not move HEAD never reaches a packaged
+body today.** With no argument and no commit, REBUT stops at `REBUTTING`, and
+only `READY_FOR_REVIEW` is packaged. Render that case anyway, since the renderer
+should not assume its caller, but do not claim in a docstring that it happens.
