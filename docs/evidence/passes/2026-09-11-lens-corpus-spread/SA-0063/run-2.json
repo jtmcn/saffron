@@ -1,0 +1,57 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.4631934,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/cell/session.py",
+        "line": 1616,
+        "claim": "`notes_worth_asking = bool(spec.forbidden) or bool(policy.protected)` gates the entire notes channel on only two of the three ways a path can be off-limits, silently dropping the third: `touches`. `NOTES_PROMPT` itself (artifacts.py:212) tells the agent to report seeing 'a path outside `touches`' first, before forbidden/protected \u2014 and BACKLOG.md item 75, the concrete precedent this spec is built to fix, is explicitly a `touches` exclusion (\"SA-0062's ... `touches` does not include tests/test_witness_gate.py\"), not a `forbidden` one. So a non-bug spec with a normal narrow `touches` list but no `forbidden` entries, in a repo that declares no `protected` paths, will never be asked the question at all \u2014 exactly the shape of the incident this feature exists to catch. This holds in this repo's own fixtures only because `.saffron/policy.yaml` happens to declare `protected` paths, masking the gap; the accompanying test `test_no_notes_turn_is_asked_for_when_nothing_could_have_been_denied` uses the default `_spec()` fixture whose `touches=[\"src/**\", \"tests/**\"]` is itself a real restriction, yet the test's own docstring asserts there is 'nothing this channel was built to catch' \u2014 which is false on the spec it actually uses.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.5232126,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "saffron/phases/package.py",
+        "line": 834,
+        "claim": "The real PACKAGE call to `render_pr_body` (the one used for every actual task, as opposed to `replay.py`'s v0 path) never passes `notes=outcome.notes`. `_drive_cell` in `saffron/cell/session.py` correctly extracts, hashes and carries `notes`/`notes_sha256` on `CellOutcome`, and `render_pr_body`/`_notes` correctly render them when given the argument directly (as `test_report.py` exercises), but nothing connects the two: a grep for `.notes` across `saffron/` shows it is written on `CellOutcome` and read only in tests, never in `phases/package.py`. Every acceptance criterion here ('notes reach the pull request body', 'clipped and neutralized', 'byte-identical when empty') is met by `render_pr_body` in isolation and is false for every real task, because the argument defaults to `\"\"` at this call site regardless of what the implementer said \u2014 the channel this whole spec exists to build is wired to nothing in production.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.5812689000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cell/session.py",
+        "line": 1616,
+        "claim": "No test sets a repo-wide `policy.protected` path while leaving `spec.forbidden` empty (or vice versa), so nothing distinguishes `bool(spec.forbidden) or bool(policy.protected)` from `bool(spec.forbidden) and bool(policy.protected)`. Every notes-eligibility test (`test_the_notes_artifact_is_hashed_when_it_is_produced`, `test_notes_are_empty_when_the_implementer_has_nothing_to_report`, `test_the_notes_turn_is_skipped_once_the_task_is_over_budget`) declares `forbidden` together with a `protected:` policy, and `test_no_notes_turn_is_asked_for_when_nothing_could_have_been_denied` sets neither \u2014 so changing `or` to `and` leaves all four green (the skipped turn is simply left unconsumed by `_drive`'s scripted-turn iterator and silently absorbed by the next lens call in REVIEW, which fails soft with `error=` rather than raising). This is exactly the SA-0062 shape the feature was built for \u2014 a `protected` path with no per-spec `forbidden` entry \u2014 and it would go unasked with no test noticing.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cell/session.py",
+          "find": "notes_worth_asking = bool(spec.forbidden) or bool(policy.protected)",
+          "replace": "notes_worth_asking = bool(spec.forbidden) and bool(policy.protected)"
+        }
+      }
+    ]
+  }
+]

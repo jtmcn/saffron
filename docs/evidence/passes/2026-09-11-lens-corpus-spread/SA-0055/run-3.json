@@ -1,0 +1,33 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.330429,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.26838599999999996,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 676,
+        "claim": "The `PinnedBase` docstring claims the class avoids 'three positional fields for the reason `check_readiness` itself is keyword-only about scratch/home' \u2014 invoking the repo's own history of adjacent same-typed parameters transposing and type-checking cleanly. But `check_readiness` enforces that via a `*,` marker forcing keyword-only call, whereas `PinnedBase` is declared as `@dataclass(frozen=True)` with no `kw_only=True` (Python's dataclass mechanism for the equivalent protection). `url: str` and `base_sha: str` (lines 682-683) are adjacent same-typed fields, so `PinnedBase(mirror, base_sha, url)` with the two strings swapped still type-checks and constructs successfully today \u2014 the exact failure mode the docstring says was designed against. The docstring promises a safety property the code does not actually implement.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.7837893,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  }
+]

@@ -1,0 +1,63 @@
+[
+  {
+    "probe": {
+      "file": "saffron/cell/worktree.py",
+      "find": "    done = runtime.exec_(container, [\"sh\", \"-euc\", script], workdir=WORKTREE_MOUNT)\n    if done.returncode != 0:\n        raise runtime.CellRuntimeError(\n            f\"writing {path}'s mutant failed: {done.stderr.strip()}\"\n        )",
+      "replace": "    runtime.exec_(container, [\"sh\", \"-euc\", script], workdir=WORKTREE_MOUNT)"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1484,
+    "summary": "1 failed, 1481 passed, 2 skipped, 20 deselected in 19.63s",
+    "baseline_failures": [
+      "tests/test_saffron_gates.py::test_structure_errors_when_its_tool_is_present_but_not_runnable"
+    ],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1484,
+    "baseline_summary": "1 failed, 1481 passed, 2 skipped, 20 deselected in 20.28s"
+  },
+  {
+    "probe": {
+      "file": "saffron/cell/worktree.py",
+      "find": "    encoded = base64.b64encode(content.encode()).decode()\n    script = f\"printf '%s' {shlex.quote(encoded)} | base64 -d > {shlex.quote(path)}\"",
+      "replace": "    script = 'printf \"%s\" \"' + content + '\" > ' + shlex.quote(path)"
+    },
+    "verdict": "killed",
+    "reason": "1 new failure(s) against the baseline",
+    "failures": [
+      "tests/test_saffron_gates.py::test_the_fast_gates_name_their_tool_and_pass_on_a_clean_tree[lint]"
+    ],
+    "tool": "pytest 9.1.1",
+    "collected": 1484,
+    "summary": "2 failed, 1480 passed, 2 skipped, 20 deselected in 19.89s",
+    "baseline_failures": [
+      "tests/test_saffron_gates.py::test_structure_errors_when_its_tool_is_present_but_not_runnable"
+    ],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1484,
+    "baseline_summary": "1 failed, 1481 passed, 2 skipped, 20 deselected in 20.28s"
+  },
+  {
+    "probe": {
+      "file": "saffron/cell/worktree.py",
+      "find": "    encoded = base64.b64encode(content.encode()).decode()\n    script = f\"printf '%s' {shlex.quote(encoded)} | base64 -d > {shlex.quote(path)}\"",
+      "replace": "    script = f\"printf -- '{content}' > {shlex.quote(path)}\""
+    },
+    "verdict": "killed",
+    "reason": "1 new failure(s) against the baseline",
+    "failures": [
+      "tests/test_saffron_gates.py::test_the_fast_gates_name_their_tool_and_pass_on_a_clean_tree[lint]"
+    ],
+    "tool": "pytest 9.1.1",
+    "collected": 1484,
+    "summary": "2 failed, 1480 passed, 2 skipped, 20 deselected in 20.27s",
+    "baseline_failures": [
+      "tests/test_saffron_gates.py::test_structure_errors_when_its_tool_is_present_but_not_runnable"
+    ],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1484,
+    "baseline_summary": "1 failed, 1481 passed, 2 skipped, 20 deselected in 20.28s"
+  }
+]

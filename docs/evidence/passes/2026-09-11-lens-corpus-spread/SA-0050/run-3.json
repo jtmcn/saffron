@@ -1,0 +1,66 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.3802071,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "blocker",
+        "file": "saffron/batch.py",
+        "line": 189,
+        "claim": "The breaker is only checked before starting a task (line 151), so if the two consecutive aborts happen to be the last two candidates in the queue, the loop simply ends and falls through to `ledger.close_batch(batch_id, \"DRAINED\")` \u2014 the batch reports DRAINED even though the breaker's own condition (two consecutive aborts) was met. The acceptance criterion states unconditionally that 'two consecutive aborts stop the batch as INFRASTRUCTURE,' with no carve-out for end-of-queue, and no test in tests/test_batch.py exercises a queue of exactly two candidates that both abort, so this boundary case is unverified and silently misreports a broken-toolchain tail of the night as an ordinary completed batch.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.7172283,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 71,
+        "claim": "`_attach_runs_minted_since` scopes its sweep to `run_id > high_water AND batch_id IS NULL` and its own docstring (lines 66-69) asserts this is 'exactly the set \u2014 zero or one row' because 'under K=1 nothing else can mint a run while one candidate's call is in flight.' That premise only holds for this loop's own thread; it does not hold for the shared SQLite ledger, which the same docstring says `saffron cell` and `replay.py` also write to with no batch, and which nothing stops a second `saffron batch` invocation (a second repo, run concurrently, tonight) from writing to as well. If any of those mints a row with `run_id > high_water` and `batch_id IS NULL` during the window this candidate's runner is in flight \u2014 a window that can be the length of a whole cell run \u2014 that unrelated run's cost is folded into this batch's `batch_spend`, corrupting the budget gate's accounting. A sequential, single-process test suite (every test here calls `run_batch` to completion before the next one starts) cannot exercise concurrent writers to the same ledger file, so this is invisible to the gates that passed.",
+        "anchored": true,
+        "probe": null
+      },
+      {
+        "lens": "contract",
+        "severity": "note",
+        "file": "saffron/batch.py",
+        "line": 45,
+        "claim": "`_max_run_id` and `_attach_runs_minted_since` read `ledger._db` directly and hand-write SQL against the `runs` table's column names \u2014 the only place in the whole `saffron` package that reaches past `Ledger`'s public methods into its private connection (every other module, including this file's own `attach_run_to_batch`/`batch_spend`/`create_batch` calls, goes through `Ledger`). That means `runs.run_id`/`runs.batch_id` is now a contract two files each encode separately, with no test on `ledger.py` itself guarding the copy in `batch.py`.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.19829220000000003,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 71,
+        "claim": "The docstring on `_attach_runs_minted_since` (lines 62-69) spends its whole body justifying `run_id > high_water` over the simpler `batch_id IS NULL`, warning that the latter would 'silently fold a past unrelated run's spend into tonight's batch' from `saffron cell` or `replay.py`. No test ever creates such a pre-existing null-`batch_id` run before calling `run_batch`; every ledger fixture is a fresh empty database, so at most one null-`batch_id` row ever exists during any test, and `run_id > high_water` and bare `batch_id IS NULL` select exactly the same row in every case exercised. Dropping the `run_id > ?` bound (see probe) leaves `test_a_crash_after_real_spend_still_counts_against_the_next_budget_gate` and `test_a_runner_that_raises_still_closes_the_batch_row` passing unchanged, even though the scoping the docstring calls load-bearing has been removed.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/batch.py",
+          "find": "    rows = ledger._db.execute(\n        \"SELECT run_id FROM runs WHERE run_id > ? AND batch_id IS NULL\",\n        (high_water,),\n    ).fetchall()",
+          "replace": "    rows = ledger._db.execute(\n        \"SELECT run_id FROM runs WHERE batch_id IS NULL\",\n    ).fetchall()"
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,88 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.7003959000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/preflight.py",
+        "line": 315,
+        "claim": "The docstring at lines 293-295 states the function's contract is 'False for anything else, including a host this probe could not reach \u2014 \"could not tell\" is not a pass,' but the implementation only treats a bare connection failure (URLError) that way. Any HTTP error other than 401/403 \u2014 a 500, 503, or 429 from api.anthropic.com \u2014 is mapped to `True` at this line, i.e. an inconclusive answer is silently reported as 'the token authenticates,' which is exactly the 'could not tell' case the docstring says must not be a pass, and which readiness then uses to let the batch proceed.",
+        "anchored": true,
+        "probe": null
+      },
+      {
+        "lens": "correctness",
+        "severity": "note",
+        "file": "saffron/preflight.py",
+        "line": 430,
+        "claim": "`GitError` from `export_saffron_dir` is treated uniformly as 'no `.saffron` at this base_sha' (absence), but the same exception also covers a genuine `git archive` failure unrelated to absence (corrupt mirror, disk write failure during the archive). Such a failure is silently read as 'policy absent, readiness passes' rather than failing the 'policy' step the way criterion 2 asks for; in practice this is largely masked because `session.py`'s own unguarded `export_saffron_dir` call still aborts the first cell before its image build, so the practical exposure is small.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.7387641,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/preflight.py",
+        "line": 438,
+        "claim": "`check_readiness` wraps every other step's exception in a `Readiness(ok=False, step=...)` result, but the disk step does not: `disk_headroom_ok` is documented (line 334) to raise `RuntimeError` rather than read as a pass when it 'could not be checked' (e.g. `home` unreadable or the mount gone), and `check_readiness` calls it unguarded at line 438. That `RuntimeError` propagates straight out of `check_readiness` as an uncaught exception, which is exactly the outcome the `Readiness` dataclass's own docstring (lines 369-371) says this entry point exists to avoid: 'a caller can skip the repo and say why... instead of discovering the reason by reading a traceback.' Every other step (mirror, origin, default_branch, policy) is caught; this one is not, so a disk check that cannot execute crashes the whole readiness call instead of returning `step=\"disk\"`.",
+        "anchored": true,
+        "probe": null
+      },
+      {
+        "lens": "contract",
+        "severity": "note",
+        "file": "saffron/preflight.py",
+        "line": 350,
+        "claim": "`prepare_mirror`'s docstring says it was 'factored out so `check_readiness` can run them once per run,' but `check_readiness` (lines 407-421) never calls `prepare_mirror` \u2014 it re-implements the same three calls inline with its own try/except blocks. The claim of reuse is false within this same diff, and it sets up a real drift risk: a future change to `prepare_mirror`'s order or error handling will not propagate to `check_readiness`, and nothing enforces the two stay in sync.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.8278734,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/preflight.py",
+        "line": 315,
+        "claim": "The 401/403-means-invalid mapping is `validate_claude_token`'s entire reason to exist per Appendix J, but no test drives an `HTTPError` through it. `test_the_token_probes_default_request_shape_is_asserted_not_sent` mocks `urlopen` to raise `URLError` (the 'unreachable host' branch) and every `check_readiness` test injects a fake `validate_token` boolean, bypassing this function's internals entirely. Flipping line 315 to `return True` (or `return exc.code in (401, 403)`) makes every present token that gets a 401/403 read as valid \u2014 exactly the Appendix J landmine this feature exists to close \u2014 and the full suite, including `census` and `criteria`, stays green. The sibling function `assert_proxy_reaches_upstream` has exactly this HTTPError branch covered by a real local server (`test_the_probe_script_itself_answers_a_401`, whose own docstring calls that coverage load-bearing: 'the `HTTPError` branch ... is covered, which is the behaviour the section's claim rests on') \u2014 the identical technique was available and not applied to this function's opposite-verdict branch.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/preflight.py",
+          "find": "        return exc.code not in (401, 403)",
+          "replace": "        return True"
+        }
+      },
+      {
+        "lens": "adequacy",
+        "severity": "note",
+        "file": "saffron/preflight.py",
+        "line": 431,
+        "claim": "`check_readiness` catches any `git_mirror.GitError` from `export_saffron_dir` and silently treats it as \u2018repo not yet onboarded\u2019 (policy check skipped, readiness continues), the same convention as `cli._protected_paths_at` \u2014 but unlike that precedent, no downstream unguarded export exists to catch a genuinely broken mirror later. No test in this diff ever makes `export_saffron_dir` raise inside `check_readiness`: both `_stub_prepare` and the ordering test configure it to always succeed. Widening `except git_mirror.GitError:` to `except Exception:` on that line would silently swallow a broken export for any reason (disk failure, corrupt mirror) and still leave the whole suite green.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/preflight.py",
+          "find": "    except git_mirror.GitError:\n        exported = None",
+          "replace": "    except Exception:\n        exported = None"
+        }
+      }
+    ]
+  }
+]

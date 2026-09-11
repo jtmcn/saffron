@@ -1,0 +1,55 @@
+[
+  {
+    "probe": {
+      "file": "saffron/batch.py",
+      "find": "        remaining = budget_usd - ledger.batch_spend(batch_id)\n        if candidate.spec.budget_usd > remaining:\n            ledger.close_batch(batch_id, \"BUDGET\")\n            return \"BUDGET\"\n\n        if consecutive_aborts >= _BREAKER_THRESHOLD:\n            ledger.close_batch(batch_id, \"INFRASTRUCTURE\")\n            return \"INFRASTRUCTURE\"",
+      "replace": "        if consecutive_aborts >= _BREAKER_THRESHOLD:\n            ledger.close_batch(batch_id, \"INFRASTRUCTURE\")\n            return \"INFRASTRUCTURE\"\n\n        remaining = budget_usd - ledger.batch_spend(batch_id)\n        if candidate.spec.budget_usd > remaining:\n            ledger.close_batch(batch_id, \"BUDGET\")\n            return \"BUDGET\""
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1292,
+    "summary": "1290 passed, 2 skipped, 20 deselected in 15.64s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1292,
+    "baseline_summary": "1290 passed, 2 skipped, 20 deselected in 17.58s"
+  },
+  {
+    "probe": {
+      "file": "saffron/batch.py",
+      "find": "\"SELECT COALESCE(MAX(run_id), 0) AS m FROM runs\"",
+      "replace": "\"SELECT 0 AS m\""
+    },
+    "verdict": "killed",
+    "reason": "1 new failure(s) against the baseline",
+    "failures": [
+      "tests/test_saffron_gates.py::test_the_fast_gates_name_their_tool_and_pass_on_a_clean_tree[format]"
+    ],
+    "tool": "pytest 9.1.1",
+    "collected": 1292,
+    "summary": "1 failed, 1289 passed, 2 skipped, 20 deselected in 16.99s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1292,
+    "baseline_summary": "1290 passed, 2 skipped, 20 deselected in 17.58s"
+  },
+  {
+    "probe": {
+      "file": "saffron/batch.py",
+      "find": "    rows = ledger._db.execute(\n        \"SELECT run_id FROM runs WHERE run_id > ? AND batch_id IS NULL\",\n        (high_water,),\n    ).fetchall()",
+      "replace": "    rows = ledger._db.execute(\n        \"SELECT run_id FROM runs WHERE batch_id IS NULL\",\n    ).fetchall()"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1292,
+    "summary": "1290 passed, 2 skipped, 20 deselected in 18.16s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1292,
+    "baseline_summary": "1290 passed, 2 skipped, 20 deselected in 17.58s"
+  }
+]

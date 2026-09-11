@@ -1,0 +1,87 @@
+[
+  {
+    "probe": {
+      "file": "saffron/cli.py",
+      "find": "    again rather than trusting the loop's default to have one.\"\"\"\n    digest = hashlib.sha256(str(repo).encode()).hexdigest()[:12]\n    return home / \"mirrors\" / f\"{repo.name}-{digest}.git\"",
+      "replace": "    again rather than trusting the loop's default to have one.\"\"\"\n    digest = hashlib.sha256(str(repo).encode()).hexdigest()[:10]\n    return home / \"mirrors\" / f\"{repo.name}-{digest}.git\""
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1309,
+    "summary": "1307 passed, 2 skipped, 20 deselected in 13.68s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1309,
+    "baseline_summary": "1307 passed, 2 skipped, 20 deselected in 14.83s"
+  },
+  {
+    "probe": {
+      "file": "saffron/cli.py",
+      "find": "            outcome.state = result.state\n",
+      "replace": ""
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1309,
+    "summary": "1307 passed, 2 skipped, 20 deselected in 14.05s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1309,
+    "baseline_summary": "1307 passed, 2 skipped, 20 deselected in 14.83s"
+  },
+  {
+    "probe": {
+      "file": "saffron/cli.py",
+      "find": "until = _resolve_until(args.until, datetime.now()) if args.until else None",
+      "replace": "until = args.until if args.until else None"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1309,
+    "summary": "1307 passed, 2 skipped, 20 deselected in 15.05s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1309,
+    "baseline_summary": "1307 passed, 2 skipped, 20 deselected in 14.83s"
+  },
+  {
+    "probe": {
+      "file": "saffron/cli.py",
+      "find": "    digest = hashlib.sha256(str(repo).encode()).hexdigest()[:12]\n    return home / \"mirrors\" / f\"{repo.name}-{digest}.git\"",
+      "replace": "    digest = hashlib.sha256(str(repo).encode()).hexdigest()[:8]\n    return home / \"mirrors\" / f\"{repo.name}-{digest}.git\""
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1309,
+    "summary": "1307 passed, 2 skipped, 20 deselected in 14.35s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1309,
+    "baseline_summary": "1307 passed, 2 skipped, 20 deselected in 14.83s"
+  },
+  {
+    "probe": {
+      "file": "saffron/cli.py",
+      "find": "    until = _resolve_until(args.until, datetime.now()) if args.until else None",
+      "replace": "    until = None"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1309,
+    "summary": "1307 passed, 2 skipped, 20 deselected in 14.65s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1309,
+    "baseline_summary": "1307 passed, 2 skipped, 20 deselected in 14.83s"
+  }
+]

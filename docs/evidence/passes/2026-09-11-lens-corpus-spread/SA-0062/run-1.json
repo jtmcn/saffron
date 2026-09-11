@@ -1,0 +1,57 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.3966267,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/cell/worktree.py",
+        "line": 358,
+        "claim": "`_read_file` gets the file's content through `runtime.exec_`, whose `_call`/`_decode` deliberately captures bytes but then decodes them as UTF-8 with `errors=\"replace\"` (saffron/cell/runtime.py:111-114) \u2014 chosen there to keep `_decode` from raising, not to preserve content. Any byte in the source file that is not valid UTF-8 becomes U+FFFD in the `str` this function returns, and `_write_file` (line 376, `content.encode()`) then re-encodes that `str` back to UTF-8 before writing it into the cell, turning the replacement character into a different byte sequence than what was on disk. Unlike `saffron/mutation.py`'s host mutator, which reads/writes raw bytes specifically so a mutation is 'byte-identical' (mutation.py:11-16), this cell implementation silently corrupts any non-UTF-8 bytes elsewhere in the file for the duration of the mutated block \u2014 not just the find/replace span \u2014 which can make the test suite fail for a reason unrelated to the mutant and have `witness_gate` read that as the mutant being caught. Every fixture in tests/test_worktree.py and tests/test_session.py uses plain ASCII content, so this never surfaces in the suite; a real repo's source tree is not guaranteed to be pure UTF-8.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.5012151,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "saffron/cell/worktree.py",
+        "line": 418,
+        "claim": "`_write_file` is called before the `try:` that guards the undo, so if the write itself raises (its own non-zero exit becomes `CellRuntimeError` at line 379-382) after the edit has actually landed in the container \u2014 e.g. the exec times out or loses its connection after the redirect wrote the file, exactly the case `witness.Mutated`'s own module comment calls out by name as reachable for a container mutator and unreachable for `host_mutator` \u2014 the `finally` at line 421 that runs `git checkout HEAD -- <file>` never executes, leaving the tree mutated with no restore attempted. `witness_gate` sees this as a raise from `__enter__` with `applied` still False, so it reports 'could not apply' rather than 'could not restore', silently understating a dirty tree. `source_reverted` (lines 337-340, same file) explicitly places its mutating git call inside the `try` for this reason ('a second [operation] that fails after the first succeeded leaves half the source reverted with no restore attempted... entering first costs one restore of an untouched tree in the worst case, which is a no-op') \u2014 `source_mutated` claims to be its sibling but does not follow that pattern, violating an invariant `witness.py` documents as binding on this exact implementation.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.6370668,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cell/worktree.py",
+        "line": 380,
+        "claim": "No test exercises `_write_file`'s own failure path (the `sh -euc ... > path` exec returning non-zero) even though acceptance criterion 4 explicitly requires 'a failure to apply... raises rather than reporting a verdict.' `test_a_failed_undo_raises_rather_than_reporting_a_verdict` only exercises the `_read_file` ('cat') failure and the undo ('git checkout HEAD') failure; the write half of 'apply' is untested. Deleting the raise here (`runtime.exec_(...)` with the `if done.returncode != 0: raise ...` removed) would keep every test in this diff green while a mutant that fails to write would silently be treated as applied, letting `source_mutated` yield `None` and `witness_gate` run tests against an unmutated tree.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cell/worktree.py",
+          "find": "    done = runtime.exec_(container, [\"sh\", \"-euc\", script], workdir=WORKTREE_MOUNT)\n    if done.returncode != 0:\n        raise runtime.CellRuntimeError(\n            f\"writing {path}'s mutant failed: {done.stderr.strip()}\"\n        )",
+          "replace": "    runtime.exec_(container, [\"sh\", \"-euc\", script], workdir=WORKTREE_MOUNT)"
+        }
+      }
+    ]
+  }
+]

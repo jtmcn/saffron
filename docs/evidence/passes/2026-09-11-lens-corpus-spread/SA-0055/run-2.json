@@ -1,0 +1,47 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.30939060000000007,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.2039991,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 668,
+        "claim": "PinnedBase's own docstring justifies its shape by invoking the exact incident it warns about (\"this repo's history has an instance of adjacent same-typed parameters transposing and type-checking cleanly anyway\"), and cites `check_readiness`'s keyword-only `*,` on `scratch`/`home` as the precedent being followed. But `PinnedBase` is declared `@dataclass(frozen=True)` with no `kw_only=True` and no `*` separator, so `mirror`, `url` and `base_sha` remain positionally constructible \u2014 and `url: str` and `base_sha: str` are themselves adjacent same-typed fields. A future `PinnedBase(mirror, base_sha, url)` call would type-check cleanly and silently swap the pinned base with the remote URL, reproducing precisely the class of bug the docstring says this design avoids; the one call site in this diff happens to use keywords, but nothing in the class enforces it the way `check_readiness` actually does.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.7129656000000002,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 964,
+        "claim": "No test asserts that `_batch_runner` actually receives `pinned.url` rather than some other `str` field on `PinnedBase` (e.g. `pinned.base_sha`) \u2014 every test that exercises this line either leaves `candidates` empty or mocks `run_batch`/`_batch_runner` before the `run()` closure that consumes `url` (in `_resolve_stacked_on` -> `package_phase.fetch_parent_branch`) ever executes. Since `url` and `base_sha` are both plain `str` fields, swapping `url=pinned.url` for `url=pinned.base_sha` at this line type-checks cleanly and leaves the full suite green (the call-count tests only prove `real_remote` isn't invoked a second time, not which pinned field was threaded through), so a transposition here \u2014 the exact class of bug `PinnedBase`'s own docstring is trying to guard against \u2014 would only surface in production, on a batch with an actual waiting stacked dependent.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cli.py",
+          "find": "resolved, repo=repo, ledger=ledger, out_dir=out_dir, url=pinned.url",
+          "replace": "resolved, repo=repo, ledger=ledger, out_dir=out_dir, url=pinned.base_sha"
+        }
+      }
+    ]
+  }
+]

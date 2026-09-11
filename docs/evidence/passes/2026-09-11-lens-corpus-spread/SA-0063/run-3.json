@@ -1,0 +1,79 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 1.5766940999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/cell/session.py",
+        "line": 1616,
+        "claim": "The notes turn's own prompt (`NOTES_PROMPT` in artifacts.py) asks the implementer to report four things, the first of which is 'a path outside `touches`' \u2014 and the spec's own reasoning calls `touches` 'the real barrier' for scope. But `notes_worth_asking = bool(spec.forbidden) or bool(policy.protected)` never looks at `touches` at all. For a spec that declares only `touches` (the normal case for every non-bug spec) against a repo that declares no `protected` paths, the eligibility check is False and the notes turn never runs \u2014 so the exact category the prompt leads with, and the one the backlog items (71/75) actually describe (files the implementer 'could not touch'), is the one this gate is least likely to ever solicit. The channel fires reliably only when a `forbidden` list or a repo-wide `protected` list happens to be non-empty, which is incidental to whether `touches` itself was binding.",
+        "anchored": true,
+        "probe": null
+      },
+      {
+        "lens": "correctness",
+        "severity": "note",
+        "file": "saffron/report/pr_body.py",
+        "line": 395,
+        "claim": "`safe[:_NOTES_LIMIT]` clips the neutralized notes text at a fixed code-point offset with no regard for multi-byte or combining-character boundaries, so a note ending mid-emoji or mid-combining-sequence renders a broken glyph in the PR body. Cosmetic only \u2014 it cannot reintroduce a mention or closing keyword since neutralization already ran over the whole string before the slice \u2014 so it costs nothing but a stray replacement character.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 1.0994721,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "saffron/phases/package.py",
+        "line": 815,
+        "claim": "The PACKAGE phase's call to `render_pr_body` \u2014 the only call site that produces the pull request an operator actually sees \u2014 never passes `notes=outcome.notes`. Every other `CellOutcome` field the renderer needs (`reviews`, `rebut_result`, `attempts`, `spent_usd`, `effective_risk`, `advisory_gates`) is forwarded here explicitly, but `notes` is absent from the argument list, so `render_pr_body` always receives its default `notes=\"\"` and the `### Notes from the implementer` section never renders in a real PR regardless of what the implementer wrote. Acceptance criterion 1 ('An implementer's notes reach the pull request body') is only exercised by tests that call `render_pr_body` directly with an explicit `notes=` kwarg (tests/test_report.py) or that inspect `CellOutcome.notes` in isolation (tests/test_session.py); no test drives the two together through `saffron/phases/package.py`, and `tests/test_package.py` contains no reference to `notes` at all. This gap exists because `saffron/phases/package.py` and all of `saffron/phases/**` are in this spec's own `forbidden` list, so the one file that would need a one-line edit to complete the wiring was structurally off-limits to the implementer \u2014 the spec's acceptance criteria are unsatisfiable within its own declared `touches`, and every gate that ran (including the five witnessed criteria) is blind to that because none of them exercise the PACKAGE integration.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.47061689999999995,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/report/pr_body.py",
+        "line": 391,
+        "claim": "No test in this diff asserts that notes text is actually neutralized. `test_notes_cannot_move_a_status_or_a_gate_result` builds a poisoned string containing exactly `@maintainer` and `Fixes #12` \u2014 the two payloads `neutralize` exists to defang \u2014 but only checks that the text *before* the heading is unchanged (`head == plain`); it never inspects the rendered notes section for the zero-width breaks `neutralize` inserts. Deleting the call (`safe = neutralize(text)` -> `safe = text`) leaves every test in test_report.py and test_session.py green while acceptance criterion 2 (notes must be neutralized like every other cell-authored string) silently stops holding, and an implementer's notes could actually close an issue or ping an account on GitHub.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/report/pr_body.py",
+          "find": "safe = neutralize(text)",
+          "replace": "safe = text"
+        }
+      },
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cell/session.py",
+        "line": 1616,
+        "claim": "`notes_worth_asking = bool(spec.forbidden) or bool(policy.protected)` is never tested for the asymmetric case that would distinguish `or` from `and`. The one test with `forbidden` set but no `protected` declared (`test_notes_are_empty_when_the_implementer_has_nothing_to_report`, tests/test_session.py:3699) never checks `len(cell.turns)`, only that `outcome.notes == \"\"` \u2014 which holds identically whether the notes turn ran and returned nothing, or never ran at all. Changing `or` to `and` would silently stop asking for notes on any spec that declares `forbidden` but whose repo has no `protected` paths (the common case per the spec's own rationale) and no test in the suite would fail.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cell/session.py",
+          "find": "notes_worth_asking = bool(spec.forbidden) or bool(policy.protected)",
+          "replace": "notes_worth_asking = bool(spec.forbidden) and bool(policy.protected)"
+        }
+      }
+    ]
+  }
+]

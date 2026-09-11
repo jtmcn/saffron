@@ -1,0 +1,47 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.43588560000000004,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.7762491000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "tests/test_package.py",
+        "line": 1726,
+        "claim": "The fourth acceptance criterion's witness, declared verbatim in the (forbidden, unchangeable) spec frontmatter as `tests/test_package.py::test_reverifying_under_an_unchanged_policy_does_not_touch_the_row`, is a pytest node id the `criteria` gate matches by exact string membership in the collected-tests set (`saffron/gates/core/criteria.py::_judge`, `criterion.witness not in collected`). The test actually added here is named `test_reverifying_under_an_unchanged_policy_issues_no_policy_write` \u2014 a different node id \u2014 so nothing in the suite satisfies that witness string; the criterion the spec calls out as the load-bearing one ('the fourth witness is the one to write first') has no test bound to it by the name the spec fixes as its contract, even though the intended behavior happens to be covered under a different name.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.5946186,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/phases/package.py",
+        "line": 771,
+        "claim": "Both new tests around the record_policy conditional start the task's recorded policy_sha at exactly the value load_policy will compute this time (NULL in the 'changed' test, matching hash in the 'unchanged' test) \u2014 neither exercises the case where the task already carries a real, non-NULL policy_sha that genuinely differs from the freshly computed one, which is the ordinary case once every new task is created with a non-NULL policy_sha at cell start (this same diff's session.py change). Replacing `!= policy_sha` with `is None` at this line keeps both `test_reverifying_under_a_changed_policy_records_the_policy_it_used` and `test_reverifying_under_an_unchanged_policy_issues_no_policy_write` green (NULL still triggers a write; a matching non-NULL still skips one) while silently disabling the rewrite for every task whose recorded declaration was already set and then legitimately changed \u2014 the acceptance criterion's actual claim, and the reason backlog item 16 exists.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/phases/package.py",
+          "find": "if ledger.task_policy_sha(outcome.task_id) != policy_sha:",
+          "replace": "if ledger.task_policy_sha(outcome.task_id) is None:"
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,57 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.1985295,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "blocker",
+        "file": "saffron/preflight.py",
+        "line": 315,
+        "claim": "`validate_claude_token` treats every HTTP error status except 401 and 403 as a passing credential (`return exc.code not in (401, 403)`), which directly contradicts its own docstring two lines above: \"'could not tell' is not a pass.\" A 5xx (upstream down/erroring), a 429 (rate-limited), or a 400 (malformed/invalid key on some auth backends) all reach `urlopen` as an `HTTPError` and are classified as a valid token here, silently re-opening exactly the Appendix J landmine this function exists to close: a cell starts with a credential that was never actually confirmed to work, and the failure looks clean until the budget doesn't move. No test exercises this branch with a real HTTPError \u2014 every test either injects `validate_token` directly or triggers the `URLError` path \u2014 so this substitution of 'inconclusive' for 'valid' passed the whole gate suite untouched.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.6051728999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/preflight.py",
+        "line": 438,
+        "claim": "Every other step in `check_readiness` catches its underlying exception (`GitError`, `PackageError`, `PolicyError`) and converts it into a named `Readiness(False, step, detail)`, which the docstrings on `Readiness` and `check_readiness` explicitly promise: 'never a bare boolean, so a caller can skip the repo and say why ... instead of discovering the reason by reading a traceback the first cell raised.' The disk step breaks that promise: `disk_headroom_ok(home)` is called unguarded, and by its own docstring it 'raises rather than reading as a pass it cannot back up' (a `RuntimeError` on any `OSError` from `shutil.disk_usage`). If that happens, `check_readiness` propagates the raw `RuntimeError` instead of returning `Readiness(False, \"disk\", ...)`, so the one caller this function exists for (a batch loop, SA-0049) gets exactly the uncaught traceback the dataclass was introduced to avoid, for this one step only. No test exercises `check_readiness` with `disk_usage` raising \u2014 only `disk_headroom_ok` in isolation (test_a_check_that_cannot_run_is_a_failure_not_a_pass) and `check_readiness` with a clean-but-false disk_usage (test_insufficient_disk_headroom_fails_readiness) are covered \u2014 so the gates cannot see the gap.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.3087438,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/preflight.py",
+        "line": 315,
+        "claim": "The whole feature's stated purpose (Appendix J: catch a token the route accepts but the credential fails, distinguishing this function from `assert_proxy_reaches_upstream`'s opposite 401-is-a-pass verdict) lives in this one line, and no test ever reaches it. The only direct test of `validate_claude_token` (`test_the_token_probes_default_request_shape_is_asserted_not_sent`) makes `urlopen` raise `URLError`, which hits the `except urllib.error.URLError` branch below, not `except urllib.error.HTTPError`. Every `check_readiness` test injects a stub `validate_token`, so the real function's HTTPError branch is exercised nowhere. Replacing `exc.code not in (401, 403)` with `True` (i.e. treating every HTTPError, including a 401 from an expired token, as a valid credential) would keep all 1264 tests green while silently reintroducing exactly the 'clean-looking nothing' failure mode Appendix J measured.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/preflight.py",
+          "find": "return exc.code not in (401, 403)",
+          "replace": "return True"
+        }
+      }
+    ]
+  }
+]

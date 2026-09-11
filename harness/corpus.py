@@ -86,10 +86,10 @@ def score_corpus(
 ) -> CorpusScore:
     """k/n per fixture, and one aggregate over defects.
 
-    `seen` and `graded` count *defects*, not runs: at n=1 a defect contributes
-    0 or 1, and at higher n a defect seen in any run counts once. That keeps
-    the aggregate comparable across passes of different depth, which is the
-    whole reason it exists.
+    `seen` and `graded` count *defects*, not runs: a defect seen in any run
+    counts once. That makes the aggregate best-of-n, which rises with
+    `--runs` — compare passes of different depth through `graded_per_run`,
+    never through this.
     """
     per_fixture: dict[str, dict[str, Score]] = {}
     dropped: list[str] = []
@@ -106,6 +106,24 @@ def score_corpus(
             f"{len(dropped)} dropped. Nothing here is a measurement."
         )
     return CorpusScore(per_fixture=per_fixture, dropped=tuple(dropped))
+
+
+def graded_per_run(
+    fixtures: Sequence[Fixture],
+    runs: Mapping[str, Sequence[Sequence[LensReview]]],
+) -> list[CorpusScore | None]:
+    """Run index k across every fixture, scored alone as one corpus pass —
+    one sample of the aggregate per run, which is the spread item 93 asks for.
+    `None` where no fixture's run k survived: unscored, never zero."""
+    depth = max((len(r) for r in runs.values()), default=0)
+    out: list[CorpusScore | None] = []
+    for k in range(depth):
+        sliced = {sid: list(r[k : k + 1]) for sid, r in runs.items() if len(r) > k}
+        try:
+            out.append(score_corpus(fixtures, sliced))
+        except LensErrored:
+            out.append(None)
+    return out
 
 
 @dataclass(frozen=True)
@@ -220,6 +238,7 @@ def render_corpus_table(
     score: CorpusScore,
     blockers: Mapping[str, list[int]],
     probes: ProbeScore | None = None,
+    per_run: Sequence[CorpusScore | None] = (),
 ) -> str:
     """The pass as markdown, for pasting into a `docs/evidence/` record.
 
@@ -230,11 +249,25 @@ def render_corpus_table(
     `--skip-probes`, or a `--skip-existing` resume that ran no fixture at all.
     Rendering `0 of 0` there would read as a lens that verified nothing, which
     is not what a pass that never applied a probe found out.
+
+    `per_run` renders the best-of-n headline's spread (`graded_per_run`) —
+    omitted at one run, where there is none to state.
     """
     lines = [
         f"**{score.graded}/{score.declared} declared defects graded** "
         f"({score.seen}/{score.declared} seen) across "
-        f"{len(score.per_fixture)} fixture(s).",
+        f"{len(score.per_fixture)} fixture(s)."
+    ]
+    if len(per_run) > 1:
+        totals = " · ".join(
+            "unscored" if s is None else f"{s.graded}/{s.declared}" for s in per_run
+        )
+        lines += [
+            "",
+            f"Per run, each scored alone: {totals} graded. The headline counts a "
+            "defect graded in any run, so it rises with `--runs`; these are the spread.",
+        ]
+    lines += [
         "",
         "| Fixture | Defect | Seen | Graded | Anchored blockers |",
         "|---|---|---|---|---|",

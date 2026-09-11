@@ -1,0 +1,57 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 1.3352096999999998,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "blocker",
+        "file": "saffron/phases/package.py",
+        "line": 834,
+        "claim": "The real PACKAGE path builds the PR body via `render_pr_body(...)` here without passing `notes=outcome.notes`. `CellOutcome.notes` is extracted, hashed, and written to `notes.json` by `session.py`, but this is the only call site that renders the PR the operator actually receives, and it never forwards it, so `render_pr_body`'s `notes: str = \"\"` default silently stands in for the real notes on every production task. Acceptance criterion 1 ('An implementer's notes reach the pull request body') is met by `pr_body.py` in isolation but not by the wired system: `tests/test_package.py` has no assertion on `notes` at all, so no gate or test in this change catches the gap, and the entire feature is a no-op end-to-end despite every unit test passing.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.30751110000000004,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "saffron/phases/package.py",
+        "line": 815,
+        "claim": "The only production call to render_pr_body (the one that builds the real PR body in PACKAGE) never passes notes=outcome.notes, even though every other outcome-derived field (reviews, rebut_result, attempts, spent_usd, effective_risk, advisory_gates) is threaded through here. The notes turn runs, gets extracted, hashed, and written to notes.json on outcome.notes/outcome.notes_sha256, but at the one site that actually renders a task's pull request body the parameter defaults to \"\" and the notes never reach GitHub. Every test that exercises the feature calls render_pr_body directly with an explicit notes= argument, so census/tests/criteria all pass while the acceptance criterion ('An implementer's notes reach the pull request body...') is unmet on the real path a task actually takes.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.6883617,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cell/session.py",
+        "line": 1617,
+        "claim": "The design comment above this line (1596-1613) explicitly says the notes turn 'runs whatever outcome repair_loop handed back \u2014 READY_FOR_REVIEW, EXHAUSTED or GATE_ERROR alike', which is the whole point of timing it right after the repair loop rather than after REVIEW: an implementer that hit a forbidden path while thrashing toward no-progress or triggering a GATE_ERROR is exactly the case items 71/75 care about. But every notes-turn test drives either a READY_FOR_REVIEW outcome or an EXHAUSTED outcome caused by _over_budget() (test_the_notes_turn_is_skipped_once_the_task_is_over_budget), never an EXHAUSTED from a no-progress/attempts-exhausted decision or a GATE_ERROR from an aborted/drifted suite, both of which repair_loop can return without ever tripping the budget guard. Narrowing the condition to `if notes_worth_asking and not _over_budget() and outcome == \"READY_FOR_REVIEW\":` keeps all four notes tests green (they only ever see READY_FOR_REVIEW or the budget-caused EXHAUSTED) while silently dropping the notes turn on exactly the failure-outcome cases the feature was built to cover.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cell/session.py",
+          "find": "if notes_worth_asking and not _over_budget():",
+          "replace": "if notes_worth_asking and not _over_budget() and outcome == \"READY_FOR_REVIEW\":"
+        }
+      }
+    ]
+  }
+]

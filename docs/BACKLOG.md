@@ -5502,6 +5502,16 @@ passes disagreeing by 1 of 12 is all the evidence there is.
 Until then, no prompt change should be read off a single corpus pass — the same
 instruction item 88 left on the one-fixture harness, now owed by its replacement.
 
+**Status, 2026-09-11: the cheap half is done, the confound half is not.**
+`docs/evidence/2026-09-11-lens-corpus-spread.md` is a `--runs 3` pass under the
+*current* (post-probe) prompt, unchanged from the baseline's. Four samples of
+that one configuration are now on record — the baseline's `3/12` plus this
+pass's per-run `1/12`, `2/12`, `3/12` — a range of `1/12` to `3/12`. That
+establishes the metric's resolution at n=1; it says nothing about the
+pre-probe prompt, so the confound this item opened (whether requiring a probe
+cost adequacy recall) is still open and still needs a pass under pass 1's
+prompt at the same `--runs` to answer.
+
 ---
 
 ## 94. A probe's baseline failures are subtracted and then discarded

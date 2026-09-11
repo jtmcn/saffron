@@ -1,0 +1,66 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.4607505,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/cell/worktree.py",
+        "line": 358,
+        "claim": "`_read_file` returns `runtime.exec_(...).stdout`, which `saffron/cell/runtime.py`'s `_decode` produces via `data.decode(\"utf-8\", errors=\"replace\")` \u2014 any byte in the target file that is not valid UTF-8 is silently turned into U+FFFD before `source_mutated` ever compares it against `mutant.find` or writes it back. `_write_file` (line 376) then re-encodes that already-lossy text with `.encode()` and writes it over the real file for the duration of the witness block, so the tree the test suite runs against can differ from the committed tree in more than the intended find/replace span whenever the file isn't strictly UTF-8. `saffron/mutation.py`'s host mutator deliberately reads and writes raw bytes for exactly this reason (its own docstring: \"anything it does must be undone exactly: byte-identical\"), but the cell path routes through a text decode with a silent substitution instead of raising or preserving bytes. The test fixtures added in `tests/test_worktree.py` are all plain ASCII, so this holds in the tests but not for a target-repo source file containing any non-UTF-8 byte (e.g. a legacy-encoded comment or string literal), where the witness result would reflect incidental corruption rather than the declared mutant.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 1.0906347,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/cell/worktree.py",
+        "line": 394,
+        "claim": "source_mutated's undo (`git checkout HEAD -- <file>`) is justified on the premise that '`committed` guarantees the agent's work is committed before any gate runs', but in `saffron/cell/session.py` the `committed` gate is only a postcondition check run *after* `run_suite` (which houses `witness_gate`/`source_mutated`) inside `_suite` \u2014 see `session.py:1008` (`run_suite(...)`) vs `session.py:1049` (`committed_gate(worktree.dirty_paths(container))`), and `saffron/gates/core/committed.py:6-8` explicitly documents that 'the gates run against `/work` ... so an uncommitted change is live for every gate'. In the ordinary IMPLEMENT-completes-with-some-commits path there is no host checkpoint of a dirty tree before `_run_gates()`/`repair_loop` runs (the only unconditional host checkpoints are in the `commits==0` cut-off/salvage branch and the REPAIR-agent-failed branch). If a mutant's target file also carries the agent's genuine uncommitted edits at that moment, `source_mutated` will overwrite that content with the mutant, and its `finally`-block `git checkout HEAD --` will silently discard those real uncommitted edits along with the mutant \u2014 leaving the tree clean by the time `committed_gate` runs afterward, so the data loss is never reported by the very gate whose docstring this new code leans on for safety. This is currently dormant (no spec in the repo declares a mutant, so `mutate` is never invoked), but the acceptance criteria and docstring assert this as a load-bearing safety property for when the first mutant-declaring spec lands.",
+        "anchored": true,
+        "probe": null
+      },
+      {
+        "lens": "contract",
+        "severity": "note",
+        "file": "saffron/cell/worktree.py",
+        "line": 376,
+        "claim": "`_write_file` reports success/failure purely from the exec call's return code. `saffron/gates/core/witness.py`'s pre-existing `Mutated` contract comment explicitly calls out that, unlike the host mutator, 'a container exec that applies the edit and then loses the connection' is a reachable case where a raise from entry does not actually mean nothing was changed. `_write_file` has no post-write verification (unlike `_restore_source`'s `git status --porcelain` check a few lines above in the same file) to distinguish a genuine write failure from an acknowledgement failure after a successful write, so `witness_gate` could report 'could not apply' over a tree that was, in fact, mutated.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.6648474,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "tests/test_worktree.py",
+        "line": 1049,
+        "claim": "Every `source_mutated`/`_write_file` test in this file (lines 1047-1142) uses `find`/`replace`/file content drawn only from plain identifiers, `<`, `:` and `=` \u2014 never a single quote, double quote, percent sign, or literal backslash. `_write_file`'s own docstring (worktree.py:369-374) justifies the base64 round-trip specifically because 'a mutant's find/replace can hold anything a shell would otherwise misread: a quote, a backslash, a newline' \u2014 exactly the character classes no test here supplies. Replacing the base64 encode/decode with a direct shell interpolation of the raw content would pass every existing test unchanged (none of the fixtures trigger the bug) while corrupting or erroring on any real mutant whose source line contains a quote or backslash, which ordinary Python source does constantly (e.g. `if x == 'foo':`).",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cell/worktree.py",
+          "find": "    encoded = base64.b64encode(content.encode()).decode()\n    script = f\"printf '%s' {shlex.quote(encoded)} | base64 -d > {shlex.quote(path)}\"",
+          "replace": "    script = f\"printf -- '{content}' > {shlex.quote(path)}\""
+        }
+      }
+    ]
+  }
+]

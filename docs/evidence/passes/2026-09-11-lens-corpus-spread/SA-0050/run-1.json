@@ -1,0 +1,57 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.6853095,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 72,
+        "claim": "The exception-path sweep `SELECT run_id FROM runs WHERE run_id > ? AND batch_id IS NULL` is scoped only by the high-water run_id, not by `repo_id`, even though `runs.repo_id` exists and a batch is single-repo. The docstring's claim that 'run_id > high_water is exactly the set... that this call produced' assumes nothing else mints a run while the candidate's call is in flight, but that only holds for this batch's own K=1 loop \u2014 it does not hold against a concurrent `saffron cell` or `replay.py` invocation against the same ledger (the same docstring acknowledges both routinely create batch_id-NULL rows) run against any repo during the (potentially long) window a candidate's runner call is in flight. If that happens, an unrelated run's real spend is silently folded into this batch's `spent_usd_est` and can wrongly trigger or avert the BUDGET stop. Tests only exercise strictly sequential single-process execution, so no gate can see this; adding `AND repo_id = ?` would not fully close it but would at least bound the blast radius to the same repo.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 1.0467933,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 45,
+        "claim": "`_max_run_id` and `_attach_runs_minted_since` (line 71) execute raw SQL against `ledger._db` \u2014 the private sqlite3 connection attribute (`saffron/ledger.py:161`) \u2014 reading and matching on the `runs` table's `run_id`/`batch_id` columns directly, rather than through a public `Ledger` method. This spec's own notes elsewhere insist that anything touching the `runs`/`batches` schema go through a method `SA-0049` adds precisely because `saffron/ledger.py` is forbidden to this spec (see the `create_run`/`attach_run_to_batch` discussion in the task notes); here, lacking a public method for 'the current max run_id' or 'runs newer than X with no batch', the code reaches around that boundary into a leading-underscore attribute instead. `scope` cannot see this because it only diffs changed files, not what a module's code reads from a file it never touched, so a future change to `Ledger`'s internal representation (renaming `_db`, wrapping the connection, changing how `runs` rows are exposed) can silently break `batch.py` with no gate or contract test catching the drift.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.6997848,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 146,
+        "claim": "No test exercises a candidate where the budget check and the breaker check would fire on the same iteration, so nothing proves the stated order (deadline, then budget, then breaker, per the comment at lines 139-141 and \u00a74.2.1). Swapping the budget block (146-149) with the breaker block (151-153) keeps every existing test green \u2014 each test only ever sets up one triggering condition at a time \u2014 yet it would change the recorded stop reason (BUDGET vs INFRASTRUCTURE) whenever both conditions co-occur in production, silently contradicting the documented priority.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/batch.py",
+          "find": "        remaining = budget_usd - ledger.batch_spend(batch_id)\n        if candidate.spec.budget_usd > remaining:\n            ledger.close_batch(batch_id, \"BUDGET\")\n            return \"BUDGET\"\n\n        if consecutive_aborts >= _BREAKER_THRESHOLD:\n            ledger.close_batch(batch_id, \"INFRASTRUCTURE\")\n            return \"INFRASTRUCTURE\"",
+          "replace": "        if consecutive_aborts >= _BREAKER_THRESHOLD:\n            ledger.close_batch(batch_id, \"INFRASTRUCTURE\")\n            return \"INFRASTRUCTURE\"\n\n        remaining = budget_usd - ledger.batch_spend(batch_id)\n        if candidate.spec.budget_usd > remaining:\n            ledger.close_batch(batch_id, \"BUDGET\")\n            return \"BUDGET\""
+        }
+      }
+    ]
+  }
+]
