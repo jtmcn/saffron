@@ -54,7 +54,7 @@ Soundness first: **79**, **69**, **93**, **94**, **80** (~~**83**~~, ~~**85**~~,
 ~~**82**~~ and ~~**81**~~, pulled up from tier 3 as why 69's gate could not be
 declared against safely, are done — 2026-09-08), then **97**. Honesty second:
 **73**, **70**, **45**, **51** (with **49**/**50**, which its fix closes),
-**47**, **46** (with **95**, which compounds it), **40**, ~~**26**~~,
+~~**47**~~, **46** (with **95**, which compounds it), **40**, ~~**26**~~,
 **7** (IMPLEMENT done; lenses open behind **93**), and the remainder of **78**.
 
 Closed since the 2026-09-04 sort, and left in place because their numbers are
@@ -1589,7 +1589,10 @@ human edit.
 
 ## 22. Core gate names are not reserved, and `pr_body` is now a second consumer of that hole
 
-**Status:** open. Found by review of `SA-0011`.
+**Status:** **done**, by hand, 2026-09-10 — the gate-suite stack's second layer
+(item 97). `CORE_GATE_NAMES` in `saffron/repos/policy.py`, held equal to
+`factory:CoreGate` by a test, and a `field_validator` on `Policy.gates` that
+fails preflight on any of them. Found by review of `SA-0011`.
 
 `GateName` at `saffron/repos/policy.py:53` accepts any string matching
 `^[A-Za-z0-9_-]+$`, so nothing stops a repo declaring `gates: {criteria: {...}}`.
@@ -3053,6 +3056,16 @@ asked for, which is correct.
 
 ## 47. Every gate attempt in `events.jsonl` claims zero commits and zero spend, and part 3 is built to read it
 
+**Status:** **done**, by hand, 2026-09-11 — the gate-suite stack's last layer
+(item 97). `Attempt.commits`/`spent_usd_est` are `int | None`/`float | None`,
+required, and `None` on every GATE and REBUT line; only the IMPLEMENT turn
+measures them. The rebuttal's gate check carries the loop's final attempt + 1,
+continuing the gate count — decided over the ledger row's `n` and over keeping
+`1`. The IMPLEMENT row's spend is still the running total, not an increment.
+Every `events.jsonl` written before this carries `0` on its GATE and REBUT
+lines, still indistinguishable from a measurement: a reader of old logs (§6's
+pages) must treat those two fields there as unmeasured.
+
 `cell/session.py` emits an `Attempt` for each GATE and REBUT decision with
 `commits=0, spent_usd_est=0.0` — four call sites — and the rebuttal-time gate
 events additionally hardcode `attempt=1`, which is wrong whenever the repair
@@ -4197,8 +4210,10 @@ retry inside the loop reintroduces the "does the queue change" question the
 **Status: done, 2026-09-08.** The third landed: `phases/package.py`'s
 re-verification now passes `acceptance=` and a `worktree.source_mutated` bound
 to each package cell's own container, on both the baseline and the head suite,
-so the two suites have the same shape and `suite_drift` can compare `witness`
-across the two call sites. Safe to pass only because item 83 landed first: a
+so the two suites have the same shape. (Corrected 2026-09-10: this said
+`suite_drift` could then compare `witness` across the two call sites. Nothing in
+PACKAGE calls `suite_drift`, so no comparison ran; the gate-suite stack named in
+item 97 closes that.) Safe to pass only because item 83 landed first: a
 witness whose test does not exist at the rebased base is `unproven` there rather
 than an abort.
 
@@ -5368,6 +5383,10 @@ behind each.
 
 ## 90. `_drive_cell` has doubled since it was born and is over half its module
 
+**Status:** open. The gate-suite stack (item 97) takes `_suite`'s assembly and
+the `current_tier`/`advisory_gates` pair out of `_drive_cell`; the rest of the
+phase sequence stays here.
+
 **Tier 3 — real, not urgent.** Nothing here fails at 03:00 and the function is
 green. **Found 2026-09-08**, by static analysis and not by a run: this is a
 measurement rather than a gap a live run exposed, and it is filed anyway
@@ -5691,6 +5710,11 @@ pushed, 10 of them over a rewritten history
 task's gates, from the same `base_sha` export, over the new head — and a
 *record*. A merge over a moved head is printed once, by whichever command saw
 it, and the row that becomes `MERGED` keeps no trace of the head it merged at.
+The re-gate's first half is the gate-suite stack begun 2026-09-10: one module
+that runs a gate suite on any tree and returns a suite comparison, adopted by the
+session and then by PACKAGE, so the re-gate is its third caller rather than a
+third hand-built suite (principle 54). The record stays this item's: a
+`gate_results` row needs an attempt or a run, and a re-gate has neither.
 
 **Tier 1 — soundness.** Found naming the delegate (PR #189, 2026-09-10).
 `run-saffron-spec-loop` steps 2c–2e have a delegate check out `saffron/SA-NNNN`

@@ -366,7 +366,7 @@ def test_a_reverted_run_that_could_not_produce_a_result_is_a_skip_not_an_error()
     new tests fail to *import*, pytest exits on a collection error, no line
     matches the gate's `path:line: word: message` regex and none carries the
     `FAILED ` its fallback reads — so the gate reports `error`, not `fail`.
-    Mapped to `error` here it reached `session.aborted_gates`, which ends the
+    Mapped to `error` here it reached `suite.aborted_gates`, which ends the
     attempt: the gate would have killed every spec that ships a module with its
     tests, which is most of them, and this one.
     """

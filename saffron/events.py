@@ -180,14 +180,15 @@ class PhaseStart:
 
 @dataclass(frozen=True, slots=True)
 class Attempt:
-    """One numbered execution that produced at least one commit and let the
-    run continue — the GATE ⇄ REPAIR loop's own numbered attempt
-    (`new_failures`/`decision` set), or an IMPLEMENT/SALVAGE turn that landed
-    commits (left `None`). Cut off *and recovered* is this, not `Terminal`:
-    that branch has commits and the run goes on.
+    """One numbered execution that let the run continue: an IMPLEMENT/SALVAGE
+    turn that landed commits, which measures `commits`/`spent_usd_est`, or a
+    gate suite judged in GATE ⇄ REPAIR or re-run after REBUT
+    (`new_failures`, and `decision` in the loop), which measures neither and
+    leaves both `None`. Cut off *and recovered* is this, not `Terminal`: that
+    branch has commits and the run goes on.
 
     `aborted`/`drift` are the loop's own two ways of distrusting a suite
-    mid-attempt — `session.aborted_gates`/`suite_drift`, both already
+    mid-attempt — `suite.aborted_gates`/`suite_drift`, both already
     `list[str]` at the call site. Named apart from `Baseline.aborted`: that one
     means the toolchain was already broken before an agent ran; these mean it
     broke, or moved, between two suites of the same attempt."""
@@ -196,10 +197,14 @@ class Attempt:
     spec_id: str
     # CONTEXT.md: "'Attempt 3' without a phase is ambiguous — name both."
     phase: Phase
+    # On a gate-suite line this counts gate suites in the task, so REBUT's
+    # re-run continues the loop's count rather than restarting at 1 (item 47).
     attempt: int
-    commits: int
+    # `None`, never `0`, where nothing was measured: a GATE or REBUT line knows
+    # neither the commits nor the spend (item 47).
+    commits: int | None
     # `_est` travels with any stored figure (DESIGN.md §4.1).
-    spent_usd_est: float
+    spent_usd_est: float | None
     new_failures: int | None = None
     decision: Literal["green", "no-progress", "exhausted", "repair"] | None = None
     aborted: tuple[str, ...] = ()
@@ -546,6 +551,8 @@ def describe(event: Event) -> str:
             )
         if event.new_failures is not None:
             return f"gates: {event.new_failures} new failures after the rebuttal"
+        if event.commits is None or event.spent_usd_est is None:
+            return f"{event.phase}: attempt {event.attempt}"
         return f"IMPLEMENT: {event.commits} commit(s), ${event.spent_usd_est:.2f} spent"
 
     if isinstance(event, GateResult):

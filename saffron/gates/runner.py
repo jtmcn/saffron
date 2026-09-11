@@ -316,7 +316,7 @@ def run_suite(
     result does (§5.4.1). `mutate` is the one thing that turns it on: omitted,
     `witness` is left out of the suite exactly as it was before this function
     knew about it — no behaviour change for a caller that does not ask for it.
-    Two production callers supply one today, `session._suite` and
+    Two production callers supply one today, `suite.GateSuite` and
     `package.reverify`, and both pass `acceptance` beside it; the sentence
     here once said no production caller could, which `SA-0061` falsified and
     `docs/BACKLOG.md` item 75 records.

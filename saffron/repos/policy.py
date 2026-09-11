@@ -13,13 +13,29 @@ from pathlib import Path
 from typing import Annotated
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from saffron.gates.core.scope import matches
 
 # A gate name reaches a filesystem path and then an exec, so it is constrained
 # the way Spec.id is: no separator, nothing that climbs out of .saffron/gates.
 GateName = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]+$")]
+
+# Core's names, never a repo's: a declared `criteria` shadowed the host's own
+# result (item 22). A test holds this equal to factory:CoreGate.
+CORE_GATE_NAMES = frozenset(
+    {
+        "scope",
+        "size",
+        "secrets",
+        "integrity",
+        "census",
+        "committed",
+        "criteria",
+        "revert",
+        "witness",
+    }
+)
 
 
 class PolicyError(ValueError):
@@ -56,6 +72,17 @@ class Policy(BaseModel):
     envelope_default: list[str] = Field(default_factory=list)
     integrity: IntegrityPatterns = Field(default_factory=IntegrityPatterns)
     thread_env: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("gates")
+    @classmethod
+    def _no_core_gate_names(
+        cls, gates: dict[str, GateDeclaration]
+    ) -> dict[str, GateDeclaration]:
+        if taken := sorted(CORE_GATE_NAMES & gates.keys()):
+            raise ValueError(
+                f"{', '.join(taken)}: a core gate's name, which a repo cannot declare"
+            )
+        return gates
 
     def gate_executables(self, repo_dir: Path) -> dict[str, Path]:
         """Declared gates in declaration order, mapped to their executables."""

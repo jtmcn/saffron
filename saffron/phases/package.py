@@ -12,20 +12,21 @@ a branch this module just created.
 
 from __future__ import annotations
 
+import contextlib
+import copy
 import json
 import re
 import subprocess
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 
 from saffron.cell.worktree import DIFF_FLAGS
 from saffron.events import Event, EventLog, PhaseStart, describe
-from saffron.gates.baseline import NewFailure
-from saffron.gates.contract import GateResult, split_lines
-from saffron.intake import Criterion
+from saffron.gates.contract import split_lines
+from saffron.gates.suite import CellTree, GateSuite, SuiteComparison
+from saffron.intake import Spec
 from saffron.phases.rebut import sustained_blockers, unkept_fixes
 from saffron.phases.review import anchored_concerns
 from saffron.report import index as index_report
@@ -454,49 +455,43 @@ def reverify(
     policy,
     gates_dir: Path,
     image: str,
-    acceptance: Sequence[Criterion],
-) -> tuple[list[NewFailure], list[GateResult]]:
-    """Run the suite on the packaged commit, in a cell. Returns the new
-    failures *and* the head results, because the body's gate table has to show
-    the run its own sentence claims: `_verification` says "re-run on the
-    packaged commit", and rendering `outcome.gates` there would print durations
-    and summaries from the cell's run at `base_sha`.
+    spec: Spec,
+) -> SuiteComparison:
+    """The whole gate suite on the packaged commit, judged against a fresh
+    baseline at `new_base_sha`, each in its own gate-only cell (§5.7). The
+    comparison's head run is what the body's gate table shows: `_verification`
+    says "re-run on the packaged commit", and `outcome.gates` is the cell's.
 
     **Never host-side.** Exec'ing a gate on the host is the control plane
     executing model-authored code — the one thing §2 says it never does. Both
     runs read their gates from the caller's `gates_dir`, which is exported from
     the default branch even when `new_base_sha` is a parent's head: the two
-    suites subtracted below come from one set of executables, and the patch's
-    own `.saffron/gates/*` are never run.
+    suites come from one set of executables, and the patch's own
+    `.saffron/gates/*` are never run.
 
     Twice, because the base moved: the old baseline describes a tree that no
-    longer exists, and comparing against it would charge this task with the
-    default branch's own drift. So a fresh baseline at `new_base_sha`, the head
-    suite at `packaged_sha`, and the usual subtraction (§4.4 steps 2-3).
-
-    `acceptance` is passed through for the same reason `session._suite` passes
-    it: without it — and without a `mutate` — `run_suite` leaves `witness` out
-    of the suite entirely, so the two suites differ in *shape* and
-    `suite_drift` has nothing to compare across the two call sites (item 71).
-    Required rather than defaulted, for the reason `CLAUDE.md` gives for cell
-    creation's `network`/`env`: an omission here is silent, `suite_drift`
-    compares head against base *within* one call and so sees both suites lose
-    `witness` together, and a caller that forgets is item 71 all over again.
-    A witness whose test does not exist at `new_base_sha` is `unproven` there
-    rather than an abort, which is item 83's fix and is what makes passing this
-    here safe.
+    longer exists (§4.4 steps 2-3). The suite is `GateSuite`, the one the
+    cell's attempts were judged by, so the two cannot differ in shape (item
+    71, principle 54). An errored gate or drift between the two suites is
+    infrastructure and raises; only new failures are the task's.
     """
     from saffron.cell import runtime, worktree
-    from saffron.cell.session import aborted_gates
-    from saffron.gates import runner
-    from saffron.gates.baseline import subtract_baseline
 
-    results = {}
-    for label, sha in (("baseline", new_base_sha), ("head", packaged_sha)):
-        # packaged_sha, not the loop's `sha`: new_base_sha is a tree many
-        # concurrent tasks share — today's default-branch head, or one parent's
-        # head for all its children (DESIGN.md N4). Keying on it would let two
-        # tasks collide and tear down each other's live cell.
+    suite = GateSuite(
+        gates=policy.gate_executables(Path(worktree.GATES_MOUNT)),
+        spec=spec,
+        policy=policy,
+        # The diff a reviewer reads: the packaged commit over the tree it
+        # merges onto, not over the tree the cell started from.
+        diff_base=new_base_sha,
+    )
+
+    @contextlib.contextmanager
+    def _gate_cell(label: str, sha: str) -> Iterator[CellTree]:
+        # packaged_sha, not `sha`: new_base_sha is a tree many concurrent tasks
+        # share — today's default-branch head, or one parent's head for all its
+        # children (DESIGN.md N4). Keying on it would let two tasks collide and
+        # tear down each other's live cell.
         volume = f"saffron-pkg-{label}-{packaged_sha[:12]}"
         container = f"saffron-pkg-{label}-{packaged_sha[:12]}"
         network = f"{container}-net"
@@ -528,34 +523,37 @@ def reverify(
             # `events.FINDINGS[0]`'s outcome line in `cell/session.py`: a
             # direct, unconditional `print`, never routed through `emit`.
             print(f"re-verify: {label} suite at {sha[:12]}")
-            # Gate paths are cell-side (`/gates/.saffron/gates/...`); `cwd` is
-            # a host path that `CellExecutor` ignores. Same shape as the
-            # session's suite — matched deliberately, so the two cannot drift
-            # in how they name a gate.
-            results[label] = runner.run_suite(
-                policy.gate_executables(Path(worktree.GATES_MOUNT)),
-                cwd=mirror,
-                executor=runner.CellExecutor(container),
-                acceptance=acceptance,
-                # Bound to *this* cell's container, the way `session._suite`
-                # binds it to its own: a mutator pointed at any other tree
-                # would edit something this suite is not judging.
-                mutate=partial(worktree.source_mutated, container),
-            )
-            # error != fail (§5.4): a gate that broke must abort the package,
-            # not net to an empty diff against an equally-broken baseline.
-            if broken := aborted_gates(results[label]):
-                raise PackageError(
-                    f"{label} suite at {sha[:12]}: {', '.join(broken)} errored "
-                    "rather than ran — infrastructure, not a task defect"
-                )
+            # `cwd` is a host path `CellExecutor` ignores; the gate paths are
+            # cell-side (`/gates/.saffron/gates/...`).
+            yield CellTree(container, cwd=mirror)
         finally:
             runtime.remove_container(container)
             runtime.remove_volume(volume)
             runtime.remove_volume(f"{volume}-state")
             runtime.remove_network(network)
 
-    return subtract_baseline(results["head"], results["baseline"]), results["head"]
+    # error != fail (§5.4): a gate that broke must abort the package, not net
+    # to an empty diff against an equally-broken baseline.
+    with _gate_cell("baseline", new_base_sha) as tree:
+        baseline = suite.baseline(tree)
+    if baseline.aborted:
+        raise PackageError(
+            f"baseline suite at {new_base_sha[:12]}: {', '.join(baseline.aborted)} "
+            "errored rather than ran — infrastructure, not a task defect"
+        )
+    with _gate_cell("head", packaged_sha) as tree:
+        comparison = suite.against(tree, baseline)
+    if comparison.aborted:
+        raise PackageError(
+            f"head suite at {packaged_sha[:12]}: {', '.join(comparison.aborted)} "
+            "errored rather than ran — infrastructure, not a task defect"
+        )
+    if comparison.drift:
+        raise PackageError(
+            f"the suites at {new_base_sha[:12]} and {packaged_sha[:12]} drifted "
+            f"({'; '.join(comparison.drift)}) — infrastructure, not a task defect"
+        )
+    return comparison
 
 
 @dataclass
@@ -791,25 +789,24 @@ def package(
             # policy above was read from — one commit, both halves. The record
             # stands across that raise on purpose: it is what re-verification
             # ran under, not what it concluded.
-            new, gates = reverify(
+            comparison = reverify(
                 mirror=mirror,
                 packaged_sha=pushed,
                 new_base_sha=target_head,
                 policy=policy,
                 gates_dir=gates_dir,
                 image=image,
-                acceptance=spec.acceptance,
+                spec=spec,
             )
-            verified_on = "packaged"
-            # The same advisory rule the repair loop applies, for the same
-            # reason: a `blocking: false` gate the loop was told to ignore must
-            # not come back as MERGE_FAILED one phase later. Unreachable until
-            # `blocking` gained a reader — before that the task went EXHAUSTED
-            # and never reached PACKAGE at all.
-            new = [
-                failure for failure in new if failure.gate not in outcome.advisory_gates
-            ]
-            if new:
+            verified_on, gates = "packaged", comparison.run.results
+            # The body and the queue line report the tier the verifying suite
+            # ran at: §5.6 elevates on the diff judged, and after a rebase that
+            # is the packaged one. Its advisory failures are already excluded.
+            # A copy, so the caller's outcome keeps the cell's own answer.
+            outcome = copy.copy(outcome)
+            outcome.effective_risk = comparison.run.effective_risk
+            outcome.advisory_gates = sorted(comparison.run.advisory_gates)
+            if new := comparison.new_failures:
                 _emit_package(f"{len(new)} new failures against {target_branch}")
                 return _finish(
                     ledger,

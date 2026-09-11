@@ -95,8 +95,9 @@ _ONE_OF_EACH = [
         spec_id="SA-0029",
         phase="GATE",
         attempt=1,
-        commits=2,
-        spent_usd_est=1.5,
+        # Unmeasured on a gate attempt: `None` must survive the wire (item 47).
+        commits=None,
+        spent_usd_est=None,
         new_failures=0,
         decision="green",
     ),
@@ -232,8 +233,15 @@ def test_agent_carries_a_parsed_dict_verbatim(tmp_path):
     assert loaded.raw is False
 
 
-def test_on_disk_shape_is_pinned_by_a_hand_written_line(tmp_path):
-    """Pinned by a hand-written line, not by the writer's own output."""
+@pytest.mark.parametrize(
+    ("commits", "spent"),
+    [(0, 0.0), (None, None)],
+    ids=["before-item-47", "since-item-47"],
+)
+def test_on_disk_shape_is_pinned_by_a_hand_written_line(tmp_path, commits, spent):
+    """Pinned by hand-written lines, not by the writer's own output: both shapes
+    a GATE line has had — the unmeasured `0` written before item 47, which old
+    logs still carry and must still parse, and `null` since."""
     events_path = tmp_path / "events.jsonl"
     events_path.write_text(
         json.dumps(
@@ -243,8 +251,8 @@ def test_on_disk_shape_is_pinned_by_a_hand_written_line(tmp_path):
                 "spec_id": "SA-0029",
                 "phase": "GATE",
                 "attempt": 1,
-                "commits": 2,
-                "spent_usd_est": 1.5,
+                "commits": commits,
+                "spent_usd_est": spent,
                 "new_failures": 0,
                 "decision": "green",
             }
@@ -257,8 +265,8 @@ def test_on_disk_shape_is_pinned_by_a_hand_written_line(tmp_path):
         spec_id="SA-0029",
         phase="GATE",
         attempt=1,
-        commits=2,
-        spent_usd_est=1.5,
+        commits=commits,
+        spent_usd_est=spent,
         new_failures=0,
         decision="green",
     )
@@ -578,8 +586,8 @@ _CASES: list[tuple[Event, str]] = [
             spec_id="x",
             phase="GATE",
             attempt=1,
-            commits=0,
-            spent_usd_est=0.0,
+            commits=None,
+            spent_usd_est=None,
             aborted=("tests",),
         ),
         "gates: ['tests'] errored — infrastructure, not the task",
@@ -590,8 +598,8 @@ _CASES: list[tuple[Event, str]] = [
             spec_id="x",
             phase="GATE",
             attempt=1,
-            commits=0,
-            spent_usd_est=0.0,
+            commits=None,
+            spent_usd_est=None,
             drift=("tests: pass->skip",),
         ),
         "gates: ['tests: pass->skip'] — distrusting the subtraction",
@@ -602,8 +610,8 @@ _CASES: list[tuple[Event, str]] = [
             spec_id="x",
             phase="GATE",
             attempt=2,
-            commits=0,
-            spent_usd_est=1.0,
+            commits=None,
+            spent_usd_est=None,
             new_failures=1,
             decision="repair",
         ),
@@ -615,8 +623,8 @@ _CASES: list[tuple[Event, str]] = [
             spec_id="x",
             phase="REBUT",
             attempt=1,
-            commits=0,
-            spent_usd_est=1.0,
+            commits=None,
+            spent_usd_est=None,
             new_failures=0,
         ),
         "gates: 0 new failures after the rebuttal",
@@ -631,6 +639,19 @@ _CASES: list[tuple[Event, str]] = [
             spent_usd_est=1.5,
         ),
         "IMPLEMENT: 3 commit(s), $1.50 spent",
+    ),
+    (
+        # Nothing measured and no gate fields: the fallthrough must not print
+        # "None commit(s)" or raise on formatting a missing figure.
+        Attempt(
+            timestamp=1.0,
+            spec_id="x",
+            phase="IMPLEMENT",
+            attempt=1,
+            commits=None,
+            spent_usd_est=None,
+        ),
+        "IMPLEMENT: attempt 1",
     ),
     (
         GateResult(
@@ -1077,8 +1098,8 @@ _JOINED: tuple[tuple[Event, str], ...] = (
             spec_id="x",
             phase="GATE",
             attempt=1,
-            commits=0,
-            spent_usd_est=0.0,
+            commits=None,
+            spent_usd_est=None,
             new_failures=0,
             decision="green",
         ),
@@ -1090,8 +1111,8 @@ _JOINED: tuple[tuple[Event, str], ...] = (
             spec_id="x",
             phase="GATE",
             attempt=1,
-            commits=0,
-            spent_usd_est=0.0,
+            commits=None,
+            spent_usd_est=None,
             new_failures=1,
             decision="repair",
         ),
@@ -1103,8 +1124,8 @@ _JOINED: tuple[tuple[Event, str], ...] = (
             spec_id="x",
             phase="GATE",
             attempt=2,
-            commits=0,
-            spent_usd_est=0.0,
+            commits=None,
+            spent_usd_est=None,
             new_failures=1,
             decision="no-progress",
         ),

@@ -295,7 +295,7 @@ def run_task(
         branch=f"saffron/{spec.id}",
         base_sha=base.base_sha,
         touches=spec.touches,
-        spec_type=spec.type,
+        spec_type=spec.spec_type,
         body=spec.body,
         forbidden=spec.forbidden,
         acceptance=spec.acceptance,

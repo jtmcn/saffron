@@ -1054,8 +1054,13 @@ package is verified against declares the gates it is verified with, exactly as
 change under the declaration it was actually measured with. The base having moved also invalidates the
 baseline, so the gate-only cell runs the suite twice — at the new default-branch
 head for a fresh baseline, and at the packaged commit — and subtracts as always.
-New failures are `MERGE_FAILED`: the change did not survive contact with today's
-main.
+It is the whole gate suite, core gates included, assembled by the one module the
+cell's attempts were judged by, so the two cannot differ in shape (principle 54).
+Every diff-reading gate measures from the new head, because that is the diff a
+reviewer reads; the tier is computed afresh from it (§5.6), and the pull request
+reports that tier. Drift between the two suites is infrastructure, exactly as an
+errored gate is. New failures are `MERGE_FAILED`: the change did not survive
+contact with today's main.
 
 **Two measured `git apply --3way` hazards** (git 2.50.1), both of which break
 the obvious implementation:

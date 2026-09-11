@@ -1,6 +1,6 @@
 """Where the vocabulary and the shipped code both close a set, they close it the same.
 
-Two sets are closed in both places. `Severity` is a `Literal` in
+Three sets are closed in both places. `Severity` is a `Literal` in
 `saffron/agents/findings.py`, so a severity declared in the vocabulary that the
 code cannot represent is a run record that cannot be written — pydantic rejects
 it. `BatchStopReason` is closed *twice* on the code side — a `Literal` in
@@ -9,9 +9,12 @@ because they can drift from each other as easily as from the vocabulary.
 
 Core gates were once excluded here on the grounds that they "have no Python
 registry (they are discovered)". That was true of the registry and false of the
-set: `saffron/gates/core/` is a directory, and reading it is what the last test
-below does. The sentence cost three pull requests with `witness` built and
-undeclared (docs/BACKLOG.md item 72). The terminal states the code names do
+set: `saffron/gates/core/` is a directory, and reading it is what
+`test_every_core_gate_that_exists_is_declared_in_the_vocabulary` does. The
+sentence cost three pull requests with `witness` built and undeclared
+(docs/BACKLOG.md item 72). The set is closed a second time as
+`policy.CORE_GATE_NAMES`, the names a repo may not declare (item 22), and held
+equal to the vocabulary so a gate is reserved before it is built. The terminal states the code names do
 still fall through to a documented default rather than a raise, so they are not
 a closed set on the code side and are not checked here.
 
@@ -28,6 +31,7 @@ from ontology_paths import NS, ONTOLOGY, VOCABULARY
 from saffron.agents.findings import Severity
 from saffron.batch import StopReason
 from saffron.ledger import SCHEMA
+from saffron.repos.policy import CORE_GATE_NAMES
 
 
 def _declared(class_name: str) -> set[str]:
@@ -82,7 +86,7 @@ def test_the_stop_reasons_the_ledger_will_store_are_the_ones_the_vocabulary_decl
     )
 
 
-# `saffron/gates/core/` has no registry object — `session._suite` imports the
+# `saffron/gates/core/` has no registry object — `saffron/gates/suite.py` imports the
 # gates by name — but the directory is a closed set all the same. Treating it as
 # one is what this file previously declined to do, and `witness` shipped built
 # and undeclared for three pull requests as a result (docs/BACKLOG.md item 72).
@@ -124,4 +128,14 @@ def test_every_core_gate_that_exists_is_declared_in_the_vocabulary():
         "catch. Declare the gate, give it a blocking level in "
         "factory:CoreGateBlockingShape (or factory:SizeTierShape if a risk tier "
         "moves it), and run `uv run python -m ontology.render`."
+    )
+
+
+def test_the_names_a_policy_may_not_declare_are_the_core_gates_declared():
+    """Item 22. Equality, unlike the subset above: `secrets` is reserved before it
+    is built, or a repo could claim the name first."""
+    assert _declared("CoreGate") == CORE_GATE_NAMES, (
+        "factory:CoreGate and saffron/repos/policy.py's CORE_GATE_NAMES disagree. "
+        "A core gate missing there is a name a repo can declare and shadow; the "
+        "generator cannot reach Python, so this is a hand edit in policy.py."
     )

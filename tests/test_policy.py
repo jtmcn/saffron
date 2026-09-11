@@ -136,6 +136,20 @@ def test_a_gate_name_that_climbs_out_of_the_gates_dir_is_a_policy_error(tmp_path
         load_policy(repo)
 
 
+@pytest.mark.parametrize("name", ["criteria", "census", "scope"])
+def test_a_repo_gate_named_for_a_core_gate_is_a_policy_error(tmp_path, name):
+    """Item 22: a repo gate named `criteria` reporting `pass` ticked every PR box
+    on the re-verify path, and `{criteria: {blocking: false}}` made the core
+    gate advisory. The name is core's, so the repo cannot declare it."""
+    repo = write_repo(
+        tmp_path,
+        policy_text=f"gates:\n  {name}: {{ blocking: false }}\n",
+        gates=(name,),
+    )
+    with pytest.raises(PolicyError, match="core gate"):
+        load_policy(repo)
+
+
 def test_a_spec_declared_elevated_risk_stays_elevated():
     """§5.6's first clause: the spec's own word is enough, with no diff at all."""
     assert effective_risk("elevated", [], []) == "elevated"

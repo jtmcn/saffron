@@ -271,7 +271,7 @@ def revert_gate(
         )
     if reverted_result.status not in ("pass", "fail"):
         # **Not `error`, and this is the whole gate's usability.** `error` ends
-        # the attempt through `session.aborted_gates` — so mapping this here
+        # the attempt through `suite.aborted_gates` — so mapping this here
         # killed the task in the gate's own canonical case. Measured: a spec
         # that lands a module and its tests together has its module removed by
         # `_revert_source`, the tests then fail to *import*, and this repo's

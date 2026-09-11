@@ -151,7 +151,9 @@ _Avoid_: "stage", "step", "mode".
 
 **Attempt**: One numbered execution of a phase. Attempts are bounded on five axes —
 turns, spend, idle, completion, and wall clock. "Attempt 3" without a phase is
-ambiguous — name both.
+ambiguous — name both. A gate suite's number is the one exception: it counts the
+gate suites judged in a task, so the suite re-run after REBUT continues the
+repair loop's count — attempt 3, labelled REBUT, after a loop that reached 2.
 _Avoid_: "iteration", "round", "pass", "retry", "try".
 
 **Plan checkpoint**: The `plan.json` write and host-side validation that opens the
@@ -273,6 +275,15 @@ baseline subtracts and what `suite_drift` compares.
 
 _Avoid_: "gate run" for the suite either. One gate's execution is a **gate result**;
 every gate's is a **gate suite**; neither is a "run".
+
+**Suite comparison**: What judging a head gate suite against its baseline yields —
+one of three things, checked in this order: a gate `error`ed, and whatever ran
+the suite aborts — an attempt, or a package; the suites **drifted** (a gate
+stopped running, or its `tool` changed), so no subtraction is to be trusted; or
+the blocking new failures that remain.
+_Avoid_: "verdict" — that is the critic's confirm-or-withdraw of a finding.
+_Avoid_ also "the subtraction" for the whole: the subtraction produces only the
+third outcome, and it is not even attempted when either of the first two holds.
 
 **Status**: A gate result is `pass`, `fail`, `skip`, or `error`.
 - `skip` — the repo declares no such gate. Not a failure; nothing is wrong.
