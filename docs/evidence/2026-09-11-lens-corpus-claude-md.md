@@ -60,9 +60,10 @@ Per run, each scored alone: 1/10 · 4/12 · 4/12 graded. The headline counts a d
 
 SA-0054's run 1 was dropped: its `contract` lens hit the 30-turn ceiling
 (`error_max_turns/max_turns` after 31 turns, no output), and `score_pass` drops an errored
-run rather than scoring it as a miss. That leaves SA-0054's two declared defects at `k/2`
-throughout the table above, and run 1's own per-run total at a denominator of 10, not 12 —
-`SA-0054` contributes nothing to that slice.
+run rather than scoring it as a miss. That leaves SA-0054's two declared defects at `k/2` in
+the Seen and Graded columns of the table above — its Anchored blockers column still lists all
+three runs (`2, 1, 1`), since run 1's surviving lenses are counted there — and run 1's own
+per-run total at a denominator of 10, not 12 — `SA-0054` contributes nothing to that slice.
 
 This is not the first time this exact fixture has hit this exact ceiling.
 `docs/evidence/2026-09-09-lens-corpus-baseline.md`'s Deviations §1 records the baseline's
@@ -124,11 +125,11 @@ The ranges overlap, so the verdict is **no measurable difference at n=3**.
   the same denominator shift as `parent-branch-unpinned`, from the same dropped run, with the
   same `0` numerator both times, so it is not counted as a content move here. Every other
   row — seven of twelve — is unchanged in both `Seen` and `Graded` between the two tables.
-- The best-of-3 headlines (`3/12` seen+graded in the spread pass's table, `6/12` seen+graded
-  here) are the same depth, `--runs 3` on both sides, so they compare like for like as a pair.
-  They are still best-of-*n*, though, and the decision rule above is written on the per-run
-  totals, not the headline — the headline moving is not itself evidence for the rule's
-  verdict.
+- The best-of-3 headlines (`3/12` graded, `5/12` seen, in the spread pass's table; `6/12`
+  graded and seen here) are the same depth, `--runs 3` on both sides, so they compare like for
+  like as a pair. They are still best-of-*n*, though, and the decision rule above is written on
+  the per-run totals, not the headline — the headline moving is not itself evidence for the
+  rule's verdict.
 - The two passes' vacuity-probe totals — 16 of 22 surviving in the spread pass, 14 of 20 here
   — count different probe sets: a probe is authored by the adequacy lens fresh on every run,
   so `--runs 3` twice files two different sets of edits, not the same 22 replayed. These two
@@ -168,6 +169,12 @@ git diff --stat a92571d d1d3aae -- saffron/agents/prompts saffron/phases/review.
 
 produces no output — no lines changed in any of those paths between the two commits. What
 moved on `main` in that window did not touch what this pass is scoring.
+
+That is `main`'s window, not the one that matters for comparing against the spread pass, which
+is from the spread pass's code to this pass's code. #199 (`fix(session): a hook refusing the
+repair checkpoint orphaned a task the next suite should have judged`) is the one non-prompt
+change in that narrower window, and it touches only `_repair`'s host checkpoint in
+`saffron/cell/session.py` — REPAIR, which the corpus never runs.
 
 ## Next
 

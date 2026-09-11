@@ -5,9 +5,10 @@ context, and declares the defects a critic lens should raise against it. The
 frozen files in each directory are the inputs a scoring pass actually reads.
 
 What makes them trustworthy is a test: every fixture's `diff.patch`,
-`spec_body.md` and `context.md` must reproduce from git at the `base_sha` and
-`head_sha` its own `fixture.toml` declares. A fixture that cannot reproduce its
-range fails loudly rather than grading a lens against a tree nobody reviewed.
+`spec_body.md`, `context.md` and `claude.md` must reproduce from git at the
+`base_sha` and `head_sha` its own `fixture.toml` declares. A fixture that
+cannot reproduce its range fails loudly rather than grading a lens against a
+tree nobody reviewed.
 
 **That test needs commits which are not reachable from `main`.** Five of the
 eight pull requests were squash-merged, so their branch commits are referenced by

@@ -100,8 +100,9 @@ of a night nobody watched; **40** merges a diff over a ceiling it passed;
 because item numbers are cited; **95** is what that fix left open — the refusal
 reaches a terminal and never the ledger; **7** is done (`fix(review): no lens
 was shown the invariants it judged a diff against`, 2026-09-11,
-`docs/evidence/2026-09-11-lens-corpus-spread.md`) and its number stays listed
-too.
+`docs/evidence/2026-09-11-lens-corpus-spread.md`, beside
+`docs/evidence/2026-09-11-lens-corpus-claude-md.md`) and its number stays
+listed too.
 
 ### Tier 2 — the morning after
 
@@ -5534,7 +5535,11 @@ pass's per-run `1/12`, `2/12`, `3/12` — a range of `1/12` to `3/12`. That
 establishes the metric's resolution at n=1; it says nothing about the
 pre-probe prompt, so the confound this item opened (whether requiring a probe
 cost adequacy recall) is still open and still needs a pass under pass 1's
-prompt at the same `--runs` to answer.
+prompt at the same `--runs` to answer. The lens prompt now also carries
+`CLAUDE.md` (item 7), so these four samples describe a configuration that is
+no longer current; `docs/evidence/2026-09-11-lens-corpus-claude-md.md` is the
+first sample of the new one, and a future confound pass must compare against
+that record, not this one.
 
 ---
 
