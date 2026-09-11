@@ -70,6 +70,8 @@ These terms have exactly one meaning here. Use them and no synonyms.
 - There is no network except the model API, and no credentials. Do not attempt
   to install anything or reach any service.
 
+{standing_instructions}
+
 ## The paths you are judged against
 
 The host enforces these, not your judgement: `validate_plan` rejects your plan

@@ -1292,6 +1292,8 @@ def _drive_cell(
 
         # The agent runs inside the cell, at /work, on the cell's own key (§5.1).
         context_md = (_SAFFRON_ROOT / "CONTEXT.md").read_text()
+        # From the mirror at base_sha, never /work — item 7, §5.3.
+        claude_md = mirror_ops.file_at(mirror, spec.base_sha, "CLAUDE.md")
         template = (_SAFFRON_PKG / "agents" / "prompts" / "implement.md").read_text()
         system_prompt = context.build_system_prompt(
             "IMPLEMENT",
@@ -1304,6 +1306,7 @@ def _drive_cell(
                 spec.touches, spec.forbidden, policy.protected
             ),
             witnesses=context.witnesses_block(spec.acceptance),
+            standing_instructions=context.standing_instructions(claude_md),
         )
         options = implement.agent_options(
             system_prompt=system_prompt,
