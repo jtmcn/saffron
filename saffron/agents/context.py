@@ -132,8 +132,8 @@ def standing_instructions(claude_md: str | None) -> str:
             "",
             "The target repo's `CLAUDE.md` as it stood at this task's base commit, "
             "read by the host rather than from /work — an edit to the file there "
-            "reaches no session of this task. Where it and the rules above "
-            "disagree, the rules above win: the host enforces those.",
+            "reaches no session of this task. Where it and the other rules in "
+            "this prompt disagree, those rules win: the host enforces them.",
             "",
             claude_md.rstrip(),
         ]
