@@ -1,6 +1,6 @@
 """Where the vocabulary and the shipped code both close a set, they close it the same.
 
-Two sets are closed in both places. `Severity` is a `Literal` in
+Three sets are closed in both places. `Severity` is a `Literal` in
 `saffron/agents/findings.py`, so a severity declared in the vocabulary that the
 code cannot represent is a run record that cannot be written — pydantic rejects
 it. `BatchStopReason` is closed *twice* on the code side — a `Literal` in
@@ -9,9 +9,12 @@ because they can drift from each other as easily as from the vocabulary.
 
 Core gates were once excluded here on the grounds that they "have no Python
 registry (they are discovered)". That was true of the registry and false of the
-set: `saffron/gates/core/` is a directory, and reading it is what the last test
-below does. The sentence cost three pull requests with `witness` built and
-undeclared (docs/BACKLOG.md item 72). The terminal states the code names do
+set: `saffron/gates/core/` is a directory, and reading it is what
+`test_every_core_gate_that_exists_is_declared_in_the_vocabulary` does. The
+sentence cost three pull requests with `witness` built and undeclared
+(docs/BACKLOG.md item 72). The set is closed a second time as
+`policy.CORE_GATE_NAMES`, the names a repo may not declare (item 22), and held
+equal to the vocabulary so a gate is reserved before it is built. The terminal states the code names do
 still fall through to a documented default rather than a raise, so they are not
 a closed set on the code side and are not checked here.
 
