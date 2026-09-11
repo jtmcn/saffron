@@ -52,6 +52,7 @@ FIXTURE_FILES = (
     "gates.txt",
     "spec_body.md",
     "context.md",
+    "claude.md",
     "fixture.toml",
 )
 
@@ -269,7 +270,7 @@ def _toml_string(value: str) -> str:
 
 
 def recover_fixture(spec_id: str, home: Path, repo: Path) -> dict[str, str]:
-    """The six frozen files' content, keyed by filename — a dict, not a write,
+    """The seven frozen files' content, keyed by filename — a dict, not a write,
     so a dry run costs nothing and `main` owns the filesystem side.
 
     No `[[defects]]` block: the backlog row that names the mutation proving a
@@ -294,6 +295,7 @@ def recover_fixture(spec_id: str, home: Path, repo: Path) -> dict[str, str]:
     spec_body = spec_body_at(repo, base, head, spec_id)
 
     context_md = _git(repo, "show", f"{base}:CONTEXT.md")
+    claude_md = _git(repo, "show", f"{base}:CLAUDE.md")
 
     fixture_toml = (
         f"spec_id = {_toml_string(spec_id)}\n"
@@ -313,5 +315,6 @@ def recover_fixture(spec_id: str, home: Path, repo: Path) -> dict[str, str]:
         "gates.txt": gates_txt,
         "spec_body.md": spec_body,
         "context.md": context_md,
+        "claude.md": claude_md,
         "fixture.toml": fixture_toml,
     }

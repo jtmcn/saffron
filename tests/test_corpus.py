@@ -43,6 +43,7 @@ def one_defect_fixture(sa0062, tmp_path):
         "spec_body.md",
         "gates.txt",
         "context.md",
+        "claude.md",
         "recorded-findings.json",
     ):
         (tmp_path / name).write_text((sa0062.root / name).read_text())
@@ -282,12 +283,13 @@ def test_pinned_diff_survives_a_hostile_git_config(tmp_path, monkeypatch):
 
 
 def test_every_shipped_fixture_s_spec_body_and_context_reproduce_from_git():
-    """Hermetic reproduction of two more frozen inputs, the same way the diff
+    """Hermetic reproduction of three more frozen inputs, the same way the diff
     is reproduced above: `spec_body.md` via `recovery.spec_body_at` (base
     tree, the off-branch fallback, or a disclosed-mutant spec — whichever
-    this fixture needed) and `context.md` via a plain `git show`. Both need
-    only this repo's git history, so a regression in the spec-body fallback
-    fails here rather than shipping silently into a paid lens prompt.
+    this fixture needed) and `context.md`/`claude.md` via a plain `git show`.
+    All three need only this repo's git history, so a regression in the
+    spec-body fallback fails here rather than shipping silently into a paid
+    lens prompt.
 
     `gates.txt` and `recorded-findings.json` are NOT covered here and cannot
     be: both are read from `~/.saffron/batches`, which exists on the machine
@@ -307,6 +309,14 @@ def test_every_shipped_fixture_s_spec_body_and_context_reproduce_from_git():
             check=True,
         ).stdout
         assert context_md == fixture.context_md, fixture.spec_id
+
+        claude_md = subprocess.run(
+            ["git", "show", f"{fixture.base_sha}:CLAUDE.md"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert claude_md == fixture.claude_md, fixture.spec_id
 
 
 def test_every_shipped_fixture_declares_a_non_empty_source():
