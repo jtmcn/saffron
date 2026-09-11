@@ -10,7 +10,7 @@ import subprocess
 import pytest
 
 from saffron.ledger import Ledger
-from saffron.reconcile import IN_FLIGHT_STATES, reconcile
+from saffron.reconcile import IN_FLIGHT_STATES, HeadMoved, reconcile
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def _repo(ledger, origin="https://github.com/jtmcn/saffron.git"):
     return ledger.upsert_repo("saffron", origin, "/m.git", policy_sha="p" * 64)
 
 
-def _task(ledger, repo_id, *, spec_id, state, pr_url=None):
+def _task(ledger, repo_id, *, spec_id, state, pr_url=None, pushed_sha=None):
     run_id = ledger.create_run(repo_id, base_sha="a" * 40)
     task_id = ledger.create_task(
         run_id, spec_id=spec_id, spec_sha="s" * 40, branch=f"saffron/{spec_id}"
@@ -35,6 +35,8 @@ def _task(ledger, repo_id, *, spec_id, state, pr_url=None):
             "UPDATE tasks SET pr_url = ? WHERE task_id = ?", (pr_url, task_id)
         )
         ledger._db.commit()
+    if pushed_sha is not None:
+        ledger.record_push(task_id, pushed_sha)
     return task_id
 
 
@@ -46,7 +48,9 @@ def _state(ledger, task_id):
 
 class _FakeGh:
     """`answers[url]` is the JSON body `gh pr view` would print, or `None`
-    for a `gh` call that fails outright (returncode != 0)."""
+    for a `gh` call that fails outright (returncode != 0). Like real `gh`, it
+    prints only the fields `--json` asked for, so code that forgets to ask for
+    one reads it as absent."""
 
     def __init__(self, answers: dict[str, dict | None]) -> None:
         self.answers = answers
@@ -58,7 +62,9 @@ class _FakeGh:
         answer = self.answers.get(argv[3])
         if answer is None:
             return subprocess.CompletedProcess(argv, 1, "", "not found")
-        return subprocess.CompletedProcess(argv, 0, json.dumps(answer), "")
+        asked = argv[argv.index("--json") + 1].split(",")
+        shown = {key: value for key, value in answer.items() if key in asked}
+        return subprocess.CompletedProcess(argv, 0, json.dumps(shown), "")
 
 
 # This repo's own six recorded PR-carrying tasks, not invented: the ids and
@@ -181,6 +187,95 @@ def test_a_merged_task_never_moves_again(ledger):
 
     assert gh.calls == []
     assert _state(ledger, task_id) == "MERGED"
+
+
+# --- A head past what PACKAGE pushed (`docs/BACKLOG.md` item 97) ---
+
+_PUSHED = "a" * 40
+_FIXED = "b" * 40
+
+
+def test_a_head_other_than_what_package_pushed_is_reported_and_moves_no_state(
+    ledger,
+):
+    """A review fix committed after PACKAGE reached no gate, critic or
+    record. Reconcile is the one reader already asking GitHub about the pull
+    request, so it names the gap — and writes nothing, because the row's
+    state is still true."""
+    repo_id = _repo(ledger)
+    url = "https://github.com/jtmcn/saffron/pull/106"
+    task_id = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9301",
+        state="READY_FOR_REVIEW",
+        pr_url=url,
+        pushed_sha=_PUSHED,
+    )
+    gh = _FakeGh({url: {"state": "OPEN", "reviewDecision": None, "headRefOid": _FIXED}})
+
+    result = reconcile(ledger, repo_id, gh=gh)
+
+    assert result.head_moved == [HeadMoved(task_id, _PUSHED, _FIXED)]
+    assert _state(ledger, task_id) == "READY_FOR_REVIEW"
+
+
+def test_a_merge_over_a_moved_head_is_reported_at_the_one_chance_there_is(ledger):
+    """`MERGED` is never asked about again, so the run that sees the merge is
+    the last that can say unjudged commits went in with it."""
+    repo_id = _repo(ledger)
+    url = "https://github.com/jtmcn/saffron/pull/107"
+    task_id = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9302",
+        state="READY_FOR_REVIEW",
+        pr_url=url,
+        pushed_sha=_PUSHED,
+    )
+    gh = _FakeGh(
+        {url: {"state": "MERGED", "reviewDecision": None, "headRefOid": _FIXED}}
+    )
+
+    result = reconcile(ledger, repo_id, gh=gh)
+
+    assert result.merged == [task_id]
+    assert result.head_moved == [HeadMoved(task_id, _PUSHED, _FIXED)]
+
+
+@pytest.mark.parametrize(
+    "pushed, answer",
+    [
+        (_PUSHED, {"headRefOid": _PUSHED}),
+        (_PUSHED, {}),
+        (_PUSHED, {"headRefOid": ""}),
+        (_PUSHED, {"headRefOid": 123}),
+        (None, {"headRefOid": _FIXED}),
+    ],
+    ids=[
+        "head-is-what-was-pushed",
+        "no-head-answered",
+        "empty-head",
+        "head-not-a-string",
+        "no-push-recorded",
+    ],
+)
+def test_a_head_that_cannot_be_compared_is_never_called_moved(ledger, pushed, answer):
+    """Absence of an answer is not a claim, here as everywhere in this module:
+    only two real shas that differ say the head moved."""
+    repo_id = _repo(ledger)
+    url = "https://github.com/jtmcn/saffron/pull/108"
+    _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9303",
+        state="READY_FOR_REVIEW",
+        pr_url=url,
+        pushed_sha=pushed,
+    )
+    gh = _FakeGh({url: {"state": "OPEN", "reviewDecision": None, **answer}})
+
+    assert reconcile(ledger, repo_id, gh=gh).head_moved == []
 
 
 def test_stamp_orphaned_only_fires_when_the_caller_asserts_the_premise(ledger):

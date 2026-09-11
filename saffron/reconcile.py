@@ -31,6 +31,7 @@ import json
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
 from saffron.ledger import Ledger
 
@@ -72,6 +73,16 @@ _BUCKET = {
 }
 
 
+class HeadMoved(NamedTuple):
+    """A pull request whose head is not the commit PACKAGE pushed — review
+    fixes or a restack, judged by no gate, critic or record (`docs/BACKLOG.md`
+    item 97)."""
+
+    task_id: int
+    packaged: str
+    head: str
+
+
 @dataclass
 class ReconcileResult:
     """What one call changed. Task ids, not bare counts, so an operator can
@@ -86,12 +97,15 @@ class ReconcileResult:
     # answer is never recorded as "not merged"; the row is left exactly as it
     # was and its id recorded here.
     unasked: list[int] = field(default_factory=list)
+    # Reported, never written: the row's state is still true, and what the
+    # extra commits did is not this module's to judge.
+    head_moved: list[HeadMoved] = field(default_factory=list)
 
 
 def _pr_status(url: str, gh: GhRunner) -> dict | None:
-    """One pull request's `state` and `reviewDecision`, or `None` on
-    anything that keeps the answer from being trustworthy."""
-    done = gh(["gh", "pr", "view", url, "--json", "state,reviewDecision"])
+    """One pull request's `state`, `reviewDecision` and `headRefOid`, or
+    `None` on anything that keeps the answer from being trustworthy."""
+    done = gh(["gh", "pr", "view", url, "--json", "state,reviewDecision,headRefOid"])
     if done.returncode != 0:
         return None
     try:
@@ -140,6 +154,10 @@ def reconcile(
         if pr is None:
             result.unasked.append(row["task_id"])
             continue
+        # Before the state check: a merge is the last time this row is asked.
+        head, pushed = pr.get("headRefOid"), row["pushed_sha"]
+        if isinstance(head, str) and head and pushed and head != pushed:
+            result.head_moved.append(HeadMoved(row["task_id"], pushed, head))
         new_state = _next_state(pr)
         if new_state is None or new_state == state:
             continue

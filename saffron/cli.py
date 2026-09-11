@@ -884,6 +884,12 @@ def _print_reconcile_summary(result: ReconcileResult) -> None:
             print(f"reconcile: task {task_id} → {label}")
     for task_id in result.unasked:
         print(f"reconcile: task {task_id} could not be asked about")
+    for moved in result.head_moved:
+        print(
+            f"reconcile: task {moved.task_id}'s pull request head differs from what "
+            f"PACKAGE pushed ({moved.packaged[:12]}..{moved.head[:12]}); no gate "
+            "judged that tree"
+        )
     # Silence read identically to "there was nothing to ask about". A run
     # that asked and found every answer unchanged now says which it was.
     if not any(
@@ -893,6 +899,7 @@ def _print_reconcile_summary(result: ReconcileResult) -> None:
             result.changes_requested,
             result.orphaned,
             result.unasked,
+            result.head_moved,
         )
     ):
         print("reconcile: nothing moved")

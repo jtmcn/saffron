@@ -5580,6 +5580,17 @@ record.
 
 ## 97. A delegate's review fixes reach a task's pull request and no gate, critic or record
 
+**Status: the minimum is done, 2026-09-10; the re-gate is open.** `reconcile`
+asks `gh` for `headRefOid` beside `state` and names every pending pull request
+whose head is not the `pushed_sha` PACKAGE recorded, on every command that
+prints a reconcile summary. It writes no state. Measured first: 34 of this
+repo's 38 packaged pull requests merged at a head other than the one PACKAGE
+pushed, 10 of them over a rewritten history
+(`docs/evidence/2026-09-10-review-fixes-past-package.md`). Still owed: the
+task's gates, from the same `base_sha` export, over the new head — and a
+*record*. A merge over a moved head is printed once, by whichever command saw
+it, and the row that becomes `MERGED` keeps no trace of the head it merged at.
+
 **Tier 1 — soundness.** Found naming the delegate (PR #189, 2026-09-10).
 `run-saffron-spec-loop` steps 2c–2e have a delegate check out `saffron/SA-NNNN`
 after PACKAGE, act on the in-cell critic's findings, run `make check` on the host,
