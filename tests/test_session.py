@@ -2202,6 +2202,46 @@ def test_a_repair_turn_cut_mid_edit_gets_a_host_checkpoint_commit(
     assert "checkpoint" in cell.checkpointed[0]
 
 
+def test_a_repair_checkpoint_the_repo_refuses_is_not_an_infrastructure_abort(
+    monkeypatch, tmp_path
+):
+    """Item 34's residual: the salvage path's rule, on the repair loop's own
+    checkpoint. A hook refusing the host commit arrives as `CellRuntimeError`;
+    let out, it ends a task the next gate suite should have judged as
+    `ORPHANED`, charged to nobody (`error` ≠ `fail`)."""
+    failing = Failure(file="a.py", code="E501", message="too long")
+    cell = _stub_the_runtime(monkeypatch, suites=([], _results(failing), []))
+    dirty_reads: list[int] = []
+
+    def _dirty_paths(_container):
+        # Dirty once, right after the repair turn is cut; clean otherwise, so
+        # `committed` does not fail the next suite and bend `suites=` above.
+        if len(cell.turns) == 3 and not dirty_reads:
+            dirty_reads.append(1)
+            return ["scheduler.py"]
+        return []
+
+    def _refused(_container, _message):
+        raise runtime.CellRuntimeError("commit failed: hook refused the commit")
+
+    monkeypatch.setattr("saffron.cell.worktree.dirty_paths", _dirty_paths)
+    monkeypatch.setattr("saffron.cell.worktree.commit_dirty", _refused)
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            implement.AgentFailed("max turns", _turn(cost=0.4)),
+        ],
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    (queued,) = ledger.queue_lines()
+    assert queued["state"] != "ORPHANED"
+    assert any("the host checkpoint failed" in line for line in cell.watched)
+
+
 def test_the_host_stops_spending_at_the_tasks_budget(monkeypatch, tmp_path):
     """I2: `max_budget_usd` is per turn and lives inside the cell. Without a
     host-side sum, a $12 task can spend (2 + max_attempts) x $12."""

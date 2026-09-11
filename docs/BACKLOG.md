@@ -2311,7 +2311,9 @@ stated intent all along, and is true for the first time.
 ## 34. A turn ceiling that fires with zero commits was total loss, and item 18's prompt was not enough
 
 **Status:** **done** — `SA-0028` (PR #87), 2026-09-01. The item's own
-closure paragraph is below.
+closure paragraph is below. Its one residual — the repair loop's own checkpoint
+letting a hook's refusal out as an infrastructure abort — closed by hand
+2026-09-10, on the salvage path's rule and with a test watched failing first.
 
 **Closed by `SA-0028`, 2026-09-01.** Item 18 closed `SA-0005`'s turn-ceiling gap
 by making `max_turns` a real, per-spec, printed ceiling and asking
@@ -2408,7 +2410,8 @@ refuse converted an earned `NOT_IMPLEMENTED` into an infrastructure abort,
 charged to nobody: the salvage path now catches `CellRuntimeError`, says so on
 the watch line, and lets the `commits_ahead` re-measure decide. The same shape
 is still live in the repair loop's own checkpoint, where the tree is not known
-dirty and so is less likely to fire — it needs its own spec. And
+dirty and so is less likely to fire — it needs its own spec (closed by hand
+2026-09-10 instead — see Status). And
 `cut_off_at_turn_ceiling` read `terminal_reason` alone where `run_agent` keys on
 `subtype`; the ledger row carried both, and a result event arriving without the
 one field would have skipped the salvage in silence, which is indistinguishable
