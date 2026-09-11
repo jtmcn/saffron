@@ -47,15 +47,18 @@ acceptance:
       from discovery is only the case that was measured.
     witness: tests/test_cli.py::test_any_raise_resolving_the_queue_still_closes_the_batch_row
   - claim: >-
-      The command exits 2 and says on its own `batch:` line that the queue could
-      not be resolved, carrying the exception's own text. It must not say
-      readiness failed. Readiness passed, and a line naming the wrong step sends
-      the operator to re-check a token and a mirror that were fine.
+      The command exits 2 and says, on a line that starts `batch:`, that the
+      queue could not be resolved, carrying the exception's own text. It must
+      not say readiness failed. Readiness passed, and a line naming the wrong
+      step sends the operator to re-check a token and a mirror that were fine.
+      The witness asserts the line's `batch:` prefix, not only its text:
+      `main`'s catch-all already prints the exception's text at base, on a
+      `saffron:` line.
     witness: tests/test_cli.py::test_a_queue_that_cannot_be_resolved_says_so_on_the_batch_line
   - claim: >-
-      A readiness failure still closes the night the way it does today and
-      names the step that failed.
-    witness: tests/test_cli.py::test_a_readiness_failure_names_the_step_that_failed
+      A readiness failure still leaves an `INFRASTRUCTURE` row with its end
+      time, and still prints `readiness failed at` the step and its detail.
+    witness: tests/test_cli.py::test_an_unready_night_still_leaves_a_row_saying_it_was_attempted
     preserves: true
   - claim: >-
       A failed readiness still scans nothing. The order of the checks is §4.4's,
@@ -105,8 +108,9 @@ width `run_batch` uses for a runner that raises.
 is forbidden here.
 
 **A new stop reason.** A night that cannot resolve its queue never started a
-task, so the machine, not the work, is what was wrong. That is what
-`INFRASTRUCTURE` already means (`CONTEXT.md`, *Batch stop reason*).
+task. `INFRASTRUCTURE` is the stop a failed readiness check already writes
+(`batch.py:137-143`), and it is the only stop reason that says the machine
+rather than the work was wrong.
 
 **`saffron queue`.** The attended preview has no night to record, and exiting 2
 there through `main`'s catch-all is correct.
@@ -116,6 +120,14 @@ there through `main`'s catch-all is correct.
 **This spec creates new code, so its new criteria carry witnesses and no
 mutants.** A guard that does not exist yet has no spelling to pin. The last two
 criteria name tests that already exist and must keep passing unchanged.
+
+**Every new witness must fail with `cli.py` and `batch.py` reverted, not merely
+be missing at base.** The `revert` gate re-runs each new witness against the
+reverted source and blocks any that still pass. Each of the three new tests
+therefore has to observe something only this change produces: the row, or the
+`batch:` line. Import what the tests need inside the test, not at module scope.
+A module-scope import of a name you add makes the reverted run a collection
+error, which `revert` reads as `skip`, and then it checks nothing.
 
 **Two shapes will pass the first two criteria, and only one passes the third.**
 The nearest shape is handing `run_batch` a failed `Readiness` whose `step` names
@@ -127,5 +139,13 @@ available. Take whichever is smaller once the third criterion is met.
 
 **Assert the row through the ledger, not through a mock of `run_batch`.** The
 defect is a missing row, and a test that replaces `run_batch` with a lambda
-cannot see one. Several `tests/test_cli.py` tests monkeypatch `run_batch`, and
-those are the wrong model for these witnesses.
+cannot see one. `main(["--home", …])` creates a real `ledger.db`, and
+`test_an_unready_night_still_leaves_a_row_saying_it_was_attempted` already reads
+`batches` that way. To make resolution raise, monkeypatch `cli._resolve_queue`
+to raise `intake.SpecError`. Building a git fixture without `.saffron/specs/` is
+also acceptable, but it is not needed.
+
+**Two strings assume readiness is the only failure before the loop.** Update
+`_batch`'s docstring, which still says `saffron/batch.py` is forbidden and that a
+readiness failure is the only `INFRASTRUCTURE` whose cause is read back, and
+`_no_candidate_should_run`'s message.

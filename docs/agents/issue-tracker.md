@@ -66,6 +66,21 @@ GitHub issues remain in use only for research/evidence records under
   a spec is when it is written, in `## Notes for the agent`, so a reviewer can
   tell an honest `skip` from a missing mutant.
 
+- **A witness must fail with the source reverted, not merely be missing at
+  base.** `criteria` requires a non-`preserves` witness to be red at base, and a
+  test that does not exist yet is red there by construction, so that check is
+  easy to pass. `revert` is the strict one. It re-runs every declared
+  non-`preserves` witness with the diff's source files reverted, and blocks any
+  that still pass (`saffron/gates/core/revert.py`). So a criterion describing
+  behaviour that is already true at base — "nothing is pushed", "the breaker
+  does not fire" — cannot be witnessed honestly as written. Reword it until its
+  test must observe something only the change produces, or mark it `preserves`
+  and name a test that already exists. Watch the other way round too: a witness
+  module that imports a name the change adds, at module scope, makes the
+  reverted run a collection error, which `revert` reads as `skip`, so the
+  anti-theater gate checks nothing. Found reviewing `SA-0066`–`SA-0073`,
+  2026-09-11, where it had been missed in five of eight specs.
+
 ## Driving a spec
 
 ```

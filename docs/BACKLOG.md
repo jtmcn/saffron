@@ -2947,6 +2947,17 @@ number the system reports as a ceiling and enforces as a suggestion.
 after that stack lands. The batch scan's overlap refusal holds it back until then
 anyway.
 
+**Two things for by hand, found reviewing `SA-0069`, 2026-09-11:**
+- **§5.7 says `pushed_sha` "is written once, by PACKAGE".** `SA-0069` makes that
+  false, and `DESIGN.md` is `protected`. Amend it when that spec lands.
+- **§5.7 step 2 promises more than the green path delivers.** It says a push
+  fails if the branch was moved underneath it, for example "you pushing a fixup
+  by hand". But PACKAGE's lease is `remote_sha(url, branch)`, read at push time,
+  so it guards against a race, not against a branch someone else owns. A
+  re-packaged spec replaces a branch that holds an operator's review fixes.
+  `SA-0069` guards its own push against this by checking the remote head
+  against the spec's recorded pushes. The green path wants the same check.
+
 `SA-0028` closed the door where an implement turn dies on its ceiling with
 *nothing* committed. This is the door beside it: commits exist, gates are red,
 the budget or the attempts are gone, and PACKAGE never runs — so nothing is
@@ -3768,7 +3779,10 @@ the thing `SA-0053` was written to avoid.
 
 ## 63. `describe` renders three agent payload fields unclipped, straight to a terminal
 
-**Status: spec queued with item 61, 2026-09-10 — `SA-0070`, not yet run.**
+**Status: spec queued with item 61, 2026-09-10 — `SA-0070`, not yet run.** It
+covers the `Agent` event only. `Terminal.detail` on a rejected plan and
+`PhaseStart.detail` also carry paths an agent wrote, and they render unclipped
+and unstripped. That is the follow-up, found reviewing `SA-0070` (2026-09-11).
 
 **Tier 3.** Found reviewing `SA-0053` (PR #119). Not a regression — the
 attended terminal has had this exposure since `SA-0029` — but that PR added a
