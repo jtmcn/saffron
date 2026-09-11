@@ -26,7 +26,9 @@ from saffron.ledger import Ledger
 from saffron.preflight import Readiness
 from saffron.scheduler import Candidate
 
-StopReason = Literal["DRAINED", "BUDGET", "UNTIL", "INFRASTRUCTURE"]
+# `INCOMPLETE` is declared ahead of its producer: `SA-0067` makes the loop
+# return it for a night that left a task in flight (backlog item 70).
+StopReason = Literal["DRAINED", "BUDGET", "UNTIL", "INFRASTRUCTURE", "INCOMPLETE"]
 
 # The breaker's own set — deliberately not `scheduler.REQUEUE_STATES`, which
 # answers a different question (what re-queues tomorrow) and contains

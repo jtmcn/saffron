@@ -28,11 +28,11 @@ CREATE TABLE IF NOT EXISTS repos (
 -- text) rather than inventing a second representation. `budget_usd` is known
 -- at start and required; `ended_at` and the running spend estimate are unset
 -- while the batch is still going, so both of those columns are nullable.
--- `status` is one of the four stop reasons — `DRAINED`, `BUDGET`, `UNTIL`,
--- `INFRASTRUCTURE`, one per stop condition (§4.2.1) — and the CHECK is
--- satisfied by NULL, so a still-running batch's row is neither a violation
--- nor a fifth reason. No `concurrency`: §4.2.1 defers it until K has a second
--- position.
+-- `status` is one of the five stop reasons — `DRAINED`, `BUDGET`, `UNTIL`,
+-- `INFRASTRUCTURE`, `INCOMPLETE`, one per stop condition (§4.2.1) — and the
+-- CHECK is satisfied by NULL, so a still-running batch's row is neither a
+-- violation nor a sixth reason. No `concurrency`: §4.2.1 defers it until K has
+-- a second position.
 CREATE TABLE IF NOT EXISTS batches (
     batch_id      INTEGER PRIMARY KEY,
     started_at    TEXT NOT NULL DEFAULT (datetime('now')),
@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS batches (
     budget_usd    REAL NOT NULL,
     spent_usd_est REAL,
     until_ts      TEXT,
-    status        TEXT CHECK (status IN ('DRAINED', 'BUDGET', 'UNTIL', 'INFRASTRUCTURE'))
+    status        TEXT CHECK (status IN ('DRAINED', 'BUDGET', 'UNTIL',
+                                         'INFRASTRUCTURE', 'INCOMPLETE'))
 );
 
 CREATE TABLE IF NOT EXISTS runs (
@@ -216,6 +217,33 @@ class Ledger:
         )
         self._db.commit()
         self._add_gate_result_reference()
+        self._widen_batch_status()
+
+    def _widen_batch_status(self) -> None:
+        """`IF NOT EXISTS` leaves an existing table's CHECK as it was, so a
+        ledger from before `INCOMPLETE` (item 70) refuses the first night to end
+        that way. The same rebuild as `_add_gate_result_reference`, with the
+        definition read out of `SCHEMA` so there is one copy of the CHECK."""
+        sql = self._db.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'batches'"
+        ).fetchone()["sql"]
+        if "'INCOMPLETE'" in sql:
+            return
+        columns = SCHEMA.split("CREATE TABLE IF NOT EXISTS batches")[1].split(");")[0]
+        # Off for the drop: `runs.batch_id` references `batches`.
+        self._db.execute("PRAGMA foreign_keys=OFF")
+        self._db.executescript(
+            f"""BEGIN;
+               CREATE TABLE batches_new {columns});
+               INSERT INTO batches_new
+                   SELECT batch_id, started_at, ended_at, budget_usd,
+                          spent_usd_est, until_ts, status FROM batches;
+               DROP TABLE batches;
+               ALTER TABLE batches_new RENAME TO batches;
+               COMMIT;"""
+        )
+        self._db.execute("PRAGMA foreign_keys=ON")
+        self._db.commit()
 
     def _add_gate_result_reference(self) -> None:
         """`IF NOT EXISTS` cannot add the reference to a table that already
@@ -419,7 +447,7 @@ class Ledger:
         together, then commit. The spend is derived through `batch_spend`
         rather than repeated in SQL, so the close and the reader can never
         become two spellings of one sum that drift apart. A `status` outside
-        §4.2.1's four stop reasons is refused by the CHECK on `batches` — this
+        §4.2.1's five stop reasons is refused by the CHECK on `batches` — this
         surfaces `sqlite3.IntegrityError` rather than swallowing it.
 
         `with self._db:` because of that raise: a failed UPDATE has already had

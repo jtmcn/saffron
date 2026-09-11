@@ -1,3 +1,4 @@
+import re
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
@@ -631,12 +632,12 @@ def test_the_gate_results_table_carries_exactly_the_fields_4_1_names(ledger):
     }
 
 
-def test_a_batch_status_outside_the_four_stop_reasons_is_rejected(ledger):
+def test_a_batch_status_outside_the_five_stop_reasons_is_rejected(ledger):
     """One row per stop condition — `DRAINED`, `BUDGET`, `UNTIL`,
-    `INFRASTRUCTURE` — and nothing else. No `create_batch` method exists yet
-    (the spec that adds the loop adds it with its caller), so this goes
-    through `ledger._db` directly."""
-    for status in ("DRAINED", "BUDGET", "UNTIL", "INFRASTRUCTURE"):
+    `INFRASTRUCTURE`, `INCOMPLETE` — and nothing else. No `create_batch` method
+    exists yet (the spec that adds the loop adds it with its caller), so this
+    goes through `ledger._db` directly."""
+    for status in ("DRAINED", "BUDGET", "UNTIL", "INFRASTRUCTURE", "INCOMPLETE"):
         ledger._db.execute(
             "INSERT INTO batches (budget_usd, status) VALUES (50, ?)", (status,)
         )
@@ -833,7 +834,7 @@ def test_an_attempt_against_no_task_raises_rather_than_naming_another(ledger, ta
 
 def test_an_opened_batch_is_in_flight_with_no_stop_reason(ledger):
     """A batch can be opened. The row carries its budget and its until, and
-    is in flight: no status and no end — §4.2.1's four stop reasons describe
+    is in flight: no status and no end — §4.2.1's five stop reasons describe
     how a batch *ended*, and a batch that has not ended has none of them."""
     batch_id = ledger.create_batch(budget_usd=50, until_ts="2026-09-06T06:00:00")
     row = ledger._db.execute(
@@ -1069,7 +1070,7 @@ def test_closing_a_batch_that_does_not_exist_raises_rather_than_passing(ledger):
 
 def test_a_refused_stop_reason_leaves_no_write_lock_behind(ledger, tmp_path):
     """`close_batch` is documented to surface `IntegrityError` on a status
-    outside the four stop reasons — and a failed UPDATE has already had
+    outside the five stop reasons — and a failed UPDATE has already had
     sqlite3 issue an implicit BEGIN. Without the rollback the connection holds
     the write lock until it next commits, and every other process on the
     ledger gets `database is locked`: `saffron reconcile`, the morning
@@ -1207,5 +1208,41 @@ def test_a_ledger_that_predates_both_migrations_opens_and_keeps_its_rows(tmp_pat
     with pytest.raises(sqlite3.IntegrityError):
         ledger.record_gate_result(
             GateResult(gate="types", status="pass"), attempt_id=90210
+        )
+    ledger.close()
+
+
+def test_a_ledger_whose_batch_check_predates_incomplete_accepts_it(tmp_path):
+    """`CREATE TABLE IF NOT EXISTS` leaves an existing table's CHECK as it was,
+    so a ledger opened before `INCOMPLETE` joined the stop reasons would refuse
+    the first night to end that way, while every fresh-database test passes.
+    The rows it already holds, and the runs pointing at them, survive."""
+    path = tmp_path / "old.db"
+    before = re.sub(r",\s*'INCOMPLETE'", "", SCHEMA)
+    assert "'INCOMPLETE'" not in before  # otherwise this test proves nothing
+    old = sqlite3.connect(path)
+    old.executescript(before)
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r','o','/m')")
+    old.execute("INSERT INTO batches (budget_usd, status) VALUES (50, 'DRAINED')")
+    old.execute("INSERT INTO runs (repo_id, base_sha, batch_id) VALUES (1, 'a', 1)")
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    batch_id = ledger.create_batch(50.0)
+    ledger.close_batch(batch_id, "INCOMPLETE")
+    rows = ledger._db.execute(
+        "SELECT batch_id, status FROM batches ORDER BY batch_id"
+    ).fetchall()
+    assert [(r["batch_id"], r["status"]) for r in rows] == [
+        (1, "DRAINED"),
+        (batch_id, "INCOMPLETE"),
+    ]
+    run = ledger._db.execute("SELECT batch_id FROM runs WHERE run_id = 1").fetchone()
+    assert run["batch_id"] == 1
+    # Widened, not dropped: the rebuild still refuses an invented reason.
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger._db.execute(
+            "INSERT INTO batches (budget_usd, status) VALUES (50, 'CRASHED')"
         )
     ledger.close()

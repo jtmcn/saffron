@@ -133,22 +133,23 @@ def test_every_terminal_state_is_a_state_a_task_can_end_in(shapes_graph):
         ("BUDGET", True),
         ("UNTIL", True),
         ("INFRASTRUCTURE", True),
-        # A fifth reason invented in SQL, where the set used to live alone.
+        ("INCOMPLETE", True),
+        # A sixth reason invented in SQL, where the set used to live alone.
         ("CANCELLED", False),
         # A *task's* terminal state. This is the confusion the class exists to
         # prevent: `EXHAUSTED` is a task that could not pass its gates, and a
-        # night is not a task. `saffron batch` maps three of the four stop
+        # night is not a task. `saffron batch` maps three of the five stop
         # reasons to exit 0, so reading one set as the other misreports a night.
         ("EXHAUSTED", False),
         ("ORPHANED", False),
     ],
 )
-def test_a_night_stops_for_one_of_four_reasons_and_no_others(
+def test_a_night_stops_for_one_of_five_reasons_and_no_others(
     reason, accepted, shapes_graph
 ):
     """The enumeration, exercised. `batches.status` carries a CHECK constraint
     saying the same thing, and the two are not redundant: the constraint refuses
-    a bad write, and this says the four are a closed set with a meaning — one
+    a bad write, and this says the five are a closed set with a meaning — one
     that does not overlap the task end states despite sharing a column type and
     a naming style."""
     data = rdflib.Graph()

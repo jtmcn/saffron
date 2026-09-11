@@ -2679,7 +2679,7 @@ block. Either is a repo-side change and neither touches `saffron/`.
 
 `SA-0029` (PR #91) left its cell at 548 changed lines, inside the 600 a
 `feature` gets. Two host-side review rounds took it to **863**. The `size` gate
-runs inside the cell, against the cell's own diff; nothing re-runs it after the
+executes inside the cell, against the cell's own diff; nothing re-runs it after the
 operator commits review fixes to the branch, so the branch merges failing a
 blocking gate it passed on the way out.
 
@@ -2755,6 +2755,14 @@ _answers_a_401` should carry the `cell` marker and say so.
 
 
 ## 42. A rebuttal lost to a trailing comma is recorded as a confirmed disagreement
+
+**Status: spec queued for the visible half, 2026-09-10 — `SA-0071`, not yet
+run.** The recording half is right only in `rebuttal.json`, and that is what stays
+open. The ledger writes no rebuttal for an errored turn or for an unanswered
+blocker, and `sustained_blockers` and `unkept_fixes` count both as zero. An
+earlier version of this line said the queue's counts already told them apart,
+and they do not (found reviewing `SA-0071`, 2026-09-11). Whether a malformed
+rebuttal is worth a re-prompt also stays open here.
 
 `phases/rebut.py:207` discards a rebuttal artifact that is not the schema and
 returns `RebuttalTurn(error=...)`. That is deliberate, and the comment says
@@ -2942,6 +2950,22 @@ number the system reports as a ceiling and enforces as a suggestion.
 
 ## 45. An `EXHAUSTED` run that made commits pushes no branch, so its work survives only as a patch
 
+**Status: spec queued, 2026-09-10 — `SA-0069`, not yet run.** It touches
+`package.py`, which the gate-suite stack (PR #200 onward) is rewriting, so run it
+after that stack lands. The batch scan's overlap refusal holds it back until then
+anyway.
+
+**Two things for by hand, found reviewing `SA-0069`, 2026-09-11:**
+- **§5.7 says `pushed_sha` "is written once, by PACKAGE".** `SA-0069` makes that
+  false, and `DESIGN.md` is `protected`. Amend it when that spec lands.
+- **§5.7 step 2 promises more than the green path delivers.** It says a push
+  fails if the branch was moved underneath it, for example "you pushing a fixup
+  by hand". But PACKAGE's lease is `remote_sha(url, branch)`, read at push time,
+  so it guards against a race, not against a branch someone else owns. A
+  re-packaged spec replaces a branch that holds an operator's review fixes.
+  `SA-0069` guards its own push against this by checking the remote head
+  against the spec's recorded pushes. The green path wants the same check.
+
 `SA-0028` closed the door where an implement turn dies on its ceiling with
 *nothing* committed. This is the door beside it: commits exist, gates are red,
 the budget or the attempts are gone, and PACKAGE never runs — so nothing is
@@ -2970,6 +2994,10 @@ there is no branch to hand.
 
 **Decided 2026-09-04: it is evidence, not an operator's record.** So it takes
 a size cap and must come within the `secrets` gate's reach. **Tier 1.**
+
+**Status: the size half has a spec queued, 2026-09-10 — `SA-0068`, not yet run.**
+The `secrets` half stays open here, because the gate it would extend does not
+exist yet.
 
 The deciding argument is §9's v1 criterion. The defining property of the
 milestone is that *nobody was watching* — so a log reduced to bounded
@@ -3475,6 +3503,12 @@ protected), and this is a forecast. A forecast that blocks is the shape item
 
 ## 57. The vocabulary hook matches within a line, and this file is hard-wrapped
 
+**Status: spec queued, 2026-09-10 — `SA-0073`, not yet run.** Measured when it
+was queued: one hit in the tree only a cross-line reading sees, in item 40 of
+this file. It was the verb, not the retired noun, which the pattern cannot tell
+apart, and it was reworded in the same commit so the spec starts from a clean
+tree.
+
 `.pre-commit-config.yaml`'s `retired-vocabulary` hook is `language: pygrep` with
 `entry: '(?i)gate[ -]runs?\b'`. pygrep searches **line by line**, and every
 prose file in this repo is hard-wrapped at ~78 columns, so a retired two-word
@@ -3660,6 +3694,11 @@ ancestor case is wrong, and only because the chain is walked one link deep.
 
 ## 60. A review lens's whole report is discarded on a schema error, and nothing re-prompts
 
+**Status: done in code, found open here on 2026-09-10.** `4139fbb` (*fix(review):
+a lens whose output is not the schema gets one re-prompt*) re-prompts once on a
+schema failure. A second failure still stops at `REVIEWING`. The item was never
+closed.
+
 **Tier 2.** Measured 2026-09-04 on `SA-0053`, and the finding it cost was a
 real one.
 
@@ -3700,6 +3739,8 @@ findings have no severity is not a report that can be acted on.
 ---
 
 ## 61. `describe` raises on a payload `read_log` hands back unchecked
+
+**Status: spec queued with item 63, 2026-09-10 — `SA-0070`, not yet run.**
 
 **Tier 3.** Found reviewing `SA-0053` (PR #119), and fixed *around* rather than
 fixed: `saffron/events.py` was `forbidden` to that spec.
@@ -3756,6 +3797,11 @@ the thing `SA-0053` was written to avoid.
 ---
 
 ## 63. `describe` renders three agent payload fields unclipped, straight to a terminal
+
+**Status: spec queued with item 61, 2026-09-10 — `SA-0070`, not yet run.** It
+covers the `Agent` event only. `Terminal.detail` on a rejected plan and
+`PhaseStart.detail` also carry paths an agent wrote, and they render unclipped
+and unstripped. That is the follow-up, found reviewing `SA-0070` (2026-09-11).
 
 **Tier 3.** Found reviewing `SA-0053` (PR #119). Not a regression — the
 attended terminal has had this exposure since `SA-0029` — but that PR added a
@@ -4072,6 +4118,20 @@ answer, and it is currently being guessed at.
 ---
 
 ## 70. A task lost to a provider error leaves the night reporting `DRAINED`, exit 0
+
+**Status: decided 2026-09-10, spec queued — `SA-0067`, not yet run.** A fifth
+stop reason, `INCOMPLETE`: it outranks `DRAINED`, `BUDGET` and `UNTIL`, and
+`INFRASTRUCTURE` outranks it. It exits 2 and leaves the breaker alone. **The
+by-hand half is done:** the vocabulary, `CONTEXT.md`, §4.2.1, `batch.StopReason`
+and the `CHECK` on `batches.status` landed together, because
+`tests/ontology/test_vocabulary_agrees_with_code.py` holds the vocabulary, the
+`Literal` and the `CHECK` equal, and `CONTEXT.md` and §4.2.1, which move with the
+vocabulary, are `protected`. The `CHECK` needed a table rebuild
+(`Ledger._widen_batch_status`), because `CREATE TABLE IF NOT EXISTS` leaves an
+existing ledger's old `CHECK` in force. Measured before the rebuild existed: a
+ledger with the old `CHECK` raised `IntegrityError` closing an `INCOMPLETE`
+night. What is left is `SA-0067`'s: the loop returning the value, and the command
+mapping it to exit 2.
 
 **Tier 1.** Measured 2026-09-06, driving `SA-0057` — the first unattended run
 in this repo to lose a task to something other than its own code.
@@ -5240,6 +5300,25 @@ as.*
 
 ## 89. `DIFF_FLAGS` pins less of the diff's shape than its own comment claims
 
+**Status: spec queued, 2026-09-10 — `SA-0072`, not yet run.** It takes
+`pinned_diff`'s measured values rather than choosing new ones. Dropping the
+duplicate flags from `pinned_diff` afterwards is a harness change, left for
+later.
+
+**Found reviewing `SA-0072`, 2026-09-11, and outside it:**
+- **`--no-renames` is guarded by no test.** Removing it left all 1745 tests
+  green, because `_hostile_repo` never renames a file.
+- **Three more repo-local settings still move the pinned diff:**
+  - `diff.interHunkContext` merges two hunks into one. That has the same
+    anchoring effect as `diff.context`.
+  - `color.ui=always` puts escape codes on the `diff --git` line, so `scope`
+    errors on every attempt.
+  - `diff.ignoreSubmodules=all` hides a gitlink from the name-only listing, so
+    `scope` never sees a path outside `touches`.
+
+Each wants its own flag and its own witness. None is a value `pinned_diff`
+measured, which is why `SA-0072` leaves them out.
+
 Found building the lens-corpus harness's byte-identity check (2026-09-08),
 which had to reproduce `export_patch`'s output on a host it does not control
 and, in doing so, needed three flags `saffron/cell/worktree.py` does not set.
@@ -5493,6 +5572,8 @@ relevant test is the same defect wearing a different hat.
 ---
 
 ## 95. A night that dies resolving its queue leaves no row to say it ever started
+
+**Status: spec queued, 2026-09-10 — `SA-0066`, not yet run.**
 
 **Tier 1 — honesty.** `SA-0065` (merged 2026-09-10) made `discover_specs` refuse
 a spec directory that is absent or is not a directory, so the silent empty queue
