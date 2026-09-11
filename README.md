@@ -12,6 +12,8 @@ cell, drives it through a hard gate loop until the change is objectively green, 
 the diff to an adversarial critic, and opens a draft PR. A person merges. Nothing else
 merges.
 
+A queue captured on 2026-09-08, while PR #166 was open:
+
 ```
 $ uv run saffron queue --repo .
 reconcile: nothing moved

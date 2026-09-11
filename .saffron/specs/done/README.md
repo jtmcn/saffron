@@ -52,7 +52,7 @@ nothing.
 | `SA-0060` | Cell task `MERGED`, PR #148; all six declared witnesses exist in `tests/test_witness_gate.py`, `tests/test_mutation.py` and `tests/test_gates.py` |
 | `SA-0061` | Cell task `MERGED`, PR #150; all four declared witnesses exist in `tests/test_session.py` |
 | `SA-0062` | Cell task `MERGED`, PR #154; all five declared witnesses exist in `tests/test_worktree.py` and `tests/test_session.py` |
-| `SA-0063` | Cell task `MERGED`, PR #158; retired in PR #173 without a row here. All five declared witnesses exist in `tests/test_report.py` and `tests/test_session.py` |
+| `SA-0063` | Cell task `MERGED`, PR #158; retired in PR #173. All five declared witnesses exist in `tests/test_report.py` and `tests/test_session.py` |
 | `SA-0064` | Cell task `MERGED`, PR #160; all four declared witnesses exist, and criterion 1's mutant still matches `saffron/phases/package.py` |
 | `SA-0065` | Cell task `MERGED`, PR #185; all three declared witnesses exist in `tests/test_intake.py` |
 

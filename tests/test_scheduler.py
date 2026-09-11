@@ -116,8 +116,8 @@ def _every_live_spec_flattened(tmp_path):
     directory.
 
     `_real_corpus` copies `done/` alone, which silently leaves out whichever
-    specs are at the top of `.saffron/specs` right now — the five most recent,
-    and the likeliest to carry a defect nobody has met yet. A check claiming to
+    specs are at the top of `.saffron/specs` right now — the most recent, and
+    the likeliest to carry a defect nobody has met yet. A check claiming to
     hold over *every* spec cannot be built on a corpus that omits them.
     `README.md` is dropped for `_real_corpus`'s own reason: `discover_specs`
     globs `*.md` and reports it as a failure, correctly and irrelevantly.
@@ -1818,8 +1818,8 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-10, a sixteenth time: every spec this repo has
-    written has shipped and is retired, so the live queue is empty. The chain
+    """Re-measured 2026-09-10, a sixteenth time: every spec still in the tree
+    has shipped and is retired, so the live queue is empty. The chain
     below merged as PRs #148, #150 and #154. What survives is the property the
     eleventh kept, the non-recursive glob.
 
@@ -1870,9 +1870,8 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     # spec in `done/` here — which is what makes the empty queue a check.
     assert candidates == []
     assert refusals == []
-    # And the retired corpus stays invisible: `discover_specs` globs
-    # non-recursively, so forty-odd shipped specs one directory down are not
-    # offered as tonight's work.
+    # A precondition, not the glob check: `done/` is populated, so the empty
+    # queue above is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30
 
 
