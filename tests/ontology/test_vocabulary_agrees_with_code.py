@@ -28,6 +28,7 @@ from ontology_paths import NS, ONTOLOGY, VOCABULARY
 from saffron.agents.findings import Severity
 from saffron.batch import StopReason
 from saffron.ledger import SCHEMA
+from saffron.repos.policy import CORE_GATE_NAMES
 
 
 def _declared(class_name: str) -> set[str]:
@@ -124,4 +125,14 @@ def test_every_core_gate_that_exists_is_declared_in_the_vocabulary():
         "catch. Declare the gate, give it a blocking level in "
         "factory:CoreGateBlockingShape (or factory:SizeTierShape if a risk tier "
         "moves it), and run `uv run python -m ontology.render`."
+    )
+
+
+def test_the_names_a_policy_may_not_declare_are_the_core_gates_declared():
+    """Item 22. Equality, unlike the subset above: `secrets` is reserved before it
+    is built, or a repo could claim the name first."""
+    assert _declared("CoreGate") == CORE_GATE_NAMES, (
+        "factory:CoreGate and saffron/repos/policy.py's CORE_GATE_NAMES disagree. "
+        "A core gate missing there is a name a repo can declare and shadow; the "
+        "generator cannot reach Python, so this is a hand edit in policy.py."
     )

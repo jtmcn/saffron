@@ -1589,7 +1589,10 @@ human edit.
 
 ## 22. Core gate names are not reserved, and `pr_body` is now a second consumer of that hole
 
-**Status:** open. Found by review of `SA-0011`.
+**Status:** **done**, by hand, 2026-09-10 — the gate-suite stack's second layer
+(item 97). `CORE_GATE_NAMES` in `saffron/repos/policy.py`, held equal to
+`factory:CoreGate` by a test, and a `field_validator` on `Policy.gates` that
+fails preflight on any of them. Found by review of `SA-0011`.
 
 `GateName` at `saffron/repos/policy.py:53` accepts any string matching
 `^[A-Za-z0-9_-]+$`, so nothing stops a repo declaring `gates: {criteria: {...}}`.
