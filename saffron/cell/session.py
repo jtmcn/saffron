@@ -1028,6 +1028,11 @@ def _drive_cell(
     # touches `.saffron/` (§5.4).
     task_dir.mkdir(parents=True, exist_ok=True)
     gates_dir = mirror_ops.export_saffron_dir(mirror, spec.base_sha, task_dir / "gates")
+    # Beside gates_dir, not at the prompt-build site: every base-sha input is
+    # read before a cell exists, so a GitError fails before one is created.
+    # ponytail: Claude Code's own `@path` imports inside CLAUDE.md still reach
+    # the model as literal text, and file_at follows only one symlink hop.
+    claude_md = mirror_ops.file_at(mirror, spec.base_sha, "CLAUDE.md")
 
     # R2: the on-host validation stays — a declared gate exists and is
     # executable — but it now runs against the exported tree the cell mounts.
@@ -1292,8 +1297,6 @@ def _drive_cell(
 
         # The agent runs inside the cell, at /work, on the cell's own key (§5.1).
         context_md = (_SAFFRON_ROOT / "CONTEXT.md").read_text()
-        # From the mirror at base_sha, never /work — item 7, §5.3.
-        claude_md = mirror_ops.file_at(mirror, spec.base_sha, "CLAUDE.md")
         template = (_SAFFRON_PKG / "agents" / "prompts" / "implement.md").read_text()
         system_prompt = context.build_system_prompt(
             "IMPLEMENT",
