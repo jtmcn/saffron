@@ -3062,6 +3062,9 @@ required, and `None` on every GATE and REBUT line; only the IMPLEMENT turn
 measures them. The rebuttal's gate check carries the loop's final attempt + 1,
 continuing the gate count — decided over the ledger row's `n` and over keeping
 `1`. The IMPLEMENT row's spend is still the running total, not an increment.
+Every `events.jsonl` written before this carries `0` on its GATE and REBUT
+lines, still indistinguishable from a measurement: a reader of old logs (§6's
+pages) must treat those two fields there as unmeasured.
 
 `cell/session.py` emits an `Attempt` for each GATE and REBUT decision with
 `commits=0, spent_usd_est=0.0` — four call sites — and the rebuttal-time gate

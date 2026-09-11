@@ -571,13 +571,22 @@ def test_suites_that_drifted_end_the_loop_without_charging_the_task():
     assert repairs == []
 
 
-def test_a_gate_attempt_claims_no_commits_or_spend_it_never_measured():
+@pytest.mark.parametrize(
+    "comparison",
+    [
+        _judged(),
+        SuiteComparison(SuiteRun([], "standard", frozenset()), aborted=("tests",)),
+        SuiteComparison(SuiteRun([], "standard", frozenset()), drift=("tests: …",)),
+    ],
+    ids=["judged", "aborted", "drifted"],
+)
+def test_a_gate_attempt_claims_no_commits_or_spend_it_never_measured(comparison):
     """Item 47: every GATE and REBUT line said `commits=0, spent_usd_est=0.0`,
     which a reader cannot tell from a measured zero. `None` is the log's own
-    word for "not computed"."""
+    word for "not computed" — on each of `attempt_event`'s three paths."""
     for phase in ("GATE", "REBUT"):
         event = session.attempt_event(
-            _judged(), spec_id="SA-TEST", phase=phase, attempt=2
+            comparison, spec_id="SA-TEST", phase=phase, attempt=2
         )
         assert event.commits is None
         assert event.spent_usd_est is None

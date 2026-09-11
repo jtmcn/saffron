@@ -180,11 +180,12 @@ class PhaseStart:
 
 @dataclass(frozen=True, slots=True)
 class Attempt:
-    """One numbered execution that produced at least one commit and let the
-    run continue — the GATE ⇄ REPAIR loop's own numbered attempt
-    (`new_failures`/`decision` set), or an IMPLEMENT/SALVAGE turn that landed
-    commits (left `None`). Cut off *and recovered* is this, not `Terminal`:
-    that branch has commits and the run goes on.
+    """One numbered execution that let the run continue: an IMPLEMENT/SALVAGE
+    turn that landed commits, which measures `commits`/`spent_usd_est`, or a
+    gate suite judged in GATE ⇄ REPAIR or re-run after REBUT
+    (`new_failures`, and `decision` in the loop), which measures neither and
+    leaves both `None`. Cut off *and recovered* is this, not `Terminal`: that
+    branch has commits and the run goes on.
 
     `aborted`/`drift` are the loop's own two ways of distrusting a suite
     mid-attempt — `suite.aborted_gates`/`suite_drift`, both already
@@ -196,6 +197,8 @@ class Attempt:
     spec_id: str
     # CONTEXT.md: "'Attempt 3' without a phase is ambiguous — name both."
     phase: Phase
+    # On a gate-suite line this counts gate suites in the task, so REBUT's
+    # re-run continues the loop's count rather than restarting at 1 (item 47).
     attempt: int
     # `None`, never `0`, where nothing was measured: a GATE or REBUT line knows
     # neither the commits nor the spend (item 47).

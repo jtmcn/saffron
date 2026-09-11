@@ -233,8 +233,15 @@ def test_agent_carries_a_parsed_dict_verbatim(tmp_path):
     assert loaded.raw is False
 
 
-def test_on_disk_shape_is_pinned_by_a_hand_written_line(tmp_path):
-    """Pinned by a hand-written line, not by the writer's own output."""
+@pytest.mark.parametrize(
+    ("commits", "spent"),
+    [(0, 0.0), (None, None)],
+    ids=["before-item-47", "since-item-47"],
+)
+def test_on_disk_shape_is_pinned_by_a_hand_written_line(tmp_path, commits, spent):
+    """Pinned by hand-written lines, not by the writer's own output: both shapes
+    a GATE line has had — the unmeasured `0` written before item 47, which old
+    logs still carry and must still parse, and `null` since."""
     events_path = tmp_path / "events.jsonl"
     events_path.write_text(
         json.dumps(
@@ -244,8 +251,8 @@ def test_on_disk_shape_is_pinned_by_a_hand_written_line(tmp_path):
                 "spec_id": "SA-0029",
                 "phase": "GATE",
                 "attempt": 1,
-                "commits": 2,
-                "spent_usd_est": 1.5,
+                "commits": commits,
+                "spent_usd_est": spent,
                 "new_failures": 0,
                 "decision": "green",
             }
@@ -258,8 +265,8 @@ def test_on_disk_shape_is_pinned_by_a_hand_written_line(tmp_path):
         spec_id="SA-0029",
         phase="GATE",
         attempt=1,
-        commits=2,
-        spent_usd_est=1.5,
+        commits=commits,
+        spent_usd_est=spent,
         new_failures=0,
         decision="green",
     )
