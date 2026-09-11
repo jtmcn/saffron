@@ -108,15 +108,58 @@ egress policy, at the blob CDN rather than at the manifest:
 docker.io       403  production.cloudfront.docker.com
 quay.io         403  quay.io/v2/
 public.ecr.aws  403  d2glxqk2uabbnd.cloudfront.net
+ghcr.io         403  pkg-containers.githubusercontent.com
 ```
 
-`images/cell-base.python.Dockerfile` is `FROM python:3.12-slim-bookworm`, so
-neither base image nor the repo's own cell image can be built. This is an egress
-policy, not a defect, and the proxy's own documentation says to report a blocked
-host rather than route around it. Until it changes, a working runtime here has
-nothing to run.
+Alpine's package CDN is refused too (`dl-cdn.alpinelinux.org`). This is an
+egress policy, not a defect, and the proxy's own documentation says to report a
+blocked host rather than route around it.
 
-Three smaller ones, none of them about the runtime: no `gh`, so PACKAGE cannot
+### Correction — a pull is not the only way to get an image
+
+The first version of this record concluded from the above that "a working
+runtime here has nothing to run". **That was wrong, and it was wrong in the way
+this repository names most often: a measurement of one thing reported as a
+conclusion about another.** Every pull is refused; no measurement had been taken
+of whether an image could be *built*. Taken the same day:
+
+```
+archive.ubuntu.com                      200
+debootstrap --variant=minbase noble     ok, 135 MB rootfs, no registry
+podman import                           ok
+apt (universe added)  python3 3.12.3, git 2.43.0, squid 6.6
+pip   claude-agent-sdk 0.2.142
+      bundled binary  .../claude_agent_sdk/_bundled/claude
+      and it runs     2.1.237 (Claude Code)
+```
+
+The last line is the one that matters, and it is asserted rather than located
+for the reason `images/cell-base.python.Dockerfile` already gives: a present and
+unrunnable binary reads identically to a working one (principle 39). The wheel's
+bundled Claude Code binary — the whole reason that image is Debian rather than
+Alpine — is present and executes on a base built here from nothing but the
+Ubuntu archive and pypi.
+
+So the real blocker is narrower and still real: **all three images are written
+against registries, and none of the substance needs one.**
+
+| Image | Registry dependency | Reachable substitute |
+|---|---|---|
+| `images/cell-base.python.Dockerfile` | `FROM python:3.12-slim-bookworm` | debootstrap + apt python3 (3.12.3) |
+| `images/proxy.Dockerfile` | `FROM alpine:3`, apk | apt squid (6.6) on the same base |
+| `.saffron/Dockerfile` | `COPY --from=ghcr.io/astral-sh/uv:latest` | uv from pypi |
+
+**What that costs is worth stating before anyone reaches for it.** The cell image
+is the toolchain (§5.1), and a repo whose image is assembled differently
+depending on which host built it has given up the property that makes a gate
+result comparable between hosts. A locally-built base is a way to *run* here; it
+is not the same image the operator's Mac builds, and two hosts disagreeing about
+the toolchain is the kind of difference that surfaces as a flaky gate rather
+than as an error. Pinning that — one base image, built once, carried between
+hosts by some means that is not a public registry — is the actual question, and
+this record does not answer it.
+
+Three others, none of them about the runtime: no `gh`, so PACKAGE cannot
 open the draft pull request and `reconcile` cannot ask GitHub anything; no
 `CLAUDE_CODE_OAUTH_TOKEN`; and the session container is reclaimed on idle, which
 takes `~/.saffron/ledger.db` and the batch tree with it. The last is survivable
@@ -138,7 +181,10 @@ safety argument, weaker and worth stating, not a port of the first.
 ## What this record does not establish
 
 That podman can run a Saffron cell. Nothing here started the agent runtime, the
-proxy, or a gate — only the mechanics underneath them, on an image built to
-answer these questions and nothing else. Assertions 2 and 3 are unproven. The
-spike is still what would decide it, and it would need an arm and a reachable
-registry before it could.
+proxy, or a gate — only the mechanics underneath them, and the base image's
+ingredients separately. Assertions 2 and 3 are unproven. The spike is still what
+would decide it, and it now needs an arm rather than a reachable registry.
+
+Nor does it establish that a locally-built base is a *good* idea — only that the
+"nothing to run" conclusion it replaces was not measured. The reproducibility
+cost above is real and unpriced.

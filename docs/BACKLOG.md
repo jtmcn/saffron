@@ -6004,15 +6004,29 @@ has none and correctly so (**102**).
 **Done looks like** a podman backend behind **102**'s protocol, its paired
 structure rule and mutant, the spike grown a fourth arm so the assertions are
 reproducible rather than recorded, and `DESIGN.md` carrying the second safety
-argument. **Not** done by that alone: a cloud host still cannot start a cell.
+argument. **Not** done by that alone: a cloud host still cannot start a cell
+until the images question below is answered too, and that is the larger half.
 
 **What blocks it there regardless of runtime**, all four measured the same day:
 
-1. **No image can be pulled.** `docker.io`, `quay.io` and `public.ecr.aws` are
-   all refused with 403 by the session's egress policy, at the blob CDN.
-   `images/cell-base.python.Dockerfile` is `FROM python:3.12-slim-bookworm`, so
-   neither the base image nor this repository's own cell image can be built. An
-   egress policy, not a defect — a working runtime there has nothing to run.
+1. **No image can be *pulled*, and all three are written against registries.**
+   `docker.io`, `quay.io`, `public.ecr.aws` and `ghcr.io` are all refused with
+   403 at the blob CDN, and Alpine's package CDN with them. An egress policy,
+   not a defect.
+   **Every ingredient is reachable without a registry, and that was measured
+   after an earlier draft of this item claimed otherwise**: `debootstrap`
+   against `archive.ubuntu.com` builds a base, apt supplies python3 3.12.3, git
+   and squid 6.6, pypi supplies `claude-agent-sdk` and uv, and the wheel's
+   bundled Claude Code binary is present *and runs* (2.1.237) — asserted rather
+   than located, principle 39. So the work is rebasing
+   `images/cell-base.python.Dockerfile`, `images/proxy.Dockerfile` and
+   `.saffron/Dockerfile` off their `FROM`s, not waiting for an egress change.
+   **Price the reproducibility first.** The cell image is the toolchain (§5.1),
+   and an image assembled differently per host gives up the property that makes
+   a gate result comparable between hosts — a difference that surfaces as a
+   flaky gate rather than as an error (§7). One base built once and carried
+   between hosts by something that is not a public registry is the question to
+   answer before the Dockerfiles move.
 2. **No cgroup controllers.** `/sys/fs/cgroup` is a tmpfs with no
    `cgroup.controllers`, so `--memory` is accepted and unenforced. §4.3's
    ceiling would be a claim. A ceiling that is not enforced has to report as
