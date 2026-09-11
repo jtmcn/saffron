@@ -1823,10 +1823,11 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     Nothing else moved.
 
     Re-measured 2026-09-10, a seventeenth time: five specs queued for a later
-    night, `SA-0066` to `SA-0070`. Four are candidates. `SA-0067` is refused, and
-    that is correct: it stacks on `SA-0066`, which has no task yet, and a night
-    resolves its scan once, so the child waits for the night after its parent
-    packages.
+    night, `SA-0066` to `SA-0070`. Three are candidates. `SA-0067` and `SA-0070`
+    are refused, and that is correct: each stacks on a parent (`SA-0066`,
+    `SA-0068`) that has no task yet, and a night resolves its scan once, so a
+    child waits for the night after its parent packages. `SA-0070` gained its
+    parent in review, because both specs edit `saffron/events.py`.
 
     Re-measured 2026-09-10, a sixteenth time: every spec then in the tree
     had shipped and was retired, so the live queue was empty. The chain
@@ -1882,13 +1883,13 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0066",
         "SA-0068",
         "SA-0069",
-        "SA-0070",
         "SA-0071",
         "SA-0072",
         "SA-0073",
     ]
-    assert [r.path.name[:7] for r in refusals] == ["SA-0067"]
+    assert [r.path.name[:7] for r in refusals] == ["SA-0067", "SA-0070"]
     assert "depends_on SA-0066" in refusals[0].reason
+    assert "depends_on SA-0068" in refusals[1].reason
     # A precondition, not the glob check: `done/` is populated, so the empty
     # queue above is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30
