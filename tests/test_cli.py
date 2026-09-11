@@ -21,7 +21,7 @@ from saffron.cli import main
 from saffron.events import Ceilings, PhaseStart, Preflight, describe, read_log
 from saffron.ledger import Ledger
 from saffron.phases import package
-from saffron.reconcile import ReconcileResult
+from saffron.reconcile import HeadMoved, ReconcileResult
 from saffron.scheduler import Candidate, Refusal
 from tests.conftest import HostToolExecInTest
 from tests.test_replay import target  # noqa: F401 — a pytest fixture, used by name
@@ -2382,6 +2382,20 @@ def test_an_orphan_only_resolution_names_the_rows_it_stamped(capsys):
     printed = capsys.readouterr().out
     assert "reconcile: task 7 → ORPHANED" in printed
     assert "reconcile: task 9 → ORPHANED" in printed
+    assert "nothing moved" not in printed
+
+
+def test_a_head_past_what_package_pushed_is_named_with_both_shas(capsys):
+    """Item 97: the line names the task and both commits, so an operator can
+    `git log packaged..head` the commits no gate judged — and it is not
+    followed by "nothing moved", which would read as nothing to look at."""
+    cli._print_reconcile_summary(
+        ReconcileResult(head_moved=[HeadMoved(7, "a" * 40, "b" * 40)])
+    )
+
+    printed = capsys.readouterr().out
+    assert "reconcile: task 7" in printed
+    assert "aaaaaaaaaaaa..bbbbbbbbbbbb" in printed
     assert "nothing moved" not in printed
 
 
