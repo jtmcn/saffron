@@ -4105,8 +4105,9 @@ stop reason, `INCOMPLETE`: it outranks `DRAINED`, `BUDGET` and `UNTIL`, and
 `INFRASTRUCTURE` outranks it. It exits 2 and leaves the breaker alone. **The
 by-hand half is done:** the vocabulary, `CONTEXT.md`, §4.2.1, `batch.StopReason`
 and the `CHECK` on `batches.status` landed together, because
-`tests/ontology/test_vocabulary_agrees_with_code.py` holds the three closed sets
-equal and two of those files are `protected`. The `CHECK` needed a table rebuild
+`tests/ontology/test_vocabulary_agrees_with_code.py` holds the vocabulary, the
+`Literal` and the `CHECK` equal, and `CONTEXT.md` and §4.2.1, which move with the
+vocabulary, are `protected`. The `CHECK` needed a table rebuild
 (`Ledger._widen_batch_status`), because `CREATE TABLE IF NOT EXISTS` leaves an
 existing ledger's old `CHECK` in force. Measured before the rebuild existed: a
 ledger with the old `CHECK` raised `IntegrityError` closing an `INCOMPLETE`
