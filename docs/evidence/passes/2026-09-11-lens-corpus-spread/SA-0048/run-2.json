@@ -1,0 +1,57 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.3457941,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "blocker",
+        "file": "saffron/preflight.py",
+        "line": 315,
+        "claim": "`validate_claude_token` treats any HTTPError whose code is not 401 or 403 as a *valid* token (`return exc.code not in (401, 403)`), which contradicts its own docstring's contract: \"`False` for anything else, including a host this probe could not reach \u2014 'could not tell' is not a pass.\" A 500, 502, 503, 429 or 400 from the upstream (transient outage, rate limiting, a malformed-header response) is exactly a 'could not tell' case, yet it is read as authentication success. This silently reopens the Appendix J landmine the whole check exists to close whenever the upstream's failure mode for a bad credential is not literally 401/403 \u2014 a case no test exercises, since every test injects `validate_token` directly or only drives the URLError branch.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.23470560000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/preflight.py",
+        "line": 438,
+        "claim": "`check_readiness`'s own docstring (lines 390-392) promises a single entry point that runs every step 'in that order, stopping at the first failure and naming it' and returns a `Readiness` rather than a bare boolean, and every other step (mirror, origin, default_branch, policy) is wrapped in try/except to honor that. The disk step at line 438 calls `disk_headroom_ok(home)` unwrapped, but `disk_headroom_ok`'s own docstring (lines 334-336) says it 'raises rather than reading as a pass it cannot back up' when the check itself cannot execute (e.g. `shutil.disk_usage` raising `OSError` on a missing or unreadable `home`). That `RuntimeError` is not caught here, so the one failure mode `disk_headroom_ok` is explicitly designed to surface propagates out of `check_readiness` as an uncaught exception instead of a named `Readiness(False, \"disk\", ...)`, breaking the 'a caller can skip the repo and say why' contract for exactly this case. No test exercises `disk_headroom_ok` raising from inside `check_readiness` (the existing tests call it directly, or stub `disk_usage` to return zero free space rather than raise), so this asymmetry is invisible to the gates.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.1879854,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/preflight.py",
+        "line": 315,
+        "claim": "The only behavior this function exists to add per Appendix J \u2014 that a 401/403 HTTPError (an accepted connection, rejected credential) must return `False` while other outcomes return `True` \u2014 is never exercised by execution. The sole test that calls the real `validate_claude_token` (`test_the_token_probes_default_request_shape_is_asserted_not_sent`) forces a `URLError`, hitting the `except URLError` branch, not the `except HTTPError` branch; every other test injects a fake `validate_token` callable instead of running the default. Inverting the branch to `return exc.code in (401, 403)` \u2014 exactly backwards from the Appendix J requirement \u2014 leaves all 1264 tests green.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/preflight.py",
+          "find": "return exc.code not in (401, 403)",
+          "replace": "return exc.code in (401, 403)"
+        }
+      }
+    ]
+  }
+]

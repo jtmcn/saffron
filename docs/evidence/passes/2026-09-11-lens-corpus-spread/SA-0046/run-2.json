@@ -1,0 +1,43 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.5331516,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/phases/package.py",
+        "line": 771,
+        "claim": "The ledger write at line 771-772 records the fetch_head-derived `policy_sha` before `reverify()` (line 776) has run, so if `reverify` raises `PackageError` for an errored gate (line 528, an infrastructure fault that per the gate contract must never be charged to the task and aborts the attempt), the ledger has already committed a claim that this task's re-verification ran under that declaration when it never actually completed. On retry the value self-corrects only if the newly computed policy_sha happens to differ again from the stale one; in the meantime the row asserts a declaration for a verification that errored out, which is the exact 'ran under' claim `record_policy`'s own docstring (ledger.py:497-500) says should only be issued for a completed re-verification. No test exercises this path \u2014 every test double for `reverify` returns cleanly \u2014 so the mismatch only shows up in production when a repo's gate toolchain is briefly broken at `fetch_head`, not in fixtures.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.8966522999999998,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "tests/test_package.py",
+        "line": 1726,
+        "claim": "This test is the witness for acceptance criterion 4 in `.saffron/specs/SA-0046-a-task-cannot-say-which-policy-it-ran-under.md` (line 49), which names it literally as `tests/test_package.py::test_reverifying_under_an_unchanged_policy_does_not_touch_the_row`. The spec's frontmatter is `forbidden` here, so that witness string is fixed, but the test actually written is named `test_reverifying_under_an_unchanged_policy_issues_no_policy_write`. `saffron/gates/core/criteria.py`'s `_judge` matches a criterion's witness against collected pytest node ids by exact string membership, so the declared witness for the spec's own most-emphasized criterion (\"the fourth witness is the one to write first\") does not exist at head, and criterion 4 has no test satisfying its literal contract even though an equivalent-looking test exists under a different name.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.5819564999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  }
+]

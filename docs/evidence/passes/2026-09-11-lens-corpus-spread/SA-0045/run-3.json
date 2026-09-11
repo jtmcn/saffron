@@ -1,0 +1,37 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.16685520000000004,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.7481121000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.5827809,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/ledger.py",
+        "line": 367,
+        "claim": "Every call to `create_run` in the entire test suite (and in production callers `cell/session.py` and `replay.py`) omits `batch_id`, so no test ever exercises the parameter actually being written and round-tripped for a non-None value. Replacing the bound tuple `(repo_id, base_sha, batch_id)` with `(repo_id, base_sha, None)` \u2014 silently discarding whatever the caller passes \u2014 keeps all 1248 tests green, including the new `test_a_run_created_outside_a_batch_has_a_null_batch_id`, because that test only checks the default-None path. The gap is invisible today since nothing calls `create_run` with a real `batch_id` yet, but it means the plumbing this spec adds for `SA-0049` to use is unverified for the one case it exists to serve.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/ledger.py",
+          "find": "            (repo_id, base_sha, batch_id),",
+          "replace": "            (repo_id, base_sha, None),"
+        }
+      }
+    ]
+  }
+]

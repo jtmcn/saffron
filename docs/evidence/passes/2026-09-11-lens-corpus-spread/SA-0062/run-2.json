@@ -1,0 +1,66 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.2789637,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/cell/worktree.py",
+        "line": 418,
+        "claim": "`_write_file` (lines 366-382) redirects the decoded mutant content straight onto `mutant.file` with `base64 -d > path`, which truncates the target the moment the redirection opens \u2014 it is not a write-to-temp-then-rename. If the exec genuinely fails partway (disk full mid-decode, or the connection to the container is lost after the write completed but before the exit code is reported \u2014 exactly the case `saffron/gates/core/witness.py` lines 78-85 names as reachable for a container exec and unreachable for `host_mutator`), `_write_file` raises before `source_mutated`'s `try: yield None / finally: undo` block is ever entered (the call at line 418 is outside that block), so no `git checkout HEAD` is attempted. `witness_gate` then reports this as \"could not apply\" (tree untouched), when the tree may actually be left mutated or corrupted with nothing restoring it \u2014 the precise \"silent dirty tree\" outcome that same docstring says this implementation must not produce.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.4722459,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "saffron/cell/worktree.py",
+        "line": 418,
+        "claim": "`_write_file` is called before the `try/finally` that performs the git-checkout undo (the `try:` only opens on the next line, at 419), so a raise out of `_write_file` is not distinguished from a raise that changed nothing. `witness.py`'s own docstring (lines 78-85) names this exact failure mode as the one obligation `host_mutator` cannot reach but a container-exec mutator can \u2014 \"a container exec that applies the edit and then loses the connection\" \u2014 and states plainly that `SA-0062`'s mutator, not just the stub, is bound by it. If `_write_file`'s exec reports failure after the write actually landed inside the container (a lost connection, a container OOM-kill mid-script), `witness_gate` sees `applied=False` and reports \"could not apply\" instead of \"could not restore\", leaving a mutated file in the tree with no undo ever attempted and no signal that it happened \u2014 the \"silent dirty tree this gate exists to refuse\" that the module's own top-level docstring (worktree.py is the implementation, witness.py lines 35-42 the promise) is supposed to prevent.",
+        "anchored": true,
+        "probe": null
+      },
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/cell/worktree.py",
+        "line": 358,
+        "claim": "`_read_file` returns `runtime.exec_(...).stdout`, which `runtime._call`/`_decode` (runtime.py:111-114) produces via `bytes.decode(\"utf-8\", errors=\"replace\")` \u2014 a lossy, one-way substitution of any invalid UTF-8 byte with U+FFFD. `_write_file` then re-encodes that string and overwrites the file (line 418), so any source file containing even one non-UTF-8 byte anywhere (not just at the mutation site) is silently corrupted in the container's tree beyond the declared find/replace before tests run. `saffron/mutation.py`'s sibling implementation deliberately avoids this by staying in raw bytes throughout (its module docstring calls out byte-identical handling as a requirement), and none of the new tests in `tests/test_worktree.py` use anything but plain ASCII fixtures, so this gap is invisible to the suite.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.6559581,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "tests/test_worktree.py",
+        "line": 1049,
+        "claim": "Every `source_mutated` test in this diff (lines 1047-1120) builds its `Mutant.find`/`replace` from plain identifiers and comparisons \u2014 never a quote, backtick, `$`, or backslash \u2014 despite `_write_file`'s own docstring (saffron/cell/worktree.py:369-374) naming exactly those characters as the reason it base64-encodes rather than shell-quoting the content directly. Replacing the base64 round trip with a naive `printf \"%s\" \"<content>\" > <path>` construction passes every existing test unchanged (none of the fixtures' find/replace text would trigger the difference) while corrupting or failing on any real source line containing a quote or `$` \u2014 a near-certainty once a spec actually declares a mutant against real code, which is the very next step this change's own scope note anticipates.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cell/worktree.py",
+          "find": "    encoded = base64.b64encode(content.encode()).decode()\n    script = f\"printf '%s' {shlex.quote(encoded)} | base64 -d > {shlex.quote(path)}\"",
+          "replace": "    script = 'printf \"%s\" \"' + content + '\" > ' + shlex.quote(path)"
+        }
+      }
+    ]
+  }
+]

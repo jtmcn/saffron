@@ -1,0 +1,36 @@
+[
+  {
+    "probe": {
+      "file": "saffron/ledger.py",
+      "find": "            (repo_id, base_sha, batch_id),\n        )",
+      "replace": "            (repo_id, base_sha, None),\n        )"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1250,
+    "summary": "1248 passed, 2 skipped, 20 deselected in 15.80s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1250,
+    "baseline_summary": "1248 passed, 2 skipped, 20 deselected in 16.80s"
+  },
+  {
+    "probe": {
+      "file": "saffron/ledger.py",
+      "find": "            (repo_id, base_sha, batch_id),",
+      "replace": "            (repo_id, base_sha, None),"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1250,
+    "summary": "1248 passed, 2 skipped, 20 deselected in 18.11s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1250,
+    "baseline_summary": "1248 passed, 2 skipped, 20 deselected in 16.80s"
+  }
+]

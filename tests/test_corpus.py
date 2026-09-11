@@ -999,3 +999,29 @@ def test_every_dollar_figure_in_the_baseline_record_is_one_a_run_produced():
     found = set(re.findall(r"\$\d+\.\d+", RECORD.read_text()))
     assert found <= allowed, found - allowed
     assert f"${published:.2f}" == "$16.53"
+
+
+SPREAD = REPO / "docs" / "evidence" / "passes" / "2026-09-11-lens-corpus-spread"
+SPREAD_RECORD = REPO / "docs" / "evidence" / "2026-09-11-lens-corpus-spread.md"
+
+
+def test_the_spread_pass_s_per_run_totals_are_re_derivable():
+    """Item 93's number, recomputed from the runs beside it, never read off prose."""
+    fixtures = corpus.load_corpus(FIXTURES)
+    runs = {
+        f.spec_id: [
+            lens_scoring.reviews_from_json(p.read_text())
+            for p in sorted((SPREAD / f.spec_id).glob("run-*.json"))
+        ]
+        for f in fixtures
+    }
+    assert all(len(r) == 3 for r in runs.values())
+    per_run = corpus.graded_per_run(fixtures, runs)
+    line = next(
+        line
+        for line in (SPREAD / "table.md").read_text().splitlines()
+        if line.startswith("Per run")
+    )
+    totals = " · ".join(f"{s.graded}/{s.declared}" for s in per_run if s is not None)
+    assert totals in line
+    assert line in SPREAD_RECORD.read_text()

@@ -1,0 +1,57 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.3494568,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "blocker",
+        "file": "saffron/batch.py",
+        "line": 189,
+        "claim": "The breaker check (line 151) only runs at the top of the loop, before a candidate is started, so it can never observe two consecutive aborts that happen to be the last two candidates in the queue: the loop simply exhausts `candidates` and falls through to `ledger.close_batch(batch_id, \"DRAINED\")`. Concretely, with a two-candidate queue where both return `GATE_ERROR`/`PREFLIGHT_FAILED` (or any pairing of ABORT_STATES with nothing after), `consecutive_aborts` reaches 2 but no further iteration exists to evaluate the `>= _BREAKER_THRESHOLD` check at line 151, so the batch is closed and returned as `DRAINED` instead of `INFRASTRUCTURE`. This inverts the very distinction the module's own comments describe as the point of the breaker (\"enough to tell 'the toolchain is broken' from 'three flaky tasks'\") and is untested \u2014 every existing breaker test (e.g. `test_two_consecutive_aborts_fire_the_breaker`) supplies a third candidate so the check always gets one more iteration to fire on, masking the tail case.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.4833198,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 73,
+        "claim": "`_attach_runs_minted_since` sweeps in every row from `runs` with `run_id > high_water AND batch_id IS NULL`, with no `repo_id` filter at all, and its own docstring (lines 62-70) justifies the lack of scoping solely on 'under K=1 nothing else can mint a run while one candidate's call is in flight' \u2014 but the ledger is a single WAL-mode SQLite file (`ledger.py:161-163`) meant to be shared across processes, and this module's own comments describe `saffron cell` and `replay.py` as real, expected sources of NULL-`batch_id` rows written concurrently with a batch. If either is invoked against this ledger (same repo or a different one) while a candidate's runner call is in flight and then raises, this sweep will attach that unrelated run \u2014 and its real billed spend \u2014 to tonight's batch, permanently rewriting `runs.batch_id` for a row this batch never produced. The tests only exercise a single in-process `Ledger` with a synchronous fake runner, so this cross-process race is invisible to the suite and true only in the fixture, not in production.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.1948992,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 21,
+        "claim": "`_attach_runs_minted_since` is scoped to `run_id > high_water AND batch_id IS NULL` specifically so that pre-existing orphaned runs (left by `saffron/replay.py` and `saffron/cell/session.py`'s `create_run` calls outside a batch, both of which pass no `batch_id`) are never swept into tonight's batch when a runner raises mid-call. No test constructs such a pre-existing orphan before invoking `run_batch`: every test's ledger is freshly created and has zero rows before the crashing candidate mints its one run, so `_max_run_id` returning 0 in every test is indistinguishable from `_max_run_id` always returning 0. Replacing the query `\"SELECT COALESCE(MAX(run_id), 0) AS m FROM runs\"` with `\"SELECT 0 AS m\"` disables the high-water guard entirely (sweeping any and all `batch_id IS NULL` runs, including stray ones from `replay.py`) and every test in tests/test_batch.py still passes, silently reintroducing the exact spend-contamination bug the docstring says this scoping prevents.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/batch.py",
+          "find": "\"SELECT COALESCE(MAX(run_id), 0) AS m FROM runs\"",
+          "replace": "\"SELECT 0 AS m\""
+        }
+      }
+    ]
+  }
+]

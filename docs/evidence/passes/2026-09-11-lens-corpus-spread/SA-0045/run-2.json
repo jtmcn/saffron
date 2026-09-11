@@ -1,0 +1,37 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.1661622,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.8612202,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.2567157,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/ledger.py",
+        "line": 367,
+        "claim": "No test anywhere in the suite calls `create_run` with a non-None `batch_id` and checks it lands in the row \u2014 every call site (session.py, replay.py, and every test including the two new ones) uses the default. Changing `(repo_id, base_sha, batch_id)` to `(repo_id, base_sha, None)` on this line would silently drop the grouping value on every real invocation and the full test suite, including the new batches/runs tests, would stay green, since the only assertion made is that the column is NULL when no batch_id is passed.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/ledger.py",
+          "find": "            (repo_id, base_sha, batch_id),",
+          "replace": "            (repo_id, base_sha, None),"
+        }
+      }
+    ]
+  }
+]

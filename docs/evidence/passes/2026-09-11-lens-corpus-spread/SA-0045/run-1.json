@@ -1,0 +1,37 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.3265812,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.7039211999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.323997,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/ledger.py",
+        "line": 367,
+        "claim": "No test ever calls `create_run` with a real (non-None) `batch_id` and checks that the stored value round-trips. `test_a_run_created_outside_a_batch_has_a_null_batch_id` only exercises the default-None path, so hard-coding the insert to always write NULL regardless of the `batch_id` argument (e.g. replacing the tuple `(repo_id, base_sha, batch_id)` with `(repo_id, base_sha, None)`) keeps every test in this diff green. The gap is deliberate for now since SA-0049 is the first caller that passes a real value, but the parameter and its wiring land in this diff with no witness that the non-null path actually works.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/ledger.py",
+          "find": "            (repo_id, base_sha, batch_id),\n        )",
+          "replace": "            (repo_id, base_sha, None),\n        )"
+        }
+      }
+    ]
+  }
+]

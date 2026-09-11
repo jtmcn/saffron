@@ -1,0 +1,57 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 1.3743834000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "note",
+        "file": "saffron/cli.py",
+        "line": 731,
+        "claim": "_resolve_until builds the deadline with naive local-time arithmetic (now.replace(hour=..., minute=...)), which doesn't account for DST transitions. On a fall-back night, a --until time inside the repeated hour (e.g. 01:30 when clocks fall back at 02:00) is reached the first time wall-clock hits it, so run_batch's clock() >= until check (also naive datetime.now()) stops the batch roughly an hour earlier than the operator intended; on a spring-forward night a --until time inside the skipped hour is never observed exactly and is only caught once the clock reaches the post-jump time. This is real but affects at most two nights a year and only when --until falls in the transition hour, so it's not worth blocking on.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 1.0760322,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "note",
+        "file": "saffron/cli.py",
+        "line": 600,
+        "claim": "The docstring at cli.py:532-536 justifies `outcome.state = result.state` by claiming it changes what `run_batch`'s breaker sees ('rather than the pre-packaging READY_FOR_REVIEW every packaged task would otherwise report to the breaker'). But `saffron/batch.py`'s `ABORT_STATES` is `{GATE_ERROR, PREFLIGHT_FAILED, RATE_LIMITED}`, and `package_phase.package` only ever returns `state` of `READY_FOR_REVIEW` or `MERGE_FAILED` \u2014 neither of which is ever in `ABORT_STATES`. So the overwrite has no effect on `consecutive_aborts` either way; the stated rationale for the line is false, even though the line itself is harmless (it only affects an object no other code reads after this call returns).",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.4295694,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/cli.py",
+        "line": 766,
+        "claim": "No test drives `saffron batch` with a real `--until` value through `main()` and checks what reaches `run_batch`; `test_a_deadline_earlier_than_now_resolves_to_tomorrow` only calls the pure `_resolve_until` helper directly, and `test_saffron_batch_runs_a_night_with_the_defaults_4_2_1_fixes` only exercises the `--until`-omitted (`None`) branch. Replacing this line with `until = None` (silently ignoring the flag) \u2014 or swapping the two arguments passed to `_resolve_until`, which would raise on the very first real `--until` invocation \u2014 leaves every test in the diff green, because nothing in the suite ever supplies `--until` to the `batch` subcommand and inspects the resulting deadline. The one call site that turns the CLI's `--until` string into the datetime `run_batch` actually compares against is untested, even though it is the exact usage shown in \u00a74.2.1's own example invocation.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cli.py",
+          "find": "    until = _resolve_until(args.until, datetime.now()) if args.until else None",
+          "replace": "    until = None"
+        }
+      }
+    ]
+  }
+]

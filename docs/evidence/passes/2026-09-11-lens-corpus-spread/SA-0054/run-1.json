@@ -1,0 +1,47 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.8997812999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.9794145000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 768,
+        "claim": "`_batch` passes `stamp_orphaned=True` on the strength of `_resolve_queue`'s documented premise that 'one batch runs at a time,' but nothing in this diff enforces that premise \u2014 no lock file, no PID check, nothing like the `flock` the repo already uses elsewhere (`saffron/report/index.py`) when concurrent writers are a real risk. A candidate's own wall-clock ceiling is per-attempt, not per-batch, so a long-running last task can carry the whole night past `--until`; if a second invocation (a retried launchd job, an operator running it by hand, a misconfigured schedule) starts while the first is still mid-candidate, its `_resolve_queue(stamp_orphaned=True)` will stamp the first batch's genuinely in-flight task `ORPHANED` and requeue it, corrupting the ledger in a way the single-process test suite can never exercise.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.4929771,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 742,
+        "claim": "`_mirror_path` is a third, now-factored-out copy of the digest formula `_resolve_queue` (line 661) and `_run_cell` (line 377) already compute inline, and the docstring's whole point is that `_batch`'s readiness check must probe 'this run's own mirror' \u2014 i.e. the same path `_resolve_queue` already resolved. But `test_the_night_is_given_a_real_readiness_check_not_the_loops_default` asserts `seen[\"mirror_path\"] == cli._mirror_path(repo.resolve(), home)`, computing its expected value by calling the very function under test a second time rather than deriving it from `resolved.mirror` (the mirror `_resolve_queue` actually fetched). Slicing the digest to `[:10]` instead of `[:12]` here would make `_batch`'s readiness probe a different, unrelated mirror path than the one the rest of the run uses \u2014 exactly the kind of silent landmine the notes warn about \u2014 yet the test would stay green because both sides of its assertion recompute with the same (now-divergent) function.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cli.py",
+          "find": "    again rather than trusting the loop's default to have one.\"\"\"\n    digest = hashlib.sha256(str(repo).encode()).hexdigest()[:12]\n    return home / \"mirrors\" / f\"{repo.name}-{digest}.git\"",
+          "replace": "    again rather than trusting the loop's default to have one.\"\"\"\n    digest = hashlib.sha256(str(repo).encode()).hexdigest()[:10]\n    return home / \"mirrors\" / f\"{repo.name}-{digest}.git\""
+        }
+      }
+    ]
+  }
+]

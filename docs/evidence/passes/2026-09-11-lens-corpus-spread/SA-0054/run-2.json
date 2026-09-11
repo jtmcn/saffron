@@ -1,0 +1,73 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.7623321000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 1.1804810999999997,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 600,
+        "claim": "The docstring at cli.py:532-536 justifies `outcome.state = result.state` by saying it makes `run_batch`'s breaker see `MERGE_FAILED` instead of the pre-packaging `READY_FOR_REVIEW`. But `run_batch`'s only consumer of this field is `outcome.state in ABORT_STATES` (saffron/batch.py:180), and `ABORT_STATES` is `{GATE_ERROR, PREFLIGHT_FAILED, RATE_LIMITED}` \u2014 states `package()` never returns (it only returns `READY_FOR_REVIEW` or `MERGE_FAILED`, per saffron/phases/package.py). So the mutation cannot change the breaker's decision either way: both the pre- and post-mutation values are equally absent from `ABORT_STATES`, and the `CellOutcome` object is discarded right after this check with no other reader. The stated rationale for this adapter behaviour is untrue as written, and a future maintainer trusting the docstring could misjudge what is safe to change in the breaker or this adapter.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.6087248999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 600,
+        "claim": "No test in this diff ever drives `_batch_runner`'s closure past a `READY_FOR_REVIEW` outcome: both `test_the_adapter_stacks_a_child_on_its_parents_branch` and `test_the_adapter_stacks_on_the_first_dependency_only` make `run_one_cell` raise `SystemExit` immediately, so the `package_phase.package` call and the `outcome.state = result.state` overwrite are dead code as far as this diff's tests are concerned. Deleting the line `outcome.state = result.state` (so a packaged task's outcome keeps reporting `READY_FOR_REVIEW` to `run_batch` instead of `MERGED`/`MERGE_FAILED`) would not fail a single new or existing test.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cli.py",
+          "find": "            outcome.state = result.state\n",
+          "replace": ""
+        }
+      },
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 766,
+        "claim": "`_resolve_until` is only unit-tested directly with an injected `now`; nothing exercises `_batch`'s own wiring of `args.until` into it through `main()`. `_fake_batch_resolution` always returns an empty `candidates` list, and `run_batch`'s `until is not None and clock() >= until` comparison only runs inside the `for candidate in candidates:` loop \u2014 so even a test that passed `--until 06:30` through `main()` with this fixture would never exercise the comparison. Replacing `until = _resolve_until(args.until, datetime.now()) if args.until else None` with `until = args.until if args.until else None` (handing `run_batch` a raw string instead of a resolved datetime) leaves every test in this diff green.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cli.py",
+          "find": "until = _resolve_until(args.until, datetime.now()) if args.until else None",
+          "replace": "until = args.until if args.until else None"
+        }
+      },
+      {
+        "lens": "adequacy",
+        "severity": "note",
+        "file": "saffron/cli.py",
+        "line": 742,
+        "claim": "`test_the_night_is_given_a_real_readiness_check_not_the_loops_default` asserts `seen[\"mirror_path\"] == cli._mirror_path(repo.resolve(), home)` \u2014 the expected value is computed by calling the very function under test, and `_resolve_queue` is faked out in that test so `resolved.mirror` is an unrelated fixed path (`tmp_path / \"m.git\"`). Nothing checks that `_mirror_path`'s digest actually matches the mirror `_resolve_queue` really creates, so narrowing the digest slice from `[:12]` to `[:8]` in `_mirror_path` alone (diverging from the identical inline computation in `_resolve_queue`) would leave every test green while `_batch`'s readiness check silently probed a mirror path that was never fetched.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cli.py",
+          "find": "    digest = hashlib.sha256(str(repo).encode()).hexdigest()[:12]\n    return home / \"mirrors\" / f\"{repo.name}-{digest}.git\"",
+          "replace": "    digest = hashlib.sha256(str(repo).encode()).hexdigest()[:8]\n    return home / \"mirrors\" / f\"{repo.name}-{digest}.git\""
+        }
+      }
+    ]
+  }
+]

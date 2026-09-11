@@ -1,0 +1,33 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.44518589999999997,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.6440481,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 668,
+        "claim": "`PinnedBase`'s docstring explicitly justifies its existence as protection against the exact bug named in the spec's 'The shape' section: adjacent same-typed positional fields silently transposing while still type-checking (the `check_readiness` scratch/home incident that once deleted the ledger). But `@dataclass(frozen=True)` at line 668 does not pass `kw_only=True`, so `PinnedBase.__init__` still accepts positional arguments, and `url` (line 682) and `base_sha` (line 683) are adjacent same-typed `str` fields. `PinnedBase(mirror, base_sha, url)` \u2014 the transposed call \u2014 type-checks and constructs cleanly, silently swapping the remote URL and the pinned commit. Every current call site (line 943-945) uses keywords so nothing fails today, but the class delivers none of the structural protection its own docstring claims, unlike `check_readiness`'s actual keyword-only `*` it is compared to.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.8644149,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  }
+]

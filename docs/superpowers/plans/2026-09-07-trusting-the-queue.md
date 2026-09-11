@@ -131,6 +131,14 @@ the record rather than felt.
    baseline's 8 verified vacuities rest on a cell baseline that was red for
    reasons nobody recorded — the same tree is green on the host. Item **94**.
 
+   **The spread is now measured, at n=4.** `docs/evidence/2026-09-11-lens-corpus-spread.md`
+   is a `--runs 3` pass under the same (post-probe) lenses as the baseline. Its three
+   per-run totals — `1/12`, `2/12`, `3/12` — plus the baseline's `3/12` are four samples
+   of one configuration, ranging `1/12` to `3/12`. That range is what "at least 3 …
+   over two consecutive passes" is written against: a single pass reporting `3` is not
+   distinguishable from this spread, which is the margin clause's whole point
+   (`docs/BACKLOG.md` item 93).
+
 Until the count is met, a batch night is a batch of pull requests each owed a
 human round. Size nights by how many rounds you will do in the morning, not by
 budget.

@@ -1,0 +1,22 @@
+[
+  {
+    "probe": {
+      "file": "saffron/cli.py",
+      "find": "resolved, repo=repo, ledger=ledger, out_dir=out_dir, url=pinned.url",
+      "replace": "resolved, repo=repo, ledger=ledger, out_dir=out_dir, url=pinned.base_sha"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1389,
+    "summary": "2 failed, 1385 passed, 2 skipped, 20 deselected in 16.42s",
+    "baseline_failures": [
+      "tests/test_batch.py::test_the_until_stored_is_utc_not_the_operators_wall_clock",
+      "tests/test_ledger.py::test_an_until_sorts_against_the_timestamps_it_will_be_compared_with"
+    ],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1389,
+    "baseline_summary": "2 failed, 1385 passed, 2 skipped, 20 deselected in 17.39s"
+  }
+]
