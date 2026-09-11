@@ -524,6 +524,7 @@ def main() -> int:
         probes=None
         if args.score_only or args.skip_probes or not probe_results
         else corpus.score_probes(probe_results, runs=args.runs),
+        per_run=corpus.graded_per_run(fixtures, runs),
     )
     (args.out / "table.md").write_text(table + "\n")
     print(

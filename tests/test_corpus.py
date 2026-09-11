@@ -924,6 +924,53 @@ def test_every_shipped_fixture_probed_at_baseline_has_a_probe_record():
     assert empty == {"SA-0046", "SA-0055"}
 
 
+def _dirty_restore_seen():
+    # SA-0062's `dirty-restore`: correctness-owned, blocker floor, 386-426.
+    return _finding("saffron/cell/worktree.py", 400, "restores over uncommitted work")
+
+
+def test_each_run_is_scored_as_its_own_corpus_pass(sa0062):
+    """Item 93. The headline counts a defect graded in any run, so it rises with
+    --runs; the per-run totals are the spread, and they disagree here."""
+    runs = {sa0062.spec_id: [_run([_dirty_restore_seen()]), _run()]}
+    assert corpus.score_corpus([sa0062], runs).graded == 1
+    per_run = corpus.graded_per_run([sa0062], runs)
+    assert [(s.graded, s.declared) for s in per_run if s is not None] == [
+        (1, 2),
+        (0, 2),
+    ]
+
+
+def test_the_table_prints_the_per_run_totals_beside_the_best_of_n_headline(sa0062):
+    runs = {sa0062.spec_id: [_run([_dirty_restore_seen()]), _run()]}
+    table = corpus.render_corpus_table(
+        [sa0062],
+        corpus.score_corpus([sa0062], runs),
+        corpus.anchored_blockers(runs),
+        per_run=corpus.graded_per_run([sa0062], runs),
+    )
+    assert table.splitlines()[0].startswith("**1/2 declared defects graded**")
+    assert "Per run, each scored alone: 1/2 · 0/2 graded" in table
+
+
+def test_a_single_run_pass_prints_no_per_run_line(sa0062):
+    """The baseline's `table.md` is pinned; one run has no spread to state."""
+    runs = {sa0062.spec_id: [_run()]}
+    table = corpus.render_corpus_table(
+        [sa0062],
+        corpus.score_corpus([sa0062], runs),
+        corpus.anchored_blockers(runs),
+        per_run=corpus.graded_per_run([sa0062], runs),
+    )
+    assert "Per run" not in table
+
+
+def test_a_run_index_no_fixture_survived_reads_as_unscored_not_zero(sa0062):
+    errored = [LensReview(lens="correctness", findings=[], error="boom")]
+    runs = {sa0062.spec_id: [_run(), errored]}
+    assert corpus.graded_per_run([sa0062], runs)[1] is None
+
+
 def test_every_dollar_figure_in_the_baseline_record_is_one_a_run_produced():
     """The strong form the second pass's record established. Every `$N.NN` the
     record prints must be a per-lens cost from the run JSON, a per-fixture or
