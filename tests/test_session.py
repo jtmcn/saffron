@@ -500,34 +500,37 @@ def _loop(*rounds, max_attempts=4):
     """Drive the loop over a scripted sequence of suite comparisons."""
     comparisons = iter(rounds)
     repairs = []
-    state, _attempts, _new = session.repair_loop(
+    state, attempts, new = session.repair_loop(
         spec_id="SA-TEST",
         judge=lambda: next(comparisons),
         max_attempts=max_attempts,
         repair=repairs.append,
         emit=lambda _event: None,
     )
-    return state, repairs
+    return state, repairs, attempts, new
 
 
 def test_a_green_suite_ends_the_loop_ready_for_review():
-    state, repairs = _loop(_judged())
+    state, repairs, *_ = _loop(_judged())
     assert state == "READY_FOR_REVIEW"
     assert repairs == []
 
 
 def test_a_fixed_failure_ends_green_after_one_repair():
     failing = Failure(file="a.py", code="E501", message="too long")
-    state, repairs = _loop(_judged(failing), _judged())
+    state, repairs, *_ = _loop(_judged(failing), _judged())
     assert state == "READY_FOR_REVIEW"
     assert len(repairs) == 1
 
 
 def test_the_same_failures_twice_running_stops_paying():
     failing = Failure(file="a.py", code="E501", message="too long")
-    state, repairs = _loop(_judged(failing), _judged(failing))
+    state, repairs, attempts, new = _loop(_judged(failing), _judged(failing))
     assert state == "EXHAUSTED"
     assert len(repairs) == 1
+    # What `CellOutcome.attempts` and `new_failures` are built from.
+    assert attempts == 2
+    assert new == [NewFailure("lint", failing)]
 
 
 def test_the_loop_stops_at_max_attempts():
@@ -535,14 +538,16 @@ def test_the_loop_stops_at_max_attempts():
     rounds = [
         _judged(Failure(file=f"{n}.py", code="E501", message="m")) for n in range(3)
     ]
-    state, repairs = _loop(*rounds, max_attempts=3)
+    state, repairs, attempts, new = _loop(*rounds, max_attempts=3)
     assert state == "EXHAUSTED"
     assert len(repairs) == 2
+    assert attempts == 3
+    assert [n.failure.file for n in new] == ["2.py"]
 
 
 def test_an_errored_gate_aborts_the_loop_without_charging_the_task():
     errored = GateResult(gate="tests", status="error", summary="toolchain missing")
-    state, repairs = _loop(
+    state, repairs, *_ = _loop(
         SuiteComparison(
             SuiteRun([errored], "standard", frozenset()), aborted=("tests",)
         )
@@ -554,7 +559,7 @@ def test_an_errored_gate_aborts_the_loop_without_charging_the_task():
 def test_suites_that_drifted_end_the_loop_without_charging_the_task():
     """§5.4: drift is grounds to distrust the subtraction rather than report it,
     so it is not a green even with no new failures."""
-    state, repairs = _loop(
+    state, repairs, *_ = _loop(
         SuiteComparison(
             SuiteRun(
                 [GateResult(gate="tests", status="skip")], "standard", frozenset()

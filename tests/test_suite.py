@@ -20,10 +20,11 @@ class _Tree:
     """The in-memory adapter: each gate answers from a table, the worktree is
     two lists, and every read the suite makes is recorded in order."""
 
-    def __init__(self, answers=None, *, changed=(), dirty=()):
+    def __init__(self, answers=None, *, changed=(), dirty=(), patch=""):
         self.answers = answers or {}
         self.changed = list(changed)
         self.dirty = list(dirty)
+        self._patch = patch
         self.calls: list[str] = []
         self.cwd = Path("/work")
 
@@ -44,7 +45,7 @@ class _Tree:
         return list(self.changed)
 
     def patch(self, base):
-        return ""
+        return self._patch
 
     def dirty_paths(self):
         self.calls.append("dirty_paths")
@@ -190,6 +191,28 @@ def test_an_advisory_gates_failure_is_reported_but_blocks_nothing():
     assert comparison.drift == ()
     assert comparison.new_failures == ()
     assert [r.status for r in comparison.run.results if r.gate == "lint"] == ["fail"]
+
+
+def test_the_head_runs_tier_decides_what_blocks_not_the_baselines():
+    """The baseline's diff is empty, so it never elevates; a head that crosses
+    `elevate_on` must block on `size` even though the baseline called it
+    advisory (§5.6)."""
+    policy = Policy(
+        gates={"lint": GateDeclaration(), "tests": GateDeclaration()},
+        elevate_on=["infra/**"],
+    )
+    suite = _suite(policy=policy)
+    oversized = "".join(
+        [
+            "diff --git a/infra/x.tf b/infra/x.tf\n",
+            "--- a/infra/x.tf\n+++ b/infra/x.tf\n@@ -0,0 +1,601 @@\n",
+            "+x\n" * 601,
+        ]
+    )
+    baseline = suite.baseline(_Tree())
+    comparison = suite.against(_Tree(changed=["infra/x.tf"], patch=oversized), baseline)
+    assert "size" in baseline.advisory_gates
+    assert [n.gate for n in comparison.new_failures] == ["size"]
 
 
 def test_a_tree_left_dirty_at_head_is_a_blocking_new_failure():
