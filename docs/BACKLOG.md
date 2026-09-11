@@ -54,8 +54,8 @@ Soundness first: **79**, **69**, **93**, **94**, **80** (~~**83**~~, ~~**85**~~,
 ~~**82**~~ and ~~**81**~~, pulled up from tier 3 as why 69's gate could not be
 declared against safely, are done — 2026-09-08), then **97**. Honesty second:
 **73**, **70**, **45**, **51** (with **49**/**50**, which its fix closes),
-**47**, **46** (with **95**, which compounds it), **40**, ~~**26**~~, **7**, and
-the remainder of **78**.
+**47**, **46** (with **95**, which compounds it), **40**, ~~**26**~~,
+**7** (IMPLEMENT done; lenses open behind **93**), and the remainder of **78**.
 
 Closed since the 2026-09-04 sort, and left in place because their numbers are
 cited: **74** is done (`SA-0063`, `SA-0064`); **88** is closed on a negative
@@ -98,8 +98,8 @@ printed line; **47** feeds part 3 a column of zeros; **46** is the only account
 of a night nobody watched; **40** merges a diff over a ceiling it passed;
 **26** is done (`SA-0065`, PR #185, 2026-09-10) and its number stays listed
 because item numbers are cited; **95** is what that fix left open — the refusal
-reaches a terminal and never the ledger; **7** leaves §8's flywheel inert exactly
-where it was meant to compound.
+reaches a terminal and never the ledger; **7**'s IMPLEMENT half is done, and the
+lens half stays open behind **93**.
 
 ### Tier 2 — the morning after
 
@@ -720,6 +720,13 @@ this item was opened about. Reviving it is a new decision with its own
 evidence, and it wants the same risk tier the half above is waiting on.
 
 ## 7. `CLAUDE.md` no longer reaches the agent, so the flywheel's middle bucket is inert
+
+**Status: IMPLEMENT done, 2026-09-10; the lenses are open.** `mirror.file_at` reads
+`CLAUDE.md` at `base_sha` and `context.standing_instructions` injects it into IMPLEMENT,
+which REPAIR, REBUT and the extraction turns resume. The three review lenses and the
+verdict lenses still receive none, deliberately: a lens prompt change moves the corpus, and
+item 93's spread is measured first
+(`docs/superpowers/plans/2026-09-10-claude-md-reaches-every-phase.md`).
 
 `setting_sources: []` was set because a target repo's `.claude/` was configuring
 the agent working on it — measured, a planted subagent and skill both loaded out
