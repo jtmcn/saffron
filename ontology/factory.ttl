@@ -152,10 +152,13 @@ factory:standard a factory:RiskTier . factory:elevated a factory:RiskTier .
 ## How a night ended (§4.2.1). Not a task's end state: these describe the batch,
 ## and a batch that drained is not a batch that passed — every task in it may
 ## have failed. INFRASTRUCTURE is the breaker, and it is the only one of the
-## four that says the machine rather than the work was wrong.
+## five that says the machine rather than the work was wrong. INCOMPLETE is a
+## night that left a task in flight: no end state at all, which is not a
+## failure the morning can read (backlog item 70).
 factory:BatchStopReason a owl:Class .
 factory:DRAINED a factory:BatchStopReason . factory:BUDGET a factory:BatchStopReason .
 factory:UNTIL a factory:BatchStopReason . factory:INFRASTRUCTURE a factory:BatchStopReason .
+factory:INCOMPLETE a factory:BatchStopReason .
 
 factory:SpecType a owl:Class .
 factory:feature a factory:SpecType . factory:bug a factory:SpecType . factory:refactor a factory:SpecType .

@@ -65,7 +65,7 @@ factory:BatchShape a sh:NodeShape ;
     sh:property [ sh:path factory:endedBecause ; sh:minCount 0 ; sh:maxCount 1 ;
         sh:class factory:BatchStopReason ;
         sh:in ( factory:DRAINED factory:BUDGET factory:UNTIL
-            factory:INFRASTRUCTURE ) ] .
+            factory:INFRASTRUCTURE factory:INCOMPLETE ) ] .
 
 factory:RunShape a sh:NodeShape ;
     sh:targetClass factory:Run ;

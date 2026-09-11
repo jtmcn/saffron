@@ -4088,15 +4088,16 @@ answer, and it is currently being guessed at.
 
 **Status: decided 2026-09-10, spec queued — `SA-0067`, not yet run.** A fifth
 stop reason, `INCOMPLETE`: it outranks `DRAINED`, `BUDGET` and `UNTIL`, and
-`INFRASTRUCTURE` outranks it. It exits 2 and leaves the breaker alone. **By hand
-first:** the vocabulary, `CONTEXT.md`, §4.2.1, `batch.StopReason` and the `CHECK`
-on `batches.status` have to land together in one commit.
+`INFRASTRUCTURE` outranks it. It exits 2 and leaves the breaker alone. **The
+by-hand half is done:** the vocabulary, `CONTEXT.md`, §4.2.1, `batch.StopReason`
+and the `CHECK` on `batches.status` landed together, because
 `tests/ontology/test_vocabulary_agrees_with_code.py` holds the three closed sets
-equal, and two of those files are `protected`. The `CHECK` also needs a table
-rebuild, because `CREATE TABLE IF NOT EXISTS` leaves an existing ledger's old
-`CHECK` in force. Without the rebuild, the first real `INCOMPLETE` night raises
-`IntegrityError` on the operator's ledger while every fresh-database test
-passes.
+equal and two of those files are `protected`. The `CHECK` needed a table rebuild
+(`Ledger._widen_batch_status`), because `CREATE TABLE IF NOT EXISTS` leaves an
+existing ledger's old `CHECK` in force. Measured before the rebuild existed: a
+ledger with the old `CHECK` raised `IntegrityError` closing an `INCOMPLETE`
+night. What is left is `SA-0067`'s: the loop returning the value, and the command
+mapping it to exit 2.
 
 **Tier 1.** Measured 2026-09-06, driving `SA-0057` — the first unattended run
 in this repo to lose a task to something other than its own code.
