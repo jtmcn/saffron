@@ -109,19 +109,21 @@ The ranges overlap, so the verdict is **no measurable difference at n=3**.
 **Observations the rule does not turn into a verdict:**
 
 - Both complete runs of this pass (`4/12` each) sit above every old sample (baseline `3/12`
-  and all three spread-pass runs). Run 1's `1/10` is the only new sample at or below the old
-  range's floor.
-- Run 1 is a partial sample: 10 of 12 declared defects, not 12, because SA-0054 dropped out of
-  that slice (see above). It is not directly comparable to the other five samples on a raw
-  count, only as a rate — which is how it is treated above.
+  and all three spread-pass runs). Run 1 is the only new sample inside the old range, which is
+  why the ranges overlap. Run 1 is also the partial sample: 10 of 12 declared defects, not 12,
+  because SA-0054 dropped out of that slice (see above), so it is not directly comparable to
+  the other five samples on a raw count, only as a rate — which is how it is treated above.
 - **Which per-defect rows moved**, read off the two tables' `k/n` columns: `SA-0054`'s
   `parent-branch-unpinned` was `0/3` in the spread pass and is now `2/2` (both surviving
   runs graded it — recall its denominator changed too, from the dropped run). `SA-0062`'s two
-  defects, both `0/3` in the spread pass, are now graded `1/3` each. Against that, `SA-0050`'s
-  `breaker-reset-unguarded` moved the other way, `2/3` seen and `2/3` graded in the spread
-  pass down to `2/3` seen and `1/3` graded here. `SA-0062`'s `truncating-write` also moved on
-  `Seen`, `1/3` to `2/3`, one run ahead of where it moved on `Graded`. Every other row —
-  seven of twelve — is unchanged in both `Seen` and `Graded` between the two tables.
+  defects, both graded `0/3` in the spread pass, are now graded `1/3` each. Against that,
+  `SA-0050`'s `breaker-reset-unguarded` moved the other way on both columns: `3/3` seen and
+  `2/3` graded in the spread pass down to `2/3` seen and `1/3` graded here. `SA-0062`'s
+  `truncating-write` also moved on `Seen`, `1/3` to `2/3`, one run ahead of where it moved on
+  `Graded`. `SA-0054`'s `stop-line-unwitnessed` reads `0/3` in the spread pass and `0/2` here —
+  the same denominator shift as `parent-branch-unpinned`, from the same dropped run, with the
+  same `0` numerator both times, so it is not counted as a content move here. Every other
+  row — seven of twelve — is unchanged in both `Seen` and `Graded` between the two tables.
 - The best-of-3 headlines (`3/12` seen+graded in the spread pass's table, `6/12` seen+graded
   here) are the same depth, `--runs 3` on both sides, so they compare like for like as a pair.
   They are still best-of-*n*, though, and the decision rule above is written on the per-run
