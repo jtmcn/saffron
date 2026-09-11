@@ -9,18 +9,17 @@ import subprocess
 import time
 from collections.abc import Sequence
 from dataclasses import replace
-from functools import partial
 from types import SimpleNamespace
 
 import pytest
 
 from saffron.agents import artifacts
-from saffron.cell import runtime, session, worktree
+from saffron.cell import runtime, session
 from saffron.cell.worktree import DIFF_FLAGS
 from saffron.events import Agent, describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
-from saffron.gates.core.committed import committed_gate
+from saffron.gates.suite import CellTree, SuiteComparison, SuiteRun
 from saffron.intake import parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
@@ -120,23 +119,6 @@ def test_a_provider_wall_is_not_a_turn_ceiling():
         is_error=True,
     )
     assert not session.cut_off_at_turn_ceiling(attempt)
-
-
-def test_an_errored_gate_aborts_rather_than_counting_against_the_task():
-    from saffron.gates.contract import GateResult
-
-    results = [
-        GateResult(gate="lint", status="pass", tool="ruff 1.0"),
-        GateResult(gate="tests", status="error", summary="toolchain missing"),
-    ]
-    assert session.aborted_gates(results) == ["tests"]
-
-
-def test_no_errored_gate_means_no_abort():
-    from saffron.gates.contract import GateResult
-
-    results = [GateResult(gate="lint", status="fail", tool="ruff 1.0")]
-    assert session.aborted_gates(results) == []
 
 
 def test_an_early_return_still_produces_a_complete_outcome(tmp_path, monkeypatch):
@@ -505,14 +487,22 @@ def _results(*failures):
     ]
 
 
+def _judged(*failures):
+    """A suite comparison whose blocking new failures are `failures`. The
+    subtraction that produces one is `tests/test_suite.py`'s to test."""
+    return SuiteComparison(
+        SuiteRun(_results(*failures), "standard", frozenset()),
+        new_failures=tuple(NewFailure("lint", f) for f in failures),
+    )
+
+
 def _loop(*rounds, max_attempts=4):
-    """Drive the loop over a scripted sequence of gate suites."""
-    suites = iter(rounds)
+    """Drive the loop over a scripted sequence of suite comparisons."""
+    comparisons = iter(rounds)
     repairs = []
     state, _attempts, _new = session.repair_loop(
         spec_id="SA-TEST",
-        run_gates=lambda: next(suites),
-        baseline=[],
+        judge=lambda: next(comparisons),
         max_attempts=max_attempts,
         repair=repairs.append,
         emit=lambda _event: None,
@@ -521,21 +511,21 @@ def _loop(*rounds, max_attempts=4):
 
 
 def test_a_green_suite_ends_the_loop_ready_for_review():
-    state, repairs = _loop(_results())
+    state, repairs = _loop(_judged())
     assert state == "READY_FOR_REVIEW"
     assert repairs == []
 
 
 def test_a_fixed_failure_ends_green_after_one_repair():
     failing = Failure(file="a.py", code="E501", message="too long")
-    state, repairs = _loop(_results(failing), _results())
+    state, repairs = _loop(_judged(failing), _judged())
     assert state == "READY_FOR_REVIEW"
     assert len(repairs) == 1
 
 
 def test_the_same_failures_twice_running_stops_paying():
     failing = Failure(file="a.py", code="E501", message="too long")
-    state, repairs = _loop(_results(failing), _results(failing))
+    state, repairs = _loop(_judged(failing), _judged(failing))
     assert state == "EXHAUSTED"
     assert len(repairs) == 1
 
@@ -543,7 +533,7 @@ def test_the_same_failures_twice_running_stops_paying():
 def test_the_loop_stops_at_max_attempts():
     """Different failures every round: progress, but not enough of it."""
     rounds = [
-        _results(Failure(file=f"{n}.py", code="E501", message="m")) for n in range(3)
+        _judged(Failure(file=f"{n}.py", code="E501", message="m")) for n in range(3)
     ]
     state, repairs = _loop(*rounds, max_attempts=3)
     assert state == "EXHAUSTED"
@@ -551,79 +541,29 @@ def test_the_loop_stops_at_max_attempts():
 
 
 def test_an_errored_gate_aborts_the_loop_without_charging_the_task():
-    errored = [GateResult(gate="tests", status="error", summary="toolchain missing")]
-    state, repairs = _loop(errored)
+    errored = GateResult(gate="tests", status="error", summary="toolchain missing")
+    state, repairs = _loop(
+        SuiteComparison(
+            SuiteRun([errored], "standard", frozenset()), aborted=("tests",)
+        )
+    )
     assert state == "GATE_ERROR"
     assert repairs == []
 
 
-def _dirty_suite(paths):
-    return [committed_gate(paths)]
-
-
-def test_a_dirty_tree_buys_one_repair_turn():
-    """Attempt 1 repairs, attempt 2 is clean."""
-    calls: list[str] = []
-    trees = iter([["a.py"], []])
-
-    state, attempts, _ = session.repair_loop(
-        spec_id="SA-TEST",
-        run_gates=lambda: _dirty_suite(next(trees)),
-        baseline=_dirty_suite([]),
-        max_attempts=4,
-        repair=lambda new: calls.append("repair"),
-        emit=lambda _event: None,
-    )
-    assert calls == ["repair"]
-    assert state == "READY_FOR_REVIEW"
-    assert attempts == 2
-
-
-def test_a_tree_still_dirty_after_the_repair_turn_ends_the_attempt():
-    calls: list[str] = []
-
-    state, attempts, new = session.repair_loop(
-        spec_id="SA-TEST",
-        run_gates=lambda: _dirty_suite(["a.py"]),
-        baseline=_dirty_suite([]),
-        max_attempts=4,
-        repair=lambda _: calls.append("repair"),
-        emit=lambda _event: None,
-    )
-    assert calls == ["repair"]  # exactly one, not four
-    assert state == "EXHAUSTED"
-    assert attempts == 2
-    assert [n.failure.file for n in new] == ["a.py"]
-
-
-def test_a_gate_that_stopped_running_between_the_suites_is_not_a_green():
-    """§5.4: gate-status or `tool` drift is grounds to distrust the subtraction
-    rather than report it — and both suites here carry zero failures."""
-    baseline = [GateResult(gate="tests", status="pass", tool="pytest 8.0")]
-    head = [GateResult(gate="tests", status="skip")]
-    state, _attempts, _new = session.repair_loop(
-        spec_id="SA-TEST",
-        run_gates=lambda: head,
-        baseline=baseline,
-        max_attempts=4,
-        repair=lambda _new: None,
-        emit=lambda _event: None,
+def test_suites_that_drifted_end_the_loop_without_charging_the_task():
+    """§5.4: drift is grounds to distrust the subtraction rather than report it,
+    so it is not a green even with no new failures."""
+    state, repairs = _loop(
+        SuiteComparison(
+            SuiteRun(
+                [GateResult(gate="tests", status="skip")], "standard", frozenset()
+            ),
+            drift=("tests: pass at baseline, skip at head",),
+        )
     )
     assert state == "GATE_ERROR"
-
-
-def test_a_baseline_failure_is_not_the_tasks_problem():
-    """Only new failures count, or every task inherits the repo's flaky tests."""
-    pre_existing = Failure(file="old.py", code="E501", message="too long")
-    state, _attempts, _new = session.repair_loop(
-        spec_id="SA-TEST",
-        run_gates=lambda: _results(pre_existing),
-        baseline=_results(pre_existing),
-        max_attempts=4,
-        repair=lambda _new: None,
-        emit=lambda _event: None,
-    )
-    assert state == "READY_FOR_REVIEW"
+    assert repairs == []
 
 
 class _Cell:
@@ -1637,32 +1577,6 @@ def test_a_green_run_leaves_the_patch_behind(monkeypatch, tmp_path):
         "head_sha": "c" * 40,
         "files": ["src/x.py"],
     }
-
-
-def test_dirty_paths_is_read_after_run_suite_on_both_calls(monkeypatch, tmp_path):
-    """A gate that writes an uncommitted artifact (`.coverage`, a build dir)
-    must show up on baseline and head alike, or `committed` reports it only at
-    head with nothing on the other side for the subtraction to cancel (§5.4)."""
-    cell = _stub_the_runtime(monkeypatch)
-    order: list[str] = []
-
-    def _run_suite(*_a, **_k):
-        order.append("run_suite")
-        return []
-
-    def _dirty_paths(_container):
-        order.append("dirty_paths")
-        return []
-
-    monkeypatch.setattr("saffron.gates.runner.run_suite", _run_suite)
-    monkeypatch.setattr("saffron.cell.worktree.dirty_paths", _dirty_paths)
-
-    outcome, _ledger = _drive(
-        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
-    )
-    assert outcome.state == "READY_FOR_REVIEW"
-    # One suite call apiece for the baseline and the (green) first attempt.
-    assert order == ["run_suite", "dirty_paths", "run_suite", "dirty_paths"]
 
 
 def test_the_suite_execs_the_gates_from_the_mount_never_the_worktree(
@@ -3279,15 +3193,11 @@ def test_a_cell_run_produces_a_witness_result(monkeypatch, tmp_path):
     # alike — never a plan the caller only remembers to pass once.
     assert captured
     assert all(acc == [criterion] for acc, _mutate in captured)
-    # `_suite` binds the real cell mutator to this attempt's own container,
-    # not `stub_mutator` — proved by identity on `partial.func` and by the
+    # The suite binds the real cell mutator to this attempt's own container,
+    # not `stub_mutator` — proved by the adapter it is bound to and by the
     # stubbed `worktree.source_mutated` actually having been reached with
     # this criterion's own mutant.
-    assert all(
-        isinstance(mutate, partial) and mutate.func is worktree.source_mutated
-        for _acc, mutate in captured
-    )
-    assert all(mutate.args == ("saffron-cell-SY-1",) for _acc, mutate in captured)
+    assert all(_bound_to_this_cell(mutate) for _acc, mutate in captured)
     assert cell.mutated == [criterion.mutant] * len(captured)
 
 
@@ -3342,14 +3252,10 @@ def test_a_cell_run_supplies_the_real_mutator(monkeypatch, tmp_path):
     assert witness_result.summary == "the spec declares no mutants"
     assert captured
     assert all(acc == [] for acc, _mutate in captured)
-    # `_suite` binds the real cell mutator, not the stub, to every call —
+    # The suite binds the real cell mutator, not the stub, to every call —
     # baseline and head alike — whether or not `witness_gate` ever ends up
     # calling it.
-    assert all(
-        isinstance(mutate, partial) and mutate.func is worktree.source_mutated
-        for _acc, mutate in captured
-    )
-    assert all(mutate.args == ("saffron-cell-SY-1",) for _acc, mutate in captured)
+    assert all(_bound_to_this_cell(mutate) for _acc, mutate in captured)
     # And it never was called: the gate skipped on an empty `declared` list
     # before `mutate` was ever reached, not because the mutator failed.
     assert cell.mutated == []
@@ -3497,11 +3403,15 @@ def test_a_skipped_witness_blocks_nothing_at_either_tier(monkeypatch, tmp_path):
         (witness_result,) = [g for g in outcome.gates if g.gate == "witness"]
         assert witness_result.status == "skip", tier
         assert captured, tier
-        assert all(
-            isinstance(mutate, partial) and mutate.func is worktree.source_mutated
-            for _acc, mutate in captured
-        ), tier
+        assert all(_bound_to_this_cell(mutate) for _acc, mutate in captured), tier
         assert all(list(acc) == [criterion] for acc, _mutate in captured), tier
+
+
+def _bound_to_this_cell(mutate) -> bool:
+    """The cell adapter's own mutator, bound to the container `_drive` starts —
+    never `stub_mutator`, and never another cell's tree."""
+    tree = getattr(mutate, "__self__", None)
+    return isinstance(tree, CellTree) and tree.container == "saffron-cell-SY-1"
 
 
 def _revert_tests(*names: str) -> list[GateResult]:

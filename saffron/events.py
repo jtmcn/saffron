@@ -187,7 +187,7 @@ class Attempt:
     that branch has commits and the run goes on.
 
     `aborted`/`drift` are the loop's own two ways of distrusting a suite
-    mid-attempt — `session.aborted_gates`/`suite_drift`, both already
+    mid-attempt — `suite.aborted_gates`/`suite_drift`, both already
     `list[str]` at the call site. Named apart from `Baseline.aborted`: that one
     means the toolchain was already broken before an agent ran; these mean it
     broke, or moved, between two suites of the same attempt."""

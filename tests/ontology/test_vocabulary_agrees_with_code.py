@@ -86,7 +86,7 @@ def test_the_stop_reasons_the_ledger_will_store_are_the_ones_the_vocabulary_decl
     )
 
 
-# `saffron/gates/core/` has no registry object — `session._suite` imports the
+# `saffron/gates/core/` has no registry object — `saffron/gates/suite.py` imports the
 # gates by name — but the directory is a closed set all the same. Treating it as
 # one is what this file previously declined to do, and `witness` shipped built
 # and undeclared for three pull requests as a result (docs/BACKLOG.md item 72).

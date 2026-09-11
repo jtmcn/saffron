@@ -216,7 +216,7 @@ def witness_gate(
         assert tests_result is not None  # both failure paths returned above
 
         # ponytail: an inner `error` ends the attempt through
-        # `session.aborted_gates`, and a mutant that kills its witness by making
+        # `suite.aborted_gates`, and a mutant that kills its witness by making
         # a fixture raise produces exactly that — `.saffron/gates/tests.py`
         # reports `error` when pytest exits non-zero with no `FAILED ` line to
         # parse. `revert.py` met the identical trap and chose **`skip`** — its

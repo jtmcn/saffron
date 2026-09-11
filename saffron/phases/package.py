@@ -474,7 +474,7 @@ def reverify(
     default branch's own drift. So a fresh baseline at `new_base_sha`, the head
     suite at `packaged_sha`, and the usual subtraction (§4.4 steps 2-3).
 
-    `acceptance` is passed through for the same reason `session._suite` passes
+    `acceptance` is passed through for the same reason `suite.GateSuite` passes
     it: without it — and without a `mutate` — `run_suite` leaves `witness` out
     of the suite entirely, and PACKAGE's suite differs in *shape* from the one
     the task was judged by (item 71). Required rather than defaulted, for the
@@ -486,9 +486,9 @@ def reverify(
     here safe.
     """
     from saffron.cell import runtime, worktree
-    from saffron.cell.session import aborted_gates
     from saffron.gates import runner
     from saffron.gates.baseline import subtract_baseline
+    from saffron.gates.suite import aborted_gates
 
     results = {}
     for label, sha in (("baseline", new_base_sha), ("head", packaged_sha)):
@@ -536,7 +536,7 @@ def reverify(
                 cwd=mirror,
                 executor=runner.CellExecutor(container),
                 acceptance=acceptance,
-                # Bound to *this* cell's container, the way `session._suite`
+                # Bound to *this* cell's container, the way `suite.CellTree`
                 # binds it to its own: a mutator pointed at any other tree
                 # would edit something this suite is not judging.
                 mutate=partial(worktree.source_mutated, container),
