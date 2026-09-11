@@ -1818,7 +1818,11 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-10, a seventeenth time: five specs queued for a later
+    """Re-measured 2026-09-10, an eighteenth time: three more specs, `SA-0071` to
+    `SA-0073`, each independent of the rest, so all three are candidates.
+    Nothing else moved.
+
+    Re-measured 2026-09-10, a seventeenth time: five specs queued for a later
     night, `SA-0066` to `SA-0070`. Four are candidates. `SA-0067` is refused, and
     that is correct: it stacks on `SA-0066`, which has no task yet, and a night
     resolves its scan once, so the child waits for the night after its parent
@@ -1879,6 +1883,9 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0068",
         "SA-0069",
         "SA-0070",
+        "SA-0071",
+        "SA-0072",
+        "SA-0073",
     ]
     assert [r.path.name[:7] for r in refusals] == ["SA-0067"]
     assert "depends_on SA-0066" in refusals[0].reason

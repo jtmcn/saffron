@@ -2679,7 +2679,7 @@ block. Either is a repo-side change and neither touches `saffron/`.
 
 `SA-0029` (PR #91) left its cell at 548 changed lines, inside the 600 a
 `feature` gets. Two host-side review rounds took it to **863**. The `size` gate
-runs inside the cell, against the cell's own diff; nothing re-runs it after the
+executes inside the cell, against the cell's own diff; nothing re-runs it after the
 operator commits review fixes to the branch, so the branch merges failing a
 blocking gate it passed on the way out.
 
@@ -2755,6 +2755,11 @@ _answers_a_401` should carry the `cell` marker and say so.
 
 
 ## 42. A rebuttal lost to a trailing comma is recorded as a confirmed disagreement
+
+**Status: spec queued for the visible half, 2026-09-10 — `SA-0071`, not yet
+run.** The recording half is already right: `rebuttal.json` and the queue's counts
+tell an errored turn from an empty one. Whether a malformed rebuttal is worth a
+re-prompt stays open here.
 
 `phases/rebut.py:207` discards a rebuttal artifact that is not the schema and
 returns `RebuttalTurn(error=...)`. That is deliberate, and the comment says
@@ -3484,6 +3489,12 @@ protected), and this is a forecast. A forecast that blocks is the shape item
 
 ## 57. The vocabulary hook matches within a line, and this file is hard-wrapped
 
+**Status: spec queued, 2026-09-10 — `SA-0073`, not yet run.** Measured when it
+was queued: one hit in the tree only a cross-line reading sees, in item 40 of
+this file. It was the verb, not the retired noun, which the pattern cannot tell
+apart, and it was reworded in the same commit so the spec starts from a clean
+tree.
+
 `.pre-commit-config.yaml`'s `retired-vocabulary` hook is `language: pygrep` with
 `entry: '(?i)gate[ -]runs?\b'`. pygrep searches **line by line**, and every
 prose file in this repo is hard-wrapped at ~78 columns, so a retired two-word
@@ -3668,6 +3679,11 @@ ancestor case is wrong, and only because the chain is walked one link deep.
 ---
 
 ## 60. A review lens's whole report is discarded on a schema error, and nothing re-prompts
+
+**Status: done in code, found open here on 2026-09-10.** `4139fbb` (*fix(review):
+a lens whose output is not the schema gets one re-prompt*) re-prompts once on a
+schema failure. A second failure still stops at `REVIEWING`. The item was never
+closed.
 
 **Tier 2.** Measured 2026-09-04 on `SA-0053`, and the finding it cost was a
 real one.
@@ -5265,6 +5281,11 @@ as.*
 ---
 
 ## 89. `DIFF_FLAGS` pins less of the diff's shape than its own comment claims
+
+**Status: spec queued, 2026-09-10 — `SA-0072`, not yet run.** It takes
+`pinned_diff`'s measured values rather than choosing new ones. Dropping the
+duplicate flags from `pinned_diff` afterwards is a harness change, left for
+later.
 
 Found building the lens-corpus harness's byte-identity check (2026-09-08),
 which had to reproduce `export_patch`'s output on a host it does not control
