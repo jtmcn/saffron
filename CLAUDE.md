@@ -102,11 +102,12 @@ exception has a shape worth memorising: **core invokes declared gates, never too
 ### Layout
 
 - `saffron/cell/` — `runtime.py` is every caller's whole view of the cell runtime and names
-  **no** product; `runtimes/apple.py` is the **only** module that spells the `apple/container`
-  binary in code, argv or bare name alike (Appendix G, gated over `saffron/` and `images/`;
-  comments and `.saffron/` are exempt); `runtimes/__init__.py` is the `Dialect`, holding only
-  what two runtimes were *measured* to spell differently; `session.py` drives one cell start
-  to finish (v0.5's supervisor); `worktree.py`, `proxy.py`.
+  **no** product; `runtimes/apple.py` and `runtimes/podman.py` are the **only** modules that
+  may spell their own binary, in code, argv or bare name alike — one gated rule each, since
+  one cannot guard two words (Appendix G; comments and `.saffron/` exempt).
+  `runtimes/__init__.py` is the `Dialect`: only what the two were *measured* to spell
+  differently. `SAFFRON_CELL_RUNTIME` picks one, unknown names raise — **declared, never
+  detected** (§5.1.2). `session.py` drives one cell start to finish; `worktree.py`, `proxy.py`.
 - `saffron/gates/` — `contract.py` is the gate JSON schema and the whole repo-agnostic
   surface; `runner.py` execs gates host-side (`LocalExecutor` / `CellExecutor`);
   `baseline.py` subtracts pre-existing failures; `core/` holds the host-side gates

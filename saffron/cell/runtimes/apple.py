@@ -34,6 +34,12 @@ class Apple:
     def exec_workdir_flag(self) -> str:
         return "--cwd"
 
+    @property
+    def security_flags(self) -> list[str]:
+        """None, and deliberately (§5.1). `no-new-privileges` and seccomp have
+        no equivalent here; the per-cell VM is the boundary offered instead."""
+        return []
+
     def cpu_flags(self, cpus: int) -> list[str]:
         """A per-cell VM configured with N vCPUs simply *has* N CPUs, so `nproc`
         is honest with no affinity flag at all — the structural form of §5.1's

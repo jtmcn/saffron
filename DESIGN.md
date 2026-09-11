@@ -587,6 +587,12 @@ container run --rm \
 
 - **Git remote is a local bare mirror.** The cell physically cannot reach your GitHub remote. The host pushes, after gates pass.
 
+**A second runtime exists, and it is a second safety argument rather than a port.** `podman` runs where `apple/container` cannot and where Appendix G's Architecture A is not on offer either — a container-hosted Linux runner has no daemon and no way to start one, and podman needs none. It keeps three of the four grounds the spike decided on: an honest CPU count, an internal network, `--cap-drop ALL`. **What it gives up is the per-cell VM, which Appendix G called the single largest point in `apple/container`'s favour.** So the paragraph above stops applying to it, in both directions: with no private kernel to offer instead, `no-new-privileges` comes back on and seccomp's default filter is relied on rather than waived. The trade is stated here rather than absorbed, because a runtime swapped in silently swaps the boundary with it.
+
+**Which runtime runs is declared and never detected,** for the reason §5.1.2 gives about postures and Appendix G's principle 32 gives about proper nouns: a supervisor that picks its boundary from what is on `PATH` has made the safety argument a property of the machine. `SAFFRON_CELL_RUNTIME` names it; an unknown name is an error, never a fallback, because a fallback reports one runtime's calibration for another and `CPU_OFFSET` wrong by one surfaces as flaky gate timings rather than as a failure.
+
+**The CPU requirement is met less completely there, and `policy.thread_env` is what closes the gap.** A per-cell VM *has* N CPUs, so every API agrees. A shared kernel can only narrow the affinity mask: measured, `--cpuset-cpus 0-1` leaves `nproc` reporting 2 while `os.cpu_count()` and `/proc/cpuinfo` both still report the host's 4 (`docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md`). A BLAS sizing itself from `sysconf` therefore oversubscribes exactly as this section warns — so under a VM-per-cell runtime the repo-declared `thread_env` is belt and braces, and under a shared-kernel one it is *the* control. A repo onboarded onto such a host that declares none has an uncapped thread pool, and that is a difference in what a gate result means, not merely in how fast it is.
+
 ### 5.1.1 The proxy's route out is asserted, never assumed
 
 **The proxy starting is not the proxy working.** A first install ran a whole

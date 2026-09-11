@@ -40,12 +40,30 @@ class Dialect(Protocol):
     def exec_workdir_flag(self) -> str:
         """How `exec` is told which directory to run in."""
 
+    @property
+    def security_flags(self) -> list[str]:
+        """In-guest hardening this runtime exposes, beyond `--cap-drop ALL`.
+
+        Empty is a real answer and not a gap: §5.1 declines `no-new-privileges`
+        and seccomp under a VM-per-cell runtime *because* the private kernel is
+        offered as the boundary instead. A runtime with no VM has no such offer
+        and must supply them — which is why this is a dialect member rather than
+        a constant in the argv builder.
+        """
+
     def cpu_flags(self, cpus: int) -> list[str]:
-        """The ceiling that makes `nproc` honest inside the cell.
+        """The ceiling that makes the cell's visible CPU count honest.
 
         §5.1 writes the requirement rather than the flag, because the flag is
         the half that moves: a quota leaves the visible core count untouched and
         thread pools size themselves from it, which is the oversubscription mode
         the requirement exists to prevent. What a runtime must supply is
         whatever makes the guest see only the CPUs it has.
+
+        **How completely it can be supplied is a property of the runtime, and
+        the two answers are not equal.** A per-cell VM has N CPUs, so every API
+        agrees. A shared kernel can only narrow the affinity mask, and a library
+        reading `sysconf` or `/proc/cpuinfo` still sees the machine — measured,
+        `docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md`. Each
+        implementation says which it gives.
         """

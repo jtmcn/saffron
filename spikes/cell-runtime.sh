@@ -5,7 +5,7 @@
 # apple/container, take it; otherwise fall back to a shared VM (Docker Desktop
 # first). Half an hour, and it settles a question eight revisions left open.
 #
-#   ./spikes/cell-runtime.sh [container|docker|auto]
+#   ./spikes/cell-runtime.sh [container|docker|podman|auto]
 #
 # Three outcomes per assertion, not two, for the reason §5.4 gives: a probe that
 # never ran is `error`, never `pass`. The first version of this file reported two
@@ -55,7 +55,11 @@ run() {
 # container on it with CPU and memory limits, inspect it, destroy it.
 
 detect() {
-	for r in container docker; do command -v "$r" >/dev/null 2>&1 && {
+	# Detection here is a convenience for a diagnostic, not the supervisor's
+	# selection. DESIGN.md §5.1.2 forbids *Saffron* choosing a runtime from what
+	# is on PATH — a control that picks its own boundary. This script has no
+	# boundary to pick; it is asking a machine what it can do.
+	for r in container docker podman; do command -v "$r" >/dev/null 2>&1 && {
 		echo "$r"
 		return
 	}; done
@@ -65,6 +69,7 @@ detect() {
 net_create() {
 	case $RUNTIME in
 	docker) run docker network create --internal --subnet "$SUBNET" "$NET" >/dev/null ;;
+	podman) run podman network create --internal --subnet "$SUBNET" "$NET" >/dev/null ;;
 	container) run container network create --internal --subnet "$SUBNET" "$NET" >/dev/null ;;
 	esac
 }
@@ -77,6 +82,7 @@ proxy_start() {
 	local listen="while true; do nc -l -p $PROXY_PORT >/dev/null 2>&1; done"
 	case $RUNTIME in
 	docker) run docker run -d --name "$PROXY" --network "$NET" "$IMAGE" sh -c "$listen" >/dev/null ;;
+	podman) run podman run -d --name "$PROXY" --network "$NET" "$IMAGE" sh -c "$listen" >/dev/null ;;
 	container) run container run -d --name "$PROXY" --network "$NET" "$IMAGE" sh -c "$listen" >/dev/null ;;
 	esac
 }
@@ -91,6 +97,13 @@ proxy_ip() {
 cell() {
 	case $RUNTIME in
 	docker) docker run --rm --network "$NET" \
+		--cpuset-cpus "0-$((CPUS - 1))" --memory "$MEM" \
+		--security-opt no-new-privileges --cap-drop ALL \
+		"$IMAGE" "$@" 2>/dev/null ;;
+	# A mask, not a quota: measured, podman's --cpus leaves the cell reporting
+	# every CPU the host has. no-new-privileges is asked for because there is no
+	# per-cell VM to offer instead (DESIGN.md §5.1).
+	podman) podman run --rm --network "$NET" \
 		--cpuset-cpus "0-$((CPUS - 1))" --memory "$MEM" \
 		--security-opt no-new-privileges --cap-drop ALL \
 		"$IMAGE" "$@" 2>/dev/null ;;
@@ -162,6 +175,29 @@ if [ "$alive" != "alive" ]; then
 fi
 note "a cell starts and returns output"
 
+# The instrument, before anything it measures. Every negative assertion below is
+# read through `nc`, and a `nc` that cannot connect at all reports the same
+# failure as a network that refuses — which reads as isolation. Measured
+# 2026-09-11: busybox `nc -z` returns 1 against a listener `wget` fetches from
+# the same container a line later, and a whole record was written on the back of
+# it (docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md). So prove the
+# probe can succeed before trusting it to fail.
+if [ "$(probe "nc -w 3 127.0.0.1 1 </dev/null")" = noran ]; then
+	er "the probe harness itself does not run in a cell"
+else
+	selfcheck=$(cell sh -c 'nc -l -p 9 >/dev/null 2>&1 & sleep 1; nc -w 3 127.0.0.1 9 </dev/null; echo "__rc=$?"' |
+		sed -n 's/.*__rc=\([0-9][0-9]*\).*/\1/p' | tail -1)
+	case ${selfcheck:-noran} in
+	0) note "probe self-check: nc connects to a listener it can see" ;;
+	*)
+		er "nc cannot connect even to a listener in its own cell — every negative"
+		note "  assertion below would 'pass' by failing. Fix the probe, not the design."
+		echo "  refusing to report isolation measured with an instrument that cannot succeed"
+		exit 2
+		;;
+	esac
+fi
+
 python3 -m http.server "$LOOPBACK_PORT" --bind 127.0.0.1 >/dev/null 2>&1 &
 LOOPBACK_PID=$!
 python3 -m http.server "$WILDCARD_PORT" --bind 0.0.0.0 >/dev/null 2>&1 &
@@ -183,7 +219,7 @@ case $RUNTIME in
 container) OFFSET=1 ;;
 *) OFFSET=0 ;;
 esac
-HOST_CPUS=$(sysctl -n hw.ncpu 2>/dev/null || echo 0)
+HOST_CPUS=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 0)
 seen=$(cell nproc | tr -d '[:space:]')
 if [ -z "$seen" ]; then
 	er "nproc produced no output"
@@ -262,6 +298,10 @@ if [ "$fail" -eq 0 ]; then
 	echo "  All assertions hold on $RUNTIME."
 	[ "$RUNTIME" = container ] &&
 		echo "  Appendix G: take it. Better isolation, better memory ceiling, §5.1 gets shorter."
+	[ "$RUNTIME" = podman ] &&
+		echo "  Backlog 103: a shared kernel, so seccomp and no-new-privileges are the"
+		echo "  boundary offered in place of the per-cell VM. A second safety argument,"
+		echo "  weaker and stated (DESIGN.md §5.1)."
 	exit 0
 fi
 echo "  $RUNTIME does not satisfy the spike as configured."

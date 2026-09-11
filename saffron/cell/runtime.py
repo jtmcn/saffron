@@ -16,6 +16,7 @@ backlog item 103).
 from __future__ import annotations
 
 import ipaddress
+import os
 import queue
 import re
 import subprocess
@@ -27,8 +28,46 @@ from dataclasses import dataclass
 
 from saffron.cell.runtimes import Dialect
 from saffron.cell.runtimes import apple as _apple
+from saffron.cell.runtimes import podman as _podman
 
-_DIALECT: Dialect = _apple.DIALECT
+
+class CellRuntimeError(RuntimeError):
+    """The runtime itself failed — not the thing running inside it."""
+
+
+# The runtimes this build can drive, by the name an operator writes.
+DIALECTS: dict[str, Dialect] = {"apple": _apple.DIALECT, "podman": _podman.DIALECT}
+DEFAULT_DIALECT = "apple"
+RUNTIME_ENV = "SAFFRON_CELL_RUNTIME"
+
+
+def select_dialect(name: str | None) -> Dialect:
+    """The named runtime, or the default when nothing was named.
+
+    **Declared, never detected** (§5.1.2). Choosing by what happens to be on
+    `PATH` would make the runtime a property of the machine rather than a
+    decision, which is Appendix G's principle 32 restaged with a `shutil.which`
+    in place of the proper noun — and it would silently swap the safety argument
+    with it, since the two runtimes do not offer the same boundary.
+
+    An unknown name raises rather than falling back. A fallback here reports the
+    default's calibration for a runtime nobody chose, and `CPU_OFFSET` being
+    wrong by one surfaces as flaky gate timings rather than as an error (§5.1).
+    """
+    if name is None or not name.strip():
+        return DIALECTS[DEFAULT_DIALECT]
+    try:
+        return DIALECTS[name.strip()]
+    except KeyError:
+        raise CellRuntimeError(
+            f"{RUNTIME_ENV}={name!r} names no runtime this build can drive; "
+            f"it knows {', '.join(sorted(DIALECTS))}"
+        ) from None
+
+
+# Read once at import, not per call: a task that created its network with one
+# runtime and its container with another is not a thing to make reachable.
+_DIALECT: Dialect = select_dialect(os.environ.get(RUNTIME_ENV))
 
 # Re-exported as a value rather than a literal, because callers outside this
 # package legitimately need the binary's name — `proxy.py` reads its log,
@@ -54,10 +93,6 @@ GATEWAY = str(next(_NETWORK.hosts()))
 # The running runtime's calibration, not a constant of the design — see
 # `Dialect.cpu_offset`. Named here because that is where every caller reads it.
 CPU_OFFSET = _DIALECT.cpu_offset
-
-
-class CellRuntimeError(RuntimeError):
-    """The runtime itself failed — not the thing running inside it."""
 
 
 @dataclass(frozen=True)
@@ -102,6 +137,9 @@ def _run_argv(
     # No capabilities. §5.1: a cell that could install firewall rules could
     # rewrite its own, which is why egress is a proxy and not iptables.
     argv += ["--cap-drop", "ALL"]
+    # Whatever in-guest hardening this runtime has to offer. Empty under a
+    # VM-per-cell runtime, which offers the kernel instead (§5.1).
+    argv += _DIALECT.security_flags
     if user:
         argv += ["--user", user]
     if name:

@@ -1,0 +1,436 @@
+id: podman-runtime-is-runtime-only
+snapshots:
+  BINS = {"podman"}:
+    labels:
+    - source: '{"podman"}'
+      style: primary
+      start: 7
+      end: 17
+    - source: podman
+      style: secondary
+      start: 9
+      end: 15
+    - source: '"podman"'
+      style: secondary
+      start: 8
+      end: 16
+  RT += "podman":
+    labels:
+    - source: RT += "podman"
+      style: primary
+      start: 0
+      end: 14
+    - source: podman
+      style: secondary
+      start: 7
+      end: 13
+    - source: '"podman"'
+      style: secondary
+      start: 6
+      end: 14
+  RT = "podman":
+    labels:
+    - source: RT = "podman"
+      style: primary
+      start: 0
+      end: 13
+    - source: podman
+      style: secondary
+      start: 6
+      end: 12
+    - source: '"podman"'
+      style: secondary
+      start: 5
+      end: 13
+  RT = 'podman':
+    labels:
+    - source: RT = 'podman'
+      style: primary
+      start: 0
+      end: 13
+    - source: podman
+      style: secondary
+      start: 6
+      end: 12
+    - source: '''podman'''
+      style: secondary
+      start: 5
+      end: 13
+  RT = r"podman":
+    labels:
+    - source: RT = r"podman"
+      style: primary
+      start: 0
+      end: 14
+    - source: podman
+      style: secondary
+      start: 7
+      end: 13
+    - source: r"podman"
+      style: secondary
+      start: 5
+      end: 14
+  'RUNTIMES = {"linux": "podman"}':
+    labels:
+    - source: '"linux": "podman"'
+      style: primary
+      start: 12
+      end: 29
+    - source: podman
+      style: secondary
+      start: 22
+      end: 28
+    - source: '"podman"'
+      style: secondary
+      start: 21
+      end: 29
+  'RUNTIMES = {"linux": r"podman"}':
+    labels:
+    - source: '"linux": r"podman"'
+      style: primary
+      start: 12
+      end: 30
+    - source: podman
+      style: secondary
+      start: 23
+      end: 29
+    - source: r"podman"
+      style: secondary
+      start: 21
+      end: 30
+  argv = ("podman", "run"):
+    labels:
+    - source: ("podman", "run")
+      style: primary
+      start: 7
+      end: 24
+    - source: podman
+      style: secondary
+      start: 9
+      end: 15
+    - source: '"podman"'
+      style: secondary
+      start: 8
+      end: 16
+  argv = ('podman', 'run'):
+    labels:
+    - source: ('podman', 'run')
+      style: primary
+      start: 7
+      end: 24
+    - source: podman
+      style: secondary
+      start: 9
+      end: 15
+    - source: '''podman'''
+      style: secondary
+      start: 8
+      end: 16
+  argv = (r"podman", "run"):
+    labels:
+    - source: (r"podman", "run")
+      style: primary
+      start: 7
+      end: 25
+    - source: podman
+      style: secondary
+      start: 10
+      end: 16
+    - source: r"podman"
+      style: secondary
+      start: 8
+      end: 17
+  argv = ["podman"]:
+    labels:
+    - source: '["podman"]'
+      style: primary
+      start: 7
+      end: 17
+    - source: podman
+      style: secondary
+      start: 9
+      end: 15
+    - source: '"podman"'
+      style: secondary
+      start: 8
+      end: 16
+  'def binary(): return "podman"':
+    labels:
+    - source: return "podman"
+      style: primary
+      start: 14
+      end: 29
+    - source: podman
+      style: secondary
+      start: 22
+      end: 28
+    - source: '"podman"'
+      style: secondary
+      start: 21
+      end: 29
+  'def binary(): return r"podman"':
+    labels:
+    - source: return r"podman"
+      style: primary
+      start: 14
+      end: 30
+    - source: podman
+      style: secondary
+      start: 23
+      end: 29
+    - source: r"podman"
+      style: secondary
+      start: 21
+      end: 30
+  'def start(binary="podman"): pass':
+    labels:
+    - source: binary="podman"
+      style: primary
+      start: 10
+      end: 25
+    - source: podman
+      style: secondary
+      start: 18
+      end: 24
+    - source: '"podman"'
+      style: secondary
+      start: 17
+      end: 25
+  'def start(binary=r"podman"): pass':
+    labels:
+    - source: binary=r"podman"
+      style: primary
+      start: 10
+      end: 26
+    - source: podman
+      style: secondary
+      start: 19
+      end: 25
+    - source: r"podman"
+      style: secondary
+      start: 17
+      end: 26
+  self.runtime = "podman":
+    labels:
+    - source: self.runtime = "podman"
+      style: primary
+      start: 0
+      end: 23
+    - source: podman
+      style: secondary
+      start: 16
+      end: 22
+    - source: '"podman"'
+      style: secondary
+      start: 15
+      end: 23
+  start(runtime="podman"):
+    labels:
+    - source: runtime="podman"
+      style: primary
+      start: 6
+      end: 22
+    - source: podman
+      style: secondary
+      start: 15
+      end: 21
+    - source: '"podman"'
+      style: secondary
+      start: 14
+      end: 22
+  start(runtime=r"podman"):
+    labels:
+    - source: runtime=r"podman"
+      style: primary
+      start: 6
+      end: 23
+    - source: podman
+      style: secondary
+      start: 16
+      end: 22
+    - source: r"podman"
+      style: secondary
+      start: 14
+      end: 23
+  subprocess.Popen(["podman", "exec", "-i", name]):
+    labels:
+    - source: '["podman", "exec", "-i", name]'
+      style: primary
+      start: 17
+      end: 47
+    - source: podman
+      style: secondary
+      start: 19
+      end: 25
+    - source: '"podman"'
+      style: secondary
+      start: 18
+      end: 26
+  subprocess.run("podman"):
+    labels:
+    - source: ("podman")
+      style: primary
+      start: 14
+      end: 24
+    - source: podman
+      style: secondary
+      start: 16
+      end: 22
+    - source: '"podman"'
+      style: secondary
+      start: 15
+      end: 23
+  subprocess.run(("podman", "run", "--rm", image)):
+    labels:
+    - source: ("podman", "run", "--rm", image)
+      style: primary
+      start: 15
+      end: 47
+    - source: podman
+      style: secondary
+      start: 17
+      end: 23
+    - source: '"podman"'
+      style: secondary
+      start: 16
+      end: 24
+  subprocess.run(["""podman""", "run", "--rm", image]):
+    labels:
+    - source: '["""podman""", "run", "--rm", image]'
+      style: primary
+      start: 15
+      end: 51
+    - source: podman
+      style: secondary
+      start: 19
+      end: 25
+    - source: '"""podman"""'
+      style: secondary
+      start: 16
+      end: 28
+  subprocess.run(["/usr/local/bin/podman", "run", "--rm", image]):
+    labels:
+    - source: '["/usr/local/bin/podman", "run", "--rm", image]'
+      style: primary
+      start: 15
+      end: 62
+    - source: /usr/local/bin/podman
+      style: secondary
+      start: 17
+      end: 38
+    - source: '"/usr/local/bin/podman"'
+      style: secondary
+      start: 16
+      end: 39
+  subprocess.run(["env", "X=1", r"podman", "run"]):
+    labels:
+    - source: '["env", "X=1", r"podman", "run"]'
+      style: primary
+      start: 15
+      end: 47
+    - source: podman
+      style: secondary
+      start: 32
+      end: 38
+    - source: r"podman"
+      style: secondary
+      start: 30
+      end: 39
+  subprocess.run(["podman", "run", "--rm", image]):
+    labels:
+    - source: '["podman", "run", "--rm", image]'
+      style: primary
+      start: 15
+      end: 47
+    - source: podman
+      style: secondary
+      start: 17
+      end: 23
+    - source: '"podman"'
+      style: secondary
+      start: 16
+      end: 24
+  subprocess.run(["sudo", "podman", "run"]):
+    labels:
+    - source: '["sudo", "podman", "run"]'
+      style: primary
+      start: 15
+      end: 40
+    - source: podman
+      style: secondary
+      start: 25
+      end: 31
+    - source: '"podman"'
+      style: secondary
+      start: 24
+      end: 32
+  subprocess.run(['podman', 'run', '--rm', image]):
+    labels:
+    - source: '[''podman'', ''run'', ''--rm'', image]'
+      style: primary
+      start: 15
+      end: 47
+    - source: podman
+      style: secondary
+      start: 17
+      end: 23
+    - source: '''podman'''
+      style: secondary
+      start: 16
+      end: 24
+  subprocess.run([f"podman", "run", "--rm", image]):
+    labels:
+    - source: '[f"podman", "run", "--rm", image]'
+      style: primary
+      start: 15
+      end: 48
+    - source: podman
+      style: secondary
+      start: 18
+      end: 24
+    - source: f"podman"
+      style: secondary
+      start: 16
+      end: 25
+  subprocess.run([r"podman", "run", "--rm", image]):
+    labels:
+    - source: '[r"podman", "run", "--rm", image]'
+      style: primary
+      start: 15
+      end: 48
+    - source: podman
+      style: secondary
+      start: 18
+      end: 24
+    - source: r"podman"
+      style: secondary
+      start: 16
+      end: 25
+  subprocess.run([r'/usr/local/bin/podman', 'run']):
+    labels:
+    - source: '[r''/usr/local/bin/podman'', ''run'']'
+      style: primary
+      start: 15
+      end: 48
+    - source: /usr/local/bin/podman
+      style: secondary
+      start: 18
+      end: 39
+    - source: r'/usr/local/bin/podman'
+      style: secondary
+      start: 16
+      end: 40
+  w = shutil.which("podman"):
+    labels:
+    - source: ("podman")
+      style: primary
+      start: 16
+      end: 26
+    - source: podman
+      style: secondary
+      start: 18
+      end: 24
+    - source: '"podman"'
+      style: secondary
+      start: 17
+      end: 25

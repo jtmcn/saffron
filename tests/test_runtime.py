@@ -7,8 +7,10 @@ import subprocess
 import sys
 import time
 
+import pytest
+
 from saffron.cell import runtime
-from saffron.cell.runtimes import apple
+from saffron.cell.runtimes import apple, podman
 
 
 def test_mount_renders_the_runtime_flag():
@@ -63,6 +65,63 @@ def test_the_apple_dialect_states_what_was_measured_of_it():
     assert apple.DIALECT.cpu_offset == 1
     assert apple.DIALECT.exec_workdir_flag == "--cwd"
     assert apple.DIALECT.cpu_flags(2) == ["--cpus", "2"]
+
+
+def test_the_podman_dialect_states_what_was_measured_of_it():
+    """podman's own values, pinned as literals for the reason apple's are: a test
+    that reads the dialect and compares it to itself passes against anything.
+
+    Each is measured in
+    `docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md`. The CPU flag
+    is a mask and not a quota because the quota left the cell reporting all four
+    of the host's CPUs, which is §5.1's oversubscription mode exactly. The
+    offset is 0 because there is no VM to be allocated a spare vCPU.
+    """
+    assert podman.DIALECT.binary == "podman"
+    assert podman.DIALECT.cpu_offset == 0
+    assert podman.DIALECT.exec_workdir_flag == "-w"
+    assert podman.DIALECT.cpu_flags(2) == ["--cpuset-cpus", "0-1"]
+    assert podman.DIALECT.cpu_flags(1) == ["--cpuset-cpus", "0-0"]
+
+
+def test_only_the_runtime_without_a_vm_asks_for_in_guest_hardening():
+    """§5.1 declines `no-new-privileges` and seccomp under a VM-per-cell runtime
+    *because* the private kernel is the boundary offered instead. A shared-kernel
+    runtime has no such offer, so the flags come back — measured, `NoNewPrivs` is
+    1 inside a podman cell with the flag and 0 without it.
+
+    Asserted as a pair. Either half alone passes while the other silently agrees
+    with it, and the whole point is that the two runtimes differ here.
+    """
+    assert apple.DIALECT.security_flags == []
+    assert podman.DIALECT.security_flags == ["--security-opt", "no-new-privileges"]
+
+
+def test_a_runtime_nobody_named_is_the_default_and_an_unknown_one_raises():
+    """Declared, never detected (§5.1.2). An unknown name must raise rather than
+    fall back: a fallback reports the default's calibration for a runtime nobody
+    chose, and `CPU_OFFSET` wrong by one surfaces as flaky gate timings rather
+    than as an error."""
+    assert runtime.select_dialect(None) is apple.DIALECT
+    assert runtime.select_dialect("") is apple.DIALECT
+    assert runtime.select_dialect("  ") is apple.DIALECT
+    assert runtime.select_dialect("podman") is podman.DIALECT
+    assert runtime.select_dialect(" podman ") is podman.DIALECT
+    with pytest.raises(runtime.CellRuntimeError) as raised:
+        runtime.select_dialect("containerd")
+    # The message names what it does know, or the operator's next move is a grep.
+    assert "apple" in str(raised.value) and "podman" in str(raised.value)
+
+
+def test_every_declared_runtime_satisfies_the_dialect():
+    """A dialect member added to the protocol and to one implementation only is
+    an `AttributeError` on whichever runtime the operator picked second."""
+    for name, dialect in runtime.DIALECTS.items():
+        assert dialect.binary, name
+        assert isinstance(dialect.cpu_offset, int), name
+        assert dialect.exec_workdir_flag.startswith("-"), name
+        assert isinstance(dialect.security_flags, list), name
+        assert dialect.cpu_flags(2), name
 
 
 def test_exec_is_told_its_working_directory_before_the_container():

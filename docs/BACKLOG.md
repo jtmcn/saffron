@@ -5950,6 +5950,27 @@ change, not a vocabulary one; it is named in **103**.
 
 ## 103. A second cell runtime, and the four things a cloud host still lacks
 
+**Status:** the **runtime half is done**, by hand, 2026-09-11 —
+`saffron/cell/runtimes/podman.py` behind **102**'s `Dialect`, its own copy of the
+structure rule with the mutant that proves it fires, the spike grown a `podman`
+arm, and §5.1 carrying the second safety argument. Three findings from doing it:
+
+- **The spike's own instrument needed a check first.** Every negative assertion
+  is read through `nc`, and a `nc` that cannot connect reports what a refusing
+  network reports. The spike now proves the probe can succeed before trusting it
+  to fail, and refuses to report isolation otherwise.
+- **`--cpuset-cpus` meets §5.1's CPU requirement only halfway.** The mask reaches
+  `sched_getaffinity`, so `nproc` is honest; `os.cpu_count()` and
+  `/proc/cpuinfo` still report the host's count. So `policy.thread_env` is belt
+  and braces under a VM and *the* control under a shared kernel — a repo
+  onboarded there declaring none has an uncapped thread pool.
+- **Every cell would get the same mask.** `cpu_flags` is handed a count, not a
+  placement, so K concurrent cells contend for cores `0..n-1` rather than being
+  spread. §4.2's question, unanswered, and the reason this runtime is for one
+  attended task before it is for a night. **That is what is left of this half.**
+
+The images half and the egress half are below and neither is started.
+
 **Tier 3.** Measured 2026-09-11 in
 `docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md`, from a Linux
 cloud session. Depends on **102** — there is nowhere to put a second backend
