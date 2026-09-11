@@ -2226,7 +2226,7 @@ def test_a_repair_checkpoint_the_repo_refuses_is_not_an_infrastructure_abort(
 
     monkeypatch.setattr("saffron.cell.worktree.dirty_paths", _dirty_paths)
     monkeypatch.setattr("saffron.cell.worktree.commit_dirty", _refused)
-    outcome, _ledger = _drive(
+    outcome, ledger = _drive(
         monkeypatch,
         tmp_path,
         cell=cell,
@@ -2237,6 +2237,8 @@ def test_a_repair_checkpoint_the_repo_refuses_is_not_an_infrastructure_abort(
         ],
     )
     assert outcome.state == "READY_FOR_REVIEW"
+    (queued,) = ledger.queue_lines()
+    assert queued["state"] != "ORPHANED"
     assert any("the host checkpoint failed" in line for line in cell.watched)
 
 

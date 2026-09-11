@@ -2410,7 +2410,8 @@ refuse converted an earned `NOT_IMPLEMENTED` into an infrastructure abort,
 charged to nobody: the salvage path now catches `CellRuntimeError`, says so on
 the watch line, and lets the `commits_ahead` re-measure decide. The same shape
 is still live in the repair loop's own checkpoint, where the tree is not known
-dirty and so is less likely to fire — it needs its own spec. And
+dirty and so is less likely to fire — it needs its own spec (closed by hand
+2026-09-10 instead — see Status). And
 `cut_off_at_turn_ceiling` read `terminal_reason` alone where `run_agent` keys on
 `subtype`; the ledger row carried both, and a result event arriving without the
 one field would have skipped the salvage in silence, which is indistinguishable
