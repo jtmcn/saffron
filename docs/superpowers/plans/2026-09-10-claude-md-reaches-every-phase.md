@@ -408,11 +408,12 @@ git commit -m "fix(session): the implementer never saw the repo's CLAUDE.md, so 
   review and verdict lenses do not yet — that change is staged behind the corpus measurement
   in `docs/BACKLOG.md` item 93." Do not edit Appendix J: appendices narrate what was found.
 - [ ] **Step 2: `.saffron/rejections.md`.** On the bucket-2 entry, replace
-  "**Inert:** item 7, `setting_sources: []`." with "**Live for the implementer** from
-  Task 3's commit (cite its subject — a stacked layer has no merge sha yet); the lenses
-  follow item 93." In the summary table, replace
-  `inert, item 7` with `live for IMPLEMENT; lenses staged`. Leave the dated prose reading
-  below the table as written — it records what was true on 2026-09-09.
+  "**Inert:** item 7, `setting_sources: []`." with "**Landed:** the line IMPLEMENT
+  reads, from `fix(session): the implementer never saw the repo's CLAUDE.md, so
+  bucket 2 had no reader`. Item 7 keeps the lens half open behind item 93." In the
+  summary table, replace `inert, item 7` with `landed for IMPLEMENT; lens half
+  open, item 7`. Leave the dated prose reading below the table as written — it
+  records what was true on 2026-09-09.
 - [ ] **Step 3: `docs/BACKLOG.md` item 7.** Add under the heading:
   "**Status: IMPLEMENT done, 2026-09-10; the lenses are open.** `mirror.file_at` reads
   `CLAUDE.md` at `base_sha` and `context.standing_instructions` injects it into IMPLEMENT,
@@ -833,7 +834,8 @@ def test_each_lens_prompt_carries_the_repo_s_claude_md(lens):
   not yet — …" clause with "every fresh session — the three review lenses and the verdict
   lenses — receives it too, because a critic judging a diff against invariants it was never
   shown is judging against nothing." `docs/BACKLOG.md` item 7: status **done**, citing the
-  merge and the stage-3 record. `.saffron/rejections.md` table: `live in every phase`.
+  merge and the stage-3 record. `.saffron/rejections.md`: the bucket-2 entry drops
+  its lens-half sentence, and its table cell becomes `landed in every phase`.
 
 - [ ] **Step 6: Commit** — do not run `gh stack submit` while layer 3 is unrecorded: it
   pushes every layer and would open layer 3's PR before Task 10's record exists.
