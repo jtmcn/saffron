@@ -52,6 +52,8 @@ host treats the whole turn as one. Each element has exactly these fields:
   or the argument does not settle it; if you are withdrawing, what changed your
   mind.
 
+{standing_instructions}
+
 ## The diff, after the rebuttal
 
 {diff}

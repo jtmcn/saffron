@@ -40,9 +40,9 @@ landing. An entry dated on or after 2026-09-09 was written when the rejection wa
   why a spec author still cannot declare a mutant safely.
 - A preflight failure that takes the whole batch down was skippable by its caller.
   **Bucket 2** — `error` ≠ `fail` is already a `CLAUDE.md` invariant, and this is
-  the judgement it exists to supply. **Landed:** the line IMPLEMENT reads, from
+  the judgement it exists to supply. **Landed:** the line every phase reads, from
   `fix(session): the implementer never saw the repo's CLAUDE.md, so bucket 2 had
-  no reader`. Item 7 keeps the lens half open behind item 93.
+  no reader`.
 
 ## 2026-09-05 — `SA-0055` (#131)
 
@@ -174,7 +174,7 @@ off counts rather than impression. Twenty-four rejections across eleven specs.
 | Bucket | Count | |
 |---|---:|---|
 | 1 — a gate | 17 | 10 landed (5 by `witness`, 5 as items 81–85), 7 open |
-| 2 — `CLAUDE.md` | 1 | landed for IMPLEMENT; lens half open, item 7 |
+| 2 — `CLAUDE.md` | 1 | landed in every phase |
 | 3 — a lens | 4 | all open |
 | No bucket | 2 | both became work, both landed |
 

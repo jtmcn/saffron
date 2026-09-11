@@ -1693,6 +1693,7 @@ def _drive_cell(
                     latest.results, sorted(latest.advisory_gates)
                 ),
                 context_md=context_md,
+                claude_md=claude_md,
                 prompts_dir=_SAFFRON_PKG / "agents" / "prompts",
                 max_turns=spec.max_turns,
                 budget_usd=critic_budget(spec.budget_usd, spent),
@@ -1758,6 +1759,7 @@ def _drive_cell(
                     session_id=session_id,
                     spec_body=spec.body + context.criteria_section(spec.acceptance),
                     context_md=context_md,
+                    claude_md=claude_md,
                     prompts_dir=_SAFFRON_PKG / "agents" / "prompts",
                     max_turns=spec.max_turns,
                     budget_usd=critic_budget(spec.budget_usd, spent),

@@ -1192,15 +1192,17 @@ def test_a_repo_with_no_claude_md_implements_with_no_standing_instructions(
     assert "standing instructions" not in cell.system_prompts[0]
 
 
-def test_the_review_lenses_do_not_yet_carry_claude_md(monkeypatch, tmp_path):
-    """Staged, not forgotten: a lens prompt change moves the corpus, and item 93's
-    spread is measured under today's lenses first. Stage 3 inverts this test."""
+def test_every_review_lens_carries_claude_md_at_the_base_commit(monkeypatch, tmp_path):
+    """Item 7's lens half. The working copy and the base disagree, so a read of
+    either the operator's checkout or /work instead of the mirror at base_sha
+    fails here — the same shape as IMPLEMENT's own test."""
     cell = _stub_the_runtime(monkeypatch)
     _drive(
         monkeypatch,
         tmp_path,
         cell=cell,
         turns=[_turn(_block(_PLAN)), _turn()],
+        claude_md="working-copy rule\n",
         base_claude_md="base-commit rule\n",
     )
     # By content, not position: PLAN and IMPLEMENT resume one session on the
@@ -1208,7 +1210,8 @@ def test_the_review_lenses_do_not_yet_carry_claude_md(monkeypatch, tmp_path):
     implement_prompt = cell.system_prompts[0]
     lens_prompts = [p for p in cell.system_prompts if p != implement_prompt]
     assert len(lens_prompts) == len(review.LENSES)  # REVIEW ran, one session per lens
-    assert all("base-commit rule" not in p for p in lens_prompts)
+    assert all("base-commit rule" in p for p in lens_prompts)
+    assert all("working-copy rule" not in p for p in lens_prompts)
 
 
 def test_no_commit_is_not_implemented(monkeypatch, tmp_path):

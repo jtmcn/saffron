@@ -166,6 +166,8 @@ def main() -> int:
                 spec_body=fixture.spec_body,
                 gates=fixture.gates,
                 context_md=fixture.context_md,
+                # Its recorded passes ran with none (item 7).
+                claude_md=None,
                 # Off the script's own root, not the CWD: a relative resolve
                 # puts the failure inside the run loop, after an image build
                 # and a container start.

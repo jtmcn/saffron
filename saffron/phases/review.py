@@ -161,6 +161,7 @@ def lens_prompt(
     lens: str,
     *,
     context_md: str,
+    claude_md: str | None,
     prompts_dir: Path,
     spec_body: str,
     diff: str,
@@ -169,7 +170,13 @@ def lens_prompt(
     """The lens's system prompt: its own file, plus what a fresh session lacks."""
     template = (prompts_dir / LENSES[lens]).read_text()
     return context.build_system_prompt(
-        "REVIEW", context_md, template=template, spec=spec_body, diff=diff, gates=gates
+        "REVIEW",
+        context_md,
+        template=template,
+        spec=spec_body,
+        diff=diff,
+        gates=gates,
+        standing_instructions=context.standing_instructions(claude_md),
     )
 
 
@@ -277,6 +284,7 @@ def run_review(
     spec_body: str,
     gates: str,
     context_md: str,
+    claude_md: str | None,
     prompts_dir: Path,
     max_turns: int,
     budget_usd: float,
@@ -298,6 +306,7 @@ def run_review(
             system_prompt=lens_prompt(
                 lens,
                 context_md=context_md,
+                claude_md=claude_md,
                 prompts_dir=prompts_dir,
                 spec_body=spec_body,
                 diff=diff,
