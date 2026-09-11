@@ -2902,6 +2902,51 @@ def test_a_verdict_lands_on_the_finding_the_review_recorded(monkeypatch, tmp_pat
     assert (row["verdict"], row["rebuttal"]) == ("withdrawn", "argued: by design")
 
 
+def test_the_verdict_session_carries_claude_md_at_the_base_commit(
+    monkeypatch, tmp_path
+):
+    """Item 7's verdict half: `run_rebut` forwards `claude_md` to
+    `verdict_prompt` the same way REVIEW's lenses forward it, but nothing
+    before this test pinned that at the session level — `tests/test_rebut.py`
+    calls `verdict_prompt` directly, and the other session tests inspect only
+    REVIEW's prompts. Identified by `## The rebuttal`, the one heading
+    `rebut-verdict.md` carries and no other template does, so this does not
+    depend on the verdict session being last."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_through_rebut(
+            _turn("It is intentional."),
+            _turn(
+                _block(
+                    {
+                        "rebuttals": [
+                            {"finding": 1, "action": "argued", "argument": "by design"}
+                        ]
+                    }
+                )
+            ),
+            _turn(
+                _block(
+                    {
+                        "verdicts": [
+                            {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                        ]
+                    }
+                )
+            ),
+        ),
+        claude_md="working-copy rule\n",
+        base_claude_md="base-commit rule\n",
+    )
+    (verdict_prompt,) = [p for p in cell.system_prompts if "## The rebuttal" in p]
+    assert "base-commit rule" in verdict_prompt
+    assert "working-copy rule" not in verdict_prompt
+
+
 def test_a_successful_outcome_carries_its_attempts_failures_reviews_and_rebuttal(
     monkeypatch, tmp_path
 ):
