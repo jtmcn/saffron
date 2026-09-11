@@ -1353,7 +1353,9 @@ It says otherwise (rev 18). `ontology/queries/` therefore stays where it is, as 
     supervisor.py          # per-task lifecycle
     gc.py                  # orphan reconciliation
     cell/
-      runtime.py  worktree.py  database.py  proxy.py   # runtime.py is the only file that knows which runtime (Appendix G)
+      runtime.py  worktree.py  database.py  proxy.py   # runtime.py names no runtime; runtimes/<product>.py each name one (Appendix G)
+      runtimes/
+        __init__.py  apple.py                           # the Dialect contract, and the one implementation there is
     phases/
       diagnose.py  implement.py  repair.py  review.py  package.py
     agents/

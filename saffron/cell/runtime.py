@@ -1,9 +1,16 @@
-"""The cell runtime — the only module that knows which one (DESIGN.md Appendix G).
+"""The cell runtime — every caller's whole view of it (DESIGN.md Appendix G).
 
-`apple/container`, chosen in rev 10 against the four assertions in
-`spikes/cell-runtime.sh`. The surface below is deliberately small: create a
-network and a volume, run a container on it with limits, exec, inspect, destroy.
-Nothing above this file changes if the answer changes.
+This module holds the surface: create a network and a volume, run a container on
+it with limits, exec, inspect, destroy. It names no runtime. Which one is
+running is a `Dialect` (`saffron/cell/runtimes/`), selected below and reached
+only for the handful of spellings that are not universal — so nothing here
+changes if the answer changes, which is what Appendix G bought and what the
+`structure` gate keeps.
+
+`_DIALECT` is the selection, and today there is one. A second arrives with a
+spike arm behind it, never with a `shutil.which` — a runtime detected from the
+host is the proper noun standing in for a decision all over again (principle 32,
+backlog item 103).
 """
 
 from __future__ import annotations
@@ -18,7 +25,16 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
-RUNTIME = "container"
+from saffron.cell.runtimes import Dialect
+from saffron.cell.runtimes import apple as _apple
+
+_DIALECT: Dialect = _apple.DIALECT
+
+# Re-exported as a value rather than a literal, because callers outside this
+# package legitimately need the binary's name — `proxy.py` reads its log,
+# `image.py` builds with it, and `tests/conftest.py` forbids a test without the
+# `cell` marker from exec'ing it. What the rule forbids is *spelling* it.
+RUNTIME = _DIALECT.binary
 DEFAULT_SUBNET = "10.88.0.0/24"
 
 # §4.3's idle and completion bounds. Idle has to clear the longest single tool
@@ -35,11 +51,9 @@ _NETWORK = ipaddress.ip_network(DEFAULT_SUBNET)
 SUBNET_PREFIX = str(_NETWORK.network_address).rsplit(".", 1)[0] + "."
 GATEWAY = str(next(_NETWORK.hosts()))
 
-# apple/container 1.2.2 allocates one vCPU more than --cpus requests, measured
-# at 1->2, 2->3, 4->5, 6->7. The guest count is honest about the VM it is in;
-# the VM just gets one more than asked for. Assert it, never assume it — and
-# re-measure with the spike on any runtime upgrade (DESIGN.md §5.1).
-CPU_OFFSET = 1
+# The running runtime's calibration, not a constant of the design — see
+# `Dialect.cpu_offset`. Named here because that is where every caller reads it.
+CPU_OFFSET = _DIALECT.cpu_offset
 
 
 class CellRuntimeError(RuntimeError):
@@ -96,7 +110,7 @@ def _run_argv(
     for net in [network] if isinstance(network, str) else network or ():
         argv += ["--network", net]
     if cpus is not None:
-        argv += ["--cpus", str(cpus)]
+        argv += _DIALECT.cpu_flags(cpus)
     if memory:
         argv += ["--memory", memory]
     for mount in mounts:
@@ -266,6 +280,29 @@ def run_ephemeral(
     )
 
 
+def exec_argv(
+    container: str,
+    command: Sequence[str],
+    *,
+    workdir: str | None = None,
+    interactive: bool = False,
+) -> list[str]:
+    """One spelling of `exec`, for both callers.
+
+    Built here rather than twice because the working-directory flag is the
+    dialect's to name and a second copy is a second thing to miss: the streaming
+    path and the collecting path disagreeing about where a command runs is a
+    cell that works and works in the wrong directory.
+    """
+    argv = [RUNTIME, "exec"]
+    if interactive:
+        argv.append("-i")
+    if workdir:
+        argv += [_DIALECT.exec_workdir_flag, workdir]
+    argv.append(container)
+    return argv + list(command)
+
+
 def exec_(
     container: str,
     command: Sequence[str],
@@ -273,12 +310,7 @@ def exec_(
     workdir: str | None = None,
     timeout_s: float = 900,
 ) -> Completed:
-    argv = [RUNTIME, "exec"]
-    if workdir:
-        argv += ["--cwd", workdir]
-    argv.append(container)
-    argv += list(command)
-    return _call(argv, timeout_s)
+    return _call(exec_argv(container, command, workdir=workdir), timeout_s)
 
 
 # Everything but PID 1 and the reaper itself. Measured, not assumed: killing the
@@ -326,11 +358,7 @@ def exec_stream(
     line, so a half-written one would still block `readline` and the fix would
     be reimplementing line splitting over `os.read`.
     """
-    argv = [RUNTIME, "exec", "-i"]
-    if workdir:
-        argv += ["--cwd", workdir]
-    argv.append(container)
-    argv += list(command)
+    argv = exec_argv(container, command, workdir=workdir, interactive=True)
 
     # stderr to a file, not a second pipe: nothing drains it while stdout is
     # being read, and a pipe that fills stops the process producing lines.

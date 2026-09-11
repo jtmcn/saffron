@@ -1,12 +1,18 @@
 id: container-runtime-is-runtime-only
 language: python
 severity: error
-message: only saffron/cell/runtime.py may build a `container` argv
+message: only saffron/cell/runtimes/apple.py may build a `container` argv
 note: |
-  DESIGN.md Appendix G. `runtime.py` is the one module that names the cell
-  runtime, so swapping apple/container for another runtime is one file's work.
-  It exports `RUNTIME`; call through it, or through the helpers in
-  `saffron/cell/runtime.py`, rather than spelling the binary here.
+  DESIGN.md Appendix G. One module per runtime names its own product, and
+  `saffron/cell/runtime.py` — which every caller uses — names none, so adding a
+  second runtime is a new file beside this rule's exemption rather than an edit
+  spread through the tree. `runtime.py` exports `RUNTIME` and reaches the rest
+  through a `Dialect`; call through those rather than spelling the binary here.
+
+  A second runtime needs its own copy of this rule, exempting its own module.
+  One rule cannot serve both: the binary is a different word, and the exemption
+  is asserted by value in `tests/test_saffron_gates.py` precisely so that
+  widening it is a decision (backlog items 102, 103).
 
 # `tests/**` and `.saffron/**` are out of scope, and by naming the two trees the
 # invariant is about rather than by exemption: Appendix G governs what `saffron/`
@@ -17,7 +23,7 @@ files:
   - "saffron/**/*.py"
   - "images/**/*.py"
 ignores:
-  - "saffron/cell/runtime.py"
+  - "saffron/cell/runtimes/apple.py"
 
 # The binary as code, not the bare word: `proxy.py` and `session.py` both discuss
 # apple/container in comments, and a text search cannot tell those from a call.

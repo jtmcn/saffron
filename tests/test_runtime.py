@@ -8,6 +8,7 @@ import sys
 import time
 
 from saffron.cell import runtime
+from saffron.cell.runtimes import apple
 
 
 def test_mount_renders_the_runtime_flag():
@@ -41,6 +42,53 @@ def test_run_argv_carries_every_control():
     assert "type=volume,source=saffron-wt-1,target=/work" in argv
     assert "HTTPS_PROXY=http://10.88.0.2:3128" in argv
     assert argv[-2:] == ["saffron/cell:saffron", "nproc"]
+
+
+def test_the_apple_dialect_states_what_was_measured_of_it():
+    """Every member of the dialect, pinned as a literal — which is the only way
+    to pin it. A test that read `apple.DIALECT.exec_workdir_flag` and compared
+    it to itself passes against any value, including a nonsense one: measured,
+    that is exactly what the first version of this test did.
+
+    These four are the differences a second runtime was observed to spell
+    differently (`docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md`).
+    A second runtime gets its own copy of this test, against its own values;
+    they are claims about a product, so they do not generalise.
+
+    `container` and `--cpus` appear here as literals because `tests/**` is out
+    of the structure rule's scope on purpose — a test that pins what a runtime
+    is called must be able to say it.
+    """
+    assert apple.DIALECT.binary == "container"
+    assert apple.DIALECT.cpu_offset == 1
+    assert apple.DIALECT.exec_workdir_flag == "--cwd"
+    assert apple.DIALECT.cpu_flags(2) == ["--cpus", "2"]
+
+
+def test_exec_is_told_its_working_directory_before_the_container():
+    """The wiring, as against the spelling above. `exec_` and `exec_stream`
+    share one builder because the flag is the dialect's to name and two copies
+    are two things to miss; what this pins is that the flag and its value land
+    together, ahead of the container name, so the command is not handed its own
+    workdir as an argument.
+    """
+    argv = runtime.exec_argv("cell-1", ["true"], workdir="/work")
+    assert argv == [runtime.RUNTIME, "exec", "--cwd", "/work", "cell-1", "true"]
+
+
+def test_exec_without_a_workdir_names_no_directory():
+    argv = runtime.exec_argv("cell-1", ["true"], workdir=None)
+    assert argv == [runtime.RUNTIME, "exec", "cell-1", "true"]
+
+
+def test_the_streaming_exec_is_the_same_command_with_stdin_attached():
+    """`exec_stream` gains no capability `exec_` lacks (§5.1) — the only
+    difference is `-i`, and it precedes the workdir flag so that the first three
+    fields stay the shape the read-loop tests assert against."""
+    streamed = runtime.exec_argv("c", ["x"], workdir="/work", interactive=True)
+    collected = runtime.exec_argv("c", ["x"], workdir="/work")
+    assert streamed[:3] == [runtime.RUNTIME, "exec", "-i"]
+    assert streamed[:2] + streamed[3:] == collected
 
 
 def test_detached_run_is_not_removed_on_exit():

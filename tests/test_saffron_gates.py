@@ -511,7 +511,7 @@ def test_a_rules_exemptions_are_the_named_files():
         for p in _rule_files()
     }
     assert exemptions == {
-        "container-runtime-is-runtime-only": ["saffron/cell/runtime.py"],
+        "container-runtime-is-runtime-only": ["saffron/cell/runtimes/apple.py"],
         "agent-sdk-import-is-runner-only": ["images/agent_runner.py"],
         "gate-tool-must-be-executed": ["tests/**"],
         "one-task-driver": ["saffron/task.py"],

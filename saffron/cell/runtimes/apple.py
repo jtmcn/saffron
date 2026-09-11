@@ -1,0 +1,45 @@
+"""`apple/container` — the cell runtime, chosen in rev 10 (DESIGN.md Appendix G).
+
+**The only module in `saffron/` permitted to name the product**, enforced by
+`.saffron/rules/container-runtime-is-runtime-only.yml`. Everything a caller
+touches is in `saffron/cell/runtime.py`, which names no runtime at all.
+
+Decided against the four assertions in `spikes/cell-runtime.sh` rather than left
+to taste, and the decision is re-makeable the same way it was made.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Apple:
+    """apple/container's dialect. Every value here is measured, not read."""
+
+    @property
+    def binary(self) -> str:
+        return "container"
+
+    @property
+    def cpu_offset(self) -> int:
+        # apple/container 1.2.2 allocates one vCPU more than --cpus requests,
+        # measured at 1->2, 2->3, 4->5, 6->7. The guest count is honest about
+        # the VM it is in; the VM just gets one more than asked for. Assert it,
+        # never assume it — and re-measure with the spike on any runtime
+        # upgrade (DESIGN.md §5.1).
+        return 1
+
+    @property
+    def exec_workdir_flag(self) -> str:
+        return "--cwd"
+
+    def cpu_flags(self, cpus: int) -> list[str]:
+        """A per-cell VM configured with N vCPUs simply *has* N CPUs, so `nproc`
+        is honest with no affinity flag at all — the structural form of §5.1's
+        requirement, and the single largest point in this runtime's favour.
+        """
+        return ["--cpus", str(cpus)]
+
+
+DIALECT = Apple()

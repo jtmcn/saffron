@@ -122,7 +122,7 @@ fire. Its number stays listed because item numbers are cited from `saffron/`.
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, **62**, **63**, **64**, **69**, **75**, **76**, **77**,
-~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, **107**, **108**.
+~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**.
 (**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
 is the same defect as filing one nowhere at all. **94** was filed here and moved
@@ -5877,6 +5877,22 @@ the change. Guard it the way #192 did — a test that fails on a stale spelling,
 run both ways.
 
 ## 102. The runtime seam is one file, and widening it cannot be done from a cell
+
+**Status:** **done**, by hand on the host, 2026-09-11 — for the reason below: a
+cell is refused at the plan checkpoint. `saffron/cell/runtime.py` names no
+product, `saffron/cell/runtimes/apple.py` is the only module that does, and
+`runtimes/__init__.py` carries the `Dialect` — three members, each one a
+difference **measured** between two runtimes rather than anticipated. The rule's
+exemption, its asserting test, `CONTEXT.md`'s **Cell runtime** entry and
+§10's layout moved with it.
+
+Two things worth keeping from doing it. The rule was re-proved rather than
+assumed: with the exemption moved, a `container` argv planted in `runtime.py`
+turns the gate red where it was previously exempt, so the invariant moved
+instead of being disarmed. And the first version of the new dialect test read
+`exec_workdir_flag` and compared it to itself — it passed against a nonsense
+value, and the mutant is what said so. A dialect's members are claims about a
+product, so they are pinned as literals; a second runtime pins its own.
 
 **Tier 3.** Appendix G wrote the seam on purpose and it held: `saffron/cell/runtime.py`
 is 441 lines and the only module that names the cell runtime, kept there by
