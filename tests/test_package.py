@@ -11,6 +11,7 @@ from saffron.agents.findings import Finding
 from saffron.events import describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
+from saffron.gates.suite import SuiteComparison, SuiteRun
 from saffron.intake import Criterion, Spec, parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import rebut
@@ -217,19 +218,10 @@ def test_fetch_default_branch_reaches_from_a_mirror_ref_when_local_is_behind(tmp
     assert _rev_parse(mirror, f"refs/heads/{branch}") == second
 
 
-def test_reverify_execs_the_gates_from_the_mount_never_the_applied_tree(
-    monkeypatch, tmp_path
-):
-    """The twin of the session's wiring, and the one §5.7 already flags for
-    drift: `reverify` is a second copy of the whole seam.
-
-    Its own cell tests hand `gates_dir` in and assert it arrives, which proves
-    the mount is plumbed but not that the runner is pointed at it. Both suites
-    must exec from `/gates`; the applied tree carries the patch's own
-    `.saffron/gates/*` at `/work` and they are never run (§5.4).
-    """
-    from saffron.repos.policy import GateDeclaration, Policy
-
+def _stub_package_cells(monkeypatch, *suites):
+    """`reverify`'s two gate-only cells with no runtime behind them: each
+    `run_suite` call answers from `suites` in turn, and every gate path and
+    diff base the suite asks for is kept."""
     for name in (
         "create_network",
         "create_volume",
@@ -242,14 +234,32 @@ def test_reverify_execs_the_gates_from_the_mount_never_the_applied_tree(
     monkeypatch.setattr(
         "saffron.gates.runner.CellExecutor", lambda container: container
     )
+    seen = SimpleNamespace(gates=[], bases=[])
+    answers = iter(suites)
 
-    asked = []
+    def _run_suite(gates, **_k):
+        seen.gates.append([str(p) for p in gates.values()])
+        return next(answers, [])
+
+    def _read_diff(container, base, answer):
+        seen.bases.append(base)
+        return answer
+
+    monkeypatch.setattr("saffron.gates.runner.run_suite", _run_suite)
     monkeypatch.setattr(
-        "saffron.gates.runner.run_suite",
-        lambda gates, **k: asked.append([str(p) for p in gates.values()]) or [],
+        "saffron.cell.worktree.changed_files", lambda c, base: _read_diff(c, base, [])
     )
+    monkeypatch.setattr(
+        "saffron.cell.worktree.export_patch", lambda c, base: _read_diff(c, base, "")
+    )
+    monkeypatch.setattr("saffron.cell.worktree.dirty_paths", lambda c: [])
+    return seen
 
-    new, head = reverify(
+
+def _reverify_stubbed(tmp_path):
+    from saffron.repos.policy import GateDeclaration, Policy
+
+    return reverify(
         mirror=tmp_path / "m.git",
         packaged_sha="a" * 40,
         new_base_sha="b" * 40,
@@ -258,10 +268,93 @@ def test_reverify_execs_the_gates_from_the_mount_never_the_applied_tree(
         policy=Policy(gates={"tests": GateDeclaration()}),
         gates_dir=tmp_path / "gates",
         image="img",
-        acceptance=[],
+        spec=SimpleNamespace(
+            type="feature",
+            touches=["src/**"],
+            forbidden=[],
+            risk="standard",
+            acceptance=[],
+        ),
     )
-    assert (new, head) == ([], [])
-    assert asked == [["/gates/.saffron/gates/tests"]] * 2
+
+
+def test_reverify_execs_the_gates_from_the_mount_never_the_applied_tree(
+    monkeypatch, tmp_path
+):
+    """The twin of the session's wiring, and the one §5.7 already flags for
+    drift. Its own cell tests hand `gates_dir` in and assert it arrives, which
+    proves the mount is plumbed but not that the runner is pointed at it. Both
+    suites must exec from `/gates`; the applied tree carries the patch's own
+    `.saffron/gates/*` at `/work` and they are never run (§5.4).
+    """
+    seen = _stub_package_cells(monkeypatch)
+    comparison = _reverify_stubbed(tmp_path)
+    assert comparison.new_failures == ()
+    assert seen.gates == [["/gates/.saffron/gates/tests"]] * 2
+
+
+def test_reverify_runs_the_whole_gate_suite_not_the_declared_gates_alone(
+    monkeypatch, tmp_path
+):
+    """§5.7 re-runs *the* gate suite. PACKAGE ran only the declared gates, so
+    no core gate judged the packaged commit, and a repo gate named `criteria`
+    ticked the PR's boxes on this path alone (item 22)."""
+    _stub_package_cells(monkeypatch)
+    comparison = _reverify_stubbed(tmp_path)
+    assert [r.gate for r in comparison.run.results] == [
+        "scope",
+        "integrity",
+        "size",
+        "revert",
+        "committed",
+        "census",
+        "criteria",
+    ]
+
+
+def test_reverify_measures_every_diff_from_the_tree_the_pr_merges_onto(
+    monkeypatch, tmp_path
+):
+    """The diff a reviewer reads is the packaged commit over the new base, not
+    over the tree the cell started from."""
+    seen = _stub_package_cells(monkeypatch)
+    _reverify_stubbed(tmp_path)
+    assert seen.bases
+    assert set(seen.bases) == {"b" * 40}
+
+
+def test_suites_that_drifted_while_re_verifying_abort_the_package(
+    monkeypatch, tmp_path
+):
+    """A tool that changed between the two runs makes the subtraction
+    untrustworthy (§5.4). Nothing in PACKAGE checked, so it netted to a clean
+    re-verification; it is infrastructure, like an errored gate."""
+    _stub_package_cells(
+        monkeypatch,
+        [GateResult(gate="tests", status="pass", tool="pytest 8.0")],
+        [GateResult(gate="tests", status="pass", tool="pytest 9.0")],
+    )
+    with pytest.raises(PackageError, match="drifted"):
+        _reverify_stubbed(tmp_path)
+
+
+def test_a_gate_that_errored_in_either_suite_aborts_the_package(monkeypatch, tmp_path):
+    """`error` ≠ `fail` (§5.4): an errored gate carries no failures to
+    subtract, and is not drift either, so unchecked it nets to a clean
+    re-verification — the toolchain's fault read as the change being fine."""
+    broke = GateResult(gate="tests", status="error", summary="toolchain missing")
+    fine = GateResult(gate="tests", status="pass", tool="pytest 8.0")
+    for baseline, head in ((fine, broke), (broke, fine)):
+        _stub_package_cells(monkeypatch, [baseline], [head])
+        with pytest.raises(PackageError, match="errored rather than ran"):
+            _reverify_stubbed(tmp_path)
+
+
+def _reverified(*new, results=(), risk="standard", advisory=()):
+    """What `reverify` returns: its head run, judged against a fresh baseline."""
+    return SuiteComparison(
+        SuiteRun(list(results), risk, frozenset(advisory)), new_failures=tuple(new)
+    )
 
 
 def test_fetch_default_branch_refuses_an_unreachable_remote(tmp_path):
@@ -1309,9 +1402,8 @@ def test_new_failures_after_the_rebase_are_the_tasks_failure(monkeypatch, packag
 
     monkeypatch.setattr(
         "saffron.phases.package.reverify",
-        lambda **_k: (
-            [NewFailure(gate="tests", failure=Failure(file="f.py", code="E"))],
-            [],
+        lambda **_k: _reverified(
+            NewFailure(gate="tests", failure=Failure(file="f.py", code="E"))
         ),
     )
 
@@ -1676,7 +1768,8 @@ def test_a_re_verified_body_shows_the_gates_that_re_ran(monkeypatch, packageable
         gate="tests", status="pass", tool="pytest 9.9.9", summary="ran on the package"
     )
     monkeypatch.setattr(
-        "saffron.phases.package.reverify", lambda **_k: ([], [repackaged])
+        "saffron.phases.package.reverify",
+        lambda **_k: _reverified(results=[repackaged]),
     )
 
     package(
@@ -1747,9 +1840,8 @@ def test_reverifying_under_a_changed_policy_records_the_policy_it_used(
     gates_that_re_ran` fakes it: no cell, no container, anywhere here."""
     monkeypatch.setattr(
         "saffron.phases.package.reverify",
-        lambda **_k: (
-            [],
-            [GateResult(gate="tests", status="pass", tool="t", summary="")],
+        lambda **_k: _reverified(
+            results=[GateResult(gate="tests", status="pass", tool="t", summary="")]
         ),
     )
     work = packageable.work
@@ -1792,9 +1884,8 @@ def test_reverifying_under_an_unchanged_policy_issues_no_policy_write(
     container, anywhere here."""
     monkeypatch.setattr(
         "saffron.phases.package.reverify",
-        lambda **_k: (
-            [],
-            [GateResult(gate="tests", status="pass", tool="t", summary="")],
+        lambda **_k: _reverified(
+            results=[GateResult(gate="tests", status="pass", tool="t", summary="")]
         ),
     )
     work = packageable.work
@@ -1829,26 +1920,24 @@ def test_reverifying_under_an_unchanged_policy_issues_no_policy_write(
     assert recorded == []
 
 
-def test_an_advisory_failure_after_the_rebase_does_not_fail_the_merge(
+def test_a_re_verified_body_marks_the_verifying_suites_advisory_gates(
     monkeypatch, packageable
 ):
-    """`blocking: false` gained a reader in the repair loop and not here, and
-    the two disagreeing turns a green task into `MERGE_FAILED` one phase later.
-
-    Before `blocking` was read anywhere this was unreachable — the task went
-    `EXHAUSTED` and never reached PACKAGE.
-    """
+    """The gate table is the re-run's, so its advisory marks are the re-run's
+    too — computed from the packaged diff, never the cell's (§5.6). An advisory
+    failure is never among the new failures, so it cannot fail the merge."""
     (packageable.work / "other.txt").write_text("main moved\n")
     git(packageable.work, "add", "-A")
     git(packageable.work, "commit", "-qm", "main moved")
     git(packageable.work, "push", "-q", "origin", "main")
 
-    packageable.outcome.advisory_gates = ["perf-smoke"]
-    advisory = NewFailure(
-        "perf-smoke", Failure(file="src/a.py", code="slow", message="12% slower")
+    packageable.outcome.advisory_gates = []
+    slow = GateResult(
+        gate="perf-smoke", status="fail", tool="perf 1.0", summary="12% slower"
     )
     monkeypatch.setattr(
-        "saffron.phases.package.reverify", lambda **_kwargs: ([advisory], [])
+        "saffron.phases.package.reverify",
+        lambda **_k: _reverified(results=[slow], advisory=["perf-smoke"]),
     )
 
     result = package(
@@ -1858,24 +1947,25 @@ def test_an_advisory_failure_after_the_rebase_does_not_fail_the_merge(
     )
 
     assert result.state == "READY_FOR_REVIEW"
+    body = (packageable.outcome.task_dir / "pr_body.md").read_text()
+    assert "(advisory) 12% slower" in body
 
 
 def test_a_blocking_failure_after_the_rebase_still_fails_the_merge(
     monkeypatch, packageable
 ):
-    """The other half, so the filter above cannot be a blanket pass: a gate
-    nobody declared advisory still stops the merge."""
+    """The other half: a blocking new failure the verifying suite reports
+    still stops the merge."""
     (packageable.work / "other.txt").write_text("main moved\n")
     git(packageable.work, "add", "-A")
     git(packageable.work, "commit", "-qm", "main moved")
     git(packageable.work, "push", "-q", "origin", "main")
 
-    packageable.outcome.advisory_gates = ["perf-smoke"]
     blocking = NewFailure(
         "tests", Failure(file="tests/test_a.py", code="failed", message="assert 1 == 2")
     )
     monkeypatch.setattr(
-        "saffron.phases.package.reverify", lambda **_kwargs: ([blocking], [])
+        "saffron.phases.package.reverify", lambda **_kwargs: _reverified(blocking)
     )
 
     result = package(
@@ -1885,6 +1975,31 @@ def test_a_blocking_failure_after_the_rebase_still_fails_the_merge(
     )
 
     assert result.state == "MERGE_FAILED"
+
+
+def test_a_re_verified_package_reports_the_tier_its_verifying_suite_ran_at(
+    monkeypatch, packageable
+):
+    """§5.6 elevates on the diff being judged, and after a rebase that is the
+    packaged diff: the body reports that tier, not the cell's."""
+    (packageable.work / "other.txt").write_text("main moved\n")
+    git(packageable.work, "add", "-A")
+    git(packageable.work, "commit", "-qm", "main moved")
+    git(packageable.work, "push", "-q", "origin", "main")
+
+    packageable.outcome.effective_risk = "standard"
+    monkeypatch.setattr(
+        "saffron.phases.package.reverify", lambda **_k: _reverified(risk="elevated")
+    )
+
+    package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **packageable.kwargs,
+    )
+
+    body = (packageable.outcome.task_dir / "pr_body.md").read_text()
+    assert "risk `elevated`" in body
 
 
 def test_the_pr_body_reports_the_effective_tier_not_the_specs_declared_one(
@@ -2044,7 +2159,7 @@ def test_reverify_is_handed_the_policy_from_the_commit_it_verifies_against(
 
     def _reverify(**kwargs):
         seen.update(kwargs)
-        return [], []
+        return _reverified()
 
     monkeypatch.setattr("saffron.phases.package.reverify", _reverify)
 
@@ -2379,7 +2494,7 @@ def test_a_parent_that_moved_ahead_is_the_tree_everything_downstream_reads(
 
     def _reverify(**kwargs):
         seen_reverify.update(kwargs)
-        return [], []
+        return _reverified()
 
     monkeypatch.setattr("saffron.phases.package.reverify", _reverify)
 
@@ -2576,6 +2691,7 @@ def test_reverification_runs_the_same_suite_shape_the_session_ran(
     from saffron.cell import runtime, worktree
     from saffron.gates import runner
     from saffron.phases import package as pkg
+    from saffron.repos.policy import GateDeclaration, Policy
 
     calls: list[dict] = []
 
@@ -2588,6 +2704,9 @@ def test_reverification_runs_the_same_suite_shape_the_session_ran(
     for name in ("remove_container", "remove_volume", "remove_network"):
         monkeypatch.setattr(runtime, name, lambda *a, **k: None)
     monkeypatch.setattr(worktree, "prepare_worktree", lambda **k: None)
+    monkeypatch.setattr(worktree, "changed_files", lambda c, base: [])
+    monkeypatch.setattr(worktree, "export_patch", lambda c, base: "")
+    monkeypatch.setattr(worktree, "dirty_paths", lambda c: [])
     monkeypatch.setattr(runner, "run_suite", fake_run_suite)
 
     criterion = Criterion(
@@ -2595,14 +2714,20 @@ def test_reverification_runs_the_same_suite_shape_the_session_ran(
         witness="tests/test_billing.py::test_clamped",
         mutant={"file": "pkg/a.py", "find": "a", "replace": "b"},
     )
-    new, head = pkg.reverify(
+    comparison = pkg.reverify(
         mirror=tmp_path,
         packaged_sha="a" * 40,
         new_base_sha="b" * 40,
-        policy=_Policy(),
+        policy=Policy(gates={"tests": GateDeclaration()}),
         gates_dir=tmp_path,
         image="img",
-        acceptance=[criterion],
+        spec=SimpleNamespace(
+            type="feature",
+            touches=["pkg/**"],
+            forbidden=[],
+            risk="standard",
+            acceptance=[criterion],
+        ),
     )
 
     assert len(calls) == 2, "both the baseline and the head suite must run"
@@ -2611,14 +2736,5 @@ def test_reverification_runs_the_same_suite_shape_the_session_ran(
         # nothing from a head that has it.
         assert list(kwargs["acceptance"]) == [criterion]
         assert callable(kwargs["mutate"])
-    assert new == []
-    assert head
-
-
-class _Policy:
-    """The two members `reverify` reads off a policy."""
-
-    thread_env: dict = {}
-
-    def gate_executables(self, _root):
-        return {"tests": _root / "tests"}
+    assert comparison.new_failures == ()
+    assert comparison.run.results

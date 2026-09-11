@@ -4,6 +4,7 @@ container build -t saffron/cell-base:python -f images/cell-base.python.Dockerfil
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,6 +16,10 @@ from saffron.repos.policy import load_policy
 pytestmark = pytest.mark.cell
 
 SAFFRON_ROOT = Path(__file__).resolve().parent.parent
+# Same sha on both sides, so the diff is empty and `scope` has nothing to judge.
+_SPEC = SimpleNamespace(
+    type="feature", touches=[], forbidden=[], risk="standard", acceptance=[]
+)
 
 
 def test_reverification_runs_the_suite_inside_a_cell(tmp_path, capsys):
@@ -37,18 +42,19 @@ def test_reverification_runs_the_suite_inside_a_cell(tmp_path, capsys):
     # Same sha for both suites: the subtraction must then be empty, which is
     # the invariant worth pinning — a non-empty result here would mean the
     # gates are not deterministic, not that the packaged commit is bad.
-    new_failures, head_results = reverify(
+    comparison = reverify(
         mirror=mirror,
         packaged_sha=head,
         new_base_sha=head,
         policy=policy,
         gates_dir=mirror_ops.export_saffron_dir(mirror, head, tmp_path / "gates"),
         image=tag,
-        acceptance=[],
+        spec=_SPEC,
     )
-    assert new_failures == []
+    assert comparison.new_failures == ()
     # The head results are returned, not just the subtraction: the body's gate
     # table has to show the run its own sentence claims.
+    head_results = comparison.run.results
     assert head_results and all(r.status != "error" for r in head_results)
     printed = capsys.readouterr().out
     assert "re-verify: baseline suite" in printed
@@ -87,7 +93,7 @@ def test_the_reverification_cell_carries_no_credential(tmp_path, monkeypatch):
             policy=policy,
             gates_dir=tmp_path / "gates",
             image="unused",
-            acceptance=[],
+            spec=_SPEC,
         )
     # Exact: the declared gate env and nothing else. `cell_env` would add
     # CLAUDE_CONFIG_DIR and the proxy variables, and fail here.
