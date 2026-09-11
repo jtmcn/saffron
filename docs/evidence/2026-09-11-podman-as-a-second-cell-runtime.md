@@ -56,18 +56,34 @@ indexes real cores. The control rev 7 wanted exists on this host. Whether it is
 worth having is a separate question from whether it is reachable; it is now
 reachable.
 
-**2. Egress to an unlisted host fails.** `wget http://1.1.1.1/` from inside an
-`--internal` cell: refused. **This assertion is vacuous here and must not be
-counted.** The same probe from the default network is refused too — the session
-itself has no direct egress, only a proxy — so the result establishes nothing
-about the network the cell was on. A real verdict needs a host the session can
-reach and the allowlist would not. Recorded as unproven rather than as a pass,
-for the reason the spike's own header gives: a probe that never ran is `error`.
+**2. Egress to an unlisted host fails.** Holds, and not vacuously — the first
+draft of this record said it was vacuous and that was the broken instrument
+talking (see below). Re-measured with `wget`: from a cell, `1.1.1.1` is
+unreachable, while `api.anthropic.com` returns an HTTP response. Something
+answers, so the path exists and is being filtered rather than severed.
 
-**3. The proxy is reachable by IP.** Inconclusive. The stand-in listener
-(`busybox nc -l`) never accepted, so both the by-IP and by-name probes returned
-the same failure and neither means anything. Needs the real `saffron/proxy`
-image, which cannot be built here (below).
+**3. The proxy is reachable by IP.** Still unproven, but not for the reason
+first recorded. The stand-in listener was fine; the *probe* was broken.
+
+### The instrument was wrong, and it answered uniformly
+
+`busybox nc -z` returns 1 against a listener that is demonstrably up — measured
+against a local `http.server` that `wget` fetched from the same shell, in the
+same container, a line apart:
+
+```
+nc -z  127.0.0.1:5599   rc=1      # a listener that is there
+wget   127.0.0.1:5599   rc=0      # the same listener, same container
+```
+
+A broken probe does not report noise. It reports the same answer every time, and
+a uniform answer reads like a finding — "nothing is reachable" looked exactly
+like strong isolation. Every `nc`-based line in the first draft of this record
+is withdrawn; every `wget`-based one stands, which is why assertions 1 and 4 are
+unaffected. Principle 34 is usually read as *a probe that never ran is `error`*;
+this is its other half, and the more dangerous one: **a probe that cannot
+succeed reports `pass` for a negative assertion.** Both isolation assertions here
+are negative.
 
 **4. A host service is not reachable from inside a cell.** The hazard
 reproduces exactly as Appendix G describes it:
@@ -159,12 +175,46 @@ than as an error. Pinning that — one base image, built once, carried between
 hosts by some means that is not a public registry — is the actual question, and
 this record does not answer it.
 
-Three others, none of them about the runtime: no `gh`, so PACKAGE cannot
-open the draft pull request and `reconcile` cannot ask GitHub anything; no
-`CLAUDE_CODE_OAUTH_TOKEN`; and the session container is reclaimed on idle, which
-takes `~/.saffron/ledger.db` and the batch tree with it. The last is survivable
-for one attended task whose output is a pull request and fatal for a night,
-whose whole product is the audit trail.
+### The cell cannot reach the API, and the reason is structural
+
+This is the deepest of them and it is not a missing package. Measured from a
+cell on an `--internal` network, with `wget`:
+
+```
+cell -> 1.1.1.1                    unreachable
+cell -> api.anthropic.com          HTTP 403        (something answers, and refuses)
+cell -> <gateway>:<agent proxy>    connection refused
+host -> api.anthropic.com:443      OK
+host -> 127.0.0.1:<agent proxy>    OK
+```
+
+The host has egress. The cell does not, because this environment's egress runs
+through an agent proxy bound to the host's **loopback**, and assertion 4 already
+established that loopback is the one host address a cell cannot reach. So
+Saffron's squid would need that proxy as a `cache_peer` parent, and cannot see
+it.
+
+**Putting it within reach means a host listener on a non-loopback address —
+which is precisely what `preflight.py` refuses.** N1's host probe exists to
+enumerate exactly that and fail the run. The two requirements are in direct
+opposition: the environment says *the only way out is a loopback proxy*, and
+Saffron says *a cell must not be able to reach a host service*. Nothing about a
+cell runtime resolves it.
+
+The repository already has the shape of an answer and is honest about what it
+is: `SAFFRON_ALLOW_HOST_PROCESS` tolerates a named host process per invocation,
+"an accepted risk, not a fix, and reported on every run so it cannot go quiet"
+(Appendix G). A relay bound to the cell network's gateway, named in that
+variable, is a cell that can reach exactly one host port. That is a weaker N1,
+and it is the kind of weakening that has to be written into §5.1 rather than
+configured around.
+
+Two others, neither about the runtime: `CLAUDE_CODE_OAUTH_TOKEN` is absent; and
+the session container is reclaimed on idle, which takes `~/.saffron/ledger.db`
+and the batch tree with it. The second is survivable for one attended task whose
+output is a pull request and fatal for a night, whose whole product is the audit
+trail. `gh` is *not* on this list: it installs from apt (2.45.0), and only needs
+a credential.
 
 ## The boundary this would trade away
 

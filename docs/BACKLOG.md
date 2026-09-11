@@ -5977,11 +5977,13 @@ What the four assertions returned, and it is not a clean sweep:
   reachable from inside an `--internal` cell; one on `127.0.0.1` is not.
   `preflight.py`'s lsof enumeration is as necessary here as on macOS and works
   unchanged.
-- **Two assertions returned nothing.** Egress-to-an-unlisted-host passed
-  vacuously — the session has no direct egress on any network, so the probe
-  established nothing about the one the cell was on. Proxy-reachable-by-IP was
-  inconclusive: the stand-in listener never accepted. Both need the real proxy
-  image and a host the session can reach but the allowlist would not.
+- **One assertion returned nothing, and the probe that said so was broken.**
+  `busybox nc -z` returns 1 against a listener `wget` fetches from a line
+  earlier, so it reported "unreachable" uniformly and that read as isolation.
+  Re-measured: egress-to-an-unlisted-host holds properly. Proxy-reachable-by-IP
+  is still unproven and needs the real proxy image. **Principle 34's other
+  half**: a probe that cannot succeed reports `pass` for a *negative*
+  assertion, and both isolation assertions are negative.
 
 **The boundary this trades away, and it is the one Appendix G bought.** Podman
 keeps the honest CPU count, the internal network and `--cap-drop ALL`, and gives
@@ -6031,11 +6033,23 @@ until the images question below is answered too, and that is the larger half.
    `cgroup.controllers`, so `--memory` is accepted and unenforced. §4.3's
    ceiling would be a claim. A ceiling that is not enforced has to report as
    absent rather than as set, which is its own change.
-3. **No `gh`.** PACKAGE cannot open the draft pull request and `reconcile`
-   cannot ask GitHub anything.
+3. **The cell cannot reach the API, and it is the deepest of these.** This
+   environment's egress runs through an agent proxy bound to the host's
+   **loopback**, and assertion 4 establishes that loopback is the one host
+   address a cell cannot reach (measured: connection refused at the gateway;
+   `1.1.1.1` unreachable; `api.anthropic.com` 403). Saffron's squid needs that
+   proxy as a `cache_peer` parent and cannot see it. Putting it in reach means a
+   host listener on a non-loopback address — exactly what `preflight.py`'s N1
+   probe exists to refuse. The requirements oppose each other and no cell
+   runtime resolves it. `SAFFRON_ALLOW_HOST_PROCESS` is the existing shape of an
+   answer — a relay on the cell network's gateway, named per invocation and
+   reported on every run — and it is a weaker N1 that belongs in §5.1 rather
+   than in a shell profile.
 4. **The host is reclaimed on idle**, taking `~/.saffron/ledger.db` and the
    batch tree with it. Survivable for one attended task whose product is a pull
    request; fatal for a night, whose product *is* the audit trail.
+5. **`CLAUDE_CODE_OAUTH_TOKEN` is absent.** `gh` is no longer on this list: it
+   installs from apt (2.45.0) and only wants a credential.
 
 ---
 
