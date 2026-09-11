@@ -251,7 +251,30 @@ def _assembled_implement_prompt() -> str:
         spec="(the task body)",
         constraints=context.constraints_block(["src/**"], [], []),
         witnesses="",
+        standing_instructions="",
     )
+
+
+def test_claude_md_reaches_the_implement_prompt_verbatim():
+    root = Path(__file__).parent.parent
+    rules = "- Never collapse `error` into `fail`.\n- A literal {vocabulary} stays literal.\n"
+    prompt = context.build_system_prompt(
+        "IMPLEMENT",
+        (root / "CONTEXT.md").read_text(),
+        template=(root / "saffron/agents/prompts/implement.md").read_text(),
+        spec="(the task body)",
+        constraints="",
+        witnesses="",
+        standing_instructions=context.standing_instructions(rules),
+    )
+    assert "## This repository's standing instructions" in prompt
+    assert "- Never collapse `error` into `fail`." in prompt
+    assert "A literal {vocabulary} stays literal." in prompt
+
+
+@pytest.mark.parametrize("absent", [None, "", "  \n\n"])
+def test_a_repo_with_no_claude_md_gets_no_standing_instructions_heading(absent):
+    assert context.standing_instructions(absent) == ""
 
 
 def _definition(prompt: str, term: str) -> str:

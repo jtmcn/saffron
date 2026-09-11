@@ -7,6 +7,7 @@ is free now and expensive later.
 
 from __future__ import annotations
 
+import posixpath
 import re
 import shutil
 import subprocess
@@ -203,6 +204,47 @@ def export_saffron_dir(mirror: Path, sha: str, dest: Path) -> Path:
     if not (dest / ".saffron").is_dir():
         raise GitError(f"{sha[:12]} has no .saffron for the cell to run")
     return dest
+
+
+_REGULAR_MODES = {"100644", "100755"}
+_SYMLINK_MODE = "120000"
+
+
+def _ls_tree_mode(mirror: Path, sha: str, path: str) -> str | None:
+    """The git file mode at `path`, or `None` if `sha`'s tree has no such path."""
+    listing = _git(mirror, "ls-tree", sha, "--", path)
+    return listing.split(None, 1)[0] if listing else None
+
+
+def file_at(mirror: Path, sha: str, path: str) -> str | None:
+    """`path` as it stood at `sha`, read from the bare mirror; `None` when that
+    tree has no such path. A regular file's exact text; a symlink is resolved
+    one hop to a regular file in the tree, or raises. Anything else readable
+    at that path — a tree, a submodule, a symlink escaping the tree or
+    pointing at another symlink — raises GitError: absent is an answer,
+    unreadable is not."""
+    mode = _ls_tree_mode(mirror, sha, path)
+    if mode is None:
+        return None
+    if mode in _REGULAR_MODES:
+        # strip=False: the file's own trailing newline is content.
+        return _git(mirror, "show", f"{sha}:{path}", strip=False)
+    if mode == _SYMLINK_MODE:
+        target = _git(mirror, "show", f"{sha}:{path}")
+        resolved = posixpath.normpath(posixpath.join(posixpath.dirname(path), target))
+        if posixpath.isabs(resolved) or resolved.startswith(".."):
+            raise GitError(
+                f"{path} at {sha[:12]}: symlink target {target!r} leaves the tree"
+            )
+        if _ls_tree_mode(mirror, sha, resolved) not in _REGULAR_MODES:
+            raise GitError(
+                f"{path} at {sha[:12]}: symlink target {resolved!r} is not a "
+                "regular file"
+            )
+        return _git(mirror, "show", f"{sha}:{resolved}", strip=False)
+    raise GitError(
+        f"{path} at {sha[:12]}: mode {mode} is not a regular file or symlink"
+    )
 
 
 def retirement_markers(mirror: Path, sha: str) -> list[tuple[str, str]]:

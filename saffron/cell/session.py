@@ -1028,6 +1028,11 @@ def _drive_cell(
     # touches `.saffron/` (§5.4).
     task_dir.mkdir(parents=True, exist_ok=True)
     gates_dir = mirror_ops.export_saffron_dir(mirror, spec.base_sha, task_dir / "gates")
+    # Beside gates_dir, not at the prompt-build site: every base-sha input is
+    # read before a cell exists, so a GitError fails before one is created.
+    # ponytail: Claude Code's own `@path` imports inside CLAUDE.md still reach
+    # the model as literal text, and file_at follows only one symlink hop.
+    claude_md = mirror_ops.file_at(mirror, spec.base_sha, "CLAUDE.md")
 
     # R2: the on-host validation stays — a declared gate exists and is
     # executable — but it now runs against the exported tree the cell mounts.
@@ -1304,6 +1309,7 @@ def _drive_cell(
                 spec.touches, spec.forbidden, policy.protected
             ),
             witnesses=context.witnesses_block(spec.acceptance),
+            standing_instructions=context.standing_instructions(claude_md),
         )
         options = implement.agent_options(
             system_prompt=system_prompt,

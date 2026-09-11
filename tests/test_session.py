@@ -23,7 +23,7 @@ from saffron.gates.contract import Failure, GateResult
 from saffron.gates.core.committed import committed_gate
 from saffron.intake import parse_spec
 from saffron.ledger import Ledger
-from saffron.phases import implement
+from saffron.phases import implement, review
 from saffron.phases import package as package_mod
 from saffron.repos import mirror
 from saffron.repos import policy as policy_mod
@@ -868,7 +868,7 @@ def _cut_off_turn(cost=0.4):
     )
 
 
-def _stub_the_export(monkeypatch, repo, policy=None, recorded=None):
+def _stub_the_export(monkeypatch, repo, policy=None, recorded=None, base_files=None):
     """`export_saffron_dir` with no mirror to `git archive` from: the working copy
     stands in for `base_sha`'s tree — except where `policy` makes the two
     diverge, which is the only thing that can tell them apart. The dest is
@@ -887,6 +887,14 @@ def _stub_the_export(monkeypatch, repo, policy=None, recorded=None):
 
     monkeypatch.setattr("saffron.repos.mirror.export_saffron_dir", _export)
 
+    def _file_at(_mirror, _sha, path):
+        if base_files is not None and path in base_files:
+            return base_files[path]
+        target = repo / path
+        return target.read_text() if target.is_file() else None
+
+    monkeypatch.setattr("saffron.repos.mirror.file_at", _file_at)
+
 
 def _drive(
     monkeypatch,
@@ -901,6 +909,8 @@ def _drive(
     use_default_emit=False,
     capture=None,
     agent_says=None,
+    claude_md=None,
+    base_claude_md=None,
 ):
     """Run one whole cell against the stubbed runtime and return its outcome.
 
@@ -923,8 +933,16 @@ def _drive(
         executable.write_text("#!/bin/sh\nexit 0\n")
         executable.chmod(0o755)
     (repo / ".saffron" / "policy.yaml").write_text(policy)
+    if claude_md is not None:
+        (repo / "CLAUDE.md").write_text(claude_md)
 
-    _stub_the_export(monkeypatch, repo, base_policy, cell.removed)
+    _stub_the_export(
+        monkeypatch,
+        repo,
+        base_policy,
+        cell.removed,
+        base_files=None if base_claude_md is None else {"CLAUDE.md": base_claude_md},
+    )
 
     scripted = iter(turns)
 
@@ -1179,6 +1197,52 @@ def test_a_spec_with_no_forbidden_shows_no_forbidden_list(monkeypatch, tmp_path)
     prompt = cell.system_prompts[0]
     assert "- `src/**`" in prompt
     assert "`forbidden` — deny paths" not in prompt
+
+
+def test_the_implement_prompt_carries_claude_md_at_the_base_commit(
+    monkeypatch, tmp_path
+):
+    """Item 7. The working copy and the base disagree, so a read of either the
+    operator's checkout or /work instead of the mirror at base_sha fails here."""
+    cell = _stub_the_runtime(monkeypatch)
+    _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        claude_md="working-copy rule\n",
+        base_claude_md="base-commit rule\n",
+    )
+    prompt = cell.system_prompts[0]
+    assert "base-commit rule" in prompt
+    assert "working-copy rule" not in prompt
+
+
+def test_a_repo_with_no_claude_md_implements_with_no_standing_instructions(
+    monkeypatch, tmp_path
+):
+    cell = _stub_the_runtime(monkeypatch)
+    _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
+    assert "standing instructions" not in cell.system_prompts[0]
+
+
+def test_the_review_lenses_do_not_yet_carry_claude_md(monkeypatch, tmp_path):
+    """Staged, not forgotten: a lens prompt change moves the corpus, and item 93's
+    spread is measured under today's lenses first. Stage 3 inverts this test."""
+    cell = _stub_the_runtime(monkeypatch)
+    _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        base_claude_md="base-commit rule\n",
+    )
+    # By content, not position: PLAN and IMPLEMENT resume one session on the
+    # same prompt, so every prompt unlike theirs is a lens's.
+    implement_prompt = cell.system_prompts[0]
+    lens_prompts = [p for p in cell.system_prompts if p != implement_prompt]
+    assert len(lens_prompts) == len(review.LENSES)  # REVIEW ran, one session per lens
+    assert all("base-commit rule" not in p for p in lens_prompts)
 
 
 def test_no_commit_is_not_implemented(monkeypatch, tmp_path):

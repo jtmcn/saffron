@@ -118,6 +118,28 @@ def criteria_section(acceptance: Sequence[Criterion]) -> str:
     )
 
 
+def standing_instructions(claude_md: str | None) -> str:
+    """The target repo's `CLAUDE.md`, as prompt text (§5.3, §8 bucket 2).
+
+    Substituted, never templated — it carries braces. Empty for a repo with
+    none: a heading over nothing invites an invented list.
+    """
+    if claude_md is None or not claude_md.strip():
+        return ""
+    return "\n".join(
+        [
+            "## This repository's standing instructions",
+            "",
+            "The target repo's `CLAUDE.md` as it stood at this task's base commit, "
+            "read by the host rather than from /work — an edit to the file there "
+            "reaches no session of this task. Where it and the other rules in "
+            "this prompt disagree, those rules win: the host enforces them.",
+            "",
+            claude_md.rstrip(),
+        ]
+    )
+
+
 def build_system_prompt(
     phase: str, context_md: str, template: str, **values: str
 ) -> str:

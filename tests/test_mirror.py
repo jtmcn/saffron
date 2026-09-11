@@ -10,6 +10,7 @@ from saffron.repos.mirror import (
     diff_stat,
     ensure_mirror,
     export_saffron_dir,
+    file_at,
     remove_worktree,
     resolve_pull_request,
     retirement_markers,
@@ -534,3 +535,73 @@ def test_a_path_carrying_a_colon_is_still_read_correctly(tmp_path):
     mirror = ensure_mirror(repo, tmp_path / "colon-marked.git")
 
     assert retirement_markers(mirror, sha) == [("weird:name.py", "SA-3")]
+
+
+# --------------------------------------------------------- file_at
+
+
+def test_file_at_reads_the_file_as_it_stood_at_the_sha(tmp_path, origin):
+    """Two commits disagree on the file, so reading HEAD instead of the sha fails."""
+    (origin / "CLAUDE.md").write_text("first rule\n")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-qm", "rules")
+    first = git(origin, "rev-parse", "HEAD")
+    (origin / "CLAUDE.md").write_text("second rule\n")
+    git(origin, "commit", "-qam", "rules again")
+    mirror = ensure_mirror(origin, tmp_path / "mirror")
+    assert file_at(mirror, first, "CLAUDE.md") == "first rule\n"
+
+
+def test_file_at_is_none_for_a_path_the_tree_does_not_have(tmp_path, origin):
+    mirror = ensure_mirror(origin, tmp_path / "mirror")
+    assert file_at(mirror, git(origin, "rev-parse", "HEAD"), "CLAUDE.md") is None
+
+
+def test_file_at_raises_on_a_sha_the_mirror_does_not_have(tmp_path, origin):
+    """Absent and unreadable are different answers; a bad sha is the second."""
+    mirror = ensure_mirror(origin, tmp_path / "mirror")
+    with pytest.raises(GitError):
+        file_at(mirror, "0" * 40, "CLAUDE.md")
+
+
+def test_file_at_resolves_a_symlink_to_its_target_text(tmp_path, origin):
+    """`git show sha:path` on a symlink prints the link target's path, not its
+    content — unresolved, that string would reach the prompt as instructions."""
+    (origin / "AGENTS.md").write_text("target rule\n")
+    os.symlink("AGENTS.md", origin / "CLAUDE.md")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-qm", "symlink CLAUDE.md")
+    sha = git(origin, "rev-parse", "HEAD")
+    mirror = ensure_mirror(origin, tmp_path / "mirror")
+    assert file_at(mirror, sha, "CLAUDE.md") == "target rule\n"
+
+
+def test_file_at_raises_on_a_symlink_escaping_the_tree(tmp_path, origin):
+    os.symlink("../outside", origin / "CLAUDE.md")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-qm", "escaping symlink")
+    sha = git(origin, "rev-parse", "HEAD")
+    mirror = ensure_mirror(origin, tmp_path / "mirror")
+    with pytest.raises(GitError):
+        file_at(mirror, sha, "CLAUDE.md")
+
+
+def test_file_at_raises_on_a_symlink_to_a_missing_path(tmp_path, origin):
+    os.symlink("nonexistent.md", origin / "CLAUDE.md")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-qm", "dangling symlink")
+    sha = git(origin, "rev-parse", "HEAD")
+    mirror = ensure_mirror(origin, tmp_path / "mirror")
+    with pytest.raises(GitError):
+        file_at(mirror, sha, "CLAUDE.md")
+
+
+def test_file_at_raises_on_a_directory_at_the_path(tmp_path, origin):
+    (origin / "CLAUDE.md").mkdir()
+    (origin / "CLAUDE.md" / "nested.txt").write_text("x\n")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-qm", "directory named CLAUDE.md")
+    sha = git(origin, "rev-parse", "HEAD")
+    mirror = ensure_mirror(origin, tmp_path / "mirror")
+    with pytest.raises(GitError):
+        file_at(mirror, sha, "CLAUDE.md")
