@@ -51,6 +51,18 @@ runner, packager, ledger. It decides what runs and whether the result is accepta
 and never executes model-authored code.
 _Avoid_: "the server", "the daemon", "the backend".
 
+**Deployment posture**: Which machine Saffron is being asked to trust, declared per
+invocation and never detected. On a **dedicated host** the operator has removed
+everything worth reaching and `preflight.py` re-establishes that each run — the
+posture `DESIGN.md` §5.1 is written for. On an **already-isolated host** — a
+disposable cloud container with nothing real behind it — the environment supplies
+the host-side half of `DESIGN.md` §2's argument, and N1 is deliberately weaker
+because the only route out is a host-loopback proxy a cell cannot reach
+(`DESIGN.md` §5.1.2). The posture
+*is* the argument: the same relaxation on a laptop leaves N1 gone.
+_Avoid_: "mode", "profile", "environment" for this — the first two read as a
+preference and the third is already the machine.
+
 **Cell**: One task's isolation unit — a container plus its worktree volume, agent
 state volume, and any fixture services. The cell is untrusted.
 _Avoid_: "sandbox" — it implies the isolation boundary is the control, and in

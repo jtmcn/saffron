@@ -6041,10 +6041,19 @@ until the images question below is answered too, and that is the larger half.
    proxy as a `cache_peer` parent and cannot see it. Putting it in reach means a
    host listener on a non-loopback address — exactly what `preflight.py`'s N1
    probe exists to refuse. The requirements oppose each other and no cell
-   runtime resolves it. `SAFFRON_ALLOW_HOST_PROCESS` is the existing shape of an
-   answer — a relay on the cell network's gateway, named per invocation and
-   reported on every run — and it is a weaker N1 that belongs in §5.1 rather
-   than in a shell profile.
+   runtime resolves it.
+   **Settled 2026-09-11 by operator decision, and written into §5.1.2 rather
+   than configured around:** a second **deployment posture**. On an
+   already-isolated host the environment supplies the host-side half of §2's
+   argument, so N1 is deliberately weaker and a cell may reach exactly one host
+   port. It is declared per invocation through the existing
+   `SAFFRON_ALLOW_HOST_PROCESS` and **never detected** — a control that switches
+   itself off when it judges the machine disposable fails silently, and "looks
+   disposable" is not a thing a program can establish about its own host. The
+   dedicated host's rules are unchanged and stay the default. What remains is
+   the build: a relay on the cell network's gateway, squid taking the host
+   proxy as a `cache_peer` parent, the cell trusting its CA, and the N1 probe
+   tolerating the named relay.
 4. **The host is reclaimed on idle**, taking `~/.saffron/ledger.db` and the
    batch tree with it. Survivable for one attended task whose product is a pull
    request; fatal for a night, whose product *is* the audit trail.

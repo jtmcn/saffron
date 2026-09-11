@@ -621,6 +621,49 @@ that caused this one.** That ordering fix is a workaround for a defect in
 is wrong on every runtime, for every cause, including the ones this design has
 not met yet. It is §7's "money spent to learn something free" one layer down.
 
+### 5.1.2 Where the boundary is, when the host is not yours
+
+§2's claim is that a cell is untrusted and every control that matters lives
+outside it. **Outside it** has meant one thing until now: the host, hardened by
+`docs/HOST-HARDENING.md`, where "nothing is listening" is a fact the operator
+establishes and `preflight.py` re-establishes on every run. That is the
+**dedicated host**, and it stays the posture this design is written for.
+
+There is a second posture, and it has to be named rather than configured into
+existence. On an **already-isolated host** — an ephemeral cloud container that is
+itself a disposable boundary with nothing real behind it — the host-side half of
+§2's argument is supplied by the environment rather than by Saffron, and one of
+Saffron's own controls cannot hold at all.
+
+**The control that cannot hold is N1's, and the reason is not a defect.** Such a
+host reaches the network through a proxy bound to its own **loopback**, and
+Appendix G establishes that loopback is the one host address a cell cannot reach
+— that is the *point* of the host-binding probe. So the cell's only route out
+runs through a host service, and the probe that exists to guarantee no host
+service is reachable is the thing standing in its way. The two requirements are
+in opposition, and no cell runtime, network mode or flag resolves it
+(`docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md`).
+
+**What is given up, stated rather than hidden.** On this posture a cell can
+reach exactly one host port. The blast radius is no longer "nothing on the host"
+but "whatever that port fronts", and Saffron is not the thing bounding it — the
+environment is. That is acceptable *only* because such a host has nothing on it
+worth reaching: no cloud profiles, no keys that push anywhere, no production
+clients, nothing §1 of `docs/HOST-HARDENING.md` spends its length removing. **The
+posture is the argument. Take the same relaxation onto a laptop and N1 is simply
+gone**, which is why this is a declared deployment posture and not a flag with a
+sensible default.
+
+**So it is declared per invocation, never inferred.** The existing mechanism is
+the right one and already has the right shape: `SAFFRON_ALLOW_HOST_PROCESS`
+names a tolerated host process, and every run reports what it tolerated so the
+relaxation cannot go quiet (Appendix G). A host whose environment supplies the
+boundary says so by naming the relay; one that says nothing gets the dedicated
+host's rules, unchanged. **Saffron must never detect this posture.** A control
+that switches itself off when it decides the machine looks disposable is a
+control whose strongest failure mode is silence, and "looks disposable" is not
+a thing a program can establish about the machine it is running on.
+
 ### 5.2 Phase 1 — DIAGNOSE (bug specs only; the scope proposal is not)
 
 Read-only tools, scoped to `envelope`. Output is `scope.json`: the proposed `touches` set, the identified root cause, and the evidence for it.
