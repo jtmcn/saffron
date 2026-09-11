@@ -55,10 +55,10 @@ Running the CLI:
 
 ```
 uv run saffron replay <repo> <pr>          # v0: replay a merged PR, agent-free
-uv run saffron cell .saffron/specs/SA-0002-size-gate.md --repo .    # v0.5: one attended cell
+uv run saffron cell .saffron/specs/SA-NNNN-<slug>.md --repo .    # v0.5: one attended cell
 uv run saffron queue --repo .              # v0.5: what a batch would run; reconciles PR state first
 uv run saffron reconcile --repo .          # ask GitHub what happened to open pull requests
-uv run saffron watch SA-0002               # follow a task's event log; --no-follow for a finished one
+uv run saffron watch SA-NNNN               # follow a task's event log; --no-follow for a finished one
 uv run saffron batch --repo . --budget 50 --until 06:30   # v0.6: a night, unattended
 ```
 
