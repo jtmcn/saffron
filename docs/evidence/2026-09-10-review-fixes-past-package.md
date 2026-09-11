@@ -1,4 +1,4 @@
-# 34 of 38 packaged pull requests merged past what PACKAGE pushed
+# 34 of 38 packaged pull requests merged at a head other than the one PACKAGE pushed
 
 `docs/BACKLOG.md` item 97. Measured 2026-09-10, on the host, against
 `~/.saffron/ledger.db` and GitHub, by
@@ -14,12 +14,18 @@ that gap was made after the cell and reached no gate, critic or ledger row.
 - **24** have the packaged commit in their history, with 1–5 commits on top.
 - **10** (`?` below) do not have it in their history at all: the branch was
   rewritten after PACKAGE, so the packaged commit cannot even be walked back
-  to from the merged head. Why each was rewritten is not recorded here.
+  to from the merged head. Eight of the ten sit in a `depends_on` chain —
+  `SA-0045` through `SA-0054` are one, and `SA-0064`'s parent is `SA-0063` —
+  which fits a restack after a parent merged rather than a review fix; that is
+  inferred from the specs, not recorded. `SA-0060` and `SA-0027` declare no
+  parent.
 
-What this does not say: whether any of those commits was *wrong*. Most were the
-review round's fixes, and the 2026-09-07 plan's table records that each round
-found something real. The measurement is that none of it was judged by the
-machinery that judged the cell's work.
+What this does not say: whether any of those trees was *wrong*. The 24 were
+mostly the review round's fixes, and the 2026-09-07 plan's table records that
+each round found something real. The measurement is that no merged head among
+the 34 was judged by the machinery that judged the cell's work — and a restack
+flags every child in a stack, which a reader of the reconcile line should
+expect.
 
 ## Output
 

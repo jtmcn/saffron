@@ -75,7 +75,8 @@ _BUCKET = {
 
 class HeadMoved(NamedTuple):
     """A pull request whose head is not the commit PACKAGE pushed — review
-    fixes that reached no gate, critic or record (`docs/BACKLOG.md` item 97)."""
+    fixes or a restack, judged by no gate, critic or record (`docs/BACKLOG.md`
+    item 97)."""
 
     task_id: int
     packaged: str

@@ -209,8 +209,9 @@ def test_package_writes_back_a_state_the_run_had_already_closed(tmp_path):
 def test_tasks_by_spec_id_carries_branch_and_pushed_sha_beside_state(tmp_path):
     """The query `SA-0026`'s resolver needs and nothing before it returns:
     `tasks_by_spec` stops at `task_id`/`spec_id`/`spec_sha`/`state`,
-    `tasks_by_repo` is `reconcile`'s three columns, `queue_lines` is the
-    printer's — none carries `branch` and `pushed_sha` beside `spec_id`."""
+    `tasks_by_repo` is `reconcile`'s four, with `pushed_sha` and no `branch`,
+    `queue_lines` is the printer's — none carries `branch` and `pushed_sha`
+    beside `spec_id`."""
     ledger = Ledger(tmp_path / "l.db")
     repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
     run_id = ledger.create_run(repo_id, base_sha="a" * 40)

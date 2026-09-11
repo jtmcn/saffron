@@ -2385,7 +2385,7 @@ def test_an_orphan_only_resolution_names_the_rows_it_stamped(capsys):
     assert "nothing moved" not in printed
 
 
-def test_a_head_past_what_package_pushed_is_named_with_both_shas(capsys):
+def test_a_moved_head_is_named_with_both_shas(capsys):
     """Item 97: the line names the task and both commits, so an operator can
     `git log packaged..head` the commits no gate judged — and it is not
     followed by "nothing moved", which would read as nothing to look at."""

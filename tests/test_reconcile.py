@@ -195,7 +195,9 @@ _PUSHED = "a" * 40
 _FIXED = "b" * 40
 
 
-def test_a_head_past_what_package_pushed_is_reported_and_moves_no_state(ledger):
+def test_a_head_other_than_what_package_pushed_is_reported_and_moves_no_state(
+    ledger,
+):
     """A review fix committed after PACKAGE reached no gate, critic or
     record. Reconcile is the one reader already asking GitHub about the pull
     request, so it names the gap — and writes nothing, because the row's
@@ -247,12 +249,14 @@ def test_a_merge_over_a_moved_head_is_reported_at_the_one_chance_there_is(ledger
         (_PUSHED, {"headRefOid": _PUSHED}),
         (_PUSHED, {}),
         (_PUSHED, {"headRefOid": ""}),
+        (_PUSHED, {"headRefOid": 123}),
         (None, {"headRefOid": _FIXED}),
     ],
     ids=[
         "head-is-what-was-pushed",
         "no-head-answered",
         "empty-head",
+        "head-not-a-string",
         "no-push-recorded",
     ],
 )
