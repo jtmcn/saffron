@@ -5538,7 +5538,7 @@ cost adequacy recall) is still open and still needs a pass under pass 1's
 prompt at the same `--runs` to answer. The lens prompt now also carries
 `CLAUDE.md` (item 7), so these four samples describe a configuration that is
 no longer current; `docs/evidence/2026-09-11-lens-corpus-claude-md.md` is the
-first sample of the new one, and a future confound pass must compare against
+first pass under the new one, and a future confound pass must compare against
 that record, not this one.
 
 ---

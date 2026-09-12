@@ -15,8 +15,11 @@ every number below is re-derivable without a cell. The per-run line is pinned by
 
 ## What was run
 
-From branch `joel/claude-md-reaches-lenses`, when it sat on the pre-rebase base — the lens
-code is identical to HEAD now:
+From branch `joel/claude-md-reaches-lenses`, on a local, pre-rebase revision of this branch
+(the SHA lives only in the reflog, and is not cited here because it will be
+garbage-collected). The lens-relevant code — `saffron/agents`, `saffron/phases`, `harness`,
+`images`, and the evidence scripts — is identical to this PR's head, except
+`saffron/phases/package.py`, which the corpus does not run:
 
 ```
 env SAFFRON_ALLOW_HOST_PROCESS=rapportd CLAUDE_CODE_OAUTH_TOKEN=… uv run python \
@@ -75,8 +78,10 @@ being close to the 30-turn ceiling on its own merits — it does not, by itself,
 longer `CLAUDE.md`-carrying prompt as the cause of this drop. It also does not clear the
 longer prompt: one more turn either way decides a trip this close to the line, and n=2 does
 not separate "this fixture is just slow" from "the added prompt cost a turn." The ceiling
-was already raised for this pass (item above); it was not raised further after this drop,
-matching the spread pass's own precedent of not changing settings mid-comparison.
+was already raised for this pass (the `--max-spend-usd` raise noted in "What was run"); it
+was not raised further after this drop, and SA-0054's run 1 was not re-run. The pass was
+scored as the operator ran it, unlike the baseline pass, whose SA-0054 drop was resumed at
+identical settings.
 
 ## The spread comparison
 
@@ -95,6 +100,11 @@ this pass's three:
 
 **Old range: 1/12 to 3/12. New range: 1/10 to 4/12.** The ranges overlap: `1/10` (0.10) falls
 inside the old range (`1/12` ≈ 0.083 to `3/12` = 0.25).
+
+Without run 1 (the partial sample, `1/10`), the new range would be `4/12`–`4/12`, entirely
+above the old maximum of `3/12`. The one partial sample alone is what makes the ranges
+overlap; the verdict below is the rule applied to the pass as run, not to that
+counterfactual.
 
 **Decision rule** (`docs/superpowers/plans/2026-09-10-claude-md-reaches-every-phase.md`, Task
 10 Step 3, quoted verbatim):
@@ -139,8 +149,9 @@ The ranges overlap, so the verdict is **no measurable difference at n=3**.
 ## Cost
 
 Per fixture, summed over the three runs' own `cost_usd` fields (sum over lenses and runs,
-never derived by subtraction), by a one-off script (not committed; command and output are in
-this task's report):
+never derived by subtraction). These figures are the sums of the run JSON's `cost_usd`
+fields, per fixture and per lens, and are re-derivable from
+`docs/evidence/passes/2026-09-11-lens-corpus-claude-md/`:
 
 | Fixture | Total | correctness | contract | adequacy |
 |---|---|---|---|---|
@@ -180,7 +191,9 @@ change in that narrower window, and it touches only `_repair`'s host checkpoint 
 
 n=3 on each side is not enough to place `1/10` cleanly inside or outside the old spread; the
 two ranges overlapping is itself a statement about resolution, not about the effect being
-absent. What would settle it is more samples of the same configuration — another pass at
-`--runs 3`, or a single pass at a higher `--runs`, either one adding to this pass's three
-per-run totals rather than to the old four. This record does not recommend spending on that
-pass; it names what would answer the question if one is run.
+absent. The cheapest thing that would decide whether the verdict survives: re-running
+SA-0054's run 1 alone, at identical settings, since it is the one partial sample the overlap
+depends on. Short of that, what would settle it more broadly is more samples of the same
+configuration — another pass at `--runs 3`, or a single pass at a higher `--runs`, either one
+adding to this pass's three per-run totals rather than to the old four. This record does not
+recommend spending on either; it names what would answer the question if one is run.

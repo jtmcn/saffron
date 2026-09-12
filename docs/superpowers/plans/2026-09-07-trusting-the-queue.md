@@ -139,6 +139,13 @@ the record rather than felt.
    distinguishable from this spread, which is the margin clause's whole point
    (`docs/BACKLOG.md` item 93).
 
+   *Amended 2026-09-12: the configuration changed.* `CLAUDE.md` now reaches every review
+   and verdict lens (`fix(review): no lens was shown the invariants it judged a diff
+   against`), so the four-sample spread above describes a prompt that no longer runs.
+   `docs/evidence/2026-09-11-lens-corpus-claude-md.md` holds the current configuration's
+   first samples — per run, `1/10 · 4/12 · 4/12`. `B = 3` was set against the configuration
+   that no longer runs. **`B` is pending re-baselining against the new configuration.**
+
 Until the count is met, a batch night is a batch of pull requests each owed a
 human round. Size nights by how many rounds you will do in the morning, not by
 budget.

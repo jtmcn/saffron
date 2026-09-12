@@ -945,7 +945,8 @@ task retroactively.
 
 ### 5.5 Phase 4 — REVIEW (adversarial)
 
-Fresh session, read-only tools, different system prompt, ideally a different model or effort level. It never sees the implementer's transcript. It sees the spec, the diff, the gate results, and the acceptance criteria.
+Fresh session, read-only tools, different system prompt, ideally a different model or effort level. It never sees the implementer's transcript. It sees the spec, the diff, the gate results, the acceptance criteria, and the repo's
+`CLAUDE.md` at `base_sha` (§5.3).
 
 Its instruction is not "review this code":
 

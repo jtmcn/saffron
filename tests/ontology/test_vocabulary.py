@@ -106,8 +106,8 @@ def test_the_vocabulary_is_the_factorys_and_nothing_still_names_saffron():
     listed = subprocess.run(
         ["git", "ls-files", "-z"], capture_output=True, text=True, cwd=root, check=True
     ).stdout.split("\0")
-    # Byte-pinned to `git show <base>` by test_corpus.py's reproduce-from-git
-    # test: renaming what they quote would falsify what the lenses saw.
+    # Reproduced from git history by tests/test_corpus.py, so renaming them would
+    # falsify what the lenses were shown.
     frozen_fixture_input = re.compile(
         r"^docs/evidence/fixtures/[^/]+/(claude|context|spec_body)\.md$"
     )

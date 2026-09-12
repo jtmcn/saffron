@@ -42,7 +42,8 @@ landing. An entry dated on or after 2026-09-09 was written when the rejection wa
   **Bucket 2** — `error` ≠ `fail` is already a `CLAUDE.md` invariant, and this is
   the judgement it exists to supply. **Landed:** the line every phase reads, from
   `fix(session): the implementer never saw the repo's CLAUDE.md, so bucket 2 had
-  no reader`.
+  no reader` (IMPLEMENT) and `fix(review): no lens was shown the invariants it
+  judged a diff against` (the lenses).
 
 ## 2026-09-05 — `SA-0055` (#131)
 
