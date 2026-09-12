@@ -146,6 +146,12 @@ the record rather than felt.
    first samples — per run, `1/10 · 4/12 · 4/12`. `B = 3` was set against the configuration
    that no longer runs. **`B` is pending re-baselining against the new configuration.**
 
+   *Decided 2026-09-12: `B` stays 3, provisionally.* It sits at or below both complete
+   samples of the current configuration (`4/12`, `4/12`), and a completed run 1 could reach
+   at most `3/12`, so criterion 3 can be met without reading one run's noise as signal. It is
+   provisional until the current configuration has a measured spread of its own — the old one
+   moved by two points between identical runs — and is re-set then, not before.
+
 Until the count is met, a batch night is a batch of pull requests each owed a
 human round. Size nights by how many rounds you will do in the morning, not by
 budget.
