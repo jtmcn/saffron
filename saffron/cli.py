@@ -676,13 +676,10 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     Exit codes are `run_batch`'s own four stop reasons, mapped per §4.2.1:
     `0` for `DRAINED`, `BUDGET` and `UNTIL`, `2` for `INFRASTRUCTURE` —
     never `1`, which is reserved for a task's own failure and a batch is not
-    a task. `INFRASTRUCTURE` now has two readable causes, not one: a
-    readiness failure, whose step and detail are read back out of the one
-    `Readiness` this call recorded, and a queue that raised while being
-    resolved *after* readiness had already passed — a discovery refusal
-    (`SA-0065`) among them — whose own text is printed instead, never as
-    "readiness failed", since readiness is exactly what did not fail on that
-    path (`docs/BACKLOG.md` item 95).
+    a task. `INFRASTRUCTURE` has two readable causes: a readiness failure,
+    whose step and detail are read back out of the one `Readiness` this call
+    recorded, and a queue that raised after readiness passed, whose own text
+    is printed instead — never as "readiness failed" (item 95).
     """
     repo = args.repo.resolve()
     until = (
@@ -707,10 +704,8 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
 
     candidates: list[Candidate] = []
     runner: Callable[[Candidate], CellOutcome] = _no_candidate_should_run
-    # Set only if resolving the queue raises below, after readiness has
-    # already passed — the case item 95 traced reaching `main`'s catch-all
-    # with no `batches` row at all, because nothing between here and there
-    # used to call `run_batch`.
+    # Set when the scan raises after readiness passed (item 95), so the raise
+    # still reaches `run_batch` and its row.
     resolution_error: Exception | None = None
     if readiness.ok:
         # Readiness already paid for these three reads. `Readiness` declares
@@ -729,12 +724,8 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 repo, args.home, ledger, stamp_orphaned=True, pinned=pinned
             )
         except Exception as exc:
-            # A discovery refusal (`SA-0065` — a spec directory that is
-            # absent or not a directory) or anything else the scan's real
-            # work — a mirror fetch, a reconcile, a `git archive` — can
-            # raise. Readiness already passed, so this is not that failure;
-            # it still has to reach `run_batch` for the row, and the line
-            # printed below still has to say which of the two happened.
+            # A discovery refusal (`SA-0065`), a mirror fetch, a reconcile:
+            # all real work, none of it readiness.
             resolution_error = exc
         else:
             # The night says what its own scan could not check. `_resolve_queue`
@@ -755,13 +746,8 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
             candidates = resolved.candidates
 
     def _readiness_or_raise() -> preflight.Readiness:
-        # `run_batch` calls this once, as `_drive`'s first line, inside the
-        # same `try`/`finally` that already closes the row `INFRASTRUCTURE`
-        # when anything below it raises (`run_batch`'s own docstring names
-        # "a readiness probe that raised" as exactly this case). Raising the
-        # resolution's own exception here reaches that close with no second
-        # `create_batch`/`close_batch` pair anywhere in this module — a
-        # probe that ran fine, followed by a scan that did not.
+        # Raised inside `run_batch`'s `try`, so its `finally` closes the row
+        # `INFRASTRUCTURE` — the "readiness probe that raised" case it names.
         if resolution_error is not None:
             raise resolution_error
         return readiness
@@ -773,17 +759,14 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
             args.budget,
             until,
             runner,
-            # Already measured, above, before the scan that depends on it —
-            # or, when resolving the queue raised, the seam that carries
-            # that raise through to the same close. Either way the answer is
-            # the one this command already has, not a second probe.
+            # The readiness already measured above, or the scan's raise — never
+            # a second probe of the same host.
             readiness_check=_readiness_or_raise,
         )
     except Exception as exc:
-        if resolution_error is None:
-            # Not this function's exception to narrate: something else
-            # raised out of `run_batch` itself, and `main`'s own catch-all is
-            # where every other command's unnamed failure says its piece.
+        if exc is not resolution_error:
+            # Identity, not presence: `create_batch` can still raise after a
+            # failed scan, and that is `main`'s to narrate, not the queue's.
             raise
         print(f"batch: the queue could not be resolved: {exc}")
         return 2

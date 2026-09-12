@@ -3447,6 +3447,30 @@ def test_a_raise_from_the_loop_itself_is_not_blamed_on_the_queue(
     assert "could not be resolved" not in printed
 
 
+def test_a_ledger_failure_after_a_failed_scan_is_not_blamed_on_the_queue(
+    tmp_path, monkeypatch, capsys
+):
+    """The scan raised, then `create_batch` raised before the row existed. The
+    line must name the ledger's failure, not send the operator to the specs."""
+    home = tmp_path / "home"
+    _readiness_passes(monkeypatch)
+
+    def _scan(*a, **k):
+        raise intake.SpecError("spec directory does not exist")
+
+    def _create(*a, **k):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(cli, "_resolve_queue", _scan)
+    monkeypatch.setattr(Ledger, "create_batch", _create)
+
+    assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 2
+
+    printed = capsys.readouterr().out
+    assert "saffron: RuntimeError: database is locked" in printed
+    assert "could not be resolved" not in printed
+
+
 def test_a_night_names_the_specs_its_scan_refused(tmp_path, monkeypatch, capsys):
     """`saffron queue` prints refusals; this printed only the gaps, so a spec
     refused at gate 0 — a dead `depends_on` parent, protected `touches`, a
