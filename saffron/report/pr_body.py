@@ -202,17 +202,39 @@ def _disagreements(
 ) -> str:
     """§6: disagreements first. Two columns — the implementer's rebuttal and
     the critic's verdict. Never `adjudication`: that is the operator's, and it
-    happens in GitHub against the pull request this phase is creating."""
+    happens in GitHub against the pull request this phase is creating.
+
+    Keyed on `rebuttal.error`, never on an empty `rebuttals` list: a turn that
+    was read and chose to answer nothing (`RebuttalTurn(rebuttals=[])`, no
+    error) still gets the ordinary per-blocker `—`. Only a turn that recorded
+    *nothing* — a failed turn, or output that was not the schema — gets the
+    fixed sentence below, and it gets it for every blocker, because there is
+    no per-blocker answer to key on at all. That sentence never quotes
+    `rebuttal.error` itself: it is untrusted, hostile-shaped model output
+    (`docs/BACKLOG.md` item 42), and this is the one place it would otherwise
+    reach a reader beside a critic's `confirmed`."""
     anchored = anchored_blockers(reviews)
     if not anchored:
         return ""
     rebuttals = {}
     verdicts = {}
+    errored = rebut_result is not None and rebut_result.rebuttal.error is not None
     if rebut_result is not None:
-        rebuttals = first_answers(rebut_result.rebuttal)
+        if not errored:
+            rebuttals = first_answers(rebut_result.rebuttal)
         verdicts = {
             v.finding: v for lens in rebut_result.verdicts for v in lens.verdicts
         }
+    no_rebuttal_recorded = (
+        "no rebuttal was recorded for this turn (see `rebuttal.json`) — HEAD "
+        + (
+            "moved"
+            if rebut_result is not None and rebut_result.moved
+            else "did not move"
+        )
+        if errored
+        else ""
+    )
     lines = [
         "### Disagreements",
         "",
@@ -220,13 +242,19 @@ def _disagreements(
         "|---|---|---|---|---|---|",
     ]
     for number, finding in enumerate(anchored, start=1):
-        rebuttal = rebuttals.get(number)
         verdict = verdicts.get(number)
+        if errored:
+            implementer_cell = no_rebuttal_recorded
+        else:
+            rebuttal = rebuttals.get(number)
+            implementer_cell = (
+                rebuttal.action + ": " + rebuttal.argument if rebuttal else "—"
+            )
         lines.append(
             f"| {number} | `{_cell(finding.lens)}` "
             f"| {_cell(finding.file)}:{finding.line} "
             f"| {_cell(finding.claim)} "
-            f"| {_cell(rebuttal.action + ': ' + rebuttal.argument) if rebuttal else '—'} "
+            f"| {_cell(implementer_cell)} "
             f"| {_cell(verdict.verdict + ': ' + verdict.reason) if verdict else '—'} |"
         )
     lines.append("")

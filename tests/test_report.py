@@ -780,6 +780,185 @@ def test_the_disagreements_table_shows_the_first_answer_to_a_duplicated_finding(
     assert "on reflection, no" not in row
 
 
+def _two_blocker_reviews():
+    return [
+        LensReview(
+            lens="correctness",
+            findings=[_finding(claim="blocker one claim", file="a.py", line=1)],
+        ),
+        LensReview(
+            lens="contract",
+            findings=[_finding(claim="blocker two claim", file="b.py", line=2)],
+        ),
+    ]
+
+
+def _rebut_body(rebut_result):
+    return render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        reviews=_two_blocker_reviews(),
+        rebut_result=rebut_result,
+    )
+
+
+def test_a_rebuttal_turn_that_recorded_nothing_is_not_rendered_as_no_answer():
+    """SA-0040/PR#93 (`docs/BACKLOG.md` item 42): a trailing comma destroyed a
+    real argument, and the table rendered the same `—` it renders for a
+    blocker nobody answered. The critic's `confirmed: the implementer offered
+    no argument` then read as agreed-with rather than as untested."""
+    hostile_error = (
+        "not the schema: Illegal trailing comma before end of object: line 6 "
+        "column 1116 (char 1186) | @SA-0040"
+    )
+
+    # Case 1: an errored turn — nothing survived, and neither blocker may show
+    # a bare dash or any of the error's own text.
+    errored_body = _rebut_body(
+        RebutResult(
+            state="REBUTTING",
+            why="test",
+            rebuttal=RebuttalTurn(error=hostile_error),
+            verdicts=[],
+            moved=True,
+            cost_usd=0.0,
+        )
+    )
+    for row in (
+        next(line for line in errored_body.splitlines() if line.startswith("| 1 ")),
+        next(line for line in errored_body.splitlines() if line.startswith("| 2 ")),
+    ):
+        assert "no rebuttal was recorded" in row
+        assert "rebuttal.json" in row
+        assert row.split("|")[5].strip() != "—"
+        assert "Illegal trailing comma" not in row
+        assert "@SA-0040" not in row
+        assert "1116" not in row
+
+    # Case 2: a read turn that answered blocker 1 and not blocker 2 — blocker
+    # 2 keeps its ordinary dash.
+    read_partial_body = _rebut_body(
+        RebutResult(
+            state="READY_FOR_REVIEW",
+            why="test",
+            rebuttal=RebuttalTurn(
+                rebuttals=[
+                    Rebuttal(finding=1, action="argued", argument="rebuttal one text")
+                ]
+            ),
+            verdicts=[],
+            moved=False,
+            cost_usd=0.0,
+        )
+    )
+    row1 = next(
+        line for line in read_partial_body.splitlines() if line.startswith("| 1 ")
+    )
+    row2 = next(
+        line for line in read_partial_body.splitlines() if line.startswith("| 2 ")
+    )
+    assert "rebuttal one text" in row1
+    assert row2.split("|")[5].strip() == "—"
+
+    # Case 3: a read turn that recorded an empty list — not an error, so both
+    # blockers keep the ordinary dash rather than the "recorded nothing" text.
+    empty_body = _rebut_body(
+        RebutResult(
+            state="REBUTTING",
+            why="test",
+            rebuttal=RebuttalTurn(rebuttals=[]),
+            verdicts=[],
+            moved=False,
+            cost_usd=0.0,
+        )
+    )
+    for row in (
+        next(line for line in empty_body.splitlines() if line.startswith("| 1 ")),
+        next(line for line in empty_body.splitlines() if line.startswith("| 2 ")),
+    ):
+        assert row.split("|")[5].strip() == "—"
+        assert "no rebuttal was recorded" not in row
+
+
+def test_a_rebuttal_turn_that_recorded_nothing_says_whether_it_moved_head():
+    """`rebuttal.json` already records `head_moved`; the body is what gets
+    read, and a turn that recorded nothing may still have fixed the blocker
+    by committing — the reader needs to know to look at the diff rather than
+    trust the critic's verdict alone."""
+    moved_body = _rebut_body(
+        RebutResult(
+            state="READY_FOR_REVIEW",
+            why="test",
+            rebuttal=RebuttalTurn(error="not the schema: boom"),
+            verdicts=[],
+            moved=True,
+            cost_usd=0.0,
+        )
+    )
+    not_moved_body = _rebut_body(
+        RebutResult(
+            state="REBUTTING",
+            why="test",
+            rebuttal=RebuttalTurn(error="not the schema: boom"),
+            verdicts=[],
+            moved=False,
+            cost_usd=0.0,
+        )
+    )
+    assert "HEAD moved" in moved_body
+    assert "HEAD did not move" not in moved_body
+    assert "HEAD did not move" in not_moved_body
+    assert "HEAD moved" not in not_moved_body
+
+
+def test_an_errored_turn_that_still_moved_head_keeps_its_verdicts():
+    """SA-0040/PR#93 itself: `run_rebut` only skips verdicting when HEAD did
+    not move *and* nothing was argued — with `moved=True`, the verdict pass
+    still runs even though `rebuttal.error` is set, so `RebutResult.verdicts`
+    can be non-empty on an errored turn. The implementer column must switch to
+    the fixed "no rebuttal was recorded" sentence, but the critic column is a
+    separate, independently-produced value and must keep showing its own
+    lens's real verdict rather than collapsing to `—` alongside it."""
+    rebut_result = RebutResult(
+        state="READY_FOR_REVIEW",
+        why="test",
+        rebuttal=RebuttalTurn(
+            error="not the schema: Illegal trailing comma before end of object"
+        ),
+        verdicts=[
+            LensVerdicts(
+                lens="correctness",
+                verdicts=[
+                    Verdict(finding=1, verdict="confirmed", reason="verdict one text")
+                ],
+            ),
+            LensVerdicts(
+                lens="contract",
+                verdicts=[
+                    Verdict(finding=2, verdict="withdrawn", reason="verdict two text")
+                ],
+            ),
+        ],
+        moved=True,
+        cost_usd=0.0,
+    )
+    body = _rebut_body(rebut_result)
+    row1 = next(line for line in body.splitlines() if line.startswith("| 1 "))
+    row2 = next(line for line in body.splitlines() if line.startswith("| 2 "))
+    assert "no rebuttal was recorded" in row1
+    assert "no rebuttal was recorded" in row2
+    assert "confirmed: verdict one text" in row1
+    assert row1.split("|")[6].strip() != "—"
+    assert "withdrawn: verdict two text" in row2
+    assert row2.split("|")[6].strip() != "—"
+
+
 def test_a_second_task_joins_the_first_without_an_orchestrator(tmp_path):
     """Appending rather than rewriting is what lets sub-project C arrive later."""
     first = QueueLine(
