@@ -43,9 +43,13 @@ cannot find it.
 Cell-marked tests need real images, built by hand once (and after editing them):
 
 ```
-container build -t saffron/cell-base:python -f images/cell-base.python.Dockerfile .
-container build -t saffron/proxy -f images/proxy.Dockerfile .
+<runtime> build -t saffron/cell-base:python -f images/cell-base.python.Dockerfile .
+<runtime> build -t saffron/proxy -f images/proxy.Dockerfile .
 ```
+
+Both take `--build-arg BASE_IMAGE=…` for a host with no registry (build one with
+`images/bootstrap-base.sh`), and each records a `provenance` file of what it really
+holds — read it before comparing gate results across hosts (§5.1.2).
 
 The repo's own cell image is built from `.saffron/Dockerfile` by `saffron.repos.image`.
 Host prerequisites (Rosetta, `container system kernel set --recommended`, nothing listening
@@ -103,11 +107,11 @@ exception has a shape worth memorising: **core invokes declared gates, never too
 
 - `saffron/cell/` — `runtime.py` is every caller's whole view of the cell runtime and names
   **no** product; `runtimes/apple.py` and `runtimes/podman.py` are the **only** modules that
-  may spell their own binary, in code, argv or bare name alike — one gated rule each, since
-  one cannot guard two words (Appendix G; comments and `.saffron/` exempt).
-  `runtimes/__init__.py` is the `Dialect`: only what the two were *measured* to spell
-  differently. `SAFFRON_CELL_RUNTIME` picks one, unknown names raise — **declared, never
-  detected** (§5.1.2). `session.py` drives one cell start to finish; `worktree.py`, `proxy.py`.
+  may spell their own binary, in code, argv or bare name alike — one gated rule each
+  (Appendix G; comments and `.saffron/` exempt). `runtimes/__init__.py` is the `Dialect`:
+  only what the two were *measured* to spell differently. `SAFFRON_CELL_RUNTIME` picks one,
+  unknown names raise — **declared, never detected**. `session.py` drives one cell;
+  `worktree.py`, `proxy.py`.
 - `saffron/gates/` — `contract.py` is the gate JSON schema and the whole repo-agnostic
   surface; `runner.py` execs gates host-side (`LocalExecutor` / `CellExecutor`);
   `baseline.py` subtracts pre-existing failures; `core/` holds the host-side gates

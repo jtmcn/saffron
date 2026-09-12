@@ -6054,27 +6054,19 @@ until the images question below is answered too, and that is the larger half.
    `cgroup.controllers`, so `--memory` is accepted and unenforced. §4.3's
    ceiling would be a claim. A ceiling that is not enforced has to report as
    absent rather than as set, which is its own change.
-3. **The cell cannot reach the API, and it is the deepest of these.** This
-   environment's egress runs through an agent proxy bound to the host's
-   **loopback**, and assertion 4 establishes that loopback is the one host
-   address a cell cannot reach (measured: connection refused at the gateway;
-   `1.1.1.1` unreachable; `api.anthropic.com` 403). Saffron's squid needs that
-   proxy as a `cache_peer` parent and cannot see it. Putting it in reach means a
-   host listener on a non-loopback address — exactly what `preflight.py`'s N1
-   probe exists to refuse. The requirements oppose each other and no cell
-   runtime resolves it.
-   **Settled 2026-09-11 by operator decision, and written into §5.1.2 rather
-   than configured around:** a second **deployment posture**. On an
-   already-isolated host the environment supplies the host-side half of §2's
-   argument, so N1 is deliberately weaker and a cell may reach exactly one host
-   port. It is declared per invocation through the existing
-   `SAFFRON_ALLOW_HOST_PROCESS` and **never detected** — a control that switches
-   itself off when it judges the machine disposable fails silently, and "looks
-   disposable" is not a thing a program can establish about its own host. The
-   dedicated host's rules are unchanged and stay the default. What remains is
-   the build: a relay on the cell network's gateway, squid taking the host
-   proxy as a `cache_peer` parent, the cell trusting its CA, and the N1 probe
-   tolerating the named relay.
+3. ~~**The cell cannot reach the API.**~~ **Withdrawn 2026-09-12 — there was no
+   such blocker.** It was measured with `busybox nc -z` and `busybox wget`, the
+   instrument this same item records as broken, and the conclusion was carried
+   forward after the instrument was discredited rather than re-taken with it.
+   Re-measured end to end: a container on a normal network reaches
+   `api.anthropic.com` directly; a container on an `--internal` network reaches
+   nothing; and a dual-homed squid between them tunnels the one allowed host
+   (`TCP_TUNNEL/200`, a real `405` from the API) while refusing every other
+   (`TCP_DENIED/403`). **§5.1's egress architecture works here unmodified.**
+   The weaker N1 approved on the strength of the original report is withdrawn
+   with it: no relay, no `cache_peer`, no host process to tolerate, and
+   `preflight.py` unchanged. A control must not be relaxed on a measurement
+   nobody re-took.
 4. **The host is reclaimed on idle**, taking `~/.saffron/ledger.db` and the
    batch tree with it. Survivable for one attended task whose product is a pull
    request; fatal for a night, whose product *is* the audit trail.

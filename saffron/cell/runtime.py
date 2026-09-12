@@ -44,7 +44,7 @@ RUNTIME_ENV = "SAFFRON_CELL_RUNTIME"
 def select_dialect(name: str | None) -> Dialect:
     """The named runtime, or the default when nothing was named.
 
-    **Declared, never detected** (§5.1.2). Choosing by what happens to be on
+    **Declared, never detected.** Choosing by what happens to be on
     `PATH` would make the runtime a property of the machine rather than a
     decision, which is Appendix G's principle 32 restaged with a `shutil.which`
     in place of the proper noun — and it would silently swap the safety argument

@@ -2,7 +2,15 @@
 # Toolchain and dependencies only; the agent runtime came from the base.
 FROM saffron/cell-base:python
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# uv from pypi, not `COPY --from=ghcr.io/astral-sh/uv`. A registry copy is a
+# second registry this image needs, and a host that cannot reach one cannot
+# reach the other — measured, ghcr.io refuses at its blob CDN exactly as
+# docker.io does (DESIGN.md §5.1.2). pypi is already required by the base.
+# Pinned for the reason the SDK is: an unpinned toolchain drifts between
+# rebuilds and the version that ran a task is recorded nowhere.
+ARG UV_VERSION=0.8.17
+RUN python -m pip install --no-cache-dir --break-system-packages "uv==${UV_VERSION}" \
+ && uv --version
 
 # procps for pgrep: the suite asserts that a timed-out gate leaves no surviving
 # process. A repo declares what its own tests need; the base image does not.

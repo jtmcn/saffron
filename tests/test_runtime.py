@@ -98,7 +98,7 @@ def test_only_the_runtime_without_a_vm_asks_for_in_guest_hardening():
 
 
 def test_a_runtime_nobody_named_is_the_default_and_an_unknown_one_raises():
-    """Declared, never detected (§5.1.2). An unknown name must raise rather than
+    """Declared, never detected (Appendix G, principle 32). An unknown name must raise rather than
     fall back: a fallback reports the default's calibration for a runtime nobody
     chose, and `CPU_OFFSET` wrong by one surfaces as flaky gate timings rather
     than as an error."""

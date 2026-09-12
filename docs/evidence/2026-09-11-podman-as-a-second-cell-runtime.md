@@ -175,39 +175,64 @@ than as an error. Pinning that — one base image, built once, carried between
 hosts by some means that is not a public registry — is the actual question, and
 this record does not answer it.
 
-### The cell cannot reach the API, and the reason is structural
+### Withdrawn: "the cell cannot reach the API"
 
-This is the deepest of them and it is not a missing package. Measured from a
-cell on an `--internal` network, with `wget`:
+**The first version of this section reported a structural blocker that does not
+exist.** It said this environment's egress runs only through a host-loopback
+proxy, that a cell therefore cannot reach the API, and that N1 and the
+environment were in irreconcilable opposition. A weaker N1 was approved on the
+strength of it. All of it rested on `busybox nc -z` and `busybox wget` — the
+instrument the section two above this one discredits — and **the conclusion was
+never re-taken after the instrument was discredited.** Writing down that a probe
+was broken is not the same as revisiting what it told you.
+
+Re-measured 2026-09-12, end to end, with a real client:
 
 ```
-cell -> 1.1.1.1                    unreachable
-cell -> api.anthropic.com          HTTP 403        (something answers, and refuses)
-cell -> <gateway>:<agent proxy>    connection refused
-host -> api.anthropic.com:443      OK
-host -> 127.0.0.1:<agent proxy>    OK
+container on a normal network   -> api.anthropic.com:443 OPEN, HTTP 405 from the API
+                                -> pypi.org, 1.1.1.1 also reachable
+container on an --internal net  -> nothing reachable at all
+cell (internal, --cap-drop ALL, no-new-privileges) through a dual-homed squid:
+    CONNECT api.anthropic.com   -> 200, then a real TLS session, HTTP 405
+    CONNECT pypi.org            -> 403
+    CONNECT 1.1.1.1             -> 403
+squid's own rows: TCP_TUNNEL/200 ... HIER_DIRECT/160.79.104.10
+                  TCP_DENIED/403 ... CONNECT pypi.org:443
 ```
 
-The host has egress. The cell does not, because this environment's egress runs
-through an agent proxy bound to the host's **loopback**, and assertion 4 already
-established that loopback is the one host address a cell cannot reach. So
-Saffron's squid would need that proxy as a `cache_peer` parent, and cannot see
-it.
+**§5.1's egress architecture works here unmodified.** The proxy is dual-homed,
+reaches the one allowed host directly, and the cell on the internal network has
+no route out except through it. There is no relay to build, no `cache_peer`, no
+host process to tolerate, and `preflight.py` needs no change. The weaker N1 is
+withdrawn with the blocker that justified it.
 
-**Putting it within reach means a host listener on a non-loopback address —
-which is precisely what `preflight.py` refuses.** N1's host probe exists to
-enumerate exactly that and fail the run. The two requirements are in direct
-opposition: the environment says *the only way out is a loopback proxy*, and
-Saffron says *a cell must not be able to reach a host service*. Nothing about a
-cell runtime resolves it.
+The lesson is the one already recorded here, and it is worth restating because
+recording it did not prevent the second half: **a discredited instrument
+discredits every conclusion drawn with it, not just the reading in front of
+you.** The instrument note was written and the conclusion it had produced was
+left standing three commits longer.
 
-The repository already has the shape of an answer and is honest about what it
-is: `SAFFRON_ALLOW_HOST_PROCESS` tolerates a named host process per invocation,
-"an accepted risk, not a fix, and reported on every run so it cannot go quiet"
-(Appendix G). A relay bound to the cell network's gateway, named in that
-variable, is a cell that can reach exactly one host port. That is a weaker N1,
-and it is the kind of weakening that has to be written into §5.1 rather than
-configured around.
+### The images are buildable here, and were proven so
+
+The other half of "what stops a cell starting" is now measured rather than
+assumed. `BASE_IMAGE` is an argument on both images and `images/bootstrap-base.sh`
+produces one from `debootstrap` alone, so the whole chain builds with no registry:
+
+```
+bootstrap base (ubuntu 24.04, 135 MB)  -> saffron/cell-base:python -> saffron/cell:saffron
+provenance the image records of itself:
+    base=ubuntu 24.04 | python=3.12.3 | git=2.43.0
+    claude-agent-sdk=0.2.142 | claude-code=2.1.237 (Claude Code)
+toolchain: ruff 0.16.3, ty 0.0.77, ast-grep 0.45.3, pytest 9.1.1, PySHACL 0.40.1
+207 of this repository's own tests, run inside that cell image: passed
+```
+
+Three things the building of it found, none of them guessable: Debian's squid
+package creates the user `proxy` and not `squid`, which is the name `proxy.py`
+starts it as, so the image supplies the name rather than core learning which
+distribution built it; pip verifies against certifi rather than the system
+store, so `update-ca-certificates` alone does not reach it; and `uv` reads
+`SSL_CERT_FILE` and neither of the variables pip reads.
 
 Two others, neither about the runtime: `CLAUDE_CODE_OAUTH_TOKEN` is absent; and
 the session container is reclaimed on idle, which takes `~/.saffron/ledger.db`

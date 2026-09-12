@@ -589,7 +589,7 @@ container run --rm \
 
 **A second runtime exists, and it is a second safety argument rather than a port.** `podman` runs where `apple/container` cannot and where Appendix G's Architecture A is not on offer either — a container-hosted Linux runner has no daemon and no way to start one, and podman needs none. It keeps three of the four grounds the spike decided on: an honest CPU count, an internal network, `--cap-drop ALL`. **What it gives up is the per-cell VM, which Appendix G called the single largest point in `apple/container`'s favour.** So the paragraph above stops applying to it, in both directions: with no private kernel to offer instead, `no-new-privileges` comes back on and seccomp's default filter is relied on rather than waived. The trade is stated here rather than absorbed, because a runtime swapped in silently swaps the boundary with it.
 
-**Which runtime runs is declared and never detected,** for the reason §5.1.2 gives about postures and Appendix G's principle 32 gives about proper nouns: a supervisor that picks its boundary from what is on `PATH` has made the safety argument a property of the machine. `SAFFRON_CELL_RUNTIME` names it; an unknown name is an error, never a fallback, because a fallback reports one runtime's calibration for another and `CPU_OFFSET` wrong by one surfaces as flaky gate timings rather than as a failure.
+**Which runtime runs is declared and never detected,** for the reason Appendix G's principle 32 gives about proper nouns: a supervisor that picks its boundary from what is on `PATH` has made the safety argument a property of the machine, and the two runtimes do not offer the same boundary. `SAFFRON_CELL_RUNTIME` names it; an unknown name is an error, never a fallback, because a fallback reports one runtime's calibration for another and `CPU_OFFSET` wrong by one surfaces as flaky gate timings rather than as a failure.
 
 **The CPU requirement is met less completely there, and `policy.thread_env` is what closes the gap.** A per-cell VM *has* N CPUs, so every API agrees. A shared kernel can only narrow the affinity mask: measured, `--cpuset-cpus 0-1` leaves `nproc` reporting 2 while `os.cpu_count()` and `/proc/cpuinfo` both still report the host's 4 (`docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md`). A BLAS sizing itself from `sysconf` therefore oversubscribes exactly as this section warns — so under a VM-per-cell runtime the repo-declared `thread_env` is belt and braces, and under a shared-kernel one it is *the* control. A repo onboarded onto such a host that declares none has an uncapped thread pool, and that is a difference in what a gate result means, not merely in how fast it is.
 
@@ -627,48 +627,39 @@ that caused this one.** That ordering fix is a workaround for a defect in
 is wrong on every runtime, for every cause, including the ones this design has
 not met yet. It is §7's "money spent to learn something free" one layer down.
 
-### 5.1.2 Where the boundary is, when the host is not yours
+### 5.1.2 The image is the toolchain, so where it came from is part of the record
 
-§2's claim is that a cell is untrusted and every control that matters lives
-outside it. **Outside it** has meant one thing until now: the host, hardened by
-`docs/HOST-HARDENING.md`, where "nothing is listening" is a fact the operator
-establishes and `preflight.py` re-establishes on every run. That is the
-**dedicated host**, and it stays the posture this design is written for.
+The cell image carries the toolchain every gate executes against (§5.1), which
+makes it the one input a gate result is not meaningful without. Two hosts whose images differ are two
+hosts whose `tests` results are not comparable, and nothing in a gate result
+says so.
 
-There is a second posture, and it has to be named rather than configured into
-existence. On an **already-isolated host** — an ephemeral cloud container that is
-itself a disposable boundary with nothing real behind it — the host-side half of
-§2's argument is supplied by the environment rather than by Saffron, and one of
-Saffron's own controls cannot hold at all.
+**`FROM` is therefore an argument, and the default is the measurement.**
+`images/cell-base.python.Dockerfile` is `FROM python:3.12-slim-bookworm` and
+that is what this project is built and measured against; `BASE_IMAGE` changes
+nothing for a host that can pull it. What the argument buys is a host that
+cannot: an egress policy that refuses every container registry still permits an
+apt mirror and pypi, which between them supply every layer above the base —
+measured, including the SDK wheel's bundled Claude Code binary, which is the
+whole reason that image is glibc rather than musl. `images/bootstrap-base.sh`
+builds such a base from `debootstrap` alone.
 
-**The control that cannot hold is N1's, and the reason is not a defect.** Such a
-host reaches the network through a proxy bound to its own **loopback**, and
-Appendix G establishes that loopback is the one host address a cell cannot reach
-— that is the *point* of the host-binding probe. So the cell's only route out
-runs through a host service, and the probe that exists to guarantee no host
-service is reachable is the thing standing in its way. The two requirements are
-in opposition, and no cell runtime, network mode or flag resolves it
-(`docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md`).
+**A base built that way is not the same toolchain, and the image says so
+itself.** Both images write a provenance file — distribution, interpreter, git,
+SDK, and the agent binary's own version string — and every line of it is
+obtained by *running* the tool rather than by restating the argument the build
+was given (principle 39, and the same rule as a gate's `tool` field in §5.4). A
+bootstrapped base records `ubuntu 24.04` where the default records `debian 12`,
+so the difference is legible instead of silent. **Read it before trusting one
+host's gate result against another's** — that is the whole reason it exists.
 
-**What is given up, stated rather than hidden.** On this posture a cell can
-reach exactly one host port. The blast radius is no longer "nothing on the host"
-but "whatever that port fronts", and Saffron is not the thing bounding it — the
-environment is. That is acceptable *only* because such a host has nothing on it
-worth reaching: no cloud profiles, no keys that push anywhere, no production
-clients, nothing §1 of `docs/HOST-HARDENING.md` spends its length removing. **The
-posture is the argument. Take the same relaxation onto a laptop and N1 is simply
-gone**, which is why this is a declared deployment posture and not a flag with a
-sensible default.
-
-**So it is declared per invocation, never inferred.** The existing mechanism is
-the right one and already has the right shape: `SAFFRON_ALLOW_HOST_PROCESS`
-names a tolerated host process, and every run reports what it tolerated so the
-relaxation cannot go quiet (Appendix G). A host whose environment supplies the
-boundary says so by naming the relay; one that says nothing gets the dedicated
-host's rules, unchanged. **Saffron must never detect this posture.** A control
-that switches itself off when it decides the machine looks disposable is a
-control whose strongest failure mode is silence, and "looks disposable" is not
-a thing a program can establish about the machine it is running on.
+**What this deliberately does not do is make the two equal.** A base resolved
+from an apt mirror at the moment it runs is reproducible only to the day it was
+built. The durable answer is one image built once and carried between hosts as
+an OCI archive — `save` on the host that can pull, `load` on the host that
+cannot — and the provenance file is what verifies it arrived intact. That is
+worth doing before a second host's results are compared to the first's, and it
+is not what a `BASE_IMAGE` argument achieves on its own.
 
 ### 5.2 Phase 1 — DIAGNOSE (bug specs only; the scope proposal is not)
 

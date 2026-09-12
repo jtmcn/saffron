@@ -56,9 +56,9 @@ run() {
 
 detect() {
 	# Detection here is a convenience for a diagnostic, not the supervisor's
-	# selection. DESIGN.md §5.1.2 forbids *Saffron* choosing a runtime from what
-	# is on PATH — a control that picks its own boundary. This script has no
-	# boundary to pick; it is asking a machine what it can do.
+	# selection. DESIGN.md §5.1 forbids *Saffron* choosing a runtime from what is
+	# on PATH — a control that picks its own boundary. This script has no boundary
+	# to pick; it is asking a machine what it can do.
 	for r in container docker podman; do command -v "$r" >/dev/null 2>&1 && {
 		echo "$r"
 		return
