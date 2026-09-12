@@ -2591,10 +2591,32 @@ def test_infrastructure_and_a_failed_readiness_both_exit_two(tmp_path, monkeypat
         )
 
 
+def test_a_night_that_left_a_task_in_flight_exits_two(tmp_path, monkeypatch, capsys):
+    """`saffron batch` exits 2 for an INCOMPLETE night and prints
+    `batch: INCOMPLETE`, not the infrastructure line. `0` means the night
+    made it, and this one did not, but the machine did not break either, and
+    a line saying it did sends the operator to the wrong place. It still
+    never exits `1`, which is reserved for a task's own failure (§4.2.1)."""
+    home = tmp_path / "home"
+
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(cli, "run_batch", lambda *a, **k: "INCOMPLETE")
+
+    assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 2
+
+    printed = capsys.readouterr().out
+    assert "batch: INCOMPLETE" in printed
+    assert "infrastructure failed" not in printed
+    assert "readiness failed" not in printed
+
+
 def test_a_batch_never_exits_one_whatever_stopped_it(tmp_path, monkeypatch):
     """§4.2.1 reserves `1` rather than reusing it: a batch is not a task, and
     letting `1` mean something here would merge two vocabularies that answer
-    different questions. Walked across all four stop reasons."""
+    different questions. Walked across all five stop reasons."""
     home = tmp_path / "home"
 
     monkeypatch.setattr(
@@ -2602,7 +2624,7 @@ def test_a_batch_never_exits_one_whatever_stopped_it(tmp_path, monkeypatch):
     )
     monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
 
-    for reason in ("DRAINED", "BUDGET", "UNTIL", "INFRASTRUCTURE"):
+    for reason in ("DRAINED", "BUDGET", "UNTIL", "INFRASTRUCTURE", "INCOMPLETE"):
         monkeypatch.setattr(cli, "run_batch", lambda *a, _r=reason, **k: _r)
         assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) != 1
 

@@ -673,13 +673,19 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     thing in this module that calls `ledger.create_batch`/`close_batch` —
     true whether the night gets past readiness or not.
 
-    Exit codes are `run_batch`'s own four stop reasons, mapped per §4.2.1:
-    `0` for `DRAINED`, `BUDGET` and `UNTIL`, `2` for `INFRASTRUCTURE` —
-    never `1`, which is reserved for a task's own failure and a batch is not
-    a task. `INFRASTRUCTURE` has two readable causes: a readiness failure,
-    whose step and detail are read back out of the one `Readiness` this call
-    recorded, and a queue that raised after readiness passed, whose own text
-    is printed instead — never as "readiness failed" (item 95).
+    Exit codes are `run_batch`'s own five stop reasons, mapped per §4.2.1:
+    `0` for `DRAINED`, `BUDGET` and `UNTIL`, `2` for `INFRASTRUCTURE` and for
+    `INCOMPLETE` — never `1`, which is reserved for a task's own failure and
+    a batch is not a task. `INCOMPLETE` shares `INFRASTRUCTURE`'s exit code
+    but never its line: it is decided and printed before either of
+    `INFRASTRUCTURE`'s two lines below are reached, because the machine did
+    not break — a task simply came back with no end state — and telling the
+    operator "infrastructure failed" would send them to re-check a token and
+    a mirror that were fine (backlog item 70). `INFRASTRUCTURE` itself has
+    two readable causes: a readiness failure, whose step and detail are read
+    back out of the one `Readiness` this call recorded, and a queue that
+    raised after readiness passed, whose own text is printed instead — never
+    as "readiness failed" (item 95).
     """
     repo = args.repo.resolve()
     until = (
@@ -769,6 +775,13 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
             # failed scan, and that is `main`'s to narrate, not the queue's.
             raise
         print(f"batch: the queue could not be resolved: {exc}")
+        return 2
+
+    if stop == "INCOMPLETE":
+        # Decided before either `INFRASTRUCTURE` line below: the queue is
+        # resolved and readiness passed, so neither line's step is what went
+        # wrong — a task just came back with no end state.
+        print("batch: INCOMPLETE")
         return 2
 
     if stop != "INFRASTRUCTURE":
