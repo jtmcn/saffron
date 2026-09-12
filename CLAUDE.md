@@ -47,9 +47,9 @@ Cell-marked tests need real images, built by hand once (and after editing them):
 <runtime> build -t saffron/proxy -f images/proxy.Dockerfile .
 ```
 
-Both take `--build-arg BASE_IMAGE=…` for a host with no registry (build one with
-`images/bootstrap-base.sh`), and each records a `provenance` file of what it really
-holds — read it before comparing gate results across hosts (§5.1.2).
+Both take `--build-arg BASE_IMAGE=…` for a host with no registry (`images/bootstrap-base.sh`
+builds one), and each records a `provenance` file — read it before comparing gate results
+across hosts (§5.1.2).
 
 The repo's own cell image is built from `.saffron/Dockerfile` by `saffron.repos.image`.
 Host prerequisites (Rosetta, `container system kernel set --recommended`, nothing listening
@@ -83,6 +83,10 @@ env CLAUDE_CODE_OAUTH_TOKEN=(bash -c 'source ~/.secrets; printf %s $CLAUDE_CODE_
   uv run saffron cell <spec> --repo .
 ```
 
+A cloud host has no `~/.secrets`, so the token goes in the environment's **Environment
+variables** — the every-shell export this rule refuses; `docs/HOST-HARDENING.md` §1a
+states what must hold for that to be acceptable.
+
 Exit codes are load-bearing: `0` reviewable, `1` the task did not make it, `2` infrastructure
 failed (`saffron/cli.py`).
 PACKAGE opens the PR as a draft (§5.7): ratifying one means `gh pr ready <n>` before `gh pr merge`.
@@ -105,13 +109,11 @@ exception has a shape worth memorising: **core invokes declared gates, never too
 
 ### Layout
 
-- `saffron/cell/` — `runtime.py` is every caller's whole view of the cell runtime and names
-  **no** product; `runtimes/apple.py` and `runtimes/podman.py` are the **only** modules that
-  may spell their own binary, in code, argv or bare name alike — one gated rule each
-  (Appendix G; comments and `.saffron/` exempt). `runtimes/__init__.py` is the `Dialect`:
-  only what the two were *measured* to spell differently. `SAFFRON_CELL_RUNTIME` picks one,
-  unknown names raise — **declared, never detected**. `session.py` drives one cell;
-  `worktree.py`, `proxy.py`.
+- `saffron/cell/` — `runtime.py` is every caller's view of the cell runtime and names **no**
+  product; only `runtimes/apple.py` and `runtimes/podman.py` may spell their own binary, one
+  gated rule each (Appendix G). `runtimes/__init__.py` is the `Dialect` — only what the two
+  were *measured* to spell differently. `SAFFRON_CELL_RUNTIME` picks one and an unknown name
+  raises: **declared, never detected**. `session.py`, `worktree.py`, `proxy.py`.
 - `saffron/gates/` — `contract.py` is the gate JSON schema and the whole repo-agnostic
   surface; `runner.py` execs gates host-side (`LocalExecutor` / `CellExecutor`);
   `baseline.py` subtracts pre-existing failures; `core/` holds the host-side gates
