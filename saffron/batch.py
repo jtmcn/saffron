@@ -100,6 +100,10 @@ def run_batch(
     )
     batch_id = ledger.create_batch(budget_usd, until_ts=until_ts)
 
+    # Every task this run left mid-phase, in the order it happened —
+    # `(spec_id, state)`. Owned here, not in `_drive`, so a night that raises
+    # after leaving one in flight still names it on the way out (item 70).
+    in_flight: list[tuple[str, str]] = []
     stopped: StopReason | None = None
     try:
         stopped = _drive(
@@ -112,6 +116,7 @@ def run_batch(
             clock=clock,
             readiness_check=readiness_check,
             emit=emit,
+            in_flight=in_flight,
         )
         return stopped
     finally:
@@ -122,7 +127,7 @@ def run_batch(
             # not catch, or an operator's Ctrl-C at 3am. An open row is the
             # one state indistinguishable from a night still running, and it
             # is what §6's morning queue reads.
-            ledger.close_batch(batch_id, "INFRASTRUCTURE")
+            _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
 
 
 def _drive(
@@ -136,19 +141,13 @@ def _drive(
     clock: Callable[[], datetime],
     readiness_check: Callable[[], Readiness],
     emit: Callable[[str], None],
+    in_flight: list[tuple[str, str]],
 ) -> StopReason:
     """`run_batch`'s body, split out so every exit closes the batch row.
 
     Every `return` here is `_stop`, which is the one call to `close_batch`;
     anything that leaves without returning is the caller's `finally` to deal
-    with."""
-    # Every task this run left mid-phase, in the order it happened —
-    # `(spec_id, state)`, named on the way out whatever the final reason is
-    # (backlog item 70). Declared ahead of the readiness check so a readiness
-    # failure, which can never populate it, still goes through the same
-    # `_stop` call as everything else.
-    in_flight: list[tuple[str, str]] = []
-
+    with — through `_stop` too, with the same `in_flight`."""
     readiness = readiness_check()
     if not readiness.ok:
         # §4.4 step 1: a readiness failure ends the night before any task
@@ -249,8 +248,9 @@ def _stop(
     be, `INFRASTRUCTURE` included: a stop reason says something went wrong,
     and this line says which spec to look at.
 
-    The single call site for `close_batch` in `_drive` — decide the reason,
-    close once, return it."""
+    The single call site for `close_batch` — every `_drive` return and
+    `run_batch`'s `finally` come through here: decide the reason, close once,
+    return it."""
     for spec_id, state in in_flight:
         emit(f"{spec_id:<10} left in flight in {state}")
     if in_flight and reason != "INFRASTRUCTURE":
