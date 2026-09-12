@@ -1,0 +1,57 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.5537514000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/cell/worktree.py",
+        "line": 418,
+        "claim": "`_write_file` (the call that actually mutates the tree via `printf | base64 -d > path` inside the container) runs before the `try:` block at line 419, unlike its sibling `_revert_source` at lines 341-345 which is deliberately placed inside the try 'because a second [step] that fails after the first succeeded leaves half [applied] with no restore attempted.' If the container exec backing `_write_file` fails after the shell has already opened/truncated the target file (a routine container-exec failure the module's own docs anticipate: `witness.Mutated`'s docstring literally calls out 'a container exec that applies the edit and then loses the connection' as a case `SA-0062`'s cell mutator must not treat as unreachable), the exception propagates before the `try/finally` undo is ever reached, so no `git checkout HEAD` restore is attempted. `witness_gate`'s `applied` flag is still `False` at that point, so the gate reports 'could not apply' \u2014 the phrasing the contract explicitly reserves for a tree that was *not* touched \u2014 even though the file may now be truncated or partially written. The attempt is aborted as `GATE_ERROR` either way, which bounds the practical damage, but the reported state ('nothing changed') can be false for exactly the failure mode the interface's own comment names as the one this implementation must handle.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.3729357,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "saffron/cell/worktree.py",
+        "line": 418,
+        "claim": "`_write_file` is called before the `try/finally` that performs the git-checkout restore (the `try:` starts on the next line, 419). `witness.Mutated`'s contract (saffron/gates/core/witness.py, the block above `Mutated = Callable[...]`, lines 71-85) explicitly requires that 'a raise from `__enter__` must mean nothing was changed', and calls out by name that this is *not* unreachable for a container mutator: 'a container exec that applies the edit and then loses the connection is exactly the shape that is not [unreachable]'. If the exec that runs `_write_file`'s shell script actually mutates the file on the remote side but the RPC then reports a non-zero/failed result (dropped connection, timeout, etc.), `_write_file` raises before the `try/finally` is ever entered, so the `git checkout HEAD -- <file>` restore is never attempted. `witness_gate` then reports this as 'could not apply {file}'s mutant' (applied=False, since the with-block's body never ran to set the flag) \u2014 the exact false 'nothing changed' framing the type's docstring says this implementation must avoid \u2014 while the container's worktree is left holding the mutant's edit. That leftover mutation would then surface downstream (e.g. `committed`) as a dirty tree misattributed to the agent, or ship silently in the diff. Moving `_write_file` inside the same `try`/`finally` (so any post-write failure still triggers the restore attempt) is what `source_reverted`'s own precedent and the `Mutated` contract call for.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.9610200000000002,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "tests/test_worktree.py",
+        "line": 1048,
+        "claim": "Every mutant fixture exercised against `source_mutated` (`if amount < 0:` / `value = 1` etc., lines 1048-1049, 1030, 1076, 1090, 1094, 1100) is plain single-line ASCII text with no quote, backslash, dollar sign or backtick in `find`/`replace`. `_write_file`'s own docstring (saffron/cell/worktree.py:371-374) says base64 exists specifically because a mutant's find/replace 'can hold anything a shell would otherwise misread: a quote, a backslash, a newline' \u2014 but no test's mutant contains any of those, so the suite cannot tell the base64 round-trip apart from a naive, shell-unsafe interpolation that would corrupt or fail on the kind of content real source mutants (e.g. any string literal) will routinely contain. Replacing the base64 encode/decode with direct double-quoted interpolation of `content` keeps every current test green while breaking on the first mutant whose find/replace holds a quote.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cell/worktree.py",
+          "find": "    encoded = base64.b64encode(content.encode()).decode()\n    script = f\"printf '%s' {shlex.quote(encoded)} | base64 -d > {shlex.quote(path)}\"",
+          "replace": "    script = f'printf \"%s\" \"{content}\" > {shlex.quote(path)}'"
+        }
+      }
+    ]
+  }
+]

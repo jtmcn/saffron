@@ -1,0 +1,57 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.3584274,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "blocker",
+        "file": "saffron/cell/session.py",
+        "line": 1616,
+        "claim": "The eligibility gate for asking the notes turn only checks `spec.forbidden` and `policy.protected`, never `spec.touches` \u2014 even though `touches` is the scope-restricting mechanism declared on essentially every non-bug spec (and ratified for bug specs), and is one of the three inputs the `scope` gate itself checks (see the `scope_gate(diff, spec.touches, forbidden=spec.forbidden, protected=policy.protected)` call earlier in this file). The motivating scenario in the spec's own Problem section \u2014 'wiring falsified four comments in files it could not touch' \u2014 and even this change's own test fixture text ('touches did not cover that file, so I left it as-is') describe an agent running into the `touches` boundary, not a `forbidden` or `protected` one. Because the heuristic omits `touches`, the notes turn will be silently skipped for the common case of a spec with a declared `touches` set but no `forbidden` list and no repo-wide `protected` path \u2014 exactly the class of omission items 71/75/80 were filed over \u2014 while the test suite only ever exercises specs that also declare `forbidden`, masking the gap.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.2729832,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "saffron/phases/package.py",
+        "line": 815,
+        "claim": "`render_pr_body` is called here with every other outcome field (`reviews`, `rebut_result`, `effective_risk`, `advisory_gates`, ...) but never `notes=outcome.notes`. Since `notes` defaults to `\"\"` on `render_pr_body`, this call site silently renders every real PR body without the implementer's notes section, so acceptance criterion 1 (\"An implementer's notes reach the pull request body\") is never actually satisfied in production even though extraction, hashing, `notes.json` persistence, and the `_notes()` renderer are all correctly implemented and unit-tested in isolation.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.8495454,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/cell/session.py",
+        "line": 1616,
+        "claim": "`notes_worth_asking = bool(spec.forbidden) or bool(policy.protected)` has its `protected` half completely unexercised: every notes-turn test in this diff pairs `forbidden=[...]` with either the default empty `protected` or an explicit non-empty `protected` on top of an already-true `forbidden`, and the only test with `protected` empty also has `forbidden` empty. Replacing the line with `notes_worth_asking = bool(spec.forbidden)` keeps every test in test_session.py green (test_the_notes_artifact_is_hashed_when_it_is_produced, test_notes_are_empty_when_the_implementer_has_nothing_to_report and test_the_notes_turn_is_skipped_once_the_task_is_over_budget all set `forbidden`; test_no_notes_turn_is_asked_for_when_nothing_could_have_been_denied sets neither). This matters concretely because Saffron's own `.saffron/policy.yaml` (this very repo, which drives its own specs) declares a permanently non-empty `protected` list and most specs do not declare `forbidden` at all \u2014 so in the repo the feature was written for, the turn's eligibility currently rides entirely on the `protected` clause, and that clause can be silently dropped without a single test noticing.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cell/session.py",
+          "find": "notes_worth_asking = bool(spec.forbidden) or bool(policy.protected)",
+          "replace": "notes_worth_asking = bool(spec.forbidden)"
+        }
+      }
+    ]
+  }
+]

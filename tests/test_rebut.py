@@ -106,6 +106,7 @@ def _run(
         session_id="sess-1",
         spec_body="fix the gap",
         context_md=CONTEXT_MD,
+        claude_md=None,
         prompts_dir=PROMPTS,
         max_turns=20,
         budget_usd=2.0,
@@ -298,6 +299,7 @@ def test_the_verdict_prompt_carries_the_argument_the_finding_and_the_new_diff():
         blockers=[(1, _blocker())],
         rebuttal=turn,
         context_md=CONTEXT_MD,
+        claude_md=None,
         prompts_dir=PROMPTS,
         spec_body="fix the gap",
         diff=DIFF,
@@ -307,6 +309,28 @@ def test_the_verdict_prompt_carries_the_argument_the_finding_and_the_new_diff():
     assert "def gap(series, tz=" in prompt
     assert "fix the gap" in prompt
     assert "**Verdict**:" in prompt  # CONTEXT.md §5's vocabulary
+
+
+def test_the_verdict_prompt_carries_the_repo_s_claude_md():
+    """The verdict session is a fresh critic session, like REVIEW's, and gets
+    the same standing instructions for the same reason (§5.3)."""
+    turn = rebut.RebuttalTurn(
+        rebuttals=[
+            rebut.Rebuttal(finding=1, action="argued", argument="the caller sets it")
+        ]
+    )
+    prompt = rebut.verdict_prompt(
+        "correctness",
+        blockers=[(1, _blocker())],
+        rebuttal=turn,
+        context_md=CONTEXT_MD,
+        claude_md="- Never collapse `error` into `fail`.\n",
+        prompts_dir=PROMPTS,
+        spec_body="fix the gap",
+        diff=DIFF,
+    )
+    assert "## This repository's standing instructions" in prompt
+    assert "- Never collapse `error` into `fail`." in prompt
 
 
 def test_a_verdict_session_is_shown_only_its_own_lens_arguments():
@@ -324,6 +348,7 @@ def test_a_verdict_session_is_shown_only_its_own_lens_arguments():
         blockers=[(1, _blocker())],
         rebuttal=turn,
         context_md=CONTEXT_MD,
+        claude_md=None,
         prompts_dir=PROMPTS,
         spec_body="fix the gap",
         diff=DIFF,

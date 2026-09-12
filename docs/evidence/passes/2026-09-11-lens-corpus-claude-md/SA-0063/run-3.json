@@ -1,0 +1,57 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.8408304000000002,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/cell/session.py",
+        "line": 1616,
+        "claim": "`notes_worth_asking = bool(spec.forbidden) or bool(policy.protected)` treats `policy.protected` as if it were a per-task signal, but it is a repo-wide constant declared once in `policy.yaml` and identical for every task in that repo. This repo's own `.saffron/policy.yaml` already declares `protected: [DESIGN.md, CONTEXT.md, .saffron/**, uv.lock]` (per the spec's own 'Out of scope' section), so `bool(policy.protected)` is `True` for every task Saffron ever runs on itself from now on, regardless of `spec.forbidden` or anything the task actually touched. That defeats the cost-consciousness the surrounding comment states as the reason for the check at all ('a turn asked of every task regardless would spend real money narrating \"nothing to report\" on the common case') \u2014 for any repo that declares even one protected path (the common case, and true of this repo), the check reduces to 'always ask'. Test fixtures default to `policy=\"gates: {}\\n\"` with an empty `protected` list, so the 'not worth asking' branch reads as the common case in tests while being nearly unreachable in production.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.6520617,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "blocker",
+        "file": "saffron/phases/package.py",
+        "line": 815,
+        "claim": "`render_pr_body` gained a `notes` parameter, but its one production call site here never passes it (`outcome.notes` is not among the kwargs at lines 815-835, and `notes` does not appear anywhere else in this file). Acceptance criterion 1 \u2014 'an implementer's notes reach the pull request body' \u2014 is witnessed only by `tests/test_report.py::test_notes_render_as_the_implementers_own_and_unadjudicated`, which calls `render_pr_body(notes=...)` directly and never exercises this call site, so the `criteria` gate passes while every real PR this spec ships will never show a notes section. This is structural, not an oversight the implementer could have fixed: the spec's own `forbidden` list (`saffron/phases/**`) blocks writing to the one file that assembles the real body, so the acceptance criterion as declared cannot be satisfied within this spec's own scope.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.4549754999999999,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cell/session.py",
+        "line": 1616,
+        "claim": "`notes_worth_asking = bool(spec.forbidden) or bool(policy.protected)` is meant to ask for notes when *either* a per-spec `forbidden` list or the repo-wide `protected` list exists (per the comment two lines above: \"a declared `forbidden` list or a repo-wide `protected` one\"). No test isolates the `protected`-only case: every test that sets `notes_worth_asking` to `True` (`test_the_notes_artifact_is_hashed_when_it_is_produced`, `test_notes_are_empty_when_the_implementer_has_nothing_to_report`, `test_the_notes_turn_is_skipped_once_the_task_is_over_budget`) does so via `spec.forbidden` while `protected` is either also set or left at its default-false value, and the one test with both false (`test_no_notes_turn_is_asked_for_when_nothing_could_have_been_denied`) leaves both operands false. Changing `or` to `and` at this line leaves every one of those tests green: in the forbidden-only tests the turn budget for `notes` still gets consumed correctly by luck of the scripted-turn queue (a skipped notes turn just shifts that scripted response into the next lens call, which errors silently since a lens error never blocks the task), so `outcome.notes`, `outcome.notes_sha256` and the absence of `notes.json` all still match expectations. The gates cannot see this because it is a boolean-connective choice inside otherwise-green tests, not a type or lint issue.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cell/session.py",
+          "find": "notes_worth_asking = bool(spec.forbidden) or bool(policy.protected)",
+          "replace": "notes_worth_asking = bool(spec.forbidden) and bool(policy.protected)"
+        }
+      }
+    ]
+  }
+]

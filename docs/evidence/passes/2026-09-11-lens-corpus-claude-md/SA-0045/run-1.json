@@ -1,0 +1,47 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.42898139999999996,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.838725,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "note",
+        "file": "saffron/ledger.py",
+        "line": 49,
+        "claim": "DESIGN.md \u00a74.1's schema listing (line 300) orders `runs` columns as `(run_id, batch_id, repo_id, base_sha, ...)`, but this diff places `batch_id` after `repo_id` instead. Harmless since every reader in this module uses `sqlite3.Row` name-based access (verified: no positional row access on `runs` exists anywhere in `saffron/`), so this is purely a textual mismatch with the cited design section, not a functional one.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.41517840000000006,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/ledger.py",
+        "line": 364,
+        "claim": "No test calls `create_run` with a real (non-`None`) `batch_id` and checks it round-trips into `runs.batch_id` \u2014 every new test exercises only the omitted-argument path. Replacing `batch_id` with a hard-coded `None` in the INSERT tuple (leaving the parameter accepted but discarded) keeps all 1250 tests, the `revert` gate, and `census` green, because the only assertions made are `row['batch_id'] is None` after calling `create_run` with no `batch_id` argument at all. The acceptance criterion this line serves ('runs carries a nullable batch_id') is verified only for the trivial NULL case; the mechanism that will actually link a run to a batch in `SA-0049` has no witness here.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/ledger.py",
+          "find": "        cursor = self._db.execute(\n            \"\"\"INSERT INTO runs (repo_id, base_sha, batch_id, status)\n               VALUES (?, ?, ?, 'RUNNING')\"\"\",\n            (repo_id, base_sha, batch_id),\n        )",
+          "replace": "        cursor = self._db.execute(\n            \"\"\"INSERT INTO runs (repo_id, base_sha, batch_id, status)\n               VALUES (?, ?, ?, 'RUNNING')\"\"\",\n            (repo_id, base_sha, None),\n        )"
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,55 @@
+[
+  {
+    "probe": {
+      "file": "saffron/cli.py",
+      "find": "        if outcome.state == \"READY_FOR_REVIEW\":\n            result = package_phase.package(\n                outcome,\n                spec=spec,\n                repo=repo,\n                mirror=resolved.mirror,",
+      "replace": "        if False and outcome.state == \"READY_FOR_REVIEW\":\n            result = package_phase.package(\n                outcome,\n                spec=spec,\n                repo=repo,\n                mirror=resolved.mirror,"
+    },
+    "verdict": "killed",
+    "reason": "1 new failure(s) against the baseline",
+    "failures": [
+      "tests/test_saffron_gates.py::test_the_fast_gates_name_their_tool_and_pass_on_a_clean_tree[lint]"
+    ],
+    "tool": "pytest 9.1.1",
+    "collected": 1309,
+    "summary": "1 failed, 1306 passed, 2 skipped, 20 deselected in 13.61s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1309,
+    "baseline_summary": "1307 passed, 2 skipped, 20 deselected in 14.74s"
+  },
+  {
+    "probe": {
+      "file": "saffron/cli.py",
+      "find": "                image=repo_image.cell_tag(repo),\n                ledger=ledger,\n                out_dir=out_dir,\n                token=os.environ.get(\"CLAUDE_CODE_OAUTH_TOKEN\"),\n                parent_branch=target_branch,",
+      "replace": "                image=repo_image.cell_tag(repo),\n                ledger=ledger,\n                out_dir=out_dir,\n                token=os.environ.get(\"CLAUDE_CODE_OAUTH_TOKEN\"),\n                parent_branch=None,"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1309,
+    "summary": "1307 passed, 2 skipped, 20 deselected in 14.36s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1309,
+    "baseline_summary": "1307 passed, 2 skipped, 20 deselected in 14.74s"
+  },
+  {
+    "probe": {
+      "file": "saffron/cli.py",
+      "find": "                parent_branch=target_branch,\n                emit=emit,\n            )",
+      "replace": "                parent_branch=None,\n                emit=emit,\n            )"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1309,
+    "summary": "1307 passed, 2 skipped, 20 deselected in 15.39s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1309,
+    "baseline_summary": "1307 passed, 2 skipped, 20 deselected in 14.74s"
+  }
+]

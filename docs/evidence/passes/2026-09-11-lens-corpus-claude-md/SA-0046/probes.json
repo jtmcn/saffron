@@ -1,0 +1,19 @@
+[
+  {
+    "probe": {
+      "file": "saffron/phases/package.py",
+      "find": "if ledger.task_policy_sha(outcome.task_id) != policy_sha:",
+      "replace": "if ledger.task_policy_sha(outcome.task_id) is None:"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1258,
+    "summary": "1256 passed, 2 skipped, 20 deselected in 12.95s",
+    "baseline_failures": [],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1258,
+    "baseline_summary": "1256 passed, 2 skipped, 20 deselected in 14.32s"
+  }
+]

@@ -1,0 +1,47 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 1.1429556,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "blocker",
+        "file": "saffron/cli.py",
+        "line": 552,
+        "claim": "`_batch_runner`'s adapter resolves each candidate's stacking parent using `resolved.repo_id`, which is captured once by `_resolve_queue` (cli.py:668, `ledger.resolve_repo_id(url)`) before any candidate in the batch has run. For a repo's first-ever batch, no `repos` row exists yet, so `resolved.repo_id` is `None` for the whole batch. `run_one_cell` (session.py:823) independently calls `ledger.upsert_repo` per candidate and mints a real repo_id, but that fresh id never flows back into `resolved.repo_id`, so `_resolve_stacked_on` (line 552) short-circuits to `(None, None)` for every later candidate in the same night \u2014 even one whose declared parent just completed and pushed a branch in this very batch. The child then builds from the pinned `base_sha` instead of the parent's head, exactly the silent failure the spec itself warns about ('an unstacked child builds against code that is not there yet and fails gates it should have passed'). The unit tests never exercise this because `test_the_adapter_stacks_a_child_on_its_parents_branch` always seeds a pre-existing repo_id via `_seed_repo` before constructing `QueueResolution`, so the fixture masks the exact case (a brand-new repo's first batch) where this breaks.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 1.6548338999999999,
+    "error": "the agent reached its ceiling of 30 turns after 31 (error_max_turns/max_turns): no output",
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.5787288,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/cli.py",
+        "line": 586,
+        "claim": "None of the eleven new tests ever execute the packaging half of `_batch_runner`'s `run` closure. The two adapter witnesses (`test_the_adapter_stacks_a_child_on_its_parents_branch`, `test_the_adapter_stacks_on_the_first_dependency_only`) monkeypatch `run_one_cell` to raise `SystemExit` before this `if` is ever reached, and every other batch test replaces `run_batch` wholesale with a fake that never calls the real `runner` at all. So the claim in the docstring above \u2014 that this adapter reuses `_run_cell`'s `package_phase.package` call and overwrites `outcome.state` with the packaging result \u2014 is never witnessed: gating this branch off entirely (so a batch never opens a PR for a `READY_FOR_REVIEW` task) leaves every test in the suite green, including `revert` and `criteria`, because no test constructs a candidate whose `run_one_cell` actually returns `READY_FOR_REVIEW` and lets the closure run to completion.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cli.py",
+          "find": "        if outcome.state == \"READY_FOR_REVIEW\":\n            result = package_phase.package(\n                outcome,\n                spec=spec,\n                repo=repo,\n                mirror=resolved.mirror,",
+          "replace": "        if False and outcome.state == \"READY_FOR_REVIEW\":\n            result = package_phase.package(\n                outcome,\n                spec=spec,\n                repo=repo,\n                mirror=resolved.mirror,"
+        }
+      }
+    ]
+  }
+]

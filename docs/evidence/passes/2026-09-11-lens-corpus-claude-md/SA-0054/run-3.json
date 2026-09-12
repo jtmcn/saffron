@@ -1,0 +1,57 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.8670161999999998,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "note",
+        "file": "saffron/cli.py",
+        "line": 730,
+        "claim": "`_resolve_until` and the `datetime.now()` it and `run_batch`'s default `clock` are fed with are both naive local wall-clock times, with no DST handling. On the one or two nights a year US/EU clocks spring forward, a naive `--until` inside the skipped hour (e.g. `--until 02:30` when 02:00-03:00 does not occur) never equals or is passed by `now` at the intended moment, so the deadline check only fires once the real clock reaches the literal value after the jump (here, once `now` reaches 03:00+), letting the batch run roughly an extra hour of spend past the deadline the operator typed. The fixture-driven test (`datetime(2026, 9, 5, 22, 0)`) is nowhere near a transition, so this holds in the test but not on a production run that happens to straddle a DST boundary.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 1.2698195999999995,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 768,
+        "claim": "`_resolve_queue` (mirror fetch, GitHub reconcile, `.saffron` export, `build_queue`) runs and can raise (`git_mirror.GitError`, `PolicyError`, etc.) before `run_batch` is ever called, and `run_batch` is what opens the ledger's `batches` row (`saffron/batch.py` line 126, `ledger.create_batch`). `run_batch`'s own readiness-check comment (`saffron/batch.py` lines 130-134) states the explicit invariant this design relies on: a night that stops before any task starts must still leave a row behind, 'or an expired token at 22:00 produces a night with no record it was attempted.' Because `_resolve_queue` and `real_remote` run outside that guarded region, any infrastructure failure during queue resolution (a transient mirror-fetch failure, an unreadable `policy.yaml` surfaced as a raised `PolicyError` rather than the best-effort path, a GitHub outage during reconcile) propagates to `main`'s generic exception handler and exits 2 with zero ledger record of the attempt \u2014 exactly the audit gap the readiness-row invariant was written to close, just for a different, equally plausible unattended-night failure mode. No test exercises this because every batch test fakes `_resolve_queue` to return a canned `QueueResolution` that never raises.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.565089,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/cli.py",
+        "line": 596,
+        "claim": "No test ever drives `_batch_runner`'s `run(candidate)` closure past `run_one_cell` into the `READY_FOR_REVIEW` / `package_phase.package(...)` branch (lines 586-600): the two adapter witnesses (`test_the_adapter_stacks_a_child_on_its_parents_branch`, `test_the_adapter_stacks_on_the_first_dependency_only`) both monkeypatch `cli.run_one_cell` to `raise SystemExit(0)` immediately, so they only ever inspect the `CellSpec` built before that call; every other `batch`-command test fakes `cli.run_batch` itself, so the real `runner` closure is built but never invoked. The Notes call the parent-branch/stacked-sha pairing load-bearing ('the sha and the branch together or neither', SA-0026), yet only the sha half (`CellSpec.stacked_on`) is witnessed \u2014 the branch half (`parent_branch=target_branch` on the `package()` call) and the subsequent `outcome.state = result.state` overwrite are dead code as far as the test suite is concerned. Changing `parent_branch=target_branch` to `parent_branch=None` here would silently target every packaged batch PR at the default branch instead of a stacked parent's, and every test in this diff (and the existing suite) would still pass.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cli.py",
+          "find": "                parent_branch=target_branch,\n                emit=emit,\n            )",
+          "replace": "                parent_branch=None,\n                emit=emit,\n            )"
+        }
+      }
+    ]
+  }
+]

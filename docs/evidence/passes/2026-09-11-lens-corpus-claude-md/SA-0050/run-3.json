@@ -1,0 +1,79 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.5574492,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 72,
+        "claim": "The sweep query `SELECT run_id FROM runs WHERE run_id > ? AND batch_id IS NULL` (and the docstring's justification at lines 66-69, 'Under K=1 nothing else can mint a run while one candidate's call is in flight') assumes exclusive access to the ledger for the whole duration of a raising runner call, filtered only by a run_id watermark and no repo scoping. K=1 bounds concurrency inside `run_batch`'s own loop, not across OS processes sharing `~/.saffron/ledger.db` \u2014 CLAUDE.md documents `saffron cell <spec> --repo .` as an ordinary attended command a person can run at any time, and nothing in the ledger layer (no flock, no per-process lock) prevents it from inserting an unbatched run (batch_id IS NULL) for any repo during the exact window a batch's runner call is in flight and dying. If that happens, this sweep silently reassigns that unrelated run's real cost into the current batch's spend and permanently overwrites its batch_id, corrupting both the budget gate's remaining-budget reading and the run's own provenance \u2014 the same failure mode the docstring explicitly warns against for pre-existing orphans, reintroduced for concurrent ones. This holds true in every test here (single-threaded, sequential fakes) but not against the multi-process reality the rest of the codebase documents as normal use.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.4689249,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 71,
+        "claim": "`_attach_runs_minted_since` sweeps in any row with `run_id > high_water AND batch_id IS NULL`, and the docstring at lines 66-69 asserts this is safe because \"under K=1 nothing else can mint a run while one candidate's call is in flight.\" That's only true of this loop's own concurrency; `saffron cell` and `replay.py` are separate processes that call `Ledger.create_run` against the same shared `~/.saffron/ledger.db` (WAL-mode, built for concurrent writers) with no `batch_id`. If an operator runs `saffron cell` by hand \u2014 exactly the documented workflow in CLAUDE.md \u2014 while a batch's `runner(candidate)` call is raising, that unrelated run can land with `run_id > high_water` and `batch_id IS NULL`, and gets silently attached to this batch, folding its cost into `batch_spend`/`spent_usd_est` and potentially tipping the very next budget-gate comparison. No test exercises two processes writing to one ledger at once, so this can't be seen from the suite.",
+        "anchored": true,
+        "probe": null
+      },
+      {
+        "lens": "contract",
+        "severity": "note",
+        "file": "saffron/batch.py",
+        "line": 45,
+        "claim": "`_max_run_id` and `_attach_runs_minted_since` reach into `ledger._db` directly rather than through a public `Ledger` method, unlike every other interaction in this file (`create_batch`, `close_batch`, `attach_run_to_batch`, `batch_spend`). It works today only because `Ledger._db` happens to be a plain sqlite3 connection; a future change to `Ledger`'s internals (pooling, a wrapper, a lock) would break this module silently rather than through a documented seam.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.47796120000000003,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 142,
+        "claim": "Every UNTIL-related test (test_the_until_deadline_is_read_from_an_injected_clock, test_the_clock_is_checked_before_a_task_still_inside_the_window) drives run_batch with exactly one candidate, so none of them distinguishes 'checked before each task' from 'checked once before the whole batch'. Hoisting the `if until is not None and clock() >= until:` check out of the `for` loop so it runs a single time before the first candidate, instead of once per iteration, keeps every test in tests/test_batch.py green while silently breaking the documented behavior for any real batch of 2+ candidates whose deadline arrives mid-night.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/batch.py",
+          "find": "    consecutive_aborts = 0\n\n    for candidate in candidates:\n        # Before each task, in this order: the deadline, then the budget,\n        # then the breaker's standing count (\u00a74.2.1's ordering, named once\n        # here rather than re-derived at each check).\n        if until is not None and clock() >= until:\n            ledger.close_batch(batch_id, \"UNTIL\")\n            return \"UNTIL\"\n\n        remaining = budget_usd - ledger.batch_spend(batch_id)",
+          "replace": "    consecutive_aborts = 0\n\n    if until is not None and clock() >= until:\n        ledger.close_batch(batch_id, \"UNTIL\")\n        return \"UNTIL\"\n\n    for candidate in candidates:\n        remaining = budget_usd - ledger.batch_spend(batch_id)"
+        }
+      },
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/batch.py",
+        "line": 72,
+        "claim": "The module's own docstring says the sweep is deliberately scoped to `run_id > high_water` rather than every `batch_id IS NULL` row, because a ledger shared with `saffron cell` and `replay.py` accumulates unrelated orphan runs whose spend must not fold into tonight's batch \u2014 but no test in tests/test_batch.py ever seeds such a pre-existing orphan run before triggering the crash path. test_a_crash_after_real_spend_still_counts_against_the_next_budget_gate starts from a fresh ledger with no prior batch_id-NULL row, so dropping the `run_id > ?` filter (sweeping every `batch_id IS NULL` row instead) would still pass that test unchanged while defeating the exact invariant the comment claims to guard.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/batch.py",
+          "find": "    rows = ledger._db.execute(\n        \"SELECT run_id FROM runs WHERE run_id > ? AND batch_id IS NULL\",\n        (high_water,),\n    ).fetchall()",
+          "replace": "    rows = ledger._db.execute(\n        \"SELECT run_id FROM runs WHERE batch_id IS NULL\"\n    ).fetchall()"
+        }
+      }
+    ]
+  }
+]

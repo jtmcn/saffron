@@ -439,6 +439,7 @@ def main() -> int:
                     spec_body=fixture.spec_body,
                     gates=fixture.gates,
                     context_md=fixture.context_md,
+                    claude_md=fixture.claude_md,
                     # Off the script's own root, not the CWD: a relative
                     # resolve fails inside the loop, after a cell has started.
                     prompts_dir=ROOT / "saffron" / "agents" / "prompts",

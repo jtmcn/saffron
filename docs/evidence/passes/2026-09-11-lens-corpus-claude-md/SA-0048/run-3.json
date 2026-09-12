@@ -1,0 +1,57 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.2809803,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/preflight.py",
+        "line": 315,
+        "claim": "`validate_claude_token`'s docstring promises `False` for anything the probe cannot conclusively read as authenticated (\"'could not tell' is not a pass\"), but the implementation returns `True` for every HTTP error code except 401 and 403 \u2014 a 429, 500, 502, 503 or 404 from the upstream host is treated as a valid credential. These are exactly the ambiguous, non-2xx responses the docstring says must not count as a pass, and none of them are exercised by any test (the only HTTPError-path assertion in test_preflight.py never runs, and check_readiness's tests all inject a stub `validate_token`). In production, a transient 5xx or a 429 from the model endpoint during preflight would be silently read as 'token valid', which is the same class of vacuous-pass failure this module explicitly guards against elsewhere (`disk_headroom_ok`, `host_probe_ports`, and `assert_proxy_reaches_upstream`'s own 'a probe that did not run is not a probe that passed').",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.4339581,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/preflight.py",
+        "line": 315,
+        "claim": "The docstring at lines 293-295 promises `True` only when the token authenticates and `False` \"for anything else, including a host this probe could not reach \u2014 'could not tell' is not a pass\", but `return exc.code not in (401, 403)` treats every non-401/403 HTTPError (e.g. a 429, 500 or 503 from the upstream) as a pass. That is exactly the 'could not tell' case the same docstring says must not be a pass, so a transient upstream error at the proxy's allowlisted host reads as a valid token and the readiness check this change exists to add (guarding Appendix J's silent-night landmine) is silently bypassed for that failure mode. No test exercises a non-401/403 HTTPError, so this gap is invisible to the gates.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.22716930000000002,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/preflight.py",
+        "line": 315,
+        "claim": "The acceptance criterion this whole spec exists for is rejecting a token the proxy answers 401/403 to (Appendix J's 'clean-looking nothing'), but no test drives `validate_claude_token` through its `HTTPError` branch. The only test that calls the real function (`test_the_token_probes_default_request_shape_is_asserted_not_sent`) makes `urlopen` raise `URLError`, exercising just the unreachable-host case; every `check_readiness` test that cares about an invalid token injects `validate_token=lambda: False`, bypassing the real function entirely. Changing line 315 from `return exc.code not in (401, 403)` to `return True` (i.e. treating a 401/403 as a valid credential, the exact landmine Appendix J measured) leaves all 1264+ tests green.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/preflight.py",
+          "find": "        return exc.code not in (401, 403)",
+          "replace": "        return True"
+        }
+      }
+    ]
+  }
+]

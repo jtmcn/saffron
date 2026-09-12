@@ -1192,15 +1192,17 @@ def test_a_repo_with_no_claude_md_implements_with_no_standing_instructions(
     assert "standing instructions" not in cell.system_prompts[0]
 
 
-def test_the_review_lenses_do_not_yet_carry_claude_md(monkeypatch, tmp_path):
-    """Staged, not forgotten: a lens prompt change moves the corpus, and item 93's
-    spread is measured under today's lenses first. Stage 3 inverts this test."""
+def test_every_review_lens_carries_claude_md_at_the_base_commit(monkeypatch, tmp_path):
+    """Item 7's lens half. The working copy and the base disagree, so a read of
+    either the operator's checkout or /work instead of the mirror at base_sha
+    fails here — the same shape as IMPLEMENT's own test."""
     cell = _stub_the_runtime(monkeypatch)
     _drive(
         monkeypatch,
         tmp_path,
         cell=cell,
         turns=[_turn(_block(_PLAN)), _turn()],
+        claude_md="working-copy rule\n",
         base_claude_md="base-commit rule\n",
     )
     # By content, not position: PLAN and IMPLEMENT resume one session on the
@@ -1208,7 +1210,8 @@ def test_the_review_lenses_do_not_yet_carry_claude_md(monkeypatch, tmp_path):
     implement_prompt = cell.system_prompts[0]
     lens_prompts = [p for p in cell.system_prompts if p != implement_prompt]
     assert len(lens_prompts) == len(review.LENSES)  # REVIEW ran, one session per lens
-    assert all("base-commit rule" not in p for p in lens_prompts)
+    assert all("base-commit rule" in p for p in lens_prompts)
+    assert all("working-copy rule" not in p for p in lens_prompts)
 
 
 def test_no_commit_is_not_implemented(monkeypatch, tmp_path):
@@ -2897,6 +2900,51 @@ def test_a_verdict_lands_on_the_finding_the_review_recorded(monkeypatch, tmp_pat
     # The action rides along: "fixed" and "argued" are the difference §4.6 asks
     # about, and the column is the only place left holding it.
     assert (row["verdict"], row["rebuttal"]) == ("withdrawn", "argued: by design")
+
+
+def test_the_verdict_session_carries_claude_md_at_the_base_commit(
+    monkeypatch, tmp_path
+):
+    """Item 7's verdict half: `run_rebut` forwards `claude_md` to
+    `verdict_prompt` the same way REVIEW's lenses forward it, but nothing
+    before this test pinned that at the session level — `tests/test_rebut.py`
+    calls `verdict_prompt` directly, and the other session tests inspect only
+    REVIEW's prompts. Identified by `## The rebuttal`, the one heading
+    `rebut-verdict.md` carries and no other template does, so this does not
+    depend on the verdict session being last."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_through_rebut(
+            _turn("It is intentional."),
+            _turn(
+                _block(
+                    {
+                        "rebuttals": [
+                            {"finding": 1, "action": "argued", "argument": "by design"}
+                        ]
+                    }
+                )
+            ),
+            _turn(
+                _block(
+                    {
+                        "verdicts": [
+                            {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                        ]
+                    }
+                )
+            ),
+        ),
+        claude_md="working-copy rule\n",
+        base_claude_md="base-commit rule\n",
+    )
+    (verdict_prompt,) = [p for p in cell.system_prompts if "## The rebuttal" in p]
+    assert "base-commit rule" in verdict_prompt
+    assert "working-copy rule" not in verdict_prompt
 
 
 def test_a_successful_outcome_carries_its_attempts_failures_reviews_and_rebuttal(

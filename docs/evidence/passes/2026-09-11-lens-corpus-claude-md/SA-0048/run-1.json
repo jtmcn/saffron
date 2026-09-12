@@ -1,0 +1,57 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.5205714,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/preflight.py",
+        "line": 428,
+        "claim": "The `except git_mirror.GitError: exported = None` around `export_saffron_dir` collapses two distinct facts into one: 'no `.saffron/` at this `base_sha`' (a genuine absence, matched by `git archive`'s pathspec-not-found error) and 'the archive/export itself failed' (e.g. a corrupted or partially-fetched mirror, a `git archive` failure unrelated to `.saffron`'s presence) \u2014 both raise the same `git_mirror.GitError` with no distinguishing type. The comment claims this draws 'the same absence-is-not-unreadability distinction `cli._protected_paths_at` already draw[s]', but that existing function is explicitly a cheap best-effort pre-cell read backstopped by an unguarded `export_saffron_dir` call later in `session.py`; here, `check_readiness` is itself the once-per-run gate meant to catch a broken repo 'before the night starts, rather than being discovered by the first cell after an image build' (per the spec's own acceptance criterion). A genuinely broken export is silently read as 'policy absent, proceed' and readiness returns `ok=True`, so the failure is only discovered when the first task's cell actually starts (`session.py:793`) \u2014 exactly the outcome this half of the criterion says it exists to prevent. This only manifests when export fails for a reason other than legitimate absence, which fixtures/tests never exercise (they only ever construct the 'no `.saffron`' case), so the gates and the new tests cannot see it.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.7285878000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/preflight.py",
+        "line": 308,
+        "claim": "validate_claude_token treats CLAUDE_CODE_OAUTH_TOKEN exactly like a plain API key: a bare `Authorization: Bearer <token>` request to the public `/v1/models` endpoint. session.py's own comment (session.py:602-604) draws a hard line between this subscription token and `ANTHROPIC_API_KEY`, saying its ceiling and revocation are provider-side and different from a key's \u2014 i.e. the codebase already knows this credential is handled specially by the provider. No test exercises the real request (by design, per the task notes), so if this subscription token requires different headers or a different endpoint to authenticate than a standard key does, every valid token would read as invalid in production while every test stays green, silently inverting the very failure mode (Appendix J) this check exists to catch.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.5102673,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/preflight.py",
+        "line": 315,
+        "claim": "`validate_claude_token`'s entire reason for existing (per its own docstring and Appendix J) is to distinguish a 401/403 (invalid credential) from a genuine success, in contrast to the same-URL `assert_proxy_reaches_upstream` which treats 401 as a pass. No test ever exercises the `HTTPError` branch of `validate_claude_token`: `test_the_token_probes_default_request_shape_is_asserted_not_sent` only drives the `URLError` path (unreachable host), and every `check_readiness` test injects a fake `validate_token` callable, bypassing this function's own logic entirely. Replacing `return exc.code not in (401, 403)` with `return True` \u2014 i.e. accidentally reusing the *opposite* verdict the docstring explicitly warns against \u2014 leaves all 1264+ tests green while silently reintroducing the exact landmine (`is_error: true`, `total_cost_usd: 0.0` all night) this spec exists to close.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/preflight.py",
+          "find": "        return exc.code not in (401, 403)",
+          "replace": "        return True"
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,61 @@
+[
+  {
+    "probe": {
+      "file": "saffron/cell/session.py",
+      "find": "notes_worth_asking = bool(spec.forbidden) or bool(policy.protected)",
+      "replace": "notes_worth_asking = bool(spec.forbidden)"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1502,
+    "summary": "1 failed, 1499 passed, 2 skipped, 21 deselected in 19.34s",
+    "baseline_failures": [
+      "tests/test_saffron_gates.py::test_structure_errors_when_its_tool_is_present_but_not_runnable"
+    ],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1502,
+    "baseline_summary": "1 failed, 1499 passed, 2 skipped, 21 deselected in 19.25s"
+  },
+  {
+    "probe": {
+      "file": "saffron/report/pr_body.py",
+      "find": "safe = neutralize(text)",
+      "replace": "safe = text"
+    },
+    "verdict": "survived",
+    "reason": "no new failure against the baseline",
+    "failures": [],
+    "tool": "pytest 9.1.1",
+    "collected": 1502,
+    "summary": "1 failed, 1499 passed, 2 skipped, 21 deselected in 19.42s",
+    "baseline_failures": [
+      "tests/test_saffron_gates.py::test_structure_errors_when_its_tool_is_present_but_not_runnable"
+    ],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1502,
+    "baseline_summary": "1 failed, 1499 passed, 2 skipped, 21 deselected in 19.25s"
+  },
+  {
+    "probe": {
+      "file": "saffron/cell/session.py",
+      "find": "notes_worth_asking = bool(spec.forbidden) or bool(policy.protected)",
+      "replace": "notes_worth_asking = bool(spec.forbidden) and bool(policy.protected)"
+    },
+    "verdict": "killed",
+    "reason": "1 new failure(s) against the baseline",
+    "failures": [
+      "tests/test_session.py::test_notes_are_empty_when_the_implementer_has_nothing_to_report"
+    ],
+    "tool": "pytest 9.1.1",
+    "collected": 1502,
+    "summary": "2 failed, 1498 passed, 2 skipped, 21 deselected in 19.59s",
+    "baseline_failures": [
+      "tests/test_saffron_gates.py::test_structure_errors_when_its_tool_is_present_but_not_runnable"
+    ],
+    "baseline_tool": "pytest 9.1.1",
+    "baseline_collected": 1502,
+    "baseline_summary": "1 failed, 1499 passed, 2 skipped, 21 deselected in 19.25s"
+  }
+]

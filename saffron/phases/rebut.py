@@ -224,6 +224,7 @@ def verdict_prompt(
     blockers: Sequence[tuple[int, Finding]],
     rebuttal: RebuttalTurn,
     context_md: str,
+    claude_md: str | None,
     prompts_dir: Path,
     spec_body: str,
     diff: str,
@@ -253,6 +254,7 @@ def verdict_prompt(
         diff=diff,
         blockers=blocker_lines(blockers),
         rebuttal=argued or "The implementer recorded no argument.",
+        standing_instructions=context.standing_instructions(claude_md),
     )
 
 
@@ -436,6 +438,7 @@ def run_rebut(
     session_id: str,
     spec_body: str,
     context_md: str,
+    claude_md: str | None,
     prompts_dir: Path,
     max_turns: int,
     budget_usd: float,
@@ -525,6 +528,7 @@ def run_rebut(
                     blockers=mine,
                     rebuttal=turn,
                     context_md=context_md,
+                    claude_md=claude_md,
                     prompts_dir=prompts_dir,
                     spec_body=spec_body,
                     diff=changed,

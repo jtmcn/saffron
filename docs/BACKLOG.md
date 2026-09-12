@@ -55,7 +55,7 @@ Soundness first: **79**, **69**, **93**, **94**, **80** (~~**83**~~, ~~**85**~~,
 declared against safely, are done — 2026-09-08), then **97**. Honesty second:
 **73**, **70**, **45**, **51** (with **49**/**50**, which its fix closes),
 ~~**47**~~, **46** (with **95**, which compounds it), **40**, ~~**26**~~,
-**7** (IMPLEMENT done; lenses open behind **93**), and the remainder of **78**.
+~~**7**~~, and the remainder of **78**.
 
 Closed since the 2026-09-04 sort, and left in place because their numbers are
 cited: **74** is done (`SA-0063`, `SA-0064`); **88** is closed on a negative
@@ -98,8 +98,11 @@ printed line; **47** feeds part 3 a column of zeros; **46** is the only account
 of a night nobody watched; **40** merges a diff over a ceiling it passed;
 **26** is done (`SA-0065`, PR #185, 2026-09-10) and its number stays listed
 because item numbers are cited; **95** is what that fix left open — the refusal
-reaches a terminal and never the ledger; **7**'s IMPLEMENT half is done, and the
-lens half stays open behind **93**.
+reaches a terminal and never the ledger; **7** is done (`fix(review): no lens
+was shown the invariants it judged a diff against`, 2026-09-11,
+`docs/evidence/2026-09-11-lens-corpus-spread.md`, beside
+`docs/evidence/2026-09-11-lens-corpus-claude-md.md`) and its number stays
+listed too.
 
 ### Tier 2 — the morning after
 
@@ -721,12 +724,15 @@ evidence, and it wants the same risk tier the half above is waiting on.
 
 ## 7. `CLAUDE.md` no longer reaches the agent, so the flywheel's middle bucket is inert
 
-**Status: IMPLEMENT done, 2026-09-10; the lenses are open.** `mirror.file_at` reads
-`CLAUDE.md` at `base_sha` and `context.standing_instructions` injects it into IMPLEMENT,
-which REPAIR, REBUT and the extraction turns resume. The three review lenses and the
-verdict lenses still receive none, deliberately: a lens prompt change moves the corpus, and
-item 93's spread is measured first
-(`docs/superpowers/plans/2026-09-10-claude-md-reaches-every-phase.md`).
+**Status: done, 2026-09-11** (`fix(review): no lens was shown the invariants it judged a
+diff against`). `mirror.file_at` reads `CLAUDE.md` at `base_sha` and
+`context.standing_instructions` injects it into IMPLEMENT, which REPAIR, REBUT and the
+extraction turns resume — and, now, into the three review lenses and the verdict lenses too,
+once the lens corpus's spread was measured
+(`docs/evidence/2026-09-11-lens-corpus-spread.md`,
+`docs/superpowers/plans/2026-09-10-claude-md-reaches-every-phase.md`). The corpus was re-run
+under the change on 2026-09-11: the per-run ranges overlap, so the decision rule reads no
+measurable difference at n=3 (`docs/evidence/2026-09-11-lens-corpus-claude-md.md`).
 
 `setting_sources: []` was set because a target repo's `.claude/` was configuring
 the agent working on it — measured, a planted subagent and skill both loaded out
@@ -5529,7 +5535,11 @@ pass's per-run `1/12`, `2/12`, `3/12` — a range of `1/12` to `3/12`. That
 establishes the metric's resolution at n=1; it says nothing about the
 pre-probe prompt, so the confound this item opened (whether requiring a probe
 cost adequacy recall) is still open and still needs a pass under pass 1's
-prompt at the same `--runs` to answer.
+prompt at the same `--runs` to answer. The lens prompt now also carries
+`CLAUDE.md` (item 7), so these four samples describe a configuration that is
+no longer current; `docs/evidence/2026-09-11-lens-corpus-claude-md.md` is the
+first pass under the new one, and a future confound pass must compare against
+that record, not this one.
 
 ---
 

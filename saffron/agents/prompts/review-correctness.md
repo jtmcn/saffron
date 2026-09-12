@@ -88,6 +88,8 @@ The host reconciles every finding against the diff and drops any it cannot
 anchor to a real line, so a finding pointing at a line you did not read is worth
 less than no finding at all.
 
+{standing_instructions}
+
 ## The gate results
 
 {gates}

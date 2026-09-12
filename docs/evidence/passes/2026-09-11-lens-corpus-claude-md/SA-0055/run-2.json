@@ -1,0 +1,47 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.2450088,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.380691,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 668,
+        "claim": "`PinnedBase`'s own docstring (lines 669-679) justifies carrying `mirror`/`url`/`base_sha` together by citing this repo's history of adjacent same-typed parameters transposing and still type-checking \u2014 the exact reason `check_readiness` made `scratch`/`home` keyword-only. But `PinnedBase` is declared `@dataclass(frozen=True)` with no `kw_only=True`, and two of its three fields (`url: str`, `base_sha: str`) are the same type, so a future positional construction such as `PinnedBase(mirror, base_sha, url)` type-checks cleanly and reproduces the very bug the docstring is written to warn against. Every call site in this diff happens to use keywords, so nothing breaks today, but the class does not structurally enforce the safety its own documentation claims for it.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.8875974,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/cli.py",
+        "line": 964,
+        "claim": "No test in this diff verifies that `_batch_runner` actually receives `pinned.url` (the value readiness derived) rather than some other string. Every test that reaches this line either stubs `_batch_runner` with `lambda *a, **k: lambda _c: None` (ignoring all kwargs) or leaves the built runner unexercised because `run_batch` is mocked to return a stop reason without invoking it; the call-count tests (`test_a_night_pins_its_base_once`, etc.) only count invocations of `ensure_mirror`/`real_remote`/`fetch_default_branch`, not the value threaded onward. Changing `url=pinned.url` to `url=pinned.base_sha` (both `str`, so `ty` would not object) would make every task in a batch resolve stacked branches and push against the wrong remote string, yet the full test suite would stay green.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/cli.py",
+          "find": "url=pinned.url",
+          "replace": "url=pinned.base_sha"
+        }
+      }
+    ]
+  }
+]

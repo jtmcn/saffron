@@ -73,6 +73,7 @@ def _review(*texts, read_head=lambda _p: None, record=None):
         spec_body="fix the gap",
         gates="- tests: pass (pytest 8.0)",
         context_md=CONTEXT_MD,
+        claude_md=None,
         prompts_dir=PROMPTS,
         max_turns=20,
         budget_usd=2.0,
@@ -335,6 +336,7 @@ def test_each_lens_prompt_carries_the_framing_that_makes_it_a_critic(lens):
     prompt = review.lens_prompt(
         lens,
         context_md=CONTEXT_MD,
+        claude_md=None,
         prompts_dir=PROMPTS,
         spec_body="fix the gap",
         diff=DIFF,
@@ -356,6 +358,21 @@ def test_each_lens_prompt_carries_the_framing_that_makes_it_a_critic(lens):
     # host cannot anchor, and it still reads like a critic while doing it.
     for field in ("`file`", "`line`", "`severity`", "`claim`"):
         assert field in prompt
+
+
+@pytest.mark.parametrize("lens", sorted(review.LENSES))
+def test_each_lens_prompt_carries_the_repo_s_claude_md(lens):
+    prompt = review.lens_prompt(
+        lens,
+        context_md=CONTEXT_MD,
+        claude_md="- Never collapse `error` into `fail`.\n",
+        prompts_dir=PROMPTS,
+        spec_body="fix the gap",
+        diff=DIFF,
+        gates="- tests: pass (pytest 8.0)",
+    )
+    assert "## This repository's standing instructions" in prompt
+    assert "- Never collapse `error` into `fail`." in prompt
 
 
 def test_the_lenses_declare_disjoint_remits():

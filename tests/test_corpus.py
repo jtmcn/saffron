@@ -43,6 +43,7 @@ def one_defect_fixture(sa0062, tmp_path):
         "spec_body.md",
         "gates.txt",
         "context.md",
+        "claude.md",
         "recorded-findings.json",
     ):
         (tmp_path / name).write_text((sa0062.root / name).read_text())
@@ -282,12 +283,13 @@ def test_pinned_diff_survives_a_hostile_git_config(tmp_path, monkeypatch):
 
 
 def test_every_shipped_fixture_s_spec_body_and_context_reproduce_from_git():
-    """Hermetic reproduction of two more frozen inputs, the same way the diff
+    """Hermetic reproduction of three more frozen inputs, the same way the diff
     is reproduced above: `spec_body.md` via `recovery.spec_body_at` (base
     tree, the off-branch fallback, or a disclosed-mutant spec — whichever
-    this fixture needed) and `context.md` via a plain `git show`. Both need
-    only this repo's git history, so a regression in the spec-body fallback
-    fails here rather than shipping silently into a paid lens prompt.
+    this fixture needed) and `context.md`/`claude.md` via a plain `git show`.
+    All three need only this repo's git history, so a regression in the
+    spec-body fallback fails here rather than shipping silently into a paid
+    lens prompt.
 
     `gates.txt` and `recorded-findings.json` are NOT covered here and cannot
     be: both are read from `~/.saffron/batches`, which exists on the machine
@@ -307,6 +309,14 @@ def test_every_shipped_fixture_s_spec_body_and_context_reproduce_from_git():
             check=True,
         ).stdout
         assert context_md == fixture.context_md, fixture.spec_id
+
+        claude_md = subprocess.run(
+            ["git", "show", f"{fixture.base_sha}:CLAUDE.md"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert claude_md == fixture.claude_md, fixture.spec_id
 
 
 def test_every_shipped_fixture_declares_a_non_empty_source():
@@ -1025,3 +1035,37 @@ def test_the_spread_pass_s_per_run_totals_are_re_derivable():
     totals = " · ".join(f"{s.graded}/{s.declared}" for s in per_run if s is not None)
     assert totals in line
     assert line in SPREAD_RECORD.read_text()
+
+
+CLAUDE_MD = REPO / "docs" / "evidence" / "passes" / "2026-09-11-lens-corpus-claude-md"
+CLAUDE_MD_RECORD = REPO / "docs" / "evidence" / "2026-09-11-lens-corpus-claude-md.md"
+
+
+def test_the_claude_md_pass_s_per_run_totals_are_re_derivable():
+    """Task 10's number, recomputed from the runs beside it, never read off
+    prose. Unlike the spread pass, one run here is partial — SA-0054's
+    contract lens hit `error_max_turns` on run 1, so that fixture drops out of
+    run 1's own slice and its denominator is 10, not 12. The totals string
+    must come out that way on its own, not by assuming every fixture
+    contributes 12 declared defects to every run."""
+    fixtures = corpus.load_corpus(FIXTURES)
+    runs = {
+        f.spec_id: [
+            lens_scoring.reviews_from_json(p.read_text())
+            for p in sorted((CLAUDE_MD / f.spec_id).glob("run-*.json"))
+        ]
+        for f in fixtures
+    }
+    assert all(len(r) == 3 for r in runs.values())
+    per_run = corpus.graded_per_run(fixtures, runs)
+    line = next(
+        line
+        for line in (CLAUDE_MD / "table.md").read_text().splitlines()
+        if line.startswith("Per run")
+    )
+    totals = " · ".join(
+        "unscored" if s is None else f"{s.graded}/{s.declared}" for s in per_run
+    )
+    assert totals in line
+    assert totals == "1/10 · 4/12 · 4/12"
+    assert line in CLAUDE_MD_RECORD.read_text()

@@ -1,0 +1,57 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.7807257000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "concern",
+        "file": "saffron/preflight.py",
+        "line": 438,
+        "claim": "`disk_headroom_ok` deliberately raises `RuntimeError` when `shutil.disk_usage(home)` itself cannot run (line ~356 doc: \"a headroom check that could not run is not a headroom check that passed\"), but `check_readiness` calls it unguarded at line 438 with no try/except, so that `RuntimeError` propagates straight out of `check_readiness` instead of becoming a `Readiness(False, \"disk\", ...)`. Every other step in this function (mirror, origin, default_branch, policy) converts its exception into a named `Readiness` result, and `Readiness`'s own docstring says the whole point is \"so a caller can skip the repo and say why ... instead of discovering the reason by reading a traceback the first cell raised\" \u2014 but for a disk check that cannot execute (permission error, unmounted filesystem, a transient stat failure on `home`), that is exactly what happens: a raw traceback instead of a named skip reason. No test exercises this path through `check_readiness` (the existing test only calls `disk_headroom_ok` directly), so the inconsistency is invisible to the suite.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.7742148,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/preflight.py",
+        "line": 438,
+        "claim": "`check_readiness` wraps every other step's failure mode in try/except and converts it to a named `Readiness(False, step, detail)` (mirror at 407-410, origin at 412-416, default_branch at 418-421, policy at 428-436), but the disk step at line 438 calls `disk_headroom_ok(home)` unguarded. `disk_headroom_ok` deliberately raises `RuntimeError` rather than returning a value when it 'cannot execute' (line 338-344, matching `host_probe_ports`'s precedent), so that RuntimeError propagates straight out of `check_readiness` uncaught. This breaks the function's own documented contract \u2014 the `Readiness` dataclass docstring (line 369-371) says the whole point is 'a caller can skip the repo and say why... instead of discovering the reason by reading a traceback' \u2014 and it is the one path through the single entry point where a caller still gets exactly that traceback, for the same 'cannot execute' class of failure every sibling check converts into a named result.",
+        "anchored": true,
+        "probe": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.3248124,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/preflight.py",
+        "line": 315,
+        "claim": "`validate_claude_token`'s actual pass/fail determination \u2014 `exc.code not in (401, 403)` on an `HTTPError`, and the bare `return True` on success \u2014 is never exercised by any test. `test_the_token_probes_default_request_shape_is_asserted_not_sent` only makes `urlopen` raise `URLError`, which takes the separate `except urllib.error.URLError: return False` branch; no test anywhere constructs an `HTTPError`. Every other test that exercises `check_readiness`'s auth step injects a fake `validate_token` callable and never calls the real function at all. Changing line 315 to `return True` (treat any HTTPError, including 401/403, as a valid token) keeps every test in the suite green while silently reinstating exactly the Appendix J landmine this spec exists to close \u2014 an expired token would again pass readiness.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/preflight.py",
+          "find": "    except urllib.error.HTTPError as exc:\n        return exc.code not in (401, 403)",
+          "replace": "    except urllib.error.HTTPError as exc:\n        return True"
+        }
+      }
+    ]
+  }
+]

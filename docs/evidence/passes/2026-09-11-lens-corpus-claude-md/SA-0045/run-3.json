@@ -1,0 +1,37 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.22730580000000003,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.6628350000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.2373402,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "concern",
+        "file": "saffron/ledger.py",
+        "line": 367,
+        "claim": "Every test added for `create_run`'s new `batch_id` parameter (`test_a_run_created_outside_a_batch_has_a_null_batch_id`, `test_a_ledger_built_by_the_previous_schema_still_opens_and_writes`) calls it with no `batch_id` argument and asserts the column is NULL. No test ever passes a real, non-null `batch_id` and checks it lands in the row. Replacing the bound tuple `(repo_id, base_sha, batch_id)` with `(repo_id, base_sha, None)` \u2014 i.e. silently discarding whatever `batch_id` is passed \u2014 keeps every test in this diff green while making the parameter a no-op for the one case (a run created inside a batch) that is the actual reason it exists. `census`/`criteria` don't see this because the acceptance criterion as worded only requires the NULL-default behavior; the reverse case is untested.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/ledger.py",
+          "find": "            (repo_id, base_sha, batch_id),",
+          "replace": "            (repo_id, base_sha, None),"
+        }
+      }
+    ]
+  }
+]

@@ -641,7 +641,7 @@ That second requirement is easy to miss and fatal to get wrong. The obvious mode
 
 The general form, because it will recur with every runtime option: **in an unattended system, "ask the operator" is not a fallback, it is a hang.** Any option whose failure mode is a prompt needs its non-interactive equivalent chosen deliberately.
 
-**Configuration is loaded from nowhere.** `setting_sources` is pinned to `[]`. Its default loads project settings from the working directory, and the working directory is `/work` — the target repo's checkout, a tree the task itself can edit. Measured with a planted `.claude/`: an agent definition and a skill in `/work` both reached the agent Saffron was running *on that repo*, which for self-hosting means Saffron's own `.claude/` configures its own factory. Every instruction the agent gets is composed host-side and injected (§5.3); nothing is read from the tree under work. The pin also stops the repo's `CLAUDE.md` loading, so the host injects it instead: read from the mirror at `base_sha`, never from the tree the agent can rewrite, and substituted as a value like the spec body. IMPLEMENT receives it, and the sessions that resume IMPLEMENT inherit it; the review and verdict lenses do not yet — that change is staged behind the corpus measurement in `docs/BACKLOG.md` item 93.
+**Configuration is loaded from nowhere.** `setting_sources` is pinned to `[]`. Its default loads project settings from the working directory, and the working directory is `/work` — the target repo's checkout, a tree the task itself can edit. Measured with a planted `.claude/`: an agent definition and a skill in `/work` both reached the agent Saffron was running *on that repo*, which for self-hosting means Saffron's own `.claude/` configures its own factory. Every instruction the agent gets is composed host-side and injected (§5.3); nothing is read from the tree under work. The pin also stops the repo's `CLAUDE.md` loading, so the host injects it instead: read from the mirror at `base_sha`, never from the tree the agent can rewrite, and substituted as a value like the spec body. IMPLEMENT receives it, and the sessions that resume IMPLEMENT inherit it; every fresh session — the three review lenses and the verdict lenses — receives it too, because a critic judging a diff against invariants it was never shown is judging against nothing.
 
 #### Control artifacts never stay in the workspace
 
@@ -945,7 +945,8 @@ task retroactively.
 
 ### 5.5 Phase 4 — REVIEW (adversarial)
 
-Fresh session, read-only tools, different system prompt, ideally a different model or effort level. It never sees the implementer's transcript. It sees the spec, the diff, the gate results, and the acceptance criteria.
+Fresh session, read-only tools, different system prompt, ideally a different model or effort level. It never sees the implementer's transcript. It sees the spec, the diff, the gate results, the acceptance criteria, and the repo's
+`CLAUDE.md` at `base_sha` (§5.3).
 
 Its instruction is not "review this code":
 

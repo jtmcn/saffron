@@ -45,6 +45,7 @@ FROZEN = {
     "spec_body": "spec_body.md",
     "gates": "gates.txt",
     "context_md": "context.md",
+    "claude_md": "claude.md",
 }
 
 
@@ -149,6 +150,10 @@ class Fixture:
     @property
     def context_md(self) -> str:
         return self._frozen("context_md")
+
+    @property
+    def claude_md(self) -> str:
+        return self._frozen("claude_md")
 
     def recorded_reviews(self) -> list[LensReview]:
         """The real output of the run this fixture was built from.
