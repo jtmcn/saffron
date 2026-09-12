@@ -25,6 +25,7 @@ from pathlib import Path
 from saffron.cell.worktree import DIFF_FLAGS
 from saffron.events import Event, EventLog, PhaseStart, describe
 from saffron.gates.contract import split_lines
+from saffron.gates.core.scope import scope_gate
 from saffron.gates.suite import CellTree, GateSuite, SuiteComparison
 from saffron.intake import Spec
 from saffron.phases.rebut import sustained_blockers, unkept_fixes
@@ -311,23 +312,29 @@ def commit_squash(
     the transcript and the batch tree share.
 
     `unpackaged_state`, set only by `push_unpackaged_work`, says the cell
-    ended in that state and the gates were never run to green — so nobody
-    reading the branch mistakes this for a commit PACKAGE produced. `None`
+    ended in that state and PACKAGE never ran — so nobody reading the branch
+    mistakes this for a commit PACKAGE produced. `None`
     (every packaged commit) reproduces the message byte-for-byte as before
     this parameter existed.
     """
     lines = [f"saffron {spec_id}: {neutralize(title)}", ""]
     if unpackaged_state is not None:
         lines += [
-            f"NOT PACKAGED — the cell ended {unpackaged_state}; the gates were "
-            "never run to green.",
+            f"NOT PACKAGED — the cell ended {unpackaged_state}; PACKAGE never "
+            "ran, so nothing here was re-verified or reviewed.",
             "",
         ]
+    counted = (
+        f"{attempts} attempts"
+        if attempts or unpackaged_state is None
+        # A rate limit or a budget stop returns before `attempts` is ever set.
+        else "attempts not recorded"
+    )
     lines += [
         f"base {base_sha[:12]}",
         f"cell head {cell_head[:12] if cell_head else '(unknown)'} "
         "(unreachable: the cell's commits died with its volume)",
-        f"{attempts} attempts, ${spent_usd:.2f}",
+        f"{counted}, ${spent_usd:.2f}",
     ]
     if agent_subjects:
         lines += ["", "The agent's own commits, squashed into this one:"]
@@ -1007,10 +1014,13 @@ def push_unpackaged_work(
 
     **The branch is `saffron/<SPEC-ID>`**, the same name `package()` uses,
     pushed with the same force-with-lease `push_with_lease` gives PACKAGE —
-    but only when the remote branch is absent or already holds a sha one of
-    this spec's own ledger rows recorded as pushed (`Ledger.tasks_by_spec_id`).
-    Otherwise the branch moved underneath this spec — an operator's own
-    review fixes, most likely — and nothing is pushed.
+    but only when the remote branch is absent or already holds a sha another
+    of this spec's ledger rows recorded as pushed (`Ledger.tasks_by_spec_id`),
+    and never while one of those rows is `READY_FOR_REVIEW`: its draft pull
+    request's head is not ours to replace. Otherwise nothing is pushed.
+
+    **Only a diff `scope` passes**, judged by the policy at `tree_base` — the
+    one bound PACKAGE's own gates enforce before anything leaves the host.
 
     **No pull request, no re-verification, no queue line, no ledger state
     write.** Only `ledger.record_push` — the same call PACKAGE makes on
@@ -1022,8 +1032,6 @@ def push_unpackaged_work(
     rejected because the branch moved mid-push — is reported through `emit`
     and returned as a refusal. The task already failed on its own terms;
     a failure pushing its leftovers must not become an infrastructure exit.
-    `add_worktree`'s own `mirror_ops.GitError` is the one exception this does
-    not catch: that is a mirror problem, not a task-shaped one.
     """
     if emit is None:
         # Same default `package()` and `run_task` both fall back to: a caller
@@ -1069,24 +1077,29 @@ def push_unpackaged_work(
     ):
         return _refuse(f"credential in the commit subjects: {'; '.join(leaked)}")
 
-    patch_meta = json.loads((outcome.task_dir / "patch.json").read_text())
-    tree_base = patch_meta.get("tree_base", patch_meta["base_sha"])
-
     try:
+        patch_meta = json.loads((outcome.task_dir / "patch.json").read_text())
+        tree_base = patch_meta.get("tree_base", patch_meta["base_sha"])
         url = real_remote(repo)
         current = remote_sha(url, branch, cwd=mirror)
-    except PackageError as exc:
+    except (PackageError, OSError, ValueError, KeyError) as exc:
         return _refuse(str(exc))
 
-    recorded = (
-        {
-            row["pushed_sha"]
+    others = (
+        [
+            row
             for row in ledger.tasks_by_spec_id(repo_id, spec.id)
-            if row["pushed_sha"]
-        }
+            if row["task_id"] != outcome.task_id
+        ]
         if repo_id is not None
-        else set()
+        else []
     )
+    if any(row["state"] == "READY_FOR_REVIEW" for row in others):
+        return _refuse(
+            f"a pull request from {spec.id} is awaiting review on {branch} — "
+            "not ours to replace"
+        )
+    recorded = {row["pushed_sha"] for row in others if row["pushed_sha"]}
     if current and current not in recorded:
         return _refuse(
             f"{branch} already points at {current[:12]}, which this spec never "
@@ -1098,6 +1111,9 @@ def push_unpackaged_work(
     try:
         assert_base_objects(mirror, tree_base)
         worktree_path = mirror_ops.add_worktree(mirror, tree_base, scratch)
+        # Read before the patch applies: red work may have edited the policy
+        # that is about to judge it.
+        policy, _ = load_policy(worktree_path)
         checked = _run(worktree_path, "checkout", "-B", branch)
         if checked.returncode != 0:
             raise PackageError(
@@ -1119,8 +1135,26 @@ def push_unpackaged_work(
             agent_subjects=outcome.agent_subjects,
             unpackaged_state=outcome.state,
         )
+        # PACKAGE pushes only a diff `scope` passed; without the same check, a
+        # workflow edit reaches CI that runs on every push.
+        changed = _run(
+            worktree_path, "diff", "--name-only", "-z", "--no-renames", tree_base
+        )
+        if changed.returncode != 0:
+            raise PackageError(
+                f"cannot list changed files: {changed.stderr.strip()[:200]}"
+            )
+        scoped = scope_gate(
+            [path for path in changed.stdout.split("\0") if path],
+            list(spec.touches),
+            diff=patch_text,
+            forbidden=list(spec.forbidden),
+            protected=list(policy.protected),
+        )
+        if scoped.status != "pass":
+            raise PackageError(f"scope {scoped.status}: {scoped.summary}")
         push_with_lease(worktree_path, url=url, branch=branch, expect=current)
-    except PackageError as exc:
+    except (PackageError, PolicyError, mirror_ops.GitError, OSError) as exc:
         return _refuse(str(exc))
     finally:
         if worktree_path is not None:

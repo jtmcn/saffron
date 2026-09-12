@@ -2775,6 +2775,9 @@ def test_work_a_task_could_not_package_is_pushed_to_its_branch(packageable):
     assert remote_head and remote_head == result.pushed_sha
     row = _state(packageable.ledger, packageable.task_id)
     assert row["pushed_sha"] == remote_head
+    assert result.note == f"pushed saffron/SA-0005 @ {remote_head[:12]}"
+    message = git(packageable.remote, "log", "-1", "--format=%B", "saffron/SA-0005")
+    assert "NOT PACKAGED — the cell ended EXHAUSTED; PACKAGE never ran" in message
 
 
 def test_pushing_unpackaged_work_opens_no_pull_request(packageable, monkeypatch):
@@ -2910,3 +2913,151 @@ def test_a_task_with_no_commits_pushes_nothing(packageable, tmp_path):
         == ""
     )
     assert _state(packageable.ledger, packageable.task_id)["pushed_sha"] is None
+
+
+def _earlier_task(packageable, state, pushed_sha):
+    """An earlier run of this spec, with the branch head it recorded."""
+    ledger = packageable.ledger
+    run_id = ledger.create_run(packageable.repo_id, packageable.base)
+    task_id = ledger.create_task(run_id, "SA-0005", "s" * 40, branch="saffron/SA-0005")
+    ledger.set_task_state(task_id, state)
+    ledger.record_push(task_id, pushed_sha)
+
+
+def test_unpackaged_work_outside_its_touches_is_not_pushed(packageable):
+    """PACKAGE pushes only a diff `scope` passed. Without the same check, a
+    workflow edit in red work reaches CI that runs on every push."""
+    from saffron.phases.package import push_unpackaged_work
+
+    work = packageable.work
+    git(work, "checkout", "-q", "cell")
+    (work / ".github" / "workflows").mkdir(parents=True)
+    (work / ".github" / "workflows" / "ci.yml").write_text("on: push\n")
+    git(work, "add", "-A")
+    git(work, "commit", "-qm", "the agent edited CI")
+    patch = packageable.outcome.task_dir / "patch.diff"
+    patch.write_text(git(work, "diff", *DIFF_FLAGS, f"{packageable.base}..HEAD") + "\n")
+    git(work, "checkout", "-q", "main")
+
+    packageable.outcome.state = "EXHAUSTED"
+    result = push_unpackaged_work(packageable.outcome, **packageable.unpackaged_kwargs)
+
+    assert result.pushed is False
+    assert result.note.startswith("scope fail")
+    assert remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work) == ""
+
+
+def test_unpackaged_work_does_not_replace_a_pull_request_awaiting_review(
+    packageable,
+):
+    """This spec's own PACKAGE pushed that head, and a draft pull request shows
+    it: a re-run that ended red must not swap it for unreviewed work."""
+    from saffron.phases.package import push_unpackaged_work
+
+    work = packageable.work
+    git(work, "push", "-q", "origin", f"{packageable.base}:refs/heads/saffron/SA-0005")
+    _earlier_task(packageable, "READY_FOR_REVIEW", packageable.base)
+
+    packageable.outcome.state = "EXHAUSTED"
+    result = push_unpackaged_work(packageable.outcome, **packageable.unpackaged_kwargs)
+
+    assert result.pushed is False
+    assert "awaiting review" in result.note
+    assert (
+        remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work)
+        == packageable.base
+    )
+
+
+def test_unpackaged_work_replaces_its_own_earlier_unpackaged_push(packageable):
+    """The retry the ledger check exists for: a rate-limited run pushed its
+    work, and the re-run may replace what it pushed."""
+    from saffron.phases.package import push_unpackaged_work
+
+    work = packageable.work
+    git(work, "push", "-q", "origin", f"{packageable.base}:refs/heads/saffron/SA-0005")
+    _earlier_task(packageable, "RATE_LIMITED", packageable.base)
+
+    packageable.outcome.state = "RATE_LIMITED"
+    packageable.outcome.attempts = 0
+    result = push_unpackaged_work(packageable.outcome, **packageable.unpackaged_kwargs)
+
+    assert result.pushed is True
+    head = remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work)
+    assert head == result.pushed_sha != packageable.base
+    # A rate limit returns before any attempt is counted; "0 attempts" beside
+    # real spend would be false.
+    message = git(packageable.remote, "log", "-1", "--format=%B", "saffron/SA-0005")
+    assert "attempts not recorded" in message
+
+
+def test_unpackaged_work_is_pushed_with_a_lease(packageable, monkeypatch):
+    """The branch read as absent and then appeared: a plain force would erase
+    whoever pushed it."""
+    from saffron.phases import package as package_module
+    from saffron.phases.package import push_unpackaged_work
+
+    work = packageable.work
+    git(work, "push", "-q", "origin", f"{packageable.base}:refs/heads/saffron/SA-0005")
+    monkeypatch.setattr(package_module, "remote_sha", lambda *_a, **_k: "")
+
+    packageable.outcome.state = "EXHAUSTED"
+    result = push_unpackaged_work(packageable.outcome, **packageable.unpackaged_kwargs)
+
+    assert result.pushed is False
+    assert (
+        remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work)
+        == packageable.base
+    )
+
+
+def test_unpackaged_work_with_a_credential_in_a_commit_subject_is_not_pushed(
+    packageable,
+):
+    """The squash carries the agent's subjects to the remote as well."""
+    from saffron.phases.package import push_unpackaged_work
+
+    packageable.outcome.state = "EXHAUSTED"
+    packageable.outcome.agent_subjects = [f"hardcode {FAKE_KEY}"]
+    result = push_unpackaged_work(packageable.outcome, **packageable.unpackaged_kwargs)
+
+    assert result.pushed is False
+    assert "credential in the commit subjects" in result.note
+    assert FAKE_KEY not in result.note
+    assert (
+        remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=packageable.work)
+        == ""
+    )
+
+
+def test_a_mirror_failure_pushing_unpackaged_work_is_said_and_not_raised(
+    packageable, monkeypatch
+):
+    """Escaping, a `GitError` is exit 2 under `saffron cell` and a breaker
+    abort in a batch."""
+    from saffron.phases import package as package_module
+    from saffron.phases.package import push_unpackaged_work
+
+    def _worktree_fails(*_a, **_k):
+        raise GitError("worktree add failed")
+
+    monkeypatch.setattr(package_module.mirror_ops, "add_worktree", _worktree_fails)
+
+    packageable.outcome.state = "EXHAUSTED"
+    result = push_unpackaged_work(packageable.outcome, **packageable.unpackaged_kwargs)
+
+    assert result.pushed is False
+    assert "worktree add failed" in result.note
+
+
+def test_a_missing_patch_record_is_said_and_not_raised(packageable):
+    """`patch.json` is written beside `patch.diff`, but a partial teardown can
+    leave one without the other."""
+    from saffron.phases.package import push_unpackaged_work
+
+    (packageable.outcome.task_dir / "patch.json").unlink()
+
+    packageable.outcome.state = "EXHAUSTED"
+    result = push_unpackaged_work(packageable.outcome, **packageable.unpackaged_kwargs)
+
+    assert result.pushed is False
