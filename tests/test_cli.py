@@ -3338,6 +3338,90 @@ def test_an_unready_night_still_leaves_a_row_saying_it_was_attempted(
     assert "readiness failed at auth: token expired" in capsys.readouterr().out
 
 
+def test_a_queue_discovery_refuses_still_leaves_a_closed_batch_row(
+    tmp_path, monkeypatch
+):
+    """A spec directory `discover_specs` refuses — absent, or not a
+    directory (`SA-0065`) — while readiness has already passed still leaves
+    a `batches` row behind, closed `INFRASTRUCTURE`, and no task started.
+    Before this, the `SpecError` reached `main`'s catch-all straight past
+    `run_batch`, and no row existed at all for the night that was
+    attempted."""
+    home = tmp_path / "home"
+    _readiness_passes(monkeypatch)
+
+    def _raise(*a, **k):
+        raise intake.SpecError("spec directory does not exist")
+
+    monkeypatch.setattr(cli, "_resolve_queue", _raise)
+
+    assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 2
+
+    ledger = Ledger(home / "ledger.db")
+    row = ledger._db.execute(
+        "SELECT status, ended_at FROM batches ORDER BY batch_id DESC LIMIT 1"
+    ).fetchone()
+    tasks = ledger._db.execute("SELECT task_id FROM tasks").fetchall()
+    ledger.close()
+
+    assert row["status"] == "INFRASTRUCTURE"
+    assert row["ended_at"] is not None
+    assert tasks == []
+
+
+def test_any_raise_resolving_the_queue_still_closes_the_batch_row(
+    tmp_path, monkeypatch
+):
+    """Not only a `SpecError`: resolving the queue is real work — a mirror
+    fetch, a reconcile, a `git archive` — and any exception it raises, after
+    readiness has already passed, must still reach the same close. A
+    `SpecError` from discovery is only the case that was measured."""
+    home = tmp_path / "home"
+    _readiness_passes(monkeypatch)
+
+    def _raise(*a, **k):
+        raise RuntimeError("the mirror could not be fetched mid-scan")
+
+    monkeypatch.setattr(cli, "_resolve_queue", _raise)
+
+    assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 2
+
+    ledger = Ledger(home / "ledger.db")
+    row = ledger._db.execute(
+        "SELECT status, ended_at FROM batches ORDER BY batch_id DESC LIMIT 1"
+    ).fetchone()
+    tasks = ledger._db.execute("SELECT task_id FROM tasks").fetchall()
+    ledger.close()
+
+    assert row["status"] == "INFRASTRUCTURE"
+    assert row["ended_at"] is not None
+    assert tasks == []
+
+
+def test_a_queue_that_cannot_be_resolved_says_so_on_the_batch_line(
+    tmp_path, monkeypatch, capsys
+):
+    """The printed line must say resolution failed, carrying the
+    exception's own text — and must not say readiness failed, since
+    readiness passed. A line naming the wrong step sends the operator to
+    re-check a token and a mirror that were fine."""
+    home = tmp_path / "home"
+    _readiness_passes(monkeypatch)
+
+    def _raise(*a, **k):
+        raise RuntimeError("spec directory /nowhere does not exist")
+
+    monkeypatch.setattr(cli, "_resolve_queue", _raise)
+
+    assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 2
+
+    printed = capsys.readouterr().out
+    batch_lines = [line for line in printed.splitlines() if line.startswith("batch:")]
+    assert batch_lines, printed
+    assert any("spec directory /nowhere does not exist" in line for line in batch_lines)
+    assert "readiness failed" not in printed
+
+
 def test_a_night_names_the_specs_its_scan_refused(tmp_path, monkeypatch, capsys):
     """`saffron queue` prints refusals; this printed only the gaps, so a spec
     refused at gate 0 — a dead `depends_on` parent, protected `touches`, a
