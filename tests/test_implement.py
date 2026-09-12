@@ -394,6 +394,83 @@ def test_a_line_that_is_not_an_event_is_bounded_at_capture():
     assert describe(raw) == "agent: (raw) " + "z" * 160
 
 
+def test_the_raw_line_and_the_event_are_bounded_by_one_value(monkeypatch, tmp_path):
+    """Item 46's open half: one value, both paths. Patching only
+    `saffron.events.BOUND_CHARS` must move the raw-line quarantine here and
+    `EventLog.append`'s own bounding of an oversized parsed event together —
+    two constants that happened to agree is exactly the drift this closes."""
+    from saffron import events  # local: kept out of the revert's collection
+
+    monkeypatch.setattr(events, "BOUND_CHARS", 10)
+    watched: list[Event] = []
+    implement.run_agent(
+        "cell",
+        prompt="p",
+        options={},
+        spec_id="SY-1",
+        emit=watched.append,
+        exec_stream=_stream("z" * 50, "", _result_line()),
+    )
+    (raw,) = [e for e in watched if isinstance(e, Agent) and e.raw]
+    assert raw.line is not None and len(raw.line) == 10
+
+    log = events.EventLog(tmp_path)
+    log.append(
+        events.Agent(
+            timestamp=1.0,
+            spec_id="X",
+            raw=False,
+            event={"type": "text", "text": "y" * 50},
+        )
+    )
+    (loaded,) = [e for e in events.read_log(tmp_path) if isinstance(e, events.Agent)]
+    assert loaded.bounded is True
+    assert loaded.line is not None and len(loaded.line) == 10
+
+
+def test_a_bounded_event_still_reaches_the_attempt_result_whole(tmp_path):
+    """Only what is persisted is bounded. `run_agent` reads the whole event it
+    parsed — the text it accumulates, the result it completes on, and the
+    rate limit it reports are the cell's full values — while what
+    `EventLog.append` writes for the oversized one is bounded on disk."""
+    from saffron import events  # local: kept out of the revert's collection
+
+    log = events.EventLog(tmp_path)
+    huge = "z" * (events.BOUND_CHARS * 3)
+    result = implement.run_agent(
+        "cell",
+        prompt="p",
+        options={},
+        spec_id="SY-1",
+        emit=log.append,
+        exec_stream=_stream(
+            json.dumps({"type": "text", "text": huge}),
+            json.dumps(
+                {
+                    "type": "rate_limit",
+                    "status": "rejected",
+                    "utilization": 1.0,
+                    "resets_at": 42,
+                }
+            ),
+            _result_line(total_cost_usd=3.5),
+        ),
+    )
+    assert result.text == huge
+    assert result.cost_usd_est == 3.5
+    assert result.rate_limit_status == "rejected"
+    assert result.rate_limit_resets_at == 42
+
+    bounded = [
+        e
+        for e in events.read_log(tmp_path)
+        if isinstance(e, events.Agent) and e.bounded
+    ]
+    assert len(bounded) == 1
+    assert bounded[0].line is not None
+    assert len(bounded[0].line) <= events.BOUND_CHARS
+
+
 def test_a_raw_line_is_shown_and_never_read_as_an_event():
     """A line that is not JSON came from a process sharing the runner's stdout
     inside an untrusted cell (`test_json_that_is_not_an_object_is_quarantined_

@@ -520,6 +520,60 @@ def test_append_never_raises_on_a_dict_a_cell_authored(tmp_path):
     assert [type(e).__name__ for e in read_log(tmp_path)] == ["Teardown"]
 
 
+# --- SA-0068: an oversized `Agent.event` is bounded, not just the raw line --
+
+
+def test_an_oversized_agent_event_is_bounded_on_disk(tmp_path):
+    """5 MB of ordinary text and 5 MB of `"` both take the `Agent.event`
+    route, wrapped in nine bytes of JSON — the route the raw-line bound never
+    reaches. Neither may write anywhere near 5 MB."""
+    from saffron.events import BOUND_CHARS  # local: kept out of the revert's collection
+
+    log = EventLog(tmp_path)
+    log.append(
+        Agent(
+            timestamp=1.0,
+            spec_id="X",
+            raw=False,
+            event={"type": "text", "text": "a" * 5_000_000},
+        )
+    )
+    log.append(
+        Agent(
+            timestamp=2.0,
+            spec_id="X",
+            raw=False,
+            event={"type": "text", "text": '"' * 5_000_000},
+        )
+    )
+    lines = (tmp_path / "events.jsonl").read_text().splitlines()
+    assert len(lines) == 2
+    for line in lines:
+        # Generous but nowhere near 5 MB: a small multiple of the bound, plus
+        # the envelope — never the size of the payload that went in.
+        assert len(line) < BOUND_CHARS * 8
+
+
+def test_a_bounded_agent_event_says_it_was_bounded(tmp_path):
+    """Truncating in silence makes a record that looks complete and is not.
+    A reader must be able to tell a cut event from a whole one, and how large
+    it really was."""
+    from saffron.events import BOUND_CHARS  # local: kept out of the revert's collection
+
+    log = EventLog(tmp_path)
+    huge = "z" * (BOUND_CHARS * 3)
+    log.append(
+        Agent(
+            timestamp=1.0, spec_id="X", raw=False, event={"type": "text", "text": huge}
+        )
+    )
+    (loaded,) = _read(tmp_path, Agent)
+    assert loaded.bounded is True
+    assert loaded.event is None
+    assert loaded.original_chars is not None and loaded.original_chars > BOUND_CHARS
+    assert loaded.line is not None and len(loaded.line) <= BOUND_CHARS
+
+
 # --- SA-0040: `describe()` and the mapping table ---------------------------
 
 # One event per render branch `describe()` has — the exact-line proof

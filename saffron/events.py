@@ -42,11 +42,22 @@ from __future__ import annotations
 
 import json
 import typing
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from typing import Literal
 
 from saffron.gates.contract import GateStatus
+
+# The one size bound feeding both paths a cell's stdout can reach the host's
+# disk through — the raw-line quarantine (`implement._quarantined`, reachable
+# as `implement.QUARANTINE_BYTES`) and the parsed-event bound below
+# (`EventLog.append`). Backlog item 46 named "one value, both paths" as the
+# open half after `implement.QUARANTINE_BYTES` shipped alone, because this
+# module was forbidden to that spec. Counted in characters — the unit a raw
+# stdout `line` is already sliced in, not bytes: JSON escaping can still
+# multiply a character's cost once it is written, which is why the bound on
+# disk is "a small constant multiple of this", never this exactly.
+BOUND_CHARS = 8192
 
 # CONTEXT.md names GATE <-> REPAIR as one phase; split here because a gate
 # attempt and a repair turn render as different lines. Deliberate divergence,
@@ -251,15 +262,27 @@ class Budget:
 @dataclass(frozen=True, slots=True)
 class Agent:
     """One line of the cell's stdout, or a host-authored fact about that
-    stream. Exactly one of three shapes: `event` — a parsed cell event,
-    verbatim, under one key, never re-typed (no Agent SDK type is imported
-    here or anywhere outside `agent_runner.py`); `line` — a raw line that was
-    not an event at all, from a process sharing the runner's stdout inside an
-    untrusted cell, quarantined by `raw=True` rather than dropped; or
-    `detail` — a host-authored fact with no cell event behind it at all (a
-    reap outcome, a pipe closing). `raw` is the field that must survive the
-    log: a raw line that loses its flag on round-trip is a quarantine that
-    stopped being one."""
+    stream. One of four shapes: `event` — a parsed cell event, verbatim,
+    under one key, never re-typed (no Agent SDK type is imported here or
+    anywhere outside `agent_runner.py`), and under `BOUND_CHARS`; `line` — a
+    raw line that was not an event at all, from a process sharing the
+    runner's stdout inside an untrusted cell, quarantined by `raw=True`
+    rather than dropped; `line` again but for a different reason, when
+    `bounded` is set instead — a parsed event whose own `json.dumps`
+    serialization exceeded `BOUND_CHARS`, too large to keep as `event` (a
+    dict truncated to a size budget is not a smaller version of the same
+    event, so `event` is `None` here rather than a partial one), stored as
+    that serialization sliced to `BOUND_CHARS` characters, with
+    `original_chars` naming how large it really was; or `detail` — a
+    host-authored fact with no cell event behind it at all (a reap outcome, a
+    pipe closing). `raw` is the field that must survive the log: a raw line
+    that loses its flag on round-trip is a quarantine that stopped being one.
+    `bounded` is the same kind of fact for the fourth shape — a bounded event
+    that loses its flag reads as a whole one, which is worse than the
+    unbounded line it replaced (item 46). `describe()` renders a bounded
+    event as `agent: (bounded, N chars) <line, cut again to 160 for the
+    terminal>` — the same truncation the raw shape gets, on top of the one
+    already applied for storage."""
 
     timestamp: float
     spec_id: str
@@ -267,6 +290,8 @@ class Agent:
     event: dict | None = None
     line: str | None = None
     detail: str = ""
+    bounded: bool = False
+    original_chars: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -353,13 +378,32 @@ class EventLog:
     def append(self, event: Event) -> None:
         """Write one line, flushed. Never raises: a cell that cannot write its
         own log is not a cell whose task should die on that account — the
-        caller has nothing useful to do with the failure either way."""
+        caller has nothing useful to do with the failure either way.
+
+        An `Agent` event's own `event` dict is bounded here, at the size its
+        `json.dumps` serialization reaches — never at the size of the whole
+        written line, which would cut an already-bounded raw line a second
+        time. Measured on one 5 MB stdout line wrapped in nine bytes of JSON:
+        unbounded before this, still 5 MB whichever shape it took."""
         try:
+            if isinstance(event, Agent) and event.event is not None:
+                serialized = json.dumps(event.event)
+                if len(serialized) > BOUND_CHARS:
+                    event = replace(
+                        event,
+                        event=None,
+                        line=serialized[:BOUND_CHARS],
+                        bounded=True,
+                        original_chars=len(serialized),
+                    )
             # `asdict` is inside the try because it deep-copies, and
             # `Agent.event` is a `json.loads` product from an untrusted cell.
             # Measured: nesting 1000 deep parses fine and `asdict` raises
             # RecursionError on it, while `json.dumps` handles 5000 — so this
             # statement, not the write, is the one reading hostile input.
+            # Still on the path even when the branch above fires: it is
+            # `event` (possibly replaced by then) that reaches `asdict`, not
+            # a bypass of it.
             payload = {"kind": type(event).__name__, **asdict(event)}
             self._path.parent.mkdir(parents=True, exist_ok=True)
             with self._path.open("a") as handle:
@@ -567,6 +611,8 @@ def describe(event: Event) -> str:
         return f"budget: ${event.value:.2f} of ${event.limit:.2f} — stopping"
 
     if isinstance(event, Agent):
+        if event.bounded:
+            return f"agent: (bounded, {event.original_chars} chars) {(event.line or '')[:160]}"
         if event.raw:
             return f"agent: (raw) {(event.line or '')[:160]}"
         if event.event is not None:

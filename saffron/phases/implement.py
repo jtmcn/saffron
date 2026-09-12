@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+from saffron import events
 from saffron.agents.artifacts import EXTRACTION_PROMPT
 from saffron.cell import runtime
 from saffron.cell.worktree import STATE_MOUNT, WORKTREE_MOUNT
@@ -183,20 +184,28 @@ def when(stamp: int | None) -> str:
 # Storage, not display. `describe` cuts at 160 for the terminal; this is what
 # `events.jsonl` keeps, and the two are different questions — 160 would throw
 # away the most interesting forensic artifact a cell produces (backlog 46).
-QUARANTINE_BYTES = 8192
+# Kept reachable at this name for the sake of the preserved witness that reads
+# it (`test_a_line_that_is_not_an_event_is_bounded_at_capture`); the value
+# itself now lives in `saffron.events.BOUND_CHARS`, the one bound this path
+# shares with `EventLog.append`'s own bounding of an oversized `Agent.event`.
+QUARANTINE_BYTES = events.BOUND_CHARS
 
 
 def _quarantined(spec_id: str, line: str) -> Agent:
     """A line that is not an event, bounded before it is persisted.
 
-    Bounds the accidental case only, and says so: a cell that wants the disk
-    wraps its payload in nine bytes of JSON and takes the `Agent.event` path,
-    which this cannot reach — `saffron/events.py` is forbidden here. Measured
-    on one 5 MB stdout line: 5 MB written unbounded, 8 KB now; the same line
-    as `{"type":"text",...}` still writes 5 MB. Backlog item 46 is where both
-    paths get one answer."""
+    Reads `events.BOUND_CHARS` live, not the `QUARANTINE_BYTES` snapshot
+    above, so patching that one value governs this path and
+    `EventLog.append`'s event-bounding together (item 46: "one value, both
+    paths"). Measured on one 5 MB stdout line: 5 MB written unbounded, 8 KB
+    now; the same line as `{"type":"text",...}` used to still write 5 MB —
+    `EventLog.append` bounds that route too, now that `saffron/events.py` is
+    reachable from here."""
     return Agent(
-        timestamp=time.time(), spec_id=spec_id, raw=True, line=line[:QUARANTINE_BYTES]
+        timestamp=time.time(),
+        spec_id=spec_id,
+        raw=True,
+        line=line[: events.BOUND_CHARS],
     )
 
 
