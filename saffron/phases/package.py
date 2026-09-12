@@ -300,6 +300,7 @@ def commit_squash(
     attempts: int,
     spent_usd: float,
     agent_subjects: list[str],
+    unpackaged_state: str | None = None,
 ) -> str:
     """One commit. Not the repo's `type(scope):` convention — that describes a
     commit a person wrote about a defect they understood, and this one is
@@ -308,10 +309,21 @@ def commit_squash(
     `cell_head` names an object that no longer exists anywhere: the cell's
     commits died with the volume. It is recorded because it is the only name
     the transcript and the batch tree share.
+
+    `unpackaged_state`, set only by `push_unpackaged_work`, says the cell
+    ended in that state and the gates were never run to green — so nobody
+    reading the branch mistakes this for a commit PACKAGE produced. `None`
+    (every packaged commit) reproduces the message byte-for-byte as before
+    this parameter existed.
     """
-    lines = [
-        f"saffron {spec_id}: {neutralize(title)}",
-        "",
+    lines = [f"saffron {spec_id}: {neutralize(title)}", ""]
+    if unpackaged_state is not None:
+        lines += [
+            f"NOT PACKAGED — the cell ended {unpackaged_state}; the gates were "
+            "never run to green.",
+            "",
+        ]
+    lines += [
         f"base {base_sha[:12]}",
         f"cell head {cell_head[:12] if cell_head else '(unknown)'} "
         "(unreachable: the cell's commits died with its volume)",
@@ -956,3 +968,168 @@ def _finish(ledger, outcome, out_dir: Path, spec, repo_name: str, result):
         ),
     )
     return result
+
+
+@dataclass
+class PushResult:
+    """What trying to push a task's unpackaged work produced. Deliberately not
+    `PackageResult`: that type's `state` field feeds `_finish` — a ledger
+    state write and a queue line — and neither happens here (§0's own
+    boundary: this is not packaging)."""
+
+    pushed: bool
+    branch: str = ""
+    pushed_sha: str = ""
+    note: str = ""
+
+
+def push_unpackaged_work(
+    outcome,
+    *,
+    spec,
+    repo: Path,
+    mirror: Path,
+    out_dir: Path,
+    repo_id: int | None,
+    ledger,
+    token: str | None,
+    emit: Callable[[Event], None] | None = None,
+) -> PushResult:
+    """A cell that did not end `READY_FOR_REVIEW` never reaches `package()`,
+    so a diff `export_patch` wrote at teardown was, until now, read by nobody
+    (`docs/BACKLOG.md` item 45). This pushes it anyway — never packages it.
+
+    **Onto the tree the cell built on, never the default branch.** The patch
+    is relative to `tree_base` (`patch.json`), applies there by construction,
+    and cannot conflict — so there is no three-way merge here and no
+    `MERGE_FAILED` to produce. A path that could hit one would have
+    recreated the loss it exists to prevent.
+
+    **The branch is `saffron/<SPEC-ID>`**, the same name `package()` uses,
+    pushed with the same force-with-lease `push_with_lease` gives PACKAGE —
+    but only when the remote branch is absent or already holds a sha one of
+    this spec's own ledger rows recorded as pushed (`Ledger.tasks_by_spec_id`).
+    Otherwise the branch moved underneath this spec — an operator's own
+    review fixes, most likely — and nothing is pushed.
+
+    **No pull request, no re-verification, no queue line, no ledger state
+    write.** Only `ledger.record_push` — the same call PACKAGE makes on
+    success — because `run_task` must not learn, from this path, that
+    PACKAGE ran.
+
+    **Never raises.** Every failure a push through here can hit — an
+    unreachable remote, a patch that will not apply, a credential, a lease
+    rejected because the branch moved mid-push — is reported through `emit`
+    and returned as a refusal. The task already failed on its own terms;
+    a failure pushing its leftovers must not become an infrastructure exit.
+    `add_worktree`'s own `mirror_ops.GitError` is the one exception this does
+    not catch: that is a mirror problem, not a task-shaped one.
+    """
+    if emit is None:
+        # Same default `package()` and `run_task` both fall back to: a caller
+        # that forgets `emit` must still get `events.jsonl`.
+        log = EventLog(outcome.task_dir)
+
+        def emit(event: Event) -> None:
+            line = describe(event)
+            if line:
+                print(line)
+            log.append(event)
+
+    def _say(detail: str) -> None:
+        emit(
+            PhaseStart(
+                timestamp=time.time(),
+                spec_id=spec.id,
+                phase="PACKAGE",
+                label="PACKAGE",
+                detail=detail,
+            )
+        )
+
+    branch = f"saffron/{spec.id}"
+    patch = outcome.task_dir / "patch.diff"
+    # Before the remote is ever read: several driver tests reach `EXHAUSTED`
+    # with no patch and a fake, unreachable remote URL, and reading the
+    # remote first would make a unit test touch the network.
+    if not patch.is_file():
+        return PushResult(
+            pushed=False, branch=branch, note="no commits, nothing to push"
+        )
+
+    def _refuse(note: str) -> PushResult:
+        _say(f"not pushing unpackaged work — {note}")
+        return PushResult(pushed=False, branch=branch, note=note)
+
+    patch_text = patch.read_text()
+    if leaked := find_credentials(patch_text, token=token):
+        return _refuse(f"credential in the patch: {'; '.join(leaked)}")
+    if leaked := find_credentials_in_text(
+        "\n".join(outcome.agent_subjects), token=token, where="agent commit subject"
+    ):
+        return _refuse(f"credential in the commit subjects: {'; '.join(leaked)}")
+
+    patch_meta = json.loads((outcome.task_dir / "patch.json").read_text())
+    tree_base = patch_meta.get("tree_base", patch_meta["base_sha"])
+
+    try:
+        url = real_remote(repo)
+        current = remote_sha(url, branch, cwd=mirror)
+    except PackageError as exc:
+        return _refuse(str(exc))
+
+    recorded = (
+        {
+            row["pushed_sha"]
+            for row in ledger.tasks_by_spec_id(repo_id, spec.id)
+            if row["pushed_sha"]
+        }
+        if repo_id is not None
+        else set()
+    )
+    if current and current not in recorded:
+        return _refuse(
+            f"{branch} already points at {current[:12]}, which this spec never "
+            "pushed — not ours to replace"
+        )
+
+    scratch = out_dir / "package" / f"{spec.id}-unpackaged"
+    worktree_path = None
+    try:
+        assert_base_objects(mirror, tree_base)
+        worktree_path = mirror_ops.add_worktree(mirror, tree_base, scratch)
+        checked = _run(worktree_path, "checkout", "-B", branch)
+        if checked.returncode != 0:
+            raise PackageError(
+                f"cannot create {branch}: {checked.stderr.strip()[:200]}"
+            )
+        if apply_patch(worktree_path, patch) == APPLY_CONFLICT:
+            raise PackageError(
+                f"{branch} does not apply onto its own base {tree_base[:12]} — "
+                "the tree it was built from must have moved"
+            )
+        pushed_sha = commit_squash(
+            worktree_path,
+            spec_id=spec.id,
+            title=spec.title,
+            base_sha=tree_base,
+            cell_head=outcome.cell_head_sha,
+            attempts=outcome.attempts,
+            spent_usd=outcome.spent_usd,
+            agent_subjects=outcome.agent_subjects,
+            unpackaged_state=outcome.state,
+        )
+        push_with_lease(worktree_path, url=url, branch=branch, expect=current)
+    except PackageError as exc:
+        return _refuse(str(exc))
+    finally:
+        if worktree_path is not None:
+            try:
+                mirror_ops.remove_worktree(mirror, scratch)
+            except mirror_ops.GitError as stuck:
+                _say(f"could not remove {scratch}: {stuck}")
+
+    ledger.record_push(outcome.task_id, pushed_sha)
+    note = f"pushed {branch} @ {pushed_sha[:12]}"
+    _say(note)
+    return PushResult(pushed=True, branch=branch, pushed_sha=pushed_sha, note=note)

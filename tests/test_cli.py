@@ -136,6 +136,55 @@ def test_the_exit_code_distinguishes_the_terminal_states(monkeypatch, tmp_path):
     assert cli.main(argv) == 2
 
 
+def test_an_unpackaged_task_names_the_branch_its_work_was_pushed_to(
+    monkeypatch, tmp_path, capsys
+):
+    """The operator's only route back to work PACKAGE never packaged is
+    knowing the batch tree exists. After `push_unpackaged_work`, it is one
+    line of output — and `saffron cell` still exits 1 for it, as it does for
+    a push that failed (§3.3)."""
+    from saffron import cli
+
+    spec = tmp_path / "SY-3.md"
+    spec.write_text(
+        "---\nid: SY-3\ntitle: Three\ntype: feature\ntouches: ['src/**']\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    monkeypatch.setattr("saffron.repos.mirror.ensure_mirror", lambda repo, at: at)
+    monkeypatch.setattr(
+        "saffron.phases.package.real_remote", lambda repo: "https://github.com/o/r.git"
+    )
+    monkeypatch.setattr(
+        "saffron.phases.package.fetch_default_branch",
+        lambda mirror, url: ("main", "a" * 40),
+    )
+    monkeypatch.setattr(
+        cli.package_phase,
+        "push_unpackaged_work",
+        lambda *a, **k: package.PushResult(
+            pushed=True,
+            branch="saffron/SY-3",
+            pushed_sha="b" * 40,
+            note=f"pushed saffron/SY-3 @ {'b' * 12}",
+        ),
+    )
+    monkeypatch.setattr(
+        task,
+        "run_one_cell",
+        lambda *a, **k: session.CellOutcome(
+            state="EXHAUSTED", task_id=1, run_id=1, task_dir=tmp_path
+        ),
+    )
+
+    argv = ["--home", str(tmp_path / "home"), "cell", str(spec)]
+    assert cli.main(argv) == 1
+
+    printed = capsys.readouterr().out
+    assert "saffron/SY-3" in printed
+    assert "b" * 12 in printed
+    assert "SY-3" in printed and "EXHAUSTED" in printed
+
+
 def test_no_signature_in_the_package_still_takes_a_watch():
     """`SA-0031` migrated `cell/session.py`'s own 64 call sites off a bare
     `watch(str)` callback onto `emit(Event)`; this spec finishes the seam for
@@ -652,7 +701,8 @@ def test_a_parent_branch_the_mirror_cannot_reach_is_an_unstacked_cell(
 def test_the_cell_is_cut_from_the_branchs_head_not_the_ledgers_recorded_sha(
     tmp_path, monkeypatch, capsys
 ):
-    """`pushed_sha` is written once, by PACKAGE. Every review fix an operator
+    """`pushed_sha` is written by PACKAGE — or, since `SA-0069`, by a push of
+    unpackaged work when PACKAGE never ran. Every review fix an operator
     commits by hand moves the branch past it, so the recorded sha is a tree
     the parent's pull request no longer shows — measured on this repository:
     task 26's `pushed_sha` was a commit behind `saffron/SA-0026`'s head while

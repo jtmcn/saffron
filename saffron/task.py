@@ -150,7 +150,8 @@ def _resolve_stacked_on(
     admitted, which is not this resolver's check to make.
 
     **The ledger supplies the branch; the branch supplies the sha.** A row's
-    `pushed_sha` is written once, by PACKAGE, and every review fix an operator
+    `pushed_sha` is written by PACKAGE — or, since `SA-0069`, by a push of
+    unpackaged work when PACKAGE never ran — and every review fix an operator
     commits by hand moves the branch past it — so the recorded sha is a tree
     the parent's pull request may no longer show. Worse, nothing puts that
     commit where the cell can read it: `ensure_mirror` fetches `+refs/*:refs/*`
@@ -332,5 +333,21 @@ def run_task(
         print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
         outcome.state = result.state
     else:
-        print(f"{spec.id:<10} {outcome.state}")
+        # PACKAGE never ran, but teardown may still have exported commits
+        # (`docs/BACKLOG.md` item 45, `SA-0069`) — pushed to the cell's own
+        # branch, never packaged, and never allowed to change `outcome.state`:
+        # a caller reading `MERGE_FAILED` or `READY_FOR_REVIEW` here would
+        # believe PACKAGE ran.
+        pushed = package_phase.push_unpackaged_work(
+            outcome,
+            spec=spec,
+            repo=repo,
+            mirror=base.mirror,
+            out_dir=out_dir,
+            repo_id=repo_id,
+            ledger=ledger,
+            token=token,
+            emit=emit,
+        )
+        print(f"{spec.id:<10} {outcome.state}  {pushed.note}")
     return outcome
