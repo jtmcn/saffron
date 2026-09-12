@@ -834,9 +834,11 @@ def test_a_rebuttal_turn_that_recorded_nothing_is_not_rendered_as_no_answer():
         next(line for line in errored_body.splitlines() if line.startswith("| 1 ")),
         next(line for line in errored_body.splitlines() if line.startswith("| 2 ")),
     ):
-        assert "no rebuttal was recorded" in row
-        assert "rebuttal.json" in row
-        assert row.split("|")[5].strip() != "—"
+        # Exactly the fixed words: any fragment of the error appended to them
+        # would still pass a containment check.
+        assert row.split("|")[5].strip() == (
+            "no rebuttal was recorded for this turn (see `rebuttal.json`) — HEAD moved"
+        )
         assert "Illegal trailing comma" not in row
         assert "@SA-0040" not in row
         assert "1116" not in row
@@ -885,6 +887,23 @@ def test_a_rebuttal_turn_that_recorded_nothing_is_not_rendered_as_no_answer():
         assert row.split("|")[5].strip() == "—"
         assert "no rebuttal was recorded" not in row
 
+    # Case 4: an exception with no message still errored — `error` is set,
+    # only empty.
+    blank_error_body = _rebut_body(
+        RebutResult(
+            state="REBUTTING",
+            why="test",
+            rebuttal=RebuttalTurn(error=""),
+            verdicts=[],
+            moved=False,
+            cost_usd=0.0,
+        )
+    )
+    row = next(
+        line for line in blank_error_body.splitlines() if line.startswith("| 1 ")
+    )
+    assert "no rebuttal was recorded" in row
+
 
 def test_a_rebuttal_turn_that_recorded_nothing_says_whether_it_moved_head():
     """`rebuttal.json` already records `head_moved`; the body is what gets
@@ -911,10 +930,18 @@ def test_a_rebuttal_turn_that_recorded_nothing_says_whether_it_moved_head():
             cost_usd=0.0,
         )
     )
-    assert "HEAD moved" in moved_body
-    assert "HEAD did not move" not in moved_body
-    assert "HEAD did not move" in not_moved_body
-    assert "HEAD moved" not in not_moved_body
+
+    def implementer_cells(body):
+        # Per row, not per body: the claim is that the row says it.
+        return [
+            line.split("|")[5].strip()
+            for line in body.splitlines()
+            if line.startswith(("| 1 ", "| 2 "))
+        ]
+
+    sentence = "no rebuttal was recorded for this turn (see `rebuttal.json`) — HEAD "
+    assert implementer_cells(moved_body) == [sentence + "moved"] * 2
+    assert implementer_cells(not_moved_body) == [sentence + "did not move"] * 2
 
 
 def test_an_errored_turn_that_still_moved_head_keeps_its_verdicts():
