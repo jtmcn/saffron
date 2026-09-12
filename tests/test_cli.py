@@ -3422,6 +3422,31 @@ def test_a_queue_that_cannot_be_resolved_says_so_on_the_batch_line(
     assert "readiness failed" not in printed
 
 
+def test_a_raise_from_the_loop_itself_is_not_blamed_on_the_queue(
+    tmp_path, monkeypatch, capsys
+):
+    """The queue resolved; `run_batch` is what raised. That must reach `main`'s
+    catch-all as itself, not be relabelled "the queue could not be resolved"
+    — a line naming the wrong step is what the resolution line exists to stop."""
+    home = tmp_path / "home"
+    _readiness_passes(monkeypatch)
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+
+    def _raise(*a, **k):
+        raise RuntimeError("the ledger went away mid-night")
+
+    monkeypatch.setattr(cli, "run_batch", _raise)
+
+    assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 2
+
+    printed = capsys.readouterr().out
+    assert "saffron: RuntimeError: the ledger went away mid-night" in printed
+    assert "could not be resolved" not in printed
+
+
 def test_a_night_names_the_specs_its_scan_refused(tmp_path, monkeypatch, capsys):
     """`saffron queue` prints refusals; this printed only the gaps, so a spec
     refused at gate 0 — a dead `depends_on` parent, protected `touches`, a
