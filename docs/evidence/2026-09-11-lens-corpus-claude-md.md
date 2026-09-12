@@ -104,7 +104,9 @@ inside the old range (`1/12` ≈ 0.083 to `3/12` = 0.25).
 Without run 1 (the partial sample, `1/10`), the new range would be `4/12`–`4/12`, entirely
 above the old maximum of `3/12`. The one partial sample alone is what makes the ranges
 overlap; the verdict below is the rule applied to the pass as run, not to that
-counterfactual.
+counterfactual. Completing run 1 could not remove the overlap either: its other seven
+fixtures graded exactly one defect (`SA-0048`'s) and `SA-0054` declares two, so a completed
+run 1 scores at most `3/12`, which ties the old maximum rather than clearing it.
 
 **Decision rule** (`docs/superpowers/plans/2026-09-10-claude-md-reaches-every-phase.md`, Task
 10 Step 3, quoted verbatim):
@@ -191,9 +193,10 @@ change in that narrower window, and it touches only `_repair`'s host checkpoint 
 
 n=3 on each side is not enough to place `1/10` cleanly inside or outside the old spread; the
 two ranges overlapping is itself a statement about resolution, not about the effect being
-absent. The cheapest thing that would decide whether the verdict survives: re-running
-SA-0054's run 1 alone, at identical settings, since it is the one partial sample the overlap
-depends on. Short of that, what would settle it more broadly is more samples of the same
-configuration — another pass at `--runs 3`, or a single pass at a higher `--runs`, either one
-adding to this pass's three per-run totals rather than to the old four. This record does not
+absent. *Corrected 2026-09-12:* this section first named re-running `SA-0054`'s run 1 alone
+as the cheapest thing that would decide whether the verdict survives. It cannot: a completed
+run 1 scores at most `3/12` (see the range comparison above), which ties the old maximum, so
+the verdict holds whatever that run finds. What would settle the question is more samples of
+the same configuration — another pass at `--runs 3`, or a single pass at a higher `--runs`,
+either one adding to this pass's three per-run totals rather than to the old four. This record does not
 recommend spending on either; it names what would answer the question if one is run.
