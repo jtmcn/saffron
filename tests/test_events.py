@@ -549,9 +549,9 @@ def test_an_oversized_agent_event_is_bounded_on_disk(tmp_path):
     lines = (tmp_path / "events.jsonl").read_text().splitlines()
     assert len(lines) == 2
     for line in lines:
-        # Generous but nowhere near 5 MB: a small multiple of the bound, plus
-        # the envelope — never the size of the payload that went in.
-        assert len(line) < BOUND_CHARS * 8
+        # Writing escapes each stored character once: 2.02x measured for `"`,
+        # plus the envelope.
+        assert len(line) < BOUND_CHARS * 2 + 1024
 
 
 def test_a_bounded_agent_event_says_it_was_bounded(tmp_path):
@@ -570,8 +570,42 @@ def test_a_bounded_agent_event_says_it_was_bounded(tmp_path):
     (loaded,) = _read(tmp_path, Agent)
     assert loaded.bounded is True
     assert loaded.event is None
-    assert loaded.original_chars is not None and loaded.original_chars > BOUND_CHARS
+    assert loaded.original_chars == len(json.dumps({"type": "text", "text": huge}))
     assert loaded.line is not None and len(loaded.line) <= BOUND_CHARS
+
+
+def test_the_cut_starts_one_character_past_the_bound(tmp_path):
+    """Every other witness is 3x the bound or 5 MB, which a threshold anywhere
+    below that would also pass."""
+    from saffron.events import BOUND_CHARS  # local: kept out of the revert's collection
+
+    def event_of(size: int) -> dict:
+        padding = size - len(json.dumps({"type": "text", "text": ""}))
+        return {"type": "text", "text": "a" * padding}
+
+    log = EventLog(tmp_path)
+    for timestamp, size in ((1.0, BOUND_CHARS), (2.0, BOUND_CHARS + 1)):
+        log.append(
+            Agent(timestamp=timestamp, spec_id="X", raw=False, event=event_of(size))
+        )
+    at, over = _read(tmp_path, Agent)
+    assert at.bounded is False and at.event == event_of(BOUND_CHARS)
+    assert over.bounded is True
+    assert over.line is not None and len(over.line) == BOUND_CHARS
+
+
+def test_a_bounded_event_renders_its_size_and_a_terminal_cut():
+    """Not a `_CASES` row: `bounded` is new, and building it at import would make
+    the reverted run a collection error."""
+    agent = Agent(
+        timestamp=1.0,
+        spec_id="X",
+        raw=False,
+        line="b" * 8192,
+        bounded=True,
+        original_chars=20000,
+    )
+    assert describe(agent) == "agent: (bounded, 20000 chars) " + "b" * 160
 
 
 # --- SA-0040: `describe()` and the mapping table ---------------------------

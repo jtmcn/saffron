@@ -181,23 +181,22 @@ def when(stamp: int | None) -> str:
     return time.strftime("%H:%M local" if same_day else "%a %d %b %H:%M local", local)
 
 
-# Storage, not display. `describe` cuts at 160 for the terminal; this is what
-# `events.jsonl` keeps, and the two are different questions — 160 would throw
-# away the most interesting forensic artifact a cell produces (backlog 46).
-# Kept reachable at this name for the sake of the preserved witness that reads
-# it (`test_a_line_that_is_not_an_event_is_bounded_at_capture`); the value
-# itself now lives in `saffron.events.BOUND_CHARS`, the one bound this path
-# shares with `EventLog.append`'s own bounding of an oversized `Agent.event`.
-QUARANTINE_BYTES = events.BOUND_CHARS
+def __getattr__(name: str) -> int:
+    # `QUARANTINE_BYTES` is read through to `events.BOUND_CHARS` rather than
+    # copied at import, so the old name cannot drift from the one bound.
+    if name == "QUARANTINE_BYTES":
+        return events.BOUND_CHARS
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _quarantined(spec_id: str, line: str) -> Agent:
     """A line that is not an event, bounded before it is persisted.
 
-    Reads `events.BOUND_CHARS` live, not the `QUARANTINE_BYTES` snapshot
-    above, so patching that one value governs this path and
-    `EventLog.append`'s event-bounding together (item 46: "one value, both
-    paths"). Measured on one 5 MB stdout line: 5 MB written unbounded, 8 KB
+    Storage, not display: `describe` cuts at 160 for the terminal, which would
+    throw away the most interesting forensic artifact a cell produces (backlog
+    46). Reads `events.BOUND_CHARS` at call time, so patching that one value
+    governs this path and `EventLog.append`'s event-bounding together (item
+    46: "one value, both paths"). Measured on one 5 MB stdout line: 5 MB written unbounded, 8 KB
     now; the same line as `{"type":"text",...}` used to still write 5 MB —
     `EventLog.append` bounds that route too, now that `saffron/events.py` is
     reachable from here."""

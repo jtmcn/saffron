@@ -264,7 +264,8 @@ class Agent:
     """One line of the cell's stdout, or a host-authored fact about that
     stream. One of four shapes: `event` — a parsed cell event, verbatim,
     under one key, never re-typed (no Agent SDK type is imported here or
-    anywhere outside `agent_runner.py`), and under `BOUND_CHARS`; `line` — a
+    anywhere outside `agent_runner.py`), and whose JSON serialization is at
+    most `BOUND_CHARS` characters; `line` — a
     raw line that was not an event at all, from a process sharing the
     runner's stdout inside an untrusted cell, quarantined by `raw=True`
     rather than dropped; `line` again but for a different reason, when
@@ -384,7 +385,8 @@ class EventLog:
         `json.dumps` serialization reaches — never at the size of the whole
         written line, which would cut an already-bounded raw line a second
         time. Measured on one 5 MB stdout line wrapped in nine bytes of JSON:
-        unbounded before this, still 5 MB whichever shape it took."""
+        5 MB written before this bound; 16517 characters now for 5 MB of `"`,
+        the worst case, since writing escapes each stored character once."""
         try:
             if isinstance(event, Agent) and event.event is not None:
                 serialized = json.dumps(event.event)
@@ -396,14 +398,10 @@ class EventLog:
                         bounded=True,
                         original_chars=len(serialized),
                     )
-            # `asdict` is inside the try because it deep-copies, and
-            # `Agent.event` is a `json.loads` product from an untrusted cell.
-            # Measured: nesting 1000 deep parses fine and `asdict` raises
-            # RecursionError on it, while `json.dumps` handles 5000 — so this
-            # statement, not the write, is the one reading hostile input.
-            # Still on the path even when the branch above fires: it is
-            # `event` (possibly replaced by then) that reaches `asdict`, not
-            # a bypass of it.
+            # Both reads of the cell's dict sit in this try. `json.dumps` above
+            # handles nesting 5000 deep; `asdict` raises RecursionError at 1000,
+            # so an event too deep to copy is dropped — unless it was bounded,
+            # in which case `asdict` copies a string and the cut event is kept.
             payload = {"kind": type(event).__name__, **asdict(event)}
             self._path.parent.mkdir(parents=True, exist_ok=True)
             with self._path.open("a") as handle:
