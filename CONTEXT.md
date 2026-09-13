@@ -116,11 +116,12 @@ _Avoid_: "ticket", "issue", "story", "request", "prompt".
 
 **Task**: One spec being executed — a ledger row with a state, a branch, a budget,
 and a cell. A spec is the input; a task is the execution. Its budget is a
-**best-effort** bound: a turn's cost is not knowable until the turn ends, so a
-task admitted under its ceiling can finish over it. The bound that is actually
-enforced is the batch's, checked between tasks (`DESIGN.md` §4.2.1) — itself
-exceedable by at most one task's overshoot, since it admits a task on that
-task's declared ceiling.
+**best-effort** bound: it is checked between attempts and an attempt's cost is
+not knowable until the attempt ends, so a task admitted under its ceiling can
+finish over it by up to one whole attempt — 67% on `SA-0059` (`DESIGN.md` §3).
+The bound that is actually enforced is the batch's, checked between tasks
+(`DESIGN.md` §4.2.1) — itself exceedable by at most one task's overshoot, since
+it admits a task on that task's declared ceiling.
 _Avoid_: "job", "work item", "unit".
 
 **Batch**: One night's execution, spanning every selected repo. One budget, one

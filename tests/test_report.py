@@ -110,6 +110,22 @@ def test_notes_cannot_move_a_status_or_a_gate_result():
     assert "Settle on the end-of-day CLI" in body()
 
 
+def test_a_mention_and_a_closing_reference_are_defanged_inside_the_notes():
+    # The test above compares only the head, so it stays green if the notes
+    # path stops neutralizing (backlog item 86).
+    section = body(notes="ping @maintainer and Fixes #12").split(
+        "### Notes from the implementer", 1
+    )[1]
+    assert "@maintainer" not in section
+    assert "Fixes #12" not in section
+    assert "maintainer" in section
+    assert "ixes #12" in section
+
+
+def test_notes_with_nothing_in_them_render_no_heading():
+    assert "Notes from the implementer" not in body(notes=" \n\t")
+
+
 def test_acceptance_criteria_render_as_an_unchecked_checklist():
     assert "- [ ] A regression test exists that fails on the current `main`" in body()
 

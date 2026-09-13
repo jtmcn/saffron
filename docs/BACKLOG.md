@@ -43,24 +43,28 @@ which items go through a cell are in
 **44**. `saffron batch` exists and the machine below can start.
 
 What replaced it as the gate was not an item: **run a night.** One has now run
-against an empty queue (`DRAINED`, 2026-09-05) — the plumbing works. What is
+against an empty queue (`DRAINED`, 2026-09-05) — the plumbing works. ~~What is
 still unmeasured is a night that *runs* something: no cell has started under a
-batch, so the budget gate, the breaker and packaging are code with tests and no
-evidence. That is the gate now, and it is one cheap spec away.
+batch.~~ Stale by the evening it was written: batches 3–12 (2026-09-05 to
+2026-09-10) each started one cell, read off `runs.batch_id` on 2026-09-12, and
+batch 8 is `SA-0059`'s night, where the budget gate got its first evidence (item
+73). What none of them was is a night of more than one task, so the between-task
+budget check and the breaker have still never had a second candidate to act on.
+That is the gate now.
 
 ### Tier 1 — breaks at 03:00 with nobody watching
 
 Soundness first: **79**, **69**, **93**, **94**, **80** (~~**83**~~, ~~**85**~~, ~~**84**~~,
 ~~**82**~~ and ~~**81**~~, pulled up from tier 3 as why 69's gate could not be
 declared against safely, are done — 2026-09-08), then **97** and **102**. Honesty second:
-**73**, ~~**70**~~, ~~**45**~~, **51** (with **49**/**50**, which its fix closes),
+~~**73**~~, ~~**70**~~, ~~**45**~~, **51** (with **49**/**50**, which its fix closes),
 ~~**47**~~, **46** (with ~~**95**~~, which compounds it), **40**, ~~**26**~~,
-~~**7**~~, and the remainder of **78**.
+~~**7**~~, and ~~**78**~~.
 
 Closed since the 2026-09-04 sort, and left in place because their numbers are
 cited: **74** is done (`SA-0063`, `SA-0064`); **88** is closed on a negative
 result (2026-09-08 — the gate summary was not the confound); **71** is
-done (2026-09-08), **78** is done in code, and **94** has its recording half done
+done (2026-09-08), **78** is done (its `DESIGN.md` half 2026-09-12), and **94** has its recording half done
 and its explanation half open — each item's own `Status` line says what is left.
 (**59** is done — `SA-0052`, PR #118.) Stack #222, merged 2026-09-12, closed
 **45**, **57**, **61**, **70** and **95**, and the spec'd half of **42**, **46**,
@@ -2930,6 +2934,10 @@ night can end at most one task's overshoot above budget. Bounded by one
 overshoot rather than unbounded is the real distinction, and it is the whole
 value of checking between tasks.
 
+**One task's overshoot is one attempt, not one turn** (item 73, corrected
+2026-09-12). The $1.17 and 6.5% below are a turn's. `SA-0059` measured the
+attempt: $26.75 against a $16 ceiling, inside a $22 night that closed 21% over.
+
 **Decided 2026-09-04: option two, plus the ceiling that is actually
 enforceable.** `budget_usd` is a best-effort bound and says so where it is
 declared. The enforceable ceiling is **per batch, checked between tasks** —
@@ -4407,6 +4415,12 @@ it, so adding `witness` left a 90-character line in a file whose longest was 87
 
 ## 73. The budget overshoot is one attempt, not one turn, and the design says 6.5%
 
+**Status: done, 2026-09-12, by hand — the first answer below, *say it
+accurately*.** `DESIGN.md` §3, `CONTEXT.md`'s Task entry and item 44's closure
+now name the attempt as the unit and `SA-0059`'s $26.75 against $16 as the
+measurement. No behaviour changed: an unattended night can still end about
+1.7× a task's ceiling over budget, and that is now what the documents say.
+
 **Tier 1.** Measured 2026-09-06 driving `SA-0059`
 (`docs/evidence/2026-09-06-an-attempt-is-the-overshoot-bound.md`).
 
@@ -4629,7 +4643,9 @@ measurement against the five wrappers and `format`'s own `case` arms.
 
 ## 78. `witness` mutates before `committed` runs, and the spec that built it says the opposite
 
-**Status: done in code, open in `DESIGN.md`, 2026-09-07.** The two fixes on
+**Status: done, 2026-09-12** — the `DESIGN.md` half by hand, as a paragraph in
+§5.4.1 stating the ordering and the self-guard it obliges. Done in code
+2026-09-07; what follows is the record of that half. The two fixes on
 PR #154 itself (`4b533d5`, `290f070`): `worktree.source_mutated` yields a reason
 when the mutant's file is dirty — the shape `revert` uses, landing `witness` on
 `skip` — and a failed write restores from `HEAD` before it re-raises, so a
@@ -5161,6 +5177,14 @@ produced this; naming it in the preflight line is not.
 ---
 
 ## 86. The notes channel's two rendering-side safety properties are unwitnessed
+
+**Status: the two assertions are done, 2026-09-12, by hand** —
+`test_a_mention_and_a_closing_reference_are_defanged_inside_the_notes` and
+`test_notes_with_nothing_in_them_render_no_heading` in `tests/test_report.py`,
+each run red against the mutant this item describes (the `neutralize` call
+dropped; `_notes`'s own empty `return ""` dropped, matched uniquely rather than
+by first occurrence). Whether `preserves` should name what would falsify it
+stays open here, beside item **82**.
 
 **Still unwritten, 2026-09-09, and the corpus now says so with a number.** Both
 properties are `SA-0063`'s declared defects, and the baseline pass graded
