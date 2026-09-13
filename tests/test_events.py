@@ -544,6 +544,86 @@ def test_a_field_of_the_wrong_shape_drops_its_event_not_the_file(tmp_path):
         Teardown(timestamp=1.0, spec_id="SA", step="s", ok=True)
     ]
 
+    # Nor a JSON float: `3.5` attempts is not a count, and an `int` field that
+    # widened to accept it would round-trip a corrupt line silently.
+    float_as_int = json.dumps(
+        {
+            "kind": "Ceilings",
+            "timestamp": 3.5,
+            "spec_id": "SA",
+            "budget_usd": 5.0,
+            "max_attempts": 3.5,
+            "max_turns": 1,
+            "budget_source": "flag",
+            "attempts_source": "flag",
+            "turns_source": "flag",
+        }
+    )
+    _write(good, float_as_int)
+    assert read_log(tmp_path) == [
+        Teardown(timestamp=1.0, spec_id="SA", step="s", ok=True)
+    ]
+
+    # One rule per case, each against a valid twin so the drop is the bad
+    # field's and not a missing one's: a `float` refuses `true` and an int past
+    # float range, a `bool` refuses a string, a `Literal` refuses a number, and
+    # a tuple refuses a bare string.
+    budget = {
+        "kind": "Budget",
+        "timestamp": 5.0,
+        "spec_id": "SA",
+        "ceiling": "budget_usd",
+        "value": 1.0,
+        "limit": 1.0,
+    }
+    cases = [
+        (budget, "value", True),
+        (budget, "value", 10**400),
+        (
+            {"kind": "Agent", "timestamp": 5.0, "spec_id": "SA", "raw": False},
+            "raw",
+            "yes",
+        ),
+        (
+            {
+                "kind": "GateResult",
+                "timestamp": 5.0,
+                "spec_id": "SA",
+                "gate": "lint",
+                "status": "pass",
+                "against": "baseline",
+            },
+            "status",
+            7,
+        ),
+        (
+            {
+                "kind": "Baseline",
+                "timestamp": 5.0,
+                "spec_id": "SA",
+                "gates": ["a", "b"],
+                "statuses": ["pass", "pass"],
+            },
+            "gates",
+            "ab",
+        ),
+    ]
+    for valid, name, bad in cases:
+        _write(json.dumps(valid))
+        assert len(read_log(tmp_path)) == 1, valid
+        _write(good, json.dumps({**valid, name: bad}))
+        assert read_log(tmp_path) == [
+            Teardown(timestamp=1.0, spec_id="SA", step="s", ok=True)
+        ], (name, bad)
+
+    # An integer past 4300 digits is a plain `ValueError` from `json.loads`,
+    # and must cost its own line only.
+    _write(good, '{"kind": "Teardown", "timestamp": ' + "9" * 5000 + "}", good)
+    assert read_log(tmp_path) == [
+        Teardown(timestamp=1.0, spec_id="SA", step="s", ok=True),
+        Teardown(timestamp=1.0, spec_id="SA", step="s", ok=True),
+    ]
+
     # `tuple[str, ...]` is coerced from a JSON list, but each element is
     # still checked — one non-string entry is the wrong shape, not a tuple
     # missing one member.
@@ -1090,6 +1170,20 @@ def test_describe_renders_whatever_it_is_handed():
         )
         assert line == "agent: rate limit rejected, resets unknown", resets_at
 
+    # `utilization` from the same live event: an int past float range raised
+    # at `:.0%`, and a huge finite float rendered a share nothing clipped.
+    for used in (10**400, 1e300):
+        line = describe(
+            Agent(
+                timestamp=1.0,
+                spec_id="x",
+                raw=False,
+                event={"type": "rate_limit", "status": "rejected", "utilization": used},
+            )
+        )
+        assert line.startswith("agent: rate limit rejected"), used
+        assert len(line) <= len("agent: rate limit rejected, ") + 160 + len(" used")
+
 
 def test_every_cell_authored_field_is_clipped():
     """Item 63: `_describe_agent_event` clipped only `text` (160) and
@@ -1117,6 +1211,29 @@ def test_every_cell_authored_field_is_clipped():
         )
         == f"agent: {clipped} in 1 turns, $0.1 ({clipped})"
     )
+    # The numeric fields too: the SDK sends numbers, but the cell writes them.
+    assert (
+        _describe_agent_event(
+            {
+                "type": "result",
+                "subtype": "s",
+                "num_turns": long,
+                "total_cost_usd": long,
+                "terminal_reason": "r",
+            }
+        )
+        == f"agent: s in {clipped} turns, ${clipped} (r)"
+    )
+
+    bounded = Agent(
+        timestamp=1.0,
+        spec_id="x",
+        raw=False,
+        line=long,
+        bounded=True,
+        original_chars=9000,
+    )
+    assert describe(bounded) == f"agent: (bounded, 9000 chars) {clipped}"
 
     assert (
         _describe_agent_event({"type": "error", "error": long})
@@ -1158,6 +1275,27 @@ def test_an_agent_payload_cannot_put_control_characters_on_a_terminal():
     )
     assert all(chr(code) not in event_line for code in (*range(0x20), 0x7F))
     assert "AAAAAAAAAAAAAAAAAAAA" in event_line
+
+    # Every branch, every field a cell writes: a strip dropped from any one of
+    # them must fail here, not only the three shapes above.
+    hostile = "\x1b[2J\x07\x7f"
+    for payload in (
+        {"type": "text", "text": hostile},
+        {"type": "tool_use", "name": hostile, "input": {"k": hostile}},
+        {
+            "type": "result",
+            "subtype": hostile,
+            "num_turns": hostile,
+            "total_cost_usd": hostile,
+            "terminal_reason": hostile,
+        },
+        {"type": "rate_limit", "status": hostile},
+        {"type": "error", "error": hostile},
+        {"type": hostile, "subtype": hostile},
+        {"type": hostile, "kind": hostile},
+    ):
+        line = describe(Agent(timestamp=1.0, spec_id="x", raw=False, event=payload))
+        assert all(chr(code) not in line for code in (*range(0x20), 0x7F)), payload
 
     raw_line = describe(Agent(timestamp=1.0, spec_id="x", raw=True, line="\x1bnormal"))
     assert "\x1b" not in raw_line and "normal" in raw_line

@@ -429,10 +429,9 @@ def _shape_ok(value: object, hint: object) -> bool:
     (there is no float/int distinction on the wire), but neither an `int`
     field nor a `float` field accepts a `bool` (`bool` is an `int`
     subclass in Python, not in JSON). `tuple[str, ...]` is checked
-    element-wise, after `read_log`'s own list coercion. `X | None`
-    resolves two different ways once `typing.get_type_hints` walks a
-    `from __future__ import annotations` module — some fields come back a
-    `types.UnionType`, others a `typing.Union` — so both are handled.
+    element-wise, after `read_log`'s own list coercion. `X | None` is
+    matched as either `types.UnionType` or `typing.Union`: one object from
+    Python 3.14, two before it.
 
     Never checks a `Literal`'s membership: a string that is the right
     shape carrying a value the enum does not (yet) list is the
@@ -456,7 +455,15 @@ def _shape_ok(value: object, hint: object) -> bool:
     if hint is int:
         return isinstance(value, int) and not isinstance(value, bool)
     if hint is float:
-        return isinstance(value, (int, float)) and not isinstance(value, bool)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        # An int past float range is valid JSON, and raises at every `:.2f`
+        # `describe` formats it with.
+        try:
+            float(value)
+        except OverflowError:
+            return False
+        return True
     if hint is str:
         return isinstance(value, str)
     if hint is dict:
@@ -490,7 +497,9 @@ def read_log(task_dir: Path) -> list[Event]:
             continue
         try:
             obj = json.loads(line)
-        except json.JSONDecodeError:
+        # Not only `JSONDecodeError`: an integer past 4300 digits raises the
+        # plain `ValueError`, which would take every other line down with it.
+        except ValueError:
             continue
         if not isinstance(obj, dict):
             continue
@@ -589,16 +598,22 @@ def _describe_agent_event(event: dict) -> str:
     if kind == "result":
         subtype = _clean(event.get("subtype"), 160)
         terminal_reason = _clean(event.get("terminal_reason"), 160)
-        return (
-            f"agent: {subtype} in {event.get('num_turns')} turns, "
-            f"${event.get('total_cost_usd')} ({terminal_reason})"
-        )
+        # Numbers from the SDK, but the cell writes them: a string here is as
+        # able to carry an escape sequence as `subtype` is.
+        turns = _clean(event.get("num_turns"), 160)
+        cost = _clean(event.get("total_cost_usd"), 160)
+        return f"agent: {subtype} in {turns} turns, ${cost} ({terminal_reason})"
     if kind == "rate_limit":
         used = event.get("utilization")
         status = _clean(event.get("status"), 160)
+        try:
+            share = f"{used:.0%}" if isinstance(used, int | float) else ""
+        except (OverflowError, ValueError):
+            # An int past float range, from a live cell's own event.
+            share = ""
         return (
             f"agent: rate limit {status}"
-            + (f", {used:.0%} used" if isinstance(used, int | float) else "")
+            + (f", {_clean(share, 160)} used" if share else "")
             + (
                 f", resets {_when(event.get('resets_at'))}"
                 if event.get("resets_at")
