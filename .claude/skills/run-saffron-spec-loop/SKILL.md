@@ -163,5 +163,11 @@ placed in its tier index, and each item a spec came from gets its `Status` line
 updated with the PR and the stack. They go in a standalone PR off the default
 branch unless the operator says otherwise.
 
-**Done when** every kept finding has an item and every spec's origin item names
-its PR.
+Every finding a review seat confirmed and the in-cell critic did not raise —
+fixed, answered or kept — is also a rejection: append it to
+`.saffron/rejections.md` as its **Adding one** paragraph says, in the same PR.
+Those lines are §8's evidence for which gate, `CLAUDE.md` line or lens comes
+next.
+
+**Done when** every kept finding has an item, every spec's origin item names
+its PR, and every finding the critic missed has a rejection line.
