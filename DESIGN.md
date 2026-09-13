@@ -639,9 +639,12 @@ says so.
 **`FROM` is therefore an argument, and the default is the measurement.**
 `images/cell-base.python.Dockerfile` is `FROM python:3.12-slim-bookworm` and
 that is what this project is built and measured against; `BASE_IMAGE` changes
-nothing for a host that can pull it. (The default path does gain three variables
-pointing pip, requests and uv at the system CA store, which a host behind a
-TLS-terminating proxy needs.) What the argument buys is a host that
+nothing for a host that can pull it. (The default path does change, on purpose:
+three variables point pip, requests and uv at the system CA store and
+`update-ca-certificates` runs, which a host behind a TLS-terminating proxy
+needs; the provenance file below is written; the build refuses a base whose
+Python is not 3.12; and `.saffron/Dockerfile` takes uv from pypi at a pinned
+version rather than from a registry at `latest`.) What the argument buys is a host that
 cannot: an egress policy that refuses every container registry still permits an
 apt mirror and pypi, which between them supply every layer above the base —
 measured, including the SDK wheel's bundled Claude Code binary, which is the

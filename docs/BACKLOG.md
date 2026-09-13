@@ -6021,7 +6021,8 @@ product, `saffron/cell/runtimes/apple.py` is the only module that does, and
 `runtimes/__init__.py` carries the `Dialect` — every spelling member a
 difference **measured** between two runtimes rather than anticipated. The rule's
 exemption, its asserting test, `CONTEXT.md`'s **Cell runtime** entry and
-§10's layout moved with it.
+§10's layout moved with it. `SA-0074` is the cell-landable piece that came out
+of it: a missing runtime reporting as absent rather than as twenty-one failures.
 
 Two things worth keeping from doing it. The rule was re-proved rather than
 assumed: with the exemption moved, a `container` argv planted in `runtime.py`
@@ -6107,8 +6108,11 @@ arm, and §5.1 carrying the second safety argument. Three findings from doing it
   attended task before it is for a night. **That is what is left of this half.**
 
 The images half has landed — `BASE_IMAGE` on both images,
-`images/bootstrap-base.sh`, and a provenance file each (§5.1.2) — and the egress
-half needed nothing (3. below). Until a cell has started on podman end to end,
+`images/bootstrap-base.sh`, and a provenance file each (§5.1.2) — **without**
+answering the question 1. below says to answer first: the provenance file makes
+a difference between hosts legible and does not remove it, and one base carried
+between hosts is still open. The egress half needed nothing (3. below). The
+ledger column below is not started. Until a cell has started on podman end to end,
 `saffron batch` refuses it, and a rootful podman is refused outright: no image
 sets a `USER`, so a rootful cell is root on the host kernel (§5.1). What still
 stands between podman and a first cell, none of it measured beyond the first:

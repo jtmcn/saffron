@@ -40,16 +40,13 @@ uv run pytest -m cell        # needs apple/container + the images below
 `prek` is a host tool, not a project dependency — `brew install prek` if `make install`
 cannot find it.
 
-Cell-marked tests need real images, built by hand once (and after editing them):
+Cell-marked tests need real images, built by hand once (and after editing them; a host with
+no registry adds `--build-arg BASE_IMAGE=…`, §5.1.2):
 
 ```
 <runtime> build -t saffron/cell-base:python -f images/cell-base.python.Dockerfile .
 <runtime> build -t saffron/proxy -f images/proxy.Dockerfile .
 ```
-
-Both take `--build-arg BASE_IMAGE=…` for a host with no registry (`images/bootstrap-base.sh`
-builds one), and each records a `provenance` file — read it before comparing gate results
-across hosts (§5.1.2).
 
 The repo's own cell image is built from `.saffron/Dockerfile` by `saffron.repos.image`.
 Host prerequisites (Rosetta, `container system kernel set --recommended`, nothing listening
@@ -76,16 +73,13 @@ carry the setup.
 the environment of the command itself, and nowhere else. `.envrc` deliberately does not load it: direnv would
 export it into every shell in this directory, and from there into any Claude Code session
 started in one. `.env` is no home for it either — `.envrc` loads that with
-`dotenv_if_exists`. Scope it to the invocation instead (fish):
+`dotenv_if_exists`. Scope it to the invocation instead (fish; a cloud host, which has no
+`~/.secrets`, is `docs/HOST-HARDENING.md` §1a):
 
 ```
 env CLAUDE_CODE_OAUTH_TOKEN=(bash -c 'source ~/.secrets; printf %s $CLAUDE_CODE_OAUTH_TOKEN') \
   uv run saffron cell <spec> --repo .
 ```
-
-A cloud host has no `~/.secrets`, so the token goes in the environment's **Environment
-variables** — the every-shell export this rule refuses; `docs/HOST-HARDENING.md` §1a
-states what must hold for that to be acceptable.
 
 Exit codes are load-bearing: `0` reviewable, `1` the task did not make it, `2` infrastructure
 failed (`saffron/cli.py`).
