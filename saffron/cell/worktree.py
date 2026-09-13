@@ -160,6 +160,8 @@ def _git(container: str, *args: str) -> runtime.Completed:
     # one uncommitted `git config` (§5.4).
     # useReplaceRefs=false: here, not in `DIFF_FLAGS` — `git replace` moves
     # every read of the object graph, not only diffs (docs/BACKLOG.md item 102).
+    # bigFileThreshold, attributesFile: either can print an edit as `Binary files
+    # differ`, so no lens reads its hunks (docs/BACKLOG.md item 103).
     return runtime.exec_(
         container,
         [
@@ -170,6 +172,10 @@ def _git(container: str, *args: str) -> runtime.Completed:
             "diff.suppressBlankEmpty=false",
             "-c",
             "core.useReplaceRefs=false",
+            "-c",
+            "core.bigFileThreshold=2g",
+            "-c",
+            "core.attributesFile=/dev/null",
             *args,
         ],
         workdir=WORKTREE_MOUNT,
