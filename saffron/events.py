@@ -41,6 +41,7 @@ record, not an input.
 from __future__ import annotations
 
 import json
+import types
 import typing
 from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
@@ -416,6 +417,53 @@ class EventLog:
             return
 
 
+def _shape_ok(value: object, hint: object) -> bool:
+    """True if `value`, straight off the wire, is a legal instance of a
+    dataclass field's annotated type — the check `read_log`'s own docstring
+    claims and `cls(**obj)` never performs. `Agent(event='x')` round-trips
+    today and `describe` raises `AttributeError` on it; this is what
+    `read_log` needs to catch that at the line, not leave it for the reader.
+
+    JSON is looser than Python, so this checks each hint's own rule rather
+    than a blanket `isinstance`: a `float` field accepts a JSON integer
+    (there is no float/int distinction on the wire), but neither an `int`
+    field nor a `float` field accepts a `bool` (`bool` is an `int`
+    subclass in Python, not in JSON). `tuple[str, ...]` is checked
+    element-wise, after `read_log`'s own list coercion. `X | None`
+    resolves two different ways once `typing.get_type_hints` walks a
+    `from __future__ import annotations` module — some fields come back a
+    `types.UnionType`, others a `typing.Union` — so both are handled.
+
+    Never checks a `Literal`'s membership: a string that is the right
+    shape carrying a value the enum does not (yet) list is the
+    forward-compatible case `read_log` exists to allow.
+    """
+    origin = typing.get_origin(hint)
+    if origin is Literal:
+        return any(type(value) is type(choice) for choice in typing.get_args(hint))
+    if origin is typing.Union or origin is types.UnionType:
+        return any(_shape_ok(value, arg) for arg in typing.get_args(hint))
+    if origin is tuple:
+        args = typing.get_args(hint)
+        elem_hint = args[0] if args else object
+        return isinstance(value, (list, tuple)) and all(
+            _shape_ok(item, elem_hint) for item in value
+        )
+    if hint is type(None):
+        return value is None
+    if hint is bool:
+        return isinstance(value, bool)
+    if hint is int:
+        return isinstance(value, int) and not isinstance(value, bool)
+    if hint is float:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if hint is str:
+        return isinstance(value, str)
+    if hint is dict:
+        return isinstance(value, dict)
+    return True
+
+
 def read_log(task_dir: Path) -> list[Event]:
     """Read back every whole event `EventLog` wrote for one task.
 
@@ -465,6 +513,11 @@ def read_log(task_dir: Path) -> list[Event]:
         for name, value in list(obj.items()):
             if isinstance(value, list) and typing.get_origin(hints.get(name)) is tuple:
                 obj[name] = tuple(value)
+        # A field present with the wrong shape drops its event, exactly like
+        # one missing outright — `Agent(event='x')` round-tripped unchecked
+        # before this, and `describe` raised on it (item 61).
+        if any(not _shape_ok(value, hints[name]) for name, value in obj.items()):
+            continue
         try:
             events.append(cls(**obj))
         except (TypeError, ValueError):
@@ -482,15 +535,41 @@ def _when(stamp: int | None) -> str:
     prints a reset time that has already passed. Both call sites here guard
     with `if event.get("resets_at")`, so neither branch is reachable today —
     `SA-0031` must pick one deliberately rather than inherit whichever copy
-    it deletes last."""
+    it deletes last.
+
+    `stamp` arrives from an untrusted cell's `resets_at`, unchecked by any
+    shape gate — it is a value, not a shape, so `read_log` would not refuse
+    it either. A string, a list, an integer past `time_t`'s range, and NaN
+    are all measured to reach here and must render `"unknown"`, never raise.
+    """
     import time
 
-    if stamp is None:
+    if isinstance(stamp, bool) or not isinstance(stamp, (int, float)):
         return "unknown"
-    local = time.localtime(stamp)
-    today = time.localtime()
+    try:
+        local = time.localtime(stamp)
+        today = time.localtime()
+    except (OverflowError, OSError, ValueError):
+        return "unknown"
     same_day = (local.tm_year, local.tm_yday) == (today.tm_year, today.tm_yday)
     return time.strftime("%H:%M local" if same_day else "%a %d %b %H:%M local", local)
+
+
+# Every C0 control character and DEL, mapped to a space — the one place
+# cell-authored content is made safe for a terminal, so no caller has to
+# remember to do it itself.
+_CONTROL_TRANSLATION = str.maketrans({chr(code): " " for code in (*range(0x20), 0x7F)})
+
+
+def _clean(value: object, limit: int) -> str:
+    """One cell-authored field, made safe to print: every control character
+    replaced with a space, then clipped to `limit` characters. An error
+    event carrying an escape sequence used to clear the operator's screen
+    and retitle their terminal — and `saffron watch` can replay that into a
+    fresh terminal long after the run — so the strip happens once, here,
+    rather than in each branch below. Host-authored text (the `, resets …`
+    suffix, `Agent.detail`) never passes through this."""
+    return str(value).translate(_CONTROL_TRANSLATION)[:limit]
 
 
 def _describe_agent_event(event: dict) -> str:
@@ -500,20 +579,25 @@ def _describe_agent_event(event: dict) -> str:
     kind = event.get("type")
     if kind == "text":
         text = " ".join(str(event.get("text", "")).split())
-        return f"agent: {text[:160]}"
+        return f"agent: {_clean(text, 160)}"
     if kind == "tool_use":
-        return f"agent: {event.get('name')} {json.dumps(event.get('input'))[:120]}"
+        name = _clean(event.get("name"), 160)
+        arg = _clean(json.dumps(event.get("input")), 120)
+        return f"agent: {name} {arg}"
     if kind == "tool_result":
         return "agent: tool " + ("error" if event.get("is_error") else "ok")
     if kind == "result":
+        subtype = _clean(event.get("subtype"), 160)
+        terminal_reason = _clean(event.get("terminal_reason"), 160)
         return (
-            f"agent: {event.get('subtype')} in {event.get('num_turns')} turns, "
-            f"${event.get('total_cost_usd')} ({event.get('terminal_reason')})"
+            f"agent: {subtype} in {event.get('num_turns')} turns, "
+            f"${event.get('total_cost_usd')} ({terminal_reason})"
         )
     if kind == "rate_limit":
         used = event.get("utilization")
+        status = _clean(event.get("status"), 160)
         return (
-            f"agent: rate limit {event.get('status')}"
+            f"agent: rate limit {status}"
             + (f", {used:.0%} used" if isinstance(used, int | float) else "")
             + (
                 f", resets {_when(event.get('resets_at'))}"
@@ -522,8 +606,9 @@ def _describe_agent_event(event: dict) -> str:
             )
         )
     if kind == "error":
-        return f"agent: error {event.get('error')}"
-    return f"agent: {kind} {event.get('subtype') or event.get('kind') or ''}".rstrip()
+        return f"agent: error {_clean(event.get('error'), 160)}"
+    rest = _clean(event.get("subtype") or event.get("kind") or "", 160)
+    return f"agent: {_clean(kind, 160)} {rest}".rstrip()
 
 
 def describe(event: Event) -> str:
@@ -564,9 +649,12 @@ def describe(event: Event) -> str:
         # diagnosis needs most.
         lines = []
         if event.gates or event.statuses:
+            # Not `strict=True`: a `Baseline` whose two lists differ in
+            # length is a value, not a shape, so `read_log` does not refuse
+            # it — this renders the overlap it has rather than raising.
             joined = ", ".join(
                 f"{gate}={status}"
-                for gate, status in zip(event.gates, event.statuses, strict=True)
+                for gate, status in zip(event.gates, event.statuses, strict=False)
             )
             lines.append(f"baseline: {joined}")
         if event.aborted:
@@ -610,9 +698,12 @@ def describe(event: Event) -> str:
 
     if isinstance(event, Agent):
         if event.bounded:
-            return f"agent: (bounded, {event.original_chars} chars) {(event.line or '')[:160]}"
+            return (
+                f"agent: (bounded, {event.original_chars} chars) "
+                f"{_clean(event.line or '', 160)}"
+            )
         if event.raw:
-            return f"agent: (raw) {(event.line or '')[:160]}"
+            return f"agent: (raw) {_clean(event.line or '', 160)}"
         if event.event is not None:
             return _describe_agent_event(event.event)
         return f"agent: {event.detail}"

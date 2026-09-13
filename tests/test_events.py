@@ -499,6 +499,85 @@ def test_a_line_missing_a_required_field_is_still_dropped(tmp_path):
     assert read_log(tmp_path) == []
 
 
+def test_a_field_of_the_wrong_shape_drops_its_event_not_the_file(tmp_path):
+    """Item 61, measured: `read_log` is `cls(**obj)` onto a plain dataclass,
+    so a hand-edited or corrupt line with a right-shaped-looking field of the
+    wrong type — `Agent(event='x')`, where `event` is `dict | None` — used to
+    round-trip, and `describe` then raised `AttributeError` on it. A field
+    present with the wrong shape now drops its event, exactly like one that
+    is missing outright, and the lines around it survive."""
+
+    def _write(*lines: str) -> None:
+        (tmp_path / "events.jsonl").write_text("\n".join(lines) + "\n")
+
+    good = json.dumps(
+        {"kind": "Teardown", "timestamp": 1.0, "spec_id": "SA", "step": "s", "ok": True}
+    )
+
+    # The measured defect itself.
+    wrong_shape = json.dumps(
+        {"kind": "Agent", "timestamp": 2.0, "spec_id": "SA", "raw": False, "event": "x"}
+    )
+    _write(good, wrong_shape, good)
+    assert read_log(tmp_path) == [
+        Teardown(timestamp=1.0, spec_id="SA", step="s", ok=True),
+        Teardown(timestamp=1.0, spec_id="SA", step="s", ok=True),
+    ]
+
+    # `bool` is an `int` subclass in Python, not in JSON: an `int` field must
+    # not silently accept `true` as `1`.
+    bool_as_int = json.dumps(
+        {
+            "kind": "Ceilings",
+            "timestamp": 3.0,
+            "spec_id": "SA",
+            "budget_usd": 5.0,
+            "max_attempts": True,
+            "max_turns": 1,
+            "budget_source": "flag",
+            "attempts_source": "flag",
+            "turns_source": "flag",
+        }
+    )
+    _write(good, bool_as_int)
+    assert read_log(tmp_path) == [
+        Teardown(timestamp=1.0, spec_id="SA", step="s", ok=True)
+    ]
+
+    # `tuple[str, ...]` is coerced from a JSON list, but each element is
+    # still checked — one non-string entry is the wrong shape, not a tuple
+    # missing one member.
+    bad_tuple_element = json.dumps(
+        {
+            "kind": "Baseline",
+            "timestamp": 4.0,
+            "spec_id": "SA",
+            "gates": ["lint", 7],
+            "statuses": ["pass", "pass"],
+        }
+    )
+    _write(good, bad_tuple_element)
+    assert read_log(tmp_path) == [
+        Teardown(timestamp=1.0, spec_id="SA", step="s", ok=True)
+    ]
+
+    # A `float` field accepts a JSON integer — that is the wire format, not
+    # a wrong shape: `1` is what a hand-written log carries where a writer
+    # meant `1.0`. This must not be dropped.
+    int_for_float = json.dumps(
+        {
+            "kind": "Terminal",
+            "timestamp": 5.0,
+            "spec_id": "SA",
+            "reason": "finished_empty",
+            "spent_usd_est": 5,
+        }
+    )
+    _write(int_for_float)
+    [loaded] = _read(tmp_path, Terminal)
+    assert loaded.spent_usd_est == 5
+
+
 def test_append_never_raises_on_a_dict_a_cell_authored(tmp_path):
     """`asdict` deep-copies before `json.dumps` is reached, and `Agent.event`
     comes from an untrusted cell."""
@@ -980,6 +1059,120 @@ def test_the_duplicated_agent_renderer_still_matches_its_original():
     )
     assert resets.startswith("agent: rate limit rejected, resets ")
     assert resets != "agent: rate limit rejected, resets "
+
+
+def test_describe_renders_whatever_it_is_handed():
+    """Item 61's second half, measured when this spec was reviewed: a
+    right-shaped `Baseline` and a right-shaped `rate_limit` payload both
+    raised, though neither is a shape `read_log` refuses — they are values.
+    `Baseline(gates=('a', 'b'), statuses=('pass',))` raised `ValueError` at
+    `zip(..., strict=True)`; a `rate_limit` `resets_at` that is a string, a
+    list, an integer too large for a timestamp, or `NaN` raised `TypeError`,
+    `OverflowError` or `ValueError` in `_when`. `describe` must tolerate
+    both."""
+    mismatched = Baseline(
+        timestamp=1.0, spec_id="x", gates=("a", "b"), statuses=("pass",)
+    )
+    assert describe(mismatched) == "baseline: a=pass"
+
+    for resets_at in ("soon", [1], 10**20, float("nan")):
+        line = describe(
+            Agent(
+                timestamp=1.0,
+                spec_id="x",
+                raw=False,
+                event={
+                    "type": "rate_limit",
+                    "status": "rejected",
+                    "resets_at": resets_at,
+                },
+            )
+        )
+        assert line == "agent: rate limit rejected, resets unknown", resets_at
+
+
+def test_every_cell_authored_field_is_clipped():
+    """Item 63: `_describe_agent_event` clipped only `text` (160) and
+    `tool_use`'s input (120). `tool_use.name`, the `result` branch, the
+    `error` branch, the `rate_limit` branch and the fallback clipped
+    nothing, so a five-thousand-character error from a cell reached the
+    terminal whole. Each is now clipped at 160, the bound `text` already
+    used — `tool_use`'s json-dumped input keeps its existing 120 bound."""
+    long = "x" * 5000
+    clipped = "x" * 160
+
+    assert _describe_agent_event(
+        {"type": "tool_use", "name": long, "input": {}}
+    ) == f"agent: {clipped} " + json.dumps({})
+
+    assert (
+        _describe_agent_event(
+            {
+                "type": "result",
+                "subtype": long,
+                "num_turns": 1,
+                "total_cost_usd": 0.1,
+                "terminal_reason": long,
+            }
+        )
+        == f"agent: {clipped} in 1 turns, $0.1 ({clipped})"
+    )
+
+    assert (
+        _describe_agent_event({"type": "error", "error": long})
+        == f"agent: error {clipped}"
+    )
+
+    assert (
+        _describe_agent_event({"type": "rate_limit", "status": long})
+        == f"agent: rate limit {clipped}"
+    )
+
+    assert (
+        _describe_agent_event({"type": long, "subtype": long})
+        == f"agent: {clipped} {clipped}"
+    )
+
+
+def test_an_agent_payload_cannot_put_control_characters_on_a_terminal():
+    """Item 63: an error event carrying an escape sequence currently clears
+    the operator's screen and retitles their terminal, and `saffron watch`
+    can replay that into a fresh terminal long after the run. Each character
+    from U+0000 to U+001F, and U+007F, in cell-authored content is replaced
+    with a space — checked directly against the new helper, and against
+    every one of `Agent`'s three cell-authored shapes (`event`, raw `line`,
+    bounded `line`) through `describe` itself."""
+    from saffron.events import _clean  # local: kept out of the revert's collection
+
+    for code in (*range(0x20), 0x7F):
+        assert _clean(chr(code) + "A", 160) == " A"
+
+    evil = "\x1b[2J\x1b]0;pwned\x07" + "A" * 20
+    event_line = describe(
+        Agent(
+            timestamp=1.0,
+            spec_id="x",
+            raw=False,
+            event={"type": "error", "error": evil},
+        )
+    )
+    assert all(chr(code) not in event_line for code in (*range(0x20), 0x7F))
+    assert "AAAAAAAAAAAAAAAAAAAA" in event_line
+
+    raw_line = describe(Agent(timestamp=1.0, spec_id="x", raw=True, line="\x1bnormal"))
+    assert "\x1b" not in raw_line and "normal" in raw_line
+
+    bounded_line = describe(
+        Agent(
+            timestamp=1.0,
+            spec_id="x",
+            raw=False,
+            line="\x07boom",
+            bounded=True,
+            original_chars=100,
+        )
+    )
+    assert "\x07" not in bounded_line and "boom" in bounded_line
 
 
 def test_findings_name_what_the_table_could_not_type():
