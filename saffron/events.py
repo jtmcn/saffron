@@ -534,23 +534,25 @@ def read_log(task_dir: Path) -> list[Event]:
     return events
 
 
-def _when(stamp: int | None) -> str:
-    """`phases.implement.when`, duplicated rather than imported: `events.py`
-    is core and stays dependency-light, and `SA-0031` deletes this copy the
-    moment `implement._describe` collapses into `describe` below.
-
-    Not byte-identical, and the difference is load-bearing for that collapse:
-    the original hands `None` to `time.localtime`, which reads it as *now* and
-    prints a reset time that has already passed. Both call sites here guard
-    with `if event.get("resets_at")`, so neither branch is reachable today —
-    `SA-0031` must pick one deliberately rather than inherit whichever copy
-    it deletes last.
+def when(stamp: int | None) -> str:
+    """The one place a unix reset time becomes something an operator can act
+    on: "when can I retry", in local time, the day dropped unless it isn't
+    today. Its callers are the `except RateLimited` handler in
+    `cell/session.py` and `describe()`'s `rate_limit` branch below; item 104
+    deleted the unguarded copy in `phases.implement`.
 
     `stamp` arrives from an untrusted cell's `resets_at`, unchecked by any
     shape gate — it is a value, not a shape, so `read_log` would not refuse
     it either. A string, a list, an integer past `time_t`'s range, and NaN
-    are all measured to reach here and must render `"unknown"`, never raise.
-    """
+    are all measured to reach here (`SA-0070`, then item 104's own table for
+    the `session.py` call site) and must render `"unknown"`, never raise.
+
+    `None` also renders `"unknown"` here, rather than `time.localtime`'s own
+    reading of it as *now* — which would print a reset time already past.
+    Both callers guard with a truthiness check before calling this, so the
+    branch is not reachable through either today; it is still handled
+    deliberately, not left to accident, since a caller that stops guarding is
+    a caller this function must not silently mislead."""
     import time
 
     if isinstance(stamp, bool) or not isinstance(stamp, (int, float)):
@@ -582,9 +584,8 @@ def _clean(value: object, limit: int) -> str:
 
 
 def _describe_agent_event(event: dict) -> str:
-    """`phases.implement._describe`, verbatim in shape: the one place a raw
-    Claude Agent SDK event dict becomes a line, duplicated here for the same
-    reason as `_when` above."""
+    """The one place a raw Claude Agent SDK event dict becomes a line;
+    `phases.implement` renders through `describe` rather than keeping a copy."""
     kind = event.get("type")
     if kind == "text":
         text = " ".join(str(event.get("text", "")).split())
@@ -615,7 +616,7 @@ def _describe_agent_event(event: dict) -> str:
             f"agent: rate limit {status}"
             + (f", {_clean(share, 160)} used" if share else "")
             + (
-                f", resets {_when(event.get('resets_at'))}"
+                f", resets {when(event.get('resets_at'))}"
                 if event.get("resets_at")
                 else ""
             )

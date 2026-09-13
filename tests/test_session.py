@@ -2727,6 +2727,36 @@ def test_a_wall_on_the_plan_turn_is_not_the_task_failing(monkeypatch, tmp_path):
     assert not any("1755800000" in line for line in cell.watched)
 
 
+def test_an_unreadable_reset_time_still_stops_rate_limited(monkeypatch, tmp_path):
+    """`SA-0070` measured `events._when` (now `events.when`) against exactly
+    these four values, for the live-cell `rate_limit` event `describe()`
+    renders. `implement.when` was its unguarded twin, and the `except
+    RateLimited` handler in `cell/session.py` was its only caller: reverted, `time.localtime` raises inside `except
+    RateLimited`, the raise escapes that clause entirely — its sibling
+    `except BaseException` is an alternative on the same `try`, not a
+    wrapper around it — and `run_one_cell` exits having set neither
+    `tasks.state` nor `runs.status`, leaving a run that reads as still going
+    for a provider ceiling that should have told the operator when to retry."""
+    for i, resets_at in enumerate(("soon", [1], 10**20, float("nan"))):
+        cell = _stub_the_runtime(monkeypatch)
+        outcome, ledger = _drive(
+            monkeypatch,
+            tmp_path / str(i),
+            cell=cell,
+            turns=[
+                implement.AgentFailed(
+                    "api_error", attempt=_rejected(resets_at=resets_at)
+                )
+            ],
+        )
+        assert outcome.state == "RATE_LIMITED", resets_at
+        (task_row,) = ledger._db.execute("SELECT state FROM tasks").fetchall()
+        assert task_row["state"] == "RATE_LIMITED", resets_at
+        (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
+        assert run_row["status"] == "COMPLETE", resets_at
+        assert not any(str(resets_at) in line for line in cell.watched), resets_at
+
+
 def test_a_wall_after_the_gates_go_green_stops_the_lenses(monkeypatch, tmp_path):
     """REVIEW had no guard of its own: every lens failed against the closed
     window, `review_state` read the errors as an incomplete review, and the run
