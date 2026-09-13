@@ -257,9 +257,14 @@ def test_a_runtime_that_cannot_be_executed_reports_as_absent(tmp_path, monkeypat
     unrunnable.write_bytes(b"not a valid executable\n")
     unrunnable.chmod(0o755)
     missing = tmp_path / "does-not-exist-at-all"
+    # Runs, but exits non-zero: what it printed is not a version.
+    failing = tmp_path / "a-failing-runtime"
+    failing.write_text("#!/bin/sh\necho oops\nexit 1\n")
+    failing.chmod(0o755)
 
-    for binary in (str(missing), str(unrunnable)):
+    for binary in (str(missing), str(unrunnable), str(failing)):
         monkeypatch.setattr(runtime, "_probed", False)
+        monkeypatch.setattr(runtime, "_probe_result", None)
         monkeypatch.setattr(runtime, "_selected", SimpleNamespace(binary=binary))
         assert runtime.probe() is None
 
@@ -274,6 +279,7 @@ def test_a_runtime_that_runs_reports_the_version_it_printed(tmp_path, monkeypatc
     runnable.chmod(0o755)
 
     monkeypatch.setattr(runtime, "_probed", False)
+    monkeypatch.setattr(runtime, "_probe_result", None)
     monkeypatch.setattr(runtime, "_selected", SimpleNamespace(binary=str(runnable)))
     assert runtime.probe() == "fake-runtime 9.9.9"
 
@@ -296,6 +302,23 @@ def test_a_cell_marked_test_skips_when_the_runtime_is_absent(monkeypatch):
     with pytest.raises(pytest.skip.Exception) as excinfo:
         conftest.pytest_runtest_setup(_CellMarkedItem())
     assert runtime.dialect().binary in str(excinfo.value)
+
+
+def test_an_unmarked_test_never_probes_the_runtime(monkeypatch):
+    # The hook runs before the tripwire fixture is installed, so its marker
+    # guard is the only thing keeping an unmarked test from execing the runtime.
+    from tests import conftest
+
+    def _probe():
+        raise AssertionError("probed the runtime for an unmarked test")
+
+    monkeypatch.setattr(runtime, "probe", _probe)
+
+    class _UnmarkedItem:
+        def get_closest_marker(self, name):
+            return None
+
+    assert conftest.pytest_runtest_setup(_UnmarkedItem()) is None
 
 
 def test_exec_is_told_its_working_directory_before_the_container():
