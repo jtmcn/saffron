@@ -12,12 +12,18 @@ standing in for a product nobody has run. Every member below is a difference
 actually observed between two runtimes
 (`docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md`). A difference
 that has not been measured does not get an entry here in advance — it gets one
-when a spike arm finds it.
+when a spike arm finds it. The last two members are the exception in kind, not
+in rule: what has been *proven* of a runtime differs too, and a runtime not yet
+proven must say so rather than inherit the first one's standing.
 """
 
 from __future__ import annotations
 
-from typing import Protocol
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from saffron.cell.runtime import Completed
 
 
 class Dialect(Protocol):
@@ -66,4 +72,16 @@ class Dialect(Protocol):
         reading `sysconf` or `/proc/cpuinfo` still sees the machine — measured,
         `docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md`. Each
         implementation says which it gives.
+        """
+
+    @property
+    def unattended(self) -> bool:
+        """Whether a night may run on this runtime: true only once a cell has
+        started end to end on it, which is a fact about evidence, not flags."""
+
+    def host_refusal(self, call: Callable[[Sequence[str]], Completed]) -> str | None:
+        """Why this host must not run cells under this runtime, or None.
+
+        Asked by running the runtime, never by reading the host around it — the
+        answer is whatever the binary says about itself (principle 39).
         """

@@ -7,10 +7,10 @@ only for the handful of spellings that are not universal — so nothing here
 changes if the answer changes, which is what Appendix G bought and what the
 `structure` gate keeps.
 
-`_DIALECT` is the selection, and today there is one. A second arrives with a
-spike arm behind it, never with a `shutil.which` — a runtime detected from the
-host is the proper noun standing in for a decision all over again (principle 32,
-backlog item 103).
+`dialect()` is the selection — `apple` by default, `podman` when
+`SAFFRON_CELL_RUNTIME` says so, and never a `shutil.which`: a runtime detected
+from the host is the proper noun standing in for a decision all over again
+(principle 32, backlog item 103).
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from saffron.cell.runtimes import Dialect
 from saffron.cell.runtimes import apple as _apple
@@ -65,15 +66,69 @@ def select_dialect(name: str | None) -> Dialect:
         ) from None
 
 
-# Read once at import, not per call: a task that created its network with one
-# runtime and its container with another is not a thing to make reachable.
-_DIALECT: Dialect = select_dialect(os.environ.get(RUNTIME_ENV))
+_selected: Dialect | None = None
 
-# Re-exported as a value rather than a literal, because callers outside this
-# package legitimately need the binary's name — `proxy.py` reads its log,
-# `image.py` builds with it, and `tests/conftest.py` forbids a test without the
-# `cell` marker from exec'ing it. What the rule forbids is *spelling* it.
-RUNTIME = _DIALECT.binary
+
+def dialect() -> Dialect:
+    """The selected runtime, chosen on first use and fixed for the process.
+
+    Fixed because a task that created its network with one runtime and its
+    container with another is not a thing to make reachable. On first use and
+    not at import, because `saffron.cli` imports this module: an unknown name
+    raised at import exits 1 with a traceback before `main` can map it to 2.
+    """
+    global _selected
+    if _selected is None:
+        _selected = select_dialect(os.environ.get(RUNTIME_ENV))
+    return _selected
+
+
+# `RUNTIME` and `CPU_OFFSET` stay module attributes for callers outside this
+# package — `proxy.py` reads the proxy's log, `image.py` builds with the binary —
+# but resolve through `dialect()` so that reading one is a use, not an import.
+if TYPE_CHECKING:
+    RUNTIME: str
+    CPU_OFFSET: int
+
+
+def __getattr__(name: str) -> object:
+    if name == "RUNTIME":
+        return dialect().binary
+    if name == "CPU_OFFSET":
+        return dialect().cpu_offset
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+_admitted = False
+
+
+def _admit() -> None:
+    """Refuse a host the selected runtime cannot safely run cells on.
+
+    Once per process, ahead of the first network or container, so no path
+    starts one without passing it — `saffron cell`, a batch, and preflight's own
+    probes alike.
+    """
+    global _admitted
+    if _admitted:
+        return
+    refusal = dialect().host_refusal(call)
+    if refusal is not None:
+        raise CellRuntimeError(refusal)
+    _admitted = True
+
+
+def unattended_refusal() -> str | None:
+    """Why a night must not run on the selected runtime, or None."""
+    selected = dialect()
+    if selected.unattended:
+        return None
+    return (
+        f"{RUNTIME_ENV} selects {selected.binary}, which has not yet started a "
+        "cell end to end; run it attended with `saffron cell` (backlog item 103)"
+    )
+
+
 DEFAULT_SUBNET = "10.88.0.0/24"
 
 # §4.3's idle and completion bounds. Idle has to clear the longest single tool
@@ -89,10 +144,6 @@ COMPLETION_TIMEOUT_S = 10.0
 _NETWORK = ipaddress.ip_network(DEFAULT_SUBNET)
 SUBNET_PREFIX = str(_NETWORK.network_address).rsplit(".", 1)[0] + "."
 GATEWAY = str(next(_NETWORK.hosts()))
-
-# The running runtime's calibration, not a constant of the design — see
-# `Dialect.cpu_offset`. Named here because that is where every caller reads it.
-CPU_OFFSET = _DIALECT.cpu_offset
 
 
 @dataclass(frozen=True)
@@ -132,14 +183,14 @@ def _run_argv(
     detach: bool,
     user: str | None = None,
 ) -> list[str]:
-    argv = [RUNTIME, "run"]
+    argv = [dialect().binary, "run"]
     argv += ["-d"] if detach else ["--rm"]
     # No capabilities. §5.1: a cell that could install firewall rules could
     # rewrite its own, which is why egress is a proxy and not iptables.
     argv += ["--cap-drop", "ALL"]
     # Whatever in-guest hardening this runtime has to offer. Empty under a
     # VM-per-cell runtime, which offers the kernel instead (§5.1).
-    argv += _DIALECT.security_flags
+    argv += dialect().security_flags
     if user:
         argv += ["--user", user]
     if name:
@@ -148,7 +199,7 @@ def _run_argv(
     for net in [network] if isinstance(network, str) else network or ():
         argv += ["--network", net]
     if cpus is not None:
-        argv += _DIALECT.cpu_flags(cpus)
+        argv += dialect().cpu_flags(cpus)
     if memory:
         argv += ["--memory", memory]
     for mount in mounts:
@@ -182,7 +233,9 @@ def _call(argv: Sequence[str], timeout_s: float) -> Completed:
             bound="wall",
         )
     except OSError as exc:
-        raise CellRuntimeError(f"{RUNTIME} could not be executed: {exc}") from exc
+        raise CellRuntimeError(
+            f"{dialect().binary} could not be executed: {exc}"
+        ) from exc
     return Completed(proc.returncode, _decode(proc.stdout), _decode(proc.stderr))
 
 
@@ -203,7 +256,16 @@ def _must(argv: Sequence[str], timeout_s: float = 120) -> Completed:
 
 
 def create_network(name: str, subnet: str = DEFAULT_SUBNET) -> None:
-    argv = [RUNTIME, "network", "create", "--internal", "--subnet", subnet, name]
+    _admit()
+    argv = [
+        dialect().binary,
+        "network",
+        "create",
+        "--internal",
+        "--subnet",
+        subnet,
+        name,
+    ]
     done = _call(argv, 120)
     if done.returncode == 0:
         return
@@ -226,7 +288,7 @@ def networks_on_subnet(subnet: str, exclude: str = "") -> list[str]:
     same wording, and an equality test names nobody in exactly the case an
     operator cannot work out by eye. Empty when the listing itself fails — this
     only ever adds detail to an error already being raised."""
-    done = _call([RUNTIME, "network", "list"], 60)
+    done = _call([dialect().binary, "network", "list"], 60)
     if done.returncode != 0:
         return []
     try:
@@ -247,19 +309,20 @@ def networks_on_subnet(subnet: str, exclude: str = "") -> list[str]:
 
 
 def remove_network(name: str) -> Completed:
-    return _call([RUNTIME, "network", "rm", name], timeout_s=60)
+    return _call([dialect().binary, "network", "rm", name], timeout_s=60)
 
 
 def create_volume(name: str) -> None:
-    _must([RUNTIME, "volume", "create", name])
+    _admit()
+    _must([dialect().binary, "volume", "create", name])
 
 
 def remove_volume(name: str) -> Completed:
-    return _call([RUNTIME, "volume", "rm", name], timeout_s=60)
+    return _call([dialect().binary, "volume", "rm", name], timeout_s=60)
 
 
 def remove_container(name: str) -> Completed:
-    return _call([RUNTIME, "rm", "-f", name], timeout_s=60)
+    return _call([dialect().binary, "rm", "-f", name], timeout_s=60)
 
 
 def run_detached(
@@ -274,6 +337,7 @@ def run_detached(
     mounts: Sequence[Mount] = (),
     user: str | None = None,
 ) -> None:
+    _admit()
     _must(
         _run_argv(
             image=image,
@@ -302,6 +366,7 @@ def run_ephemeral(
     mounts: Sequence[Mount] = (),
     timeout_s: float = 120,
 ) -> Completed:
+    _admit()
     return _call(
         _run_argv(
             image=image,
@@ -332,11 +397,11 @@ def exec_argv(
     path and the collecting path disagreeing about where a command runs is a
     cell that works and works in the wrong directory.
     """
-    argv = [RUNTIME, "exec"]
+    argv = [dialect().binary, "exec"]
     if interactive:
         argv.append("-i")
     if workdir:
-        argv += [_DIALECT.exec_workdir_flag, workdir]
+        argv += [dialect().exec_workdir_flag, workdir]
     argv.append(container)
     return argv + list(command)
 
@@ -365,7 +430,7 @@ _REAP = (
 
 def reap_cell(container: str, timeout_s: float = 60) -> Completed:
     """Kill whatever the last turn left running inside the cell."""
-    return _call([RUNTIME, "exec", container, "sh", "-c", _REAP], timeout_s)
+    return _call([dialect().binary, "exec", container, "sh", "-c", _REAP], timeout_s)
 
 
 def exec_stream(
@@ -410,7 +475,9 @@ def exec_stream(
                 text=True,
             )
         except OSError as exc:
-            raise CellRuntimeError(f"{RUNTIME} could not be executed: {exc}") from exc
+            raise CellRuntimeError(
+                f"{dialect().binary} could not be executed: {exc}"
+            ) from exc
 
         lines: queue.Queue[str | None] = queue.Queue()
 
@@ -493,7 +560,7 @@ def _first_address(inspected: str, subnet_prefix: str) -> str | None:
 
 
 def container_ip(name: str, subnet_prefix: str = SUBNET_PREFIX) -> str | None:
-    done = _call([RUNTIME, "inspect", name], timeout_s=60)
+    done = _call([dialect().binary, "inspect", name], timeout_s=60)
     if done.returncode != 0:
         return None
     return _first_address(done.stdout, subnet_prefix)

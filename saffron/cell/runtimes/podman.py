@@ -18,7 +18,12 @@ Every value below is measured, in
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from saffron.cell.runtime import Completed
 
 
 @dataclass(frozen=True)
@@ -74,6 +79,30 @@ class Podman:
         this runtime is for one attended task before it is for a night.
         """
         return ["--cpuset-cpus", f"0-{cpus - 1}"]
+
+    @property
+    def unattended(self) -> bool:
+        # No cell has started end to end here: the measured host refused
+        # `DEFAULT_SUBNET`, and `--memory` went unenforced (backlog item 103).
+        return False
+
+    def host_refusal(self, call: Callable[[Sequence[str]], Completed]) -> str | None:
+        """Rootful podman is refused, because no image sets a `USER`.
+
+        The cell runs as root, and with no user namespace that is root on the
+        host kernel, with only `--cap-drop ALL`, `no-new-privileges` and seccomp
+        between them. Rootless maps it to the invoking user. The measured host
+        ran podman as root (the evidence record's first line).
+        """
+        done = call([self.binary, "info", "--format", "{{.Host.Security.Rootless}}"])
+        if done.returncode != 0:
+            return f"could not ask podman whether it is rootless: {done.stderr.strip()}"
+        if done.stdout.strip() != "true":
+            return (
+                "podman is running rootful, so root in a cell would be root on the "
+                "host kernel; run it as an unprivileged user (DESIGN.md §5.1)"
+            )
+        return None
 
 
 DIALECT = Podman()

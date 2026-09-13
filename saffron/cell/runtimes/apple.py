@@ -10,7 +10,12 @@ to taste, and the decision is re-makeable the same way it was made.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from saffron.cell.runtime import Completed
 
 
 @dataclass(frozen=True)
@@ -46,6 +51,14 @@ class Apple:
         requirement, and the single largest point in this runtime's favour.
         """
         return ["--cpus", str(cpus)]
+
+    @property
+    def unattended(self) -> bool:
+        return True
+
+    def host_refusal(self, call: Callable[[Sequence[str]], Completed]) -> str | None:
+        """None: root in the guest is root in a VM holding one cell (§5.1)."""
+        return None
 
 
 DIALECT = Apple()

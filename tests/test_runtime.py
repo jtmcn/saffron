@@ -3,6 +3,7 @@ that actually chose this runtime live in spikes/cell-runtime.sh."""
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
@@ -65,6 +66,7 @@ def test_the_apple_dialect_states_what_was_measured_of_it():
     assert apple.DIALECT.cpu_offset == 1
     assert apple.DIALECT.exec_workdir_flag == "--cwd"
     assert apple.DIALECT.cpu_flags(2) == ["--cpus", "2"]
+    assert apple.DIALECT.unattended is True
 
 
 def test_the_podman_dialect_states_what_was_measured_of_it():
@@ -82,6 +84,110 @@ def test_the_podman_dialect_states_what_was_measured_of_it():
     assert podman.DIALECT.exec_workdir_flag == "-w"
     assert podman.DIALECT.cpu_flags(2) == ["--cpuset-cpus", "0-1"]
     assert podman.DIALECT.cpu_flags(1) == ["--cpuset-cpus", "0-0"]
+    # No cell has started end to end on it, so no night may run on it.
+    assert podman.DIALECT.unattended is False
+
+
+def _as_podman(monkeypatch, info: runtime.Completed) -> list[list[str]]:
+    """Select podman and answer `podman info` with `info`; returns every argv."""
+    seen: list[list[str]] = []
+
+    def fake_call(argv, timeout_s=120):
+        seen.append(list(argv))
+        if argv[1:2] == ["info"]:
+            return info
+        return runtime.Completed(0, "", "")
+
+    monkeypatch.setattr(runtime, "_selected", podman.DIALECT)
+    monkeypatch.setattr(runtime, "_admitted", False)
+    monkeypatch.setattr(runtime, "_call", fake_call)
+    return seen
+
+
+def test_podman_hardening_and_cpu_mask_reach_the_run_command(monkeypatch):
+    """The wiring, as against the values pinned above. Apple's security flags
+    are empty, so under the default runtime deleting the line that appends them
+    passes every other test here."""
+    monkeypatch.setattr(runtime, "_selected", podman.DIALECT)
+    argv = runtime._run_argv(
+        image="i",
+        command=["nproc"],
+        name=None,
+        network="n",
+        env=None,
+        cpus=1,
+        memory=None,
+        mounts=[],
+        detach=False,
+    )
+    assert argv[:2] == ["podman", "run"]
+    at = argv.index("--security-opt")
+    assert argv[at : at + 2] == ["--security-opt", "no-new-privileges"]
+    at = argv.index("--cpuset-cpus")
+    assert argv[at : at + 2] == ["--cpuset-cpus", "0-0"]
+    assert "--cpus" not in argv
+    assert runtime.exec_argv("c", ["x"], workdir="/work")[:4] == [
+        "podman",
+        "exec",
+        "-w",
+        "/work",
+    ]
+
+
+def test_a_rootful_podman_is_refused_before_any_container(monkeypatch):
+    """No image sets a `USER`, so a rootful podman's cell is root on the host
+    kernel. Refused at the first container, never after it."""
+    seen = _as_podman(monkeypatch, runtime.Completed(0, "false\n", ""))
+    with pytest.raises(runtime.CellRuntimeError, match="rootful"):
+        runtime.run_ephemeral("i", ["true"])
+    with pytest.raises(runtime.CellRuntimeError, match="rootful"):
+        runtime.create_network("n")
+    assert all(argv[1] == "info" for argv in seen), seen
+
+
+def test_a_podman_that_cannot_say_whether_it_is_rootless_is_refused(monkeypatch):
+    """An unanswered question is not a yes (principle 34)."""
+    _as_podman(monkeypatch, runtime.Completed(125, "", "Error: no such format"))
+    with pytest.raises(runtime.CellRuntimeError, match="no such format"):
+        runtime.run_detached("c", "i")
+
+
+def test_a_rootless_podman_is_admitted_and_asked_once(monkeypatch):
+    seen = _as_podman(monkeypatch, runtime.Completed(0, "true\n", ""))
+    runtime.run_ephemeral("i", ["true"])
+    runtime.run_ephemeral("i", ["true"])
+    assert [argv[1] for argv in seen] == ["info", "run", "run"]
+
+
+def test_apple_admits_without_asking_the_host_anything(monkeypatch):
+    """Root in the guest is root in a VM holding one cell (§5.1)."""
+    seen: list[list[str]] = []
+    monkeypatch.setattr(
+        runtime,
+        "_call",
+        lambda argv, timeout_s=120: (
+            seen.append(list(argv)) or runtime.Completed(0, "", "")
+        ),
+    )
+    runtime.run_ephemeral("i", ["true"])
+    assert [argv[1] for argv in seen] == ["run"]
+
+
+def test_an_unknown_runtime_name_is_refused_on_use_not_at_import(monkeypatch):
+    """`saffron.cli` imports this module. Raised at import, a typo exits 1 with
+    a traceback before `main` can map it to 2, and 1 says the task failed."""
+    env = {**os.environ, runtime.RUNTIME_ENV: "bogus"}
+    done = subprocess.run(
+        [sys.executable, "-c", "import saffron.cli"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 0, done.stderr
+    monkeypatch.setattr(runtime, "_selected", None)
+    monkeypatch.setenv(runtime.RUNTIME_ENV, "bogus")
+    with pytest.raises(runtime.CellRuntimeError, match="bogus"):
+        runtime.dialect()
 
 
 def test_only_the_runtime_without_a_vm_asks_for_in_guest_hardening():
@@ -122,6 +228,8 @@ def test_every_declared_runtime_satisfies_the_dialect():
         assert dialect.exec_workdir_flag.startswith("-"), name
         assert isinstance(dialect.security_flags, list), name
         assert dialect.cpu_flags(2), name
+        assert isinstance(dialect.unattended, bool), name
+        assert callable(dialect.host_refusal), name
 
 
 def test_exec_is_told_its_working_directory_before_the_container():
