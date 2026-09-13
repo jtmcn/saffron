@@ -32,6 +32,7 @@ from saffron.events import (
     Teardown,
     Terminal,
     describe,
+    when,
 )
 from saffron.gates.baseline import NewFailure, is_no_progress
 from saffron.gates.contract import GateResult
@@ -1840,7 +1841,7 @@ def _drive_cell(
         print(
             "rate limit: rejected — stopping, not exhausted"
             + (
-                f"; window reopens {implement.when(stopped.resets_at)}"
+                f"; window reopens {when(stopped.resets_at)}"
                 if stopped.resets_at
                 else ""
             )

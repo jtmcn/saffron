@@ -1133,7 +1133,7 @@ def test_the_duplicated_agent_renderer_still_matches_its_original():
         )
 
     # `resets_at` renders a local clock time, so only its stable half is
-    # pinned; `_when`'s own formatting is covered by its call sites above.
+    # pinned; `when`'s own formatting is covered by its call sites above.
     resets = _describe_agent_event(
         {"type": "rate_limit", "status": "rejected", "resets_at": 1_700_000_000}
     )
@@ -1148,7 +1148,7 @@ def test_describe_renders_whatever_it_is_handed():
     `Baseline(gates=('a', 'b'), statuses=('pass',))` raised `ValueError` at
     `zip(..., strict=True)`; a `rate_limit` `resets_at` that is a string, a
     list, an integer too large for a timestamp, or `NaN` raised `TypeError`,
-    `OverflowError` or `ValueError` in `_when`. `describe` must tolerate
+    `OverflowError` or `ValueError` in `when`. `describe` must tolerate
     both."""
     mismatched = Baseline(
         timestamp=1.0, spec_id="x", gates=("a", "b"), statuses=("pass",)
