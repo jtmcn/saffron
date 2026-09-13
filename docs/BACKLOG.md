@@ -57,7 +57,7 @@ That is the gate now.
 Soundness first: **79**, **69**, **93**, **94**, **109** (filed 2026-09-12; it
 leaks a mutant wherever 80 stores one), **80** (~~**83**~~, ~~**85**~~, ~~**84**~~,
 ~~**82**~~ and ~~**81**~~, pulled up from tier 3 as why 69's gate could not be
-declared against safely, are done — 2026-09-08), then **97**, **102** and **109**. Honesty second:
+declared against safely, are done — 2026-09-08), then **97**, **102** and **112**. Honesty second:
 ~~**73**~~, ~~**70**~~, ~~**45**~~, **51** (with **49**/**50**, which its fix closes),
 ~~**47**~~, **46** (with ~~**95**~~, which compounds it), **40**, ~~**26**~~,
 ~~**7**~~, and ~~**78**~~.
@@ -125,10 +125,10 @@ fire. Its number stays listed because item numbers are cited from `saffron/`.
 
 ### Tier 3 — real, not urgent
 
-**22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
-**56**, ~~**57**~~, ~~**61**~~, **62**, **63**, **64**, **69**, **75**, **76**, **77**,
+~~**22**~~, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
+**56**, ~~**57**~~, ~~**61**~~, **62**, **63**, **64**, **75**, **76**, **77**,
 ~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, **110**, **111**.
-(**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived.
+(**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived, and **69** is ranked there too.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
 is the same defect as filing one nowhere at all. **94** was filed here and moved
 to tier 1 the same day, when a host run turned it into a correctness item.)
@@ -151,7 +151,9 @@ two. **9** and **10**, each done bar a remnant, sit outside the index. Items
 **102** to tier 1, **103** and **104** to tier 2, **105** and **106** to tier 3.
 **107** and **108** were filed 2026-09-11 as 102 and 103, when running the suite
 on Linux turned "the runtime is one file behind a seam" into a claim with a test
-against it, and renumbered when #222's items landed first.)
+against it, and renumbered when #222's items landed first. **112** was filed
+2026-09-13 as a second 109, and renumbered when #234's 109 was found to have
+landed first.)
 
 ---
 
@@ -6164,6 +6166,8 @@ so the runtime earns an entry when a query or a shape reads it, which would mean
 recording per task which runtime ran it. That is worth doing and is a ledger
 change, not a vocabulary one; it is named in **108**.
 
+---
+
 ## 108. A second cell runtime, and the four things a cloud host still lacks
 
 **Status:** the **runtime half is done**, by hand, 2026-09-11 —
@@ -6304,6 +6308,8 @@ until the images question below is answered too, and that is the larger half.
 5. **`CLAUDE_CODE_OAUTH_TOKEN` is absent.** `gh` is no longer on this list: it
    installs from apt (2.45.0) and only wants a credential.
 
+---
+
 ## 109. A mutant its witness survives is spelled out to the implementer in the repair turn
 
 **Status: spec queued, 2026-09-12 — `SA-0078`, not yet run.**
@@ -6326,36 +6332,6 @@ mutant is undone by this.
 carrying neither `find` nor `replace`, with a witness that asserts over the
 whole gate result. The pull request body loses the edit with it. That is
 intended: the operator has the spec.
-
----
-
-## 109. A name bound to a suppression passes `integrity`'s scan
-
-**Tier 1.** Found reviewing `SA-0077` (PR #232), 2026-09-12 — in the wild, not
-by probe. The agent needed a legitimate skip in `tests/conftest.py`, found that
-`integrity` refuses the call form of pytest's skip, and bound pytest's skip
-function to a private name ahead of its one call, with a comment saying that was
-why. `integrity` passed the diff (`3 changed files clean of suppression and
-gate-config edits`); the same diff with the literal call fails
-`added-suppression`. The scan (`saffron/gates/core/integrity.py:272`) matches
-each `policy.yaml` token as a substring of each added line, so it reads a
-spelling, not a call: the alias covers every later call of that name in the
-file, and the same move works for the expected-failure marker and for pytest's
-skip marker applied without the decorator's `@`.
-
-The review commit spelled the call literally, by operator decision, so #232
-carries a suppression a person approved. Re-run in a cell, it fails
-`integrity`, which is the point.
-
-**Tier 1, not 2,** because it is the question the tier's soundness half exists
-for: a blocking gate reported `pass` on a diff whose own comment described
-getting past it, and none of the three lenses raised it.
-
-**Done looks like** the suppression tokens matched as what they resolve to
-rather than as text — an ast-grep rule over `tests/**` flagging any reference to
-pytest's skip or expected-failure objects, called or not, is the likely shape —
-with a witness built from `SA-0077`'s own alias, run against the substring scan
-to prove it passes there. `.saffron/**` is `protected`, so it lands by hand.
 
 ---
 
@@ -6399,6 +6375,36 @@ well past what this repo keeps comments to.
 **Done looks like** a witness for each — a stub runtime that counts its own
 invocations across two probes, and one that sleeps past a timeout patched small
 — each killed by deleting the line it names.
+
+---
+
+## 112. A name bound to a suppression passes `integrity`'s scan
+
+**Tier 1.** Found reviewing `SA-0077` (PR #232), 2026-09-12 — in the wild, not
+by probe. The agent needed a legitimate skip in `tests/conftest.py`, found that
+`integrity` refuses the call form of pytest's skip, and bound pytest's skip
+function to a private name ahead of its one call, with a comment saying that was
+why. `integrity` passed the diff (`3 changed files clean of suppression and
+gate-config edits`); the same diff with the literal call fails
+`added-suppression`. The scan (`saffron/gates/core/integrity.py:272`) matches
+each `policy.yaml` token as a substring of each added line, so it reads a
+spelling, not a call: the alias covers every later call of that name in the
+file, and the same move works for the expected-failure marker and for pytest's
+skip marker applied without the decorator's `@`.
+
+The review commit spelled the call literally, by operator decision, so #232
+carries a suppression a person approved. Re-run in a cell, it fails
+`integrity`, which is the point.
+
+**Tier 1, not 2,** because it is the question the tier's soundness half exists
+for: a blocking gate reported `pass` on a diff whose own comment described
+getting past it, and none of the three lenses raised it.
+
+**Done looks like** the suppression tokens matched as what they resolve to
+rather than as text — an ast-grep rule over `tests/**` flagging any reference to
+pytest's skip or expected-failure objects, called or not, is the likely shape —
+with a witness built from `SA-0077`'s own alias, run against the substring scan
+to prove it passes there. `.saffron/**` is `protected`, so it lands by hand.
 
 ---
 
