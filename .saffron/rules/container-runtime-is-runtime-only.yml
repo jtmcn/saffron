@@ -51,12 +51,12 @@ rule:
     # measured, `nthChild: 1` let every argv that prefixes the binary walk past —
     # `["sudo", "container", "run"]`, and the same with `env` or a wrapper.
     # `has:` reaches direct children only, which is what keeps the labelled
-    # `[("container", name, ...)]` at `session.py:1797` out: its list's child is
+    # `[("container", name, ...)]` in `session.py`'s `removed` out: its list's child is
     # a tuple, not a string.
     - kind: list
       has: { matches: binary-literal }
     # subprocess.run(("container", "run")) — a tuple is an argv too. Guarded on
-    # not being an element of a list, because `session.py:1797` holds
+    # not being an element of a list, because `session.py`'s `removed` holds
     # `[("container", name, ...)]`, which is labelled data rather than a call
     # and is the only such tuple in the tree. Measured: 0 others in scope.
     - kind: tuple
