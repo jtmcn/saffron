@@ -7,20 +7,12 @@
 # Claude Code binary, and a musl image silently falls back to the sdist with no
 # binary at all. glibc is the requirement; the distribution is not.
 #
-# `BASE_IMAGE` is an argument because a host whose egress refuses every registry
-# cannot pull the default and can still build every layer below it —
-# `images/bootstrap-base.sh` produces one from an apt mirror alone. The default
-# is what this project is measured against, so nothing changes for a host that
-# can pull; what a host built *from* is recorded below rather than assumed
-# (DESIGN.md §5.1.2).
+# A host with no registry passes a base from images/bootstrap-base.sh (§5.1.2).
 ARG BASE_IMAGE=python:3.12-slim-bookworm
 FROM ${BASE_IMAGE}
 
-# python3 and pip only when the base lacks them: the default carries 3.12 in
-# /usr/local, and Debian's packages would add an older second interpreter beside
-# it. A bootstrapped base has none, and one that silently lacks an interpreter
-# fails at the SDK install with an error nobody would trace back to here.
-# `python` is the name everything below uses, so a `python3`-only base gets the link.
+# Debian's python3 only when the base has none: beside the default's 3.12 it
+# would be a second, older interpreter.
 RUN set -eu; \
     pkgs="git ca-certificates"; \
     command -v python3 >/dev/null || pkgs="$pkgs python3 python3-pip python3-venv"; \
@@ -30,17 +22,8 @@ RUN set -eu; \
     command -v python >/dev/null || ln -s "$(command -v python3)" /usr/local/bin/python; \
     update-ca-certificates
 
-# pip verifies against certifi's bundle, not the system store, so a host behind
-# a TLS-terminating proxy fails here with a self-signed-certificate error even
-# though `ca-certificates` is installed and apt is happy. Pointing it at the
-# system store is what makes the `update-ca-certificates` above reach pip, and
-# it is a no-op on a host with nothing extra to trust — such a host's bundle is
-# the standard set. Mount the CA into /usr/local/share/ca-certificates at build
-# time; do not disable verification.
-# `SSL_CERT_FILE` is the one most tools honour and `uv` is among them — measured,
-# it reads neither of the other two and fails `uv sync` with `UnknownIssuer`
-# while pip a layer above is content. These apply on the default base too, where
-# they swap certifi's copy of the standard CA set for Debian's.
+# pip trusts certifi and uv reads only SSL_CERT_FILE (measured), so a CA mounted
+# into /usr/local/share/ca-certificates reaches neither without these.
 ENV PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
     REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
     SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
@@ -48,12 +31,8 @@ ENV PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
 # Pinned: unpinned, the agent runtime drifts between rebuilds and the version
 # that ran a task is recorded nowhere. Bump deliberately.
 ARG SDK_VERSION=0.2.142
-# --break-system-packages unconditionally: a distribution base marks itself
-# externally managed (PEP 668) and the default slim image does not, and this
-# image *is* the environment — there is no system here to protect from it. Not
-# guarded by a fallback: measured, an `||` here reported the second command's
-# PEP 668 complaint for a first command that had failed on TLS, which sent the
-# reader to the wrong problem entirely.
+# Unconditionally: a distribution base is PEP 668 externally managed. No `||`
+# fallback — measured, one reported PEP 668 for an install that had failed on TLS.
 RUN python -m pip install --no-cache-dir --break-system-packages \
       "claude-agent-sdk==${SDK_VERSION}"
 
@@ -92,20 +71,18 @@ RUN echo 'not json' | /opt/saffron/python /opt/saffron/agent_runner.py \
 
 WORKDIR /work
 
-# What this image actually is, written by running each tool rather than by
-# restating the arguments it was built with. Two hosts that built by different
-# routes are then comparable rather than assumed equal, which is the whole cost
-# of `BASE_IMAGE` being an argument (DESIGN.md §5.1.2). Every line is a version
-# some tool printed about itself; a build that could not produce one fails here
-# instead of shipping a blank. Assigned before printing because `set -e` ignores
-# a failed substitution inside `echo`'s arguments.
+# Every line a version the tool printed about itself (§5.1.2). One substitution per
+# step: `set -e` misses a failure inside `$(a | b)` or `echo "$(a)"` — measured, dash.
 RUN set -eu; \
     base=$(. /etc/os-release && echo "$ID $VERSION_ID"); \
     py=$(python --version 2>&1); \
     gitv=$(git --version); \
     sdk=$(python -c 'import importlib.metadata as m; print(m.version("claude-agent-sdk"))'); \
-    cc=$(/opt/saffron/claude-code --version 2>&1 | head -1); \
+    cc=$(/opt/saffron/claude-code --version 2>&1); \
+    cc=$(printf '%s\n' "$cc" | head -n 1); \
     printf 'base=%s\npython=%s\ngit=%s\nclaude-agent-sdk=%s\nclaude-code=%s\n' \
       "$base" "$py" "$gitv" "$sdk" "$cc" > /opt/saffron/provenance; \
+    if grep -q '=$' /opt/saffron/provenance; then \
+      echo "a tool printed no version:" >&2; cat /opt/saffron/provenance >&2; exit 1; fi; \
     grep -q '^python=Python 3\.12\.' /opt/saffron/provenance \
       || { echo "base image is not Python 3.12:" >&2; cat /opt/saffron/provenance >&2; exit 1; }

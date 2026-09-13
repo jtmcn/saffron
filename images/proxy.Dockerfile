@@ -2,16 +2,12 @@
 # filtering. Not iptables: --cap-drop ALL removes CAP_NET_ADMIN, and granting
 # it would let the untrusted cell rewrite its own firewall (DESIGN.md §5.1).
 #
-# `BASE_IMAGE` is an argument for the reason `cell-base.python.Dockerfile` gives:
-# a host whose egress refuses every registry cannot pull the default and can
-# still build every layer below it (DESIGN.md §5.1.2). The default is unchanged.
+# A host with no registry passes a Debian or Ubuntu base (§5.1.2).
 ARG BASE_IMAGE=alpine:3
 FROM ${BASE_IMAGE}
 
-# Either package manager, because the base is an argument now. Asserted by
-# running squid, never by finding it: a present-and-unrunnable binary reads
-# identically to a working one (principle 39), and this one is only ever
-# executed by a container nobody is watching.
+# Either package manager, since the base is an argument. squid is run, not
+# located: a present-and-unrunnable binary reads as a working one (principle 39).
 RUN set -eu; \
     if command -v apk >/dev/null; then apk add --no-cache squid; \
     elif command -v apt-get >/dev/null; then \
@@ -21,11 +17,8 @@ RUN set -eu; \
     squid --version | grep -qi squid \
       || { echo "squid reported no version" >&2; exit 1; }
 
-# The host starts this container as `squid:squid` and never as root, because
-# dropping privilege needs SETUID/SETGID and `--cap-drop ALL` removes them
-# (§5.1). Alpine's package creates that user; Debian's creates `proxy` instead —
-# measured — so the image supplies the name the host names rather than core
-# learning which distribution built its own proxy image.
+# The host runs this as squid:squid (--cap-drop ALL leaves nothing to drop
+# privilege with), and Debian's package names that user `proxy` — measured.
 RUN set -eu; \
     if ! getent group squid >/dev/null; then \
       addgroup --system squid 2>/dev/null || addgroup -S squid; fi; \
@@ -37,12 +30,14 @@ RUN set -eu; \
 
 COPY images/squid.conf /etc/squid/squid.conf
 
-# What this image is, recorded by running the tool rather than restating the
-# build argument — the same reason the cell base carries one.
+# Versions the tools printed, one substitution per step as the cell base explains.
 RUN set -eu; \
-    { echo "base=$(. /etc/os-release && echo "$ID ${VERSION_ID:-}")"; \
-      echo "squid=$(squid --version 2>&1 | head -1)"; \
-    } > /etc/squid/provenance
+    base=$(. /etc/os-release && echo "$ID ${VERSION_ID:-}"); \
+    sq=$(squid --version 2>&1); \
+    sq=$(printf '%s\n' "$sq" | head -n 1); \
+    printf 'base=%s\nsquid=%s\n' "$base" "$sq" > /etc/squid/provenance; \
+    if grep -q '=$' /etc/squid/provenance; then \
+      echo "a tool printed no version:" >&2; cat /etc/squid/provenance >&2; exit 1; fi
 
 EXPOSE 3128
 CMD ["squid", "-N", "-f", "/etc/squid/squid.conf"]
