@@ -2730,8 +2730,8 @@ def test_a_wall_on_the_plan_turn_is_not_the_task_failing(monkeypatch, tmp_path):
 def test_an_unreadable_reset_time_still_stops_rate_limited(monkeypatch, tmp_path):
     """`SA-0070` measured `events._when` (now `events.when`) against exactly
     these four values, for the live-cell `rate_limit` event `describe()`
-    renders. `implement.when` was its unguarded twin, and the handler below
-    was its only caller: reverted, `time.localtime` raises inside `except
+    renders. `implement.when` was its unguarded twin, and the `except
+    RateLimited` handler in `cell/session.py` was its only caller: reverted, `time.localtime` raises inside `except
     RateLimited`, the raise escapes that clause entirely — its sibling
     `except BaseException` is an alternative on the same `try`, not a
     wrapper around it — and `run_one_cell` exits having set neither

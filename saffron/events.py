@@ -537,13 +537,9 @@ def read_log(task_dir: Path) -> list[Event]:
 def when(stamp: int | None) -> str:
     """The one place a unix reset time becomes something an operator can act
     on: "when can I retry", in local time, the day dropped unless it isn't
-    today. Backlog item 104 deleted `phases.implement.when`, the unguarded
-    original this was duplicated from, once that copy turned out to be the
-    *only* caller of the twin `except RateLimited` handler in
-    `cell/session.py` ever had — a wall on a value `time.localtime` cannot
-    read raised there, escaped the one `except` clause it was inside, and
-    left a run row `RUNNING` forever. `describe()`'s own `rate_limit` branch
-    below is this function's other caller.
+    today. Its callers are the `except RateLimited` handler in
+    `cell/session.py` and `describe()`'s `rate_limit` branch below; item 104
+    deleted the unguarded copy in `phases.implement`.
 
     `stamp` arrives from an untrusted cell's `resets_at`, unchecked by any
     shape gate — it is a value, not a shape, so `read_log` would not refuse
@@ -588,9 +584,8 @@ def _clean(value: object, limit: int) -> str:
 
 
 def _describe_agent_event(event: dict) -> str:
-    """`phases.implement._describe`, verbatim in shape: the one place a raw
-    Claude Agent SDK event dict becomes a line, duplicated here for the same
-    reason as `_when` above."""
+    """The one place a raw Claude Agent SDK event dict becomes a line;
+    `phases.implement` renders through `describe` rather than keeping a copy."""
     kind = event.get("type")
     if kind == "text":
         text = " ".join(str(event.get("text", "")).split())

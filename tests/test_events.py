@@ -41,6 +41,7 @@ from saffron.events import (
     _describe_agent_event,
     describe,
     read_log,
+    when,
 )
 from saffron.gates.contract import Failure
 from saffron.phases import review
@@ -1183,6 +1184,20 @@ def test_describe_renders_whatever_it_is_handed():
         )
         assert line.startswith("agent: rate limit rejected"), used
         assert len(line) <= len("agent: rate limit rejected, ") + 160 + len(" used")
+
+
+def test_when_renders_a_readable_reset_time_in_local_time(monkeypatch):
+    # Pinned to UTC+9 so local and UTC disagree on the day: a formatter that
+    # returned "unknown", or used gmtime, both passed the whole suite before this.
+    import time
+
+    monkeypatch.setenv("TZ", "XXX-9")
+    time.tzset()
+    try:
+        assert when(1755800000) == "Fri 22 Aug 03:13 local"
+    finally:
+        monkeypatch.undo()
+        time.tzset()
 
 
 def test_every_cell_authored_field_is_clipped():
