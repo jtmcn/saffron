@@ -160,13 +160,8 @@ def _git(container: str, *args: str) -> runtime.Completed:
     # one uncommitted `git config` (§5.4).
     # useReplaceRefs=false: here, not in `DIFF_FLAGS` — `git replace` moves
     # every read of the object graph, not only diffs (docs/BACKLOG.md item 102).
-    # bigFileThreshold=2g: below this, git calls a file "big" and reports the
-    # diff as `Binary files ... differ` with no hunks — no lens then reads the
-    # edit, and PACKAGE's `_NO_FULL_INDEX` refusal fires as infrastructure
-    # rather than the task's own failure (docs/BACKLOG.md item 103).
-    # attributesFile=/dev/null: the same hiding, reached by marking every path
-    # `-diff` in a file this worktree config names; a file with nothing in it
-    # marks nothing.
+    # bigFileThreshold, attributesFile: either can print an edit as `Binary files
+    # differ`, so no lens reads its hunks (docs/BACKLOG.md item 103).
     return runtime.exec_(
         container,
         [

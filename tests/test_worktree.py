@@ -1538,6 +1538,11 @@ def test_read_at_head_reads_through_a_planted_replacement(tmp_path, monkeypatch)
 # --- export_patch against a worktree setting that hides content (item 103) -
 
 
+# Over 1 MiB, so a threshold pin lowered to any round constant up to `1m` still
+# hides these hunks; git's own `512m` default and the `2g` pin both clear it.
+_PADDING = "".join(f"line_{i} = {i}\n" for i in range(80_000))
+
+
 def _isolated_repo_with_a_text_file(tmp_path, monkeypatch):
     """A repo isolated from the operator's own git config, with one committed
     text file ready to be edited under whatever worktree-local setting each
@@ -1555,14 +1560,14 @@ def _isolated_repo_with_a_text_file(tmp_path, monkeypatch):
     # this fixture's callers assert against.
     monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
     subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
-    (tmp_path / "f.py").write_text("one = 1\n")
+    (tmp_path / "f.py").write_text("one = 1\n" + _PADDING)
     base = _commit(tmp_path, "base")
     _host_git(tmp_path, monkeypatch)
     return base
 
 
 def _edit_and_commit_f(tmp_path):
-    (tmp_path / "f.py").write_text("one = 2\n")
+    (tmp_path / "f.py").write_text("one = 2\n" + _PADDING)
     return _commit(tmp_path, "edit f.py")
 
 
