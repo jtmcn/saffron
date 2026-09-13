@@ -141,6 +141,20 @@ DIFF_FLAGS = (
     # A rename is git's guess at intent; the host needs both paths, or a test
     # renamed into `touches` leaves scope nothing to object to.
     "--no-renames",
+    # core.abbrev scales an `index` line's object hashes with the repo's
+    # object count under `auto`; nothing host-side reads that hash, but a
+    # configured value still moves the bytes `harness/recovery.py`'s
+    # `pinned_diff` compares against a recorded patch. Pinned to what `auto`
+    # actually emitted across every shipped fixture (7 hex digits), not to
+    # `auto` itself, so this keeps matching after the repo outgrows auto-7.
+    "--abbrev=7",
+    # diff.context widens the unchanged lines flanking a hunk, and
+    # `parse_diff` puts every line a hunk's range covers into what a critic
+    # finding may anchor to — the one of these three with a consequence
+    # beyond byte-identity.
+    "--unified=3",
+    # diff.algorithm picks a different diff for the same two trees.
+    "--diff-algorithm=myers",
 )
 
 

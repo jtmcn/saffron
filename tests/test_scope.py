@@ -202,6 +202,126 @@ def test_the_pinned_flags_beat_repo_local_config(tmp_path):
     assert "+b" in pinned
 
 
+def _context_repo(path):
+    """A repo with enough unchanged lines around one edit that a configured
+    `diff.context` wider than git's default (3) visibly widens a bare diff's
+    hunk — and narrow enough that the default width does not already cover
+    the whole file, so the two are distinguishable. No `diff.context` is set
+    here: the test sets it after taking the unconfigured reference diff."""
+    path.mkdir(parents=True, exist_ok=True)
+
+    def run(*a):
+        subprocess.run(a, cwd=path, check=True, capture_output=True)
+
+    run("git", "init", "-q", "-b", "main")
+    run("git", "config", "user.email", "t@example.com")
+    run("git", "config", "user.name", "t")
+    lines = [f"line{i}\n" for i in range(1, 31)]
+    (path / "f.txt").write_text("".join(lines))
+    run("git", "add", "-A")
+    run("git", "commit", "-qm", "base")
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=path, capture_output=True, text=True
+    ).stdout.strip()
+
+    lines[14] = "line15 CHANGED\n"
+    (path / "f.txt").write_text("".join(lines))
+    run("git", "add", "-A")
+    run("git", "commit", "-qm", "edit")
+    return base
+
+
+def _algorithm_repo(path):
+    """A repo whose base/head pair is one of the classic patience-vs-myers
+    divergences: two whole-line blocks separated by blank lines, swapped.
+    Myers reads it as an edit to the first and last line of the file;
+    patience anchors on the unique `pass` lines and reads it as deleting the
+    first block and re-inserting it after the second — genuinely different
+    hunks, not just a different label on the same one (measured empirically
+    before writing this docstring). No `diff.algorithm`/`core.abbrev` is set
+    here: the test sets them after taking the unconfigured reference diff."""
+    path.mkdir(parents=True, exist_ok=True)
+
+    def run(*a):
+        subprocess.run(a, cwd=path, check=True, capture_output=True)
+
+    run("git", "init", "-q", "-b", "main")
+    run("git", "config", "user.email", "t@example.com")
+    run("git", "config", "user.name", "t")
+    (path / "f.py").write_text("def foo():\n    pass\n\n\ndef bar():\n    pass\n")
+    run("git", "add", "-A")
+    run("git", "commit", "-qm", "base")
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=path, capture_output=True, text=True
+    ).stdout.strip()
+
+    (path / "f.py").write_text("def bar():\n    pass\n\n\ndef foo():\n    pass\n")
+    run("git", "add", "-A")
+    run("git", "commit", "-qm", "swap")
+    return base
+
+
+def _hunk_headers(diff):
+    return [ln for ln in diff.splitlines() if ln.startswith("@@")]
+
+
+def test_the_pinned_flags_beat_a_configured_context_width(tmp_path):
+    """A worktree that configures a wider `diff.context` does not widen the
+    pinned diff: `--unified=3` on the command line beats it, matching every
+    recorded fixture's hunk headers (`harness/recovery.py`'s `pinned_diff`).
+    `parse_diff` puts every line a hunk's range covers into what a critic
+    finding may anchor to, so this is the one of the three pins in this file
+    with a consequence beyond byte-identity."""
+    repo = tmp_path / "repo"
+    base = _context_repo(repo)
+    default_headers = _hunk_headers(_diff(repo, base))
+
+    subprocess.run(
+        ["git", "config", "diff.context", "10"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    bare_headers = _hunk_headers(_diff(repo, base))
+    pinned_headers = _hunk_headers(_diff(repo, base, *worktree.DIFF_FLAGS))
+    # The config actually widened the bare diff's hunk — proving the fixture
+    # exercises `diff.context`, not a no-op.
+    assert bare_headers != default_headers
+    assert bare_headers != pinned_headers
+    assert pinned_headers == default_headers
+
+
+def test_the_pinned_flags_beat_a_configured_abbrev_and_algorithm(tmp_path):
+    """A worktree that configures `core.abbrev` or `diff.algorithm` does not
+    move the pinned diff's bytes either: `--abbrev=7` and
+    `--diff-algorithm=myers` on the command line beat both, matching what
+    `auto` actually emitted across every shipped fixture
+    (`harness/recovery.py`'s `pinned_diff`)."""
+    repo = tmp_path / "repo"
+    base = _algorithm_repo(repo)
+    default = _diff(repo, base)
+
+    subprocess.run(
+        ["git", "config", "diff.algorithm", "patience"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "core.abbrev", "12"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    bare = _diff(repo, base)
+    pinned = _diff(repo, base, *worktree.DIFF_FLAGS)
+    # The config actually changed both the hunks (algorithm) and the index
+    # line's hash width (abbrev) — proving the fixture exercises both knobs,
+    # not a no-op.
+    assert bare != default
+    assert pinned == default
+
+
 def test_a_gate_handed_a_bent_diff_errors_rather_than_passing(tmp_path):
     """`error` is charged to nobody (§5.4); a `pass` here would be the escape."""
     base = _hostile_repo(tmp_path / "repo")
