@@ -9,12 +9,32 @@ GitHub issues remain in use only for research/evidence records under
 
 - **One spec per file**: `.saffron/specs/SA-NNNN-<slug>.md`, numbered from the
   highest existing `SA-` id + 1 (e.g. after `SA-0011`, next is `SA-0012`).
-- **Frontmatter** (YAML between `---` fences, required): `id`, `title`, `type`,
-  `priority`, `depends_on`, `touches`, `forbidden`, `budget_usd`, `max_attempts`,
-  `risk`. Do not leave a field out — the parser gates on all of them.
-- **Body**: headings `## Context`, `## Problem`, `## Acceptance criteria` (as
-  `- [ ]` boxes), `## Out of scope`, `## Notes for the agent`. The acceptance
-  criteria are load-bearing: each drives a gate check.
+- **Frontmatter** (YAML between `---` fences). `id`, `title` and `type` are
+  required. The rest default: `priority` 3; `depends_on`, `envelope`, `touches`
+  and `forbidden` empty; the ceilings `budget_usd` 12, `max_attempts` 4,
+  `max_turns` 60 and `risk` `standard`. An unknown key is refused, not ignored.
+- **Acceptance criteria are `acceptance:` in the frontmatter**, one entry per
+  criterion: a `claim` (the prose the PR body renders) and a `witness` (a test
+  node id), plus `preserves: true` or a `mutant` where the bullets below say so.
+  They are load-bearing: `criteria` checks each witness at base and at head, and
+  `witness` runs each mutant.
+
+  ```yaml
+  acceptance:
+    - claim: >-
+        A task that wrote notes opens a pull request carrying them.
+      witness: tests/test_package.py::test_the_packaged_body_carries_the_implementers_notes
+      mutant:
+        file: saffron/phases/package.py
+        find: notes=outcome.notes
+        replace: notes=""
+  ```
+
+  A `## Acceptance criteria` checklist in the body still parses — every spec up to
+  `SA-0031` used one — but it names no witness, so nothing host-side can check
+  it, and a spec declaring both is refused at intake.
+- **Body**: headings `## Context`, `## Problem`, `## Out of scope`, `## Notes for
+  the agent`.
 - **Dependencies**: list blocked-by spec ids in `depends_on` (e.g. `[SA-0002, SA-0005]`).
 - **A spec that introduces a term files its vocabulary follow-up when it is
   written.** `ontology/` is rightly `forbidden` to the spec implementing against
@@ -102,5 +122,5 @@ the user passed, resolving to its file).
 Used by `/wayfinder`. The **map** is a spec file; research/one-off records live
 in `docs/evidence/` as markdown, each prefixed with the issue/record number. A
 work item is a spec with a `depends_on` line. Triage state is read from the
-spec's `priority`, `depends_on`, and whether its acceptance criteria are ticked,
-not from a label string.
+spec's `priority`, `depends_on`, and whether it has been retired to
+`.saffron/specs/done/`, not from a label string.
