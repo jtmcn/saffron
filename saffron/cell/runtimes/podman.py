@@ -36,9 +36,7 @@ class Podman:
 
     @property
     def cpu_offset(self) -> int:
-        # No VM, so nothing allocates a vCPU beyond what was asked for: a mask
-        # of n CPUs reports n. Measured 0 at 1->1 and 2->2, against
-        # apple/container's deterministic 1.
+        # No VM to allocate a spare vCPU: measured 1->1 and 2->2.
         return 0
 
     @property

@@ -28,11 +28,8 @@ class Apple:
 
     @property
     def cpu_offset(self) -> int:
-        # apple/container 1.2.2 allocates one vCPU more than --cpus requests,
-        # measured at 1->2, 2->3, 4->5, 6->7. The guest count is honest about
-        # the VM it is in; the VM just gets one more than asked for. Assert it,
-        # never assume it — and re-measure with the spike on any runtime
-        # upgrade (DESIGN.md §5.1).
+        # apple/container 1.2.2 gives the VM one vCPU beyond --cpus: measured 1->2,
+        # 2->3, 4->5, 6->7. Re-measure with the spike on any upgrade (DESIGN.md §5.1).
         return 1
 
     @property

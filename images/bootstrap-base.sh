@@ -1,37 +1,28 @@
 #!/usr/bin/env sh
-# Build a base image for a host that cannot reach a container registry.
+# Build a base image from an apt mirror alone, for a host whose egress refuses
+# every registry (docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md).
 #
-# `images/cell-base.python.Dockerfile` is `FROM python:3.12-slim-bookworm` and
-# that is the base this project is built and measured against. A host whose
-# egress policy refuses every registry cannot pull it — measured on a Claude
-# Code cloud runner, where docker.io, quay.io, public.ecr.aws and ghcr.io are
-# all 403 at the blob CDN (docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md).
-# Nothing in the base needs a registry: an apt mirror and pypi supply all of it.
-#
-#   ./images/bootstrap-base.sh [tag] [suite] [mirror]
+#   ./images/bootstrap-base.sh [tag] [suite] [mirror] [runtime-binary]
 #
 # Then build the cell base against it:
 #   <runtime> build --build-arg BASE_IMAGE=<tag> -t saffron/cell-base:python \
 #     -f images/cell-base.python.Dockerfile .
 #
-# **This does not produce the same image the default does**, and DESIGN.md §5.1.2
-# says what that costs. It is a different distribution, resolved at the moment it
-# runs. The image records what it actually contains so two hosts can be compared
-# rather than assumed equal; that record is the thing to read before trusting a
-# gate result from one host against a gate result from another.
+# Not the image the default builds: a different distribution, resolved today.
+# Compare provenance files before comparing gate results (DESIGN.md §5.1.2).
 set -eu
 
 TAG=${1:-saffron/bootstrap-base:local}
 SUITE=${2:-noble}
 MIRROR=${3:-http://archive.ubuntu.com/ubuntu/}
-RUNTIME=${SAFFRON_CELL_RUNTIME_BIN:-podman}
+RUNTIME=${4:-podman}
 
 command -v debootstrap >/dev/null || {
 	echo "debootstrap is not installed (apt-get install debootstrap)" >&2
 	exit 2
 }
 command -v "$RUNTIME" >/dev/null || {
-	echo "$RUNTIME is not on PATH; set SAFFRON_CELL_RUNTIME_BIN" >&2
+	echo "$RUNTIME is not on PATH; name the runtime binary as the fourth argument" >&2
 	exit 2
 }
 
@@ -43,10 +34,8 @@ trap 'rm -rf "$root"' EXIT
 echo "debootstrap $SUITE -> $root/rootfs"
 debootstrap --force-check-gpg --variant=minbase --include=ca-certificates \
 	"$SUITE" "$root/rootfs" "$MIRROR" >/dev/null
-# --variant=minbase leaves `universe` disabled, and python3-pip lives there.
-# Without it `apt-get install` aborts the whole transaction on one missing
-# candidate and the other packages silently do not arrive either. Measured.
-# -updates and -security too, or every image built on this ships release day's.
+# minbase leaves `universe` (python3-pip) off, and one missing candidate aborts the
+# whole install — measured. -updates and -security, or it ships release day's.
 printf 'deb %s %s main universe\n' "$MIRROR" "$SUITE" "$MIRROR" "$SUITE-updates" \
 	"$MIRROR" "$SUITE-security" >"$root/rootfs/etc/apt/sources.list"
 

@@ -55,10 +55,7 @@ run() {
 # container on it with CPU and memory limits, inspect it, destroy it.
 
 detect() {
-	# Detection here is a convenience for a diagnostic, not the supervisor's
-	# selection. DESIGN.md §5.1 forbids *Saffron* choosing a runtime from what is
-	# on PATH — a control that picks its own boundary. This script has no boundary
-	# to pick; it is asking a machine what it can do.
+	# §5.1 forbids *Saffron* detecting its runtime; a diagnostic has no boundary to pick.
 	for r in container docker podman; do command -v "$r" >/dev/null 2>&1 && {
 		echo "$r"
 		return
@@ -68,8 +65,7 @@ detect() {
 
 net_create() {
 	case $RUNTIME in
-	docker) run docker network create --internal --subnet "$SUBNET" "$NET" >/dev/null ;;
-	podman) run podman network create --internal --subnet "$SUBNET" "$NET" >/dev/null ;;
+	docker | podman) run "$RUNTIME" network create --internal --subnet "$SUBNET" "$NET" >/dev/null ;;
 	container) run container network create --internal --subnet "$SUBNET" "$NET" >/dev/null ;;
 	esac
 }
@@ -81,8 +77,7 @@ net_create() {
 proxy_start() {
 	local listen="while true; do nc -l -p $PROXY_PORT >/dev/null 2>&1; done"
 	case $RUNTIME in
-	docker) run docker run -d --name "$PROXY" --network "$NET" "$IMAGE" sh -c "$listen" >/dev/null ;;
-	podman) run podman run -d --name "$PROXY" --network "$NET" "$IMAGE" sh -c "$listen" >/dev/null ;;
+	docker | podman) run "$RUNTIME" run -d --name "$PROXY" --network "$NET" "$IMAGE" sh -c "$listen" >/dev/null ;;
 	container) run container run -d --name "$PROXY" --network "$NET" "$IMAGE" sh -c "$listen" >/dev/null ;;
 	esac
 }
@@ -96,14 +91,8 @@ proxy_ip() {
 
 cell() {
 	case $RUNTIME in
-	docker) docker run --rm --network "$NET" \
-		--cpuset-cpus "0-$((CPUS - 1))" --memory "$MEM" \
-		--security-opt no-new-privileges --cap-drop ALL \
-		"$IMAGE" "$@" 2>/dev/null ;;
-	# A mask, not a quota: measured, podman's --cpus leaves the cell reporting
-	# every CPU the host has. no-new-privileges is asked for because there is no
-	# per-cell VM to offer instead (DESIGN.md §5.1).
-	podman) podman run --rm --network "$NET" \
+	# A mask, not a quota: measured, podman's --cpus shows the cell every host CPU.
+	docker | podman) "$RUNTIME" run --rm --network "$NET" \
 		--cpuset-cpus "0-$((CPUS - 1))" --memory "$MEM" \
 		--security-opt no-new-privileges --cap-drop ALL \
 		"$IMAGE" "$@" 2>/dev/null ;;
@@ -175,13 +164,8 @@ if [ "$alive" != "alive" ]; then
 fi
 note "a cell starts and returns output"
 
-# The instrument, before anything it measures. Every negative assertion below is
-# read through `nc`, and a `nc` that cannot connect at all reports the same
-# failure as a network that refuses — which reads as isolation. Measured
-# 2026-09-11: busybox `nc -z` returns 1 against a listener `wget` fetches from
-# the same container a line later, and a whole record was written on the back of
-# it (docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md). So prove the
-# probe can succeed before trusting it to fail.
+# Prove the probe can succeed before trusting it to fail: a broken `nc` reads as
+# isolation, and measured 2026-09-11 one did (docs/evidence/, podman record).
 if [ "$(probe "nc -w 3 127.0.0.1 1 </dev/null")" = noran ]; then
 	er "the probe harness itself does not run in a cell"
 else

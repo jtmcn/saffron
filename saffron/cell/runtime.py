@@ -83,9 +83,8 @@ def dialect() -> Dialect:
     return _selected
 
 
-# `RUNTIME` and `CPU_OFFSET` stay module attributes for callers outside this
-# package — `proxy.py` reads the proxy's log, `image.py` builds with the binary —
-# but resolve through `dialect()` so that reading one is a use, not an import.
+# Module attributes for callers outside the package (`proxy.py`, `image.py`), resolved
+# through `dialect()` so that reading one is a use, not an import.
 if TYPE_CHECKING:
     RUNTIME: str
     CPU_OFFSET: int
