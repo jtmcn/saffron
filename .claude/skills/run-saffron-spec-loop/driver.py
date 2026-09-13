@@ -527,10 +527,33 @@ def cmd_snapshot(args) -> int:
     return 0
 
 
+def _next_spec(
+    rows: list[Planned], *, again: bool
+) -> tuple[Planned | None, str | None]:
+    """The first pending spec no cell has answered, and a note when its parent
+    is reviewable: a child's worktree is cut from the parent's branch, so the
+    parent's review commits have to be pushed first."""
+    by_id = {p.spec_id: p for p in rows}
+    for p in rows:
+        if p.pending and (again or p.last_state is None):
+            parents = [
+                d
+                for d in p.depends_on
+                if by_id.get(d) and by_id[d].state == "READY_FOR_REVIEW"
+            ]
+            note = (
+                f"{p.spec_id} is cut from {', '.join(parents)}: push "
+                f"{'their' if len(parents) > 1 else 'its'} review commits first"
+                if parents
+                else None
+            )
+            return p, note
+    return None, None
+
+
 def cmd_next(args) -> int:
-    """The first pending spec no cell has answered. `--again` hands back one a
-    cell stopped on without deciding — the case is a reopened rate-limit
-    window."""
+    """`--again` hands back a spec a cell stopped on without deciding — the
+    case is a reopened rate-limit window."""
     rows = _load()
     if reasons := _stale(rows):
         print("the run order is stale:", file=sys.stderr)
@@ -538,11 +561,13 @@ def cmd_next(args) -> int:
             print(f"  {reason}", file=sys.stderr)
         print("re-snapshot with `snapshot --force`.", file=sys.stderr)
         return 1
+    chosen, note = _next_spec(rows, again=args.again)
+    if chosen is not None:
+        print(chosen.spec_id)
+        if note:
+            print(f"note: {note}", file=sys.stderr)
+        return 0
     pending = [p for p in rows if p.pending]
-    for p in pending:
-        if args.again or p.last_state is None:
-            print(p.spec_id)
-            return 0
     if not pending:
         print("done: every spec in the order has been run or dropped", file=sys.stderr)
         return 1

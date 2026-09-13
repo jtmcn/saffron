@@ -43,7 +43,7 @@ def _row(
     priority: int = 1,
     depends_on: tuple[str, ...] | list[str] = (),
     pr: int | None = 1,
-    state: str = "READY_FOR_REVIEW",
+    state: str | None = "READY_FOR_REVIEW",
 ):
     return driver.Planned(
         spec_id=spec_id,
@@ -205,3 +205,17 @@ def test_the_watch_pattern_matches_every_terminal_state_after_a_padded_spec_id()
         )
     assert pattern.search("IMPLEMENT: 1 commit(s), $1.48 spent")
     assert not pattern.search("agent: thinking")
+
+
+def test_next_says_when_the_spec_it_names_is_cut_from_a_reviewable_parent():
+    parent = _row("A", pr=10)
+    child = _row("B", 2, ["A"], pr=None, state=None)
+    sibling = _row("C", 2, pr=None, state=None)
+
+    chosen, note = driver._next_spec([parent, child, sibling], again=False)
+    assert chosen is child
+    assert note == "B is cut from A: push its review commits first"
+
+    chosen, note = driver._next_spec([parent, sibling], again=False)
+    assert chosen is sibling
+    assert note is None

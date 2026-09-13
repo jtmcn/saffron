@@ -5,7 +5,7 @@ placeholders; send everything below the rule verbatim.
 
 - `{PR}`, `{BRANCH}` (`saffron/SA-NNNN`), `{SPEC}` (the spec's path)
 - `{BASE}` — `git merge-base origin/main origin/{BRANCH}`; for a spec with
-  `depends_on`, the parent's branch in place of `origin/main`
+  `depends_on`, `origin/saffron/<parent id>` in place of `origin/main`
 - `{HEAD}` — `git rev-parse origin/{BRANCH}`
 - `{WHAT}` — two sentences on what the diff does, and its `git diff --stat`
 - `{KNOWN}` — the in-cell critic's findings you have already verified or
@@ -43,9 +43,9 @@ Demonstrate every finding with a command and its output, or mark it unverified.
 **Working copy:** /Users/jm/Code/saffron is read-only to you, because another
 process edits it. Probe in your own worktrees
 (`git -C /Users/jm/Code/saffron worktree add /tmp/review-{PR} {HEAD}`, then
-`uv sync` inside) and remove them when done. Keep to the default suite:
-`pytest -m cell`, pushing, committing and commenting on the PR are the
-operator's. You are the only review seat, so do the whole review yourself.
+`uv sync` inside) and remove them when done. Run only the default suite;
+`pytest -m cell`, pushing, committing and commenting on the PR are left to the
+operator. You are the only review seat, so do the whole review yourself.
 
 **Report, in this order:**
 

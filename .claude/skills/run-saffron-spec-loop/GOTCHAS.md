@@ -20,17 +20,19 @@ do; the measurement behind it follows.
 - **`PYTHONUNBUFFERED=1` on every cell.** Redirected to a file, the CLI's
   stdout is block-buffered: measured, the log stayed at 0 bytes while the cell
   ran and the batch directory filled.
-- **Check the provider window before the first cell.** A rate limit can land
-  after the work is done: SA-0028's first cell had green gates and hit the limit
-  in REBUT at $7.92 of $14. PACKAGE never ran, so there was no branch, and the
+- **A closed rate-limit window is the account's, not the spec's.** Start no
+  cell before the reopen time a `rate limit:` line printed. A limit can land
+  after the work is done: SA-0028's first cell had green gates and hit it in
+  REBUT at $7.92 of $14. PACKAGE never ran, so there was no branch, and the
   re-run started over. The loop's cost is not bounded by the specs' budgets.
 - **`baseline: … tests=fail` on every cell is expected.** One host-only test
   fails in every cell (backlog item 106); baseline subtraction cancels it.
 
 ## Recording
 
-- **Record after the cell process exits.** `READY_FOR_REVIEW` prints before
-  PACKAGE opens the pull request; recording on that line finds no PR.
+- **Record after the cell process exits** — the background task's completion
+  notice, not the Monitor. `READY_FOR_REVIEW` prints before PACKAGE opens the
+  pull request; recording on that line finds no PR.
 - **A state that decided nothing leaves the spec pending** with `last_state`
   set, and `next` walks past it so a closed rate-limit window cannot loop
   forever:
@@ -39,8 +41,11 @@ do; the measurement behind it follows.
     says when. The re-run starts from `base_sha`.
   - An in-flight state (`IMPLEMENTING`, `REPAIRING`, `REVIEWING`, `REBUTTING`,
     `QUEUED`): the cell is still running; wait for the process to exit.
-- **One re-run per failure, then `drop`.** A cell is about an hour and real
-  money. A rate limit is the exception: nothing about the task failed.
+- **A decided state is final for this loop.** `EXHAUSTED`, `NOT_IMPLEMENTED`
+  and the rest of `scheduler.DONE_STATES` leave the stack and are not re-run. A
+  cell that exits 2, or leaves `record` with no task, gets one more cell,
+  started by its spec path; after that, `drop`. A cell is about an hour and
+  real money. A rate limit does not count: nothing about the task failed.
 
 ## Reviewing
 
@@ -71,8 +76,10 @@ do; the measurement behind it follows.
   Siblings that both append to one document collide on the number as well as
   the text: SA-0027 and SA-0028 both appended `## 34.` to `docs/BACKLOG.md`,
   and the PR pages looked clean while `git merge-tree` reported a `CONFLICT`.
-  `stack` runs that check on every adjacent pair. Resolve by rebasing,
-  renumbering, and grepping the code for comments citing the old number.
+  `stack` runs that check on every adjacent pair. A conflict goes to the
+  operator before linking: resolving it is a hand rebase of the upper branch
+  onto the lower one, renumbering, a grep of the code for comments citing the
+  old number, and a force-push they approve.
 - **Read the bases back after linking.** A numeric first argument to `link` is
   taken as a stack number when a stack with that number exists, and the rest
   are appended to it. `stack --execute` reads every PR's base and flags one that
