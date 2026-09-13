@@ -984,6 +984,16 @@ once, and the result *names* every such criterion. A check that quietly buys
 nothing is the defect one level up, and it is the failure mode Appendix I is
 about.
 
+**A gate that mutates the tree guards itself against a dirty one.** `witness`
+runs inside the declared suite and `committed` runs after it
+(`saffron/gates/suite.py`) — deliberately, because `committed` must see what the
+gates leave behind (§5.4). So the file a mutant targets may carry uncommitted
+work, and `source_mutated` refuses one that is not at `HEAD`, landing on `skip`
+the way `revert` does; a failed write restores from `HEAD` before it re-raises.
+Any future gate that edits the tree owes the same guard, since `committed` will
+not have run yet. `SA-0062` specified the opposite order and passed review
+(`docs/BACKLOG.md` item 78).
+
 **Blocking level.** Advisory at `standard`, blocking at `elevated` — the level
 `size` already carries, and for the same reason: an elevated diff is one where a
 plausible-looking wrong change hurts most, and a claim guarded by nothing is

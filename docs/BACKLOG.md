@@ -55,12 +55,12 @@ Soundness first: **79**, **69**, **93**, **94**, **80** (~~**83**~~, ~~**85**~~,
 declared against safely, are done — 2026-09-08), then **97** and **102**. Honesty second:
 ~~**73**~~, ~~**70**~~, ~~**45**~~, **51** (with **49**/**50**, which its fix closes),
 ~~**47**~~, **46** (with ~~**95**~~, which compounds it), **40**, ~~**26**~~,
-~~**7**~~, and the remainder of **78**.
+~~**7**~~, and ~~**78**~~.
 
 Closed since the 2026-09-04 sort, and left in place because their numbers are
 cited: **74** is done (`SA-0063`, `SA-0064`); **88** is closed on a negative
 result (2026-09-08 — the gate summary was not the confound); **71** is
-done (2026-09-08), **78** is done in code, and **94** has its recording half done
+done (2026-09-08), **78** is done (its `DESIGN.md` half 2026-09-12), and **94** has its recording half done
 and its explanation half open — each item's own `Status` line says what is left.
 (**59** is done — `SA-0052`, PR #118.) Stack #222, merged 2026-09-12, closed
 **45**, **57**, **61**, **70** and **95**, and the spec'd half of **42**, **46**,
@@ -4639,7 +4639,9 @@ measurement against the five wrappers and `format`'s own `case` arms.
 
 ## 78. `witness` mutates before `committed` runs, and the spec that built it says the opposite
 
-**Status: done in code, open in `DESIGN.md`, 2026-09-07.** The two fixes on
+**Status: done, 2026-09-12** — the `DESIGN.md` half by hand, as a paragraph in
+§5.4.1 stating the ordering and the self-guard it obliges. Done in code
+2026-09-07; what follows is the record of that half. The two fixes on
 PR #154 itself (`4b533d5`, `290f070`): `worktree.source_mutated` yields a reason
 when the mutant's file is dirty — the shape `revert` uses, landing `witness` on
 `skip` — and a failed write restores from `HEAD` before it re-raises, so a
