@@ -41,6 +41,7 @@ from saffron.events import (
     _describe_agent_event,
     describe,
     read_log,
+    when,
 )
 from saffron.gates.contract import Failure
 from saffron.phases import review
@@ -1133,7 +1134,7 @@ def test_the_duplicated_agent_renderer_still_matches_its_original():
         )
 
     # `resets_at` renders a local clock time, so only its stable half is
-    # pinned; `_when`'s own formatting is covered by its call sites above.
+    # pinned; `when`'s own formatting is covered by its call sites above.
     resets = _describe_agent_event(
         {"type": "rate_limit", "status": "rejected", "resets_at": 1_700_000_000}
     )
@@ -1148,7 +1149,7 @@ def test_describe_renders_whatever_it_is_handed():
     `Baseline(gates=('a', 'b'), statuses=('pass',))` raised `ValueError` at
     `zip(..., strict=True)`; a `rate_limit` `resets_at` that is a string, a
     list, an integer too large for a timestamp, or `NaN` raised `TypeError`,
-    `OverflowError` or `ValueError` in `_when`. `describe` must tolerate
+    `OverflowError` or `ValueError` in `when`. `describe` must tolerate
     both."""
     mismatched = Baseline(
         timestamp=1.0, spec_id="x", gates=("a", "b"), statuses=("pass",)
@@ -1183,6 +1184,20 @@ def test_describe_renders_whatever_it_is_handed():
         )
         assert line.startswith("agent: rate limit rejected"), used
         assert len(line) <= len("agent: rate limit rejected, ") + 160 + len(" used")
+
+
+def test_when_renders_a_readable_reset_time_in_local_time(monkeypatch):
+    # Pinned to UTC+9 so local and UTC disagree on the day: a formatter that
+    # returned "unknown", or used gmtime, both passed the whole suite before this.
+    import time
+
+    monkeypatch.setenv("TZ", "XXX-9")
+    time.tzset()
+    try:
+        assert when(1755800000) == "Fri 22 Aug 03:13 local"
+    finally:
+        monkeypatch.undo()
+        time.tzset()
 
 
 def test_every_cell_authored_field_is_clipped():
