@@ -56,7 +56,10 @@ direnv was not, and all three have to hold:
   without that property does not go here.
 - **The host is disposable and holds nothing else.** The list above is
   satisfied by construction rather than by discipline — there are no cloud
-  profiles or SSH keys to sit beside it, and the VM is reclaimed on idle.
+  profiles or SSH keys to sit beside it, and the VM is reclaimed on idle. The
+  one exception is the `gh` credential PACKAGE pushes with, and it is why podman
+  there must run rootless: a cell escaping a rootful podman is root beside it,
+  so Saffron refuses a rootful one (`DESIGN.md` §5.1).
 - **The blast radius is the subscription's rate limit, not data** (§5.1).
 
 Two properties of the mechanism worth knowing before using it, both from

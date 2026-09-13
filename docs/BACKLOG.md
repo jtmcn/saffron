@@ -5881,7 +5881,7 @@ run both ways.
 **Status:** **done**, by hand on the host, 2026-09-11 — for the reason below: a
 cell is refused at the plan checkpoint. `saffron/cell/runtime.py` names no
 product, `saffron/cell/runtimes/apple.py` is the only module that does, and
-`runtimes/__init__.py` carries the `Dialect` — three members, each one a
+`runtimes/__init__.py` carries the `Dialect` — every spelling member a
 difference **measured** between two runtimes rather than anticipated. The rule's
 exemption, its asserting test, `CONTEXT.md`'s **Cell runtime** entry and
 §10's layout moved with it.
@@ -5969,7 +5969,19 @@ arm, and §5.1 carrying the second safety argument. Three findings from doing it
   spread. §4.2's question, unanswered, and the reason this runtime is for one
   attended task before it is for a night. **That is what is left of this half.**
 
-The images half and the egress half are below and neither is started.
+The images half has landed — `BASE_IMAGE` on both images,
+`images/bootstrap-base.sh`, and a provenance file each (§5.1.2) — and the egress
+half needed nothing (3. below). Until a cell has started on podman end to end,
+`saffron batch` refuses it, and a rootful podman is refused outright: no image
+sets a `USER`, so a rootful cell is root on the host kernel (§5.1). What still
+stands between podman and a first cell, none of it measured beyond the first:
+
+- **`DEFAULT_SUBNET`** was refused as in use on the measured host.
+- **`networks_on_subnet`** reads a subnet from the listing's second column, and
+  `podman network ls` does not print one; the `overlap` match is
+  `apple/container`'s wording.
+- **Rootless** is now required, and whether rootless podman can apply
+  `--cpuset-cpus` without a delegated cpuset controller is unasked.
 
 **Tier 3.** Measured 2026-09-11 in
 `docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md`, from a Linux

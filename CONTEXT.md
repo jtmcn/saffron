@@ -51,7 +51,6 @@ runner, packager, ledger. It decides what runs and whether the result is accepta
 and never executes model-authored code.
 _Avoid_: "the server", "the daemon", "the backend".
 
-
 **Cell**: One task's isolation unit — a container plus its worktree volume, agent
 state volume, and any fixture services. The cell is untrusted.
 _Avoid_: "sandbox" — it implies the isolation boundary is the control, and in
