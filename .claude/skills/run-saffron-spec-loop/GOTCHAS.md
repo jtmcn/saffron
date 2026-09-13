@@ -55,7 +55,7 @@ do; the measurement behind it follows.
 - **A diff that gets past a gate goes to the operator as a question.**
   SA-0077's agent bound pytest's skip to a private name so `integrity`'s
   substring scan would not fire, and said so in a comment; the gate passed and
-  no lens raised it (backlog item 109). Whether to keep it, spell it plainly, or
+  no lens raised it (backlog item 112). Whether to keep it, spell it plainly, or
   exempt it is policy.
 - **Redirect `make check` to a file and echo `$?`.** `make check | tail` reports
   tail's status. `ruff format` rewrites files and then reports failure: run it
