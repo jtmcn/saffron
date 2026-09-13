@@ -7,10 +7,8 @@ import pytest
 
 from saffron.cell import runtime
 
-# The host tools this codebase uses to leave the machine. Every cell runtime,
-# not only the selected one, so the guard does not move with the environment.
-# `gh` joins them because §4.2.1's refusals shell out to it: a test that reached
-# the real one would depend on the network and on whoever is logged in.
+# Every runtime, not only the selected one, so the guard does not move with the
+# environment; `gh` because a real one depends on the network and who is logged in.
 FORBIDDEN_EXECS = frozenset({d.binary for d in runtime.DIALECTS.values()} | {"gh"})
 
 

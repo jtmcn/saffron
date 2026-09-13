@@ -84,8 +84,9 @@ repository's code being wrong. The suite currently has no way to say so.
 
 ## Problem
 
-`saffron/cell/runtime.py` is the module that knows which cell runtime, and it
-has no way to answer whether that runtime is there. Every caller finds out the
+`saffron/cell/runtime.py` is every caller's view of the cell runtime
+`SAFFRON_CELL_RUNTIME` selects, and it has no way to answer whether that runtime
+is there. Every caller finds out the
 same way — by executing it and catching `CellRuntimeError` — which is the right
 answer for a task that is already under way and the wrong one for a test session
 deciding whether to start.
@@ -97,17 +98,17 @@ the operator's Mac.
 
 ## Out of scope
 
-**A second cell runtime.** This spec adds no backend and changes no behaviour
-for a host that has `apple/container`. The seam that would let a second one
-exist is backlog item **107**, and it cannot be landed from a cell — it needs a
-simultaneous edit to `.saffron/rules/`, which is `protected`.
+**Another cell runtime.** This spec adds no backend and changes no behaviour for
+a host whose selected runtime is installed. Backlog items **107** and **108**
+landed the seam and podman by hand, because each needed a simultaneous edit to
+`.saffron/rules/`, which is `protected`.
 
 **Preflight.** `saffron/preflight.py` answers a richer question (§4.2.1) at a
-different moment, for a run rather than for a test session, and it is forbidden
-here. If it should later share this probe, that is its own change.
+different moment, before a cell starts rather than for a test session, and it is
+forbidden here. If it should later share this probe, that is its own change.
 
 **Recording which runtime ran a task.** A ledger column is the natural next
-question and a different one; it belongs with item 107, not here.
+question and a different one; it belongs with item 108, not here.
 
 **The other reasons a marked test cannot run.** A host with the runtime but no
 built images fails differently and is not covered. Naming it would mean building
@@ -145,6 +146,7 @@ Each one starts a process that is not there. Answer it once per session.
 **The third criterion is the one an edit to `tests/conftest.py` is most likely
 to break, and it is why it is declared.** The tripwire's exemption is the `cell`
 marker, and the new skip reads the same marker; wiring them through one another
-carelessly is how the exemption widens to every test. Its witness should observe
-that an unmarked test still cannot exec a host tool, not that the fixture's
-source is unchanged.
+carelessly is how the exemption widens to every test. Its witness already exists
+— written by hand before this spec, so `criteria` finds it green at base — and
+observes that an unmarked test still cannot exec a host tool, not that the
+fixture's source is unchanged. Keep it green; do not rewrite it.

@@ -12,6 +12,7 @@ import pytest
 
 from saffron.cell import runtime
 from saffron.cell.runtimes import apple, podman
+from tests.conftest import HostToolExecInTest
 
 
 def test_mount_renders_the_runtime_flag():
@@ -48,8 +49,8 @@ def test_run_argv_carries_every_control():
 
 
 def test_the_apple_dialect_states_what_was_measured_of_it():
-    """Every member of the dialect, pinned as a literal — which is the only way
-    to pin it. A test that read `apple.DIALECT.exec_workdir_flag` and compared
+    """The dialect's members, pinned as literals — which is the only way to pin
+    them. `security_flags` is pinned beside podman's, below, because it is a pair. A test that read `apple.DIALECT.exec_workdir_flag` and compared
     it to itself passes against any value, including a nonsense one: measured,
     that is exactly what the first version of this test did.
 
@@ -230,6 +231,18 @@ def test_every_declared_runtime_satisfies_the_dialect():
         assert dialect.cpu_flags(2), name
         assert isinstance(dialect.unattended, bool), name
         assert callable(dialect.host_refusal), name
+
+
+def test_a_test_without_the_marker_still_may_not_exec_a_host_tool(request):
+    """SA-0074's `preserves` witness, written ahead of that spec so `criteria`
+    finds it green at base. It observes the tripwire rather than reading the
+    fixture: every runtime's binary and `gh`, bare and as a path, are refused to
+    an unmarked test, and the default suite still deselects `cell`."""
+    assert "not cell" in request.config.getoption("markexpr")
+    names = [d.binary for d in runtime.DIALECTS.values()] + ["gh"]
+    for argv0 in names + [f"/usr/bin/{name}" for name in names]:
+        with pytest.raises(HostToolExecInTest):
+            subprocess.run([argv0, "--version"], capture_output=True)
 
 
 def test_exec_is_told_its_working_directory_before_the_container():
