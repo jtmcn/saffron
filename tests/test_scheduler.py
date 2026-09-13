@@ -1818,7 +1818,10 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-12, a nineteenth time: all eight specs below merged
+    """Re-measured 2026-09-12, a twentieth time: `SA-0074` queued for backlog
+    item 102, independent of everything, so it is the one candidate.
+
+    Re-measured 2026-09-12, a nineteenth time: all eight specs below merged
     as stack #222 and were retired, so the live queue is empty again — the
     sixteenth anchor's shape, and the same non-recursive glob is what it checks.
 
@@ -1883,7 +1886,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == []
+    assert [c.spec.id for c in candidates] == ["SA-0074"]
     assert refusals == []
     # A precondition, not the glob check: `done/` is populated, so the empty
     # queue above is a check rather than a scan of nothing.

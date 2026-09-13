@@ -5877,6 +5877,8 @@ run both ways.
 
 ## 102. `refs/replace` lets a cell ship a tree its gates never ran on
 
+**Status: spec queued, 2026-09-12 — `SA-0074`, not yet run.**
+
 **Tier 1.** Found reviewing `SA-0072` (PR #219), 2026-09-12, by probe; the
 PACKAGE half is read from the code, not run in a cell. An agent that runs
 `git replace <real> <benign>` in its worktree changes what every git read of
