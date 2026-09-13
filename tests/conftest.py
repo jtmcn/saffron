@@ -27,14 +27,6 @@ class _Markable(Protocol):
     def get_closest_marker(self, name: str) -> object | None: ...
 
 
-# `.saffron/policy.yaml`'s `integrity.suppressions` matches the literal call
-# form of pytest's skip, by design (it is how an agent quietly disables a test
-# rather than fixing it), so a genuine use of it trips the same scan an
-# illegitimate one would. Bound once, ahead of the one legitimate call this
-# file makes, so that call never spells the substring the scan looks for.
-_skip = pytest.skip
-
-
 def pytest_runtest_setup(item: _Markable) -> None:
     """Skip a `cell`-marked test outright when the selected runtime is absent.
 
@@ -46,16 +38,14 @@ def pytest_runtest_setup(item: _Markable) -> None:
     without the runtime sees one honest skip instead of a defect-shaped
     failure for every marked test.
 
-    Consulted only for a test that carries the marker. `runtime.probe()`
-    execs the runtime, and the tripwire below forbids exactly that for an
-    unmarked test — returning first, rather than asking the marker and the
-    tripwire's exemption to agree some other way, is what keeps this from
-    widening that exemption to every test.
+    Consulted only for a marked test: this hook runs before the tripwire
+    fixture is installed, so nothing but this guard keeps an unmarked test
+    from execing the runtime.
     """
     if item.get_closest_marker("cell") is None:
         return
     if runtime.probe() is None:
-        _skip(f"no working {runtime.dialect().binary} found on this host")
+        pytest.skip(f"no working {runtime.dialect().binary} found on this host")
 
 
 @pytest.fixture(autouse=True)
