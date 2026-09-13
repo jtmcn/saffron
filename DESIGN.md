@@ -587,6 +587,14 @@ container run --rm \
 
 - **Git remote is a local bare mirror.** The cell physically cannot reach your GitHub remote. The host pushes, after gates pass.
 
+**A second runtime exists, and it is a second safety argument rather than a port.** `podman` runs where `apple/container` cannot and where Appendix G's Architecture A is not on offer either — a container-hosted Linux runner has no daemon and no way to start one, and podman needs none. It keeps three of the four grounds the spike decided on: an honest CPU count, an internal network, `--cap-drop ALL`. **What it gives up is the per-cell VM, which Appendix G called the single largest point in `apple/container`'s favour.** So the paragraph above stops applying to it, in both directions: with no private kernel to offer instead, `no-new-privileges` comes back on and seccomp's default filter is relied on rather than waived. The trade is stated here rather than absorbed, because a runtime swapped in silently swaps the boundary with it.
+
+**Rootful podman is refused outright, and a night does not run on podman at all yet.** No image sets a `USER`, so a cell runs as root; with no user namespace that is root on the host kernel, and the three flags above are all that stand between the untrusted cell and a host holding the `gh` credential PACKAGE pushes with. Rootless podman maps it to an unprivileged user, so the supervisor asks the binary itself (`podman info`) before its first network or container and refuses anything else. And until a cell has started on podman end to end — the one measured host refused `DEFAULT_SUBNET` — `saffron batch` refuses it; attended `saffron cell` does not.
+
+**Which runtime runs is declared and never detected,** for the reason Appendix G's principle 32 gives about proper nouns: a supervisor that picks its boundary from what is on `PATH` has made the safety argument a property of the machine, and the two runtimes do not offer the same boundary. `SAFFRON_CELL_RUNTIME` names it; an unknown name is an error, never a fallback, because a fallback reports one runtime's calibration for another and `CPU_OFFSET` wrong by one surfaces as flaky gate timings rather than as a failure.
+
+**The CPU requirement is met less completely there, and `policy.thread_env` is what closes the gap.** A per-cell VM *has* N CPUs, so every API agrees. A shared kernel can only narrow the affinity mask: measured, `--cpuset-cpus 0-1` leaves `nproc` reporting 2 while `os.cpu_count()` and `/proc/cpuinfo` both still report the host's 4 (`docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md`). A BLAS sizing itself from `sysconf` therefore oversubscribes exactly as this section warns — so under a VM-per-cell runtime the repo-declared `thread_env` is belt and braces, and under a shared-kernel one it is *the* control. A repo onboarded onto such a host that declares none has an uncapped thread pool, and that is a difference in what a gate result means, not merely in how fast it is.
+
 ### 5.1.1 The proxy's route out is asserted, never assumed
 
 **The proxy starting is not the proxy working.** A first install ran a whole
@@ -620,6 +628,45 @@ that caused this one.** That ordering fix is a workaround for a defect in
 `container` 1.3.0 and will age with it; a proxy that cannot reach the upstream
 is wrong on every runtime, for every cause, including the ones this design has
 not met yet. It is §7's "money spent to learn something free" one layer down.
+
+### 5.1.2 The image is the toolchain, so where it came from is part of the record
+
+The cell image carries the toolchain every gate executes against (§5.1), which
+makes it the one input a gate result is not meaningful without. Two hosts whose images differ are two
+hosts whose `tests` results are not comparable, and nothing in a gate result
+says so.
+
+**`FROM` is therefore an argument, and the default is the measurement.**
+`images/cell-base.python.Dockerfile` is `FROM python:3.12-slim-bookworm` and
+that is what this project is built and measured against; `BASE_IMAGE` changes
+nothing for a host that can pull it. (The default path does change, on purpose:
+three variables point pip, requests and uv at the system CA store and
+`update-ca-certificates` runs, which a host behind a TLS-terminating proxy
+needs; the provenance file below is written; the build refuses a base whose
+Python is not 3.12; and `.saffron/Dockerfile` takes uv from pypi at a pinned
+version rather than from a registry at `latest`.) What the argument buys is a host that
+cannot: an egress policy that refuses every container registry still permits an
+apt mirror and pypi, which between them supply every layer above the base —
+measured, including the SDK wheel's bundled Claude Code binary, which is the
+whole reason that image is glibc rather than musl. `images/bootstrap-base.sh`
+builds such a base from `debootstrap` alone.
+
+**A base built that way is not the same toolchain, and the image says so
+itself.** Both images write a provenance file — distribution, interpreter, git,
+SDK, and the agent binary's own version string — and every line of it is
+obtained by *running* the tool rather than by restating the argument the build
+was given (principle 39, and the same rule as a gate's `tool` field in §5.4). A
+bootstrapped base records `ubuntu 24.04` where the default records `debian 12`,
+so the difference is legible instead of silent. **Read it before trusting one
+host's gate result against another's** — that is the whole reason it exists.
+
+**What this deliberately does not do is make the two equal.** A base resolved
+from an apt mirror at the moment it runs is reproducible only to the day it was
+built. The durable answer is one image built once and carried between hosts as
+an OCI archive — `save` on the host that can pull, `load` on the host that
+cannot — and the provenance file is what verifies it arrived intact. That is
+worth doing before a second host's results are compared to the first's, and it
+is not what a `BASE_IMAGE` argument achieves on its own.
 
 ### 5.2 Phase 1 — DIAGNOSE (bug specs only; the scope proposal is not)
 
@@ -1353,7 +1400,9 @@ It says otherwise (rev 18). `ontology/queries/` therefore stays where it is, as 
     supervisor.py          # per-task lifecycle
     gc.py                  # orphan reconciliation
     cell/
-      runtime.py  worktree.py  database.py  proxy.py   # runtime.py is the only file that knows which runtime (Appendix G)
+      runtime.py  worktree.py  database.py  proxy.py   # runtime.py names no runtime; runtimes/<product>.py each name one (Appendix G)
+      runtimes/
+        __init__.py  apple.py  podman.py                # the Dialect contract, and one module per runtime
     phases/
       diagnose.py  implement.py  repair.py  review.py  package.py
     agents/

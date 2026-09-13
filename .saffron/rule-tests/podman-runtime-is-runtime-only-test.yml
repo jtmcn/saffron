@@ -1,0 +1,68 @@
+id: podman-runtime-is-runtime-only
+valid:
+  - 'subprocess.run([RUNTIME, "run", "--rm", image])'
+  - 'subprocess.run(["git", "status"])'
+  - '_run_argv([RUNTIME, "exec", "-i", name])'
+  # A mention is not a call. Both of these are live in the tree and must stay.
+  - 'note = "podman drops the per-cell VM and restores no-new-privileges"'
+  - 'd = {"podman": "not an argv"}'
+  # The live one: `runtime.py` maps a runtime name to its dialect, and the name
+  # is the *key*. A rule that read keys would fail the tree it ships in.
+  - 'DIALECTS = {"apple": _apple.DIALECT, "podman": _podman.DIALECT}'
+  # A tuple whose first element labels rather than invokes, inside a list —
+  # data, not an argv. The sibling rule pins a live instance at `session.py`;
+  # this one keeps the case so that adding one later is not a hole.
+  - 'removed = [("podman", name, runtime.remove_container(name))]'
+invalid:
+  - 'subprocess.run(["podman", "run", "--rm", image])'
+  - 'subprocess.Popen(["podman", "exec", "-i", name])'
+  - 'argv = ["podman"]'
+  # The binary spelled as a path is the same argv.
+  - 'subprocess.run(["/usr/local/bin/podman", "run", "--rm", image])'
+  # A tuple is an argv too, when it is not an element of a list.
+  - 'subprocess.run(("podman", "run", "--rm", image))'
+  - 'argv = ("podman", "run")'
+  # Naming the binary once and calling through the local: what the rule's own
+  # note ("call through RUNTIME") invites, and what every branch above missed.
+  - 'RT = "podman"'
+  - 'self.runtime = "podman"'
+  # Both quote styles, one per branch. Measured: with the regexes anchored on a
+  # literal `"`, every one of these walked past while its double-quoted twin
+  # above was caught — the rule caught the spellings its author happened to type.
+  - "subprocess.run(['podman', 'run', '--rm', image])"
+  - "argv = ('podman', 'run')"
+  - "RT = 'podman'"
+  # A name binds to the binary without an assignment in sight. `session.py` calls
+  # its helpers by keyword throughout, so the first is what a refactor reaches for.
+  - 'start(runtime="podman")'
+  - 'def start(binary="podman"): pass'
+  - 'RUNTIMES = {"linux": "podman"}'
+  # The prefix, one per branch. A `string` node's text carries `r`/`f`/`b` and the
+  # triple-quoted form as well as its quotes, so a regex anchored on the quote
+  # character read only two of the spellings. Measured: with the rule matching the
+  # node's text, every one of these walked past — and `lint` and `format` passed
+  # them too, so unlike the single-quoted form there was no cross-gate luck left.
+  - 'subprocess.run([r"podman", "run", "--rm", image])'
+  - 'subprocess.run([f"podman", "run", "--rm", image])'
+  - 'subprocess.run(["""podman""", "run", "--rm", image])'
+  - 'argv = (r"podman", "run")'
+  - 'RT = r"podman"'
+  - 'start(runtime=r"podman")'
+  - 'def start(binary=r"podman"): pass'
+  - 'RUNTIMES = {"linux": r"podman"}'
+  - "subprocess.run([r'/usr/local/bin/podman', 'run'])"
+  # An argv that prefixes the binary with a wrapper. Measured: `nthChild: 1` let
+  # every one of these past — `sudo`, `env`, `nice`, or any helper's own name.
+  - 'subprocess.run(["sudo", "podman", "run"])'
+  - 'subprocess.run(["env", "X=1", r"podman", "run"])'
+  # The binary as a plain call argument, and the function form of `RT =`. `which`
+  # is what a preflight check reaches for; a helper returning the name satisfies
+  # every argv branch while doing what Appendix G forbids.
+  - 'w = shutil.which("podman")'
+  - 'subprocess.run("podman")'
+  - 'def binary(): return "podman"'
+  - 'def binary(): return r"podman"'
+  # A set literal is neither a list nor a tuple.
+  - 'BINS = {"podman"}'
+  # An augmented assignment is neither an `assignment` nor a `keyword_argument`.
+  - 'RT += "podman"'

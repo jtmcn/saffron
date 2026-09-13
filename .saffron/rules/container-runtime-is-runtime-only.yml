@@ -1,12 +1,18 @@
 id: container-runtime-is-runtime-only
 language: python
 severity: error
-message: only saffron/cell/runtime.py may build a `container` argv
+message: only saffron/cell/runtimes/apple.py may build a `container` argv
 note: |
-  DESIGN.md Appendix G. `runtime.py` is the one module that names the cell
-  runtime, so swapping apple/container for another runtime is one file's work.
-  It exports `RUNTIME`; call through it, or through the helpers in
-  `saffron/cell/runtime.py`, rather than spelling the binary here.
+  DESIGN.md Appendix G. One module per runtime names its own product, and
+  `saffron/cell/runtime.py` — which every caller uses — names none, so adding a
+  second runtime is a new file beside this rule's exemption rather than an edit
+  spread through the tree. `runtime.py` exports `RUNTIME` and reaches the rest
+  through a `Dialect`; call through those rather than spelling the binary here.
+
+  A second runtime needs its own copy of this rule, exempting its own module.
+  One rule cannot serve both: the binary is a different word, and the exemption
+  is asserted by value in `tests/test_saffron_gates.py` precisely so that
+  widening it is a decision (backlog items 107, 108).
 
 # `tests/**` and `.saffron/**` are out of scope, and by naming the two trees the
 # invariant is about rather than by exemption: Appendix G governs what `saffron/`
@@ -17,7 +23,7 @@ files:
   - "saffron/**/*.py"
   - "images/**/*.py"
 ignores:
-  - "saffron/cell/runtime.py"
+  - "saffron/cell/runtimes/apple.py"
 
 # The binary as code, not the bare word: `proxy.py` and `session.py` both discuss
 # apple/container in comments, and a text search cannot tell those from a call.
@@ -45,12 +51,12 @@ rule:
     # measured, `nthChild: 1` let every argv that prefixes the binary walk past —
     # `["sudo", "container", "run"]`, and the same with `env` or a wrapper.
     # `has:` reaches direct children only, which is what keeps the labelled
-    # `[("container", name, ...)]` at `session.py:1797` out: its list's child is
+    # `[("container", name, ...)]` in `session.py`'s `removed` out: its list's child is
     # a tuple, not a string.
     - kind: list
       has: { matches: binary-literal }
     # subprocess.run(("container", "run")) — a tuple is an argv too. Guarded on
-    # not being an element of a list, because `session.py:1797` holds
+    # not being an element of a list, because `session.py`'s `removed` holds
     # `[("container", name, ...)]`, which is labelled data rather than a call
     # and is the only such tuple in the tree. Measured: 0 others in scope.
     - kind: tuple

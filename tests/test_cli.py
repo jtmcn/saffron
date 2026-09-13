@@ -2679,6 +2679,35 @@ def test_a_batch_never_exits_one_whatever_stopped_it(tmp_path, monkeypatch):
         assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) != 1
 
 
+def test_a_batch_on_a_runtime_never_proven_end_to_end_is_refused(
+    tmp_path, monkeypatch, capsys
+):
+    """podman has not started a cell end to end, so a night on it is refused
+    before readiness spends anything — and refused as infrastructure, 2."""
+    from saffron.cell import runtime
+    from saffron.cell.runtimes import podman
+
+    monkeypatch.setattr(runtime, "_selected", podman.DIALECT)
+
+    def _no_readiness(*a, **k):
+        raise AssertionError("readiness ran for a refused night")
+
+    monkeypatch.setattr(cli.preflight, "check_readiness", _no_readiness)
+    assert main(["--home", str(tmp_path / "h"), "batch", "--repo", str(tmp_path)]) == 2
+    assert "batch: refused" in capsys.readouterr().out
+
+
+def test_an_unknown_runtime_name_exits_two_not_one(tmp_path, monkeypatch, capsys):
+    """A typo in `SAFFRON_CELL_RUNTIME` is the operator's infrastructure, not a
+    task that did not make it. Under launchd, 1 reads as a night that ran."""
+    from saffron.cell import runtime
+
+    monkeypatch.setattr(runtime, "_selected", None)
+    monkeypatch.setenv(runtime.RUNTIME_ENV, "bogus")
+    assert main(["--home", str(tmp_path / "h"), "batch", "--repo", str(tmp_path)]) == 2
+    assert "bogus" in capsys.readouterr().out
+
+
 def test_the_night_is_given_a_real_readiness_check_not_the_loops_default(
     tmp_path, monkeypatch
 ):

@@ -5,17 +5,36 @@
 #
 # Debian, not Alpine: claude-agent-sdk ships manylinux wheels with a bundled
 # Claude Code binary, and a musl image silently falls back to the sdist with no
-# binary at all.
-FROM python:3.12-slim-bookworm
+# binary at all. glibc is the requirement; the distribution is not.
+#
+# A host with no registry passes a base from images/bootstrap-base.sh (§5.1.2).
+ARG BASE_IMAGE=python:3.12-slim-bookworm
+FROM ${BASE_IMAGE}
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+# Debian's python3 only when the base has none: beside the default's 3.12 it
+# would be a second, older interpreter.
+RUN set -eu; \
+    pkgs="git ca-certificates"; \
+    command -v python3 >/dev/null || pkgs="$pkgs python3 python3-pip python3-venv"; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends $pkgs; \
+    rm -rf /var/lib/apt/lists/*; \
+    command -v python >/dev/null || ln -s "$(command -v python3)" /usr/local/bin/python; \
+    update-ca-certificates
+
+# pip trusts certifi and uv reads only SSL_CERT_FILE (measured), so a CA mounted
+# into /usr/local/share/ca-certificates reaches neither without these.
+ENV PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
+    REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
 # Pinned: unpinned, the agent runtime drifts between rebuilds and the version
 # that ran a task is recorded nowhere. Bump deliberately.
 ARG SDK_VERSION=0.2.142
-RUN pip install --no-cache-dir "claude-agent-sdk==${SDK_VERSION}"
+# Unconditionally: a distribution base is PEP 668 externally managed. No `||`
+# fallback — measured, one reported PEP 668 for an install that had failed on TLS.
+RUN python -m pip install --no-cache-dir --break-system-packages \
+      "claude-agent-sdk==${SDK_VERSION}"
 
 # The bundled binary is the whole reason this image is Debian. If a source
 # distribution was installed instead, the agent has no runtime and every cell
@@ -29,7 +48,9 @@ p = pathlib.Path(claude_agent_sdk.__file__).parent; \
 found = list(p.rglob('claude-code*')) + list(p.rglob('claude')); \
 print(found[0] if found else sys.exit('no bundled Claude Code binary in the wheel'))")"; \
     "$bin" --version | grep -q . \
-      || { echo "the bundled Claude Code binary reported no version" >&2; exit 1; }
+      || { echo "the bundled Claude Code binary reported no version" >&2; exit 1; }; \
+    mkdir -p /opt/saffron; \
+    ln -sf "$bin" /opt/saffron/claude-code
 
 # The host drives the agent from outside; this is what it execs inside. It is
 # agent-runtime code, so it belongs to the base image and not to any repo's.
@@ -49,3 +70,19 @@ RUN echo 'not json' | /opt/saffron/python /opt/saffron/agent_runner.py \
       || { echo "agent_runner.py did not emit a Saffron event" >&2; exit 1; }
 
 WORKDIR /work
+
+# Every line a version the tool printed about itself (§5.1.2). One substitution per
+# step: `set -e` misses a failure inside `$(a | b)` or `echo "$(a)"` — measured, dash.
+RUN set -eu; \
+    base=$(. /etc/os-release && echo "$ID $VERSION_ID"); \
+    py=$(python --version 2>&1); \
+    gitv=$(git --version); \
+    sdk=$(python -c 'import importlib.metadata as m; print(m.version("claude-agent-sdk"))'); \
+    cc=$(/opt/saffron/claude-code --version 2>&1); \
+    cc=$(printf '%s\n' "$cc" | head -n 1); \
+    printf 'base=%s\npython=%s\ngit=%s\nclaude-agent-sdk=%s\nclaude-code=%s\n' \
+      "$base" "$py" "$gitv" "$sdk" "$cc" > /opt/saffron/provenance; \
+    if grep -q '=$' /opt/saffron/provenance; then \
+      echo "a tool printed no version:" >&2; cat /opt/saffron/provenance >&2; exit 1; fi; \
+    grep -q '^python=Python 3\.12\.' /opt/saffron/provenance \
+      || { echo "base image is not Python 3.12:" >&2; cat /opt/saffron/provenance >&2; exit 1; }

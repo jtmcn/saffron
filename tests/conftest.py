@@ -7,10 +7,9 @@ import pytest
 
 from saffron.cell import runtime
 
-# The two host tools this codebase uses to leave the machine. `gh` joins the
-# cell runtime because §4.2.1's refusals shell out to it: a test that reached
-# the real one would depend on the network and on whoever is logged in.
-FORBIDDEN_EXECS = frozenset({runtime.RUNTIME, "gh"})
+# Every runtime, not only the selected one, so the guard does not move with the
+# environment; `gh` because a real one depends on the network and who is logged in.
+FORBIDDEN_EXECS = frozenset({d.binary for d in runtime.DIALECTS.values()} | {"gh"})
 
 
 class HostToolExecInTest(BaseException):
@@ -20,8 +19,22 @@ class HostToolExecInTest(BaseException):
 
 
 @pytest.fixture(autouse=True)
+def default_cell_runtime(request, monkeypatch):
+    """Unmarked tests run under the default runtime, whatever the shell exports.
+
+    They pin `apple/container`'s spellings as literals, and a cloud host sets
+    `SAFFRON_CELL_RUNTIME` for every shell (docs/HOST-HARDENING.md §1a). A `cell`
+    test drives the runtime the operator actually selected.
+    """
+    if request.node.get_closest_marker("cell"):
+        return
+    monkeypatch.setattr(runtime, "_selected", runtime.DIALECTS[runtime.DEFAULT_DIALECT])
+    monkeypatch.setattr(runtime, "_admitted", False)
+
+
+@pytest.fixture(autouse=True)
 def no_host_tool_exec(request, monkeypatch):
-    """A test without the `cell` marker must never exec `apple/container` or `gh`.
+    """A test without the `cell` marker must never exec a cell runtime or `gh`.
 
     Four `test_implement` tests reached the runtime through `run_agent`'s reap
     and were green only because the host has the binary; inside a cell, where

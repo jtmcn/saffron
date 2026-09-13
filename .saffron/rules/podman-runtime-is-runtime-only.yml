@@ -1,0 +1,66 @@
+id: podman-runtime-is-runtime-only
+language: python
+severity: error
+message: only saffron/cell/runtimes/podman.py may build a `podman` argv
+note: |
+  DESIGN.md Appendix G. One module per runtime names its own product, and
+  `saffron/cell/runtime.py` — which every caller uses — names none, so adding a
+  second runtime is a new file beside this rule's exemption rather than an edit
+  spread through the tree. `runtime.py` exports `RUNTIME` and reaches the rest
+  through a `Dialect`; call through those rather than spelling the binary here.
+
+  This is that second copy. It is a near-duplicate of
+  `container-runtime-is-runtime-only.yml` on purpose: one rule cannot serve both
+  runtimes, because the binary is a different word and each exemption is
+  asserted by value in `tests/test_saffron_gates.py` so that widening either is
+  a decision somebody made (backlog items 107, 108).
+
+# `tests/**` and `.saffron/**` are out of scope by naming the trees, not by
+# exemption: a test that starts a real cell has to spell the binary.
+files:
+  - "saffron/**/*.py"
+  - "images/**/*.py"
+ignores:
+  - "saffron/cell/runtimes/podman.py"
+
+# Structural, because this runtime is named in comments a text search cannot tell from calls.
+# ponytail: a name the parser never reads (`"pod" + "man"`, `shell=True`) walks past.
+utils:
+  # On `string_content`, not source text: measured, `r"podman"` walked past a
+  # quote-anchored regex. The optional prefix is the binary spelled as a path.
+  # ponytail: an escape splits the content, so `"podma\x6e"` is out of reach.
+  binary-literal:
+    kind: string
+    has: { kind: string_content, regex: '^(.*/)?podman$' }
+rule:
+  any:
+    # An argv at any position (`["sudo", "podman", ...]`). `has:` sees direct
+    # children only, so a list of labelled tuples stays out.
+    - kind: list
+      has: { matches: binary-literal }
+    # A tuple argv, unless it sits in a list: then it is labelled data.
+    - kind: tuple
+      all:
+        - has: { matches: binary-literal }
+        - not: { inside: { kind: list } }
+    # `RT = "podman"` or `+=`: naming the binary once and calling through the
+    # local would satisfy every branch above.
+    - kind: assignment
+      has: { field: right, matches: binary-literal }
+    - kind: augmented_assignment
+      has: { field: right, matches: binary-literal }
+    # Bound by keyword, default or dict value. A dict *key* is a label, not an argv.
+    - kind: keyword_argument
+      has: { field: value, matches: binary-literal }
+    - kind: default_parameter
+      has: { field: value, matches: binary-literal }
+    - kind: pair
+      has: { field: value, matches: binary-literal }
+    # A helper returning the name, and `shutil.which("podman")`.
+    - kind: return_statement
+      has: { matches: binary-literal }
+    - kind: argument_list
+      has: { matches: binary-literal }
+    # `{"podman"}`: a set is neither a list nor a tuple.
+    - kind: set
+      has: { matches: binary-literal }

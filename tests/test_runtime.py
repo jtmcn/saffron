@@ -3,11 +3,16 @@ that actually chose this runtime live in spikes/cell-runtime.sh."""
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
 
+import pytest
+
 from saffron.cell import runtime
+from saffron.cell.runtimes import apple, podman
+from tests.conftest import HostToolExecInTest
 
 
 def test_mount_renders_the_runtime_flag():
@@ -41,6 +46,229 @@ def test_run_argv_carries_every_control():
     assert "type=volume,source=saffron-wt-1,target=/work" in argv
     assert "HTTPS_PROXY=http://10.88.0.2:3128" in argv
     assert argv[-2:] == ["saffron/cell:saffron", "nproc"]
+
+
+def test_the_apple_dialect_states_what_was_measured_of_it():
+    """The dialect's members, pinned as literals — which is the only way to pin
+    them. `security_flags` is pinned beside podman's, below, because it is a pair. A test that read `apple.DIALECT.exec_workdir_flag` and compared
+    it to itself passes against any value, including a nonsense one: measured,
+    that is exactly what the first version of this test did.
+
+    These four are the differences a second runtime was observed to spell
+    differently (`docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md`).
+    A second runtime gets its own copy of this test, against its own values;
+    they are claims about a product, so they do not generalise.
+
+    `container` and `--cpus` appear here as literals because `tests/**` is out
+    of the structure rule's scope on purpose — a test that pins what a runtime
+    is called must be able to say it.
+    """
+    assert apple.DIALECT.binary == "container"
+    assert apple.DIALECT.cpu_offset == 1
+    assert apple.DIALECT.exec_workdir_flag == "--cwd"
+    assert apple.DIALECT.cpu_flags(2) == ["--cpus", "2"]
+    assert apple.DIALECT.unattended is True
+
+
+def test_the_podman_dialect_states_what_was_measured_of_it():
+    """podman's own values, pinned as literals for the reason apple's are: a test
+    that reads the dialect and compares it to itself passes against anything.
+
+    Each is measured in
+    `docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md`. The CPU flag
+    is a mask and not a quota because the quota left the cell reporting all four
+    of the host's CPUs, which is §5.1's oversubscription mode exactly. The
+    offset is 0 because there is no VM to be allocated a spare vCPU.
+    """
+    assert podman.DIALECT.binary == "podman"
+    assert podman.DIALECT.cpu_offset == 0
+    assert podman.DIALECT.exec_workdir_flag == "-w"
+    assert podman.DIALECT.cpu_flags(2) == ["--cpuset-cpus", "0-1"]
+    assert podman.DIALECT.cpu_flags(1) == ["--cpuset-cpus", "0-0"]
+    # No cell has started end to end on it, so no night may run on it.
+    assert podman.DIALECT.unattended is False
+
+
+def _as_podman(monkeypatch, info: runtime.Completed) -> list[list[str]]:
+    """Select podman and answer `podman info` with `info`; returns every argv."""
+    seen: list[list[str]] = []
+
+    def fake_call(argv, timeout_s=120):
+        seen.append(list(argv))
+        if argv[1:2] == ["info"]:
+            return info
+        return runtime.Completed(0, "", "")
+
+    monkeypatch.setattr(runtime, "_selected", podman.DIALECT)
+    monkeypatch.setattr(runtime, "_admitted", False)
+    monkeypatch.setattr(runtime, "_call", fake_call)
+    return seen
+
+
+def test_podman_hardening_and_cpu_mask_reach_the_run_command(monkeypatch):
+    """The wiring, as against the values pinned above. Apple's security flags
+    are empty, so under the default runtime deleting the line that appends them
+    passes every other test here."""
+    monkeypatch.setattr(runtime, "_selected", podman.DIALECT)
+    argv = runtime._run_argv(
+        image="i",
+        command=["nproc"],
+        name=None,
+        network="n",
+        env=None,
+        cpus=1,
+        memory=None,
+        mounts=[],
+        detach=False,
+    )
+    assert argv[:2] == ["podman", "run"]
+    at = argv.index("--security-opt")
+    assert argv[at : at + 2] == ["--security-opt", "no-new-privileges"]
+    at = argv.index("--cpuset-cpus")
+    assert argv[at : at + 2] == ["--cpuset-cpus", "0-0"]
+    assert "--cpus" not in argv
+    assert runtime.exec_argv("c", ["x"], workdir="/work")[:4] == [
+        "podman",
+        "exec",
+        "-w",
+        "/work",
+    ]
+
+
+def test_a_rootful_podman_is_refused_before_any_container(monkeypatch):
+    """No image sets a `USER`, so a rootful podman's cell is root on the host
+    kernel. Refused at the first container, never after it."""
+    seen = _as_podman(monkeypatch, runtime.Completed(0, "false\n", ""))
+    with pytest.raises(runtime.CellRuntimeError, match="rootful"):
+        runtime.run_ephemeral("i", ["true"])
+    with pytest.raises(runtime.CellRuntimeError, match="rootful"):
+        runtime.create_network("n")
+    assert all(argv[1] == "info" for argv in seen), seen
+
+
+def test_a_podman_that_cannot_say_whether_it_is_rootless_is_refused(monkeypatch):
+    """An unanswered question is not a yes (principle 34)."""
+    _as_podman(monkeypatch, runtime.Completed(125, "", "Error: no such format"))
+    with pytest.raises(runtime.CellRuntimeError, match="no such format"):
+        runtime.run_detached("c", "i")
+
+
+def test_a_rootless_podman_is_admitted_and_asked_once(monkeypatch):
+    seen = _as_podman(monkeypatch, runtime.Completed(0, "true\n", ""))
+    runtime.run_ephemeral("i", ["true"])
+    runtime.run_ephemeral("i", ["true"])
+    assert [argv[1] for argv in seen] == ["info", "run", "run"]
+
+
+def test_apple_admits_without_asking_the_host_anything(monkeypatch):
+    """Root in the guest is root in a VM holding one cell (§5.1)."""
+    seen: list[list[str]] = []
+    monkeypatch.setattr(
+        runtime,
+        "_call",
+        lambda argv, timeout_s=120: (
+            seen.append(list(argv)) or runtime.Completed(0, "", "")
+        ),
+    )
+    runtime.run_ephemeral("i", ["true"])
+    assert [argv[1] for argv in seen] == ["run"]
+
+
+def test_an_unknown_runtime_name_is_refused_on_use_not_at_import(monkeypatch):
+    """`saffron.cli` imports this module. Raised at import, a typo exits 1 with
+    a traceback before `main` can map it to 2, and 1 says the task failed."""
+    env = {**os.environ, runtime.RUNTIME_ENV: "bogus"}
+    done = subprocess.run(
+        [sys.executable, "-c", "import saffron.cli"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 0, done.stderr
+    monkeypatch.setattr(runtime, "_selected", None)
+    monkeypatch.setenv(runtime.RUNTIME_ENV, "bogus")
+    with pytest.raises(runtime.CellRuntimeError, match="bogus"):
+        runtime.dialect()
+
+
+def test_only_the_runtime_without_a_vm_asks_for_in_guest_hardening():
+    """§5.1 declines `no-new-privileges` and seccomp under a VM-per-cell runtime
+    *because* the private kernel is the boundary offered instead. A shared-kernel
+    runtime has no such offer, so the flags come back — measured, `NoNewPrivs` is
+    1 inside a podman cell with the flag and 0 without it.
+
+    Asserted as a pair. Either half alone passes while the other silently agrees
+    with it, and the whole point is that the two runtimes differ here.
+    """
+    assert apple.DIALECT.security_flags == []
+    assert podman.DIALECT.security_flags == ["--security-opt", "no-new-privileges"]
+
+
+def test_a_runtime_nobody_named_is_the_default_and_an_unknown_one_raises():
+    """Declared, never detected (Appendix G, principle 32). An unknown name must raise rather than
+    fall back: a fallback reports the default's calibration for a runtime nobody
+    chose, and `CPU_OFFSET` wrong by one surfaces as flaky gate timings rather
+    than as an error."""
+    assert runtime.select_dialect(None) is apple.DIALECT
+    assert runtime.select_dialect("") is apple.DIALECT
+    assert runtime.select_dialect("  ") is apple.DIALECT
+    assert runtime.select_dialect("podman") is podman.DIALECT
+    assert runtime.select_dialect(" podman ") is podman.DIALECT
+    with pytest.raises(runtime.CellRuntimeError) as raised:
+        runtime.select_dialect("containerd")
+    # The message names what it does know, or the operator's next move is a grep.
+    assert "apple" in str(raised.value) and "podman" in str(raised.value)
+
+
+def test_every_declared_runtime_satisfies_the_dialect():
+    """A dialect member added to the protocol and to one implementation only is
+    an `AttributeError` on whichever runtime the operator picked second."""
+    for name, dialect in runtime.DIALECTS.items():
+        assert dialect.binary, name
+        assert isinstance(dialect.cpu_offset, int), name
+        assert dialect.exec_workdir_flag.startswith("-"), name
+        assert isinstance(dialect.security_flags, list), name
+        assert dialect.cpu_flags(2), name
+        assert isinstance(dialect.unattended, bool), name
+        assert callable(dialect.host_refusal), name
+
+
+def test_a_test_without_the_marker_still_may_not_exec_a_host_tool(request):
+    """SA-0077's `preserves` witness, written ahead of that spec so `criteria`
+    finds it green at base. It observes the tripwire rather than reading the
+    fixture: every runtime's binary and `gh`, bare and as a path, are refused to
+    an unmarked test, and the default suite still deselects `cell`."""
+    assert "not cell" in request.config.getoption("markexpr")
+    names = [d.binary for d in runtime.DIALECTS.values()] + ["gh"]
+    for argv0 in names + [f"/usr/bin/{name}" for name in names]:
+        with pytest.raises(HostToolExecInTest):
+            subprocess.run([argv0, "--version"], capture_output=True)
+
+
+def test_exec_is_told_its_working_directory_before_the_container():
+    """The wiring, as against the spelling above. `exec_` and `exec_stream`
+    share one builder because the flag is the dialect's to name and two copies
+    are two things to miss; what this pins is that the flag and its value land
+    together, ahead of the container name, so the command is not handed its own
+    workdir as an argument.
+    """
+    argv = runtime.exec_argv("cell-1", ["true"], workdir="/work")
+    assert argv == [runtime.RUNTIME, "exec", "--cwd", "/work", "cell-1", "true"]
+
+
+def test_exec_without_a_workdir_names_no_directory():
+    argv = runtime.exec_argv("cell-1", ["true"], workdir=None)
+    assert argv == [runtime.RUNTIME, "exec", "cell-1", "true"]
+
+
+def test_the_streaming_exec_is_the_same_command_with_stdin_attached():
+    """`exec_stream` gains no capability `exec_` lacks (§5.1) — the only
+    difference is `-i`, and it precedes the workdir flag so that the first three
+    fields stay the shape the read-loop tests assert against."""
+    streamed = runtime.exec_argv("c", ["x"], workdir="/work", interactive=True)
+    collected = runtime.exec_argv("c", ["x"], workdir="/work")
+    assert streamed[:3] == [runtime.RUNTIME, "exec", "-i"]
+    assert streamed[:2] + streamed[3:] == collected
 
 
 def test_detached_run_is_not_removed_on_exit():

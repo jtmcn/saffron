@@ -62,9 +62,11 @@ creates and destroys. Use only when that object itself is the subject.
 
 **Cell runtime**: The program that creates cells. `apple/container` — a VM per
 cell — chosen in rev 10 against a four-assertion spike (`DESIGN.md` Appendix G).
-Say "the cell runtime"; the seam is `saffron/cell/runtime.py` and it stays the only
-module that names the product, because a decision made by spike can be remade by
-spike.
+Say "the cell runtime". The seam is `saffron/cell/runtime.py`, which every caller
+uses and which names no product at all; each runtime's own module under
+`saffron/cell/runtimes/` names exactly one, and nothing else in `saffron/` may
+name any. A decision made by spike can be remade by spike, and a second answer
+is a second module rather than an edit spread through the tree.
 _Avoid_: **"Docker"** as a generic term for it — that was a product name standing
 in for an unmade decision through seven revisions, and naming a different product
 generically would repeat the mistake. _Avoid_ also "the container engine", "the

@@ -501,9 +501,13 @@ def test_a_rules_exemptions_are_the_named_files():
     violation — a rule disarmed without a snippet changing.
 
     Reach is not the check, because a wider glob reaches *more* files. These are
-    four named files and one test tree; they are not supposed to move without a
+    five named files and one test tree; they are not supposed to move without a
     person saying so. The count left this test's *name* when the fourth arrived,
-    so that adding a rule is one deliberate edit here rather than two."""
+    so that adding a rule is one deliberate edit here rather than two.
+
+    The two runtime rules are near-duplicates and that is deliberate: one rule
+    cannot guard both binaries, because the word differs and each exemption is
+    pinned here so widening either is a decision (backlog items 107, 108)."""
     exemptions = {
         yaml.safe_load(p.read_text())["id"]: yaml.safe_load(p.read_text()).get(
             "ignores"
@@ -511,7 +515,8 @@ def test_a_rules_exemptions_are_the_named_files():
         for p in _rule_files()
     }
     assert exemptions == {
-        "container-runtime-is-runtime-only": ["saffron/cell/runtime.py"],
+        "container-runtime-is-runtime-only": ["saffron/cell/runtimes/apple.py"],
+        "podman-runtime-is-runtime-only": ["saffron/cell/runtimes/podman.py"],
         "agent-sdk-import-is-runner-only": ["images/agent_runner.py"],
         "gate-tool-must-be-executed": ["tests/**"],
         "one-task-driver": ["saffron/task.py"],

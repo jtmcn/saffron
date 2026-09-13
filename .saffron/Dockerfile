@@ -2,7 +2,11 @@
 # Toolchain and dependencies only; the agent runtime came from the base.
 FROM saffron/cell-base:python
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# From pypi, not ghcr.io, which refuses at its blob CDN as docker.io does (§5.1.2).
+# Pinned to the host's uv, which writes the `uv.lock` read below — bump the two together.
+ARG UV_VERSION=0.12.11
+RUN python -m pip install --no-cache-dir --break-system-packages "uv==${UV_VERSION}" \
+ && uv --version
 
 # procps for pgrep: the suite asserts that a timed-out gate leaves no surviving
 # process. A repo declares what its own tests need; the base image does not.

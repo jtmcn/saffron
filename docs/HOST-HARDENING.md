@@ -34,6 +34,52 @@ out: there is nothing to leak even by mistake.
 
 Check what a fresh account actually has before assuming it is clean.
 
+### 1a. The token on a host you did not build
+
+`CLAUDE.md` says the token belongs in the environment of the command itself and
+nowhere else, and gives a fish incantation that reads it out of `~/.secrets` for
+one invocation. That rule is about a machine with a shell you control and a
+secrets file you put there. **An Anthropic-hosted cloud session has neither.**
+There is no `~/.secrets`, and the container is rebuilt from an environment
+definition every time, so the only supported way in is the cloud environment's
+**Environment variables** field (`claude.ai/code` → the environment →
+**Update cloud environment**), in `.env` form.
+
+**That is the thing the rule warns about, and it is the right answer anyway.**
+An environment variable there is exported into every shell in the session, which
+is exactly what `.envrc` was refused for. Three things make it acceptable where
+direnv was not, and all three have to hold:
+
+- **The token is separately minted and separately revocable.** This is §5.1's
+  own argument for tolerating one credential inside an untrusted cell, applied
+  one layer out: revoking it does not touch interactive work. A credential
+  without that property does not go here.
+- **The host is disposable and holds nothing else.** The list above is
+  satisfied by construction rather than by discipline — there are no cloud
+  profiles or SSH keys to sit beside it, and the VM is reclaimed on idle. The
+  one exception is the `gh` credential PACKAGE pushes with, and it is why podman
+  there must run rootless: a cell escaping a rootful podman is root beside it,
+  so Saffron refuses a rootful one (`DESIGN.md` §5.1).
+- **The blast radius is the subscription's rate limit, not data** (§5.1).
+
+Two properties of the mechanism worth knowing before using it, both from
+Anthropic's own documentation rather than inferred:
+
+- **Anyone who can use the environment can read the value.** These are ordinary
+  environment variables, not secrets. Do not put anything there that the first
+  two bullets above do not cover.
+- **A session copies the values once, at startup.** Editing the environment
+  changes sessions started afterwards; a session already running keeps what it
+  started with. So set it, then start a new session.
+
+**The credential-holding proxy is not an option for this one.** Pro and Max
+plans can store an *API credential* that Anthropic's agent proxy attaches to
+matching requests after they leave the VM, so the key never reaches the session
+at all — the custody model §5.1 calls the principled fix and calls unavailable.
+It is real, and it explicitly excludes `api.anthropic.com` along with the public
+package registries. So the agent's own credential cannot be held that way, and
+§5.1's single stated exception stands exactly as written.
+
 ## 2. Nothing listening
 
 `saffron`'s preflight probe enumerates the host's non-loopback TCP listeners and

@@ -40,11 +40,12 @@ uv run pytest -m cell        # needs apple/container + the images below
 `prek` is a host tool, not a project dependency — `brew install prek` if `make install`
 cannot find it.
 
-Cell-marked tests need real images, built by hand once (and after editing them):
+Cell-marked tests need real images, built by hand once (and after editing them; a host with
+no registry adds `--build-arg BASE_IMAGE=…`, §5.1.2):
 
 ```
-container build -t saffron/cell-base:python -f images/cell-base.python.Dockerfile .
-container build -t saffron/proxy -f images/proxy.Dockerfile .
+<runtime> build -t saffron/cell-base:python -f images/cell-base.python.Dockerfile .
+<runtime> build -t saffron/proxy -f images/proxy.Dockerfile .
 ```
 
 The repo's own cell image is built from `.saffron/Dockerfile` by `saffron.repos.image`.
@@ -72,7 +73,8 @@ carry the setup.
 the environment of the command itself, and nowhere else. `.envrc` deliberately does not load it: direnv would
 export it into every shell in this directory, and from there into any Claude Code session
 started in one. `.env` is no home for it either — `.envrc` loads that with
-`dotenv_if_exists`. Scope it to the invocation instead (fish):
+`dotenv_if_exists`. Scope it to the invocation instead (fish; a cloud host, which has no
+`~/.secrets`, is `docs/HOST-HARDENING.md` §1a):
 
 ```
 env CLAUDE_CODE_OAUTH_TOKEN=(bash -c 'source ~/.secrets; printf %s $CLAUDE_CODE_OAUTH_TOKEN') \
@@ -101,10 +103,11 @@ exception has a shape worth memorising: **core invokes declared gates, never too
 
 ### Layout
 
-- `saffron/cell/` — `runtime.py` is the **only** module that spells the `apple/container`
-  binary in code, argv or bare name alike (Appendix G, gated over `saffron/` and `images/`;
-  comments and `.saffron/` are deliberately exempt); `session.py` drives one cell start to
-  finish (v0.5's supervisor); `worktree.py`, `proxy.py`.
+- `saffron/cell/` — `runtime.py` is every caller's view of the cell runtime and names **no**
+  product; only `runtimes/apple.py` and `runtimes/podman.py` may spell their own binary, one
+  gated rule each (Appendix G). `runtimes/__init__.py` is the `Dialect` — only what the two
+  were *measured* to spell differently. `SAFFRON_CELL_RUNTIME` picks one and an unknown name
+  raises: **declared, never detected**. `session.py`, `worktree.py`, `proxy.py`.
 - `saffron/gates/` — `contract.py` is the gate JSON schema and the whole repo-agnostic
   surface; `runner.py` execs gates host-side (`LocalExecutor` / `CellExecutor`);
   `baseline.py` subtracts pre-existing failures; `core/` holds the host-side gates
