@@ -1535,6 +1535,92 @@ def test_read_at_head_reads_through_a_planted_replacement(tmp_path, monkeypatch)
     assert worktree.read_at_head("c", "a.py") == "real content\n"
 
 
+# --- export_patch against a worktree setting that hides content (item 103) -
+
+
+def _isolated_repo_with_a_text_file(tmp_path, monkeypatch):
+    """A repo isolated from the operator's own git config, with one committed
+    text file ready to be edited under whatever worktree-local setting each
+    witness pins. Shared: `core.bigFileThreshold` and `core.attributesFile`
+    are two instances of the same hazard (docs/BACKLOG.md item 103), so both
+    witnesses build on this one fixture rather than duplicating it — the
+    `size` gate counts tests.
+    """
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    xdg = tmp_path / "xdg-config"
+    xdg.mkdir()
+    # core.attributesFile defaults to a file under here; without pinning it,
+    # an operator's own attributes file could reach the bare-diff reference
+    # this fixture's callers assert against.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    (tmp_path / "f.py").write_text("one = 1\n")
+    base = _commit(tmp_path, "base")
+    _host_git(tmp_path, monkeypatch)
+    return base
+
+
+def _edit_and_commit_f(tmp_path):
+    (tmp_path / "f.py").write_text("one = 2\n")
+    return _commit(tmp_path, "edit f.py")
+
+
+def _assert_bare_diff_is_binary(tmp_path, base):
+    """Proves the setting actually bites on this git before the pinned call
+    is asked to look unaffected by it (`tests/test_scope.py` pairs a bare
+    diff with the pinned one the same way)."""
+    bare = subprocess.run(
+        ["git", "diff", f"{base}..HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "Binary files" in bare
+
+
+def test_export_patch_shows_hunks_under_a_tiny_big_file_threshold(
+    tmp_path, monkeypatch
+):
+    base = _isolated_repo_with_a_text_file(tmp_path, monkeypatch)
+    subprocess.run(
+        ["git", "config", "core.bigFileThreshold", "1"], cwd=tmp_path, check=True
+    )
+    _edit_and_commit_f(tmp_path)
+
+    _assert_bare_diff_is_binary(tmp_path, base)
+
+    patch = worktree.export_patch("c", base)
+    assert "+one = 2" in patch
+    assert "Binary files" not in patch
+
+
+def test_export_patch_shows_hunks_under_a_configured_attributes_file(
+    tmp_path, monkeypatch
+):
+    base = _isolated_repo_with_a_text_file(tmp_path, monkeypatch)
+    # Outside the repository on purpose: no commit here shows this file, and
+    # that is exactly why `integrity`'s check on a committed `.gitattributes`
+    # never sees why the content went missing.
+    attrs_dir = Path(f"{tmp_path}-attrs")
+    attrs_dir.mkdir()
+    attributes = attrs_dir / "attributes"
+    attributes.write_text("* -diff\n")
+    subprocess.run(
+        ["git", "config", "core.attributesFile", str(attributes)],
+        cwd=tmp_path,
+        check=True,
+    )
+    _edit_and_commit_f(tmp_path)
+
+    _assert_bare_diff_is_binary(tmp_path, base)
+
+    patch = worktree.export_patch("c", base)
+    assert "+one = 2" in patch
+    assert "Binary files" not in patch
+
+
 def test_dirty_paths_reads_through_a_planted_replacement(tmp_path, monkeypatch):
     # The pin sits in `_git` so it covers reads no criterion names; `status`
     # diffs the index against the replaced tree and calls a clean tree dirty.
