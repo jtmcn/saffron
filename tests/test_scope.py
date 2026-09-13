@@ -265,13 +265,17 @@ def _hunk_headers(diff):
     return [ln for ln in diff.splitlines() if ln.startswith("@@")]
 
 
-def test_the_pinned_flags_beat_a_configured_context_width(tmp_path):
+def test_the_pinned_flags_beat_a_configured_context_width(tmp_path, monkeypatch):
     """A worktree that configures a wider `diff.context` does not widen the
     pinned diff: `--unified=3` on the command line beats it, matching every
     recorded fixture's hunk headers (`harness/recovery.py`'s `pinned_diff`).
     `parse_diff` puts every line a hunk's range covers into what a critic
     finding may anchor to, so this is the one of the three pins in this file
     with a consequence beyond byte-identity."""
+    # The reference diff is unpinned, so an operator's own `diff.context` would
+    # move it: only this repo's config may.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     repo = tmp_path / "repo"
     base = _context_repo(repo)
     default_headers = _hunk_headers(_diff(repo, base))
@@ -291,12 +295,16 @@ def test_the_pinned_flags_beat_a_configured_context_width(tmp_path):
     assert pinned_headers == default_headers
 
 
-def test_the_pinned_flags_beat_a_configured_abbrev_and_algorithm(tmp_path):
+def test_the_pinned_flags_beat_a_configured_abbrev_and_algorithm(tmp_path, monkeypatch):
     """A worktree that configures `core.abbrev` or `diff.algorithm` does not
     move the pinned diff's bytes either: `--abbrev=7` and
     `--diff-algorithm=myers` on the command line beat both, matching what
     `auto` actually emitted across every shipped fixture
     (`harness/recovery.py`'s `pinned_diff`)."""
+    # A global `diff.algorithm=histogram` is common, and would move the
+    # unpinned reference diff this compares against.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     repo = tmp_path / "repo"
     base = _algorithm_repo(repo)
     default = _diff(repo, base)
