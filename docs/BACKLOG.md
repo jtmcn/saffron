@@ -53,7 +53,7 @@ evidence. That is the gate now, and it is one cheap spec away.
 Soundness first: **79**, **69**, **93**, **94**, **80** (~~**83**~~, ~~**85**~~, ~~**84**~~,
 ~~**82**~~ and ~~**81**~~, pulled up from tier 3 as why 69's gate could not be
 declared against safely, are done — 2026-09-08), then **97** and **102**. Honesty second:
-**73**, ~~**70**~~, ~~**45**~~, **51** (with **49**/**50**, which its fix closes),
+~~**73**~~, ~~**70**~~, ~~**45**~~, **51** (with **49**/**50**, which its fix closes),
 ~~**47**~~, **46** (with ~~**95**~~, which compounds it), **40**, ~~**26**~~,
 ~~**7**~~, and the remainder of **78**.
 
@@ -2930,6 +2930,10 @@ night can end at most one task's overshoot above budget. Bounded by one
 overshoot rather than unbounded is the real distinction, and it is the whole
 value of checking between tasks.
 
+**One task's overshoot is one attempt, not one turn** (item 73, corrected
+2026-09-12). The $1.17 and 6.5% below are a turn's. `SA-0059` measured the
+attempt: $26.75 against a $16 ceiling, inside a $22 night that closed 21% over.
+
 **Decided 2026-09-04: option two, plus the ceiling that is actually
 enforceable.** `budget_usd` is a best-effort bound and says so where it is
 declared. The enforceable ceiling is **per batch, checked between tasks** —
@@ -4406,6 +4410,12 @@ it, so adding `witness` left a 90-character line in a file whose longest was 87
 ---
 
 ## 73. The budget overshoot is one attempt, not one turn, and the design says 6.5%
+
+**Status: done, 2026-09-12, by hand — the first answer below, *say it
+accurately*.** `DESIGN.md` §3, `CONTEXT.md`'s Task entry and item 44's closure
+now name the attempt as the unit and `SA-0059`'s $26.75 against $16 as the
+measurement. No behaviour changed: an unattended night can still end about
+1.7× a task's ceiling over budget, and that is now what the documents say.
 
 **Tier 1.** Measured 2026-09-06 driving `SA-0059`
 (`docs/evidence/2026-09-06-an-attempt-is-the-overshoot-bound.md`).
