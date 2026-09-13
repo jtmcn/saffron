@@ -5906,6 +5906,15 @@ pinned read sees the real tree.
 
 ## 103. A cell can hide an edit's content from the critic with settings the diff never shows
 
+**Status: spec queued for the two `-c` pins, 2026-09-12 — `SA-0075`, stacked on
+`SA-0074`, not yet run.** Two parts stay here. `.git/info/attributes` now has a
+probed answer: on git 2.54, `--text` restores its hunks, and a `diff.<driver>.binary`
+driver's too. It is not taken, because it also renders every genuine binary as
+text, which changes `integrity`'s binary check and PACKAGE's no-full-index
+refusal. The other is `integrity`'s comment at `:238-240`, which `SA-0075`
+cannot reach: under `* -diff`, `--numstat` printed `-	-	f.py` in the same probe,
+so the cross-check it names counts nothing. That correction is by hand.
+
 **Tier 2.** Found reviewing `SA-0072` (PR #219), 2026-09-12, by probe. Four
 repo-local settings make the pinned diff print `Binary files a/f.py and b/f.py
 differ` with no hunks, while the name-only listing is unchanged: `* -diff` or
@@ -5932,6 +5941,14 @@ Item **89** holds the settings that move the diff's shape rather than hide it.
 ---
 
 ## 104. A cell's malformed `resets_at` raises inside the rate-limit handler
+
+**Status: spec queued, 2026-09-12 — `SA-0076`, not yet run.** The "not verified"
+below is now measured, through `run_one_cell` with `tests/test_session.py`'s
+stubs. It is worse than an abort. All four values raise out of the session:
+`TypeError` for a string or a list, `OverflowError` for `10**20`, `ValueError`
+for NaN. Each leaves the run row `RUNNING`, because the raise is inside `except
+RateLimited` and its sibling `except BaseException` never closes the row. The
+ledger keeps a run that reads as still going.
 
 **Tier 2.** Found reviewing `SA-0070` (PR #221), 2026-09-12. `SA-0070` made
 `events._when` return `"unknown"` for a `resets_at` it cannot read — a string,

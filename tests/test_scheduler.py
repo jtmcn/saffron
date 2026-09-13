@@ -1818,7 +1818,13 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-12, a twentieth time: `SA-0074` queued for backlog
+    """Re-measured 2026-09-12, a twenty-first time: `SA-0075` (item 103) and
+    `SA-0076` (item 104) queued. `SA-0076` is independent, so it joins `SA-0074`
+    as a candidate. `SA-0075` is refused, which is correct: it stacks on
+    `SA-0074`, both edit `_git`, and the parent has no task yet, so it waits for
+    the night after its parent packages. This is the seventeenth anchor's shape.
+
+    Re-measured 2026-09-12, a twentieth time: `SA-0074` queued for backlog
     item 102, independent of everything, so it is the one candidate.
 
     Re-measured 2026-09-12, a nineteenth time: all eight specs below merged
@@ -1886,8 +1892,9 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == ["SA-0074"]
-    assert refusals == []
+    assert [c.spec.id for c in candidates] == ["SA-0074", "SA-0076"]
+    assert [r.path.name[:7] for r in refusals] == ["SA-0075"]
+    assert "SA-0074 has no task" in refusals[0].reason
     # A precondition, not the glob check: `done/` is populated, so the empty
     # queue above is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30
