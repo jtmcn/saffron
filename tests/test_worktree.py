@@ -1413,3 +1413,120 @@ def test_an_undo_that_exits_zero_without_restoring_still_raises(tmp_path, monkey
         worktree.source_mutated("c", mutant),
     ):
         pass
+
+
+# --- _git reads through a planted `git replace` (docs/BACKLOG.md item 102) -
+
+
+def _repo_with_a_planted_replacement(tmp_path, monkeypatch):
+    """A head that edits `a.py` and adds `b.py`, `git replace`d by a benign
+    commit on the same parent that edits `a.py` differently and adds nothing.
+    A bare read of `HEAD` sees the benign one; `rev-parse HEAD` does not move."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    (tmp_path / "a.py").write_text("base\n")
+    base = _commit(tmp_path, "base")
+
+    # Plumbing, so the benign commit attaches to no ref and never moves HEAD.
+    (tmp_path / "a.py").write_text("benign content\n")
+    subprocess.run(["git", "add", "a.py"], cwd=tmp_path, check=True)
+    benign_tree = subprocess.run(
+        ["git", "write-tree"], cwd=tmp_path, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    benign = subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=T",
+            "commit-tree",
+            benign_tree,
+            "-p",
+            base,
+            "-m",
+            "benign",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    (tmp_path / "a.py").write_text("real content\n")
+    (tmp_path / "b.py").write_text("added for real\n")
+    real_head = _commit(tmp_path, "real")
+
+    subprocess.run(["git", "replace", real_head, benign], cwd=tmp_path, check=True)
+    assert (
+        subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+        ).stdout.strip()
+        == real_head
+    )
+
+    _host_git(tmp_path, monkeypatch)
+    return base
+
+
+def test_changed_files_reads_through_a_planted_replacement(tmp_path, monkeypatch):
+    base = _repo_with_a_planted_replacement(tmp_path, monkeypatch)
+
+    # Prove the plant first: a bare read in this same repo is fooled, and
+    # lists fewer paths than the real commit touched.
+    bare = subprocess.run(
+        ["git", "diff", "--name-only", f"{base}..HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert bare == ["a.py"]
+
+    assert worktree.changed_files("c", base) == ["a.py", "b.py"]
+
+
+def test_export_patch_reads_through_a_planted_replacement(tmp_path, monkeypatch):
+    base = _repo_with_a_planted_replacement(tmp_path, monkeypatch)
+
+    bare = subprocess.run(
+        ["git", "diff", f"{base}..HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "benign content" in bare
+    assert "real content" not in bare
+    assert "added for real" not in bare
+
+    patch = worktree.export_patch("c", base)
+    assert "real content" in patch
+    assert "added for real" in patch
+    assert "benign content" not in patch
+
+
+def test_read_at_head_reads_through_a_planted_replacement(tmp_path, monkeypatch):
+    _repo_with_a_planted_replacement(tmp_path, monkeypatch)
+
+    bare = subprocess.run(
+        ["git", "show", "HEAD:a.py"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert bare == "benign content\n"
+
+    assert worktree.read_at_head("c", "a.py") == "real content\n"
+
+
+def test_dirty_paths_reads_through_a_planted_replacement(tmp_path, monkeypatch):
+    # The pin sits in `_git` so it covers reads no criterion names; `status`
+    # diffs the index against the replaced tree and calls a clean tree dirty.
+    _repo_with_a_planted_replacement(tmp_path, monkeypatch)
+
+    assert "a.py" in _porcelain(tmp_path)
+
+    assert worktree.dirty_paths("c") == []
