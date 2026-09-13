@@ -36,6 +36,13 @@ GitHub issues remain in use only for research/evidence records under
 - **Body**: headings `## Context`, `## Problem`, `## Out of scope`, `## Notes for
   the agent`.
 - **Dependencies**: list blocked-by spec ids in `depends_on` (e.g. `[SA-0002, SA-0005]`).
+- **A new spec changes this repo's measured queue.**
+  `tests/test_scheduler.py::test_saffron_queue_smoke_reproduces_this_repos_measured_queue`
+  pins the exact candidates and refusals the live `.saffron/specs/` produces.
+  So the commit that adds a spec updates that list and adds a "Re-measured"
+  paragraph to the top of its docstring, and so does the commit that retires one
+  to `done/`. Run `make check` before pushing a spec: `SA-0078` reached CI
+  without it and failed there.
 - **A spec that introduces a term files its vocabulary follow-up when it is
   written.** `ontology/` is rightly `forbidden` to the spec implementing against
   a term — a cell inventing vocabulary while implementing against it is how a
