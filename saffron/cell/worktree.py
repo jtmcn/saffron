@@ -158,6 +158,8 @@ def _git(container: str, *args: str) -> runtime.Completed:
     # suppressBlankEmpty=false: it strips the leading space from a blank context
     # line, and a diff the host cannot parse is an `error` the agent can set with
     # one uncommitted `git config` (§5.4).
+    # useReplaceRefs=false: here, not in `DIFF_FLAGS` — `git replace` moves
+    # every read of the object graph, not only diffs (docs/BACKLOG.md item 102).
     return runtime.exec_(
         container,
         [
@@ -166,6 +168,8 @@ def _git(container: str, *args: str) -> runtime.Completed:
             "core.quotePath=false",
             "-c",
             "diff.suppressBlankEmpty=false",
+            "-c",
+            "core.useReplaceRefs=false",
             *args,
         ],
         workdir=WORKTREE_MOUNT,
