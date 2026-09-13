@@ -197,7 +197,7 @@ max_turns: 60                   # per-turn ceiling; the flags override all three
 risk: standard                  # standard | elevated (§5.6)
 ---
 
-**`budget_usd` is a best-effort bound, and saying so here is backlog item 44's decision rather than an apology.** The supervisor gates a turn on what has been spent *so far*, and a turn's cost is not knowable until it ends — so a task admitted just under its ceiling can finish over it, measured at 6.5% on `SA-0031`. Charging a worst-case estimate instead would mean *guessing* the bound, which is the defect item 56 argues against for size predicates and is worse here: a guess that refuses a legitimate turn costs more than the overshoot it prevents. **The enforceable ceiling is the batch's, checked between tasks** (§4.2.1), because between tasks nothing is mid-flight — which is exactly why a bound holds there and cannot inside a turn. Strictly the batch's bound is best-effort too, since it admits a task on that task's *declared* ceiling: a night can end at most one task's overshoot above its budget. Bounded by one overshoot rather than unbounded is the whole distinction. Unattended, one task running $1.17 over is not the exposure; a night spending unboundedly is.
+**`budget_usd` is a best-effort bound, and saying so here is backlog item 44's decision rather than an apology.** The supervisor gates each attempt on what has been spent *so far*, and an attempt's cost is not knowable until it ends — nothing caps it but `max_turns` times the per-turn cap — so a task admitted under its ceiling can finish over it by up to one whole attempt. Measured at 67% on `SA-0059`: $26.75 against a $16 ceiling, the last attempt admitted at $12.64 and costing $14.11 by itself (`docs/evidence/2026-09-06-an-attempt-is-the-overshoot-bound.md`). The 6.5% this paragraph used to cite, on `SA-0031`, was one turn's overshoot — a true measurement of the wrong unit (backlog item 73). Charging a worst-case estimate instead would mean *guessing* the bound, which is the defect item 56 argues against for size predicates and is worse here: a guess that refuses a legitimate attempt costs more than the overshoot it prevents. **The enforceable ceiling is the batch's, checked between tasks** (§4.2.1), because between tasks nothing is mid-flight — which is exactly why a bound holds there and cannot inside a turn. Strictly the batch's bound is best-effort too, since it admits a task on that task's *declared* ceiling: a night can end at most one task's overshoot above its budget. Bounded by one overshoot rather than unbounded is the whole distinction. Unattended, one task running $10.75 over is not the exposure; a night spending unboundedly is.
 
 **`forbidden` and `protected` bind both the plan and the diff, and this paragraph has been wrong in each direction once.** It said they bound the diff until `SA-0011` leaned on it; it said they bound only the plan until `SA-0024` closed that. Three places read them now: `agents/artifacts.py` rejects a plan whose *declared* `files_to_change` matches one, `agents/context.py` prints them into the prompt, and the `scope` gate (§5.4) fails any changed file matching either — independently of `touches`, under its own `forbidden` and `protected` failure codes.
 
@@ -983,6 +983,16 @@ reports `skip` for a criterion whose `find` text is absent or matches more than
 once, and the result *names* every such criterion. A check that quietly buys
 nothing is the defect one level up, and it is the failure mode Appendix I is
 about.
+
+**A gate that mutates the tree guards itself against a dirty one.** `witness`
+runs inside the declared suite and `committed` runs after it
+(`saffron/gates/suite.py`) — deliberately, because `committed` must see what the
+gates leave behind (§5.4). So the file a mutant targets may carry uncommitted
+work, and `source_mutated` refuses one that is not at `HEAD`, landing on `skip`
+the way `revert` does; a failed write restores from `HEAD` before it re-raises.
+Any future gate that edits the tree owes the same guard, since `committed` will
+not have run yet. `SA-0062` specified the opposite order and passed review
+(`docs/BACKLOG.md` item 78).
 
 **Blocking level.** Advisory at `standard`, blocking at `elevated` — the level
 `size` already carries, and for the same reason: an elevated diff is one where a
