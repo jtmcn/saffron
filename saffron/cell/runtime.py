@@ -128,6 +128,36 @@ def unattended_refusal() -> str | None:
     )
 
 
+_probed = False
+_probe_result: str | None = None
+
+
+def probe() -> str | None:
+    """The selected runtime's version, or None if it cannot be run.
+
+    Answered by executing it, never by asking the filesystem: a file that is
+    present on `PATH` but cannot run reads identically to a working one to any
+    check that only asks whether it exists, and that identical reading is
+    exactly the failure a test session deciding whether to start needs to see
+    through (SA-0077). A file that is not there at all fails the same way, for
+    the same reason — `_call` turns both into `CellRuntimeError` the moment
+    `subprocess.run` raises `OSError`.
+
+    Memoized for the process: a probe that runs once per `cell`-marked test
+    starts a process that is not there once per test, and there can be dozens.
+    """
+    global _probed, _probe_result
+    if not _probed:
+        try:
+            done = _call([dialect().binary, "--version"], timeout_s=10)
+        except CellRuntimeError:
+            _probe_result = None
+        else:
+            _probe_result = done.stdout.strip() if done.returncode == 0 else None
+        _probed = True
+    return _probe_result
+
+
 DEFAULT_SUBNET = "10.88.0.0/24"
 
 # §4.3's idle and completion bounds. Idle has to clear the longest single tool
