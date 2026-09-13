@@ -13,7 +13,7 @@ note: |
   `container-runtime-is-runtime-only.yml` on purpose: one rule cannot serve both
   runtimes, because the binary is a different word and each exemption is
   asserted by value in `tests/test_saffron_gates.py` so that widening either is
-  a decision somebody made (backlog items 102, 103).
+  a decision somebody made (backlog items 107, 108).
 
 # `tests/**` and `.saffron/**` are out of scope, and by naming the two trees the
 # invariant is about rather than by exemption: Appendix G governs what `saffron/`

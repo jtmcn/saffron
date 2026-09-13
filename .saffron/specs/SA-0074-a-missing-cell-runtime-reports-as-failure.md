@@ -99,7 +99,7 @@ the operator's Mac.
 
 **A second cell runtime.** This spec adds no backend and changes no behaviour
 for a host that has `apple/container`. The seam that would let a second one
-exist is backlog item **102**, and it cannot be landed from a cell — it needs a
+exist is backlog item **107**, and it cannot be landed from a cell — it needs a
 simultaneous edit to `.saffron/rules/`, which is `protected`.
 
 **Preflight.** `saffron/preflight.py` answers a richer question (§4.2.1) at a
@@ -107,7 +107,7 @@ different moment, for a run rather than for a test session, and it is forbidden
 here. If it should later share this probe, that is its own change.
 
 **Recording which runtime ran a task.** A ledger column is the natural next
-question and a different one; it belongs with item 102, not here.
+question and a different one; it belongs with item 107, not here.
 
 **The other reasons a marked test cannot run.** A host with the runtime but no
 built images fails differently and is not covered. Naming it would mean building

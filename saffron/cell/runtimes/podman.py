@@ -4,7 +4,7 @@
 `.saffron/rules/podman-runtime-is-runtime-only.yml`, which is this rule's own
 copy of the one guarding `apple.py`. One rule cannot serve both: the binary is a
 different word and each exemption is asserted by value, so that widening either
-is a decision somebody made (backlog items 102, 103).
+is a decision somebody made (backlog items 107, 108).
 
 Daemonless, which is why it is this and not Appendix G's Architecture A: a
 container-hosted Linux runner has no socket to offer and no way to start one.
@@ -75,7 +75,7 @@ class Podman:
         ponytail: every cell gets the same mask, `0..n-1`, so K concurrent cells
         contend for one set of cores rather than being spread across them. The
         dialect is handed a count and cannot know which cores are free — that is
-        §4.2's concurrency question, filed on backlog item 103, and it is why
+        §4.2's concurrency question, filed on backlog item 108, and it is why
         this runtime is for one attended task before it is for a night.
         """
         return ["--cpuset-cpus", f"0-{cpus - 1}"]
@@ -83,7 +83,7 @@ class Podman:
     @property
     def unattended(self) -> bool:
         # No cell has started end to end here: the measured host refused
-        # `DEFAULT_SUBNET`, and `--memory` went unenforced (backlog item 103).
+        # `DEFAULT_SUBNET`, and `--memory` went unenforced (backlog item 108).
         return False
 
     def host_refusal(self, call: Callable[[Sequence[str]], Completed]) -> str | None:

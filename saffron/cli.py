@@ -689,7 +689,7 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     as "readiness failed" (item 95).
     """
     # Before readiness spends a token probe: a runtime that has never started a
-    # cell end to end is for an attended task, never a night (backlog item 103).
+    # cell end to end is for an attended task, never a night (backlog item 108).
     refusal = runtime.unattended_refusal()
     if refusal is not None:
         print(f"batch: refused — {refusal}")

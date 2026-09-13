@@ -300,7 +300,7 @@ if [ "$fail" -eq 0 ]; then
 	[ "$RUNTIME" = container ] &&
 		echo "  Appendix G: take it. Better isolation, better memory ceiling, §5.1 gets shorter."
 	[ "$RUNTIME" = podman ] && {
-		echo "  Backlog 103: a shared kernel, so seccomp and no-new-privileges are the"
+		echo "  Backlog 108: a shared kernel, so seccomp and no-new-privileges are the"
 		echo "  boundary offered in place of the per-cell VM. A second safety argument,"
 		echo "  weaker and stated (DESIGN.md §5.1)."
 	}

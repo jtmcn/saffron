@@ -507,7 +507,7 @@ def test_a_rules_exemptions_are_the_named_files():
 
     The two runtime rules are near-duplicates and that is deliberate: one rule
     cannot guard both binaries, because the word differs and each exemption is
-    pinned here so widening either is a decision (backlog items 102, 103)."""
+    pinned here so widening either is a decision (backlog items 107, 108)."""
     exemptions = {
         yaml.safe_load(p.read_text())["id"]: yaml.safe_load(p.read_text()).get(
             "ignores"

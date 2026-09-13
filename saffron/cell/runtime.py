@@ -10,7 +10,7 @@ changes if the answer changes, which is what Appendix G bought and what the
 `dialect()` is the selection — `apple` by default, `podman` when
 `SAFFRON_CELL_RUNTIME` says so, and never a `shutil.which`: a runtime detected
 from the host is the proper noun standing in for a decision all over again
-(principle 32, backlog item 103).
+(principle 32, backlog item 108).
 """
 
 from __future__ import annotations
@@ -125,7 +125,7 @@ def unattended_refusal() -> str | None:
         return None
     return (
         f"{RUNTIME_ENV} selects {selected.binary}, which has not yet started a "
-        "cell end to end; run it attended with `saffron cell` (backlog item 103)"
+        "cell end to end; run it attended with `saffron cell` (backlog item 108)"
     )
 
 

@@ -12,7 +12,7 @@ note: |
   A second runtime needs its own copy of this rule, exempting its own module.
   One rule cannot serve both: the binary is a different word, and the exemption
   is asserted by value in `tests/test_saffron_gates.py` precisely so that
-  widening it is a decision (backlog items 102, 103).
+  widening it is a decision (backlog items 107, 108).
 
 # `tests/**` and `.saffron/**` are out of scope, and by naming the two trees the
 # invariant is about rather than by exemption: Appendix G governs what `saffron/`
