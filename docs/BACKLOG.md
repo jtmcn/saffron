@@ -5162,6 +5162,14 @@ produced this; naming it in the preflight line is not.
 
 ## 86. The notes channel's two rendering-side safety properties are unwitnessed
 
+**Status: the two assertions are done, 2026-09-12, by hand** —
+`test_a_mention_and_a_closing_reference_are_defanged_inside_the_notes` and
+`test_notes_with_nothing_in_them_render_no_heading` in `tests/test_report.py`,
+each run red against the mutant this item describes (the `neutralize` call
+dropped; `_notes`'s own empty `return ""` dropped, matched uniquely rather than
+by first occurrence). Whether `preserves` should name what would falsify it
+stays open here, beside item **82**.
+
 **Still unwritten, 2026-09-09, and the corpus now says so with a number.** Both
 properties are `SA-0063`'s declared defects, and the baseline pass graded
 **neither** — every finding that fixture produced anchored in
