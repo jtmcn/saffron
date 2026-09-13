@@ -50,7 +50,8 @@ evidence. That is the gate now, and it is one cheap spec away.
 
 ### Tier 1 — breaks at 03:00 with nobody watching
 
-Soundness first: **79**, **69**, **93**, **94**, **80** (~~**83**~~, ~~**85**~~, ~~**84**~~,
+Soundness first: **79**, **69**, **93**, **94**, **109** (filed 2026-09-12; it
+leaks a mutant wherever 80 stores one), **80** (~~**83**~~, ~~**85**~~, ~~**84**~~,
 ~~**82**~~ and ~~**81**~~, pulled up from tier 3 as why 69's gate could not be
 declared against safely, are done — 2026-09-08), then **97** and **102**. Honesty second:
 **73**, ~~**70**~~, ~~**45**~~, **51** (with **49**/**50**, which its fix closes),
@@ -4816,6 +4817,36 @@ agent a file it is otherwise given for context. What this needs is not code so
 much as a decision about which copy is authoritative for whom; either shape is
 cheap once that is settled.
 
+**Decided 2026-09-12: neither shape works, and mutants move to a ref the cell
+never fetches.** Both shapes assumed the worktree copy is the only one the cell
+holds. It is not. `prepare_worktree` checks the cell out at `base_sha` from a
+fetch of the mirror, and a batch runs committed specs, so the spec is in
+`HEAD`'s tree and `git show HEAD:<spec>` reads its mutant whatever the working
+copy says. Stripping the working copy also leaves the tree dirty, which
+`committed` fails on every attempt. A salted hash of the edit does not work
+either: the host has to apply the edit, so it would have to search the file for
+the span matching the hash, and the cell holds the same file and the same salt.
+Keeping the salt on the host makes it a host secret, and then encrypting the
+whole mutant is simpler.
+
+**Chosen:** mutants as plain YAML under a non-branch ref in the same repository
+(for example `refs/saffron/mutants`). The mirror fetches `+refs/*:refs/*`
+(`saffron/repos/mirror.py`) and so holds it. The cell's seed fetch takes git's
+default refspec, branches and the tags on them, and does not. Measured in a
+scratch repository with the host's git 2.54, seeded the way `prepare_worktree`
+seeds a cell: the mirror held the mutant's blob and the cell did not. Not yet
+measured with the cell image's git. **Rejected:** a host-held key encrypting the
+mutant inside the spec. It keeps the spec one file, but it is one more secret
+that must never reach a cell and must be handed to every cloud host.
+
+**Done looks like** `DESIGN.md` §5.4.1 saying where a mutant lives, written by
+hand and first; the seed fetch naming its refspec rather than relying on git's
+default; a cell-marked test that starts a cell the way production does and
+proves the mutant's blob is absent; intake reading mutants from the ref, with
+the ref's commit recorded beside `spec_sha`; and a `saffron mutant` command to
+write and push them. Item **109** comes first: it leaks a surviving mutant to
+the implementer wherever the mutant is stored.
+
 ---
 
 ## 81. The guard against a spec refused on its own criteria never sees 31 of 53 specs
@@ -6225,6 +6256,29 @@ until the images question below is answered too, and that is the larger half.
    request; fatal for a night, whose product *is* the audit trail.
 5. **`CLAUDE_CODE_OAUTH_TOKEN` is absent.** `gh` is no longer on this list: it
    installs from apt (2.45.0) and only wants a credential.
+
+## 109. A mutant its witness survives is spelled out to the implementer in the repair turn
+
+**Status: spec queued, 2026-09-12 — `SA-0078`, not yet run.**
+
+Found 2026-09-12 while deciding item 80. `witness_gate` builds the
+`survived-mutant` failure with a message quoting the mutant's `find`, its
+`replace` and its file (`saffron/gates/core/witness.py`). At `elevated`,
+`witness_blocking` makes that failure blocking, and `repair_prompt` renders
+every blocking new failure's `code` and `message` to the implementer verbatim.
+So the first attempt whose witness survives hands the next attempt the exact
+edit it is judged by. That is the test written to kill a known edit, the thing
+`witness` exists to refuse, delivered by `witness` itself.
+
+Below `elevated`, `witness` is advisory and its failures never reach the repair
+turn, and no gate summary reaches any prompt. The message is the one path. It is
+filed apart from item 80 and ahead of it because every place 80 might store a
+mutant is undone by this.
+
+**Done looks like** the message naming the criterion's claim and its witness and
+carrying neither `find` nor `replace`, with a witness that asserts over the
+whole gate result. The pull request body loses the edit with it. That is
+intended: the operator has the spec.
 
 ---
 
