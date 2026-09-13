@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -243,6 +244,81 @@ def test_a_test_without_the_marker_still_may_not_exec_a_host_tool(request):
     for argv0 in names + [f"/usr/bin/{name}" for name in names]:
         with pytest.raises(HostToolExecInTest):
             subprocess.run([argv0, "--version"], capture_output=True)
+
+
+def test_a_runtime_that_cannot_be_executed_reports_as_absent(tmp_path, monkeypatch):
+    """SA-0077: the answer comes from running the runtime, not from asking the
+    filesystem about it. A path that names nothing, and a real file that
+    exists and is marked executable but is not a valid executable format,
+    both report absent the same way — because both raise the same `OSError`
+    from `subprocess.run`, which `_call` already turns into
+    `CellRuntimeError`."""
+    unrunnable = tmp_path / "not-a-real-runtime"
+    unrunnable.write_bytes(b"not a valid executable\n")
+    unrunnable.chmod(0o755)
+    missing = tmp_path / "does-not-exist-at-all"
+    # Runs, but exits non-zero: what it printed is not a version.
+    failing = tmp_path / "a-failing-runtime"
+    failing.write_text("#!/bin/sh\necho oops\nexit 1\n")
+    failing.chmod(0o755)
+
+    for binary in (str(missing), str(unrunnable), str(failing)):
+        monkeypatch.setattr(runtime, "_probed", False)
+        monkeypatch.setattr(runtime, "_probe_result", None)
+        monkeypatch.setattr(runtime, "_selected", SimpleNamespace(binary=binary))
+        assert runtime.probe() is None
+
+
+def test_a_runtime_that_runs_reports_the_version_it_printed(tmp_path, monkeypatch):
+    """SA-0077's other half: a runtime that can be executed is not merely
+    "not absent" — what is recorded is what it actually printed, trimmed,
+    read from a real process `probe()` really ran (not a stubbed `_call`,
+    which would prove only that the plumbing forwards a value it was handed)."""
+    runnable = tmp_path / "a-real-runtime"
+    runnable.write_text("#!/bin/sh\necho 'fake-runtime 9.9.9'\n")
+    runnable.chmod(0o755)
+
+    monkeypatch.setattr(runtime, "_probed", False)
+    monkeypatch.setattr(runtime, "_probe_result", None)
+    monkeypatch.setattr(runtime, "_selected", SimpleNamespace(binary=str(runnable)))
+    assert runtime.probe() == "fake-runtime 9.9.9"
+
+
+def test_a_cell_marked_test_skips_when_the_runtime_is_absent(monkeypatch):
+    """SA-0077: when `runtime.probe()` says absent, a `cell`-marked item is
+    skipped with a reason naming the runtime — not failed, and not errored.
+
+    Calls the hook directly rather than through a nested pytest run: it is a
+    plain function, not a fixture, so it can be exercised the same way any
+    other unit under test here is."""
+    from tests import conftest
+
+    monkeypatch.setattr(runtime, "probe", lambda: None)
+
+    class _CellMarkedItem:
+        def get_closest_marker(self, name):
+            return object() if name == "cell" else None
+
+    with pytest.raises(pytest.skip.Exception) as excinfo:
+        conftest.pytest_runtest_setup(_CellMarkedItem())
+    assert runtime.dialect().binary in str(excinfo.value)
+
+
+def test_an_unmarked_test_never_probes_the_runtime(monkeypatch):
+    # The hook runs before the tripwire fixture is installed, so its marker
+    # guard is the only thing keeping an unmarked test from execing the runtime.
+    from tests import conftest
+
+    def _probe():
+        raise AssertionError("probed the runtime for an unmarked test")
+
+    monkeypatch.setattr(runtime, "probe", _probe)
+
+    class _UnmarkedItem:
+        def get_closest_marker(self, name):
+            return None
+
+    assert conftest.pytest_runtest_setup(_UnmarkedItem()) is None
 
 
 def test_exec_is_told_its_working_directory_before_the_container():

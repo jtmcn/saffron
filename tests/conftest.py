@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Protocol
 
 import pytest
 
@@ -16,6 +17,35 @@ class HostToolExecInTest(BaseException):
     """Not an `Exception`: `session.export_patch` and `gates.runner` both catch
     `Exception` broadly and turn it into a watch line, which would convert this
     tripwire into a green run reporting nothing."""
+
+
+class _Markable(Protocol):
+    """What this hook needs of an item — narrower than `pytest.Item` so a
+    test can exercise it against a minimal stand-in rather than a live item
+    the pytest internals constructed."""
+
+    def get_closest_marker(self, name: str) -> object | None: ...
+
+
+def pytest_runtest_setup(item: _Markable) -> None:
+    """Skip a `cell`-marked test outright when the selected runtime is absent.
+
+    The marker already says *this test needs a cell runtime*; this is the
+    other half of that sentence, asked once per session through
+    `runtime.probe()` (SA-0077). A plain hook function rather than a fixture:
+    it runs ahead of fixture setup, so a skip here means the test's fixtures —
+    including `no_host_tool_exec` below — never run at all, and a machine
+    without the runtime sees one honest skip instead of a defect-shaped
+    failure for every marked test.
+
+    Consulted only for a marked test: this hook runs before the tripwire
+    fixture is installed, so nothing but this guard keeps an unmarked test
+    from execing the runtime.
+    """
+    if item.get_closest_marker("cell") is None:
+        return
+    if runtime.probe() is None:
+        pytest.skip(f"no working {runtime.dialect().binary} found on this host")
 
 
 @pytest.fixture(autouse=True)
