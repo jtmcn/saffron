@@ -52,7 +52,7 @@ evidence. That is the gate now, and it is one cheap spec away.
 
 Soundness first: **79**, **69**, **93**, **94**, **80** (~~**83**~~, ~~**85**~~, ~~**84**~~,
 ~~**82**~~ and ~~**81**~~, pulled up from tier 3 as why 69's gate could not be
-declared against safely, are done — 2026-09-08), then **97**. Honesty second:
+declared against safely, are done — 2026-09-08), then **97** and **102**. Honesty second:
 **73**, **70**, **45**, **51** (with **49**/**50**, which its fix closes),
 ~~**47**~~, **46** (with **95**, which compounds it), **40**, ~~**26**~~,
 ~~**7**~~, and the remainder of **78**.
@@ -108,7 +108,8 @@ listed too.
 
 Operator visibility parts 2 and 3 — `SA-0032`–`SA-0039`, with the plan's Task 6
 rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
-**38**), plus **43**, **48**, **52**, **60**, **66**, **67**, ~~**72**~~, **98**.
+**38**), plus **43**, **48**, **52**, **60**, **66**, **67**, ~~**72**~~, **98**, **103**,
+**104**.
 
 **72 is done** (2026-09-07, by hand), taken ahead of Track A by operator
 decision because it was the one item whose defect was a guard that could not
@@ -118,7 +119,7 @@ fire. Its number stays listed because item numbers are cited from `saffron/`.
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, **57**, **61**, **62**, **63**, **64**, **69**, **75**, **76**, **77**,
-~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**.
+~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**.
 (**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
 is the same defect as filing one nowhere at all. **94** was filed here and moved
@@ -137,7 +138,9 @@ operator-visibility spec there is already a full plan for. That is the deliberat
 consequence of ranking by the milestone rather than by what is nearest to hand.
 (Recounted 2026-09-10 from each item's own `Status` line to 34 of 51, then items
 **97**–**101**, filed open that day, added — **97** to tier 1, the rest to these
-two. **9** and **10**, each done bar a remnant, sit outside the index.)
+two. **9** and **10**, each done bar a remnant, sit outside the index. Items
+**102**–**106** were filed open on 2026-09-12 from the reviews of stack #222 —
+**102** to tier 1, **103** and **104** to tier 2, **105** and **106** to tier 3.)
 
 ---
 
@@ -5866,6 +5869,121 @@ target-repo directory and the marker accepted under both spellings until every
 onboarded repo has moved; the branch prefix changed only for tasks started after
 the change. Guard it the way #192 did — a test that fails on a stale spelling,
 run both ways.
+
+---
+
+## 102. `refs/replace` lets a cell ship a tree its gates never ran on
+
+**Tier 1.** Found reviewing `SA-0072` (PR #219), 2026-09-12, by probe; the
+PACKAGE half is read from the code, not run in a cell. An agent that runs
+`git replace <real> <benign>` in its worktree changes what every git read of
+those objects returns, and `_git` (`saffron/cell/worktree.py:147`) pins config
+with `-c` but not replacement. Measured: `--name-only` went from
+`FORBIDDEN.md`, `src/a.py`, `tests/test_x.py` to `src/a.py` alone,
+`git show HEAD:FORBIDDEN.md` returned the benign content, and `rev-parse HEAD`
+still named the real commit.
+
+The gates run on the real tree in `/work`, but `export_patch` and
+`changed_files` read the replaced one. So `scope` judges one tree, `tests`
+passes another, and `patch.diff` — what PACKAGE applies (§5.7) — describes
+neither the commit `patch.json`'s `head_sha` names nor the tree the suite ran
+on. `reverify`'s "the packaged tree is the tree the suite already ran on" is
+the assumption it breaks. The mirror never receives `refs/replace`, so the
+hidden edit itself does not reach the pull request; a `pass` certifying a tree
+that does not ship does.
+
+**Done looks like** `--no-replace-objects` as a global option in `_git` —
+probed: it restores all three reads, as does `-c core.useReplaceRefs=false` —
+with a witness that plants a replacement in `_hostile_repo` and asserts the
+pinned read sees the real tree.
+
+---
+
+## 103. A cell can hide an edit's content from the critic with settings the diff never shows
+
+**Tier 2.** Found reviewing `SA-0072` (PR #219), 2026-09-12, by probe. Four
+repo-local settings make the pinned diff print `Binary files a/f.py and b/f.py
+differ` with no hunks, while the name-only listing is unchanged: `* -diff` or
+`* binary` in `.git/info/attributes`, `core.attributesFile`,
+`diff.<driver>.binary=true`, and `core.bigFileThreshold=1`. None appears in the
+diff, so the critic reviews nothing, and `integrity`'s binary ceiling
+(`saffron/gates/core/integrity.py:234`), written against a *committed*
+`.gitattributes`, never sees why. That ceiling's own upgrade path (`:238-240`)
+says `--numstat` still counts added lines for a file rendered as binary; under
+`* -diff` it printed `-	-	f.py`.
+
+**Tier 2, not 1,** because — from reading `apply_patch`, not run — PACKAGE
+refuses a binary change with no full index line, so the hidden content cannot
+reach a pull request unreviewed. The task fails instead, and as infrastructure
+rather than as its own failure, which is a second defect of the same shape.
+
+**Done looks like** each setting pinned on `_git`'s command line where one
+exists — probed: `-c core.bigFileThreshold=2g` restores the hunks and
+`-c core.attributesFile=/dev/null` neutralises the second — and an answer for
+`.git/info/attributes`, which neither `--attr-source=<empty tree>` nor
+`core.attributesFile` overrode. The integrity comment corrected either way.
+Item **89** holds the settings that move the diff's shape rather than hide it.
+
+---
+
+## 104. A cell's malformed `resets_at` raises inside the rate-limit handler
+
+**Tier 2.** Found reviewing `SA-0070` (PR #221), 2026-09-12. `SA-0070` made
+`events._when` return `"unknown"` for a `resets_at` it cannot read — a string,
+a list, an integer past a timestamp, `NaN` — because `rate_limit` events
+carrying them reach the renderer from a live cell. Its twin,
+`saffron/phases/implement.py:when` (`:172`), still calls `time.localtime`
+unguarded, and `saffron/cell/session.py:1843` calls it inside the
+`except RateLimited` handler on `stopped.resets_at`: the cell's own
+`rate_limit.get("resets_at")`, guarded only by truthiness. Measured by the
+review: a rejected rate limit with `resets_at="soon"` raises `TypeError` there.
+What that does past the handler is not verified; a raise out of
+`run_one_cell` reaches the batch loop as an abort (§4.2.1) where a provider
+ceiling should have been `RATE_LIMITED`. `phases/**` was forbidden to
+`SA-0070`.
+
+**Done looks like** one function rather than two — `implement.when` replaced
+by `events._when`, or guarded the same way — with a witness that drives a
+rejected rate limit carrying a malformed `resets_at` through the session and
+asserts `RATE_LIMITED`.
+
+---
+
+## 105. `README.md`'s exit-code table says `2` is infrastructure, and `INCOMPLETE` exits 2 too
+
+**Tier 3.** Found by `SA-0067`'s critic (PR #216), 2026-09-12. `README.md:142`
+reads "`2` | infrastructure failed". Since `SA-0067`, `saffron batch` also exits
+2 for an `INCOMPLETE` night, which `_batch`'s own docstring says must not be
+described to the operator as the machine breaking. The README now sends a
+reader to the place the `batch: INCOMPLETE` line was written to keep them out
+of. `README.md` was outside the spec's `touches`.
+
+**Done looks like** the row saying what `2` means for each command, by hand.
+
+---
+
+## 106. One test fails in every cell's baseline and passes on the host
+
+**Tier 3.** Measured running stack #222, 2026-09-12.
+`tests/test_saffron_gates.py::test_structure_errors_when_its_tool_is_present_but_not_runnable`
+is the one failure in every cell baseline the batch took — `SA-0066`'s
+`baseline.json` records 1 failed of 1778 collected, and every cell's
+`baseline:` line read `tests=fail` — and passes on the host in 0.26s. The
+2026-09-11 lens-corpus probes record it too
+(`docs/evidence/passes/2026-09-11-lens-corpus-spread/SA-0062/probes.json`). The
+test puts an `ast-grep` stub of mode `0644` first on `PATH` and expects the
+`structure` gate to report `error`.
+
+Baseline subtraction cancels it, so it blocks nothing. What it costs: every
+cell's `tests` baseline is `fail`, and a spec that changes the `structure` gate
+would find its own witness already failing. The cause is not measured. No image
+under `images/` or `.saffron/Dockerfile` sets `USER`, so cells run as root — but
+root still cannot execute a file with no execute bit, so that alone does not
+explain it.
+
+**Done looks like** the failure reproduced in a cell and its cause named, then
+the test or the cell fixed — not the test skipped in a cell, which is a `pass`
+nobody checked.
 
 ---
 

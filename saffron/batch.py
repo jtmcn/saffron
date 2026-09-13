@@ -3,8 +3,9 @@
 `saffron queue` resolves candidates and prints them; nothing consumed the
 list. This module is the consumer: `run_batch` is a K=1 `for` loop over the
 sorted candidates `build_queue` already produced, calling an injected runner
-once per candidate and stopping four ways — the queue drains, the budget is
-gone, `--until` hits, or the breaker fires.
+once per candidate and stopping five ways — the queue drains, the budget is
+gone, `--until` hits, the breaker fires, or a task comes back mid-phase
+having reached no end state at all (`INCOMPLETE`, backlog item 70).
 
 Deliberately not here: resolving the scan (`cli._queue` already does it and
 `cli.py` is forbidden to this module), driving a task (`task.run_task` owns
@@ -24,10 +25,14 @@ from typing import Literal
 from saffron.cell.session import CellOutcome
 from saffron.ledger import Ledger
 from saffron.preflight import Readiness
+from saffron.reconcile import IN_FLIGHT_STATES
 from saffron.scheduler import Candidate
 
-# `INCOMPLETE` is declared ahead of its producer: `SA-0067` makes the loop
-# return it for a night that left a task in flight (backlog item 70).
+# The loop returns `INCOMPLETE` for a night that left a task in flight — a
+# task that came back mid-phase, having reached no end state, which is not
+# the same as the task failing (backlog item 70). `reconcile.IN_FLIGHT_STATES`
+# is read, never copied: a second list is how the loop and the next batch
+# scan would come to disagree about what a finished task is.
 StopReason = Literal["DRAINED", "BUDGET", "UNTIL", "INFRASTRUCTURE", "INCOMPLETE"]
 
 # The breaker's own set — deliberately not `scheduler.REQUEUE_STATES`, which
@@ -82,8 +87,8 @@ def run_batch(
     loud. `clock` keeps its real default, because `datetime.now` is one.
 
     Returns the stop reason itself, one of `DRAINED`, `BUDGET`, `UNTIL`,
-    `INFRASTRUCTURE` — never a boolean or an exit code. `SA-0051` owns the
-    mapping to an exit code.
+    `INFRASTRUCTURE`, `INCOMPLETE` — never a boolean or an exit code.
+    `SA-0051` owns the mapping to an exit code.
     """
     # UTC, and space-separated: `batches.started_at` is `datetime('now')`,
     # which is both. A naive local `isoformat()` matched neither, so the two
@@ -95,6 +100,10 @@ def run_batch(
     )
     batch_id = ledger.create_batch(budget_usd, until_ts=until_ts)
 
+    # Every task this run left mid-phase, in the order it happened —
+    # `(spec_id, state)`. Owned here, not in `_drive`, so a night that raises
+    # after leaving one in flight still names it on the way out (item 70).
+    in_flight: list[tuple[str, str]] = []
     stopped: StopReason | None = None
     try:
         stopped = _drive(
@@ -107,6 +116,7 @@ def run_batch(
             clock=clock,
             readiness_check=readiness_check,
             emit=emit,
+            in_flight=in_flight,
         )
         return stopped
     finally:
@@ -117,7 +127,7 @@ def run_batch(
             # not catch, or an operator's Ctrl-C at 3am. An open row is the
             # one state indistinguishable from a night still running, and it
             # is what §6's morning queue reads.
-            ledger.close_batch(batch_id, "INFRASTRUCTURE")
+            _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
 
 
 def _drive(
@@ -131,18 +141,19 @@ def _drive(
     clock: Callable[[], datetime],
     readiness_check: Callable[[], Readiness],
     emit: Callable[[str], None],
+    in_flight: list[tuple[str, str]],
 ) -> StopReason:
     """`run_batch`'s body, split out so every exit closes the batch row.
 
-    Every `return` here is paired with a `close_batch`; anything that leaves
-    without returning is the caller's `finally` to deal with."""
+    Every `return` here is `_stop`, which is the one call to `close_batch`;
+    anything that leaves without returning is the caller's `finally` to deal
+    with — through `_stop` too, with the same `in_flight`."""
     readiness = readiness_check()
     if not readiness.ok:
         # §4.4 step 1: a readiness failure ends the night before any task
         # starts, but it still has to leave a row behind, or an expired token
         # at 22:00 produces a night with no record it was attempted.
-        ledger.close_batch(batch_id, "INFRASTRUCTURE")
-        return "INFRASTRUCTURE"
+        return _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
 
     consecutive_aborts = 0
 
@@ -151,17 +162,14 @@ def _drive(
         # then the breaker's standing count (§4.2.1's ordering, named once
         # here rather than re-derived at each check).
         if until is not None and clock() >= until:
-            ledger.close_batch(batch_id, "UNTIL")
-            return "UNTIL"
+            return _stop(ledger, batch_id, "UNTIL", in_flight, emit)
 
         remaining = budget_usd - ledger.batch_spend(batch_id)
         if candidate.spec.budget_usd > remaining:
-            ledger.close_batch(batch_id, "BUDGET")
-            return "BUDGET"
+            return _stop(ledger, batch_id, "BUDGET", in_flight, emit)
 
         if consecutive_aborts >= _BREAKER_THRESHOLD:
-            ledger.close_batch(batch_id, "INFRASTRUCTURE")
-            return "INFRASTRUCTURE"
+            return _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
 
         high_water = ledger.max_run_id()
         try:
@@ -199,8 +207,17 @@ def _drive(
             # Any state a task earned resets the counter, `EXHAUSTED`
             # included — "any terminal state" would also reset on
             # `GATE_ERROR` and `PREFLIGHT_FAILED` themselves, and the counter
-            # would never reach two.
+            # would never reach two. An in-flight state resets it the same
+            # way: two provider blips in a row must not end a night that
+            # would have recovered on its third task (backlog item 70).
             consecutive_aborts = 0
+
+        if outcome.state in IN_FLIGHT_STATES:
+            # Read from `reconcile`, never copied: the next batch scan's own
+            # definition of "in flight" is what decides a corpse there, and a
+            # second list here is how the two would come to disagree about
+            # what a finished task is.
+            in_flight.append((candidate.spec.id, outcome.state))
 
     if consecutive_aborts >= _BREAKER_THRESHOLD:
         # The breaker is consulted before a task, so a queue whose last
@@ -208,8 +225,35 @@ def _drive(
         # standing. Reporting `DRAINED` there would exit 0, and launchd would
         # record a successful night in which every task died of one global
         # condition.
-        ledger.close_batch(batch_id, "INFRASTRUCTURE")
-        return "INFRASTRUCTURE"
+        return _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
 
-    ledger.close_batch(batch_id, "DRAINED")
-    return "DRAINED"
+    return _stop(ledger, batch_id, "DRAINED", in_flight, emit)
+
+
+def _stop(
+    ledger: Ledger,
+    batch_id: int,
+    reason: StopReason,
+    in_flight: list[tuple[str, str]],
+    emit: Callable[[str], None],
+) -> StopReason:
+    """Name every task this night left in flight, then close the batch row
+    with `reason` — or with `INCOMPLETE` in its place, whenever `in_flight`
+    is non-empty and `reason` is not already `INFRASTRUCTURE`.
+
+    `INFRASTRUCTURE` outranks `INCOMPLETE`, which outranks every ordinary
+    reason (`DRAINED`, `BUDGET`, `UNTIL`) — never the other way, and never
+    hidden behind either (backlog item 70, `DESIGN.md` §4.2.1). Naming
+    happens first and unconditionally, whatever the final reason turns out to
+    be, `INFRASTRUCTURE` included: a stop reason says something went wrong,
+    and this line says which spec to look at.
+
+    The single call site for `close_batch` — every `_drive` return and
+    `run_batch`'s `finally` come through here: decide the reason, close once,
+    return it."""
+    for spec_id, state in in_flight:
+        emit(f"{spec_id:<10} left in flight in {state}")
+    if in_flight and reason != "INFRASTRUCTURE":
+        reason = "INCOMPLETE"
+    ledger.close_batch(batch_id, reason)
+    return reason

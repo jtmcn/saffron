@@ -612,13 +612,17 @@ def _mirror_path(repo: Path, home: Path) -> Path:
 
 
 def _no_candidate_should_run(candidate: Candidate) -> CellOutcome:
-    """The runner a night gets when readiness already failed.
+    """The runner a night gets when the loop was never meant to start —
+    readiness failed, or readiness passed but the queue itself could not be
+    resolved.
 
     `run_batch` takes the runner before it knows whether it will use one, and
-    an unready night has no candidates to give it — so reaching this is a bug
-    in the ordering above, not an operator's problem."""
+    a night that never reaches the loop has no candidates to give it — so
+    reaching this is a bug in the ordering above, not an operator's
+    problem."""
     raise AssertionError(
-        f"readiness failed, yet {candidate.spec.id} was started anyway"
+        "readiness failed or the queue could not be resolved, yet "
+        f"{candidate.spec.id} was started anyway"
     )
 
 
@@ -665,16 +669,23 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     watching); binds a real readiness check to this run's own paths and
     token, never the loop's "proceed" default; builds the adapter that turns
     a candidate into a cell (`_batch_runner`); and hands all three to
-    `saffron.batch.run_batch`, which owns the loop itself (`saffron/batch.py`
-    is forbidden here).
+    `saffron.batch.run_batch`, which owns the loop itself and is the only
+    thing in this module that calls `ledger.create_batch`/`close_batch` —
+    true whether the night gets past readiness or not.
 
-    Exit codes are `run_batch`'s own four stop reasons, mapped per §4.2.1:
-    `0` for `DRAINED`, `BUDGET` and `UNTIL`, `2` for `INFRASTRUCTURE` —
-    never `1`, which is reserved for a task's own failure and a batch is not
-    a task. A readiness failure is a plain `INFRASTRUCTURE` from
-    `run_batch`'s point of view, so the step and detail it found are read
-    back out of the one `Readiness` this call recorded, not out of the stop
-    reason itself.
+    Exit codes are `run_batch`'s own five stop reasons, mapped per §4.2.1:
+    `0` for `DRAINED`, `BUDGET` and `UNTIL`, `2` for `INFRASTRUCTURE` and for
+    `INCOMPLETE` — never `1`, which is reserved for a task's own failure and
+    a batch is not a task. `INCOMPLETE` shares `INFRASTRUCTURE`'s exit code
+    but never its line: it is decided and printed before either of
+    `INFRASTRUCTURE`'s two lines below are reached, because the machine did
+    not break — a task simply came back with no end state — and telling the
+    operator "infrastructure failed" would send them to re-check a token and
+    a mirror that were fine (backlog item 70). `INFRASTRUCTURE` itself has
+    two readable causes: a readiness failure, whose step and detail are read
+    back out of the one `Readiness` this call recorded, and a queue that
+    raised after readiness passed, whose own text is printed instead — never
+    as "readiness failed" (item 95).
     """
     repo = args.repo.resolve()
     until = (
@@ -699,6 +710,9 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
 
     candidates: list[Candidate] = []
     runner: Callable[[Candidate], CellOutcome] = _no_candidate_should_run
+    # Set when the scan raises after readiness passed (item 95), so the raise
+    # still reaches `run_batch` and its row.
+    resolution_error: Exception | None = None
     if readiness.ok:
         # Readiness already paid for these three reads. `Readiness` declares
         # all three optional and enforces nothing; what makes this safe is
@@ -711,39 +725,64 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         pinned = PinnedBase(
             mirror=readiness.mirror, url=readiness.url, base_sha=readiness.base_sha
         )
-        resolved = _resolve_queue(
-            repo, args.home, ledger, stamp_orphaned=True, pinned=pinned
+        try:
+            resolved = _resolve_queue(
+                repo, args.home, ledger, stamp_orphaned=True, pinned=pinned
+            )
+        except Exception as exc:
+            # A discovery refusal (`SA-0065`), a mirror fetch, a reconcile:
+            # all real work, none of it readiness.
+            resolution_error = exc
+        else:
+            # The night says what its own scan could not check. `_resolve_queue`
+            # leaves reporting to its caller, and the attended caller discharges
+            # that by printing all three; unreported here, a night whose `gh`
+            # never ran looks identical in the morning to one whose refusals all
+            # passed — the scan quietly did less than it appears to have done, on
+            # the one path where nobody is awake to notice.
+            _print_reconcile_summary(resolved.reconciled)
+            _print_batch_plan(resolved, budget_usd=args.budget, until=until)
+
+            # The same remote `readiness` already read — reused, not re-derived,
+            # for the same reason `_resolve_queue` above no longer derives it
+            # either.
+            runner = _batch_runner(
+                resolved, repo=repo, ledger=ledger, out_dir=out_dir, url=pinned.url
+            )
+            candidates = resolved.candidates
+
+    def _readiness_or_raise() -> preflight.Readiness:
+        # Raised inside `run_batch`'s `try`, so its `finally` closes the row
+        # `INFRASTRUCTURE` — the "readiness probe that raised" case it names.
+        if resolution_error is not None:
+            raise resolution_error
+        return readiness
+
+    try:
+        stop = run_batch(
+            candidates,
+            ledger,
+            args.budget,
+            until,
+            runner,
+            # The readiness already measured above, or the scan's raise — never
+            # a second probe of the same host.
+            readiness_check=_readiness_or_raise,
         )
+    except Exception as exc:
+        if exc is not resolution_error:
+            # Identity, not presence: `create_batch` can still raise after a
+            # failed scan, and that is `main`'s to narrate, not the queue's.
+            raise
+        print(f"batch: the queue could not be resolved: {exc}")
+        return 2
 
-        # The night says what its own scan could not check. `_resolve_queue`
-        # leaves reporting to its caller, and the attended caller discharges
-        # that by printing all three; unreported here, a night whose `gh`
-        # never ran looks identical in the morning to one whose refusals all
-        # passed — the scan quietly did less than it appears to have done, on
-        # the one path where nobody is awake to notice.
-        _print_reconcile_summary(resolved.reconciled)
-        _print_batch_plan(resolved, budget_usd=args.budget, until=until)
-
-        # The same remote `readiness` already read — reused, not re-derived,
-        # for the same reason `_resolve_queue` above no longer derives it
-        # either.
-        runner = _batch_runner(
-            resolved, repo=repo, ledger=ledger, out_dir=out_dir, url=pinned.url
-        )
-        candidates = resolved.candidates
-
-    stop = run_batch(
-        candidates,
-        ledger,
-        args.budget,
-        until,
-        runner,
-        # Already measured, above, before the scan that depends on it. The
-        # loop still calls this — it is what makes the batch row close
-        # `INFRASTRUCTURE` and exist at all — but the answer is the one this
-        # command took, not a second probe of the same host.
-        readiness_check=lambda: readiness,
-    )
+    if stop == "INCOMPLETE":
+        # Decided before either `INFRASTRUCTURE` line below: the queue is
+        # resolved and readiness passed, so neither line's step is what went
+        # wrong — a task just came back with no end state.
+        print("batch: INCOMPLETE")
+        return 2
 
     if stop != "INFRASTRUCTURE":
         print(f"batch: {stop}")

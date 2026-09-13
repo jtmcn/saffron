@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+from saffron import events
 from saffron.agents.artifacts import EXTRACTION_PROMPT
 from saffron.cell import runtime
 from saffron.cell.worktree import STATE_MOUNT, WORKTREE_MOUNT
@@ -180,23 +181,30 @@ def when(stamp: int | None) -> str:
     return time.strftime("%H:%M local" if same_day else "%a %d %b %H:%M local", local)
 
 
-# Storage, not display. `describe` cuts at 160 for the terminal; this is what
-# `events.jsonl` keeps, and the two are different questions — 160 would throw
-# away the most interesting forensic artifact a cell produces (backlog 46).
-QUARANTINE_BYTES = 8192
+def __getattr__(name: str) -> int:
+    # `QUARANTINE_BYTES` is read through to `events.BOUND_CHARS` rather than
+    # copied at import, so the old name cannot drift from the one bound.
+    if name == "QUARANTINE_BYTES":
+        return events.BOUND_CHARS
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _quarantined(spec_id: str, line: str) -> Agent:
     """A line that is not an event, bounded before it is persisted.
 
-    Bounds the accidental case only, and says so: a cell that wants the disk
-    wraps its payload in nine bytes of JSON and takes the `Agent.event` path,
-    which this cannot reach — `saffron/events.py` is forbidden here. Measured
-    on one 5 MB stdout line: 5 MB written unbounded, 8 KB now; the same line
-    as `{"type":"text",...}` still writes 5 MB. Backlog item 46 is where both
-    paths get one answer."""
+    Storage, not display: `describe` cuts at 160 for the terminal, which would
+    throw away the most interesting forensic artifact a cell produces (backlog
+    46). Reads `events.BOUND_CHARS` at call time, so patching that one value
+    governs this path and `EventLog.append`'s event-bounding together (item
+    46: "one value, both paths"). Measured on one 5 MB stdout line: 5 MB written unbounded, 8 KB
+    now; the same line as `{"type":"text",...}` used to still write 5 MB —
+    `EventLog.append` bounds that route too, now that `saffron/events.py` is
+    reachable from here."""
     return Agent(
-        timestamp=time.time(), spec_id=spec_id, raw=True, line=line[:QUARANTINE_BYTES]
+        timestamp=time.time(),
+        spec_id=spec_id,
+        raw=True,
+        line=line[: events.BOUND_CHARS],
     )
 
 

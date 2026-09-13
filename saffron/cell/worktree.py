@@ -141,6 +141,14 @@ DIFF_FLAGS = (
     # A rename is git's guess at intent; the host needs both paths, or a test
     # renamed into `touches` leaves scope nothing to object to.
     "--no-renames",
+    # core.abbrev moves the `index` line's bytes `pinned_diff` compares; 7 is
+    # what `auto` emitted across every shipped fixture, not `auto` itself.
+    "--abbrev=7",
+    # diff.context widens a hunk, and every line a hunk covers is somewhere a
+    # critic finding may anchor (`parse_diff`).
+    "--unified=3",
+    # diff.algorithm picks a different diff for the same two trees.
+    "--diff-algorithm=myers",
 )
 
 

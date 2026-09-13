@@ -41,12 +41,24 @@ record, not an input.
 from __future__ import annotations
 
 import json
+import types
 import typing
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from typing import Literal
 
 from saffron.gates.contract import GateStatus
+
+# The one size bound feeding both paths a cell's stdout can reach the host's
+# disk through — the raw-line quarantine (`implement._quarantined`, reachable
+# as `implement.QUARANTINE_BYTES`) and the parsed-event bound below
+# (`EventLog.append`). Backlog item 46 named "one value, both paths" as the
+# open half after `implement.QUARANTINE_BYTES` shipped alone, because this
+# module was forbidden to that spec. Counted in characters — the unit a raw
+# stdout `line` is already sliced in, not bytes: JSON escaping can still
+# multiply a character's cost once it is written, which is why the bound on
+# disk is "a small constant multiple of this", never this exactly.
+BOUND_CHARS = 8192
 
 # CONTEXT.md names GATE <-> REPAIR as one phase; split here because a gate
 # attempt and a repair turn render as different lines. Deliberate divergence,
@@ -251,15 +263,28 @@ class Budget:
 @dataclass(frozen=True, slots=True)
 class Agent:
     """One line of the cell's stdout, or a host-authored fact about that
-    stream. Exactly one of three shapes: `event` — a parsed cell event,
-    verbatim, under one key, never re-typed (no Agent SDK type is imported
-    here or anywhere outside `agent_runner.py`); `line` — a raw line that was
-    not an event at all, from a process sharing the runner's stdout inside an
-    untrusted cell, quarantined by `raw=True` rather than dropped; or
-    `detail` — a host-authored fact with no cell event behind it at all (a
-    reap outcome, a pipe closing). `raw` is the field that must survive the
-    log: a raw line that loses its flag on round-trip is a quarantine that
-    stopped being one."""
+    stream. One of four shapes: `event` — a parsed cell event, verbatim,
+    under one key, never re-typed (no Agent SDK type is imported here or
+    anywhere outside `agent_runner.py`), and whose JSON serialization is at
+    most `BOUND_CHARS` characters; `line` — a
+    raw line that was not an event at all, from a process sharing the
+    runner's stdout inside an untrusted cell, quarantined by `raw=True`
+    rather than dropped; `line` again but for a different reason, when
+    `bounded` is set instead — a parsed event whose own `json.dumps`
+    serialization exceeded `BOUND_CHARS`, too large to keep as `event` (a
+    dict truncated to a size budget is not a smaller version of the same
+    event, so `event` is `None` here rather than a partial one), stored as
+    that serialization sliced to `BOUND_CHARS` characters, with
+    `original_chars` naming how large it really was; or `detail` — a
+    host-authored fact with no cell event behind it at all (a reap outcome, a
+    pipe closing). `raw` is the field that must survive the log: a raw line
+    that loses its flag on round-trip is a quarantine that stopped being one.
+    `bounded` is the same kind of fact for the fourth shape — a bounded event
+    that loses its flag reads as a whole one, which is worse than the
+    unbounded line it replaced (item 46). `describe()` renders a bounded
+    event as `agent: (bounded, N chars) <line, cut again to 160 for the
+    terminal>` — the same truncation the raw shape gets, on top of the one
+    already applied for storage."""
 
     timestamp: float
     spec_id: str
@@ -267,6 +292,8 @@ class Agent:
     event: dict | None = None
     line: str | None = None
     detail: str = ""
+    bounded: bool = False
+    original_chars: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -353,13 +380,29 @@ class EventLog:
     def append(self, event: Event) -> None:
         """Write one line, flushed. Never raises: a cell that cannot write its
         own log is not a cell whose task should die on that account — the
-        caller has nothing useful to do with the failure either way."""
+        caller has nothing useful to do with the failure either way.
+
+        An `Agent` event's own `event` dict is bounded here, at the size its
+        `json.dumps` serialization reaches — never at the size of the whole
+        written line, which would cut an already-bounded raw line a second
+        time. Measured on one 5 MB stdout line wrapped in nine bytes of JSON:
+        5 MB written before this bound; 16517 characters now for 5 MB of `"`,
+        the worst case, since writing escapes each stored character once."""
         try:
-            # `asdict` is inside the try because it deep-copies, and
-            # `Agent.event` is a `json.loads` product from an untrusted cell.
-            # Measured: nesting 1000 deep parses fine and `asdict` raises
-            # RecursionError on it, while `json.dumps` handles 5000 — so this
-            # statement, not the write, is the one reading hostile input.
+            if isinstance(event, Agent) and event.event is not None:
+                serialized = json.dumps(event.event)
+                if len(serialized) > BOUND_CHARS:
+                    event = replace(
+                        event,
+                        event=None,
+                        line=serialized[:BOUND_CHARS],
+                        bounded=True,
+                        original_chars=len(serialized),
+                    )
+            # Both reads of the cell's dict sit in this try. `json.dumps` above
+            # handles nesting 5000 deep; `asdict` raises RecursionError at 1000,
+            # so an event too deep to copy is dropped — unless it was bounded,
+            # in which case `asdict` copies a string and the cut event is kept.
             payload = {"kind": type(event).__name__, **asdict(event)}
             self._path.parent.mkdir(parents=True, exist_ok=True)
             with self._path.open("a") as handle:
@@ -372,6 +415,60 @@ class EventLog:
             # breadcrumb — silence here must not read as "nothing happened".
             self.failed = True
             return
+
+
+def _shape_ok(value: object, hint: object) -> bool:
+    """True if `value`, straight off the wire, is a legal instance of a
+    dataclass field's annotated type — the check `read_log`'s own docstring
+    claims and `cls(**obj)` never performs. `Agent(event='x')` round-trips
+    today and `describe` raises `AttributeError` on it; this is what
+    `read_log` needs to catch that at the line, not leave it for the reader.
+
+    JSON is looser than Python, so this checks each hint's own rule rather
+    than a blanket `isinstance`: a `float` field accepts a JSON integer
+    (there is no float/int distinction on the wire), but neither an `int`
+    field nor a `float` field accepts a `bool` (`bool` is an `int`
+    subclass in Python, not in JSON). `tuple[str, ...]` is checked
+    element-wise, after `read_log`'s own list coercion. `X | None` is
+    matched as either `types.UnionType` or `typing.Union`: one object from
+    Python 3.14, two before it.
+
+    Never checks a `Literal`'s membership: a string that is the right
+    shape carrying a value the enum does not (yet) list is the
+    forward-compatible case `read_log` exists to allow.
+    """
+    origin = typing.get_origin(hint)
+    if origin is Literal:
+        return any(type(value) is type(choice) for choice in typing.get_args(hint))
+    if origin is typing.Union or origin is types.UnionType:
+        return any(_shape_ok(value, arg) for arg in typing.get_args(hint))
+    if origin is tuple:
+        args = typing.get_args(hint)
+        elem_hint = args[0] if args else object
+        return isinstance(value, (list, tuple)) and all(
+            _shape_ok(item, elem_hint) for item in value
+        )
+    if hint is type(None):
+        return value is None
+    if hint is bool:
+        return isinstance(value, bool)
+    if hint is int:
+        return isinstance(value, int) and not isinstance(value, bool)
+    if hint is float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        # An int past float range is valid JSON, and raises at every `:.2f`
+        # `describe` formats it with.
+        try:
+            float(value)
+        except OverflowError:
+            return False
+        return True
+    if hint is str:
+        return isinstance(value, str)
+    if hint is dict:
+        return isinstance(value, dict)
+    return True
 
 
 def read_log(task_dir: Path) -> list[Event]:
@@ -400,7 +497,9 @@ def read_log(task_dir: Path) -> list[Event]:
             continue
         try:
             obj = json.loads(line)
-        except json.JSONDecodeError:
+        # Not only `JSONDecodeError`: an integer past 4300 digits raises the
+        # plain `ValueError`, which would take every other line down with it.
+        except ValueError:
             continue
         if not isinstance(obj, dict):
             continue
@@ -423,6 +522,11 @@ def read_log(task_dir: Path) -> list[Event]:
         for name, value in list(obj.items()):
             if isinstance(value, list) and typing.get_origin(hints.get(name)) is tuple:
                 obj[name] = tuple(value)
+        # A field present with the wrong shape drops its event, exactly like
+        # one missing outright — `Agent(event='x')` round-tripped unchecked
+        # before this, and `describe` raised on it (item 61).
+        if any(not _shape_ok(value, hints[name]) for name, value in obj.items()):
+            continue
         try:
             events.append(cls(**obj))
         except (TypeError, ValueError):
@@ -440,15 +544,41 @@ def _when(stamp: int | None) -> str:
     prints a reset time that has already passed. Both call sites here guard
     with `if event.get("resets_at")`, so neither branch is reachable today —
     `SA-0031` must pick one deliberately rather than inherit whichever copy
-    it deletes last."""
+    it deletes last.
+
+    `stamp` arrives from an untrusted cell's `resets_at`, unchecked by any
+    shape gate — it is a value, not a shape, so `read_log` would not refuse
+    it either. A string, a list, an integer past `time_t`'s range, and NaN
+    are all measured to reach here and must render `"unknown"`, never raise.
+    """
     import time
 
-    if stamp is None:
+    if isinstance(stamp, bool) or not isinstance(stamp, (int, float)):
         return "unknown"
-    local = time.localtime(stamp)
-    today = time.localtime()
+    try:
+        local = time.localtime(stamp)
+        today = time.localtime()
+    except (OverflowError, OSError, ValueError):
+        return "unknown"
     same_day = (local.tm_year, local.tm_yday) == (today.tm_year, today.tm_yday)
     return time.strftime("%H:%M local" if same_day else "%a %d %b %H:%M local", local)
+
+
+# Every C0 control character and DEL, mapped to a space — the one place
+# cell-authored content is made safe for a terminal, so no caller has to
+# remember to do it itself.
+_CONTROL_TRANSLATION = str.maketrans({chr(code): " " for code in (*range(0x20), 0x7F)})
+
+
+def _clean(value: object, limit: int) -> str:
+    """One cell-authored field, made safe to print: every control character
+    replaced with a space, then clipped to `limit` characters. An error
+    event carrying an escape sequence used to clear the operator's screen
+    and retitle their terminal — and `saffron watch` can replay that into a
+    fresh terminal long after the run — so the strip happens once, here,
+    rather than in each branch below. Host-authored text (the `, resets …`
+    suffix, `Agent.detail`) never passes through this."""
+    return str(value).translate(_CONTROL_TRANSLATION)[:limit]
 
 
 def _describe_agent_event(event: dict) -> str:
@@ -458,21 +588,32 @@ def _describe_agent_event(event: dict) -> str:
     kind = event.get("type")
     if kind == "text":
         text = " ".join(str(event.get("text", "")).split())
-        return f"agent: {text[:160]}"
+        return f"agent: {_clean(text, 160)}"
     if kind == "tool_use":
-        return f"agent: {event.get('name')} {json.dumps(event.get('input'))[:120]}"
+        name = _clean(event.get("name"), 160)
+        arg = _clean(json.dumps(event.get("input")), 120)
+        return f"agent: {name} {arg}"
     if kind == "tool_result":
         return "agent: tool " + ("error" if event.get("is_error") else "ok")
     if kind == "result":
-        return (
-            f"agent: {event.get('subtype')} in {event.get('num_turns')} turns, "
-            f"${event.get('total_cost_usd')} ({event.get('terminal_reason')})"
-        )
+        subtype = _clean(event.get("subtype"), 160)
+        terminal_reason = _clean(event.get("terminal_reason"), 160)
+        # Numbers from the SDK, but the cell writes them: a string here is as
+        # able to carry an escape sequence as `subtype` is.
+        turns = _clean(event.get("num_turns"), 160)
+        cost = _clean(event.get("total_cost_usd"), 160)
+        return f"agent: {subtype} in {turns} turns, ${cost} ({terminal_reason})"
     if kind == "rate_limit":
         used = event.get("utilization")
+        status = _clean(event.get("status"), 160)
+        try:
+            share = f"{used:.0%}" if isinstance(used, int | float) else ""
+        except (OverflowError, ValueError):
+            # An int past float range, from a live cell's own event.
+            share = ""
         return (
-            f"agent: rate limit {event.get('status')}"
-            + (f", {used:.0%} used" if isinstance(used, int | float) else "")
+            f"agent: rate limit {status}"
+            + (f", {_clean(share, 160)} used" if share else "")
             + (
                 f", resets {_when(event.get('resets_at'))}"
                 if event.get("resets_at")
@@ -480,8 +621,9 @@ def _describe_agent_event(event: dict) -> str:
             )
         )
     if kind == "error":
-        return f"agent: error {event.get('error')}"
-    return f"agent: {kind} {event.get('subtype') or event.get('kind') or ''}".rstrip()
+        return f"agent: error {_clean(event.get('error'), 160)}"
+    rest = _clean(event.get("subtype") or event.get("kind") or "", 160)
+    return f"agent: {_clean(kind, 160)} {rest}".rstrip()
 
 
 def describe(event: Event) -> str:
@@ -522,9 +664,12 @@ def describe(event: Event) -> str:
         # diagnosis needs most.
         lines = []
         if event.gates or event.statuses:
+            # Not `strict=True`: a `Baseline` whose two lists differ in
+            # length is a value, not a shape, so `read_log` does not refuse
+            # it — this renders the overlap it has rather than raising.
             joined = ", ".join(
                 f"{gate}={status}"
-                for gate, status in zip(event.gates, event.statuses, strict=True)
+                for gate, status in zip(event.gates, event.statuses, strict=False)
             )
             lines.append(f"baseline: {joined}")
         if event.aborted:
@@ -567,8 +712,13 @@ def describe(event: Event) -> str:
         return f"budget: ${event.value:.2f} of ${event.limit:.2f} — stopping"
 
     if isinstance(event, Agent):
+        if event.bounded:
+            return (
+                f"agent: (bounded, {event.original_chars} chars) "
+                f"{_clean(event.line or '', 160)}"
+            )
         if event.raw:
-            return f"agent: (raw) {(event.line or '')[:160]}"
+            return f"agent: (raw) {_clean(event.line or '', 160)}"
         if event.event is not None:
             return _describe_agent_event(event.event)
         return f"agent: {event.detail}"

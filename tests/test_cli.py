@@ -136,6 +136,55 @@ def test_the_exit_code_distinguishes_the_terminal_states(monkeypatch, tmp_path):
     assert cli.main(argv) == 2
 
 
+def test_an_unpackaged_task_names_the_branch_its_work_was_pushed_to(
+    monkeypatch, tmp_path, capsys
+):
+    """The operator's only route back to work PACKAGE never packaged is
+    knowing the batch tree exists. After `push_unpackaged_work`, it is one
+    line of output — and `saffron cell` still exits 1 for it, as it does for
+    a push that failed (§3.3)."""
+    from saffron import cli
+
+    spec = tmp_path / "SY-3.md"
+    spec.write_text(
+        "---\nid: SY-3\ntitle: Three\ntype: feature\ntouches: ['src/**']\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    monkeypatch.setattr("saffron.repos.mirror.ensure_mirror", lambda repo, at: at)
+    monkeypatch.setattr(
+        "saffron.phases.package.real_remote", lambda repo: "https://github.com/o/r.git"
+    )
+    monkeypatch.setattr(
+        "saffron.phases.package.fetch_default_branch",
+        lambda mirror, url: ("main", "a" * 40),
+    )
+    monkeypatch.setattr(
+        cli.package_phase,
+        "push_unpackaged_work",
+        lambda *a, **k: package.PushResult(
+            pushed=True,
+            branch="saffron/SY-3",
+            pushed_sha="b" * 40,
+            note=f"pushed saffron/SY-3 @ {'b' * 12}",
+        ),
+    )
+    monkeypatch.setattr(
+        task,
+        "run_one_cell",
+        lambda *a, **k: session.CellOutcome(
+            state="EXHAUSTED", task_id=1, run_id=1, task_dir=tmp_path
+        ),
+    )
+
+    argv = ["--home", str(tmp_path / "home"), "cell", str(spec)]
+    assert cli.main(argv) == 1
+
+    printed = capsys.readouterr().out
+    assert "saffron/SY-3" in printed
+    assert "b" * 12 in printed
+    assert "SY-3" in printed and "EXHAUSTED" in printed
+
+
 def test_no_signature_in_the_package_still_takes_a_watch():
     """`SA-0031` migrated `cell/session.py`'s own 64 call sites off a bare
     `watch(str)` callback onto `emit(Event)`; this spec finishes the seam for
@@ -652,7 +701,8 @@ def test_a_parent_branch_the_mirror_cannot_reach_is_an_unstacked_cell(
 def test_the_cell_is_cut_from_the_branchs_head_not_the_ledgers_recorded_sha(
     tmp_path, monkeypatch, capsys
 ):
-    """`pushed_sha` is written once, by PACKAGE. Every review fix an operator
+    """`pushed_sha` is written by PACKAGE — or, since `SA-0069`, by a push of
+    unpackaged work when PACKAGE never ran. Every review fix an operator
     commits by hand moves the branch past it, so the recorded sha is a tree
     the parent's pull request no longer shows — measured on this repository:
     task 26's `pushed_sha` was a commit behind `saffron/SA-0026`'s head while
@@ -2591,10 +2641,32 @@ def test_infrastructure_and_a_failed_readiness_both_exit_two(tmp_path, monkeypat
         )
 
 
+def test_a_night_that_left_a_task_in_flight_exits_two(tmp_path, monkeypatch, capsys):
+    """`saffron batch` exits 2 for an INCOMPLETE night and prints
+    `batch: INCOMPLETE`, not the infrastructure line. `0` means the night
+    made it, and this one did not, but the machine did not break either, and
+    a line saying it did sends the operator to the wrong place. It still
+    never exits `1`, which is reserved for a task's own failure (§4.2.1)."""
+    home = tmp_path / "home"
+
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(cli, "run_batch", lambda *a, **k: "INCOMPLETE")
+
+    assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 2
+
+    printed = capsys.readouterr().out
+    assert "batch: INCOMPLETE" in printed
+    assert "infrastructure failed" not in printed
+    assert "readiness failed" not in printed
+
+
 def test_a_batch_never_exits_one_whatever_stopped_it(tmp_path, monkeypatch):
     """§4.2.1 reserves `1` rather than reusing it: a batch is not a task, and
     letting `1` mean something here would merge two vocabularies that answer
-    different questions. Walked across all four stop reasons."""
+    different questions. Walked across all five stop reasons."""
     home = tmp_path / "home"
 
     monkeypatch.setattr(
@@ -2602,7 +2674,7 @@ def test_a_batch_never_exits_one_whatever_stopped_it(tmp_path, monkeypatch):
     )
     monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
 
-    for reason in ("DRAINED", "BUDGET", "UNTIL", "INFRASTRUCTURE"):
+    for reason in ("DRAINED", "BUDGET", "UNTIL", "INFRASTRUCTURE", "INCOMPLETE"):
         monkeypatch.setattr(cli, "run_batch", lambda *a, _r=reason, **k: _r)
         assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) != 1
 
@@ -3336,6 +3408,139 @@ def test_an_unready_night_still_leaves_a_row_saying_it_was_attempted(
     assert row["status"] == "INFRASTRUCTURE"
     assert row["ended_at"] is not None
     assert "readiness failed at auth: token expired" in capsys.readouterr().out
+
+
+def test_a_queue_discovery_refuses_still_leaves_a_closed_batch_row(
+    tmp_path, monkeypatch
+):
+    """A spec directory `discover_specs` refuses — absent, or not a
+    directory (`SA-0065`) — while readiness has already passed still leaves
+    a `batches` row behind, closed `INFRASTRUCTURE`, and no task started.
+    Before this, the `SpecError` reached `main`'s catch-all straight past
+    `run_batch`, and no row existed at all for the night that was
+    attempted."""
+    home = tmp_path / "home"
+    _readiness_passes(monkeypatch)
+
+    def _raise(*a, **k):
+        raise intake.SpecError("spec directory does not exist")
+
+    monkeypatch.setattr(cli, "_resolve_queue", _raise)
+
+    assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 2
+
+    ledger = Ledger(home / "ledger.db")
+    row = ledger._db.execute(
+        "SELECT status, ended_at FROM batches ORDER BY batch_id DESC LIMIT 1"
+    ).fetchone()
+    tasks = ledger._db.execute("SELECT task_id FROM tasks").fetchall()
+    ledger.close()
+
+    assert row["status"] == "INFRASTRUCTURE"
+    assert row["ended_at"] is not None
+    assert tasks == []
+
+
+def test_any_raise_resolving_the_queue_still_closes_the_batch_row(
+    tmp_path, monkeypatch
+):
+    """Not only a `SpecError`: resolving the queue is real work — a mirror
+    fetch, a reconcile, a `git archive` — and any exception it raises, after
+    readiness has already passed, must still reach the same close. A
+    `SpecError` from discovery is only the case that was measured."""
+    home = tmp_path / "home"
+    _readiness_passes(monkeypatch)
+
+    def _raise(*a, **k):
+        raise RuntimeError("the mirror could not be fetched mid-scan")
+
+    monkeypatch.setattr(cli, "_resolve_queue", _raise)
+
+    assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 2
+
+    ledger = Ledger(home / "ledger.db")
+    row = ledger._db.execute(
+        "SELECT status, ended_at FROM batches ORDER BY batch_id DESC LIMIT 1"
+    ).fetchone()
+    tasks = ledger._db.execute("SELECT task_id FROM tasks").fetchall()
+    ledger.close()
+
+    assert row["status"] == "INFRASTRUCTURE"
+    assert row["ended_at"] is not None
+    assert tasks == []
+
+
+def test_a_queue_that_cannot_be_resolved_says_so_on_the_batch_line(
+    tmp_path, monkeypatch, capsys
+):
+    """The printed line must say resolution failed, carrying the
+    exception's own text — and must not say readiness failed, since
+    readiness passed. A line naming the wrong step sends the operator to
+    re-check a token and a mirror that were fine."""
+    home = tmp_path / "home"
+    _readiness_passes(monkeypatch)
+
+    def _raise(*a, **k):
+        raise RuntimeError("spec directory /nowhere does not exist")
+
+    monkeypatch.setattr(cli, "_resolve_queue", _raise)
+
+    assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 2
+
+    printed = capsys.readouterr().out
+    batch_lines = [line for line in printed.splitlines() if line.startswith("batch:")]
+    assert batch_lines, printed
+    assert any("spec directory /nowhere does not exist" in line for line in batch_lines)
+    assert "readiness failed" not in printed
+
+
+def test_a_raise_from_the_loop_itself_is_not_blamed_on_the_queue(
+    tmp_path, monkeypatch, capsys
+):
+    """The queue resolved; `run_batch` is what raised. That must reach `main`'s
+    catch-all as itself, not be relabelled "the queue could not be resolved"
+    — a line naming the wrong step is what the resolution line exists to stop."""
+    home = tmp_path / "home"
+    _readiness_passes(monkeypatch)
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+
+    def _raise(*a, **k):
+        raise RuntimeError("the ledger went away mid-night")
+
+    monkeypatch.setattr(cli, "run_batch", _raise)
+
+    assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 2
+
+    printed = capsys.readouterr().out
+    assert "saffron: RuntimeError: the ledger went away mid-night" in printed
+    assert "could not be resolved" not in printed
+
+
+def test_a_ledger_failure_after_a_failed_scan_is_not_blamed_on_the_queue(
+    tmp_path, monkeypatch, capsys
+):
+    """The scan raised, then `create_batch` raised before the row existed. The
+    line must name the ledger's failure, not send the operator to the specs."""
+    home = tmp_path / "home"
+    _readiness_passes(monkeypatch)
+
+    def _scan(*a, **k):
+        raise intake.SpecError("spec directory does not exist")
+
+    def _create(*a, **k):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(cli, "_resolve_queue", _scan)
+    monkeypatch.setattr(Ledger, "create_batch", _create)
+
+    assert main(["--home", str(home), "batch", "--repo", str(tmp_path)]) == 2
+
+    printed = capsys.readouterr().out
+    assert "saffron: RuntimeError: database is locked" in printed
+    assert "could not be resolved" not in printed
 
 
 def test_a_night_names_the_specs_its_scan_refused(tmp_path, monkeypatch, capsys):

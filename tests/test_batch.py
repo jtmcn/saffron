@@ -335,6 +335,265 @@ def test_an_exhausted_task_between_two_aborts_resets_the_breaker(ledger, repo_id
     assert runner.calls == candidates
 
 
+def test_a_task_left_in_flight_is_not_a_clean_drain(ledger, repo_id):
+    """A night whose queue drains after a task came back still in flight
+    closes INCOMPLETE, not DRAINED. DRAINED says the queue emptied, and a
+    queue that emptied with a task stopped mid-phase is a different night:
+    nobody can say what happened to that task, which is not the same as the
+    task failing."""
+    candidates = [_candidate("TE-0001")]
+    run_id = _spend(ledger, repo_id, 1.0)
+    runner = FakeRunner([_outcome(state="REBUTTING", run_id=run_id)])
+
+    reason = run_batch(
+        candidates,
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+    )
+
+    assert reason == "INCOMPLETE"
+    batch_id = _latest_batch_id(ledger)
+    assert _batch_row(ledger, batch_id)["status"] == "INCOMPLETE"
+
+
+def test_a_task_left_in_flight_outranks_an_ordinary_stop(ledger, repo_id):
+    """INCOMPLETE outranks the other ordinary stop reasons: a night that left
+    a task in flight and then stopped at BUDGET or at UNTIL still closes
+    INCOMPLETE, because what the morning most needs to know is that a task
+    reached no end state, not which of the ordinary limits came first."""
+    # BUDGET, after an in-flight task: the first candidate fits the budget
+    # and comes back REVIEWING; the second cannot fit what is left.
+    over_budget = [_candidate("TE-0001", budget_usd=1.0), _candidate("TE-0002")]
+    run_id = _spend(ledger, repo_id, 1.0)
+    runner = FakeRunner([_outcome(state="REVIEWING", run_id=run_id)])
+    lines: list[str] = []
+
+    budget_reason = run_batch(
+        over_budget,
+        ledger,
+        budget_usd=5.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        emit=lines.append,
+    )
+    assert budget_reason == "INCOMPLETE"
+    assert _batch_row(ledger, _latest_batch_id(ledger))["status"] == "INCOMPLETE"
+    assert any("TE-0001" in line and "REVIEWING" in line for line in lines)
+
+    # UNTIL, after an in-flight task: the clock is still inside the window
+    # for the first candidate, then past the deadline for the second.
+    deadline = datetime(2026, 9, 5, 6, 30)
+    run_id_two = _spend(ledger, repo_id, 1.0)
+    runner_two = FakeRunner([_outcome(state="REVIEWING", run_id=run_id_two)])
+    clock = FakeClock([datetime(2026, 9, 5, 1, 0), deadline])
+
+    until_reason = run_batch(
+        [_candidate("TE-0003"), _candidate("TE-0004")],
+        ledger,
+        budget_usd=50.0,
+        until=deadline,
+        runner=runner_two,
+        clock=clock,
+        readiness_check=_ready,
+        emit=lines.append,
+    )
+    assert until_reason == "INCOMPLETE"
+    assert _batch_row(ledger, _latest_batch_id(ledger))["status"] == "INCOMPLETE"
+    assert any("TE-0003" in line and "REVIEWING" in line for line in lines)
+
+
+def test_the_breaker_still_reports_infrastructure_over_a_task_left_in_flight(
+    ledger, repo_id
+):
+    """INFRASTRUCTURE outranks INCOMPLETE. A breaker that fires after a task
+    was left in flight still closes INFRASTRUCTURE, the one stop reason that
+    must never be hidden behind another — and the night still names the task
+    it left in flight, and that task's state, on the way out."""
+    candidates = [
+        _candidate("TE-0001"),
+        _candidate("TE-0002"),
+        _candidate("TE-0003"),
+    ]
+    runs = [_spend(ledger, repo_id, 1.0) for _ in candidates]
+    runner = FakeRunner(
+        [
+            _outcome(state="REBUTTING", run_id=runs[0]),
+            _outcome(state="GATE_ERROR", run_id=runs[1]),
+            _outcome(state="PREFLIGHT_FAILED", run_id=runs[2]),
+        ]
+    )
+    lines: list[str] = []
+
+    reason = run_batch(
+        candidates,
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        emit=lines.append,
+    )
+
+    assert reason == "INFRASTRUCTURE"
+    assert any("TE-0001" in line and "REBUTTING" in line for line in lines)
+    batch_id = _latest_batch_id(ledger)
+    assert _batch_row(ledger, batch_id)["status"] == "INFRASTRUCTURE"
+
+    # The breaker also fires before a task, mid-loop, when a fourth candidate
+    # is still queued — a different `_stop` call, and it names the same way.
+    queued = [_candidate(f"TE-001{i}") for i in range(4)]
+    runs = [_spend(ledger, repo_id, 1.0) for _ in range(3)]
+    runner = FakeRunner(
+        [
+            _outcome(state="REBUTTING", run_id=runs[0]),
+            _outcome(state="GATE_ERROR", run_id=runs[1]),
+            _outcome(state="GATE_ERROR", run_id=runs[2]),
+        ]
+    )
+    lines = []
+    reason = run_batch(
+        queued,
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        emit=lines.append,
+    )
+    assert reason == "INFRASTRUCTURE"
+    assert runner.calls == queued[:3]
+    assert any("TE-0010" in line and "REBUTTING" in line for line in lines)
+
+
+def test_in_flight_outcomes_do_not_fire_the_breaker(ledger, repo_id):
+    """The breaker is unchanged: an in-flight outcome still resets the
+    consecutive-abort count, so two provider blips in a row do not end a
+    night that would have recovered on its third task. A night of
+    GATE_ERROR, REBUTTING, RATE_LIMITED, READY_FOR_REVIEW runs all four
+    candidates and closes INCOMPLETE, not INFRASTRUCTURE — item 70 argues
+    this deliberately, and the recovery it relies on works."""
+    candidates = [
+        _candidate("TE-0001"),
+        _candidate("TE-0002"),
+        _candidate("TE-0003"),
+        _candidate("TE-0004"),
+    ]
+    runs = [_spend(ledger, repo_id, 1.0) for _ in candidates]
+    runner = FakeRunner(
+        [
+            _outcome(state="GATE_ERROR", run_id=runs[0]),
+            _outcome(state="REBUTTING", run_id=runs[1]),
+            _outcome(state="RATE_LIMITED", run_id=runs[2]),
+            _outcome(state="READY_FOR_REVIEW", run_id=runs[3]),
+        ]
+    )
+
+    reason = run_batch(
+        candidates,
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+    )
+
+    assert reason == "INCOMPLETE"
+    assert runner.calls == candidates
+    assert _batch_row(ledger, _latest_batch_id(ledger))["status"] == "INCOMPLETE"
+
+
+def test_a_task_left_in_flight_is_named_on_the_way_out(ledger, repo_id):
+    """The night names each task it left in flight, and the state it
+    stopped in, on the way out, whatever the stop reason. A stop reason says
+    that something went wrong; this line says which spec to look at."""
+    candidates = [_candidate("TE-0001"), _candidate("TE-0002")]
+    run_one = _spend(ledger, repo_id, 1.0)
+    run_two = _spend(ledger, repo_id, 1.0)
+    runner = FakeRunner(
+        [
+            _outcome(state="REBUTTING", run_id=run_one),
+            _outcome(state="GATING", run_id=run_two),
+        ]
+    )
+    lines: list[str] = []
+
+    reason = run_batch(
+        candidates,
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        emit=lines.append,
+    )
+
+    assert reason == "INCOMPLETE"
+    assert any("TE-0001" in line and "REBUTTING" in line for line in lines)
+    assert any("TE-0002" in line and "GATING" in line for line in lines)
+
+
+def test_a_night_that_raises_still_names_the_task_it_left_in_flight(
+    ledger, repo_id, monkeypatch
+):
+    """`run_batch`'s `finally` closes `INFRASTRUCTURE` for a raise nothing
+    below caught — a ledger error, a 3am Ctrl-C. That is the night the
+    operator most needs to know which spec was left mid-phase."""
+    import sqlite3
+
+    real_spend = ledger.batch_spend
+    calls = {"n": 0}
+
+    def _locked_on_the_second_candidate(batch_id):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise sqlite3.OperationalError("database is locked")
+        return real_spend(batch_id)
+
+    monkeypatch.setattr(ledger, "batch_spend", _locked_on_the_second_candidate)
+    run_id = _spend(ledger, repo_id, 1.0)
+    lines: list[str] = []
+    with pytest.raises(sqlite3.OperationalError):
+        run_batch(
+            [_candidate("TE-0001"), _candidate("TE-0002")],
+            ledger,
+            budget_usd=50.0,
+            until=None,
+            runner=FakeRunner([_outcome(state="REBUTTING", run_id=run_id)]),
+            readiness_check=_ready,
+            emit=lines.append,
+        )
+    assert _batch_row(ledger, _latest_batch_id(ledger))["status"] == "INFRASTRUCTURE"
+    assert any("TE-0001" in line and "REBUTTING" in line for line in lines)
+
+    monkeypatch.undo()
+    run_id = _spend(ledger, repo_id, 1.0)
+    seen: list = []
+
+    def _interrupted_on_the_second(candidate):
+        seen.append(candidate)
+        if len(seen) == 2:
+            raise KeyboardInterrupt
+        return _outcome(state="REVIEWING", run_id=run_id)
+
+    lines = []
+    with pytest.raises(KeyboardInterrupt):
+        run_batch(
+            [_candidate("TE-0003"), _candidate("TE-0004")],
+            ledger,
+            budget_usd=50.0,
+            until=None,
+            runner=_interrupted_on_the_second,
+            readiness_check=_ready,
+            emit=lines.append,
+        )
+    assert _batch_row(ledger, _latest_batch_id(ledger))["status"] == "INFRASTRUCTURE"
+    assert any("TE-0003" in line and "REVIEWING" in line for line in lines)
+
+
 def _assert_closed(ledger, reason, expected):
     assert reason == expected
     batch_id = _latest_batch_id(ledger)
@@ -344,8 +603,10 @@ def _assert_closed(ledger, reason, expected):
 
 
 def test_every_stop_path_closes_the_batch_row_with_its_reason(ledger, repo_id):
-    # One test, all four stop reasons — a parametrized test would leave no
-    # bare node id for the host to check this witness against.
+    # One test, four of the five stop reasons — a parametrized test would
+    # leave no bare node id for the host to check this witness against.
+    # `INCOMPLETE` gets its own tests above, since it needs an in-flight
+    # outcome rather than a bare readiness/budget/deadline condition.
     drained = run_batch(
         [],
         ledger,
