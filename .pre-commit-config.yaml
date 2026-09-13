@@ -47,14 +47,18 @@ repos:
   # English elsewhere. Only a word a settled decision killed outright is decidable
   # by grep. The excluded paths all state the vocabulary rules and so must quote
   # the word they forbid — the plans included, which open by listing them.
+  #
+  # pygrep matches one line at a time, and every prose file this hook covers
+  # is hard-wrapped, so a retired two-word term split by a line wrap was never
+  # seen (docs/BACKLOG.md item 57). hooks/retired_vocabulary.py reads each
+  # file whole instead, joining wrap whitespace back into the one-line shape
+  # its pattern list already recognises before matching, and keeps that
+  # pattern list as the one place a second retired term would go.
   - repo: local
     hooks:
       - id: retired-vocabulary
         name: retired vocabulary (CONTEXT.md § settled naming decisions)
-        language: pygrep
+        language: system
         types: [text]
-        # The class is a space or a hyphen — both forms were live — and it is
-        # also what stops this line matching itself. `gate-runner` is safe: the
-        # boundary after `run` fails on the `n`.
-        entry: '(?i)gate[ -]runs?\b'
+        entry: uv run hooks/retired_vocabulary.py
         exclude: '^(CONTEXT\.md|CLAUDE\.md|docs/superpowers/|docs/evidence/)'
