@@ -1533,3 +1533,20 @@ def test_read_at_head_reads_through_a_planted_replacement(tmp_path, monkeypatch)
     assert bare == "benign content\n"
 
     assert worktree.read_at_head("c", "a.py") == "real content\n"
+
+
+def test_dirty_paths_reads_through_a_planted_replacement(tmp_path, monkeypatch):
+    # The pin sits in `_git` so it covers reads no criterion names; `status`
+    # diffs the index against the replaced tree and calls a clean tree dirty.
+    _repo_with_a_planted_replacement(tmp_path, monkeypatch)
+
+    bare = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "a.py" in bare
+
+    assert worktree.dirty_paths("c") == []
