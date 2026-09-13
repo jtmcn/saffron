@@ -28,8 +28,11 @@ from pathlib import Path
 # "run" and "batch" settles. `[ -]` covers both separator forms that were live
 # on one line before this script existed, and `\b` after `runs?` is what keeps
 # a near miss like "gate-runner" out (the boundary fails on the trailing "ner").
+#
+# `re.ASCII`: pygrep matched bytes, where `\b` is ASCII-only, so a letter like
+# `é` right after the verb still ended the word there.
 RETIRED_TERMS = [
-    re.compile(r"(?i)gate[ -]runs?\b"),
+    re.compile(r"(?i)gate[ -]runs?\b", re.ASCII),
 ]
 
 # A maximal run of horizontal-or-vertical whitespace. Whether it joins, or
@@ -114,34 +117,31 @@ class Hit:
 def check_file(path: str | Path) -> list[Hit]:
     """Every retired-term hit in `path`, read whole rather than line by line.
 
-    Approximates prek's `types: [text]` filter — a file containing a NUL byte,
-    or that does not decode as UTF-8, is treated as having no hits rather than
-    raising, the same way a non-text file is simply never handed to a pygrep
-    hook.
+    prek has already applied `types: [text]`, so every file handed here is
+    read: bytes that do not decode are replaced, not skipped, since pygrep
+    matched bytes whatever the encoding. An unreadable file raises, for `main`
+    to report — never a clean result nobody checked.
     """
     path = Path(path)
-    try:
-        raw = path.read_bytes()
-    except OSError:
-        return []
-    if b"\x00" in raw:
-        return []
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        return []
+    text = path.read_bytes().decode("utf-8", errors="replace")
     return [Hit(path=path, line=line) for line in find_hits(text)]
 
 
 def main(argv: list[str]) -> int:
-    hits: list[Hit] = []
+    failed = False
     for name in argv:
-        hits.extend(check_file(name))
-    for hit in hits:
-        print(
-            f"{hit.path}:{hit.line}: retired vocabulary term found (line-break spans do not exempt it)"
-        )
-    return 1 if hits else 0
+        try:
+            hits = check_file(name)
+        except OSError as exc:
+            print(f"{name}: unreadable, so not checked: {exc}")
+            failed = True
+            continue
+        for hit in hits:
+            print(
+                f"{hit.path}:{hit.line}: retired vocabulary term found (line-break spans do not exempt it)"
+            )
+            failed = True
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

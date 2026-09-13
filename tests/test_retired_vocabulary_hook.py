@@ -81,6 +81,27 @@ def test_a_retired_term_split_by_a_line_break_is_caught(tmp_path):
     )
 
 
+def test_it_still_catches_what_the_line_by_line_hook_caught(tmp_path):
+    """Seeing wrapped terms while dropping ones pygrep matched is a narrower
+    hook. pygrep matched bytes: any encoding, a NUL past prek's text sniff, an
+    ASCII-only word boundary, and either case."""
+    module = _load_module()
+    noun, verb = _retired_words()
+    term = f"{noun} {verb}".encode()
+
+    latin1 = tmp_path / "latin1.md"
+    latin1.write_bytes(b"caf\xe9 then " + term + b" here\n")
+    late_nul = tmp_path / "late_nul.md"
+    late_nul.write_bytes(b"x" * 2000 + b"\x00\n" + term + b"\n")
+    accented = tmp_path / "accented.md"
+    accented.write_bytes(term + "é after\n".encode())
+    mixed = tmp_path / "mixed.md"
+    mixed.write_text(f"prose {noun.upper()}\n{verb.capitalize()}s on\n")
+
+    for path in (latin1, late_nul, accented, mixed):
+        assert module.check_file(path), path.name
+
+
 def test_a_near_miss_stays_a_near_miss_across_a_break(tmp_path):
     module = _load_module()
     noun, verb = _retired_words()
@@ -124,16 +145,25 @@ def test_a_hit_names_the_file_and_the_line_it_starts_on(tmp_path):
     assert {hit.line for hit in hits} == {3}, (
         "the hit belongs to the line the term starts on, not the continuation line"
     )
+    # What the author sees is the exit code and the printed line, not `Hit`.
+    done = subprocess.run(
+        [sys.executable, str(SCRIPT), str(target)], capture_output=True, text=True
+    )
+    assert done.returncode == 1
+    assert f"{target}:3:" in done.stdout
 
 
 def test_the_configured_hook_runs_the_check_over_the_same_files():
     hook = _hook_config()
+    # Exactly these keys: `pass_filenames: false`, `files:` or `stages:` would
+    # each leave the hook passing without checking what it checked before.
+    assert set(hook) == {"id", "name", "language", "types", "entry", "exclude"}
     assert hook["types"] == ["text"]
     assert (
         hook["exclude"] == r"^(CONTEXT\.md|CLAUDE\.md|docs/superpowers/|docs/evidence/)"
     )
     assert hook["language"] == "system"
-    assert "hooks/retired_vocabulary.py" in hook["entry"]
+    assert hook["entry"] == "uv run hooks/retired_vocabulary.py"
 
 
 def test_the_tree_carries_no_retired_term_across_a_line_break():
@@ -157,6 +187,24 @@ def test_the_tree_carries_no_retired_term_across_a_line_break():
         path = REPO / name
         if not path.is_file():
             continue
+        # The spec's stand-in for `types: [text]`, which prek applies before
+        # the hook ever sees a file.
+        raw = path.read_bytes()
+        if b"\x00" in raw:
+            continue
+        try:
+            raw.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
         hits.extend(module.check_file(path))
 
     assert not hits, f"found a retired term only a cross-line reading sees: {hits}"
+
+
+def test_a_file_it_cannot_read_fails_the_hook_rather_than_passing(tmp_path, capsys):
+    """Swallowed, an unreadable file reads as clean. A missing path stands in
+    for one: the cell runs as root, which reads straight through `chmod 000`."""
+    module = _load_module()
+    gone = tmp_path / "gone.md"
+    assert module.main([str(gone)]) == 1
+    assert f"{gone}: unreadable" in capsys.readouterr().out
