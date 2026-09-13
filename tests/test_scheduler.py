@@ -1892,7 +1892,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == ["SA-0074", "SA-0074", "SA-0076"]
+    assert [c.spec.id for c in candidates] == ["SA-0074", "SA-0076", "SA-0077"]
     assert [r.path.name[:7] for r in refusals] == ["SA-0075"]
     assert "SA-0074 has no task" in refusals[0].reason
     # A precondition, not the glob check: `done/` is populated, so the empty

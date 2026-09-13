@@ -1,5 +1,5 @@
 ---
-id: SA-0074
+id: SA-0077
 title: a missing cell runtime reports as twenty-one failures rather than as absent
 type: bug
 priority: 2

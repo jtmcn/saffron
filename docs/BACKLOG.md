@@ -6021,7 +6021,7 @@ product, `saffron/cell/runtimes/apple.py` is the only module that does, and
 `runtimes/__init__.py` carries the `Dialect` — every spelling member a
 difference **measured** between two runtimes rather than anticipated. The rule's
 exemption, its asserting test, `CONTEXT.md`'s **Cell runtime** entry and
-§10's layout moved with it. `SA-0074` is the cell-landable piece that came out
+§10's layout moved with it. `SA-0077` is the cell-landable piece that came out
 of it: a missing runtime reporting as absent rather than as twenty-one failures.
 
 Two things worth keeping from doing it. The rule was re-proved rather than

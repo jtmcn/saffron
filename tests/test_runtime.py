@@ -234,7 +234,7 @@ def test_every_declared_runtime_satisfies_the_dialect():
 
 
 def test_a_test_without_the_marker_still_may_not_exec_a_host_tool(request):
-    """SA-0074's `preserves` witness, written ahead of that spec so `criteria`
+    """SA-0077's `preserves` witness, written ahead of that spec so `criteria`
     finds it green at base. It observes the tripwire rather than reading the
     fixture: every runtime's binary and `gh`, bare and as a path, are refused to
     an unmarked test, and the default suite still deselects `cell`."""
