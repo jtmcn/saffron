@@ -1,6 +1,8 @@
 import fcntl
 import json
+import re
 from dataclasses import asdict, replace
+from pathlib import Path
 from unittest import mock
 
 from saffron.agents.findings import Finding
@@ -215,6 +217,155 @@ def test_an_advisory_gate_is_marked_in_the_gate_table():
 def test_a_gate_absent_from_advisory_gates_is_not_marked():
     rendered = body()
     assert "(advisory)" not in rendered
+
+
+def test_the_body_and_the_template_declare_the_same_spine():
+    """One shape, two producers. `.github/pull_request_template.md` is what a
+    person fills in; this body is rendered from the ledger. They cannot be one
+    file — the order here is load-bearing (`_notes` last so cell prose cannot
+    appear to have moved a table, `_test_diff` sized last as the only unbounded
+    section) where the template's is guidance somebody edits freely. So a test is
+    the whole coupling: rename a section on either side and this fails.
+    """
+    template = Path(__file__).resolve().parents[1] / ".github/pull_request_template.md"
+    declared = re.findall(r"^## (.+)$", template.read_text(), re.MULTILINE)
+    assert declared == ["What", "Verification", "Not covered"]
+    assert re.findall(r"^## (.+)$", body(), re.MULTILINE) == declared
+
+
+def test_not_covered_collects_the_checks_that_never_judged_the_code():
+    """`skip` and `error` each have a footnote under the gate table explaining
+    the word. Neither says which gates they were, and a reviewer scanning a wide
+    table for a red row does not assemble that."""
+    section = body().split("## Not covered", 1)[1]
+    assert "`coverage`" in section
+    assert "`tests`" in section
+
+
+def test_not_covered_names_an_advisory_failure():
+    rendered = render_pr_body(
+        SPEC,
+        [GateResult(gate="size", status="fail", summary="too big")],
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        advisory_gates=["size"],
+    )
+    section = rendered.split("## Not covered", 1)[1]
+    assert "`size`" in section and "without blocking" in section
+
+
+def test_an_advisory_gate_that_passed_is_not_a_gap():
+    """Keyed on the `fail`, exactly as the gate table's own marker is: a gate
+    that passed checked what it checks, advisory or not."""
+    rendered = render_pr_body(
+        SPEC,
+        [GateResult(gate="size", status="pass", summary="fine")],
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        advisory_gates=["size"],
+    )
+    assert "`size`" not in rendered.split("## Not covered", 1)[1]
+
+
+def test_findings_that_never_anchored_are_named_as_never_adjudicated():
+    """`anchored_blockers` and `anchored_concerns` both filter on the anchor, so
+    an unanchored finding reached neither REBUT nor the concern count the queue
+    sorts on. The findings table shows `anchored: no` and says neither."""
+    rendered = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        reviews=[
+            LensReview(lens="adequacy", findings=[_finding(anchored=False)]),
+        ],
+    )
+    section = rendered.split("## Not covered", 1)[1]
+    assert "`adequacy`" in section
+    assert "implementer" in section and "concern count" in section
+
+
+def test_gates_that_were_not_re_run_are_not_listed_as_a_gap():
+    """§5.7: with the base unmoved the packaged tree is byte-identical to the
+    one the gates saw, so re-running is *provably* redundant. Calling that a gap
+    would be false, and `## Verification` already says which case it is."""
+    rendered = body()
+    assert "were not re-run" in rendered.split("## Verification", 1)[1]
+    assert "re-run" not in rendered.split("## Not covered", 1)[1]
+
+
+def test_not_covered_says_so_when_there_is_nothing():
+    """Shaped like `### No new failures`: a section rendered empty reads as a
+    claim that nobody looked, which is the opposite of what this one means."""
+    spec = parse_spec("---\nid: TE-9002\ntitle: A clean one\ntype: chore\n---\n")
+    rendered = render_pr_body(
+        spec,
+        [GateResult(gate="lint", status="pass", summary="clean")],
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+    )
+    section = rendered.split("## Not covered", 1)[1]
+    assert "No gate reported `skip`" in section
+
+
+def test_the_specs_problem_reaches_what_so_the_heading_answers_itself():
+    spec = parse_spec(
+        "---\nid: TE-9003\ntitle: A titled one\ntype: bug\n---\n\n"
+        "## Problem\n\nThe intraday path reports a snapshot as a forecast.\n\n"
+        "## Out of scope\n\nThe forecast store.\n"
+    )
+    rendered = render_pr_body(
+        spec,
+        [],
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+    )
+    what = rendered.split("## What", 1)[1].split("## Verification", 1)[0]
+    assert "reports a snapshot as a forecast" in what
+    assert "The forecast store" not in what
+
+
+def test_a_closing_keyword_in_a_specs_problem_is_defanged():
+    """Operator-authored, so nothing a cell wrote reaches here — and neutralized
+    anyway. A spec is a description of work, not of a pull request; Saffron's own
+    work is not tracked as issues at all, so `Fixes #12` in one would close an
+    issue on merge that nobody meant to close."""
+    spec = parse_spec(
+        "---\nid: TE-9004\ntitle: A referring one\ntype: bug\n---\n\n"
+        "## Problem\n\nFixes #12, and ask @someone about it.\n"
+    )
+    rendered = render_pr_body(
+        spec,
+        [],
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+    )
+    assert "Fixes #12" not in rendered
+    assert "@someone" not in rendered
 
 
 def line(**overrides) -> QueueLine:

@@ -28,6 +28,15 @@ _CLOSES = re.compile(
 )
 _MENTION = re.compile(r"(?<![\w/])@(?=\w)")
 
+# The spec's own statement of the defect, so `## What` answers the question its
+# heading asks instead of restating the title. Shaped like `intake`'s
+# `_CRITERIA_SECTION`, and deliberately not a parsed `Spec` field: the heading is
+# a rendering concern, and a spec that omits it renders exactly as before.
+_PROBLEM_SECTION = re.compile(
+    r"^##\s*Problem\s*$(.*?)(?=^##\s|\Z)", re.MULTILINE | re.DOTALL | re.IGNORECASE
+)
+_PROBLEM_LIMIT = 2000
+
 # GitHub rejects a pull request body over 65,536 characters. Left uncapped,
 # `gh pr create` fails *after* the push and the run exits 2 with no `pr_url`
 # and no queue line — the state `_finish` exists to avoid. A margin, because
@@ -93,25 +102,37 @@ def render_pr_body(
     last and clipped like every other such string here. Empty for every task
     that produced none, which is every task before this channel existed."""
     risk = effective_risk if effective_risk is not None else spec.risk
+    # The three `##` headings are the spine `.github/pull_request_template.md`
+    # asks a person for, in that order, and a test holds the two lists equal. The
+    # bodies cannot be one file — this one is rendered from the ledger and its
+    # section *order* is load-bearing twice over (see `_notes` and `_test_diff`
+    # below), where the template's is guidance someone edits freely — so the
+    # shape is coupled by that test and nothing else.
     sections = [
-        f"## {spec.id} — {spec.title}",
-        "",
-        f"`{spec.type}` · risk `{risk}` · +{added}/−{removed} · "
-        f"{attempts} attempt{'' if attempts == 1 else 's'} · ${spent_usd:.2f}",
-        "",
+        _what(
+            spec,
+            risk=risk,
+            added=added,
+            removed=removed,
+            attempts=attempts,
+            spent_usd=spent_usd,
+        ),
         _criteria(spec, results),
+        _verification(verified_on),
         _new_failures(new_failures),
         _disagreements(reviews, rebut_result),
         None,  # _test_diff, sized last: it is the only unbounded section.
-        _verification(verified_on),
         _gate_table(results, advisory_gates),
         _findings(reviews),
         _provenance(spec, base_sha, head_sha, transcript_path),
+        _not_covered(spec, results, reviews, advisory_gates=advisory_gates),
         # Last, deliberately: every status, checklist and table above is fully
         # rendered before this ever starts, so cell-authored prose here cannot
         # be mistaken for having moved any of them (SA-0044's reasoning, held
         # unchanged). Falsy when there is nothing to report, so a task with no
         # notes renders a body byte-identical to one from before this existed.
+        # It sits under `## Not covered` because that is what it is: the
+        # implementer's account of something it saw and was not asked to fix.
         _notes(notes),
     ]
     slot = sections.index(None)
@@ -136,6 +157,57 @@ def _cell(value: object) -> str:
     longest backtick run inside it, so no line of the diff can close it early.
     """
     return neutralize(str(value).replace("|", "\\|").replace("\n", " "))
+
+
+def _what(
+    spec: Spec,
+    *,
+    risk: str,
+    added: int,
+    removed: int,
+    attempts: int,
+    spent_usd: float,
+) -> str:
+    """The spec, the tier, and what the change cost — under the heading the
+    template asks a person for."""
+    lines = [
+        "## What",
+        "",
+        f"**{spec.id} — {spec.title}**",
+        "",
+        f"`{spec.type}` · risk `{risk}` · +{added}/−{removed} · "
+        f"{attempts} attempt{'' if attempts == 1 else 's'} · ${spent_usd:.2f}",
+        "",
+    ]
+    if problem := _problem(spec.body):
+        lines += [problem, ""]
+    return "\n".join(lines)
+
+
+def _problem(body: str) -> str:
+    """The spec's `## Problem` section, verbatim, or nothing.
+
+    Operator-authored and out of a cell's reach by construction: the host parses
+    the spec at `base_sha` before the cell exists, and every render reads that
+    object rather than the worktree. Neutralized regardless, which `spec.title`
+    is not — a title is a phrase and this is prose long enough to carry a
+    `Fixes #12` written about the work, which would close an issue on merge that
+    nobody meant to close. Saffron's own work is not tracked as issues at all
+    (`docs/agents/issue-tracker.md`), so there is no reading of that keyword in a
+    spec worth honouring.
+    """
+    section = _PROBLEM_SECTION.search(body)
+    if section is None:
+        return ""
+    text = section.group(1).strip()
+    if not text:
+        return ""
+    if len(text) > _PROBLEM_LIMIT:
+        text = (
+            text[:_PROBLEM_LIMIT].rstrip()
+            + "\n\n… clipped at the problem ceiling; the spec is the record."
+        )
+    return neutralize(text)
 
 
 def _criteria(spec: Spec, results: Sequence[GateResult]) -> str:
@@ -322,14 +394,18 @@ def _test_diff(
 
 
 def _verification(verified_on: str) -> str:
+    """What the sections below were measured on. The sentence is unchanged; it
+    had no heading of its own until the spine gave it one."""
     if verified_on == "base":
         return (
+            "## Verification\n\n"
             "Gates ran at `base_sha`, and were not re-run: the base had not "
-            "moved, so the packaged tree is byte-identical to the one they saw."
+            "moved, so the packaged tree is byte-identical to the one they saw.\n"
         )
     return (
+        "## Verification\n\n"
         "Gates were re-run on the **packaged commit**, because the base moved "
-        "after this task started."
+        "after this task started.\n"
     )
 
 
@@ -369,6 +445,87 @@ def _gate_table(results: list[GateResult], advisory_gates: Sequence[str] = ()) -
         "",
     ]
     return "\n".join(lines)
+
+
+def _not_covered(
+    spec: Spec,
+    results: Sequence[GateResult],
+    reviews: Sequence[LensReview],
+    *,
+    advisory_gates: Sequence[str] = (),
+) -> str:
+    """What this body does not stand behind, collected.
+
+    Every line is derivable from a section above — a `skip` row, an `(advisory)`
+    mark, the checklist's blockquote, an `anchored: no` cell — and each is one
+    cell of a wide table a reviewer is scanning for something else. §5.7 states
+    its own residual that way (the credential shapes the refusal does not know),
+    for the same reason: a reader who has to assemble it never does.
+
+    One thing that belongs here and is deliberately absent: gates that ran at
+    `base_sha` and were not re-run. §5.7 makes that case *provably* redundant —
+    the packaged tree is byte-identical to the tree they saw — so listing it as
+    a gap would be false, and `_verification` already says which case this is.
+    """
+    lines = []
+    if skipped := [r.gate for r in results if r.status == "skip"]:
+        lines.append(
+            "- Did not run: "
+            + ", ".join(f"`{_cell(gate)}`" for gate in skipped)
+            + " — the repo declares no such gate."
+        )
+    # PACKAGE aborts on an errored gate, so a packaged body does not carry one.
+    # It is here because this is a renderer and the caller decides what it is
+    # handed: a body that shows an `error` row and then omits it from the list of
+    # what went unjudged is the narrower lie of the two.
+    if broken := [r.gate for r in results if r.status == "error"]:
+        lines.append(
+            "- Broke rather than judged: "
+            + ", ".join(f"`{_cell(gate)}`" for gate in broken)
+            + " — an `error` is charged to nobody, and checks nothing either."
+        )
+    # `fail` only, exactly as the gate table's marker: an advisory gate that
+    # passed is not a gap, and keying on the gate alone would list it as one.
+    if advisory := [
+        r.gate for r in results if r.status == "fail" and r.gate in advisory_gates
+    ]:
+        lines.append(
+            "- Failed without blocking: "
+            + ", ".join(f"`{_cell(gate)}`" for gate in advisory)
+            + " — advisory at this risk tier, so the pull request is green anyway."
+        )
+    claims = [c.claim for c in spec.acceptance] or spec.acceptance_criteria
+    criteria = next((r for r in reversed(list(results)) if r.gate == "criteria"), None)
+    if claims and (criteria is None or criteria.status not in ("pass", "fail")):
+        lines.append(
+            f"- The {len(claims)} acceptance "
+            f"criteri{'on is' if len(claims) == 1 else 'a are'} not mechanically "
+            "checked: no `criteria` gate result stands behind the checklist."
+        )
+    # Anchoring is what `anchored_blockers` and `anchored_concerns` both filter
+    # on, so an unanchored finding is absent from REBUT *and* from the concern
+    # count the morning queue sorts on (§6). Nothing else in the body says so.
+    # Keyed on the review's lens, not the finding's own `lens` field, because
+    # `_findings` builds the table carrying the `anchored: no` cells that way and
+    # this line exists to be cross-referenced against it.
+    if unanchored := [
+        (r.lens, f) for r in reviews for f in r.findings if not f.anchored
+    ]:
+        lenses = sorted({lens for lens, _ in unanchored})
+        lines.append(
+            f"- {len(unanchored)} finding"
+            f"{'' if len(unanchored) == 1 else 's'} could not be anchored to the "
+            "diff ("
+            + ", ".join(f"`{_cell(lens)}`" for lens in lenses)
+            + "), so neither the implementer nor the concern count ever saw "
+            + ("it." if len(unanchored) == 1 else "them.")
+        )
+    if not lines:
+        lines.append(
+            "- No gate reported `skip`, no failure was advisory, and every "
+            "finding anchored to the diff."
+        )
+    return "\n".join(["## Not covered", "", *lines, ""])
 
 
 _NOTES_LIMIT = 4000
