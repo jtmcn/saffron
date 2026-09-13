@@ -5907,13 +5907,14 @@ pinned read sees the real tree.
 ## 103. A cell can hide an edit's content from the critic with settings the diff never shows
 
 **Status: spec queued for the two `-c` pins, 2026-09-12 — `SA-0075`, stacked on
-`SA-0074`, not yet run.** Two parts stay here. `.git/info/attributes` now has a
+`SA-0074`, not yet run.** `.git/info/attributes` stays here, and now has a
 probed answer: on git 2.54, `--text` restores its hunks, and a `diff.<driver>.binary`
 driver's too. It is not taken, because it also renders every genuine binary as
 text, which changes `integrity`'s binary check and PACKAGE's no-full-index
-refusal. The other is `integrity`'s comment at `:238-240`, which `SA-0075`
-cannot reach: under `* -diff`, `--numstat` printed `-	-	f.py` in the same probe,
-so the cross-check it names counts nothing. That correction is by hand.
+refusal. `integrity`'s comment claiming a `--numstat` cross-check would close
+this was corrected by hand the same day, since `SA-0075` cannot reach
+`saffron/gates/**`. On the comment's own example, a committed `*.py -diff`,
+`--numstat` printed `-	-	f.py`, with `--text` as well.
 
 **Tier 2.** Found reviewing `SA-0072` (PR #219), 2026-09-12, by probe. Four
 repo-local settings make the pinned diff print `Binary files a/f.py and b/f.py

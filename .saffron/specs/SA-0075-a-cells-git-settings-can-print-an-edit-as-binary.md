@@ -92,8 +92,8 @@ and whether PACKAGE's no-full-index refusal ever fires. It is a design decision,
 so it stays in item 103.
 
 **`integrity`'s comment** about a `--numstat` cross-check. The probe above
-falsifies it, but `saffron/gates/**` is forbidden here, so item 103 records the
-correction instead.
+falsified it, and it was corrected by hand beside this spec, because
+`saffron/gates/**` is forbidden here.
 
 **Settings that change the diff's shape without hiding content.** Those are item
 **89**.

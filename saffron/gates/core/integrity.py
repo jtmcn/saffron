@@ -233,12 +233,13 @@ def integrity_gate(
         #
         # ponytail: two ceilings, one rule. A genuine binary fixture inside
         # `touches` aborts the attempt — the false positive. And an agent can
-        # reach `error` *on purpose*: a committed `.gitattributes` with
-        # `*.py -diff` renders every Python file this way, and `error` is
-        # `GATE_ERROR`, charged to nobody. The upgrade path closes both: a
-        # `--numstat` cross-check, since git still reports added lines for a
-        # file it renders as binary. Not built here — it is a design change
-        # (BACKLOG item 1, "Still open, deliberately").
+        # reach `error` *on purpose*: `*.py -diff` in a committed `.gitattributes`,
+        # or a worktree setting no commit shows (BACKLOG item 103), renders every
+        # Python file this way, and `error` is `GATE_ERROR`, charged to nobody.
+        # A `--numstat` cross-check cannot close it: measured on git 2.54, both
+        # counts read `-` under `-diff`, with `--text` or without. `--text` on the
+        # patch restores the hunks, but renders every genuine binary as text too —
+        # a design change (BACKLOG items 1 and 103), not built here.
         if file_diff.unreadable:
             if not declared:
                 continue
