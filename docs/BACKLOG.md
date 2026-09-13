@@ -53,8 +53,8 @@ evidence. That is the gate now, and it is one cheap spec away.
 Soundness first: **79**, **69**, **93**, **94**, **80** (~~**83**~~, ~~**85**~~, ~~**84**~~,
 ~~**82**~~ and ~~**81**~~, pulled up from tier 3 as why 69's gate could not be
 declared against safely, are done — 2026-09-08), then **97** and **102**. Honesty second:
-**73**, **70**, **45**, **51** (with **49**/**50**, which its fix closes),
-~~**47**~~, **46** (with **95**, which compounds it), **40**, ~~**26**~~,
+**73**, ~~**70**~~, ~~**45**~~, **51** (with **49**/**50**, which its fix closes),
+~~**47**~~, **46** (with ~~**95**~~, which compounds it), **40**, ~~**26**~~,
 ~~**7**~~, and the remainder of **78**.
 
 Closed since the 2026-09-04 sort, and left in place because their numbers are
@@ -62,7 +62,10 @@ cited: **74** is done (`SA-0063`, `SA-0064`); **88** is closed on a negative
 result (2026-09-08 — the gate summary was not the confound); **71** is
 done (2026-09-08), **78** is done in code, and **94** has its recording half done
 and its explanation half open — each item's own `Status` line says what is left.
-(**59** is done — `SA-0052`, PR #118.)
+(**59** is done — `SA-0052`, PR #118.) Stack #222, merged 2026-09-12, closed
+**45**, **57**, **61**, **70** and **95**, and the spec'd half of **42**, **46**,
+**63** and **89**; each of those four stays listed for the half its `Status`
+line names.
 
 **93 and 94 sit with them** because they decide whether their numbers can be
 read at all: 93 is the metric's unknown resolution, and 94 is that 2 of the
@@ -118,7 +121,7 @@ fire. Its number stays listed because item numbers are cited from `saffron/`.
 ### Tier 3 — real, not urgent
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
-**56**, **57**, **61**, **62**, **63**, **64**, **69**, **75**, **76**, **77**,
+**56**, ~~**57**~~, ~~**61**~~, **62**, **63**, **64**, **69**, **75**, **76**, **77**,
 ~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**.
 (**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
@@ -2768,8 +2771,8 @@ _answers_a_401` should carry the `cell` marker and say so.
 
 ## 42. A rebuttal lost to a trailing comma is recorded as a confirmed disagreement
 
-**Status: spec queued for the visible half, 2026-09-10 — `SA-0071`, not yet
-run.** The recording half is right only in `rebuttal.json`, and that is what stays
+**Status: the visible half is done — `SA-0071`, PR #215, merged
+2026-09-12.** The recording half is right only in `rebuttal.json`, and that is what stays
 open. The ledger writes no rebuttal for an errored turn or for an unanswered
 blocker, and `sustained_blockers` and `unkept_fixes` count both as zero. An
 earlier version of this line said the queue's counts already told them apart,
@@ -2962,10 +2965,9 @@ number the system reports as a ceiling and enforces as a suggestion.
 
 ## 45. An `EXHAUSTED` run that made commits pushes no branch, so its work survives only as a patch
 
-**Status: spec queued, 2026-09-10 — `SA-0069`, not yet run.** It touches
-`package.py`, which the gate-suite stack (PR #200 onward) is rewriting, so run it
-after that stack lands. The batch scan's overlap refusal holds it back until then
-anyway.
+**Status:** **done** — `SA-0069`, PR #214, merged 2026-09-12. Its review added
+the `scope` check before the push and a refusal while another task of the spec
+awaits review. The by-hand notes below are not covered by it.
 
 **Two things for by hand, found reviewing `SA-0069`, 2026-09-11:**
 - **§5.7 says `pushed_sha` "is written once, by PACKAGE".** `SA-0069` makes that
@@ -3007,7 +3009,7 @@ there is no branch to hand.
 **Decided 2026-09-04: it is evidence, not an operator's record.** So it takes
 a size cap and must come within the `secrets` gate's reach. **Tier 1.**
 
-**Status: the size half has a spec queued, 2026-09-10 — `SA-0068`, not yet run.**
+**Status: the size half is done — `SA-0068`, PR #213, merged 2026-09-12.**
 The `secrets` half stays open here, because the gate it would extend does not
 exist yet.
 
@@ -3525,7 +3527,7 @@ protected), and this is a forecast. A forecast that blocks is the shape item
 
 ## 57. The vocabulary hook matches within a line, and this file is hard-wrapped
 
-**Status: spec queued, 2026-09-10 — `SA-0073`, not yet run.** Measured when it
+**Status:** **done** — `SA-0073`, PR #220, merged 2026-09-12. Measured when it
 was queued: one hit in the tree only a cross-line reading sees, in item 40 of
 this file. It was the verb, not the retired noun, which the pattern cannot tell
 apart, and it was reworded in the same commit so the spec starts from a clean
@@ -3762,7 +3764,7 @@ findings have no severity is not a report that can be acted on.
 
 ## 61. `describe` raises on a payload `read_log` hands back unchecked
 
-**Status: spec queued with item 63, 2026-09-10 — `SA-0070`, not yet run.**
+**Status:** **done**, with item 63 — `SA-0070`, PR #221, merged 2026-09-12.
 
 **Tier 3.** Found reviewing `SA-0053` (PR #119), and fixed *around* rather than
 fixed: `saffron/events.py` was `forbidden` to that spec.
@@ -3820,8 +3822,8 @@ the thing `SA-0053` was written to avoid.
 
 ## 63. `describe` renders three agent payload fields unclipped, straight to a terminal
 
-**Status: spec queued with item 61, 2026-09-10 — `SA-0070`, not yet run.** It
-covers the `Agent` event only. `Terminal.detail` on a rejected plan and
+**Status: done for the `Agent` event, with item 61 — `SA-0070`, PR #221, merged
+2026-09-12.** It covers the `Agent` event only. `Terminal.detail` on a rejected plan and
 `PhaseStart.detail` also carry paths an agent wrote, and they render unclipped
 and unstripped. That is the follow-up, found reviewing `SA-0070` (2026-09-11).
 
@@ -4141,7 +4143,7 @@ answer, and it is currently being guessed at.
 
 ## 70. A task lost to a provider error leaves the night reporting `DRAINED`, exit 0
 
-**Status: decided 2026-09-10, spec queued — `SA-0067`, not yet run.** A fifth
+**Status:** **done** — `SA-0067`, PR #216, merged 2026-09-12. A fifth
 stop reason, `INCOMPLETE`: it outranks `DRAINED`, `BUDGET` and `UNTIL`, and
 `INFRASTRUCTURE` outranks it. It exits 2 and leaves the breaker alone. **The
 by-hand half is done:** the vocabulary, `CONTEXT.md`, §4.2.1, `batch.StopReason`
@@ -5324,7 +5326,8 @@ as.*
 
 ## 89. `DIFF_FLAGS` pins less of the diff's shape than its own comment claims
 
-**Status: spec queued, 2026-09-10 — `SA-0072`, not yet run.** It takes
+**Status: the three measured pins are done — `SA-0072`, PR #219, merged
+2026-09-12.** It takes
 `pinned_diff`'s measured values rather than choosing new ones. Dropping the
 duplicate flags from `pinned_diff` afterwards is a harness change, left for
 later.
@@ -5615,7 +5618,7 @@ relevant test is the same defect wearing a different hat.
 
 ## 95. A night that dies resolving its queue leaves no row to say it ever started
 
-**Status: spec queued, 2026-09-10 — `SA-0066`, not yet run.**
+**Status:** **done** — `SA-0066`, PR #212, merged 2026-09-12.
 
 **Tier 1 — honesty.** `SA-0065` (merged 2026-09-10) made `discover_specs` refuse
 a spec directory that is absent or is not a directory, so the silent empty queue

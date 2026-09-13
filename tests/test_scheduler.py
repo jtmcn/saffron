@@ -1818,7 +1818,11 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-10, an eighteenth time: three more specs, `SA-0071` to
+    """Re-measured 2026-09-12, a nineteenth time: all eight specs below merged
+    as stack #222 and were retired, so the live queue is empty again — the
+    sixteenth anchor's shape, and the same non-recursive glob is what it checks.
+
+    Re-measured 2026-09-10, an eighteenth time: three more specs, `SA-0071` to
     `SA-0073`, each independent of the rest, so all three are candidates.
     Nothing else moved.
 
@@ -1879,17 +1883,8 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == [
-        "SA-0066",
-        "SA-0068",
-        "SA-0069",
-        "SA-0071",
-        "SA-0072",
-        "SA-0073",
-    ]
-    assert [r.path.name[:7] for r in refusals] == ["SA-0067", "SA-0070"]
-    assert "depends_on SA-0066" in refusals[0].reason
-    assert "depends_on SA-0068" in refusals[1].reason
+    assert [c.spec.id for c in candidates] == []
+    assert refusals == []
     # A precondition, not the glob check: `done/` is populated, so the empty
     # queue above is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30

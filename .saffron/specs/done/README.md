@@ -55,6 +55,19 @@ nothing.
 | `SA-0063` | Cell task `MERGED`, PR #158; retired in PR #173. All five declared witnesses exist in `tests/test_report.py` and `tests/test_session.py` |
 | `SA-0064` | Cell task `MERGED`, PR #160; all four declared witnesses exist, and criterion 1's mutant still matches `saffron/phases/package.py` |
 | `SA-0065` | Cell task `MERGED`, PR #185; all three declared witnesses exist in `tests/test_intake.py` |
+| `SA-0066` | Cell task `MERGED`, PR #212; all five declared witnesses exist in `tests/test_cli.py` |
+| `SA-0067` | Cell task `MERGED`, PR #216, stacked on #212; all eight declared witnesses exist in `tests/test_batch.py` and `tests/test_cli.py` |
+| `SA-0068` | Cell task `MERGED`, PR #213; all seven declared witnesses exist in `tests/test_events.py` and `tests/test_implement.py` |
+| `SA-0069` | Cell task `MERGED`, PR #214; all ten declared witnesses exist in `tests/test_package.py` and `tests/test_cli.py` |
+| `SA-0070` | Cell task `MERGED` on its second run, PR #221, stacked on #213; its first run is an `EXHAUSTED` row at the same `spec_sha`. All seven declared witnesses exist in `tests/test_events.py` |
+| `SA-0071` | Cell task `MERGED`, PR #215; all four declared witnesses exist in `tests/test_report.py` |
+| `SA-0072` | Cell task `MERGED`, PR #219; all four declared witnesses exist in `tests/test_scope.py` |
+| `SA-0073` | Cell task `MERGED`, PR #220; all five declared witnesses exist in `tests/test_retired_vocabulary_hook.py` |
+
+**Stack #222 (`SA-0066`–`SA-0073`, merged 2026-09-12).** Every one of its eight
+pull requests carries review fixes committed after its cell's last gate, so each
+merged head differs from the tree PACKAGE pushed, and `saffron reconcile` says so
+for each. No gate judged those fixes — backlog item **97**, measured eight times.
 
 **A fourth thing the ledger cannot say, found 2026-08-31.** `DONE_STATES` means
 the scan is finished with a spec, not that the work is — `EXHAUSTED`,
