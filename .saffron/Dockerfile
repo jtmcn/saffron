@@ -2,13 +2,12 @@
 # Toolchain and dependencies only; the agent runtime came from the base.
 FROM saffron/cell-base:python
 
-# uv from pypi, not `COPY --from=ghcr.io/astral-sh/uv`. A registry copy is a
-# second registry this image needs, and a host that cannot reach one cannot
-# reach the other — measured, ghcr.io refuses at its blob CDN exactly as
-# docker.io does (DESIGN.md §5.1.2). pypi is already required by the base.
-# Pinned for the reason the SDK is: an unpinned toolchain drifts between
-# rebuilds and the version that ran a task is recorded nowhere.
-ARG UV_VERSION=0.8.17
+# uv from pypi, not `COPY --from=ghcr.io/astral-sh/uv`: a registry copy is a
+# second registry this image needs, and ghcr.io refuses at its blob CDN exactly
+# as docker.io does (docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md).
+# pypi is already required by the base. Pinned to the host's uv, which writes the
+# `uv.lock` that `uv sync --frozen` reads below — bump the two together.
+ARG UV_VERSION=0.12.11
 RUN python -m pip install --no-cache-dir --break-system-packages "uv==${UV_VERSION}" \
  && uv --version
 

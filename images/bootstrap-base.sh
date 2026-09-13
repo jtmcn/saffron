@@ -38,12 +38,17 @@ command -v "$RUNTIME" >/dev/null || {
 root=$(mktemp -d)
 trap 'rm -rf "$root"' EXIT
 
+# --force-check-gpg: with no archive keyring debootstrap only warns and installs
+# unverified, and this base ends up holding the agent's token.
+echo "debootstrap $SUITE -> $root/rootfs"
+debootstrap --force-check-gpg --variant=minbase --include=ca-certificates \
+	"$SUITE" "$root/rootfs" "$MIRROR" >/dev/null
 # --variant=minbase leaves `universe` disabled, and python3-pip lives there.
 # Without it `apt-get install` aborts the whole transaction on one missing
 # candidate and the other packages silently do not arrive either. Measured.
-echo "debootstrap $SUITE -> $root/rootfs"
-debootstrap --variant=minbase --include=ca-certificates "$SUITE" "$root/rootfs" "$MIRROR" >/dev/null
-echo "deb $MIRROR $SUITE universe" >>"$root/rootfs/etc/apt/sources.list"
+# -updates and -security too, or every image built on this ships release day's.
+printf 'deb %s %s main universe\n' "$MIRROR" "$SUITE" "$MIRROR" "$SUITE-updates" \
+	"$MIRROR" "$SUITE-security" >"$root/rootfs/etc/apt/sources.list"
 
 tar -C "$root/rootfs" -cf "$root/rootfs.tar" .
 "$RUNTIME" import -q "$root/rootfs.tar" "$TAG" >/dev/null

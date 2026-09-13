@@ -16,16 +16,19 @@
 ARG BASE_IMAGE=python:3.12-slim-bookworm
 FROM ${BASE_IMAGE}
 
-# python3 and pip explicitly: the default base has them and a bootstrapped one
-# does not, and a base that silently lacks an interpreter fails at the SDK
-# install with an error nobody would trace back to here. `python` is the name
-# everything below uses, so a base providing only `python3` gets the link.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      git ca-certificates python3 python3-pip python3-venv \
- && rm -rf /var/lib/apt/lists/* \
- && { command -v python >/dev/null || ln -s "$(command -v python3)" /usr/local/bin/python; } \
- && update-ca-certificates
+# python3 and pip only when the base lacks them: the default carries 3.12 in
+# /usr/local, and Debian's packages would add an older second interpreter beside
+# it. A bootstrapped base has none, and one that silently lacks an interpreter
+# fails at the SDK install with an error nobody would trace back to here.
+# `python` is the name everything below uses, so a `python3`-only base gets the link.
+RUN set -eu; \
+    pkgs="git ca-certificates"; \
+    command -v python3 >/dev/null || pkgs="$pkgs python3 python3-pip python3-venv"; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends $pkgs; \
+    rm -rf /var/lib/apt/lists/*; \
+    command -v python >/dev/null || ln -s "$(command -v python3)" /usr/local/bin/python; \
+    update-ca-certificates
 
 # pip verifies against certifi's bundle, not the system store, so a host behind
 # a TLS-terminating proxy fails here with a self-signed-certificate error even
@@ -36,7 +39,8 @@ RUN apt-get update \
 # time; do not disable verification.
 # `SSL_CERT_FILE` is the one most tools honour and `uv` is among them — measured,
 # it reads neither of the other two and fails `uv sync` with `UnknownIssuer`
-# while pip a layer above is content.
+# while pip a layer above is content. These apply on the default base too, where
+# they swap certifi's copy of the standard CA set for Debian's.
 ENV PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
     REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
     SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
@@ -93,13 +97,15 @@ WORKDIR /work
 # routes are then comparable rather than assumed equal, which is the whole cost
 # of `BASE_IMAGE` being an argument (DESIGN.md §5.1.2). Every line is a version
 # some tool printed about itself; a build that could not produce one fails here
-# instead of shipping a blank.
+# instead of shipping a blank. Assigned before printing because `set -e` ignores
+# a failed substitution inside `echo`'s arguments.
 RUN set -eu; \
-    { echo "base=$(. /etc/os-release && echo "$ID $VERSION_ID")"; \
-      echo "python=$(python --version 2>&1)"; \
-      echo "git=$(git --version)"; \
-      echo "claude-agent-sdk=$(python -c 'import claude_agent_sdk as s; print(s.__version__)' 2>/dev/null || echo unknown)"; \
-      echo "claude-code=$(/opt/saffron/claude-code --version 2>&1 | head -1)"; \
-    } > /opt/saffron/provenance; \
+    base=$(. /etc/os-release && echo "$ID $VERSION_ID"); \
+    py=$(python --version 2>&1); \
+    gitv=$(git --version); \
+    sdk=$(python -c 'import importlib.metadata as m; print(m.version("claude-agent-sdk"))'); \
+    cc=$(/opt/saffron/claude-code --version 2>&1 | head -1); \
+    printf 'base=%s\npython=%s\ngit=%s\nclaude-agent-sdk=%s\nclaude-code=%s\n' \
+      "$base" "$py" "$gitv" "$sdk" "$cc" > /opt/saffron/provenance; \
     grep -q '^python=Python 3\.12\.' /opt/saffron/provenance \
       || { echo "base image is not Python 3.12:" >&2; cat /opt/saffron/provenance >&2; exit 1; }
