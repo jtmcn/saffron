@@ -3,6 +3,7 @@ and the watch pattern. Real git in a temporary repo; `gh` is always injected."""
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import os
 import re
@@ -10,6 +11,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -219,3 +221,91 @@ def test_next_says_when_the_spec_it_names_is_cut_from_a_reviewable_parent():
     chosen, note = driver._next_spec([parent, sibling], again=False)
     assert chosen is sibling
     assert note is None
+
+
+def _rate_limited(spec_id: str):
+    row = _row(spec_id, pr=None, state=None)
+    row.last_state = "RATE_LIMITED"
+    return row
+
+
+def _dropped(spec_id: str):
+    row = _row(spec_id, pr=None, state=None)
+    row.dropped = "operator's call"
+    return row
+
+
+@pytest.mark.parametrize(
+    ("parent", "why"),
+    [
+        (_rate_limited("A"), "RATE_LIMITED"),
+        (_row("A", state="EXHAUSTED", pr=None), "EXHAUSTED"),
+        (_dropped("A"), "dropped"),
+    ],
+)
+def test_next_skips_a_child_whose_parent_has_no_reviewable_branch(parent, why):
+    # `saffron cell` runs no `depends_on` refusal, and a parent with no waiting
+    # task leaves the child's worktree cut from main, without a word.
+    child = _row("B", 2, ["A"], pr=None, state=None)
+    sibling = _row("C", 2, pr=None, state=None)
+
+    chosen, note = driver._next_spec([parent, child, sibling], again=False)
+    assert chosen is sibling
+    assert note == f"skipped B: its parent A is {why}, so a cell would cut it from main"
+
+    chosen, note = driver._next_spec([parent, child], again=False)
+    assert chosen is None
+
+
+def test_a_resnapshot_keeps_what_the_loop_recorded(tmp_path, monkeypatch):
+    # `build_queue` skips a spec with a finished task, so an order rebuilt from
+    # the scan alone lost every reviewable PR and every drop.
+    from saffron.intake import load_spec
+
+    specs_dir = tmp_path / ".saffron" / "specs"
+    specs_dir.mkdir(parents=True)
+    paths = []
+    for source in sorted((REPO / ".saffron" / "specs" / "done").glob("SA-*.md"))[:4]:
+        shutil.copy(source, specs_dir / source.name)
+        paths.append(specs_dir / source.name)
+    loaded = [load_spec(p) for p in paths]
+    ready, dropped, merged, new = (spec.id for spec, _sha in loaded)
+
+    monkeypatch.setattr(driver, "REPO", tmp_path)
+    monkeypatch.setattr(driver, "STATE_DIR", tmp_path / ".saffron-loop")
+    monkeypatch.setattr(driver, "ORDER", tmp_path / ".saffron-loop" / "order.json")
+    monkeypatch.setattr(
+        driver, "_gh_pr_field", lambda n, _name: {10: "OPEN", 11: "MERGED"}[n]
+    )
+
+    def row(i, **recorded):
+        spec, sha = loaded[i]
+        return driver.Planned(
+            spec.id,
+            str(paths[i].relative_to(tmp_path)),
+            spec.priority,
+            spec_sha=sha,
+            branch=f"saffron/{spec.id}",
+            **recorded,
+        )
+
+    driver._save(
+        [
+            row(0, state="READY_FOR_REVIEW", pr=10),
+            row(1, dropped="operator's call"),
+            row(2, state="READY_FOR_REVIEW", pr=11),
+        ]
+    )
+    # What the scan returns now: the three recorded specs all have finished
+    # tasks (or a drop the ledger knows nothing of), and one spec is new.
+    scanned = [SimpleNamespace(spec=loaded[i][0], path=paths[i]) for i in (1, 3)]
+    monkeypatch.setattr(driver, "_scan", lambda *, ignore_open_prs: (scanned, []))
+
+    assert driver.cmd_snapshot(argparse.Namespace(force=True)) == 0
+
+    rows = {p.spec_id: p for p in driver._load()}
+    assert set(rows) == {ready, dropped, new}  # a merged PR leaves the loop
+    assert (rows[ready].state, rows[ready].pr) == ("READY_FOR_REVIEW", 10)
+    assert rows[dropped].dropped == "operator's call"
+    assert rows[new].state is None
+    assert driver._stale(list(rows.values())) == []

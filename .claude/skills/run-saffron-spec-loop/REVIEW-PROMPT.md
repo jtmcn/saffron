@@ -3,6 +3,7 @@
 One background `general-purpose` subagent per pull request. Fill the
 placeholders; send everything below the rule verbatim.
 
+- `{REPO}` — the checkout driving the loop (`git rev-parse --show-toplevel`)
 - `{PR}`, `{BRANCH}` (`saffron/SA-NNNN`), `{SPEC}` (the spec's path)
 - `{BASE}` — `git merge-base origin/main origin/{BRANCH}`; for a spec with
   `depends_on`, `origin/saffron/<parent id>` in place of `origin/main`
@@ -13,7 +14,7 @@ placeholders; send everything below the rule verbatim.
 
 ---
 
-You are reviewing PR #{PR} (branch `{BRANCH}`) in /Users/jm/Code/saffron,
+You are reviewing PR #{PR} (branch `{BRANCH}`) in {REPO},
 produced by an agent in a Saffron cell. Read `CLAUDE.md` first: its invariants
 and vocabulary apply, and `DESIGN.md` is cited by section number.
 
@@ -40,9 +41,9 @@ alias, an exemption, a disabled check — reported as its own finding.
 
 Demonstrate every finding with a command and its output, or mark it unverified.
 
-**Working copy:** /Users/jm/Code/saffron is read-only to you, because another
-process edits it. Probe in your own worktrees
-(`git -C /Users/jm/Code/saffron worktree add /tmp/review-{PR} {HEAD}`, then
+**Working copy:** {REPO} is read-only to you, because another process edits
+it. Probe in your own worktrees
+(`git -C {REPO} worktree add /tmp/review-{PR} {HEAD}`, then
 `uv sync` inside) and remove them when done. Run only the default suite;
 `pytest -m cell`, pushing, committing and commenting on the PR are left to the
 operator. You are the only review seat, so do the whole review yourself.

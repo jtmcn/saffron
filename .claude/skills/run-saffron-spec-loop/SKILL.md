@@ -1,6 +1,6 @@
 ---
 name: run-saffron-spec-loop
-description: Use when asked to run every queued Saffron spec, drive the spec queue through attended cells, or produce a stack of spec pull requests for review instead of merging each one.
+description: Use when running the Saffron spec loop — every queued spec through an attended cell and an independent review, stacked as draft pull requests instead of merged.
 ---
 
 # Run the Saffron spec loop
@@ -34,10 +34,11 @@ empties after the first cell packages. `snapshot` writes the run order once, to
 including a spec refused only for an unmet `depends_on` on a parent in the
 order — and every later command reads that file.
 
-An existing order is kept until `snapshot --force`. `status` and `next` call an
-order **stale** when a spec file moved or changed or a PR merged or closed, and
-`next` refuses a stale one. A spec queued since the snapshot is not in it:
-re-snapshot to add it.
+An existing order is kept until `snapshot --force`, which rescans and keeps
+every recorded outcome still true — a reviewable PR, a drop, an undecided cell.
+`status` and `next` call an order **stale** when a spec file moved or changed or
+a PR merged or closed, and `next` refuses a stale one. A spec queued since the
+snapshot is not in it: re-snapshot to add it.
 
 **Done when** `status` lists the specs you mean to run and reports nothing
 stale.
@@ -52,7 +53,9 @@ from the remote, not the checkout, so PR N can be reviewed on its branch while
 cell N+1 runs. A spec with `depends_on` has its worktree cut from its parent's
 branch, so it starts after the parent's review commits are pushed; when `next`
 names such a child first, it says so, and the next independent spec can be
-started by its path meanwhile.
+started by its path meanwhile. `next` skips a child whose parent has no
+reviewable branch — rate-limited, decided otherwise, or dropped — because
+`saffron cell` would cut it from main, and names the child it skipped.
 
 ### a. Start the cell in the background
 
@@ -147,6 +150,10 @@ It records every branch's SHA before moving any, restores all of them on a
 conflict, and prints the push with each lease pinned to the recorded SHA. Run
 `make check` on the top branch, then ask the operator before running the push:
 it rewrites branches with open PRs.
+
+**Done when** every layer reports `identical` or its range-diff has been read,
+`make check` echoes `make exit: 0` on the top branch, and the operator has
+approved and seen the push run, or declined it.
 
 ## 5. File what the reviews left
 

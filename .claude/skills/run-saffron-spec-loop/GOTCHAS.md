@@ -30,9 +30,6 @@ do; the measurement behind it follows.
 
 ## Recording
 
-- **Record after the cell process exits** — the background task's completion
-  notice, not the Monitor. `READY_FOR_REVIEW` prints before PACKAGE opens the
-  pull request; recording on that line finds no PR.
 - **A state that decided nothing leaves the spec pending** with `last_state`
   set, and `next` walks past it so a closed rate-limit window cannot loop
   forever:
@@ -52,11 +49,10 @@ do; the measurement behind it follows.
 - **Read the spec's `touches` before blaming the diff.** Three consecutive
   specs shipped with a `touches` list that boxed the agent in; a finding that
   the agent gamed a check was the spec's fault each time.
-- **A diff that gets past a gate goes to the operator as a question.**
+- **Read every alias and exemption in the diff as a way past a gate.**
   SA-0077's agent bound pytest's skip to a private name so `integrity`'s
   substring scan would not fire, and said so in a comment; the gate passed and
-  no lens raised it (backlog item 112). Whether to keep it, spell it plainly, or
-  exempt it is policy.
+  no lens raised it (backlog item 112).
 - **Redirect `make check` to a file and echo `$?`.** `make check | tail` reports
   tail's status. `ruff format` rewrites files and then reports failure: run it
   again before believing red.
@@ -69,8 +65,8 @@ do; the measurement behind it follows.
   already opened and keeps no local tracking — the `gh-stack` skill's own path
   for branches another tool manages. `submit` works from local stack state and
   force-pushes every branch.
-- **PRs stay drafts.** PACKAGE opens drafts on purpose (§5.7); `link --open`
-  would flip them all. Ratifying is `gh pr ready <n>`, the operator's.
+- **Link without `--open`.** It flips every draft PACKAGE opened on purpose
+  (§5.7).
 - **`link` retargets bases.** Each PR's diff stays right, because GitHub
   computes it from the merge base; what changes is what merging it would do.
   Siblings that both append to one document collide on the number as well as
@@ -108,7 +104,8 @@ do; the measurement behind it follows.
 | Symptom | What to do |
 |---|---|
 | `no run order at .saffron-loop/order.json` | Run `snapshot`. A leftover `plan.json` is the previous driver's file; delete it. |
-| `next` or `status` says the order is stale | A spec moved or was edited, or a PR merged or closed since the snapshot. `snapshot --force`. |
+| `next` or `status` says the order is stale | A spec moved or was edited, or a PR merged or closed since the snapshot. `snapshot --force`; it keeps every recorded outcome still true. |
+| `next`: `skipped SA-NNNN: its parent … so a cell would cut it from main` | The parent has no reviewable branch. `next --again` once a rate-limited parent's window reopens; `drop` the child otherwise. |
 | `snapshot` prints `nothing to run: no candidate specs` | Every spec is done at its current `spec_sha`, or refused; the refusals are printed. |
 | `record`: `no task for SA-NNNN at <sha>` | The spec was edited after its cell ran. Re-run the cell, or revert the edit. |
 | `CLAUDE_CODE_OAUTH_TOKEN is unset` | Scope it to the `saffron cell` invocation (Starting cells); refresh with `claude setup-token`. |

@@ -19,7 +19,7 @@ import json
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -147,10 +147,12 @@ def _relative(path: Path) -> str:
     return str(path.relative_to(REPO)) if path.is_absolute() else str(path)
 
 
-def _order(candidates, refusals) -> tuple[list[Planned], list[Path]]:
+def _order(
+    candidates, refusals, carried: Sequence[Planned] = ()
+) -> tuple[list[Planned], list[Path]]:
     """Parents before children, then priority, then id. A spec refused only
     for an unmet `depends_on` on a parent in the order is admitted; every
-    other refusal stands."""
+    other refusal stands. A `carried` row outranks the scan's row for its id."""
     from saffron.intake import load_spec
 
     def planned_row(spec, path: Path) -> Planned:
@@ -163,7 +165,9 @@ def _order(candidates, refusals) -> tuple[list[Planned], list[Path]]:
             branch=f"saffron/{spec.id}",
         )
 
-    planned = {c.spec.id: planned_row(c.spec, c.path) for c in candidates}
+    planned = {p.spec_id: p for p in carried}
+    for c in candidates:
+        planned.setdefault(c.spec.id, planned_row(c.spec, c.path))
 
     deferred = []
     unreadable = []
@@ -201,6 +205,10 @@ def _order(candidates, refusals) -> tuple[list[Planned], list[Path]]:
     return ordered, stranded + [r.path for r in unreadable]
 
 
+def _parse_order() -> list[Planned]:
+    return [Planned(**row) for row in json.loads(ORDER.read_text())]
+
+
 def _load() -> list[Planned]:
     if not ORDER.is_file():
         legacy = (
@@ -212,7 +220,7 @@ def _load() -> list[Planned]:
             _fail(f"no run order at {ORDER.relative_to(REPO)} — run `snapshot`{legacy}")
         )
     try:
-        return [Planned(**row) for row in json.loads(ORDER.read_text())]
+        return _parse_order()
     except TypeError as stale:
         raise SystemExit(
             _fail(
@@ -236,27 +244,48 @@ def _gh_pr_field(number: int, name: str) -> str | None:
     return done.stdout.strip() if done.returncode == 0 else None
 
 
+def _pr_state(number: int) -> str | None:
+    return _gh_pr_field(number, "state")
+
+
+def _stale_reasons(
+    p: Planned, pr_state: Callable[[int], str | None] = _pr_state
+) -> list[str]:
+    from saffron.intake import load_spec
+
+    path = REPO / p.path
+    if not path.is_file():
+        return [f"{p.spec_id}: {p.path} is gone"]
+    reasons = []
+    if p.spec_sha and load_spec(path)[1] != p.spec_sha:
+        reasons.append(f"{p.spec_id}: the spec changed after the snapshot")
+    if p.pr and (state := pr_state(p.pr)) in {"MERGED", "CLOSED"}:
+        reasons.append(f"{p.spec_id}: #{p.pr} is {state}")
+    return reasons
+
+
 def _stale(
-    rows: list[Planned],
-    *,
-    pr_state: Callable[[int], str | None] = lambda n: _gh_pr_field(n, "state"),
+    rows: list[Planned], *, pr_state: Callable[[int], str | None] = _pr_state
 ) -> list[str]:
     """Why the order no longer describes the repository, if it does not. A
     leftover order once listed a merged PR as reviewable and an unrun spec as
     next, and nothing said so (2026-09-12)."""
-    from saffron.intake import load_spec
+    return [reason for p in rows for reason in _stale_reasons(p, pr_state)]
 
-    reasons = []
-    for p in rows:
-        path = REPO / p.path
-        if not path.is_file():
-            reasons.append(f"{p.spec_id}: {p.path} is gone")
-            continue
-        if p.spec_sha and load_spec(path)[1] != p.spec_sha:
-            reasons.append(f"{p.spec_id}: the spec changed after the snapshot")
-        if p.pr and (state := pr_state(p.pr)) in {"MERGED", "CLOSED"}:
-            reasons.append(f"{p.spec_id}: #{p.pr} is {state}")
-    return reasons
+
+def _carried() -> list[Planned]:
+    """The rows a re-snapshot keeps: every recorded outcome still true.
+    `build_queue` skips a spec with a finished task, so an order rebuilt from
+    the scan alone dropped every reviewable pull request."""
+    try:
+        previous = _parse_order() if ORDER.is_file() else []
+    except (TypeError, ValueError):
+        return []  # an order this driver cannot read has nothing to carry
+    return [
+        p
+        for p in previous
+        if (p.state or p.dropped or p.last_state) and not _stale_reasons(p)
+    ]
 
 
 # ------------------------------------------------------------ the stack
@@ -494,8 +523,9 @@ def watch_pattern() -> str:
 def cmd_snapshot(args) -> int:
     if ORDER.is_file() and not args.force:
         return _fail(f"{ORDER.relative_to(REPO)} exists — pass --force to re-snapshot")
+    carried = _carried() if args.force else []
     candidates, refusals = _scan(ignore_open_prs=args.force)
-    ordered, stranded = _order(candidates, refusals)
+    ordered, stranded = _order(candidates, refusals, carried)
     if not ordered:
         print("nothing to run: no candidate specs")
         for r in refusals:
@@ -532,23 +562,39 @@ def _next_spec(
 ) -> tuple[Planned | None, str | None]:
     """The first pending spec no cell has answered, and a note when its parent
     is reviewable: a child's worktree is cut from the parent's branch, so the
-    parent's review commits have to be pushed first."""
+    parent's review commits have to be pushed first. A child whose parent in
+    the order has no reviewable branch is skipped: `saffron cell` does not
+    refuse it, and would cut its worktree from main."""
     by_id = {p.spec_id: p for p in rows}
+    skipped = []
     for p in rows:
-        if p.pending and (again or p.last_state is None):
-            parents = [
-                d
-                for d in p.depends_on
-                if by_id.get(d) and by_id[d].state == "READY_FOR_REVIEW"
-            ]
-            note = (
+        if not (p.pending and (again or p.last_state is None)):
+            continue
+        blocked = [
+            (d, by_id[d])
+            for d in p.depends_on
+            if d in by_id and by_id[d].state != "READY_FOR_REVIEW"
+        ]
+        if blocked:
+            d, parent = blocked[0]
+            why = (
+                "dropped"
+                if parent.dropped
+                else parent.state or parent.last_state or "not run yet"
+            )
+            skipped.append(
+                f"skipped {p.spec_id}: its parent {d} is {why}, "
+                "so a cell would cut it from main"
+            )
+            continue
+        parents = [d for d in p.depends_on if d in by_id]
+        if parents:
+            skipped.append(
                 f"{p.spec_id} is cut from {', '.join(parents)}: push "
                 f"{'their' if len(parents) > 1 else 'its'} review commits first"
-                if parents
-                else None
             )
-            return p, note
-    return None, None
+        return p, "; ".join(skipped) or None
+    return None, "; ".join(skipped) or None
 
 
 def cmd_next(args) -> int:
@@ -562,10 +608,10 @@ def cmd_next(args) -> int:
         print("re-snapshot with `snapshot --force`.", file=sys.stderr)
         return 1
     chosen, note = _next_spec(rows, again=args.again)
+    if note:
+        print(f"note: {note}", file=sys.stderr)
     if chosen is not None:
         print(chosen.spec_id)
-        if note:
-            print(f"note: {note}", file=sys.stderr)
         return 0
     pending = [p for p in rows if p.pending]
     if not pending:
