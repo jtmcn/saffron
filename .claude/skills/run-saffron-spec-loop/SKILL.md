@@ -1,6 +1,6 @@
 ---
 name: run-saffron-spec-loop
-description: Use when running the Saffron spec loop — every queued spec through an attended cell and an independent review, stacked as draft pull requests instead of merged.
+description: Use when asked to run the Saffron spec loop over the queued specs, or to stack spec pull requests for review instead of merging them.
 ---
 
 # Run the Saffron spec loop
@@ -96,10 +96,11 @@ spec pending, and `next` moves past it (GOTCHAS, Recording).
 1. **The in-cell critic's findings** are in
    `~/.saffron/batches/v0/SA-NNNN/findings.json`: a list of lenses, each with
    `findings` carrying `severity`, `file`, `line` and `claim`.
-2. **Independent review:** one background `general-purpose` subagent per PR,
-   prompted from [REVIEW-PROMPT.md](REVIEW-PROMPT.md). Its criterion walk is
-   what finds the defects — in stack #233 each of four reviews found a witness
-   that survived an edit breaking its line, after three clean lenses.
+2. **Independent review:** two background `general-purpose` subagents per PR,
+   the Spec seat and the Standards seat, prompted from
+   [REVIEW-PROMPT.md](REVIEW-PROMPT.md). The Spec seat's criterion walk is what
+   finds the defects — in stack #233 each of four reviews found a witness that
+   survived an edit breaking its line, after three clean lenses.
 3. **Verify every finding yourself** before acting: read the line and re-run
    its probe. A finding's claim to have been verified is part of what you are
    reviewing.
