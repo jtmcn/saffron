@@ -43,10 +43,14 @@ which items go through a cell are in
 **44**. `saffron batch` exists and the machine below can start.
 
 What replaced it as the gate was not an item: **run a night.** One has now run
-against an empty queue (`DRAINED`, 2026-09-05) — the plumbing works. What is
+against an empty queue (`DRAINED`, 2026-09-05) — the plumbing works. ~~What is
 still unmeasured is a night that *runs* something: no cell has started under a
-batch, so the budget gate, the breaker and packaging are code with tests and no
-evidence. That is the gate now, and it is one cheap spec away.
+batch.~~ Stale by the evening it was written: batches 3–12 (2026-09-05 to
+2026-09-10) each started one cell, read off `runs.batch_id` on 2026-09-12, and
+batch 8 is `SA-0059`'s night, where the budget gate got its first evidence (item
+73). What none of them was is a night of more than one task, so the between-task
+budget check and the breaker have still never had a second candidate to act on.
+That is the gate now.
 
 ### Tier 1 — breaks at 03:00 with nobody watching
 
