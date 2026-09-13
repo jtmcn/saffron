@@ -158,12 +158,8 @@ def _git(container: str, *args: str) -> runtime.Completed:
     # suppressBlankEmpty=false: it strips the leading space from a blank context
     # line, and a diff the host cannot parse is an `error` the agent can set with
     # one uncommitted `git config` (§5.4).
-    # useReplaceRefs=false: belongs here, not in `DIFF_FLAGS` — `git replace`
-    # moves `show`, `rev-list`, `ls-tree` and `checkout` too, and `_git` is the
-    # one function every one of them passes through. `rev-parse HEAD` still
-    # names the real commit either way; without this, every other read here
-    # would resolve through whatever object the agent replaced it with
-    # (docs/BACKLOG.md item 102).
+    # useReplaceRefs=false: here, not in `DIFF_FLAGS` — `git replace` moves
+    # every read of the object graph, not only diffs (docs/BACKLOG.md item 102).
     return runtime.exec_(
         container,
         [
