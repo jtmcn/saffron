@@ -185,7 +185,8 @@ note "a cell starts and returns output"
 if [ "$(probe "nc -w 3 127.0.0.1 1 </dev/null")" = noran ]; then
 	er "the probe harness itself does not run in a cell"
 else
-	selfcheck=$(cell sh -c 'nc -l -p 9 >/dev/null 2>&1 & sleep 1; nc -w 3 127.0.0.1 9 </dev/null; echo "__rc=$?"' |
+	# Above 1024: the cell has no CAP_NET_BIND_SERVICE to bind below it.
+	selfcheck=$(cell sh -c 'nc -l -p 5435 >/dev/null 2>&1 & sleep 1; nc -w 3 127.0.0.1 5435 </dev/null; echo "__rc=$?"' |
 		sed -n 's/.*__rc=\([0-9][0-9]*\).*/\1/p' | tail -1)
 	case ${selfcheck:-noran} in
 	0) note "probe self-check: nc connects to a listener it can see" ;;
@@ -298,10 +299,11 @@ if [ "$fail" -eq 0 ]; then
 	echo "  All assertions hold on $RUNTIME."
 	[ "$RUNTIME" = container ] &&
 		echo "  Appendix G: take it. Better isolation, better memory ceiling, §5.1 gets shorter."
-	[ "$RUNTIME" = podman ] &&
+	[ "$RUNTIME" = podman ] && {
 		echo "  Backlog 103: a shared kernel, so seccomp and no-new-privileges are the"
 		echo "  boundary offered in place of the per-cell VM. A second safety argument,"
 		echo "  weaker and stated (DESIGN.md §5.1)."
+	}
 	exit 0
 fi
 echo "  $RUNTIME does not satisfy the spike as configured."
