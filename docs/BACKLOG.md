@@ -57,7 +57,7 @@ That is the gate now.
 Soundness first: **79**, **69**, **93**, **94**, **109** (filed 2026-09-12; it
 leaks a mutant wherever 80 stores one), **80** (~~**83**~~, ~~**85**~~, ~~**84**~~,
 ~~**82**~~ and ~~**81**~~, pulled up from tier 3 as why 69's gate could not be
-declared against safely, are done — 2026-09-08), then **97** and **102**. Honesty second:
+declared against safely, are done — 2026-09-08), then **97**, **102** and **109**. Honesty second:
 ~~**73**~~, ~~**70**~~, ~~**45**~~, **51** (with **49**/**50**, which its fix closes),
 ~~**47**~~, **46** (with ~~**95**~~, which compounds it), **40**, ~~**26**~~,
 ~~**7**~~, and ~~**78**~~.
@@ -127,7 +127,7 @@ fire. Its number stays listed because item numbers are cited from `saffron/`.
 
 **22**, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, **62**, **63**, **64**, **69**, **75**, **76**, **77**,
-~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**.
+~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, **110**, **111**.
 (**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
 is the same defect as filing one nowhere at all. **94** was filed here and moved
@@ -5935,7 +5935,12 @@ run both ways.
 
 ## 102. `refs/replace` lets a cell ship a tree its gates never ran on
 
-**Status: spec queued, 2026-09-12 — `SA-0074`, not yet run.**
+**Status: `READY_FOR_REVIEW`, 2026-09-12 — `SA-0074`, PR #228, the bottom of
+stack #233.** The pin is `-c core.useReplaceRefs=false` in `_git`, so it covers
+every read, not only the three the criteria name; a review commit added a
+witness on `dirty_paths`, which a replacement made report a clean tree as
+dirty. Grafts and `.git/shallow` are not replace refs and still move the
+history reads: item **110**.
 
 **Tier 1.** Found reviewing `SA-0072` (PR #219), 2026-09-12, by probe; the
 PACKAGE half is read from the code, not run in a cell. An agent that runs
@@ -5964,8 +5969,10 @@ pinned read sees the real tree.
 
 ## 103. A cell can hide an edit's content from the critic with settings the diff never shows
 
-**Status: spec queued for the two `-c` pins, 2026-09-12 — `SA-0075`, stacked on
-`SA-0074`, not yet run.** `.git/info/attributes` stays here, and now has a
+**Status: the two `-c` pins are `READY_FOR_REVIEW`, 2026-09-12 — `SA-0075`,
+PR #231 in stack #233, measured on the cell's own git (2.39.5) as well as the
+host's.** Their threshold witness first edited an 8-byte file, so a pin lowered
+to 32 bytes passed it; a review commit grew the file past 1 MiB. `.git/info/attributes` stays here, and now has a
 probed answer: on git 2.54, `--text` restores its hunks, and a `diff.<driver>.binary`
 driver's too. It is not taken, because it also renders every genuine binary as
 text, which changes `integrity`'s binary check and PACKAGE's no-full-index
@@ -5997,11 +6004,27 @@ exists — probed: `-c core.bigFileThreshold=2g` restores the hunks and
 `core.attributesFile` overrode. The integrity comment corrected either way.
 Item **89** holds the settings that move the diff's shape rather than hide it.
 
+**A fifth vector**, found reviewing `SA-0075` (PR #231), 2026-09-12, by probe.
+An untracked `.gitattributes` marking every path `-diff`, hidden by a line in
+`.git/info/exclude`, makes the pinned diff print `Binary files … differ` on both
+the host's git (2.54) and the cell's (2.39.5). `dirty_paths`' `status
+--untracked-files=all` does not list it and `commit_dirty`'s `add -A` never
+commits it, so it is as invisible as `.git/info/attributes`. `--attr-source=HEAD`
+restores the hunks on 2.54, since it reads attributes from the tree rather than
+the worktree, but 2.39.5 rejects the flag: that answer needs the cell image's git
+bumped first. Unmeasured: the `2g` threshold now also governs `commit_dirty`'s
+`add -A`, which reads a file between git's `512m` default and `2g` into memory
+rather than streaming it, inside a `4g` cell.
+
 ---
 
 ## 104. A cell's malformed `resets_at` raises inside the rate-limit handler
 
-**Status: spec queued, 2026-09-12 — `SA-0076`, not yet run.** The "not verified"
+**Status: `READY_FOR_REVIEW`, 2026-09-12 — `SA-0076`, PR #230 in stack #233.**
+`implement.when` is deleted and `events.when` is the one formatter. A review
+commit added the first test pinning its output to local time: before it, a
+formatter that always returned `"unknown"`, or used `gmtime`, passed the whole
+suite. The "not verified"
 below is now measured, through `run_one_cell` with `tests/test_session.py`'s
 stubs. It is worse than an abort. All four values raise out of the session:
 `TypeError` for a string or a list, `OverflowError` for `10**20`, `ValueError`
@@ -6303,6 +6326,79 @@ mutant is undone by this.
 carrying neither `find` nor `replace`, with a witness that asserts over the
 whole gate result. The pull request body loses the edit with it. That is
 intended: the operator has the spec.
+
+---
+
+## 109. A name bound to a suppression passes `integrity`'s scan
+
+**Tier 1.** Found reviewing `SA-0077` (PR #232), 2026-09-12 — in the wild, not
+by probe. The agent needed a legitimate skip in `tests/conftest.py`, found that
+`integrity` refuses the call form of pytest's skip, and bound pytest's skip
+function to a private name ahead of its one call, with a comment saying that was
+why. `integrity` passed the diff (`3 changed files clean of suppression and
+gate-config edits`); the same diff with the literal call fails
+`added-suppression`. The scan (`saffron/gates/core/integrity.py:272`) matches
+each `policy.yaml` token as a substring of each added line, so it reads a
+spelling, not a call: the alias covers every later call of that name in the
+file, and the same move works for the expected-failure marker and for pytest's
+skip marker applied without the decorator's `@`.
+
+The review commit spelled the call literally, by operator decision, so #232
+carries a suppression a person approved. Re-run in a cell, it fails
+`integrity`, which is the point.
+
+**Tier 1, not 2,** because it is the question the tier's soundness half exists
+for: a blocking gate reported `pass` on a diff whose own comment described
+getting past it, and none of the three lenses raised it.
+
+**Done looks like** the suppression tokens matched as what they resolve to
+rather than as text — an ast-grep rule over `tests/**` flagging any reference to
+pytest's skip or expected-failure objects, called or not, is the likely shape —
+with a witness built from `SA-0077`'s own alias, run against the substring scan
+to prove it passes there. `.saffron/**` is `protected`, so it lands by hand.
+
+---
+
+## 110. Grafts and `.git/shallow` move a worktree's history reads with replace refs off
+
+**Tier 3.** Found reviewing `SA-0074` (PR #228), 2026-09-12, by probe on host
+git 2.54. With base, then a commit touching a forbidden path, then an innocent
+commit, and HEAD's parent grafted onto base, `rev-list --count base..HEAD`
+dropped from 2 to 1 and `log` listed only the innocent commit — under
+`-c core.useReplaceRefs=false` and `--no-replace-objects` alike, because a graft
+is not a replace ref. A `.git/shallow` did the same. The diff was unaffected
+(`--name-only` still listed the forbidden path), so `scope`, the gates and
+PACKAGE judge the real tree.
+
+What moves is what `commits_ahead` and `commit_subjects`
+(`saffron/cell/worktree.py`) read: the commit count §4.3's doneness is measured
+by — though an attempt with no commits still counts 0, since the range is empty
+whatever a graft says — and the subjects recorded in the squash body (§5.7), the
+only surviving trace of the agent's own commits.
+
+**Done looks like** both reads pinned against both files — `GIT_GRAFT_FILE`
+pointed at nothing is the reviewer's suggestion, unprobed, and `.git/shallow`
+has no probed answer yet — with a witness that grafts a worktree the way
+`SA-0074`'s fixture plants a replacement.
+
+---
+
+## 111. `runtime.probe()`'s once-per-session answer and its timeout are both untested
+
+**Tier 3.** Found reviewing `SA-0077` (PR #232), 2026-09-12. Two lines of
+`probe()` survive deletion with the suite green: the memo that asks the runtime
+once per process, and the 10-second `timeout_s` on `--version` — the review's
+mutant removing it survived. Measured by the same review: with the timeout, a
+runtime that hangs on `--version` reports absent after 10.0s.
+The memo is a note in the spec, not a criterion. Unverified: whether an
+installed runtime whose service is stopped still reports present —
+`container --version` looks client-side, and the spec put it out of scope. The
+same review found `probe()`'s docstring and `pytest_runtest_setup`'s running
+well past what this repo keeps comments to.
+
+**Done looks like** a witness for each — a stub runtime that counts its own
+invocations across two probes, and one that sleeps past a timeout patched small
+— each killed by deleting the line it names.
 
 ---
 
