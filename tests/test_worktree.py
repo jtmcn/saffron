@@ -1413,3 +1413,123 @@ def test_an_undo_that_exits_zero_without_restoring_still_raises(tmp_path, monkey
         worktree.source_mutated("c", mutant),
     ):
         pass
+
+
+# --- _git reads through a planted `git replace` (docs/BACKLOG.md item 102) -
+
+
+def _repo_with_a_planted_replacement(tmp_path, monkeypatch):
+    """A real head commit that changes two files, one of them with content the
+    benign substitute does not carry, and a `git replace` of that head onto a
+    benign commit built on the same parent — via `git commit-tree`, never
+    merged into history — that changes only the other of the two, with
+    different content on the file both touch.
+
+    A bare git read of `HEAD` in this repo resolves through the replacement,
+    exactly as `SA-0072`'s probe measured; `rev-parse HEAD` does not move.
+    Every test using this fixture pairs a bare read proving the plant with a
+    pinned one through `worktree`, the same way `SA-0072`'s own tests pair a
+    bare diff with the pinned one.
+    """
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    (tmp_path / "a.py").write_text("base\n")
+    base = _commit(tmp_path, "base")
+
+    # The benign tree: a.py changes to content the real commit never carries,
+    # and b.py never appears. Built with plumbing so it attaches to no ref and
+    # never moves HEAD.
+    (tmp_path / "a.py").write_text("benign content\n")
+    subprocess.run(["git", "add", "a.py"], cwd=tmp_path, check=True)
+    benign_tree = subprocess.run(
+        ["git", "write-tree"], cwd=tmp_path, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    benign = subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=T",
+            "commit-tree",
+            benign_tree,
+            "-p",
+            base,
+            "-m",
+            "benign",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    # The real commit: a.py to different content, plus a second file the
+    # benign tree never got.
+    (tmp_path / "a.py").write_text("real content\n")
+    (tmp_path / "b.py").write_text("added for real\n")
+    real_head = _commit(tmp_path, "real")
+
+    subprocess.run(["git", "replace", real_head, benign], cwd=tmp_path, check=True)
+    assert (
+        subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+        ).stdout.strip()
+        == real_head
+    )
+
+    _host_git(tmp_path, monkeypatch)
+    return base, real_head
+
+
+def test_changed_files_reads_through_a_planted_replacement(tmp_path, monkeypatch):
+    base, real_head = _repo_with_a_planted_replacement(tmp_path, monkeypatch)
+
+    # Prove the plant first: a bare read in this same repo is fooled, and
+    # lists fewer paths than the real commit touched.
+    bare = subprocess.run(
+        ["git", "diff", "--name-only", f"{base}..HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert bare == ["a.py"]
+
+    assert worktree.changed_files("c", base) == ["a.py", "b.py"]
+
+
+def test_export_patch_reads_through_a_planted_replacement(tmp_path, monkeypatch):
+    base, real_head = _repo_with_a_planted_replacement(tmp_path, monkeypatch)
+
+    bare = subprocess.run(
+        ["git", "diff", f"{base}..HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "benign content" in bare
+    assert "real content" not in bare
+    assert "added for real" not in bare
+
+    patch = worktree.export_patch("c", base)
+    assert "real content" in patch
+    assert "added for real" in patch
+    assert "benign content" not in patch
+
+
+def test_read_at_head_reads_through_a_planted_replacement(tmp_path, monkeypatch):
+    base, real_head = _repo_with_a_planted_replacement(tmp_path, monkeypatch)
+
+    bare = subprocess.run(
+        ["git", "show", "HEAD:a.py"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert bare == "benign content\n"
+
+    assert worktree.read_at_head("c", "a.py") == "real content\n"
