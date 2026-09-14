@@ -1653,7 +1653,10 @@ counterpart in code.
 
 ## 23. A witness already green at `base_sha` makes a spec unsatisfiable, and nothing says so
 
-**Status:** open. Found by review of `SA-0011`.
+**Status:** spec queued, 2026-09-13 — `SA-0085`, stacked on `SA-0084`, not yet
+run. Found by review of `SA-0011`. The `watch()` line asked for below is now an
+event: it goes on `Baseline`, because `criteria` skips at baseline and nothing
+else there reads a witness.
 
 `saffron/gates/core/criteria.py` reports `witness-green-at-base` (`:100`) for a
 non-`preserves` witness that already passed at base. It is blocking, and no
@@ -3848,6 +3851,7 @@ the thing `SA-0053` was written to avoid.
 2026-09-12.** It covers the `Agent` event only. `Terminal.detail` on a rejected plan and
 `PhaseStart.detail` also carry paths an agent wrote, and they render unclipped
 and unstripped. That is the follow-up, found reviewing `SA-0070` (2026-09-11).
+Spec queued 2026-09-13 — `SA-0084`, stacked on `SA-0080`, not yet run.
 
 **Tier 3.** Found reviewing `SA-0053` (PR #119). Not a regression — the
 attended terminal has had this exposure since `SA-0029` — but that PR added a
@@ -5408,6 +5412,15 @@ as.*
 duplicate flags from `pinned_diff` afterwards is a harness change, left for
 later.
 
+**The four below: spec queued, 2026-09-13 — `SA-0082`, not yet run.** Probed
+that day on git 2.39.5 (the cell image) and 2.54, with identical results
+(`docs/evidence/scripts/2026-09-13-history-and-diff-pins.sh`).
+`--ignore-submodules=none`, `--no-color` and `--inter-hunk-context=0` each
+restore the pinned shape. `-c color.ui=never` does not beat `color.diff=always`.
+One correction to the bullet below: `color.ui=always` leaves the name-only
+listing clean, so its escape codes land in the patch, not in the list `scope`
+reads.
+
 **Found reviewing `SA-0072`, 2026-09-11, and outside it:**
 - **`--no-renames` is guarded by no test.** Removing it left all 1745 tests
   green, because `_hostile_repo` never renames a file.
@@ -6352,6 +6365,17 @@ intended: the operator has the spec.
 ---
 
 ## 110. Grafts and `.git/shallow` move a worktree's history reads with replace refs off
+
+**Status: spec queued, 2026-09-13 — `SA-0083`, stacked on `SA-0082`, not yet
+run.** Probed that day on git 2.39.5 (the cell image) and 2.54, with identical
+results (`docs/evidence/scripts/2026-09-13-history-and-diff-pins.sh`):
+- `GIT_GRAFT_FILE=/dev/null` pins grafts and not shallow.
+- `GIT_SHALLOW_FILE=/dev/null`, which git does not document, pins shallow.
+- `--shallow-file` is not a command-line option on either version.
+- Together the two variables restore both reads, and they change nothing on a
+  clean repo.
+- `GIT_GRAFT_FILE` makes every call print git's deprecation hint until
+  `advice.graftFileDeprecated=false` is set.
 
 **Tier 3.** Found reviewing `SA-0074` (PR #228), 2026-09-12, by probe on host
 git 2.54. With base, then a commit touching a forbidden path, then an innocent

@@ -1818,7 +1818,15 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-13, a twenty-third time: `SA-0079` (item 111),
+    """Re-measured 2026-09-13, a twenty-fourth time: four more specs. `SA-0082`
+    (item 89) is independent and joins the candidates, ahead of `SA-0079` and
+    `SA-0080` because it is priority 2 and they are 3. The other three are
+    refused on a parent with no task yet, and each refusal is correct:
+    `SA-0083` (item 110) stacks on `SA-0082` (both edit `worktree.py`),
+    `SA-0084` (item 63) on `SA-0080` (both edit `events.py`), and `SA-0085`
+    (item 23) on `SA-0084`.
+
+    Re-measured 2026-09-13, a twenty-third time: `SA-0079` (item 111),
     `SA-0080` (item 62) and `SA-0081` (item 64) queued. The first two are
     independent and join the candidates. `SA-0081` is refused, which is
     correct: it stacks on `SA-0080`, both edit `saffron/watch.py`, and the
@@ -1907,12 +1915,21 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0076",
         "SA-0077",
         "SA-0078",
+        "SA-0082",
         "SA-0079",
         "SA-0080",
     ]
-    assert [r.path.name[:7] for r in refusals] == ["SA-0075", "SA-0081"]
-    assert "SA-0074 has no task" in refusals[0].reason
-    assert "SA-0080 has no task" in refusals[1].reason
+    assert [r.path.name[:7] for r in refusals] == [
+        "SA-0075",
+        "SA-0081",
+        "SA-0083",
+        "SA-0084",
+        "SA-0085",
+    ]
+    for refusal, parent in zip(
+        refusals, ["SA-0074", "SA-0080", "SA-0082", "SA-0080", "SA-0084"], strict=True
+    ):
+        assert f"{parent} has no task" in refusal.reason
     # A precondition, not the glob check: `done/` is populated, so the empty
     # queue above is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30
