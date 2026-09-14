@@ -1,28 +1,16 @@
 #!/usr/bin/env python3
-"""Drive Saffron's spec loop over every active spec, stacking the pull
-requests instead of merging them.
+"""Drive Saffron's spec loop over every queued spec, stacking the pull
+requests instead of merging them. `SKILL.md` is the procedure; this is its
+state.
 
-The problem this exists to solve: `saffron queue` is computed against open
-pull requests, and this workflow deliberately leaves them open. The moment
-the first cell packages, gate 0 refuses every remaining spec whose `touches`
-overlap that pull request's files — and nearly every spec in this repository
-touches `docs/BACKLOG.md`. A loop that re-reads the queue each iteration
-therefore stops after one spec and reports "nothing to do" with work left.
+`saffron queue` checks every spec against a conflict set that includes open
+pull requests, and this loop leaves them open, so the loop's order is
+snapshotted once, before any exists, and every later command reads
+`.saffron-loop/order.json`.
 
-So the run order is snapshotted **once, before any pull request exists**, and
-persisted. Everything after that reads the plan, never the queue.
-
-Usage (from the repo root):
-
-    uv run .claude/skills/run-saffron-spec-loop/driver.py plan
-    uv run .claude/skills/run-saffron-spec-loop/driver.py next
-    uv run .claude/skills/run-saffron-spec-loop/driver.py record SA-0028
-    uv run .claude/skills/run-saffron-spec-loop/driver.py status
-    uv run .claude/skills/run-saffron-spec-loop/driver.py stack [--execute]
-
-The cell runs themselves are not this script's job: `saffron cell` needs
-`CLAUDE_CODE_OAUTH_TOKEN` scoped to its own invocation and nothing else, so
-the agent runs it directly (see SKILL.md) and calls `record` afterwards.
+The driver starts no cell: `saffron cell` takes `CLAUDE_CODE_OAUTH_TOKEN`
+scoped to its own invocation, so the delegate driving the loop starts it and
+calls `record` afterwards.
 """
 
 from __future__ import annotations
@@ -31,21 +19,32 @@ import argparse
 import json
 import subprocess
 import sys
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
-PLAN = REPO / ".saffron-loop" / "plan.json"
-# What a state has to be for `record` to consume the spec is
-# `scheduler.DONE_STATES`, gate 0's own "running it again learns nothing new"
-# (§4.2.1) — and what still has a cell behind it is `reconcile.IN_FLIGHT_STATES`.
-# Both are imported in `cmd_record`, neither is re-listed here: a copy that
-# omitted `QUEUED` would tell the operator to launch a second cell during the
-# minutes `session.py` spends on the proxy, the image and the baseline gates
-# before it leaves that state. Measured 2026-09-01 — SA-0028 came back
-# `RATE_LIMITED` and SA-0027 was read mid-run as `REBUTTING`; both were written
-# to the plan, and both would have dropped the spec out of the stack with
-# nobody told.
+STATE_DIR = REPO / ".saffron-loop"
+ORDER = STATE_DIR / "order.json"
+LEGACY_PLAN = STATE_DIR / "plan.json"
+ONTOLOGY = REPO / "ontology" / "factory.ttl"
+ONTOLOGY_NS = "urn:software-factory:ns#"
+# What the CLI prints at column 0 while a cell runs. Terminal states are not
+# listed here: `watch_pattern` takes them from the ontology's closed set.
+WATCH_PREFIXES = (
+    "IMPLEMENT",
+    "GATE",
+    "REVIEW",
+    "REBUT",
+    "PACKAGE",
+    "gates:",
+    "baseline:",
+    "ceilings:",
+    "teardown",
+    "rate limit",
+    "cell:",
+)
 
 if not (REPO / "DESIGN.md").is_file():  # the skill was moved; say so, do not guess
     raise SystemExit(
@@ -55,39 +54,53 @@ if not (REPO / "DESIGN.md").is_file():  # the skill was moved; say so, do not gu
 
 
 def _fail(message: str) -> int:
-    """1, not 2: `saffron/cli.py` reserves 2 for infrastructure, and this is
-    the operator holding it wrong."""
+    """1, not 2: `saffron/cli.py` reserves 2 for infrastructure."""
     print(f"error: {message}", file=sys.stderr)
     return 1
 
 
-# --------------------------------------------------------------- discovery
+class GitError(RuntimeError):
+    pass
+
+
+def _git(*args: str, cwd: Path = REPO) -> str:
+    done = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    if done.returncode != 0:
+        raise GitError(f"git {' '.join(args)}: {done.stderr.strip()}")
+    return done.stdout.strip()
+
+
+# --------------------------------------------------------------- the order
 
 
 @dataclass
-class Planned:
+class OrderRow:
     spec_id: str
     path: str
     priority: int
     depends_on: list[str] = field(default_factory=list)
+    spec_sha: str = ""
     state: str | None = None
     pr: int | None = None
     branch: str = ""
-    # What a cell last said about a spec that is still pending, and how many
-    # cells stopped without deciding. Pending-with-no-trace read identically to
-    # never-attempted, and `next` returns the first pending spec: a
-    # `RATE_LIMITED` head of the plan was handed straight back inside the same
-    # closed window, forever, with every later spec unreachable behind it.
-    attempts: int = 0
+    # A cell that stopped without deciding (a rate limit, an orphan). `next`
+    # walks past a spec carrying one, so a closed window cannot loop forever.
     last_state: str | None = None
+    undecided_cells: int = 0
+    dropped: str | None = None
+
+    @property
+    def pending(self) -> bool:
+        return self.state is None and self.dropped is None
+
+    @property
+    def reviewable(self) -> bool:
+        return self.state == "READY_FOR_REVIEW" and self.pr is not None
 
 
 def _ledger_and_repo():
-    """The ledger and this repo's id, resolved the way `cli._queue` does.
-
-    `real_remote` supplies the origin string; the ledger holds the SSH form
-    for this repository, so reading it back with anything else finds nothing.
-    """
+    """The ledger and this repo's id, resolved the way `cli._queue` does: the
+    ledger holds the SSH remote, so any other spelling finds nothing."""
     from saffron.ledger import Ledger
     from saffron.phases import package as package_phase
 
@@ -97,13 +110,8 @@ def _ledger_and_repo():
 
 
 def _protected() -> list[str]:
-    """`policy.yaml`'s repo-wide deny list, read from the checkout beside the
-    specs this plans against.
-
-    Gate 0 checks it first and cheapest, and `SA-0023` exists because the
-    collision was otherwise found inside a cell — "after the cell, the turn
-    and the money". A planner that launches cells is the last place to drop it.
-    """
+    """`policy.yaml`'s protected paths — gate 0's first refusal, kept here so
+    a collision is found before a cell rather than inside one (`SA-0023`)."""
     from saffron.repos.policy import PolicyError, load_policy
 
     try:
@@ -113,22 +121,33 @@ def _protected() -> list[str]:
     return list(getattr(policy, "protected", []) or [])
 
 
-def _scan(*, ignore_open_prs: bool):
-    """`build_queue` against the specs on disk — not the mirror export
-    `saffron queue` reads, because a plan is made against the specs the
-    operator is looking at.
+def _hiding(gh, branches: frozenset[str]):
+    """`gh`, with every pull request from `branches` left out of what it lists."""
 
-    `ignore_open_prs` is for a re-snapshot **mid-loop**, where this batch's
-    own pull requests are open and are exactly what must be looked past. On a
-    first snapshot the real `gh` runs: every open pull request is then someone
-    else's, and a spec whose `touches` collide with one should still be
-    refused.
-    """
+    def run(argv):
+        done = gh(argv)
+        try:
+            listed = json.loads(done.stdout)
+        except (TypeError, ValueError):
+            return done
+        if done.returncode != 0 or not isinstance(listed, list):
+            return done
+        kept = [
+            pr
+            for pr in listed
+            if not (isinstance(pr, dict) and pr.get("headRefName") in branches)
+        ]
+        return subprocess.CompletedProcess(argv, 0, json.dumps(kept), done.stderr)
+
+    return run
+
+
+def _scan(*, loop_branches: frozenset[str]):
+    """`build_queue` over the specs on disk. A re-snapshot mid-loop looks past
+    the loop's own open pull requests, each of which would refuse its
+    siblings on the conflict set, and no one else's."""
     from saffron.phases import package as package_phase
     from saffron.scheduler import build_queue, run_gh
-
-    def no_prs(argv):
-        return subprocess.CompletedProcess(argv, 0, stdout="[]", stderr="")
 
     ledger, repo_id, url = _ledger_and_repo()
     try:
@@ -142,31 +161,42 @@ def _scan(*, ignore_open_prs: bool):
             ledger,
             repo_slug=slug,
             protected=_protected(),
-            gh=no_prs if ignore_open_prs else run_gh,
+            gh=_hiding(run_gh, loop_branches),
         )
     finally:
         ledger.close()
 
 
-def _order(candidates, refusals) -> tuple[list[Planned], list[Path]]:
-    """Run order: parents before children, then priority, then file order.
+def _relative(path: Path) -> str:
+    return str(path.relative_to(REPO)) if path.is_absolute() else str(path)
 
-    A spec refused *only* because its `depends_on` has not run is included —
-    running the parent is what admits it, and that is the whole point of an
-    ordered plan. Every other refusal stands.
-    """
+
+def _order(
+    candidates,
+    refusals,
+    carried: Sequence[OrderRow] = (),
+    exclude: frozenset[str] = frozenset(),
+) -> tuple[list[OrderRow], list[Path]]:
+    """Parents before children, then priority, then id. A spec refused only
+    for an unmet `depends_on` on a parent in the order is admitted; every
+    other refusal stands. A `carried` row outranks the scan's row for its id,
+    and an `exclude`d id is admitted by neither."""
     from saffron.intake import load_spec
 
-    planned = {
-        c.spec.id: Planned(
-            spec_id=c.spec.id,
-            path=str(c.path.relative_to(REPO)) if c.path.is_absolute() else str(c.path),
-            priority=c.spec.priority,
-            depends_on=list(c.spec.depends_on),
-            branch=f"saffron/{c.spec.id}",
+    def row_for(spec, path: Path) -> OrderRow:
+        return OrderRow(
+            spec_id=spec.id,
+            path=_relative(path),
+            priority=spec.priority,
+            depends_on=list(spec.depends_on),
+            spec_sha=load_spec(REPO / _relative(path))[1],
+            branch=f"saffron/{spec.id}",
         )
-        for c in candidates
-    }
+
+    admitted = {p.spec_id: p for p in carried}
+    for c in candidates:
+        if c.spec.id not in exclude:
+            admitted.setdefault(c.spec.id, row_for(c.spec, c.path))
 
     deferred = []
     unreadable = []
@@ -176,81 +206,415 @@ def _order(candidates, refusals) -> tuple[list[Planned], list[Path]]:
         try:
             spec, _sha = load_spec(refusal.path)
         except Exception:
-            # A parse failure can name `depends_on` too (a scalar where a list
-            # belongs), and it is not a deferral. Do not let it vanish.
+            # A parse failure can name `depends_on` too, and is not a deferral.
             unreadable.append(refusal)
             continue
         deferred.append((spec, refusal.path))
 
-    # Enough passes for a chain: a grandchild's parent may itself be deferred.
-    for _ in range(len(deferred) + 1):
+    for _ in range(len(deferred) + 1):  # enough passes for a chain
         for spec, path in deferred:
-            if spec.id in planned:
-                continue
-            if all(dep in planned for dep in spec.depends_on):
-                planned[spec.id] = Planned(
-                    spec_id=spec.id,
-                    path=str(path.relative_to(REPO))
-                    if path.is_absolute()
-                    else str(path),
-                    priority=spec.priority,
-                    depends_on=list(spec.depends_on),
-                    branch=f"saffron/{spec.id}",
-                )
+            if (
+                spec.id not in admitted
+                and spec.id not in exclude
+                and all(d in admitted for d in spec.depends_on)
+            ):
+                admitted[spec.id] = row_for(spec, path)
 
-    ordered: list[Planned] = []
-    remaining = dict(planned)
+    ordered: list[OrderRow] = []
+    remaining = dict(admitted)
     while remaining:
         ready = [
             p
             for p in remaining.values()
             if all(d not in remaining for d in p.depends_on)
         ]
-        if not ready:  # a cycle; emit the rest in a stable order rather than hang
+        if not ready:  # a dependency cycle; emit the rest stably rather than hang
             ready = sorted(remaining.values(), key=lambda p: p.spec_id)
         ready.sort(key=lambda p: (p.priority, p.spec_id))
-        first = ready[0]
-        ordered.append(first)
-        del remaining[first.spec_id]
+        ordered.append(ready[0])
+        del remaining[ready[0].spec_id]
 
-    # Deferred and never admitted — a dead parent, or a parent that is not a
-    # candidate at all. Returned so `plan` can say so rather than drop it.
-    stranded = [path for spec, path in deferred if spec.id not in planned]
+    stranded = [path for spec, path in deferred if spec.id not in admitted]
     return ordered, stranded + [r.path for r in unreadable]
 
 
-# ------------------------------------------------------------- plan file
+def _parse_order() -> list[OrderRow]:
+    return [OrderRow(**row) for row in json.loads(ORDER.read_text())]
 
 
-def _load() -> list[Planned]:
-    if not PLAN.is_file():
+def _load() -> list[OrderRow]:
+    if not ORDER.is_file():
+        legacy = (
+            f" ({LEGACY_PLAN.relative_to(REPO)} is the previous driver's file — delete it)"
+            if LEGACY_PLAN.is_file()
+            else ""
+        )
         raise SystemExit(
-            _fail(f"no plan at {PLAN.relative_to(REPO)} — run `plan` first")
+            _fail(f"no order at {ORDER.relative_to(REPO)} — run `snapshot`{legacy}")
         )
     try:
-        return [Planned(**row) for row in json.loads(PLAN.read_text())]
+        return _parse_order()
     except TypeError as stale:
         raise SystemExit(
             _fail(
-                f"{PLAN.relative_to(REPO)} does not match this driver ({stale}) "
-                "— re-run `plan --force`"
+                f"{ORDER.relative_to(REPO)} does not match this driver ({stale}) — `snapshot --force`"
             )
         ) from stale
 
 
-def _save(rows: list[Planned]) -> None:
-    PLAN.parent.mkdir(parents=True, exist_ok=True)
-    PLAN.write_text(json.dumps([r.__dict__ for r in rows], indent=2) + "\n")
+def _save(rows: list[OrderRow]) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    ORDER.write_text(json.dumps([r.__dict__ for r in rows], indent=2) + "\n")
+
+
+def _gh_pr_field(number: int, name: str) -> str | None:
+    done = subprocess.run(
+        ["gh", "pr", "view", str(number), "--json", name, "-q", f".{name}"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def _pr_state(number: int) -> str | None:
+    return _gh_pr_field(number, "state")
+
+
+def _stale_reasons(
+    p: OrderRow, pr_state: Callable[[int], str | None] = _pr_state
+) -> list[str]:
+    from saffron.intake import load_spec
+
+    path = REPO / p.path
+    if not path.is_file():
+        return [f"{p.spec_id}: {p.path} is gone"]
+    reasons = []
+    if p.spec_sha and load_spec(path)[1] != p.spec_sha:
+        reasons.append(f"{p.spec_id}: the spec changed after the snapshot")
+    if p.pr and (state := pr_state(p.pr)) in {"MERGED", "CLOSED"}:
+        reasons.append(f"{p.spec_id}: #{p.pr} is {state}")
+    return reasons
+
+
+def _stale(
+    rows: list[OrderRow], *, pr_state: Callable[[int], str | None] = _pr_state
+) -> list[str]:
+    """Why the order no longer describes the repository, if it does not. A
+    leftover order once listed a merged PR as reviewable and an unrun spec as
+    next, and nothing said so (2026-09-12)."""
+    return [reason for p in rows for reason in _stale_reasons(p, pr_state)]
+
+
+def _previous() -> list[OrderRow]:
+    try:
+        return _parse_order() if ORDER.is_file() else []
+    except (TypeError, ValueError):
+        return []  # an order this driver cannot read has nothing to carry
+
+
+def _carried(previous: list[OrderRow]) -> tuple[list[OrderRow], dict[str, str]]:
+    """The rows a re-snapshot keeps, every recorded outcome still true, and
+    the specs it holds out, with why. `build_queue` passes over a spec with a
+    finished task, so an order rebuilt from the scan alone dropped every
+    reviewable PR; and it hands back a spec edited while its PR is open as new."""
+    kept, held = [], {}
+    for p in previous:
+        if not (p.state or p.dropped or p.last_state):
+            continue
+        reasons = _stale_reasons(p)
+        if not reasons:
+            kept.append(p)
+        elif p.pr and _pr_state(p.pr) not in {"MERGED", "CLOSED"}:
+            held[p.spec_id] = f"{'; '.join(reasons)}, and #{p.pr} is still open"
+    return kept, held
+
+
+# ------------------------------------------------------------ the stack
+
+
+def _stack_order(rows: list[OrderRow]) -> tuple[list[OrderRow], list[str]]:
+    """The reviewable pull requests, bottom to top, each child directly above
+    its parent. Snapshot order alone put a child above an unrelated sibling,
+    and the child's PR then showed its parent's changes. A stack is a line, so
+    a parent with two children, or a child whose parent is not in it, is said
+    rather than hidden."""
+    ready = [p for p in rows if p.reviewable]
+    ids = {p.spec_id for p in ready}
+    by_id = {p.spec_id: p for p in rows}
+
+    def parent(p: OrderRow) -> str | None:
+        return next((d for d in p.depends_on if d in ids), None)
+
+    order: list[OrderRow] = []
+    seen: set[str] = set()
+
+    def visit(p: OrderRow) -> None:
+        if p.spec_id in seen:
+            return
+        seen.add(p.spec_id)
+        order.append(p)
+        for child in ready:
+            if parent(child) == p.spec_id:
+                visit(child)
+
+    for p in ready:
+        if parent(p) is None:
+            visit(p)
+    for p in ready:  # a dependency cycle leaves some unvisited
+        visit(p)
+
+    warnings = []
+    for lower, upper in zip(order, order[1:], strict=False):
+        want = parent(upper)
+        if want is not None and want != lower.spec_id:
+            warnings.append(
+                f"{upper.spec_id} sits above {lower.spec_id}, not its parent {want}: "
+                f"#{upper.pr} will show {want}'s changes"
+            )
+    for i, p in enumerate(order):
+        below = order[i - 1].branch if i else "the trunk"
+        for dep in p.depends_on:
+            if dep in by_id and dep not in ids:
+                warnings.append(
+                    f"{p.spec_id}'s parent {dep} is not in the stack; `link` "
+                    f"retargets #{p.pr} onto {below}, where it shows {dep}'s changes"
+                )
+    return order, warnings
+
+
+def _trunk(cwd: Path = REPO) -> str:
+    try:
+        return _git("symbolic-ref", "--short", "refs/remotes/origin/HEAD", cwd=cwd)
+    except GitError:
+        return "origin/main"
+
+
+def _merge_conflicts(lower: str, upper: str, cwd: Path = REPO) -> list[str]:
+    """What merging the two would conflict on. A retargeted PR page looks
+    clean either way: two siblings both appending `## 34.` to the backlog did."""
+    done = subprocess.run(
+        ["git", "merge-tree", "--write-tree", lower, upper],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+    )
+    if done.returncode == 0:
+        return []
+    conflicts = [
+        line for line in done.stdout.splitlines() if line.startswith("CONFLICT")
+    ]
+    return conflicts or [f"merge-tree exited {done.returncode}: {done.stderr.strip()}"]
+
+
+# ----------------------------------------------------------- the rebase
+
+
+@dataclass
+class Layer:
+    branch: str
+    old_tip: str
+    fork: str
+    onto: str
+
+
+def _fork_point(branch: str, lower: str, trunk: str, cwd: Path = REPO) -> str:
+    """Where `branch` left what it was cut from: its merge-base with the layer
+    below or with the trunk, whichever is newer. A child forks from its
+    parent; a sibling forks from the trunk it was cut from, even when the
+    layer below was cut from an older one."""
+    below = _git("merge-base", branch, lower, cwd=cwd)
+    trunkward = _git("merge-base", branch, trunk, cwd=cwd)
+    newer_is_trunkward = (
+        subprocess.run(
+            ["git", "merge-base", "--is-ancestor", below, trunkward], cwd=cwd
+        ).returncode
+        == 0
+    )
+    return trunkward if newer_is_trunkward else below
+
+
+def _layers(
+    branches: list[str], trunk: str, cwd: Path = REPO, prefix: str = "origin/"
+) -> list[Layer]:
+    """Every fork point, taken before anything moves."""
+    layers = []
+    for i, branch in enumerate(branches):
+        ref = prefix + branch
+        lower = trunk if i == 0 else prefix + branches[i - 1]
+        layers.append(
+            Layer(
+                branch=branch,
+                old_tip=_git("rev-parse", ref, cwd=cwd),
+                fork=_fork_point(ref, lower, trunk, cwd),
+                onto=trunk if i == 0 else branches[i - 1],
+            )
+        )
+    return layers
+
+
+def _patch_id(a: str, b: str, cwd: Path) -> str:
+    diff = subprocess.run(
+        ["git", "diff", a, b], cwd=cwd, capture_output=True, text=True, check=True
+    ).stdout
+    out = subprocess.run(
+        ["git", "patch-id", "--stable"],
+        cwd=cwd,
+        input=diff,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return out.split()[0] if out else ""
+
+
+def _held_elsewhere(cwd: Path) -> dict[str, str]:
+    """Each branch checked out in a worktree other than `cwd`'s, and where."""
+    here = Path(_git("rev-parse", "--show-toplevel", cwd=cwd)).resolve()
+    held: dict[str, str] = {}
+    path = ""
+    for line in _git("worktree", "list", "--porcelain", cwd=cwd).splitlines():
+        if line.startswith("worktree "):
+            path = line.removeprefix("worktree ")
+        elif line.startswith("branch refs/heads/") and Path(path).resolve() != here:
+            held[line.removeprefix("branch refs/heads/")] = path
+    return held
+
+
+def _restore(layers: list[Layer], start: str, cwd: Path) -> list[str]:
+    """Put back every layer that moved, and name any that could not be: a
+    restore that raised halfway left HEAD detached and said nothing."""
+    subprocess.run(["git", "checkout", "-q", "--detach"], cwd=cwd, capture_output=True)
+    failed = []
+    for layer in layers:
+        try:
+            if (
+                _git("rev-parse", f"refs/heads/{layer.branch}", cwd=cwd)
+                != layer.old_tip
+            ):
+                _git("branch", "-f", layer.branch, layer.old_tip, cwd=cwd)
+        except GitError as err:
+            failed.append(f"{layer.branch}: {err}")
+    if start != "HEAD":
+        subprocess.run(["git", "checkout", "-q", start], cwd=cwd, capture_output=True)
+    return failed
+
+
+def _apply_layers(layers: list[Layer], cwd: Path = REPO) -> tuple[bool, list[str]]:
+    """Rebase each layer onto the one below, bottom to top, then compare each
+    layer's patch-id with what it was. Any conflict restores every branch."""
+    if _git("status", "--porcelain", "--untracked-files=no", cwd=cwd):
+        return False, ["the working tree has changes; commit or stash them first"]
+    # git cannot move a branch another worktree holds (step 2c's review fixes).
+    elsewhere = _held_elsewhere(cwd)
+    if held := [layer.branch for layer in layers if layer.branch in elsewhere]:
+        return False, [
+            f"{b} is checked out in {elsewhere[b]}; switch that worktree off it first"
+            for b in held
+        ]
+    for layer in layers:
+        local = subprocess.run(
+            ["git", "rev-parse", "--verify", "-q", f"refs/heads/{layer.branch}"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+        )
+        if local.returncode != 0:
+            _git("branch", layer.branch, layer.old_tip, cwd=cwd)
+        elif local.stdout.strip() != layer.old_tip:
+            return False, [
+                f"local {layer.branch} is {local.stdout.strip()[:8]}, not the recorded "
+                f"{layer.old_tip[:8]}; push or reset it first"
+            ]
+
+    start = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd)
+    for layer in layers:
+        done = subprocess.run(
+            ["git", "rebase", "-q", "--onto", layer.onto, layer.fork, layer.branch],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+        )
+        if done.returncode != 0:
+            subprocess.run(["git", "rebase", "--abort"], cwd=cwd, capture_output=True)
+            failed = _restore(layers, start, cwd)
+            output = (done.stdout + done.stderr).splitlines()
+            detail = [line for line in output if "CONFLICT" in line] or output[-1:]
+            restored = (
+                "every branch is restored"
+                if not failed
+                else "reset these to their recorded SHAs by hand:"
+            )
+            return False, [
+                f"{layer.branch} did not rebase onto {layer.onto}; {restored}",
+                *failed,
+                *detail,
+            ]
+
+    messages = []
+    for layer in layers:
+        before = _patch_id(layer.fork, layer.old_tip, cwd)
+        after = _patch_id(layer.onto, layer.branch, cwd)
+        messages.append(
+            f"{layer.branch}: identical"
+            if before == after
+            else f"{layer.branch}: content changed — "
+            f"git range-diff {layer.fork[:8]}..{layer.old_tip[:8]} {layer.onto}..{layer.branch}"
+        )
+    if start != "HEAD":
+        subprocess.run(["git", "checkout", "-q", start], cwd=cwd, capture_output=True)
+    return True, messages
+
+
+def _push_command(layers: list[Layer]) -> str:
+    leases = " ".join(f"--force-with-lease={x.branch}:{x.old_tip}" for x in layers)
+    return f"git push {leases} origin {' '.join(x.branch for x in layers)}"
+
+
+# ------------------------------------------------------- the watch line
+
+
+def terminal_states() -> list[str]:
+    """The ontology's closed `TerminalState` set, read rather than copied: a
+    hand copy missed three of the nine."""
+    import rdflib
+
+    graph = rdflib.Graph().parse(ONTOLOGY, format="turtle")
+    states = sorted(
+        str(s).removeprefix(ONTOLOGY_NS)
+        for s in graph.subjects(
+            rdflib.RDF.type, rdflib.URIRef(f"{ONTOLOGY_NS}TerminalState")
+        )
+    )
+    if not states:
+        raise SystemExit(
+            _fail(f"no TerminalState members in {ONTOLOGY.relative_to(REPO)}")
+        )
+    return states
+
+
+def watch_pattern() -> str:
+    """The Monitor's `grep -E` pattern: phase lines anchored, terminal states
+    not — the CLI prints a state after a padded spec id."""
+    states = "|".join(terminal_states())
+    return f"^({'|'.join(WATCH_PREFIXES)})|({states})|Traceback"
 
 
 # ------------------------------------------------------------- commands
 
 
-def cmd_plan(args) -> int:
-    if PLAN.is_file() and not args.force:
-        return _fail(f"{PLAN.relative_to(REPO)} exists — pass --force to re-snapshot")
-    candidates, refusals = _scan(ignore_open_prs=args.force)
-    ordered, stranded = _order(candidates, refusals)
+def cmd_snapshot(args) -> int:
+    if ORDER.is_file() and not args.force:
+        return _fail(f"{ORDER.relative_to(REPO)} exists — pass --force to re-snapshot")
+    previous = _previous() if args.force else []
+    carried, held_out = _carried(previous)
+    candidates, refusals = _scan(loop_branches=frozenset(p.branch for p in previous))
+    ordered, stranded = _order(candidates, refusals, carried, frozenset(held_out))
+    if held_out:
+        print(f"held out of the order ({len(held_out)}):")
+        for reason in held_out.values():
+            print(f"  {reason}")
+        print("  close the PR to run the edited spec, or revert the edit to keep it\n")
     if not ordered:
         print("nothing to run: no candidate specs")
         for r in refusals:
@@ -258,65 +622,89 @@ def cmd_plan(args) -> int:
         return 1
     _save(ordered)
 
-    print(f"plan: {len(ordered)} spec(s), bottom of the stack first\n")
+    print(f"order: {len(ordered)} spec(s), bottom of the stack first\n")
     for i, p in enumerate(ordered, 1):
         dep = f"  depends_on={p.depends_on}" if p.depends_on else ""
         print(f"  {i}. {p.spec_id}  priority={p.priority}{dep}")
-    # Every refusal whose spec did not make the plan — including the ones that
-    # mention `depends_on`, which are only *usually* deferrals.
-    planned_paths = {p.path for p in ordered}
+    ordered_paths = {p.path for p in ordered}
     held = [
         r
         for r in refusals
-        if str(r.path.relative_to(REPO) if r.path.is_absolute() else r.path)
-        not in planned_paths
-        or r.path in stranded
+        if _relative(r.path) not in ordered_paths or r.path in stranded
     ]
     if held:
-        print(f"\nrefused, and not in the plan ({len(held)}):")
+        print(f"\nrefused, and not in the order ({len(held)}):")
         for r in held:
             print(f"  {r.path.name}: {r.reason}")
-    print(f"\nwritten to {PLAN.relative_to(REPO)}")
-    _warn_siblings(ordered)
+    print(f"\nwritten to {ORDER.relative_to(REPO)}")
+    loose = [p for p in ordered[1:] if not p.depends_on]
+    if loose:
+        print(
+            f"\nnote: {len(loose)} spec(s) declare no depends_on, so their branches are "
+            "siblings\n      cut from the default branch; `rebase` chains them if asked."
+        )
     return 0
 
 
-def _warn_siblings(ordered: list[Planned]) -> None:
-    """A stack of specs that do not depend on each other is a stack of
-    siblings: Saffron cuts each branch from the default branch, so nothing
-    chains them. `gh stack init`/`link` marks the upper ones "needs rebase",
-    and `gh stack rebase --no-trunk` rewrites branches Saffron has already
-    pushed. Say so now, not after the pull requests exist.
-    """
-    loose = [p for p in ordered[1:] if not p.depends_on]
-    if not loose:
-        return
-    print(
-        f"\nnote: {len(loose)} spec(s) declare no depends_on, so their branches "
-        "will be siblings\n      cut from the default branch rather than a real "
-        "chain. See SKILL.md, Gotchas."
-    )
+def _next_spec(
+    rows: list[OrderRow], *, again: bool
+) -> tuple[OrderRow | None, str | None]:
+    """The first pending spec no cell has answered, and a note when its parent
+    is reviewable: a child's worktree is cut from the parent's branch, so the
+    parent's review commits have to be pushed first. A child whose parent in
+    the order has no reviewable branch is held back: `saffron cell` does not
+    refuse it, and would cut its worktree from main."""
+    by_id = {p.spec_id: p for p in rows}
+    notes = []
+    for p in rows:
+        if not (p.pending and (again or p.last_state is None)):
+            continue
+        unready = [
+            (d, by_id[d])
+            for d in p.depends_on
+            if d in by_id and by_id[d].state != "READY_FOR_REVIEW"
+        ]
+        if unready:
+            d, parent = unready[0]
+            why = (
+                "dropped"
+                if parent.dropped
+                else parent.state or parent.last_state or "not run yet"
+            )
+            notes.append(
+                f"held back {p.spec_id}: its parent {d} is {why}, "
+                "so a cell would cut it from main"
+            )
+            continue
+        parents = [d for d in p.depends_on if d in by_id]
+        if parents:
+            notes.append(
+                f"{p.spec_id} is cut from {', '.join(parents)}: push "
+                f"{'their' if len(parents) > 1 else 'its'} review commits first"
+            )
+        return p, "; ".join(notes) or None
+    return None, "; ".join(notes) or None
 
 
 def cmd_next(args) -> int:
-    """The first spec no cell has answered.
-
-    `last_state` is the guard. SKILL.md's "never re-run a cell more than once
-    on the same failure — an hour and real money a pass" is unenforceable by
-    anything else: the agent driving the loop reads this command's output, not
-    the rule. A pending spec that carries a `last_state` has already had its
-    cell, so hand back the next untouched one instead; `--retry` overrides for
-    the case the rule is written for (a rate-limit window that has reopened),
-    and `skip` takes a spec out for good.
-    """
+    """`--again` hands back a spec a cell stopped on without deciding — the
+    case is a reopened rate-limit window."""
     rows = _load()
-    pending = [p for p in rows if p.state is None]
-    for p in pending:
-        if args.retry or p.last_state is None:
-            print(p.spec_id)
-            return 0
+    if reasons := _stale(rows):
+        print("the order is stale:", file=sys.stderr)
+        for reason in reasons:
+            print(f"  {reason}", file=sys.stderr)
+        print("re-snapshot with `snapshot --force`.", file=sys.stderr)
+        return 1
+    chosen, note = _next_spec(rows, again=args.again)
+    if note:
+        print(f"note: {note}", file=sys.stderr)
+    if chosen is not None:
+        print(chosen.spec_id)
+        return 0
+    pending = [p for p in rows if p.pending]
     if not pending:
-        print("done: every spec in the plan has been run", file=sys.stderr)
+        print("done: every spec in the order has been run or dropped", file=sys.stderr)
         return 1
     print(
         "nothing untouched left: every pending spec has already had a cell.",
@@ -324,24 +712,22 @@ def cmd_next(args) -> int:
     )
     for p in pending:
         print(
-            f"  {p.spec_id}  last={p.last_state}  attempts={p.attempts}",
+            f"  {p.spec_id}  last={p.last_state}  cells={p.undecided_cells}",
             file=sys.stderr,
         )
     print(
-        "re-run one deliberately with `next --retry` (a reopened rate-limit "
-        "window is the case for it), or take it out with `skip <spec> --why ...`.",
+        "`next --again` after a reopened rate-limit window; `drop <spec> --why …` otherwise.",
         file=sys.stderr,
     )
     return 1
 
 
 def cmd_record(args) -> int:
-    """Read the ledger for what the cell actually did. Reported states are
-    not taken from the operator or the transcript — §4.3."""
+    """What the cell did, read from the ledger (§4.3)."""
     rows = _load()
     match = next((p for p in rows if p.spec_id == args.spec_id), None)
     if match is None:
-        return _fail(f"{args.spec_id} is not in the plan")
+        return _fail(f"{args.spec_id} is not in the order")
 
     from saffron.intake import load_spec
     from saffron.reconcile import IN_FLIGHT_STATES
@@ -357,15 +743,8 @@ def cmd_record(args) -> int:
             return _fail(
                 f"no task for {args.spec_id} at {spec_sha[:12]} — did the cell run?"
             )
-        # Not `tasks[-1]`. `Ledger.tasks_by_spec`'s own docstring says folding
-        # to the highest task_id answers a different question, "one an
-        # `ORPHANED` corpse from a later killed run silently wins" — and this
-        # repo's ledger proves it: SA-0013 holds ten rows at one sha with the
-        # MERGED one at index 8 and NOT_IMPLEMENTED after it. The question
-        # here is "did a cell produce a pull request for this spec", so a row
-        # that carries one outranks a later row that does not.
-        # `tasks_by_repo` is the public read that carries `pr_url`;
-        # `tasks_by_spec` selects four columns and this is not one of them.
+        # Not `tasks[-1]`: a later orphaned or unfinished row must not hide the
+        # one that opened a pull request (SA-0013 holds ten rows at one sha).
         urls = {
             row["task_id"]: row["pr_url"]
             for row in ledger.tasks_by_repo(repo_id)
@@ -381,23 +760,13 @@ def cmd_record(args) -> int:
         if state in DONE_STATES:
             match.state, match.pr = state, pr
         else:
-            # Nothing was decided about the task: a provider ceiling
-            # (`RATE_LIMITED` is not `EXHAUSTED`), a cell still mid-phase, an
-            # orphaned row. Leaving the state set would let `next` walk past a
-            # spec no cell has answered.
+            # Nothing was decided. Keep a PR number the ledger still carries: a
+            # `CHANGES_REQUESTED` spec has one open.
             match.state = None
-            # The pull request survives, though. `CHANGES_REQUESTED` is a
-            # `scheduler.REQUEUE_STATE`, not a `DONE_STATE`, so the documented
-            # `saffron queue --repo .` reconcile lands a reviewed spec here —
-            # and dropping the number would make `status` show it as never
-            # attempted, `stack` refuse it, and `next` hand it back for a
-            # second cell while its pull request is open.
             match.pr = pr or match.pr
             match.last_state = state
-            # Polling a live row is not an attempt; a cell that stopped
-            # without deciding is.
             if state not in IN_FLIGHT_STATES:
-                match.attempts += 1
+                match.undecided_cells += 1
     finally:
         ledger.close()
 
@@ -408,97 +777,164 @@ def cmd_record(args) -> int:
         why = (
             "the cell is still running — wait for it to exit, then record again"
             if state in IN_FLIGHT_STATES
-            else "nothing was decided about the task; `next` will move on to "
-            "the next untouched spec rather than re-run this one"
+            else "nothing was decided; `next` moves on to the next untouched spec"
         )
         print(f"left pending: {why}.", file=sys.stderr)
     return 0 if state == "READY_FOR_REVIEW" else 1
 
 
-def cmd_skip(args) -> int:
-    """Take a spec out of the loop by hand.
-
-    `state` is only ever set by `record`, and `record` fails outright when the
-    ledger has no task at the spec's current sha — so without this, `next`
-    returns the same spec forever and an agent following the loop mechanically
-    re-runs the same cell at an hour and real money a pass.
-    """
+def cmd_drop(args) -> int:
+    """Take a spec out of the loop — the way out when `record` cannot find a
+    task and `next` would otherwise hand the same spec back forever."""
     rows = _load()
     match = next((p for p in rows if p.spec_id == args.spec_id), None)
     if match is None:
-        return _fail(f"{args.spec_id} is not in the plan")
-    match.state = f"SKIPPED: {args.why}"
+        return _fail(f"{args.spec_id} is not in the order")
+    match.dropped = args.why
     _save(rows)
-    print(f"{match.spec_id}  {match.state}")
+    print(f"{match.spec_id}  dropped: {args.why}")
     return 0
 
 
 def cmd_status(_args) -> int:
     rows = _load()
     if not rows:
-        return _fail("the plan is empty — re-run `plan --force`")
+        return _fail("the order is empty — `snapshot --force`")
     width = max(len(p.spec_id) for p in rows)
     for p in rows:
         pr = f"#{p.pr}" if p.pr else ""
-        # A pending spec that has already had a cell is not a pending spec that
-        # has not, and `next` treats them differently. Say which this is.
-        seen = (
-            f"  (last {p.last_state}, {p.attempts} attempt(s))"
-            if p.state is None and p.last_state
-            else ""
-        )
-        print(f"  {p.spec_id:<{width}}  {p.state or 'pending':<18} {pr:<5}{seen}")
-    ready = [p for p in rows if p.state == "READY_FOR_REVIEW" and p.pr]
+        if p.dropped:
+            label, extra = "dropped", f"  ({p.dropped})"
+        else:
+            label = p.state or "pending"
+            extra = (
+                f"  (last {p.last_state}, {p.undecided_cells} undecided cell(s))"
+                if p.pending and p.last_state
+                else ""
+            )
+        print(f"  {p.spec_id:<{width}}  {label:<18} {pr:<5}{extra}")
+    ready = [p for p in rows if p.reviewable]
     print(f"\n{len(ready)}/{len(rows)} reviewable")
+    if reasons := _stale(rows):
+        print("\nstale — `snapshot --force` before the next cell:")
+        for reason in reasons:
+            print(f"  {reason}")
     return 0
 
 
 def cmd_stack(args) -> int:
-    rows = _load()
-    ready = [p for p in rows if p.state == "READY_FOR_REVIEW" and p.pr]
-    if len(ready) < 2:
+    order, warnings = _stack_order(_load())
+    if len(order) < 2:
         return _fail(
-            f"a stack needs two or more reviewable pull requests; have {len(ready)}"
+            f"a stack needs two or more reviewable pull requests; have {len(order)}"
         )
-    numbers = [str(p.pr) for p in ready]
-    command = ["gh", "stack", "link", *numbers]
+    subprocess.run(["git", "fetch", "-q", "origin"], cwd=REPO)
 
     print("stack, bottom to top:")
-    for p in ready:
+    for p in order:
         print(f"  #{p.pr}  {p.spec_id}  ({p.branch})")
+    for warning in warnings:
+        print(f"\nwarning: {warning}")
+    clean = True
+    for lower, upper in zip(order, order[1:], strict=False):
+        conflicts = _merge_conflicts(f"origin/{lower.branch}", f"origin/{upper.branch}")
+        if conflicts:
+            clean = False
+            print(f"\n{lower.branch} and {upper.branch} do not merge cleanly:")
+            for line in conflicts:
+                print(f"  {line}")
+    if clean:
+        print("\nevery adjacent pair merges cleanly (git merge-tree)")
+
+    command = ["gh", "stack", "link", *(str(p.pr) for p in order)]
     print(f"\n  {' '.join(command)}")
-    print(
-        "\nnot passing --open: PACKAGE opens drafts on purpose (DESIGN.md §5.7),\n"
-        "and ratifying one is `gh pr ready <n>` — the operator's call, not this\n"
-        "script's."
-    )
-    print(
-        "\ncheck the result: `link` reads a leading number as a *stack* number "
-        f"when a\nstack #{numbers[0]} already exists, and then appends the rest "
-        "to that stack rather than\nforming this one. Stack numbers come from the "
-        "same repo-wide counter as\npull requests, so the collision is unlikely, "
-        "not impossible — `gh stack view`\nafter --execute says which happened."
-    )
+    print("\nPRs stay drafts (§5.7); ratifying is `gh pr ready <n>`, the operator's.")
     if not args.execute:
-        print("\n(dry run — pass --execute to run it)")
+        print("\n(dry run — pass --execute to link)")
         return 0
+
     done = subprocess.run(command, cwd=REPO, text=True)
-    return done.returncode
+    if done.returncode != 0:
+        return _fail(f"gh stack link exited {done.returncode}")
+    trunk = _trunk().removeprefix("origin/")
+    mismatched = 0
+    print("\nbases, read back:")
+    for i, p in enumerate(order):
+        want = trunk if i == 0 else order[i - 1].branch
+        got = _gh_pr_field(p.pr, "baseRefName") if p.pr else None
+        mismatched += got != want
+        print(
+            f"  #{p.pr}  base={got}" + ("" if got == want else f"  — expected {want}")
+        )
+    return 1 if mismatched else 0
+
+
+def cmd_rebase(args) -> int:
+    order, warnings = _stack_order(_load())
+    if not order:
+        return _fail("no reviewable pull requests to rebase")
+    for warning in warnings:
+        print(f"warning: {warning}")
+    subprocess.run(["git", "fetch", "-q", "origin"], cwd=REPO)
+    trunk = _trunk()
+    try:
+        layers = _layers([p.branch for p in order], trunk)
+    except GitError as err:
+        return _fail(str(err))
+
+    targets = [trunk] + [f"origin/{layer.branch}" for layer in layers[:-1]]
+    moving = [
+        layer
+        for layer, target in zip(layers, targets, strict=True)
+        if layer.fork != _git("rev-parse", target)
+    ]
+    print(f"rebase, bottom to top (trunk {trunk}):")
+    for layer in layers:
+        print(f"  {layer.branch}  fork {layer.fork[:8]}  onto {layer.onto}")
+    if not moving:
+        print("\nevery layer already sits on the one below — nothing to rebase")
+        return 0
+
+    push = _push_command(layers)
+    if not args.execute:
+        print(f"\nthen, with the operator's approval:\n  {push}")
+        print("\n(dry run — pass --execute to rebase locally)")
+        return 0
+
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    record = STATE_DIR / f"rebase-{time.strftime('%Y%m%dT%H%M%S')}.json"
+    record.write_text(json.dumps([layer.__dict__ for layer in layers], indent=2) + "\n")
+    try:
+        ok, messages = _apply_layers(layers)
+    except GitError as err:
+        ok, messages = False, [str(err)]
+    for message in messages:
+        print(f"  {message}")
+    print(f"\nrecorded SHAs: {record.relative_to(REPO)}")
+    if not ok:
+        return 1
+    print(f"push, with the operator's approval:\n  {push}")
+    return 0
+
+
+def cmd_pattern(_args) -> int:
+    print(watch_pattern())
+    return 0
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("plan", help="snapshot the run order before any PR exists")
-    p.add_argument("--force", action="store_true", help="overwrite an existing plan")
-    p.set_defaults(func=cmd_plan)
+    p = sub.add_parser("snapshot", help="write the loop's order, before any PR exists")
+    p.add_argument("--force", action="store_true", help="replace an existing order")
+    p.set_defaults(func=cmd_snapshot)
 
-    p = sub.add_parser("next", help="print the next spec id to run")
+    p = sub.add_parser("next", help="print the next spec to start a cell for")
     p.add_argument(
-        "--retry",
+        "--again",
         action="store_true",
-        help="hand back a pending spec a cell has already answered",
+        help="hand back a spec a cell stopped on undecided",
     )
     p.set_defaults(func=cmd_next)
 
@@ -506,17 +942,26 @@ def main() -> int:
     p.add_argument("spec_id")
     p.set_defaults(func=cmd_record)
 
-    p = sub.add_parser("skip", help="take a spec out of the loop by hand")
+    p = sub.add_parser("drop", help="take a spec out of the loop")
     p.add_argument("spec_id")
     p.add_argument("--why", required=True, help="what the operator should know")
-    p.set_defaults(func=cmd_skip)
+    p.set_defaults(func=cmd_drop)
 
-    p = sub.add_parser("status", help="show the plan and what has run")
+    p = sub.add_parser("status", help="show the order, what has run, and staleness")
     p.set_defaults(func=cmd_status)
 
-    p = sub.add_parser("stack", help="link the reviewable PRs into a GitHub stack")
-    p.add_argument("--execute", action="store_true", help="actually run gh stack link")
+    p = sub.add_parser("stack", help="link the reviewable PRs into one GitHub stack")
+    p.add_argument("--execute", action="store_true", help="run gh stack link")
     p.set_defaults(func=cmd_stack)
+
+    p = sub.add_parser(
+        "rebase", help="chain the stack's branches, each onto the one below"
+    )
+    p.add_argument("--execute", action="store_true", help="rebase the local branches")
+    p.set_defaults(func=cmd_rebase)
+
+    p = sub.add_parser("pattern", help="print the Monitor's grep -E pattern")
+    p.set_defaults(func=cmd_pattern)
 
     args = parser.parse_args()
     return args.func(args)

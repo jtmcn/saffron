@@ -738,6 +738,12 @@ three `Not yours` lists scatters it across three lenses, which is the overlap
 this item was opened about. Reviving it is a new decision with its own
 evidence, and it wants the same risk tier the half above is waiting on.
 
+*(Added 2026-09-13.)* The spec loop's Spec seat
+(`.claude/skills/run-saffron-spec-loop/REVIEW-PROMPT.md`) asks for "call sites
+the fix should also cover", which leaves it, host-side, the one place this
+remit is still reviewed. What it finds that no lens raised goes into
+`.saffron/rejections.md`: the evidence this decision is waiting on.
+
 ## 7. `CLAUDE.md` no longer reaches the agent, so the flywheel's middle bucket is inert
 
 **Status: done, 2026-09-11** (`fix(review): no lens was shown the invariants it judged a
