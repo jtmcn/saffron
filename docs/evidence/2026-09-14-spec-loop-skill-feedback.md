@@ -19,19 +19,20 @@ Ranked by cost to the loop this run, measured, not by how often each came up.
 3. **Step 1 never shows the operator the queue** (item 5, raised by the operator). Fix:
    `snapshot` prints titles, budgets, the summed budget and the queue's refusals, and the
    step ends by showing them.
-4. **Mechanical steps done by hand** (items 2, 6, 7, 22). The host allowlist isn't in the
-   command block, review prompts are filled in by hand, the Monitor never exits, and
-   `pattern` matches the agent's own greps. Fix: `driver.py command|prompt SA-NNNN`, and
-   an anchored `pattern` whose grep ends on the CLI's final state line.
+4. **The Monitor misleads** (items 7, 22). It never exits, and `pattern` matches the
+   agent's own greps. Fix: an anchored `pattern`, and a Monitor that ends on the CLI's
+   final state line.
 5. **GOTCHAS gaps** (items 11, 16, 18, 23). Probes need pyc caching off. A turn-ceiling
    line isn't terminal. A cell can run to ~1.7× its budget. `stack`'s sibling warning is a
    false alarm when the parent is two layers down (measured on GitHub, #249).
+6. **Labour-savers, lowest** (items 2, 6). The allowlist sits in the sentence right after
+   the command block, and 16 review prompts were filled by hand. Neither caused a failure
+   this run. Fix, if cheap: `driver.py command|prompt SA-NNNN`.
 
 **What worked and should stay:** the two-seat split (every seat-only finding on #243–#250
 came from running a probe, and the seats found a real defect the lenses missed on every
 one of the eight PRs, #243–#250, including two where all three lenses came back clean);
-the seats'
-"read-only, another process edits it" line; `make check > file; echo $?`; `stack` as a
+the seats' "read-only, another process edits it" line; `make check > file; echo $?`; `stack` as a
 mid-loop dry run; `stack --execute`'s read-back.
 
 ---
@@ -172,6 +173,30 @@ Observations, in the order they happened. Each: what happened, what the skill sa
     script that asserts the edit applied and prints the `E` line. Fix: a probe runner in
     the driver (`driver.py probe <file> <find> <replace> <test>`) that refuses an edit
     that didn't apply, and reports "killed (AssertionError)" apart from "broke (TypeError)".
+20. **Review commits can push a diff past `size` with no gate noticing.** #247 was 294
+    changed lines against the `bug` ceiling of 300. The review added a witness and a
+    shared helper, which puts it over. That's item 40's known hole (`size` runs only in the
+    cell), but the skill never tells the delegate to check. Fix: 2c.6 prints the branch's
+    changed-line count against its type's ceiling after the review commit. Anything over
+    goes to the operator as a gate-policy call, which the skill already routes that way.
+
+
+21. **Worked: `stack` as a mid-loop dry run.** Run after 5 of 8 PRs, it printed the order,
+    with SA-0083 kept directly above SA-0082, and a clean `merge-tree` for every pair. So
+    conflicts can be caught hours before step 3. Step 2 could say "run `stack` (dry) after
+    each review push", so a conflict between neighbours is found while its branch is
+    still fresh. `stack --execute` also worked first time: 4 bases retargeted,
+    stack #251 created, all 8 bases read back correct, drafts left as drafts. It prints
+    the whole dry-run block again before the read-back, false-alarm warning included,
+    so the one line that matters ("bases, read back") is at the bottom of 30.
+22. **`pattern`'s unanchored state names match the agent's own tool calls.** During
+    SA-0084's REBUT/REVIEW, the Monitor fired on
+    `agent: Grep {"pattern": "SCOPE_REVIEW|PhaseStart|…"`. A spec about events or states
+    greps for those names, and the notification reads as a terminal state. The skill
+    leaves the states unanchored because the CLI prints them after a padded spec id.
+    Fix: anchor that alternation to the CLI's own shape, `^SA-[0-9]+ +(STATE…)` plus
+    `^(STATE…):` for the phase-summary lines. Or exclude `^agent:` lines, which never
+    carry a real state.
 23. **`stack` warns that a sibling child "will show its parent's changes", and it
     won't.** With 81 and 84 both children of 80, the dry run printed `warning: SA-0084
     sits above SA-0081, not its parent SA-0080: #249 will show SA-0080's changes`.
@@ -183,26 +208,3 @@ Observations, in the order they happened. Each: what happened, what the skill sa
     sibling SA-0081; its diff is unaffected, and `rebase` would chain it if asked".
     A linear stack over a fan-out parent always produces this, so a false alarm here
     trains the delegate to ignore the warning.
-22. **`pattern`'s unanchored state names match the agent's own tool calls.** During
-    SA-0084's REBUT/REVIEW, the Monitor fired on
-    `agent: Grep {"pattern": "SCOPE_REVIEW|PhaseStart|…"`. A spec about events or states
-    greps for those names, and the notification reads as a terminal state. The skill
-    leaves the states unanchored because the CLI prints them after a padded spec id.
-    Fix: anchor that alternation to the CLI's own shape, `^SA-[0-9]+ +(STATE…)` plus
-    `^(STATE…):` for the phase-summary lines. Or exclude `^agent:` lines, which never
-    carry a real state.
-21. **Worked: `stack` as a mid-loop dry run.** Run after 5 of 8 PRs, it printed the order,
-    with SA-0083 kept directly above SA-0082, and a clean `merge-tree` for every pair. So
-    conflicts can be caught hours before step 3. Step 2 could say "run `stack` (dry) after
-    each review push", so a conflict between neighbours is found while its branch is
-    still fresh. `stack --execute` also worked first time: 4 bases retargeted,
-    stack #251 created, all 8 bases read back correct, drafts left as drafts. It prints
-    the whole dry-run block again before the read-back, false-alarm warning included,
-    so the one line that matters ("bases, read back") is at the bottom of 30.
-20. **Review commits can push a diff past `size` with no gate noticing.** #247 was 294
-    changed lines against the `bug` ceiling of 300. The review added a witness and a
-    shared helper, which puts it over. That's item 40's known hole (`size` runs only in the
-    cell), but the skill never tells the delegate to check. Fix: 2c.6 prints the branch's
-    changed-line count against its type's ceiling after the review commit. Anything over
-    goes to the operator as a gate-policy call, which the skill already routes that way.
-
