@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from saffron.cell import runtime, worktree
 from saffron.gates.core.integrity import integrity_gate
-from saffron.repos.policy import IntegrityPatterns
+from saffron.repos.policy import IntegrityPatterns, load_policy
+
+REPO = Path(__file__).resolve().parent.parent
 
 PATTERNS = IntegrityPatterns(
     test_paths=["tests/**"],
@@ -82,6 +85,52 @@ def test_prose_quoting_a_token_fails_and_that_is_the_accepted_cost(tmp_path):
     result = integrity_gate(diff, PATTERNS, touches=["src/a.py"])
     assert result.status == "fail"
     assert result.failures[0].line == 2
+
+
+@pytest.mark.parametrize(
+    "added",
+    [
+        'emit({"tool": "ruff 9.9.9"})  # ast-grep-ignore\n',
+        '# ast-grep-ignore\nemit({"tool": "ruff 9.9.9"})\n',
+        'emit({"tool": "ruff 9.9.9"})  # ast-grep-ignore: gate-tool-must-be-executed\n',
+    ],
+    ids=["same-line", "line-above", "rule-scoped"],
+)
+def test_ast_greps_inline_ignore_fails_this_repos_scan(tmp_path, added):
+    """Measured at ast-grep 0.45.3: `scan` honours its own inline ignore comment in
+    all three placements and has no flag that turns it off, so one comment disarms
+    any `structure` rule. The `structure` gate cannot refuse it; this list is
+    the only thing that can (backlog item 112)."""
+    run = _repo(tmp_path, {"src/a.py": "x = 1\n"})
+    diff = _diff(tmp_path, run, {"src/a.py": "x = 1\n" + added})
+    patterns = load_policy(REPO)[0].integrity
+    result = integrity_gate(diff, patterns, touches=["src/a.py"])
+    assert result.status == "fail"
+    assert [f.code for f in result.failures] == ["added-suppression"]
+
+
+# SA-0077's own move, ahead of its one call (PR #232, backlog item 112).
+SA_0077_ALIAS = (
+    "import pytest\n"
+    "\n"
+    "_skip = pytest.skip\n"
+    "\n"
+    "\n"
+    "def pytest_runtest_setup(item):\n"
+    '    _skip("no working container found on this host")\n'
+)
+
+
+def test_a_skip_bound_to_a_name_passes_the_substring_scan(tmp_path):
+    """The scan's ceiling, kept as a witness: it reads spellings, and the alias
+    spells no token. `structure`'s `pytest-skip-is-spelled-in-full` is what
+    refuses this diff. If this starts failing, the scan learned to read the
+    alias and the rule can be reconsidered."""
+    run = _repo(tmp_path, {"tests/conftest.py": "import pytest\n"})
+    diff = _diff(tmp_path, run, {"tests/conftest.py": SA_0077_ALIAS})
+    patterns = load_policy(REPO)[0].integrity
+    result = integrity_gate(diff, patterns, touches=["tests/conftest.py"])
+    assert result.status == "pass", result.failures
 
 
 def test_a_gate_config_edit_fails(tmp_path):

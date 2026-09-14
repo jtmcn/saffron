@@ -57,7 +57,7 @@ That is the gate now.
 Soundness first: **79**, **69**, **93**, **94**, **109** (filed 2026-09-12; it
 leaks a mutant wherever 80 stores one), **80** (~~**83**~~, ~~**85**~~, ~~**84**~~,
 ~~**82**~~ and ~~**81**~~, pulled up from tier 3 as why 69's gate could not be
-declared against safely, are done — 2026-09-08), then **97**, **102** and **112**. Honesty second:
+declared against safely, are done — 2026-09-08), then **97**, **102** and ~~**112**~~. Honesty second:
 ~~**73**~~, ~~**70**~~, ~~**45**~~, **51** (with **49**/**50**, which its fix closes),
 ~~**47**~~, **46** (with ~~**95**~~, which compounds it), **40**, ~~**26**~~,
 ~~**7**~~, and ~~**78**~~.
@@ -6380,6 +6380,14 @@ invocations across two probes, and one that sleeps past a timeout patched small
 
 ## 112. A name bound to a suppression passes `integrity`'s scan
 
+**Status:** **done**, by hand, 2026-09-13, on
+`joel/suppression-aliases-and-inline-ignores`. `structure` carries
+`pytest-skip-is-spelled-in-full`, with no `files:` scope so a helper outside
+`tests/` is read too, and ast-grep's inline ignore comment is a `suppressions`
+token (the second half below). Left open: `getattr` on a computed name and the
+module bound to a plain name, the rule's `ponytail:`; and pytest's
+import-or-skip helper, which skips a whole module and which no token names.
+
 **Tier 1.** Found reviewing `SA-0077` (PR #232), 2026-09-12 — in the wild, not
 by probe. The agent needed a legitimate skip in `tests/conftest.py`, found that
 `integrity` refuses the call form of pytest's skip, and bound pytest's skip
@@ -6405,6 +6413,15 @@ rather than as text — an ast-grep rule over `tests/**` flagging any reference 
 pytest's skip or expected-failure objects, called or not, is the likely shape —
 with a witness built from `SA-0077`'s own alias, run against the substring scan
 to prove it passes there. `.saffron/**` is `protected`, so it lands by hand.
+
+**Folded in, 2026-09-13: that rule would not have held either.** ast-grep
+honours its own inline ignore comment in `scan` — on the matched line, on the
+line above, and scoped to one rule id, all three measured at 0.45.3 — and `scan`
+has no flag that turns it off; `--no-ignore` reaches ignore *files* only. The
+comment was no `suppressions` token, so one comment disarmed any `structure`
+rule, the four gated invariants included, and `integrity` passed the diff.
+`structure` cannot refuse it itself, so the fix is the token, and there a
+substring scan is the right reader: a comment has no name to bind.
 
 ---
 

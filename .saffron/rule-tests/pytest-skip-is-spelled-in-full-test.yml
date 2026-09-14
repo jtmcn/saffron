@@ -1,0 +1,35 @@
+id: pytest-skip-is-spelled-in-full
+# Every legitimate shape in the tree today: tests/conftest.py, tests/test_policy.py,
+# tests/test_runtime.py and tests/test_package_cell.py. `integrity` reads these.
+valid:
+  - 'pytest.skip("no working container found on this host")'
+  - 'pytest.skip(reason="root reads everything")'
+  - |
+    @pytest.mark.skip
+    def test_a():
+        pass
+  - |
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permission bits")
+    def test_a():
+        pass
+  - |
+    with pytest.raises(pytest.skip.Exception) as excinfo:
+        pytest_runtest_setup(item)
+  - 'pytestmark = pytest.mark.cell'
+  - 'from pytest import raises'
+  - 'import pytest'
+invalid:
+  # SA-0077's own move (PR #232).
+  - '_skip = pytest.skip'
+  - 'run(pytest.skip, "passed as a value")'
+  - 'raise pytest.skip.Exception("no")'
+  - 'pytestmark = pytest.mark.skip'
+  - 'pytestmark = pytest.mark.skip(reason="no")'
+  - 'pytest.param(1, marks=pytest.mark.skipif(True, reason="no"))'
+  - 'mark = pytest.mark'
+  - 'from pytest import skip'
+  - 'from pytest import skip as _skip'
+  - 'from pytest import mark'
+  - 'from _pytest.outcomes import skip'
+  - 'import _pytest.outcomes'
+  - 'import pytest as pt'
