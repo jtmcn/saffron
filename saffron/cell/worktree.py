@@ -149,6 +149,18 @@ DIFF_FLAGS = (
     "--unified=3",
     # diff.algorithm picks a different diff for the same two trees.
     "--diff-algorithm=myers",
+    # diff.ignoreSubmodules=all drops a submodule path a commit added from
+    # both the name-only listing and the patch — a hole in `scope` itself,
+    # not merely a cosmetic one (docs/BACKLOG.md item 89).
+    "--ignore-submodules=none",
+    # color.ui=always or color.diff=always paints the patch with escape
+    # codes, `diff --git` headers included. The flag, not `-c color.ui=never`
+    # — probed on git 2.54, the override does not undo `color.diff=always`.
+    "--no-color",
+    # diff.interHunkContext widens how close two hunks must be before they
+    # merge into one, which widens where a critic finding may anchor exactly
+    # as diff.context would.
+    "--inter-hunk-context=0",
 )
 
 
