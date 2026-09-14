@@ -54,7 +54,8 @@ That is the gate now.
 
 ### Tier 1 — breaks at 03:00 with nobody watching
 
-Soundness first: **79**, **69**, **93**, **94**, **109** (filed 2026-09-12; it
+Soundness first: **79**, **69**, **117** (69 answered by running the probe the lens
+already names), **93**, **94**, **109** (filed 2026-09-12; it
 leaks a mutant wherever 80 stores one), **114** (109's other path, to the critic),
 **115** (a path hidden from `scope` by committed content), **80** (~~**83**~~, ~~**85**~~, ~~**84**~~,
 ~~**82**~~ and ~~**81**~~, pulled up from tier 3 as why 69's gate could not be
@@ -155,8 +156,8 @@ on Linux turned "the runtime is one file behind a seam" into a claim with a test
 against it, and renumbered when #222's items landed first. **112** was filed
 2026-09-13 as a second 109, and renumbered when #234's 109 was found to have
 landed first. **113** was filed open on 2026-09-13, to tier 2 beside 37 and 38.
-**114**–**116** were filed open on 2026-09-14 from the reviews of the spec loop's
-stack — **114** and **115** to tier 1, **116** to tier 3.)
+**114**–**117** were filed open on 2026-09-14 from the reviews of the spec loop's
+stack — **114**, **115** and **117** to tier 1, **116** to tier 3.)
 
 ---
 
@@ -4901,7 +4902,13 @@ default; a cell-marked test that starts a cell the way production does and
 proves the mutant's blob is absent; intake reading mutants from the ref, with
 the ref's commit recorded beside `spec_sha`; and a `saffron mutant` command to
 write and push them. Item **109** comes first: it leaks a surviving mutant to
-the implementer wherever the mutant is stored.
+the implementer wherever the mutant is stored. And once mutants live on the ref,
+spec authoring declares one for every criterion whose witness pins code that
+already exists at `base_sha`. Stack #251 (2026-09-14) is why: seven of its eight
+specs declared none, so `witness` skipped on every attempt, and the review round
+found a witness that could not fail in most of them. Until this item lands that
+rule would hand every mutant to the cell, so it is recorded here and not enforced.
+A criterion over new code still cannot declare one (§5.4.1); item 117 covers it.
 
 ---
 
@@ -6588,6 +6595,50 @@ running on the host. Unverified against a real runtime.
 **Done looks like** `_call` starting the runtime in its own process group and
 killing the group on timeout, with a witness whose stub forks and whose child is
 gone once `_call` returns.
+
+---
+
+## 117. The host never runs the probe the adequacy lens names, so a confirmed vacuity ships as a concern
+
+**Tier 1.** Found running the spec loop over stack #251, 2026-09-14. The adequacy
+lens must attach a `probe` — `{file, find, replace}` — to every finding
+(`saffron/phases/review.py`, `_ReportedWithProbe`), and `CONTEXT.md` defines a
+vacuity probe that survives the suite as the finding confirmed. Nothing in
+production runs one. Its only reader is the lens corpus driver
+(`docs/evidence/scripts/2026-09-08-lens-corpus.py`), scoring the lens offline; in a
+cell the finding is anchored, counted, and reaches the morning queue as a `concern`
+or `note` whatever running it would have said.
+
+Five of the stack's eight adequacy runs named a probe that survived at the packaged
+head, and each was a defect the review round then fixed:
+
+| spec | PR | lens said | the probe | survival shown by |
+|---|---|---|---|---|
+| `SA-0082` | #244 | concern | `--inter-hunk-context=0` → `=1` | the loop's delegate |
+| `SA-0081` | #248 | concern | cut every poll, not only the first | Spec seat |
+| `SA-0085` | #250 | concern | `_green_at_base` reads `collected` only | Spec seat |
+| `SA-0084` | #249 | note | `_clean` keeps the tail, `[-limit:]` | Spec seat |
+| `SA-0080` | #247 | note | decode with no `except UnicodeDecodeError` | Spec seat |
+
+This is item 69's question answered the way that item says it must be, by running,
+and without a spec author declaring anything. That matters because §5.4.1 lets a
+spec creating new code declare no mutant at all, and four of the five probes above
+edit lines the diff itself added. The machinery exists: the `witness` gate's cell
+mutator applies a `Mutant` and restores it (`saffron/mutation.py`, `SA-0062`), and
+the repo's `tests` gate accepts a subset. What a probe lacks that a spec mutant has
+is its witness — it names the edit, not the test that should die — so it runs under
+the spec's declared witnesses and the diff's own added tests.
+
+**Done looks like** each adequacy probe applied after REVIEW, the spec's witnesses
+and the diff's added tests run under it, and the result deciding the finding: a
+probe that survives becomes a blocker routed to REBUT with the probe named; one that
+is killed drops its finding and is counted, so the lens's drop rate measures what
+the corpus measures; one that does not apply is named, as `witness` names a mutant
+that does not. Two limits for the design. REBUT then shows the implementer the
+probe, and `SA-0079`'s REBUT shows what follows: it tightened a bound until the
+named edit died and left a near neighbour surviving. And a probe handed back to the
+implementer is the exposure item 109 closes for spec mutants — tolerable here only
+because the lens authored it and a fresh one can be asked for each round.
 
 ---
 
