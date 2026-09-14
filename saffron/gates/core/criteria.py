@@ -72,13 +72,8 @@ def _fail(criterion: Criterion, code: str, why: str) -> Failure:
 
 
 def _green_at_base(criterion: Criterion, before: _Side) -> bool:
-    """Whether `criterion`'s witness already passed on the base side, for a
-    criterion that does not declare `preserves`. One question, asked at two
-    different times: `_judge`'s own last branch asks it mid-attempt, after a
-    witness has already failed the gate for it; `witnesses_green_at_base`
-    below asks it of the baseline, before any turn has run. Both are this
-    function, so the rule cannot drift between the two askings.
-    """
+    """Whether a non-`preserves` witness already passed at base: the one rule
+    `_judge` and `witnesses_green_at_base` both ask, so it cannot drift."""
     return not criterion.preserves and _green(before, criterion.witness)
 
 
@@ -117,8 +112,8 @@ def _judge(criterion: Criterion, before: _Side, after: _Side) -> Failure | None:
 def witnesses_green_at_base(
     acceptance: Sequence[Criterion], base: list[GateResult]
 ) -> list[str]:
-    """Witnesses `criteria` would fail with `witness-green-at-base` on the
-    very first attempt this task ever runs — named here, from the baseline
+    """Witnesses `criteria` would fail with `witness-green-at-base` on any
+    attempt whose head passes them — named here, from the baseline
     alone, before any agent turn spends money learning it (`docs/BACKLOG.md`
     item 23). `_judge`'s own last branch, built on `_side` and `_green`,
     exposed once so `session.py` does not restate the rule: two copies of

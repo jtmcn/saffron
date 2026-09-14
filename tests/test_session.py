@@ -3272,7 +3272,7 @@ def test_a_witness_green_at_base_is_named_before_the_first_turn(monkeypatch, tmp
     """`docs/BACKLOG.md` item 23 (SA-0085): `criteria` itself skips at
     baseline and would only report `witness-green-at-base` after the first
     GATE suite — an attempt spent to learn what the baseline already knew,
-    and one no repair turn can fix: the agent's only routes are renaming or
+    and one no repair turn can make pass: the agent's only routes are renaming or
     deleting an existing test, and `census`/`integrity` block both. The
     baseline event names it instead, before the first agent turn runs.
 
@@ -3319,30 +3319,50 @@ def test_a_witness_green_at_base_is_named_before_the_first_turn(monkeypatch, tmp
     assert baseline_event.green_at_base == ("t.py::test_a",)
 
     baseline_line = next(w for w in cell.watched if w.startswith("baseline:"))
-    assert "criteria: ['t.py::test_a'] already green at base_sha" in baseline_line
+    assert "baseline: ['t.py::test_a'] already green at base_sha" in baseline_line
     baseline_idx = cell.watched.index(baseline_line)
-    first_plan_idx = next(
-        i for i, w in enumerate(cell.watched) if w.startswith("PLAN:")
+    # Logged before the plan turn runs; `PLAN:` comes only after it, so an
+    # anchor there would pass a naming held until after turn one.
+    first_turn_idx = next(
+        i
+        for i, w in enumerate(cell.watched)
+        if w.startswith("IMPLEMENT: system prompt")
     )
-    assert baseline_idx < first_plan_idx, (
+    assert baseline_idx < first_turn_idx, (
         "the naming must reach the operator before the first turn spends "
         "anything, not after a repair loop no-progresses on it"
     )
 
-    # A baseline whose enumeration is unreadable at all — no declared gate
-    # enumerated — says nothing either, exactly as `_judge` would.
-    cell2 = _stub_the_runtime(monkeypatch, suites=([], head, head))
-    capture2: list = []
-    _drive(
-        monkeypatch,
-        tmp_path / "second",
-        cell=cell2,
-        turns=[_turn(_block(_PLAN)), _turn()],
-        spec=_spec(acceptance=[named]),
-        capture=capture2,
+    # Three bases `_judge` says nothing about, so neither does the naming: no
+    # gate enumerated; the witness collected but red there (the ordinary bug
+    # fix); and failures keyed on something other than a node id.
+    red_at_base = GateResult(
+        gate="tests",
+        status="fail",
+        tool="pytest 8",
+        collected=["t.py::test_a"],
+        failures=[Failure(file="t.py", code="t.py::test_a")],
     )
-    (unreadable_baseline,) = [e for e in capture2 if isinstance(e, Baseline)]
-    assert unreadable_baseline.green_at_base == ()
+    keyed_elsewhere = GateResult(
+        gate="tests",
+        status="fail",
+        tool="pytest 8",
+        collected=["t.py::test_a"],
+        failures=[Failure(file="saffron/gates/runner.py", line=147, code="error")],
+    )
+    for n, silent_base in enumerate(([], [red_at_base], [keyed_elsewhere])):
+        silent_cell = _stub_the_runtime(monkeypatch, suites=(silent_base, head, head))
+        silent_capture: list = []
+        _drive(
+            monkeypatch,
+            tmp_path / f"silent-{n}",
+            cell=silent_cell,
+            turns=[_turn(_block(_PLAN)), _turn()],
+            spec=_spec(acceptance=[named]),
+            capture=silent_capture,
+        )
+        (silent,) = [e for e in silent_capture if isinstance(e, Baseline)]
+        assert silent.green_at_base == (), n
 
 
 # --- `witness` reaches a real attempt (SA-0061, `docs/BACKLOG.md` item 71) ---

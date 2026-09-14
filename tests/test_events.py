@@ -483,7 +483,10 @@ def test_a_baseline_naming_a_green_witness_renders_it(tmp_path):
     """SA-0085, `docs/BACKLOG.md` item 23. The naming travels on the
     baseline's own event and is rendered by `describe`, so it reaches
     `events.jsonl` and `saffron watch`, not only the attended terminal that
-    watched it live."""
+    watched it live.
+
+    Not a `_CASES` row: `green_at_base` is new, and building it at import would
+    make the reverted run a collection error rather than this test failing."""
     event = Baseline(
         timestamp=1.0,
         spec_id="x",
@@ -496,7 +499,7 @@ def test_a_baseline_naming_a_green_witness_renders_it(tmp_path):
     (round_tripped,) = _read(tmp_path, Baseline)
     assert round_tripped.green_at_base == ("t.py::test_a",)
     assert describe(round_tripped).splitlines()[-1] == (
-        "criteria: ['t.py::test_a'] already green at base_sha — named "
+        "baseline: ['t.py::test_a'] already green at base_sha — named "
         "before the first turn, since no repair can rename or delete an "
         "existing test"
     )
@@ -1162,7 +1165,7 @@ def test_every_family_has_a_kind_and_renders():
 
 def test_every_row_cites_a_file_and_symbol_that_exist():
     """AC2, the half the assertion above cannot make. `family.kind in
-    _KINDS.values()` is true of *any* row carrying any of the nine types, so
+    _KINDS.values()` is true of *any* row carrying any of the ten types, so
     the table could cite anything: a row reading
     `_Family("QQQQ", "no/such/file.py:nope", Teardown)` passed every check
     here. Resolve each citation instead — the file exists, and the symbol is
@@ -1185,7 +1188,7 @@ def test_every_row_cites_a_file_and_symbol_that_exist():
 def test_the_table_did_not_quietly_lose_a_row():
     """AC2 again, and the mutation neither assertion above catches: deleting
     three rows — `unstacked:`, `baseline errored in`, `PACKAGE: (pr_url)` —
-    left every test in this file passing. The table is the proof the nine
+    left every test in this file passing. The table is the proof the ten
     kinds cover all 64 call sites and is what `SA-0030`/`SA-0031` read to find
     their work, so losing a row silently is the failure that matters.
 

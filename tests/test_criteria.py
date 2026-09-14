@@ -252,6 +252,15 @@ def test_witnesses_green_at_base_says_nothing_it_would_not_say_at_a_gate():
     assert witnesses_green_at_base([_c("t.py::test_a")], []) == []
 
 
+def test_a_witness_red_at_base_is_not_named():
+    """The ordinary bug fix: a regression test that already existed and was red
+    at base. Collected there is not the same as green there."""
+    from saffron.gates.core.criteria import witnesses_green_at_base
+
+    base = [_tests("t.py::test_a", failed=("t.py::test_a",))]
+    assert witnesses_green_at_base([_c("t.py::test_a")], base) == []
+
+
 _FIXTURE_SPEC = """---
 id: TE-11
 title: A spec that declares the key this spec introduces

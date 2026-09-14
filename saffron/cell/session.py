@@ -1118,15 +1118,9 @@ def _drive_cell(
         # The last suite run: every outcome reports its tier and advisory set,
         # so an outcome never reads a stale attempt's (§5.6).
         latest = baseline
-        # Before the first agent turn: the baseline's own results already
-        # hold the answer `criteria` would otherwise only give after an
-        # attempt has paid for it (`docs/BACKLOG.md` item 23).
         green_at_base = witnesses_green_at_base(spec.acceptance, baseline.results)
-        # One event for all three facts (`Baseline.aborted`/`gates`/
-        # `statuses`/`green_at_base`), matching what two consecutive
-        # `watch()` calls used to print with nothing between them —
-        # `describe()` joins them with the same "\n" (§5.4, `events.Baseline`'s
-        # own docstring).
+        # One event, one line per fact present; `describe()` joins them with
+        # "\n" (§5.4, `events.Baseline`'s own docstring).
         emit(
             Baseline(
                 timestamp=time.time(),

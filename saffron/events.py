@@ -165,8 +165,8 @@ class Baseline:
 
     `green_at_base` names any witness `criteria.witnesses_green_at_base`
     found already passing at `base_sha` for a criterion that does not
-    declare `preserves` — what `criteria` would fail the first attempt with
-    `witness-green-at-base` for, known before any turn runs
+    declare `preserves` — what `criteria` would fail with `witness-green-at-base`
+    on any attempt whose head passes it, known before any turn runs
     (`docs/BACKLOG.md` item 23). Defaulted to `()`, not required: a log
     written before this field existed carries no such key, and `read_log`'s
     per-field construction already treats a missing key as the dataclass
@@ -746,7 +746,7 @@ def describe(event: Event) -> str:
             )
         if event.green_at_base:
             lines.append(
-                f"criteria: {list(event.green_at_base)} already green at "
+                f"baseline: {list(event.green_at_base)} already green at "
                 "base_sha — named before the first turn, since no repair "
                 "can rename or delete an existing test"
             )
@@ -874,7 +874,7 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("ceilings:", _RT, Ceilings),
     _Family("baseline: (joined gate=status)", _S, Baseline),
     _Family("baseline errored in", _S, Baseline),
-    _Family("criteria: … already green at base_sha", _S, Baseline),
+    _Family("baseline: … already green at base_sha", _S, Baseline),
     _Family("SCOPE: proposal refused", _PC, PhaseStart),
     _Family("SCOPE_REVIEW: proposed", _S, PhaseStart),
     _Family("PLAN: not the schema", _PC, PhaseStart),
