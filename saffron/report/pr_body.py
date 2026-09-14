@@ -125,7 +125,13 @@ def render_pr_body(
         _gate_table(results, advisory_gates),
         _findings(reviews),
         _provenance(spec, base_sha, head_sha, transcript_path),
-        _not_covered(spec, results, reviews, advisory_gates=advisory_gates),
+        _not_covered(
+            spec,
+            results,
+            reviews,
+            advisory_gates=advisory_gates,
+            rebut_result=rebut_result,
+        ),
         # Last, deliberately: every status, checklist and table above is fully
         # rendered before this ever starts, so cell-authored prose here cannot
         # be mistaken for having moved any of them (SA-0044's reasoning, held
@@ -481,6 +487,7 @@ def _not_covered(
     reviews: Sequence[LensReview],
     *,
     advisory_gates: Sequence[str] = (),
+    rebut_result: RebutResult | None = None,
 ) -> str:
     """What this body does not stand behind, collected.
 
@@ -547,6 +554,27 @@ def _not_covered(
             + ", ".join(f"`{_cell(lens)}`" for lens in lenses)
             + "), so neither the implementer nor the concern count ever saw "
             + ("it." if len(unanchored) == 1 else "them.")
+        )
+    # `rebuttal.error` is set when the turn recorded *nothing* — it failed, or
+    # its output was not the schema — which §4.3 holds distinct from a turn that
+    # was read and argued nothing. So every blocker went unanswered, rather than
+    # each being answered with a `—` the table renders either way. Guarded on
+    # there being a blocker at all: with none there was nothing to answer, and
+    # the sentence would name a gap of zero.
+    #
+    # The error string is never quoted here, exactly as `_disagreements` never
+    # quotes it: it is untrusted, hostile-shaped model output (`docs/BACKLOG.md`
+    # item 42), and a residual list is no better a place for it than a table.
+    blockers = anchored_blockers(reviews)
+    if blockers and rebut_result is not None and rebut_result.rebuttal.error:
+        lines.append(
+            "- No implementer answer stands against "
+            + (
+                "the blocker"
+                if len(blockers) == 1
+                else f"any of the {len(blockers)} blockers"
+            )
+            + ": the rebuttal turn recorded nothing (see `rebuttal.json`)."
         )
     if not lines:
         lines.append(

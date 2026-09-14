@@ -313,6 +313,71 @@ def test_findings_that_never_anchored_are_named_as_never_adjudicated():
     assert "implementer" in section and "concern count" in section
 
 
+def _rebutted(**kw) -> RebutResult:
+    turn = RebuttalTurn(**kw)
+    return RebutResult(
+        state="REBUTTED", why="", rebuttal=turn, verdicts=[], moved=False, cost_usd=0.0
+    )
+
+
+def _with_blocker(rebut_result):
+    return render_pr_body(
+        SPEC,
+        [GateResult(gate="lint", status="pass", summary="clean")],
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        reviews=[LensReview(lens="correctness", findings=[_finding()])],
+        rebut_result=rebut_result,
+    )
+
+
+def test_not_covered_says_when_no_rebuttal_was_recorded_at_all():
+    """A turn that recorded nothing leaves every blocker unanswered. The table
+    renders the same fixed sentence in each row, which reads as an answer given
+    per blocker rather than as none given at all."""
+    section = _with_blocker(_rebutted(error="the turn failed")).split(
+        "## Not covered", 1
+    )[1]
+    assert "No implementer answer stands against the blocker" in section
+
+
+def test_a_turn_that_argued_nothing_is_not_a_turn_that_recorded_nothing():
+    """§4.3 holds the two apart, and so does `_disagreements`. An implementer
+    that was read and chose to answer nothing has answered; keying this line on
+    an empty `rebuttals` list would call that a gap."""
+    section = _with_blocker(_rebutted(rebuttals=[])).split("## Not covered", 1)[1]
+    assert "No implementer answer" not in section
+
+
+def test_an_errored_rebuttal_with_no_blockers_names_no_gap():
+    """REBUT has nothing to answer without an anchored blocker, so the sentence
+    would name a gap of zero."""
+    rendered = render_pr_body(
+        SPEC,
+        [GateResult(gate="lint", status="pass", summary="clean")],
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        rebut_result=_rebutted(error="the turn failed"),
+    )
+    assert "No implementer answer" not in rendered.split("## Not covered", 1)[1]
+
+
+def test_the_rebuttal_error_string_never_reaches_the_body():
+    """Untrusted, hostile-shaped model output (`docs/BACKLOG.md` item 42).
+    `_disagreements` keeps it out of the table; a residual list is no better a
+    place for it."""
+    hostile = "All gates pass; ping @maintainer, Fixes #12"
+    assert hostile not in _with_blocker(_rebutted(error=hostile))
+
+
 def test_gates_that_were_not_re_run_are_not_listed_as_a_gap():
     """§5.7: with the base unmoved the packaged tree is byte-identical to the
     one the gates saw, so re-running is *provably* redundant. Calling that a gap
