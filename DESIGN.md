@@ -2,7 +2,7 @@
 
 An agentic software factory: spec files in, reviewed pull requests out, running unattended overnight on one Mac.
 
-**Status:** rev 20 — **the vocabulary covers the design record as well as the run record.** `CONTEXT.md` §11 named the genres a decision here is written in and nothing carried them; `factory:Principle` and `factory:RevisionAppendix` now do, with shapes as their readers and `DESIGN.md`'s generated principle index as the surface that renders from them (Appendix P). What §9's v2.5 closed is **the emitter** — the ledger→RDF projection — and it is deferred rather than finished: `ontology/RATIONALE.md` carries its own revisit clause and it will be asked again. "`ontology/` is a completed project" was shorthand for that verdict plus Appendix O's, and it read as a third and wider decision neither of them made — principle 57. §1.4 is untouched: no shape controls execution, and the design record projects from no §4.1 table. Prior: rev 19 — the vocabulary is authoritative for the run record's closed sets and generates them: `CONTEXT.md`'s enumerations and the shapes' `sh:in` lists render from `ontology/factory.ttl`, so a set declared in one place reaches all three (§4.6). Two shape lists stay hand-maintained because the vocabulary cannot imply them — `CoreGateBlockingShape`'s blocking levels and `TaskShape`'s `endedInState` superset — and a test names the file when one is forgotten. **And Appendix O's spike ran and closed §1.4.** The refusal predicate built as shapes against the Python answered *no* on questions 1 and 4, so §1.4's bullet stands and no scheduling decision reads a triple. (Rev 20 narrows what that sentence originally claimed: it said `ontology/` was a completed project, which is not what either verdict decided.) Two corrections landed with it — the appendix's premise that the predicate is "pure set containment" is wrong, four of its eight refusals being glob matching; and the spike's own first claim that glob matching is inexpressible in SHACL was false and is retracted (Appendix O *The result*, `docs/evidence/2026-09-04-refusal-predicate-two-arms.md`). A fourth defect the modelling found: `MERGE_TRAIN` is a state §3.3 shows a task entering and `scheduler.py` reads twice, and it is in neither `CONTEXT.md` nor the vocabulary. Prior: rev 18 `SA-0001` built and answered: five queries, five SQL equivalents, don't build the emitter (`ontology/RATIONALE.md`). The vocabulary is gated by `shacl` and cross-checked against `CONTEXT.md`'s closed sets; the *operational* question the RATIONALE never tested is stated in Appendix O and left to a spike, and §1.4's bullet stands until that spike runs. Prior: rev 17 the first night's scheduler decided against the queue that exists rather than the deep one §4.2 is written for (§4.2.1), and §6's ranking corrected against the real ledger after it sorted a sustained blocker last (`docs/evidence/2026-08-25-morning-queue-from-real-rows.md`). Prior: rev 16 the tree a task is cut from and the executables that judge it are both host-supplied, closing the two trust boundaries backlog items 11 and 12 left open (Appendix N). Prior: rev 15 the cell moved off the API key onto a Claude Code subscription token, and the ceiling reasoning corrected against a measured run (`docs/evidence/2026-08-21-subscription-turn-accounting.md`, Appendix M); rev 14 the critic built and measured against a known-bad diff (Appendix L); rev 13 three tasks run, one reviewed, and the review said no (Appendix K); rev 12 v0.5 run against a live model (Appendix J); rev 11 v0.5 built and reviewed (Appendix I); rev 10 the cell runtime chosen by spike (Appendix G); rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime named (Appendix G); rev 9 v0 built and replayed (Appendix H)
+**Status:** rev 21 — **the verdict of record leaves the implementer's container.** The final gate suite and every critic lens ran in the container the implementer had spent the repair loop in as root. PACKAGE's re-verification, the one check outside it, was skipped on an unmoved base as "provably redundant". It now re-verifies every packaged commit, and the lenses move to a critic cell rebuilt from the exported patch (§5.4 to §5.7, Appendix Q, principle 58). `SA-0086` to `SA-0089` build it. Prior: rev 20 — the vocabulary covers the design record as well as the run record. `CONTEXT.md` §11 named the genres a decision here is written in and nothing carried them; `factory:Principle` and `factory:RevisionAppendix` now do, with shapes as their readers and `DESIGN.md`'s generated principle index as the surface that renders from them (Appendix P). What §9's v2.5 closed is **the emitter** — the ledger→RDF projection — and it is deferred rather than finished: `ontology/RATIONALE.md` carries its own revisit clause and it will be asked again. "`ontology/` is a completed project" was shorthand for that verdict plus Appendix O's, and it read as a third and wider decision neither of them made — principle 57. §1.4 is untouched: no shape controls execution, and the design record projects from no §4.1 table. Prior: rev 19 — the vocabulary is authoritative for the run record's closed sets and generates them: `CONTEXT.md`'s enumerations and the shapes' `sh:in` lists render from `ontology/factory.ttl`, so a set declared in one place reaches all three (§4.6). Two shape lists stay hand-maintained because the vocabulary cannot imply them — `CoreGateBlockingShape`'s blocking levels and `TaskShape`'s `endedInState` superset — and a test names the file when one is forgotten. **And Appendix O's spike ran and closed §1.4.** The refusal predicate built as shapes against the Python answered *no* on questions 1 and 4, so §1.4's bullet stands and no scheduling decision reads a triple. (Rev 20 narrows what that sentence originally claimed: it said `ontology/` was a completed project, which is not what either verdict decided.) Two corrections landed with it — the appendix's premise that the predicate is "pure set containment" is wrong, four of its eight refusals being glob matching; and the spike's own first claim that glob matching is inexpressible in SHACL was false and is retracted (Appendix O *The result*, `docs/evidence/2026-09-04-refusal-predicate-two-arms.md`). A fourth defect the modelling found: `MERGE_TRAIN` is a state §3.3 shows a task entering and `scheduler.py` reads twice, and it is in neither `CONTEXT.md` nor the vocabulary. Prior: rev 18 `SA-0001` built and answered: five queries, five SQL equivalents, don't build the emitter (`ontology/RATIONALE.md`). The vocabulary is gated by `shacl` and cross-checked against `CONTEXT.md`'s closed sets; the *operational* question the RATIONALE never tested is stated in Appendix O and left to a spike, and §1.4's bullet stands until that spike runs. Prior: rev 17 the first night's scheduler decided against the queue that exists rather than the deep one §4.2 is written for (§4.2.1), and §6's ranking corrected against the real ledger after it sorted a sustained blocker last (`docs/evidence/2026-08-25-morning-queue-from-real-rows.md`). Prior: rev 16 the tree a task is cut from and the executables that judge it are both host-supplied, closing the two trust boundaries backlog items 11 and 12 left open (Appendix N). Prior: rev 15 the cell moved off the API key onto a Claude Code subscription token, and the ceiling reasoning corrected against a measured run (`docs/evidence/2026-08-21-subscription-turn-accounting.md`, Appendix M); rev 14 the critic built and measured against a known-bad diff (Appendix L); rev 13 three tasks run, one reviewed, and the review said no (Appendix K); rev 12 v0.5 run against a live model (Appendix J); rev 11 v0.5 built and reviewed (Appendix I); rev 10 the cell runtime chosen by spike (Appendix G); rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime named (Appendix G); rev 9 v0 built and replayed (Appendix H)
 
 **Companion document:** `CONTEXT.md` — the controlled vocabulary. It is authoritative for what words mean; this document is authoritative for what the system does. Where they disagree, one of them has a bug.
 **Scope:** language- and stack-agnostic. Saffron develops *any* repo that can satisfy the gate contract (§5.4). First repo is Saffron itself; `thermal-edge` is the first external one.
@@ -877,6 +877,8 @@ Three more routes reach the same place, each measured against real git with the 
 
 **`census` buys exactness against an honest suite; the gate source and `committed` buy visibility against a dishonest one. Neither buys integrity, and no diff-shaped check will.**
 
+**So the verdict of record is not the cell's.** Every gate above executes from the read-only `/gates` mount. Every one of them still calls its toolchain from the cell's writable rootfs, and reads the tree through the cell's own `git`: the executable is pinned, and what it runs on is not. Backlog items 2, 89, 102 and 103 each closed one route one flag at a time, and the next route is the next item. The class closes where §5.7 re-verifies: in a gate-only cell the implementer never ran in, on a commit host git built from the exported patch (Appendix Q). The suites the repair loop runs stay in the implementer's cell. Their results are feedback the agent needs, and a claim the host does not publish.
+
 **`criteria` — every acceptance criterion is prose, and an unchecked one is indistinguishable from a met one.** A spec's criteria were rendered into the PR body as `- [ ]`, unticked, always, for every criterion, with no host-side component anywhere that asked whether one was met. That is §5.4's founding `tool` defect one layer up, in the layer that decides whether a pull request is merged: the artifact an operator reads to decide looks identical whether the work was verified or nobody looked.
 
 A criterion may therefore declare a **witness** — a test node id, in an optional `acceptance:` frontmatter block alongside the `claim` the PR body renders. What a ticked box then means, exactly: *a test by this name ran at head and passed, and if it existed at base it was not green there.* It does not mean the criterion was met; the witness's body is out of reach, which is `revert`'s question and not this one.
@@ -1035,6 +1037,8 @@ This is §4.3's doneness rule again, one level out: **anything that must happen 
 
 One property the subagent facility does confirm: a fresh session receives no parent conversation at all — only what its invoker puts in the prompt. That is exactly the isolation this phase requires, and it means the diff, the spec, the gate results and the acceptance criteria must all be passed explicitly. There is no context to inherit, by design.
 
+**A fresh session is not a fresh container.** Until rev 21 every lens ran in the implementer's own cell. Each was a new conversation, but it re-executed the agent runner and the SDK from a rootfs the implementer had root over. It also read `/work`, and every file a finding anchors against, through the implementer's `.git`. Each lens now runs in a **critic cell**: a new container from the repo's cell image, on the task's network and proxy, whose worktree is `tree_base` with the exported patch applied and committed by that cell's own git. What the critic reads is then the patch that ships. A forged export can hide the agent's work from the pull request, but not from the critic. A patch that will not apply to its own base ends the task `EXHAUSTED`. The agent can cause that failure, and one charged to nobody would be a free way past the critic. The gate table each lens is shown moves out too: into a gate-only cell on the same rebuilt tree, never into the critic cell, where a gate would run model-authored code as root in the container the lenses then re-exec their runner from. `SA-0087` builds the critic cell for REVIEW, `SA-0088` for REBUT's verdicts, and `SA-0089` the gate table. Until they land, the lenses still run in the implementer's cell and read its gate results (backlog item 118).
+
 **Any single blocker routes to REBUT.** No voting. A majority rule sounds rigorous and is decoration here: the lenses are disjoint by construction, so the schema critic will never independently corroborate the correctness critic's timezone finding, and "majority" over disjoint lenses means "never" at any count. False positives are handled by the rebuttal plus queue ordering (§6), which is the better mechanism anyway.
 
 This section argued until 2026-09-02 that lens #3 in a naive design would be "test quality", displaced by `revert` answering it mechanically and for free — a bucket-1 solution displacing a bucket-3 one, per §8's triage rule. **That argument is withdrawn, and §5.5.1 says why.** The direction is still right; the displacement was not measured, and when it was, it did not hold.
@@ -1060,7 +1064,7 @@ The implementer session resumes and gets the confirmed blockers. **One** attempt
 
 Why allow rebuttal rather than mandate a fix: sometimes the critic is wrong, and a recorded disagreement between two agents is a strong signal about *which part of the diff you should read carefully*. Unanimity is far less informative than a documented argument.
 
-**The order, settled.** "Confirmed blockers" here means *anchored* (§5.5) — the host has already established the finding points at real changed code, and that is the only confirmation available before a rebuttal exists. The critic's `verdict` (§4.1) comes **after** the argument: anchored blockers → the implementer rebuts → each lens that raised one confirms or withdraws it, in a fresh read-only session that sees the argument and never the transcript behind it. A critic verdicting first would be restating its finding rather than disagreeing with an answer, which is the one thing this phase exists to record. Three outcomes reach `READY_FOR_REVIEW` — every blocker withdrawn, a fix that commits and stays green, and a confirmed blocker the implementer argued against — because none of them is the machine's to settle: adjudication is yours, in the PR. A rebuttal that neither moved HEAD nor recorded an argument earns nothing and halts at `REBUTTING`; §3.3 has no state for it, and `NOT_IMPLEMENTED` would name the wrong phase.
+**The order, settled.** "Confirmed blockers" here means *anchored* (§5.5) — the host has already established the finding points at real changed code, and that is the only confirmation available before a rebuttal exists. The critic's `verdict` (§4.1) comes **after** the argument: anchored blockers → the implementer rebuts → each lens that raised one confirms or withdraws it, in a fresh read-only session that sees the argument and never the transcript behind it. That session runs in a critic cell rebuilt from the post-rebuttal patch (§5.5). A critic verdicting first would be restating its finding rather than disagreeing with an answer, which is the one thing this phase exists to record. Three outcomes reach `READY_FOR_REVIEW` — every blocker withdrawn, a fix that commits and stays green, and a confirmed blocker the implementer argued against — because none of them is the machine's to settle: adjudication is yours, in the PR. A rebuttal that neither moved HEAD nor recorded an argument earns nothing and halts at `REBUTTING`; §3.3 has no state for it, and `NOT_IMPLEMENTED` would name the wrong phase.
 
 **Risk tiering.** `risk: elevated` — set explicitly in the spec, or auto-elevated when the diff touches any path in the repo's `policy.elevate_on` (a repo with migrations and an ontology might list `migrations/**`, `**/*.ttl`, `trading/**`; Saffron's own lists `saffron/gates/**` and `saffron/cell/**`) — makes `size` blocking and marks the queue entry so you read it cold rather than skim. **It does not add a lens:** every lens `review.LENSES` declares runs on every reviewed diff at every tier (§5.5.1). Tier-gating one is still an open question and, until it is settled, the tier buys a gate and an ordering, not a critic. **`coverage` does not become blocking** — not at `elevated`, not ever; see §5.4.
 
@@ -1076,13 +1080,13 @@ Host-side, deterministic:
 3. Open the PR. Body generated from the ledger: spec, root cause (if diagnosed), acceptance-criteria checklist with the critic's assessment of each, gate table, findings with rebuttals, attempt count, cost, transcript path.
 4. Append the verdict line to the batch index.
 
-**The base a task is cut from is the head of the remote's default branch as of task start**, not the invoking checkout's `HEAD`. It is fetched into the mirror before the cell is built (§5.1), so both ends of the comparison below read one source rather than two. Two consequences, both intended. Uncommitted and unpushed local work leaves a task's base — running from a dirty feature branch used to include it silently, and this is the change most likely to surprise an operator standing at a terminal. And the re-verification skip below becomes reachable by construction rather than by accident, because in the common case nothing has moved. The rejected alternative — keep `HEAD` and have PACKAGE compare against it too — is symmetric and needs no network; it loses because it makes a task's base unreproducible from the ledger, and §4.2 cannot start tasks unattended if two of them queued the same night are cut from different trees for no recorded reason.
+**The base a task is cut from is the head of the remote's default branch as of task start**, not the invoking checkout's `HEAD`. It is fetched into the mirror before the cell is built (§5.1), so both ends of the comparison below read one source rather than two. Two consequences, both intended. Uncommitted and unpushed local work leaves a task's base — running from a dirty feature branch used to include it silently, and this is the change most likely to surprise an operator standing at a terminal. And re-verification below measures against a base the ledger already names, not one reconstructed from wherever the operator was standing. (Until rev 21 this consequence was that re-verification's skip became reachable by construction. §5.7 no longer skips.) The rejected alternative — keep `HEAD` and have PACKAGE compare against it too — is symmetric and needs no network; it loses because it makes a task's base unreproducible from the ledger, and §4.2 cannot start tasks unattended if two of them queued the same night are cut from different trees for no recorded reason.
 
 **A stacked task has two bases, and they answer different questions.** `base_sha` stays the run's pin — gates, policy and the `.saffron/` export are read from it whether the task is stacked or not, so two tasks queued the same night are still measured against one declaration. `tree_base` is what the worktree is built on and the patch is exported against: `base_sha` for an ordinary task, and the parent's branch head for a stacked one. `patch.json` records both, because PACKAGE has to apply the patch against the tree it is relative to while reading its policy from the pin. Collapsing them was the defect the three specs building stacking each had to avoid in turn (`SA-0022`, `SA-0025`, `SA-0026`).
 
 **The parent's head is fetched, never remembered.** A task row's `pushed_sha` is written once, by PACKAGE, and a branch moves afterwards — every review fix an operator commits by hand puts it ahead. The ledger is asked *which branch*; the branch is asked which commit, freshly, at both ends: once when the cell is built and again at PACKAGE, where a parent that has since merged falls back to the default branch and one that has vanished is `MERGE_FAILED` rather than a pull request opened against a branch that is not there. Nothing else puts the parent's objects in the mirror — `ensure_mirror` fetches from the *local working copy* and prunes, so a parent branch the operator does not happen to have checked out is deleted from the mirror between one task and the next.
 
-#### v1: one squashed commit, a draft PR, and re-verification only when the base moved
+#### v1: one squashed commit, a draft PR, and re-verification of every packaged commit
 
 v1 packages **one squashed commit**, not the agent's own. The cell's commits
 live on the worktree volume and die with it, so `patch.diff` — a squashed
@@ -1096,11 +1100,20 @@ in a transcript.
 The PR opens as a **draft**. Real enough to exercise the path nightly, without
 pinging reviewers while v1 settles.
 
-**Re-verification runs when, and only when, the base moved.** If the default
-branch head still equals `base_sha`, the merged tree is byte-identical to the
-one the suite already ran on and re-running it is provably redundant; the body
-says it was skipped and why. Otherwise the suite re-runs — **inside a cell,
-never host-side**, because the applied tree carries `.saffron/gates/*` exactly
+**Re-verification runs on every packaged commit.** Until rev 21 it ran only
+when the base moved, on the argument that an unmoved base makes the merged tree
+byte-identical to the one the suite already ran on, so a re-run is provably
+redundant. That argument proves the *tree* is the same and says nothing about
+the *verdict*. The suite that ran on that tree ran inside the implementer's
+cell, on a toolchain and a `.git` the agent had root over (§5.4). Re-running it
+elsewhere is the first time the answer is computed outside the untrusted zone
+at all (Appendix Q, principle 58). It is also where the diff half of the class
+closes. The packaged commit is built by host git from `patch.diff`, so every
+gate in the fresh cell, `scope` and `integrity` included, measures the tree
+that is pushed and the diff a reviewer reads, whatever the implementer's `.git`
+said. `SA-0086` builds it; until it lands the skip still stands, and backlog
+item 118 carries it. The suite re-runs **inside a cell, never host-side**,
+because the applied tree carries `.saffron/gates/*` exactly
 as the patch left them, and exec'ing those on the host is the control plane
 executing model-authored code (§2). Both of its runs read their gates from a
 host-supplied export at the new default-branch head (§5.4), so the patch's own
@@ -1109,16 +1122,20 @@ come from one set of executables. **PACKAGE reads its whole policy out of that
 export**, unconditionally and whether or not the suite re-runs: the commit a
 package is verified against declares the gates it is verified with, exactly as
 `base_sha` does for the cell, and the pull request body then describes the
-change under the declaration it was actually measured with. The base having moved also invalidates the
-baseline, so the gate-only cell runs the suite twice — at the new default-branch
-head for a fresh baseline, and at the packaged commit — and subtracts as always.
+change under the declaration it was actually measured with. The gate-only cell runs the suite twice
+and subtracts as always: at the default-branch head for a fresh baseline, which
+a moved base would have invalidated anyway, and at the packaged commit.
 It is the whole gate suite, core gates included, assembled by the one module the
 cell's attempts were judged by, so the two cannot differ in shape (principle 54).
 Every diff-reading gate measures from the new head, because that is the diff a
 reviewer reads; the tier is computed afresh from it (§5.6), and the pull request
 reports that tier. Drift between the two suites is infrastructure, exactly as an
-errored gate is. New failures are `MERGE_FAILED`: the change did not survive
-contact with today's main.
+errored gate is. New failures are `MERGE_FAILED`. After a moved base, that means the
+change did not survive contact with today's main. On an unmoved base, it means
+the cell's own verdict did not reproduce outside the cell. The two share a state
+for now, with a note saying which. Whether the second needs its own state is
+backlog item 118's vocabulary question, and principle 55 is why no test may
+assert on the state alone.
 
 **Two measured `git apply --3way` hazards** (git 2.50.1), both of which break
 the obvious implementation:
@@ -1533,6 +1550,7 @@ disagrees with an appendix, the appendix is right.
 | **N** | 16 | What tree a task is about, and who may write the thing that judges it (backlog items 11 and 12) | 53–55 |
 | **O** | 18, 19 | Is there an *operational* case for the ontology, beyond the analytical one `RATIONALE.md` closed? Rev 19 ran the spike and closed it — *The result* | 56 |
 | **P** | 20 | Should the appendices have been ADRs? No — and the phrase that kept the question alive was a summary of two verdicts that nobody decided | 57 |
+| **Q** | 21 | Where the verdict of record is computed: outside the container the implementer had root in, on the tree the exported patch describes | 58 |
 
 **Two revisions have no appendix, and neither needs one.** Rev 1 is the document.
 Rev 17 is in §4.2.1 and §6 with
@@ -1623,6 +1641,7 @@ compresses an appendix, and the appendix is where the case that found it lives.
 | 55 | Where two outcomes deliberately share a state, that state cannot be the assertion | N |
 | 56 | A negative result answers the question it tested, and no other | O |
 | 57 | A summary of two decisions is a third decision, and nobody made it | P |
+| 58 | A check that is redundant only if its subject was honest is not redundant | Q |
 
 ---
 
@@ -2763,3 +2782,63 @@ A closed set is a decision the vocabulary owns, so `CONTEXT.md` renders from the
 **What the emitter's status is now.** Deferred, with the revisit clause
 `RATIONALE.md:22` already carried. Not finished, not refused — asked again when
 reconstructibility has to be enforced continuously rather than spot-checked.
+
+## Appendix Q — rev 21: where the verdict of record is computed
+
+Found threat-modelling Saffron on 2026-09-13: a bootstrap from the code and the
+git history, then an interview with the owner. It was confirmed by reading the
+code rather than by probe, and recorded as backlog item 118.
+
+**The finding is a class, and every earlier fix was an instance of it.** This
+document records four routes by which the implementer changes what the host
+reads back: `diff.srcPrefix` (Appendix K, backlog item 2), the diff settings
+(item 89), replace refs (item 102) and binary rendering (item 103). Each was
+closed by pinning one more thing on the command line. The class was open at its
+root. The final gate suite and every critic lens ran in the implementer's own
+container, after it had spent the repair loop as root on a writable rootfs.
+The gates' executables came from `/gates`; the `pytest`, `ruff`, `git` and
+Python they call did not. The lenses were fresh sessions; the runner and SDK
+each session re-execs were not fresh. And the one check PACKAGE owns outside
+that container, re-verification, was skipped on an unmoved base, which is most
+bases, because a re-run there was "provably redundant".
+
+58. **A check that is redundant only if its subject was honest is not redundant.**
+    "Provably redundant" was true about the tree: an unmoved base makes the
+    packaged tree byte-identical to the one the suite ran on. It said nothing
+    about the verdict, and the verdict is the only thing the re-run was for. A
+    skip justified by equal inputs has to ask who computed the output. When the
+    answer is the party being checked, the equality proves nothing.
+
+**What changed.** The verdict of record moves out of the implementer's
+container, on both halves (§5.4 to §5.7):
+
+- PACKAGE re-verifies every packaged commit, in a gate-only cell, on a commit
+  host git built from `patch.diff`. What the gates judge is what is pushed
+  (`SA-0086`).
+- REVIEW's lenses and REBUT's verdict lenses run in a **critic cell**: a new
+  container from the repo's image, whose worktree is the task's base with the
+  exported patch applied. What the critic reads is what ships (`SA-0087`,
+  `SA-0088`).
+- The gate table a REVIEW lens is shown comes from a suite run in a gate-only
+  cell on that same rebuilt tree, never in the critic cell, where the gates
+  would run model-authored code as root before the lenses re-exec their runner
+  (`SA-0089`).
+
+The suites the repair loop runs stay where they were. They are feedback, and
+feedback the agent can corrupt corrupts only the agent's own attempt.
+
+**What it does not change.** The cell still runs as root on a writable rootfs
+(§5.4). Nothing here makes the implementer's container trustworthy; it only
+stops the verdict depending on it. A read-only rootfs and a non-root `USER`
+would narrow what the agent can reach inside it, the token and the host's
+resources among them, and are still worth doing for that. This revision does
+not rest on them. §5.4's invariant is untouched: a lie still has to be visible
+in the diff, and the diff is now also the only thing the verdict is computed
+from.
+
+**Vocabulary.** "Critic cell" is a hand-written `CONTEXT.md` entry, as **Cell**
+and **Critic** are. It is not a `factory:` term: nothing would read one, and
+`tests/ontology/test_no_dead_terms.py` deletes a term with no reader. Until
+someone decides otherwise, a verdict that does not reproduce on an unmoved base
+shares `MERGE_FAILED` with a change that did not survive today's main (item
+118).
