@@ -1672,19 +1672,8 @@ def _hunk_count(patch):
     return sum(1 for line in patch.splitlines() if line.startswith("@@"))
 
 
-def test_changed_files_lists_a_submodule_the_worktree_config_ignores(
-    tmp_path, monkeypatch
-):
-    """`diff.ignoreSubmodules=all` drops a submodule path the worktree's real
-    commits added from both the name-only listing and the patch. A hole in
-    `scope` itself, not merely a cosmetic one: the list `scope` checks
-    against `touches` loses a path the agent's own commits added. A gitlink
-    entry is enough to make one — no second repository needed.
-    """
-    _isolated_repo(tmp_path, monkeypatch)
-    (tmp_path / "a.txt").write_text("one\n")
-    base = _commit(tmp_path, "base")
-
+def _commit_a_gitlink(tmp_path):
+    """Commit a gitlink at `vendor/sub` — no second repository needed."""
     subprocess.run(
         [
             "git",
@@ -1713,6 +1702,22 @@ def test_changed_files_lists_a_submodule_the_worktree_config_ignores(
         cwd=tmp_path,
         check=True,
     )
+
+
+def test_changed_files_lists_a_submodule_the_worktree_config_ignores(
+    tmp_path, monkeypatch
+):
+    """`diff.ignoreSubmodules=all` drops a submodule path the worktree's real
+    commits added from both the name-only listing and the patch. A hole in
+    `scope` itself, not merely a cosmetic one: the list `scope` checks
+    against `touches` loses a path the agent's own commits added. A gitlink
+    entry is enough to make one — no second repository needed.
+    """
+    _isolated_repo(tmp_path, monkeypatch)
+    (tmp_path / "a.txt").write_text("one\n")
+    base = _commit(tmp_path, "base")
+
+    _commit_a_gitlink(tmp_path)
     subprocess.run(
         ["git", "config", "diff.ignoreSubmodules", "all"], cwd=tmp_path, check=True
     )
@@ -1732,14 +1737,45 @@ def test_changed_files_lists_a_submodule_the_worktree_config_ignores(
     assert worktree.changed_files("c", base) == ["vendor/sub"]
 
 
+def test_changed_files_lists_a_submodule_a_committed_gitmodules_ignores(
+    tmp_path, monkeypatch
+):
+    """A committed `.gitmodules` with `ignore = all` hides the gitlink the same
+    way, and it is content, not config: `-c diff.ignoreSubmodules=none` does
+    not override it, only the `--ignore-submodules=none` flag does.
+    """
+    _isolated_repo(tmp_path, monkeypatch)
+    (tmp_path / "a.txt").write_text("one\n")
+    base = _commit(tmp_path, "base")
+
+    (tmp_path / ".gitmodules").write_text(
+        '[submodule "sub"]\n\tpath = vendor/sub\n\turl = ./sub\n\tignore = all\n'
+    )
+    subprocess.run(["git", "add", ".gitmodules"], cwd=tmp_path, check=True)
+    _commit_a_gitlink(tmp_path)
+
+    overridden = subprocess.run(
+        ["git", "-c", "diff.ignoreSubmodules=none", "diff", "--name-only"]
+        + [f"{base}..HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert overridden == [".gitmodules"]
+
+    _host_git(tmp_path, monkeypatch)
+    assert worktree.changed_files("c", base) == [".gitmodules", "vendor/sub"]
+
+
 def test_export_patch_carries_no_color_when_the_worktree_forces_it(
     tmp_path, monkeypatch
 ):
-    """23 lines of a two-hunk patch carry terminal escape codes when the
-    worktree forces colour on, whether through `color.ui` or through
-    `color.diff` — including the `diff --git` headers the host parses.
-    `--no-color`, not a `-c color.ui=never` override: probed on git 2.54,
-    the override does not undo `color.diff=always`.
+    """Every line of the patch, the `diff --git` header the host parses
+    included, carries terminal escape codes when the worktree forces colour
+    on, whether through `color.ui` or through `color.diff`. `--no-color`, not
+    a `-c color.ui=never` override: probed on git 2.39.5 and 2.54, the
+    override does not undo `color.diff=always`.
     """
     _isolated_repo(tmp_path, monkeypatch)
     (tmp_path / "f.py").write_text("one = 1\n")
@@ -1748,9 +1784,8 @@ def test_export_patch_carries_no_color_when_the_worktree_forces_it(
     _commit(tmp_path, "edit")
 
     _host_git(tmp_path, monkeypatch)
-    # First `color.ui` alone, then `color.diff` added on top — the table's
-    # two color rows, folded into one witness since both are restored the
-    # same way.
+    # First `color.ui` alone, then `color.diff` added on top — the two colour
+    # rows of SA-0082's probe table, folded into one witness.
     for key in ("color.ui", "color.diff"):
         subprocess.run(["git", "config", key, "always"], cwd=tmp_path, check=True)
 
@@ -1770,9 +1805,10 @@ def test_export_patch_carries_no_color_when_the_worktree_forces_it(
 def test_export_patch_keeps_hunks_apart_under_a_wide_inter_hunk_context(
     tmp_path, monkeypatch
 ):
-    """Two hunks eight lines apart merge into one when the worktree sets
-    `diff.interHunkContext` wide enough — which widens the lines a critic
-    finding may anchor to, the way `diff.context` would.
+    """Two hunks merge into one when the worktree sets `diff.interHunkContext`
+    wide enough — which widens the lines a critic finding may anchor to, the
+    way `diff.context` would. One unchanged line separates their context, so
+    any pin but 0 merges them.
     """
     _isolated_repo(tmp_path, monkeypatch)
     lines = [f"line_{i} = {i}" for i in range(30)]
@@ -1780,9 +1816,9 @@ def test_export_patch_keeps_hunks_apart_under_a_wide_inter_hunk_context(
     base = _commit(tmp_path, "base")
 
     lines[5] = "line_5 = CHANGED"
-    lines[14] = "line_14 = CHANGED"
+    lines[13] = "line_13 = CHANGED"
     (tmp_path / "f.py").write_text("\n".join(lines) + "\n")
-    _commit(tmp_path, "two edits, eight lines apart")
+    _commit(tmp_path, "two edits, one line between their contexts")
 
     subprocess.run(
         ["git", "config", "diff.interHunkContext", "10"], cwd=tmp_path, check=True

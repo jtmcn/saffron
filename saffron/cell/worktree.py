@@ -155,7 +155,8 @@ DIFF_FLAGS = (
     "--ignore-submodules=none",
     # color.ui=always or color.diff=always paints the patch with escape
     # codes, `diff --git` headers included. The flag, not `-c color.ui=never`
-    # — probed on git 2.54, the override does not undo `color.diff=always`.
+    # — probed on git 2.39.5 and 2.54, the override does not undo
+    # `color.diff=always`.
     "--no-color",
     # diff.interHunkContext widens how close two hunks must be before they
     # merge into one, which widens where a critic finding may anchor exactly
