@@ -520,6 +520,9 @@ def test_a_rules_exemptions_are_the_named_files():
         "agent-sdk-import-is-runner-only": ["images/agent_runner.py"],
         "gate-tool-must-be-executed": ["tests/**"],
         "one-task-driver": ["saffron/task.py"],
+        # None, not an exemption for tests/conftest.py: that is the file SA-0077
+        # aliased the skip in, so exempting it would reopen exactly that hole.
+        "skip-is-spelled-in-full": None,
     }
 
 
@@ -771,6 +774,62 @@ def test_structure_fails_on_code_its_rules_reject(tmp_path):
     # ast-grep counts lines from zero and every other gate here reports them from
     # one, so an unconverted line reads as the line above the defect.
     assert result.failures[0].line == 1
+
+
+def test_structure_fails_a_skip_bound_to_a_name(tmp_path):
+    """SA-0077's own diff, which `integrity` passed: the alias spells none of its
+    tokens, so every later call of that name went unread (backlog item 112)."""
+    gate = _rules_tree(tmp_path)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "conftest.py").write_text(
+        "import pytest\n"
+        "\n"
+        "_skip = pytest.skip\n"
+        "\n"
+        "\n"
+        "def pytest_runtest_setup(item):\n"
+        '    _skip("no working container found on this host")\n'
+    )
+    done = subprocess.run(
+        [str(gate)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "fail", result.summary
+    assert [(f.file, f.code, f.line) for f in result.failures] == [
+        ("tests/conftest.py", "skip-is-spelled-in-full", 3)
+    ]
+
+
+@pytest.mark.parametrize(
+    "planted",
+    [
+        'emit({"gate": "lint", "tool": "ruff 9.9.9"})  # ast-grep-ignore\n',
+        '# ast-grep-ignore\nemit({"gate": "lint", "tool": "ruff 9.9.9"})\n',
+        'emit({"gate": "lint", "tool": "ruff 9.9.9"})'
+        "  # ast-grep-ignore: gate-tool-must-be-executed\n",
+    ],
+    ids=["same-line", "line-above", "rule-scoped"],
+)
+def test_ast_greps_inline_ignore_silences_a_structure_rule(tmp_path, planted):
+    """Why `integrity.suppressions` names ast-grep's inline ignore comment: the
+    violation `test_structure_fails_on_code_its_rules_reject` plants, with the
+    comment added, reports `pass`. If this starts failing, ast-grep stopped
+    honouring the comment and the policy entry is harmless, not wrong."""
+    gate = _rules_tree(tmp_path)
+    (tmp_path / "bad.py").write_text(planted)
+    done = subprocess.run(
+        [str(gate)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "pass", result.failures
 
 
 def test_structure_scans_the_dot_directory_its_rules_most_need(tmp_path):

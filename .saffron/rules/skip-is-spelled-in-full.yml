@@ -1,0 +1,94 @@
+id: skip-is-spelled-in-full
+language: python
+severity: error
+message: spell a skip in full where it is used, or `integrity` cannot read it
+note: |
+  Backlog item 112. `integrity` matches `.saffron/policy.yaml`'s suppression
+  tokens as text, so a skip bound to a name, imported by name, reached through a
+  renamed module, or named by string spells none of them, and every later use
+  passes. SA-0077 did exactly this, with a comment saying why. Call pytest's or
+  unittest's skip directly, or decorate with the marker, where the scan reads it.
+  A typing import from `_pytest` has a public name on `pytest` itself; use that.
+
+# No `files:` scope: an alias bound in a helper outside tests/ is the same hole.
+# Absent on purpose: the expected-failure marker, unittest's skip exception and
+# method, and pytest's import-or-skip — each token is a word every spelling carries.
+# ponytail: a name reached dynamically — `__import__`, `sys.modules`, a module's
+# `__dict__` — is past any structural rule; closing it means reading what a name
+# resolves to, not its shape.
+rule:
+  any:
+    # `pytest.skip` anywhere but the callee of a call.
+    - kind: attribute
+      regex: '^pytest\.skip$'
+      not:
+        any:
+          - inside: { kind: call, field: function }
+          # `with pytest.raises(pytest.skip.Exception)` asserts that a skip
+          # happened. Only there: kept as a value, the call hands the class back.
+          - inside:
+              kind: attribute
+              has: { field: attribute, regex: '^Exception$' }
+              inside:
+                kind: argument_list
+                inside:
+                  kind: call
+                  has: { field: function, regex: '^pytest\.raises$' }
+                  inside: { any: [{ kind: with_item }, { kind: as_pattern }] }
+    # The markers anywhere but a decorator, bare or called — `marks=` in a
+    # `pytest.param` and a module's `pytestmark` spell no `@`.
+    - kind: attribute
+      regex: '^pytest\.mark\.skip(if)?$'
+      not:
+        any:
+          - inside: { kind: decorator }
+          - inside: { kind: call, field: function, inside: { kind: decorator } }
+    # `pytest.mark` itself bound to a name, which reaches the markers unspelled.
+    - kind: attribute
+      regex: '^pytest\.mark$'
+      not: { inside: { kind: attribute, field: object } }
+    # The module itself as a value — `getattr(pytest, "skip")`, or bound to a name.
+    - kind: identifier
+      regex: '^(pytest|unittest)$'
+      not:
+        any:
+          - inside: { kind: attribute, field: object }
+          - inside: { kind: dotted_name }
+    - kind: import_from_statement
+      all:
+        - has: { field: module_name, regex: '^pytest$' }
+        - has:
+            stopBy: end
+            any:
+              - { kind: dotted_name, regex: '^(skip|mark)$' }
+              - { kind: wildcard_import }
+    - kind: import_from_statement
+      all:
+        - has: { field: module_name, regex: '^unittest(\.case)?$' }
+        - has:
+            stopBy: end
+            any:
+              - { kind: dotted_name, regex: '^skip' }
+              - { kind: wildcard_import }
+    - kind: import_from_statement
+      has: { field: module_name, regex: '^_pytest(\.|$)' }
+    - kind: import_statement
+      has: { kind: dotted_name, regex: '^_pytest(\.|$)', stopBy: end }
+    - kind: aliased_import
+      has: { field: name, regex: '^(pytest|unittest)$' }
+    # The marker named by string: the word is also a gate status, so no token can.
+    - kind: call
+      all:
+        - has: { field: function, regex: '(^|\.)add_marker$' }
+        - has:
+            field: arguments
+            has:
+              any:
+                - kind: string
+                  nthChild: 1
+                  has: { kind: string_content, regex: '^skip(if)?$' }
+                - kind: keyword_argument
+                  has:
+                    field: value
+                    kind: string
+                    has: { kind: string_content, regex: '^skip(if)?$' }

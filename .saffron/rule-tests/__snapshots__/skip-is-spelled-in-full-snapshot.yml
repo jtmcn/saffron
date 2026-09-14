@@ -1,0 +1,296 @@
+id: skip-is-spelled-in-full
+snapshots:
+  _B = pytest.raises(pytest.skip.Exception).expected_exceptions:
+    labels:
+    - source: pytest.skip
+      style: primary
+      start: 19
+      end: 30
+  _C = raises(pytest.skip.Exception):
+    labels:
+    - source: pytest.skip
+      style: primary
+      start: 12
+      end: 23
+  _P = pytest:
+    labels:
+    - source: pytest
+      style: primary
+      start: 5
+      end: 11
+  _U = unittest:
+    labels:
+    - source: unittest
+      style: primary
+      start: 5
+      end: 13
+  _skip = pytest.skip:
+    labels:
+    - source: pytest.skip
+      style: primary
+      start: 8
+      end: 19
+  from _pytest.outcomes import skip:
+    labels:
+    - source: from _pytest.outcomes import skip
+      style: primary
+      start: 0
+      end: 33
+    - source: _pytest.outcomes
+      style: secondary
+      start: 5
+      end: 21
+  from pytest import *:
+    labels:
+    - source: from pytest import *
+      style: primary
+      start: 0
+      end: 20
+    - source: pytest
+      style: secondary
+      start: 5
+      end: 11
+    - source: '*'
+      style: secondary
+      start: 19
+      end: 20
+  from pytest import mark:
+    labels:
+    - source: from pytest import mark
+      style: primary
+      start: 0
+      end: 23
+    - source: pytest
+      style: secondary
+      start: 5
+      end: 11
+    - source: mark
+      style: secondary
+      start: 19
+      end: 23
+  from pytest import skip:
+    labels:
+    - source: from pytest import skip
+      style: primary
+      start: 0
+      end: 23
+    - source: pytest
+      style: secondary
+      start: 5
+      end: 11
+    - source: skip
+      style: secondary
+      start: 19
+      end: 23
+  from pytest import skip as _skip:
+    labels:
+    - source: from pytest import skip as _skip
+      style: primary
+      start: 0
+      end: 32
+    - source: pytest
+      style: secondary
+      start: 5
+      end: 11
+    - source: skip
+      style: secondary
+      start: 19
+      end: 23
+  from unittest import *:
+    labels:
+    - source: from unittest import *
+      style: primary
+      start: 0
+      end: 22
+    - source: unittest
+      style: secondary
+      start: 5
+      end: 13
+    - source: '*'
+      style: secondary
+      start: 21
+      end: 22
+  from unittest import skip:
+    labels:
+    - source: from unittest import skip
+      style: primary
+      start: 0
+      end: 25
+    - source: unittest
+      style: secondary
+      start: 5
+      end: 13
+    - source: skip
+      style: secondary
+      start: 21
+      end: 25
+  from unittest import skipIf as _s:
+    labels:
+    - source: from unittest import skipIf as _s
+      style: primary
+      start: 0
+      end: 33
+    - source: unittest
+      style: secondary
+      start: 5
+      end: 13
+    - source: skipIf
+      style: secondary
+      start: 21
+      end: 27
+  from unittest.case import skipUnless:
+    labels:
+    - source: from unittest.case import skipUnless
+      style: primary
+      start: 0
+      end: 36
+    - source: unittest.case
+      style: secondary
+      start: 5
+      end: 18
+    - source: skipUnless
+      style: secondary
+      start: 26
+      end: 36
+  getattr(pytest, "skip")("no"):
+    labels:
+    - source: pytest
+      style: primary
+      start: 8
+      end: 14
+  import _pytest.outcomes:
+    labels:
+    - source: import _pytest.outcomes
+      style: primary
+      start: 0
+      end: 23
+    - source: _pytest.outcomes
+      style: secondary
+      start: 7
+      end: 23
+  import pytest as pt:
+    labels:
+    - source: pytest as pt
+      style: primary
+      start: 7
+      end: 19
+    - source: pytest
+      style: secondary
+      start: 7
+      end: 13
+  import unittest as ut:
+    labels:
+    - source: unittest as ut
+      style: primary
+      start: 7
+      end: 21
+    - source: unittest
+      style: secondary
+      start: 7
+      end: 15
+  item.add_marker("skip"):
+    labels:
+    - source: item.add_marker("skip")
+      style: primary
+      start: 0
+      end: 23
+    - source: item.add_marker
+      style: secondary
+      start: 0
+      end: 15
+    - source: skip
+      style: secondary
+      start: 17
+      end: 21
+    - source: '"skip"'
+      style: secondary
+      start: 16
+      end: 22
+    - source: '"skip"'
+      style: secondary
+      start: 16
+      end: 22
+  item.add_marker('skipif'):
+    labels:
+    - source: item.add_marker('skipif')
+      style: primary
+      start: 0
+      end: 25
+    - source: item.add_marker
+      style: secondary
+      start: 0
+      end: 15
+    - source: skipif
+      style: secondary
+      start: 17
+      end: 23
+    - source: '''skipif'''
+      style: secondary
+      start: 16
+      end: 24
+    - source: '''skipif'''
+      style: secondary
+      start: 16
+      end: 24
+  item.add_marker(marker="skip"):
+    labels:
+    - source: item.add_marker(marker="skip")
+      style: primary
+      start: 0
+      end: 30
+    - source: item.add_marker
+      style: secondary
+      start: 0
+      end: 15
+    - source: skip
+      style: secondary
+      start: 24
+      end: 28
+    - source: '"skip"'
+      style: secondary
+      start: 23
+      end: 29
+    - source: marker="skip"
+      style: secondary
+      start: 16
+      end: 29
+    - source: marker="skip"
+      style: secondary
+      start: 16
+      end: 29
+  mark = pytest.mark:
+    labels:
+    - source: pytest.mark
+      style: primary
+      start: 7
+      end: 18
+  pytest.param(1, marks=pytest.mark.skipif(True, reason="no")):
+    labels:
+    - source: pytest.mark.skipif
+      style: primary
+      start: 22
+      end: 40
+  pytestmark = pytest.mark.skip:
+    labels:
+    - source: pytest.mark.skip
+      style: primary
+      start: 13
+      end: 29
+  pytestmark = pytest.mark.skip(reason="no"):
+    labels:
+    - source: pytest.mark.skip
+      style: primary
+      start: 13
+      end: 29
+  raise pytest.skip.Exception("no"):
+    labels:
+    - source: pytest.skip
+      style: primary
+      start: 6
+      end: 17
+  run(pytest.skip, "passed as a value"):
+    labels:
+    - source: pytest.skip
+      style: primary
+      start: 4
+      end: 15

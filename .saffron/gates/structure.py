@@ -4,7 +4,9 @@
 The rules live in `.saffron/rules/` and encode invariants that were prose in
 CLAUDE.md and enforced by nothing: which module may name the cell runtime, which
 file may import the Agent SDK, and that a gate's `tool` field is executed rather
-than written. Structural rather than textual because every one of those has a
+than written — and one `integrity` cannot read: that pytest's skip is spelled
+where its text scan sees it (backlog item 112). Structural rather than textual
+because every one of the first three has a
 legitimate textual near-miss in the tree — a comment naming apple/container, a
 string passing `import claude_agent_sdk` to `python -c` (Appendix G, §2.1, §5.4).
 """

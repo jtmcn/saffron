@@ -13,9 +13,11 @@ gates:
   # Invariants that were prose in CLAUDE.md and enforced by nothing: which module
   # may name the cell runtime, which file may import the Agent SDK, and that a
   # gate's `tool` field is executed rather than written (Appendix G, §2.1, §5.4).
+  # And one `integrity` cannot read: a skip spelled where its text scan sees it
+  # rather than bound to a name first (backlog item 112).
   # Structural, not textual — each has a legitimate textual near-miss in the tree,
-  # so the `retired-vocabulary` pygrep hook's approach would false-positive on all
-  # three. Declared unconditionally, for the reason `shacl` gives above.
+  # so the `retired-vocabulary` pygrep hook's approach would false-positive on the
+  # first three. Declared unconditionally, for the reason `shacl` gives above.
   structure: { blocking: true }
 
 # Where a plausible-looking wrong change hurts most. Getting this right is most
@@ -65,6 +67,8 @@ integrity:
   # the `types` gate is blocking — a suppression syntax this list cannot see is
   # the hole `integrity` exists to close. The bare form matches the
   # rule-scoped form too, as with the expected-failure marker above.
+  # ast-grep's own inline ignore comment disarms any `structure` rule, and no
+  # `scan` flag turns it off: measured, so the scan here is the only refusal.
   suppressions:
     [
       "@pytest.mark.skip",
@@ -73,6 +77,13 @@ integrity:
       "# type: ignore",
       "# ty: ignore",
       "# noqa",
+      "ast-grep-ignore",
+      # Skips pytest honours from elsewhere, each measured under pytest 9.1.1. The
+      # exception and the method differ by one capital, so both are listed.
+      "unittest.skip",
+      "SkipTest",
+      "skipTest",
+      "importorskip",
     ]
   # Collection runs in the repo's own Python, so `census` cannot see a conftest
   # that hides a test from the runner. This routes the edit to a person.
