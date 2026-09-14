@@ -27,9 +27,9 @@ forbidden:
   - saffron/cli.py
   - saffron/batch.py
   - saffron/replay.py
-budget_usd: 7
+budget_usd: 12
 max_attempts: 3
-max_turns: 60
+max_turns: 90
 risk: elevated
 acceptance:
   - claim: >-
