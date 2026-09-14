@@ -627,26 +627,15 @@ def _clean(value: object, limit: int) -> str:
     event carrying an escape sequence used to clear the operator's screen
     and retitle their terminal — and `saffron watch` can replay that into a
     fresh terminal long after the run — so the strip happens once, here,
-    rather than in each branch below. Host-authored text (the `, resets …`
-    suffix, `Agent.detail`) never passes through this — nor does most of
-    `PhaseStart.detail`/`Terminal.detail` below, but both fields are shared
-    with call sites that quote a plan, a lens report, or a rebuttal a cell
-    wrote (backlog item 63), so both are cleaned unconditionally rather than
-    trusted per call site."""
+    rather than in each branch below. Fields that carry only host-authored
+    text (the `, resets …` suffix, `Agent.detail`) skip this;
+    `PhaseStart.detail`/`Terminal.detail` mix host and cell text (item 63),
+    so they pass through it."""
     return str(value).translate(_CONTROL_TRANSLATION)[:limit]
 
 
-# `PhaseStart.detail`/`Terminal.detail` are cleaned to this bound rather than
-# `BOUND_CHARS` above (8192, sized for the *stored* `Agent.event` JSON) or the
-# 160 `_describe_agent_event` uses for one SDK field at a time: a rejected
-# plan's or a lens's non-schema report's quoted text is host-formatted prose
-# around a model-authored fragment, not one bounded SDK field, and 160 already
-# clips the longest line either fixture this suite carries today (91
-# characters, the golden fixture's `baseline:` line; 67 for a `REVIEW:`
-# summary's `detail` alone) — measured, not reasoned, per item 63's own
-# instruction to check before reusing the `Agent` bound. 500 leaves a rejected
-# plan's or a parse error's own reasoning legible as one bounded line, well
-# clear of every detail line measured above.
+# Reasoned, not measured: a detail is host prose around a quoted cell fragment,
+# wider than one SDK field's 160. The longest detail in the suite today is 67.
 _DETAIL_BOUND = 500
 
 
@@ -805,7 +794,8 @@ def describe(event: Event) -> str:
         if event.reason == "ended_without_finishing":
             return (
                 "IMPLEMENT: the turn ended without finishing and produced "
-                f"nothing ({event.subtype}/{event.terminal_reason})"
+                f"nothing ({_clean(event.subtype, 160)}/"
+                f"{_clean(event.terminal_reason, 160)})"
             )
         if event.reason == "finished_empty":
             return "IMPLEMENT: finished and produced nothing"

@@ -1422,65 +1422,66 @@ def test_an_agent_payload_cannot_put_control_characters_on_a_terminal():
 def test_a_phase_line_cannot_put_control_characters_on_a_terminal():
     """Item 63: `describe()` cleaned an `Agent` payload's control characters
     and printed a `PhaseStart`'s `detail` verbatim, though the same kind of
-    model-authored text reaches it — `plan_checkpoint`'s re-prompt lines
+    cell-authored text reaches it — `plan_checkpoint`'s re-prompt lines
     among others (`not the schema, re-prompting once — {exc}`, `proposal
     refused, re-prompting once — {exc}`), where `exc` quotes an artifact a
     cell wrote. Modeled on
     `test_an_agent_payload_cannot_put_control_characters_on_a_terminal`: every
     code point from U+0000 to U+001F, and U+007F, must not reach the
     rendered line, and the surrounding text must survive."""
-    from saffron.events import _clean  # local: kept out of the revert's collection
-
+    # Each code point through `describe` itself, not `_clean` alone: a render
+    # that stripped only ESC and BEL would pass a fixture holding only those.
     for code in (*range(0x20), 0x7F):
-        assert _clean(chr(code) + "A", 160) == " A"
-
-    evil = "\x1b[2J\x1b]0;pwned\x07 re-prompting once — " + "A" * 20
-    line = describe(
-        PhaseStart(
-            timestamp=1.0,
-            spec_id="x",
-            phase="IMPLEMENT",
-            label="PLAN",
-            detail=evil,
+        line = describe(
+            PhaseStart(
+                timestamp=1.0,
+                spec_id="x",
+                phase="IMPLEMENT",
+                label="PLAN",
+                detail=f"re-prompting once — A{chr(code)}B",
+            )
         )
-    )
-    assert all(chr(code) not in line for code in (*range(0x20), 0x7F))
-    assert "AAAAAAAAAAAAAAAAAAAA" in line
-    assert line.startswith("PLAN: ")
+        assert chr(code) not in line, hex(code)
+        assert line == "PLAN: re-prompting once — A B"
 
 
 def test_a_terminal_line_cannot_put_control_characters_on_a_terminal():
     """The sibling above, for `Terminal`. A rejected plan's `detail` is the
-    rejection's own text, which names the paths the plan proposed — model
-    text the same way a `PhaseStart` re-prompt is. Both `Terminal` branches
-    that render a `detail` are covered: `plan_rejected`, and
-    `cut_off_no_salvage_room`, which item 63's own notes call out because the
-    fix lives in `describe()` once, not per branch."""
-    evil = "\x1b[2J\x1b]0;pwned\x07" + "A" * 20
-
-    rejected_line = describe(
-        Terminal(
-            timestamp=1.0,
-            spec_id="x",
-            reason="plan_rejected",
-            spent_usd_est=0.1,
-            detail=evil,
+    rejection's own text, which names the paths the plan proposed. Every
+    `Terminal` branch that renders cell text is covered: `plan_rejected` and
+    `cut_off_no_salvage_room` through `detail`, and `ended_without_finishing`
+    through the runtime's own `subtype` and `terminal_reason`."""
+    for code in (*range(0x20), 0x7F):
+        evil = f"A{chr(code)}B"
+        lines = [
+            describe(
+                Terminal(
+                    timestamp=1.0,
+                    spec_id="x",
+                    reason=reason,
+                    spent_usd_est=0.1,
+                    detail=evil,
+                )
+            )
+            for reason in ("plan_rejected", "cut_off_no_salvage_room")
+        ]
+        # `ended_without_finishing` renders the cell's own `subtype` and
+        # `terminal_reason` rather than a `detail`.
+        lines.append(
+            describe(
+                Terminal(
+                    timestamp=1.0,
+                    spec_id="x",
+                    reason="ended_without_finishing",
+                    spent_usd_est=0.1,
+                    subtype=evil,
+                    terminal_reason=evil,
+                )
+            )
         )
-    )
-    assert all(chr(code) not in rejected_line for code in (*range(0x20), 0x7F))
-    assert "AAAAAAAAAAAAAAAAAAAA" in rejected_line
-
-    cut_off_line = describe(
-        Terminal(
-            timestamp=1.0,
-            spec_id="x",
-            reason="cut_off_no_salvage_room",
-            spent_usd_est=9.0,
-            detail=evil,
-        )
-    )
-    assert all(chr(code) not in cut_off_line for code in (*range(0x20), 0x7F))
-    assert "AAAAAAAAAAAAAAAAAAAA" in cut_off_line
+        for line in lines:
+            assert chr(code) not in line, (hex(code), line)
+            assert "A B" in line
 
 
 def test_a_phase_or_terminal_detail_is_clipped():
@@ -1492,8 +1493,9 @@ def test_a_phase_or_terminal_detail_is_clipped():
     # local: kept out of the revert's collection
     from saffron.events import _DETAIL_BOUND
 
-    long_detail = "x" * (_DETAIL_BOUND + 400)
-    clipped = "x" * _DETAIL_BOUND
+    # A distinct head, so a clip that kept the tail instead would not match.
+    long_detail = "HEAD " + "x" * (_DETAIL_BOUND + 400)
+    clipped = long_detail[:_DETAIL_BOUND]
 
     phase_line = describe(
         PhaseStart(
@@ -1505,6 +1507,13 @@ def test_a_phase_or_terminal_detail_is_clipped():
         )
     )
     assert phase_line == f"PLAN: {clipped}"
+
+    # A literal five thousand, not one built from the bound: a bound raised
+    # past it would print the criterion's own example whole.
+    five_thousand = PhaseStart(
+        timestamp=1.0, spec_id="x", phase="IMPLEMENT", label="PLAN", detail="y" * 5000
+    )
+    assert len(describe(five_thousand)) < 5000
 
     rejected_line = describe(
         Terminal(
