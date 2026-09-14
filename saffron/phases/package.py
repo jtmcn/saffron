@@ -457,20 +457,10 @@ def open_draft_pr(
     )
 
 
-def needs_reverification(fetch_head: str, base_sha: str) -> bool:
-    """Whether the default branch (or parent) moved since the cell ran.
-
-    Once named the gate for re-verification itself: equal shas meant the
-    packaged tree was byte-identical to the one the cell's own suite already
-    ran on, so a re-run read as "provably redundant". That reasoning trusted
-    the cell's own results, which is the one thing a cell is never trusted
-    with (§2) — the cell that ran the suite is also the cell that could have
-    replaced the tools it ran (`docs/BACKLOG.md` item 118). `package()` now
-    reverifies every packaged commit unconditionally; this only tells the
-    caller whether anything actually moved, so a blocked push after a red
-    re-run can say which case it was.
-    """
-    return fetch_head != base_sha
+def needs_reverification(fetch_head: str, tree_base: str) -> bool:
+    """Whether the base moved since the cell ran. It picks the `MERGE_FAILED`
+    note only: re-verification itself is unconditional (§5.7, principle 58)."""
+    return fetch_head != tree_base
 
 
 def reverify(
@@ -810,11 +800,10 @@ def package(
         if ledger.task_policy_sha(outcome.task_id) != policy_sha:
             ledger.record_policy(outcome.task_id, policy_sha)
         # Every packaged commit is re-verified outside the cell that built it,
-        # base moved or not (`docs/BACKLOG.md` item 118): the cell is root on
-        # a writable rootfs and controls every tool its own gates called, so
-        # "the base did not move" is not evidence the cell's results were
-        # honest. A gate that errored raises out of `reverify`: infrastructure,
-        # and never this task's MERGE_FAILED. The gates are the export the
+        # base moved or not: an unmoved base says nothing about whether the
+        # cell's own results were honest (§5.7, principle 58). A gate that
+        # errored raises out of `reverify`: infrastructure, and never this
+        # task's MERGE_FAILED. The gates are the export the
         # policy above was read from — one commit, both halves. The record
         # stands across that raise on purpose: it is what re-verification ran
         # under, not what it concluded.
@@ -839,8 +828,8 @@ def package(
             _emit_package(f"{len(new)} new failures against {target_branch}")
             # Not `pushed`: this returns before the push, and a `pushed_sha`
             # no remote has is a claim, not a record. The wording splits on
-            # `moved` so a verdict that did not reproduce (the base held
-            # still) reads distinctly from a change that did not survive
+            # `moved` so cell gate results that did not reproduce (the base
+            # held still) read distinctly from a change that did not survive
             # today's main (item 118).
             note = (
                 f"{len(new)} new failures after rebase ({pushed[:12]} in the mirror)"

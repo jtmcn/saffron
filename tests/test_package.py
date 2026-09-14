@@ -717,7 +717,7 @@ def test_an_unmoved_base_makes_reverification_provably_redundant():
     """`needs_reverification` still answers "did the base move" — equal shas
     here. It no longer licenses `package()` to skip re-verification, though:
     the cell that ran the suite is the one thing never trusted with its own
-    verdict (§2), so an unmoved base is re-verified exactly like a moved one
+    gate results (§2), so an unmoved base is re-verified exactly like a moved one
     (`docs/BACKLOG.md` item 118). This return value now only shapes the note
     `package()` writes when a re-run finds new failures."""
     assert not needs_reverification("a" * 40, "a" * 40)
@@ -1381,7 +1381,7 @@ def test_a_gate_that_errored_while_re_verifying_aborts_the_package(
     """`reverify` raises on an errored gate. A broken gate is not a merge
     conflict, and netting it to MERGE_FAILED would charge the task for the
     toolchain (§5.4)."""
-    # Move the default branch, so re-verification is not redundant.
+    # Move the default branch, so a red re-run would take the "after rebase" note.
     (packageable.work / "other.txt").write_text("main moved\n")
     git(packageable.work, "add", "-A")
     git(packageable.work, "commit", "-qm", "main moved")
@@ -2232,7 +2232,7 @@ def test_an_unmoved_base_still_reverifies_the_packaged_commit(monkeypatch, packa
     body = (packageable.outcome.task_dir / "pr_body.md").read_text()
     assert "packaged commit" in body
     assert "ran on the package" in body
-    # The cell's own run at `base_sha` must never be the one shown, moved
+    # The cell's own run at `tree_base` must never be the one shown, moved
     # base or not.
     assert "ran at base" not in body
 
@@ -2242,8 +2242,9 @@ def test_new_failures_on_an_unmoved_base_block_the_push_and_say_the_base_did_not
 ):
     """The other half of item 118: when re-verification on an unmoved base
     finds new failures, nothing is pushed and no pull request is opened — and
-    the note says the base did not move, so a reader can tell a verdict that
-    did not reproduce from a change that did not survive today's main."""
+    the note says the base did not move, so a reader can tell cell gate
+    results that did not reproduce from a change that did not survive today's
+    main."""
     blocking = NewFailure(
         "tests", Failure(file="tests/test_a.py", code="failed", message="assert 1 == 2")
     )
@@ -2594,8 +2595,8 @@ def test_a_parent_that_moved_ahead_is_the_tree_everything_downstream_reads(
     ledger.finish_run(run_id, "COMPLETE")
     outcome = _cell_outcome(task_dir, task_id, run_id)
 
-    # Stubbed, not skipped: the parent moved, so re-verification is exactly
-    # what this path must reach — and a real one starts a cell.
+    # Stubbed: every path reaches re-verification, and a real one starts a
+    # cell.
     seen_reverify = {}
 
     def _reverify(**kwargs):

@@ -356,8 +356,8 @@ def _verification(verified_on: str) -> str:
             "moved, so the packaged tree is byte-identical to the one they saw."
         )
     return (
-        "Gates were re-run on the **packaged commit**, because the base moved "
-        "after this task started."
+        "Gates were re-run on the **packaged commit**, in a gate-only cell "
+        "outside the one that built it (§5.7)."
     )
 
 
