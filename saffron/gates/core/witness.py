@@ -242,15 +242,8 @@ def witness_gate(
             tool = tool or tests_result.tool
             continue
         if tests_result.status == "pass":
-            # The claim and the file, never the edit: a mutant is withheld
-            # from the implementer on purpose (`CONTEXT.md`, **Mutant**;
-            # §5.4.1, "The spec may not disclose its own mutant"), and at
-            # `elevated` this failure is blocking, which means
-            # `repair_prompt` hands its `message` to the next IMPLEMENT
-            # attempt verbatim (`saffron/phases/implement.py`). Quoting
-            # `mutant.find`/`mutant.replace` here would hand that attempt
-            # the exact edit it is being judged against — the one place in
-            # the whole gate suite that text could leak.
+            # The claim and the file, never the edit: at `elevated` this message
+            # reaches the REPAIR turn verbatim, and a mutant is withheld (§5.4.1).
             survived.append(
                 Failure(
                     file=criterion.witness,

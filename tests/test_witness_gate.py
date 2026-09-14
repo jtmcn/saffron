@@ -69,11 +69,9 @@ def test_a_witness_that_dies_under_its_mutant_passes(tmp_path):
 
 def test_a_witness_that_survives_its_mutant_fails(tmp_path):
     """A witness that survives its mutant fails, and the failure names the
-    criterion and the witness — never the edit itself (a mutant is withheld
-    from the implementer on purpose; `test_a_surviving_mutant_names_its_claim_and_not_its_edit`
-    below is the test that pins that)."""
+    criterion and the witness."""
     _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
-    criterion = _criterion(claim="the total is clamped at zero", replace="0")
+    criterion = _criterion(claim="the total is clamped at zero")
 
     def run_tests(subset):
         return _tests(status="pass", collected=(criterion.witness,))
@@ -95,14 +93,11 @@ def test_a_surviving_mutant_names_its_claim_and_not_its_edit(tmp_path):
     the criterion's claim and its witness, and carries neither the edit's
     `find` text nor its `replace` text anywhere in the result. At `elevated`,
     where `witness` blocks, `repair_prompt` hands this message to the next
-    IMPLEMENT attempt verbatim — a mutant a cell can read back is a mutant
-    chosen to be killed, which defeats the reason it is withheld from the
-    implementer's prompt in the first place (`CONTEXT.md`, **Mutant**)."""
+    REPAIR turn verbatim — a mutant a cell can read back is a mutant chosen
+    to be killed (`CONTEXT.md`, **Mutant**)."""
     _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
-    # `find` is the fixture's own source text, and `replace` is a token
-    # chosen to appear nowhere else — not in the claim, not in the witness
-    # id, not in the file name — so a match against the whole serialized
-    # result can only mean the edit itself leaked.
+    # `replace` appears nowhere else in the result, so finding it can only
+    # mean the edit leaked.
     criterion = _criterion(
         claim="the total is clamped at zero",
         find="max(x, 0)",
@@ -483,9 +478,9 @@ def test_a_blocking_witness_failure_is_an_ordinary_blocking_failure(tmp_path):
     nothing in the whole suite.
 
     So this guards the *shape* half and not the *reaches* half. The reaches
-    half is now true: item 71 gave `_advisory` (`saffron/gates/suite.py`) a
-    case for `witness`, so a failure is advisory below `elevated` and blocks
-    at `elevated` only — this file has no way to drive `_advisory` or
+    half is now true: `docs/BACKLOG.md` item 71 made `witness` advisory below
+    `elevated`, which now lives in `_advisory` (`saffron/gates/suite.py`),
+    so a failure blocks at `elevated` only — this file has no way to drive `_advisory` or
     `session._blocking`, so it cannot assert that itself. Said here rather
     than left as an apparent omission — the assertions below are real, and
     they are not the claim."""
