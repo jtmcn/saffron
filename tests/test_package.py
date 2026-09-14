@@ -2217,10 +2217,13 @@ def test_an_unmoved_base_still_reverifies_the_packaged_commit(monkeypatch, packa
     repackaged = GateResult(
         gate="tests", status="pass", tool="pytest 9.9.9", summary="ran on the package"
     )
-    monkeypatch.setattr(
-        "saffron.phases.package.reverify",
-        lambda **_k: _reverified(results=[repackaged]),
-    )
+    seen = {}
+
+    def _reverify(**kwargs):
+        seen.update(kwargs)
+        return _reverified(results=[repackaged])
+
+    monkeypatch.setattr("saffron.phases.package.reverify", _reverify)
 
     result = package(
         packageable.outcome,
@@ -2232,6 +2235,11 @@ def test_an_unmoved_base_still_reverifies_the_packaged_commit(monkeypatch, packa
     body = (packageable.outcome.task_dir / "pr_body.md").read_text()
     assert "packaged commit" in body
     assert "ran on the package" in body
+    # The commit pushed, against today's main — not the cell's own head.
+    assert seen["packaged_sha"] == result.pushed_sha
+    assert seen["new_base_sha"] == remote_sha(
+        str(packageable.remote), "main", cwd=packageable.work
+    )
     # The cell's own run at `tree_base` must never be the one shown, moved
     # base or not.
     assert "ran at base" not in body
