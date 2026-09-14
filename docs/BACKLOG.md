@@ -3817,6 +3817,8 @@ guard exists to make unnecessary once, and `describe`'s contract should be
 
 ## 62. A follower re-reads the whole log every poll, so watching a night is O(n²)
 
+**Status: spec queued, 2026-09-13 — `SA-0080`, not yet run.**
+
 **Tier 3.** Measured 2026-09-04 while reviewing `SA-0053` (PR #119), and named
 in a `ponytail:` beside the call.
 
@@ -3873,6 +3875,14 @@ live run — still exposed.
 ---
 
 ## 64. A re-run appends to the same log, so `watch` shows two nights as one
+
+**Status: spec queued, 2026-09-13 — `SA-0081`, stacked on `SA-0080`, not yet
+run.** Two things below are out of date. The run id is *not* minted before the
+first event: the ledger mints run and task ids inside `run_one_cell`, after
+`Ceilings` and the cell's first `Preflight` are logged. And the two "runs" are two
+**tasks**, since a run is a repo's slice of a batch. The marker exists anyway:
+`Ceilings` is the first event `run_task` writes, so the spec keys the boundary
+on it.
 
 **Tier 3.** Measured 2026-09-04 while reading `SA-0051`'s second run with the
 verb built two specs earlier.
@@ -6366,6 +6376,8 @@ has no probed answer yet — with a witness that grafts a worktree the way
 ---
 
 ## 111. `runtime.probe()`'s once-per-session answer and its timeout are both untested
+
+**Status: spec queued, 2026-09-13 — `SA-0079`, not yet run.**
 
 **Tier 3.** Found reviewing `SA-0077` (PR #232), 2026-09-12. Two lines of
 `probe()` survive deletion with the suite green: the memo that asks the runtime

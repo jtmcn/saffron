@@ -1818,7 +1818,13 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-12, a twenty-second time: `SA-0078` (item 109)
+    """Re-measured 2026-09-13, a twenty-third time: `SA-0079` (item 111),
+    `SA-0080` (item 62) and `SA-0081` (item 64) queued. The first two are
+    independent and join the candidates. `SA-0081` is refused, which is
+    correct: it stacks on `SA-0080`, both edit `saffron/watch.py`, and the
+    parent has no task yet.
+
+    Re-measured 2026-09-12, a twenty-second time: `SA-0078` (item 109)
     queued, independent of everything, so it joins the candidates. `SA-0075`
     is still refused on its parent.
 
@@ -1901,9 +1907,12 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0076",
         "SA-0077",
         "SA-0078",
+        "SA-0079",
+        "SA-0080",
     ]
-    assert [r.path.name[:7] for r in refusals] == ["SA-0075"]
+    assert [r.path.name[:7] for r in refusals] == ["SA-0075", "SA-0081"]
     assert "SA-0074 has no task" in refusals[0].reason
+    assert "SA-0080 has no task" in refusals[1].reason
     # A precondition, not the glob check: `done/` is populated, so the empty
     # queue above is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30
