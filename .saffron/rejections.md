@@ -268,6 +268,26 @@ landing. An entry dated on or after 2026-09-09 was written when the rejection wa
   covered only the half any implementation passes, not failures keyed off node ids.
   **Bucket 1** — `witness`, a mutant per clause of the claim. **Open.**
 
+## 2026-09-14 — `SA-0086` (#255)
+
+- Re-verifying every packaged commit sent every body down `pr_body.py`'s
+  `"packaged"` branch. Its reason, "because the base moved", is false on the
+  unmoved-base path most tasks take. The file was forbidden, and the review fixed
+  it there by operator decision.
+  **Bucket 3** — a changed value's consumers, read for what they now say. **Open** — item 118.
+- The unmoved-base witness stubbed `reverify` with `lambda **_k` and never read its
+  arguments, so re-verifying the cell's own head passed all 136 tests.
+  **Bucket 1** — `witness`, a declared mutant on `packaged_sha`; the spec declared none. **Open.**
+- The stacked-child note has no witness: `tree_base` → `base_sha` in the `moved`
+  test survived the whole file.
+  **Bucket 1** — `witness`, the same kind of mutant. **Open** — item 121.
+- Three comments called the cell's gate results a "verdict", and two test comments
+  still tied re-verification to a moved base. The rewritten docstring retold
+  Appendix Q instead of citing §5.7, and its parameter carried `tree_base` under
+  the name `base_sha`.
+  **Bucket 3** — a closed-vocabulary word used in another sense, and comments read
+  against the rule the diff changed. **Open** — the spec's own text says "verdict" (item 118).
+
 ---
 
 ## First reading — 2026-09-09

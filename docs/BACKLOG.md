@@ -59,7 +59,7 @@ already names), **93**, **94**, ~~**109**~~ (filed 2026-09-12; it
 leaks a mutant wherever 80 stores one), **114** (109's other path, to the critic),
 **115** (a path hidden from `scope` by committed content), **80** (~~**83**~~, ~~**85**~~, ~~**84**~~,
 ~~**82**~~ and ~~**81**~~, pulled up from tier 3 as why 69's gate could not be
-declared against safely, are done — 2026-09-08), then **97**, **102** and ~~**112**~~. Honesty second:
+declared against safely, are done — 2026-09-08), then **97**, **102**, ~~**112**~~, **119** and **120**. Honesty second:
 ~~**73**~~, ~~**70**~~, ~~**45**~~, **51** (with **49**/**50**, which its fix closes),
 ~~**47**~~, **46** (with ~~**95**~~, which compounds it), **40**, ~~**26**~~,
 ~~**7**~~, and ~~**78**~~.
@@ -129,7 +129,7 @@ fire. Its number stays listed because item numbers are cited from `saffron/`.
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**,
-~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, **110**, **111**, **116**.
+~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, **110**, **111**, **116**, **121**, **122**.
 (**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived, and **69** is ranked there too.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
 is the same defect as filing one nowhere at all. **94** was filed here and moved
@@ -157,7 +157,9 @@ against it, and renumbered when #222's items landed first. **112** was filed
 2026-09-13 as a second 109, and renumbered when #234's 109 was found to have
 landed first. **113** was filed open on 2026-09-13, to tier 2 beside 37 and 38.
 **114**–**117** were filed open on 2026-09-14 from the reviews of the spec loop's
-stack — **114**, **115** and **117** to tier 1, **116** to tier 3.)
+stack — **114**, **115** and **117** to tier 1, **116** to tier 3.
+**119**–**122** were filed open the same day from the loop's second run —
+**119** and **120** to tier 1, **121** and **122** to tier 3.)
 
 ---
 
@@ -2740,6 +2742,14 @@ It happened again on 2026-09-14: `SA-0080` (PR #247, stack #251) left its cell a
 witnesses, one of which is the only test that fails on the defect the spec exists
 for, and a shared decode helper. The operator chose to merge it over the ceiling,
 with this item as the record.
+
+And the same day with `scope` instead of `size`: `SA-0086` (PR #255) forbade
+`saffron/report/pr_body.py`, and its review round edited that file (`4ba8bdf`),
+by operator decision. The diff had made the file's `"packaged"` sentence false
+on every unmoved-base pull request. `scope` runs in the cell against the cell's
+diff, so nothing on the branch records that it now carries a forbidden path. It
+is the same fix: re-run the gates the cell passed against the branch before it
+is marked ready, and have an operator's exemption leave a record.
 
 
 ## 41. `NO_PROXY=""` denies a cell its own loopback, so a test that stands up a local server fails at baseline forever
@@ -6641,6 +6651,15 @@ because the lens authored it and a fresh one can be asked for each round.
 
 ## 118. The verdict of record is computed inside the container the implementer controlled
 
+**Status:** open. `SA-0086` is `READY_FOR_REVIEW`: PR #255, 2026-09-14,
+reviewed on the spec loop's second run. It is that run's only reviewable pull
+request, so it is not stacked. `SA-0087` ran twice. The first cell ended
+`NOT_IMPLEMENTED` at its turn ceiling ($8.39 of $8, item 119). The second, with
+its ceilings raised in #256, went green on its first attempt and halted at
+`REBUTTING` when REBUT ran out of budget ($14.03 of $14, item 120). Its branch,
+`saffron/SA-0087` @ `82258f0`, is pushed with no pull request. The operator
+stopped the chain there, so `SA-0088` and `SA-0089` never ran.
+
 **Tier 1.** Found threat-modelling Saffron, 2026-09-13, and confirmed by
 reading rather than by probe. The cell runs as root on a writable rootfs
 (`_run_argv` passes no `--read-only` and no image sets `USER`), and three
@@ -6686,6 +6705,43 @@ critic cell, where a gate would run as root before the lenses do).
   this is a verdict that did not reproduce.
 - `saffron/report/pr_body.py`'s `_verification("base")` branch becomes
   unreachable once `SA-0086` lands. Delete it, or keep it as a guard.
+- Found reviewing #255: the `"packaged"` branch gave "because the base moved
+  after this task started" as its reason, which is false on every unmoved-base
+  pull request once `SA-0086` re-verifies them all. It was fixed on the branch
+  (`4ba8bdf`) by operator decision, though the spec forbade the file (item 40).
+- `DESIGN.md` §5.7 goes stale when #255 merges, in two places: "`SA-0086` builds
+  it; until it lands the skip still stands", and "whether or not the suite
+  re-runs".
+- "Verdict" is used for the cell's gate results in §5.7 ("the cell's own
+  verdict did not reproduce"), in Appendix Q's "verdict of record", and in
+  `SA-0086`'s own spec text. That goes against `CONTEXT.md`'s **Suite
+  comparison** _Avoid_ line and its "never call any of them 'the verdict'
+  without saying whose". #255's review took the word out of the code, and the
+  design text still carries it.
+- **Before `SA-0087` runs again, its third criterion needs amending.** It says "a
+  patch that does not apply to its own base in that fresh tree ends the task
+  `EXHAUSTED`". `worktree.DIFF_FLAGS` has no `--binary` or `--full-index`, so a
+  binary change exports as a `Binary files … differ` stub that can never apply,
+  whatever the agent did. PACKAGE's `apply_patch` already calls that
+  infrastructure (`PackageError`, exit 2;
+  `test_a_binary_patch_is_an_error_not_a_conflict`). Built to the letter, as on
+  `saffron/SA-0087` @ `82258f0` (`apply_exported_patch`, the
+  `CriticPatchApplyFailed` catch), a task touching a binary file ends `EXHAUSTED`
+  before any lens runs and is charged for a gap in the export. That breaks
+  `error` ≠ `fail`. The contract lens raised it as a blocker, and REBUT never
+  answered it (item 120). Confirmed by reading; no binary diff was run through it.
+  The amendment: a stub the export could never carry is `GATE_ERROR` or a
+  refusal at export, as PACKAGE has it, and only a real failure to apply is the
+  task's.
+- **`SA-0087`'s second criterion needs a witness that can fail.**
+  `test_the_critic_reads_the_tree_rebuilt_from_the_exported_patch` asserts
+  `read_head_containers == [] or …`, and no test scripts a finding outside a
+  diff hunk, so `anchor()` never calls `read_head`. The adequacy lens's probe,
+  pointing `read_head` at the implementer's own `container` in place of
+  `critic_container`, passes all 157 tests in `tests/test_session.py` on
+  `82258f0` (run 2026-09-14). That swap is the regression the spec exists to
+  prevent. The re-run's witness needs a finding anchored outside a hunk and an
+  assertion that `read_head` ran, and ran in the critic cell.
 
 **Not this item:** the threat model's other owner-chosen half, re-gating the
 head that merges and handing a delegate findings only as quoted data. Items
@@ -6694,6 +6750,100 @@ head that merges and handing a delegate findings only as quoted data. Items
 **Done looks like** no gate result or lens finding that reaches a pull
 request, and no gate table a lens is shown, was produced in a container the
 implementer ran in.
+
+---
+
+## 119. A turn ceiling reached before the first commit still loses the work when the budget is spent, and planning can spend half of it first
+
+**Tier 1.** Found running the spec loop, 2026-09-14 (its second run). Item 18
+closed "turn exhaustion is total loss" with a salvage turn and a prompt asking
+for a commit per coherent step. Both cells of this run still reached their
+IMPLEMENT turn ceiling with nothing committed:
+
+| spec | plan checkpoint | IMPLEMENT session | at the ceiling | outcome |
+|---|---|---|---|---|
+| `SA-0086` | 20 turns, $1.82 | 41 turns, $2.33 | $4.15 of $6 | the salvage turn (3 turns, $0.17) committed it; `READY_FOR_REVIEW`, #255 |
+| `SA-0087` | 47 turns, $3.79 | 61 turns, $4.59 | $8.39 of $8 | `cut_off_no_salvage_room`; `NOT_IMPLEMENTED`, nothing exported |
+
+`SA-0087`'s last 30 turns ran the full suite, `ruff`, `types`, `ast-grep test`,
+`structure` and a size check. Turn 61 was `git diff --stat`, and no `git commit`
+ever ran (`~/.saffron/batches/v0/SA-0087/events.jsonl`). The salvage exists,
+and it was refused for money, not turns (`saffron/cell/session.py`, the
+`cut_off_no_salvage_room` branch). The plan checkpoint had spent 45% of the
+budget before a line was written.
+
+**Done looks like** the salvage turn's cost reserved out of IMPLEMENT's
+`max_budget_usd`, so a turn ceiling can always be salvaged, and a measured
+answer on whether the plan checkpoint's spend belongs in the budget IMPLEMENT is
+judged against. Raising the spec's ceilings (#256) was the workaround, and it
+moved the shortfall to REBUT (item 120).
+
+---
+
+## 120. REBUT gets whatever the task budget has left, and the halt it ends in reads as a corpse
+
+**Tier 1.** Found running the spec loop, 2026-09-14 (its second run).
+`SA-0087`'s second cell went green on its first attempt at $8.64 of $14, and its
+lenses spent $2.21 raising two anchored blockers. REBUT's cap is
+`critic_budget(spec.budget_usd, spent)`: the remainder, floored at
+`REVIEW_FLOOR_USD` (`saffron/cell/session.py:130`, passed at `:1767`). Here that was
+$3.09, and the rebuttal session exhausted it with no output. `rebuttal.json` then
+says "the rebuttal moved no commit and made no argument", the same words it would
+use for an implementer that chose to say nothing. The task halts at `REBUTTING`,
+as §5.6 intends (`DESIGN.md`, "earns nothing and halts at `REBUTTING`").
+PACKAGE pushes the branch and opens no pull request. Three things read that halt
+wrongly:
+
+- `REBUTTING` is in `reconcile.IN_FLIGHT_STATES`, and §4.2's scan stamps any
+  in-flight task `ORPHANED` before re-queueing it. The next queue therefore
+  treats a deliberate halt as a crash.
+- `DEPENDENCY_WAITING_STATES` (`saffron/scheduler.py:91`) excludes it, so a child
+  cannot stack on a branch PACKAGE did push. This is why the operator dropped
+  `SA-0088` and `SA-0089`.
+- The spec loop's driver waits on it as a running cell
+  (`docs/evidence/2026-09-14-spec-loop-skill-feedback-run-2.md`, observation 13).
+
+**Done looks like** REBUT's budget decided on purpose, as a reserve or a ceiling
+of its own, rather than inherited as a remainder. A rebuttal that ran out of
+budget is reported as that. And `REBUTTING` after the cell exits is named as a
+halt everywhere it is read, or gets the terminal state §5.6 says §3.3 lacks.
+
+---
+
+## 121. What #255's review left
+
+**Tier 3.** Kept from the review of `SA-0086` (PR #255), 2026-09-14.
+
+- **The stacked unmoved-parent note is unwitnessed.** In
+  `saffron/phases/package.py`, `moved = needs_reverification(target_head,
+  tree_base)` survives the mutant `tree_base` → `base_sha` across all 136 tests
+  in `tests/test_package.py`. No test drives a red re-run for a stacked child
+  whose parent held still, so the "the base did not move" note is untested on
+  that path. It was kept because a stacked witness would have taken the branch
+  past its 300-line ceiling.
+- **The body's new-failures section may still be the cell's.**
+  `render_pr_body` receives `outcome.new_failures` beside the re-run's gate
+  table. The section is reached only when the re-run found no new failures, so
+  whether this is a defect depends on whether a `READY_FOR_REVIEW` outcome can
+  carry a non-empty list, for example advisory failures. Unverified.
+
+**Done looks like** a stacked witness with an unmoved parent and a red re-run,
+asserting the note, and the second bullet either reproduced or closed on reading.
+
+---
+
+## 122. The event log records that a tool ran, never what it returned
+
+**Tier 3.** Found diagnosing `SA-0087`'s turn-ceiling loss, 2026-09-14. An agent
+`tool_result` event carries `is_error` and nothing else. The size check the
+agent ran just before it was cut off therefore left no record of the count it
+saw. The log can say what the agent tried and not what it learned, and the
+second is what a post-mortem of a lost cell needs first. Bounded output is the
+obvious objection, and the log already bounds agent text (`bounded`,
+`original_chars`).
+
+**Done looks like** a clipped tail of each tool result in its event, under the
+same bound agent text has.
 
 ---
 
