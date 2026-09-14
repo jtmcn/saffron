@@ -157,6 +157,117 @@ landing. An entry dated on or after 2026-09-09 was written when the rejection wa
   **Bucket 1** — **Open:** item 87. No round in the record attributes it; a
   rejection whose pull request cannot be cited is itself worth noticing.
 
+## 2026-09-14 — `SA-0078` (#243)
+
+- The fix's comment named IMPLEMENT for the REPAIR turn its message reaches, and
+  called itself the one place the edit could leak when the `unproven` note is
+  another; a later test argument and a backlog citation were stale the same way.
+  **Bucket 3** — a comment's claim checked against the code it describes. **Open.**
+- A nine-line cross-reference comment above one call. The operator's terse-comment
+  rule lives in a `CLAUDE.md` no cell reads; three of this stack's four diffs broke it.
+  **Bucket 2** — the rule, in the repo's own `CLAUDE.md`. **Open.**
+- A mutant that does not apply still carries its `find` text into the critic's prompt
+  through the `unproven` note.
+  **Bucket 1** — **Open:** item 114.
+
+## 2026-09-14 — `SA-0082` (#244)
+
+- The submodule witness passed with the flag swapped for `-c diff.ignoreSubmodules=none`,
+  which the spec's own table called equivalent and a committed `.gitmodules` defeats.
+  **Bucket 1** — `witness`, had the spec declared that mutant. **Open.**
+- A docstring quoted a count measured on the probe script's fixture for a test that
+  builds a different one, and named the host's git where the read runs on the cell's.
+  **Bucket 3** — a measured number checked against what it was measured on. **Open.**
+- `tests/test_package.py` restates `DIFF_FLAGS` — five flags of eleven — under a
+  fixture that says it is shaped exactly like `export_patch`'s output.
+  **Bucket 1** — a structure rule refusing a second definition. **Open:** item 89.
+- The same `.gitmodules` hides a gitlink from PACKAGE's scope listing and the
+  mirror's `changed_files`, neither of which carries the flag.
+  **Bucket 1** — **Open:** item 115.
+
+## 2026-09-14 — `SA-0083` (#246)
+
+- The `advice.graftFileDeprecated` override had no witness: deleting it left every
+  test green.
+  **Bucket 1** — `witness`, one mutant per pinned line. **Open.**
+- An eleven-line comment beside neighbours of two or three. The same rule as
+  `SA-0078`'s second line.
+  **Bucket 2** — **Open.**
+
+## 2026-09-14 — `SA-0079` (#245)
+
+- The memo witness's stub only ever answered present, so a memo that forgets an
+  absent answer — the case `probe()`'s docstring gives as its reason — passed.
+  **Bucket 1** — `witness`, a second declared mutant. **Open.**
+- The hang witness left a `sleep 300` running for five minutes on every run.
+  **Bucket 1** — a suite-level check for processes a test leaves behind. **Open.**
+- REBUT fixed the adequacy blocker and kept the lens's counterexample in the
+  comment as "`probe()`'s own 60s bound", which `probe()` does not have.
+  **Bucket 3** — the rebuttal verdict reads the comment as well as the code. **Open.**
+- `_call`'s timeout kills only the runtime's own process, so one that forks leaves its
+  children running.
+  **No bucket** — **Open:** item 116.
+
+## 2026-09-14 — `SA-0080` (#247)
+
+- The witness for "nothing already read is read or parsed again" failed at base only
+  because base's count-based slice dropped an event: a follower re-parsing the whole
+  log each poll and keeping its tail passed it and the full suite.
+  **Bucket 1** — `witness`, had the spec declared a mutant for its headline claim. **Open.**
+- The offset reader's comment claimed `read_log`'s per-line tolerance for an
+  undecodable line; `read_log` decoded the whole file and raised on one bad byte.
+  **Bucket 3** — a comment's claim checked against the code it describes. **Open.**
+- The implementer proved its witness failed at base by checking base's source out
+  into `/work`, ran out of turns before restoring it, and its first attempt's gates
+  failed on its own dirty tree.
+  **Bucket 2** — a `CLAUDE.md` line: prove a witness against base somewhere other than
+  the worktree being packaged. **Open.**
+
+## 2026-09-14 — `SA-0081` (#248)
+
+- The two-task fixture left the newest task live, so a cut after the last `Terminal`
+  instead of at the last `Ceilings` passed every test while rendering nothing once
+  that task finishes.
+  **Bucket 1** — `witness`, a declared mutant on the boundary's own line. **Open.**
+- `follow`'s docstring called the first poll's events "that first batch"; a batch is
+  a night.
+  **Bucket 3** — a closed-vocabulary word used in another sense. **Open.**
+- The pass-through witness's fake gave the new keyword a default, so a caller that
+  omitted it passed; the flag's help text carried the spec's design note to operators.
+  **Bucket 3** — a fake that cannot fail the way its docstring says. **Open.**
+
+## 2026-09-14 — `SA-0084` (#249)
+
+- Both control-byte witnesses ran every code point through the helper directly and
+  handed the renderer only ESC and BEL, so a render stripping just those two passed
+  the criteria that say "every control character".
+  **Bucket 1** — `witness`, a mutant that narrows the strip. **Open.**
+- One `Terminal` branch still printed the runtime's own `subtype` and
+  `terminal_reason` raw — the two fields the agent-event renderer already cleans.
+  **Bucket 1** — a structure rule: every `describe` branch interpolating an event
+  field goes through the cleaner. **Open.**
+- The new bound's comment called its reasoning measured and stated the measurement
+  backwards — 160 "already clips" a 91-character line from a render the bound never
+  touches — citing the backlog for an instruction that was the spec's.
+  **Bucket 3** — a measured number checked against what it was measured on. **Open.**
+- The clip's docstring contradicted itself on which fields pass through it, and the
+  diff called cell-written text "model-authored", where "model" names an identifier.
+  **Bucket 3** — **Open.**
+
+## 2026-09-14 — `SA-0085` (#250)
+
+- The new baseline line was prefixed `criteria:`, reading as a `criteria` gate result
+  on the event whose line above reports `criteria=skip`.
+  **Bucket 3** — a line family named after a gate that did not run. **Open.**
+- The shared rule's docstring said `_judge` asks it after a witness has failed, when
+  it asks after the witness passed at head; two docstrings promised a failure on the
+  first attempt that `witness-failed` pre-empts whenever head fails the witness.
+  **Bucket 3** — a comment's claim checked against the code it describes. **Open.**
+- The first witness's "before the first turn" was anchored on a line logged after the
+  first turn, so the naming could be held past it; and its "unreadable baseline" case
+  covered only the half any implementation passes, not failures keyed off node ids.
+  **Bucket 1** — `witness`, a mutant per clause of the claim. **Open.**
+
 ---
 
 ## First reading — 2026-09-09
