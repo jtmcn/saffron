@@ -1676,6 +1676,21 @@ def _three_commit_repo(tmp_path, monkeypatch):
     return base, middle, head
 
 
+def _bare_history(tmp_path, base):
+    """What an unpinned `git` reads: the commit count and subjects since base."""
+
+    def read(*args):
+        return subprocess.run(
+            ["git", *args, f"{base}..HEAD"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+
+    return read("rev-list", "--count").strip(), read("log", "--format=%s").splitlines()
+
+
 def test_history_reads_see_through_a_graft_file(tmp_path, monkeypatch):
     base, _middle, head = _three_commit_repo(tmp_path, monkeypatch)
     # One line, `<head> <base>`: git then treats head as parented directly on
@@ -1684,28 +1699,15 @@ def test_history_reads_see_through_a_graft_file(tmp_path, monkeypatch):
     _host_git(tmp_path, monkeypatch)
 
     # Prove the plant first: a bare read in this same repo is fooled.
-    bare_count = subprocess.run(
-        ["git", "rev-list", "--count", f"{base}..HEAD"],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    assert bare_count == "1"
-    bare_subjects = subprocess.run(
-        ["git", "log", "--format=%s", f"{base}..HEAD"],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.splitlines()
-    assert bare_subjects == ["innocent"]
+    assert _bare_history(tmp_path, base) == ("1", ["innocent"])
 
     assert worktree.commits_ahead("c", base) == 2
     assert worktree.commit_subjects("c", base) == [
         "innocent",
         "touch a forbidden path",
     ]
+    # The deprecation hint `GIT_GRAFT_FILE` provokes stays off stderr.
+    assert worktree._git("c", "rev-list", "--count", f"{base}..HEAD").stderr == ""
 
 
 def test_history_reads_see_through_a_shallow_file(tmp_path, monkeypatch):
@@ -1715,22 +1717,7 @@ def test_history_reads_see_through_a_shallow_file(tmp_path, monkeypatch):
     _host_git(tmp_path, monkeypatch)
 
     # Prove the plant first: a bare read in this same repo is fooled.
-    bare_count = subprocess.run(
-        ["git", "rev-list", "--count", f"{base}..HEAD"],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    assert bare_count == "1"
-    bare_subjects = subprocess.run(
-        ["git", "log", "--format=%s", f"{base}..HEAD"],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.splitlines()
-    assert bare_subjects == ["innocent"]
+    assert _bare_history(tmp_path, base) == ("1", ["innocent"])
 
     assert worktree.commits_ahead("c", base) == 2
     assert worktree.commit_subjects("c", base) == [

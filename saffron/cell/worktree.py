@@ -176,17 +176,9 @@ def _git(container: str, *args: str) -> runtime.Completed:
     # (docs/BACKLOG.md item 102).
     # bigFileThreshold, attributesFile: either can print an edit as `Binary files
     # differ`, so no lens reads its hunks (docs/BACKLOG.md item 103).
-    # GIT_GRAFT_FILE, GIT_SHALLOW_FILE: an agent-written `.git/info/grafts` or
-    # `.git/shallow` re-parents or truncates history, undercounting
-    # `commits_ahead` and dropping subjects from `commit_subjects` — measured
-    # on git 2.39.5 (the cell image) and git 2.54 (the host),
-    # `docs/evidence/scripts/2026-09-13-history-and-diff-pins.sh`. There is no
-    # command-line pin for the shallow file — `--shallow-file` is refused as
-    # an unknown option — and `GIT_SHALLOW_FILE` itself is undocumented; both
-    # env vars point git at `/dev/null` instead, `env` prefixed ahead of
-    # `git` because `runtime.exec_` takes no environment. Pointing at
-    # `/dev/null` when neither file exists is a no-op, so this is a pin, not
-    # a behaviour change for the ordinary case.
+    # GIT_GRAFT_FILE, GIT_SHALLOW_FILE: a planted grafts or shallow file re-parents
+    # the history `commits_ahead` counts (docs/BACKLOG.md item 110). No flag pins
+    # either, and `exec_` takes no env; measured on git 2.39.5 and 2.54.
     # advice.graftFileDeprecated=false: setting `GIT_GRAFT_FILE` alone makes
     # git print its eight-line "grafts is deprecated" hint on stderr on every
     # call, present or not — measured the same way as the two vars above.
