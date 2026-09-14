@@ -48,6 +48,10 @@ WATCH_PREFIXES = (
     "teardown",
     "rate limit",
     "cell:",
+    # Neither a phase nor a state, and `budget:` is what says a turn-ceiling
+    # line is the end (SA-0087).
+    "PLAN",
+    "budget:",
 )
 
 if not (REPO / "DESIGN.md").is_file():  # the skill was moved; say so, do not guess
@@ -842,6 +846,16 @@ def cmd_next(args) -> int:
     return 1
 
 
+def _cell_running(spec_id: str) -> bool:
+    """Whether a `saffron cell` for this spec is still alive. Without one, an
+    in-flight state is a halt: SA-0087's REBUT ran out of budget and the task
+    stayed `REBUTTING` after the process exited (§5.6)."""
+    done = subprocess.run(
+        ["pgrep", "-f", f"saffron cell .*{spec_id}"], capture_output=True, text=True
+    )
+    return done.returncode == 0
+
+
 def cmd_record(args) -> int:
     """What the cell did, read from the ledger (§4.3)."""
     rows = _load()
@@ -854,6 +868,7 @@ def cmd_record(args) -> int:
     from saffron.scheduler import DONE_STATES
 
     ledger, repo_id, _url = _ledger_and_repo()
+    running, pushed = False, ""
     try:
         if repo_id is None:
             return _fail("this repo has no ledger row yet")
@@ -887,8 +902,10 @@ def cmd_record(args) -> int:
             match.state = None
             match.pr = pr or match.pr
             match.last_state = state
-            if state not in IN_FLIGHT_STATES:
+            running = state in IN_FLIGHT_STATES and _cell_running(args.spec_id)
+            if not running:
                 match.undecided_cells += 1
+            pushed = line["pushed_sha"] or ""
     finally:
         ledger.close()
 
@@ -897,11 +914,18 @@ def cmd_record(args) -> int:
     cost = f"  ${spent:.2f} of ${budget:.2f}" if spent is not None and budget else ""
     print(f"{match.spec_id}  {state}  {where}{cost}")
     if match.state is None:
-        why = (
-            "the cell is still running — wait for it to exit, then record again"
-            if state in IN_FLIGHT_STATES
-            else "nothing was decided; `next` moves on to the next untouched spec"
-        )
+        if running:
+            why = "the cell is still running — wait for it to exit, then record again"
+        elif state in IN_FLIGHT_STATES:
+            branch = f", its branch pushed at {pushed[:12]}" if pushed else ""
+            why = (
+                f"halted at {state}: the cell has exited and nothing decided the "
+                f"task{branch}. The operator's call — raise the spec's ceilings and "
+                "re-run, take the branch by hand, or drop it; a child cannot stack "
+                "on it (GOTCHAS, Recording)"
+            )
+        else:
+            why = "nothing was decided; `next` moves on to the next untouched spec"
         print(f"left pending: {why}.", file=sys.stderr)
     return 0 if state == "READY_FOR_REVIEW" else 1
 

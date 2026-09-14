@@ -351,6 +351,18 @@ def test_the_watch_pattern_ignores_state_names_inside_the_agents_own_lines():
     assert pattern.search("Traceback (most recent call last):")
 
 
+def test_the_watch_pattern_shows_the_lines_that_decide_a_turn_ceiling():
+    # SA-0087: a turn-ceiling line reads as non-terminal, and only the `budget:`
+    # line after it said nothing could be salvaged. The Monitor never showed it.
+    pattern = re.compile(driver.watch_pattern())
+    assert pattern.search(
+        "budget: $8.39 of $8.00 — cut off at the turn ceiling with nothing "
+        "committed, no room left to salvage"
+    )
+    assert pattern.search("PLAN: accepted, sha256 ff246b44a498")
+    assert not pattern.search('agent: Bash {"command": "echo budget: 1"}')
+
+
 def test_the_driver_reads_every_terminal_state_from_the_ontology():
     assert sorted(driver.terminal_states()) == sorted(TERMINAL_STATES)
 
@@ -610,6 +622,62 @@ def test_record_keeps_what_package_pushed_and_says_what_the_cell_spent(
     assert capsys.readouterr().out == (
         f"{spec_id}  READY_FOR_REVIEW  #247  $7.55 of $6.00\n"
     )
+
+
+@pytest.mark.parametrize("running", [False, True])
+def test_record_calls_an_in_flight_state_a_halt_once_the_cell_has_exited(
+    loop, monkeypatch, capsys, running
+):
+    # SA-0087's second cell exited with the task at REBUTTING, its branch
+    # pushed, and `record` said "the cell is still running" to a delegate the
+    # skill had told to wait for exactly that.
+    from saffron.ledger import Ledger
+
+    spec_id = loop.ids[0]
+    driver._save([loop.row(0)])
+    sha = driver._load()[0].spec_sha
+    ledger = Ledger(loop.root / "ledger.db")
+    repo_id = ledger.upsert_repo("r", "git@github.com:o/r.git", "/mirror", "policy")
+    task_id = ledger.create_task(
+        ledger.create_run(repo_id, "b" * 40), spec_id, sha, "saffron/X", budget_usd=14.0
+    )
+    ledger.set_task_state(task_id, "REBUTTING")
+    ledger.record_push(task_id, "p" * 40)
+    monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (ledger, repo_id, "url"))
+    monkeypatch.setattr(driver, "_cell_running", lambda _spec_id: running)
+
+    assert driver.cmd_record(argparse.Namespace(spec_id=spec_id)) == 1
+    row = driver._load()[0]
+    err = capsys.readouterr().err
+    assert row.state is None and row.last_state == "REBUTTING"
+    if running:
+        assert "still running" in err
+        assert row.undecided_cells == 0
+    else:
+        assert "halted at REBUTTING" in err and "p" * 12 in err
+        assert "still running" not in err
+        assert row.undecided_cells == 1
+
+
+@pytest.mark.skipif(shutil.which("pgrep") is None, reason="needs pgrep")
+def test_a_live_saffron_cell_is_found_by_its_spec_id():
+    probe = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import time; time.sleep(30)",
+            "saffron",
+            "cell",
+            ".saffron/specs/SA-9999-probe.md",
+        ]
+    )
+    try:
+        assert driver._cell_running("SA-9999")
+        assert not driver._cell_running("SA-9998")
+    finally:
+        probe.kill()
+        probe.wait()
+    assert not driver._cell_running("SA-9999")
 
 
 def test_a_resnapshot_keeps_what_the_loop_recorded(loop):
