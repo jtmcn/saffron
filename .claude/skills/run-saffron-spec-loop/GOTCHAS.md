@@ -90,7 +90,7 @@ independent specs nobody reviews between cells.
   `stack` runs that check on every adjacent pair. A conflict goes to the
   operator before linking: resolving it is a hand rebase of the upper branch
   onto the lower one, renumbering, a grep of the code for comments citing the
-  old number, and a force-push they approve.
+  old number, and a leased force-push.
 - **A child whose parent is not in the stack lands on the layer below.** `link`
   corrects every base it finds wrong, so the child's PR leaves its parent's
   branch and shows the parent's changes. `stack` warns and names where it lands.
@@ -114,8 +114,9 @@ independent specs nobody reviews between cells.
   `rebase` does: take each layer's fork point before moving anything,
   `git rebase --onto <layer below> <fork point> <branch>` bottom to top, and
   compare each layer's patch-id before and after.
-- **The push needs the operator's approval, every time.** It rewrites branches
-  with open PRs; `rebase` prints it with each lease pinned to the recorded SHA.
+- **The push is a leased force-push, which step 1's grant covers.** It
+  rewrites branches with open PRs, so `rebase` pins each lease to the recorded
+  SHA: a branch that moved since then is refused, not overwritten.
 
 ## Troubleshooting
 

@@ -165,13 +165,14 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py rebase --execute   # local
 ```
 
 It refuses a branch checked out in another worktree, records every branch's
-SHA before moving any, restores all of them on a conflict, and prints the push with each lease pinned to the recorded SHA. Run
-`make check` on the top branch, then ask the operator before running the push:
-it rewrites branches with open PRs.
+SHA before moving any, restores all of them on a conflict, and prints the push
+with each lease pinned to the recorded SHA. Run `make check` on the top branch,
+then run the push: step 1's grant covers a leased force-push to the loop's
+branches. It rewrites branches with open PRs, so show the operator its output.
 
 **Done when** every layer reports `identical` or its range-diff has been read,
-`make check` echoes `make exit: 0` on the top branch, and the operator has
-approved and seen the push run, or declined it.
+`make check` echoes `make exit: 0` on the top branch, and the operator has seen
+the push run.
 
 ## 5. File what the reviews left
 
