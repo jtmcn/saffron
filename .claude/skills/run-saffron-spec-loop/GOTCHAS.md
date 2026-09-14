@@ -76,6 +76,9 @@ do; the measurement behind it follows.
   operator before linking: resolving it is a hand rebase of the upper branch
   onto the lower one, renumbering, a grep of the code for comments citing the
   old number, and a force-push they approve.
+- **A child whose parent is not in the stack lands on the layer below.** `link`
+  corrects every base it finds wrong, so the child's PR leaves its parent's
+  branch and shows the parent's changes. `stack` warns and names where it lands.
 - **Read the bases back after linking.** A numeric first argument to `link` is
   taken as a stack number when a stack with that number exists, and the rest
   are appended to it. `stack --execute` reads every PR's base and flags one that
@@ -105,6 +108,7 @@ do; the measurement behind it follows.
 |---|---|
 | `no order at .saffron-loop/order.json` | Run `snapshot`. A leftover `plan.json` is the previous driver's file; delete it. |
 | `next` or `status` says the order is stale | A spec moved or was edited, or a PR merged or closed since the snapshot. `snapshot --force`; it keeps every recorded outcome still true. |
+| `snapshot --force`: `held out … #N is still open` | The spec was edited after its PR was packaged. Close #N to run the edited spec, or revert the edit to keep #N in the stack. |
 | `next`: `held back SA-NNNN: its parent … so a cell would cut it from main` | The parent has no reviewable branch. `next --again` once a rate-limited parent's window reopens; `drop` the child otherwise. |
 | `snapshot` prints `nothing to run: no candidate specs` | Every spec is done at its current `spec_sha`, or refused; the refusals are printed. |
 | `record`: `no task for SA-NNNN at <sha>` | The spec was edited after its cell ran. Re-run the cell, or revert the edit. |
@@ -113,3 +117,4 @@ do; the measurement behind it follows.
 | Preflight fails naming host ports | The allowlist variable is missing from the invocation (Starting cells). |
 | `next`: `nothing untouched left` | Every pending spec already had a cell that decided nothing. `next --again` after a reopened rate-limit window; `drop` otherwise. |
 | `rebase` refuses: local branch differs from origin | Push or reset the local branch first; the rebase starts from what is on GitHub. |
+| `rebase` refuses: `<branch> is checked out in <path>` | A step 2c review worktree still holds it. `git -C <path> switch --detach`, or remove that worktree, then run `rebase` again. |

@@ -37,6 +37,7 @@ order — and every later command reads that file.
 
 An existing order is kept until `snapshot --force`, which rescans and keeps
 every recorded outcome still true — a reviewable PR, a drop, an undecided cell.
+A spec edited while its PR is open is held out of the new order and named.
 `status` and `next` call an order **stale** when a spec file moved or changed or
 a PR merged or closed, and `next` refuses a stale one. A spec queued since the
 snapshot is not in it: re-snapshot to add it.
@@ -132,8 +133,8 @@ The stack order is the loop's order rearranged so each child sits directly above
 its parent. The dry run prints it, runs `git merge-tree` on every adjacent pair,
 and shows the `gh stack link` command. `link` retargets each PR onto the one
 below; its diff stays right and only what merging it would do changes. A
-`CONFLICT` between neighbours goes to the operator before linking (GOTCHAS,
-Stacking). Every PR stays a draft: ratifying is `gh pr ready <n>`, the
+`CONFLICT` between neighbours, and a child whose parent is not in the stack,
+go to the operator before linking (GOTCHAS, Stacking). Every PR stays a draft: ratifying is `gh pr ready <n>`, the
 operator's.
 
 **Done when** `--execute` reports every PR's base as the branch below it.
@@ -148,8 +149,8 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py rebase             # dry r
 uv run .claude/skills/run-saffron-spec-loop/driver.py rebase --execute   # local rebase, then each layer's patch-id
 ```
 
-It records every branch's SHA before moving any, restores all of them on a
-conflict, and prints the push with each lease pinned to the recorded SHA. Run
+It refuses a branch checked out in another worktree, records every branch's
+SHA before moving any, restores all of them on a conflict, and prints the push with each lease pinned to the recorded SHA. Run
 `make check` on the top branch, then ask the operator before running the push:
 it rewrites branches with open PRs.
 

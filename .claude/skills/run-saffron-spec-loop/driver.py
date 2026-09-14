@@ -121,14 +121,33 @@ def _protected() -> list[str]:
     return list(getattr(policy, "protected", []) or [])
 
 
-def _scan(*, ignore_open_prs: bool):
+def _hiding(gh, branches: frozenset[str]):
+    """`gh`, with every pull request from `branches` left out of what it lists."""
+
+    def run(argv):
+        done = gh(argv)
+        try:
+            listed = json.loads(done.stdout)
+        except (TypeError, ValueError):
+            return done
+        if done.returncode != 0 or not isinstance(listed, list):
+            return done
+        kept = [
+            pr
+            for pr in listed
+            if not (isinstance(pr, dict) and pr.get("headRefName") in branches)
+        ]
+        return subprocess.CompletedProcess(argv, 0, json.dumps(kept), done.stderr)
+
+    return run
+
+
+def _scan(*, loop_branches: frozenset[str]):
     """`build_queue` over the specs on disk. A re-snapshot mid-loop looks past
-    open pull requests, which are this loop's own; a first one does not."""
+    the loop's own open pull requests, each of which would refuse its
+    siblings on the conflict set, and no one else's."""
     from saffron.phases import package as package_phase
     from saffron.scheduler import build_queue, run_gh
-
-    def no_prs(argv):
-        return subprocess.CompletedProcess(argv, 0, stdout="[]", stderr="")
 
     ledger, repo_id, url = _ledger_and_repo()
     try:
@@ -142,7 +161,7 @@ def _scan(*, ignore_open_prs: bool):
             ledger,
             repo_slug=slug,
             protected=_protected(),
-            gh=no_prs if ignore_open_prs else run_gh,
+            gh=_hiding(run_gh, loop_branches),
         )
     finally:
         ledger.close()
@@ -153,11 +172,15 @@ def _relative(path: Path) -> str:
 
 
 def _order(
-    candidates, refusals, carried: Sequence[OrderRow] = ()
+    candidates,
+    refusals,
+    carried: Sequence[OrderRow] = (),
+    exclude: frozenset[str] = frozenset(),
 ) -> tuple[list[OrderRow], list[Path]]:
     """Parents before children, then priority, then id. A spec refused only
     for an unmet `depends_on` on a parent in the order is admitted; every
-    other refusal stands. A `carried` row outranks the scan's row for its id."""
+    other refusal stands. A `carried` row outranks the scan's row for its id,
+    and an `exclude`d id is admitted by neither."""
     from saffron.intake import load_spec
 
     def row_for(spec, path: Path) -> OrderRow:
@@ -172,7 +195,8 @@ def _order(
 
     admitted = {p.spec_id: p for p in carried}
     for c in candidates:
-        admitted.setdefault(c.spec.id, row_for(c.spec, c.path))
+        if c.spec.id not in exclude:
+            admitted.setdefault(c.spec.id, row_for(c.spec, c.path))
 
     deferred = []
     unreadable = []
@@ -189,7 +213,11 @@ def _order(
 
     for _ in range(len(deferred) + 1):  # enough passes for a chain
         for spec, path in deferred:
-            if spec.id not in admitted and all(d in admitted for d in spec.depends_on):
+            if (
+                spec.id not in admitted
+                and spec.id not in exclude
+                and all(d in admitted for d in spec.depends_on)
+            ):
                 admitted[spec.id] = row_for(spec, path)
 
     ordered: list[OrderRow] = []
@@ -278,19 +306,28 @@ def _stale(
     return [reason for p in rows for reason in _stale_reasons(p, pr_state)]
 
 
-def _carried() -> list[OrderRow]:
-    """The rows a re-snapshot keeps: every recorded outcome still true.
-    `build_queue` passes over a spec with a finished task, so an order rebuilt from
-    the scan alone dropped every reviewable pull request."""
+def _previous() -> list[OrderRow]:
     try:
-        previous = _parse_order() if ORDER.is_file() else []
+        return _parse_order() if ORDER.is_file() else []
     except (TypeError, ValueError):
         return []  # an order this driver cannot read has nothing to carry
-    return [
-        p
-        for p in previous
-        if (p.state or p.dropped or p.last_state) and not _stale_reasons(p)
-    ]
+
+
+def _carried(previous: list[OrderRow]) -> tuple[list[OrderRow], dict[str, str]]:
+    """The rows a re-snapshot keeps, every recorded outcome still true, and
+    the specs it holds out, with why. `build_queue` passes over a spec with a
+    finished task, so an order rebuilt from the scan alone dropped every
+    reviewable PR; and it hands back a spec edited while its PR is open as new."""
+    kept, held = [], {}
+    for p in previous:
+        if not (p.state or p.dropped or p.last_state):
+            continue
+        reasons = _stale_reasons(p)
+        if not reasons:
+            kept.append(p)
+        elif p.pr and _pr_state(p.pr) not in {"MERGED", "CLOSED"}:
+            held[p.spec_id] = f"{'; '.join(reasons)}, and #{p.pr} is still open"
+    return kept, held
 
 
 # ------------------------------------------------------------ the stack
@@ -335,12 +372,13 @@ def _stack_order(rows: list[OrderRow]) -> tuple[list[OrderRow], list[str]]:
                 f"{upper.spec_id} sits above {lower.spec_id}, not its parent {want}: "
                 f"#{upper.pr} will show {want}'s changes"
             )
-    for p in ready:
+    for i, p in enumerate(order):
+        below = order[i - 1].branch if i else "the trunk"
         for dep in p.depends_on:
             if dep in by_id and dep not in ids:
                 warnings.append(
-                    f"{p.spec_id}'s parent {dep} is not in the stack; "
-                    f"#{p.pr} stays based on {by_id[dep].branch}"
+                    f"{p.spec_id}'s parent {dep} is not in the stack; `link` "
+                    f"retargets #{p.pr} onto {below}, where it shows {dep}'s changes"
                 )
     return order, warnings
 
@@ -430,12 +468,36 @@ def _patch_id(a: str, b: str, cwd: Path) -> str:
     return out.split()[0] if out else ""
 
 
-def _restore(layers: list[Layer], start: str, cwd: Path) -> None:
+def _held_elsewhere(cwd: Path) -> dict[str, str]:
+    """Each branch checked out in a worktree other than `cwd`'s, and where."""
+    here = Path(_git("rev-parse", "--show-toplevel", cwd=cwd)).resolve()
+    held: dict[str, str] = {}
+    path = ""
+    for line in _git("worktree", "list", "--porcelain", cwd=cwd).splitlines():
+        if line.startswith("worktree "):
+            path = line.removeprefix("worktree ")
+        elif line.startswith("branch refs/heads/") and Path(path).resolve() != here:
+            held[line.removeprefix("branch refs/heads/")] = path
+    return held
+
+
+def _restore(layers: list[Layer], start: str, cwd: Path) -> list[str]:
+    """Put back every layer that moved, and name any that could not be: a
+    restore that raised halfway left HEAD detached and said nothing."""
     subprocess.run(["git", "checkout", "-q", "--detach"], cwd=cwd, capture_output=True)
+    failed = []
     for layer in layers:
-        _git("branch", "-f", layer.branch, layer.old_tip, cwd=cwd)
+        try:
+            if (
+                _git("rev-parse", f"refs/heads/{layer.branch}", cwd=cwd)
+                != layer.old_tip
+            ):
+                _git("branch", "-f", layer.branch, layer.old_tip, cwd=cwd)
+        except GitError as err:
+            failed.append(f"{layer.branch}: {err}")
     if start != "HEAD":
         subprocess.run(["git", "checkout", "-q", start], cwd=cwd, capture_output=True)
+    return failed
 
 
 def _apply_layers(layers: list[Layer], cwd: Path = REPO) -> tuple[bool, list[str]]:
@@ -443,6 +505,13 @@ def _apply_layers(layers: list[Layer], cwd: Path = REPO) -> tuple[bool, list[str
     layer's patch-id with what it was. Any conflict restores every branch."""
     if _git("status", "--porcelain", "--untracked-files=no", cwd=cwd):
         return False, ["the working tree has changes; commit or stash them first"]
+    # git cannot move a branch another worktree holds (step 2c's review fixes).
+    elsewhere = _held_elsewhere(cwd)
+    if held := [layer.branch for layer in layers if layer.branch in elsewhere]:
+        return False, [
+            f"{b} is checked out in {elsewhere[b]}; switch that worktree off it first"
+            for b in held
+        ]
     for layer in layers:
         local = subprocess.run(
             ["git", "rev-parse", "--verify", "-q", f"refs/heads/{layer.branch}"],
@@ -468,15 +537,18 @@ def _apply_layers(layers: list[Layer], cwd: Path = REPO) -> tuple[bool, list[str
         )
         if done.returncode != 0:
             subprocess.run(["git", "rebase", "--abort"], cwd=cwd, capture_output=True)
-            _restore(layers, start, cwd)
-            conflicts = [
-                line
-                for line in (done.stdout + done.stderr).splitlines()
-                if "CONFLICT" in line
-            ]
+            failed = _restore(layers, start, cwd)
+            output = (done.stdout + done.stderr).splitlines()
+            detail = [line for line in output if "CONFLICT" in line] or output[-1:]
+            restored = (
+                "every branch is restored"
+                if not failed
+                else "reset these to their recorded SHAs by hand:"
+            )
             return False, [
-                f"{layer.branch} conflicts on {layer.onto}; every branch is restored",
-                *conflicts,
+                f"{layer.branch} did not rebase onto {layer.onto}; {restored}",
+                *failed,
+                *detail,
             ]
 
     messages = []
@@ -534,9 +606,15 @@ def watch_pattern() -> str:
 def cmd_snapshot(args) -> int:
     if ORDER.is_file() and not args.force:
         return _fail(f"{ORDER.relative_to(REPO)} exists — pass --force to re-snapshot")
-    carried = _carried() if args.force else []
-    candidates, refusals = _scan(ignore_open_prs=args.force)
-    ordered, stranded = _order(candidates, refusals, carried)
+    previous = _previous() if args.force else []
+    carried, held_out = _carried(previous)
+    candidates, refusals = _scan(loop_branches=frozenset(p.branch for p in previous))
+    ordered, stranded = _order(candidates, refusals, carried, frozenset(held_out))
+    if held_out:
+        print(f"held out of the order ({len(held_out)}):")
+        for reason in held_out.values():
+            print(f"  {reason}")
+        print("  close the PR to run the edited spec, or revert the edit to keep it\n")
     if not ordered:
         print("nothing to run: no candidate specs")
         for r in refusals:
@@ -826,12 +904,15 @@ def cmd_rebase(args) -> int:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     record = STATE_DIR / f"rebase-{time.strftime('%Y%m%dT%H%M%S')}.json"
     record.write_text(json.dumps([layer.__dict__ for layer in layers], indent=2) + "\n")
-    ok, messages = _apply_layers(layers)
+    try:
+        ok, messages = _apply_layers(layers)
+    except GitError as err:
+        ok, messages = False, [str(err)]
     for message in messages:
         print(f"  {message}")
+    print(f"\nrecorded SHAs: {record.relative_to(REPO)}")
     if not ok:
         return 1
-    print(f"\nrecorded SHAs: {record.relative_to(REPO)}")
     print(f"push, with the operator's approval:\n  {push}")
     return 0
 

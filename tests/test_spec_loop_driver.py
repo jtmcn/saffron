@@ -74,16 +74,24 @@ def test_a_parent_with_two_children_is_reported_not_hidden():
     assert warnings == ["C sits above B, not its parent A: #12 will show A's changes"]
 
 
-def test_a_child_whose_parent_is_not_reviewable_is_reported():
-    rows = [
-        _row("A", state="EXHAUSTED", pr=None),
-        _row("B", 2, ["A"], pr=11),
-        _row("C", pr=12),
-    ]
-    order, warnings = driver._stack_order(rows)
-    assert [p.spec_id for p in order] == ["B", "C"]
+@pytest.mark.parametrize(
+    ("rows", "below"),
+    [
+        (["B", "C"], "the trunk"),
+        (["C", "B"], "saffron/C"),
+    ],
+)
+def test_a_child_whose_parent_is_not_reviewable_is_reported(rows, below):
+    # `link` corrects every base it finds wrong, so the child does not stay on
+    # its parent's branch: it lands on whatever sits below it.
+    made = {"B": _row("B", 2, ["A"], pr=11), "C": _row("C", pr=12)}
+    order, warnings = driver._stack_order(
+        [_row("A", state="EXHAUSTED", pr=None), *(made[r] for r in rows)]
+    )
+    assert [p.spec_id for p in order] == rows
     assert warnings == [
-        "B's parent A is not in the stack; #11 stays based on saffron/A"
+        f"B's parent A is not in the stack; `link` retargets #11 onto {below}, "
+        "where it shows A's changes"
     ]
 
 
@@ -166,6 +174,39 @@ def test_a_conflict_restores_every_branch(repo):
     assert {b: _git(cwd, "rev-parse", b) for b in ("a", "e")} == before
     assert _git(cwd, "rev-parse", "--abbrev-ref", "HEAD") == "main"
     assert not (cwd / ".git" / "rebase-merge").exists()
+
+
+def test_a_branch_checked_out_in_another_worktree_is_refused_before_anything_moves(
+    repo,
+):
+    # Its rebase failed as if on a conflict, and the restore then raised on it,
+    # leaving HEAD detached with nothing said.
+    cwd, _tips = repo
+    _git(cwd, "worktree", "add", "-q", str(cwd.with_name(cwd.name + "-wt")), "c")
+    before = {b: _git(cwd, "rev-parse", b) for b in ("a", "c", "d")}
+
+    ok, messages = driver._apply_layers(
+        driver._layers(["a", "c", "d"], "main", cwd, prefix=""), cwd
+    )
+
+    assert not ok
+    assert messages[0].startswith("c is checked out in ")
+    assert {b: _git(cwd, "rev-parse", b) for b in ("a", "c", "d")} == before
+    assert _git(cwd, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+
+
+def test_restore_resets_every_branch_it_can_and_names_the_one_it_cannot(repo):
+    cwd, tips = repo
+    layers = driver._layers(["a", "c"], "main", cwd, prefix="")
+    for branch in ("a", "c"):
+        _git(cwd, "branch", "-f", branch, tips["M1"])
+    _git(cwd, "worktree", "add", "-q", str(cwd.with_name(cwd.name + "-wt")), "a")
+
+    failed = driver._restore(layers, "main", cwd)
+
+    assert len(failed) == 1 and failed[0].startswith("a: ")
+    assert _git(cwd, "rev-parse", "c") == tips["c"]
+    assert _git(cwd, "rev-parse", "--abbrev-ref", "HEAD") == "main"
 
 
 def test_a_local_branch_that_differs_from_the_recorded_tip_is_refused(repo):
@@ -282,9 +323,10 @@ def test_next_holds_back_a_child_whose_parent_has_no_reviewable_branch(parent, w
     assert chosen is None
 
 
-def test_a_resnapshot_keeps_what_the_loop_recorded(tmp_path, monkeypatch):
-    # `build_queue` passes over a spec with a finished task, so an order rebuilt from
-    # the scan alone lost every reviewable PR and every drop.
+@pytest.fixture
+def loop(tmp_path, monkeypatch):
+    """Four real specs in a scratch repo root, the driver pointed at it, and
+    `gh` answering #10 OPEN and #11 MERGED."""
     from saffron.intake import load_spec
 
     specs_dir = tmp_path / ".saffron" / "specs"
@@ -294,7 +336,6 @@ def test_a_resnapshot_keeps_what_the_loop_recorded(tmp_path, monkeypatch):
         shutil.copy(source, specs_dir / source.name)
         paths.append(specs_dir / source.name)
     loaded = [load_spec(p) for p in paths]
-    ready, dropped, merged, new = (spec.id for spec, _sha in loaded)
 
     monkeypatch.setattr(driver, "REPO", tmp_path)
     monkeypatch.setattr(driver, "STATE_DIR", tmp_path / ".saffron-loop")
@@ -305,26 +346,79 @@ def test_a_resnapshot_keeps_what_the_loop_recorded(tmp_path, monkeypatch):
 
     def row(i, **recorded):
         spec, sha = loaded[i]
+        recorded.setdefault("spec_sha", sha)
         return driver.OrderRow(
             spec.id,
             str(paths[i].relative_to(tmp_path)),
             spec.priority,
-            spec_sha=sha,
             branch=f"saffron/{spec.id}",
             **recorded,
         )
 
+    def scan_returns(*indices):
+        scanned = [SimpleNamespace(spec=loaded[i][0], path=paths[i]) for i in indices]
+        seen = {}
+
+        def scan(*, loop_branches):
+            seen["loop_branches"] = loop_branches
+            return scanned, []
+
+        monkeypatch.setattr(driver, "_scan", scan)
+        return seen
+
+    return SimpleNamespace(
+        ids=[spec.id for spec, _sha in loaded], row=row, scan_returns=scan_returns
+    )
+
+
+def test_a_resnapshot_holds_out_a_spec_edited_while_its_pr_is_open(loop, capsys):
+    # The scan looks past the loop's own PRs, so the edited spec came back as a
+    # fresh candidate, and its next cell would have packaged onto #10's branch.
+    edited, sibling, _merged, _new = loop.ids
+    driver._save(
+        [loop.row(0, state="READY_FOR_REVIEW", pr=10, spec_sha="edited"), loop.row(1)]
+    )
+    seen = loop.scan_returns(0, 1)
+
+    assert driver.cmd_snapshot(argparse.Namespace(force=True)) == 0
+
+    assert [p.spec_id for p in driver._load()] == [sibling]
+    assert "#10 is still open" in capsys.readouterr().out
+    assert seen["loop_branches"] == {f"saffron/{edited}", f"saffron/{sibling}"}
+
+
+def test_a_resnapshot_looks_past_only_the_loops_own_open_prs():
+    # Hiding every open PR also hid step 5's backlog PR from the conflict set.
+    import json
+
+    listed = [
+        {"number": 10, "headRefName": "saffron/SA-0001", "files": []},
+        {"number": 20, "headRefName": "joel/backlog", "files": []},
+    ]
+
+    def gh(argv):
+        return subprocess.CompletedProcess(
+            argv, 0, stdout=json.dumps(listed), stderr=""
+        )
+
+    hiding = driver._hiding(gh, frozenset({"saffron/SA-0001"}))
+    assert json.loads(hiding(["gh", "pr", "list"]).stdout) == [listed[1]]
+
+
+def test_a_resnapshot_keeps_what_the_loop_recorded(loop):
+    # `build_queue` passes over a spec with a finished task, so an order rebuilt from
+    # the scan alone lost every reviewable PR and every drop.
+    ready, dropped, _merged, new = loop.ids
     driver._save(
         [
-            row(0, state="READY_FOR_REVIEW", pr=10),
-            row(1, dropped="operator's call"),
-            row(2, state="READY_FOR_REVIEW", pr=11),
+            loop.row(0, state="READY_FOR_REVIEW", pr=10),
+            loop.row(1, dropped="operator's call"),
+            loop.row(2, state="READY_FOR_REVIEW", pr=11),
         ]
     )
     # What the scan returns now: the three recorded specs all have finished
     # tasks (or a drop the ledger knows nothing of), and one spec is new.
-    scanned = [SimpleNamespace(spec=loaded[i][0], path=paths[i]) for i in (1, 3)]
-    monkeypatch.setattr(driver, "_scan", lambda *, ignore_open_prs: (scanned, []))
+    loop.scan_returns(1, 3)
 
     assert driver.cmd_snapshot(argparse.Namespace(force=True)) == 0
 
