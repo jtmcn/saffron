@@ -6639,6 +6639,56 @@ because the lens authored it and a fresh one can be asked for each round.
 
 ---
 
+## 118. The verdict of record is computed inside the container the implementer controlled
+
+**Tier 1.** Found threat-modelling Saffron, 2026-09-13, and confirmed by
+reading rather than by probe. The cell runs as root on a writable rootfs
+(`_run_argv` passes no `--read-only` and no image sets `USER`), and three
+things the host trusts run inside it after the agent has had it:
+
+- **Every gate.** The executables come from the read-only `/gates` mount, but
+  they call `pytest`, `ruff`, `ty` and `python3` from `/opt/venv` and `/usr`,
+  and read the tree through the cell's own `git`. `DESIGN.md` §5.4 names the
+  writable toolchain; this is what it costs.
+- **Every lens.** `run_review` and `run_verdict` are handed the implementer's
+  container, so each critic session re-execs `/opt/saffron/agent_runner.py`
+  and the SDK from that rootfs, and reads `/work` and `read_at_head` through
+  the implementer's `.git`.
+- **Nothing re-checks either when the base did not move.**
+  `needs_reverification` returns `False` on an unmoved base, and its docstring
+  calls a re-run "provably redundant". That holds only if the cell's own
+  results were honest, so the one fresh-cell check PACKAGE owns is skipped on
+  the path most tasks take.
+
+Every git-config forgery this backlog has closed (items 2, 89, 102, 103) is
+one instance of the class. Closing the class means the gates and the critic
+judge a tree rebuilt from the exported patch, in a container the implementer
+never ran in. Then what they judge is what ships, and a forged export only
+hides the agent's own work.
+
+Three specs, in order: `SA-0086` (PACKAGE re-verifies every packaged
+commit), `SA-0087` (REVIEW runs in a critic cell rebuilt from the patch) and
+`SA-0088` (REBUT's verdict lenses do the same).
+
+**By hand, because a cell cannot:**
+
+- `DESIGN.md` §5.7, "Re-verification runs when, and only when, the base
+  moved", and §5.5's lens description, rewritten to the new rule. This should
+  land before or with `SA-0086`.
+- **Vocabulary.** "Critic cell" landed as a hand-written `CONTEXT.md` entry
+  with rev 21, like **Cell**. It is not a `factory:` term, because nothing
+  would read one. Still open: whether new failures on an unmoved base need
+  their own terminal state. `SA-0086` reports them as `MERGE_FAILED` with a
+  note, but that state means the change did not survive today's main, and
+  this is a verdict that did not reproduce.
+- `saffron/report/pr_body.py`'s `_verification("base")` branch becomes
+  unreachable once `SA-0086` lands. Delete it, or keep it as a guard.
+
+**Done looks like** no gate result or lens finding that reaches a pull request
+was produced in a container the implementer ran in.
+
+---
+
 ## What is *not* here, deliberately
 
 DIAGNOSE and `SCOPE_REVIEW`, the scheduler's conflict sets and stacking, `saffron

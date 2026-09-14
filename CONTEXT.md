@@ -361,6 +361,16 @@ per finding, chosen by the lens to make its own case, is not a sample of the mut
 implementer's transcript.
 _Avoid_: "the reviewer" (that's the operator), "QA", "the checker".
 
+**Critic cell**: The cell a critic runs in: a new container from the repo's cell
+image, on the task's network and proxy, whose worktree is the task's base with
+the exported patch applied by that cell's own git. It is never the implementer's
+cell. A fresh session in the container the implementer had root in re-execs a
+runner that container could have rewritten, and reads the tree through a `.git`
+the implementer wrote (`DESIGN.md` §5.5, Appendix Q). Until `SA-0087` and
+`SA-0088` land, the lenses still run in the implementer's cell.
+_Avoid_: "review cell", "clean cell", "second cell", "the critic's container"
+when you mean the whole cell.
+
 **Implementer**: The session that holds write tools during IMPLEMENT and REBUT. It
 acts on the operator's behalf, directly or through the delegate that started the
 task, and every diff it writes is written to the plan validated at the plan
