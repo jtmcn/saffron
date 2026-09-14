@@ -2734,6 +2734,12 @@ lines at all — §5.4 sets one number for a diff whose test half is mandated
 elsewhere. Recorded rather than fixed here: PR #91 is over the ceiling and is
 being merged over it deliberately, with this item as the record.
 
+It happened again on 2026-09-14: `SA-0080` (PR #247, stack #251) left its cell at
+294 changed lines against a `bug`'s 300, and the review round took it to 367 — two
+witnesses, one of which is the only test that fails on the defect the spec exists
+for, and a shared decode helper. The operator chose to merge it over the ceiling,
+with this item as the record.
+
 
 ## 41. `NO_PROXY=""` denies a cell its own loopback, so a test that stands up a local server fails at baseline forever
 
