@@ -66,19 +66,22 @@ held back.
 ### a. Start the cell in the background
 
 ```bash
-PYTHONUNBUFFERED=1 env CLAUDE_CODE_OAUTH_TOKEN="$(bash -c 'source ~/.secrets; printf %s "$CLAUDE_CODE_OAUTH_TOKEN"')" \
+PYTHONUNBUFFERED=1 SAFFRON_ALLOW_HOST_PROCESS=<listener> env CLAUDE_CODE_OAUTH_TOKEN="$(bash -c 'source ~/.secrets; printf %s "$CLAUDE_CODE_OAUTH_TOKEN"')" \
   uv run saffron cell .saffron/specs/SA-NNNN-*.md --repo . > /tmp/SA-NNNN.log 2>&1
 ```
 
-A host that tolerates a listener also puts its `SAFFRON_ALLOW_HOST_PROCESS` on
-this command (GOTCHAS, Starting cells). Watch it with a Monitor:
+`<listener>` is the process `docs/HOST-HARDENING.md` lets this host tolerate.
+On a host that tolerates none, leave `SAFFRON_ALLOW_HOST_PROCESS=…` out
+(GOTCHAS, Starting cells). Watch it with a Monitor:
 
 ```bash
 tail -F /tmp/SA-NNNN.log | grep -E --line-buffered "$(uv run .claude/skills/run-saffron-spec-loop/driver.py pattern)"
 ```
 
 `pattern` prints the phase lines plus every terminal state in the ontology's
-closed set, anchored where the CLI prints one. A cell takes 30–60 minutes.
+closed set, anchored where the CLI prints one. A cell takes 30–60 minutes, and a
+Monitor expires after 30. Re-arm it with `tail -n 0 -F` so it doesn't replay the
+log. A silent Monitor ends nothing; only the process exit does (b).
 
 ### b. Record it once the process exits
 
@@ -94,8 +97,10 @@ against the spec's budget, and exits 0 only for `READY_FOR_REVIEW`. Stop the
 Monitor now: `tail -F` outlives the cell. A **decided** state — one in
 `scheduler.DONE_STATES` — settles the spec for this loop, and only
 `READY_FOR_REVIEW` joins the stack. A
-state that decided nothing (a rate limit, a cell still in flight) keeps the
-spec pending, and `next` moves past it (GOTCHAS, Recording).
+state that decided nothing keeps the spec pending, and `next` moves past it.
+Once the process has exited, an in-flight state is a **halt**: the cell stopped
+at a ceiling and nothing decided the task. `record` says so, and a halt goes
+to the operator (GOTCHAS, Recording).
 `drop SA-NNNN --why "…"` takes a spec out for good.
 
 ### c. Review it

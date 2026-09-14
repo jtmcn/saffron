@@ -36,8 +36,9 @@ do; the measurement behind it follows.
   - `RATE_LIMITED` (which is not `EXHAUSTED`): `next --again` once the window
     reopens — the cell's own `rate limit: … window reopens HH:MM local` line
     says when. The next cell starts from `base_sha`.
-  - A state in `reconcile.IN_FLIGHT_STATES`: the cell is still running; wait
-    for the process to exit.
+  - A state in `reconcile.IN_FLIGHT_STATES` while a `saffron cell` for the
+    spec is alive: wait for the process to exit. Once it has exited, that
+    state is a halt (below).
 - **A decided state is final for this loop.** `EXHAUSTED`, `NOT_IMPLEMENTED`
   and the rest of `scheduler.DONE_STATES` leave the stack and are not re-run. A
   cell that exits 2, or leaves `record` with no task, gets one more cell,
@@ -47,10 +48,26 @@ do; the measurement behind it follows.
   failed — the agent reached its ceiling of N turns` keeps the committed work
   (§4.3), and the next gate suite measures it: wait for `gates:` and the process
   exit. Two of stack #251's eight cells hit it and both reached review. Keep
-  it for step 5: the spec's `max_turns` may be too low for it.
+  it for step 5: the spec's `max_turns` may be too low for it. The exception
+  is when the next line is `budget: … no room left to salvage`. Then nothing
+  was committed and nothing can be, and the cell ends `NOT_IMPLEMENTED`
+  because it hit a ceiling, not because the work failed (SA-0087, 2026-09-14).
 - **A cell can overrun its `budget_usd` by up to one whole attempt** (§3),
   measured at 67% on SA-0059. `record` prints spend against budget; SA-0080
   closed at $7.55 of $6. An overrun past one attempt's cost is a bug: file it.
+- **A cell that halts at a ceiling goes to the operator.** SA-0087 hit two
+  shapes on 2026-09-14:
+  - `NOT_IMPLEMENTED` after `budget: … no room left to salvage`. The plan
+    checkpoint had spent 45% of the budget.
+  - `REBUTTING` after the process exited. REBUT gets only what the budget has
+    left (backlog item 120), and a rebuttal that runs out halts there by design
+    (§5.6), with its branch pushed and no PR.
+
+  A child cannot stack on either (`scheduler.DEPENDENCY_WAITING_STATES`), so
+  `next` holds it back. Ask whether to raise the spec's ceilings and re-run,
+  take a `REBUTTING` branch by hand, or drop the chain. A re-run is a spec edit
+  merged to main, then `snapshot --force`: it re-queues the spec at its new
+  `spec_sha` and keeps every other recorded outcome (#256).
 
 ## Why attended cells, not `saffron batch`
 
@@ -127,6 +144,7 @@ independent specs nobody reviews between cells.
 | `snapshot --force`: `held out … #N is still open` | The spec was edited after its PR was packaged. Close #N to run the edited spec, or revert the edit to keep #N in the stack. |
 | `next`: `held back SA-NNNN: its parent … so a cell would cut it from main` | The parent has no reviewable branch. `next --again` once a rate-limited parent's window reopens; `drop` the child otherwise. |
 | `snapshot` prints `nothing to run: no candidate specs` | Every spec is done at its current `spec_sha`, or refused; the refusals are printed. |
+| `record`: `halted at REBUTTING` | The cell ran out of budget in REBUT. It goes to the operator (Recording). |
 | `record`: `no task for SA-NNNN at <sha>` | The spec was edited after its cell ran. Re-run the cell, or revert the edit. |
 | `CLAUDE_CODE_OAUTH_TOKEN is unset` | Scope it to the `saffron cell` invocation (Starting cells); refresh with `claude setup-token`. |
 | Cell exits 2 | Read the last lines first: `rate limit: rejected` means wait for the window. Otherwise `container system start`, then `container image list`. |
