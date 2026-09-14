@@ -522,7 +522,7 @@ def test_a_rules_exemptions_are_the_named_files():
         "one-task-driver": ["saffron/task.py"],
         # None, not an exemption for tests/conftest.py: that is the file SA-0077
         # aliased the skip in, so exempting it would reopen exactly that hole.
-        "pytest-skip-is-spelled-in-full": None,
+        "skip-is-spelled-in-full": None,
     }
 
 
@@ -800,7 +800,7 @@ def test_structure_fails_a_skip_bound_to_a_name(tmp_path):
     result = parse_gate_json(done.stdout, expected_gate="structure")
     assert result.status == "fail", result.summary
     assert [(f.file, f.code, f.line) for f in result.failures] == [
-        ("tests/conftest.py", "pytest-skip-is-spelled-in-full", 3)
+        ("tests/conftest.py", "skip-is-spelled-in-full", 3)
     ]
 
 

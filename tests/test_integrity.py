@@ -123,7 +123,7 @@ SA_0077_ALIAS = (
 
 def test_a_skip_bound_to_a_name_passes_the_substring_scan(tmp_path):
     """The scan's ceiling, kept as a witness: it reads spellings, and the alias
-    spells no token. `structure`'s `pytest-skip-is-spelled-in-full` is what
+    spells no token. `structure`'s `skip-is-spelled-in-full` is what
     refuses this diff. If this starts failing, the scan learned to read the
     alias and the rule can be reconsidered."""
     run = _repo(tmp_path, {"tests/conftest.py": "import pytest\n"})
@@ -131,6 +131,34 @@ def test_a_skip_bound_to_a_name_passes_the_substring_scan(tmp_path):
     patterns = load_policy(REPO)[0].integrity
     result = integrity_gate(diff, patterns, touches=["tests/conftest.py"])
     assert result.status == "pass", result.failures
+
+
+@pytest.mark.parametrize(
+    "added",
+    [
+        '@unittest.skip("no")\n',
+        '@unittest.skipIf(True, "no")\n',
+        'raise unittest.SkipTest("no")\n',
+        'self.skipTest("no")\n',
+        'pytest.importorskip("no_such_module")\n',
+    ],
+    ids=[
+        "unittest-skip",
+        "unittest-skipif",
+        "skip-exception",
+        "skip-method",
+        "importorskip",
+    ],
+)
+def test_a_skip_pytest_honours_from_elsewhere_fails_this_repos_scan(tmp_path, added):
+    """Each of these skips under pytest, measured — none spelled a token until
+    #241's review ran them (backlog item 112)."""
+    run = _repo(tmp_path, {"tests/test_a.py": TESTS})
+    diff = _diff(tmp_path, run, {"tests/test_a.py": TESTS + added})
+    patterns = load_policy(REPO)[0].integrity
+    result = integrity_gate(diff, patterns, touches=["tests/test_a.py"])
+    assert result.status == "fail"
+    assert [f.code for f in result.failures] == ["added-suppression"]
 
 
 def test_a_gate_config_edit_fails(tmp_path):

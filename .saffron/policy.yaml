@@ -78,6 +78,12 @@ integrity:
       "# ty: ignore",
       "# noqa",
       "ast-grep-ignore",
+      # Skips pytest honours from elsewhere, each measured under pytest 9.1.1. The
+      # exception and the method differ by one capital, so both are listed.
+      "unittest.skip",
+      "SkipTest",
+      "skipTest",
+      "importorskip",
     ]
   # Collection runs in the repo's own Python, so `census` cannot see a conftest
   # that hides a test from the runner. This routes the edit to a person.

@@ -6388,15 +6388,15 @@ invocations across two probes, and one that sleeps past a timeout patched small
 
 **Status:** **done**, by hand, 2026-09-13, on
 `joel/suppression-aliases-and-inline-ignores`. `structure` carries
-`pytest-skip-is-spelled-in-full`, with no `files:` scope so a helper outside
-`tests/` is read too, and ast-grep's inline ignore comment is a `suppressions`
-token (the second half below). Left open: a name reached dynamically —
-`__import__`, `sys.modules`, a module's `__dict__` — the rule's `ponytail:`; and
-three skips no token names, found by #241's review and each run to a skip under
-pytest 9.1.1: pytest's import-or-skip helper, unittest's skip decorator and
-exception, and a conftest hook adding the skip marker by string (that one reaches
-a person as `gate-config-changed`, unless `touches` names the conftest, as
-`SA-0077`'s did).
+`skip-is-spelled-in-full`, with no `files:` scope so a helper outside `tests/`
+is read too, and ast-grep's inline ignore comment is a `suppressions` token (the
+second half below). #241's review, and its fix, ran five more skips pytest
+honours that no token named, each under pytest 9.1.1: unittest's skip
+decorators, its skip exception and method, pytest's import-or-skip, and the skip
+marker added by string. The first four are tokens now; the fifth cannot be one —
+the word is a gate status — so the rule reads it. Left open: a name reached
+dynamically — `__import__`, `sys.modules`, a module's `__dict__` — the rule's
+`ponytail:`.
 
 **Tier 1.** Found reviewing `SA-0077` (PR #232), 2026-09-12 — in the wild, not
 by probe. The agent needed a legitimate skip in `tests/conftest.py`, found that

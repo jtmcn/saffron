@@ -1,6 +1,7 @@
-id: pytest-skip-is-spelled-in-full
+id: skip-is-spelled-in-full
 # Every legitimate shape in the tree today: tests/conftest.py, tests/test_policy.py,
-# tests/test_runtime.py and tests/test_package_cell.py. `integrity` reads these.
+# tests/test_runtime.py, tests/test_package_cell.py and tests/test_report.py.
+# `integrity` reads these.
 valid:
   - 'pytest.skip("no working container found on this host")'
   - 'pytest.skip(reason="root reads everything")'
@@ -22,6 +23,14 @@ valid:
   - 'def test_a(monkeypatch: pytest.MonkeyPatch): pass'
   - 'from pytest import raises'
   - 'import pytest'
+  - 'from unittest import mock'
+  # unittest's skip spelled in full is the token's to read, not this rule's.
+  - |
+    @unittest.skip("no")
+    def test_a():
+        pass
+  - 'item.add_marker("cell")'
+  - 'item.add_marker(pytest.mark.cell)'
 invalid:
   # SA-0077's own move (PR #232).
   - '_skip = pytest.skip'
@@ -44,3 +53,14 @@ invalid:
   # The raises allowance, read too loosely: the call kept, or not pytest's.
   - '_B = pytest.raises(pytest.skip.Exception).expected_exceptions'
   - '_C = raises(pytest.skip.Exception)'
+  # unittest's, which pytest honours on a plain function too.
+  - 'from unittest import skip'
+  - 'from unittest import skipIf as _s'
+  - 'from unittest.case import skipUnless'
+  - 'from unittest import *'
+  - 'import unittest as ut'
+  - '_U = unittest'
+  # The marker named by string, which no token can read: "skip" is a gate status.
+  - 'item.add_marker("skip")'
+  - "item.add_marker('skipif')"
+  - 'item.add_marker(marker="skip")'
