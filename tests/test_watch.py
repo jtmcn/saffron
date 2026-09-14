@@ -2,7 +2,7 @@
 
 Every fixture below is a real `Event`, appended through the real `EventLog`,
 never hand-typed JSON: that is what makes each witness prove the round trip
-through `read_log`/`describe` rather than a parser reading what the test
+through `read_log_since`/`describe` rather than a parser reading what the test
 author imagined the writer emits.
 """
 
@@ -239,9 +239,45 @@ def test_a_poll_reads_only_what_was_appended_since_the_last(tmp_path):
     assert lines == [describe(first), describe(second)]
 
 
+def test_a_poll_parses_only_the_lines_appended_since_the_last(tmp_path, monkeypatch):
+    """The output alone cannot tell an offset follower from one that re-parses
+    the whole log and keeps its tail, so the parses are counted: after the
+    first poll, one appended event costs one parse."""
+    from saffron import events
+
+    task_dir = tmp_path / "SY-4c"
+    log = EventLog(task_dir)
+    first = Teardown(timestamp=1.0, spec_id="SY-4c", step="start", ok=True)
+    second = Teardown(timestamp=2.0, spec_id="SY-4c", step="network", ok=True)
+    log.append(first)
+
+    parsed: list[str] = []
+    real_parse = events._parse_line
+
+    def counting_parse(line: str):
+        parsed.append(line)
+        return real_parse(line)
+
+    monkeypatch.setattr(events, "_parse_line", counting_parse)
+    polls: list[float] = []
+
+    def sleep(seconds: float) -> bool:
+        polls.append(seconds)
+        if len(polls) == 1:
+            parsed.clear()
+            log.append(second)
+            return True
+        return False
+
+    lines = list(watch.follow(task_dir, sleep=sleep))
+
+    assert lines == [describe(first), describe(second)]
+    assert len(parsed) == 1
+
+
 def test_a_partial_final_line_is_dropped_and_the_whole_ones_survive(tmp_path):
     """A log caught mid-write loses the partial line and keeps every whole
-    one — `read_log`'s own distinction, inherited here rather than
+    one — `read_log_since`'s own distinction, inherited here rather than
     reimplemented."""
     task_dir = tmp_path / "SY-5"
     task_dir.mkdir()
@@ -311,18 +347,17 @@ def test_an_unknown_task_names_the_directory_it_looked_in(tmp_path):
 
 
 def test_a_payload_that_is_not_an_object_is_dropped_and_the_rest_survive(tmp_path):
-    """`read_log` type-checks nothing, so a corrupt line can hand `describe`
-    a `str` where it expects a mapping — and `describe` raises
-    `AttributeError` on it. One such line must cost its own line and no
-    more: raised, it ends the whole follow, and `main`'s catch-all reports
-    the per-line corruption `read_log` exists to tolerate as exit `2`,
-    infrastructure failed.
+    """A corrupt line can carry a `str` where `describe` expects a mapping,
+    and `describe` raises `AttributeError` on it. One such line must cost
+    its own line and no more: raised, it ends the whole follow, and `main`'s
+    catch-all reports the per-line corruption the reader exists to tolerate
+    as exit `2`, infrastructure failed.
 
     Written straight to the file rather than built as an `Agent` and
     appended, following the partial-line witness above and for the same
     reason: `Agent.event` is annotated `dict | None`, so the constructor is
-    the one path this shape cannot arrive by. `read_log` is where it gets in,
-    because `cls(**obj)` checks no types at all.
+    the one path this shape cannot arrive by. `_parse_line`'s shape check
+    (item 61) is what stops it.
     """
     task_dir = tmp_path / "SY-6"
     log = EventLog(task_dir)

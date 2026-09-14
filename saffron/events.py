@@ -497,8 +497,6 @@ def _parse_line(line: str) -> Event | None:
     cls = _KINDS.get(kind) if isinstance(kind, str) else None
     if cls is None:
         return None
-    # Drop the unknown field, not the event: a newer Saffron adds fields, and
-    # rejecting the line would delete every event of that kind.
     expected = {f.name for f in fields(cls)}
     obj = {k: v for k, v in obj.items() if k in expected}
     # JSON has no tuple, so a `tuple[str, ...]` field (Baseline's `aborted`)
@@ -513,6 +511,14 @@ def _parse_line(line: str) -> Event | None:
     try:
         return cls(**obj)
     except (TypeError, ValueError):
+        return None
+
+
+def _parse_raw(raw: bytes) -> Event | None:
+    """One line as bytes: a line that is not UTF-8 is dropped like bad JSON."""
+    try:
+        return _parse_line(raw.decode("utf-8"))
+    except UnicodeDecodeError:
         return None
 
 
@@ -531,8 +537,8 @@ def read_log(task_dir: Path) -> list[Event]:
     if not path.is_file():
         return []
     events: list[Event] = []
-    for line in path.read_text().split("\n"):
-        event = _parse_line(line)
+    for raw_line in path.read_bytes().split(b"\n"):
+        event = _parse_raw(raw_line)
         if event is not None:
             events.append(event)
     return events
@@ -549,9 +555,9 @@ def read_log_since(task_dir: Path, offset: int) -> tuple[list[Event], int]:
 
     A trailing chunk with no terminating `b"\\n"` — a write caught mid-object
     — is left unconsumed: the returned offset stops right before it, so the
-    next call resumes before the partial object rather than past it (item
-    62's second criterion). Each complete line is decoded and handed to
-    `_parse_line`, the same parser `read_log` uses.
+    next call resumes before the partial object rather than past it
+    (`SA-0080`'s second criterion). Each complete line goes through
+    `_parse_raw`, as `read_log`'s do.
 
     A missing `events.jsonl` returns `([], offset)` unchanged.
     """
@@ -571,13 +577,7 @@ def read_log_since(task_dir: Path, offset: int) -> tuple[list[Event], int]:
         raw_line = chunk[start:newline_at]
         start = newline_at + 1
         consumed = start
-        try:
-            line = raw_line.decode("utf-8")
-        # A line this poll cannot decode is a line this poll cannot parse —
-        # the same per-line tolerance `_parse_line` applies to bad JSON.
-        except UnicodeDecodeError:
-            continue
-        event = _parse_line(line)
+        event = _parse_raw(raw_line)
         if event is not None:
             events.append(event)
     return events, offset + consumed

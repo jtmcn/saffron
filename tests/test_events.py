@@ -292,6 +292,20 @@ def test_read_log_drops_a_truncated_final_line(tmp_path):
     ]
 
 
+def test_both_readers_drop_an_undecodable_line_and_keep_its_neighbours(tmp_path):
+    """A line that is not UTF-8 costs that line in either reader, never the log."""
+    from saffron.events import read_log_since
+
+    good = json.dumps(
+        {"kind": "Teardown", "timestamp": 1.0, "spec_id": "SA", "step": "c", "ok": True}
+    ).encode()
+    (tmp_path / "events.jsonl").write_bytes(good + b"\n\xff\xfe\n" + good + b"\n")
+    kept = [Teardown(timestamp=1.0, spec_id="SA", step="c", ok=True)] * 2
+
+    assert read_log(tmp_path) == kept
+    assert read_log_since(tmp_path, 0)[0] == kept
+
+
 def test_read_log_tolerates_an_unknown_kind(tmp_path):
     events_path = tmp_path / "events.jsonl"
     known = json.dumps(
