@@ -43,6 +43,21 @@ do; the measurement behind it follows.
   cell that exits 2, or leaves `record` with no task, gets one more cell,
   started by its spec path; after that, `drop`. A cell is about an hour and
   real money. A rate limit does not count: nothing about the task failed.
+- **A turn-ceiling line is not the end of a cell.** `IMPLEMENT: the session
+  failed — the agent reached its ceiling of N turns` keeps the committed work
+  (§4.3), and the next gate suite measures it: wait for `gates:` and the process
+  exit. Two of stack #251's eight cells hit it and both reached review. Keep
+  it for step 5: the spec's `max_turns` may be too low for it.
+- **A cell can overrun its `budget_usd` by up to one whole attempt** (§3),
+  measured at 67% on SA-0059. `record` prints spend against budget; SA-0080
+  closed at $7.55 of $6. An overrun past one attempt's cost is a bug: file it.
+
+## Why attended cells, not `saffron batch`
+
+`run_batch` resolves its candidates once, at start, so a child whose parent has
+not run yet is refused, and it runs cells back to back with no pause for review
+commits before a child is cut from its parent's branch. A batch is the tool for
+independent specs nobody reviews between cells.
 
 ## Reviewing
 
@@ -75,7 +90,7 @@ do; the measurement behind it follows.
   `stack` runs that check on every adjacent pair. A conflict goes to the
   operator before linking: resolving it is a hand rebase of the upper branch
   onto the lower one, renumbering, a grep of the code for comments citing the
-  old number, and a force-push they approve.
+  old number, and a leased force-push.
 - **A child whose parent is not in the stack lands on the layer below.** `link`
   corrects every base it finds wrong, so the child's PR leaves its parent's
   branch and shows the parent's changes. `stack` warns and names where it lands.
@@ -99,8 +114,9 @@ do; the measurement behind it follows.
   `rebase` does: take each layer's fork point before moving anything,
   `git rebase --onto <layer below> <fork point> <branch>` bottom to top, and
   compare each layer's patch-id before and after.
-- **The push needs the operator's approval, every time.** It rewrites branches
-  with open PRs; `rebase` prints it with each lease pinned to the recorded SHA.
+- **The push is a leased force-push, which step 1's grant covers.** It
+  rewrites branches with open PRs, so `rebase` pins each lease to the recorded
+  SHA: a branch that moved since then is refused, not overwritten.
 
 ## Troubleshooting
 
@@ -115,6 +131,7 @@ do; the measurement behind it follows.
 | `CLAUDE_CODE_OAUTH_TOKEN is unset` | Scope it to the `saffron cell` invocation (Starting cells); refresh with `claude setup-token`. |
 | Cell exits 2 | Read the last lines first: `rate limit: rejected` means wait for the window. Otherwise `container system start`, then `container image list`. |
 | Preflight fails naming host ports | The allowlist variable is missing from the invocation (Starting cells). |
+| `next`: `B waits on A's review commits: none are pushed yet` | Finish A's review and push it; `next` hands B back once A's branch moves past what PACKAGE pushed. |
 | `next`: `nothing untouched left` | Every pending spec already had a cell that decided nothing. `next --again` after a reopened rate-limit window; `drop` otherwise. |
 | `rebase` refuses: local branch differs from origin | Push or reset the local branch first; the rebase starts from what is on GitHub. |
 | `rebase` refuses: `<branch> is checked out in <path>` | A step 2c review worktree still holds it. `git -C <path> switch --detach`, or remove that worktree, then run `rebase` again. |

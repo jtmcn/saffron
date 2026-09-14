@@ -8,9 +8,10 @@ description: Use when asked to run the Saffron spec loop over the queued specs, 
 Every queued spec goes through an attended `saffron cell`, an independent
 review, and review commits; the pull requests are then linked into one stack
 for the operator. **Nothing is merged.** You are the operator's delegate
-(`CONTEXT.md`), so ask them once, before the first review push, for ordinary
-pushes to the loop's `saffron/SA-NNNN` branches. Every force-push and every
-gate-policy call is asked separately, each time.
+(`CONTEXT.md`), so ask them once, before the first cell, which pushes are yours:
+ordinary pushes to the loop's `saffron/SA-NNNN` branches, force-pushes to them
+with a lease, and step 5's branch and draft PR. Every other branch, and every
+gate-policy call, is asked separately, each time.
 
 The driver is `.claude/skills/run-saffron-spec-loop/driver.py`, run with
 `uv run` from the repo root (`--help` lists its commands). It starts no cell —
@@ -19,7 +20,7 @@ each cell and tell the driver what happened. Exit `0` means the command did
 what it says, `1` everything else.
 
 When a step's output surprises you, [GOTCHAS.md](GOTCHAS.md) is grouped by
-step.
+step; it also says why this loop runs attended cells rather than `saffron batch`.
 
 ## 1. Snapshot the loop's order
 
@@ -42,8 +43,9 @@ A spec edited while its PR is open is held out of the new order and named.
 a PR merged or closed, and `next` refuses a stale one. A spec queued since the
 snapshot is not in it: re-snapshot to add it.
 
-**Done when** `status` lists the specs you mean to run and reports nothing
-stale.
+**Done when** `status` lists the specs you mean to run, reports nothing stale,
+and the operator has seen `snapshot`'s table in your reply: each spec's title
+and budget, the total, and every spec it refused.
 
 ## 2. Run each spec
 
@@ -53,11 +55,13 @@ spec, or exits 1 saying why none is left.
 **One cell at a time, reviewing while the next runs.** A cell's worktree is cut
 from the remote, not the checkout, so PR N can be reviewed on its branch while
 cell N+1 runs. A spec with `depends_on` has its worktree cut from its parent's
-branch, so it starts after the parent's review commits are pushed; when `next`
-names such a child first, it says so, and the next independent spec can be
-started by its path meanwhile. `next` holds back a child whose parent has no
-reviewable branch — rate-limited, decided otherwise, or dropped — because
-`saffron cell` would cut it from main, and names the child it held back.
+branch, so it starts after the parent's review commits are pushed: until then
+`next` names it as waiting and hands back the next spec that can start. Within
+a priority, the order puts the parent with most descendants first, so its
+children have something to run beside its review. `next` holds back a child
+whose parent has no reviewable branch — rate-limited, decided otherwise, or
+dropped — because `saffron cell` would cut it from main, and names the child it
+held back.
 
 ### a. Start the cell in the background
 
@@ -74,8 +78,7 @@ tail -F /tmp/SA-NNNN.log | grep -E --line-buffered "$(uv run .claude/skills/run-
 ```
 
 `pattern` prints the phase lines plus every terminal state in the ontology's
-closed set, unanchored, since the CLI prints a state after a padded spec id. A
-cell takes 30–60 minutes.
+closed set, anchored where the CLI prints one. A cell takes 30–60 minutes.
 
 ### b. Record it once the process exits
 
@@ -86,9 +89,11 @@ state in the log does not, because PACKAGE runs after it.
 uv run .claude/skills/run-saffron-spec-loop/driver.py record SA-NNNN   # SA-NNNN  READY_FOR_REVIEW  #228
 ```
 
-It reads the ledger, never the transcript (§4.3), and exits 0 only for
-`READY_FOR_REVIEW`. A **decided** state — one in `scheduler.DONE_STATES` —
-settles the spec for this loop, and only `READY_FOR_REVIEW` joins the stack. A
+It reads the ledger, never the transcript (§4.3), prints what the cell spent
+against the spec's budget, and exits 0 only for `READY_FOR_REVIEW`. Stop the
+Monitor now: `tail -F` outlives the cell. A **decided** state — one in
+`scheduler.DONE_STATES` — settles the spec for this loop, and only
+`READY_FOR_REVIEW` joins the stack. A
 state that decided nothing (a rate limit, a cell still in flight) keeps the
 spec pending, and `next` moves past it (GOTCHAS, Recording).
 `drop SA-NNNN --why "…"` takes a spec out for good.
@@ -97,7 +102,9 @@ spec pending, and `next` moves past it (GOTCHAS, Recording).
 
 1. **The in-cell critic's findings** are in
    `~/.saffron/batches/v0/SA-NNNN/findings.json`: a list of lenses, each with
-   `findings` carrying `severity`, `file`, `line` and `claim`.
+   `findings` carrying `severity`, `file`, `line` and `claim`, and an adequacy
+   finding a `probe`. A blocker a lens withdrew after REBUT is in
+   `rebuttal.json` beside it, with the implementer's argument.
 2. **Independent review:** two background `general-purpose` subagents per PR,
    the Spec seat and the Standards seat, prompted from
    [REVIEW-PROMPT.md](REVIEW-PROMPT.md). The Spec seat's criterion walk is what
@@ -116,11 +123,19 @@ spec pending, and `next` moves past it (GOTCHAS, Recording).
    ```bash
    make check > /tmp/check.log 2>&1; echo "make exit: $?"; tail -3 /tmp/check.log
    git add <files> && git commit -m "review(SA-NNNN): <the defect, as a sentence>" && git push -q origin HEAD
+   uv run .claude/skills/run-saffron-spec-loop/driver.py size SA-NNNN
+   uv run .claude/skills/run-saffron-spec-loop/driver.py stack             # dry run
    ```
 
+   `size` measures what was pushed, so it runs after the push; the PR is a
+   draft, so a branch over its ceiling is still the operator's to answer. The
+   dry `stack` finds a conflict between neighbours while the branch is fresh.
+
 **Done when** each criterion has a file:line and a probe result, each finding is
-fixed, answered, or kept, `make check` echoes `make exit: 0`, and the commit is
-pushed.
+fixed, answered, or kept, every witness the review added fails at the spec's
+base with its imports inside the test, `size` reports the branch within its
+ceiling or the operator has been asked, `make check` echoes `make exit: 0`, and
+the commit is pushed.
 
 ## 3. Stack the pull requests
 
@@ -150,13 +165,14 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py rebase --execute   # local
 ```
 
 It refuses a branch checked out in another worktree, records every branch's
-SHA before moving any, restores all of them on a conflict, and prints the push with each lease pinned to the recorded SHA. Run
-`make check` on the top branch, then ask the operator before running the push:
-it rewrites branches with open PRs.
+SHA before moving any, restores all of them on a conflict, and prints the push
+with each lease pinned to the recorded SHA. Run `make check` on the top branch,
+then run the push: step 1's grant covers a leased force-push to the loop's
+branches. It rewrites branches with open PRs, so show the operator its output.
 
 **Done when** every layer reports `identical` or its range-diff has been read,
-`make check` echoes `make exit: 0` on the top branch, and the operator has
-approved and seen the push run, or declined it.
+`make check` echoes `make exit: 0` on the top branch, and the operator has seen
+the push run.
 
 ## 5. File what the reviews left
 

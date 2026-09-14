@@ -59,7 +59,10 @@ reported as its own finding.
 
 Probe in your own worktrees (`git -C {REPO} worktree add /tmp/review-{PR}-spec
 {HEAD}`, then `uv sync` inside) and remove them when done. Run only the default
-suite; `pytest -m cell` is the operator's.
+suite; `pytest -m cell` is the operator's. Run every probe with
+`PYTHONDONTWRITEBYTECODE=1` and `-p no:cacheprovider`, and confirm the edit
+applied before reading its result: a stale `.pyc` and an edit that never landed
+both read as "survived", and a mutant that raises `TypeError` reads as "killed".
 
 ## Standards seat
 
@@ -87,7 +90,10 @@ Demonstrate every finding with a command and its output, or mark it
 unverified. Each finding is one bullet: severity (`blocker`: the diff is wrong
 or a witness cannot fail; `concern`: needs the operator's judgement; `note`:
 true but trivial), the file:line, the rule or criterion it breaks quoted with
-its own file:line, what is wrong, the evidence, and the fix.
+its own file:line, what is wrong, the evidence, and the fix. The operator's
+judgement is for a diff that gets past a gate, a fix outside the spec's
+`touches`, and a fix incomplete without one; a witness to strengthen inside
+`touches` is a `blocker` with its fix.
 
 Report, in this order:
 
