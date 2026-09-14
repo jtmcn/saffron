@@ -307,6 +307,27 @@ def test_the_runtime_is_asked_once_however_often_it_is_probed(tmp_path, monkeypa
     assert calls.read_text().count("x") == 1
 
 
+def test_an_absent_runtime_is_asked_once_however_often_it_is_probed(
+    tmp_path, monkeypatch
+):
+    """The memo keeps an *absent* answer too — the case `probe()`'s docstring
+    names as its reason. A memo that forgets it passes the witness above,
+    whose stub only ever answers present."""
+    calls = tmp_path / "calls"
+    failing = tmp_path / "a-failing-runtime"
+    failing.write_text("#!/bin/sh\necho x >> " + str(calls) + "\nexit 1\n")
+    failing.chmod(0o755)
+
+    monkeypatch.setattr(runtime, "_probed", False)
+    monkeypatch.setattr(runtime, "_probe_result", None)
+    monkeypatch.setattr(runtime, "_selected", SimpleNamespace(binary=str(failing)))
+
+    for _ in range(5):
+        assert runtime.probe() is None
+
+    assert calls.read_text().count("x") == 1
+
+
 def test_a_runtime_that_hangs_reports_as_absent_within_seconds(tmp_path, monkeypatch):
     """SA-0077: the probe's timeout is short, so a runtime hanging on
     `--version` reports absent within seconds rather than stalling a whole
@@ -314,7 +335,8 @@ def test_a_runtime_that_hangs_reports_as_absent_within_seconds(tmp_path, monkeyp
     and dividing whatever it is handed, rather than substituting a small
     constant — so this still depends on the value `probe()` actually chose."""
     hanging = tmp_path / "a-hanging-runtime"
-    hanging.write_text("#!/bin/sh\nsleep 300\n")
+    # `exec`, so the timeout kills the sleep itself rather than orphaning it.
+    hanging.write_text("#!/bin/sh\nexec sleep 300\n")
     hanging.chmod(0o755)
 
     real_call = runtime._call
@@ -331,10 +353,7 @@ def test_a_runtime_that_hangs_reports_as_absent_within_seconds(tmp_path, monkeyp
     started = time.monotonic()
     assert runtime.probe() is None
     elapsed = time.monotonic() - started
-    # The nominal 10.0s timeout, scaled down by the same factor, is ~0.4s;
-    # 1.0s leaves room for process overhead without losing the "seconds, not
-    # minutes" claim — a timeout widened to even half a minute (30/scale =
-    # 1.2s) already exceeds it, well short of `probe()`'s own 60s bound.
+    # 10s/25 ≈ 0.4s; a timeout past ~25s exceeds 1.0s.
     assert elapsed < 1.0, elapsed
 
 
