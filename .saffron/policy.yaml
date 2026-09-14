@@ -16,8 +16,8 @@ gates:
   # And one `integrity` cannot read: a skip spelled where its text scan sees it
   # rather than bound to a name first (backlog item 112).
   # Structural, not textual — each has a legitimate textual near-miss in the tree,
-  # so the `retired-vocabulary` pygrep hook's approach would false-positive on all
-  # three. Declared unconditionally, for the reason `shacl` gives above.
+  # so the `retired-vocabulary` pygrep hook's approach would false-positive on the
+  # first three. Declared unconditionally, for the reason `shacl` gives above.
   structure: { blocking: true }
 
 # Where a plausible-looking wrong change hurts most. Getting this right is most

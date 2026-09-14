@@ -15,7 +15,11 @@ valid:
   - |
     with pytest.raises(pytest.skip.Exception) as excinfo:
         pytest_runtest_setup(item)
+  - |
+    with pytest.raises(pytest.skip.Exception):
+        pytest_runtest_setup(item)
   - 'pytestmark = pytest.mark.cell'
+  - 'def test_a(monkeypatch: pytest.MonkeyPatch): pass'
   - 'from pytest import raises'
   - 'import pytest'
 invalid:
@@ -33,3 +37,10 @@ invalid:
   - 'from _pytest.outcomes import skip'
   - 'import _pytest.outcomes'
   - 'import pytest as pt'
+  - 'from pytest import *'
+  # The module itself as a value, which reaches every name on it unspelled.
+  - '_P = pytest'
+  - 'getattr(pytest, "skip")("no")'
+  # The raises allowance, read too loosely: the call kept, or not pytest's.
+  - '_B = pytest.raises(pytest.skip.Exception).expected_exceptions'
+  - '_C = raises(pytest.skip.Exception)'

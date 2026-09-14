@@ -7,14 +7,15 @@ note: |
   tokens as text, so a skip bound to a name, imported by name, or reached through
   a renamed module spells none of them, and every later call passes. SA-0077 did
   exactly this, with a comment saying why. Call pytest's skip directly, or
-  decorate with the marker, where the scan reads it.
+  decorate with the marker, where the scan reads it. A typing import from
+  `_pytest` has a public name on `pytest` itself; use that.
 
 # No `files:` scope: an alias bound in a helper outside tests/ is the same hole.
 # The expected-failure marker is absent on purpose — its token is the bare word,
 # which every spelling of it carries, the binding line included.
-# ponytail: `getattr` on a computed name, or the module itself bound to a plain
-# name, is past any structural rule; closing those means a reader of what a name
-# resolves to, not of its shape.
+# ponytail: a name reached dynamically — `__import__`, `sys.modules`, a module's
+# `__dict__` — is past any structural rule; closing it means reading what a name
+# resolves to, not its shape.
 rule:
   any:
     # `pytest.skip` anywhere but the callee of a call.
@@ -23,7 +24,8 @@ rule:
       not:
         any:
           - inside: { kind: call, field: function }
-          # `pytest.raises(pytest.skip.Exception)` asserts that a skip happened.
+          # `with pytest.raises(pytest.skip.Exception)` asserts that a skip
+          # happened. Only there: kept as a value, the call hands the class back.
           - inside:
               kind: attribute
               has: { field: attribute, regex: '^Exception$' }
@@ -31,7 +33,8 @@ rule:
                 kind: argument_list
                 inside:
                   kind: call
-                  has: { field: function, regex: '(^|\.)raises$' }
+                  has: { field: function, regex: '^pytest\.raises$' }
+                  inside: { any: [{ kind: with_item }, { kind: as_pattern }] }
     # The markers anywhere but a decorator, bare or called — `marks=` in a
     # `pytest.param` and a module's `pytestmark` spell no `@`.
     - kind: attribute
@@ -44,10 +47,21 @@ rule:
     - kind: attribute
       regex: '^pytest\.mark$'
       not: { inside: { kind: attribute, field: object } }
+    # The module itself as a value — `getattr(pytest, "skip")`, or bound to a name.
+    - kind: identifier
+      regex: '^pytest$'
+      not:
+        any:
+          - inside: { kind: attribute, field: object }
+          - inside: { kind: dotted_name }
     - kind: import_from_statement
       all:
         - has: { field: module_name, regex: '^pytest$' }
-        - has: { kind: dotted_name, regex: '^(skip|mark)$', stopBy: end }
+        - has:
+            stopBy: end
+            any:
+              - { kind: dotted_name, regex: '^(skip|mark)$' }
+              - { kind: wildcard_import }
     - kind: import_from_statement
       has: { field: module_name, regex: '^_pytest(\.|$)' }
     - kind: import_statement
