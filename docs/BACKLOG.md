@@ -6718,6 +6718,30 @@ critic cell, where a gate would run as root before the lenses do).
   comparison** _Avoid_ line and its "never call any of them 'the verdict'
   without saying whose". #255's review took the word out of the code, and the
   design text still carries it.
+- **Before `SA-0087` runs again, its third criterion needs amending.** It says "a
+  patch that does not apply to its own base in that fresh tree ends the task
+  `EXHAUSTED`". `worktree.DIFF_FLAGS` has no `--binary` or `--full-index`, so a
+  binary change exports as a `Binary files … differ` stub that can never apply,
+  whatever the agent did. PACKAGE's `apply_patch` already calls that
+  infrastructure (`PackageError`, exit 2;
+  `test_a_binary_patch_is_an_error_not_a_conflict`). Built to the letter, as on
+  `saffron/SA-0087` @ `82258f0` (`apply_exported_patch`, the
+  `CriticPatchApplyFailed` catch), a task touching a binary file ends `EXHAUSTED`
+  before any lens runs and is charged for a gap in the export. That breaks
+  `error` ≠ `fail`. The contract lens raised it as a blocker, and REBUT never
+  answered it (item 120). Confirmed by reading; no binary diff was run through it.
+  The amendment: a stub the export could never carry is `GATE_ERROR` or a
+  refusal at export, as PACKAGE has it, and only a real failure to apply is the
+  task's.
+- **`SA-0087`'s second criterion needs a witness that can fail.**
+  `test_the_critic_reads_the_tree_rebuilt_from_the_exported_patch` asserts
+  `read_head_containers == [] or …`, and no test scripts a finding outside a
+  diff hunk, so `anchor()` never calls `read_head`. The adequacy lens's probe,
+  pointing `read_head` at the implementer's own `container` in place of
+  `critic_container`, passes all 157 tests in `tests/test_session.py` on
+  `82258f0` (run 2026-09-14). That swap is the regression the spec exists to
+  prevent. The re-run's witness needs a finding anchored outside a hunk and an
+  assertion that `read_head` ran, and ran in the critic cell.
 
 **Not this item:** the threat model's other owner-chosen half, re-gating the
 head that merges and handing a delegate findings only as quoted data. Items
