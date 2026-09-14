@@ -161,13 +161,23 @@ class Baseline:
     (PREFLIGHT_FAILED). Both can be set on the same event: the real call site
     prints the joined `baseline: g=s, ...` line unconditionally and then, only
     when something errored, a second line naming it — `describe()` renders
-    both, in that order, from the one event."""
+    both, in that order, from the one event.
+
+    `green_at_base` names any witness `criteria.witnesses_green_at_base`
+    found already passing at `base_sha` for a criterion that does not
+    declare `preserves` — what `criteria` would fail the first attempt with
+    `witness-green-at-base` for, known before any turn runs
+    (`docs/BACKLOG.md` item 23). Defaulted to `()`, not required: a log
+    written before this field existed carries no such key, and `read_log`'s
+    per-field construction already treats a missing key as the dataclass
+    default rather than dropping the event."""
 
     timestamp: float
     spec_id: str
     aborted: tuple[str, ...] = ()
     gates: tuple[str, ...] = ()
     statuses: tuple[GateStatus, ...] = ()
+    green_at_base: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -734,6 +744,12 @@ def describe(event: Event) -> str:
                 f"baseline errored in {list(event.aborted)} — the toolchain "
                 "is broken, not the code"
             )
+        if event.green_at_base:
+            lines.append(
+                f"criteria: {list(event.green_at_base)} already green at "
+                "base_sha — named before the first turn, since no repair "
+                "can rename or delete an existing test"
+            )
         return "\n".join(lines)
 
     if isinstance(event, PhaseStart):
@@ -858,6 +874,7 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("ceilings:", _RT, Ceilings),
     _Family("baseline: (joined gate=status)", _S, Baseline),
     _Family("baseline errored in", _S, Baseline),
+    _Family("criteria: … already green at base_sha", _S, Baseline),
     _Family("SCOPE: proposal refused", _PC, PhaseStart),
     _Family("SCOPE_REVIEW: proposed", _S, PhaseStart),
     _Family("PLAN: not the schema", _PC, PhaseStart),

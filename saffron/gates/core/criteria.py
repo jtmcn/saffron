@@ -71,6 +71,17 @@ def _fail(criterion: Criterion, code: str, why: str) -> Failure:
     )
 
 
+def _green_at_base(criterion: Criterion, before: _Side) -> bool:
+    """Whether `criterion`'s witness already passed on the base side, for a
+    criterion that does not declare `preserves`. One question, asked at two
+    different times: `_judge`'s own last branch asks it mid-attempt, after a
+    witness has already failed the gate for it; `witnesses_green_at_base`
+    below asks it of the baseline, before any turn has run. Both are this
+    function, so the rule cannot drift between the two askings.
+    """
+    return not criterion.preserves and _green(before, criterion.witness)
+
+
 def _judge(criterion: Criterion, before: _Side, after: _Side) -> Failure | None:
     """`None` when the criterion holds.
 
@@ -94,13 +105,37 @@ def _judge(criterion: Criterion, before: _Side, after: _Side) -> Failure | None:
             "witness-not-preserved",
             "declared `preserves` but was not green at base_sha",
         )
-    if _green(before, criterion.witness):
+    if _green_at_base(criterion, before):
         return _fail(
             criterion,
             "witness-green-at-base",
             "passed at base_sha, so it proves nothing about this change",
         )
     return None
+
+
+def witnesses_green_at_base(
+    acceptance: Sequence[Criterion], base: list[GateResult]
+) -> list[str]:
+    """Witnesses `criteria` would fail with `witness-green-at-base` on the
+    very first attempt this task ever runs — named here, from the baseline
+    alone, before any agent turn spends money learning it (`docs/BACKLOG.md`
+    item 23). `_judge`'s own last branch, built on `_side` and `_green`,
+    exposed once so `session.py` does not restate the rule: two copies of
+    one rule is how they drift.
+
+    Says nothing wherever `_judge` would say nothing about it instead: `[]`
+    for a `preserves` criterion (it claims the opposite already held, not
+    that this witness proves nothing about the change), for a witness
+    `base` never collected, and for a `base` whose enumeration is
+    unreadable at all — no gate reported what it collected, or the runner
+    keyed its failures on something other than a node id (`_side`'s own
+    membership guard).
+    """
+    side = _side(base)
+    if side is None:
+        return []
+    return [c.witness for c in acceptance if _green_at_base(c, side)]
 
 
 def criteria_gate(

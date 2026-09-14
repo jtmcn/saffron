@@ -981,6 +981,7 @@ def _drive_cell(
     """`run_one_cell`'s whole body. `exported` is teardown's way out."""
     from saffron.agents import artifacts, context
     from saffron.cell import runtime, worktree
+    from saffron.gates.core.criteria import witnesses_green_at_base
     from saffron.gates.suite import CellTree, GateSuite
     from saffron.repos import mirror as mirror_ops
     from saffron.repos.policy import PolicyError, load_policy
@@ -1117,10 +1118,15 @@ def _drive_cell(
         # The last suite run: every outcome reports its tier and advisory set,
         # so an outcome never reads a stale attempt's (§5.6).
         latest = baseline
-        # One event for both facts (`Baseline.aborted`/`gates`/`statuses`),
-        # matching what two consecutive `watch()` calls used to print with
-        # nothing between them — `describe()` joins them with the same "\n"
-        # (§5.4, `events.Baseline`'s own docstring).
+        # Before the first agent turn: the baseline's own results already
+        # hold the answer `criteria` would otherwise only give after an
+        # attempt has paid for it (`docs/BACKLOG.md` item 23).
+        green_at_base = witnesses_green_at_base(spec.acceptance, baseline.results)
+        # One event for all three facts (`Baseline.aborted`/`gates`/
+        # `statuses`/`green_at_base`), matching what two consecutive
+        # `watch()` calls used to print with nothing between them —
+        # `describe()` joins them with the same "\n" (§5.4, `events.Baseline`'s
+        # own docstring).
         emit(
             Baseline(
                 timestamp=time.time(),
@@ -1128,6 +1134,7 @@ def _drive_cell(
                 aborted=tuple(baseline.aborted),
                 gates=tuple(r.gate for r in baseline.results),
                 statuses=tuple(r.status for r in baseline.results),
+                green_at_base=tuple(green_at_base),
             )
         )
         for result in baseline.results:

@@ -479,6 +479,39 @@ def test_a_gate_result_says_which_tree_it_ran_against(tmp_path):
     ]
 
 
+def test_a_baseline_naming_a_green_witness_renders_it(tmp_path):
+    """SA-0085, `docs/BACKLOG.md` item 23. The naming travels on the
+    baseline's own event and is rendered by `describe`, so it reaches
+    `events.jsonl` and `saffron watch`, not only the attended terminal that
+    watched it live."""
+    event = Baseline(
+        timestamp=1.0,
+        spec_id="x",
+        gates=("tests",),
+        statuses=("pass",),
+        green_at_base=("t.py::test_a",),
+    )
+    log = EventLog(tmp_path)
+    log.append(event)
+    (round_tripped,) = _read(tmp_path, Baseline)
+    assert round_tripped.green_at_base == ("t.py::test_a",)
+    assert describe(round_tripped).splitlines()[-1] == (
+        "criteria: ['t.py::test_a'] already green at base_sha — named "
+        "before the first turn, since no repair can rename or delete an "
+        "existing test"
+    )
+    # A log written before this field existed carries no such key, and
+    # `read_log` must keep reading it: the default is what stands in.
+    (tmp_path / "events.jsonl").write_text(
+        json.dumps(
+            {"kind": "Baseline", "timestamp": 1.0, "spec_id": "x", "gates": ["tests"]}
+        )
+        + "\n"
+    )
+    (old_log,) = _read(tmp_path, Baseline)
+    assert old_log.green_at_base == ()
+
+
 def test_an_attempt_names_its_phase(tmp_path):
     """CONTEXT.md: "'Attempt 3' without a phase is ambiguous — name both.\""""
     log = EventLog(tmp_path)
@@ -1157,9 +1190,11 @@ def test_the_table_did_not_quietly_lose_a_row():
     their work, so losing a row silently is the failure that matters.
 
     `SA-0030` and `SA-0031` migrate these call sites and will move this count.
-    That is the point: moving it is a deliberate edit, not a silent one."""
-    assert len(FAMILIES) == 59
-    assert len({f.prefix for f in FAMILIES}) == 59
+    That is the point: moving it is a deliberate edit, not a silent one.
+    `SA-0085` moved it again, deliberately, for the one new line shape it adds
+    — a witness already green at base_sha, named on the baseline's own event."""
+    assert len(FAMILIES) == 60
+    assert len({f.prefix for f in FAMILIES}) == 60
 
 
 def test_the_duplicated_agent_renderer_still_matches_its_original():
