@@ -714,16 +714,20 @@ def test_a_silent_gh_is_infrastructure_and_says_the_branch_is_pushed(tmp_path):
 
 
 def test_an_unmoved_base_makes_reverification_provably_redundant():
-    """If the default branch head still equals base_sha, the packaged tree is
-    byte-identical to the one the suite already ran on. Skipping is not a
-    shortcut — re-running could not produce a different answer."""
+    """`needs_reverification` still answers "did the base move" — equal shas
+    here. It no longer licenses `package()` to skip re-verification, though:
+    the cell that ran the suite is the one thing never trusted with its own
+    verdict (§2), so an unmoved base is re-verified exactly like a moved one
+    (`docs/BACKLOG.md` item 118). This return value now only shapes the note
+    `package()` writes when a re-run finds new failures."""
     assert not needs_reverification("a" * 40, "a" * 40)
 
 
 def test_a_moved_base_requires_reverification():
-    """Otherwise the gate table would publish `pass` for a suite that ran
-    against base_sha's tree, on a commit whose tree is today's main plus the
-    patch — the tool-field defect of §5.4 in a new costume."""
+    """A moved base still reports True. Re-verification itself no longer
+    depends on the answer — `package()` always re-runs the suite — but the
+    two cases still write a different note when the re-run finds new
+    failures ("after rebase" here, "the base did not move" for the other)."""
     assert needs_reverification("b" * 40, "a" * 40)
 
 
@@ -861,11 +865,14 @@ def test_a_conflict_persists_merge_failed_and_pushes_nothing(monkeypatch, tmp_pa
 @pytest.fixture
 def packageable(monkeypatch, tmp_path):
     """A green cell's patch, a mirror, and a remote whose default branch has
-    not moved — so PACKAGE runs its whole path and re-verification is provably
-    redundant (no cell, no container, anywhere in these tests)."""
+    not moved — but re-verification runs regardless (item 118), so `reverify`
+    is stubbed clean by default (no cell, no container, anywhere in these
+    tests). A test that cares what re-verification itself does overrides this
+    same `monkeypatch.setattr` with its own answer."""
     # A plain local path stands in for the remote; it is not shaped like a
     # forge remote, so github_slug is faked rather than the path contorted.
     monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    monkeypatch.setattr("saffron.phases.package.reverify", lambda **_k: _reverified())
     remote = tmp_path / "remote.git"
     git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
     work = tmp_path / "work"
@@ -2012,19 +2019,25 @@ def test_a_re_verified_package_reports_the_tier_its_verifying_suite_ran_at(
 
 
 def test_the_pr_body_reports_the_effective_tier_not_the_specs_declared_one(
+    monkeypatch,
     packageable,
 ):
     """SA-0005 computed `effective_risk` and left the spec's own `risk` field
     for `render_pr_body` to read instead — an auto-elevated attempt then wrote
     a pull request that said `standard`. The spec here stays `standard` while
-    the outcome's computed tier is `elevated`, so this only passes if PACKAGE
-    reads the outcome, not `spec.risk`."""
+    the tier re-verification computes is `elevated`, so this only passes if
+    PACKAGE reads the verifying suite's tier, never `spec.risk` — and, since
+    item 118 made re-verification unconditional, `outcome.effective_risk` is
+    always re-verification's answer, expressed here through the `reverify`
+    seam rather than written onto the outcome directly."""
     assert packageable.kwargs["spec"].risk == "standard"
-    packageable.outcome.effective_risk = "elevated"
-    packageable.outcome.gates = [
-        GateResult(gate="perf-smoke", status="fail", summary="12% slower")
-    ]
-    packageable.outcome.advisory_gates = ["perf-smoke"]
+    slow = GateResult(gate="perf-smoke", status="fail", summary="12% slower")
+    monkeypatch.setattr(
+        "saffron.phases.package.reverify",
+        lambda **_k: _reverified(
+            results=[slow], risk="elevated", advisory=["perf-smoke"]
+        ),
+    )
 
     package(
         packageable.outcome,
@@ -2042,13 +2055,20 @@ def test_the_pr_body_reports_the_effective_tier_not_the_specs_declared_one(
 
 
 def test_the_queue_line_carries_the_effective_tier_not_the_specs_declared_one(
+    monkeypatch,
     packageable,
 ):
     """`index.py`'s `sort_key` puts elevated risk ahead of ordinary tasks in
-    the 8am queue — but only if the row it sorts on is the computed tier, not
-    the field an auto-elevated spec never set."""
+    the 8am queue — but only if the row it sorts on is the tier
+    re-verification computed, not the field an auto-elevated spec never set.
+    `outcome.effective_risk` is always re-verification's answer now that
+    item 118 made re-verification unconditional, so the elevation is
+    expressed through the `reverify` seam rather than written onto the
+    outcome directly."""
     assert packageable.kwargs["spec"].risk == "standard"
-    packageable.outcome.effective_risk = "elevated"
+    monkeypatch.setattr(
+        "saffron.phases.package.reverify", lambda **_k: _reverified(risk="elevated")
+    )
 
     package(
         packageable.outcome,
@@ -2182,6 +2202,74 @@ def test_reverify_is_handed_the_policy_from_the_commit_it_verifies_against(
     assert seen["gates_dir"].is_dir()
 
 
+def test_an_unmoved_base_still_reverifies_the_packaged_commit(monkeypatch, packageable):
+    """`docs/BACKLOG.md` item 118: an unmoved base used to skip
+    re-verification and publish the cell's own gate table — the one thing a
+    cell is never trusted with (§2), since it is root on a writable rootfs and
+    controls every tool its own gates would call. `packageable`'s remote never
+    moves, so this proves re-verification runs anyway: the packaged commit's
+    own gate table, not the cell's, must reach the pull request."""
+    packageable.outcome.gates = [
+        GateResult(
+            gate="tests", status="pass", tool="pytest 1.0", summary="ran at base"
+        )
+    ]
+    repackaged = GateResult(
+        gate="tests", status="pass", tool="pytest 9.9.9", summary="ran on the package"
+    )
+    monkeypatch.setattr(
+        "saffron.phases.package.reverify",
+        lambda **_k: _reverified(results=[repackaged]),
+    )
+
+    result = package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **packageable.kwargs,
+    )
+
+    assert result.state == "READY_FOR_REVIEW"
+    body = (packageable.outcome.task_dir / "pr_body.md").read_text()
+    assert "packaged commit" in body
+    assert "ran on the package" in body
+    # The cell's own run at `base_sha` must never be the one shown, moved
+    # base or not.
+    assert "ran at base" not in body
+
+
+def test_new_failures_on_an_unmoved_base_block_the_push_and_say_the_base_did_not_move(
+    monkeypatch, packageable
+):
+    """The other half of item 118: when re-verification on an unmoved base
+    finds new failures, nothing is pushed and no pull request is opened — and
+    the note says the base did not move, so a reader can tell a verdict that
+    did not reproduce from a change that did not survive today's main."""
+    blocking = NewFailure(
+        "tests", Failure(file="tests/test_a.py", code="failed", message="assert 1 == 2")
+    )
+    monkeypatch.setattr(
+        "saffron.phases.package.reverify", lambda **_kwargs: _reverified(blocking)
+    )
+
+    def never_called(argv):
+        raise AssertionError("gh must not be reached when re-verification fails")
+
+    result = package(
+        packageable.outcome,
+        gh=never_called,
+        **packageable.kwargs,
+    )
+
+    assert result.state == "MERGE_FAILED"
+    assert "did not move" in result.note
+    assert result.pushed_sha == ""
+    assert (
+        remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=packageable.work)
+        == ""
+    )
+    assert _state(packageable.ledger, packageable.task_id)["pushed_sha"] == ""
+
+
 # --- SA-0025: package() learns an inert parent branch ----------------------
 
 
@@ -2206,8 +2294,11 @@ def stacked_packageable(monkeypatch, tmp_path):
     """A parent branch with its own commit and its own policy, pushed and
     never merged, and a child stacked on it whose patch is relative to the
     parent's head — never the default branch, which the parent has not yet
-    reached."""
+    reached. Re-verification runs unconditionally (item 118), so `reverify`
+    is stubbed clean by default here too, overridable the same way
+    `packageable`'s is."""
     monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    monkeypatch.setattr("saffron.phases.package.reverify", lambda **_k: _reverified())
     remote = tmp_path / "remote.git"
     git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
 
@@ -2401,6 +2492,12 @@ def test_a_merged_parent_falls_back_to_the_ordinary_target(tmp_path, monkeypatch
     ledger.set_task_state(task_id, "READY_FOR_REVIEW")
     ledger.finish_run(run_id, "COMPLETE")
     outcome = _cell_outcome(task_dir, task_id, run_id)
+
+    # The merge left the default branch's head equal to `tree_base`: no cell
+    # runtime is under test here, so `reverify` — which now runs
+    # unconditionally (item 118) — is stubbed clean, the way `packageable`'s
+    # default now is.
+    monkeypatch.setattr("saffron.phases.package.reverify", lambda **_k: _reverified())
 
     seen = []
 
