@@ -457,13 +457,10 @@ def open_draft_pr(
     )
 
 
-def needs_reverification(fetch_head: str, base_sha: str) -> bool:
-    """Re-run only when the base moved (§5.7).
-
-    Equal shas mean the packaged tree is the tree the suite already ran on, so
-    a re-run is provably redundant rather than merely expensive.
-    """
-    return fetch_head != base_sha
+def needs_reverification(fetch_head: str, tree_base: str) -> bool:
+    """Whether the base moved since the cell ran. It picks the `MERGE_FAILED`
+    note only: re-verification itself is unconditional (§5.7, principle 58)."""
+    return fetch_head != tree_base
 
 
 def reverify(
@@ -488,8 +485,11 @@ def reverify(
     suites come from one set of executables, and the patch's own
     `.saffron/gates/*` are never run.
 
-    Twice, because the base moved: the old baseline describes a tree that no
-    longer exists (§4.4 steps 2-3). The suite is `GateSuite`, the one the
+    Twice, always: a fresh baseline at `new_base_sha` and a fresh head at
+    `packaged_sha`, both in cells the cell under package never touched — the
+    old baseline (the cell's own run) is never reused, moved base or not,
+    because the cell that produced it is the one thing never trusted with it
+    (§2, `docs/BACKLOG.md` item 118). The suite is `GateSuite`, the one the
     cell's attempts were judged by, so the two cannot differ in shape (item
     71, principle 54). An errored gate or drift between the two suites is
     infrastructure and raises; only new failures are the task's.
@@ -791,59 +791,66 @@ def package(
         # stacked — because that is the diff a reviewer actually sees.
         added, removed = mirror_ops.diff_stat(mirror, target_head, pushed)
 
-        verified_on, gates = "base", outcome.gates
-        # `tree_base`, not `base_sha`: the cell's own gates ran against
-        # `spec.tree_base` (`SA-0022`), so that is the tree a fresh baseline
-        # would be redundant against — and `target_head` is where a stacked
-        # child's own baseline has to include the parent's commits, closing
-        # the gap BACKLOG item 33 named as this spec's to fix.
-        if needs_reverification(target_head, tree_base):
-            # The second declaration becomes real here: re-verification runs
-            # under whatever `fetch_head` declares, not what cell start
-            # recorded (item 16). See `record_policy` for why it is guarded.
-            if ledger.task_policy_sha(outcome.task_id) != policy_sha:
-                ledger.record_policy(outcome.task_id, policy_sha)
-            # A gate that errored raises out of `reverify`: infrastructure, and
-            # never this task's MERGE_FAILED. The gates are the export the
-            # policy above was read from — one commit, both halves. The record
-            # stands across that raise on purpose: it is what re-verification
-            # ran under, not what it concluded.
-            comparison = reverify(
-                mirror=mirror,
-                packaged_sha=pushed,
-                new_base_sha=target_head,
-                policy=policy,
-                gates_dir=gates_dir,
-                image=image,
-                spec=spec,
+        # Whether the base actually moved — no longer whether re-verification
+        # runs (it always does, below), only which note a red re-run writes.
+        moved = needs_reverification(target_head, tree_base)
+        # The second declaration becomes real here: re-verification runs
+        # under whatever `fetch_head` declares, not what cell start
+        # recorded (item 16). See `record_policy` for why it is guarded.
+        if ledger.task_policy_sha(outcome.task_id) != policy_sha:
+            ledger.record_policy(outcome.task_id, policy_sha)
+        # Every packaged commit is re-verified outside the cell that built it,
+        # base moved or not: an unmoved base says nothing about whether the
+        # cell's own results were honest (§5.7, principle 58). A gate that
+        # errored raises out of `reverify`: infrastructure, and never this
+        # task's MERGE_FAILED. The gates are the export the
+        # policy above was read from — one commit, both halves. The record
+        # stands across that raise on purpose: it is what re-verification ran
+        # under, not what it concluded.
+        comparison = reverify(
+            mirror=mirror,
+            packaged_sha=pushed,
+            new_base_sha=target_head,
+            policy=policy,
+            gates_dir=gates_dir,
+            image=image,
+            spec=spec,
+        )
+        verified_on, gates = "packaged", comparison.run.results
+        # The body and the queue line report the tier the verifying suite ran
+        # at: §5.6 elevates on the diff judged, and that is always the
+        # packaged one now. Its advisory failures are already excluded. A
+        # copy, so the caller's outcome keeps the cell's own answer.
+        outcome = copy.copy(outcome)
+        outcome.effective_risk = comparison.run.effective_risk
+        outcome.advisory_gates = sorted(comparison.run.advisory_gates)
+        if new := comparison.new_failures:
+            _emit_package(f"{len(new)} new failures against {target_branch}")
+            # Not `pushed`: this returns before the push, and a `pushed_sha`
+            # no remote has is a claim, not a record. The wording splits on
+            # `moved` so cell gate results that did not reproduce (the base
+            # held still) read distinctly from a change that did not survive
+            # today's main (item 118).
+            note = (
+                f"{len(new)} new failures after rebase ({pushed[:12]} in the mirror)"
+                if moved
+                else f"{len(new)} new failures re-verifying the packaged commit "
+                f"({pushed[:12]} in the mirror) — the base did not move"
             )
-            verified_on, gates = "packaged", comparison.run.results
-            # The body and the queue line report the tier the verifying suite
-            # ran at: §5.6 elevates on the diff judged, and after a rebase that
-            # is the packaged one. Its advisory failures are already excluded.
-            # A copy, so the caller's outcome keeps the cell's own answer.
-            outcome = copy.copy(outcome)
-            outcome.effective_risk = comparison.run.effective_risk
-            outcome.advisory_gates = sorted(comparison.run.advisory_gates)
-            if new := comparison.new_failures:
-                _emit_package(f"{len(new)} new failures against {target_branch}")
-                return _finish(
-                    ledger,
-                    outcome,
-                    out_dir,
-                    spec,
-                    repo.name,
-                    PackageResult(
-                        state="MERGE_FAILED",
-                        branch=branch,
-                        # Not `pushed`: this returns before the push, and a
-                        # `pushed_sha` no remote has is a claim, not a record.
-                        note=f"{len(new)} new failures after rebase "
-                        f"({pushed[:12]} in the mirror)",
-                        added=added,
-                        removed=removed,
-                    ),
-                )
+            return _finish(
+                ledger,
+                outcome,
+                out_dir,
+                spec,
+                repo.name,
+                PackageResult(
+                    state="MERGE_FAILED",
+                    branch=branch,
+                    note=note,
+                    added=added,
+                    removed=removed,
+                ),
+            )
 
         # DIFF_FLAGS, not a bare diff: `diff.noprefix` in the operator's global
         # gitconfig makes every ` b/` path parse as garbage in `_test_diff`.
