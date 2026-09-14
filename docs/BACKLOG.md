@@ -55,7 +55,7 @@ That is the gate now.
 ### Tier 1 — breaks at 03:00 with nobody watching
 
 Soundness first: **79**, **69**, **117** (69 answered by running the probe the lens
-already names), **93**, **94**, **109** (filed 2026-09-12; it
+already names), **93**, **94**, ~~**109**~~ (filed 2026-09-12; it
 leaks a mutant wherever 80 stores one), **114** (109's other path, to the critic),
 **115** (a path hidden from `scope` by committed content), **80** (~~**83**~~, ~~**85**~~, ~~**84**~~,
 ~~**82**~~ and ~~**81**~~, pulled up from tier 3 as why 69's gate could not be
@@ -127,8 +127,8 @@ fire. Its number stays listed because item numbers are cited from `saffron/`.
 
 ### Tier 3 — real, not urgent
 
-~~**22**~~, **23**, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
-**56**, ~~**57**~~, ~~**61**~~, **62**, **63**, **64**, **75**, **76**, **77**,
+~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
+**56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**,
 ~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, **110**, **111**, **116**.
 (**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived, and **69** is ranked there too.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
@@ -1657,8 +1657,8 @@ counterpart in code.
 
 ## 23. A witness already green at `base_sha` makes a spec unsatisfiable, and nothing says so
 
-**Status:** in review, 2026-09-14 — `SA-0085`, PR #250 (draft), stacked on
-`SA-0084`, in stack #251; not merged. It names the witness before the first turn
+**Status:** merged, 2026-09-14 — `SA-0085`, PR #250, stacked on
+`SA-0084`, in stack #251. It names the witness before the first turn
 and does not stop the task: the attempts are still paid for. Found by review of `SA-0011`. The `watch()` line asked for below is now an
 event: it goes on `Baseline`, because `criteria` skips at baseline and nothing
 else there reads a witness.
@@ -3831,8 +3831,7 @@ guard exists to make unnecessary once, and `describe`'s contract should be
 
 ## 62. A follower re-reads the whole log every poll, so watching a night is O(n²)
 
-**Status: in review, 2026-09-14 — `SA-0080`, PR #247 (draft), in stack #251;
-not merged.** It added `read_log_since` beside `read_log` rather than giving
+**Status: merged, 2026-09-14 — `SA-0080`, PR #247, in stack #251.** It added `read_log_since` beside `read_log` rather than giving
 `read_log` an offset, so "done looks like" below is met by a sibling. The follower
 assumes an append-only log: a truncated or replaced file stalls it and then loses
 events, so whoever lifts `EventLog`'s rotation `ponytail:` owns the follower's reset.
@@ -3866,8 +3865,8 @@ the thing `SA-0053` was written to avoid.
 2026-09-12.** It covers the `Agent` event only. `Terminal.detail` on a rejected plan and
 `PhaseStart.detail` also carry paths an agent wrote, and they render unclipped
 and unstripped. That is the follow-up, found reviewing `SA-0070` (2026-09-11).
-In review, 2026-09-14 — `SA-0084`, PR #249 (draft), stacked on `SA-0080`, in stack
-#251; not merged. It also cleans `ended_without_finishing`'s `subtype` and
+Merged, 2026-09-14 — `SA-0084`, PR #249, stacked on `SA-0080`, in stack
+#251. It also cleans `ended_without_finishing`'s `subtype` and
 `terminal_reason`. `Preflight`, `Teardown` and `Agent.detail` still render raw; the
 spec deferred them, and a proxy denial naming a host the cell asked for is the likely
 way cell text reaches the first two.
@@ -3899,8 +3898,8 @@ live run — still exposed.
 
 ## 64. A re-run appends to the same log, so `watch` shows two nights as one
 
-**Status: in review, 2026-09-14 — `SA-0081`, PR #248 (draft), stacked on
-`SA-0080`, in stack #251; not merged.** Two things below are out of date. The run id is *not* minted before the
+**Status: merged, 2026-09-14 — `SA-0081`, PR #248, stacked on
+`SA-0080`, in stack #251.** Two things below are out of date. The run id is *not* minted before the
 first event: the ledger mints run and task ids inside `run_one_cell`, after
 `Ceilings` and the cell's first `Preflight` are logged. And the two "runs" are two
 **tasks**, since a run is a repo's slice of a batch. The marker exists anyway:
@@ -5441,8 +5440,8 @@ flags of eleven, under a fixture that calls itself "shaped exactly like
 `worktree.export_patch`'s output"; it should import the tuple (found reviewing
 `SA-0082`, PR #244, 2026-09-14).
 
-**The four below: in review, 2026-09-14 — `SA-0082`, PR #244 (draft), in stack
-#251; not merged.** The `.gitmodules` half the review found is item 115. Probed
+**The four below: merged, 2026-09-14 — `SA-0082`, PR #244, in stack
+#251.** The `.gitmodules` half the review found is item 115. Probed
 that day on git 2.39.5 (the cell image) and 2.54, with identical results
 (`docs/evidence/scripts/2026-09-13-history-and-diff-pins.sh`).
 `--ignore-submodules=none`, `--no-color` and `--inter-hunk-context=0` each
@@ -6371,8 +6370,7 @@ until the images question below is answered too, and that is the larger half.
 
 ## 109. A mutant its witness survives is spelled out to the implementer in the repair turn
 
-**Status: in review, 2026-09-14 — `SA-0078`, PR #243 (draft), in stack #251;
-not merged.** The mutant that does not apply still reaches the critic: item 114.
+**Status: merged, 2026-09-14 — `SA-0078`, PR #243, in stack #251.** The mutant that does not apply still reaches the critic: item 114.
 
 Found 2026-09-12 while deciding item 80. `witness_gate` builds the
 `survived-mutant` failure with a message quoting the mutant's `find`, its
@@ -6397,8 +6395,8 @@ intended: the operator has the spec.
 
 ## 110. Grafts and `.git/shallow` move a worktree's history reads with replace refs off
 
-**Status: in review, 2026-09-14 — `SA-0083`, PR #246 (draft), stacked on
-`SA-0082`, in stack #251; not merged.** The pin puts `env` at argv[0], and
+**Status: merged, 2026-09-14 — `SA-0083`, PR #246, stacked on
+`SA-0082`, in stack #251.** The pin puts `env` at argv[0], and
 `.saffron/Dockerfile` asserts `git --version` but not `env --version`. Probed that day on git 2.39.5 (the cell image) and 2.54, with identical
 results (`docs/evidence/scripts/2026-09-13-history-and-diff-pins.sh`):
 - `GIT_GRAFT_FILE=/dev/null` pins grafts and not shallow.
@@ -6433,8 +6431,7 @@ has no probed answer yet — with a witness that grafts a worktree the way
 
 ## 111. `runtime.probe()`'s once-per-session answer and its timeout are both untested
 
-**Status: in review, 2026-09-14 — `SA-0079`, PR #245 (draft), in stack #251;
-not merged.** The docstring hand fix below also owes `probe()`'s garbled "starts a
+**Status: merged, 2026-09-14 — `SA-0079`, PR #245, in stack #251.** The docstring hand fix below also owes `probe()`'s garbled "starts a
 process that is not there once per test". A runtime that forks outliving the
 timeout is item 116.
 
