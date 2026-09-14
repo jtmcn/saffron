@@ -88,6 +88,11 @@ class OrderRow:
     last_state: str | None = None
     undecided_cells: int = 0
     dropped: str | None = None
+    # What PACKAGE pushed, from the ledger; a branch head past it carries
+    # review commits. Empty in an order written before `record` stored it.
+    pushed_sha: str = ""
+    title: str = ""
+    budget_usd: float = 0.0
 
     @property
     def pending(self) -> bool:
@@ -191,6 +196,8 @@ def _order(
             depends_on=list(spec.depends_on),
             spec_sha=load_spec(REPO / _relative(path))[1],
             branch=f"saffron/{spec.id}",
+            title=spec.title,
+            budget_usd=spec.budget_usd,
         )
 
     admitted = {p.spec_id: p for p in carried}
@@ -220,8 +227,31 @@ def _order(
             ):
                 admitted[spec.id] = row_for(spec, path)
 
+    stranded = [path for spec, path in deferred if spec.id not in admitted]
+    return _sequence(list(admitted.values())), stranded + [r.path for r in unreadable]
+
+
+def _sequence(rows: list[OrderRow]) -> list[OrderRow]:
+    """Parents before children; among the rows ready at each turn, priority,
+    then the most descendants, then id. A parent that sorts late leaves its
+    children nothing independent to run beside its review (stack #251)."""
+    children: dict[str, list[str]] = {}
+    for p in rows:
+        for d in p.depends_on:
+            children.setdefault(d, []).append(p.spec_id)
+
+    def descendants(spec_id: str) -> int:
+        seen: set[str] = set()
+        stack = list(children.get(spec_id, []))
+        while stack:
+            child = stack.pop()
+            if child not in seen:
+                seen.add(child)
+                stack.extend(children.get(child, []))
+        return len(seen)
+
     ordered: list[OrderRow] = []
-    remaining = dict(admitted)
+    remaining = {p.spec_id: p for p in rows}
     while remaining:
         ready = [
             p
@@ -230,12 +260,10 @@ def _order(
         ]
         if not ready:  # a dependency cycle; emit the rest stably rather than hang
             ready = sorted(remaining.values(), key=lambda p: p.spec_id)
-        ready.sort(key=lambda p: (p.priority, p.spec_id))
+        ready.sort(key=lambda p: (p.priority, -descendants(p.spec_id), p.spec_id))
         ordered.append(ready[0])
         del remaining[ready[0].spec_id]
-
-    stranded = [path for spec, path in deferred if spec.id not in admitted]
-    return ordered, stranded + [r.path for r in unreadable]
+    return ordered
 
 
 def _parse_order() -> list[OrderRow]:
@@ -368,9 +396,12 @@ def _stack_order(rows: list[OrderRow]) -> tuple[list[OrderRow], list[str]]:
     for lower, upper in zip(order, order[1:], strict=False):
         want = parent(upper)
         if want is not None and want != lower.spec_id:
+            # `visit` already put `want` further down, so the merge base is its
+            # head and the PR's diff is the child's own (measured on #249).
             warnings.append(
-                f"{upper.spec_id} sits above {lower.spec_id}, not its parent {want}: "
-                f"#{upper.pr} will show {want}'s changes"
+                f"{upper.spec_id} sits above its sibling {lower.spec_id}, not "
+                f"directly above its parent {want}; #{upper.pr}'s diff is "
+                "unaffected, and `rebase` would chain them if asked"
             )
     for i, p in enumerate(order):
         below = order[i - 1].branch if i else "the trunk"
@@ -388,6 +419,39 @@ def _trunk(cwd: Path = REPO) -> str:
         return _git("symbolic-ref", "--short", "refs/remotes/origin/HEAD", cwd=cwd)
     except GitError:
         return "origin/main"
+
+
+def _own_base(upper: str, others: Sequence[str], trunk: str, cwd: Path = REPO) -> str:
+    """The merge base nearest `upper` among the trunk and the loop's other
+    branches: a parent, a sibling it was rebased onto, or the trunk. Measured
+    from the trunk, stack #251's chained SA-0080 counted three specs below it."""
+    best: tuple[int, str] | None = None
+    for other in (trunk, *others):
+        if other == upper:
+            continue
+        try:
+            base = _git("merge-base", other, upper, cwd=cwd)
+        except GitError:
+            continue
+        behind = int(_git("rev-list", "--count", f"{base}..{upper}", cwd=cwd))
+        if best is None or behind < best[0]:
+            best = (behind, base)
+    if best is None:
+        raise GitError(f"{upper} shares no history with {trunk}")
+    return best[1]
+
+
+def _size(
+    lower: str, upper: str, spec_type: str, *, cwd: Path = REPO
+) -> tuple[int, int]:
+    """Changed lines from `lower` to `upper` and the ceiling `spec_type` gets —
+    counted and looked up by the `size` gate itself, which runs only in the
+    cell, so a review round can take a branch past it unseen (item 40)."""
+    from saffron.cell.worktree import DIFF_FLAGS
+    from saffron.gates.core.size import _CEILINGS, _DEFAULT_CEILING, _changed_lines
+
+    diff = _git("diff", *DIFF_FLAGS, f"{lower}...{upper}", cwd=cwd)
+    return _changed_lines(diff), _CEILINGS.get(spec_type, _DEFAULT_CEILING)
 
 
 def _merge_conflicts(lower: str, upper: str, cwd: Path = REPO) -> list[str]:
@@ -594,10 +658,14 @@ def terminal_states() -> list[str]:
 
 
 def watch_pattern() -> str:
-    """The Monitor's `grep -E` pattern: phase lines anchored, terminal states
-    not — the CLI prints a state after a padded spec id."""
+    """The Monitor's `grep -E` pattern. A terminal state is anchored where the
+    CLI prints one — column 0, or after a padded spec id — because an agent
+    line grepping for `SCOPE_REVIEW` fired it unanchored."""
     states = "|".join(terminal_states())
-    return f"^({'|'.join(WATCH_PREFIXES)})|({states})|Traceback"
+    return (
+        f"^({'|'.join(WATCH_PREFIXES)})|^SA-[0-9]+ +({states})\\b|^({states})\\b"
+        "|Traceback"
+    )
 
 
 # ------------------------------------------------------------- commands
@@ -625,7 +693,15 @@ def cmd_snapshot(args) -> int:
     print(f"order: {len(ordered)} spec(s), bottom of the stack first\n")
     for i, p in enumerate(ordered, 1):
         dep = f"  depends_on={p.depends_on}" if p.depends_on else ""
-        print(f"  {i}. {p.spec_id}  priority={p.priority}{dep}")
+        print(
+            f"  {i}. {p.spec_id}  priority={p.priority}  ${p.budget_usd:.2f}"
+            f"{dep}  {p.title}"
+        )
+    total = sum(p.budget_usd for p in ordered)
+    print(
+        f"\nspec budgets: ${total:.2f} in total; a cell can run to ~1.7x its own "
+        "(DESIGN.md §3)"
+    )
     ordered_paths = {p.path for p in ordered}
     held = [
         r
@@ -637,17 +713,28 @@ def cmd_snapshot(args) -> int:
         for r in held:
             print(f"  {r.path.name}: {r.reason}")
     print(f"\nwritten to {ORDER.relative_to(REPO)}")
-    loose = [p for p in ordered[1:] if not p.depends_on]
-    if loose:
+    roots = [p for p in ordered if not p.depends_on]
+    if len(roots) > 1:
         print(
-            f"\nnote: {len(loose)} spec(s) declare no depends_on, so their branches are "
-            "siblings\n      cut from the default branch; `rebase` chains them if asked."
+            f"\nnote: {len(roots)} specs declare no depends_on, so their branches are "
+            "siblings\n      cut from the default branch; `rebase` would chain the "
+            f"{len(roots) - 1} above the bottom one if asked."
         )
     return 0
 
 
+def _origin_head(branch: str) -> str | None:
+    try:
+        return _git("rev-parse", f"origin/{branch}")
+    except GitError:
+        return None
+
+
 def _next_spec(
-    rows: list[OrderRow], *, again: bool
+    rows: list[OrderRow],
+    *,
+    again: bool,
+    head_of: Callable[[str], str | None] | None = None,
 ) -> tuple[OrderRow | None, str | None]:
     """The first pending spec no cell has answered, and a note when its parent
     is reviewable: a child's worktree is cut from the parent's branch, so the
@@ -676,10 +763,26 @@ def _next_spec(
                 "so a cell would cut it from main"
             )
             continue
-        parents = [d for d in p.depends_on if d in by_id]
-        if parents:
+        parents = [by_id[d] for d in p.depends_on if d in by_id]
+        names = ", ".join(q.spec_id for q in parents)
+        if parents and all(q.pushed_sha for q in parents):
+            head_of = head_of or _origin_head
+            heads = {q.spec_id: head_of(q.branch) for q in parents}
+            unpushed = [q for q in parents if heads[q.spec_id] in (None, q.pushed_sha)]
+            if unpushed:
+                notes.append(
+                    f"{p.spec_id} waits on {unpushed[0].spec_id}'s review commits: "
+                    "none are pushed yet"
+                )
+                continue
+            pushed = ", ".join((heads[q.spec_id] or "")[:8] for q in parents)
             notes.append(
-                f"{p.spec_id} is cut from {', '.join(parents)}: push "
+                f"{p.spec_id} is cut from {names}, whose review commits are pushed "
+                f"({pushed})"
+            )
+        elif parents:  # an order `record` wrote before it stored `pushed_sha`
+            notes.append(
+                f"{p.spec_id} is cut from {names}: push "
                 f"{'their' if len(parents) > 1 else 'its'} review commits first"
             )
         return p, "; ".join(notes) or None
@@ -706,6 +809,8 @@ def cmd_next(args) -> int:
     if not pending:
         print("done: every spec in the order has been run or dropped", file=sys.stderr)
         return 1
+    if any(p.last_state is None for p in pending):
+        return 1  # every untouched spec waits on a parent; the note said which
     print(
         "nothing untouched left: every pending spec has already had a cell.",
         file=sys.stderr,
@@ -757,8 +862,10 @@ def cmd_record(args) -> int:
         url = urls.get(chosen["task_id"], "")
         pr = int(url.rstrip("/").rsplit("/", 1)[-1]) if "/pull/" in url else None
 
+        spent, budget = chosen["spent_usd_est"], chosen["budget_usd"]
         if state in DONE_STATES:
             match.state, match.pr = state, pr
+            match.pushed_sha = chosen["pushed_sha"] or ""
         else:
             # Nothing was decided. Keep a PR number the ledger still carries: a
             # `CHANGES_REQUESTED` spec has one open.
@@ -772,7 +879,8 @@ def cmd_record(args) -> int:
 
     _save(rows)
     where = f"#{match.pr}" if match.pr else "(no PR)"
-    print(f"{match.spec_id}  {state}  {where}")
+    cost = f"  ${spent:.2f} of ${budget:.2f}" if spent is not None and budget else ""
+    print(f"{match.spec_id}  {state}  {where}{cost}")
     if match.state is None:
         why = (
             "the cell is still running — wait for it to exit, then record again"
@@ -917,6 +1025,30 @@ def cmd_rebase(args) -> int:
     return 0
 
 
+def cmd_size(args) -> int:
+    from saffron.intake import load_spec
+
+    rows = _load()
+    match = next((p for p in rows if p.spec_id == args.spec_id), None)
+    if match is None:
+        return _fail(f"{args.spec_id} is not in the order")
+    spec, _sha = load_spec(REPO / match.path)
+    subprocess.run(["git", "fetch", "-q", "origin"], cwd=REPO)
+    upper = f"origin/{match.branch}"
+    others = [f"origin/{p.branch}" for p in rows if p.spec_id != match.spec_id]
+    try:
+        lower = _own_base(upper, others, _trunk())
+    except GitError as err:
+        return _fail(str(err))
+    lines, ceiling = _size(lower, upper, spec.type)
+    verdict = "within it" if lines <= ceiling else "over it: ask the operator (item 40)"
+    print(
+        f"{match.spec_id}: {lines} changed lines since {lower[:8]}; the "
+        f"{spec.type} ceiling is {ceiling}, {verdict}"
+    )
+    return 0 if lines <= ceiling else 1
+
+
 def cmd_pattern(_args) -> int:
     print(watch_pattern())
     return 0
@@ -959,6 +1091,10 @@ def main() -> int:
     )
     p.add_argument("--execute", action="store_true", help="rebase the local branches")
     p.set_defaults(func=cmd_rebase)
+
+    p = sub.add_parser("size", help="a branch's changed lines against its ceiling")
+    p.add_argument("spec_id")
+    p.set_defaults(func=cmd_size)
 
     p = sub.add_parser("pattern", help="print the Monitor's grep -E pattern")
     p.set_defaults(func=cmd_pattern)

@@ -67,11 +67,29 @@ def test_a_child_sits_directly_above_its_parent_ahead_of_an_earlier_sibling():
     assert warnings == []
 
 
+def test_a_parent_of_waiting_children_runs_before_a_leaf_of_equal_priority():
+    # Stack #251: SA-0080, parent of three, sorted after the leaf SA-0079 by
+    # id, so once it ran nothing independent was left to run beside its review.
+    rows = [
+        _row("L", 3, state=None, pr=None),
+        _row("P", 3, state=None, pr=None),
+        _row("C1", 3, ["P"], state=None, pr=None),
+        _row("C2", 3, ["P"], state=None, pr=None),
+        _row("H", 2, state=None, pr=None),
+    ]
+    assert [p.spec_id for p in driver._sequence(rows)] == ["H", "P", "C1", "C2", "L"]
+
+
 def test_a_parent_with_two_children_is_reported_not_hidden():
     rows = [_row("A", pr=10), _row("B", 2, ["A"], pr=11), _row("C", 2, ["A"], pr=12)]
     order, warnings = driver._stack_order(rows)
     assert [p.spec_id for p in order] == ["A", "B", "C"]
-    assert warnings == ["C sits above B, not its parent A: #12 will show A's changes"]
+    # Not "will show A's changes": A is further down the stack, so #12's merge
+    # base with B is A's head and its diff is C's own (measured on #249).
+    assert warnings == [
+        "C sits above its sibling B, not directly above its parent A; #12's diff "
+        "is unaffected, and `rebase` would chain them if asked"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -130,6 +148,40 @@ def repo(tmp_path, monkeypatch):
     tips["d"] = _commit(tmp_path, "d.txt", "d\n")
     _git(tmp_path, "checkout", "-q", "main")
     return tmp_path, tips
+
+
+@pytest.mark.parametrize(
+    ("lower", "upper", "spec_type", "ceiling"),
+    [
+        ("main", "a", "bug", 300),
+        ("a", "b", "feature", 600),
+        ("main", "c", "test", 1000),
+    ],
+)
+def test_size_counts_a_branch_against_the_gates_own_ceiling(
+    repo, lower, upper, spec_type, ceiling
+):
+    # A review round took #247 from 294 to 367 lines against a bug's 300, and
+    # `size` runs only in the cell (item 40). Each branch here adds one line.
+    tmp, _tips = repo
+    assert driver._size(lower, upper, spec_type, cwd=tmp) == (1, ceiling)
+
+
+def test_size_measures_a_branch_from_the_nearest_branch_it_was_cut_or_rebased_from(
+    repo,
+):
+    # Stack #251's siblings were chained before they merged, and measured from
+    # trunk SA-0080 counted SA-0078 to SA-0079 as well: 802 lines, not 367.
+    cwd, tips = repo
+    assert driver._own_base("b", ["a", "c"], "main", cwd) == tips["a"]  # a child
+    assert driver._own_base("c", ["a", "b"], "main", cwd) == tips["M0"]  # a sibling
+    assert driver._own_base("d", ["a", "b", "c"], "main", cwd) == tips["M1"]
+
+    layers = driver._layers(["a", "b", "c", "d"], "main", cwd, prefix="")
+    ok, messages = driver._apply_layers(layers, cwd)
+    assert ok, messages
+    chained_c = _git(cwd, "rev-parse", "c")
+    assert driver._own_base("d", ["a", "b", "c"], "main", cwd) == chained_c
 
 
 def test_a_fork_point_is_the_newer_of_the_two_merge_bases(repo):
@@ -269,6 +321,15 @@ def test_the_watch_pattern_matches_every_terminal_state_after_a_padded_spec_id()
     assert not pattern.search("agent: thinking")
 
 
+def test_the_watch_pattern_ignores_state_names_inside_the_agents_own_lines():
+    # SA-0084's agent grepped for SCOPE_REVIEW and the Monitor fired on it.
+    pattern = re.compile(driver.watch_pattern())
+    assert not pattern.search(
+        'agent: Grep {"pattern": "SCOPE_REVIEW|PhaseStart|detail=", "path": "/work"}'
+    )
+    assert pattern.search("READY_FOR_REVIEW: $2.82 spent, session 7b45a3b7")
+
+
 def test_the_driver_reads_every_terminal_state_from_the_ontology():
     assert sorted(driver.terminal_states()) == sorted(TERMINAL_STATES)
 
@@ -285,6 +346,47 @@ def test_next_says_when_the_spec_it_names_is_cut_from_a_reviewable_parent():
     chosen, note = driver._next_spec([parent, sibling], again=False)
     assert chosen is sibling
     assert note is None
+
+
+def test_next_passes_over_a_child_until_its_parents_review_commits_are_pushed():
+    # Stack #251: `next` named SA-0083 while SA-0082's review was unpushed, and
+    # exit 0 with a spec id reads as "start this".
+    parent = _row("A", pr=10)
+    parent.pushed_sha = "p" * 40
+    child = _row("B", 2, ["A"], pr=None, state=None)
+    sibling = _row("C", 2, pr=None, state=None)
+    heads = {"saffron/A": "p" * 40}
+
+    chosen, note = driver._next_spec(
+        [parent, child, sibling], again=False, head_of=heads.get
+    )
+    assert chosen is sibling
+    assert note == "B waits on A's review commits: none are pushed yet"
+
+    chosen, note = driver._next_spec([parent, child], again=False, head_of=heads.get)
+    assert chosen is None
+    assert note == "B waits on A's review commits: none are pushed yet"
+
+    heads["saffron/A"] = "r" * 40
+    chosen, note = driver._next_spec(
+        [parent, child, sibling], again=False, head_of=heads.get
+    )
+    assert chosen is child
+    assert note == "B is cut from A, whose review commits are pushed (rrrrrrrr)"
+
+
+def test_next_says_a_waiting_child_is_all_that_is_left(monkeypatch, capsys):
+    parent = _row("A", pr=10)
+    parent.pushed_sha = "p" * 40
+    child = _row("B", 2, ["A"], pr=None, state=None)
+    monkeypatch.setattr(driver, "_load", lambda: [parent, child])
+    monkeypatch.setattr(driver, "_stale", lambda rows: [])
+    monkeypatch.setattr(driver, "_origin_head", lambda branch: "p" * 40)
+
+    assert driver.cmd_next(argparse.Namespace(again=False)) == 1
+    err = capsys.readouterr().err
+    assert "B waits on A's review commits" in err
+    assert "nothing untouched left" not in err
 
 
 def _rate_limited(spec_id: str):
@@ -371,6 +473,25 @@ def loop(tmp_path, monkeypatch):
     )
 
 
+def test_snapshot_shows_each_specs_title_and_budget_and_counts_every_root(loop, capsys):
+    # The operator saw no queue before the first cell, and the note said "3
+    # spec(s) declare no depends_on" of four that did.
+    loop.scan_returns(0, 1, 2, 3)
+
+    assert driver.cmd_snapshot(argparse.Namespace(force=False)) == 0
+
+    out = capsys.readouterr().out
+    for title in (
+        "Define a factory ontology",
+        "The size core gate is specified but not implemented",
+        "An attempt's identity is recorded nowhere",
+        "The anti-gaming gate is declared, parsed, and enforced by nothing",
+    ):
+        assert title in out
+    assert "$28.50" in out  # 10 + 8 + 6 + 4.5, the four specs' budget_usd
+    assert "4 specs declare no depends_on" in out
+
+
 def test_a_resnapshot_holds_out_a_spec_edited_while_its_pr_is_open(loop, capsys):
     # The scan looks past the loop's own PRs, so the edited spec came back as a
     # fresh candidate, and its next cell would have packaged onto #10's branch.
@@ -403,6 +524,37 @@ def test_a_resnapshot_looks_past_only_the_loops_own_open_prs():
 
     hiding = driver._hiding(gh, frozenset({"saffron/SA-0001"}))
     assert json.loads(hiding(["gh", "pr", "list"]).stdout) == [listed[1]]
+
+
+def test_record_keeps_what_package_pushed_and_says_what_the_cell_spent(
+    loop, monkeypatch, capsys
+):
+    # SA-0080 finished at $7.55 against a $6 budget and nothing on the way out
+    # said so; `next` needs the pushed sha to tell a reviewed parent apart.
+    spec_id = loop.ids[0]
+    driver._save([loop.row(0)])
+    sha = driver._load()[0].spec_sha
+    task = {
+        "task_id": 7,
+        "state": "READY_FOR_REVIEW",
+        "pushed_sha": "p" * 40,
+        "spent_usd_est": 7.55,
+        "budget_usd": 6.0,
+    }
+    ledger = SimpleNamespace(
+        tasks_by_spec=lambda _repo: {(spec_id, sha): [task]},
+        tasks_by_repo=lambda _repo: [
+            {"task_id": 7, "pr_url": "https://github.com/o/r/pull/247"}
+        ],
+        close=lambda: None,
+    )
+    monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (ledger, 1, "url"))
+
+    assert driver.cmd_record(argparse.Namespace(spec_id=spec_id)) == 0
+    assert driver._load()[0].pushed_sha == "p" * 40
+    assert capsys.readouterr().out == (
+        f"{spec_id}  READY_FOR_REVIEW  #247  $7.55 of $6.00\n"
+    )
 
 
 def test_a_resnapshot_keeps_what_the_loop_recorded(loop):
