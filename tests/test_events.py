@@ -1419,6 +1419,119 @@ def test_an_agent_payload_cannot_put_control_characters_on_a_terminal():
     assert "\x07" not in bounded_line and "boom" in bounded_line
 
 
+def test_a_phase_line_cannot_put_control_characters_on_a_terminal():
+    """Item 63: `describe()` cleaned an `Agent` payload's control characters
+    and printed a `PhaseStart`'s `detail` verbatim, though the same kind of
+    model-authored text reaches it — `plan_checkpoint`'s re-prompt lines
+    among others (`not the schema, re-prompting once — {exc}`, `proposal
+    refused, re-prompting once — {exc}`), where `exc` quotes an artifact a
+    cell wrote. Modeled on
+    `test_an_agent_payload_cannot_put_control_characters_on_a_terminal`: every
+    code point from U+0000 to U+001F, and U+007F, must not reach the
+    rendered line, and the surrounding text must survive."""
+    from saffron.events import _clean  # local: kept out of the revert's collection
+
+    for code in (*range(0x20), 0x7F):
+        assert _clean(chr(code) + "A", 160) == " A"
+
+    evil = "\x1b[2J\x1b]0;pwned\x07 re-prompting once — " + "A" * 20
+    line = describe(
+        PhaseStart(
+            timestamp=1.0,
+            spec_id="x",
+            phase="IMPLEMENT",
+            label="PLAN",
+            detail=evil,
+        )
+    )
+    assert all(chr(code) not in line for code in (*range(0x20), 0x7F))
+    assert "AAAAAAAAAAAAAAAAAAAA" in line
+    assert line.startswith("PLAN: ")
+
+
+def test_a_terminal_line_cannot_put_control_characters_on_a_terminal():
+    """The sibling above, for `Terminal`. A rejected plan's `detail` is the
+    rejection's own text, which names the paths the plan proposed — model
+    text the same way a `PhaseStart` re-prompt is. Both `Terminal` branches
+    that render a `detail` are covered: `plan_rejected`, and
+    `cut_off_no_salvage_room`, which item 63's own notes call out because the
+    fix lives in `describe()` once, not per branch."""
+    evil = "\x1b[2J\x1b]0;pwned\x07" + "A" * 20
+
+    rejected_line = describe(
+        Terminal(
+            timestamp=1.0,
+            spec_id="x",
+            reason="plan_rejected",
+            spent_usd_est=0.1,
+            detail=evil,
+        )
+    )
+    assert all(chr(code) not in rejected_line for code in (*range(0x20), 0x7F))
+    assert "AAAAAAAAAAAAAAAAAAAA" in rejected_line
+
+    cut_off_line = describe(
+        Terminal(
+            timestamp=1.0,
+            spec_id="x",
+            reason="cut_off_no_salvage_room",
+            spent_usd_est=9.0,
+            detail=evil,
+        )
+    )
+    assert all(chr(code) not in cut_off_line for code in (*range(0x20), 0x7F))
+    assert "AAAAAAAAAAAAAAAAAAAA" in cut_off_line
+
+
+def test_a_phase_or_terminal_detail_is_clipped():
+    """Item 63: the bound exists so a five-thousand-character validation
+    error renders as one bounded line rather than whole — proven by clipping
+    a `detail` longer than the bound, for both kinds that carry one, and
+    checking the render actually stops there rather than merely tolerating
+    a short one."""
+    # local: kept out of the revert's collection
+    from saffron.events import _DETAIL_BOUND
+
+    long_detail = "x" * (_DETAIL_BOUND + 400)
+    clipped = "x" * _DETAIL_BOUND
+
+    phase_line = describe(
+        PhaseStart(
+            timestamp=1.0,
+            spec_id="x",
+            phase="IMPLEMENT",
+            label="PLAN",
+            detail=long_detail,
+        )
+    )
+    assert phase_line == f"PLAN: {clipped}"
+
+    rejected_line = describe(
+        Terminal(
+            timestamp=1.0,
+            spec_id="x",
+            reason="plan_rejected",
+            spent_usd_est=0.1,
+            detail=long_detail,
+        )
+    )
+    assert rejected_line == f"PLAN: rejected, $0.10 spent — {clipped}"
+
+    cut_off_line = describe(
+        Terminal(
+            timestamp=1.0,
+            spec_id="x",
+            reason="cut_off_no_salvage_room",
+            spent_usd_est=9.0,
+            detail=long_detail,
+        )
+    )
+    assert cut_off_line == (
+        f"budget: {clipped} — cut off at the turn ceiling with nothing "
+        "committed, no room left to salvage"
+    )
+
+
 def test_findings_name_what_the_table_could_not_type():
     """The two call-site shapes `FAMILIES` refused to force into a
     `message: str` are named, not silently dropped."""

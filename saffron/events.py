@@ -628,8 +628,26 @@ def _clean(value: object, limit: int) -> str:
     and retitle their terminal — and `saffron watch` can replay that into a
     fresh terminal long after the run — so the strip happens once, here,
     rather than in each branch below. Host-authored text (the `, resets …`
-    suffix, `Agent.detail`) never passes through this."""
+    suffix, `Agent.detail`) never passes through this — nor does most of
+    `PhaseStart.detail`/`Terminal.detail` below, but both fields are shared
+    with call sites that quote a plan, a lens report, or a rebuttal a cell
+    wrote (backlog item 63), so both are cleaned unconditionally rather than
+    trusted per call site."""
     return str(value).translate(_CONTROL_TRANSLATION)[:limit]
+
+
+# `PhaseStart.detail`/`Terminal.detail` are cleaned to this bound rather than
+# `BOUND_CHARS` above (8192, sized for the *stored* `Agent.event` JSON) or the
+# 160 `_describe_agent_event` uses for one SDK field at a time: a rejected
+# plan's or a lens's non-schema report's quoted text is host-formatted prose
+# around a model-authored fragment, not one bounded SDK field, and 160 already
+# clips the longest line either fixture this suite carries today (91
+# characters, the golden fixture's `baseline:` line; 67 for a `REVIEW:`
+# summary's `detail` alone) — measured, not reasoned, per item 63's own
+# instruction to check before reusing the `Agent` bound. 500 leaves a rejected
+# plan's or a parse error's own reasoning legible as one bounded line, well
+# clear of every detail line measured above.
+_DETAIL_BOUND = 500
 
 
 def _describe_agent_event(event: dict) -> str:
@@ -730,7 +748,7 @@ def describe(event: Event) -> str:
         return "\n".join(lines)
 
     if isinstance(event, PhaseStart):
-        return f"{event.label}: {event.detail}"
+        return f"{event.label}: {_clean(event.detail, _DETAIL_BOUND)}"
 
     if isinstance(event, Attempt):
         if event.aborted:
@@ -776,8 +794,8 @@ def describe(event: Event) -> str:
     if isinstance(event, Terminal):
         if event.reason == "cut_off_no_salvage_room":
             return (
-                f"budget: {event.detail} — cut off at the turn ceiling with "
-                "nothing committed, no room left to salvage"
+                f"budget: {_clean(event.detail, _DETAIL_BOUND)} — cut off at "
+                "the turn ceiling with nothing committed, no room left to salvage"
             )
         if event.reason == "cut_off_salvage_failed":
             return (
@@ -791,7 +809,10 @@ def describe(event: Event) -> str:
             )
         if event.reason == "finished_empty":
             return "IMPLEMENT: finished and produced nothing"
-        return f"PLAN: rejected, ${event.spent_usd_est:.2f} spent — {event.detail}"
+        return (
+            f"PLAN: rejected, ${event.spent_usd_est:.2f} spent — "
+            f"{_clean(event.detail, _DETAIL_BOUND)}"
+        )
 
     if isinstance(event, Teardown):
         if event.step == "start":
