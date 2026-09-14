@@ -314,6 +314,83 @@ def test_read_log_on_a_missing_file_returns_no_events(tmp_path):
     assert read_log(tmp_path / "nowhere") == []
 
 
+def test_read_log_since_returns_only_events_after_the_offset(tmp_path):
+    # SA-0080: local, never at module scope, or a reverted run collects with
+    # an error rather than failing clean.
+    from saffron.events import read_log_since
+
+    log = EventLog(tmp_path)
+    events_path = tmp_path / "events.jsonl"
+    first = Teardown(timestamp=1.0, spec_id="SA", step="start", ok=True)
+    log.append(first)
+    first_offset = events_path.stat().st_size
+    second = Teardown(timestamp=2.0, spec_id="SA", step="network", ok=True)
+    log.append(second)
+    end = events_path.stat().st_size
+
+    assert read_log_since(tmp_path, 0) == ([first, second], end)
+    assert read_log_since(tmp_path, first_offset) == ([second], end)
+
+
+def test_read_log_since_leaves_a_partial_final_line_unconsumed(tmp_path):
+    """The offset resumes before a half-written line, never past it."""
+    # local: kept out of the revert's collection
+    from saffron.events import read_log_since
+
+    log = EventLog(tmp_path)
+    events_path = tmp_path / "events.jsonl"
+    whole = Teardown(timestamp=1.0, spec_id="SA", step="start", ok=True)
+    log.append(whole)
+    size_before_partial = events_path.stat().st_size
+
+    # `late` split in half and appended one half at a time — a write caught
+    # mid-object.
+    late = Teardown(timestamp=2.0, spec_id="SA", step="network", ok=False, detail="x")
+    scratch = tmp_path / "scratch"
+    EventLog(scratch).append(late)
+    written = (scratch / "events.jsonl").read_text()
+    half = len(written) // 2
+    with events_path.open("a") as handle:
+        handle.write(written[:half])
+
+    events, offset = read_log_since(tmp_path, 0)
+    assert (events, offset) == ([whole], size_before_partial)
+
+    with events_path.open("a") as handle:
+        handle.write(written[half:])
+
+    assert read_log_since(tmp_path, offset) == ([late], events_path.stat().st_size)
+
+
+def test_read_log_since_shares_read_logs_per_line_tolerance(tmp_path):
+    """An unknown `kind` and a wrong-shaped field drop identically for both
+    readers — one parser, never a second reimplemented for the offset path."""
+    # local: kept out of the revert's collection
+    from saffron.events import read_log_since
+
+    events_path = tmp_path / "events.jsonl"
+    unknown = json.dumps({"kind": "FromTheFuture", "timestamp": 1.0, "spec_id": "SA"})
+    wrong_shape = json.dumps(
+        {"kind": "Agent", "timestamp": 2.0, "spec_id": "SA", "raw": False, "event": "x"}
+    )
+    good = json.dumps(
+        {"kind": "Teardown", "timestamp": 3.0, "spec_id": "SA", "step": "s", "ok": True}
+    )
+    events_path.write_text(unknown + "\n" + wrong_shape + "\n" + good + "\n")
+    expected = [Teardown(timestamp=3.0, spec_id="SA", step="s", ok=True)]
+
+    events, offset = read_log_since(tmp_path, 0)
+    assert events == expected == read_log(tmp_path)
+    assert offset == events_path.stat().st_size
+
+
+def test_read_log_since_on_a_missing_file_returns_the_offset_unchanged(tmp_path):
+    # local: kept out of the revert's collection
+    from saffron.events import read_log_since
+
+    assert read_log_since(tmp_path / "nowhere", 42) == ([], 42)
+
+
 def test_event_log_write_failure_raises_nothing(tmp_path):
     """A cell that cannot write its own log must not lose the caller to it."""
     unwritable = tmp_path / "not-a-directory"

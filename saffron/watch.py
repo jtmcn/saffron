@@ -1,14 +1,14 @@
 """`saffron watch` — read one task's `events.jsonl` back, for an operator who
 is not the terminal that started it.
 
-Every mechanism this needs already shipped in `saffron/events.py` (forbidden
-here, and reused exactly as it is): `EventLog` writes one flushed JSON line
-per event, `read_log` reads them back tolerating a truncated final line, and
-`describe` turns any event into the exact line the attended terminal printed.
-This module adds no second formatter and no second parser — it only adds a
-follower: something that polls `read_log` for what is new and renders it
-through `describe`, plus a filter over the two agent payloads that carry no
-operator signal.
+Almost everything this needs shipped in `saffron/events.py` already:
+`EventLog` writes one flushed JSON line per event, `read_log_since` reads
+only what was appended past a byte offset (sharing `read_log`'s own per-line
+tolerance for a truncated final line), and `describe` turns any event into
+the exact line the attended terminal printed. This module adds no second
+formatter and no second parser — it only adds a follower: something that
+polls for what is new since the last poll and renders it through `describe`,
+plus a filter over the two agent payloads that carry no operator signal.
 
 Deliberately narrow, per the spec this ships under (`SA-0053`): no detection
 of a task having finished (a follower here runs until interrupted, the way
@@ -23,7 +23,7 @@ import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from saffron.events import Agent, Event, describe, read_log
+from saffron.events import Agent, Event, describe, read_log_since
 
 # The token counter, by the subtype the runtime gives it. Measured on one live
 # task: 630 of 878 lines, the single largest shape in any log.
@@ -154,10 +154,10 @@ def follow(
     directory appears when the supervisor first writes to it, and waiting for
     that to happen is a different feature from reading it).
 
-    Each poll re-reads the whole log with `read_log` — inheriting its
-    per-line tolerance for a truncated final line rather than reimplementing
-    it — and yields only the events past the last count already seen, so a
-    line already rendered is never rendered again. `sleep`/`interval` are
+    Each poll reads only the bytes appended since the poll before it, via
+    `read_log_since`, so nothing already read is read or parsed again (item
+    62: a whole-file re-read every poll cost O(n²) over a night, measured at
+    5.7s per re-read on a 37 MB / 160k-line log). `sleep`/`interval` are
     injected rather than reaching `time.sleep` directly, so a test can drive
     this loop to a deterministic end without waiting on a real clock; the
     real default (`_sleep_and_continue`) never returns `False`, which is what
@@ -166,17 +166,12 @@ def follow(
     task_dir = Path(task_dir)
     if not task_dir.is_dir():
         raise UnknownTask(task_dir)
-    seen = 0
+    offset = 0
     while True:
-        # ponytail: every poll re-reads and re-parses the whole file, so a
-        # follow costs O(n²) over a night. Measured: 5.7s for one `read_log`
-        # on a 37 MB / 160k-line log, past which a 1s interval falls
-        # permanently behind. `read_log` has no offset — item 62.
-        events = read_log(task_dir)
-        for event in events[seen:]:
+        events, offset = read_log_since(task_dir, offset)
+        for event in events:
             line = render_line(event, verbose=verbose)
             if line is not None:
                 yield line
-        seen = len(events)
         if not sleep(interval):
             return

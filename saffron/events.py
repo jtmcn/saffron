@@ -471,67 +471,116 @@ def _shape_ok(value: object, hint: object) -> bool:
     return True
 
 
+def _parse_line(line: str) -> Event | None:
+    """One already-decoded line, parsed into whichever `Event` it names, or
+    `None` if it is blank, fails to parse as JSON, is not an object, names no
+    known `kind`, is missing a field its kind requires, or has a field of the
+    wrong shape. An unknown *extra* field is dropped without dropping its
+    event — a reader that rejected the line would delete every event of a
+    kind rather than one line of it.
+
+    The one parser `read_log` and `read_log_since` both call, so whatever
+    reads from a byte offset shares this tolerance rather than reimplementing
+    it as a second parser in `watch.py` (item 62).
+    """
+    if not line.strip():
+        return None
+    try:
+        obj = json.loads(line)
+    # Not only `JSONDecodeError`: an int past 4300 digits raises plain `ValueError`.
+    except ValueError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    # `.get` raises TypeError on an unhashable key — the isinstance guard first.
+    kind = obj.pop("kind", None)
+    cls = _KINDS.get(kind) if isinstance(kind, str) else None
+    if cls is None:
+        return None
+    # Drop the unknown field, not the event: a newer Saffron adds fields, and
+    # rejecting the line would delete every event of that kind.
+    expected = {f.name for f in fields(cls)}
+    obj = {k: v for k, v in obj.items() if k in expected}
+    # JSON has no tuple, so a `tuple[str, ...]` field (Baseline's `aborted`)
+    # comes back a list; coerced here so a round-trip equality check sees none.
+    hints = typing.get_type_hints(cls)
+    for name, value in list(obj.items()):
+        if isinstance(value, list) and typing.get_origin(hints.get(name)) is tuple:
+            obj[name] = tuple(value)
+    # A field of the wrong shape drops its event, like a missing one (item 61).
+    if any(not _shape_ok(value, hints[name]) for name, value in obj.items()):
+        return None
+    try:
+        return cls(**obj)
+    except (TypeError, ValueError):
+        return None
+
+
 def read_log(task_dir: Path) -> list[Event]:
     """Read back every whole event `EventLog` wrote for one task.
 
     Per-line tolerance, never a whole-file discard — the rule
     `saffron.report.index._existing_queue_rows` already applies, named there
-    in a `ponytail:`. A line that fails to parse as JSON, is not an object,
-    names no known `kind`, or is missing a field its kind requires, is dropped
-    in silence: this is what turns a truncated final line (the write a killed
-    cell left mid-object) and a `kind` from a newer Saffron into "the earlier
-    events survive" rather than a raised error.
+    in a `ponytail:`. A line `_parse_line` cannot make into an `Event` is
+    dropped in silence.
 
-    An unknown *extra* field is dropped without dropping its event, which is
-    the asymmetry that makes this forward-compatible in the direction it will
-    actually be used: `SA-0030`, `SA-0031` and `SA-0040` add fields to these
-    kinds, and a reader that rejected the line would delete every event of a
-    kind rather than one line of it.
+    Whole-file, every time — the shape every other caller needs and gets,
+    untouched by `read_log_since` below existing beside it.
     """
     path = Path(task_dir) / "events.jsonl"
     if not path.is_file():
         return []
     events: list[Event] = []
     for line in path.read_text().split("\n"):
-        if not line.strip():
-            continue
-        try:
-            obj = json.loads(line)
-        # Not only `JSONDecodeError`: an integer past 4300 digits raises the
-        # plain `ValueError`, which would take every other line down with it.
-        except ValueError:
-            continue
-        if not isinstance(obj, dict):
-            continue
-        # `.get` raises TypeError on an unhashable key, which would take the
-        # whole file down — the one thing per-line tolerance exists to prevent.
-        kind = obj.pop("kind", None)
-        cls = _KINDS.get(kind) if isinstance(kind, str) else None
-        if cls is None:
-            continue
-        # Drop the unknown field, not the event carrying it: a newer Saffron
-        # adds fields to existing kinds, and rejecting the line would delete
-        # every event of that kind. A missing required field still goes below.
-        expected = {f.name for f in fields(cls)}
-        obj = {k: v for k, v in obj.items() if k in expected}
-        # JSON has no tuple, so a field declared `tuple[str, ...]` (Baseline's
-        # `aborted`) comes back a list; coerced here rather than loosened on
-        # the dataclass, or a round-trip's equality check reads a real
-        # difference where the wire format has none.
-        hints = typing.get_type_hints(cls)
-        for name, value in list(obj.items()):
-            if isinstance(value, list) and typing.get_origin(hints.get(name)) is tuple:
-                obj[name] = tuple(value)
-        # A field present with the wrong shape drops its event, exactly like
-        # one missing outright — `Agent(event='x')` round-tripped unchecked
-        # before this, and `describe` raised on it (item 61).
-        if any(not _shape_ok(value, hints[name]) for name, value in obj.items()):
-            continue
-        try:
-            events.append(cls(**obj))
-        except (TypeError, ValueError):
-            continue
+        event = _parse_line(line)
+        if event is not None:
+            events.append(event)
     return events
+
+
+def read_log_since(task_dir: Path, offset: int) -> tuple[list[Event], int]:
+    """The events appended to one task's log since byte `offset`, and the
+    offset to resume from next time.
+
+    Read in binary and sliced on the literal newline byte, not decoded text:
+    offsets are bytes throughout, never characters, on the reasoned (not
+    measured) grounds that a multi-byte character before the offset makes the
+    two counts disagree.
+
+    A trailing chunk with no terminating `b"\\n"` — a write caught mid-object
+    — is left unconsumed: the returned offset stops right before it, so the
+    next call resumes before the partial object rather than past it (item
+    62's second criterion). Each complete line is decoded and handed to
+    `_parse_line`, the same parser `read_log` uses.
+
+    A missing `events.jsonl` returns `([], offset)` unchanged.
+    """
+    path = Path(task_dir) / "events.jsonl"
+    if not path.is_file():
+        return [], offset
+    with path.open("rb") as handle:
+        handle.seek(offset)
+        chunk = handle.read()
+    events: list[Event] = []
+    consumed = 0
+    start = 0
+    while True:
+        newline_at = chunk.find(b"\n", start)
+        if newline_at == -1:
+            break
+        raw_line = chunk[start:newline_at]
+        start = newline_at + 1
+        consumed = start
+        try:
+            line = raw_line.decode("utf-8")
+        # A line this poll cannot decode is a line this poll cannot parse —
+        # the same per-line tolerance `_parse_line` applies to bad JSON.
+        except UnicodeDecodeError:
+            continue
+        event = _parse_line(line)
+        if event is not None:
+            events.append(event)
+    return events, offset + consumed
 
 
 def when(stamp: int | None) -> str:

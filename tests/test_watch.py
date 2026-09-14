@@ -204,6 +204,41 @@ def test_following_emits_only_events_that_arrived_since_the_last_poll(tmp_path):
     assert calls == [5, 5]
 
 
+def test_a_poll_reads_only_what_was_appended_since_the_last(tmp_path):
+    """Item 62: a follower resumes from a byte offset, not a whole-file
+    re-read. Proven behaviourally: the bytes already read are overwritten in
+    place (same length, same newline, bytes that fail to parse) before a real
+    second event is appended. A whole-file re-read would drop the
+    now-corrupted first line from its count, so its count-based slice would
+    silently skip the appended one; a byte-offset follower never revisits the
+    corrupted bytes and still renders it."""
+    task_dir = tmp_path / "SY-4b"
+    task_dir.mkdir()
+    log = EventLog(task_dir)
+    first = Teardown(timestamp=1.0, spec_id="SY-4b", step="start", ok=True)
+    log.append(first)
+    events_path = task_dir / "events.jsonl"
+    original = events_path.read_bytes()
+    second = Teardown(timestamp=2.0, spec_id="SY-4b", step="network", ok=True)
+
+    polls: list[float] = []
+
+    def sleep(seconds: float) -> bool:
+        polls.append(seconds)
+        if len(polls) == 1:
+            # Same length, same newline as the bytes already read.
+            corrupted = b"x" * (len(original) - 1) + b"\n"
+            assert len(corrupted) == len(original)
+            events_path.write_bytes(corrupted)
+            log.append(second)
+            return True
+        return False
+
+    lines = list(watch.follow(task_dir, sleep=sleep))
+
+    assert lines == [describe(first), describe(second)]
+
+
 def test_a_partial_final_line_is_dropped_and_the_whole_ones_survive(tmp_path):
     """A log caught mid-write loses the partial line and keeps every whole
     one — `read_log`'s own distinction, inherited here rather than
