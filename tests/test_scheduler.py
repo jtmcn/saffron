@@ -1818,12 +1818,13 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-14, a twenty-fifth time: `SA-0086` to `SA-0088`
-    queued for item 118. `SA-0086` is independent and joins the candidates
-    second, because candidates run in priority order and it is priority 1;
-    refusals stay in file order. `SA-0087` stacks on `SA-0076` because both
-    edit `session.py`, and `SA-0088` stacks on `SA-0087`. Neither parent has a
-    task yet, so both are refused until the night after their parent packages.
+    """Re-measured 2026-09-14, a twenty-fifth time: `SA-0086` to `SA-0089`
+    queued for item 118. `SA-0086` and `SA-0087` are independent and join the
+    candidates behind `SA-0074`, because candidates run in priority order and
+    both are priority 1; refusals stay in file order. `SA-0088` stacks on
+    `SA-0087` and `SA-0089` on `SA-0088`, because all three edit `session.py`.
+    Neither parent has a task yet, so both are refused until the night after
+    their parent packages.
 
     Re-measured 2026-09-13, a twenty-fourth time: four more specs. `SA-0082`
     (item 89) is independent and joins the candidates, ahead of `SA-0079` and
@@ -1920,6 +1921,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     assert [c.spec.id for c in candidates] == [
         "SA-0074",
         "SA-0086",
+        "SA-0087",
         "SA-0076",
         "SA-0077",
         "SA-0078",
@@ -1933,8 +1935,8 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0083",
         "SA-0084",
         "SA-0085",
-        "SA-0087",
         "SA-0088",
+        "SA-0089",
     ]
     parents = [
         "SA-0074",
@@ -1942,8 +1944,8 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0082",
         "SA-0080",
         "SA-0084",
-        "SA-0076",
         "SA-0087",
+        "SA-0088",
     ]
     for refusal, parent in zip(refusals, parents, strict=True):
         assert f"{parent} has no task" in refusal.reason

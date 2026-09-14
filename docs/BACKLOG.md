@@ -6653,7 +6653,8 @@ things the host trusts run inside it after the agent has had it:
 - **Every lens.** `run_review` and `run_verdict` are handed the implementer's
   container, so each critic session re-execs `/opt/saffron/agent_runner.py`
   and the SDK from that rootfs, and reads `/work` and `read_at_head` through
-  the implementer's `.git`.
+  the implementer's `.git`. The gate table each REVIEW lens is shown is
+  `latest.results`, the implementer cell's own last suite.
 - **Nothing re-checks either when the base did not move.**
   `needs_reverification` returns `False` on an unmoved base, and its docstring
   calls a re-run "provably redundant". That holds only if the cell's own
@@ -6666,9 +6667,11 @@ judge a tree rebuilt from the exported patch, in a container the implementer
 never ran in. Then what they judge is what ships, and a forged export only
 hides the agent's own work.
 
-Three specs, in order: `SA-0086` (PACKAGE re-verifies every packaged
-commit), `SA-0087` (REVIEW runs in a critic cell rebuilt from the patch) and
-`SA-0088` (REBUT's verdict lenses do the same).
+Four specs, in order: `SA-0086` (PACKAGE re-verifies every packaged
+commit), `SA-0087` (REVIEW runs in a critic cell rebuilt from the patch),
+`SA-0088` (REBUT's verdict lenses do the same) and `SA-0089` (the lenses'
+gate table comes from a gate-only cell on the rebuilt tree, never from the
+critic cell, where a gate would run as root before the lenses do).
 
 **By hand, because a cell cannot:**
 
@@ -6684,8 +6687,13 @@ commit), `SA-0087` (REVIEW runs in a critic cell rebuilt from the patch) and
 - `saffron/report/pr_body.py`'s `_verification("base")` branch becomes
   unreachable once `SA-0086` lands. Delete it, or keep it as a guard.
 
-**Done looks like** no gate result or lens finding that reaches a pull request
-was produced in a container the implementer ran in.
+**Not this item:** the threat model's other owner-chosen half, re-gating the
+head that merges and handing a delegate findings only as quoted data. Items
+**97** and **98** already carry those.
+
+**Done looks like** no gate result or lens finding that reaches a pull
+request, and no gate table a lens is shown, was produced in a container the
+implementer ran in.
 
 ---
 

@@ -3,7 +3,7 @@ id: SA-0087
 title: every REVIEW lens runs in the container the implementer just had root in, and reads the tree through that container's own git
 type: bug
 priority: 1
-depends_on: [SA-0076]
+depends_on: []
 touches:
   - saffron/cell/session.py
   - tests/test_session.py
@@ -46,8 +46,9 @@ acceptance:
     witness: tests/test_session.py::test_the_critic_reads_the_tree_rebuilt_from_the_exported_patch
   - claim: >-
       A patch that does not apply to its own base in that fresh tree ends the
-      task before any lens runs, in a state other than `READY_FOR_REVIEW` and
-      other than `GATE_ERROR`.
+      task `EXHAUSTED` before any lens runs, and the reason it reports names
+      the patch that failed to apply, so the end cannot be read as a task
+      that ran out of attempts on its gates.
     witness: tests/test_session.py::test_a_patch_that_does_not_apply_to_its_base_never_reaches_review
   - claim: >-
       The container, worktree volume and state volume created for the lenses
@@ -102,6 +103,11 @@ forbidden here. That is `SA-0088`, which depends on this one.
 cell, where their results are feedback. The verdict of record is
 `SA-0086`'s.
 
+**The gate table the lenses are shown.** It stays the implementer cell's last
+suite here. Running the suite in the critic cell instead would execute
+model-authored code as root in the container the lenses then re-exec their
+runner from. That is `SA-0089`.
+
 **Changing `saffron/cell/worktree.py` or `saffron/cell/runtime.py`.** Both are
 forbidden: `SA-0074`, `SA-0075` and `SA-0077` are queued against them. Call
 their existing functions; build anything new in `session.py`.
@@ -133,10 +139,11 @@ it, and remove the container and both volumes in a `finally`.
 
 **Apply the patch inside the critic cell, with its own git.** The patch is
 `worktree.export_patch(container, spec.tree_base)` from the implementer's
-cell, the same bytes the operator gets. `worktree.source_mutated` shows how
-this module already moves bytes into a cell through `runtime.exec_` (base64
-through `sh -c`). Linux caps a single argument at 128 KiB, so a patch too big
-for one argument has to end the task honestly, not raise.
+cell, the same bytes the operator gets. Hand it to `git apply` on stdin, with
+`runtime.exec_stream(..., stdin_data=patch, ...)`, not as an argument the way
+`worktree.source_mutated` moves bytes (base64 through `sh -c`). Linux caps a
+single argument at 128 KiB, and a limit that is Saffron's must not end a task
+the agent is charged for.
 
 **A patch that will not apply is the task's, not infrastructure.** Do not end
 it `GATE_ERROR` or raise it as a runtime failure. Both are charged to nobody,
@@ -150,7 +157,9 @@ callable receives the container as its first argument, so a stub that records
 it can tell a lens turn's container from the implementer's. Every new witness
 must fail with `session.py` reverted. Reverted, the lenses get the
 implementer's container and no critic cell exists, so honest tests of the
-four criteria fail. Import nothing new at module scope: a module-scope import
+four criteria fail. `_drive(capture=...)` collects the raw events, so the
+third witness can read the reason and not the state alone (principle 55).
+Import nothing new at module scope: a module-scope import
 of a name you add turns the reverted run into a collection error, which
 `revert` reads as `skip`.
 
