@@ -144,8 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         "--whole-log",
         action="store_true",
         help="render every task recorded in this spec's log, in order, "
-        "rather than only the newest (`--all` is taken; it means something "
-        "else)",
+        "rather than only the newest",
     )
 
     args = parser.parse_args(argv)

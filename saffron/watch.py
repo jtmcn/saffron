@@ -120,8 +120,8 @@ def _since_newest_task(events: list[Event]) -> list[Event]:
 
     Unchanged when `events` holds no `Ceilings` at all: a log written before
     tasks recorded their own ceilings on the way in has no boundary to cut
-    at, and renders in full — the same fact `test_a_log_renders_as_the_lines_
-    its_terminal_printed` already pins for a log with none.
+    at, and renders in full — the fact
+    `test_a_log_renders_as_the_lines_its_terminal_printed` already pins.
     """
     newest: int | None = None
     for index, event in enumerate(events):
@@ -196,7 +196,7 @@ def follow(
     from offset `0` and so is the one whole-file read this ever does — is cut
     to `_since_newest_task`: a spec driven twice writes both tasks into one
     file, and an operator diagnosing the newer one must not open on the
-    older one's outcome (`docs/BACKLOG.md` item 64). Only that first batch is
+    older one's outcome (`docs/BACKLOG.md` item 64). Only that first read is
     cut: a `Ceilings` a spec driven again writes while this follower is
     already running arrives on a later poll like anything else appended
     since the poll before it, and following continues past it rather than

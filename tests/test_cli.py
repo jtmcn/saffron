@@ -1807,7 +1807,8 @@ def test_watch_passes_the_whole_log_flag_through_to_the_follower(tmp_path, monke
     so this is a second flag, not a second meaning for the first."""
     seen = {}
 
-    def fake_follow(task_dir, *, verbose=False, whole_log=False, interval=1.0):
+    # No default for `whole_log`: a `_watch` that omitted it would raise here.
+    def fake_follow(task_dir, *, verbose=False, whole_log, interval=1.0):
         seen["whole_log"] = whole_log
         return iter(())
 

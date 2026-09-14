@@ -103,6 +103,15 @@ def _two_tasks(spec_id: str) -> tuple[list, list]:
             label="REPAIR",
             detail="attempt 2, 3 new failures",
         ),
+        # The newest task finishes too, so a cut placed after the last
+        # `Terminal` rather than at the last `Ceilings` renders nothing.
+        Terminal(
+            timestamp=5.0,
+            spec_id=spec_id,
+            reason="finished_empty",
+            spent_usd_est=2.10,
+            detail="no commits",
+        ),
     ]
     return first_task, second_task
 
@@ -135,6 +144,30 @@ def test_the_whole_log_is_still_reachable_behind_a_flag(tmp_path):
         log.append(event)
 
     lines = list(watch.follow(task_dir, whole_log=True, sleep=_once))
+
+    assert lines == [describe(event) for event in first_task + second_task]
+
+
+def test_a_task_boundary_on_a_later_poll_does_not_cut_what_came_before_it(tmp_path):
+    """Only the first poll is cut. A later poll reading the old task's last
+    line and then a new `Ceilings` renders both: the follower already showed
+    the old task's start, and dropping its end would hide how it finished."""
+    task_dir = tmp_path / "SY-9c"
+    log = EventLog(task_dir)
+    first_task, second_task = _two_tasks("SY-9c")
+    log.append(first_task[0])
+
+    polls: list[float] = []
+
+    def sleep(seconds: float) -> bool:
+        polls.append(seconds)
+        if len(polls) == 1:
+            for event in first_task[1:] + second_task:
+                log.append(event)
+            return True
+        return False
+
+    lines = list(watch.follow(task_dir, sleep=sleep))
 
     assert lines == [describe(event) for event in first_task + second_task]
 
