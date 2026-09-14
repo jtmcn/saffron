@@ -69,11 +69,10 @@ def test_a_witness_that_dies_under_its_mutant_passes(tmp_path):
 
 def test_a_witness_that_survives_its_mutant_fails(tmp_path):
     """A witness that survives its mutant fails, and the failure names the
-    criterion, the witness and the edit."""
+    criterion and the witness — never the edit itself (a mutant is withheld
+    from the implementer on purpose; `test_a_surviving_mutant_names_its_claim_and_not_its_edit`
+    below is the test that pins that)."""
     _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
-    # `replace="0"`, not the helper's default `"x"`: `"x"` is a substring of
-    # `find`, so an assertion on it could not tell whether the message named
-    # the replacement at all.
     criterion = _criterion(claim="the total is clamped at zero", replace="0")
 
     def run_tests(subset):
@@ -89,16 +88,46 @@ def test_a_witness_that_survives_its_mutant_fails(tmp_path):
     assert isinstance(failure, Failure)
     assert failure.file == criterion.witness  # the witness
     assert "the total is clamped at zero" in failure.message  # the criterion's claim
-    # Both halves of the edit, and `replace` chosen so it is not a substring
-    # of `find`: with the default `replace="x"` the second assertion was a
-    # substring of the first and held whether or not the message named it —
-    # deleting `{mutant.replace!r}` from the message left this green.
-    assert "max(x, 0)" in failure.message  # what was there
-    # `repr`, and `replaced` read off the criterion rather than restated:
-    # asserting the fixture equals its own literal tests nothing.
+
+
+def test_a_surviving_mutant_names_its_claim_and_not_its_edit(tmp_path):
+    """A mutant its witness survives fails `witness` with a result that names
+    the criterion's claim and its witness, and carries neither the edit's
+    `find` text nor its `replace` text anywhere in the result. At `elevated`,
+    where `witness` blocks, `repair_prompt` hands this message to the next
+    IMPLEMENT attempt verbatim — a mutant a cell can read back is a mutant
+    chosen to be killed, which defeats the reason it is withheld from the
+    implementer's prompt in the first place (`CONTEXT.md`, **Mutant**)."""
+    _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
+    # `find` is the fixture's own source text, and `replace` is a token
+    # chosen to appear nowhere else — not in the claim, not in the witness
+    # id, not in the file name — so a match against the whole serialized
+    # result can only mean the edit itself leaked.
+    criterion = _criterion(
+        claim="the total is clamped at zero",
+        find="max(x, 0)",
+        replace="QRVTPLACEHOLDER_NOT_A_REAL_TOKEN",
+    )
+
+    def run_tests(subset):
+        return _tests(status="pass", collected=(criterion.witness,))
+
+    result = witness_gate(
+        acceptance=[criterion], mutate=host_mutator(tmp_path), run_tests=run_tests
+    )
+
+    assert result.status == "fail"
+    assert len(result.failures) == 1
+    failure = result.failures[0]
+    assert criterion.claim in failure.message
+    assert failure.file == criterion.witness
+
+    # The whole serialized result, not just `message` — a leak anywhere in
+    # the result is as bad as a leak in the field meant to carry it.
+    dumped = result.model_dump_json()
     assert criterion.mutant is not None
-    replaced = criterion.mutant.replace  # "0" — not a substring of `find`
-    assert repr(replaced) in failure.message  # what replaced it
+    assert criterion.mutant.find not in dumped
+    assert criterion.mutant.replace not in dumped
 
 
 def test_the_tree_is_unchanged_however_the_gate_ends(tmp_path):
@@ -453,11 +482,13 @@ def test_a_blocking_witness_failure_is_an_ordinary_blocking_failure(tmp_path):
     `session._blocking`, the literal special case this claim forbids, fails
     nothing in the whole suite.
 
-    So this guards the *shape* half and not the *reaches* half, and the
-    reaches half is currently false: `witness` is in no `advisory_gates` set,
-    so a failure blocks at every tier rather than at `elevated` only
-    (`docs/BACKLOG.md` item 71). Said here rather than left as an apparent
-    omission — the assertions below are real, and they are not the claim."""
+    So this guards the *shape* half and not the *reaches* half. The reaches
+    half is now true: item 71 gave `_advisory` (`saffron/gates/suite.py`) a
+    case for `witness`, so a failure is advisory below `elevated` and blocks
+    at `elevated` only — this file has no way to drive `_advisory` or
+    `session._blocking`, so it cannot assert that itself. Said here rather
+    than left as an apparent omission — the assertions below are real, and
+    they are not the claim."""
     _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
     criterion = _criterion(claim="the total is clamped at zero", replace="0")
 
