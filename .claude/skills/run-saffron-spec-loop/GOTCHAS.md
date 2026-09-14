@@ -14,7 +14,7 @@ do; the measurement behind it follows.
   `~/.secrets` itself holds other keys, so it is never the `--env-file`.
 - **Put the host's preflight allowlist on the invocation.** A development host
   that tolerates a listener (`docs/HOST-HARDENING.md`) needs
-  `SAFFRON_ALLOW_HOST_PROCESS=<name>` on every `saffron cell`. The agent's shell
+  `SAFFRON_ALLOW_HOST_PROCESS=<name>` on every `saffron cell`. The delegate's shell
   does not run direnv, and preflight's failure names the ports, never the
   missing variable.
 - **`PYTHONUNBUFFERED=1` on every cell.** Redirected to a file, the CLI's
@@ -24,7 +24,7 @@ do; the measurement behind it follows.
   cell before the reopen time a `rate limit:` line printed. A limit can land
   after the work is done: SA-0028's first cell had green gates and hit it in
   REBUT at $7.92 of $14. PACKAGE never ran, so there was no branch, and the
-  re-run started over. The loop's cost is not bounded by the specs' budgets.
+  next cell started over. The loop's cost is not bounded by the specs' budgets.
 - **`baseline: … tests=fail` on every cell is expected.** One host-only test
   fails in every cell (backlog item 106); baseline subtraction cancels it.
 
@@ -35,9 +35,9 @@ do; the measurement behind it follows.
   forever:
   - `RATE_LIMITED` (which is not `EXHAUSTED`): `next --again` once the window
     reopens — the cell's own `rate limit: … window reopens HH:MM local` line
-    says when. The re-run starts from `base_sha`.
-  - An in-flight state (`IMPLEMENTING`, `REPAIRING`, `REVIEWING`, `REBUTTING`,
-    `QUEUED`): the cell is still running; wait for the process to exit.
+    says when. The next cell starts from `base_sha`.
+  - A state in `reconcile.IN_FLIGHT_STATES`: the cell is still running; wait
+    for the process to exit.
 - **A decided state is final for this loop.** `EXHAUSTED`, `NOT_IMPLEMENTED`
   and the rest of `scheduler.DONE_STATES` leave the stack and are not re-run. A
   cell that exits 2, or leaves `record` with no task, gets one more cell,
@@ -56,7 +56,7 @@ do; the measurement behind it follows.
 - **Redirect `make check` to a file and echo `$?`.** `make check | tail` reports
   tail's status. `ruff format` rewrites files and then reports failure: run it
   again before believing red.
-- **Stage review commits by name.** `.saffron-loop/` is gitignored run state and
+- **Stage review commits by name.** `.saffron-loop/` is gitignored loop state and
   stays out of every commit.
 
 ## Stacking
@@ -103,13 +103,13 @@ do; the measurement behind it follows.
 
 | Symptom | What to do |
 |---|---|
-| `no run order at .saffron-loop/order.json` | Run `snapshot`. A leftover `plan.json` is the previous driver's file; delete it. |
+| `no order at .saffron-loop/order.json` | Run `snapshot`. A leftover `plan.json` is the previous driver's file; delete it. |
 | `next` or `status` says the order is stale | A spec moved or was edited, or a PR merged or closed since the snapshot. `snapshot --force`; it keeps every recorded outcome still true. |
-| `next`: `skipped SA-NNNN: its parent … so a cell would cut it from main` | The parent has no reviewable branch. `next --again` once a rate-limited parent's window reopens; `drop` the child otherwise. |
+| `next`: `held back SA-NNNN: its parent … so a cell would cut it from main` | The parent has no reviewable branch. `next --again` once a rate-limited parent's window reopens; `drop` the child otherwise. |
 | `snapshot` prints `nothing to run: no candidate specs` | Every spec is done at its current `spec_sha`, or refused; the refusals are printed. |
 | `record`: `no task for SA-NNNN at <sha>` | The spec was edited after its cell ran. Re-run the cell, or revert the edit. |
 | `CLAUDE_CODE_OAUTH_TOKEN is unset` | Scope it to the `saffron cell` invocation (Starting cells); refresh with `claude setup-token`. |
 | Cell exits 2 | Read the last lines first: `rate limit: rejected` means wait for the window. Otherwise `container system start`, then `container image list`. |
 | Preflight fails naming host ports | The allowlist variable is missing from the invocation (Starting cells). |
 | `next`: `nothing untouched left` | Every pending spec already had a cell that decided nothing. `next --again` after a reopened rate-limit window; `drop` otherwise. |
-| `rebase` refuses: local branch differs from origin | Push or reset the local branch first; the rebase plans from what is on GitHub. |
+| `rebase` refuses: local branch differs from origin | Push or reset the local branch first; the rebase starts from what is on GitHub. |

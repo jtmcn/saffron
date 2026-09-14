@@ -21,15 +21,16 @@ what it says, `1` everything else.
 When a step's output surprises you, [GOTCHAS.md](GOTCHAS.md) is grouped by
 step.
 
-## 1. Snapshot the run order
+## 1. Snapshot the loop's order
 
 ```bash
 uv run .claude/skills/run-saffron-spec-loop/driver.py snapshot
 ```
 
-The live queue cannot drive this loop: `saffron queue` refuses every spec whose
-`touches` overlap an open PR, and this loop leaves every PR open, so the queue
-empties after the first cell packages. `snapshot` writes the run order once, to
+The live queue cannot drive this loop: `saffron queue` checks every spec
+against a conflict set that includes open PRs, and this loop leaves every PR
+open, so the queue empties after the first cell packages. `snapshot` writes the
+loop's order once, to
 `.saffron-loop/order.json` — parents before children, then priority, then id,
 including a spec refused only for an unmet `depends_on` on a parent in the
 order — and every later command reads that file.
@@ -53,9 +54,9 @@ from the remote, not the checkout, so PR N can be reviewed on its branch while
 cell N+1 runs. A spec with `depends_on` has its worktree cut from its parent's
 branch, so it starts after the parent's review commits are pushed; when `next`
 names such a child first, it says so, and the next independent spec can be
-started by its path meanwhile. `next` skips a child whose parent has no
+started by its path meanwhile. `next` holds back a child whose parent has no
 reviewable branch — rate-limited, decided otherwise, or dropped — because
-`saffron cell` would cut it from main, and names the child it skipped.
+`saffron cell` would cut it from main, and names the child it held back.
 
 ### a. Start the cell in the background
 
@@ -127,7 +128,7 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py stack             # dry ru
 uv run .claude/skills/run-saffron-spec-loop/driver.py stack --execute   # gh stack link, then bases read back
 ```
 
-The stack order is the run order rearranged so each child sits directly above
+The stack order is the loop's order rearranged so each child sits directly above
 its parent. The dry run prints it, runs `git merge-tree` on every adjacent pair,
 and shows the `gh stack link` command. `link` retargets each PR onto the one
 below; its diff stays right and only what merging it would do changes. A
@@ -163,11 +164,11 @@ placed in its tier index, and each item a spec came from gets its `Status` line
 updated with the PR and the stack. They go in a standalone PR off the default
 branch unless the operator says otherwise.
 
-Every finding a review seat confirmed and the in-cell critic did not raise —
-fixed, answered or kept — is also a rejection: append it to
-`.saffron/rejections.md` as its **Adding one** paragraph says, in the same PR.
-Those lines are §8's evidence for which gate, `CLAUDE.md` line or lens comes
-next.
+Every finding you verified that the in-cell critic did not raise, and that was
+fixed or kept, is a change requested on the operator's behalf — a rejection:
+append it to `.saffron/rejections.md` as its **Adding one** paragraph says, in
+the same PR. A finding answered with no change rejected nothing. Those lines
+are §8's evidence for which gate, `CLAUDE.md` line or lens comes next.
 
 **Done when** every kept finding has an item, every spec's origin item names
-its PR, and every finding the critic missed has a rejection line.
+its PR, and every fixed or kept finding the critic missed has a rejection line.

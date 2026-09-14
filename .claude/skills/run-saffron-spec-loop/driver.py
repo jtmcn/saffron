@@ -3,9 +3,10 @@
 requests instead of merging them. `SKILL.md` is the procedure; this is its
 state.
 
-`saffron queue` refuses every spec whose `touches` overlap an open pull
-request, and this loop leaves them open, so the run order is snapshotted once,
-before any exists, and every later command reads `.saffron-loop/order.json`.
+`saffron queue` checks every spec against a conflict set that includes open
+pull requests, and this loop leaves them open, so the loop's order is
+snapshotted once, before any exists, and every later command reads
+`.saffron-loop/order.json`.
 
 The driver starts no cell: `saffron cell` takes `CLAUDE_CODE_OAUTH_TOKEN`
 scoped to its own invocation, so the delegate driving the loop starts it and
@@ -73,7 +74,7 @@ def _git(*args: str, cwd: Path = REPO) -> str:
 
 
 @dataclass
-class Planned:
+class OrderRow:
     spec_id: str
     path: str
     priority: int
@@ -91,6 +92,10 @@ class Planned:
     @property
     def pending(self) -> bool:
         return self.state is None and self.dropped is None
+
+    @property
+    def reviewable(self) -> bool:
+        return self.state == "READY_FOR_REVIEW" and self.pr is not None
 
 
 def _ledger_and_repo():
@@ -148,15 +153,15 @@ def _relative(path: Path) -> str:
 
 
 def _order(
-    candidates, refusals, carried: Sequence[Planned] = ()
-) -> tuple[list[Planned], list[Path]]:
+    candidates, refusals, carried: Sequence[OrderRow] = ()
+) -> tuple[list[OrderRow], list[Path]]:
     """Parents before children, then priority, then id. A spec refused only
     for an unmet `depends_on` on a parent in the order is admitted; every
     other refusal stands. A `carried` row outranks the scan's row for its id."""
     from saffron.intake import load_spec
 
-    def planned_row(spec, path: Path) -> Planned:
-        return Planned(
+    def row_for(spec, path: Path) -> OrderRow:
+        return OrderRow(
             spec_id=spec.id,
             path=_relative(path),
             priority=spec.priority,
@@ -165,9 +170,9 @@ def _order(
             branch=f"saffron/{spec.id}",
         )
 
-    planned = {p.spec_id: p for p in carried}
+    admitted = {p.spec_id: p for p in carried}
     for c in candidates:
-        planned.setdefault(c.spec.id, planned_row(c.spec, c.path))
+        admitted.setdefault(c.spec.id, row_for(c.spec, c.path))
 
     deferred = []
     unreadable = []
@@ -184,11 +189,11 @@ def _order(
 
     for _ in range(len(deferred) + 1):  # enough passes for a chain
         for spec, path in deferred:
-            if spec.id not in planned and all(d in planned for d in spec.depends_on):
-                planned[spec.id] = planned_row(spec, path)
+            if spec.id not in admitted and all(d in admitted for d in spec.depends_on):
+                admitted[spec.id] = row_for(spec, path)
 
-    ordered: list[Planned] = []
-    remaining = dict(planned)
+    ordered: list[OrderRow] = []
+    remaining = dict(admitted)
     while remaining:
         ready = [
             p
@@ -201,15 +206,15 @@ def _order(
         ordered.append(ready[0])
         del remaining[ready[0].spec_id]
 
-    stranded = [path for spec, path in deferred if spec.id not in planned]
+    stranded = [path for spec, path in deferred if spec.id not in admitted]
     return ordered, stranded + [r.path for r in unreadable]
 
 
-def _parse_order() -> list[Planned]:
-    return [Planned(**row) for row in json.loads(ORDER.read_text())]
+def _parse_order() -> list[OrderRow]:
+    return [OrderRow(**row) for row in json.loads(ORDER.read_text())]
 
 
-def _load() -> list[Planned]:
+def _load() -> list[OrderRow]:
     if not ORDER.is_file():
         legacy = (
             f" ({LEGACY_PLAN.relative_to(REPO)} is the previous driver's file — delete it)"
@@ -217,7 +222,7 @@ def _load() -> list[Planned]:
             else ""
         )
         raise SystemExit(
-            _fail(f"no run order at {ORDER.relative_to(REPO)} — run `snapshot`{legacy}")
+            _fail(f"no order at {ORDER.relative_to(REPO)} — run `snapshot`{legacy}")
         )
     try:
         return _parse_order()
@@ -229,7 +234,7 @@ def _load() -> list[Planned]:
         ) from stale
 
 
-def _save(rows: list[Planned]) -> None:
+def _save(rows: list[OrderRow]) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     ORDER.write_text(json.dumps([r.__dict__ for r in rows], indent=2) + "\n")
 
@@ -249,7 +254,7 @@ def _pr_state(number: int) -> str | None:
 
 
 def _stale_reasons(
-    p: Planned, pr_state: Callable[[int], str | None] = _pr_state
+    p: OrderRow, pr_state: Callable[[int], str | None] = _pr_state
 ) -> list[str]:
     from saffron.intake import load_spec
 
@@ -265,7 +270,7 @@ def _stale_reasons(
 
 
 def _stale(
-    rows: list[Planned], *, pr_state: Callable[[int], str | None] = _pr_state
+    rows: list[OrderRow], *, pr_state: Callable[[int], str | None] = _pr_state
 ) -> list[str]:
     """Why the order no longer describes the repository, if it does not. A
     leftover order once listed a merged PR as reviewable and an unrun spec as
@@ -273,9 +278,9 @@ def _stale(
     return [reason for p in rows for reason in _stale_reasons(p, pr_state)]
 
 
-def _carried() -> list[Planned]:
+def _carried() -> list[OrderRow]:
     """The rows a re-snapshot keeps: every recorded outcome still true.
-    `build_queue` skips a spec with a finished task, so an order rebuilt from
+    `build_queue` passes over a spec with a finished task, so an order rebuilt from
     the scan alone dropped every reviewable pull request."""
     try:
         previous = _parse_order() if ORDER.is_file() else []
@@ -291,23 +296,23 @@ def _carried() -> list[Planned]:
 # ------------------------------------------------------------ the stack
 
 
-def _stack_order(rows: list[Planned]) -> tuple[list[Planned], list[str]]:
+def _stack_order(rows: list[OrderRow]) -> tuple[list[OrderRow], list[str]]:
     """The reviewable pull requests, bottom to top, each child directly above
     its parent. Snapshot order alone put a child above an unrelated sibling,
     and the child's PR then showed its parent's changes. A stack is a line, so
     a parent with two children, or a child whose parent is not in it, is said
     rather than hidden."""
-    ready = [p for p in rows if p.state == "READY_FOR_REVIEW" and p.pr]
+    ready = [p for p in rows if p.reviewable]
     ids = {p.spec_id for p in ready}
     by_id = {p.spec_id: p for p in rows}
 
-    def parent(p: Planned) -> str | None:
+    def parent(p: OrderRow) -> str | None:
         return next((d for d in p.depends_on if d in ids), None)
 
-    order: list[Planned] = []
+    order: list[OrderRow] = []
     seen: set[str] = set()
 
-    def visit(p: Planned) -> None:
+    def visit(p: OrderRow) -> None:
         if p.spec_id in seen:
             return
         seen.add(p.spec_id)
@@ -335,7 +340,7 @@ def _stack_order(rows: list[Planned]) -> tuple[list[Planned], list[str]]:
             if dep in by_id and dep not in ids:
                 warnings.append(
                     f"{p.spec_id}'s parent {dep} is not in the stack; "
-                    f"#{p.pr} stays based on saffron/{dep}"
+                    f"#{p.pr} stays based on {by_id[dep].branch}"
                 )
     return order, warnings
 
@@ -391,7 +396,7 @@ def _fork_point(branch: str, lower: str, trunk: str, cwd: Path = REPO) -> str:
     return trunkward if newer_is_trunkward else below
 
 
-def _plan_layers(
+def _layers(
     branches: list[str], trunk: str, cwd: Path = REPO, prefix: str = "origin/"
 ) -> list[Layer]:
     """Every fork point, taken before anything moves."""
@@ -449,7 +454,7 @@ def _apply_layers(layers: list[Layer], cwd: Path = REPO) -> tuple[bool, list[str
             _git("branch", layer.branch, layer.old_tip, cwd=cwd)
         elif local.stdout.strip() != layer.old_tip:
             return False, [
-                f"local {layer.branch} is {local.stdout.strip()[:8]}, not the planned "
+                f"local {layer.branch} is {local.stdout.strip()[:8]}, not the recorded "
                 f"{layer.old_tip[:8]}; push or reset it first"
             ]
 
@@ -497,10 +502,9 @@ def _push_command(layers: list[Layer]) -> str:
 # ------------------------------------------------------- the watch line
 
 
-def watch_pattern() -> str:
-    """The Monitor's `grep -E` pattern: phase lines anchored, terminal states
-    not — the CLI prints a state after a padded spec id. The states come from
-    the ontology, because a hand copy missed three of the nine."""
+def terminal_states() -> list[str]:
+    """The ontology's closed `TerminalState` set, read rather than copied: a
+    hand copy missed three of the nine."""
     import rdflib
 
     graph = rdflib.Graph().parse(ONTOLOGY, format="turtle")
@@ -514,7 +518,14 @@ def watch_pattern() -> str:
         raise SystemExit(
             _fail(f"no TerminalState members in {ONTOLOGY.relative_to(REPO)}")
         )
-    return f"^({'|'.join(WATCH_PREFIXES)})|({'|'.join(states)})|Traceback"
+    return states
+
+
+def watch_pattern() -> str:
+    """The Monitor's `grep -E` pattern: phase lines anchored, terminal states
+    not — the CLI prints a state after a padded spec id."""
+    states = "|".join(terminal_states())
+    return f"^({'|'.join(WATCH_PREFIXES)})|({states})|Traceback"
 
 
 # ------------------------------------------------------------- commands
@@ -537,11 +548,11 @@ def cmd_snapshot(args) -> int:
     for i, p in enumerate(ordered, 1):
         dep = f"  depends_on={p.depends_on}" if p.depends_on else ""
         print(f"  {i}. {p.spec_id}  priority={p.priority}{dep}")
-    planned_paths = {p.path for p in ordered}
+    ordered_paths = {p.path for p in ordered}
     held = [
         r
         for r in refusals
-        if _relative(r.path) not in planned_paths or r.path in stranded
+        if _relative(r.path) not in ordered_paths or r.path in stranded
     ]
     if held:
         print(f"\nrefused, and not in the order ({len(held)}):")
@@ -558,43 +569,43 @@ def cmd_snapshot(args) -> int:
 
 
 def _next_spec(
-    rows: list[Planned], *, again: bool
-) -> tuple[Planned | None, str | None]:
+    rows: list[OrderRow], *, again: bool
+) -> tuple[OrderRow | None, str | None]:
     """The first pending spec no cell has answered, and a note when its parent
     is reviewable: a child's worktree is cut from the parent's branch, so the
     parent's review commits have to be pushed first. A child whose parent in
-    the order has no reviewable branch is skipped: `saffron cell` does not
+    the order has no reviewable branch is held back: `saffron cell` does not
     refuse it, and would cut its worktree from main."""
     by_id = {p.spec_id: p for p in rows}
-    skipped = []
+    notes = []
     for p in rows:
         if not (p.pending and (again or p.last_state is None)):
             continue
-        blocked = [
+        unready = [
             (d, by_id[d])
             for d in p.depends_on
             if d in by_id and by_id[d].state != "READY_FOR_REVIEW"
         ]
-        if blocked:
-            d, parent = blocked[0]
+        if unready:
+            d, parent = unready[0]
             why = (
                 "dropped"
                 if parent.dropped
                 else parent.state or parent.last_state or "not run yet"
             )
-            skipped.append(
-                f"skipped {p.spec_id}: its parent {d} is {why}, "
+            notes.append(
+                f"held back {p.spec_id}: its parent {d} is {why}, "
                 "so a cell would cut it from main"
             )
             continue
         parents = [d for d in p.depends_on if d in by_id]
         if parents:
-            skipped.append(
+            notes.append(
                 f"{p.spec_id} is cut from {', '.join(parents)}: push "
                 f"{'their' if len(parents) > 1 else 'its'} review commits first"
             )
-        return p, "; ".join(skipped) or None
-    return None, "; ".join(skipped) or None
+        return p, "; ".join(notes) or None
+    return None, "; ".join(notes) or None
 
 
 def cmd_next(args) -> int:
@@ -602,7 +613,7 @@ def cmd_next(args) -> int:
     case is a reopened rate-limit window."""
     rows = _load()
     if reasons := _stale(rows):
-        print("the run order is stale:", file=sys.stderr)
+        print("the order is stale:", file=sys.stderr)
         for reason in reasons:
             print(f"  {reason}", file=sys.stderr)
         print("re-snapshot with `snapshot --force`.", file=sys.stderr)
@@ -724,7 +735,7 @@ def cmd_status(_args) -> int:
                 else ""
             )
         print(f"  {p.spec_id:<{width}}  {label:<18} {pr:<5}{extra}")
-    ready = [p for p in rows if p.state == "READY_FOR_REVIEW" and p.pr]
+    ready = [p for p in rows if p.reviewable]
     print(f"\n{len(ready)}/{len(rows)} reviewable")
     if reasons := _stale(rows):
         print("\nstale — `snapshot --force` before the next cell:")
@@ -766,7 +777,7 @@ def cmd_stack(args) -> int:
 
     done = subprocess.run(command, cwd=REPO, text=True)
     if done.returncode != 0:
-        return done.returncode
+        return _fail(f"gh stack link exited {done.returncode}")
     trunk = _trunk().removeprefix("origin/")
     mismatched = 0
     print("\nbases, read back:")
@@ -789,7 +800,7 @@ def cmd_rebase(args) -> int:
     subprocess.run(["git", "fetch", "-q", "origin"], cwd=REPO)
     trunk = _trunk()
     try:
-        layers = _plan_layers([p.branch for p in order], trunk)
+        layers = _layers([p.branch for p in order], trunk)
     except GitError as err:
         return _fail(str(err))
 
@@ -834,7 +845,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("snapshot", help="write the run order, before any PR exists")
+    p = sub.add_parser("snapshot", help="write the loop's order, before any PR exists")
     p.add_argument("--force", action="store_true", help="replace an existing order")
     p.set_defaults(func=cmd_snapshot)
 

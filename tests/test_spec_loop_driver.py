@@ -25,8 +25,8 @@ driver = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = driver  # a dataclass resolves its annotations through it
 _SPEC.loader.exec_module(driver)
 
-# CONTEXT.md's **Terminal state**, spelled out: the pattern reads the ontology,
-# so this is the second source that notices the two drifting apart.
+# CONTEXT.md's **Terminal state**, spelled out apart from the ontology the driver
+# reads, so a state added to or dropped from either one fails here.
 TERMINAL_STATES = (
     "SCOPE_REVIEW",
     "PLAN_REJECTED",
@@ -47,7 +47,7 @@ def _row(
     pr: int | None = 1,
     state: str | None = "READY_FOR_REVIEW",
 ):
-    return driver.Planned(
+    return driver.OrderRow(
         spec_id=spec_id,
         path=f"x/{spec_id}.md",
         priority=priority,
@@ -135,7 +135,7 @@ def test_a_fork_point_is_the_newer_of_the_two_merge_bases(repo):
 
 def test_rebase_chains_siblings_onto_the_new_trunk_and_keeps_each_layers_content(repo):
     cwd, _tips = repo
-    layers = driver._plan_layers(["a", "b", "c", "d"], "main", cwd, prefix="")
+    layers = driver._layers(["a", "b", "c", "d"], "main", cwd, prefix="")
     ok, messages = driver._apply_layers(layers, cwd)
     assert ok, messages
     assert messages == [f"{b}: identical" for b in ("a", "b", "c", "d")]
@@ -158,7 +158,7 @@ def test_a_conflict_restores_every_branch(repo):
     before = {b: _git(cwd, "rev-parse", b) for b in ("a", "e")}
 
     ok, messages = driver._apply_layers(
-        driver._plan_layers(["a", "e"], "main", cwd, prefix=""), cwd
+        driver._layers(["a", "e"], "main", cwd, prefix=""), cwd
     )
 
     assert not ok
@@ -168,16 +168,33 @@ def test_a_conflict_restores_every_branch(repo):
     assert not (cwd / ".git" / "rebase-merge").exists()
 
 
-def test_a_local_branch_that_differs_from_the_plan_is_refused(repo):
+def test_a_local_branch_that_differs_from_the_recorded_tip_is_refused(repo):
     cwd, tips = repo
-    layers = driver._plan_layers(["a", "c"], "main", cwd, prefix="")
+    layers = driver._layers(["a", "c"], "main", cwd, prefix="")
     _git(cwd, "branch", "-f", "c", tips["M0"])
     ok, messages = driver._apply_layers(layers, cwd)
     assert not ok
     assert messages[0].startswith("local c is")
 
 
-def test_a_gone_spec_an_edited_spec_and_a_merged_pr_make_the_order_stale(tmp_path):
+def test_neighbours_that_both_append_to_one_file_are_reported_as_a_conflict(repo):
+    # Two siblings both appended `## 34.` to the backlog, and each PR page
+    # looked clean after `link` retargeted it.
+    cwd, tips = repo
+    for branch in ("x", "y"):
+        _git(cwd, "checkout", "-q", "-b", branch, tips["M0"])
+        _commit(cwd, "base.txt", f"base\n## 34. {branch}\n")
+    _git(cwd, "checkout", "-q", "main")
+
+    assert driver._merge_conflicts("a", "c", cwd) == []
+    conflicts = driver._merge_conflicts("x", "y", cwd)
+    assert conflicts and all(line.startswith("CONFLICT") for line in conflicts)
+    assert "base.txt" in conflicts[0]
+
+
+def test_a_gone_spec_an_edited_spec_and_a_merged_or_closed_pr_make_the_order_stale(
+    tmp_path,
+):
     from saffron.intake import load_spec
 
     source = sorted((REPO / ".saffron" / "specs").rglob("SA-*.md"))[0]
@@ -185,17 +202,19 @@ def test_a_gone_spec_an_edited_spec_and_a_merged_pr_make_the_order_stale(tmp_pat
     shutil.copy(source, spec)
     sha = load_spec(spec)[1]
     rows = [
-        driver.Planned("A", str(tmp_path / "gone.md"), 1),
-        driver.Planned("B", str(spec), 1, spec_sha="0" * len(sha)),
-        driver.Planned("C", str(spec), 1, spec_sha=sha, pr=5),
-        driver.Planned("D", str(spec), 1, spec_sha=sha, pr=6),
+        driver.OrderRow("A", str(tmp_path / "gone.md"), 1),
+        driver.OrderRow("B", str(spec), 1, spec_sha="0" * len(sha)),
+        driver.OrderRow("C", str(spec), 1, spec_sha=sha, pr=5),
+        driver.OrderRow("D", str(spec), 1, spec_sha=sha, pr=6),
+        driver.OrderRow("E", str(spec), 1, spec_sha=sha, pr=7),
     ]
-    states = {5: "MERGED", 6: "OPEN"}
+    states = {5: "MERGED", 6: "OPEN", 7: "CLOSED"}
     reasons = driver._stale(rows, pr_state=states.get)
     assert reasons == [
         f"A: {tmp_path / 'gone.md'} is gone",
         "B: the spec changed after the snapshot",
         "C: #5 is MERGED",
+        "E: #7 is CLOSED",
     ]
 
 
@@ -207,6 +226,10 @@ def test_the_watch_pattern_matches_every_terminal_state_after_a_padded_spec_id()
         )
     assert pattern.search("IMPLEMENT: 1 commit(s), $1.48 spent")
     assert not pattern.search("agent: thinking")
+
+
+def test_the_driver_reads_every_terminal_state_from_the_ontology():
+    assert sorted(driver.terminal_states()) == sorted(TERMINAL_STATES)
 
 
 def test_next_says_when_the_spec_it_names_is_cut_from_a_reviewable_parent():
@@ -243,7 +266,7 @@ def _dropped(spec_id: str):
         (_dropped("A"), "dropped"),
     ],
 )
-def test_next_skips_a_child_whose_parent_has_no_reviewable_branch(parent, why):
+def test_next_holds_back_a_child_whose_parent_has_no_reviewable_branch(parent, why):
     # `saffron cell` runs no `depends_on` refusal, and a parent with no waiting
     # task leaves the child's worktree cut from main, without a word.
     child = _row("B", 2, ["A"], pr=None, state=None)
@@ -251,14 +274,16 @@ def test_next_skips_a_child_whose_parent_has_no_reviewable_branch(parent, why):
 
     chosen, note = driver._next_spec([parent, child, sibling], again=False)
     assert chosen is sibling
-    assert note == f"skipped B: its parent A is {why}, so a cell would cut it from main"
+    assert note == (
+        f"held back B: its parent A is {why}, so a cell would cut it from main"
+    )
 
     chosen, note = driver._next_spec([parent, child], again=False)
     assert chosen is None
 
 
 def test_a_resnapshot_keeps_what_the_loop_recorded(tmp_path, monkeypatch):
-    # `build_queue` skips a spec with a finished task, so an order rebuilt from
+    # `build_queue` passes over a spec with a finished task, so an order rebuilt from
     # the scan alone lost every reviewable PR and every drop.
     from saffron.intake import load_spec
 
@@ -280,7 +305,7 @@ def test_a_resnapshot_keeps_what_the_loop_recorded(tmp_path, monkeypatch):
 
     def row(i, **recorded):
         spec, sha = loaded[i]
-        return driver.Planned(
+        return driver.OrderRow(
             spec.id,
             str(paths[i].relative_to(tmp_path)),
             spec.priority,
