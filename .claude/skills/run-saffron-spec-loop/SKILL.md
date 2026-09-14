@@ -59,8 +59,9 @@ branch, so it starts after the parent's review commits are pushed: until then
 `next` names it as waiting and hands back the next spec that can start. Within
 a priority, the order puts the parent with most descendants first, so its
 children have something to run beside its review. `next` holds back a child
-whose parent has no reviewable branch — rate-limited, decided otherwise, or dropped — because
-`saffron cell` would cut it from main, and names the child it held back.
+whose parent has no reviewable branch — rate-limited, decided otherwise, or
+dropped — because `saffron cell` would cut it from main, and names the child it
+held back.
 
 ### a. Start the cell in the background
 
@@ -90,8 +91,9 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py record SA-NNNN   # SA-NNNN
 
 It reads the ledger, never the transcript (§4.3), prints what the cell spent
 against the spec's budget, and exits 0 only for `READY_FOR_REVIEW`. Stop the
-Monitor now: `tail -F` outlives the cell. A **decided** state — one in `scheduler.DONE_STATES` —
-settles the spec for this loop, and only `READY_FOR_REVIEW` joins the stack. A
+Monitor now: `tail -F` outlives the cell. A **decided** state — one in
+`scheduler.DONE_STATES` — settles the spec for this loop, and only
+`READY_FOR_REVIEW` joins the stack. A
 state that decided nothing (a rate limit, a cell still in flight) keeps the
 spec pending, and `next` moves past it (GOTCHAS, Recording).
 `drop SA-NNNN --why "…"` takes a spec out for good.
@@ -120,9 +122,14 @@ spec pending, and `next` moves past it (GOTCHAS, Recording).
 
    ```bash
    make check > /tmp/check.log 2>&1; echo "make exit: $?"; tail -3 /tmp/check.log
-   uv run .claude/skills/run-saffron-spec-loop/driver.py size SA-NNNN
    git add <files> && git commit -m "review(SA-NNNN): <the defect, as a sentence>" && git push -q origin HEAD
+   uv run .claude/skills/run-saffron-spec-loop/driver.py size SA-NNNN
+   uv run .claude/skills/run-saffron-spec-loop/driver.py stack             # dry run
    ```
+
+   `size` measures what was pushed, so it runs after the push; the PR is a
+   draft, so a branch over its ceiling is still the operator's to answer. The
+   dry `stack` finds a conflict between neighbours while the branch is fresh.
 
 **Done when** each criterion has a file:line and a probe result, each finding is
 fixed, answered, or kept, every witness the review added fails at the spec's

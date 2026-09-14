@@ -23,6 +23,10 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from saffron.gates.contract import GateResult
 
 REPO = Path(__file__).resolve().parents[3]
 STATE_DIR = REPO / ".saffron-loop"
@@ -91,8 +95,10 @@ class OrderRow:
     # What PACKAGE pushed, from the ledger; a branch head past it carries
     # review commits. Empty in an order written before `record` stored it.
     pushed_sha: str = ""
+
     title: str = ""
     budget_usd: float = 0.0
+    risk: str = "standard"
 
     @property
     def pending(self) -> bool:
@@ -198,6 +204,7 @@ def _order(
             branch=f"saffron/{spec.id}",
             title=spec.title,
             budget_usd=spec.budget_usd,
+            risk=spec.risk,
         )
 
     admitted = {p.spec_id: p for p in carried}
@@ -441,17 +448,25 @@ def _own_base(upper: str, others: Sequence[str], trunk: str, cwd: Path = REPO) -
     return best[1]
 
 
+def _bases_below(spec_id: str, rows: list[OrderRow]) -> list[str]:
+    """The loop branches `spec_id` can have been cut or rebased from: those
+    below it in the stack. A child above it shares its whole tip, and as a
+    candidate it had a parent measure 0 changed lines."""
+    order, _warnings = _stack_order(rows)
+    ids = [p.spec_id for p in order]
+    return [p.branch for p in order[: ids.index(spec_id)]] if spec_id in ids else []
+
+
 def _size(
-    lower: str, upper: str, spec_type: str, *, cwd: Path = REPO
-) -> tuple[int, int]:
-    """Changed lines from `lower` to `upper` and the ceiling `spec_type` gets —
-    counted and looked up by the `size` gate itself, which runs only in the
-    cell, so a review round can take a branch past it unseen (item 40)."""
+    lower: str, upper: str, spec_type: str, touches: list[str], *, cwd: Path = REPO
+) -> GateResult:
+    """The `size` gate's own verdict from `lower` to `upper`. It runs only in
+    the cell, so review commits can take a branch past it unseen (item 40)."""
     from saffron.cell.worktree import DIFF_FLAGS
-    from saffron.gates.core.size import _CEILINGS, _DEFAULT_CEILING, _changed_lines
+    from saffron.gates.core.size import size_gate
 
     diff = _git("diff", *DIFF_FLAGS, f"{lower}...{upper}", cwd=cwd)
-    return _changed_lines(diff), _CEILINGS.get(spec_type, _DEFAULT_CEILING)
+    return size_gate(diff, spec_type, touches, blocking=False)
 
 
 def _merge_conflicts(lower: str, upper: str, cwd: Path = REPO) -> list[str]:
@@ -664,7 +679,7 @@ def watch_pattern() -> str:
     states = "|".join(terminal_states())
     return (
         f"^({'|'.join(WATCH_PREFIXES)})|^SA-[0-9]+ +({states})\\b|^({states})\\b"
-        "|Traceback"
+        "|^Traceback"
     )
 
 
@@ -694,13 +709,13 @@ def cmd_snapshot(args) -> int:
     for i, p in enumerate(ordered, 1):
         dep = f"  depends_on={p.depends_on}" if p.depends_on else ""
         print(
-            f"  {i}. {p.spec_id}  priority={p.priority}  ${p.budget_usd:.2f}"
-            f"{dep}  {p.title}"
+            f"  {i}. {p.spec_id}  priority={p.priority}  risk={p.risk}  "
+            f"${p.budget_usd:.2f}{dep}  {p.title}"
         )
     total = sum(p.budget_usd for p in ordered)
     print(
-        f"\nspec budgets: ${total:.2f} in total; a cell can run to ~1.7x its own "
-        "(DESIGN.md §3)"
+        f"\nspec budgets: ${total:.2f} in total; a cell can overrun its own by up "
+        "to one attempt (DESIGN.md §3; 67% on SA-0059)"
     )
     ordered_paths = {p.path for p in ordered}
     held = [
@@ -850,11 +865,10 @@ def cmd_record(args) -> int:
             )
         # Not `tasks[-1]`: a later orphaned or unfinished row must not hide the
         # one that opened a pull request (SA-0013 holds ten rows at one sha).
-        urls = {
-            row["task_id"]: row["pr_url"]
-            for row in ledger.tasks_by_repo(repo_id)
-            if row["pr_url"]
-        }
+        # `queue_lines`, not `tasks_by_spec`: only it carries the spend and the
+        # pushed sha, and a task id is unique across repos.
+        lines = {row["task_id"]: row for row in ledger.queue_lines()}
+        urls = {tid: row["pr_url"] for tid, row in lines.items() if row["pr_url"]}
         chosen = next(
             (row for row in reversed(tasks) if row["task_id"] in urls), tasks[-1]
         )
@@ -862,10 +876,11 @@ def cmd_record(args) -> int:
         url = urls.get(chosen["task_id"], "")
         pr = int(url.rstrip("/").rsplit("/", 1)[-1]) if "/pull/" in url else None
 
-        spent, budget = chosen["spent_usd_est"], chosen["budget_usd"]
+        line = lines[chosen["task_id"]]
+        spent, budget = line["spent_usd_est"], line["budget_usd"]
         if state in DONE_STATES:
             match.state, match.pr = state, pr
-            match.pushed_sha = chosen["pushed_sha"] or ""
+            match.pushed_sha = line["pushed_sha"] or ""
         else:
             # Nothing was decided. Keep a PR number the ledger still carries: a
             # `CHANGES_REQUESTED` spec has one open.
@@ -920,6 +935,13 @@ def cmd_status(_args) -> int:
                 if p.pending and p.last_state
                 else ""
             )
+            if p.reviewable and p.pushed_sha:  # item 14: what is left to review
+                head = _origin_head(p.branch)
+                extra = (
+                    f"  reviewed {head[:8]}"
+                    if head and head != p.pushed_sha
+                    else "  no review commits pushed"
+                )
         print(f"  {p.spec_id:<{width}}  {label:<18} {pr:<5}{extra}")
     ready = [p for p in rows if p.reviewable]
     print(f"\n{len(ready)}/{len(rows)} reviewable")
@@ -1032,21 +1054,20 @@ def cmd_size(args) -> int:
     match = next((p for p in rows if p.spec_id == args.spec_id), None)
     if match is None:
         return _fail(f"{args.spec_id} is not in the order")
+    if not match.reviewable:
+        return _fail(f"{match.spec_id} is not reviewable, so it has no stack to sit in")
     spec, _sha = load_spec(REPO / match.path)
     subprocess.run(["git", "fetch", "-q", "origin"], cwd=REPO)
     upper = f"origin/{match.branch}"
-    others = [f"origin/{p.branch}" for p in rows if p.spec_id != match.spec_id]
+    below = [f"origin/{b}" for b in _bases_below(match.spec_id, rows)]
     try:
-        lower = _own_base(upper, others, _trunk())
+        lower = _own_base(upper, below, _trunk())
     except GitError as err:
         return _fail(str(err))
-    lines, ceiling = _size(lower, upper, spec.type)
-    verdict = "within it" if lines <= ceiling else "over it: ask the operator (item 40)"
-    print(
-        f"{match.spec_id}: {lines} changed lines since {lower[:8]}; the "
-        f"{spec.type} ceiling is {ceiling}, {verdict}"
-    )
-    return 0 if lines <= ceiling else 1
+    result = _size(lower, upper, spec.type, spec.touches)
+    ask = "" if result.status == "pass" else "; ask the operator (item 40)"
+    print(f"{match.spec_id} since {lower[:8]}: {result.summary}{ask}")
+    return 0 if result.status == "pass" else 1
 
 
 def cmd_pattern(_args) -> int:

@@ -46,10 +46,11 @@ do; the measurement behind it follows.
 - **A turn-ceiling line is not the end of a cell.** `IMPLEMENT: the session
   failed — the agent reached its ceiling of N turns` keeps the committed work
   (§4.3), and the next gate suite measures it: wait for `gates:` and the process
-  exit. Two of stack #251's eight cells hit it and both reached review.
-- **A cell can finish at up to ~1.7× its `budget_usd`** (§3: the attempt is the
-  unit). `record` prints spend against budget; SA-0080 closed at $7.55 of $6.
-  Past ~1.7×, file it.
+  exit. Two of stack #251's eight cells hit it and both reached review. Keep
+  it for step 5: the spec's `max_turns` may be too low for it.
+- **A cell can overrun its `budget_usd` by up to one whole attempt** (§3),
+  measured at 67% on SA-0059. `record` prints spend against budget; SA-0080
+  closed at $7.55 of $6. An overrun past one attempt's cost is a bug: file it.
 
 ## Why attended cells, not `saffron batch`
 

@@ -161,10 +161,29 @@ def repo(tmp_path, monkeypatch):
 def test_size_counts_a_branch_against_the_gates_own_ceiling(
     repo, lower, upper, spec_type, ceiling
 ):
-    # A review round took #247 from 294 to 367 lines against a bug's 300, and
+    # Review commits took #247 from 294 to 367 lines against a bug's 300, and
     # `size` runs only in the cell (item 40). Each branch here adds one line.
     tmp, _tips = repo
-    assert driver._size(lower, upper, spec_type, cwd=tmp) == (1, ceiling)
+    result = driver._size(lower, upper, spec_type, [], cwd=tmp)
+    assert result.status == "pass"
+    assert (
+        result.summary == f"1 changed lines within the {spec_type} ceiling of {ceiling}"
+    )
+
+
+def test_size_measures_a_parent_from_below_it_not_from_its_own_child(repo):
+    # Every other loop branch was a candidate base, so a parent whose child had
+    # been cut from it measured from its own tip: 0 changed lines.
+    cwd, tips = repo
+    a, b, c = _row("a"), _row("b", depends_on=["a"]), _row("c")
+    for p in (a, b, c):
+        p.branch = p.spec_id
+
+    below_a = driver._bases_below("a", [a, b, c])
+    assert below_a == []
+    assert driver._own_base("a", below_a, "main", cwd) == tips["M0"]
+    assert driver._own_base("a", ["b", "c"], "main", cwd) == tips["a"]  # the defect
+    assert driver._bases_below("b", [a, b, c]) == ["a"]
 
 
 def test_size_measures_a_branch_from_the_nearest_branch_it_was_cut_or_rebased_from(
@@ -328,6 +347,8 @@ def test_the_watch_pattern_ignores_state_names_inside_the_agents_own_lines():
         'agent: Grep {"pattern": "SCOPE_REVIEW|PhaseStart|detail=", "path": "/work"}'
     )
     assert pattern.search("READY_FOR_REVIEW: $2.82 spent, session 7b45a3b7")
+    assert not pattern.search('agent: Grep {"pattern": "Traceback", "path": "/work"}')
+    assert pattern.search("Traceback (most recent call last):")
 
 
 def test_the_driver_reads_every_terminal_state_from_the_ontology():
@@ -387,6 +408,25 @@ def test_next_says_a_waiting_child_is_all_that_is_left(monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "B waits on A's review commits" in err
     assert "nothing untouched left" not in err
+
+
+def test_status_says_which_reviewable_branches_carry_pushed_review_commits(
+    monkeypatch, capsys
+):
+    # Item 14: `status` showed `READY_FOR_REVIEW #243` either way, so it could
+    # not answer "what is left to review?".
+    reviewed, unreviewed, unrecorded = _row("A", pr=10), _row("B", pr=11), _row("C")
+    reviewed.pushed_sha = unreviewed.pushed_sha = "p" * 40
+    heads = {"saffron/A": "r" * 40, "saffron/B": "p" * 40}
+    monkeypatch.setattr(driver, "_load", lambda: [reviewed, unreviewed, unrecorded])
+    monkeypatch.setattr(driver, "_stale", lambda rows: [])
+    monkeypatch.setattr(driver, "_origin_head", heads.get)
+
+    assert driver.cmd_status(argparse.Namespace()) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].endswith("#10    reviewed rrrrrrrr")
+    assert lines[1].endswith("#11    no review commits pushed")
+    assert lines[2].endswith("#1   ")
 
 
 def _rate_limited(spec_id: str):
@@ -469,7 +509,10 @@ def loop(tmp_path, monkeypatch):
         return seen
 
     return SimpleNamespace(
-        ids=[spec.id for spec, _sha in loaded], row=row, scan_returns=scan_returns
+        ids=[spec.id for spec, _sha in loaded],
+        row=row,
+        scan_returns=scan_returns,
+        root=tmp_path,
     )
 
 
@@ -490,6 +533,7 @@ def test_snapshot_shows_each_specs_title_and_budget_and_counts_every_root(loop, 
         assert title in out
     assert "$28.50" in out  # 10 + 8 + 6 + 4.5, the four specs' budget_usd
     assert "4 specs declare no depends_on" in out
+    assert out.count("  risk=") == 4  # item 5's table asked for it
 
 
 def test_a_resnapshot_holds_out_a_spec_edited_while_its_pr_is_open(loop, capsys):
@@ -530,25 +574,36 @@ def test_record_keeps_what_package_pushed_and_says_what_the_cell_spent(
     loop, monkeypatch, capsys
 ):
     # SA-0080 finished at $7.55 against a $6 budget and nothing on the way out
-    # said so; `next` needs the pushed sha to tell a reviewed parent apart.
+    # said so; `next` needs the pushed sha to tell a reviewed parent apart. A
+    # real ledger: `tasks_by_spec` rows carry neither, and dicts hid that.
+    from saffron.ledger import Ledger
+
     spec_id = loop.ids[0]
     driver._save([loop.row(0)])
     sha = driver._load()[0].spec_sha
-    task = {
-        "task_id": 7,
-        "state": "READY_FOR_REVIEW",
-        "pushed_sha": "p" * 40,
-        "spent_usd_est": 7.55,
-        "budget_usd": 6.0,
-    }
-    ledger = SimpleNamespace(
-        tasks_by_spec=lambda _repo: {(spec_id, sha): [task]},
-        tasks_by_repo=lambda _repo: [
-            {"task_id": 7, "pr_url": "https://github.com/o/r/pull/247"}
-        ],
-        close=lambda: None,
+    ledger = Ledger(loop.root / "ledger.db")
+    repo_id = ledger.upsert_repo("r", "git@github.com:o/r.git", "/mirror", "policy")
+    task_id = ledger.create_task(
+        ledger.create_run(repo_id, "b" * 40), spec_id, sha, "saffron/X", budget_usd=6.0
     )
-    monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (ledger, 1, "url"))
+    attempt_id = ledger.open_attempt(task_id, "IMPLEMENT")
+    ledger.close_attempt(
+        attempt_id,
+        session_id=None,
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=7.55,
+    )
+    ledger.set_task_state(task_id, "PACKAGE")
+    ledger.set_task_package(
+        task_id,
+        "READY_FOR_REVIEW",
+        "saffron/X",
+        "p" * 40,
+        "https://github.com/o/r/pull/247",
+    )
+    monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (ledger, repo_id, "url"))
 
     assert driver.cmd_record(argparse.Namespace(spec_id=spec_id)) == 0
     assert driver._load()[0].pushed_sha == "p" * 40
