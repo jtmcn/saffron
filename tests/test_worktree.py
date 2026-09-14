@@ -1649,6 +1649,96 @@ def test_dirty_paths_reads_through_a_planted_replacement(tmp_path, monkeypatch):
     assert worktree.dirty_paths("c") == []
 
 
+# --- _git reads through a graft or shallow file (docs/BACKLOG.md item 110) -
+#
+# `SA-0074` pinned away `git replace`; a graft is not a replacement ref, and
+# neither is `.git/shallow` — both re-shape what `rev-list`/`log` consider
+# history, undercounting `commits_ahead` and dropping subjects from
+# `commit_subjects` (§4.3, §5.7). Built the way `_repo_with_a_planted_replacement`
+# is: config isolated, three real commits, a bare read proved fooled before the
+# pinned one is asserted.
+
+
+def _three_commit_repo(tmp_path, monkeypatch):
+    """A repo with three real commits: base, one touching a stand-in forbidden
+    path, and an innocent one on top — the shared start for the graft and
+    shallow witnesses below, each of which plants its own history-hiding file
+    afterward."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    (tmp_path / "a.py").write_text("base\n")
+    base = _commit(tmp_path, "base")
+    (tmp_path / "DESIGN.md").write_text("forbidden edit\n")
+    middle = _commit(tmp_path, "touch a forbidden path")
+    (tmp_path / "a.py").write_text("innocent change\n")
+    head = _commit(tmp_path, "innocent")
+    return base, middle, head
+
+
+def test_history_reads_see_through_a_graft_file(tmp_path, monkeypatch):
+    base, _middle, head = _three_commit_repo(tmp_path, monkeypatch)
+    # One line, `<head> <base>`: git then treats head as parented directly on
+    # base, skipping the middle commit entirely.
+    (tmp_path / ".git" / "info" / "grafts").write_text(f"{head} {base}\n")
+    _host_git(tmp_path, monkeypatch)
+
+    # Prove the plant first: a bare read in this same repo is fooled.
+    bare_count = subprocess.run(
+        ["git", "rev-list", "--count", f"{base}..HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert bare_count == "1"
+    bare_subjects = subprocess.run(
+        ["git", "log", "--format=%s", f"{base}..HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    assert bare_subjects == ["innocent"]
+
+    assert worktree.commits_ahead("c", base) == 2
+    assert worktree.commit_subjects("c", base) == [
+        "innocent",
+        "touch a forbidden path",
+    ]
+
+
+def test_history_reads_see_through_a_shallow_file(tmp_path, monkeypatch):
+    base, _middle, head = _three_commit_repo(tmp_path, monkeypatch)
+    # Head's sha alone: git then treats head as having no parents at all.
+    (tmp_path / ".git" / "shallow").write_text(f"{head}\n")
+    _host_git(tmp_path, monkeypatch)
+
+    # Prove the plant first: a bare read in this same repo is fooled.
+    bare_count = subprocess.run(
+        ["git", "rev-list", "--count", f"{base}..HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert bare_count == "1"
+    bare_subjects = subprocess.run(
+        ["git", "log", "--format=%s", f"{base}..HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    assert bare_subjects == ["innocent"]
+
+    assert worktree.commits_ahead("c", base) == 2
+    assert worktree.commit_subjects("c", base) == [
+        "innocent",
+        "touch a forbidden path",
+    ]
+
+
 # --- DIFF_FLAGS against three more worktree-local settings (item 89) -------
 #
 # `SA-0072` pinned `DIFF_FLAGS` against the settings it found; this is the
