@@ -15,6 +15,15 @@ of a task having finished (a follower here runs until interrupted, the way
 `tail -f` does — the teardown event is not a reliable end marker, since a
 killed cell never reaches it), and no rendering of a night's worth of tasks
 (that is the batch index, `saffron/report/**`, forbidden to this spec).
+
+`docs/BACKLOG.md` item 64 named a second way one task's log reads as
+another's: a spec driven twice writes both tasks into one `events.jsonl`,
+in order, with nothing between them, so the default view used to open on
+whichever task's lines happened to be oldest — a rejected plan from last
+week above today's live repair turn. `_since_newest_task` is the fix, and it
+needs no new event kind: `Ceilings` is already the first event `run_task`
+writes for every task, so the newest task starts at the last `Ceilings` the
+log holds.
 """
 
 from __future__ import annotations
@@ -23,7 +32,7 @@ import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from saffron.events import Agent, Event, describe, read_log_since
+from saffron.events import Agent, Ceilings, Event, describe, read_log_since
 
 # The token counter, by the subtype the runtime gives it. Measured on one live
 # task: 630 of 878 lines, the single largest shape in any log.
@@ -104,6 +113,25 @@ def render_line(event: Event, *, verbose: bool = False) -> str | None:
     return describe(event) or None
 
 
+def _since_newest_task(events: list[Event]) -> list[Event]:
+    """`events`, cut to the suffix that starts at the last `Ceilings` among
+    them — the newest task's own boundary, since `run_task` writes one
+    `Ceilings` first, for every task, before anything else in the log.
+
+    Unchanged when `events` holds no `Ceilings` at all: a log written before
+    tasks recorded their own ceilings on the way in has no boundary to cut
+    at, and renders in full — the same fact `test_a_log_renders_as_the_lines_
+    its_terminal_printed` already pins for a log with none.
+    """
+    newest: int | None = None
+    for index, event in enumerate(events):
+        if isinstance(event, Ceilings):
+            newest = index
+    if newest is None:
+        return events
+    return events[newest:]
+
+
 def _sleep_and_continue(seconds: float) -> bool:
     """The real poll: sleep, then say "keep going" — the one thing this
     default never says is "stop". A test's own `sleep` is the only way a
@@ -143,6 +171,7 @@ def follow(
     task_dir: Path,
     *,
     verbose: bool = False,
+    whole_log: bool = False,
     interval: float = 1.0,
     sleep: Callable[[float], bool] = _sleep_and_continue,
 ) -> Iterator[str]:
@@ -162,13 +191,28 @@ def follow(
     this loop to a deterministic end without waiting on a real clock; the
     real default (`_sleep_and_continue`) never returns `False`, which is what
     makes "runs until interrupted" true in production and finite in a test.
+
+    By default (`whole_log=False`) the very first poll — the one that starts
+    from offset `0` and so is the one whole-file read this ever does — is cut
+    to `_since_newest_task`: a spec driven twice writes both tasks into one
+    file, and an operator diagnosing the newer one must not open on the
+    older one's outcome (`docs/BACKLOG.md` item 64). Only that first batch is
+    cut: a `Ceilings` a spec driven again writes while this follower is
+    already running arrives on a later poll like anything else appended
+    since the poll before it, and following continues past it rather than
+    clearing the screen. `whole_log=True` skips the cut entirely — every
+    task in the file renders, in order, behind `--whole-log`.
     """
     task_dir = Path(task_dir)
     if not task_dir.is_dir():
         raise UnknownTask(task_dir)
     offset = 0
+    first_poll = True
     while True:
         events, offset = read_log_since(task_dir, offset)
+        if first_poll and not whole_log:
+            events = _since_newest_task(events)
+        first_poll = False
         for event in events:
             line = render_line(event, verbose=verbose)
             if line is not None:

@@ -140,6 +140,13 @@ def main(argv: list[str] | None = None) -> int:
         help="print what the log already holds and exit, rather than "
         "following it until interrupted",
     )
+    watch_parser.add_argument(
+        "--whole-log",
+        action="store_true",
+        help="render every task recorded in this spec's log, in order, "
+        "rather than only the newest (`--all` is taken; it means something "
+        "else)",
+    )
 
     args = parser.parse_args(argv)
     out_dir_arg = getattr(args, "out", None)
@@ -867,6 +874,12 @@ def _watch(args: argparse.Namespace, out_dir: Path) -> int:
     `task_dir` is built from `out_dir`, the same batch-tree root `main`
     already computed above — never a second reading of `--home` here, which
     is how a watcher comes to read a directory nothing writes.
+
+    By default this opens on the newest task the directory's log holds — a
+    spec driven twice writes both into one `events.jsonl`, and `--whole-log`
+    is the escape hatch back to every task, in order (docs/BACKLOG.md item
+    64). `--all` was already taken for the noisy-agent-line flag, so this is
+    a second name rather than a second meaning for it.
     """
     task_dir = out_dir / args.task
     # `--no-follow` is this same loop with a poll that says stop the first
@@ -874,7 +887,13 @@ def _watch(args: argparse.Namespace, out_dir: Path) -> int:
     # the real default stays bound in `follow`'s own signature.
     poll = {"sleep": once} if args.no_follow else {}
     try:
-        for line in follow(task_dir, verbose=args.all, interval=args.interval, **poll):
+        for line in follow(
+            task_dir,
+            verbose=args.all,
+            whole_log=args.whole_log,
+            interval=args.interval,
+            **poll,
+        ):
             # Flushed: stdout is block-buffered off a tty, and a `tail -f`
             # shaped command that shows nothing until 8 KB accumulates is one
             # nobody pipes twice.

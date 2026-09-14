@@ -13,7 +13,16 @@ import json
 import pytest
 
 from saffron import watch
-from saffron.events import Agent, EventLog, PhaseStart, Preflight, Teardown, describe
+from saffron.events import (
+    Agent,
+    Ceilings,
+    EventLog,
+    PhaseStart,
+    Preflight,
+    Teardown,
+    Terminal,
+    describe,
+)
 
 
 def _once(_seconds: float) -> bool:
@@ -50,6 +59,84 @@ def test_a_log_renders_as_the_lines_its_terminal_printed(tmp_path):
     lines = list(watch.follow(task_dir, sleep=_once))
 
     assert lines == [describe(event) for event in events]
+
+
+def _two_tasks(spec_id: str) -> tuple[list, list]:
+    """One spec driven twice, in one log — `docs/BACKLOG.md` item 64's own
+    fixture. `Ceilings` is the first event `run_task` writes for every task,
+    so each task below opens with one, exactly as production does; nothing
+    hand-typed stands in for it."""
+    first_task = [
+        Ceilings(
+            timestamp=1.0,
+            spec_id=spec_id,
+            budget_usd=10.0,
+            max_attempts=3,
+            max_turns=40,
+            budget_source="spec",
+            attempts_source="spec",
+            turns_source="spec",
+        ),
+        Terminal(
+            timestamp=2.0,
+            spec_id=spec_id,
+            reason="plan_rejected",
+            spent_usd_est=1.80,
+            detail="touches cannot satisfy the criteria",
+        ),
+    ]
+    second_task = [
+        Ceilings(
+            timestamp=3.0,
+            spec_id=spec_id,
+            budget_usd=12.0,
+            max_attempts=3,
+            max_turns=40,
+            budget_source="flag",
+            attempts_source="spec",
+            turns_source="spec",
+        ),
+        PhaseStart(
+            timestamp=4.0,
+            spec_id=spec_id,
+            phase="REPAIR",
+            label="REPAIR",
+            detail="attempt 2, 3 new failures",
+        ),
+    ]
+    return first_task, second_task
+
+
+def test_the_default_view_starts_at_the_newest_task(tmp_path):
+    """A spec driven twice writes both tasks into one `events.jsonl`, with
+    nothing between them (item 64). An operator diagnosing the task that is
+    running must not open on the earlier task's `PLAN: rejected` — the
+    default view starts at the last `Ceilings` the log holds, which is the
+    newest task's own opening event."""
+    task_dir = tmp_path / "SY-9"
+    log = EventLog(task_dir)
+    first_task, second_task = _two_tasks("SY-9")
+    for event in first_task + second_task:
+        log.append(event)
+
+    lines = list(watch.follow(task_dir, sleep=_once))
+
+    assert lines == [describe(event) for event in second_task]
+
+
+def test_the_whole_log_is_still_reachable_behind_a_flag(tmp_path):
+    """Nothing the default view skips is lost: `whole_log=True` renders
+    every task the file holds, in order — both the rejected plan and the
+    live repair turn that followed it."""
+    task_dir = tmp_path / "SY-9b"
+    log = EventLog(task_dir)
+    first_task, second_task = _two_tasks("SY-9b")
+    for event in first_task + second_task:
+        log.append(event)
+
+    lines = list(watch.follow(task_dir, whole_log=True, sleep=_once))
+
+    assert lines == [describe(event) for event in first_task + second_task]
 
 
 def test_the_default_view_drops_the_token_counter_and_bare_acknowledgements(tmp_path):
