@@ -149,6 +149,19 @@ DIFF_FLAGS = (
     "--unified=3",
     # diff.algorithm picks a different diff for the same two trees.
     "--diff-algorithm=myers",
+    # diff.ignoreSubmodules=all drops a submodule path a commit added from
+    # both the name-only listing and the patch — a hole in `scope` itself,
+    # not merely a cosmetic one (docs/BACKLOG.md item 89).
+    "--ignore-submodules=none",
+    # color.ui=always or color.diff=always paints the patch with escape
+    # codes, `diff --git` headers included. The flag, not `-c color.ui=never`
+    # — probed on git 2.39.5 and 2.54, the override does not undo
+    # `color.diff=always`.
+    "--no-color",
+    # diff.interHunkContext widens how close two hunks must be before they
+    # merge into one, which widens where a critic finding may anchor exactly
+    # as diff.context would.
+    "--inter-hunk-context=0",
 )
 
 
@@ -163,9 +176,18 @@ def _git(container: str, *args: str) -> runtime.Completed:
     # (docs/BACKLOG.md item 102).
     # bigFileThreshold, attributesFile: either can print an edit as `Binary files
     # differ`, so no lens reads its hunks (docs/BACKLOG.md item 103).
+    # GIT_GRAFT_FILE, GIT_SHALLOW_FILE: a planted grafts or shallow file re-parents
+    # the history `commits_ahead` counts (docs/BACKLOG.md item 110). No flag pins
+    # either, and `exec_` takes no env; measured on git 2.39.5 and 2.54.
+    # advice.graftFileDeprecated=false: setting `GIT_GRAFT_FILE` alone makes
+    # git print its eight-line "grafts is deprecated" hint on stderr on every
+    # call, present or not — measured the same way as the two vars above.
     return runtime.exec_(
         container,
         [
+            "env",
+            "GIT_GRAFT_FILE=/dev/null",
+            "GIT_SHALLOW_FILE=/dev/null",
             "git",
             "-c",
             "core.quotePath=false",
@@ -173,6 +195,8 @@ def _git(container: str, *args: str) -> runtime.Completed:
             "diff.suppressBlankEmpty=false",
             "-c",
             "core.useReplaceRefs=false",
+            "-c",
+            "advice.graftFileDeprecated=false",
             "-c",
             "core.bigFileThreshold=2g",
             "-c",

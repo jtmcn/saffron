@@ -2,7 +2,7 @@
 
 Every fixture below is a real `Event`, appended through the real `EventLog`,
 never hand-typed JSON: that is what makes each witness prove the round trip
-through `read_log`/`describe` rather than a parser reading what the test
+through `read_log_since`/`describe` rather than a parser reading what the test
 author imagined the writer emits.
 """
 
@@ -13,7 +13,16 @@ import json
 import pytest
 
 from saffron import watch
-from saffron.events import Agent, EventLog, PhaseStart, Preflight, Teardown, describe
+from saffron.events import (
+    Agent,
+    Ceilings,
+    EventLog,
+    PhaseStart,
+    Preflight,
+    Teardown,
+    Terminal,
+    describe,
+)
 
 
 def _once(_seconds: float) -> bool:
@@ -50,6 +59,117 @@ def test_a_log_renders_as_the_lines_its_terminal_printed(tmp_path):
     lines = list(watch.follow(task_dir, sleep=_once))
 
     assert lines == [describe(event) for event in events]
+
+
+def _two_tasks(spec_id: str) -> tuple[list, list]:
+    """One spec driven twice, in one log — `docs/BACKLOG.md` item 64's own
+    fixture. `Ceilings` is the first event `run_task` writes for every task,
+    so each task below opens with one, exactly as production does; nothing
+    hand-typed stands in for it."""
+    first_task = [
+        Ceilings(
+            timestamp=1.0,
+            spec_id=spec_id,
+            budget_usd=10.0,
+            max_attempts=3,
+            max_turns=40,
+            budget_source="spec",
+            attempts_source="spec",
+            turns_source="spec",
+        ),
+        Terminal(
+            timestamp=2.0,
+            spec_id=spec_id,
+            reason="plan_rejected",
+            spent_usd_est=1.80,
+            detail="touches cannot satisfy the criteria",
+        ),
+    ]
+    second_task = [
+        Ceilings(
+            timestamp=3.0,
+            spec_id=spec_id,
+            budget_usd=12.0,
+            max_attempts=3,
+            max_turns=40,
+            budget_source="flag",
+            attempts_source="spec",
+            turns_source="spec",
+        ),
+        PhaseStart(
+            timestamp=4.0,
+            spec_id=spec_id,
+            phase="REPAIR",
+            label="REPAIR",
+            detail="attempt 2, 3 new failures",
+        ),
+        # The newest task finishes too, so a cut placed after the last
+        # `Terminal` rather than at the last `Ceilings` renders nothing.
+        Terminal(
+            timestamp=5.0,
+            spec_id=spec_id,
+            reason="finished_empty",
+            spent_usd_est=2.10,
+            detail="no commits",
+        ),
+    ]
+    return first_task, second_task
+
+
+def test_the_default_view_starts_at_the_newest_task(tmp_path):
+    """A spec driven twice writes both tasks into one `events.jsonl`, with
+    nothing between them (item 64). An operator diagnosing the task that is
+    running must not open on the earlier task's `PLAN: rejected` — the
+    default view starts at the last `Ceilings` the log holds, which is the
+    newest task's own opening event."""
+    task_dir = tmp_path / "SY-9"
+    log = EventLog(task_dir)
+    first_task, second_task = _two_tasks("SY-9")
+    for event in first_task + second_task:
+        log.append(event)
+
+    lines = list(watch.follow(task_dir, sleep=_once))
+
+    assert lines == [describe(event) for event in second_task]
+
+
+def test_the_whole_log_is_still_reachable_behind_a_flag(tmp_path):
+    """Nothing the default view skips is lost: `whole_log=True` renders
+    every task the file holds, in order — both the rejected plan and the
+    live repair turn that followed it."""
+    task_dir = tmp_path / "SY-9b"
+    log = EventLog(task_dir)
+    first_task, second_task = _two_tasks("SY-9b")
+    for event in first_task + second_task:
+        log.append(event)
+
+    lines = list(watch.follow(task_dir, whole_log=True, sleep=_once))
+
+    assert lines == [describe(event) for event in first_task + second_task]
+
+
+def test_a_task_boundary_on_a_later_poll_does_not_cut_what_came_before_it(tmp_path):
+    """Only the first poll is cut. A later poll reading the old task's last
+    line and then a new `Ceilings` renders both: the follower already showed
+    the old task's start, and dropping its end would hide how it finished."""
+    task_dir = tmp_path / "SY-9c"
+    log = EventLog(task_dir)
+    first_task, second_task = _two_tasks("SY-9c")
+    log.append(first_task[0])
+
+    polls: list[float] = []
+
+    def sleep(seconds: float) -> bool:
+        polls.append(seconds)
+        if len(polls) == 1:
+            for event in first_task[1:] + second_task:
+                log.append(event)
+            return True
+        return False
+
+    lines = list(watch.follow(task_dir, sleep=sleep))
+
+    assert lines == [describe(event) for event in first_task + second_task]
 
 
 def test_the_default_view_drops_the_token_counter_and_bare_acknowledgements(tmp_path):
@@ -204,9 +324,80 @@ def test_following_emits_only_events_that_arrived_since_the_last_poll(tmp_path):
     assert calls == [5, 5]
 
 
+def test_a_poll_reads_only_what_was_appended_since_the_last(tmp_path):
+    """Item 62: a follower resumes from a byte offset, not a whole-file
+    re-read. Proven behaviourally: the bytes already read are overwritten in
+    place (same length, same newline, bytes that fail to parse) before a real
+    second event is appended. A whole-file re-read would drop the
+    now-corrupted first line from its count, so its count-based slice would
+    silently skip the appended one; a byte-offset follower never revisits the
+    corrupted bytes and still renders it."""
+    task_dir = tmp_path / "SY-4b"
+    task_dir.mkdir()
+    log = EventLog(task_dir)
+    first = Teardown(timestamp=1.0, spec_id="SY-4b", step="start", ok=True)
+    log.append(first)
+    events_path = task_dir / "events.jsonl"
+    original = events_path.read_bytes()
+    second = Teardown(timestamp=2.0, spec_id="SY-4b", step="network", ok=True)
+
+    polls: list[float] = []
+
+    def sleep(seconds: float) -> bool:
+        polls.append(seconds)
+        if len(polls) == 1:
+            # Same length, same newline as the bytes already read.
+            corrupted = b"x" * (len(original) - 1) + b"\n"
+            assert len(corrupted) == len(original)
+            events_path.write_bytes(corrupted)
+            log.append(second)
+            return True
+        return False
+
+    lines = list(watch.follow(task_dir, sleep=sleep))
+
+    assert lines == [describe(first), describe(second)]
+
+
+def test_a_poll_parses_only_the_lines_appended_since_the_last(tmp_path, monkeypatch):
+    """The output alone cannot tell an offset follower from one that re-parses
+    the whole log and keeps its tail, so the parses are counted: after the
+    first poll, one appended event costs one parse."""
+    from saffron import events
+
+    task_dir = tmp_path / "SY-4c"
+    log = EventLog(task_dir)
+    first = Teardown(timestamp=1.0, spec_id="SY-4c", step="start", ok=True)
+    second = Teardown(timestamp=2.0, spec_id="SY-4c", step="network", ok=True)
+    log.append(first)
+
+    parsed: list[str] = []
+    real_parse = events._parse_line
+
+    def counting_parse(line: str):
+        parsed.append(line)
+        return real_parse(line)
+
+    monkeypatch.setattr(events, "_parse_line", counting_parse)
+    polls: list[float] = []
+
+    def sleep(seconds: float) -> bool:
+        polls.append(seconds)
+        if len(polls) == 1:
+            parsed.clear()
+            log.append(second)
+            return True
+        return False
+
+    lines = list(watch.follow(task_dir, sleep=sleep))
+
+    assert lines == [describe(first), describe(second)]
+    assert len(parsed) == 1
+
+
 def test_a_partial_final_line_is_dropped_and_the_whole_ones_survive(tmp_path):
     """A log caught mid-write loses the partial line and keeps every whole
-    one — `read_log`'s own distinction, inherited here rather than
+    one — `read_log_since`'s own distinction, inherited here rather than
     reimplemented."""
     task_dir = tmp_path / "SY-5"
     task_dir.mkdir()
@@ -276,18 +467,17 @@ def test_an_unknown_task_names_the_directory_it_looked_in(tmp_path):
 
 
 def test_a_payload_that_is_not_an_object_is_dropped_and_the_rest_survive(tmp_path):
-    """`read_log` type-checks nothing, so a corrupt line can hand `describe`
-    a `str` where it expects a mapping — and `describe` raises
-    `AttributeError` on it. One such line must cost its own line and no
-    more: raised, it ends the whole follow, and `main`'s catch-all reports
-    the per-line corruption `read_log` exists to tolerate as exit `2`,
-    infrastructure failed.
+    """A corrupt line can carry a `str` where `describe` expects a mapping,
+    and `describe` raises `AttributeError` on it. One such line must cost
+    its own line and no more: raised, it ends the whole follow, and `main`'s
+    catch-all reports the per-line corruption the reader exists to tolerate
+    as exit `2`, infrastructure failed.
 
     Written straight to the file rather than built as an `Agent` and
     appended, following the partial-line witness above and for the same
     reason: `Agent.event` is annotated `dict | None`, so the constructor is
-    the one path this shape cannot arrive by. `read_log` is where it gets in,
-    because `cls(**obj)` checks no types at all.
+    the one path this shape cannot arrive by. `_parse_line`'s shape check
+    (item 61) is what stops it.
     """
     task_dir = tmp_path / "SY-6"
     log = EventLog(task_dir)

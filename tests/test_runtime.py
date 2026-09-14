@@ -284,6 +284,79 @@ def test_a_runtime_that_runs_reports_the_version_it_printed(tmp_path, monkeypatc
     assert runtime.probe() == "fake-runtime 9.9.9"
 
 
+def test_the_runtime_is_asked_once_however_often_it_is_probed(tmp_path, monkeypatch):
+    """SA-0077: `probe()` starts the runtime once for the life of the process,
+    not once per call — a session with dozens of `cell`-marked tests must not
+    start the runtime once per test. Driven by a real stub that records each
+    invocation to a file under `tmp_path`, so this witnesses the memo itself
+    rather than merely that repeated answers happen to agree."""
+    calls = tmp_path / "calls"
+    counting = tmp_path / "a-counting-runtime"
+    counting.write_text(
+        "#!/bin/sh\necho x >> " + str(calls) + "\necho 'fake-runtime 1.0.0'\n"
+    )
+    counting.chmod(0o755)
+
+    monkeypatch.setattr(runtime, "_probed", False)
+    monkeypatch.setattr(runtime, "_probe_result", None)
+    monkeypatch.setattr(runtime, "_selected", SimpleNamespace(binary=str(counting)))
+
+    for _ in range(5):
+        assert runtime.probe() == "fake-runtime 1.0.0"
+
+    assert calls.read_text().count("x") == 1
+
+
+def test_an_absent_runtime_is_asked_once_however_often_it_is_probed(
+    tmp_path, monkeypatch
+):
+    """The memo keeps an *absent* answer too — the case `probe()`'s docstring
+    names as its reason. A memo that forgets it passes the witness above,
+    whose stub only ever answers present."""
+    calls = tmp_path / "calls"
+    failing = tmp_path / "a-failing-runtime"
+    failing.write_text("#!/bin/sh\necho x >> " + str(calls) + "\nexit 1\n")
+    failing.chmod(0o755)
+
+    monkeypatch.setattr(runtime, "_probed", False)
+    monkeypatch.setattr(runtime, "_probe_result", None)
+    monkeypatch.setattr(runtime, "_selected", SimpleNamespace(binary=str(failing)))
+
+    for _ in range(5):
+        assert runtime.probe() is None
+
+    assert calls.read_text().count("x") == 1
+
+
+def test_a_runtime_that_hangs_reports_as_absent_within_seconds(tmp_path, monkeypatch):
+    """SA-0077: the probe's timeout is short, so a runtime hanging on
+    `--version` reports absent within seconds rather than stalling a whole
+    test session. The real timeout is scaled down here by wrapping `_call`
+    and dividing whatever it is handed, rather than substituting a small
+    constant — so this still depends on the value `probe()` actually chose."""
+    hanging = tmp_path / "a-hanging-runtime"
+    # `exec`, so the timeout kills the sleep itself rather than orphaning it.
+    hanging.write_text("#!/bin/sh\nexec sleep 300\n")
+    hanging.chmod(0o755)
+
+    real_call = runtime._call
+    scale = 25.0
+
+    def scaled_call(argv, timeout_s):
+        return real_call(argv, timeout_s / scale)
+
+    monkeypatch.setattr(runtime, "_call", scaled_call)
+    monkeypatch.setattr(runtime, "_probed", False)
+    monkeypatch.setattr(runtime, "_probe_result", None)
+    monkeypatch.setattr(runtime, "_selected", SimpleNamespace(binary=str(hanging)))
+
+    started = time.monotonic()
+    assert runtime.probe() is None
+    elapsed = time.monotonic() - started
+    # 10s/25 ≈ 0.4s; a timeout past ~25s exceeds 1.0s.
+    assert elapsed < 1.0, elapsed
+
+
 def test_a_cell_marked_test_skips_when_the_runtime_is_absent(monkeypatch):
     """SA-0077: when `runtime.probe()` says absent, a `cell`-marked item is
     skipped with a reason naming the runtime — not failed, and not errored.

@@ -16,7 +16,7 @@ import pytest
 from saffron.agents import artifacts
 from saffron.cell import runtime, session
 from saffron.cell.worktree import DIFF_FLAGS
-from saffron.events import Agent, Attempt, describe
+from saffron.events import Agent, Attempt, Baseline, describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
 from saffron.gates.suite import CellTree, SuiteComparison, SuiteRun
@@ -3266,6 +3266,103 @@ def test_the_criteria_gate_skips_for_a_spec_that_declares_no_witnesses(
     )
     result = next(r for r in outcome.gates if r.gate == "criteria")
     assert result.status == "skip"
+
+
+def test_a_witness_green_at_base_is_named_before_the_first_turn(monkeypatch, tmp_path):
+    """`docs/BACKLOG.md` item 23 (SA-0085): `criteria` itself skips at
+    baseline and would only report `witness-green-at-base` after the first
+    GATE suite — an attempt spent to learn what the baseline already knew,
+    and one no repair turn can make pass: the agent's only routes are renaming or
+    deleting an existing test, and `census`/`integrity` block both. The
+    baseline event names it instead, before the first agent turn runs.
+
+    Every 'says nothing' case `_judge` itself has no opinion about is
+    asserted here too, inside this one witness — not as separate test
+    functions, which `revert` would not be checking against anything."""
+    from saffron.intake import Criterion
+
+    named = Criterion(claim="already proven", witness="t.py::test_a")
+    preserved = Criterion(claim="not broken", witness="t.py::test_b", preserves=True)
+    brand_new = Criterion(claim="added by this change", witness="t.py::test_new")
+
+    base = [
+        GateResult(
+            gate="tests",
+            status="pass",
+            tool="pytest 8",
+            collected=["t.py::test_a", "t.py::test_b"],
+        )
+    ]
+    head = [
+        GateResult(
+            gate="tests",
+            status="pass",
+            tool="pytest 8",
+            collected=["t.py::test_a", "t.py::test_b", "t.py::test_new"],
+        )
+    ]
+    cell = _stub_the_runtime(monkeypatch, suites=(base, head, head))
+    capture: list = []
+    _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(acceptance=[named, preserved, brand_new]),
+        capture=capture,
+    )
+
+    (baseline_event,) = [e for e in capture if isinstance(e, Baseline)]
+    # Only the plain, not-`preserves` witness already green at base is
+    # named — not the `preserves` one (it claims the opposite already
+    # held) and not the one absent from the base enumeration entirely.
+    assert baseline_event.green_at_base == ("t.py::test_a",)
+
+    baseline_line = next(w for w in cell.watched if w.startswith("baseline:"))
+    assert "baseline: ['t.py::test_a'] already green at base_sha" in baseline_line
+    baseline_idx = cell.watched.index(baseline_line)
+    # Logged before the plan turn runs; `PLAN:` comes only after it, so an
+    # anchor there would pass a naming held until after turn one.
+    first_turn_idx = next(
+        i
+        for i, w in enumerate(cell.watched)
+        if w.startswith("IMPLEMENT: system prompt")
+    )
+    assert baseline_idx < first_turn_idx, (
+        "the naming must reach the operator before the first turn spends "
+        "anything, not after a repair loop no-progresses on it"
+    )
+
+    # Three bases `_judge` says nothing about, so neither does the naming: no
+    # gate enumerated; the witness collected but red there (the ordinary bug
+    # fix); and failures keyed on something other than a node id.
+    red_at_base = GateResult(
+        gate="tests",
+        status="fail",
+        tool="pytest 8",
+        collected=["t.py::test_a"],
+        failures=[Failure(file="t.py", code="t.py::test_a")],
+    )
+    keyed_elsewhere = GateResult(
+        gate="tests",
+        status="fail",
+        tool="pytest 8",
+        collected=["t.py::test_a"],
+        failures=[Failure(file="saffron/gates/runner.py", line=147, code="error")],
+    )
+    for n, silent_base in enumerate(([], [red_at_base], [keyed_elsewhere])):
+        silent_cell = _stub_the_runtime(monkeypatch, suites=(silent_base, head, head))
+        silent_capture: list = []
+        _drive(
+            monkeypatch,
+            tmp_path / f"silent-{n}",
+            cell=silent_cell,
+            turns=[_turn(_block(_PLAN)), _turn()],
+            spec=_spec(acceptance=[named]),
+            capture=silent_capture,
+        )
+        (silent,) = [e for e in silent_capture if isinstance(e, Baseline)]
+        assert silent.green_at_base == (), n
 
 
 # --- `witness` reaches a real attempt (SA-0061, `docs/BACKLOG.md` item 71) ---

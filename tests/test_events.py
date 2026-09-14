@@ -292,6 +292,20 @@ def test_read_log_drops_a_truncated_final_line(tmp_path):
     ]
 
 
+def test_both_readers_drop_an_undecodable_line_and_keep_its_neighbours(tmp_path):
+    """A line that is not UTF-8 costs that line in either reader, never the log."""
+    from saffron.events import read_log_since
+
+    good = json.dumps(
+        {"kind": "Teardown", "timestamp": 1.0, "spec_id": "SA", "step": "c", "ok": True}
+    ).encode()
+    (tmp_path / "events.jsonl").write_bytes(good + b"\n\xff\xfe\n" + good + b"\n")
+    kept = [Teardown(timestamp=1.0, spec_id="SA", step="c", ok=True)] * 2
+
+    assert read_log(tmp_path) == kept
+    assert read_log_since(tmp_path, 0)[0] == kept
+
+
 def test_read_log_tolerates_an_unknown_kind(tmp_path):
     events_path = tmp_path / "events.jsonl"
     known = json.dumps(
@@ -312,6 +326,83 @@ def test_read_log_tolerates_an_unknown_kind(tmp_path):
 
 def test_read_log_on_a_missing_file_returns_no_events(tmp_path):
     assert read_log(tmp_path / "nowhere") == []
+
+
+def test_read_log_since_returns_only_events_after_the_offset(tmp_path):
+    # SA-0080: local, never at module scope, or a reverted run collects with
+    # an error rather than failing clean.
+    from saffron.events import read_log_since
+
+    log = EventLog(tmp_path)
+    events_path = tmp_path / "events.jsonl"
+    first = Teardown(timestamp=1.0, spec_id="SA", step="start", ok=True)
+    log.append(first)
+    first_offset = events_path.stat().st_size
+    second = Teardown(timestamp=2.0, spec_id="SA", step="network", ok=True)
+    log.append(second)
+    end = events_path.stat().st_size
+
+    assert read_log_since(tmp_path, 0) == ([first, second], end)
+    assert read_log_since(tmp_path, first_offset) == ([second], end)
+
+
+def test_read_log_since_leaves_a_partial_final_line_unconsumed(tmp_path):
+    """The offset resumes before a half-written line, never past it."""
+    # local: kept out of the revert's collection
+    from saffron.events import read_log_since
+
+    log = EventLog(tmp_path)
+    events_path = tmp_path / "events.jsonl"
+    whole = Teardown(timestamp=1.0, spec_id="SA", step="start", ok=True)
+    log.append(whole)
+    size_before_partial = events_path.stat().st_size
+
+    # `late` split in half and appended one half at a time — a write caught
+    # mid-object.
+    late = Teardown(timestamp=2.0, spec_id="SA", step="network", ok=False, detail="x")
+    scratch = tmp_path / "scratch"
+    EventLog(scratch).append(late)
+    written = (scratch / "events.jsonl").read_text()
+    half = len(written) // 2
+    with events_path.open("a") as handle:
+        handle.write(written[:half])
+
+    events, offset = read_log_since(tmp_path, 0)
+    assert (events, offset) == ([whole], size_before_partial)
+
+    with events_path.open("a") as handle:
+        handle.write(written[half:])
+
+    assert read_log_since(tmp_path, offset) == ([late], events_path.stat().st_size)
+
+
+def test_read_log_since_shares_read_logs_per_line_tolerance(tmp_path):
+    """An unknown `kind` and a wrong-shaped field drop identically for both
+    readers — one parser, never a second reimplemented for the offset path."""
+    # local: kept out of the revert's collection
+    from saffron.events import read_log_since
+
+    events_path = tmp_path / "events.jsonl"
+    unknown = json.dumps({"kind": "FromTheFuture", "timestamp": 1.0, "spec_id": "SA"})
+    wrong_shape = json.dumps(
+        {"kind": "Agent", "timestamp": 2.0, "spec_id": "SA", "raw": False, "event": "x"}
+    )
+    good = json.dumps(
+        {"kind": "Teardown", "timestamp": 3.0, "spec_id": "SA", "step": "s", "ok": True}
+    )
+    events_path.write_text(unknown + "\n" + wrong_shape + "\n" + good + "\n")
+    expected = [Teardown(timestamp=3.0, spec_id="SA", step="s", ok=True)]
+
+    events, offset = read_log_since(tmp_path, 0)
+    assert events == expected == read_log(tmp_path)
+    assert offset == events_path.stat().st_size
+
+
+def test_read_log_since_on_a_missing_file_returns_the_offset_unchanged(tmp_path):
+    # local: kept out of the revert's collection
+    from saffron.events import read_log_since
+
+    assert read_log_since(tmp_path / "nowhere", 42) == ([], 42)
 
 
 def test_event_log_write_failure_raises_nothing(tmp_path):
@@ -386,6 +477,42 @@ def test_a_gate_result_says_which_tree_it_ran_against(tmp_path):
         "attempt",
         "rebuttal",
     ]
+
+
+def test_a_baseline_naming_a_green_witness_renders_it(tmp_path):
+    """SA-0085, `docs/BACKLOG.md` item 23. The naming travels on the
+    baseline's own event and is rendered by `describe`, so it reaches
+    `events.jsonl` and `saffron watch`, not only the attended terminal that
+    watched it live.
+
+    Not a `_CASES` row: `green_at_base` is new, and building it at import would
+    make the reverted run a collection error rather than this test failing."""
+    event = Baseline(
+        timestamp=1.0,
+        spec_id="x",
+        gates=("tests",),
+        statuses=("pass",),
+        green_at_base=("t.py::test_a",),
+    )
+    log = EventLog(tmp_path)
+    log.append(event)
+    (round_tripped,) = _read(tmp_path, Baseline)
+    assert round_tripped.green_at_base == ("t.py::test_a",)
+    assert describe(round_tripped).splitlines()[-1] == (
+        "baseline: ['t.py::test_a'] already green at base_sha — named "
+        "before the first turn, since no repair can rename or delete an "
+        "existing test"
+    )
+    # A log written before this field existed carries no such key, and
+    # `read_log` must keep reading it: the default is what stands in.
+    (tmp_path / "events.jsonl").write_text(
+        json.dumps(
+            {"kind": "Baseline", "timestamp": 1.0, "spec_id": "x", "gates": ["tests"]}
+        )
+        + "\n"
+    )
+    (old_log,) = _read(tmp_path, Baseline)
+    assert old_log.green_at_base == ()
 
 
 def test_an_attempt_names_its_phase(tmp_path):
@@ -1038,7 +1165,7 @@ def test_every_family_has_a_kind_and_renders():
 
 def test_every_row_cites_a_file_and_symbol_that_exist():
     """AC2, the half the assertion above cannot make. `family.kind in
-    _KINDS.values()` is true of *any* row carrying any of the nine types, so
+    _KINDS.values()` is true of *any* row carrying any of the ten types, so
     the table could cite anything: a row reading
     `_Family("QQQQ", "no/such/file.py:nope", Teardown)` passed every check
     here. Resolve each citation instead — the file exists, and the symbol is
@@ -1061,14 +1188,16 @@ def test_every_row_cites_a_file_and_symbol_that_exist():
 def test_the_table_did_not_quietly_lose_a_row():
     """AC2 again, and the mutation neither assertion above catches: deleting
     three rows — `unstacked:`, `baseline errored in`, `PACKAGE: (pr_url)` —
-    left every test in this file passing. The table is the proof the nine
+    left every test in this file passing. The table is the proof the ten
     kinds cover all 64 call sites and is what `SA-0030`/`SA-0031` read to find
     their work, so losing a row silently is the failure that matters.
 
     `SA-0030` and `SA-0031` migrate these call sites and will move this count.
-    That is the point: moving it is a deliberate edit, not a silent one."""
-    assert len(FAMILIES) == 59
-    assert len({f.prefix for f in FAMILIES}) == 59
+    That is the point: moving it is a deliberate edit, not a silent one.
+    `SA-0085` moved it again, deliberately, for the one new line shape it adds
+    — a witness already green at base_sha, named on the baseline's own event."""
+    assert len(FAMILIES) == 60
+    assert len({f.prefix for f in FAMILIES}) == 60
 
 
 def test_the_duplicated_agent_renderer_still_matches_its_original():
@@ -1326,6 +1455,128 @@ def test_an_agent_payload_cannot_put_control_characters_on_a_terminal():
         )
     )
     assert "\x07" not in bounded_line and "boom" in bounded_line
+
+
+def test_a_phase_line_cannot_put_control_characters_on_a_terminal():
+    """Item 63: `describe()` cleaned an `Agent` payload's control characters
+    and printed a `PhaseStart`'s `detail` verbatim, though the same kind of
+    cell-authored text reaches it — `plan_checkpoint`'s re-prompt lines
+    among others (`not the schema, re-prompting once — {exc}`, `proposal
+    refused, re-prompting once — {exc}`), where `exc` quotes an artifact a
+    cell wrote. Modeled on
+    `test_an_agent_payload_cannot_put_control_characters_on_a_terminal`: every
+    code point from U+0000 to U+001F, and U+007F, must not reach the
+    rendered line, and the surrounding text must survive."""
+    # Each code point through `describe` itself, not `_clean` alone: a render
+    # that stripped only ESC and BEL would pass a fixture holding only those.
+    for code in (*range(0x20), 0x7F):
+        line = describe(
+            PhaseStart(
+                timestamp=1.0,
+                spec_id="x",
+                phase="IMPLEMENT",
+                label="PLAN",
+                detail=f"re-prompting once — A{chr(code)}B",
+            )
+        )
+        assert chr(code) not in line, hex(code)
+        assert line == "PLAN: re-prompting once — A B"
+
+
+def test_a_terminal_line_cannot_put_control_characters_on_a_terminal():
+    """The sibling above, for `Terminal`. A rejected plan's `detail` is the
+    rejection's own text, which names the paths the plan proposed. Every
+    `Terminal` branch that renders cell text is covered: `plan_rejected` and
+    `cut_off_no_salvage_room` through `detail`, and `ended_without_finishing`
+    through the runtime's own `subtype` and `terminal_reason`."""
+    for code in (*range(0x20), 0x7F):
+        evil = f"A{chr(code)}B"
+        lines = [
+            describe(
+                Terminal(
+                    timestamp=1.0,
+                    spec_id="x",
+                    reason=reason,
+                    spent_usd_est=0.1,
+                    detail=evil,
+                )
+            )
+            for reason in ("plan_rejected", "cut_off_no_salvage_room")
+        ]
+        # `ended_without_finishing` renders the cell's own `subtype` and
+        # `terminal_reason` rather than a `detail`.
+        lines.append(
+            describe(
+                Terminal(
+                    timestamp=1.0,
+                    spec_id="x",
+                    reason="ended_without_finishing",
+                    spent_usd_est=0.1,
+                    subtype=evil,
+                    terminal_reason=evil,
+                )
+            )
+        )
+        for line in lines:
+            assert chr(code) not in line, (hex(code), line)
+            assert "A B" in line
+
+
+def test_a_phase_or_terminal_detail_is_clipped():
+    """Item 63: the bound exists so a five-thousand-character validation
+    error renders as one bounded line rather than whole — proven by clipping
+    a `detail` longer than the bound, for both kinds that carry one, and
+    checking the render actually stops there rather than merely tolerating
+    a short one."""
+    # local: kept out of the revert's collection
+    from saffron.events import _DETAIL_BOUND
+
+    # A distinct head, so a clip that kept the tail instead would not match.
+    long_detail = "HEAD " + "x" * (_DETAIL_BOUND + 400)
+    clipped = long_detail[:_DETAIL_BOUND]
+
+    phase_line = describe(
+        PhaseStart(
+            timestamp=1.0,
+            spec_id="x",
+            phase="IMPLEMENT",
+            label="PLAN",
+            detail=long_detail,
+        )
+    )
+    assert phase_line == f"PLAN: {clipped}"
+
+    # A literal five thousand, not one built from the bound: a bound raised
+    # past it would print the criterion's own example whole.
+    five_thousand = PhaseStart(
+        timestamp=1.0, spec_id="x", phase="IMPLEMENT", label="PLAN", detail="y" * 5000
+    )
+    assert len(describe(five_thousand)) < 5000
+
+    rejected_line = describe(
+        Terminal(
+            timestamp=1.0,
+            spec_id="x",
+            reason="plan_rejected",
+            spent_usd_est=0.1,
+            detail=long_detail,
+        )
+    )
+    assert rejected_line == f"PLAN: rejected, $0.10 spent — {clipped}"
+
+    cut_off_line = describe(
+        Terminal(
+            timestamp=1.0,
+            spec_id="x",
+            reason="cut_off_no_salvage_room",
+            spent_usd_est=9.0,
+            detail=long_detail,
+        )
+    )
+    assert cut_off_line == (
+        f"budget: {clipped} — cut off at the turn ceiling with nothing "
+        "committed, no room left to salvage"
+    )
 
 
 def test_findings_name_what_the_table_could_not_type():

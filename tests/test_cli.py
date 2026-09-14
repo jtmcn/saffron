@@ -1751,7 +1751,7 @@ def test_watch_reads_the_batch_tree_the_cli_already_computes(tmp_path, monkeypat
     this witness is about which path reaches it, not about following."""
     seen = {}
 
-    def fake_follow(task_dir, *, verbose=False, interval=1.0):
+    def fake_follow(task_dir, *, verbose=False, whole_log=False, interval=1.0):
         seen["task_dir"] = task_dir
         return iter(())
 
@@ -1785,7 +1785,7 @@ def test_watch_passes_its_flags_through_to_the_follower(tmp_path, monkeypatch):
     """
     seen = {}
 
-    def fake_follow(task_dir, *, verbose=False, interval=1.0):
+    def fake_follow(task_dir, *, verbose=False, whole_log=False, interval=1.0):
         seen.update(verbose=verbose, interval=interval)
         return iter(())
 
@@ -1801,6 +1801,26 @@ def test_watch_passes_its_flags_through_to_the_follower(tmp_path, monkeypatch):
     assert seen == {"verbose": True, "interval": 0.25}
 
 
+def test_watch_passes_the_whole_log_flag_through_to_the_follower(tmp_path, monkeypatch):
+    """`--whole-log` reaches `follow` as `whole_log=True`; its absence is
+    `whole_log=False`, never omitted — `--all` already means something else,
+    so this is a second flag, not a second meaning for the first."""
+    seen = {}
+
+    # No default for `whole_log`: a `_watch` that omitted it would raise here.
+    def fake_follow(task_dir, *, verbose=False, whole_log, interval=1.0):
+        seen["whole_log"] = whole_log
+        return iter(())
+
+    monkeypatch.setattr(cli, "follow", fake_follow)
+
+    assert cli.main(["--home", str(tmp_path), "watch", "SY-1", "--whole-log"]) == 0
+    assert seen["whole_log"] is True
+
+    assert cli.main(["--home", str(tmp_path), "watch", "SY-1"]) == 0
+    assert seen["whole_log"] is False
+
+
 def test_watch_no_follow_hands_the_follower_a_poll_that_stops(tmp_path, monkeypatch):
     """`--no-follow` reaches `follow` as the poll that ends it, and without
     the flag nothing is passed at all — the real default stays bound in
@@ -1814,7 +1834,9 @@ def test_watch_no_follow_hands_the_follower_a_poll_that_stops(tmp_path, monkeypa
 
     seen = {}
 
-    def fake_follow(task_dir, *, verbose=False, interval=1.0, sleep=None):
+    def fake_follow(
+        task_dir, *, verbose=False, whole_log=False, interval=1.0, sleep=None
+    ):
         seen["sleep"] = sleep
         return iter(())
 

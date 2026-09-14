@@ -161,13 +161,23 @@ class Baseline:
     (PREFLIGHT_FAILED). Both can be set on the same event: the real call site
     prints the joined `baseline: g=s, ...` line unconditionally and then, only
     when something errored, a second line naming it — `describe()` renders
-    both, in that order, from the one event."""
+    both, in that order, from the one event.
+
+    `green_at_base` names any witness `criteria.witnesses_green_at_base`
+    found already passing at `base_sha` for a criterion that does not
+    declare `preserves` — what `criteria` would fail with `witness-green-at-base`
+    on any attempt whose head passes it, known before any turn runs
+    (`docs/BACKLOG.md` item 23). Defaulted to `()`, not required: a log
+    written before this field existed carries no such key, and `read_log`'s
+    per-field construction already treats a missing key as the dataclass
+    default rather than dropping the event."""
 
     timestamp: float
     spec_id: str
     aborted: tuple[str, ...] = ()
     gates: tuple[str, ...] = ()
     statuses: tuple[GateStatus, ...] = ()
+    green_at_base: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -471,67 +481,116 @@ def _shape_ok(value: object, hint: object) -> bool:
     return True
 
 
+def _parse_line(line: str) -> Event | None:
+    """One already-decoded line, parsed into whichever `Event` it names, or
+    `None` if it is blank, fails to parse as JSON, is not an object, names no
+    known `kind`, is missing a field its kind requires, or has a field of the
+    wrong shape. An unknown *extra* field is dropped without dropping its
+    event — a reader that rejected the line would delete every event of a
+    kind rather than one line of it.
+
+    The one parser `read_log` and `read_log_since` both call, so whatever
+    reads from a byte offset shares this tolerance rather than reimplementing
+    it as a second parser in `watch.py` (item 62).
+    """
+    if not line.strip():
+        return None
+    try:
+        obj = json.loads(line)
+    # Not only `JSONDecodeError`: an int past 4300 digits raises plain `ValueError`.
+    except ValueError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    # `.get` raises TypeError on an unhashable key — the isinstance guard first.
+    kind = obj.pop("kind", None)
+    cls = _KINDS.get(kind) if isinstance(kind, str) else None
+    if cls is None:
+        return None
+    expected = {f.name for f in fields(cls)}
+    obj = {k: v for k, v in obj.items() if k in expected}
+    # JSON has no tuple, so a `tuple[str, ...]` field (Baseline's `aborted`)
+    # comes back a list; coerced here so a round-trip equality check sees none.
+    hints = typing.get_type_hints(cls)
+    for name, value in list(obj.items()):
+        if isinstance(value, list) and typing.get_origin(hints.get(name)) is tuple:
+            obj[name] = tuple(value)
+    # A field of the wrong shape drops its event, like a missing one (item 61).
+    if any(not _shape_ok(value, hints[name]) for name, value in obj.items()):
+        return None
+    try:
+        return cls(**obj)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_raw(raw: bytes) -> Event | None:
+    """One line as bytes: a line that is not UTF-8 is dropped like bad JSON."""
+    try:
+        return _parse_line(raw.decode("utf-8"))
+    except UnicodeDecodeError:
+        return None
+
+
 def read_log(task_dir: Path) -> list[Event]:
     """Read back every whole event `EventLog` wrote for one task.
 
     Per-line tolerance, never a whole-file discard — the rule
     `saffron.report.index._existing_queue_rows` already applies, named there
-    in a `ponytail:`. A line that fails to parse as JSON, is not an object,
-    names no known `kind`, or is missing a field its kind requires, is dropped
-    in silence: this is what turns a truncated final line (the write a killed
-    cell left mid-object) and a `kind` from a newer Saffron into "the earlier
-    events survive" rather than a raised error.
+    in a `ponytail:`. A line `_parse_line` cannot make into an `Event` is
+    dropped in silence.
 
-    An unknown *extra* field is dropped without dropping its event, which is
-    the asymmetry that makes this forward-compatible in the direction it will
-    actually be used: `SA-0030`, `SA-0031` and `SA-0040` add fields to these
-    kinds, and a reader that rejected the line would delete every event of a
-    kind rather than one line of it.
+    Whole-file, every time — the shape every other caller needs and gets,
+    untouched by `read_log_since` below existing beside it.
     """
     path = Path(task_dir) / "events.jsonl"
     if not path.is_file():
         return []
     events: list[Event] = []
-    for line in path.read_text().split("\n"):
-        if not line.strip():
-            continue
-        try:
-            obj = json.loads(line)
-        # Not only `JSONDecodeError`: an integer past 4300 digits raises the
-        # plain `ValueError`, which would take every other line down with it.
-        except ValueError:
-            continue
-        if not isinstance(obj, dict):
-            continue
-        # `.get` raises TypeError on an unhashable key, which would take the
-        # whole file down — the one thing per-line tolerance exists to prevent.
-        kind = obj.pop("kind", None)
-        cls = _KINDS.get(kind) if isinstance(kind, str) else None
-        if cls is None:
-            continue
-        # Drop the unknown field, not the event carrying it: a newer Saffron
-        # adds fields to existing kinds, and rejecting the line would delete
-        # every event of that kind. A missing required field still goes below.
-        expected = {f.name for f in fields(cls)}
-        obj = {k: v for k, v in obj.items() if k in expected}
-        # JSON has no tuple, so a field declared `tuple[str, ...]` (Baseline's
-        # `aborted`) comes back a list; coerced here rather than loosened on
-        # the dataclass, or a round-trip's equality check reads a real
-        # difference where the wire format has none.
-        hints = typing.get_type_hints(cls)
-        for name, value in list(obj.items()):
-            if isinstance(value, list) and typing.get_origin(hints.get(name)) is tuple:
-                obj[name] = tuple(value)
-        # A field present with the wrong shape drops its event, exactly like
-        # one missing outright — `Agent(event='x')` round-tripped unchecked
-        # before this, and `describe` raised on it (item 61).
-        if any(not _shape_ok(value, hints[name]) for name, value in obj.items()):
-            continue
-        try:
-            events.append(cls(**obj))
-        except (TypeError, ValueError):
-            continue
+    for raw_line in path.read_bytes().split(b"\n"):
+        event = _parse_raw(raw_line)
+        if event is not None:
+            events.append(event)
     return events
+
+
+def read_log_since(task_dir: Path, offset: int) -> tuple[list[Event], int]:
+    """The events appended to one task's log since byte `offset`, and the
+    offset to resume from next time.
+
+    Read in binary and sliced on the literal newline byte, not decoded text:
+    offsets are bytes throughout, never characters, on the reasoned (not
+    measured) grounds that a multi-byte character before the offset makes the
+    two counts disagree.
+
+    A trailing chunk with no terminating `b"\\n"` — a write caught mid-object
+    — is left unconsumed: the returned offset stops right before it, so the
+    next call resumes before the partial object rather than past it
+    (`SA-0080`'s second criterion). Each complete line goes through
+    `_parse_raw`, as `read_log`'s do.
+
+    A missing `events.jsonl` returns `([], offset)` unchanged.
+    """
+    path = Path(task_dir) / "events.jsonl"
+    if not path.is_file():
+        return [], offset
+    with path.open("rb") as handle:
+        handle.seek(offset)
+        chunk = handle.read()
+    events: list[Event] = []
+    consumed = 0
+    start = 0
+    while True:
+        newline_at = chunk.find(b"\n", start)
+        if newline_at == -1:
+            break
+        raw_line = chunk[start:newline_at]
+        start = newline_at + 1
+        consumed = start
+        event = _parse_raw(raw_line)
+        if event is not None:
+            events.append(event)
+    return events, offset + consumed
 
 
 def when(stamp: int | None) -> str:
@@ -578,9 +637,16 @@ def _clean(value: object, limit: int) -> str:
     event carrying an escape sequence used to clear the operator's screen
     and retitle their terminal — and `saffron watch` can replay that into a
     fresh terminal long after the run — so the strip happens once, here,
-    rather than in each branch below. Host-authored text (the `, resets …`
-    suffix, `Agent.detail`) never passes through this."""
+    rather than in each branch below. Fields that carry only host-authored
+    text (the `, resets …` suffix, `Agent.detail`) skip this;
+    `PhaseStart.detail`/`Terminal.detail` mix host and cell text (item 63),
+    so they pass through it."""
     return str(value).translate(_CONTROL_TRANSLATION)[:limit]
+
+
+# Reasoned, not measured: a detail is host prose around a quoted cell fragment,
+# wider than one SDK field's 160. The longest detail in the suite today is 67.
+_DETAIL_BOUND = 500
 
 
 def _describe_agent_event(event: dict) -> str:
@@ -678,10 +744,16 @@ def describe(event: Event) -> str:
                 f"baseline errored in {list(event.aborted)} — the toolchain "
                 "is broken, not the code"
             )
+        if event.green_at_base:
+            lines.append(
+                f"baseline: {list(event.green_at_base)} already green at "
+                "base_sha — named before the first turn, since no repair "
+                "can rename or delete an existing test"
+            )
         return "\n".join(lines)
 
     if isinstance(event, PhaseStart):
-        return f"{event.label}: {event.detail}"
+        return f"{event.label}: {_clean(event.detail, _DETAIL_BOUND)}"
 
     if isinstance(event, Attempt):
         if event.aborted:
@@ -727,8 +799,8 @@ def describe(event: Event) -> str:
     if isinstance(event, Terminal):
         if event.reason == "cut_off_no_salvage_room":
             return (
-                f"budget: {event.detail} — cut off at the turn ceiling with "
-                "nothing committed, no room left to salvage"
+                f"budget: {_clean(event.detail, _DETAIL_BOUND)} — cut off at "
+                "the turn ceiling with nothing committed, no room left to salvage"
             )
         if event.reason == "cut_off_salvage_failed":
             return (
@@ -738,11 +810,15 @@ def describe(event: Event) -> str:
         if event.reason == "ended_without_finishing":
             return (
                 "IMPLEMENT: the turn ended without finishing and produced "
-                f"nothing ({event.subtype}/{event.terminal_reason})"
+                f"nothing ({_clean(event.subtype, 160)}/"
+                f"{_clean(event.terminal_reason, 160)})"
             )
         if event.reason == "finished_empty":
             return "IMPLEMENT: finished and produced nothing"
-        return f"PLAN: rejected, ${event.spent_usd_est:.2f} spent — {event.detail}"
+        return (
+            f"PLAN: rejected, ${event.spent_usd_est:.2f} spent — "
+            f"{_clean(event.detail, _DETAIL_BOUND)}"
+        )
 
     if isinstance(event, Teardown):
         if event.step == "start":
@@ -798,6 +874,7 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("ceilings:", _RT, Ceilings),
     _Family("baseline: (joined gate=status)", _S, Baseline),
     _Family("baseline errored in", _S, Baseline),
+    _Family("baseline: … already green at base_sha", _S, Baseline),
     _Family("SCOPE: proposal refused", _PC, PhaseStart),
     _Family("SCOPE_REVIEW: proposed", _S, PhaseStart),
     _Family("PLAN: not the schema", _PC, PhaseStart),

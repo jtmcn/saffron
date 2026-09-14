@@ -222,6 +222,45 @@ def test_every_unmet_criterion_is_named_with_its_own_reason():
     assert "a claim about t.py::test_a" in result.failures[0].message
 
 
+# --- SA-0085: exposing `_judge`'s last branch for `session.py` -------------
+
+
+def test_witnesses_green_at_base_names_the_ones_criteria_would_fail_first():
+    """The rule `_judge`'s last branch enforces, asked of the baseline alone,
+    before any suite comparison exists: which witnesses already prove
+    nothing about this change."""
+    from saffron.gates.core.criteria import witnesses_green_at_base
+
+    base = [_tests("t.py::test_a", "t.py::test_b", "t.py::test_c")]
+    acceptance = [
+        _c("t.py::test_a"),
+        _c("t.py::test_b", preserves=True),
+        _c("t.py::test_missing"),
+    ]
+    assert witnesses_green_at_base(acceptance, base) == ["t.py::test_a"]
+
+
+def test_witnesses_green_at_base_says_nothing_it_would_not_say_at_a_gate():
+    """Three cases `_judge` itself says nothing about, each mirrored here:
+    a `preserves` criterion, a witness absent from `base`, and a `base`
+    whose enumeration is unreadable at all."""
+    from saffron.gates.core.criteria import witnesses_green_at_base
+
+    base = [_tests("t.py::test_a")]
+    assert witnesses_green_at_base([_c("t.py::test_a", preserves=True)], base) == []
+    assert witnesses_green_at_base([_c("t.py::test_missing")], base) == []
+    assert witnesses_green_at_base([_c("t.py::test_a")], []) == []
+
+
+def test_a_witness_red_at_base_is_not_named():
+    """The ordinary bug fix: a regression test that already existed and was red
+    at base. Collected there is not the same as green there."""
+    from saffron.gates.core.criteria import witnesses_green_at_base
+
+    base = [_tests("t.py::test_a", failed=("t.py::test_a",))]
+    assert witnesses_green_at_base([_c("t.py::test_a")], base) == []
+
+
 _FIXTURE_SPEC = """---
 id: TE-11
 title: A spec that declares the key this spec introduces

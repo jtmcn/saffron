@@ -1647,3 +1647,271 @@ def test_dirty_paths_reads_through_a_planted_replacement(tmp_path, monkeypatch):
     assert "a.py" in _porcelain(tmp_path)
 
     assert worktree.dirty_paths("c") == []
+
+
+# --- _git reads through a graft or shallow file (docs/BACKLOG.md item 110) -
+#
+# `SA-0074` pinned away `git replace`; a graft is not a replacement ref, and
+# neither is `.git/shallow` — both re-shape what `rev-list`/`log` consider
+# history, undercounting `commits_ahead` and dropping subjects from
+# `commit_subjects` (§4.3, §5.7). Built the way `_repo_with_a_planted_replacement`
+# is: config isolated, three real commits, a bare read proved fooled before the
+# pinned one is asserted.
+
+
+def _three_commit_repo(tmp_path, monkeypatch):
+    """A repo with three real commits: base, one touching a stand-in forbidden
+    path, and an innocent one on top — the shared start for the graft and
+    shallow witnesses below, each of which plants its own history-hiding file
+    afterward."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    (tmp_path / "a.py").write_text("base\n")
+    base = _commit(tmp_path, "base")
+    (tmp_path / "DESIGN.md").write_text("forbidden edit\n")
+    middle = _commit(tmp_path, "touch a forbidden path")
+    (tmp_path / "a.py").write_text("innocent change\n")
+    head = _commit(tmp_path, "innocent")
+    return base, middle, head
+
+
+def _bare_history(tmp_path, base):
+    """What an unpinned `git` reads: the commit count and subjects since base."""
+
+    def read(*args):
+        return subprocess.run(
+            ["git", *args, f"{base}..HEAD"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+
+    return read("rev-list", "--count").strip(), read("log", "--format=%s").splitlines()
+
+
+def test_history_reads_see_through_a_graft_file(tmp_path, monkeypatch):
+    base, _middle, head = _three_commit_repo(tmp_path, monkeypatch)
+    # One line, `<head> <base>`: git then treats head as parented directly on
+    # base, skipping the middle commit entirely.
+    (tmp_path / ".git" / "info" / "grafts").write_text(f"{head} {base}\n")
+    _host_git(tmp_path, monkeypatch)
+
+    # Prove the plant first: a bare read in this same repo is fooled.
+    assert _bare_history(tmp_path, base) == ("1", ["innocent"])
+
+    assert worktree.commits_ahead("c", base) == 2
+    assert worktree.commit_subjects("c", base) == [
+        "innocent",
+        "touch a forbidden path",
+    ]
+    # The deprecation hint `GIT_GRAFT_FILE` provokes stays off stderr.
+    assert worktree._git("c", "rev-list", "--count", f"{base}..HEAD").stderr == ""
+
+
+def test_history_reads_see_through_a_shallow_file(tmp_path, monkeypatch):
+    base, _middle, head = _three_commit_repo(tmp_path, monkeypatch)
+    # Head's sha alone: git then treats head as having no parents at all.
+    (tmp_path / ".git" / "shallow").write_text(f"{head}\n")
+    _host_git(tmp_path, monkeypatch)
+
+    # Prove the plant first: a bare read in this same repo is fooled.
+    assert _bare_history(tmp_path, base) == ("1", ["innocent"])
+
+    assert worktree.commits_ahead("c", base) == 2
+    assert worktree.commit_subjects("c", base) == [
+        "innocent",
+        "touch a forbidden path",
+    ]
+
+
+# --- DIFF_FLAGS against three more worktree-local settings (item 89) -------
+#
+# `SA-0072` pinned `DIFF_FLAGS` against the settings it found; this is the
+# rest the review of it turned up, probed on 2026-09-13
+# (docs/evidence/scripts/2026-09-13-history-and-diff-pins.sh). Each witness
+# below proves the setting moves a bare `git diff` in the same repo before
+# asserting the pinned read is not moved — the pairing
+# `test_changed_files_reads_through_a_planted_replacement` already uses.
+
+
+def _isolated_repo(tmp_path, monkeypatch):
+    """An empty repo isolated from the operator's own git config — the
+    shared start for the three witnesses below, each of which sets its own
+    worktree-local config afterward."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+
+
+def _hunk_count(patch):
+    return sum(1 for line in patch.splitlines() if line.startswith("@@"))
+
+
+def _commit_a_gitlink(tmp_path):
+    """Commit a gitlink at `vendor/sub` — no second repository needed."""
+    subprocess.run(
+        [
+            "git",
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"160000,{'1' * 40},vendor/sub",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    # Not `_commit`: its `git add -A` sees a gitlink with nothing on disk at
+    # that path and re-stages it away, so the index update-index just made
+    # never survives to the commit.
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=T",
+            "commit",
+            "-qm",
+            "add a submodule",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+
+
+def test_changed_files_lists_a_submodule_the_worktree_config_ignores(
+    tmp_path, monkeypatch
+):
+    """`diff.ignoreSubmodules=all` drops a submodule path the worktree's real
+    commits added from both the name-only listing and the patch. A hole in
+    `scope` itself, not merely a cosmetic one: the list `scope` checks
+    against `touches` loses a path the agent's own commits added. A gitlink
+    entry is enough to make one — no second repository needed.
+    """
+    _isolated_repo(tmp_path, monkeypatch)
+    (tmp_path / "a.txt").write_text("one\n")
+    base = _commit(tmp_path, "base")
+
+    _commit_a_gitlink(tmp_path)
+    subprocess.run(
+        ["git", "config", "diff.ignoreSubmodules", "all"], cwd=tmp_path, check=True
+    )
+
+    # Prove the setting bites first: a bare listing in this same repo loses
+    # the submodule path entirely.
+    bare = subprocess.run(
+        ["git", "diff", "--name-only", f"{base}..HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert bare == []
+
+    _host_git(tmp_path, monkeypatch)
+    assert worktree.changed_files("c", base) == ["vendor/sub"]
+
+
+def test_changed_files_lists_a_submodule_a_committed_gitmodules_ignores(
+    tmp_path, monkeypatch
+):
+    """A committed `.gitmodules` with `ignore = all` hides the gitlink the same
+    way, and it is content, not config: `-c diff.ignoreSubmodules=none` does
+    not override it, only the `--ignore-submodules=none` flag does.
+    """
+    _isolated_repo(tmp_path, monkeypatch)
+    (tmp_path / "a.txt").write_text("one\n")
+    base = _commit(tmp_path, "base")
+
+    (tmp_path / ".gitmodules").write_text(
+        '[submodule "sub"]\n\tpath = vendor/sub\n\turl = ./sub\n\tignore = all\n'
+    )
+    subprocess.run(["git", "add", ".gitmodules"], cwd=tmp_path, check=True)
+    _commit_a_gitlink(tmp_path)
+
+    overridden = subprocess.run(
+        ["git", "-c", "diff.ignoreSubmodules=none", "diff", "--name-only"]
+        + [f"{base}..HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert overridden == [".gitmodules"]
+
+    _host_git(tmp_path, monkeypatch)
+    assert worktree.changed_files("c", base) == [".gitmodules", "vendor/sub"]
+
+
+def test_export_patch_carries_no_color_when_the_worktree_forces_it(
+    tmp_path, monkeypatch
+):
+    """Every line of the patch, the `diff --git` header the host parses
+    included, carries terminal escape codes when the worktree forces colour
+    on, whether through `color.ui` or through `color.diff`. `--no-color`, not
+    a `-c color.ui=never` override: probed on git 2.39.5 and 2.54, the
+    override does not undo `color.diff=always`.
+    """
+    _isolated_repo(tmp_path, monkeypatch)
+    (tmp_path / "f.py").write_text("one = 1\n")
+    base = _commit(tmp_path, "base")
+    (tmp_path / "f.py").write_text("one = 2\n")
+    _commit(tmp_path, "edit")
+
+    _host_git(tmp_path, monkeypatch)
+    # First `color.ui` alone, then `color.diff` added on top — the two colour
+    # rows of SA-0082's probe table, folded into one witness.
+    for key in ("color.ui", "color.diff"):
+        subprocess.run(["git", "config", key, "always"], cwd=tmp_path, check=True)
+
+        bare = subprocess.run(
+            ["git", "diff", f"{base}..HEAD"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert "\x1b[" in bare
+
+        patch = worktree.export_patch("c", base)
+        assert "\x1b[" not in patch
+
+
+def test_export_patch_keeps_hunks_apart_under_a_wide_inter_hunk_context(
+    tmp_path, monkeypatch
+):
+    """Two hunks merge into one when the worktree sets `diff.interHunkContext`
+    wide enough — which widens the lines a critic finding may anchor to, the
+    way `diff.context` would. One unchanged line separates their context, so
+    any pin but 0 merges them.
+    """
+    _isolated_repo(tmp_path, monkeypatch)
+    lines = [f"line_{i} = {i}" for i in range(30)]
+    (tmp_path / "f.py").write_text("\n".join(lines) + "\n")
+    base = _commit(tmp_path, "base")
+
+    lines[5] = "line_5 = CHANGED"
+    lines[13] = "line_13 = CHANGED"
+    (tmp_path / "f.py").write_text("\n".join(lines) + "\n")
+    _commit(tmp_path, "two edits, one line between their contexts")
+
+    subprocess.run(
+        ["git", "config", "diff.interHunkContext", "10"], cwd=tmp_path, check=True
+    )
+
+    # Prove the setting bites first: a bare diff in this same repo merges
+    # the two edits into a single hunk.
+    bare = subprocess.run(
+        ["git", "diff", f"{base}..HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert _hunk_count(bare) == 1
+
+    _host_git(tmp_path, monkeypatch)
+    patch = worktree.export_patch("c", base)
+    assert _hunk_count(patch) == 2

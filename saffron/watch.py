@@ -1,20 +1,29 @@
 """`saffron watch` — read one task's `events.jsonl` back, for an operator who
 is not the terminal that started it.
 
-Every mechanism this needs already shipped in `saffron/events.py` (forbidden
-here, and reused exactly as it is): `EventLog` writes one flushed JSON line
-per event, `read_log` reads them back tolerating a truncated final line, and
-`describe` turns any event into the exact line the attended terminal printed.
-This module adds no second formatter and no second parser — it only adds a
-follower: something that polls `read_log` for what is new and renders it
-through `describe`, plus a filter over the two agent payloads that carry no
-operator signal.
+Almost everything this needs shipped in `saffron/events.py` already:
+`EventLog` writes one flushed JSON line per event, `read_log_since` reads
+only what was appended past a byte offset (sharing `read_log`'s own per-line
+tolerance for a truncated final line), and `describe` turns any event into
+the exact line the attended terminal printed. This module adds no second
+formatter and no second parser — it only adds a follower: something that
+polls for what is new since the last poll and renders it through `describe`,
+plus a filter over the two agent payloads that carry no operator signal.
 
 Deliberately narrow, per the spec this ships under (`SA-0053`): no detection
 of a task having finished (a follower here runs until interrupted, the way
 `tail -f` does — the teardown event is not a reliable end marker, since a
 killed cell never reaches it), and no rendering of a night's worth of tasks
 (that is the batch index, `saffron/report/**`, forbidden to this spec).
+
+`docs/BACKLOG.md` item 64 named a second way one task's log reads as
+another's: a spec driven twice writes both tasks into one `events.jsonl`,
+in order, with nothing between them, so the default view used to open on
+whichever task's lines happened to be oldest — a rejected plan from last
+week above today's live repair turn. `_since_newest_task` is the fix, and it
+needs no new event kind: `Ceilings` is already the first event `run_task`
+writes for every task, so the newest task starts at the last `Ceilings` the
+log holds.
 """
 
 from __future__ import annotations
@@ -23,7 +32,7 @@ import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from saffron.events import Agent, Event, describe, read_log
+from saffron.events import Agent, Ceilings, Event, describe, read_log_since
 
 # The token counter, by the subtype the runtime gives it. Measured on one live
 # task: 630 of 878 lines, the single largest shape in any log.
@@ -104,6 +113,25 @@ def render_line(event: Event, *, verbose: bool = False) -> str | None:
     return describe(event) or None
 
 
+def _since_newest_task(events: list[Event]) -> list[Event]:
+    """`events`, cut to the suffix that starts at the last `Ceilings` among
+    them — the newest task's own boundary, since `run_task` writes one
+    `Ceilings` first, for every task, before anything else in the log.
+
+    Unchanged when `events` holds no `Ceilings` at all: a log written before
+    tasks recorded their own ceilings on the way in has no boundary to cut
+    at, and renders in full — the fact
+    `test_a_log_renders_as_the_lines_its_terminal_printed` already pins.
+    """
+    newest: int | None = None
+    for index, event in enumerate(events):
+        if isinstance(event, Ceilings):
+            newest = index
+    if newest is None:
+        return events
+    return events[newest:]
+
+
 def _sleep_and_continue(seconds: float) -> bool:
     """The real poll: sleep, then say "keep going" — the one thing this
     default never says is "stop". A test's own `sleep` is the only way a
@@ -143,6 +171,7 @@ def follow(
     task_dir: Path,
     *,
     verbose: bool = False,
+    whole_log: bool = False,
     interval: float = 1.0,
     sleep: Callable[[float], bool] = _sleep_and_continue,
 ) -> Iterator[str]:
@@ -154,29 +183,39 @@ def follow(
     directory appears when the supervisor first writes to it, and waiting for
     that to happen is a different feature from reading it).
 
-    Each poll re-reads the whole log with `read_log` — inheriting its
-    per-line tolerance for a truncated final line rather than reimplementing
-    it — and yields only the events past the last count already seen, so a
-    line already rendered is never rendered again. `sleep`/`interval` are
+    Each poll reads only the bytes appended since the poll before it, via
+    `read_log_since`, so nothing already read is read or parsed again (item
+    62: a whole-file re-read every poll cost O(n²) over a night, measured at
+    5.7s per re-read on a 37 MB / 160k-line log). `sleep`/`interval` are
     injected rather than reaching `time.sleep` directly, so a test can drive
     this loop to a deterministic end without waiting on a real clock; the
     real default (`_sleep_and_continue`) never returns `False`, which is what
     makes "runs until interrupted" true in production and finite in a test.
+
+    By default (`whole_log=False`) the very first poll — the one that starts
+    from offset `0` and so is the one whole-file read this ever does — is cut
+    to `_since_newest_task`: a spec driven twice writes both tasks into one
+    file, and an operator diagnosing the newer one must not open on the
+    older one's outcome (`docs/BACKLOG.md` item 64). Only that first read is
+    cut: a `Ceilings` a spec driven again writes while this follower is
+    already running arrives on a later poll like anything else appended
+    since the poll before it, and following continues past it rather than
+    clearing the screen. `whole_log=True` skips the cut entirely — every
+    task in the file renders, in order, behind `--whole-log`.
     """
     task_dir = Path(task_dir)
     if not task_dir.is_dir():
         raise UnknownTask(task_dir)
-    seen = 0
+    offset = 0
+    first_poll = True
     while True:
-        # ponytail: every poll re-reads and re-parses the whole file, so a
-        # follow costs O(n²) over a night. Measured: 5.7s for one `read_log`
-        # on a 37 MB / 160k-line log, past which a 1s interval falls
-        # permanently behind. `read_log` has no offset — item 62.
-        events = read_log(task_dir)
-        for event in events[seen:]:
+        events, offset = read_log_since(task_dir, offset)
+        if first_poll and not whole_log:
+            events = _since_newest_task(events)
+        first_poll = False
+        for event in events:
             line = render_line(event, verbose=verbose)
             if line is not None:
                 yield line
-        seen = len(events)
         if not sleep(interval):
             return
