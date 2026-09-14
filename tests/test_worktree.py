@@ -1522,6 +1522,32 @@ def test_read_at_head_reads_through_a_planted_replacement(tmp_path, monkeypatch)
     assert worktree.read_at_head("c", "a.py") == "real content\n"
 
 
+def test_changed_files_lists_both_paths_of_a_rename(tmp_path, monkeypatch):
+    """SA-0082's `preserves` witness, written ahead of that spec so `criteria`
+    finds it green at base: no other fixture renames a file, so deleting the
+    rename pin left the suite green (item 89)."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    (tmp_path / "old.py").write_text("".join(f"line_{i} = {i}\n" for i in range(20)))
+    base = _commit(tmp_path, "base")
+    subprocess.run(["git", "mv", "old.py", "new.py"], cwd=tmp_path, check=True)
+    _commit(tmp_path, "rename")
+
+    # Prove git would detect the rename: a bare listing names the new path alone.
+    bare = subprocess.run(
+        ["git", "-c", "diff.renames=true", "diff", "--name-only", f"{base}..HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert bare == ["new.py"]
+
+    _host_git(tmp_path, monkeypatch)
+    assert worktree.changed_files("c", base) == ["new.py", "old.py"]
+
+
 # --- export_patch against a worktree setting that hides content (item 103) -
 
 

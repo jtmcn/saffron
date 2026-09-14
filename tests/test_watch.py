@@ -227,6 +227,43 @@ def test_a_partial_final_line_is_dropped_and_the_whole_ones_survive(tmp_path):
     assert lines == [describe(whole_a), describe(whole_b)]
 
 
+def test_a_line_completed_between_polls_renders_once_and_whole(tmp_path):
+    """SA-0080's `preserves` witness, written ahead of that spec so `criteria`
+    finds it green at base: a follower that resumes from a byte offset and
+    steps past a half-written line resumes mid-object and loses that event
+    (item 62)."""
+    task_dir = tmp_path / "SY-6"
+    task_dir.mkdir()
+    log = EventLog(task_dir)
+    whole = Teardown(timestamp=1.0, spec_id="SY-6", step="start", ok=True)
+    late = Teardown(
+        timestamp=2.0, spec_id="SY-6", step="network", ok=False, detail="refused"
+    )
+    log.append(whole)
+    # `late` exactly as `EventLog` serializes it, written in two halves.
+    scratch = tmp_path / "scratch"
+    EventLog(scratch).append(late)
+    written = (scratch / "events.jsonl").read_text()
+    half = len(written) // 2
+    events_path = task_dir / "events.jsonl"
+    with events_path.open("a") as handle:
+        handle.write(written[:half])
+
+    polls: list[float] = []
+
+    def sleep(seconds: float) -> bool:
+        polls.append(seconds)
+        if len(polls) == 1:
+            with events_path.open("a") as handle:
+                handle.write(written[half:])
+            return True
+        return len(polls) < 3
+
+    lines = list(watch.follow(task_dir, sleep=sleep))
+
+    assert lines == [describe(whole), describe(late)]
+
+
 def test_an_unknown_task_names_the_directory_it_looked_in(tmp_path):
     """A mistyped spec id must not read as a task that has genuinely
     produced nothing yet — it names the directory `follow` looked in."""
