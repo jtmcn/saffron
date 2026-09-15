@@ -437,6 +437,21 @@ The operator rules on (b) and (c).
 
 ### Cost
 
-$8.23 across the four re-reviews (`total_cost_usd`: SA-0062 $1.95, SA-0061
+$8.24 across the four re-reviews (`total_cost_usd`: SA-0062 $1.95, SA-0061
 $2.10, SA-0040 $2.30, SA-0054 $1.89; 35–42 turns; no error records). This is
 outside the $71.38 above.
+
+## Verdict, 2026-09-14 (operator)
+
+**FAIL.** The operator ruled the five remaining disputed control blockers false:
+SA-0060 3 and SA-0027 1, whose ceilings "too low" was contradicted when both
+specs finished inside them; and SA-0061 3, SA-0054 2 and SA-0055 1, whose
+"witness already green at base" was contradicted by each cell's `criteria` and
+`revert` gates. The last two recur at the real bases. That makes K = 5 against
+a bar of 2, with recall 18/34 (bar 17). The four class-(a) blockers were
+artifacts of the control versions and do not count, since none recurred at the
+cells' real bases.
+
+The spec reviewer is **not promoted** to a spec-review cell. It stays advisory,
+where Task 3 put it: the spec loop's step 1b and `docs/agents/issue-tracker.md`.
+Items 123–125 carry what a second backtest needs.

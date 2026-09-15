@@ -3,6 +3,8 @@
 2026-09-14. Designed with the operator after the spec loop was used a second
 time (`docs/evidence/2026-09-14-spec-loop-skill-feedback-run-2.md`).
 
+**Status:** built; backtest FAIL (K = 5 false blockers against a bar of 2, recall 18/34, operator's ruling). The reviewer stays advisory. See docs/evidence/2026-09-14-spec-reviewer-backtest.md and BACKLOG items 123–125.
+
 ## Why
 
 Of the cells whose failure a written record blames on something, the most
