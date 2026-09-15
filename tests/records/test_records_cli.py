@@ -1,7 +1,7 @@
-# tests/records/test_records_cli.py
 """The command is the retrieval fix: one record in one read, and the open set
 on one screen. Run as a subprocess, the way `tests/test_cli.py` runs `saffron`."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -84,9 +84,43 @@ def test_show_a_missing_section_exits_one_and_names_the_sections():
 
 
 def test_grep_prints_id_title_and_the_matching_line():
-    out = run("grep", "stamps").stdout.splitlines()
+    proc = run("grep", "stamps")
+    assert proc.returncode == 0
+    out = proc.stdout.splitlines()
     assert out[0].split(maxsplit=1)[0] == "3"
     assert any("Nothing stamps" in line for line in out)
+
+
+def test_grep_with_no_match_exits_one():
+    proc = run("grep", "zzz-matches-nothing")
+    assert proc.returncode == 1
+    assert proc.stdout == ""
+
+
+def test_show_a_spec_id_with_a_section_exits_two_and_says_why():
+    proc = run("show", "SA-0001", "--section", "Problem")
+    assert proc.returncode == 2
+    assert "SA-0001" in proc.stderr and "--section" in proc.stderr
+    assert proc.stdout == ""
+
+
+def test_a_closed_reader_is_not_a_traceback():
+    # The read end is closed before the child starts, so its first flush hits EPIPE.
+    read, write = os.pipe()
+    os.close(read)
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "records", "grep", "e", "--root", str(FIXTURE)],
+            stdout=write,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=ROOT,
+            check=False,
+        )
+    finally:
+        os.close(write)
+    assert "Traceback" not in proc.stderr and "BrokenPipeError" not in proc.stderr
+    assert proc.returncode == 1
 
 
 def test_grep_with_an_invalid_pattern_exits_two_without_a_traceback():

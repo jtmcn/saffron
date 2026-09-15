@@ -64,6 +64,30 @@ def test_a_citation_carries_its_section_sign():
         BacklogItem.model_validate({**MINIMAL, "cites": ["5.4"]})
 
 
+def test_superseded_by_is_refused_on_an_item_that_is_not_superseded():
+    with pytest.raises(ValidationError, match="superseded_by"):
+        BacklogItem.model_validate({**MINIMAL, "superseded_by": 8})
+
+
+def test_an_item_may_not_close_before_it_was_filed():
+    with pytest.raises(ValidationError, match="filed"):
+        BacklogItem.model_validate(
+            {
+                **MINIMAL,
+                "status": "done",
+                "prs": [1],
+                "filed": "2026-09-14",
+                "closed": "2026-09-13",
+            }
+        )
+
+
+@pytest.mark.parametrize("field", ["prs", "related"])
+def test_a_pr_or_related_number_is_at_least_one(field):
+    with pytest.raises(ValidationError, match=field):
+        BacklogItem.model_validate({**MINIMAL, field: [0]})
+
+
 def test_backlog_is_a_registered_kind():
     kind = KINDS["backlog"]
     assert kind.directory == "docs/backlog"

@@ -1,6 +1,7 @@
 """A record is its frontmatter plus its body split at `## ` headings; a file
 that breaks a rule is refused with the file and the field named."""
 
+import datetime as dt
 from pathlib import Path
 
 import pytest
@@ -105,3 +106,35 @@ def test_an_unknown_key_set_to_null_is_still_refused():
     text = "---\nid: 1\ntitle: T\nstatus: open\nbogus_unknown_field: null\n---\n\n## Problem\n\nx\n\n## Done looks like\n\ny\n"
     with pytest.raises(RecordError, match="bogus_unknown_field"):
         parse(text, BACKLOG)
+
+
+def _open_item(frontmatter: str) -> str:
+    return f"---\n{frontmatter}\n---\n\n## Problem\n\nx\n\n## Done looks like\n\ny\n"
+
+
+@pytest.mark.parametrize(
+    "frontmatter, field",
+    [
+        # YAML 1.1 reads `033` as octal 27 and `yes` as True; both must be refused.
+        ("id: 1\ntitle: T\nstatus: open\nrelated: [033]", "related"),
+        ("id: 1\ntitle: T\nstatus: open\ntier: yes", "tier"),
+        ("id: 010\ntitle: T\nstatus: open", "id"),
+    ],
+)
+def test_a_yaml_1_1_coercion_is_refused_naming_the_field(frontmatter, field):
+    with pytest.raises(RecordError, match=field):
+        parse(_open_item(frontmatter), BACKLOG)
+
+
+def test_plain_decimals_booleans_and_dates_still_load():
+    record = parse(
+        _open_item(
+            "id: 1\ntitle: T\nstatus: open\nrelated: [33]\nby_hand: true\nfiled: 2026-09-01"
+        ),
+        BACKLOG,
+    )
+    assert record.model.model_dump(include={"related", "by_hand", "filed"}) == {
+        "related": [33],
+        "by_hand": True,
+        "filed": dt.date(2026, 9, 1),
+    }

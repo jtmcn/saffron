@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from records.kinds import KINDS
-from records.load import Record, load, split_sections
+from records.load import _FRONTMATTER, Record, load, split_sections
 
 # Where a live `item N` is a promise someone can follow today. Not
 # `docs/evidence/`: dated primary records, true on their date.
@@ -96,14 +96,36 @@ def check_links(records: list[Record]) -> list[Violation]:
     return out
 
 
+def _spec_paths(root: Path) -> list[tuple[str, Path]]:
+    specs = root / ".saffron" / "specs"
+    return [
+        (match.group(1), path)
+        for path in sorted(specs.glob("**/*.md"))
+        if (match := _SPEC_FILENAME.match(path.name)) is not None
+    ]
+
+
 def spec_files(root: Path) -> dict[str, Path]:
     """Spec id → file, over the queue and `done/`."""
-    found: dict[str, Path] = {}
-    for path in (root / ".saffron" / "specs").glob("**/*.md"):
-        match = _SPEC_FILENAME.match(path.name)
-        if match is not None:
-            found[match.group(1)] = path
-    return found
+    return dict(_spec_paths(root))
+
+
+def check_spec_ids_unique(root: Path) -> list[Violation]:
+    """`spec_files` keeps one file per id; a second one would vanish from it."""
+    by_id: dict[str, list[Path]] = {}
+    for spec_id, path in _spec_paths(root):
+        by_id.setdefault(spec_id, []).append(path)
+    specs = root / ".saffron" / "specs"
+    return [
+        Violation(
+            paths[0],
+            "specs",
+            f"{spec_id} is in more than one file: "
+            + ", ".join(str(p.relative_to(specs)) for p in paths),
+        )
+        for spec_id, paths in by_id.items()
+        if len(paths) > 1
+    ]
 
 
 def check_specs_resolve(records: list[Record], root: Path) -> list[Violation]:
@@ -172,8 +194,8 @@ def first_cited_item(text: str) -> int | None:
 
 
 def _context_section(spec_text: str) -> str:
-    # maxsplit=1: a `---` rule inside the body must not truncate the Context.
-    body = spec_text.split("\n---\n", 1)[-1]
+    match = _FRONTMATTER.match(spec_text)
+    body = match.group(2) if match else spec_text
     return split_sections(body).get("Context", "")
 
 
@@ -240,6 +262,8 @@ def check_specs_name_their_items(records: list[Record], root: Path) -> list[Viol
 
 
 def check_priority(records: list[Record], priority_md: Path) -> list[Violation]:
+    if not priority_md.is_file():
+        return [Violation(priority_md, "index", "does not exist")]
     by_id = _ids(records)
     out: list[Violation] = []
     named_under: dict[int, set[int]] = {}
@@ -250,7 +274,8 @@ def check_priority(records: list[Record], priority_md: Path) -> list[Violation]:
             continue
         if _OTHER_HEADING.match(line) or line.strip() == "---":
             tier = None  # scope ends; ids are still checked, just not credited
-        for n in map(int, _STRUCK.findall(line)):
+        struck, bold = _STRUCK.findall(line), _BOLD.findall(line)
+        for n in map(int, struck):
             if n not in by_id:
                 out.append(
                     Violation(
@@ -265,7 +290,7 @@ def check_priority(records: list[Record], priority_md: Path) -> list[Violation]:
                         f"strikes item {n}, which is {by_id[n].model.status}",
                     )
                 )
-        for n in map(int, _BOLD.findall(line)):
+        for n in map(int, bold):
             if n not in by_id:
                 out.append(
                     Violation(
@@ -273,9 +298,7 @@ def check_priority(records: list[Record], priority_md: Path) -> list[Violation]:
                     )
                 )
         if tier is not None:
-            for n in map(
-                int, _NUM.findall(" ".join(_STRUCK.findall(line) + _BOLD.findall(line)))
-            ):
+            for n in map(int, struck + bold):
                 named_under.setdefault(n, set()).add(tier)
     for n, r in by_id.items():
         t = getattr(r.model, "tier", None)
@@ -307,6 +330,7 @@ def check_all(root: Path, sections: set[str]) -> list[Violation]:
     return (
         check_ids(records)
         + check_links(records)
+        + check_spec_ids_unique(root)
         + check_specs_resolve(records, root)
         + check_cites_resolve(records, sections)
         + check_item_citations(root, {int(r.model.id) for r in records})

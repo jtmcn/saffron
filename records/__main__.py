@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
 from typing import get_args
 
-from records.kinds import KINDS, Status
+from records.kinds import KINDS, BacklogItem, Status
 from records.load import Record, RecordError, load
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -24,12 +25,16 @@ def _add_root(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _item(record: Record) -> BacklogItem:
+    if not isinstance(record.model, BacklogItem):
+        raise RecordError("not a backlog item", record.path)
+    return record.model
+
+
 def _line(record: Record) -> str:
-    m = record.model
-    tier = getattr(m, "tier", None)
-    tier_str = "-" if tier is None else str(tier)
-    title = getattr(m, "title", "")
-    return f"{m.id:>3}  {m.status:<10}  {tier_str}  {title}"
+    m = _item(record)
+    tier = "-" if m.tier is None else str(m.tier)
+    return f"{m.id:>3}  {m.status:<10}  {tier}  {m.title}"
 
 
 def _render(record: Record, section: str | None) -> str | None:
@@ -47,10 +52,10 @@ def _render(record: Record, section: str | None) -> str | None:
 
 def cmd_list(args: argparse.Namespace) -> int:
     for record in load(KINDS[args.kind], args.root):
-        m = record.model
+        m = _item(record)
         if args.status and m.status != args.status:
             continue
-        if args.tier is not None and getattr(m, "tier", None) != args.tier:
+        if args.tier is not None and m.tier != args.tier:
             continue
         print(_line(record))
     return 0
@@ -68,8 +73,14 @@ def cmd_show(args: argparse.Namespace) -> int:
             return 1
         print(text, end="")
         return 0
+    if args.section is not None:
+        print(
+            f"--section needs an item number; {args.id} lists the items naming it",
+            file=sys.stderr,
+        )
+        return 2
     # Not a kind yet: a spec id answers with the items whose `specs:` name it.
-    naming = [r for r in records if args.id in getattr(r.model, "specs", [])]
+    naming = [r for r in records if args.id in _item(r).specs]
     if not naming:
         print(f"no backlog item names {args.id}", file=sys.stderr)
         return 1
@@ -84,14 +95,15 @@ def cmd_grep(args: argparse.Namespace) -> int:
     except re.error as exc:
         print(f"invalid pattern {args.pattern}: {exc}", file=sys.stderr)
         return 2
+    matched = False
     for record in load(KINDS["backlog"], args.root):
         hits = [line for line in record.body.splitlines() if pattern.search(line)]
         if hits:
-            title = getattr(record.model, "title", "")
-            print(f"{record.model.id:>3}  {title}")
+            matched = True
+            print(f"{record.model.id:>3}  {_item(record).title}")
             for hit in hits:
                 print(f"     {hit}")
-    return 0
+    return 0 if matched else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -118,10 +130,16 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     try:
-        return args.func(args)
+        code = args.func(args)
+        sys.stdout.flush()  # surface EPIPE here, not in the shutdown flush
     except RecordError as exc:
         print(exc, file=sys.stderr)
         return 2
+    except BrokenPipeError:
+        # Python's documented SIGPIPE pattern: silence the exit flush, exit 1.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 1
+    return code
 
 
 if __name__ == "__main__":

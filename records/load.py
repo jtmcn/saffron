@@ -20,6 +20,23 @@ _DATE = re.compile(r"\b20\d\d-\d\d-\d\d\b")
 
 REQUIRED_SECTIONS = ("Problem", "Done looks like", "Record")
 
+_INT, _BOOL = "tag:yaml.org,2002:int", "tag:yaml.org,2002:bool"
+
+
+class _Loader(yaml.SafeLoader):
+    """SafeLoader minus YAML 1.1's octal ints and `yes`/`no` booleans: `033`
+    stays the string "033", so a strict int field refuses it by name."""
+
+
+_Loader.yaml_implicit_resolvers = {
+    first: [(tag, rx) for tag, rx in resolvers if tag not in (_INT, _BOOL)]
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+_Loader.add_implicit_resolver(
+    _INT, re.compile(r"^(?:0|[1-9][0-9]*)$"), list("0123456789")
+)
+_Loader.add_implicit_resolver(_BOOL, re.compile(r"^(?:true|false)$"), list("tf"))
+
 
 class RecordError(ValueError):
     def __init__(self, message: str, path: Path | None = None) -> None:
@@ -58,7 +75,7 @@ def parse(text: str, kind: Kind, path: Path | None = None) -> Record:
         raise RecordError("no YAML frontmatter block", path)
     raw, body = match.group(1), match.group(2)
     try:
-        fields = yaml.safe_load(raw) or {}
+        fields = yaml.load(raw, Loader=_Loader) or {}
     except yaml.YAMLError as exc:
         raise RecordError(f"frontmatter is not valid YAML: {exc}", path) from exc
     if not isinstance(fields, dict):

@@ -2,12 +2,15 @@
 (exactly the violation it exists to find). The broken copy is the mutant the
 check is trusted against."""
 
+import inspect
 import shutil
 from pathlib import Path
 
 import pytest
 
+import records.check
 from records.check import (
+    Violation,
     check_all,
     check_cites_resolve,
     check_done_specs_are_done,
@@ -16,6 +19,7 @@ from records.check import (
     check_links,
     check_no_old_path,
     check_priority,
+    check_spec_ids_unique,
     check_specs_name_their_items,
     check_specs_resolve,
     cited_items,
@@ -41,16 +45,6 @@ def _rewrite(path: Path, old: str, new: str) -> None:
     text = path.read_text()
     assert old in text, old
     path.write_text(text.replace(old, new, 1))
-
-
-def test_the_good_fixture_has_no_violations():
-    records = load(BACKLOG, FIXTURE)
-    sections = {"4", "4.2", "4.2.1", "5", "5.4"}
-    assert check_ids(records) == []
-    assert check_links(records) == []
-    assert check_specs_resolve(records, FIXTURE) == []
-    assert check_cites_resolve(records, sections) == []
-    assert check_item_citations(FIXTURE, {r.model.id for r in records}) == []
 
 
 def test_ids_must_be_contiguous(broken):
@@ -90,8 +84,21 @@ def test_superseded_by_must_resolve_and_not_be_superseded_itself(broken):
         "status: partial\n",
         "status: superseded\nclosed: 2026-09-03\nprs: [1]\nsuperseded_by: 1\n",
     )
-    fields = {v.field for v in check_links(load(BACKLOG, broken))}
-    assert fields == {"superseded_by"}
+    # Item 3 → 2 is a chain; item 2 → 1 is fine, since item 1 is done.
+    [v] = check_links(load(BACKLOG, broken))
+    assert v.field == "superseded_by" and v.message == "item 2 is itself superseded"
+    assert v.path == _item(broken, "003-a-corpse-reads-as-drained.md")
+
+
+def test_superseded_by_must_name_an_item_that_exists(broken):
+    _rewrite(
+        _item(broken, "003-a-corpse-reads-as-drained.md"),
+        "status: open\n",
+        "status: superseded\nclosed: 2026-09-03\nprs: [1]\nsuperseded_by: 9\n",
+    )
+    [v] = check_links(load(BACKLOG, broken))
+    assert v.field == "superseded_by"
+    assert v.message == "names item 9, which does not exist"
 
 
 def test_specs_must_resolve_to_a_spec_file(broken):
@@ -167,6 +174,32 @@ def test_the_good_fixture_passes_every_check():
     assert check_all(FIXTURE, {"4", "4.2", "4.2.1", "5", "5.4"}) == []
 
 
+def test_check_all_runs_every_check(monkeypatch):
+    # The expected set is every `check_*` the module defines, not check_all's body.
+    names = {
+        name
+        for name, fn in inspect.getmembers(records.check, inspect.isfunction)
+        if name.startswith("check_")
+        and name != "check_all"
+        and fn.__module__ == "records.check"
+    }
+    for name in names:
+        sentinel = Violation(Path(name), "sentinel", name)
+        monkeypatch.setattr(
+            records.check, name, lambda *_, sentinel=sentinel: [sentinel]
+        )
+    ran = {v.message for v in check_all(FIXTURE, set())}
+    assert ran == names
+
+
+def test_a_spec_id_in_two_files_is_a_violation_naming_both(broken):
+    specs = broken / ".saffron" / "specs"
+    shutil.copy(specs / "done" / "SA-0001-a-gate.md", specs / "SA-0001-again.md")
+    [v] = check_spec_ids_unique(broken)
+    assert v.field == "specs" and "SA-0001" in v.message
+    assert "done/SA-0001-a-gate.md" in v.message and "SA-0001-again.md" in v.message
+
+
 def test_a_done_item_may_not_name_a_spec_still_in_the_queue(broken):
     done = broken / ".saffron" / "specs" / "done" / "SA-0001-a-gate.md"
     done.rename(broken / ".saffron" / "specs" / "SA-0001-a-gate.md")
@@ -209,6 +242,21 @@ def test_priority_may_not_name_a_missing_item(broken):
         load(BACKLOG, broken), broken / "docs" / "backlog" / "PRIORITY.md"
     )
     assert "9" in v.message
+
+
+def test_priority_may_not_strike_a_missing_item(broken):
+    _rewrite(broken / "docs" / "backlog" / "PRIORITY.md", "**3**.", "**3**, ~~**9**~~.")
+    [v] = check_priority(
+        load(BACKLOG, broken), broken / "docs" / "backlog" / "PRIORITY.md"
+    )
+    assert v.message == "strikes item 9, which does not exist"
+
+
+def test_a_missing_priority_file_is_a_violation_naming_it(broken):
+    priority = broken / "docs" / "backlog" / "PRIORITY.md"
+    priority.unlink()
+    [v] = check_priority(load(BACKLOG, broken), priority)
+    assert v.path == priority and "does not exist" in v.message
 
 
 def test_priority_may_not_strike_an_open_item(broken):
