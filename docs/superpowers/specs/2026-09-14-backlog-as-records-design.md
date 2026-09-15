@@ -214,9 +214,11 @@ integrity tests run against the live `docs/backlog/`, `.saffron/specs/` and
   (`docs/agents/issue-tracker.md`); touching the item in the same commit is
   the same convention, not a new one.
 - `PRIORITY.md` agrees with the records: every `**N**` it names exists; every
-  `~~**N**~~` is `done` or `superseded`; every id under a tier heading carries
-  that `tier` in its frontmatter. The index can no longer drift from the items
-  without a test saying so.
+  `~~**N**~~` is `done` or `superseded`; every item with a `tier` is named
+  under that tier's heading. The rule runs from the records to the index and
+  not the other way, because the index's prose names ids under other tiers'
+  headings when it narrates a move ("**80** moved to tier 1" sits under tier
+  3). The index can no longer drift from the items without a test saying so.
 - No live surface names the path `docs/BACKLOG.md`: `saffron/`, `tests/`,
   `.saffron/specs/` (open only), `CLAUDE.md`, `DESIGN.md`, `README.md`,
   `docs/agents/`. Done specs and evidence are history and are exempt.
