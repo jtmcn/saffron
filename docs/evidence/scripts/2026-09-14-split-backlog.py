@@ -111,13 +111,23 @@ def status_of(body: str, struck: bool) -> tuple[str, str | None]:
         rest1 = m.group("rest1")
         head = rest1 if rest1 is not None else (m.group("rest2") or "") + (m.group("tail2") or "")
     head = head.lower()
+
+    def closed_date() -> str | None:
+        if dates:
+            return dates[-1]
+        found = STATUS_DATE.search(head)
+        return found.group(0) if found else None
+
+    done_cue = "done" in head or "merged" in head or "closed" in head
+    # A strike plus an explicit done cue outweighs a partial-cue word that
+    # happens to sit in the same status line's trailing prose (item 78:
+    # "the `DESIGN.md` half by hand" — struck, and already done).
+    if struck and done_cue:
+        return "done", closed_date()
     if any(cue in head for cue in PARTIAL_CUES):
         return "partial", None
-    if "done" in head or "merged" in head or "closed" in head or dates or struck:
-        closed = dates[-1] if dates else None
-        if closed is None and (found := STATUS_DATE.search(head)):
-            closed = found.group(0)
-        return "done", closed
+    if done_cue or dates or struck:
+        return "done", closed_date()
     return "open", None
 
 

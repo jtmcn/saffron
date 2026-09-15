@@ -1,8 +1,9 @@
 ---
 id: 78
 title: '`witness` mutates before `committed` runs, and the spec that built it says the opposite'
-status: partial
+status: done
 tier: 1
+closed: 2026-09-12
 specs: [SA-0062]
 prs: [154]
 commits: [290f070, 4b533d5]
