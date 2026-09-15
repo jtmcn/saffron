@@ -89,4 +89,236 @@ raises **at most 2 false blockers across the 10 controls**.
 
 ## Results
 
-Not yet run.
+Scored 2026-09-14 against the rule above, read strictly. Reports and cost
+records: `docs/evidence/spec-reviewer-backtest/<SPEC>-<version>.{md,json}`.
+Finding numbers are the report's own; an unnumbered report is cited by its
+first words.
+
+### Known defects
+
+| spec | version | defect (short) | caught as | finding |
+| --- | --- | --- | --- | --- |
+| SA-0005 | 351bdd3 | `touches` lacked `cli.py` and `package.py` | blocker | 1 and 2 ("`saffron/phases/package.py` … is not in `touches`"; "`saffron/cli.py` is not in `touches`") |
+| SA-0009 | ad94fd2 | 990 lines against 600 | blocker | 1 ("the change is too big for the size gate", 690–840) |
+| SA-0011 | 1e069af | `tests/test_package.py` fakes outside `touches` | missed | no finding names `tests/test_package.py`; 4 names `package.py` for a different path |
+| SA-0014 | e1090dc | false claim about SA-0005's criteria | blocker | 1 ("the SA-0005 measurement that criterion 1 rests on is false") |
+| SA-0016 | e1090dc | false claim its refusal fires on SA-0005 | missed | 1 attacks the same Notes sentence for another claim (SA-0014 not at base) |
+| SA-0018 | 366e377 | forbade `DESIGN.md`/`CONTEXT.md`, made false | blocker | 3 ("sentences in `CONTEXT.md` and `DESIGN.md` become false, and both files are forbidden") |
+| SA-0019 | 6f8e0d7 | orphan criterion broke an invariant | concern | C1 ("`queue` or `reconcile` can stamp a live cell `ORPHANED`. Criterion 4 … is unconditional") |
+| SA-0020 | 86f0c6e | forbade `saffron/phases/**`, which the fix needed | blocker | 1 ("PACKAGE undoes the stacking, and PACKAGE is forbidden") |
+| SA-0025 | 2e4f2e6 | too wide; 141 turns | concern | 7 ("size is close to the ceiling", ~600; split) |
+| SA-0026 | 0301518 | guard test file outside `touches` | blocker | 1 ("a test outside `touches` asserts the behaviour criterion 4 removes", `tests/test_package.py:2075`) |
+| SA-0029 | 3ed6f83 | plan at 1100 lines against 600 | blocker | 2 ("the estimated diff clearly exceeds the 600-line feature ceiling", ~900) |
+| SA-0029 | 98ce586 | 548 lines grew to 863 | missed | C5 estimated ~450 and advised leaving it |
+| SA-0031 | 0bcf5ac | `EXHAUSTED` at 141/140 turns, $19.17/$18 | missed | ceilings line reads `checked` (140 against a 32t peak) |
+| SA-0043 | a205a90 | three files outside `touches` | blocker | 2 (`tests/test_session.py`, `tests/test_events.py`, `tests/fixtures/watch-golden.txt`, the three `990ad71` names) |
+| SA-0044 | 6ceb5ba | criterion 2's witness proved half | missed | no finding on criterion 2; 4 covers criteria 1 and 3 |
+| SA-0044 | 6ceb5ba | criterion 4's witness needed a file outside `touches` | missed | 4 calls the restore criterion's witness weak but names no file outside `touches` (the record's is `tests/test_worktree.py`) |
+| SA-0051 | 5177edb | three mechanisms; plan at 650 | concern | "Concern — estimated size is at the ceiling" (600–650) |
+| SA-0059 | ab42114 | nine files at `elevated`; `EXHAUSTED` at $26.75 | missed | 5 and 6 blame the ceilings, which the record clears; size appears only in a check line (~590, "a concern, not a blocker") |
+| SA-0063 | 6527f73 | forbade `saffron/phases/**`, the only call site | blocker | "the notes cannot reach the PR body, because the only production caller … is under a forbidden path" |
+| SA-0063 | 6527f73 | the body dictated the mutants' literals | concern | "the spec body gives away both mutants' `find` text" |
+| SA-0065 | d84cab3 | forbidden excluded a caller | blocker | "a caller the spec forbids the cell to edit would start raising" (`session.py:426`) |
+| SA-0079 | 1e2209a | memo witness only answered present | missed | notes only; none on the memo stub |
+| SA-0080 | 1e2209a | headline witness passed a full re-parse | concern | C1 ("witness 1 can't tell 'read again' from 'parsed again'") |
+| SA-0081 | 1e2209a | misplaced boundary passed every test | missed | C4 names a different boundary mistake (re-finding `Ceilings` each poll) |
+| SA-0082 | c0e84c3 | table called a non-equivalent alternative equivalent | concern | C1 (the `-c diff.ignoreSubmodules=none` row) |
+| SA-0083 | c0e84c3 | deleting the override left every test green | missed | a note saw the unwitnessed `advice.graftFileDeprecated` override and called it harmless |
+| SA-0084 | c0e84c3 | a partial strip passed "every control character" | missed | C4 is the record's other, unscored line (raw `subtype`/`terminal_reason`) |
+| SA-0085 | c0e84c3 | two witnesses each covered half a claim | missed | C2 finds a different gap in the first witness |
+| SA-0086 | 8811f3a | forbade `pr_body.py`, made false | blocker | 1 ("a rendered sentence becomes false, and its file is forbidden") |
+| SA-0086 | 8811f3a | no mutants on an edit; a witness that could not fail | blocker | 2 ("criterion 1 has no mutant, and a wrong implementation passes its witness") |
+| SA-0086 | 8811f3a | "verdict" in the spec text | missed | a note only (7) |
+| SA-0087 | 24edb32 | 60 turns / $8 against a 47-turn plan checkpoint | missed | ceilings line reads `checked` (60 above a 45t peak) |
+| SA-0087 | 24edb32 | criterion 3 charges an unappliable binary stub | concern | 4 ("a patch with a binary file will end the task `EXHAUSTED`") |
+| SA-0087 | 14f6357 | criterion 2's witness passes `read_head` on the wrong container | missed | 1 flags criterion 2's witness for another hole (apply without commit) |
+
+Today's intake refuses SA-0063@6527f73 for a disclosed mutant — its recorded
+defect 2 — so a mechanical check now catches that defect without the reviewer.
+
+### Controls
+
+| spec | version | blockers | false | new finds | disputed | concerns / notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| SA-0062 | 210b0d4 | 4 | 0 | 3 (2, 3, 4) | 1 (1) | 3 / 2 |
+| SA-0061 | 210b0d4 | 3 | 0 | 1 (2) | 2 (1, 3) | 5 / 1 |
+| SA-0060 | 210b0d4 | 3 | 0 | 2 (1, 2) | 1 (3) | 4 / 2 |
+| SA-0056 | ee98185 | 2 | 0 | 2 (1, 2) | 0 | 2 / 3 |
+| SA-0055 | 49cc2ef | 1 | 0 | 0 | 1 (1) | 3 / 3 |
+| SA-0054 | fdcbbad | 2 | 0 | 0 | 2 (1, 2) | 5 / 3 |
+| SA-0030 | 59cde3d | 4 | 0 | 4 (1–4) | 0 | 2 / 2 |
+| SA-0040 | 98ce586 | 2 | 0 | 1 (2) | 1 (1) | 3 / 2 |
+| SA-0027 | 094cc4e | 3 | 0 | 2 (2, 3) | 1 (1) | 5 / 3 |
+| SA-0024 | 7455593 | 4 | 0 | 4 (1–4) | 0 | 3 / 3 |
+| **total** | | **28** | **0** | **19** | **9** | 35 / 24 |
+
+Blockers are numbered in report order. Each was read at the control's version
+with `git show <version>:<path>`; the evidence is under *New finds* and
+*Disputed*.
+
+### Totals
+
+- caught **19/34** (blocker-only **12/34**); without SA-0087@24edb32,
+  **18/32**
+- false blockers **0** across the 10 controls, with **9 disputed** and left to
+  the operator
+
+**PASS**, on the calls settled here. Two sets of calls can reverse it:
+- The three close calls counted as catches: if all three flip, recall is
+  16/34 and the result is FAIL.
+- The dependency class of disputed blockers: if it is ruled false, K = 4 and
+  the result is FAIL.
+
+### Cost
+
+$71.38 across the 39 scored reviews (`total_cost_usd`, no error records).
+Spent outside the scored set: a discarded first sweep ($7.26, 3 reviews) and
+three smoke runs (~$10.30).
+
+### New finds
+
+Control blockers whose claim holds at the version, as candidate backlog
+items. Several were already found after the cell or were handled by it; each
+line says which.
+
+1. **SA-0062@210b0d4, 2:** the `git checkout HEAD` undo destroys uncommitted
+   edits.
+   - Verified: `committed_gate` runs after `run_suite` (`session.py:966` vs
+     `:1001`), and `revert.py:174-179` refuses dirty paths for that reason.
+   - Already recorded: BACKLOG item 78, found at PR #154's review.
+2. **SA-0062, 3:** criterion 5's witness cannot tell the real mutator from the
+   stub while no spec declares a mutant.
+   - Verified: `witness.py:77-81` returns `skip` ("the spec declares no
+     mutants") before any mutator is consulted.
+3. **SA-0062, 4:** criterion 3 has no mutant, and an in-cell count by line
+   passes a same-line double match.
+   - Verified: the host rule counts bytes (`mutation.py:131`,
+     `content.count(find)`).
+4. **SA-0061@210b0d4, 2:** criterion 3's witness passes
+   `witness_blocking(spec.risk)` in place of the effective tier.
+   - Verified: the tier is computed at `session.py:952`.
+   - Handled by the cell (`suite.py:218` keys on the tier).
+5. **SA-0060@210b0d4, 1:** the spec says a context manager's exit has neither
+   of `SA-0057`'s shapes. That is false.
+   - Verified by running Python: an exception raised in a `@contextmanager`
+     `finally` replaces an in-flight `KeyboardInterrupt`.
+   - An `__exit__` returning true swallows one.
+6. **SA-0060, 2:** criterion 5 names no signal separating "did not apply"
+   from "cannot reach", so `except Exception → skip` passes its witness.
+   - Verified against the spec's text.
+7. **SA-0056@ee98185, 1:** restore is unspecified, so a find/replace swap back
+   passes a simple byte-identical witness.
+   - Handled by the cell (`restore_mutant` checks a whole-file digest).
+8. **SA-0056, 2:** containment names only `..`.
+   - Verified: `Path("/tree") / "/etc/x"` is `/etc/x`.
+   - Handled by the cell (`mutation.py:96-104` refuses absolute paths and
+     resolves).
+9. **SA-0030@59cde3d, 1:** criterion 1 cannot be met for the outcome and
+   rate-limit lines.
+   - Verified: `events.FINDINGS[0]`, `LineLabel` excludes them, and `types` is
+     blocking.
+   - Both lines shipped as `print(...)`, so the criterion was not met to the
+     letter.
+10. **SA-0030, 2:** criteria 2, 5 and 6 conflict over `GateResult`. Rendering
+    one changes the golden output; not rendering one makes the log differ from
+    what printed.
+    - Verified: `events.py:502-508`, `tests/test_events.py:843`.
+11. **SA-0030, 3:** an unwritable `task_dir` raises before any terminal state.
+    - Verified: the gates export (`session.py:653`) and `baseline.json`
+      (`:875`) write there first.
+12. **SA-0030, 4:** no criterion has a mutant.
+    - The claim holds, though `mutant` could not be declared until ee98185.
+13. **SA-0040@98ce586, 2:** no test ties `describe` to the lines the call
+    sites print.
+    - Measured later: `tests/test_events.py` at 0bcf5ac records a drifted
+      rewrite passing 67 tests.
+14. **SA-0027@094cc4e, 2:** the marker scan matches spec text that quotes a
+    marker.
+    - Verified: the only match at the version is the spec itself.
+    - Handled by the cell (`retirement_markers` excludes `.saffron/specs/`).
+15. **SA-0027, 3:** no witnesses, so the refusal wired into `_refuse` alone
+    passes every gate.
+    - Verified: checklist form, no `acceptance:`.
+16. **SA-0024@7455593, 1:** the change reverses DESIGN §3.2's recorded
+    decision, and `DESIGN.md` is forbidden.
+    - Verified: `DESIGN.md:200-202`.
+    - The sentence is gone at HEAD, so it was fixed by hand.
+17. **SA-0024, 2:** a `protected` check in `scope` breaks the §5.2 spec-path
+    writeback.
+    - Verified: `DESIGN.md:626`, and `.saffron/**` is protected.
+    - Already recorded: BACKLOG item 31.
+18. **SA-0024, 3:** criterion 8 cites item 30, which does not exist at the
+    version (the backlog ends at 29).
+    - Item 30 was first written by SA-0024's own cell (`43fbe1b`).
+19. **SA-0024, 4:** no witnesses, so a build that never wires `session.py`
+    passes every gate.
+    - Verified: checklist form.
+
+Possible new finds on case versions, unverified:
+- SA-0011@1e069af, 4 (re-verification drops the `criteria` result).
+- SA-0044@6ceb5ba, 1 (the golden fixture and `tests/test_events.py` outside
+  `touches`).
+- SA-0084@c0e84c3, C4 (this one matches an unscored `rejections.md` line).
+- SA-0087@14f6357, 1 (claim 2 omits "committed").
+- SA-0081@1e2209a, C4.
+
+### Close calls
+
+Counted as caught:
+- **SA-0019:** C1 names criterion 4 and the batch-scan premise, but not the
+  recorded consequence (a live row re-queued). Its C7 says `ORPHANED` is not a
+  re-queue state; it is (`scheduler.py:67`).
+- **SA-0025:** the estimate is ~600, at the ceiling rather than over it, and
+  the same report calls `max_turns` 140 fine.
+- **SA-0080:** C1's wrong build (read everything, parse from the offset)
+  differs from the recorded one (re-parse everything, keep the tail). Its fix,
+  "never read everything and slice", covers the recorded one.
+
+Counted as missed:
+- **SA-0016:** the same sentence, but a different claim.
+- **SA-0029@98ce586:** a size concern that said the spec fits.
+- **SA-0044, defect 2:** the same criterion, but a witness finding, not a
+  scope finding.
+- **SA-0059:** the ceilings findings the record rejects, and size only in a
+  check line.
+- **SA-0081:** a different boundary mistake.
+- **SA-0085:** a different gap in the same witness.
+- **SA-0087@14f6357:** a different hole in the same witness. The `read_head`
+  half was caught at 24edb32 (C5), which is not scored for it.
+
+If every one of the ten flipped, recall would range from 16 to 26.
+
+### Disputed
+
+**(a) The dependency is absent at the version but landed before the cell
+started.**
+- Blockers: SA-0062 1, SA-0061 1, SA-0054 1, SA-0040 1.
+- The claims hold at the version the rule names, but each cell's own base had
+  the code:
+  - `events.py`: `ad92654`, 09-01 14:43 PDT, before SA-0040 at 17:52 PDT.
+  - `batch.py`: `b20f42d`, 09-04 18:28 PDT, before SA-0054 at 20:36 PDT.
+  - SA-0061: `7f29609`, 09-06 11:23 PDT, before SA-0062 at 20:04 PDT.
+  - SA-0060: merged in `95e9b95`, 09-06 10:10 PDT, before SA-0061 at 10:59
+    PDT.
+- The same class appears on seven case versions. In the spec loop it would
+  fire on every stacked spec.
+- Ruled false, K = 4 and the result is FAIL.
+
+**(b) The ceilings are below what the cited history rows spent, but the
+control finished inside them.**
+- Blockers: SA-0060 3 (90 turns against SA-0042's 101t) and SA-0027 1 ($14 /
+  120t against SA-0019's $14.39 / 120t).
+- SA-0027 finished at $13.43 total with a 102t peak, per other reports'
+  `history` rows.
+
+**(c) A witness predicted green at base, but the cell passed.**
+- Blockers: SA-0061 3, SA-0054 2, SA-0055 1.
+- Each premise holds: the behaviour is already true at base.
+  - `session.py:278-281`.
+  - No `batch` subparser at fdcbbad.
+  - `cli.py:904-905`, with tests already asserting it at
+    `tests/test_cli.py:2124`, `:2882` and `:2907`.
+- Each cell reached `READY_FOR_REVIEW` with `criteria` and `revert` blocking,
+  so the witnesses it wrote were not green at base.
+
+All nine ruled false gives K = 9.
