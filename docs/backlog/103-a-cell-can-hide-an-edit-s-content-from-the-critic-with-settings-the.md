@@ -1,7 +1,7 @@
 ---
 id: 103
 title: A cell can hide an edit's content from the critic with settings the diff never shows
-status: open
+status: partial
 tier: 2
 specs: [SA-0075]
 prs: [231]

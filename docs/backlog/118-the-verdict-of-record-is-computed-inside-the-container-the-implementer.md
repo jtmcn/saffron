@@ -1,7 +1,7 @@
 ---
 id: 118
 title: The verdict of record is computed inside the container the implementer controlled
-status: open
+status: partial
 tier: null
 filed: 2026-09-13
 by_hand: true

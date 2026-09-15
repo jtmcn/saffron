@@ -1,8 +1,9 @@
 ---
 id: 102
 title: '`refs/replace` lets a cell ship a tree its gates never ran on'
-status: open
+status: done
 tier: 1
+closed: 2026-09-13
 specs: [SA-0074]
 prs: [228]
 commits: []

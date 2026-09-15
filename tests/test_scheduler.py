@@ -1818,7 +1818,14 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-14, a twenty-fifth time: `SA-0086` to `SA-0089`
+    """Re-measured 2026-09-14, a twenty-sixth time: `SA-0074` to `SA-0086`
+    (item 118) all merged to `main` and retired to `done/`, so the live queue
+    holds only the chain's tail. `SA-0087` has `depends_on: []`, so it is the
+    one candidate. `SA-0088` (`depends_on: [SA-0087]`) and `SA-0089`
+    (`depends_on: [SA-0088]`) are both refused, and correctly: neither parent
+    has a task at its current `spec_sha`, so nothing says it merged.
+
+    Re-measured 2026-09-14, a twenty-fifth time: `SA-0086` to `SA-0089`
     queued for item 118. `SA-0086` and `SA-0087` are independent and join the
     candidates behind `SA-0074`, because candidates run in priority order and
     both are priority 1; refusals stay in file order. `SA-0088` stacks on
@@ -1918,37 +1925,11 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == [
-        "SA-0074",
-        "SA-0086",
-        "SA-0087",
-        "SA-0076",
-        "SA-0077",
-        "SA-0078",
-        "SA-0082",
-        "SA-0079",
-        "SA-0080",
-    ]
-    assert [r.path.name[:7] for r in refusals] == [
-        "SA-0075",
-        "SA-0081",
-        "SA-0083",
-        "SA-0084",
-        "SA-0085",
-        "SA-0088",
-        "SA-0089",
-    ]
-    parents = [
-        "SA-0074",
-        "SA-0080",
-        "SA-0082",
-        "SA-0080",
-        "SA-0084",
-        "SA-0087",
-        "SA-0088",
-    ]
+    assert [c.spec.id for c in candidates] == ["SA-0087"]
+    assert [r.path.name[:7] for r in refusals] == ["SA-0088", "SA-0089"]
+    parents = ["SA-0087", "SA-0088"]
     for refusal, parent in zip(refusals, parents, strict=True):
-        assert f"{parent} has no task" in refusal.reason
+        assert f"depends_on {parent} has no task" in refusal.reason
     # A precondition, not the glob check: `done/` is populated, so the empty
     # queue above is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30
