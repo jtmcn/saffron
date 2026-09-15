@@ -3,8 +3,10 @@
     uv run docs/evidence/scripts/2026-09-14-spec-reviewer-backtest.py controls
     uv run docs/evidence/scripts/2026-09-14-spec-reviewer-backtest.py review [--only SA-NNNN@sha]
 
-Spends money: one headless `claude -p` session per spec version, each in a
-detached worktree at that version, so the reviewer can read nothing newer.
+Spends money: one headless `claude -p` session per spec version, each against a
+fresh single-commit snapshot of that version (`git archive`, re-committed with
+no parent), so the reviewer can read nothing newer and has no history to reach
+through `git log --all` or a later `git show`.
 `history` is computed here with `--before` and handed in, because the driver at
 an old version has no `history` command.
 """
@@ -25,53 +27,54 @@ REPO = Path(__file__).resolve().parents[3]
 DRIVER = REPO / ".claude" / "skills" / "run-saffron-spec-loop" / "driver.py"
 AGENT = REPO / ".claude" / "agents" / "spec-reviewer.md"
 OUT = REPO / "docs" / "evidence" / "spec-reviewer-backtest"
-TOOLS = "Read,Grep,Glob,Bash(git show:*),Bash(git log:*),Bash(git ls-tree:*),Bash(git grep:*)"
+TOOLS = "Read(./**),Grep(./**),Glob(./**),Bash(git show:*),Bash(git log:*),Bash(git ls-tree:*),Bash(git grep:*)"
 FIRST_CELL_OK = {"READY_FOR_REVIEW", "APPROVED", "MERGE_TRAIN", "MERGED"}
 
-# The design's Appendix A, minus its four excluded rows: (spec, pre-cell version, defects).
+# The design's Appendix A "Defect" column verbatim, minus its four excluded
+# rows: (spec, pre-cell version, defects).
 CASES = [
-    ("SA-0005", "351bdd3", ["touches lacked cli.py and package.py, which its criteria needed"]),
-    ("SA-0009", "ad94fd2", ["too wide: 990 lines against a 600 ceiling"]),
-    ("SA-0011", "1e069af", ["tests/test_package.py Spec fakes outside touches"]),
+    ("SA-0005", "351bdd3", ["`touches` lacked `cli.py` and `package.py`, which its criteria needed"]),
+    ("SA-0009", "ad94fd2", ["990 lines against a 600 ceiling; `EXHAUSTED` at $31.60"]),
+    ("SA-0011", "1e069af", ["`tests/test_package.py` fakes outside `touches`"]),
     ("SA-0014", "e1090dc", ["false claim about SA-0005's criteria"]),
     ("SA-0016", "e1090dc", ["false claim that its refusal fires on SA-0005"]),
-    ("SA-0018", "366e377", ["forbade DESIGN.md/CONTEXT.md, which the change made false"]),
-    ("SA-0019", "6f8e0d7", ["orphan criterion broke an invariant"]),
-    ("SA-0020", "86f0c6e", ["forbade saffron/phases/**, which the fix needed"]),
-    ("SA-0025", "2e4f2e6", ["too wide for its ceilings"]),
-    ("SA-0026", "0301518", ["test file holding a guard outside touches"]),
-    ("SA-0029", "3ed6f83", ["too wide: plan at 1100 lines against 600"]),
-    ("SA-0029", "98ce586", ["14 criteria demand tests past the 600 ceiling"]),
-    ("SA-0031", "0bcf5ac", ["turn and budget ceilings too low for its width"]),
-    ("SA-0043", "a205a90", ["golden fixture, test_events.py, test_session.py outside touches"]),
+    ("SA-0018", "366e377", ["forbade `DESIGN.md`/`CONTEXT.md`, which the change made false"]),
+    ("SA-0019", "6f8e0d7", ["orphan criterion broke an invariant; `EXHAUSTED` at $12.12"]),
+    ("SA-0020", "86f0c6e", ["forbade `saffron/phases/**`, which the fix needed; too wide"]),
+    ("SA-0025", "2e4f2e6", ["too wide; `NOT_IMPLEMENTED` at 141 turns"]),
+    ("SA-0026", "0301518", ["test file with a guard outside `touches`; the agent dodged the guard"]),
+    ("SA-0029", "3ed6f83", ["plan estimated 1100 lines against 600; `PLAN_REJECTED`"]),
+    ("SA-0029", "98ce586", ["548 lines grew to 863 in review because 14 criteria demanded tests"]),
+    ("SA-0031", "0bcf5ac", ["`EXHAUSTED` at 141 of 140 turns, $19.17 of $18"]),
+    ("SA-0043", "a205a90", ["three files outside `touches`; `EXHAUSTED` with a sound diff"]),
     ("SA-0044", "6ceb5ba", [
-        "criterion 2's witness proves only the half already true",
-        "criterion 4's real witness needs tests/test_worktree.py, outside touches",
+        "criterion 2's witness proved only the half already true",
+        "criterion 4's real witness needed a file outside `touches`",
     ]),
-    ("SA-0051", "5177edb", ["three mechanisms; 650 lines against 600"]),
-    ("SA-0059", "ab42114", ["nine files at elevated: too wide for its ceilings"]),
+    ("SA-0051", "5177edb", ["three mechanisms; plan at 650 lines against 600"]),
+    ("SA-0059", "ab42114", ["nine files at `elevated`; `EXHAUSTED` at $26.75 of $16"]),
     ("SA-0063", "6527f73", [
-        "forbade saffron/phases/**, home of the only call site",
-        "the body dictates the literals its mutants pin",
+        "forbade `saffron/phases/**`, home of the only call site",
+        "the spec body dictated the literals its mutants pin",
     ]),
-    ("SA-0065", "d84cab3", ["forbidden excludes a caller the change breaks"]),
-    ("SA-0079", "1e2209a", ["missing mutant: the memo witness only answers 'present'"]),
-    ("SA-0080", "1e2209a", ["missing mutant: headline witness passes a full re-parse"]),
-    ("SA-0081", "1e2209a", ["missing mutant: a misplaced boundary passes"]),
-    ("SA-0082", "c0e84c3", ["its table calls a non-equivalent alternative equivalent"]),
-    ("SA-0083", "c0e84c3", ["missing mutant: deleting the override stays green"]),
-    ("SA-0084", "c0e84c3", ["missing mutant: a partial strip passes 'every control character'"]),
-    ("SA-0085", "c0e84c3", ["missing mutant: two witnesses each cover half a claim"]),
+    ("SA-0065", "d84cab3", ["forbidden excluded a caller the change breaks"]),
+    ("SA-0079", "1e2209a", ['the memo witness only ever answered "present"']),
+    ("SA-0080", "1e2209a", ["missing mutant; the headline witness passed a full re-parse"]),
+    ("SA-0081", "1e2209a", ["missing mutant; a misplaced boundary passed every test"]),
+    ("SA-0082", "c0e84c3", ["the spec's table called an alternative equivalent that is not"]),
+    ("SA-0083", "c0e84c3", ["missing mutant; deleting the override left every test green"]),
+    ("SA-0084", "c0e84c3", ['missing mutant; a partial strip passed "every control character"']),
+    ("SA-0085", "c0e84c3", ["missing mutant; two witnesses each covered half a claim"]),
     ("SA-0086", "8811f3a", [
-        "forbade pr_body.py, which the change made false",
-        "no mutants on an edit, so a witness that cannot fail ships",
-        "'verdict' used in the sense CONTEXT.md forbids",
+        "forbade `pr_body.py`, which the change made false",
+        "no mutants on an edit, so a witness that could not fail shipped",
+        '"verdict" in the spec text, which `CONTEXT.md` forbids in that sense',
     ]),
     ("SA-0087", "24edb32", [
         "60 turns / $8 against a 47-turn plan checkpoint",
         "criterion 3 charges an unappliable binary stub to the task",
     ]),
-    ("SA-0087", "14f6357", ["criterion 2's witness passes with read_head on the wrong container"]),
+    ("SA-0087", "14f6357", ["criterion 2's witness passes with `read_head` on the wrong container"]),
 ]
 # Appendix A and B ids: no control comes from either.
 BLAMED = {spec for spec, _v, _d in CASES} | {
@@ -163,21 +166,37 @@ def _review(spec_id: str, version: str) -> None:
         cwd=REPO, check=True, capture_output=True, text=True,
     ).stdout
     prompt = (
-        f"spec: {path}\nbase: HEAD (this checkout is the base commit)\n"
+        f"spec: {path}\n"
+        "base: HEAD (this checkout is a snapshot of the base commit, with no history)\n"
         f"history (precomputed; do not run the command):\n{history}"
     )
     with tempfile.TemporaryDirectory() as tmp:
         tree = Path(tmp) / f"{spec_id}-{version}"
-        _git("worktree", "add", "-q", "--detach", str(tree), version)
-        try:
-            done = subprocess.run(
-                ["claude", "-p", "--agents", _agent_json(), "--agent", "spec-reviewer",
-                 "--output-format", "json", "--permission-prompts", "none",
-                 "--allowedTools", TOOLS],
-                cwd=tree, input=prompt, capture_output=True, text=True, timeout=1800,
-            )
-        finally:
-            _git("worktree", "remove", "--force", str(tree))
+        tree.mkdir()
+        archive = subprocess.run(
+            ["git", "-C", str(REPO), "archive", "--format=tar", version],
+            check=True, capture_output=True,
+        )
+        subprocess.run(["tar", "-x", "-C", str(tree)], input=archive.stdout, check=True)
+        subprocess.run(["git", "init", "-q"], cwd=tree, check=True, capture_output=True)
+        subprocess.run(["git", "add", "-A", "-f"], cwd=tree, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-c", "user.email=backtest@saffron.invalid", "-c", "user.name=backtest",
+             "commit", "-q", "-m", f"{spec_id} at {version}"],
+            cwd=tree, check=True, capture_output=True,
+        )
+        count = subprocess.run(
+            ["git", "-C", str(tree), "rev-list", "--all", "--count"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        if count != "1":
+            raise SystemExit(f"{spec_id}@{version}: snapshot has history")
+        done = subprocess.run(
+            ["claude", "-p", "--agents", _agent_json(), "--agent", "spec-reviewer",
+             "--output-format", "json", "--permission-prompts", "none",
+             "--allowedTools", TOOLS],
+            cwd=tree, input=prompt, capture_output=True, text=True, timeout=1800,
+        )
     if done.returncode != 0:
         raise SystemExit(f"{spec_id}@{version}: claude exited {done.returncode}: {done.stderr[-500:]}")
     result = json.loads(done.stdout)
