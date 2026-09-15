@@ -9,7 +9,8 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from records.load import Record
+from records.kinds import KINDS
+from records.load import Record, load, split_sections
 
 # Where a live `item N` is a promise someone can follow today. Not
 # `docs/evidence/`: dated primary records, true on their date.
@@ -153,3 +154,169 @@ def check_item_citations(root: Path, ids: set[int]) -> list[Violation]:
                 Violation(path, "item", f"cites backlog item {n}, which does not exist")
             )
     return out
+
+
+def first_cited_item(text: str) -> int | None:
+    """The first number of the first `_ITEMS` match, in document order — the
+    item a spec's `## Context` came from, not the background it also names."""
+    match = _ITEMS.search(text)
+    if match is None:
+        return None
+    return int(_NUM.findall(match.group(1))[0])
+
+
+def _context_section(spec_text: str) -> str:
+    # maxsplit=1: a `---` rule inside the body must not truncate the Context.
+    body = spec_text.split("\n---\n", 1)[-1]
+    return split_sections(body).get("Context", "")
+
+
+OLD_PATH = "docs/BACKLOG.md"
+LIVE_SURFACES = (
+    "saffron",
+    "tests",
+    ".saffron/specs",
+    "CLAUDE.md",
+    "DESIGN.md",
+    "README.md",
+    "docs/agents",
+)
+
+_TIER_HEADING = re.compile(r"^### Tier (\d)\b")
+_STRUCK = re.compile(r"~~\*\*(\d+)\*\*~~")
+_BOLD = re.compile(r"(?<!~)\*\*(\d+)\*\*(?!~)")
+
+
+def check_done_specs_are_done(records: list[Record], root: Path) -> list[Violation]:
+    specs = spec_files(root)
+    out: list[Violation] = []
+    for r in records:
+        if r.model.status != "done":
+            continue
+        for spec in getattr(r.model, "specs", []):
+            path = specs.get(spec)
+            if path is not None and path.parent.name != "done":
+                out.append(
+                    Violation(
+                        r.path,
+                        "specs",
+                        f"item is done but {spec} is still in the queue",
+                    )
+                )
+    return out
+
+
+def check_specs_name_their_items(records: list[Record], root: Path) -> list[Violation]:
+    """The inverse link: a spec's `## Context` names the first backlog item it
+    cites, and a spec in `done/` leaves that item not open."""
+    by_id = _ids(records)
+    out: list[Violation] = []
+    for spec_id, path in spec_files(root).items():
+        context = _context_section(path.read_text())
+        n = first_cited_item(context)
+        if n is None:
+            continue
+        item = by_id.get(n)
+        if item is None:
+            continue  # check_item_citations reports it
+        if spec_id not in getattr(item.model, "specs", []):
+            out.append(
+                Violation(
+                    item.path, "specs", f"{spec_id} cites this item and is not listed"
+                )
+            )
+        if path.parent.name == "done" and item.model.status == "open":
+            out.append(
+                Violation(item.path, "status", f"open, but {spec_id} is in done/")
+            )
+    return out
+
+
+def check_priority(records: list[Record], priority_md: Path) -> list[Violation]:
+    by_id = _ids(records)
+    out: list[Violation] = []
+    named_under: dict[int, set[int]] = {}
+    tier: int | None = None
+    for line in priority_md.read_text().splitlines():
+        if heading := _TIER_HEADING.match(line):
+            tier = int(heading.group(1))
+            continue
+        for n in map(int, _STRUCK.findall(line)):
+            if n not in by_id:
+                out.append(
+                    Violation(
+                        priority_md, "index", f"strikes item {n}, which does not exist"
+                    )
+                )
+            elif by_id[n].model.status not in ("done", "superseded"):
+                out.append(
+                    Violation(
+                        priority_md,
+                        "index",
+                        f"strikes item {n}, which is {by_id[n].model.status}",
+                    )
+                )
+        for n in map(int, _BOLD.findall(line)):
+            if n not in by_id:
+                out.append(
+                    Violation(
+                        priority_md, "index", f"names item {n}, which does not exist"
+                    )
+                )
+        if tier is not None:
+            for n in map(
+                int, _NUM.findall(" ".join(_STRUCK.findall(line) + _BOLD.findall(line)))
+            ):
+                named_under.setdefault(n, set()).add(tier)
+    for n, r in by_id.items():
+        t = getattr(r.model, "tier", None)
+        if t is not None and t not in named_under.get(n, set()):
+            out.append(
+                Violation(
+                    r.path,
+                    "tier",
+                    f"item {n} is tier {t}, but PRIORITY.md does not name it under tier {t}",
+                )
+            )
+    return out
+
+
+def check_no_old_path(root: Path) -> list[Violation]:
+    # tests/records/ quotes the old path as data; .saffron/specs/done/ is dated history.
+    skip = root / "tests" / "records"
+    out: list[Violation] = []
+    for name in LIVE_SURFACES:
+        path = root / name
+        files = (
+            [path]
+            if path.is_file()
+            else [p for p in path.rglob("*") if p.is_file()]
+            if path.is_dir()
+            else []
+        )
+        for file in files:
+            if "specs" in file.parts and "done" in file.parts:
+                continue
+            if skip in file.parents:
+                continue
+            if file.suffix in _SUFFIXES and OLD_PATH in file.read_text():
+                out.append(
+                    Violation(file, "path", f"names {OLD_PATH}, which no longer exists")
+                )
+    return sorted(out, key=lambda v: v.path)
+
+
+def check_all(root: Path, sections: set[str]) -> list[Violation]:
+    records = load(KINDS["backlog"], root)
+    priority = root / KINDS["backlog"].directory / "PRIORITY.md"
+    return (
+        check_ids(records)
+        + check_links(records)
+        + check_specs_resolve(records, root)
+        + check_cites_resolve(records, sections)
+        + check_item_citations(root, {int(r.model.id) for r in records})
+        + check_done_specs_are_done(records, root)
+        + check_specs_name_their_items(records, root)
+        + check_priority(records, priority)
+        + check_no_old_path(root)
+    )

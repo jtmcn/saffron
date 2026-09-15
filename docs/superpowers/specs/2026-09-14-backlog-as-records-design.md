@@ -208,9 +208,10 @@ integrity tests run against the live `docs/backlog/`, `.saffron/specs/` and
   at least one dated `## Record` entry as well.
 - `done` ⇒ every spec in `specs:` is in `done/`. An item cannot claim closure by
   a spec still in the queue.
-- The inverse: a spec whose `## Context` cites `item N` is listed in item N's
-  `specs:`; and if that spec is in `done/`, item N is not `open`. Adding a spec
-  is already a by-hand commit that updates the scheduler smoke test
+- The inverse: a spec whose `## Context` cites `item N` *first* — the item it
+  came from, since a Context also names background items — is listed in item
+  N's `specs:`; and if that spec is in `done/`, item N is not `open`. Adding a
+  spec is already a by-hand commit that updates the scheduler smoke test
   (`docs/agents/issue-tracker.md`); touching the item in the same commit is
   the same convention, not a new one.
 - `PRIORITY.md` agrees with the records: every `**N**` it names exists; every

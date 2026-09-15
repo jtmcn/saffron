@@ -8,10 +8,15 @@ from pathlib import Path
 import pytest
 
 from records.check import (
+    check_all,
     check_cites_resolve,
+    check_done_specs_are_done,
     check_ids,
     check_item_citations,
     check_links,
+    check_no_old_path,
+    check_priority,
+    check_specs_name_their_items,
     check_specs_resolve,
     cited_items,
 )
@@ -156,3 +161,102 @@ def test_tests_records_is_not_scanned(broken):
     target.parent.mkdir(parents=True)
     target.write_text("# backlog item 77\n")
     assert check_item_citations(broken, {1, 2, 3}) == []
+
+
+def test_the_good_fixture_passes_every_check():
+    assert check_all(FIXTURE, {"4", "4.2", "4.2.1", "5", "5.4"}) == []
+
+
+def test_a_done_item_may_not_name_a_spec_still_in_the_queue(broken):
+    done = broken / ".saffron" / "specs" / "done" / "SA-0001-a-gate.md"
+    done.rename(broken / ".saffron" / "specs" / "SA-0001-a-gate.md")
+    [v] = check_done_specs_are_done(load(BACKLOG, broken), broken)
+    assert v.field == "specs" and "SA-0001" in v.message
+
+
+def test_a_spec_citing_an_item_must_be_listed_by_it(broken):
+    _rewrite(
+        _item(broken, "001-a-gate-that-never-ran.md"),
+        "specs: [SA-0001]\n",
+        "specs: []\ncommits: [abc1234]\n",
+    )
+    [v] = check_specs_name_their_items(load(BACKLOG, broken), broken)
+    assert v.field == "specs" and "SA-0001" in v.message
+
+
+def test_a_done_spec_may_not_leave_its_item_open(broken):
+    spec = broken / ".saffron" / "specs" / "done" / "SA-0001-a-gate.md"
+    _rewrite(spec, "backlog item 1.", "backlog item 3.")
+    _rewrite(
+        _item(broken, "003-a-corpse-reads-as-drained.md"),
+        "cites:",
+        "specs: [SA-0001]\ncites:",
+    )
+    violations = check_specs_name_their_items(load(BACKLOG, broken), broken)
+    assert any(v.field == "status" and "SA-0001" in v.message for v in violations)
+
+
+def test_the_inverse_rule_keys_on_the_first_cited_item(broken):
+    # Context cites item 1 first, item 3 second — only item 1 must list the spec.
+    spec = broken / ".saffron" / "specs" / "done" / "SA-0001-a-gate.md"
+    _rewrite(spec, "backlog item 1.", "backlog item 1 and item 3.")
+    assert check_specs_name_their_items(load(BACKLOG, broken), broken) == []
+
+
+def test_priority_may_not_name_a_missing_item(broken):
+    _rewrite(broken / "docs" / "backlog" / "PRIORITY.md", "**3**.", "**3**, **9**.")
+    [v] = check_priority(
+        load(BACKLOG, broken), broken / "docs" / "backlog" / "PRIORITY.md"
+    )
+    assert "9" in v.message
+
+
+def test_priority_may_not_strike_an_open_item(broken):
+    _rewrite(broken / "docs" / "backlog" / "PRIORITY.md", "**3**.", "~~**3**~~.")
+    [v] = check_priority(
+        load(BACKLOG, broken), broken / "docs" / "backlog" / "PRIORITY.md"
+    )
+    assert "3" in v.message and "open" in v.message
+
+
+def test_a_tiered_item_is_named_under_its_tier(broken):
+    _rewrite(_item(broken, "002-the-index-drifts.md"), "tier: 2", "tier: 1")
+    [v] = check_priority(
+        load(BACKLOG, broken), broken / "docs" / "backlog" / "PRIORITY.md"
+    )
+    assert v.field == "tier" and "2" in v.message
+
+
+def test_an_id_named_under_another_tier_in_prose_is_fine(broken):
+    # The index narrates a move under the old tier; the rule runs records → index.
+    _rewrite(
+        broken / "docs" / "backlog" / "PRIORITY.md",
+        "**2**.",
+        "**2**. (**3** moved to tier 1.)",
+    )
+    assert (
+        check_priority(
+            load(BACKLOG, broken), broken / "docs" / "backlog" / "PRIORITY.md"
+        )
+        == []
+    )
+
+
+def test_no_live_surface_names_the_old_path(broken):
+    (broken / "saffron" / "example.py").write_text("# see docs/BACKLOG.md item 1\n")
+    [v] = check_no_old_path(broken)
+    assert v.path.name == "example.py"
+
+
+def test_a_done_spec_may_still_name_the_old_path(broken):
+    spec = broken / ".saffron" / "specs" / "done" / "SA-0001-a-gate.md"
+    _rewrite(spec, "backlog item 1.", "`docs/BACKLOG.md` item 1.")
+    assert check_no_old_path(broken) == []
+
+
+def test_tests_records_may_name_the_old_path(broken):
+    # Its own tests quote the old path as data, not a promise.
+    target = broken / "tests" / "records" / "x.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("# docs/BACKLOG.md\n")
+    assert check_no_old_path(broken) == []
