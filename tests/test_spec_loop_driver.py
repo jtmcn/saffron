@@ -719,19 +719,19 @@ def _ledger_with_one_cell(tmp_path):
         budget_usd=6.0,
     )
     implement = None
-    for phase, turns, cost, subtype in (
-        ("IMPLEMENTING", 20, 1.82, "success"),  # the plan checkpoint
-        ("IMPLEMENTING", 41, 2.33, "error_max_turns"),
-        ("IMPLEMENTING", 3, 0.17, "success"),  # the salvage turn
-        ("REVIEWING", 11, 0.80, "success"),
-        ("REBUTTING", 32, 3.09, "error_max_budget_usd"),
+    for phase, turns, cost, subtype, terminal_reason in (
+        ("IMPLEMENTING", 20, 1.82, "success", None),  # the plan checkpoint
+        ("IMPLEMENTING", 41, 2.33, "error_max_turns", None),
+        ("IMPLEMENTING", 3, 0.17, "success", None),  # the salvage turn
+        ("REVIEWING", 11, 0.80, "success", None),
+        ("REBUTTING", 32, 3.09, "error_max_budget_usd", "budget_exhausted"),
     ):
         attempt = ledger.open_attempt(task_id, phase)
         ledger.close_attempt(
             attempt,
             session_id=None,
             subtype=subtype,
-            terminal_reason=None,
+            terminal_reason=terminal_reason,
             num_turns=turns,
             cost_usd_est=cost,
         )
@@ -762,6 +762,19 @@ def _spec(spec_id, spec_type="bug", touches=2, criteria=3):
     )
 
 
+def test_known_specs_skips_a_missing_done_directory(tmp_path, monkeypatch):
+    # A repo with nothing retired yet has no `done/`, and `discover_specs`
+    # raises `SpecError` on a directory that does not exist.
+    specs_dir = tmp_path / ".saffron" / "specs"
+    specs_dir.mkdir(parents=True)
+    (specs_dir / "SA-0001-x.md").write_text(
+        "---\nid: SA-0001\ntitle: x\ntype: bug\n---\n"
+    )
+    monkeypatch.setattr(driver, "SPECS_DIR", specs_dir)
+
+    assert set(driver._known_specs()) == {"SA-0001"}
+
+
 def test_history_splits_a_cells_spend_by_phase_and_names_how_attempts_ended(tmp_path):
     # SA-0087: 47 of 60 turns went to the plan checkpoint, and nothing showed
     # the operator that a cell of its shape needed more.
@@ -778,7 +791,7 @@ def test_history_splits_a_cells_spend_by_phase_and_names_how_attempts_ended(tmp_
     assert cell.rebut_usd == pytest.approx(3.09)
     assert cell.endings == [
         "IMPLEMENTING error_max_turns",
-        "REBUTTING error_max_budget_usd",
+        "REBUTTING error_max_budget_usd (budget_exhausted)",
     ]
     assert cell.size == "269 changed lines within the bug ceiling of 300"
 

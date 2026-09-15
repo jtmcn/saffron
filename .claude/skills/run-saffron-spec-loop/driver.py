@@ -1124,6 +1124,8 @@ def _known_specs() -> dict[str, Spec]:
 
     found: dict[str, Spec] = {}
     for directory in (SPECS_DIR / "done", SPECS_DIR):
+        if not directory.is_dir():  # a repo with nothing retired yet has no `done/`
+            continue
         specs, _failures = discover_specs(directory)
         found.update({d.spec.id: d.spec for d in specs})
     return found
@@ -1194,6 +1196,7 @@ def _past_cells(
                     ),
                     endings=[
                         f"{a['phase']} {a['subtype']}"
+                        + (f" ({a['terminal_reason']})" if a["terminal_reason"] else "")
                         for a in attempts
                         if a["subtype"] not in (None, "success")
                     ],
