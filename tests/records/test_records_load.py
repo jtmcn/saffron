@@ -129,16 +129,15 @@ def test_a_yaml_1_1_coercion_is_refused_naming_the_field(frontmatter, field):
 _CLOSED_ITEM = "id: 1\ntitle: T\nstatus: done\nclosed: 2026-09-01\nspecs: [SA-0001]"
 
 
-@pytest.mark.parametrize(
-    "text",
-    [
-        _open_item("id: 1\ntitle: T\nstatus: open").replace("\n", "\r\n"),
-        f"---\n{_CLOSED_ITEM}\n---",
-    ],
-    ids=["crlf", "no-body"],
-)
-def test_frontmatter_that_intake_reads_a_record_reads(text):
+def test_frontmatter_that_intake_reads_a_record_reads():
+    text = _open_item("id: 1\ntitle: T\nstatus: open").replace("\n", "\r\n")
     assert parse(text, BACKLOG).model.id == 1
+
+
+def test_a_file_ending_at_its_closing_fence_is_refused_for_its_body():
+    # Naming Problem, not "no YAML frontmatter", is proof the fence was read.
+    with pytest.raises(RecordError, match="Problem"):
+        parse(f"---\n{_CLOSED_ITEM}\n---", BACKLOG)
 
 
 def test_an_unquoted_all_digit_commit_sha_is_refused_naming_commits():
@@ -149,7 +148,7 @@ def test_an_unquoted_all_digit_commit_sha_is_refused_naming_commits():
 
 
 def test_a_quoted_or_leading_zero_sha_loads_as_written():
-    text = f"---\n{_CLOSED_ITEM}\ncommits: ['1234567', 0123456, 57b676c]\n---\n"
+    text = f"---\n{_CLOSED_ITEM}\ncommits: ['1234567', 0123456, 57b676c]\n---\n\n## Problem\n\nx\n"
     assert parse(text, BACKLOG).model.model_dump(include={"commits"}) == {
         "commits": ["1234567", "0123456", "57b676c"]
     }
