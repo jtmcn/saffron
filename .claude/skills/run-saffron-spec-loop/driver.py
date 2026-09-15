@@ -1098,7 +1098,7 @@ def cmd_size(args) -> int:
 
 @dataclass
 class PastCell:
-    """One past cell's spend by phase, for the reviewer's ceilings and size checks."""
+    """One past cell's spend by phase, for a spec review's ceilings and size checks."""
 
     spec_id: str
     spec_type: str
@@ -1110,7 +1110,8 @@ class PastCell:
     plan: (
         tuple[int, float] | None
     )  # the first IMPLEMENTING attempt: the plan checkpoint
-    implement: tuple[int, float]  # every other IMPLEMENTING and REPAIRING attempt
+    implement: tuple[int, float]  # every other IMPLEMENTING attempt
+    repair: tuple[int, float]
     peak_turns: int  # the largest single attempt of any phase; max_turns bounds each
     review_usd: float
     rebut_usd: float
@@ -1162,6 +1163,15 @@ def _criteria_count(spec: Spec) -> int:
     return len(spec.acceptance) or len(spec.acceptance_criteria)
 
 
+def _spend(attempts: list, phase: str) -> tuple[int, float]:
+    """Turns and cost summed over `attempts` in `phase`."""
+    mine = [a for a in attempts if a["phase"] == phase]
+    return (
+        sum(a["num_turns"] or 0 for a in mine),
+        sum(a["cost_usd_est"] or 0.0 for a in mine),
+    )
+
+
 def _commit_time(commit: str, cwd: Path = REPO) -> str:
     """`commit`'s committer time the way the ledger writes `started_at`:
     UTC, `YYYY-MM-DD HH:MM:SS`, so the two compare as strings."""
@@ -1189,11 +1199,8 @@ def _past_cells(
                 before is not None and attempts[0]["started_at"] >= before
             ):
                 continue
-            implementing = [
-                a for a in attempts if a["phase"] in ("IMPLEMENTING", "REPAIRING")
-            ]
-            first = implementing[0] if implementing else None
-            rest = implementing[1:]
+            implementing = [a for a in attempts if a["phase"] == "IMPLEMENTING"]
+            checkpoint = implementing[0] if implementing else None
             sizes = [
                 r.summary
                 for r in ledger.task_results(row["task_id"])
@@ -1208,24 +1215,14 @@ def _past_cells(
                     started_at=attempts[0]["started_at"],
                     state=row["state"],
                     budget_usd=budgets.get(row["task_id"]),
-                    plan=(first["num_turns"] or 0, first["cost_usd_est"] or 0.0)
-                    if first is not None
+                    plan=_spend([checkpoint], "IMPLEMENTING")
+                    if checkpoint is not None
                     else None,
-                    implement=(
-                        sum(a["num_turns"] or 0 for a in rest),
-                        sum(a["cost_usd_est"] or 0.0 for a in rest),
-                    ),
+                    implement=_spend(implementing[1:], "IMPLEMENTING"),
+                    repair=_spend(attempts, "REPAIRING"),
                     peak_turns=max(a["num_turns"] or 0 for a in attempts),
-                    review_usd=sum(
-                        a["cost_usd_est"] or 0.0
-                        for a in attempts
-                        if a["phase"] == "REVIEWING"
-                    ),
-                    rebut_usd=sum(
-                        a["cost_usd_est"] or 0.0
-                        for a in attempts
-                        if a["phase"] == "REBUTTING"
-                    ),
+                    review_usd=_spend(attempts, "REVIEWING")[1],
+                    rebut_usd=_spend(attempts, "REBUTTING")[1],
                     endings=[
                         f"{a['phase']} {a['subtype']}"
                         + (f" ({a['terminal_reason']})" if a["terminal_reason"] else "")
@@ -1246,7 +1243,8 @@ def _cell_line(c: PastCell) -> str:
     return (
         f"{c.spec_id}  {c.spec_type}  touches={c.touches} criteria={c.criteria}  "
         f"{c.started_at[:10]}  {c.state}  budget {budget}  {plan}  "
-        f"implement {c.implement[0]}t ${c.implement[1]:.2f}  peak {c.peak_turns}t  "
+        f"implement {c.implement[0]}t ${c.implement[1]:.2f}  "
+        f"repair {c.repair[0]}t ${c.repair[1]:.2f}  peak {c.peak_turns}t  "
         f"review ${c.review_usd:.2f}  rebut ${c.rebut_usd:.2f}{size}{ended}"
     )
 

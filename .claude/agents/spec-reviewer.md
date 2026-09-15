@@ -69,10 +69,11 @@ trivial.
    sum, so compare it with the `peak` of the `history` rows closest in shape:
    their longest single session. A row that ended `error_max_turns` was cut
    off at its own ceiling, so its peak is a floor on what it needed, not what
-   it used. Compare `budget_usd` with those rows' total spend: plan plus
-   implement plus review plus rebut. It is a blocker if `max_turns` is at or
-   below the peak a similar cell needed, or `budget_usd` is below what
-   similar cells spent on the plan checkpoint plus IMPLEMENT. It is a concern
+   it used. Compare `budget_usd` with those rows' total spend: plan,
+   implement, repair, review and rebut. It is a blocker if `max_turns` is at
+   or below the peak a similar cell needed, or `budget_usd` is below what
+   similar cells spent before REVIEW: the plan checkpoint, IMPLEMENT and
+   REPAIR. It is a concern
    if what remains cannot cover REVIEW and REBUT at the rows' usual cost.
    Cite the rows you compared.
 5. **Size vs ceiling.** Estimate the changed lines the criteria, `touches`,

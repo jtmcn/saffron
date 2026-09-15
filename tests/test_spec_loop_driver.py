@@ -722,6 +722,7 @@ def _ledger_with_one_cell(tmp_path):
     for phase, turns, cost, subtype, terminal_reason in (
         ("IMPLEMENTING", 20, 1.82, "success", None),  # the plan checkpoint
         ("IMPLEMENTING", 41, 2.33, "error_max_turns", None),
+        ("REPAIRING", 7, 0.40, "success", None),
         ("IMPLEMENTING", 3, 0.17, "success", None),  # the salvage turn
         ("REVIEWING", 11, 0.80, "success", None),
         ("REBUTTING", 45, 3.09, "error_max_budget_usd", "budget_exhausted"),
@@ -787,6 +788,8 @@ def test_history_splits_a_cells_spend_by_phase_and_names_how_attempts_ended(tmp_
     assert cell.budget_usd == 6.0
     assert cell.plan == (20, pytest.approx(1.82))
     assert cell.implement == (44, pytest.approx(2.50))
+    assert cell.repair == (7, pytest.approx(0.40))  # REPAIR is its own phase
+    assert "implement 44t $2.50  repair 7t $0.40" in driver._cell_line(cell)
     assert cell.peak_turns == 45  # REBUT runs under `max_turns` too
     assert cell.review_usd == pytest.approx(0.80)
     assert cell.rebut_usd == pytest.approx(3.09)
@@ -837,6 +840,7 @@ def _cell(spec_id, spec_type, touches, criteria, started_at="2026-09-14 12:00:00
         budget_usd=6.0,
         plan=(20, 1.82),
         implement=(44, 2.5),
+        repair=(0, 0.0),
         peak_turns=41,
         review_usd=0.8,
         rebut_usd=0.0,
