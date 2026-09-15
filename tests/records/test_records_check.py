@@ -210,6 +210,13 @@ def test_a_non_backlog_record_is_refused_naming_the_file():
         check_links([bogus])
 
 
+def test_the_priority_check_refuses_a_non_backlog_record_too():
+    records = load(BACKLOG, FIXTURE)
+    bogus = replace(records[0], model=Identified(id=records[0].model.id, status="open"))
+    with pytest.raises(TypeError, match=str(bogus.path)):
+        check_priority([bogus], FIXTURE / "docs" / "backlog" / "PRIORITY.md")
+
+
 def test_a_done_item_may_not_name_a_spec_still_in_the_queue(broken):
     done = broken / ".saffron" / "specs" / "done" / "SA-0001-a-gate.md"
     done.rename(broken / ".saffron" / "specs" / "SA-0001-a-gate.md")
