@@ -89,6 +89,18 @@ def test_grep_prints_id_title_and_the_matching_line():
     assert any("Nothing stamps" in line for line in out)
 
 
+def test_grep_with_an_invalid_pattern_exits_two_without_a_traceback():
+    proc = run("grep", "(")
+    assert proc.returncode == 2
+    assert "Traceback" not in proc.stderr
+
+
+def test_list_refuses_an_unknown_status():
+    proc = run("list", "backlog", "--status", "opne")
+    assert proc.returncode == 2
+    assert "opne" in proc.stderr
+
+
 def test_a_broken_directory_exits_two_naming_the_file(tmp_path):
     (tmp_path / "docs" / "backlog").mkdir(parents=True)
     (tmp_path / "docs" / "backlog" / "001-x.md").write_text(

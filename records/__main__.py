@@ -7,8 +7,9 @@ import argparse
 import re
 import sys
 from pathlib import Path
+from typing import get_args
 
-from records.kinds import KINDS
+from records.kinds import KINDS, Status
 from records.load import Record, RecordError, load
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -78,11 +79,16 @@ def cmd_show(args: argparse.Namespace) -> int:
 
 
 def cmd_grep(args: argparse.Namespace) -> int:
-    pattern = re.compile(args.pattern, re.IGNORECASE)
+    try:
+        pattern = re.compile(args.pattern, re.IGNORECASE)
+    except re.error as exc:
+        print(f"invalid pattern {args.pattern}: {exc}", file=sys.stderr)
+        return 2
     for record in load(KINDS["backlog"], args.root):
         hits = [line for line in record.body.splitlines() if pattern.search(line)]
         if hits:
-            print(f"{record.model.id:>3}  {getattr(record.model, 'title', '')}")
+            title = getattr(record.model, "title", "")
+            print(f"{record.model.id:>3}  {title}")
             for hit in hits:
                 print(f"     {hit}")
     return 0
@@ -94,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("list", help="one line per record")
     p.add_argument("kind", choices=sorted(KINDS))
-    p.add_argument("--status")
+    p.add_argument("--status", choices=get_args(Status))
     p.add_argument("--tier", type=int)
     _add_root(p)
     p.set_defaults(func=cmd_list)
