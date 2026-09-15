@@ -951,11 +951,16 @@ def test_specs_at_reads_other_specs_as_they_stood_and_keeps_todays_where_absent(
 def test_history_before_shows_every_spec_as_it_stood_and_none_of_the_targets_cells(
     empty_repo, monkeypatch, capsys
 ):
-    # The helpers above were each tested; that `cmd_history` wires all three
+    # The helpers above were each tested; that `cmd_history` wires all four
     # into `--before` was not, and a mutant dropping any one passed.
+    from saffron.ledger import Ledger
+
     tmp_path = empty_repo
     (tmp_path / ".saffron" / "specs").mkdir(parents=True)
-    _commit(tmp_path, ".saffron/specs/SA-0001-x.md", _spec_text(60))
+    monkeypatch.setenv(
+        "GIT_COMMITTER_DATE", "2000-01-01T00:00:00Z"
+    )  # before every cell
+    early = _commit(tmp_path, ".saffron/specs/SA-0001-x.md", _spec_text(60))
     monkeypatch.setenv("GIT_COMMITTER_DATE", "2099-01-01T00:00:00Z")  # after every cell
     then = _commit(
         tmp_path,
@@ -979,7 +984,16 @@ def test_history_before_shows_every_spec_as_it_stood_and_none_of_the_targets_cel
     real_git = driver._git
     monkeypatch.setattr(driver, "_git", lambda *a, cwd=None: real_git(*a, cwd=tmp_path))
     monkeypatch.setattr(driver, "_known_specs", lambda: today)
-    monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (ledger, repo_id, "u"))
+    ledger.close()
+    monkeypatch.setattr(  # `cmd_history` closes the ledger it is handed
+        driver,
+        "_ledger_and_repo",
+        lambda: (Ledger(tmp_path / "ledger.db"), repo_id, "u"),
+    )
+
+    args = SimpleNamespace(spec_id="SA-0001", before=early, limit=12)
+    assert driver.cmd_history(args) == 0
+    assert capsys.readouterr().out.splitlines()[1:] == []  # every cell started later
 
     args = SimpleNamespace(spec_id="SA-0001", before=then, limit=12)
     assert driver.cmd_history(args) == 0
