@@ -1,8 +1,9 @@
 ---
 id: 86
 title: The notes channel's two rendering-side safety properties are unwitnessed
-status: open
+status: done
 tier: 3
+closed: 2026-09-12
 specs: [SA-0063, SA-0064]
 prs: []
 commits: [0631855]

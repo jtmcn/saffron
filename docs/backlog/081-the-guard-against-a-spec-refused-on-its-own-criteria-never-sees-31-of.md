@@ -3,6 +3,7 @@ id: 81
 title: The guard against a spec refused on its own criteria never sees 31 of 53 specs
 status: done
 tier: 1
+closed: 2026-09-08
 specs: [SA-0001, SA-0011, SA-0015, SA-0016, SA-0021, SA-0060, SA-0063]
 prs: []
 commits: []

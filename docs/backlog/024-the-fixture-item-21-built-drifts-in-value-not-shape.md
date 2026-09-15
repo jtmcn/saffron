@@ -3,6 +3,7 @@ id: 24
 title: The fixture item 21 built drifts in value, not shape
 status: done
 tier: null
+closed: 2026-08-28
 specs: [SA-0012, SA-0013]
 prs: [49, 51]
 commits: []

@@ -3,6 +3,7 @@ id: 72
 title: '`witness` and `mutant` exist in code and in no vocabulary, and the guard for that reads the vocabulary'
 status: done
 tier: 2
+closed: 2026-09-07
 specs: [SA-0045, SA-0056, SA-0057, SA-0058, SA-0063, SA-0064]
 prs: []
 commits: []

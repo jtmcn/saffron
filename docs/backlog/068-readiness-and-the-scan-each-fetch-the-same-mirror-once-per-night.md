@@ -1,7 +1,7 @@
 ---
 id: 68
 title: Readiness and the scan each fetch the same mirror, once per night
-status: open
+status: done
 tier: 3
 specs: [SA-0054, SA-0055]
 prs: [123, 131]

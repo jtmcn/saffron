@@ -3,6 +3,7 @@ id: 83
 title: A mutant that matches at the base commit kills the task before it starts
 status: done
 tier: 1
+closed: 2026-09-08
 specs: [SA-0063, SA-0064]
 prs: []
 commits: []

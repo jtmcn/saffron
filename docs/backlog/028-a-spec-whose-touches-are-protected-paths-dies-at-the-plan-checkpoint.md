@@ -3,6 +3,7 @@ id: 28
 title: A spec whose `touches` are protected paths dies at the plan checkpoint with no exit
 status: done
 tier: null
+closed: 2026-08-31
 specs: [SA-0016, SA-0021, SA-0023]
 prs: []
 commits: []

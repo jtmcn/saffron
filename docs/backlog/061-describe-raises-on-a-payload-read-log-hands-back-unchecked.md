@@ -3,6 +3,7 @@ id: 61
 title: '`describe` raises on a payload `read_log` hands back unchecked'
 status: done
 tier: 1
+closed: 2026-09-12
 specs: [SA-0053, SA-0070]
 prs: [119, 221]
 commits: []

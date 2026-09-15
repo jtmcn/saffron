@@ -3,6 +3,7 @@ id: 47
 title: Every gate attempt in `events.jsonl` claims zero commits and zero spend, and part 3 is built to read it
 status: done
 tier: 1
+closed: 2026-09-11
 specs: [SA-0034, SA-0035, SA-0039, SA-0041, SA-0042]
 prs: []
 commits: []

@@ -35,7 +35,15 @@ PR = re.compile(r"(?:PR|pull request) #(\d+)", re.IGNORECASE)
 COMMIT = re.compile(r"`([0-9a-f]{7,10})`")
 ITEMS = re.compile(r"(?i)\b(?:backlog\s+)?items?\s+((?:\*{0,2}\d{1,3}\*{0,2}(?:\s*(?:,|and|–|—|-)\s*)?)+)")
 DONE_DATE = re.compile(r"^\*\*Done, (20\d\d-\d\d-\d\d)", re.MULTILINE)
-STATUS_LINE = re.compile(r"^\*\*Status:\*\* (.+)$", re.MULTILINE)
+# Two ways the file spells a status line: colon outside the bold
+# (`**Status:** done, ...`) or inside it (`**Status: done** — ...`, sometimes
+# wrapped, so the closing `**` lands on the next physical line).
+STATUS_LINE = re.compile(
+    r"^\*\*Status:(?:\*\*[ ]+(?P<rest1>.+)|[ ]+(?s:(?P<rest2>.+?))\*\*(?P<tail2>.*))$",
+    re.MULTILINE,
+)
+STATUS_DATE = re.compile(r"20\d\d-\d\d-\d\d")
+PARTIAL_CUES = ("partly", "partial", "half", "done bar", "done except", "bar the")
 TIER_HEADING = re.compile(r"^### Tier (\d)\b")
 STRUCK = re.compile(r"~~\*\*(\d+)\*\*~~")
 BOLD = re.compile(r"\*\*(\d+)\*\*")
@@ -97,12 +105,19 @@ def tiers(priority: str) -> tuple[dict[int, int], set[int]]:
 
 def status_of(body: str, struck: bool) -> tuple[str, str | None]:
     dates = DONE_DATE.findall(body)
-    line = STATUS_LINE.search(body)
-    head = (line.group(1).lower() if line else "")
-    if "partly" in head or "half" in head or "partial" in head:
+    m = STATUS_LINE.search(body)
+    head = ""
+    if m:
+        rest1 = m.group("rest1")
+        head = rest1 if rest1 is not None else (m.group("rest2") or "") + (m.group("tail2") or "")
+    head = head.lower()
+    if any(cue in head for cue in PARTIAL_CUES):
         return "partial", None
-    if "done" in head or "merged" in head or dates or struck:
-        return "done", (dates[-1] if dates else None)
+    if "done" in head or "merged" in head or "closed" in head or dates or struck:
+        closed = dates[-1] if dates else None
+        if closed is None and (found := STATUS_DATE.search(head)):
+            closed = found.group(0)
+        return "done", closed
     return "open", None
 
 

@@ -1,7 +1,7 @@
 ---
 id: 10
 title: Small, measured, cheap
-status: done
+status: partial
 tier: 3
 specs: [SA-0002]
 prs: []

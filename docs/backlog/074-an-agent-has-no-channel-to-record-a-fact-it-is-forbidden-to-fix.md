@@ -1,8 +1,9 @@
 ---
 id: 74
 title: An agent has no channel to record a fact it is forbidden to fix
-status: open
+status: done
 tier: 1
+closed: 2026-09-07
 specs: [SA-0044, SA-0058, SA-0061, SA-0063, SA-0064]
 prs: [150, 158, 160]
 commits: [bb9fd74]

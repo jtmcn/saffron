@@ -1,8 +1,9 @@
 ---
 id: 97
 title: A delegate's review fixes reach a task's pull request and no gate, critic or record
-status: open
+status: done
 tier: 1
+closed: 2026-09-10
 specs: []
 prs: [189]
 commits: []

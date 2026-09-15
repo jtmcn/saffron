@@ -3,6 +3,7 @@ id: 7
 title: '`CLAUDE.md` no longer reaches the agent, so the flywheel''s middle bucket is inert'
 status: done
 tier: 1
+closed: 2026-09-11
 specs: []
 prs: []
 commits: []

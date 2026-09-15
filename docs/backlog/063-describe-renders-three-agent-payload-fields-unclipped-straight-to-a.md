@@ -1,8 +1,9 @@
 ---
 id: 63
 title: '`describe` renders three agent payload fields unclipped, straight to a terminal'
-status: open
+status: done
 tier: 1
+closed: 2026-09-12
 specs: [SA-0029, SA-0053, SA-0070, SA-0080, SA-0084]
 prs: [119, 221, 249]
 commits: []

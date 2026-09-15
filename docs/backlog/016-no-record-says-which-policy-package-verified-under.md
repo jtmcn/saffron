@@ -1,7 +1,7 @@
 ---
 id: 16
 title: No record says which policy PACKAGE verified under
-status: open
+status: done
 tier: 0
 specs: [SA-0046]
 prs: [116]

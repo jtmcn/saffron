@@ -3,6 +3,7 @@ id: 109
 title: A mutant its witness survives is spelled out to the implementer in the repair turn
 status: done
 tier: 1
+closed: 2026-09-14
 specs: [SA-0078]
 prs: [243]
 commits: []

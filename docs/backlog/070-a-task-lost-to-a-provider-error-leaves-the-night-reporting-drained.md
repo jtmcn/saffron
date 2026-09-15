@@ -3,6 +3,7 @@ id: 70
 title: A task lost to a provider error leaves the night reporting `DRAINED`, exit 0
 status: done
 tier: 1
+closed: 2026-09-12
 specs: [SA-0048, SA-0057, SA-0067]
 prs: [136, 216]
 commits: []

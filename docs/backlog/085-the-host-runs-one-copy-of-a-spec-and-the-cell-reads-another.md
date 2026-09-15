@@ -3,6 +3,7 @@ id: 85
 title: The host runs one copy of a spec and the cell reads another
 status: done
 tier: 1
+closed: 2026-09-08
 specs: [SA-0064]
 prs: []
 commits: []

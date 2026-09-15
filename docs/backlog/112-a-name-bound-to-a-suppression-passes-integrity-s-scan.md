@@ -3,6 +3,7 @@ id: 112
 title: A name bound to a suppression passes `integrity`'s scan
 status: done
 tier: 1
+closed: 2026-09-13
 specs: [SA-0077]
 prs: [232]
 commits: []

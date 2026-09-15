@@ -3,6 +3,7 @@ id: 82
 title: A mutant can pin the text a spec dictates or the text an agent writes, never both
 status: done
 tier: 1
+closed: 2026-09-08
 specs: [SA-0063, SA-0064]
 prs: []
 commits: []

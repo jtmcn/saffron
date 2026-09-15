@@ -1,7 +1,7 @@
 ---
 id: 44
 title: A single turn can overshoot the budget ceiling, because the check runs before it
-status: open
+status: done
 tier: 0
 specs: [SA-0031, SA-0050, SA-0059]
 prs: [121]

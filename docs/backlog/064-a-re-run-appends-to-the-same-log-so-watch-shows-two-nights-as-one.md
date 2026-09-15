@@ -3,6 +3,7 @@ id: 64
 title: A re-run appends to the same log, so `watch` shows two nights as one
 status: done
 tier: 3
+closed: 2026-09-14
 specs: [SA-0051, SA-0080, SA-0081]
 prs: [248]
 commits: []

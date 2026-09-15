@@ -3,6 +3,7 @@ id: 27
 title: '`SA-0018` built a door it could not document, and the prompt then contradicted it'
 status: done
 tier: null
+closed: 2026-08-30
 specs: [SA-0018, SA-0021]
 prs: []
 commits: []

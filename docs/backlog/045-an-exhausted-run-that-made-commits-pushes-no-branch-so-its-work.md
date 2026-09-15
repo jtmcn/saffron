@@ -3,6 +3,7 @@ id: 45
 title: An `EXHAUSTED` run that made commits pushes no branch, so its work survives only as a patch
 status: done
 tier: 1
+closed: 2026-09-12
 specs: [SA-0028, SA-0030, SA-0031, SA-0069]
 prs: [214]
 commits: []

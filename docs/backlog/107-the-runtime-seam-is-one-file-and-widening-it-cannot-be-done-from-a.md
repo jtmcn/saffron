@@ -3,6 +3,7 @@ id: 107
 title: The runtime seam is one file, and widening it cannot be done from a cell
 status: done
 tier: 3
+closed: 2026-09-11
 specs: [SA-0077]
 prs: []
 commits: []

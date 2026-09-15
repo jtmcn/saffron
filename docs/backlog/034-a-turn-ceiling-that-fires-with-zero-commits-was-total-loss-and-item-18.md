@@ -3,6 +3,7 @@ id: 34
 title: A turn ceiling that fires with zero commits was total loss, and item 18's prompt was not enough
 status: done
 tier: null
+closed: 2026-09-01
 specs: [SA-0005, SA-0025, SA-0028]
 prs: [87]
 commits: []

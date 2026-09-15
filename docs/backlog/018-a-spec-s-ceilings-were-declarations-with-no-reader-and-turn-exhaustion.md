@@ -3,6 +3,7 @@ id: 18
 title: A spec's ceilings were declarations with no reader, and turn exhaustion is total loss
 status: done
 tier: null
+closed: 2026-08-25
 specs: [SA-0005, SA-0007, SA-0014, SA-0016, SA-0018]
 prs: []
 commits: []

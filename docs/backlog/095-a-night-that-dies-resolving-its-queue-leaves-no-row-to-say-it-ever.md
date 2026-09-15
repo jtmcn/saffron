@@ -3,6 +3,7 @@ id: 95
 title: A night that dies resolving its queue leaves no row to say it ever started
 status: done
 tier: 1
+closed: 2026-09-12
 specs: [SA-0065, SA-0066]
 prs: [212]
 commits: []

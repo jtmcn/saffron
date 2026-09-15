@@ -3,6 +3,7 @@ id: 62
 title: A follower re-reads the whole log every poll, so watching a night is O(n²)
 status: done
 tier: 3
+closed: 2026-09-14
 specs: [SA-0053, SA-0080]
 prs: [119, 247]
 commits: []

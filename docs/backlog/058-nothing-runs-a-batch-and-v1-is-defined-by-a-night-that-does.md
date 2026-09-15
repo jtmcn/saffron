@@ -1,7 +1,7 @@
 ---
 id: 58
 title: Nothing runs a batch, and v1 is defined by a night that does
-status: open
+status: done
 tier: null
 specs: [SA-0009, SA-0045, SA-0054]
 prs: []

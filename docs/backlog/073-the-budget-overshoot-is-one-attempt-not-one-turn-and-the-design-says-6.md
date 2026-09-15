@@ -3,6 +3,7 @@ id: 73
 title: The budget overshoot is one attempt, not one turn, and the design says 6.5%
 status: done
 tier: 1
+closed: 2026-09-12
 specs: [SA-0031, SA-0059]
 prs: []
 commits: []

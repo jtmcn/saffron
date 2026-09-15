@@ -3,6 +3,7 @@ id: 35
 title: An inertness guard names its own successor, and nothing checked the successor could reach it
 status: done
 tier: null
+closed: 2026-09-01
 specs: [SA-0022, SA-0025, SA-0026, SA-0027, SA-0031]
 prs: []
 commits: []

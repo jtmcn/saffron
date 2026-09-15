@@ -1,8 +1,9 @@
 ---
 id: 111
 title: '`runtime.probe()`''s once-per-session answer and its timeout are both untested'
-status: open
+status: done
 tier: 3
+closed: 2026-09-14
 specs: [SA-0077, SA-0079]
 prs: [232, 245]
 commits: []

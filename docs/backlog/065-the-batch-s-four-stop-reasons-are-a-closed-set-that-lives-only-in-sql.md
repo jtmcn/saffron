@@ -1,7 +1,7 @@
 ---
 id: 65
 title: The batch's four stop reasons are a closed set that lives only in SQL
-status: open
+status: done
 tier: 3
 specs: [SA-0045, SA-0049]
 prs: [115]

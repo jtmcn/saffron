@@ -1,8 +1,9 @@
 ---
 id: 71
 title: '`witness` is built, wired, and cannot run — the `tree` it needs does not exist in a cell'
-status: open
+status: done
 tier: 1
+closed: 2026-09-08
 specs: [SA-0058, SA-0060, SA-0061, SA-0062, SA-0063, SA-0064]
 prs: [139, 148]
 commits: []

@@ -1,8 +1,9 @@
 ---
 id: 60
 title: A review lens's whole report is discarded on a schema error, and nothing re-prompts
-status: open
+status: done
 tier: 2
+closed: 2026-09-10
 specs: [SA-0053]
 prs: []
 commits: [4139fbb]

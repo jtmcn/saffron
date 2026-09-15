@@ -3,6 +3,7 @@ id: 84
 title: '`revert` judges a witness whose subject the spec forbids'
 status: done
 tier: 1
+closed: 2026-09-08
 specs: [SA-0063, SA-0064]
 prs: []
 commits: []

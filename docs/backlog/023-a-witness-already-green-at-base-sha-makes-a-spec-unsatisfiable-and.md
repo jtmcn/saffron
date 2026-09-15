@@ -3,6 +3,7 @@ id: 23
 title: A witness already green at `base_sha` makes a spec unsatisfiable, and nothing says so
 status: done
 tier: 3
+closed: 2026-09-14
 specs: [SA-0005, SA-0011, SA-0084, SA-0085]
 prs: [250]
 commits: []

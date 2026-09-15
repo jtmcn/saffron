@@ -3,6 +3,7 @@ id: 22
 title: Core gate names are not reserved, and `pr_body` is now a second consumer of that hole
 status: done
 tier: 3
+closed: 2026-09-10
 specs: [SA-0011]
 prs: []
 commits: [2c3b231]

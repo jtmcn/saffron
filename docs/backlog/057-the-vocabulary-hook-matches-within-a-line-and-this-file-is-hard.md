@@ -3,6 +3,7 @@ id: 57
 title: The vocabulary hook matches within a line, and this file is hard-wrapped
 status: done
 tier: 1
+closed: 2026-09-12
 specs: [SA-0073]
 prs: [220]
 commits: []

@@ -3,6 +3,7 @@ id: 26
 title: Discovery cannot tell an empty night from a missing directory
 status: done
 tier: 1
+closed: 2026-09-10
 specs: [SA-0014, SA-0015, SA-0017, SA-0065]
 prs: [56, 185]
 commits: [30bd85c]

@@ -1,7 +1,7 @@
 ---
 id: 94
 title: A probe's baseline failures are subtracted and then discarded
-status: done
+status: partial
 tier: 1
 specs: [SA-0054, SA-0063]
 prs: []
