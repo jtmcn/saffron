@@ -42,14 +42,22 @@ acceptance:
       The diff the lenses are shown, and the file contents a finding is
       anchored against, are read from that other container's tree, which is
       the task's base with the exported patch applied, not from the
-      implementer's worktree.
-    witness: tests/test_session.py::test_the_critic_reads_the_tree_rebuilt_from_the_exported_patch
+      implementer's worktree. That includes a finding cited outside every
+      diff hunk, whose file content is read in the critic cell.
+    witness: tests/test_session.py::test_a_finding_outside_the_diff_is_anchored_against_the_critic_cells_tree
   - claim: >-
       A patch that does not apply to its own base in that fresh tree ends the
       task `EXHAUSTED` before any lens runs, and the reason it reports names
       the patch that failed to apply, so the end cannot be read as a task
       that ran out of attempts on its gates.
     witness: tests/test_session.py::test_a_patch_that_does_not_apply_to_its_base_never_reaches_review
+  - claim: >-
+      A patch that could never apply, because the export carries a binary
+      change as a `Binary files ... differ` stub, ends the task `GATE_ERROR`
+      before any lens runs, not `EXHAUSTED`, and the reason names the binary
+      change. The gap is the export's, not the agent's, as PACKAGE's
+      `apply_patch` already treats it.
+    witness: tests/test_session.py::test_a_binary_change_the_export_cannot_carry_ends_in_gate_error
   - claim: >-
       The container, worktree volume and state volume created for the lenses
       are removed when REVIEW ends, including when a lens raises.
@@ -109,8 +117,9 @@ model-authored code as root in the container the lenses then re-exec their
 runner from. That is `SA-0089`.
 
 **Changing `saffron/cell/worktree.py` or `saffron/cell/runtime.py`.** Both are
-forbidden: `SA-0074`, `SA-0075` and `SA-0077` are queued against them. Call
-their existing functions; build anything new in `session.py`.
+forbidden. Call their existing functions; build anything new in `session.py`.
+Giving the export `--binary` would change every patch PACKAGE applies, and is
+not this spec's to decide.
 
 **Vocabulary.** "Critic cell" is defined in `CONTEXT.md` §5, and that is the
 name to use. Do not edit `ontology/`.
@@ -145,11 +154,22 @@ cell, the same bytes the operator gets. Hand it to `git apply` on stdin, with
 single argument at 128 KiB, and a limit that is Saffron's must not end a task
 the agent is charged for.
 
-**A patch that will not apply is the task's, not infrastructure.** Do not end
-it `GATE_ERROR` or raise it as a runtime failure. Both are charged to nobody,
+**A patch that will not apply is the task's, unless the export could never
+have carried it.** A real failure to apply is the agent's. Do not end it
+`GATE_ERROR` or raise it as a runtime failure. Both are charged to nobody,
 and an agent-controlled failure that is charged to nobody is a free way to
 disarm a check (`d3b9c51`). `EXHAUSTED`, with a `why` naming the apply
 failure, is the existing state that fits.
+
+The one exception is a binary change. `worktree.DIFF_FLAGS` has no `--binary`
+or `--full-index`, so the export carries a binary change as a stub that no
+base can apply, whatever the agent did, and `git apply` reports `without full
+index line`. PACKAGE already reads that marker as infrastructure
+(`_NO_FULL_INDEX` in `saffron/phases/package.py`,
+`test_a_binary_patch_is_an_error_not_a_conflict`). Match the same marker,
+imported inside the function, and end the task `GATE_ERROR`. Nothing ships
+from either end, so the critic is not bypassed. The difference is only who is
+charged.
 
 **Test through `_drive`.** `_stub_the_runtime` and `_drive` in
 `tests/test_session.py` already run `_drive_cell` against stubs. The agent
@@ -157,8 +177,17 @@ callable receives the container as its first argument, so a stub that records
 it can tell a lens turn's container from the implementer's. Every new witness
 must fail with `session.py` reverted. Reverted, the lenses get the
 implementer's container and no critic cell exists, so honest tests of the
-four criteria fail. `_drive(capture=...)` collects the raw events, so the
-third witness can read the reason and not the state alone (principle 55).
+five criteria fail. `_drive(capture=...)` collects the raw events, so the
+two apply witnesses can read the reason and not the state alone (principle 55).
+
+**The anchoring witness must script a finding outside every hunk.** `anchor()`
+calls `read_head` only for a finding whose line is not in a diff hunk
+(`_is_anchored`, `saffron/agents/findings.py`), and a lens stub that returns
+`{"findings": []}` never reaches it. Script a lens finding on a line outside
+the patch's hunks, and assert that `read_head` ran and ran in the critic
+cell's container. A witness that accepts "`read_head` never ran" passes with
+`read_head` pointed at the implementer's container, which is the regression
+this spec exists to prevent (backlog item 118).
 Import nothing new at module scope: a module-scope import
 of a name you add turns the reverted run into a collection error, which
 `revert` reads as `skip`.
@@ -169,4 +198,6 @@ even inside `touches`.
 
 **The `size` gate counts tests.** A `bug` gets 300 changed lines, tests
 included. Keep the critic cell's lifecycle in one function that REVIEW calls,
-so `SA-0088` can call it again.
+so `SA-0088` can call it again. An earlier build of the other criteria came
+to about 290 lines, so share one stub and one setup helper across the
+witnesses rather than repeating them.

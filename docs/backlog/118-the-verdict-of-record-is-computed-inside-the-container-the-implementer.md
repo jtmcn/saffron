@@ -7,7 +7,7 @@ filed: 2026-09-13
 by_hand: true
 specs: [SA-0086, SA-0087, SA-0088, SA-0089]
 prs: [255]
-commits: [4ba8bdf, 82258f0]
+commits: [4ba8bdf]
 cites: [§5.4, §5.5, §5.7]
 related: [2, 40, 89, 97, 98, 102, 103, 119, 120]
 ---
@@ -117,3 +117,10 @@ its ceilings raised in #256, went green on its first attempt and halted at
 `REBUTTING` when REBUT ran out of budget ($14.03 of $14, item 120). Its branch,
 `saffron/SA-0087` @ `82258f0`, is pushed with no pull request. The operator
 stopped the chain there, so `SA-0088` and `SA-0089` never ran.
+
+**2026-09-15:** `SA-0087` amended before its third run, in PR #263. Its
+third criterion now splits a real failure to apply (`EXHAUSTED`) from a
+binary stub the export could never carry (`GATE_ERROR`). Its second
+criterion's witness must anchor a finding outside every hunk and see
+`read_head` run in the critic cell. The halted branch, `saffron/SA-0087` @
+`82258f0`, is discarded, and the next cell starts from the base.
