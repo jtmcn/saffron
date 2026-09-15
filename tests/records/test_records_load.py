@@ -1,0 +1,91 @@
+"""A record is its frontmatter plus its body split at `## ` headings; a file
+that breaks a rule is refused with the file and the field named."""
+
+from pathlib import Path
+
+import pytest
+
+from records.kinds import KINDS
+from records.load import Record, RecordError, load, parse, split_sections
+
+FIXTURE = Path(__file__).resolve().parent / "fixtures" / "good"
+BACKLOG = KINDS["backlog"]
+
+
+def test_sections_split_at_h2_and_keep_h3_inside():
+    body = "## Problem\n\nA.\n\n### Defect A\n\nB.\n\n## Record\n\nC.\n"
+    assert split_sections(body) == {
+        "Problem": "A.\n\n### Defect A\n\nB.",
+        "Record": "C.",
+    }
+
+
+def test_a_fenced_h2_is_not_a_heading():
+    body = "## Problem\n\n```\n## not a heading\n```\n\n## Record\n\nx\n"
+    assert list(split_sections(body)) == ["Problem", "Record"]
+
+
+def test_load_reads_every_item_in_id_order():
+    records = load(BACKLOG, FIXTURE)
+    assert [r.model.id for r in records] == [1, 2, 3]
+    assert all(isinstance(r, Record) for r in records)
+    assert records[0].sections["Done looks like"].startswith("`tool` is obtained")
+
+
+def test_load_ignores_the_hand_written_files():
+    names = {r.path.name for r in load(BACKLOG, FIXTURE)}
+    assert "README.md" not in names and "PRIORITY.md" not in names
+
+
+def test_a_filename_whose_prefix_disagrees_with_its_id_is_refused(tmp_path):
+    item = tmp_path / "docs" / "backlog" / "009-nine.md"
+    item.parent.mkdir(parents=True)
+    item.write_text(
+        "---\nid: 8\ntitle: Eight\nstatus: open\n---\n\n## Problem\n\nx\n\n## Done looks like\n\ny\n"
+    )
+    with pytest.raises(RecordError, match="009-nine.md.*id"):
+        load(BACKLOG, tmp_path)
+
+
+def test_a_file_with_no_frontmatter_is_refused():
+    with pytest.raises(RecordError, match="frontmatter"):
+        parse("## Problem\n\nx\n", BACKLOG)
+
+
+def test_a_bad_field_names_the_field():
+    with pytest.raises(RecordError, match="tier"):
+        parse(
+            "---\nid: 1\ntitle: T\nstatus: open\ntier: 9\n---\n\n## Problem\n\nx\n\n## Done looks like\n\ny\n",
+            BACKLOG,
+        )
+
+
+@pytest.mark.parametrize("status", ["open", "partial"])
+def test_an_unfinished_item_needs_done_looks_like(status):
+    text = f"---\nid: 1\ntitle: T\nstatus: {status}\n---\n\n## Problem\n\nx\n\n## Record\n\n**Done, 2026-01-01.** half\n"
+    with pytest.raises(RecordError, match="Done looks like"):
+        parse(text, BACKLOG)
+
+
+def test_a_partial_item_needs_a_dated_record_entry():
+    text = "---\nid: 1\ntitle: T\nstatus: partial\n---\n\n## Problem\n\nx\n\n## Done looks like\n\ny\n\n## Record\n\nno date here\n"
+    with pytest.raises(RecordError, match="Record.*dated"):
+        parse(text, BACKLOG)
+
+
+def test_an_unknown_section_is_refused():
+    text = "---\nid: 1\ntitle: T\nstatus: open\n---\n\n## Problem\n\nx\n\n## Done looks like\n\ny\n\n## Notes\n\nz\n"
+    with pytest.raises(RecordError, match="Notes"):
+        parse(text, BACKLOG)
+
+
+def test_sections_must_keep_their_order():
+    text = "---\nid: 1\ntitle: T\nstatus: open\n---\n\n## Done looks like\n\ny\n\n## Problem\n\nx\n"
+    with pytest.raises(RecordError, match="order"):
+        parse(text, BACKLOG)
+
+
+def test_a_missing_directory_is_refused_naming_it(tmp_path):
+    missing = tmp_path / "docs" / "backlog"
+    with pytest.raises(RecordError, match=str(missing)):
+        load(BACKLOG, tmp_path)
