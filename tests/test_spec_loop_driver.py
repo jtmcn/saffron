@@ -127,14 +127,21 @@ def _commit(cwd, name, text):
 
 
 @pytest.fixture
-def repo(tmp_path, monkeypatch):
-    """main at M0; `a` cut from M0; `b` a child of `a`; `c` a sibling cut from
-    M0; main then advances to M1, and `d` is a sibling cut from M1."""
+def empty_repo(tmp_path, monkeypatch):
+    """A git repo on `main` with no commits, blind to the host's git config."""
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.email", "t@example.com")
     _git(tmp_path, "config", "user.name", "t")
+    return tmp_path
+
+
+@pytest.fixture
+def repo(empty_repo):
+    """main at M0; `a` cut from M0; `b` a child of `a`; `c` a sibling cut from
+    M0; main then advances to M1, and `d` is a sibling cut from M1."""
+    tmp_path = empty_repo
     tips = {"M0": _commit(tmp_path, "base.txt", "base\n")}
     _git(tmp_path, "checkout", "-q", "-b", "a")
     tips["a"] = _commit(tmp_path, "a.txt", "a\n")
@@ -838,9 +845,9 @@ def _cell(spec_id, spec_type, touches, criteria, started_at="2026-09-14 12:00:00
         started_at=started_at,
         state="READY_FOR_REVIEW",
         budget_usd=6.0,
-        plan=(20, 1.82),
-        implement=(44, 2.5),
-        repair=(0, 0.0),
+        plan=driver.Spend(20, 1.82),
+        implement=driver.Spend(44, 2.5),
+        repair=driver.Spend(0, 0.0),
         peak_turns=41,
         review_usd=0.8,
         rebut_usd=0.0,
@@ -879,13 +886,9 @@ def _spec_text(max_turns):
     return f"---\nid: SA-0001\ntitle: x\ntype: bug\nmax_turns: {max_turns}\n---\n"
 
 
-def test_spec_at_reads_the_spec_as_it_stood_at_the_commit(tmp_path, monkeypatch):
+def test_spec_at_reads_the_spec_as_it_stood_at_the_commit(empty_repo):
     # SA-0087@24edb32's header showed its later 90 turns, not the 60 it was run at.
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
-    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    _git(tmp_path, "init", "-q", "-b", "main")
-    _git(tmp_path, "config", "user.email", "t@example.com")
-    _git(tmp_path, "config", "user.name", "t")
+    tmp_path = empty_repo
     specs = tmp_path / ".saffron" / "specs"
     (specs / "done").mkdir(parents=True)
     first = _commit(tmp_path, ".saffron/specs/SA-0001-x.md", _spec_text(60))
@@ -898,14 +901,10 @@ def test_spec_at_reads_the_spec_as_it_stood_at_the_commit(tmp_path, monkeypatch)
 
 
 def test_spec_at_reads_a_spec_that_todays_intake_refuses_as_a_disclosed_mutant(
-    tmp_path, monkeypatch
+    empty_repo,
 ):
     # SA-0063 predates item 82's check; `history` still needs its shape.
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
-    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    _git(tmp_path, "init", "-q", "-b", "main")
-    _git(tmp_path, "config", "user.email", "t@example.com")
-    _git(tmp_path, "config", "user.name", "t")
+    tmp_path = empty_repo
     (tmp_path / ".saffron" / "specs").mkdir(parents=True)
     text = (
         "---\n"
@@ -932,15 +931,11 @@ def test_spec_at_reads_a_spec_that_todays_intake_refuses_as_a_disclosed_mutant(
 
 
 def test_specs_at_reads_other_specs_as_they_stood_and_keeps_todays_where_absent(
-    tmp_path, monkeypatch
+    empty_repo,
 ):
     # A blind review ranks past cells by shape; today's text for them is later
     # than the base it reviews.
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
-    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    _git(tmp_path, "init", "-q", "-b", "main")
-    _git(tmp_path, "config", "user.email", "t@example.com")
-    _git(tmp_path, "config", "user.name", "t")
+    tmp_path = empty_repo
     (tmp_path / ".saffron" / "specs").mkdir(parents=True)
     then = _commit(tmp_path, ".saffron/specs/SA-0001-x.md", _spec_text(60))
     _commit(tmp_path, ".saffron/specs/SA-0001-x.md", _spec_text(90))
@@ -951,6 +946,48 @@ def test_specs_at_reads_other_specs_as_they_stood_and_keeps_todays_where_absent(
 
     assert shapes["SA-0001"].max_turns == 60
     assert shapes["SA-0002"] is today["SA-0002"]  # no text at `then` to read
+
+
+def test_history_before_shows_every_spec_as_it_stood_and_none_of_the_targets_cells(
+    empty_repo, monkeypatch, capsys
+):
+    # The helpers above were each tested; that `cmd_history` wires all three
+    # into `--before` was not, and a mutant dropping any one passed.
+    tmp_path = empty_repo
+    (tmp_path / ".saffron" / "specs").mkdir(parents=True)
+    _commit(tmp_path, ".saffron/specs/SA-0001-x.md", _spec_text(60))
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2099-01-01T00:00:00Z")  # after every cell
+    then = _commit(
+        tmp_path,
+        ".saffron/specs/SA-0002-y.md",
+        "---\nid: SA-0002\ntitle: y\ntype: bug\ntouches: [a.py, b.py]\n---\n",
+    )
+    ledger, repo_id = _ledger_with_one_cell(tmp_path)
+    other = ledger.create_task(
+        ledger.create_run(repo_id, "b" * 40), "SA-0002", "t" * 40, "saffron/SA-0002"
+    )
+    ledger.close_attempt(
+        ledger.open_attempt(other, "IMPLEMENTING"),
+        session_id=None,
+        subtype="success",
+        terminal_reason=None,
+        num_turns=5,
+        cost_usd_est=0.5,
+    )
+    today = {"SA-0001": _spec("SA-0001"), "SA-0002": _spec("SA-0002", touches=9)}
+    today["SA-0001"].max_turns = 90
+    real_git = driver._git
+    monkeypatch.setattr(driver, "_git", lambda *a, cwd=None: real_git(*a, cwd=tmp_path))
+    monkeypatch.setattr(driver, "_known_specs", lambda: today)
+    monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (ledger, repo_id, "u"))
+
+    args = SimpleNamespace(spec_id="SA-0001", before=then, limit=12)
+    assert driver.cmd_history(args) == 0
+
+    header, *cells = capsys.readouterr().out.splitlines()
+    assert "max_turns=60" in header
+    assert [line.split()[0] for line in cells] == ["SA-0002"]
+    assert "touches=2" in cells[0]
 
 
 def test_commit_time_is_utc_in_the_ledgers_own_format(tmp_path):

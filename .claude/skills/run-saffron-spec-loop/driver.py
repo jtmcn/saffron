@@ -23,7 +23,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
     from saffron.gates.contract import GateResult
@@ -1096,6 +1096,11 @@ def cmd_size(args) -> int:
     return 0 if result.status == "pass" else 1
 
 
+class Spend(NamedTuple):
+    turns: int
+    usd: float
+
+
 @dataclass
 class PastCell:
     """One past cell's spend by phase, for a spec review's ceilings and size checks."""
@@ -1107,11 +1112,9 @@ class PastCell:
     started_at: str
     state: str
     budget_usd: float | None
-    plan: (
-        tuple[int, float] | None
-    )  # the first IMPLEMENTING attempt: the plan checkpoint
-    implement: tuple[int, float]  # every other IMPLEMENTING attempt
-    repair: tuple[int, float]
+    plan: Spend | None  # the first IMPLEMENTING attempt: the plan checkpoint
+    implement: Spend  # every other IMPLEMENTING attempt
+    repair: Spend
     peak_turns: int  # the largest single attempt of any phase; max_turns bounds each
     review_usd: float
     rebut_usd: float
@@ -1177,10 +1180,10 @@ def _criteria_count(spec: Spec) -> int:
     return len(spec.acceptance) or len(spec.acceptance_criteria)
 
 
-def _spend(attempts: list, phase: str) -> tuple[int, float]:
+def _spend(attempts: list, phase: str) -> Spend:
     """Turns and cost summed over `attempts` in `phase`."""
     mine = [a for a in attempts if a["phase"] == phase]
-    return (
+    return Spend(
         sum(a["num_turns"] or 0 for a in mine),
         sum(a["cost_usd_est"] or 0.0 for a in mine),
     )
@@ -1235,8 +1238,8 @@ def _past_cells(
                     implement=_spend(implementing[1:], "IMPLEMENTING"),
                     repair=_spend(attempts, "REPAIRING"),
                     peak_turns=max(a["num_turns"] or 0 for a in attempts),
-                    review_usd=_spend(attempts, "REVIEWING")[1],
-                    rebut_usd=_spend(attempts, "REBUTTING")[1],
+                    review_usd=_spend(attempts, "REVIEWING").usd,
+                    rebut_usd=_spend(attempts, "REBUTTING").usd,
                     endings=[
                         f"{a['phase']} {a['subtype']}"
                         + (f" ({a['terminal_reason']})" if a["terminal_reason"] else "")
@@ -1250,15 +1253,15 @@ def _past_cells(
 
 
 def _cell_line(c: PastCell) -> str:
-    plan = f"plan {c.plan[0]}t ${c.plan[1]:.2f}" if c.plan else "plan -"
+    plan = f"plan {c.plan.turns}t ${c.plan.usd:.2f}" if c.plan else "plan -"
     budget = f"${c.budget_usd:.2f}" if c.budget_usd is not None else "-"
     ended = f"  ended: {'; '.join(c.endings)}" if c.endings else ""
     size = f"  size: {c.size}" if c.size else ""
     return (
         f"{c.spec_id}  {c.spec_type}  touches={c.touches} criteria={c.criteria}  "
         f"{c.started_at[:10]}  {c.state}  budget {budget}  {plan}  "
-        f"implement {c.implement[0]}t ${c.implement[1]:.2f}  "
-        f"repair {c.repair[0]}t ${c.repair[1]:.2f}  peak {c.peak_turns}t  "
+        f"implement {c.implement.turns}t ${c.implement.usd:.2f}  "
+        f"repair {c.repair.turns}t ${c.repair.usd:.2f}  peak {c.peak_turns}t  "
         f"review ${c.review_usd:.2f}  rebut ${c.rebut_usd:.2f}{size}{ended}"
     )
 
