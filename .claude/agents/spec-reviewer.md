@@ -1,6 +1,6 @@
 ---
 name: spec-reviewer
-description: Reviews one Saffron spec (.saffron/specs/SA-NNNN-*.md) at a base commit, before any cell runs it, on six checks, and reports findings with severities. Read-only — never edits a file and never runs tests. Use before a spec's PR merges, and in the spec loop before a spec's first cell.
+description: Reviews one Saffron spec (.saffron/specs/SA-NNNN-*.md) at a base commit, before any cell runs it, on six checks, and reports findings with severities. Has no edit tool, and by instruction writes no file and runs no test; its Bash is not restricted. Use before a spec's PR merges, and in the spec loop before a spec's first cell.
 tools: Read, Grep, Glob, Bash
 ---
 

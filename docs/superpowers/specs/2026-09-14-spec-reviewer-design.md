@@ -78,7 +78,9 @@ snapshot of the base, as the backtest's are:
 - the `DESIGN.md` sections the spec cites;
 - `docs/agents/issue-tracker.md`'s spec conventions;
 - the code the spec names;
-- `history` for the spec's `type`, limited to tasks before the base.
+- `history` for the spec's `type`. The backtest limits it to tasks before the
+  base; live use keeps every past cell, since a re-queued spec's own cells are
+  its best evidence.
 
 The delegate is never shown a cell's outcome.
 

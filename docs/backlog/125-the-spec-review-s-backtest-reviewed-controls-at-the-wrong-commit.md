@@ -1,6 +1,6 @@
 ---
 id: 125
-title: The spec review's backtest reviewed controls at the wrong commit
+title: The spec review's backtest reviewed controls at the wrong commit and scored a spec review that has since changed
 status: open
 tier: 3
 filed: 2026-09-14

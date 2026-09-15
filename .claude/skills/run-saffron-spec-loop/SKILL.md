@@ -53,7 +53,8 @@ Every spec in the order gets one spec review before any cell runs: one
 background subagent per spec, dispatched together. Use `subagent_type:
 spec-reviewer`, or `Plan` handed the body of
 `.claude/agents/spec-reviewer.md` if the session started before that file
-existed: `Plan` has no Edit or Write, and a spec review writes nothing. Prompt
+existed: `Plan` has no Edit or Write. Neither restricts Bash; the prompt
+limits it to reading. Prompt
 each with its spec's path, `base: origin/main`, and
 `history: run it yourself`. `snapshot` reads the specs from the checkout, so
 run this step from an up-to-date `main`; a spec that exists only on a branch
@@ -67,7 +68,7 @@ after the edit merges.
 
 Two kinds of blocker failed the backtest, and reading the line at base does
 not filter them, because their premise holds there
-(`docs/evidence/2026-09-14-spec-reviewer-backtest.md`, items 123–124). One is a
+(`docs/evidence/2026-09-14-spec-reviewer-backtest.md`; BACKLOG items 123–124). One is a
 check 4 claim that the ceilings are below what similar cells spent; cells
 finished inside the ceilings called too low. The other is a check 3 claim that a
 witness is "already green at base" because the behaviour exists there; the cells

@@ -436,7 +436,7 @@ The operator rules on (b) and (c).
 
 ### Cost
 
-$8.24 across the four re-reviews (`total_cost_usd`: SA-0062 $1.95, SA-0061
+$8.23 across the four re-reviews (`total_cost_usd`: SA-0062 $1.95, SA-0061
 $2.10, SA-0040 $2.30, SA-0054 $1.89; 35–42 turns; no error records). This is
 outside the $71.38 above.
 
@@ -457,7 +457,12 @@ Items 123–125 carry what a second backtest needs.
 
 ## Disclosures, 2026-09-15, after the ruling
 
-Found reviewing the pull request. Nothing above changes; these qualify it.
+Found reviewing the pull request. Nothing pre-registered and no result above
+changes; these qualify them. Three post-hoc lines were edited with them:
+the ruling's heading said "Verdict", the critic's word; reading (ii)'s second
+bullet said all five blockers came from the pre-registered reviews, then
+counted two from the real-base ones; and the re-reviews' cost read $8.24, a
+sum of rounded figures, where the records sum to $8.2258.
 
 - **The cases' wording changed after pre-registration.** `8578d74` rewrote every
   defect's text after `19a5cc9` committed the bar, and before any scored

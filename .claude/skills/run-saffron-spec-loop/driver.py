@@ -1112,7 +1112,8 @@ class PastCell:
     started_at: str
     state: str
     budget_usd: float | None
-    plan: Spend | None  # the first IMPLEMENTING attempt: the plan checkpoint
+    # The first IMPLEMENTING attempt; a checkpoint re-prompt counts as implement.
+    plan: Spend | None
     implement: Spend  # every other IMPLEMENTING attempt
     repair: Spend
     peak_turns: int  # the largest single attempt of any phase; max_turns bounds each
@@ -1164,7 +1165,7 @@ def _spec_at(spec_id: str, commit: str, cwd: Path = REPO) -> Spec | None:
 
 def _specs_at(commit: str, specs: dict[str, Spec], cwd: Path = REPO) -> dict[str, Spec]:
     """Each of `specs` as it stood at `commit`, so a blind review ranks past cells
-    by the shapes they ran at. Today's text stands in where none then parses."""
+    by no text later than its base. Today's stands in where none then parses."""
     from saffron.intake import SpecError
 
     shapes = {}

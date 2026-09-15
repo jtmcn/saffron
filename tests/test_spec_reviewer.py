@@ -9,7 +9,7 @@ from pathlib import Path
 AGENT = Path(__file__).resolve().parents[1] / ".claude" / "agents" / "spec-reviewer.md"
 
 
-def test_the_spec_review_agent_has_no_tool_that_writes():
+def test_the_spec_review_agent_has_no_edit_tool():
     front = AGENT.read_text().split("---")[1]
     tools = re.search(r"^tools:(.*)$", front, re.MULTILINE)
     assert tools is not None
