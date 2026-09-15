@@ -89,3 +89,19 @@ def test_a_missing_directory_is_refused_naming_it(tmp_path):
     missing = tmp_path / "docs" / "backlog"
     with pytest.raises(RecordError, match=str(missing)):
         load(BACKLOG, tmp_path)
+
+
+def test_a_misnamed_item_file_is_refused_not_skipped(tmp_path):
+    item = tmp_path / "docs" / "backlog" / "12-foo.md"
+    item.parent.mkdir(parents=True)
+    item.write_text(
+        "---\nid: 12\ntitle: Foo\nstatus: open\n---\n\n## Problem\n\nx\n\n## Done looks like\n\ny\n"
+    )
+    with pytest.raises(RecordError, match="12-foo.md"):
+        load(BACKLOG, tmp_path)
+
+
+def test_an_unknown_key_set_to_null_is_still_refused():
+    text = "---\nid: 1\ntitle: T\nstatus: open\nbogus_unknown_field: null\n---\n\n## Problem\n\nx\n\n## Done looks like\n\ny\n"
+    with pytest.raises(RecordError, match="bogus_unknown_field"):
+        parse(text, BACKLOG)

@@ -63,7 +63,8 @@ def parse(text: str, kind: Kind, path: Path | None = None) -> Record:
         raise RecordError(f"frontmatter is not valid YAML: {exc}", path) from exc
     if not isinstance(fields, dict):
         raise RecordError("frontmatter is not a mapping", path)
-    fields = {k: v for k, v in fields.items() if v is not None}
+    declared = kind.model.model_fields
+    fields = {k: v for k, v in fields.items() if k not in declared or v is not None}
     try:
         model = kind.model.model_validate(fields)
     except ValidationError as exc:
@@ -104,13 +105,18 @@ def _check_sections(
 def load(kind: Kind, root: Path) -> list[Record]:
     directory = root / kind.directory
     if not directory.is_dir():
-        raise RecordError(f"no directory {directory}")
+        raise RecordError(f"no directory {directory}", path=directory)
     pattern = re.compile(kind.pattern)
     records: list[Record] = []
     for path in sorted(directory.glob("*.md")):
         match = pattern.match(path.name)
         if match is None:
-            continue
+            if path.name in kind.hand_written:
+                continue
+            raise RecordError(
+                f"not a record filename ({kind.pattern}) and not a hand-written file",
+                path,
+            )
         record = parse(path.read_text(), kind, path)
         if int(match.group(1)) != record.model.id:
             raise RecordError(

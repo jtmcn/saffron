@@ -74,10 +74,15 @@ class Kind:
     directory: str
     pattern: str
     model: type[Identified]
+    hand_written: frozenset[str] = frozenset()
 
 
 KINDS: dict[str, Kind] = {
     "backlog": Kind(
-        "backlog", "docs/backlog", r"^(\d{3})-[a-z0-9-]+\.md$", BacklogItem
+        "backlog",
+        "docs/backlog",
+        r"^(\d{3})-[a-z0-9-]+\.md$",
+        BacklogItem,
+        frozenset({"README.md", "PRIORITY.md"}),
     ),
 }
