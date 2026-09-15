@@ -4,9 +4,9 @@ title: Every gate attempt in `events.jsonl` claims zero commits and zero spend, 
 status: done
 tier: 1
 closed: 2026-09-11
-specs: [SA-0034, SA-0035, SA-0039, SA-0041, SA-0042]
+specs: [SA-0041, SA-0042]
 prs: []
-commits: []
+commits: [3b60eae, 75bd0f2]
 cites: [§6]
 related: [97]
 by_hand: true

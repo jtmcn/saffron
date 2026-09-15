@@ -4,7 +4,7 @@ title: A single turn can overshoot the budget ceiling, because the check runs be
 status: done
 tier: 0
 closed: 2026-09-05
-specs: [SA-0031, SA-0050, SA-0059]
+specs: [SA-0031, SA-0050]
 prs: [121]
 commits: [57b676c]
 cites: [§3, §9]
@@ -12,11 +12,6 @@ related: [56, 58, 73]
 ---
 
 ## Problem
-
-**Status: done** — `SA-0050`, PR #121, merge `57b676c`. `run_batch` computes
-`budget_usd - ledger.batch_spend(batch_id)` before each candidate, reading
-spend back out of the ledger rather than trusting a tally kept in the loop —
-which is what survives a caller cut mid-night.
 
 The wording this item settled needed one correction after review, and
 `DESIGN.md` §3 and `CONTEXT.md` now carry it: the batch bound is *also*
@@ -54,6 +49,11 @@ best-effort bound and say so where it is declared. What it should not stay is a
 number the system reports as a ceiling and enforces as a suggestion.
 
 ## Record
+
+**Status: done** — `SA-0050`, PR #121, merge `57b676c`. `run_batch` computes
+`budget_usd - ledger.batch_spend(batch_id)` before each candidate, reading
+spend back out of the ledger rather than trusting a tally kept in the loop —
+which is what survives a caller cut mid-night.
 
 Measured on `SA-0031`, 2026-09-01. Admitted under an $18.00 budget with roughly
 $6 spent, its IMPLEMENT turn ran to the 140-turn ceiling and cost **$13.18 on

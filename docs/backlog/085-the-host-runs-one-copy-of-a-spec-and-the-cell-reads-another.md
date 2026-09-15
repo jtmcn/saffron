@@ -4,8 +4,8 @@ title: The host runs one copy of a spec and the cell reads another
 status: done
 tier: 1
 closed: 2026-09-08
-specs: [SA-0064]
-prs: []
+specs: []
+prs: [166]
 commits: []
 cites: []
 related: [80, 83]

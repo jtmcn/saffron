@@ -6,9 +6,9 @@ tier: 1
 filed: 2026-09-06
 closed: 2026-09-12
 by_hand: true
-specs: [SA-0031, SA-0059]
+specs: [SA-0031]
 prs: []
-commits: []
+commits: [a960687]
 cites: [§3, §5.4]
 related: [44]
 ---

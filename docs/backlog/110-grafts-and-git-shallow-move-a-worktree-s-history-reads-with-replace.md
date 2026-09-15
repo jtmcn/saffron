@@ -1,12 +1,13 @@
 ---
 id: 110
 title: Grafts and `.git/shallow` move a worktree's history reads with replace refs off
-status: partial
+status: done
 tier: 3
 filed: 2026-09-12
+closed: 2026-09-14
 specs: [SA-0083]
 prs: [246]
-commits: []
+commits: [7d2fe74]
 cites: [§4.3, §5.7]
 related: []
 ---

@@ -1,7 +1,7 @@
 ---
 id: 43
 title: Two of `cell/session.py`'s events never fit a kind, and `emit` is not the whole output seam
-status: open
+status: partial
 tier: 2
 specs: [SA-0029, SA-0030, SA-0031, SA-0041, SA-0042]
 prs: []

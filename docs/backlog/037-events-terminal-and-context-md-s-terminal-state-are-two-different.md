@@ -3,7 +3,7 @@ id: 37
 title: '`events.Terminal` and `CONTEXT.md`''s "terminal state" are two different things'
 status: open
 tier: 2
-specs: [SA-0029, SA-0030, SA-0038, SA-0040]
+specs: [SA-0029, SA-0030, SA-0040]
 prs: []
 commits: []
 cites: [§4.1]

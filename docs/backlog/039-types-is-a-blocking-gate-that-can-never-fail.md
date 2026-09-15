@@ -9,6 +9,7 @@ prs: [91, 92]
 commits: []
 cites: [§5.4]
 related: []
+by_hand: true
 ---
 
 ## Problem

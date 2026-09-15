@@ -58,6 +58,11 @@ synthetic dicts, so the change is invisible to the suite by construction.
 
 ## Done looks like
 
+The `secrets` half stays open here, because the gate it would extend does not
+exist yet.
+
+## Record
+
 Done looks like a decision about what the log is for. If it is an operator's
 record of a night, the rendered line is sufficient and `Agent.event` should be
 bounded the way the display already is. If it is evidence, it needs a size cap
@@ -65,11 +70,7 @@ and to be in the `secrets` gate's reach. `SA-0041` could not make that choice �
 `saffron/events.py` is `forbidden` to it — and made the reachability fix it was
 asked for, which is correct.
 
-## Record
-
 **Decided 2026-09-04: it is evidence, not an operator's record.** So it takes
 a size cap and must come within the `secrets` gate's reach. **Tier 1.**
 
 **Status: the size half is done — `SA-0068`, PR #213, merged 2026-09-12.**
-The `secrets` half stays open here, because the gate it would extend does not
-exist yet.

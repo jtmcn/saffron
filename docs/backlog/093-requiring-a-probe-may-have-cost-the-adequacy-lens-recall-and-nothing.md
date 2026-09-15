@@ -1,7 +1,7 @@
 ---
 id: 93
 title: Requiring a probe may have cost the adequacy lens recall, and nothing measured it
-status: open
+status: partial
 tier: 1
 specs: [SA-0063]
 prs: []

@@ -66,6 +66,16 @@ than assumed.
 
 ## Done looks like
 
+Dropping the
+duplicate flags from `pinned_diff` afterwards is a harness change, left for
+later — and its docstring still says `_git` has "two `-c` overrides", which is
+five now. `tests/test_package.py:361` keeps a third copy of `DIFF_FLAGS`, five
+flags of eleven, under a fixture that calls itself "shaped exactly like
+`worktree.export_patch`'s output"; it should import the tuple (found reviewing
+`SA-0082`, PR #244, 2026-09-14).
+
+## Record
+
 `DIFF_FLAGS` (or `_git`'s `-c` overrides) gaining the same
 three pins `pinned_diff` already carries — an explicit `--unified=<n>` matters
 most, since it is the one with anchoring consequences; `--abbrev`/
@@ -73,17 +83,9 @@ most, since it is the one with anchoring consequences; `--abbrev`/
 `harness/recovery.py`'s `pinned_diff` for the exact flags and the measurement
 behind each.
 
-## Record
-
 **Status: the three measured pins are done — `SA-0072`, PR #219, merged
 2026-09-12.** It takes
-`pinned_diff`'s measured values rather than choosing new ones. Dropping the
-duplicate flags from `pinned_diff` afterwards is a harness change, left for
-later — and its docstring still says `_git` has "two `-c` overrides", which is
-five now. `tests/test_package.py:361` keeps a third copy of `DIFF_FLAGS`, five
-flags of eleven, under a fixture that calls itself "shaped exactly like
-`worktree.export_patch`'s output"; it should import the tuple (found reviewing
-`SA-0082`, PR #244, 2026-09-14).
+`pinned_diff`'s measured values rather than choosing new ones.
 
 **The four below: merged, 2026-09-14 — `SA-0082`, PR #244, in stack
 #251.** The `.gitmodules` half the review found is item 115. Probed
