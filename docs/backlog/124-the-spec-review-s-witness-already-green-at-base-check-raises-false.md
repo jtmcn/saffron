@@ -1,6 +1,6 @@
 ---
 id: 124
-title: The spec reviewer's "witness already green at base" check raises false blockers
+title: The spec review's "witness already green at base" check raises false blockers
 status: open
 tier: 3
 filed: 2026-09-14
@@ -13,7 +13,7 @@ related: [123, 125]
 
 ## Problem
 
-**Tier 3.** Found running the spec reviewer's 2026-09-14 backtest.
+**Tier 3.** Found running the spec review's 2026-09-14 backtest.
 
 - It flagged SA-0061, SA-0054 and SA-0055 because the behaviour a criterion
   names already exists at base.

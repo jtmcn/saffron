@@ -1,6 +1,6 @@
 ---
 id: 123
-title: The spec reviewer is blind to ceilings defects and raises ceilings blockers the outcome contradicts
+title: The spec review is blind to ceilings defects and raises ceilings blockers the outcome contradicts
 status: open
 tier: 3
 filed: 2026-09-14
@@ -13,7 +13,7 @@ related: [124, 125]
 
 ## Problem
 
-**Tier 3.** Found running the spec reviewer's 2026-09-14 backtest.
+**Tier 3.** Found running the spec review's 2026-09-14 backtest.
 
 - It missed every recorded ceilings defect: SA-0031, SA-0087@24edb32 and
   SA-0059 were marked `checked` or blamed on the wrong cause.
@@ -24,8 +24,8 @@ related: [124, 125]
 ## Done looks like
 
 check 4 either reads `history`'s peak and endings correctly on the recorded
-cases, or is dropped from the reviewer in favour of a deterministic comparison
-in `driver.py history`.
+cases, or is dropped from the spec review in favour of a deterministic
+comparison in `driver.py history`.
 
 ## Record
 

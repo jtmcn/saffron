@@ -1,6 +1,6 @@
 ---
 id: 125
-title: The spec reviewer's backtest reviewed controls at the wrong commit
+title: The spec review's backtest reviewed controls at the wrong commit
 status: open
 tier: 3
 filed: 2026-09-14
@@ -13,7 +13,7 @@ related: [123, 124]
 
 ## Problem
 
-**Tier 3.** Found running the spec reviewer's 2026-09-14 backtest.
+**Tier 3.** Found running the spec review's 2026-09-14 backtest.
 
 - Controls were reviewed at the spec's last-touch commit, not at the base
   their cell ran on (`tree_base` in the batch tree's `patch.json`).

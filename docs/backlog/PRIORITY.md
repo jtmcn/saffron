@@ -138,6 +138,6 @@ landed first. **113** was filed open on 2026-09-13, to tier 2 beside 37 and 38.
 stack — **114**, **115** and **117** to tier 1, **116** to tier 3.
 **119**–**122** were filed open the same day from the loop's second run —
 **119** and **120** to tier 1, **121** and **122** to tier 3. **123**–**125**
-were filed open the same day from the spec reviewer's backtest, all to tier 3.)
+were filed open the same day from the spec review's backtest, all to tier 3.)
 
 ---
