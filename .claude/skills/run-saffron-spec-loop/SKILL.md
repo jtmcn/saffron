@@ -54,7 +54,9 @@ background subagent per spec, dispatched together. Use `subagent_type:
 spec-reviewer`, or `general-purpose` handed the body of
 `.claude/agents/spec-reviewer.md` if the session started before that file
 existed. Prompt each with its spec's path, `base: origin/main`, and
-`history: run it yourself`.
+`history: run it yourself`. `snapshot` reads the specs from the checkout, so
+run this step from an up-to-date `main`; a spec that exists only on a branch
+is reviewed at that branch's head.
 
 Verify each blocker before acting on it: read its line at `origin/main`. A
 verified blocker goes to the operator before that spec's cell, as a question:

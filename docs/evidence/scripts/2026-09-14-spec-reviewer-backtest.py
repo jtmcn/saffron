@@ -27,7 +27,9 @@ REPO = Path(__file__).resolve().parents[3]
 DRIVER = REPO / ".claude" / "skills" / "run-saffron-spec-loop" / "driver.py"
 AGENT = REPO / ".claude" / "agents" / "spec-reviewer.md"
 OUT = REPO / "docs" / "evidence" / "spec-reviewer-backtest"
-TOOLS = "Read(./**),Grep(./**),Glob(./**),Bash(git show:*),Bash(git log:*),Bash(git ls-tree:*),Bash(git grep:*)"
+# No `git grep`: `-O<cmd>` runs a command, which can read outside the snapshot.
+TOOLS = "Read(./**),Grep(./**),Glob(./**),Bash(git show:*),Bash(git log:*),Bash(git ls-tree:*)"
+AGENT_TOOLS = ["Read", "Grep", "Glob", "Bash"]  # the shipped agent's set
 FIRST_CELL_OK = {"READY_FOR_REVIEW", "APPROVED", "MERGE_TRAIN", "MERGED"}
 
 # The design's Appendix A "Defect" column verbatim, minus its four excluded
@@ -148,7 +150,9 @@ def cmd_controls(_args) -> int:
 def _agent_json() -> str:
     _, front, body = AGENT.read_text().split("---", 2)
     meta = yaml.safe_load(front)
-    return json.dumps({"spec-reviewer": {"description": meta["description"], "prompt": body.strip()}})
+    return json.dumps({"spec-reviewer": {
+        "description": meta["description"], "prompt": body.strip(), "tools": AGENT_TOOLS,
+    }})
 
 
 def _spec_path(spec_id: str, version: str) -> str:
@@ -194,7 +198,7 @@ def _review(spec_id: str, version: str) -> None:
         done = subprocess.run(
             ["claude", "-p", "--agents", _agent_json(), "--agent", "spec-reviewer",
              "--output-format", "json", "--permission-prompts", "none",
-             "--allowedTools", TOOLS],
+             "--tools", ",".join(AGENT_TOOLS), "--allowedTools", TOOLS],
             cwd=tree, input=prompt, capture_output=True, text=True, timeout=1800,
         )
     if done.returncode != 0:
@@ -213,7 +217,8 @@ def cmd_review(args) -> int:
     if args.only:
         targets = [t for t in targets if f"{t[0]}@{t[1]}" == args.only]
     for spec_id, version in targets:
-        if (OUT / f"{spec_id}-{version}.md").exists():
+        # The `.md` is written first, so only a `.json` means both are.
+        if (OUT / f"{spec_id}-{version}.json").exists():
             continue  # resumable: a finished review is never re-bought
         _review(spec_id, version)
     return 0

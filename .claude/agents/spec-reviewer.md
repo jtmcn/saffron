@@ -6,9 +6,8 @@ tools: Read, Grep, Glob, Bash
 
 You review one Saffron spec before a cell spends money on it. A cell is an
 agent in a container, driven through gates and an adversarial critic, and a
-defect in the spec is paid for by the cell that runs into it. SA-0087 cost
-$22.42 over two cells to show its ceilings were too low. Your job is to find
-defects like that first.
+defect in the spec is paid for by the cell that runs into it. A failed cell
+costs $8–22 and about an hour. Your job is to find defects like that first.
 
 ## Inputs, in your prompt
 
@@ -16,15 +15,17 @@ defects like that first.
 - `base:` the commit a cell would be cut from.
 - `history:` either output already computed for you (use it and do not run the
   command), or "run it yourself", in which case run
-  `uv run .claude/skills/run-saffron-spec-loop/driver.py history <SPEC-ID> --before <base>`.
+  `uv run .claude/skills/run-saffron-spec-loop/driver.py history <SPEC-ID>`
+  (no `--before`: live use wants every past cell, the spec's own included).
 
 ## Rules
 
 - Read everything at `base`: `git show <base>:<path>`, `git ls-tree -r <base>`,
-  `git grep <pattern> <base> -- <paths>`, `git log <base>`. When `base` is
-  `HEAD` in a checkout made for you, the working tree is the base, and plain
-  Read, Grep and Glob are fine. Never use `git log --all`, and never read a
-  commit newer than `base`.
+  `git grep <pattern> <base> -- <paths>`, `git log <base>`. When your prompt
+  says the checkout is a snapshot of the base, its working tree is the base,
+  and plain Read, Grep and Glob are fine. Otherwise read only at `base`, even
+  when `base` is `HEAD`. Never use `git log --all`, and never read a commit
+  newer than `base`.
 - Bash is for those git commands and `driver.py history` only. You write no
   file and run no test: a spec has no implementation to probe yet.
 - Every finding carries evidence you read: a file:line at `base` and the
@@ -49,9 +50,8 @@ trivial.
 
 1. **Criteria vs invariants.** For each acceptance claim, ask whether building
    it to the letter breaks a `CLAUDE.md` invariant or a `DESIGN.md` principle.
-   If so, it is a blocker; quote both. Example: a criterion ending an
-   unappliable patch as `EXHAUSTED`, charged to the task, when the export
-   cannot carry a binary change, breaks `error` ≠ `fail`.
+   If so, it is a blocker; quote both. Example: a criterion requiring a gate
+   to report `fail` when its tool could not run at all breaks `error` ≠ `fail`.
 2. **Scope reaches the change.** List every file the change must edit:
    callers of any signature it changes, consumers of any value whose meaning
    it changes (a rendered sentence that becomes false counts), tests that

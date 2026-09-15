@@ -9,6 +9,21 @@ Script: `docs/evidence/scripts/2026-09-14-spec-reviewer-backtest.py`.
 The reviewer passes if it catches **at least 17 of the 34 known defects** and
 raises **at most 2 false blockers across the 10 controls**.
 
+## Correction, 2026-09-14, before any scoring
+
+- The first sweep was stopped and its reviews discarded unread. `history`'s
+  header showed each spec as it stands today, which leaked a fixed spec into
+  10 of 29 case versions (SA-0087@24edb32 showed its raised 90 turns / $14)
+  and into none of the controls. The header now shows the spec at the version.
+- The agent's own text named SA-0087@24edb32's two scored defects (its
+  ceilings, and the binary-patch criterion as check 1's example). Both were
+  replaced with neutral text before the re-run.
+- The six checks' wording was written with this corpus in view, so recall is
+  in-sample. It is reported with and without SA-0087@24edb32.
+- The backtest now runs the shipped agent's tool set (`--tools`), without
+  `git grep` (which can run a command).
+- The bar, the cases, the controls and the scoring rule are unchanged.
+
 ## Scoring
 
 - A known defect is **caught** when a `blocker` or `concern` names the same file
@@ -19,8 +34,9 @@ raises **at most 2 false blockers across the 10 controls**.
   not a false alarm. The operator settles any disputed call.
 - Each version is reviewed once, blind: a fresh single-commit snapshot of the
   version (`git archive`), so no later commit is reachable, with Read, Grep
-  and Glob scoped to it, `history --before` the version, and no outcome in
-  the prompt.
+  and Glob scoped to it, `history --before` the version, and `history`'s
+  header shows the spec as it stood at the version, and no outcome in the
+  prompt.
 
 ## Known defects
 

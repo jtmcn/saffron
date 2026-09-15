@@ -110,8 +110,10 @@ GitHub issues remain in use only for research/evidence records under
   2026-09-11, where it had been missed in five of eight specs.
 
 - **Run the spec reviewer before a spec's pull request merges.** It is
-  `.claude/agents/spec-reviewer.md`, with `base: origin/main` and
-  `history: run it yourself`. Fix its verified blockers in the same pull
+  `.claude/agents/spec-reviewer.md`, with `base:` the head of the spec's own
+  branch (the pull request's head, e.g. `origin/<branch>`), since the spec is
+  not on `origin/main` yet, and `history: run it yourself`. Fix its verified
+  blockers in the same pull
   request. Every defect it finds there is a cell that never has to find it
   (`docs/superpowers/specs/2026-09-14-spec-reviewer-design.md`).
 

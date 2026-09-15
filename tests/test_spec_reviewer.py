@@ -1,5 +1,5 @@
 """The spec reviewer's definition. Its prose is judged by the backtest; this
-holds the one property a reader cannot see from a report: it can write nothing."""
+holds the one property a reader cannot see from a report: it has no edit tool."""
 
 from __future__ import annotations
 

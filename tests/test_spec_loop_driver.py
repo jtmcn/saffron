@@ -724,7 +724,7 @@ def _ledger_with_one_cell(tmp_path):
         ("IMPLEMENTING", 41, 2.33, "error_max_turns", None),
         ("IMPLEMENTING", 3, 0.17, "success", None),  # the salvage turn
         ("REVIEWING", 11, 0.80, "success", None),
-        ("REBUTTING", 32, 3.09, "error_max_budget_usd", "budget_exhausted"),
+        ("REBUTTING", 45, 3.09, "error_max_budget_usd", "budget_exhausted"),
     ):
         attempt = ledger.open_attempt(task_id, phase)
         ledger.close_attempt(
@@ -787,7 +787,7 @@ def test_history_splits_a_cells_spend_by_phase_and_names_how_attempts_ended(tmp_
     assert cell.budget_usd == 6.0
     assert cell.plan == (20, pytest.approx(1.82))
     assert cell.implement == (44, pytest.approx(2.50))
-    assert cell.peak_turns == 41
+    assert cell.peak_turns == 45  # REBUT runs under `max_turns` too
     assert cell.review_usd == pytest.approx(0.80)
     assert cell.rebut_usd == pytest.approx(3.09)
     assert cell.endings == [
@@ -812,36 +812,85 @@ def test_history_before_a_commit_hides_later_cells_and_always_the_specs_own(tmp_
     assert driver._past_cells(ledger, repo_id, specs, exclude="SA-0001") == []
 
 
-def test_history_lists_only_the_same_type_most_similar_shape_first():
-    def cell(spec_id, spec_type, touches, criteria):
-        return driver.PastCell(
-            spec_id=spec_id,
-            spec_type=spec_type,
-            touches=touches,
-            criteria=criteria,
-            started_at="2026-09-14 12:00:00",
-            state="READY_FOR_REVIEW",
-            budget_usd=6.0,
-            plan=(20, 1.82),
-            implement=(44, 2.5),
-            peak_turns=41,
-            review_usd=0.8,
-            rebut_usd=0.0,
-            endings=[],
-            size=None,
-        )
+def test_history_before_a_cells_own_start_hides_it(tmp_path):
+    # "Started before": a cell that started at `before` itself is hidden.
+    ledger, repo_id = _ledger_with_one_cell(tmp_path)
+    [[row]] = ledger.tasks_by_spec(repo_id).values()
+    started = ledger.attempts(row["task_id"])[0]["started_at"]
 
+    assert (
+        driver._past_cells(
+            ledger, repo_id, {"SA-0001": _spec("SA-0001")}, before=started
+        )
+        == []
+    )
+
+
+def _cell(spec_id, spec_type, touches, criteria, started_at="2026-09-14 12:00:00"):
+    return driver.PastCell(
+        spec_id=spec_id,
+        spec_type=spec_type,
+        touches=touches,
+        criteria=criteria,
+        started_at=started_at,
+        state="READY_FOR_REVIEW",
+        budget_usd=6.0,
+        plan=(20, 1.82),
+        implement=(44, 2.5),
+        peak_turns=41,
+        review_usd=0.8,
+        rebut_usd=0.0,
+        endings=[],
+        size=None,
+    )
+
+
+def test_history_lists_only_the_same_type_most_similar_shape_first():
     lines = driver._history_lines(
         _spec("SA-0009", touches=2, criteria=3),
         [
-            cell("SA-0002", "feature", 2, 3),
-            cell("SA-0003", "bug", 9, 9),
-            cell("SA-0004", "bug", 2, 4),
+            _cell("SA-0002", "feature", 2, 3),
+            _cell("SA-0003", "bug", 9, 9),
+            _cell("SA-0004", "bug", 2, 4),
         ],
     )
 
     assert lines[0].startswith("SA-0009  bug  touches=2 criteria=3")
     assert [line.split()[0] for line in lines[1:]] == ["SA-0004", "SA-0003"]
+
+
+def test_history_lists_the_newer_of_two_same_shape_cells_first():
+    lines = driver._history_lines(
+        _spec("SA-0009", touches=2, criteria=3),
+        [
+            _cell("SA-0002", "bug", 2, 3, started_at="2026-09-01 12:00:00"),
+            _cell("SA-0003", "bug", 2, 3, started_at="2026-09-10 12:00:00"),
+        ],
+    )
+
+    assert [line.split()[0] for line in lines[1:]] == ["SA-0003", "SA-0002"]
+
+
+def _spec_text(max_turns):
+    return f"---\nid: SA-0001\ntitle: x\ntype: bug\nmax_turns: {max_turns}\n---\n"
+
+
+def test_spec_at_reads_the_spec_as_it_stood_at_the_commit(tmp_path, monkeypatch):
+    # SA-0087@24edb32's header showed its later 90 turns, not the 60 it was run at.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    _git(tmp_path, "init", "-q", "-b", "main")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
+    specs = tmp_path / ".saffron" / "specs"
+    (specs / "done").mkdir(parents=True)
+    first = _commit(tmp_path, ".saffron/specs/SA-0001-x.md", _spec_text(60))
+    _git(tmp_path, "mv", ".saffron/specs/SA-0001-x.md", ".saffron/specs/done/")
+    second = _commit(tmp_path, ".saffron/specs/done/SA-0001-x.md", _spec_text(90))
+
+    assert driver._spec_at("SA-0001", first, cwd=tmp_path).max_turns == 60
+    assert driver._spec_at("SA-0001", second, cwd=tmp_path).max_turns == 90
+    assert driver._spec_at("SA-0002", second, cwd=tmp_path) is None
 
 
 def test_commit_time_is_utc_in_the_ledgers_own_format(tmp_path):
