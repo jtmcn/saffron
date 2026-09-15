@@ -16,13 +16,13 @@ from records.load import Record
 CITING = ("saffron", "tests", ".saffron/specs", "DESIGN.md")
 _SUFFIXES = {".py", ".md", ".yaml", ".yml", ".toml", ".sh"}
 
-# `item 33`, `items 65, 72`, `items **81**–**85**`, `BACKLOG item 118`. A
-# digit run is not followed by another digit, so `item 1000` does not read as
-# `item 100`. A range reads its endpoints, as the § citation test does for
-# appendices.
+# `item 33`, `items 65, 72`, `items **81**–**85**`, `BACKLOG item 118`,
+# `items 71/75/80`. A digit run is not followed by another digit, so
+# `item 1000` does not read as `item 100`. A range reads its endpoints, as
+# the § citation test does for appendices.
 _ITEMS = re.compile(
     r"(?i)\b(?:backlog\s+)?items?\s+"
-    r"((?:\*{0,2}\d{1,3}(?!\d)\*{0,2}(?:\s*(?:,|and|–|—|-)\s*)?)+)"
+    r"((?:\*{0,2}\d{1,3}(?!\d)\*{0,2}(?:\s*(?:,|and|–|—|-|/)\s*)?)+)"
 )
 _NUM = re.compile(r"\d+")
 _SPEC_FILENAME = re.compile(r"^([A-Za-z0-9]+-\d+)-")
@@ -52,9 +52,11 @@ def check_ids(records: list[Record]) -> list[Violation]:
     if present:
         missing = sorted(set(range(1, max(present) + 1)) - present)
         if missing:
+            # Named against the highest id present, the file after which the gap shows.
+            highest = _ids(records)[max(present)]
             out.append(
                 Violation(
-                    records[0].path.parent,
+                    highest.path,
                     "id",
                     f"ids are not contiguous; missing {missing}",
                 )

@@ -55,6 +55,7 @@ def test_ids_must_be_contiguous(broken):
     _rewrite(_item(broken, "005-a-corpse.md"), "id: 3", "id: 5")
     [v] = check_ids(load(BACKLOG, broken))
     assert v.field == "id" and "3" in v.message and "4" in v.message
+    assert v.path == _item(broken, "005-a-corpse.md")
 
 
 def test_ids_must_be_unique(broken):
@@ -120,6 +121,9 @@ def test_cites_must_resolve_to_a_design_section():
         ("the third item in the list", set()),
         ("item 3 of `touches`", {3}),
         ("item 1000 of them", set()),
+        ("items 71/75/80, SA-0058", {71, 75, 80}),
+        ("items 71/75", {71, 75}),
+        ("item 3/4 of the way", {3, 4}),
     ],
 )
 def test_cited_items_reads_every_form_the_corpus_uses(text, expected):
