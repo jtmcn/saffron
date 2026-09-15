@@ -42,7 +42,7 @@ a proportionally larger overshoot available to it.
 
 ## Done looks like
 
-Done looks like a decision about which of two honest options to take, not a
+a decision about which of two honest options to take, not a
 patch: charge the ceiling *before* a turn against a worst-case estimate and
 refuse a turn that could exceed it, or accept that `budget_usd` is a
 best-effort bound and say so where it is declared. What it should not stay is a

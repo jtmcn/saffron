@@ -4,6 +4,7 @@ title: A protected document's one-line definition of a gate drifts the moment th
 status: done
 tier: null
 closed: 2026-08-31
+by_hand: true
 specs: [SA-0011, SA-0018, SA-0021, SA-0023, SA-0024]
 prs: []
 commits: []

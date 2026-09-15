@@ -4,6 +4,7 @@ title: '`SA-0018` built a door it could not document, and the prompt then contra
 status: done
 tier: null
 closed: 2026-08-30
+by_hand: true
 specs: [SA-0018, SA-0021]
 prs: []
 commits: []

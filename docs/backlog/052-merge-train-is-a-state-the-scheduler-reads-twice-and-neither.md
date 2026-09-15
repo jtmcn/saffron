@@ -43,6 +43,10 @@ rather than breaking. That is by design and stays.
 
 ## Done looks like
 
+_The item grew on 2026-09-08. `## Record` says what now belongs to it: a
+`TaskState` class, a total `_STATE_RANK`, and checks on the scheduler's five
+state sets. The original criterion follows._
+
 `MERGE_TRAIN` declared once in `ontology/factory.ttl`, the
 derived surfaces regenerated, `TaskShape` updated, and a one-line note in §3.3 or
 §6 saying which of the two sets it joined and why.

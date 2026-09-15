@@ -27,7 +27,7 @@ control for a number.
 
 ## Done looks like
 
-Done looks like: the loop running `size` (at minimum) against the branch before
+the loop running `size` (at minimum) against the branch before
 it is marked ready, and a decision on whether the ceiling should count test
 lines at all — §5.4 sets one number for a diff whose test half is mandated
 elsewhere. Recorded rather than fixed here: PR #91 is over the ceiling and is

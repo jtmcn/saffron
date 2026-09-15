@@ -46,6 +46,8 @@ item's `specs:` list in the same commit.
 - `done`, `superseded` and `wontfix` need `closed` plus at least one of `specs`/`prs`/`commits`
   (`superseded` also needs `superseded_by`).
 - `partial` needs a dated `## Record` entry.
+- Set `by_hand: true` when the item's own prose says the work that closed it, or the work still
+  left, cannot go through a cell.
 - An open item with no stated exit criterion writes `_Not stated in the original item._` under
   `## Done looks like`.
 - Quote commit shas in YAML (`commits: ["0123456"]`) so an all-digit sha is not read as a number.

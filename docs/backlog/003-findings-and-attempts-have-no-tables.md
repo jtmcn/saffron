@@ -4,6 +4,7 @@ title: '`findings` and `attempts` have no tables'
 status: done
 tier: null
 closed: 2026-08-23
+by_hand: true
 specs: [SA-0003]
 prs: []
 commits: [229c4b2]

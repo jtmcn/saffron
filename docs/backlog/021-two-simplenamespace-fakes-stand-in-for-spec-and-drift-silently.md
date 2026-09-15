@@ -3,7 +3,7 @@ id: 21
 title: Two `SimpleNamespace` fakes stand in for `Spec` and drift silently
 status: done
 tier: null
-closed: 2026-08-27
+closed: 2026-08-28
 specs: [SA-0012]
 prs: [49]
 commits: [f31550c]

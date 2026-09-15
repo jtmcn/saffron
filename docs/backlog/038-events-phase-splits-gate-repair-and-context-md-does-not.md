@@ -19,5 +19,5 @@ The split is probably right and is currently held by a comment and a test.
 
 ## Done looks like
 
-Done looks like: `CONTEXT.md` saying whether it is sanctioned, and the `Literal`
+`CONTEXT.md` saying whether it is sanctioned, and the `Literal`
 following. Protected, so by hand. Second divergence — see item 37.

@@ -24,6 +24,6 @@ cite `Terminal`. An earlier draft of this item said the name was `DESIGN.md`
 
 ## Done looks like
 
-Done looks like: `TurnEnded` across the three specs, or a `CONTEXT.md` entry
+`TurnEnded` across the three specs, or a `CONTEXT.md` entry
 saying the two terms are deliberately distinct. Protected either way, so by
 hand, and worth settling before `SA-0040` and `SA-0038` render the word.

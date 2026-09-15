@@ -3,6 +3,7 @@ id: 36
 title: The event schema wants its own `DESIGN.md` §4 subsection, and nothing can write one
 status: open
 tier: 2
+by_hand: true
 specs: [SA-0040]
 prs: []
 commits: []
@@ -22,6 +23,6 @@ count that moves, rather than a number to correct again.
 
 ## Done looks like
 
-Done looks like: a new §4.x naming the kinds, the wire discriminator and
+a new §4.x naming the kinds, the wire discriminator and
 `events.jsonl`'s one-file-per-task, no-rotation ceiling — by hand, after
 `SA-0040`, when the shape has stopped moving.

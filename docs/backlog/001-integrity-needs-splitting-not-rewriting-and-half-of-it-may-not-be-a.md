@@ -4,6 +4,7 @@ title: '`integrity` needs splitting, not rewriting — and half of it may not be
 status: done
 tier: null
 closed: 2026-08-22
+by_hand: true
 specs: [SA-0004]
 prs: [6]
 commits: [596f96f]

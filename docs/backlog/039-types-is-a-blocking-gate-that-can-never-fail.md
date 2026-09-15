@@ -5,7 +5,7 @@ status: done
 tier: null
 closed: 2026-09-01
 specs: []
-prs: [91, 92]
+prs: [92]
 commits: []
 cites: [§5.4]
 related: []
@@ -102,7 +102,7 @@ value is type safety, and `tests/test_events.py` now hand-rolls
 
 ## Done looks like
 
-Done looks like: pyright as a dev dependency and `.saffron/gates/types`
+pyright as a dev dependency and `.saffron/gates/types`
 executing it — the gate is already declared and already blocking, so nothing in
 `policy.yaml` changes. Or, if that is not wanted, the gate stops claiming to
 block. Either is a repo-side change and neither touches `saffron/`.

@@ -3,6 +3,7 @@ id: 94
 title: A probe's baseline failures are subtracted and then discarded
 status: partial
 tier: 1
+by_hand: true
 specs: [SA-0054, SA-0063]
 prs: []
 commits: [f76931df]
@@ -52,7 +53,7 @@ so re-running yields different probes rather than an audit of these.
 
 ## Done looks like
 
-Done looks like: `ProbeResult` carries the baseline's failure identities beside
+`ProbeResult` carries the baseline's failure identities beside
 the new ones, and `probes.json` writes them. Additive, and the value is already
 in `check_probe`'s hand — the same shape as the `tool`/`collected`/`summary`
 fields, which exist because a verdict that keeps nothing about the suite that

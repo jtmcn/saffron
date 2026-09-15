@@ -4,6 +4,7 @@ title: The dependency gate asked whether a parent shipped and answered from a re
 status: done
 tier: null
 closed: 2026-08-31
+by_hand: true
 specs: [SA-0020, SA-0022]
 prs: []
 commits: []

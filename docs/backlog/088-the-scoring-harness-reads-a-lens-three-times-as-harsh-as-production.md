@@ -14,13 +14,6 @@ filed: 2026-09-07
 
 ## Problem
 
-Two things the pass found that the item did not predict, both in the plan now:
-the per-defect scores *did* move — `dirty-restore` 2/3 → 1/3, `truncating-write`
-3/3 → 2/3 seen — on an input change with no mechanism to make either defect
-harder to see, so item 79's exit criterion is written on the noisier of the two
-numbers; and production's side of the comparison is **n=1**, which no amount of
-work on the harness fixes.
-
 **Tier 1**, directly under 79 — it is 79's own measuring instrument, and 79's
 exit criterion is written against an absolute this item puts in doubt.
 **Found 2026-09-07**, in the first lens-scoring pass
@@ -89,3 +82,10 @@ routing to REBUT against production's zero. Naming the tools moved the count by
 narrow, and the item closes on its own fallback: the harness's absolute numbers
 steer nothing, its differences over one fixture do. The `tool` column landed
 anyway (`gate_results`, 2026-09-08) so the next fixture needs no splice.
+
+Two things the pass found that the item did not predict, both in the plan now:
+the per-defect scores *did* move — `dirty-restore` 2/3 → 1/3, `truncating-write`
+3/3 → 2/3 seen — on an input change with no mechanism to make either defect
+harder to see, so item 79's exit criterion is written on the noisier of the two
+numbers; and production's side of the comparison is **n=1**, which no amount of
+work on the harness fixes.

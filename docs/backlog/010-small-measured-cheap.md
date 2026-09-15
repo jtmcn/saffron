@@ -34,14 +34,14 @@ _Not stated in the original item._
 
 ## Record
 
-**Done, 2026-08-21:**
+**Done, 2026-08-21:** `rebut.py`'s blockers are
   numbered from 1 in both places they are produced. Not cosmetic —
   `run_verdict` requires the verdict set to match the blockers exactly, so a
   critic answering "1." for the first of one blocker failed the check, and
   the phase discarded both lens sessions, both rebuttal turns and every
   verdict session over the numbering.
 
-**Done, 2026-08-24.** It does need the network, and the cost is three turns,
+**Done, 2026-08-24.** `uv run` does need the network, and the cost is three turns,
   not one: `SA-0002`'s implementer took four `403`s from the proxy on
   `pypi.org` before reaching `python3 -m pytest`. `UV_NO_SYNC=1` in
   `.saffron/Dockerfile` runs it out of the venv the image already baked. The
