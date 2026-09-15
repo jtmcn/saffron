@@ -464,8 +464,8 @@ bullet said all five blockers came from the pre-registered reviews, then
 counted two from the real-base ones; and the re-reviews' cost read $8.24, a
 sum of rounded figures, where the records sum to $8.2258.
 
-- **The cases' wording changed after pre-registration.** `8578d74` rewrote every
-  defect's text after `19a5cc9` committed the bar, and before any scored
+- **The cases' wording changed after pre-registration.** `d38df7b` rewrote every
+  defect's text after `872f4ff` committed the bar, and before any scored
   review. The new text is the design's Appendix A, and several rows gained
   outcome figures: SA-0031's "ceilings too low for its width" became
   "`EXHAUSTED` at 141 of 140 turns, $19.17 of $18". The reviews never saw this
@@ -473,13 +473,13 @@ sum of rounded figures, where the records sum to $8.2258.
   the scoring rule did not change. *The Correction*'s "unchanged" holds for
   those four and not for the wording.
 - **The shipped spec review is not the one scored.** After the ruling:
-  - `17129fe` split REPAIR out of `history`'s implement column and widened
+  - `28021f8` split REPAIR out of `history`'s implement column and widened
     check 4's budget blocker to "the plan checkpoint, IMPLEMENT and REPAIR".
     The scored `history` already summed REPAIR into implement, so the figures
     compared are the same, but the label is new.
-  - `df1672c` made a blind `history` rank past cells by their specs' text at
+  - `d29a9fd` made a blind `history` rank past cells by their specs' text at
     the base. The scored reviews' rows were ranked by today's text.
-  - `3e1f8ad` reworded the prompt's description of a cell and gave `base` a
+  - `19f15ec` reworded the prompt's description of a cell and gave `base` a
     default.
 
   No review was re-run, so the result above is evidence about the scored
