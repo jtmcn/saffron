@@ -1,7 +1,7 @@
-# A spec reviewer, before any cell spends money
+# A spec review, before any cell spends money
 
-2026-09-14. Designed with the operator after the spec loop's second run
-(`docs/evidence/2026-09-14-spec-loop-skill-feedback-run-2.md`).
+2026-09-14. Designed with the operator after the spec loop was used a second
+time (`docs/evidence/2026-09-14-spec-loop-skill-feedback-run-2.md`).
 
 ## Why
 
@@ -17,7 +17,7 @@ has paid for the answer. SA-0087 cost $22.42 over two cells to show its
 ceilings were too low and one criterion broke `error` ≠ `fail`.
 
 Specs are already reviewed by hand, and it pays when it happens: Appendix B
-lists 17 specs whose defects a review caught before any cell ran. It does not
+lists 29 specs whose defects a review caught before any cell ran. It does not
 happen every time, and #253's review of SA-0086–0089 missed the ceilings and
 the binary-patch criterion. This design makes the review a standing step and
 measures it before anything is promoted.
@@ -34,10 +34,10 @@ measures it before anything is promoted.
 
 ## Components
 
-1. **`.claude/agents/spec-reviewer.md`: the reviewer.** A Claude Code agent
-   with read-only tools: Read, Grep, Glob, and Bash for `git show`, `git log`
-   and `driver.py history` only. Its input is a spec path and a base commit,
-   which defaults to `origin/main`. It never edits a file and never runs
+1. **`.claude/agents/spec-reviewer.md`: the agent definition.** A delegate
+   runs it with read-only tools: Read, Grep, Glob, and Bash for `git show`,
+   `git log`, `git ls-tree`, `git grep` and `driver.py history` only. Its
+   input is a spec path and a base commit, which defaults to `origin/main`. It never edits a file and never runs
    tests, because a spec has no implementation to probe.
 2. **`driver.py history SA-NNNN [--before <commit>]`: the numbers.**
    Deterministic, and it reads the ledger only. For the spec's `type`, it
@@ -51,7 +51,7 @@ measures it before anything is promoted.
    ledger reads, and is callable on its own.
 3. **Where it runs.**
    - In the loop: a step 1b in the loop skill, between snapshot and the first
-     cell. One reviewer per spec in the order, in parallel.
+     cell. One spec review per spec in the order, in parallel.
    - When writing a spec: one line in `docs/agents/issue-tracker.md`.
 4. **The backtest.** The script goes under `docs/evidence/scripts/` and the
    record under `docs/evidence/`. Following the `harness/` convention, the
@@ -63,7 +63,8 @@ is a later spec, and only if the backtest passes.
 ## The review contract
 
 **Inputs.** Everything is read at the base commit through
-`git show <base>:<path>`, never from the working tree:
+`git show <base>:<path>`, never from the working tree unless the checkout is a
+snapshot of the base, as the backtest's are:
 
 - the spec's frontmatter and body;
 - `CLAUDE.md` and `CONTEXT.md`;
@@ -72,10 +73,12 @@ is a later spec, and only if the backtest passes.
 - the code the spec names;
 - `history` for the spec's `type`, limited to tasks before the base.
 
-The reviewer is never shown a cell's outcome.
+The delegate is never shown a cell's outcome.
 
-**The six checks.** A blocker is a defect that, built to the letter, gets a
-cell wrong. Anything short of that is a `concern`.
+**The six checks.** A `blocker` is a defect that, built to the letter, gets a
+cell wrong. With no task yet to route to REBUT, it becomes a question to the
+operator. A `concern` needs the operator's judgement, and a `note` is true but
+trivial (`CONTEXT.md`'s severities).
 
 | Check | Blocker when |
 |---|---|
@@ -136,8 +139,8 @@ rates, pass or fail against the bar, and any new finds.
 
 ## Appendix A — cells whose failure the record blames on the spec
 
-Collected 2026-09-14 from `GOTCHAS.md`, `.saffron/rejections.md`,
-`docs/BACKLOG.md`, `docs/agents/issue-tracker.md`, `docs/evidence/`,
+Collected 2026-09-14 from `.claude/skills/run-saffron-spec-loop/GOTCHAS.md`,
+`.saffron/rejections.md`, `docs/BACKLOG.md`, `docs/agents/issue-tracker.md`, `docs/evidence/`,
 `DESIGN.md` and the git history of `.saffron/specs/`. Each version is the last
 commit touching the spec before its cell or its fixing commit. The ledger's
 `spec_sha` is not a git blob id, so it cannot be used to recover the text.
@@ -192,5 +195,5 @@ SA-0044 (`6ceb5ba`), SA-0045 (`2e563cf`), SA-0046 (`be3ed91`),
 SA-0048 (`c5b8838`), SA-0049/0050 (`535bf23`, `5177edb`),
 SA-0052 (`865c11a`, `9299734`), SA-0066–0070 (`15f4d77`),
 SA-0071–0073 (`25cbf81`), SA-0077 (`a74a21a`), SA-0087 (`24edb32`),
-SA-0088/0089 (`14f6357`). Each commit is the fix. The version the reviewer
+SA-0088/0089 (`14f6357`). Each commit is the fix. The version a spec review
 would see is its parent.
