@@ -167,3 +167,21 @@ def test_plain_decimals_booleans_and_dates_still_load():
         "by_hand": True,
         "filed": dt.date(2026, 9, 1),
     }
+
+
+def test_a_record_with_no_problem_section_is_refused():
+    text = "---\nid: 1\ntitle: T\nstatus: open\n---\n\n## Done looks like\n\ny\n"
+    with pytest.raises(RecordError, match="Problem"):
+        parse(text, BACKLOG)
+
+
+def test_prose_before_the_first_heading_is_refused(tmp_path):
+    item = tmp_path / "docs" / "backlog" / "001-x.md"
+    item.parent.mkdir(parents=True)
+    item.write_text(
+        "---\nid: 1\ntitle: T\nstatus: open\n---\n\n"
+        "A stray paragraph before any heading.\n\n"
+        "## Problem\n\nx\n\n## Done looks like\n\ny\n"
+    )
+    with pytest.raises(RecordError, match="001-x.md"):
+        load(BACKLOG, tmp_path)

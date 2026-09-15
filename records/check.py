@@ -9,7 +9,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from records.kinds import KINDS
+from records.kinds import KINDS, BacklogItem
 from records.load import _FRONTMATTER, Record, load, split_sections
 
 # Where a live `item N` is a promise someone can follow today. Not
@@ -43,6 +43,15 @@ def _ids(records: list[Record]) -> dict[int, Record]:
     return {r.model.id: r for r in records}
 
 
+def _backlog(r: Record) -> BacklogItem:
+    """Narrow a record's model to `BacklogItem`, the only registered kind
+    today — a field read via `getattr(..., default)` on the wrong model
+    would silently check nothing instead of refusing it."""
+    if not isinstance(r.model, BacklogItem):
+        raise TypeError(f"{r.path}: not a BacklogItem")
+    return r.model
+
+
 def check_ids(records: list[Record]) -> list[Violation]:
     out: list[Violation] = []
     counts = Counter(r.model.id for r in records)
@@ -69,15 +78,15 @@ def check_links(records: list[Record]) -> list[Violation]:
     by_id = _ids(records)
     out: list[Violation] = []
     for r in records:
-        m = r.model
-        for other in getattr(m, "related", []):
+        m = _backlog(r)
+        for other in m.related:
             if other not in by_id:
                 out.append(
                     Violation(
                         r.path, "related", f"names item {other}, which does not exist"
                     )
                 )
-        target = getattr(m, "superseded_by", None)
+        target = m.superseded_by
         if target is not None:
             if target not in by_id:
                 out.append(
@@ -133,7 +142,7 @@ def check_specs_resolve(records: list[Record], root: Path) -> list[Violation]:
     return [
         Violation(r.path, "specs", f"{spec} has no file under .saffron/specs/")
         for r in records
-        for spec in getattr(r.model, "specs", [])
+        for spec in _backlog(r).specs
         if spec not in specs
     ]
 
@@ -142,7 +151,7 @@ def check_cites_resolve(records: list[Record], sections: set[str]) -> list[Viola
     return [
         Violation(r.path, "cites", f"{cite} is not a DESIGN.md section")
         for r in records
-        for cite in getattr(r.model, "cites", [])
+        for cite in _backlog(r).cites
         if cite.lstrip("§") not in sections
     ]
 
@@ -222,7 +231,7 @@ def check_done_specs_are_done(records: list[Record], root: Path) -> list[Violati
     for r in records:
         if r.model.status != "done":
             continue
-        for spec in getattr(r.model, "specs", []):
+        for spec in _backlog(r).specs:
             path = specs.get(spec)
             if path is not None and path.parent.name != "done":
                 out.append(
@@ -248,7 +257,7 @@ def check_specs_name_their_items(records: list[Record], root: Path) -> list[Viol
         item = by_id.get(n)
         if item is None:
             continue  # check_item_citations reports it
-        if spec_id not in getattr(item.model, "specs", []):
+        if spec_id not in _backlog(item).specs:
             out.append(
                 Violation(
                     item.path, "specs", f"{spec_id} cites this item and is not listed"
@@ -301,7 +310,7 @@ def check_priority(records: list[Record], priority_md: Path) -> list[Violation]:
             for n in map(int, struck + bold):
                 named_under.setdefault(n, set()).add(tier)
     for n, r in by_id.items():
-        t = getattr(r.model, "tier", None)
+        t = _backlog(r).tier
         if t is not None and t not in named_under.get(n, set()):
             out.append(
                 Violation(
@@ -333,7 +342,7 @@ def check_all(root: Path, sections: set[str]) -> list[Violation]:
         + check_spec_ids_unique(root)
         + check_specs_resolve(records, root)
         + check_cites_resolve(records, sections)
-        + check_item_citations(root, {int(r.model.id) for r in records})
+        + check_item_citations(root, {r.model.id for r in records})
         + check_done_specs_are_done(records, root)
         + check_specs_name_their_items(records, root)
         + check_priority(records, priority)

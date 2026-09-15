@@ -70,6 +70,19 @@ def split_sections(body: str) -> dict[str, str]:
     return {name: "\n".join(lines).strip() for name, lines in sections.items()}
 
 
+def _preamble(body: str) -> str:
+    """Text before the first `## ` heading, fence-aware like `split_sections`."""
+    lines: list[str] = []
+    fenced = False
+    for line in body.splitlines():
+        if _FENCE.match(line):
+            fenced = not fenced
+        if not fenced and _H2.match(line):
+            break
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
 def parse(text: str, kind: Kind, path: Path | None = None) -> Record:
     match = _FRONTMATTER.match(text)
     if match is None:
@@ -88,6 +101,9 @@ def parse(text: str, kind: Kind, path: Path | None = None) -> Record:
     except ValidationError as exc:
         raise RecordError(f"frontmatter is invalid: {exc}", path) from exc
 
+    preamble = _preamble(body)
+    if preamble:
+        raise RecordError(f"prose before the first `## ` heading: {preamble!r}", path)
     sections = split_sections(body)
     unknown = [s for s in sections if s not in REQUIRED_SECTIONS]
     if unknown:
@@ -109,6 +125,8 @@ def parse(text: str, kind: Kind, path: Path | None = None) -> Record:
 def _check_sections(
     model: Identified, sections: dict[str, str], path: Path | None
 ) -> None:
+    if "Problem" not in sections:
+        raise RecordError("missing required `## Problem` section", path)
     status = model.status
     if status not in CLOSED and not sections.get("Done looks like"):
         raise RecordError(
