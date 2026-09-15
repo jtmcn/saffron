@@ -21,8 +21,8 @@ related: [123, 124]
   SA-0054, SA-0040). None recurred when those controls were reviewed at their
   real bases; SA-0054, a stacked child, needed its parent's tree plus its own
   spec.
-- The shipped agent and `history` changed after scoring (`28021f8`, `d29a9fd`,
-  `19f15ec`), and the cases and the prompt were written with the corpus in
+- The shipped agent and `history` changed after scoring (`cfa1a61`, `c2a4ee5`,
+  `7986d0c`), and the cases and the prompt were written with the corpus in
   view, so its recall is in-sample.
 
 ## Done looks like
