@@ -787,6 +787,7 @@ def test_history_splits_a_cells_spend_by_phase_and_names_how_attempts_ended(tmp_
     assert cell.budget_usd == 6.0
     assert cell.plan == (20, pytest.approx(1.82))
     assert cell.implement == (44, pytest.approx(2.50))
+    assert cell.peak_turns == 41
     assert cell.review_usd == pytest.approx(0.80)
     assert cell.rebut_usd == pytest.approx(3.09)
     assert cell.endings == [
@@ -823,6 +824,7 @@ def test_history_lists_only_the_same_type_most_similar_shape_first():
             budget_usd=6.0,
             plan=(20, 1.82),
             implement=(44, 2.5),
+            peak_turns=41,
             review_usd=0.8,
             rebut_usd=0.0,
             endings=[],

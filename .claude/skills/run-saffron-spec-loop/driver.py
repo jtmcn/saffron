@@ -1111,6 +1111,9 @@ class PastCell:
         tuple[int, float] | None
     )  # the first IMPLEMENTING attempt: the plan checkpoint
     implement: tuple[int, float]  # every other IMPLEMENTING and REPAIRING attempt
+    peak_turns: (
+        int  # the largest single IMPLEMENTING/REPAIRING attempt; max_turns bounds this
+    )
     review_usd: float
     rebut_usd: float
     endings: list[str]  # "<phase> <subtype>" for every attempt that did not succeed
@@ -1184,6 +1187,9 @@ def _past_cells(
                         sum(a["num_turns"] or 0 for a in rest),
                         sum(a["cost_usd_est"] or 0.0 for a in rest),
                     ),
+                    peak_turns=max(
+                        (a["num_turns"] or 0 for a in implementing), default=0
+                    ),
                     review_usd=sum(
                         a["cost_usd_est"] or 0.0
                         for a in attempts
@@ -1214,7 +1220,7 @@ def _cell_line(c: PastCell) -> str:
     return (
         f"{c.spec_id}  {c.spec_type}  touches={c.touches} criteria={c.criteria}  "
         f"{c.started_at[:10]}  {c.state}  budget {budget}  {plan}  "
-        f"implement {c.implement[0]}t ${c.implement[1]:.2f}  "
+        f"implement {c.implement[0]}t ${c.implement[1]:.2f}  peak {c.peak_turns}t  "
         f"review ${c.review_usd:.2f}  rebut ${c.rebut_usd:.2f}{size}{ended}"
     )
 

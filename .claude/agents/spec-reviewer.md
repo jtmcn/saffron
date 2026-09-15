@@ -65,12 +65,16 @@ trivial.
    `git grep` for the test name). A non-`preserves` witness must not already
    pass at `base`: if the behaviour it claims is already true there, that is
    a blocker.
-4. **Ceilings vs history.** Compare `max_turns` and `budget_usd` with the
-   `history` rows closest in shape: their plan checkpoint plus IMPLEMENT
-   turns and cost. It is a blocker if the spec's ceilings are below what
-   similar cells needed for those two phases. It is a concern if what remains
-   cannot cover REVIEW and REBUT at the rows' usual cost. Cite the rows you
-   compared.
+4. **Ceilings vs history.** `max_turns` bounds each agent session, not their
+   sum, so compare it with the `peak` of the `history` rows closest in shape:
+   their longest single session. A row that ended `error_max_turns` was cut
+   off at its own ceiling, so its peak is a floor on what it needed, not what
+   it used. Compare `budget_usd` with those rows' total spend: plan plus
+   implement plus review plus rebut. It is a blocker if `max_turns` is at or
+   below the peak a similar cell needed, or `budget_usd` is below what
+   similar cells spent on the plan checkpoint plus IMPLEMENT. It is a concern
+   if what remains cannot cover REVIEW and REBUT at the rows' usual cost.
+   Cite the rows you compared.
 5. **Size vs ceiling.** Estimate the changed lines the criteria, `touches`,
    and the tests they demand imply. Compare with the `size:` summaries in
    similar `history` rows and the ceiling those summaries name. It is a
