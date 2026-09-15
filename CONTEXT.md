@@ -403,6 +403,16 @@ lens is the signal that a lens is badly prompted.
 _Avoid_: "nit", "minor", "suggestion". _Avoid_ using "finding" where you mean one
 specific severity.
 
+**Spec review**: A delegate's read of one spec at the base a cell would be cut
+from, before any cell runs it, on six checks
+(`docs/superpowers/specs/2026-09-14-spec-reviewer-design.md`). It uses the
+severities, but no task exists yet for a `blocker` to route to REBUT, so it
+becomes a question to the operator. Advisory: nothing in code enforces it.
+`spec-reviewer` is the file and id of the agent definition that performs it, not
+a role.
+_Avoid_: "the reviewer" (that's the operator), "the critic" or "a lens" (both
+read a diff, and are sessions the host starts).
+
 **Verdict**: The critic's own confirm-or-withdraw of a finding at REBUT.
 
 **Adjudication**: The operator's agree-or-disagree with a finding. Distinct from
@@ -672,6 +682,14 @@ defect rather than a word choice (`DESIGN.md` Appendix E).
    resolve (`DESIGN.md` §1.4). Every use was rewritten, dated records included.
    `saffron:retired-by` was not: it is a marker in source that the scheduler
    reads, not a vocabulary term, and shares only the spelling.
+
+7. **the spec reviewer vs. a spec review** — a delegate reading a spec before its
+   first cell was named "the spec reviewer", and "the reviewer" was already the
+   operator and a lens's avoided name. The seat had an occupant, and the name hid
+   what separates this one: its `blocker` cannot route to REBUT, because no task
+   exists yet, so it reaches the operator. It is named as an activity a delegate
+   performs. `spec-reviewer` stays as the agent definition's file and id, which
+   the loop invokes and the backtest's frozen reports cite.
 
 ## Open naming decisions
 
