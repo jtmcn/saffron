@@ -124,3 +124,5 @@ binary stub the export could never carry (`GATE_ERROR`). Its second
 criterion's witness must anchor a finding outside every hunk and see
 `read_head` run in the critic cell. The halted branch, `saffron/SA-0087` @
 `82258f0`, is discarded, and the next cell starts from the base.
+`DESIGN.md` §5.5 and §3.3 carve the binary stub out by hand in the same pull
+request. The budget rises to $20, because run 2 ran dry in REBUT (item 120).
