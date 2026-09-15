@@ -703,3 +703,155 @@ def test_a_resnapshot_keeps_what_the_loop_recorded(loop):
     assert rows[dropped].dropped == "operator's call"
     assert rows[new].state is None
     assert driver._stale(list(rows.values())) == []
+
+
+def _ledger_with_one_cell(tmp_path):
+    from saffron.gates.contract import GateResult
+    from saffron.ledger import Ledger
+
+    ledger = Ledger(tmp_path / "ledger.db")
+    repo_id = ledger.upsert_repo("r", "git@github.com:o/r.git", "/mirror", "policy")
+    task_id = ledger.create_task(
+        ledger.create_run(repo_id, "b" * 40),
+        "SA-0001",
+        "s" * 40,
+        "saffron/SA-0001",
+        budget_usd=6.0,
+    )
+    implement = None
+    for phase, turns, cost, subtype in (
+        ("IMPLEMENTING", 20, 1.82, "success"),  # the plan checkpoint
+        ("IMPLEMENTING", 41, 2.33, "error_max_turns"),
+        ("IMPLEMENTING", 3, 0.17, "success"),  # the salvage turn
+        ("REVIEWING", 11, 0.80, "success"),
+        ("REBUTTING", 32, 3.09, "error_max_budget_usd"),
+    ):
+        attempt = ledger.open_attempt(task_id, phase)
+        ledger.close_attempt(
+            attempt,
+            session_id=None,
+            subtype=subtype,
+            terminal_reason=None,
+            num_turns=turns,
+            cost_usd_est=cost,
+        )
+        if phase == "IMPLEMENTING":
+            implement = attempt
+    ledger.record_gate_result(
+        GateResult(
+            gate="size",
+            status="pass",
+            tool="size 1",
+            summary="269 changed lines within the bug ceiling of 300",
+        ),
+        attempt_id=implement,
+    )
+    ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+    return ledger, repo_id
+
+
+def _spec(spec_id, spec_type="bug", touches=2, criteria=3):
+    from saffron.intake import Spec
+
+    return Spec(
+        id=spec_id,
+        title=spec_id,
+        type=spec_type,
+        touches=[f"f{i}.py" for i in range(touches)],
+        acceptance_criteria=[f"c{i}" for i in range(criteria)],
+    )
+
+
+def test_history_splits_a_cells_spend_by_phase_and_names_how_attempts_ended(tmp_path):
+    # SA-0087: 47 of 60 turns went to the plan checkpoint, and nothing showed
+    # the operator that a cell of its shape needed more.
+    ledger, repo_id = _ledger_with_one_cell(tmp_path)
+
+    [cell] = driver._past_cells(ledger, repo_id, {"SA-0001": _spec("SA-0001")})
+
+    assert cell.spec_id == "SA-0001"
+    assert cell.state == "READY_FOR_REVIEW"
+    assert cell.budget_usd == 6.0
+    assert cell.plan == (20, pytest.approx(1.82))
+    assert cell.implement == (44, pytest.approx(2.50))
+    assert cell.review_usd == pytest.approx(0.80)
+    assert cell.rebut_usd == pytest.approx(3.09)
+    assert cell.endings == [
+        "IMPLEMENTING error_max_turns",
+        "REBUTTING error_max_budget_usd",
+    ]
+    assert cell.size == "269 changed lines within the bug ceiling of 300"
+
+
+def test_history_before_a_commit_hides_later_cells_and_always_the_specs_own(tmp_path):
+    # A blind review must not see the outcome it is being scored against.
+    ledger, repo_id = _ledger_with_one_cell(tmp_path)
+    specs = {"SA-0001": _spec("SA-0001")}
+
+    assert (
+        driver._past_cells(ledger, repo_id, specs, before="2000-01-01 00:00:00") == []
+    )
+    assert (
+        len(driver._past_cells(ledger, repo_id, specs, before="2999-01-01 00:00:00"))
+        == 1
+    )
+    assert driver._past_cells(ledger, repo_id, specs, exclude="SA-0001") == []
+
+
+def test_history_lists_only_the_same_type_most_similar_shape_first():
+    def cell(spec_id, spec_type, touches, criteria):
+        return driver.PastCell(
+            spec_id=spec_id,
+            spec_type=spec_type,
+            touches=touches,
+            criteria=criteria,
+            started_at="2026-09-14 12:00:00",
+            state="READY_FOR_REVIEW",
+            budget_usd=6.0,
+            plan=(20, 1.82),
+            implement=(44, 2.5),
+            review_usd=0.8,
+            rebut_usd=0.0,
+            endings=[],
+            size=None,
+        )
+
+    lines = driver._history_lines(
+        _spec("SA-0009", touches=2, criteria=3),
+        [
+            cell("SA-0002", "feature", 2, 3),
+            cell("SA-0003", "bug", 9, 9),
+            cell("SA-0004", "bug", 2, 4),
+        ],
+    )
+
+    assert lines[0].startswith("SA-0009  bug  touches=2 criteria=3")
+    assert [line.split()[0] for line in lines[1:]] == ["SA-0004", "SA-0003"]
+
+
+def test_commit_time_is_utc_in_the_ledgers_own_format(tmp_path):
+    env = {
+        **os.environ,
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_COMMITTER_DATE": "2026-09-14T12:00:00-07:00",
+        "GIT_AUTHOR_DATE": "2026-09-14T12:00:00-07:00",
+    }
+    for argv in (
+        ["git", "init", "-q", "-b", "main"],
+        [
+            "git",
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "c",
+        ],
+    ):
+        subprocess.run(argv, cwd=tmp_path, env=env, check=True)
+
+    assert driver._commit_time("HEAD", cwd=tmp_path) == "2026-09-14 19:00:00"

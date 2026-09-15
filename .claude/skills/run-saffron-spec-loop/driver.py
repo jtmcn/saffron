@@ -27,9 +27,11 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from saffron.gates.contract import GateResult
+    from saffron.intake import Spec
 
 REPO = Path(__file__).resolve().parents[3]
 STATE_DIR = REPO / ".saffron-loop"
+SPECS_DIR = REPO / ".saffron" / "specs"
 ORDER = STATE_DIR / "order.json"
 LEGACY_PLAN = STATE_DIR / "plan.json"
 ONTOLOGY = REPO / "ontology" / "factory.ttl"
@@ -1094,6 +1096,161 @@ def cmd_size(args) -> int:
     return 0 if result.status == "pass" else 1
 
 
+@dataclass
+class PastCell:
+    """One past cell's spend by phase, for the reviewer's ceilings and size checks."""
+
+    spec_id: str
+    spec_type: str
+    touches: int
+    criteria: int
+    started_at: str
+    state: str
+    budget_usd: float | None
+    plan: (
+        tuple[int, float] | None
+    )  # the first IMPLEMENTING attempt: the plan checkpoint
+    implement: tuple[int, float]  # every other IMPLEMENTING and REPAIRING attempt
+    review_usd: float
+    rebut_usd: float
+    endings: list[str]  # "<phase> <subtype>" for every attempt that did not succeed
+    size: str | None  # the last `size` gate summary, verbatim: it names the ceiling
+
+
+def _known_specs() -> dict[str, Spec]:
+    """Every spec by id, live or retired. The ledger's `spec_sha` is not a git
+    blob, so a past spec's shape is read from its text as it stands now."""
+    from saffron.intake import discover_specs
+
+    found: dict[str, Spec] = {}
+    for directory in (SPECS_DIR / "done", SPECS_DIR):
+        specs, _failures = discover_specs(directory)
+        found.update({d.spec.id: d.spec for d in specs})
+    return found
+
+
+def _commit_time(commit: str, cwd: Path = REPO) -> str:
+    """`commit`'s committer time the way the ledger writes `started_at`:
+    UTC, `YYYY-MM-DD HH:MM:SS`, so the two compare as strings."""
+    epoch = int(_git("log", "-1", "--format=%ct", commit, cwd=cwd))
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(epoch))
+
+
+def _past_cells(
+    ledger,
+    repo_id: int,
+    specs: dict[str, Spec],
+    *,
+    before: str | None = None,
+    exclude: str | None = None,
+) -> list[PastCell]:
+    budgets = {row["task_id"]: row["budget_usd"] for row in ledger.queue_lines()}
+    cells = []
+    for (spec_id, _sha), rows in ledger.tasks_by_spec(repo_id).items():
+        if spec_id == exclude or spec_id not in specs:
+            continue
+        spec = specs[spec_id]
+        for row in rows:
+            attempts = ledger.attempts(row["task_id"])
+            if not attempts or (
+                before is not None and attempts[0]["started_at"] >= before
+            ):
+                continue
+            implementing = [
+                a for a in attempts if a["phase"] in ("IMPLEMENTING", "REPAIRING")
+            ]
+            first = implementing[0] if implementing else None
+            rest = implementing[1:]
+            sizes = [
+                r.summary
+                for r in ledger.task_results(row["task_id"])
+                if r.gate == "size"
+            ]
+            cells.append(
+                PastCell(
+                    spec_id=spec_id,
+                    spec_type=spec.type,
+                    touches=len(spec.touches),
+                    criteria=len(spec.acceptance) or len(spec.acceptance_criteria),
+                    started_at=attempts[0]["started_at"],
+                    state=row["state"],
+                    budget_usd=budgets.get(row["task_id"]),
+                    plan=(first["num_turns"] or 0, first["cost_usd_est"] or 0.0)
+                    if first is not None
+                    else None,
+                    implement=(
+                        sum(a["num_turns"] or 0 for a in rest),
+                        sum(a["cost_usd_est"] or 0.0 for a in rest),
+                    ),
+                    review_usd=sum(
+                        a["cost_usd_est"] or 0.0
+                        for a in attempts
+                        if a["phase"] == "REVIEWING"
+                    ),
+                    rebut_usd=sum(
+                        a["cost_usd_est"] or 0.0
+                        for a in attempts
+                        if a["phase"] == "REBUTTING"
+                    ),
+                    endings=[
+                        f"{a['phase']} {a['subtype']}"
+                        for a in attempts
+                        if a["subtype"] not in (None, "success")
+                    ],
+                    size=sizes[-1] if sizes else None,
+                )
+            )
+    return cells
+
+
+def _cell_line(c: PastCell) -> str:
+    plan = f"plan {c.plan[0]}t ${c.plan[1]:.2f}" if c.plan else "plan -"
+    budget = f"${c.budget_usd:.2f}" if c.budget_usd is not None else "-"
+    ended = f"  ended: {'; '.join(c.endings)}" if c.endings else ""
+    size = f"  size: {c.size}" if c.size else ""
+    return (
+        f"{c.spec_id}  {c.spec_type}  touches={c.touches} criteria={c.criteria}  "
+        f"{c.started_at[:10]}  {c.state}  budget {budget}  {plan}  "
+        f"implement {c.implement[0]}t ${c.implement[1]:.2f}  "
+        f"review ${c.review_usd:.2f}  rebut ${c.rebut_usd:.2f}{size}{ended}"
+    )
+
+
+def _history_lines(target: Spec, cells: list[PastCell], limit: int = 12) -> list[str]:
+    """The target's own shape and ceilings, then past cells of its type, the
+    closest in `touches` and criteria count first, newest first on a tie."""
+    criteria = len(target.acceptance) or len(target.acceptance_criteria)
+    header = (
+        f"{target.id}  {target.type}  touches={len(target.touches)} "
+        f"criteria={criteria}  max_turns={target.max_turns} "
+        f"budget_usd={target.budget_usd}  max_attempts={target.max_attempts}"
+    )
+    same = [c for c in cells if c.spec_type == target.type]
+    same.sort(key=lambda c: c.started_at, reverse=True)
+    same.sort(
+        key=lambda c: abs(c.touches - len(target.touches)) + abs(c.criteria - criteria)
+    )
+    return [header, *(_cell_line(c) for c in same[:limit])]
+
+
+def cmd_history(args) -> int:
+    """What cells of this spec's shape spent before, for the spec reviewer."""
+    specs = _known_specs()
+    target = specs.get(args.spec_id)
+    if target is None:
+        return _fail(f"no spec declares {args.spec_id}")
+    before = _commit_time(args.before) if args.before else None
+    ledger, repo_id, _url = _ledger_and_repo()
+    try:
+        if repo_id is None:
+            return _fail("this repo has no ledger row yet")
+        cells = _past_cells(ledger, repo_id, specs, before=before, exclude=args.spec_id)
+    finally:
+        ledger.close()
+    print("\n".join(_history_lines(target, cells, args.limit)))
+    return 0
+
+
 def cmd_pattern(_args) -> int:
     print(watch_pattern())
     return 0
@@ -1140,6 +1297,12 @@ def main() -> int:
     p = sub.add_parser("size", help="a branch's changed lines against its ceiling")
     p.add_argument("spec_id")
     p.set_defaults(func=cmd_size)
+
+    p = sub.add_parser("history", help="what cells of this spec's shape spent before")
+    p.add_argument("spec_id")
+    p.add_argument("--before", help="only cells that started before this commit")
+    p.add_argument("--limit", type=int, default=12)
+    p.set_defaults(func=cmd_history)
 
     p = sub.add_parser("pattern", help="print the Monitor's grep -E pattern")
     p.set_defaults(func=cmd_pattern)
