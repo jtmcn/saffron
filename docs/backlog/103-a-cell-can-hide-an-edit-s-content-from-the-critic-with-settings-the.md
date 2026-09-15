@@ -62,3 +62,5 @@ refusal. `integrity`'s comment claiming a `--numstat` cross-check would close
 this was corrected by hand the same day, since `SA-0075` cannot reach
 `saffron/gates/**`. On the comment's own example, a committed `*.py -diff`,
 `--numstat` printed `-	-	f.py`, with `--text` as well.
+
+Merged 2026-09-13, PR #231.

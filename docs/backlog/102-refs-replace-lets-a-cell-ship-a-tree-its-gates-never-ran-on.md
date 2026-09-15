@@ -46,3 +46,5 @@ every read, not only the three the criteria name; a review commit added a
 witness on `dirty_paths`, which a replacement made report a clean tree as
 dirty. Grafts and `.git/shallow` are not replace refs and still move the
 history reads: item **110**.
+
+Merged 2026-09-13, PR #228.

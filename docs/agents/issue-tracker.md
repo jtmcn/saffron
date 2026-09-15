@@ -42,7 +42,8 @@ GitHub issues remain in use only for research/evidence records under
   So the commit that adds a spec updates that list and adds a "Re-measured"
   paragraph to the top of its docstring, and so does the commit that retires one
   to `done/`. Run `make check` before pushing a spec: `SA-0078` reached CI
-  without it and failed there.
+  without it and failed there. The commit that adds a spec also lists it in its
+  origin item's `specs:` — the item its `## Context` cites first.
 - **A spec that introduces a term files its vocabulary follow-up when it is
   written.** `ontology/` is rightly `forbidden` to the spec implementing against
   a term — a cell inventing vocabulary while implementing against it is how a

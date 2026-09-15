@@ -184,9 +184,12 @@ the push run.
 Findings kept in step 2 become a new `docs/backlog/NNN-slug.md` record each — the
 frontmatter shape of any open item, next id = highest existing + 1 — placed in
 `PRIORITY.md`'s tier index, with `uv run pytest tests/records -q` green before
-committing. Each item a spec came from gets its `## Record` section's `Status`
-line updated with the PR and the stack. They go in a standalone PR off the
-default branch unless the operator says otherwise.
+committing. Each item a spec came from gets its frontmatter `status` / `closed`
+/ `prs` (and `specs`/`commits` as applicable) set and a dated line added to
+`## Record`. If the spec merged, retire it to `.saffron/specs/done/` (updating
+the scheduler smoke test, `docs/agents/issue-tracker.md`) — an item whose
+origin spec is in `done/` cannot stay `open`. They go in a standalone PR off
+the default branch unless the operator says otherwise.
 
 Every finding you verified that the in-cell critic did not raise, and that was
 fixed or kept, is a change requested on the operator's behalf — a rejection:

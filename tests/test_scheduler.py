@@ -514,7 +514,7 @@ def test_the_stacking_parents_own_pull_request_is_not_an_overlap(tmp_path, ledge
     the parent's open pull request is what stacking is for. Left refused,
     this check shadowed the dependency admission entirely: a parent at
     `READY_FOR_REVIEW` has an open pull request by definition, and almost
-    every spec in this repository touches `docs/backlog/` (`SA-0026`)."""
+    every spec in this repository touched the backlog file then (`SA-0026`)."""
     directory = _spec_dir(tmp_path)
     _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
     _write_spec(directory, "b.md", id="TE-0", touches=["b.py"])

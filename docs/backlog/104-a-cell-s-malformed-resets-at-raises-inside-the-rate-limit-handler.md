@@ -46,3 +46,5 @@ stubs. It is worse than an abort. All four values raise out of the session:
 for NaN. Each leaves the run row `RUNNING`, because the raise is inside `except
 RateLimited` and its sibling `except BaseException` never closes the row. The
 ledger keeps a run that reads as still going.
+
+Merged 2026-09-13, PR #230.

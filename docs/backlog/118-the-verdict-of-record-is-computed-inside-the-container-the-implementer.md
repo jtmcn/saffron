@@ -2,7 +2,7 @@
 id: 118
 title: The verdict of record is computed inside the container the implementer controlled
 status: partial
-tier: null
+tier: 1
 filed: 2026-09-13
 by_hand: true
 specs: [SA-0086, SA-0087, SA-0088, SA-0089]
