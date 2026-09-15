@@ -141,8 +141,15 @@ def test_frontmatter_that_intake_reads_a_record_reads(text):
     assert parse(text, BACKLOG).model.id == 1
 
 
-def test_an_all_digit_commit_sha_loads_as_the_sha():
-    text = f"---\n{_CLOSED_ITEM}\ncommits: [1234567, 0123456, 57b676c]\n---\n"
+def test_an_unquoted_all_digit_commit_sha_is_refused_naming_commits():
+    # Refused, not coerced, like every other field that YAML reads as a number.
+    text = f"---\n{_CLOSED_ITEM}\ncommits: [1234567]\n---\n"
+    with pytest.raises(RecordError, match="commits"):
+        parse(text, BACKLOG)
+
+
+def test_a_quoted_or_leading_zero_sha_loads_as_written():
+    text = f"---\n{_CLOSED_ITEM}\ncommits: ['1234567', 0123456, 57b676c]\n---\n"
     assert parse(text, BACKLOG).model.model_dump(include={"commits"}) == {
         "commits": ["1234567", "0123456", "57b676c"]
     }
