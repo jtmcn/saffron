@@ -121,7 +121,7 @@ def witness_blocking(tier: RiskTier) -> bool:
     where `revert` answers it with `skip` — a disagreement recorded, not
     resolved, at `saffron/gates/core/witness.py`'s `ponytail:` comment. If
     either turns out to make a blocking `witness` too likely to abort an
-    attempt on nothing, that is `docs/backlog/`'s to carry, not a reason to
+    attempt on nothing, that is the backlog's to carry, not a reason to
     silently soften the level here.
     """
     return tier == "elevated"

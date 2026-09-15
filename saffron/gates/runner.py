@@ -191,8 +191,8 @@ def run_witness(
     When at least one criterion declares a `mutant`, this first re-invokes
     `tests` once on the *unmutated* tree, over a subset of exactly one node
     id, before ever applying anything. That subset argument is `revert`'s
-    own contract obligation (`docs/backlog/`,
-    `saffron/gates/core/revert.py`), and a repo may not have met it: a
+    own contract obligation (`saffron/gates/core/revert.py`), and a repo
+    may not have met it: a
     `tests` gate that cannot be filtered errors on every subset call,
     indistinguishable — from inside `witness_gate` alone — from the
     mutant-killed-its-own-witness trap that gate deliberately answers with

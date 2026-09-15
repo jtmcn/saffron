@@ -21,7 +21,7 @@ still carrying the **previous** attempt's `pr_url` — whose `reviewDecision` is
 the `CHANGES_REQUESTED` that requeued it. Reconciling in that window writes a
 `REQUEUE_STATES` value onto a task whose cell is alive. Harmless in v0.5, where
 no scan starts a cell and PACKAGE overwrites the row immediately after; it stops
-being harmless the moment `SA-0020` gives a scan teeth. `docs/backlog/` carries
+being harmless the moment `SA-0020` gives a scan teeth. Backlog item 29 carries
 it; do not close that item by widening this module's state guard alone.
 """
 

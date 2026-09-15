@@ -1,7 +1,7 @@
 """The `criteria` gate: did each criterion's witness run, and turn green? (§5.4)
 
-Core, and it executes nothing — the route `census` took, and `docs/backlog/`'s
-reasoning applies unchanged. Both suites already ran the repo's tests, at
+Core, and it executes nothing — the route `census` took, and the same reasoning
+applies unchanged. Both suites already ran the repo's tests, at
 `base_sha` for the baseline and at head on every attempt, so what a witness did
 on each side is two lists the host is already holding. Fetching it would need a
 §2.1 exception, a second suite execution charged to every task, and it would
