@@ -10,6 +10,7 @@ touches:
   - saffron/cell/session.py
   - tests/test_rebut.py
   - tests/test_session.py
+  - tests/test_events.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -36,9 +37,9 @@ forbidden:
   - saffron/cli.py
   - saffron/batch.py
   - saffron/replay.py
-budget_usd: 8
+budget_usd: 12
 max_attempts: 3
-max_turns: 60
+max_turns: 80
 risk: elevated
 acceptance:
   - claim: >-
@@ -79,8 +80,8 @@ numbers belong to the earlier tree.
 
 A critic that reads line 40 of the file as it now stands can find different
 code there, and withdraw a blocker because "that line no longer does that."
-A withdrawal is the one verdict nobody re-reads: `sustained_blockers` counts
-only `confirmed`. This is reasoned from the code and has not been seen in a
+A withdrawal is the one verdict nobody re-reads: `sustained_blockers` and
+`unkept_fixes` count only confirmed verdicts. This is reasoned from the code and has not been seen in a
 recorded night.
 
 ## Problem
@@ -100,9 +101,10 @@ the line's text as filed would need `Finding` to carry it, in
 `saffron/agents/findings.py`, which is a later spec.
 
 **Where either diff is read from.** `SA-0087` moved REVIEW's diff to the critic
-cell and `SA-0088` moved `diff()` there. Keep both sources. The diff REVIEW was
-shown is a string `session.py` already holds when it calls `run_review`: pass
-that string, and do not export it a second time.
+cell and `SA-0088` moved `diff()` there. Keep both sources. Pass REBUT the
+exact diff string `run_review` was handed, and do not export it a second time.
+If the function that manages the critic cell reads that string internally,
+return it from there.
 
 **The order of the verdict template's blocks.** Whether sessions can share a
 cached prompt is backlog item 126, and it waits on a measurement.
@@ -128,12 +130,19 @@ finding with `finding`, `verdict` and `reason`, exactly as it is.
 it a reviewed diff and a `diff()` that returns something different, record the
 verdict session's options, and assert its system prompt carries both.
 
-**Test the session half through `_drive`, with a patch stub that changes.**
-`_stub_the_runtime` in `tests/test_session.py` returns one fixed patch for every
-export, and after `SA-0087` and `SA-0088` the diffs are read from critic cells.
-Read the stub as it stands when you start, make the exported patch differ before
-and after the rebuttal turn, and assert that the verdict prompt, the one
-carrying `## The rebuttal`, holds the diff the lens prompts held.
+**`run_rebut` has a caller outside `tests/test_rebut.py`.** `tests/test_events.py`
+drives it too, which is why that file is in `touches`. A new argument is
+required, not defaulted, as `run_rebut`'s own `spec_id` comment says: a
+default would let a caller keep today's behaviour without noticing.
+
+**Test the session half through `_drive`, with a patch stub that changes only
+in the new witness.** `_stub_the_runtime` in `tests/test_session.py` returns one
+fixed patch for every export, and after `SA-0087` and `SA-0088` the diffs are
+read from critic cells. Read the stub as it stands when you start. Make the
+exported patch differ before and after the rebuttal turn inside the new witness
+alone: other tests, the `preserves` witness among them, anchor findings against
+the fixed patch. Assert that the verdict prompt, the one carrying
+`## The rebuttal`, holds the diff the lens prompts held.
 
 **Both witnesses must fail with the source reverted.** Reverted, the verdict
 prompt carries only the later diff, so honest tests of both criteria fail.

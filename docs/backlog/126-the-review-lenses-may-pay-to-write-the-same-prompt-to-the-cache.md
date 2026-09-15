@@ -21,7 +21,9 @@ characters on this repo), `CLAUDE.md` (12,372), the gate table, the diff and the
 task. Each template opens with its own lens's paragraph, and puts its remit,
 severity and output text before four of the five. `agent_options` sets the
 one-hour TTL on every session, and a one-hour cache write costs twice base
-input where a read costs a tenth.
+input where a read costs a tenth. Cells authenticate with a subscription token,
+so the cost is plan usage and rate-limit headroom rather than an invoice, and
+`total_cost_usd` is the client's estimate of it.
 
 Reordering the templates is not enough. A cache read lands only where an
 earlier request placed a breakpoint, and the CLI, not Saffron, places them.
@@ -33,9 +35,11 @@ checked.
 
 ## Done looks like
 
-`SA-0090`'s counts, read from one night's event log after a base-image rebuild,
-showing what the second and third lens read from the cache today. If it is only
-the tools, a spec for the shape above, ratified only after a lens-scoring
+`SA-0090`'s per-step counts, read from one night's event log after a base-image
+rebuild, showing what the second and third lens's *first* step read from the
+cache. A result's counts cannot answer this: they are cumulative over the
+session's steps, and every later step reads the session's own earlier writes.
+If the first step reads only the tools, a spec for the shape above, ratified only after a lens-scoring
 comparison, because moving a remit out of the system prompt can change what the
 lens finds. The verdict template and the one-hour TTL on lens sessions are
 settled from the same numbers.
