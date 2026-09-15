@@ -47,6 +47,29 @@ snapshot is not in it: re-snapshot to add it.
 and the operator has seen `snapshot`'s table in your reply: each spec's title
 and budget, the total, and every spec it refused.
 
+## 1b. Review each spec before its first cell
+
+Every spec in the order gets one spec review before any cell runs: one
+background subagent per spec, dispatched together. Use `subagent_type:
+spec-reviewer`, or `general-purpose` handed the body of
+`.claude/agents/spec-reviewer.md` if the session started before that file
+existed. Prompt each with its spec's path, `base: origin/main`, and
+`history: run it yourself`.
+
+Verify each blocker before acting on it: read its line at `origin/main`. A
+verified blocker goes to the operator before that spec's cell, as a question:
+fix the spec, run it as written, or drop it. Concerns and notes are kept for
+step 5. A spec edited here changes its `spec_sha`, so run `snapshot --force`
+after the edit merges.
+
+A spec with `depends_on` is reviewed at `origin/main` too, where its parent's
+code does not exist yet, so a finding that rests on the parent is expected
+there. Review it again at its parent's pushed branch
+(`base: origin/saffron/<parent id>`) before its own cell starts.
+
+**Done when** every spec in the order has a report with six check lines, and
+every verified blocker has the operator's answer.
+
 ## 2. Run each spec
 
 `uv run .claude/skills/run-saffron-spec-loop/driver.py next` names the next
