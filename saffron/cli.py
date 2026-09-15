@@ -328,7 +328,7 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # — never `repo`, the working copy (item 13, item 15 are both that
     # mistake) — so a spec whose own `touches` collide with `policy.yaml`'s
     # `protected` list is refused for the price of a `git archive`, not a
-    # cell, a turn and $0.82 (`SA-0021`, measured, docs/BACKLOG.md item 28).
+    # cell, a turn and $0.82 (`SA-0021`, measured, backlog item 28).
     # No task row exists yet, so nothing is left in an in-flight state.
     policy_unread: list[str] = []
     with tempfile.TemporaryDirectory() as scratch:
@@ -349,7 +349,7 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         return 1
 
     # Same cheap-before-a-cell shape, one check later: a `saffron:retired-by`
-    # marker this spec's own `touches` cannot reach (`SA-0027`, docs/BACKLOG.md
+    # marker this spec's own `touches` cannot reach (`SA-0027`, backlog
     # item 35) is a `git grep` against the mirror, not a plan checkpoint an
     # agent has to talk its way out of.
     markers = _retirement_markers_at(mirror, base_sha)
@@ -876,7 +876,7 @@ def _watch(args: argparse.Namespace, out_dir: Path) -> int:
 
     By default this opens on the newest task the directory's log holds — a
     spec driven twice writes both into one `events.jsonl`, and `--whole-log`
-    is the escape hatch back to every task, in order (docs/BACKLOG.md item
+    is the escape hatch back to every task, in order (backlog item
     64). `--all` was already taken for the noisy-agent-line flag, so this is
     a second name rather than a second meaning for it.
     """

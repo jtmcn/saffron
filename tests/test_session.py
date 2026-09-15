@@ -3269,7 +3269,7 @@ def test_the_criteria_gate_skips_for_a_spec_that_declares_no_witnesses(
 
 
 def test_a_witness_green_at_base_is_named_before_the_first_turn(monkeypatch, tmp_path):
-    """`docs/BACKLOG.md` item 23 (SA-0085): `criteria` itself skips at
+    """backlog item 23 (SA-0085): `criteria` itself skips at
     baseline and would only report `witness-green-at-base` after the first
     GATE suite — an attempt spent to learn what the baseline already knew,
     and one no repair turn can make pass: the agent's only routes are renaming or
@@ -3365,7 +3365,7 @@ def test_a_witness_green_at_base_is_named_before_the_first_turn(monkeypatch, tmp
         assert silent.green_at_base == (), n
 
 
-# --- `witness` reaches a real attempt (SA-0061, `docs/BACKLOG.md` item 71) ---
+# --- `witness` reaches a real attempt (SA-0061, backlog item 71) ---
 
 
 def test_a_cell_run_produces_a_witness_result(monkeypatch, tmp_path):
@@ -3439,7 +3439,7 @@ def test_a_cell_run_produces_a_witness_result(monkeypatch, tmp_path):
 def test_a_cell_run_supplies_the_real_mutator(monkeypatch, tmp_path):
     """The cell run supplies `worktree.source_mutated` — bound to this
     attempt's own container — in place of the stub, so `witness` reaches a
-    real verdict on a real attempt (`SA-0062`, `docs/BACKLOG.md` item 71).
+    real verdict on a real attempt (`SA-0062`, backlog item 71).
 
     Every spec in this repo declares no mutants — the default `_spec()`
     fixture included — so that verdict is `skip` for want of anything to
@@ -3966,7 +3966,7 @@ def test_a_protected_path_alone_asks_for_notes(monkeypatch, tmp_path):
     `revert` requires every new test to fail with the diff's own source
     reverted, and this claim's subject — `session.py`'s predicate — is a file
     `SA-0064` forbids, so it is untouched by construction and the check cannot
-    be satisfied honestly. `docs/BACKLOG.md` item 84 is that gap, filed from
+    be satisfied honestly. backlog item 84 is that gap, filed from
     this run's own notes. Until it closes, the half stays and this docstring
     is what says so.
 

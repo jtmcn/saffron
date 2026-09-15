@@ -1,0 +1,53 @@
+# Backlog — what v0.5 left, and why each thing matters
+
+Written at the close of v0.5 (`DESIGN.md` rev 14). Every item here is a gap a
+live run exposed or a decision deliberately deferred — none is speculation about
+what might be nice. Each says what "done" looks like, so it can be picked up
+cold.
+
+**Numbered in filing order, not priority order.** The numbers are an API —
+comments across `saffron/` cite them (`BACKLOG item 33`, `backlog item 41`), so
+an item is appended and never renumbered, exactly as `DESIGN.md`'s sections
+are. The header line here used to claim the file was ordered by what would hurt
+most on the first unattended night; it never was, and as items were appended it
+drifted further. **The order to work in is `PRIORITY.md`.**
+
+**Where the evidence lives.** `DESIGN.md` Appendices I–L narrate what building
+and running v0.5 found. The per-task briefs and implementation reports were
+written under `.superpowers/`, which is gitignored and does **not** survive a
+merge — anything from them worth keeping was moved into the appendices or into
+`docs/superpowers/plans/2026-08-19-v0.5-findings.md` before this was written.
+
+---
+
+## What is *not* here, deliberately
+
+DIAGNOSE and `SCOPE_REVIEW`, the scheduler's conflict sets and stacking, `saffron
+gc`, multi-repo, the merge train, and the `secrets` gate. All are v1+ by
+`DESIGN.md` §9's own build order, and none of them is blocked by any open item.
+`size` left this list on 2026-08-25: it is built and unwired, which is
+item 17. `revert` left it with `SA-0044`: it is built and wired into `_suite`,
+which is item 49. §4.2's own argument applies: at a two-deep queue they
+arbitrate contention that never arrives.
+
+---
+
+## How to add an item
+
+Copy the frontmatter shape from any open item: each field is defined in `records/kinds.py` and
+validated on load. Set `id` to one more than the highest existing item, and use that id at
+the start of the filename as `NNN-slug.md`. The body must have three sections in order:
+`## Problem`, `## Done looks like`, and `## Record`. Before committing, run `uv run pytest tests/records -q` to
+validate the record. If a spec's `## Context` section cites this item, add that spec's id to this
+item's `specs:` list in the same commit.
+
+- Set `tier` (0–3) only if the item is named under that tier's heading in `PRIORITY.md` — the
+  check enforces it.
+- `done`, `superseded` and `wontfix` need `closed` plus at least one of `specs`/`prs`/`commits`
+  (`superseded` also needs `superseded_by`).
+- `partial` needs a dated `## Record` entry.
+- Set `by_hand: true` when the item's own prose says the work that closed it, or the work still
+  left, cannot go through a cell.
+- An open item with no stated exit criterion writes `_Not stated in the original item._` under
+  `## Done looks like`.
+- Quote commit shas in YAML (`commits: ["0123456"]`) so an all-digit sha is not read as a number.

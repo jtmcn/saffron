@@ -514,7 +514,7 @@ def test_the_stacking_parents_own_pull_request_is_not_an_overlap(tmp_path, ledge
     the parent's open pull request is what stacking is for. Left refused,
     this check shadowed the dependency admission entirely: a parent at
     `READY_FOR_REVIEW` has an open pull request by definition, and almost
-    every spec in this repository touches `docs/BACKLOG.md` (`SA-0026`)."""
+    every spec in this repository touched the backlog file then (`SA-0026`)."""
     directory = _spec_dir(tmp_path)
     _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
     _write_spec(directory, "b.md", id="TE-0", touches=["b.py"])
@@ -1050,7 +1050,7 @@ def _spec_at(tmp_path, name, **kwargs):
     """A real `Spec`, parsed the way `build_queue` parses one — `_write_spec`
     writes the frontmatter, `load_spec` reads it back — so `retirement_refusal`
     is tested against the same object `_refuse` actually receives, not a
-    `SimpleNamespace` standing in for one (docs/BACKLOG.md item 21's own
+    `SimpleNamespace` standing in for one (backlog item 21's own
     lesson)."""
     directory = _spec_dir(tmp_path)
     _write_spec(directory, name, **kwargs)
@@ -1085,7 +1085,7 @@ def test_a_forbidden_glob_reaches_a_nested_marker_too(tmp_path):
         tmp_path, "a.md", id="TE-9", touches=["src/**"], forbidden=["docs/**"]
     )
 
-    reason = retirement_refusal(spec, [("docs/BACKLOG.md", "TE-9")])
+    reason = retirement_refusal(spec, [("docs/README.md", "TE-9")])
 
     assert reason is not None
     assert "forbidden" in reason
@@ -1261,7 +1261,7 @@ def test_a_marker_naming_a_retired_spec_is_not_dangling(tmp_path, ledger):
 def test_a_touches_entry_matching_a_protected_literal_path_is_refused(tmp_path, ledger):
     """`SA-0021`'s own shape: `DESIGN.md` declared in `touches` is exactly
     the collision that cost a cell, a turn and $0.82 before it reached
-    `validate_plan` (docs/BACKLOG.md item 28)."""
+    `validate_plan` (backlog item 28)."""
     directory = _spec_dir(tmp_path)
     _write_spec(directory, "a.md", id="TE-1", touches=["DESIGN.md", "saffron/x.py"])
 
@@ -1300,7 +1300,7 @@ def test_protected_matching_uses_the_glob_matcher_not_a_string_compare(
 
 def test_a_glob_protected_entry_is_not_decided_here(tmp_path, ledger):
     """`.saffron/**` is this repo's own fourth `protected` entry, and the one
-    that is not literal (docs/BACKLOG.md item 28, `SA-0023`'s own criteria).
+    that is not literal (backlog item 28, `SA-0023`'s own criteria).
     Deciding whether it can ever intersect a `touches` glob needs the file
     list at `base_sha`, which the scan does not have — `protected_touch_
     refusal`'s own `ponytail:` — so this is left to `validate_plan`'s
@@ -1818,7 +1818,14 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-14, a twenty-fifth time: `SA-0086` to `SA-0089`
+    """Re-measured 2026-09-14, a twenty-sixth time: `SA-0074` to `SA-0086`
+    all merged to `main` and retired to `done/`, so the live queue holds only
+    the tail of item 118's chain. `SA-0087` has `depends_on: []`, so it is the
+    one candidate. `SA-0088` (`depends_on: [SA-0087]`) and `SA-0089`
+    (`depends_on: [SA-0088]`) are both refused, and correctly: neither parent
+    has a task at its current `spec_sha`, so nothing says it merged.
+
+    Re-measured 2026-09-14, a twenty-fifth time: `SA-0086` to `SA-0089`
     queued for item 118. `SA-0086` and `SA-0087` are independent and join the
     candidates behind `SA-0074`, because candidates run in priority order and
     both are priority 1; refusals stay in file order. `SA-0088` stacks on
@@ -1918,37 +1925,11 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == [
-        "SA-0074",
-        "SA-0086",
-        "SA-0087",
-        "SA-0076",
-        "SA-0077",
-        "SA-0078",
-        "SA-0082",
-        "SA-0079",
-        "SA-0080",
-    ]
-    assert [r.path.name[:7] for r in refusals] == [
-        "SA-0075",
-        "SA-0081",
-        "SA-0083",
-        "SA-0084",
-        "SA-0085",
-        "SA-0088",
-        "SA-0089",
-    ]
-    parents = [
-        "SA-0074",
-        "SA-0080",
-        "SA-0082",
-        "SA-0080",
-        "SA-0084",
-        "SA-0087",
-        "SA-0088",
-    ]
+    assert [c.spec.id for c in candidates] == ["SA-0087"]
+    assert [r.path.name[:7] for r in refusals] == ["SA-0088", "SA-0089"]
+    parents = ["SA-0087", "SA-0088"]
     for refusal, parent in zip(refusals, parents, strict=True):
-        assert f"{parent} has no task" in refusal.reason
+        assert f"depends_on {parent} has no task" in refusal.reason
     # A precondition, not the glob check: `done/` is populated, so the empty
     # queue above is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30

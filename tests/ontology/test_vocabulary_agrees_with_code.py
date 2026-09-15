@@ -12,7 +12,7 @@ registry (they are discovered)". That was true of the registry and false of the
 set: `saffron/gates/core/` is a directory, and reading it is what
 `test_every_core_gate_that_exists_is_declared_in_the_vocabulary` does. The
 sentence cost three pull requests with `witness` built and undeclared
-(docs/BACKLOG.md item 72). The set is closed a second time as
+(backlog item 72). The set is closed a second time as
 `policy.CORE_GATE_NAMES`, the names a repo may not declare (item 22), and held
 equal to the vocabulary so a gate is reserved before it is built. The terminal states the code names do
 still fall through to a documented default rather than a raise, so they are not
@@ -89,7 +89,7 @@ def test_the_stop_reasons_the_ledger_will_store_are_the_ones_the_vocabulary_decl
 # `saffron/gates/core/` has no registry object — `saffron/gates/suite.py` imports the
 # gates by name — but the directory is a closed set all the same. Treating it as
 # one is what this file previously declined to do, and `witness` shipped built
-# and undeclared for three pull requests as a result (docs/BACKLOG.md item 72).
+# and undeclared for three pull requests as a result (backlog item 72).
 CORE_GATES = ONTOLOGY.parent / "saffron" / "gates" / "core"
 
 

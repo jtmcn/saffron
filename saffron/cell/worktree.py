@@ -151,7 +151,7 @@ DIFF_FLAGS = (
     "--diff-algorithm=myers",
     # diff.ignoreSubmodules=all drops a submodule path a commit added from
     # both the name-only listing and the patch — a hole in `scope` itself,
-    # not merely a cosmetic one (docs/BACKLOG.md item 89).
+    # not merely a cosmetic one (backlog item 89).
     "--ignore-submodules=none",
     # color.ui=always or color.diff=always paints the patch with escape
     # codes, `diff --git` headers included. The flag, not `-c color.ui=never`
@@ -173,11 +173,11 @@ def _git(container: str, *args: str) -> runtime.Completed:
     # one uncommitted `git config` (§5.4).
     # useReplaceRefs=false: here, not in `DIFF_FLAGS` — measured on git 2.54,
     # `git replace` moves every read of the object graph, not only diffs
-    # (docs/BACKLOG.md item 102).
+    # (backlog item 102).
     # bigFileThreshold, attributesFile: either can print an edit as `Binary files
-    # differ`, so no lens reads its hunks (docs/BACKLOG.md item 103).
+    # differ`, so no lens reads its hunks (backlog item 103).
     # GIT_GRAFT_FILE, GIT_SHALLOW_FILE: a planted grafts or shallow file re-parents
-    # the history `commits_ahead` counts (docs/BACKLOG.md item 110). No flag pins
+    # the history `commits_ahead` counts (backlog item 110). No flag pins
     # either, and `exec_` takes no env; measured on git 2.39.5 and 2.54.
     # advice.graftFileDeprecated=false: setting `GIT_GRAFT_FILE` alone makes
     # git print its eight-line "grafts is deprecated" hint on stderr on every
@@ -489,7 +489,7 @@ def source_mutated(container: str, mutant: Mutant) -> Iterator[str | None]:
     is only correct over a file that *is* at `HEAD`, and this refuses to run
     otherwise. `SA-0062` claimed `committed` guaranteed that; it does not.
     `committed_gate` runs after `run_suite`, which is where this is called
-    from, so the tree here may still be dirty (`docs/BACKLOG.md` item 78).
+    from, so the tree here may still be dirty (backlog item 78).
 
     Six things apply nothing and say so by yielding the reason instead of
     `None`, leaving the tree exactly as it was: a path outside the worktree,

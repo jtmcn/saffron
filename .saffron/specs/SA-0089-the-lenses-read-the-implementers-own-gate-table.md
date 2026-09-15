@@ -48,7 +48,7 @@ acceptance:
 
 ## Context
 
-`docs/BACKLOG.md` item **118**, the fourth of four. `SA-0087` moved the lenses
+backlog item **118**, the fourth of four. `SA-0087` moved the lenses
 into a critic cell and the diff they read with them. One input stayed behind.
 In `_drive_cell` (`saffron/cell/session.py`), REVIEW passes
 `gates=review.gate_summary(latest.results, ...)`, and `latest` is the last

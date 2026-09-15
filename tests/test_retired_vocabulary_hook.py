@@ -1,4 +1,4 @@
-"""Witnesses for `hooks/retired_vocabulary.py` (docs/BACKLOG.md item 57).
+"""Witnesses for `hooks/retired_vocabulary.py` (backlog item 57).
 
 `pygrep` — the engine the `retired-vocabulary` hook used before this script —
 matches one line at a time, and every prose file the hook covers is

@@ -129,16 +129,15 @@ def test_a_yaml_1_1_coercion_is_refused_naming_the_field(frontmatter, field):
 _CLOSED_ITEM = "id: 1\ntitle: T\nstatus: done\nclosed: 2026-09-01\nspecs: [SA-0001]"
 
 
-@pytest.mark.parametrize(
-    "text",
-    [
-        _open_item("id: 1\ntitle: T\nstatus: open").replace("\n", "\r\n"),
-        f"---\n{_CLOSED_ITEM}\n---",
-    ],
-    ids=["crlf", "no-body"],
-)
-def test_frontmatter_that_intake_reads_a_record_reads(text):
+def test_frontmatter_that_intake_reads_a_record_reads():
+    text = _open_item("id: 1\ntitle: T\nstatus: open").replace("\n", "\r\n")
     assert parse(text, BACKLOG).model.id == 1
+
+
+def test_a_file_ending_at_its_closing_fence_is_refused_for_its_body():
+    # Naming Problem, not "no YAML frontmatter", is proof the fence was read.
+    with pytest.raises(RecordError, match="Problem"):
+        parse(f"---\n{_CLOSED_ITEM}\n---", BACKLOG)
 
 
 def test_an_unquoted_all_digit_commit_sha_is_refused_naming_commits():
@@ -149,7 +148,7 @@ def test_an_unquoted_all_digit_commit_sha_is_refused_naming_commits():
 
 
 def test_a_quoted_or_leading_zero_sha_loads_as_written():
-    text = f"---\n{_CLOSED_ITEM}\ncommits: ['1234567', 0123456, 57b676c]\n---\n"
+    text = f"---\n{_CLOSED_ITEM}\ncommits: ['1234567', 0123456, 57b676c]\n---\n\n## Problem\n\nx\n"
     assert parse(text, BACKLOG).model.model_dump(include={"commits"}) == {
         "commits": ["1234567", "0123456", "57b676c"]
     }
@@ -167,3 +166,21 @@ def test_plain_decimals_booleans_and_dates_still_load():
         "by_hand": True,
         "filed": dt.date(2026, 9, 1),
     }
+
+
+def test_a_record_with_no_problem_section_is_refused():
+    text = "---\nid: 1\ntitle: T\nstatus: open\n---\n\n## Done looks like\n\ny\n"
+    with pytest.raises(RecordError, match="Problem"):
+        parse(text, BACKLOG)
+
+
+def test_prose_before_the_first_heading_is_refused(tmp_path):
+    item = tmp_path / "docs" / "backlog" / "001-x.md"
+    item.parent.mkdir(parents=True)
+    item.write_text(
+        "---\nid: 1\ntitle: T\nstatus: open\n---\n\n"
+        "A stray paragraph before any heading.\n\n"
+        "## Problem\n\nx\n\n## Done looks like\n\ny\n"
+    )
+    with pytest.raises(RecordError, match="001-x.md"):
+        load(BACKLOG, tmp_path)

@@ -334,7 +334,7 @@ def run_task(
         outcome.state = result.state
     else:
         # PACKAGE never ran, but teardown may still have exported commits
-        # (`docs/BACKLOG.md` item 45, `SA-0069`) — pushed to the cell's own
+        # (backlog item 45, `SA-0069`) — pushed to the cell's own
         # branch, never packaged, and never allowed to change `outcome.state`:
         # a caller reading `MERGE_FAILED` or `READY_FOR_REVIEW` here would
         # believe PACKAGE ran.

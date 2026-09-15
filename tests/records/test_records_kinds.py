@@ -88,6 +88,20 @@ def test_a_pr_or_related_number_is_at_least_one(field):
         BacklogItem.model_validate({**MINIMAL, field: [0]})
 
 
+def test_a_commit_sha_has_the_hex_shape():
+    with pytest.raises(ValidationError, match="commits"):
+        BacklogItem.model_validate({**MINIMAL, "commits": ["xyz"]})
+    assert BacklogItem.model_validate({**MINIMAL, "commits": ["4ba8bdf"]}).commits == [
+        "4ba8bdf"
+    ]
+
+
+def test_an_unquoted_commit_sha_hints_to_quote_it():
+    # An all-digit sha with no quotes arrives as an int.
+    with pytest.raises(ValidationError, match="quote"):
+        BacklogItem.model_validate({**MINIMAL, "commits": [1234567]})
+
+
 def test_backlog_is_a_registered_kind():
     kind = KINDS["backlog"]
     assert kind.directory == "docs/backlog"

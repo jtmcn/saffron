@@ -4,6 +4,7 @@ check is trusted against."""
 
 import inspect
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -24,7 +25,7 @@ from records.check import (
     check_specs_resolve,
     cited_items,
 )
-from records.kinds import KINDS
+from records.kinds import KINDS, Identified
 from records.load import load
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "good"
@@ -198,6 +199,22 @@ def test_a_spec_id_in_two_files_is_a_violation_naming_both(broken):
     [v] = check_spec_ids_unique(broken)
     assert v.field == "specs" and "SA-0001" in v.message
     assert "done/SA-0001-a-gate.md" in v.message and "SA-0001-again.md" in v.message
+
+
+def test_a_non_backlog_record_is_refused_naming_the_file():
+    # A field read via getattr(..., default) on the wrong model would silently
+    # check nothing; narrowing to BacklogItem must refuse it instead.
+    records = load(BACKLOG, FIXTURE)
+    bogus = replace(records[0], model=Identified(id=records[0].model.id, status="open"))
+    with pytest.raises(TypeError, match=str(bogus.path)):
+        check_links([bogus])
+
+
+def test_the_priority_check_refuses_a_non_backlog_record_too():
+    records = load(BACKLOG, FIXTURE)
+    bogus = replace(records[0], model=Identified(id=records[0].model.id, status="open"))
+    with pytest.raises(TypeError, match=str(bogus.path)):
+        check_priority([bogus], FIXTURE / "docs" / "backlog" / "PRIORITY.md")
 
 
 def test_a_done_item_may_not_name_a_spec_still_in_the_queue(broken):

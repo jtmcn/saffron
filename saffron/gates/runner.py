@@ -191,8 +191,8 @@ def run_witness(
     When at least one criterion declares a `mutant`, this first re-invokes
     `tests` once on the *unmutated* tree, over a subset of exactly one node
     id, before ever applying anything. That subset argument is `revert`'s
-    own contract obligation (`docs/BACKLOG.md`,
-    `saffron/gates/core/revert.py`), and a repo may not have met it: a
+    own contract obligation (`saffron/gates/core/revert.py`), and a repo
+    may not have met it: a
     `tests` gate that cannot be filtered errors on every subset call,
     indistinguishable — from inside `witness_gate` alone — from the
     mutant-killed-its-own-witness trap that gate deliberately answers with
@@ -319,7 +319,7 @@ def run_suite(
     Two production callers supply one today, `suite.GateSuite` and
     `package.reverify`, and both pass `acceptance` beside it; the sentence
     here once said no production caller could, which `SA-0061` falsified and
-    `docs/BACKLOG.md` item 75 records.
+    backlog item 75 records.
     """
     results = [
         run_gate(name, executable, cwd, timeout_s=timeout_s, executor=executor)

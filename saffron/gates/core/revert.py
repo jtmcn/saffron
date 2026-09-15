@@ -6,7 +6,7 @@ hunk-level, which is the ceiling the `ponytail:` below names. "New" is a set
 difference over names the host already holds (`collected(head) -
 collected(base)`, `census`'s own route); "changed-body-same-name" needs a
 hunk-to-node-id mapping, which is language knowledge §2.1 keeps out of core
-(`docs/BACKLOG.md` item 49).
+(backlog item 49).
 
 The one sanctioned exception to "core executes nothing" (§2.1): it re-invokes
 a gate the repo already declared, through the same JSON contract as every
@@ -68,7 +68,7 @@ def _argv_safe(name: str) -> bool:
     gate reads an untrustworthy run as `skip`. So a `skip` is buyable for one
     line in a new test file, and no name filter closes that: a bogus id can be
     spelled inside `test_paths` as easily as outside them. Named in
-    `docs/BACKLOG.md` item 51 rather than papered over here, and the drop is
+    backlog item 51 rather than papered over here, and the drop is
     reported in the summary so the attempt is at least visible.
     """
     return not name.startswith("-")
@@ -149,7 +149,7 @@ def revert_gate(
     #
     # ponytail: a file that is half test and half source is therefore reverted
     # whole or not at all — the spec's own Out of scope names this and asks for
-    # the marker. `docs/BACKLOG.md` item 49 carries the sibling gap.
+    # the marker. backlog item 49 carries the sibling gap.
     if not test_paths:
         # A fourth kind of nothing, and it must be caught before the worktree is
         # touched: with no declared test paths every changed file reads as

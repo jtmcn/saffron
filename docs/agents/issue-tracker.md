@@ -42,18 +42,19 @@ GitHub issues remain in use only for research/evidence records under
   So the commit that adds a spec updates that list and adds a "Re-measured"
   paragraph to the top of its docstring, and so does the commit that retires one
   to `done/`. Run `make check` before pushing a spec: `SA-0078` reached CI
-  without it and failed there.
+  without it and failed there. The commit that adds a spec also lists it in its
+  origin item's `specs:` — the item its `## Context` cites first.
 - **A spec that introduces a term files its vocabulary follow-up when it is
   written.** `ontology/` is rightly `forbidden` to the spec implementing against
   a term — a cell inventing vocabulary while implementing against it is how a
   term comes to mean whatever the implementation needed. The defect is that
   nothing then owns the entry: `witness`, `mutant` and the four batch stop
   reasons each reached `main` with the code using a word the glossary did not
-  have (`docs/BACKLOG.md` items 65, 72). The follow-up cannot itself be a spec —
+  have (backlog items 65, 72). The follow-up cannot itself be a spec —
   a cell cannot land it. `ontology/factory.ttl` is editable by a cell, but
   `CONTEXT.md` is `protected` and is generated from it, so the two halves cannot
-  move together inside a cell and the task is refused at intake. File it as a
-  backlog item marked **by hand**, in the same commit as the spec.
+  move together inside a cell and the task is refused at intake. File it as a new
+  `docs/backlog/NNN-slug.md` record marked `by_hand: true`, in the same commit as the spec.
 
 - **A mutant pins text the existing code already determines; a spec that
   creates new code declares a witness and no mutant.** A `mutant` names exact
@@ -78,7 +79,7 @@ GitHub issues remain in use only for research/evidence records under
   "declare a module-scope constant named CEILING, set to 60" discloses the
   spelling without containing it — and the cell can read the spec file directly
   in any case: `.saffron/**` is forbidden to *write*, not to *read*
-  (`docs/BACKLOG.md` item 80). It catches the literal, which is the shape
+  (backlog item 80). It catches the literal, which is the shape
   `SA-0063` took; the honest mutant is still the author's job.
 
   *Pinning what the code determines does work*, and is what `SA-0064` did: a
@@ -89,7 +90,7 @@ GitHub issues remain in use only for research/evidence records under
   So a spec whose change is an **edit** declares a mutant, and one whose change
   is **new** declares a witness alone and accepts that `witness` will report
   `skip`. That is a real limit on the answer item 69 was built to give
-  (`docs/BACKLOG.md` item 82) rather than a rule of thumb — say which of the two
+  (backlog item 82) rather than a rule of thumb — say which of the two
   a spec is when it is written, in `## Notes for the agent`, so a reviewer can
   tell an honest `skip` from a missing mutant.
 
@@ -117,7 +118,7 @@ uv run saffron cell .saffron/specs/SA-NNNN-<slug>.md --repo .
 ## When a skill says "publish to the issue tracker"
 
 Create the next `SA-` spec file under `.saffron/specs/` and record the work in
-`docs/BACKLOG.md` / `docs/evidence/` per the conventions there.
+`docs/backlog/` / `docs/evidence/` per the conventions there.
 
 ## When a skill says "fetch the relevant ticket"
 

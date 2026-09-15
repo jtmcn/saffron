@@ -489,7 +489,7 @@ def reverify(
     `packaged_sha`, both in cells the cell under package never touched — the
     old baseline (the cell's own run) is never reused, moved base or not,
     because the cell that produced it is the one thing never trusted with it
-    (§2, `docs/BACKLOG.md` item 118). The suite is `GateSuite`, the one the
+    (§2, backlog item 118). The suite is `GateSuite`, the one the
     cell's attempts were judged by, so the two cannot differ in shape (item
     71, principle 54). An errored gate or drift between the two suites is
     infrastructure and raises; only new failures are the task's.
@@ -1011,7 +1011,7 @@ def push_unpackaged_work(
 ) -> PushResult:
     """A cell that did not end `READY_FOR_REVIEW` never reaches `package()`,
     so a diff `export_patch` wrote at teardown was, until now, read by nobody
-    (`docs/BACKLOG.md` item 45). This pushes it anyway — never packages it.
+    (backlog item 45). This pushes it anyway — never packages it.
 
     **Onto the tree the cell built on, never the default branch.** The patch
     is relative to `tree_base` (`patch.json`), applies there by construction,

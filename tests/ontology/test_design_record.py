@@ -47,7 +47,7 @@ def test_the_principle_sequence_is_contiguous():
     shape form and lives here instead.
 
     Contiguity is what makes a principle number an address: `DESIGN.md`,
-    `CONTEXT.md`, `docs/BACKLOG.md` and `docs/evidence/` all cite one, and a gap
+    `CONTEXT.md`, `docs/backlog/` and `docs/evidence/` all cite one, and a gap
     means an appendix allocated a block that overlaps or skips a neighbour's.
     """
     numbers = _numbers(_graph())

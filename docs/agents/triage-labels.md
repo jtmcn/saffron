@@ -10,7 +10,7 @@ spec on disk carries no GitHub label strings.
 | `needs-info`           | acceptance criteria under-specified                         | Waiting on additional detail before driving       |
 | `ready-for-agent`      | `priority`, `depends_on` clear + criteria tickable          | Fully specified, ready for an AFK agent (`saffron cell`) |
 | `ready-for-human`      | `risk: elevated` / blocked on `depends_on`                  | Requires human implementation                     |
-| `wontfix`              | acceptance criteria marked N/A / spec closed in `docs/BACKLOG.md` | Will not be actioned                             |
+| `wontfix`              | acceptance criteria marked N/A / spec closed in `docs/backlog/` | Will not be actioned                             |
 
 Driving role maps onto a concrete action:
 

@@ -60,7 +60,7 @@ acceptance:
 
 ## Context
 
-`docs/BACKLOG.md` item **118**, the third of four. `SA-0087` built the
+backlog item **118**, the third of four. `SA-0087` built the
 critic cell and moved REVIEW into it. REBUT has the same shape one phase later.
 `rebut.run_rebut(container, ...)` takes one container. It runs the rebuttal
 turn there, which resumes the implementer's session and may commit fixes. It

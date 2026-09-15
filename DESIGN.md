@@ -268,8 +268,9 @@ Design notes:
                        the code, and no model call has happened yet (§5.4)
   NOT_IMPLEMENTED  ◀── IMPLEMENT produced no commit. Measured, never reported —
                        a dead seam here would have returned an earned state
-  GATE_ERROR       ◀── a gate errored, or the two suites drifted: infrastructure,
-                       and never charged to the task (§5.4)
+  GATE_ERROR       ◀── a gate errored, the two suites drifted, or the critic cell
+                       met a binary stub the export cannot carry: infrastructure,
+                       and never charged to the task (§5.4, §5.5)
   SCOPE_REVIEW     ◀── also from IMPLEMENTING: an implementer whose declared
                        `touches` cannot satisfy the criteria proposes a set
                        instead of writing a plan, and the proposal ends the
@@ -384,7 +385,7 @@ Everything above is the scheduler once the queue is deep. This is what v1 builds
 
 > Item 18 counts five instances and declines to number a sixth. This is the sixth, and #27 called it the fifth — the miscount is worth correcting precisely because the pattern's value is in the count.
 
-**The refusal gate refuses eight things, and the fifth is the only one with a corpse behind it.** §4.2's four stand as written, `depends_on` is the sixth, `SA-0023`'s is the seventh — a spec whose own `touches` are protected paths, refused before the cell rather than after the plan checkpoint has spent its budget — and `SA-0027`'s is the eighth, which belongs beside the fifth rather than at the end: both refuse *a path named that no `touches` pattern reaches*, read from two different sources — an acceptance criterion in the one case, a `saffron:retired-by` marker in the repository in the other. This count has now been wrong by one twice, each time within a release of being corrected; `docs/BACKLOG.md` item 48 is the standing item for the reader that would notice a ninth. The fifth is: **a spec whose acceptance criteria name a path that no `touches` pattern matches.** Item 18 measured that such a spec is unsatisfiable by construction — `SA-0005` burned $5.34 and died at turn 61 because its criteria reached `cli.py` and `package.py` while its `touches` did not, so the implementer could not have satisfied them without failing `scope`, and one finding was dropped as unanchorable for the same reason. The adjudication was that **the fault was the spec's, not the implementer's**, and nothing in intake checked for it.
+**The refusal gate refuses eight things, and the fifth is the only one with a corpse behind it.** §4.2's four stand as written, `depends_on` is the sixth, `SA-0023`'s is the seventh — a spec whose own `touches` are protected paths, refused before the cell rather than after the plan checkpoint has spent its budget — and `SA-0027`'s is the eighth, which belongs beside the fifth rather than at the end: both refuse *a path named that no `touches` pattern reaches*, read from two different sources — an acceptance criterion in the one case, a `saffron:retired-by` marker in the repository in the other. This count has now been wrong by one twice, each time within a release of being corrected; backlog item 48 is the standing item for the reader that would notice a ninth. The fifth is: **a spec whose acceptance criteria name a path that no `touches` pattern matches.** Item 18 measured that such a spec is unsatisfiable by construction — `SA-0005` burned $5.34 and died at turn 61 because its criteria reached `cli.py` and `package.py` while its `touches` did not, so the implementer could not have satisfied them without failing `scope`, and one finding was dropped as unanchorable for the same reason. The adjudication was that **the fault was the spec's, not the implementer's**, and nothing in intake checked for it.
 
 Two things that condition has to get right, and the obvious statement of it gets both wrong:
 
@@ -830,7 +831,7 @@ gates:
   perf-smoke: { blocking: false }
 ```
 
-`when` is **declared and not yet read**: `repos/policy.py` parses it and `run_suite` runs every declared gate regardless, so a conditional gate today runs unconditionally. Saffron's own `shacl` gate is declared without it for that reason (`docs/BACKLOG.md`).
+`when` is **declared and not yet read**: `repos/policy.py` parses it and `run_suite` runs every declared gate regardless, so a conditional gate today runs unconditionally. Saffron's own `shacl` gate is declared without it for that reason (backlog item 19).
 
 Core sees three more entries in a list. **The best gates are always the domain-specific ones** — a migration round-trip, a schema conformance check, an invariant only this codebase can state — because they are the ones an agent cannot satisfy by writing plausible-looking code. Onboarding a repo well means asking: *what is expensive to fake here?*
 
@@ -921,7 +922,7 @@ for n in 1..max_attempts:
 
 #### 5.4.1 The `witness` gate — an acceptance claim that nothing guards
 
-**Added 2026-09-05, on measurement** (`docs/BACKLOG.md` item 69). Nine tests
+**Added 2026-09-05, on measurement** (backlog item 69). Nine tests
 shipped in one session naming a behaviour they did not guard. Each passed every
 gate, all three lenses including `adequacy`, and a human read; each was found by
 running a mutation. Two were written by review agents and one by the operator's
@@ -939,7 +940,7 @@ implementer has not read it. The spec body *is* prompt text — `build_system_pr
 substitutes it as `{spec}` — and so is every claim, which `witnesses_block` hands
 the implementer and `criteria_section` hands the critic. So `parse_spec` refuses a
 mutant whose `find` text appears in the body or in any claim, before a cell starts
-(`docs/BACKLOG.md` item 82; measured on `SA-0063`, which dictated the heading its
+(backlog item 82; measured on `SA-0063`, which dictated the heading its
 own mutant pinned and produced this repo's first `witness` verdict — sound
 evidence the mechanism works and none that the tests were honest). The refusal is
 a policy one: the spec parsed, so it keeps its id and a retirement to `done/`
@@ -994,7 +995,7 @@ work, and `source_mutated` refuses one that is not at `HEAD`, landing on `skip`
 the way `revert` does; a failed write restores from `HEAD` before it re-raises.
 Any future gate that edits the tree owes the same guard, since `committed` will
 not have run yet. `SA-0062` specified the opposite order and passed review
-(`docs/BACKLOG.md` item 78).
+(backlog item 78).
 
 **Blocking level.** Advisory at `standard`, blocking at `elevated` — the level
 `size` already carries, and for the same reason: an elevated diff is one where a
@@ -1037,7 +1038,7 @@ This is §4.3's doneness rule again, one level out: **anything that must happen 
 
 One property the subagent facility does confirm: a fresh session receives no parent conversation at all — only what its invoker puts in the prompt. That is exactly the isolation this phase requires, and it means the diff, the spec, the gate results and the acceptance criteria must all be passed explicitly. There is no context to inherit, by design.
 
-**A fresh session is not a fresh container.** Until rev 21 every lens ran in the implementer's own cell. Each was a new conversation, but it re-executed the agent runner and the SDK from a rootfs the implementer had root over. It also read `/work`, and every file a finding anchors against, through the implementer's `.git`. Each lens now runs in a **critic cell**: a new container from the repo's cell image, on the task's network and proxy, whose worktree is `tree_base` with the exported patch applied and committed by that cell's own git. What the critic reads is then the patch that ships. A forged export can hide the agent's work from the pull request, but not from the critic. A patch that will not apply to its own base ends the task `EXHAUSTED`. The agent can cause that failure, and one charged to nobody would be a free way past the critic. The gate table each lens is shown moves out too: into a gate-only cell on the same rebuilt tree, never into the critic cell, where a gate would run model-authored code as root in the container the lenses then re-exec their runner from. `SA-0087` builds the critic cell for REVIEW, `SA-0088` for REBUT's verdicts, and `SA-0089` the gate table. Until they land, the lenses still run in the implementer's cell and read its gate results (backlog item 118).
+**A fresh session is not a fresh container.** Until rev 21 every lens ran in the implementer's own cell. Each was a new conversation, but it re-executed the agent runner and the SDK from a rootfs the implementer had root over. It also read `/work`, and every file a finding anchors against, through the implementer's `.git`. Each lens now runs in a **critic cell**: a new container from the repo's cell image, on the task's network and proxy, whose worktree is `tree_base` with the exported patch applied and committed by that cell's own git. What the critic reads is then the patch that ships. A forged export can hide the agent's work from the pull request, but not from the critic. A patch that will not apply to its own base ends the task `EXHAUSTED`. The agent can cause that failure, and one charged to nobody would be a free way past the critic. The one exception is a binary change: the export carries it as a `Binary files … differ` stub that no base can apply, and that ends `GATE_ERROR`, as PACKAGE already treats it. An agent can reach the stub on purpose and go uncharged, but nothing ships from it, so it is no way past the critic. It is the ceiling `size` and `integrity` already carry for a hidden binary (backlog item 118). The gate table each lens is shown moves out too: into a gate-only cell on the same rebuilt tree, never into the critic cell, where a gate would run model-authored code as root in the container the lenses then re-exec their runner from. `SA-0087` builds the critic cell for REVIEW, `SA-0088` for REBUT's verdicts, and `SA-0089` the gate table. Until they land, the lenses still run in the implementer's cell and read its gate results (backlog item 118).
 
 **Any single blocker routes to REBUT.** No voting. A majority rule sounds rigorous and is decoration here: the lenses are disjoint by construction, so the schema critic will never independently corroborate the correctness critic's timezone finding, and "majority" over disjoint lenses means "never" at any count. False positives are handled by the rebuttal plus queue ordering (§6), which is the better mechanism anyway.
 
@@ -1045,16 +1046,16 @@ This section argued until 2026-09-02 that lens #3 in a naive design would be "te
 
 #### 5.5.1 Lens #3 is test adequacy, not blast radius
 
-**Amended 2026-09-02, on measurement rather than reasoning** (`docs/evidence/2026-08-25-mutation-testing-vs-a-lens.md`, `docs/BACKLOG.md` item 6). Two claims this section made are false:
+**Amended 2026-09-02, on measurement rather than reasoning** (`docs/evidence/2026-08-25-mutation-testing-vs-a-lens.md`, backlog item 6). Two claims this section made are false:
 
-- **`revert` does not displace a test-quality remit.** It reverts the source files, keeps the test files, and requires the new tests to fail — which for a spec that lands source and tests together they do, for the trivial reason, without anything having asked whether a particular line is tested. **`revert` asks whether the new tests test *anything*; this remit asks whether they test *each thing*.** The two do not overlap, and the second is the one nothing else covers. `SA-0044` built it, file-level, which is the ceiling its own `ponytail:` names: a file that is half test and half source is reverted whole or not at all. Measured once it shipped, that trivial-reason case is weaker still than this bullet assumed: the reverted tests fail to *import*, and a collection error prints no line this repo's `tests` gate can key on, so it reports `error` and `revert` reports `skip` rather than green. Free, honest, and no answer at all — `docs/BACKLOG.md` item 50.
+- **`revert` does not displace a test-quality remit.** It reverts the source files, keeps the test files, and requires the new tests to fail — which for a spec that lands source and tests together they do, for the trivial reason, without anything having asked whether a particular line is tested. **`revert` asks whether the new tests test *anything*; this remit asks whether they test *each thing*.** The two do not overlap, and the second is the one nothing else covers. `SA-0044` built it, file-level, which is the ceiling its own `ponytail:` names: a file that is half test and half source is reverted whole or not at all. Measured once it shipped, that trivial-reason case is weaker still than this bullet assumed: the reverted tests fail to *import*, and a collection error prints no line this repo's `tests` gate can key on, so it reports `error` and `revert` reports `skip` rather than green. Free, honest, and no answer at all — backlog item 50.
 - **A test can be fully covered and still prove nothing.** `saffron/gates/core/size.py` reports 100% statement and 100% branch coverage, and a line whose removal left all sixteen of its tests green was executed by every one of them. An *executed line whose effect nothing observes* is the class coverage cannot report by construction, which is why a coverage gate was priced against this remit and lost.
 
 **What the lens is.** A prompted critic (`saffron/agents/prompts/review-adequacy.md`) holding no tool that can run anything: no test runner, no interpreter, no mutation harness — all three priced against this remit and rejected in the evidence above. It cannot mutate a line and watch a test fail, so every finding instead names the smallest edit that would keep the suite green while the behaviour breaks. That is what makes a finding checkable in one command by someone who *can* run one, rather than a claim about coverage the lens has no way to have confirmed.
 
 **Blast radius is retired, not deferred.** It is the lens that would have caught the `git config diff.srcPrefix` escape (Appendix L), and that argument stands — but it was never built, because it was gated on a risk tier nothing wires, and the gap measured on two live diffs was test adequacy instead. Reviving it is a new decision with its own evidence, not the resumption of this one. What the retirement does **not** touch is the second anchoring target above: the reconciler rule blast radius motivated is load-bearing for #3 as it now stands. One consequence is deliberate and worth stating rather than discovering: all three prompts still route callers-and-downstream findings away to "the blast-radius lens", so that class is now owned by nobody and is suppressed at three seats rather than merely uncovered at one. Left as-is on purpose — a `Not yours` list edited to release the remit would scatter it across three lenses, which is the overlap §5.5 spends its no-voting rule on.
 
-**Ungated, and that half is open.** The lens runs at every risk tier, not at `elevated` only — measured against this repo's own specs, 28 of 34 declare `elevated`, so gating would exclude six tasks to save one lens session ($0.76–$0.91 on the two it was priced against). REVIEW is not gated on the spend ceiling (§5.5), so the third session cannot fail a task for money; it does raise the worst-case REVIEW overrun from two remainders to three, because the per-lens cap is not decremented between lenses. Whether `adequacy` is what a tier should gate, once a tier exists, is `docs/BACKLOG.md` item 6's remaining half.
+**Ungated, and that half is open.** The lens runs at every risk tier, not at `elevated` only — measured against this repo's own specs, 28 of 34 declare `elevated`, so gating would exclude six tasks to save one lens session ($0.76–$0.91 on the two it was priced against). REVIEW is not gated on the spend ceiling (§5.5), so the third session cannot fail a task for money; it does raise the worst-case REVIEW overrun from two remainders to three, because the per-lens cap is not decremented between lenses. Whether `adequacy` is what a tier should gate, once a tier exists, is backlog item 6's remaining half.
 
 ### 5.6 Phase 4b — REBUT
 

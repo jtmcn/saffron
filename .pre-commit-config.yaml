@@ -50,7 +50,7 @@ repos:
   #
   # pygrep matches one line at a time, and every prose file this hook covers
   # is hard-wrapped, so a retired two-word term split by a line wrap was never
-  # seen (docs/BACKLOG.md item 57). hooks/retired_vocabulary.py reads each
+  # seen (backlog item 57). hooks/retired_vocabulary.py reads each
   # file whole instead, joining wrap whitespace back into the one-line shape
   # its pattern list already recognises before matching, and keeps that
   # pattern list as the one place a second retired term would go.

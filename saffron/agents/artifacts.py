@@ -201,7 +201,7 @@ def hash_artifact(raw: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-# The notes extraction turn's own prompt (`docs/BACKLOG.md` items 71/75,
+# The notes extraction turn's own prompt (backlog items 71/75,
 # SA-0058/SA-0061/SA-0062): the cheapest moment the implementer will ever have
 # to say it saw a thing it was told not to touch. Built on `EXTRACTION_PROMPT`
 # rather than beside it: every rule that turn already states ("no tools", "the

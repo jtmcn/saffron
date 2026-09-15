@@ -163,7 +163,7 @@ It does not import `saffron/` either, until specs join as a kind and it takes
 
 ```
 records list backlog                          # id  status  tier  title — one line each
-records list backlog --status open --tier 1   # any frontmatter field is a filter
+records list backlog --status open --tier 1   # the filters are --status and --tier
 records show 118                              # frontmatter and body, nothing else
 records show 118 --section "Done looks like"  # one section
 records show SA-0087                          # not a kind yet: the items whose specs: name it
@@ -293,7 +293,12 @@ the 122-file diff:
 
 - **Specs as a kind.** `records/kinds.py` registers `.saffron/specs/` with
   `saffron.intake.Spec`; `records show SA-0087` stops being a reverse lookup.
-  The item ↔ spec tests above become one join.
+  The item ↔ spec tests above become one join. At that step the loader's
+  section rules — the required headings and the status-dependent section
+  checks, both in `records/load.py` today — move onto `Kind`, since a spec's
+  sections differ from an item's, and `Identified` becomes a protocol (a
+  spec's id is a string, not an int). The record format itself needs no
+  change.
 - **The graph lift.** With two kinds sharing ids, a loader lifts frontmatter
   into `ontology/design_record.py`'s graph and cross-kind questions get SPARQL.
   Nothing in the record format needs to change for that; that is why every

@@ -10,12 +10,20 @@ import re
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, Strict, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    Strict,
+    field_validator,
+    model_validator,
+)
 
 Status = Literal["open", "partial", "done", "superseded", "wontfix"]
 CLOSED: frozenset[str] = frozenset({"done", "superseded", "wontfix"})
 _SPEC_ID = r"^[A-Za-z0-9]+-[0-9]+$"
 _SECTION = r"^§\d+(\.\d+)*[a-z]?$"
+_COMMIT_SHA = r"^[0-9a-f]{7,40}$"
 
 # Strict: a string or bool is refused by name rather than coerced to an int.
 Number = Annotated[int, Strict(), Field(ge=1)]
@@ -45,6 +53,18 @@ class BacklogItem(Identified):
     related: list[Number] = Field(default_factory=list)
     superseded_by: Number | None = None
 
+    @field_validator("commits", mode="before")
+    @classmethod
+    def _commits_are_quoted(cls, v: object) -> object:
+        if isinstance(v, list):
+            bad = [x for x in v if not isinstance(x, str)]
+            if bad:
+                raise ValueError(
+                    f'commits: quote shas as strings, e.g. "{bad[0]}" — an '
+                    f"unquoted all-digit sha reads as a number: {bad}"
+                )
+        return v
+
     @model_validator(mode="after")
     def _shapes(self) -> BacklogItem:
         bad = [s for s in self.specs if not re.match(_SPEC_ID, s)]
@@ -53,6 +73,9 @@ class BacklogItem(Identified):
         bad = [c for c in self.cites if not re.match(_SECTION, c)]
         if bad:
             raise ValueError(f"cites: not a § address: {bad}")
+        bad = [c for c in self.commits if not re.match(_COMMIT_SHA, c)]
+        if bad:
+            raise ValueError(f"commits: not a sha (7-40 lowercase hex): {bad}")
         return self
 
     @model_validator(mode="after")

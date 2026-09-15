@@ -1160,7 +1160,7 @@ def test_a_mutant_over_uncommitted_work_applies_nothing(tmp_path, monkeypatch):
     restores `HEAD`. `revert` refuses the identical move for the identical
     reason: restoring to `HEAD` would destroy the agent's uncommitted work and
     hide it from the one gate whose job is to notice (`gates/core/revert.py`,
-    `docs/BACKLOG.md` item 78). A yielded reason lands `witness` on `skip`,
+    backlog item 78). A yielded reason lands `witness` on `skip`,
     which is the honest answer when the evidence cannot be bought.
     """
     _repo_with_a_file(tmp_path, monkeypatch, "value = 1\n")
@@ -1415,7 +1415,7 @@ def test_an_undo_that_exits_zero_without_restoring_still_raises(tmp_path, monkey
         pass
 
 
-# --- _git reads through a planted `git replace` (docs/BACKLOG.md item 102) -
+# --- _git reads through a planted `git replace` (backlog item 102) -
 
 
 def _repo_with_a_planted_replacement(tmp_path, monkeypatch):
@@ -1560,7 +1560,7 @@ def _isolated_repo_with_a_text_file(tmp_path, monkeypatch):
     """A repo isolated from the operator's own git config, with one committed
     text file ready to be edited under whatever worktree-local setting each
     witness pins. Shared: `core.bigFileThreshold` and `core.attributesFile`
-    are two instances of the same hazard (docs/BACKLOG.md item 103), so both
+    are two instances of the same hazard (backlog item 103), so both
     witnesses build on this one fixture rather than duplicating it — the
     `size` gate counts tests.
     """
@@ -1649,7 +1649,7 @@ def test_dirty_paths_reads_through_a_planted_replacement(tmp_path, monkeypatch):
     assert worktree.dirty_paths("c") == []
 
 
-# --- _git reads through a graft or shallow file (docs/BACKLOG.md item 110) -
+# --- _git reads through a graft or shallow file (backlog item 110) -
 #
 # `SA-0074` pinned away `git replace`; a graft is not a replacement ref, and
 # neither is `.git/shallow` — both re-shape what `rev-list`/`log` consider
