@@ -29,3 +29,14 @@ above. `size` left this list on 2026-08-25: it is built and unwired, which is
 item 17. `revert` left it with `SA-0044`: it is built and wired into `_suite`,
 which is item 49. §4.2's own argument applies: at a two-deep queue they
 arbitrate contention that never arrives.
+
+---
+
+## How to add an item
+
+Copy the frontmatter shape from any open item: each field is defined in `records/kinds.py` and
+validated on load. Set `id` to one more than the highest existing item, and use that id at
+the start of the filename as `NNN-slug.md`. The body must have three sections in order:
+`## Problem`, `## Done looks like`, and `## Record`. Before committing, run `uv run pytest tests/records -q` to
+validate the record. If a spec's `## Context` section cites this item, add that spec's id to this
+item's `specs:` list in the same commit.
