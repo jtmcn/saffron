@@ -1,6 +1,6 @@
 ---
 id: SA-0090
-title: the result event drops the session's token counts, so whether a session read its prompt from the cache is a guess
+title: the result event drops the result message's token counts, so whether a session read its prompt from the cache is a guess
 type: feature
 priority: 3
 depends_on: []
@@ -21,8 +21,8 @@ max_attempts: 3
 max_turns: 40
 acceptance:
   - claim: >-
-      A result event carries the session's input, output, cache-read and
-      cache-write token counts, as the SDK's result message reports them.
+      A result event carries the input, output, cache-read and cache-write
+      token counts the SDK's result message reports, exactly as reported.
       Today it carries `total_cost_usd` and no token count, so nothing in the
       event log can say whether a session read its prompt from the cache or
       paid to write it again.
@@ -54,10 +54,10 @@ the event reaches the event log with no host change.
 
 Two cost questions are open because of this, and both have been reasoned,
 never measured. `DESIGN.md` §7.1's one-hour cache TTL is set on every session
-(`agent_options`), not only the repair loop it was argued for. The three REVIEW
-lenses share most of their system prompt but not its first sentence (`SA-0091`).
-Each answer is a cache-read count and a cache-write count per session. This
-spec records them.
+(`agent_options`), not only the repair loop it was argued for. Whether the three
+REVIEW lenses could read a shared system prompt from the cache depends on where
+the CLI places its cache breakpoints (backlog item 126). Each answer
+is a cache-read count and a cache-write count per turn. This spec records them.
 
 ## Problem
 
@@ -92,6 +92,12 @@ fake messages, as every test in `tests/test_agent_runner.py` does. Give the fake
 result a `usage` dict. Read it with `getattr` and `.get`, the way the rest of
 `events()` reads the message: an SDK that renames or drops the field must give
 nulls, never a crash inside a cell the host cannot see into.
+
+**Carry the counts as the message reports them, and nothing more.** One result
+event covers one `run_agent` call, and IMPLEMENT and the repair loop resume one
+session across several. Do not sum, subtract or reconcile the counts across
+calls, the way `_reconcile_cost` does with cost; whether a count is per call or
+cumulative is the SDK's, and the event log records it as it came.
 
 **Assert presence, not only value, in the null-counts test.** `event.get(...)
 is None` also passes on the reverted runner, which has no such keys at all, so

@@ -1,5 +1,5 @@
 ---
-id: SA-0092
+id: SA-0091
 title: a verdict session reads each blocker's line number against the diff after the rebuttal, where a committed fix has already moved it
 type: bug
 priority: 3
@@ -42,16 +42,22 @@ max_turns: 60
 risk: elevated
 acceptance:
   - claim: >-
-      Each verdict session's system prompt carries the diff its lens's
-      blockers were filed and anchored against, as well as the diff after the
-      rebuttal, and says which of the two the blocker line numbers refer to.
-      Today it carries only the diff after the rebuttal, so a blocker whose fix
-      was committed names a line that has since moved.
+      Each verdict session's system prompt carries the diff its lens reviewed,
+      as well as the diff after the rebuttal, and says that the blocker line
+      numbers refer to the files as they stood when the findings were filed,
+      the tree the first diff describes. Today it carries only the diff after
+      the rebuttal, so a blocker whose fix was committed names a line that has
+      since moved.
     witness: tests/test_rebut.py::test_the_verdict_prompt_carries_the_diff_its_blockers_were_filed_against
   - claim: >-
-      `saffron cell` hands REBUT the diff REVIEW's lenses were shown, not a
-      diff exported again after the rebuttal turn.
+      A task hands REBUT the diff REVIEW's lenses were shown, not a diff
+      exported again after the rebuttal turn.
     witness: tests/test_session.py::test_the_verdict_prompt_carries_the_diff_the_lenses_were_shown
+  - claim: >-
+      A verdict still lands on the finding REVIEW recorded, under the number
+      the implementer answered, as it does today.
+    witness: tests/test_session.py::test_a_verdict_lands_on_the_finding_the_review_recorded
+    preserves: true
 ---
 
 ## Context
@@ -62,13 +68,14 @@ hold everything it depends on. A line number that refers to a tree the session
 is not shown is a dependency the session does not hold.
 
 `blocker_lines` (`saffron/phases/rebut.py`) renders each blocker as
-`N. [lens] file:line — claim`. `file:line` is the finding as REVIEW filed it,
-anchored against the diff REVIEW's lenses were shown (`anchor` in
-`saffron/agents/findings.py`). The verdict prompt (`rebut-verdict.md`) shows
-those lines under "Your findings", then shows "The diff, after the rebuttal":
-`run_rebut` calls `diff()` after the rebuttal turn, and when the implementer
-fixed and committed, that is a different diff. Nothing tells the critic that
-its line numbers belong to the earlier one.
+`N. [lens] file:line — claim`. `line` is a line in the file as it stood at the
+HEAD REVIEW read: the lens prompt asks for one "as it stands after the change",
+and `anchor` (`saffron/agents/findings.py`) checks it against that diff's hunks
+or that tree's files. The verdict prompt (`rebut-verdict.md`) shows those lines
+under "Your findings", then shows "The diff, after the rebuttal": `run_rebut`
+calls `diff()` after the rebuttal turn, and when the implementer fixed and
+committed, that is a different diff. Nothing tells the critic that its line
+numbers belong to the earlier tree.
 
 A critic that reads line 40 of the file as it now stands can find different
 code there, and withdraw a blocker because "that line no longer does that."
@@ -87,36 +94,48 @@ another.
 REVIEW recorded. They are the ledger's and the pull request body's too, and
 `anchored_blockers` says the order is load-bearing.
 
+**Findings anchored outside any hunk.** The reviewed diff does not show such a
+line, so for those the critic still reads the file as it now stands. Showing
+the line's text as filed would need `Finding` to carry it, in
+`saffron/agents/findings.py`, which is a later spec.
+
 **Where either diff is read from.** `SA-0087` moved REVIEW's diff to the critic
 cell and `SA-0088` moved `diff()` there. Keep both sources. The diff REVIEW was
 shown is a string `session.py` already holds when it calls `run_review`: pass
 that string, and do not export it a second time.
 
-**The lens templates.** `SA-0091` reorders them. The verdict template's own
-order is a later spec.
+**The order of the verdict template's blocks.** Whether sessions can share a
+cached prompt is backlog item 126, and it waits on a measurement.
 
 ## Notes for the agent
 
-**The criteria carry witnesses and no mutants.** The new argument and the new
-prompt block are new code, so no text exists yet that a mutant could pin
-honestly. `witness` will report `skip`, and that is expected.
+**The first two criteria carry witnesses and no mutants; the third is
+`preserves`.** The new argument and the new prompt block are new code, so no
+text exists yet that a mutant could pin honestly. `witness` will report `skip`
+on the first two, and that is expected.
 
 **Read `SA-0088`'s change to `run_rebut` before editing it.** This spec stacks
 on `SA-0089`, which stacks on `SA-0088`. `diff()` and the verdicts must read the
 same tree (`SA-0088`, Notes), and nothing here changes that.
 
-**Say which diff the numbers belong to, in the template.** The two diffs get
+**Say which tree the numbers belong to, in the template.** The two diffs get
 headings that tell them apart, and the instruction above "Your findings" says
-the line numbers refer to the diff the findings were filed against. Keep the
-verdict contract, one entry per finding with `finding`, `verdict` and `reason`,
-exactly as it is.
+the line numbers refer to the files as they stood when the findings were filed,
+which the first diff describes. Keep the verdict contract, one entry per
+finding with `finding`, `verdict` and `reason`, exactly as it is.
 
 **Test the rebut half through `run_rebut`, not `verdict_prompt` alone.** Give
-it a filed-against diff and a `diff()` that returns something different, record
-the verdict session's options, and assert its system prompt carries both. For
-the session half, test through `_drive`: make the exported patch differ before
-and after the rebuttal turn, and assert the verdict prompt, the one carrying
-`## The rebuttal`, holds the diff the lens prompts held. Reverted, the verdict
+it a reviewed diff and a `diff()` that returns something different, record the
+verdict session's options, and assert its system prompt carries both.
+
+**Test the session half through `_drive`, with a patch stub that changes.**
+`_stub_the_runtime` in `tests/test_session.py` returns one fixed patch for every
+export, and after `SA-0087` and `SA-0088` the diffs are read from critic cells.
+Read the stub as it stands when you start, make the exported patch differ before
+and after the rebuttal turn, and assert that the verdict prompt, the one
+carrying `## The rebuttal`, holds the diff the lens prompts held.
+
+**Both witnesses must fail with the source reverted.** Reverted, the verdict
 prompt carries only the later diff, so honest tests of both criteria fail.
 Import nothing new at module scope: a module-scope import of a name you add
 turns the reverted run into a collection error, which `revert` reads as `skip`.
