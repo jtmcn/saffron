@@ -1,8 +1,9 @@
 ---
 id: 104
 title: A cell's malformed `resets_at` raises inside the rate-limit handler
-status: partial
+status: done
 tier: 2
+closed: 2026-09-13
 specs: [SA-0076]
 prs: [230]
 commits: []

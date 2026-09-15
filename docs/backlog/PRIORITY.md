@@ -97,7 +97,7 @@ listed too.
 Operator visibility parts 2 and 3 — `SA-0032`–`SA-0039`, with the plan's Task 6
 rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
 **38**), plus **43**, **48**, **52**, **60**, **66**, **67**, ~~**72**~~, **98**, **103**,
-**104**, **113**.
+~~**104**~~, **113**.
 
 **72 is done** (2026-09-07, by hand), taken ahead of Track A by operator
 decision because it was the one item whose defect was a guard that could not

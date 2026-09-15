@@ -31,15 +31,6 @@ already a bug spec about a rebuttal outcome that is not written down — but its
 
 ## Done looks like
 
-The recording half is right only in `rebuttal.json`, and that is what stays
-open. The ledger writes no rebuttal for an errored turn or for an unanswered
-blocker, and `sustained_blockers` and `unkept_fixes` count both as zero. An
-earlier version of this line said the queue's counts already told them apart,
-and they do not (found reviewing `SA-0071`, 2026-09-11). Whether a malformed
-rebuttal is worth a re-prompt also stays open here.
-
-## Record
-
 the artifact's *shape* failure not being silently equivalent to
 the agent having no answer. Cheapest honest fix is not a re-prompt: it is that a
 `RebuttalTurn` carrying `error` renders in the pull request body as
@@ -48,6 +39,15 @@ argue, and that `HEAD moved` — already recorded in `rebuttal.json` — is show
 next to it. Whether a malformed rebuttal is also worth one re-prompt is a
 separate question from whether the record should imply an answer that was never
 read.
+
+The recording half is right only in `rebuttal.json`, and that is what stays
+open. The ledger writes no rebuttal for an errored turn or for an unanswered
+blocker, and `sustained_blockers` and `unkept_fixes` count both as zero. An
+earlier version of this line said the queue's counts already told them apart,
+and they do not (found reviewing `SA-0071`, 2026-09-11). Whether a malformed
+rebuttal is worth a re-prompt also stays open here.
+
+## Record
 
 `SA-0040` (PR #93) is the case where the second half of that sentence does not
 hold. Measured 2026-09-01:
