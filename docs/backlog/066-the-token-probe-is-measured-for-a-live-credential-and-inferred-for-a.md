@@ -3,6 +3,7 @@ id: 66
 title: The token probe is measured for a live credential and inferred for a dead one
 status: open
 tier: 2
+filed: 2026-09-05
 specs: []
 prs: []
 commits: []
@@ -31,7 +32,9 @@ credential. So a wrong guess costs a night that declines to start and says why
 — never a night that starts on a dead token. That is why this is Tier 2 rather
 than Tier 1.
 
-**Done looks like** the results table in that evidence file having a revoked
+## Done looks like
+
+the results table in that evidence file having a revoked
 column, filled from a real run. The moment to do it is a token rotation, when a
 dead token exists anyway: revoke, run
 `docs/evidence/scripts/2026-09-05-token-probe-shape.py`, record the status. If

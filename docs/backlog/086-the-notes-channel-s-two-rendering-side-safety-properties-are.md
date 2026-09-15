@@ -13,22 +13,6 @@ related: [82]
 
 ## Problem
 
-**Status: the two assertions are done, 2026-09-12, by hand** —
-`test_a_mention_and_a_closing_reference_are_defanged_inside_the_notes` and
-`test_notes_with_nothing_in_them_render_no_heading` in `tests/test_report.py`,
-each run red against the mutant this item describes (the `neutralize` call
-dropped; `_notes`'s own empty `return ""` dropped, matched uniquely rather than
-by first occurrence). Whether `preserves` should name what would falsify it
-stays open here, beside item **82**.
-
-**Still unwritten, 2026-09-09, and the corpus now says so with a number.** Both
-properties are `SA-0063`'s declared defects, and the baseline pass graded
-**neither** — every finding that fixture produced anchored in
-`saffron/cell/session.py` and `saffron/phases/package.py`, none in
-`saffron/report/pr_body.py` or `tests/test_report.py`. So no lens reached them,
-which is a measured miss rather than the assumed one. The two assertions are
-still owed.
-
 Found reviewing `SA-0064` (#160), 2026-09-07, by mutation rather than by
 reading. Both are gaps in what the suite *proves*, not live defects — I
 confirmed each behaviour holds today by hand. Both live in
@@ -68,9 +52,29 @@ that the named test would actually notice, and nothing checks that judgement.
 `criteria` confirms the test passed at both ends, which it would whether or not
 it has anything to do with the claim.
 
-**Done looks like** two assertions in `tests/test_report.py` — that a mention
+## Done looks like
+
+two assertions in `tests/test_report.py` — that a mention
 and an issue-closing reference are defanged *inside* the rendered notes section,
 and that empty notes render no heading — plus, separately worth deciding,
 whether `preserves` should require the operator to name what would falsify it
 the way `mutant` does for the other direction. The first is half an hour; the
 second is a design question and probably belongs beside item **82**.
+
+## Record
+
+**Still unwritten, 2026-09-09, and the corpus now says so with a number.** Both
+properties are `SA-0063`'s declared defects, and the baseline pass graded
+**neither** — every finding that fixture produced anchored in
+`saffron/cell/session.py` and `saffron/phases/package.py`, none in
+`saffron/report/pr_body.py` or `tests/test_report.py`. So no lens reached them,
+which is a measured miss rather than the assumed one. The two assertions are
+still owed.
+
+**Status: the two assertions are done, 2026-09-12, by hand** —
+`test_a_mention_and_a_closing_reference_are_defanged_inside_the_notes` and
+`test_notes_with_nothing_in_them_render_no_heading` in `tests/test_report.py`,
+each run red against the mutant this item describes (the `neutralize` call
+dropped; `_notes`'s own empty `return ""` dropped, matched uniquely rather than
+by first occurrence). Whether `preserves` should name what would falsify it
+stays open here, beside item **82**.

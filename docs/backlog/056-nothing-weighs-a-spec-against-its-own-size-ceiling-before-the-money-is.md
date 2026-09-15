@@ -3,7 +3,7 @@ id: 56
 title: Nothing weighs a spec against its own size ceiling before the money is spent
 status: open
 tier: 3
-specs: [SA-0009, SA-0014, SA-0017]
+specs: []
 prs: []
 commits: []
 cites: [§4.2.1]
@@ -47,7 +47,9 @@ diffstat behind them, each pinned to its own `spec_sha`, so the honest first
 move is to fit the predicate against that corpus and see whether it separates
 `SA-0009` from the twenty that converged.
 
-**Done looks like** one of: a warning line on `saffron queue` naming a spec
+## Done looks like
+
+one of: a warning line on `saffron queue` naming a spec
 whose shape predicts an over-ceiling diff, fitted against the merged corpus
 rather than reasoned; or a written finding that the corpus does not separate
 them, which retires the idea. **The refusal gate is the wrong home either

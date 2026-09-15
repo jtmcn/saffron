@@ -3,6 +3,7 @@ id: 115
 title: A committed `.gitmodules` hides a gitlink from every name-only read without the flag
 status: open
 tier: 1
+filed: 2026-09-14
 specs: [SA-0082]
 prs: [244]
 commits: []
@@ -25,6 +26,8 @@ reads carry neither: PACKAGE's listing fed to `scope_gate`
 `changed_files`, whose docstring says it is matched against `touches`. Unverified
 end to end through `apply_patch` and `commit_squash`.
 
-**Done looks like** both reads taking `--ignore-submodules=none`, ideally by
+## Done looks like
+
+both reads taking `--ignore-submodules=none`, ideally by
 importing `worktree.DIFF_FLAGS`, each with a witness that commits a gitlink under an
 `ignore = all` `.gitmodules` and finds the path listed.

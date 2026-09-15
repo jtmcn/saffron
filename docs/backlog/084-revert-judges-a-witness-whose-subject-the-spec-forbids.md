@@ -3,6 +3,7 @@ id: 84
 title: '`revert` judges a witness whose subject the spec forbids'
 status: done
 tier: 1
+filed: 2026-09-07
 closed: 2026-09-08
 specs: [SA-0063, SA-0064]
 prs: []
@@ -12,23 +13,6 @@ related: [74, 83]
 ---
 
 ## Problem
-
-**Status: done, 2026-09-08 (#166), against `source` rather than the
-`touches` this item's *Done looks like* names.** `revert` sets aside a
-criterion whose `mutant.file` is not among the source files the diff changed,
-and says which in the summary. The divergence is deliberate: `touches` is what
-a spec was *permitted* to change, and a spec permitted to change a file it then
-left alone leaves the gate equally unable to answer, so `source` — the set
-about to be reverted — is what the question is actually made of. `SA-0064`, the
-case that filed this, is set aside under either rule.
-
-**One narrowing the first implementation lacked, added in review.** `source`
-excludes the repo's declared test paths wholesale, so a subject inside them is
-outside `source` for every diff there will ever be: exempting it would have
-given any criterion whose `mutant.file` names a test file a standing pass from
-the anti-theater gate, bought with one line of frontmatter — `_argv_safe`'s
-buyable-`skip` shape from the other side. A test subject says nothing about
-whether the witness leans on the source being reverted, so it stays judged.
 
 Received 2026-09-07 through the notes channel item **74** asked for — the first
 finding this repo has been handed by an implementer rather than by a lens or a
@@ -63,7 +47,28 @@ answer `fail`/`error` where the spec's own scope made the question unanswerable,
 and item **83** is the first. Same class: a gate that cannot say *unproven*
 says something worse.
 
-**Done looks like** `revert` skipping a witness whose subject lies outside the
+## Done looks like
+
+`revert` skipping a witness whose subject lies outside the
 spec's `touches`, with a summary saying so. "This diff could not have made that
 test pass, because the spec did not let it near the code" is unproven, not
 theater, and `skip` is the status that already means it.
+
+## Record
+
+**Status: done, 2026-09-08 (#166), against `source` rather than the
+`touches` this item's *Done looks like* names.** `revert` sets aside a
+criterion whose `mutant.file` is not among the source files the diff changed,
+and says which in the summary. The divergence is deliberate: `touches` is what
+a spec was *permitted* to change, and a spec permitted to change a file it then
+left alone leaves the gate equally unable to answer, so `source` — the set
+about to be reverted — is what the question is actually made of. `SA-0064`, the
+case that filed this, is set aside under either rule.
+
+**One narrowing the first implementation lacked, added in review.** `source`
+excludes the repo's declared test paths wholesale, so a subject inside them is
+outside `source` for every diff there will ever be: exempting it would have
+given any criterion whose `mutant.file` names a test file a standing pass from
+the anti-theater gate, bought with one line of frontmatter — `_argv_safe`'s
+buyable-`skip` shape from the other side. A test subject says nothing about
+whether the witness leans on the source being reverted, so it stays judged.

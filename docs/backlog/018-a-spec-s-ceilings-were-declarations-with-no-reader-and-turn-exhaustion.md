@@ -4,7 +4,7 @@ title: A spec's ceilings were declarations with no reader, and turn exhaustion i
 status: done
 tier: null
 closed: 2026-08-25
-specs: [SA-0005, SA-0007, SA-0014, SA-0016, SA-0018]
+specs: [SA-0007, SA-0009, SA-0018, SA-0054]
 prs: []
 commits: []
 cites: [§2.1]
@@ -12,8 +12,6 @@ related: [4, 9, 17]
 ---
 
 ## Problem
-
-**Status:** **done**, 2026-08-25 — the item's own closure paragraph is below.
 
 Found by running `SA-0005`, which is the only way it could have been found: it
 is invisible to every unit test and to four green live runs.
@@ -37,12 +35,6 @@ could not raise, holding more than half the budget it *could* declare.
 behind (item 4). `error_max_turns` fires with the worktree full, the cell is
 torn down, and the run exports nothing: 61 turns of correct work, $7.50, zero
 commits. `implement.md` said *"Commit your work"* — singular, at the end.
-
-**Closed, 2026-08-25.** The flags default to `None` and stay overrides, the
-spec governs otherwise, `max_turns` joins `Spec`, all three print with their
-source on the way in, and a turn ceiling names itself in the failure instead of
-reading as `exited 1`. `implement.md` asks for a commit per coherent step and
-says why, with the measurement.
 
 **And a fifth, found the same day by `SA-0005` (#21).** `cli.py` never passed
 `risk=spec.risk` into `CellSpec`, and `package.py` never passed the effective
@@ -99,3 +91,13 @@ resumes is not a bound, and committing per step removes most of the loss — if 
 run exhausts turns *with* its commits landing, that is the evidence for
 reopening this, and the honest shape then is a repair-loop state rather than a
 retry.
+
+## Record
+
+**Status:** **done**, 2026-08-25 — the item's own closure paragraph is below.
+
+**Closed, 2026-08-25.** The flags default to `None` and stay overrides, the
+spec governs otherwise, `max_turns` joins `Spec`, all three print with their
+source on the way in, and a turn ceiling names itself in the failure instead of
+reading as `exited 1`. `implement.md` asks for a commit per coherent step and
+says why, with the measurement.

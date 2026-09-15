@@ -39,6 +39,8 @@ in its own notes, the `CONTEXT.md`/`DESIGN.md` sentence its change makes
 stale**, so the by-hand follow-up has a known list rather than a fresh reading
 of both documents each time.
 
+## Record
+
 **Status:** **done** — by hand on the host, 2026-08-31, in `SA-0024`'s own
 pull request.
 

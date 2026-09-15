@@ -22,7 +22,9 @@ is neither: it lifts PACKAGE's draft (§5.7) into review. The retired-vocabulary
 hook cannot see this — **ratify** is live vocabulary in the wrong sense, not a
 retired word.
 
-**Done looks like** `CLAUDE.md` and the driver saying "mark ready", and the skill's
+## Done looks like
+
+`CLAUDE.md` and the driver saying "mark ready", and the skill's
 quoted output regenerated to match — or, if that act turns out to carry a judgement
 worth a word, an entry under `CONTEXT.md`'s open naming decisions rather than a
 third sense arriving in prose.

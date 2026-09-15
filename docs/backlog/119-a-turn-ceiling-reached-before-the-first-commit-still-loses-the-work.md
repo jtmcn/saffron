@@ -3,6 +3,7 @@ id: 119
 title: A turn ceiling reached before the first commit still loses the work when the budget is spent, and planning can spend half of it first
 status: open
 tier: 1
+filed: 2026-09-14
 specs: [SA-0086, SA-0087]
 prs: []
 commits: []
@@ -29,7 +30,9 @@ and it was refused for money, not turns (`saffron/cell/session.py`, the
 `cut_off_no_salvage_room` branch). The plan checkpoint had spent 45% of the
 budget before a line was written.
 
-**Done looks like** the salvage turn's cost reserved out of IMPLEMENT's
+## Done looks like
+
+the salvage turn's cost reserved out of IMPLEMENT's
 `max_budget_usd`, so a turn ceiling can always be salvaged, and a measured
 answer on whether the plan checkpoint's spend belongs in the budget IMPLEMENT is
 judged against. Raising the spec's ceilings (#256) was the workaround, and it

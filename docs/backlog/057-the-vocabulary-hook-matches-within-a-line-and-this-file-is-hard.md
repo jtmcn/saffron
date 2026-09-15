@@ -13,12 +13,6 @@ related: [25, 40]
 
 ## Problem
 
-**Status:** **done** — `SA-0073`, PR #220, merged 2026-09-12. Measured when it
-was queued: one hit in the tree only a cross-line reading sees, in item 40 of
-this file. It was the verb, not the retired noun, which the pattern cannot tell
-apart, and it was reworded in the same commit so the spec starts from a clean
-tree.
-
 `.pre-commit-config.yaml`'s `retired-vocabulary` hook is `language: pygrep` with
 `entry: '(?i)gate[ -]runs?\b'`. pygrep searches **line by line**, and every
 prose file in this repo is hard-wrapped at ~78 columns, so a retired two-word
@@ -67,3 +61,11 @@ deliberate — most of the others are common English (`run`, `session`, `the
 tool`) and a mechanical match would drown in false positives, whereas
 `gate[ -]run` is safely distinctive. Worth stating in the config so the next
 reader does not take the gap for an oversight and "finish" it.
+
+## Record
+
+**Status:** **done** — `SA-0073`, PR #220, merged 2026-09-12. Measured when it
+was queued: one hit in the tree only a cross-line reading sees, in item 40 of
+this file. It was the verb, not the retired noun, which the pattern cannot tell
+apart, and it was reworded in the same commit so the spec starts from a clean
+tree.

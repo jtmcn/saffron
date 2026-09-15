@@ -4,7 +4,7 @@ title: '`size` exists and nothing calls it'
 status: done
 tier: null
 closed: 2026-08-25
-specs: [SA-0002, SA-0005, SA-0006, SA-0007]
+specs: [SA-0005, SA-0006, SA-0007]
 prs: []
 commits: [2f7c6d9]
 cites: [§5.6]
@@ -12,10 +12,6 @@ related: [6, 18]
 ---
 
 ## Problem
-
-**Status:** **done** — `SA-0005` (`2f7c6d9`). `size_gate` is called at
-`session.py:1017`, advisory unless the effective risk tier is elevated
-(`session.py:950`).
 
 `SA-0002` built the gate (#15) and its spec put the consumer out of scope, on
 the correct reasoning that the risk tier has none until v1. So the module is
@@ -29,17 +25,12 @@ handed one without a change it does not have: every `fail` today means repair,
 while §5.6 makes `size` **advisory at `standard` and blocking only at
 `elevated`**. There is no advisory result the repair loop honours.
 
-**Corrected 2026-08-25, writing `SA-0005`:** the sentence here said
-`policy.elevate_on` "does not exist either", and it does — `Policy.elevate_on`
-(`saffron/repos/policy.py:51`), parsed, validated, tested, and already carrying
-three patterns in this repo's own `.saffron/policy.yaml`. So does
-`GateDeclaration.blocking` (`:29`), which is the advisory switch for *declared*
-gates. Both have **no reader anywhere downstream**. That makes this task
-smaller than the item claimed and its failure mode worse: a declaration a repo
-can set, that validates, and that changes nothing is indistinguishable from one
-that works until someone checks.
+The same wiring is what item 6's third lens needs, and the two should be built
+together or in that order.
 
-**Done looks like:** an advisory status the repair loop does not act on,
+## Done looks like
+
+an advisory status the repair loop does not act on,
 `policy.elevate_on` matched against the diff, `risk` reaching `run_one_cell`,
 and `size` in `_suite`. Two things it must carry, both found reviewing #15:
 
@@ -55,8 +46,21 @@ and `size` in `_suite`. Two things it must carry, both found reviewing #15:
   `touches`, and `size_gate` is handed neither `touches` nor a `--numstat`
   cross-check. This spec is handed both.
 
-The same wiring is what item 6's third lens needs, and the two should be built
-together or in that order.
+## Record
+
+**Status:** **done** — `SA-0005` (`2f7c6d9`). `size_gate` is called at
+`session.py:1017`, advisory unless the effective risk tier is elevated
+(`session.py:950`).
+
+**Corrected 2026-08-25, writing `SA-0005`:** the sentence here said
+`policy.elevate_on` "does not exist either", and it does — `Policy.elevate_on`
+(`saffron/repos/policy.py:51`), parsed, validated, tested, and already carrying
+three patterns in this repo's own `.saffron/policy.yaml`. So does
+`GateDeclaration.blocking` (`:29`), which is the advisory switch for *declared*
+gates. Both have **no reader anywhere downstream**. That makes this task
+smaller than the item claimed and its failure mode worse: a declaration a repo
+can set, that validates, and that changes nothing is indistinguishable from one
+that works until someone checks.
 
 **Done, 2026-08-25**, across three specs rather than one — which is the part
 worth carrying forward. `SA-0005` (#21) wired the tier and the advisory set,

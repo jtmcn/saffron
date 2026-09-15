@@ -3,6 +3,7 @@ id: 120
 title: REBUT gets whatever the task budget has left, and the halt it ends in reads as a corpse
 status: open
 tier: 1
+filed: 2026-09-14
 specs: [SA-0087, SA-0088, SA-0089]
 prs: []
 commits: []
@@ -33,7 +34,9 @@ wrongly:
 - The spec loop's driver waits on it as a running cell
   (`docs/evidence/2026-09-14-spec-loop-skill-feedback-run-2.md`, observation 13).
 
-**Done looks like** REBUT's budget decided on purpose, as a reserve or a ceiling
+## Done looks like
+
+REBUT's budget decided on purpose, as a reserve or a ceiling
 of its own, rather than inherited as a remainder. A rebuttal that ran out of
 budget is reported as that. And `REBUTTING` after the cell exits is named as a
 halt everywhere it is read, or gets the terminal state §5.6 says §3.3 lacks.

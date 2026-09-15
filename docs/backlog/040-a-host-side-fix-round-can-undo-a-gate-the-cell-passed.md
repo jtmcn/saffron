@@ -25,11 +25,15 @@ criteria, and both reviews of it added tests precisely because criteria were
 being held up by comments. Cutting those to reach 600 would trade a real
 control for a number.
 
+## Done looks like
+
 Done looks like: the loop running `size` (at minimum) against the branch before
 it is marked ready, and a decision on whether the ceiling should count test
 lines at all — §5.4 sets one number for a diff whose test half is mandated
 elsewhere. Recorded rather than fixed here: PR #91 is over the ceiling and is
 being merged over it deliberately, with this item as the record.
+
+## Record
 
 It happened again on 2026-09-14: `SA-0080` (PR #247, stack #251) left its cell at
 294 changed lines against a `bug`'s 300, and the review round took it to 367 — two

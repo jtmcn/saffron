@@ -5,19 +5,13 @@ status: done
 tier: null
 closed: 2026-08-22
 specs: [SA-0004]
-prs: [5, 6]
-commits: [596f96f, d1141d0]
+prs: [6]
+commits: [596f96f]
 cites: [§2.1, §5.4]
 related: [2, 9]
 ---
 
 ## Problem
-
-**Status:** **done**, by hand, in PR #6 (merge `596f96f`) — not by the factory
-patch this item was written about. That patch was reviewed and **rejected**, and
-stayed in the batch tree; what shipped keeps its §2.1 split and its suppression
-detection and replaces the rest. Nothing below needs picking up. Read it for
-what the shipped gate is answering and why, not as work outstanding.
 
 `SA-0004` produced a 371-line `integrity` gate that passed every gate and its own
 31 tests, and adversarial review rejected it (Appendix K). The three Criticals
@@ -64,19 +58,6 @@ line numbers derived from the `@@` header, and **suppression detection that is
 correct** — added lines only, with the context-line and removed-line cases both
 tested and right. The `gate_config` check is right too.
 
-### Done looks like
-
-- Suppression and gate-config checks surviving as a diff-reading core gate,
-  with defect A fixed and §5.4's "unless `touches` explicitly includes it"
-  exemption honoured — the rejected gate omitted it and so failed its own PR
-  with sixteen violations.
-- Test removal answered by comparing collected test sets, with `DESIGN.md`
-  updated first to say so.
-- Both wired into `run_one_cell`'s suite beside `scope`.
-- A `-diff` gitattribute renders a text file as `Binary files ... differ`; that
-  hides content but not paths, so `scope` is safe and this gate must treat such
-  a section as unreadable rather than as no change (see item 2).
-
 ### Why it is first
 
 Principle 49: a verification an agent can run itself is one it will have already
@@ -90,6 +71,27 @@ own tests, finds one hard to fix, and deletes it before ever committing produces
 exactly the same diff as one that deleted it under repair. The gaming pressure
 moved earlier in the process, not away — which makes this the only place that
 deletion is visible at all.
+
+## Done looks like
+
+- Suppression and gate-config checks surviving as a diff-reading core gate,
+  with defect A fixed and §5.4's "unless `touches` explicitly includes it"
+  exemption honoured — the rejected gate omitted it and so failed its own PR
+  with sixteen violations.
+- Test removal answered by comparing collected test sets, with `DESIGN.md`
+  updated first to say so.
+- Both wired into `run_one_cell`'s suite beside `scope`.
+- A `-diff` gitattribute renders a text file as `Binary files ... differ`; that
+  hides content but not paths, so `scope` is safe and this gate must treat such
+  a section as unreadable rather than as no change (see item 2).
+
+## Record
+
+**Status:** **done**, by hand, in PR #6 (merge `596f96f`) — not by the factory
+patch this item was written about. That patch was reviewed and **rejected**, and
+stayed in the batch tree; what shipped keeps its §2.1 split and its suppression
+detection and replaces the rest. Nothing below needs picking up. Read it for
+what the shipped gate is answering and why, not as work outstanding.
 
 **Done, 2026-08-22.** Split, and three of this item's own claims were wrong —
 measured, not re-reasoned (`docs/evidence/2026-08-22-integrity-rejected-gate-measured.md`,

@@ -13,20 +13,24 @@ related: [17]
 
 ## Problem
 
-**Status:** **done**, in `cf0dee8` (*fix(cell): a gate the agent could
-reconfigure from inside the cell*). `DIFF_FLAGS` at `saffron/cell/worktree.py:131`
-pins `--src-prefix=a/`, `--dst-prefix=b/` and `--no-ext-diff`, and both
-`export_patch` and `changed_files` diff through it.
-
 `worktree.export_patch` runs bare `git diff`, inheriting worktree config the
 agent can write. One `git config diff.srcPrefix x/` and a diff deleting the
 entire test suite reads as `pass`, because path matching no longer recognises
 anything.
 
-**Done looks like:** `export_patch` pins `--src-prefix=a/ --dst-prefix=b/
+## Done looks like
+
+`export_patch` pins `--src-prefix=a/ --dst-prefix=b/
 --no-ext-diff`, and any core gate reading a diff refuses a prefix it does not
 recognise rather than silently passing. A test that sets the hostile config and
 asserts the gate does not report `pass`.
+
+## Record
+
+**Status:** **done**, in `cf0dee8` (*fix(cell): a gate the agent could
+reconfigure from inside the cell*). `DIFF_FLAGS` at `saffron/cell/worktree.py:131`
+pins `--src-prefix=a/`, `--dst-prefix=b/` and `--no-ext-diff`, and both
+`export_patch` and `changed_files` diff through it.
 
 **Done, 2026-08-20.** `worktree.DIFF_FLAGS` pins prefixes, `--no-ext-diff`,
 `--no-textconv` and `--no-renames` on every diff the host reads, and `_git` adds

@@ -3,6 +3,7 @@ id: 116
 title: A runtime that forks outlives `_call`'s timeout
 status: open
 tier: 3
+filed: 2026-09-14
 specs: [SA-0079]
 prs: [245]
 commits: []
@@ -20,6 +21,8 @@ on every run, until #245 made it `exec sleep`. `container` and `podman` (via
 conmon) both fork, so a runtime that hangs past a timeout can leave its children
 running on the host. Unverified against a real runtime.
 
-**Done looks like** `_call` starting the runtime in its own process group and
+## Done looks like
+
+`_call` starting the runtime in its own process group and
 killing the group on timeout, with a witness whose stub forks and whose child is
 gone once `_call` returns.

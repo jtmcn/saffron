@@ -17,6 +17,8 @@ tree, so it is invisible until someone runs a build — and `pyproject.toml`'s
 `packages = ["saffron"]` is a claim worth checking by building, which is how this
 was found.
 
-**Done looks like** one line in `.gitignore`. Filed rather than fixed in passing
+## Done looks like
+
+one line in `.gitignore`. Filed rather than fixed in passing
 because it belongs to no branch in flight; it is a two-minute item for whoever
 touches packaging next.

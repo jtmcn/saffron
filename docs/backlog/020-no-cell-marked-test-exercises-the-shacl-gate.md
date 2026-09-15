@@ -4,10 +4,10 @@ title: No cell-marked test exercises the `shacl` gate
 status: open
 tier: 3
 specs: []
-prs: []
+prs: [46]
 commits: []
 cites: []
-related: []
+related: [19]
 ---
 
 ## Problem
@@ -27,6 +27,8 @@ assertion is real, and `python3` and the `pyshacl` console script both resolve t
 `/opt/venv` — but nothing proves the gate produces a contract-shaped result from
 inside a cell.
 
-**Done looks like** a `@pytest.mark.cell` test that starts a cell the way
+## Done looks like
+
+a `@pytest.mark.cell` test that starts a cell the way
 production does and runs `shacl` through `CellExecutor`, asserting `pass` and a
 `tool` obtained in the cell rather than on the host.

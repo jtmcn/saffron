@@ -4,7 +4,7 @@ title: Nothing holds the operator's side of a rebuttal, or a manual assertion, t
 status: open
 tier: 3
 specs: []
-prs: [189]
+prs: []
 commits: []
 cites: []
 related: []
@@ -20,7 +20,9 @@ operator's rejection in `lifecycle.ttl` — may likewise be `earl:assertedBy` a
 delegate. `CONTEXT.md`'s **Delegate** entry says a judgement a delegate types is
 still the operator's; only ratification (`TouchesShape`) holds that in a shape.
 
-**Done looks like** a third qualified association in `RebuttalShape` — at most one,
+## Done looks like
+
+a third qualified association in `RebuttalShape` — at most one,
 role in `( factory:agrees factory:disagrees )`, agent `sh:class factory:Operator` —
 and a shape putting a manual assertion's `earl:assertedBy` on the operator, each
 with a negative fixture naming a delegate.

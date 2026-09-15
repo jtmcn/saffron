@@ -3,6 +3,7 @@ id: 122
 title: The event log records that a tool ran, never what it returned
 status: open
 tier: 3
+filed: 2026-09-14
 specs: [SA-0087]
 prs: []
 commits: []
@@ -20,5 +21,7 @@ second is what a post-mortem of a lost cell needs first. Bounded output is the
 obvious objection, and the log already bounds agent text (`bounded`,
 `original_chars`).
 
-**Done looks like** a clipped tail of each tool result in its event, under the
+## Done looks like
+
+a clipped tail of each tool result in its event, under the
 same bound agent text has.

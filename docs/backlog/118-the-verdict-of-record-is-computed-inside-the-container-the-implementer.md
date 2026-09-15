@@ -3,6 +3,8 @@ id: 118
 title: The verdict of record is computed inside the container the implementer controlled
 status: open
 tier: null
+filed: 2026-09-13
+by_hand: true
 specs: [SA-0086, SA-0087, SA-0088, SA-0089]
 prs: [255]
 commits: [4ba8bdf, 82258f0]
@@ -11,15 +13,6 @@ related: [2, 40, 89, 97, 98, 102, 103, 119, 120]
 ---
 
 ## Problem
-
-**Status:** open. `SA-0086` is `READY_FOR_REVIEW`: PR #255, 2026-09-14,
-reviewed on the spec loop's second run. It is that run's only reviewable pull
-request, so it is not stacked. `SA-0087` ran twice. The first cell ended
-`NOT_IMPLEMENTED` at its turn ceiling ($8.39 of $8, item 119). The second, with
-its ceilings raised in #256, went green on its first attempt and halted at
-`REBUTTING` when REBUT ran out of budget ($14.03 of $14, item 120). Its branch,
-`saffron/SA-0087` @ `82258f0`, is pushed with no pull request. The operator
-stopped the chain there, so `SA-0088` and `SA-0089` never ran.
 
 **Tier 1.** Found threat-modelling Saffron, 2026-09-13, and confirmed by
 reading rather than by probe. The cell runs as root on a writable rootfs
@@ -108,6 +101,19 @@ critic cell, where a gate would run as root before the lenses do).
 head that merges and handing a delegate findings only as quoted data. Items
 **97** and **98** already carry those.
 
-**Done looks like** no gate result or lens finding that reaches a pull
+## Done looks like
+
+no gate result or lens finding that reaches a pull
 request, and no gate table a lens is shown, was produced in a container the
 implementer ran in.
+
+## Record
+
+**Status:** open. `SA-0086` is `READY_FOR_REVIEW`: PR #255, 2026-09-14,
+reviewed on the spec loop's second run. It is that run's only reviewable pull
+request, so it is not stacked. `SA-0087` ran twice. The first cell ended
+`NOT_IMPLEMENTED` at its turn ceiling ($8.39 of $8, item 119). The second, with
+its ceilings raised in #256, went green on its first attempt and halted at
+`REBUTTING` when REBUT ran out of budget ($14.03 of $14, item 120). Its branch,
+`saffron/SA-0087` @ `82258f0`, is pushed with no pull request. The operator
+stopped the chain there, so `SA-0088` and `SA-0089` never ran.

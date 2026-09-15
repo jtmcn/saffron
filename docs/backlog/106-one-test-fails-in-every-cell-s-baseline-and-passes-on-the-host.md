@@ -3,7 +3,7 @@ id: 106
 title: One test fails in every cell's baseline and passes on the host
 status: open
 tier: 3
-specs: [SA-0062, SA-0066]
+specs: []
 prs: []
 commits: []
 cites: []
@@ -29,6 +29,8 @@ under `images/` or `.saffron/Dockerfile` sets `USER`, so cells run as root — b
 root still cannot execute a file with no execute bit, so that alone does not
 explain it.
 
-**Done looks like** the failure reproduced in a cell and its cause named, then
+## Done looks like
+
+the failure reproduced in a cell and its cause named, then
 the test or the cell fixed — not the test skipped in a cell, which is a `pass`
 nobody checked.

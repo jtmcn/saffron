@@ -1,36 +1,16 @@
 ---
 id: 69
 title: The adequacy lens reads where only running can answer, and nine tests got through
-status: open
+status: partial
 tier: 1
-specs: [SA-0045, SA-0046, SA-0048, SA-0050, SA-0054, SA-0055, SA-0056, SA-0057, SA-0058, SA-0059]
-prs: [135]
+specs: [SA-0056, SA-0057, SA-0058]
+prs: [135, 136, 139]
 commits: []
 cites: [§5.4]
 related: [65, 71]
 ---
 
 ## Problem
-
-**Its table is now a scored corpus, 2026-09-09, and that closes nothing here.**
-`docs/evidence/2026-09-09-lens-corpus-baseline.md` grades adequacy at **2 of the
-10 declared defects it owns**, and separately verifies **8 vacuity probes** whose
-named edit left the fixture's suite green — the first numbers this item's
-question has ever had. Both are measurements of the gap. The mechanism is still
-item **71**'s seam: a `witness` result on a real attempt is what closes this.
-
-**Partly built, not done.** `SA-0056` (PR #135), `SA-0057` (#136) and `SA-0058`
-(#139) merged 2026-09-06 and built the whole mechanism: a `mutant` beside a
-claim, an applier, the `witness` gate, and the wiring. **It runs on nothing** —
-`witness_gate` mutates a host path and a cell's worktree has none, so
-`run_suite`'s `tree` parameter is one no production caller can supply. Item
-**71** is that seam and `SA-0059` is its fix; this item is not done until a
-`witness` result appears on a real attempt.
-
-Two things the chain produced that are worth having anyway: `mutation.py`'s
-applier, whose whole-file digest refuses a restore into a tree that moved, and
-`run_witness`'s pre-flight probe, which tells "this repo's `tests` gate cannot
-be filtered" apart from "the mutant killed its witness" and was not asked for.
 
 **Tier 1.** Measured across one session, 2026-09-05: the batch orchestration
 stack and the two pull requests after it.
@@ -78,7 +58,9 @@ gates its own tree. But that record's lens evidence was n=5, sonnet, one repo,
 and — its own words — "a prompt written after the defect was known". It should
 be read alongside this item rather than as settled.
 
-**Done looks like** a mutation check that is *spec-guided rather than
+## Done looks like
+
+a mutation check that is *spec-guided rather than
 syntactic*, which is the thing the review agents actually did and the thing
 neither tool does. Saffron already holds the targets as structured data: each
 `acceptance:` entry is a claim plus the witness that guards it. For each
@@ -104,3 +86,25 @@ designed raise, a batch row left open on Ctrl-C, three docstrings claiming more
 than their code — was found by reading, and no mutation would have surfaced any
 of it. The two answer different questions. Only one of them has a mechanical
 answer, and it is currently being guessed at.
+
+## Record
+
+**Partly built, not done.** `SA-0056` (PR #135), `SA-0057` (#136) and `SA-0058`
+(#139) merged 2026-09-06 and built the whole mechanism: a `mutant` beside a
+claim, an applier, the `witness` gate, and the wiring. **It runs on nothing** —
+`witness_gate` mutates a host path and a cell's worktree has none, so
+`run_suite`'s `tree` parameter is one no production caller can supply. Item
+**71** is that seam and `SA-0059` is its fix; this item is not done until a
+`witness` result appears on a real attempt.
+
+Two things the chain produced that are worth having anyway: `mutation.py`'s
+applier, whose whole-file digest refuses a restore into a tree that moved, and
+`run_witness`'s pre-flight probe, which tells "this repo's `tests` gate cannot
+be filtered" apart from "the mutant killed its witness" and was not asked for.
+
+**Its table is now a scored corpus, 2026-09-09, and that closes nothing here.**
+`docs/evidence/2026-09-09-lens-corpus-baseline.md` grades adequacy at **2 of the
+10 declared defects it owns**, and separately verifies **8 vacuity probes** whose
+named edit left the fixture's suite green — the first numbers this item's
+question has ever had. Both are measurements of the gap. The mechanism is still
+item **71**'s seam: a `witness` result on a real attempt is what closes this.

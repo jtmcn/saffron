@@ -4,7 +4,7 @@ title: A turn ceiling that fires with zero commits was total loss, and item 18's
 status: done
 tier: null
 closed: 2026-09-01
-specs: [SA-0005, SA-0025, SA-0028]
+specs: [SA-0025, SA-0028]
 prs: [87]
 commits: []
 cites: [§4.1, §4.3, §5.3]
@@ -12,17 +12,6 @@ related: [4, 18]
 ---
 
 ## Problem
-
-**Status:** **done** — `SA-0028` (PR #87), 2026-09-01. The item's own
-closure paragraph is below. Its one residual — the repair loop's own checkpoint
-letting a hook's refusal out as an infrastructure abort — closed by hand
-2026-09-10, on the salvage path's rule and with a test watched failing first.
-
-**Closed by `SA-0028`, 2026-09-01.** Item 18 closed `SA-0005`'s turn-ceiling gap
-by making `max_turns` a real, per-spec, printed ceiling and asking
-`implement.md` for a commit per coherent step, "with the measurement." That was
-necessary and it was not sufficient: `SA-0025`, ledger task 24, hit the same
-shape it was written about and died the same way.
 
 **Measured, once, and it cost a whole task.** `SA-0025` ran `NOT_IMPLEMENTED`
 at $14.61 — the first zero-commit run of the eight logged at the time. Its two
@@ -129,3 +118,16 @@ measured `base..HEAD` when the code has measured from the plan turn's head since
 item 18; and `CONTEXT.md` grants bare-caps status to phases plus the plan
 checkpoint by name, which `SALVAGE:` now needs too — it is a turn at a boundary,
 deliberately not a phase, the same entry the plan checkpoint carries.
+
+## Record
+
+**Status:** **done** — `SA-0028` (PR #87), 2026-09-01. The item's own
+closure paragraph is below. Its one residual — the repair loop's own checkpoint
+letting a hook's refusal out as an infrastructure abort — closed by hand
+2026-09-10, on the salvage path's rule and with a test watched failing first.
+
+**Closed by `SA-0028`, 2026-09-01.** Item 18 closed `SA-0005`'s turn-ceiling gap
+by making `max_turns` a real, per-spec, printed ceiling and asking
+`implement.md` for a commit per coherent step, "with the measurement." That was
+necessary and it was not sufficient: `SA-0025`, ledger task 24, hit the same
+shape it was written about and died the same way.

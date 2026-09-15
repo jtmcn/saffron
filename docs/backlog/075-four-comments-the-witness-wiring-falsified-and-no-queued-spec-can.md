@@ -3,6 +3,7 @@ id: 75
 title: Four comments the `witness` wiring falsified, and no queued spec can reach them
 status: open
 tier: 3
+filed: 2026-09-06
 specs: [SA-0061, SA-0062]
 prs: [150]
 commits: []
@@ -48,13 +49,15 @@ first asserted the opposite — that `SA-0062` "already touches
 finding handed to something that cannot act on it is a finding lost. Corrected
 there, recorded here.
 
-**Done looks like** one spec owning `saffron/gates/contract.py`,
-`saffron/gates/runner.py` and `tests/test_witness_gate.py`, correcting all four
-in a pass. It is comment-only, so `type: chore` and a small ceiling; the value
-is that the next reader of any of them is not misled about what is built.
-
 **Worth folding in while there:** `run_witness`'s subset probe is now live on
 every suite call for any criterion declaring a `mutant` — one extra in-cell
 `tests` invocation per `_suite`, baseline and head, to reach a guaranteed
 `skip` while the mutator is a stub. Zero cost for this repo today, since no
 spec declares one. A target repo that does would pay it, and nothing says so.
+
+## Done looks like
+
+one spec owning `saffron/gates/contract.py`,
+`saffron/gates/runner.py` and `tests/test_witness_gate.py`, correcting all four
+in a pass. It is comment-only, so `type: chore` and a small ceiling; the value
+is that the next reader of any of them is not misled about what is built.

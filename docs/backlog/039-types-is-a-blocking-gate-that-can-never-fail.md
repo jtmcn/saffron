@@ -3,8 +3,9 @@ id: 39
 title: '`types` is a blocking gate that can never fail'
 status: done
 tier: null
+closed: 2026-09-01
 specs: []
-prs: [91]
+prs: [91, 92]
 commits: []
 cites: [§5.4]
 related: []
@@ -97,6 +98,8 @@ Measured while reviewing PR #91: mutations replacing `Ceiling` and
 union, all left the suite green. `saffron/events.py` is a module whose whole
 value is type safety, and `tests/test_events.py` now hand-rolls
 `test_the_enumerations_are_pinned` as a substitute.
+
+## Done looks like
 
 Done looks like: pyright as a dev dependency and `.saffron/gates/types`
 executing it — the gate is already declared and already blocking, so nothing in

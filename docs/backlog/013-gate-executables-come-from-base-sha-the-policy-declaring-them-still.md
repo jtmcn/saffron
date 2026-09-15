@@ -13,11 +13,6 @@ related: [11]
 
 ## Problem
 
-**Status:** **done**, in `1b670c3` (*fix(session): the policy declaring a
-run's gates came from the working copy*). `session.py:800` reads
-`load_policy(gates_dir)` — the same export the gate executables resolve
-against.
-
 The same asymmetry item 11 raised for a task's base, in a second place, left
 half-closed by the fix that closed the first. `session.py` calls
 `load_policy(repo)` — reading and validating `.saffron/policy.yaml` and the
@@ -47,12 +42,21 @@ agent starts, so it costs nothing but the wrong diagnosis. Until it is closed,
 the workaround is to land the gate on the default branch first — `base_sha` is
 the remote's head, so the export sees a gate only once it is pushed there.
 
-**Done looks like:** `load_policy` reading from the same export
+## Done looks like
+
+`load_policy` reading from the same export
 `gate_executables` already resolves against, rather than from `repo`.
 `export_gates` already archives a subtree with `git archive <sha> .saffron`;
 loading policy from that archive — `git archive <sha> .saffron` plus
 `load_policy` pointed at the export instead of the working copy — is the shape
 of the fix, not a new mechanism.
+
+## Record
+
+**Status:** **done**, in `1b670c3` (*fix(session): the policy declaring a
+run's gates came from the working copy*). `session.py:800` reads
+`load_policy(gates_dir)` — the same export the gate executables resolve
+against.
 
 **Done, 2026-08-24.** The shape held: the pathspec widened from
 `.saffron/gates` to `.saffron`, and `_drive_cell` reads its policy back out of

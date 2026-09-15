@@ -3,9 +3,10 @@ id: 65
 title: The batch's four stop reasons are a closed set that lives only in SQL
 status: done
 tier: 3
-specs: [SA-0045, SA-0049]
-prs: [115]
-commits: []
+closed: 2026-09-05
+specs: []
+prs: []
+commits: [2a293b5]
 cites: [§6]
 related: []
 ---
@@ -50,7 +51,9 @@ Deferring was correct in the layer that found it — `ontology/` and `CONTEXT.md
 were both `forbidden` to `SA-0045` and to every spec above it — but the
 deferral has no owner now.
 
-**Done looks like** a `factory:BatchStopReason` class in the vocabulary with the
+## Done looks like
+
+a `factory:BatchStopReason` class in the vocabulary with the
 four individuals, `uv run python -m ontology.render` re-run, and the closed-set
 test naming it alongside the other five. The `CHECK` constraint stays: the
 vocabulary is authoritative for the words, and the constraint is what enforces

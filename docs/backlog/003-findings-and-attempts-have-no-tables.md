@@ -13,10 +13,6 @@ related: [9]
 
 ## Problem
 
-**Status:** **done**, in `229c4b2` (*feat(ledger): an attempt had no identity,
-so every one of them shared the task's*). Both tables exist — `attempts` at
-`saffron/ledger.py:54`, `findings` at `:98`.
-
 `DESIGN.md` §4.1 declares both. Neither exists, so:
 
 - REVIEW's findings and REBUT's verdicts and rebuttals live in `rebuttal.json`
@@ -33,8 +29,16 @@ so every one of them shared the task's*). Both tables exist — `attempts` at
 `SA-0003` produced an `attempts` implementation, unreviewed, in the batch tree —
 its patch no longer applies (see item 9).
 
-**Done looks like:** both tables, the drop-rate-per-lens query answerable in SQL,
+## Done looks like
+
+both tables, the drop-rate-per-lens query answerable in SQL,
 and cost on the task row.
+
+## Record
+
+**Status:** **done**, in `229c4b2` (*feat(ledger): an attempt had no identity,
+so every one of them shared the task's*). Both tables exist — `attempts` at
+`saffron/ledger.py:54`, `findings` at `:98`.
 
 **Done, 2026-08-23.** All three, by hand; `SA-0003`'s stale patch was not
 reopened, and two review rounds followed. What is worth carrying forward, in the

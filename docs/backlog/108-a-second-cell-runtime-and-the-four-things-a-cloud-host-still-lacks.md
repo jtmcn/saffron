@@ -7,29 +7,10 @@ specs: []
 prs: []
 commits: []
 cites: [§4.2, §4.3, §5.1, §5.1.2, §5.4, §7]
-related: []
+related: [107]
 ---
 
 ## Problem
-
-**Status:** the **runtime half is done**, by hand, 2026-09-11 —
-`saffron/cell/runtimes/podman.py` behind **107**'s `Dialect`, its own copy of the
-structure rule with the mutant that proves it fires, the spike grown a `podman`
-arm, and §5.1 carrying the second safety argument. Three findings from doing it:
-
-- **The spike's own instrument needed a check first.** Every negative assertion
-  is read through `nc`, and a `nc` that cannot connect reports what a refusing
-  network reports. The spike now proves the probe can succeed before trusting it
-  to fail, and refuses to report isolation otherwise.
-- **`--cpuset-cpus` meets §5.1's CPU requirement only halfway.** The mask reaches
-  `sched_getaffinity`, so `nproc` is honest; `os.cpu_count()` and
-  `/proc/cpuinfo` still report the host's count. So `policy.thread_env` is belt
-  and braces under a VM and *the* control under a shared kernel — a repo
-  onboarded there declaring none has an uncapped thread pool.
-- **Every cell would get the same mask.** `cpu_flags` is handed a count, not a
-  placement, so K concurrent cells contend for cores `0..n-1` rather than being
-  spread. §4.2's question, unanswered, and the reason this runtime is for one
-  attended task before it is for a night. **That is what is left of this half.**
 
 The images half has landed — `BASE_IMAGE` on both images,
 `images/bootstrap-base.sh`, and a provenance file each (§5.1.2) — **without**
@@ -101,12 +82,6 @@ makes a gate result carry the tool version it actually ran (§5.4). It is also
 what would earn the cell runtime an entry in `ontology/factory.ttl`, which today
 has none and correctly so (**107**).
 
-**Done looks like** a podman backend behind **107**'s protocol, its paired
-structure rule and mutant, the spike grown a fourth arm so the assertions are
-reproducible rather than recorded, and `DESIGN.md` carrying the second safety
-argument. **Not** done by that alone: a cloud host still cannot start a cell
-until the images question below is answered too, and that is the larger half.
-
 **What blocks it there regardless of runtime**, all four measured the same day:
 
 1. **No image can be *pulled*, and all three are written against registries.**
@@ -149,3 +124,32 @@ until the images question below is answered too, and that is the larger half.
    request; fatal for a night, whose product *is* the audit trail.
 5. **`CLAUDE_CODE_OAUTH_TOKEN` is absent.** `gh` is no longer on this list: it
    installs from apt (2.45.0) and only wants a credential.
+
+## Done looks like
+
+a podman backend behind **107**'s protocol, its paired
+structure rule and mutant, the spike grown a fourth arm so the assertions are
+reproducible rather than recorded, and `DESIGN.md` carrying the second safety
+argument. **Not** done by that alone: a cloud host still cannot start a cell
+until the images question below is answered too, and that is the larger half.
+
+## Record
+
+**Status:** the **runtime half is done**, by hand, 2026-09-11 —
+`saffron/cell/runtimes/podman.py` behind **107**'s `Dialect`, its own copy of the
+structure rule with the mutant that proves it fires, the spike grown a `podman`
+arm, and §5.1 carrying the second safety argument. Three findings from doing it:
+
+- **The spike's own instrument needed a check first.** Every negative assertion
+  is read through `nc`, and a `nc` that cannot connect reports what a refusing
+  network reports. The spike now proves the probe can succeed before trusting it
+  to fail, and refuses to report isolation otherwise.
+- **`--cpuset-cpus` meets §5.1's CPU requirement only halfway.** The mask reaches
+  `sched_getaffinity`, so `nproc` is honest; `os.cpu_count()` and
+  `/proc/cpuinfo` still report the host's count. So `policy.thread_env` is belt
+  and braces under a VM and *the* control under a shared kernel — a repo
+  onboarded there declaring none has an uncapped thread pool.
+- **Every cell would get the same mask.** `cpu_flags` is handed a count, not a
+  placement, so K concurrent cells contend for cores `0..n-1` rather than being
+  spread. §4.2's question, unanswered, and the reason this runtime is for one
+  attended task before it is for a night. **That is what is left of this half.**

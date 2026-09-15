@@ -12,10 +12,6 @@ related: [56]
 
 ## Problem
 
-**Decided 2026-09-04: they are vocabulary. Enumerate all three** in
-`CONTEXT.md`, joining `CLOSED_SETS`, `SETS` and `SHAPE_SETS` — three lines and
-a regenerate. **Tier 3.**
-
 The item says the reason matters more than the choice, so: the test is **who
 has to know the term.** `SpecType` appears in every spec's frontmatter and,
 since item 56, selects the size ceiling that can end a run `EXHAUSTED`.
@@ -42,9 +38,17 @@ A: a closed set with one hand-maintained copy per file, and no check that the
 copies agree. The difference is that the second copy has not been written yet,
 so nothing has drifted. This is a deferred decision, not a live defect.
 
-**Done looks like** a decision, in writing: either `CONTEXT.md` enumerates them
+## Done looks like
+
+a decision, in writing: either `CONTEXT.md` enumerates them
 and they join `CLOSED_SETS`, `SETS` and `SHAPE_SETS` — three lines and a
 regenerate — or a stated reason why they are shape-internal and not vocabulary,
 of the kind §4 already gives for repo-defined gate names. The reason matters more
 than the choice; `test_the_generator_and_the_cross_check_name_the_same_sets`
 will hold whichever way it goes.
+
+## Record
+
+**Decided 2026-09-04: they are vocabulary. Enumerate all three** in
+`CONTEXT.md`, joining `CLOSED_SETS`, `SETS` and `SHAPE_SETS` — three lines and
+a regenerate. **Tier 3.**

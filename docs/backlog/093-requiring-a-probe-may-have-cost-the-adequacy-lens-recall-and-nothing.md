@@ -21,6 +21,11 @@ adequacy-owned (`SA-0063`'s pair). n=1 each side, so the drop is neither noise
 nor a measured regression: it is *confounded*, and
 `docs/evidence/2026-09-09-lens-corpus-baseline.md` claims neither reading.
 
+Until then, no prompt change should be read off a single corpus pass — the same
+instruction item 88 left on the one-fixture harness, now owed by its replacement.
+
+## Done looks like
+
 What makes it answerable: pass 1's runs are on disk, but re-scoring them cannot
 help — the prompt changes the *runs*, not the predicate that reads them. It needs
 a pass under each prompt at the same `--runs`, or a higher `--runs` under the
@@ -28,8 +33,7 @@ current one to establish the spread first. The second is cheaper and comes first
 at `--runs 1` over eight fixtures nobody knows this metric's resolution, and two
 passes disagreeing by 1 of 12 is all the evidence there is.
 
-Until then, no prompt change should be read off a single corpus pass — the same
-instruction item 88 left on the one-fixture harness, now owed by its replacement.
+## Record
 
 **Status, 2026-09-11: the cheap half is done, the confound half is not.**
 `docs/evidence/2026-09-11-lens-corpus-spread.md` is a `--runs 3` pass under the

@@ -3,6 +3,7 @@ id: 121
 title: 'What #255''s review left'
 status: open
 tier: 3
+filed: 2026-09-14
 specs: [SA-0086]
 prs: [255]
 commits: []
@@ -27,5 +28,7 @@ related: []
   whether this is a defect depends on whether a `READY_FOR_REVIEW` outcome can
   carry a non-empty list, for example advisory failures. Unverified.
 
-**Done looks like** a stacked witness with an unmoved parent and a red re-run,
+## Done looks like
+
+a stacked witness with an unmoved parent and a red re-run,
 asserting the note, and the second bullet either reproduced or closed on reading.

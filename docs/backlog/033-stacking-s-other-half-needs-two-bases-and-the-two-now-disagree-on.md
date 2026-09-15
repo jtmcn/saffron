@@ -3,19 +3,15 @@ id: 33
 title: Stacking's other half needs two bases, and the two now disagree on purpose
 status: done
 tier: null
+closed: 2026-08-31
 specs: [SA-0020, SA-0022, SA-0025, SA-0026]
-prs: [81]
+prs: [81, 82, 84]
 commits: [5ab674e, ab23523]
 cites: [§3.1, §4.2, §4.2.1, §5.3.1, §5.7, §9]
 related: [11, 13, 32]
 ---
 
 ## Problem
-
-**Status:** **done** — all three specs merged: `SA-0022` (PR #81),
-`SA-0025` (#82) and `SA-0026` (#84). `CellSpec.stacked_on` is distinct from
-`base_sha`, PACKAGE resolves a real parent, and `CONTEXT.md` carries the **Tree
-base** entry the split needed.
 
 `SA-0020`'s first attempt (ledger task 20, `EXHAUSTED` at $14.43 against a $16
 budget, 2026-08-30) found that a stacked task — one whose parent is still only
@@ -92,6 +88,13 @@ stacked child that is the wrong baseline outright — the parent's commits are
 not in it — which is a different failure from the gate-source disagreement
 this item decides. `saffron/phases/**` is forbidden to `SA-0022`, so recording
 it here is the only action available; `SA-0025` owns the file and the fix.
+
+## Record
+
+**Status:** **done** — all three specs merged: `SA-0022` (PR #81),
+`SA-0025` (#82) and `SA-0026` (#84). `CellSpec.stacked_on` is distinct from
+`base_sha`, PACKAGE resolves a real parent, and `CONTEXT.md` carries the **Tree
+base** entry the split needed.
 
 **Decided and implemented, 2026-08-31 (`SA-0025`).** `package()` now takes an
 optional `parent_branch`. Unset — every caller today — nothing above changes:

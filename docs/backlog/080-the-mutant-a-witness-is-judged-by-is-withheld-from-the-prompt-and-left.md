@@ -3,6 +3,7 @@ id: 80
 title: The mutant a witness is judged by is withheld from the prompt and left in the worktree
 status: open
 tier: 1
+filed: 2026-09-06
 specs: [SA-0056, SA-0063, SA-0064]
 prs: []
 commits: []
@@ -34,12 +35,6 @@ the gate reports `pass` because the test killed the mutant, over a test written
 to kill that mutant and nothing else, and `run_witness`'s pre-flight probe
 cannot tell those apart because from outside they are identical.
 
-**Tier 1 as of 2026-09-07 — the evidence arrived.** `SA-0064`'s implementer
-reasoned in its notes about a criterion's `mutant` field, which the prompt
-withholds and which the host's own copy of that spec no longer contained: it had
-read the worktree copy. Item **85** carries the measurement. The paragraph below
-is kept as filed, because what it predicted is what happened.
-
 ~~Tier 3, and it moves on evidence rather than on argument.~~ No run had yet had
 a mutant to read, so the likelihood was unmeasured while the consequence is
 tier-1 shaped. `SA-0063` is the first run that could produce the datapoint, and
@@ -56,6 +51,30 @@ not placing the spec in the worktree at all, which is cleaner and costs the
 agent a file it is otherwise given for context. What this needs is not code so
 much as a decision about which copy is authoritative for whom; either shape is
 cheap once that is settled.
+
+## Done looks like
+
+`DESIGN.md` §5.4.1 saying where a mutant lives, written by hand and first; the
+seed fetch naming its refspec rather than relying on git's default; a
+cell-marked test that starts a cell the way production does and proves the
+mutant's blob is absent; intake reading mutants from the ref, with the ref's
+commit recorded beside `spec_sha`; and a `saffron mutant` command to write and
+push them. Item **109** comes first: it leaks a surviving mutant to the
+implementer wherever the mutant is stored. And once mutants live on the ref,
+spec authoring declares one for every criterion whose witness pins code that
+already exists at `base_sha`. Stack #251 (2026-09-14) is why: seven of its eight
+specs declared none, so `witness` skipped on every attempt, and the review round
+found a witness that could not fail in most of them. Until this item lands that
+rule would hand every mutant to the cell, so it is recorded here and not enforced.
+A criterion over new code still cannot declare one (§5.4.1); item 117 covers it.
+
+## Record
+
+**Tier 1 as of 2026-09-07 — the evidence arrived.** `SA-0064`'s implementer
+reasoned in its notes about a criterion's `mutant` field, which the prompt
+withholds and which the host's own copy of that spec no longer contained: it had
+read the worktree copy. Item **85** carries the measurement. The paragraph below
+is kept as filed, because what it predicted is what happened.
 
 **Decided 2026-09-12: neither shape works, and mutants move to a ref the cell
 never fetches.** Both shapes assumed the worktree copy is the only one the cell
@@ -78,17 +97,3 @@ seeds a cell: the mirror held the mutant's blob and the cell did not. Not yet
 measured with the cell image's git. **Rejected:** a host-held key encrypting the
 mutant inside the spec. It keeps the spec one file, but it is one more secret
 that must never reach a cell and must be handed to every cloud host.
-
-**Done looks like** `DESIGN.md` §5.4.1 saying where a mutant lives, written by
-hand and first; the seed fetch naming its refspec rather than relying on git's
-default; a cell-marked test that starts a cell the way production does and
-proves the mutant's blob is absent; intake reading mutants from the ref, with
-the ref's commit recorded beside `spec_sha`; and a `saffron mutant` command to
-write and push them. Item **109** comes first: it leaks a surviving mutant to
-the implementer wherever the mutant is stored. And once mutants live on the ref,
-spec authoring declares one for every criterion whose witness pins code that
-already exists at `base_sha`. Stack #251 (2026-09-14) is why: seven of its eight
-specs declared none, so `witness` skipped on every attempt, and the review round
-found a witness that could not fail in most of them. Until this item lands that
-rule would hand every mutant to the cell, so it is recorded here and not enforced.
-A criterion over new code still cannot declare one (§5.4.1); item 117 covers it.

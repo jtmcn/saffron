@@ -8,20 +8,10 @@ prs: []
 commits: [f76931df]
 cites: []
 related: [93]
+filed: 2026-09-09
 ---
 
 ## Problem
-
-**Status:** **done bar the explanation**, 2026-09-09, by hand. The recording
-half, which is what "done looks like" below specifies, is done: `ProbeResult`
-carries a `BaselineRecord` — the baseline's failure identities, tool, collected
-count and summary line — and `probes.json` writes it as `baseline_failures`,
-`baseline_tool`, `baseline_collected` and `baseline_summary`. A `None` record
-is not one with no failures, and on disk `null` is not `[]`: no baseline in
-hand against one read and green. Every path records the baseline it had,
-refusals and a raise out of `check_probe` included, and both spellings are
-pinned, because collapsing them reads the baseline pass's ten silent verdicts
-as ten green baselines.
 
 **What is not done, and does not go quiet here:** the *explanation* for the two
 cell-only skips. `baseline_summary` is the line that will carry them from the
@@ -60,6 +50,8 @@ baseline's 8 verified vacuities**, and **no re-run can settle those two**: a pro
 is authored by the lens per run — `SA-0054`'s re-run named two *different* edits —
 so re-running yields different probes rather than an audit of these.
 
+## Done looks like
+
 Done looks like: `ProbeResult` carries the baseline's failure identities beside
 the new ones, and `probes.json` writes them. Additive, and the value is already
 in `check_probe`'s hand — the same shape as the `tool`/`collected`/`summary`
@@ -74,3 +66,16 @@ the argument for landing it early rather than the argument for deferring it.
 Worth pairing with it: the cell's own baseline summary line, and an explanation
 for the two cell-only skips. A `survived` over a baseline that skipped the
 relevant test is the same defect wearing a different hat.
+
+## Record
+
+**Status:** **done bar the explanation**, 2026-09-09, by hand. The recording
+half, which is what "done looks like" below specifies, is done: `ProbeResult`
+carries a `BaselineRecord` — the baseline's failure identities, tool, collected
+count and summary line — and `probes.json` writes it as `baseline_failures`,
+`baseline_tool`, `baseline_collected` and `baseline_summary`. A `None` record
+is not one with no failures, and on disk `null` is not `[]`: no baseline in
+hand against one read and green. Every path records the baseline it had,
+refusals and a raise out of `check_probe` included, and both spellings are
+pinned, because collapsing them reads the baseline pass's ten silent verdicts
+as ten green baselines.

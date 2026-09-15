@@ -1,9 +1,8 @@
 ---
 id: 89
 title: '`DIFF_FLAGS` pins less of the diff''s shape than its own comment claims'
-status: done
+status: partial
 tier: 1
-closed: 2026-09-12
 specs: [SA-0072, SA-0082]
 prs: [219, 244]
 commits: []
@@ -12,26 +11,6 @@ related: [115]
 ---
 
 ## Problem
-
-**Status: the three measured pins are done — `SA-0072`, PR #219, merged
-2026-09-12.** It takes
-`pinned_diff`'s measured values rather than choosing new ones. Dropping the
-duplicate flags from `pinned_diff` afterwards is a harness change, left for
-later — and its docstring still says `_git` has "two `-c` overrides", which is
-five now. `tests/test_package.py:361` keeps a third copy of `DIFF_FLAGS`, five
-flags of eleven, under a fixture that calls itself "shaped exactly like
-`worktree.export_patch`'s output"; it should import the tuple (found reviewing
-`SA-0082`, PR #244, 2026-09-14).
-
-**The four below: merged, 2026-09-14 — `SA-0082`, PR #244, in stack
-#251.** The `.gitmodules` half the review found is item 115. Probed
-that day on git 2.39.5 (the cell image) and 2.54, with identical results
-(`docs/evidence/scripts/2026-09-13-history-and-diff-pins.sh`).
-`--ignore-submodules=none`, `--no-color` and `--inter-hunk-context=0` each
-restore the pinned shape. `-c color.ui=never` does not beat `color.diff=always`.
-One correction to the bullet below: `color.ui=always` leaves the name-only
-listing clean, so its escape codes land in the patch, not in the list `scope`
-reads.
 
 **Found reviewing `SA-0072`, 2026-09-11, and outside it:**
 - **`--no-renames` is guarded by no test.** Removing it left all 1745 tests
@@ -85,9 +64,33 @@ recorded patch on an arbitrary host needed `--abbrev=7 --unified=3
 three measured against every one of this repo's own recorded patches rather
 than assumed.
 
-**Done looks like** `DIFF_FLAGS` (or `_git`'s `-c` overrides) gaining the same
+## Done looks like
+
+`DIFF_FLAGS` (or `_git`'s `-c` overrides) gaining the same
 three pins `pinned_diff` already carries — an explicit `--unified=<n>` matters
 most, since it is the one with anchoring consequences; `--abbrev`/
 `--diff-algorithm` close the comment's claim rather than a live hazard. Cite
 `harness/recovery.py`'s `pinned_diff` for the exact flags and the measurement
 behind each.
+
+## Record
+
+**Status: the three measured pins are done — `SA-0072`, PR #219, merged
+2026-09-12.** It takes
+`pinned_diff`'s measured values rather than choosing new ones. Dropping the
+duplicate flags from `pinned_diff` afterwards is a harness change, left for
+later — and its docstring still says `_git` has "two `-c` overrides", which is
+five now. `tests/test_package.py:361` keeps a third copy of `DIFF_FLAGS`, five
+flags of eleven, under a fixture that calls itself "shaped exactly like
+`worktree.export_patch`'s output"; it should import the tuple (found reviewing
+`SA-0082`, PR #244, 2026-09-14).
+
+**The four below: merged, 2026-09-14 — `SA-0082`, PR #244, in stack
+#251.** The `.gitmodules` half the review found is item 115. Probed
+that day on git 2.39.5 (the cell image) and 2.54, with identical results
+(`docs/evidence/scripts/2026-09-13-history-and-diff-pins.sh`).
+`--ignore-submodules=none`, `--no-color` and `--inter-hunk-context=0` each
+restore the pinned shape. `-c color.ui=never` does not beat `color.diff=always`.
+One correction to the bullet below: `color.ui=always` leaves the name-only
+listing clean, so its escape codes land in the patch, not in the list `scope`
+reads.

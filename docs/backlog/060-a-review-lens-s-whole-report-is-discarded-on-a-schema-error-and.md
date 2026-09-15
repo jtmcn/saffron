@@ -4,7 +4,7 @@ title: A review lens's whole report is discarded on a schema error, and nothing 
 status: done
 tier: 2
 closed: 2026-09-10
-specs: [SA-0053]
+specs: []
 prs: []
 commits: [4139fbb]
 cites: []
@@ -12,14 +12,6 @@ related: []
 ---
 
 ## Problem
-
-**Status: done in code, found open here on 2026-09-10.** `4139fbb` (*fix(review):
-a lens whose output is not the schema gets one re-prompt*) re-prompts once on a
-schema failure. A second failure still stops at `REVIEWING`. The item was never
-closed.
-
-**Tier 2.** Measured 2026-09-04 on `SA-0053`, and the finding it cost was a
-real one.
 
 The correctness lens returned a well-argued finding about `saffron/watch.py`
 and omitted one field:
@@ -54,3 +46,13 @@ most of the fix.
 **Not** relaxing the schema to make `severity` optional. The severity is what
 `_describe` counts and what decides whether a finding blocks; a report whose
 findings have no severity is not a report that can be acted on.
+
+## Record
+
+**Tier 2.** Measured 2026-09-04 on `SA-0053`, and the finding it cost was a
+real one.
+
+**Status: done in code, found open here on 2026-09-10.** `4139fbb` (*fix(review):
+a lens whose output is not the schema gets one re-prompt*) re-prompts once on a
+schema failure. A second failure still stops at `REVIEWING`. The item was never
+closed.

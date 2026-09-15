@@ -3,7 +3,7 @@ id: 9
 title: Unverified against a live model
 status: partial
 tier: 3
-specs: [SA-0002, SA-0031, SA-0040]
+specs: [SA-0002]
 prs: [16]
 commits: []
 cites: [§4.3]
@@ -11,23 +11,6 @@ related: [10, 42, 45]
 ---
 
 ## Problem
-
-**Status:** **partly met, and the standing claim in it is now false.** Two of
-the three "expensive" paths this item was waiting on have since fired in
-production, both recorded elsewhere in this file rather than here:
-
-- **A critic confirming a plausible-but-wrong finding** — item 42, measured on
-  `SA-0040` 2026-09-01. The critic wrote `confirmed: The implementer offered no
-  argument and made no visible change` about a finding that was false, and the
-  operator inherited a pull request body asserting it.
-- **`GATE ⇄ REPAIR` firing at all** — item 45, measured on `SA-0031`: six
-  commits, 39 new gate failures and an `EXHAUSTED` terminal. The bullet below
-  claiming it "did not fire, for the fourth time" describes 2026-08-25 and has
-  not held since.
-
-**Still unmet:** a rebuttal that claims a fix and does neither — §4.3's doneness
-rule at the point an agent has the strongest incentive to lie. That one still
-needs a task chosen to fail rather than a fifth hope.
 
 Everything here is built and unit-tested and has never met a real session. On
 this project's evidence that is exactly where the next defect is.
@@ -40,8 +23,16 @@ this project's evidence that is exactly where the next defect is.
   and that is the kind that costs mornings.
 - **A rebuttal that fixes and commits**, with `head_moved` true.
 - **The gate re-run after a rebuttal**, and `EXHAUSTED` when it is red.
-- **A rebuttal that claims a fix and does neither** — §4.3's doneness rule at the
-  point an agent has the strongest incentive to claim it is done.
+- **A rebuttal that claims a fix and does neither** — §4.3's doneness rule at
+  the point an agent has the strongest incentive to claim it is done.
+
+## Done looks like
+
+**Still unmet:** a rebuttal that claims a fix and does neither — §4.3's doneness
+rule at the point an agent has the strongest incentive to lie. That one still
+needs a task chosen to fail rather than a fifth hope.
+
+## Record
 
 **Half met, 2026-08-25**, by `SA-0002` — the first task to run the whole
 pipeline, spec to pull request (#15), $2.38 against an $8 budget, green on
@@ -75,3 +66,16 @@ host, so the baseline every gate result is subtracted from was carrying five
 failures for reasons unrelated to any task (closed by PR #16). Both were
 invisible to every unit test and to three prior live runs; both cost money on
 the first task that reached PACKAGE.
+
+**Status:** **partly met, and the standing claim in it is now false.** Two of
+the three "expensive" paths this item was waiting on have since fired in
+production, both recorded elsewhere in this file rather than here:
+
+- **A critic confirming a plausible-but-wrong finding** — item 42, measured on
+  `SA-0040` 2026-09-01. The critic wrote `confirmed: The implementer offered no
+  argument and made no visible change` about a finding that was false, and the
+  operator inherited a pull request body asserting it.
+- **`GATE ⇄ REPAIR` firing at all** — item 45, measured on `SA-0031`: six
+  commits, 39 new gate failures and an `EXHAUSTED` terminal. The bullet below
+  claiming it "did not fire, for the fourth time" describes 2026-08-25 and has
+  not held since.

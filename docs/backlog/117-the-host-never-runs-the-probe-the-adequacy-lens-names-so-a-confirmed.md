@@ -3,6 +3,7 @@ id: 117
 title: The host never runs the probe the adequacy lens names, so a confirmed vacuity ships as a concern
 status: open
 tier: 1
+filed: 2026-09-14
 specs: [SA-0062, SA-0079, SA-0080, SA-0081, SA-0082, SA-0084, SA-0085]
 prs: []
 commits: []
@@ -41,7 +42,9 @@ the repo's `tests` gate accepts a subset. What a probe lacks that a spec mutant 
 is its witness — it names the edit, not the test that should die — so it runs under
 the spec's declared witnesses and the diff's own added tests.
 
-**Done looks like** each adequacy probe applied after REVIEW, the spec's witnesses
+## Done looks like
+
+each adequacy probe applied after REVIEW, the spec's witnesses
 and the diff's added tests run under it, and the result deciding the finding: a
 probe that survives becomes a blocker routed to REBUT with the probe named; one that
 is killed drops its finding and is counted, so the lens's drop rate measures what

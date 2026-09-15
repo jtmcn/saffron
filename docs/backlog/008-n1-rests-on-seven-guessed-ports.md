@@ -13,12 +13,6 @@ related: []
 
 ## Problem
 
-**Status:** **done**, in `8e6838a` (*feat(preflight): a host process the
-operator has accepted, named and reported*). `PROBED_PORTS` is gone.
-`listening_sockets` parses `lsof -nP -iTCP`, `host_probe_ports` raises rather
-than covering nothing when the enumeration fails, and `probed_ports` drops a
-port only when *every* listener on it is a tolerated process.
-
 `preflight.PROBED_PORTS` is `5432, 5433, 3306, 6379, 8000, 8080, 27017`. The
 probe raises rather than passing when it cannot run, which is right — but "no
 host service answered on seven ports I thought of" and "no host service is
@@ -28,8 +22,18 @@ the second.
 This was not hypothetical: the host service that *was* exposed sat on 8000 and
 was caught, while four more on 8001+ would have been invisible.
 
-**Done looks like:** enumerate the host's actual wildcard-bound listeners and
+## Done looks like
+
+enumerate the host's actual wildcard-bound listeners and
 probe those.
+
+## Record
+
+**Status:** **done**, in `8e6838a` (*feat(preflight): a host process the
+operator has accepted, named and reported*). `PROBED_PORTS` is gone.
+`listening_sockets` parses `lsof -nP -iTCP`, `host_probe_ports` raises rather
+than covering nothing when the enumeration fails, and `probed_ports` drops a
+port only when *every* listener on it is a tolerated process.
 
 **Done, 2026-08-20.** `preflight.host_listening_ports()` parses `lsof -nP -iTCP
 -sTCP:LISTEN` and probes every listener not bound to loopback — a superset of

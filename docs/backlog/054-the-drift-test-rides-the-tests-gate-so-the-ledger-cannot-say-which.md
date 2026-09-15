@@ -22,7 +22,9 @@ The cost is paid in the morning queue. An operator sees "some test failed" rathe
 than a named gate, and the distinction between "the code is wrong" and "the
 generated documents are stale" is one the ledger cannot make.
 
-**Done looks like** either a `.saffron/gates/` executable that runs the render and
+## Done looks like
+
+either a `.saffron/gates/` executable that runs the render and
 obtains its own `tool` by executing something real, or a written decision that the
 test is enough — with the reason, so the next reader does not re-litigate it. It
 becomes worth doing the first night an operator misreads a stale-surface failure

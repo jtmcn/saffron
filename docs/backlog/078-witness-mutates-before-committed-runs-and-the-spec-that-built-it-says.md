@@ -3,6 +3,7 @@ id: 78
 title: '`witness` mutates before `committed` runs, and the spec that built it says the opposite'
 status: done
 tier: 1
+filed: 2026-09-06
 closed: 2026-09-12
 specs: [SA-0062]
 prs: [154]
@@ -12,17 +13,6 @@ related: []
 ---
 
 ## Problem
-
-**Status: done, 2026-09-12** — the `DESIGN.md` half by hand, as a paragraph in
-§5.4.1 stating the ordering and the self-guard it obliges. Done in code
-2026-09-07; what follows is the record of that half. The two fixes on
-PR #154 itself (`4b533d5`, `290f070`): `worktree.source_mutated` yields a reason
-when the mutant's file is dirty — the shape `revert` uses, landing `witness` on
-`skip` — and a failed write restores from `HEAD` before it re-raises, so a
-truncation cannot outlive the failure. What is left is the third paragraph of
-"done looks like": the `run_suite`-before-`committed` ordering is load-bearing
-and written down nowhere. One sentence in §5.4, by hand — a gate that mutates
-the tree self-guards against dirtiness, because `committed` runs after it.
 
 Found reviewing PR #154 (`SA-0062`), 2026-09-06. The spec justifies a
 `git checkout HEAD` undo with *"the agent's work is committed by the time gates
@@ -55,7 +45,9 @@ spec was forbidden to edit, and not met.
 Both are latent only until a spec declares a mutant, which `SA-0062`'s own
 *Out of scope* says is the next one.
 
-**Done looks like** `source_mutated` yielding a reason when the mutant's file is
+## Done looks like
+
+`source_mutated` yielding a reason when the mutant's file is
 dirty — the shape `revert` already uses, landing `witness` on `skip` — and a
 failed write either restoring from `HEAD` before it re-raises or going through a
 temp file inside the cell, so a truncation cannot outlive the failure. Then the
@@ -63,3 +55,16 @@ ordering itself: either `committed` moves ahead of `run_suite` in `_suite`, or
 `DESIGN.md` records that a gate which mutates must self-guard against dirtiness.
 Right now that ordering is load-bearing and written down nowhere, which is how a
 spec came to assert its opposite and pass review.
+
+## Record
+
+**Status: done, 2026-09-12** — the `DESIGN.md` half by hand, as a paragraph in
+§5.4.1 stating the ordering and the self-guard it obliges. Done in code
+2026-09-07; what follows is the record of that half. The two fixes on
+PR #154 itself (`4b533d5`, `290f070`): `worktree.source_mutated` yields a reason
+when the mutant's file is dirty — the shape `revert` uses, landing `witness` on
+`skip` — and a failed write restores from `HEAD` before it re-raises, so a
+truncation cannot outlive the failure. What is left is the third paragraph of
+"done looks like": the `run_suite`-before-`committed` ordering is load-bearing
+and written down nowhere. One sentence in §5.4, by hand — a gate that mutates
+the tree self-guards against dirtiness, because `committed` runs after it.

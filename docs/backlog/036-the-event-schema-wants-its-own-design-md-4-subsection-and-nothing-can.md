@@ -20,6 +20,8 @@ The count is now **ten**: `Ceilings` was added by hand with `saffron/task.py`,
 so a §4.x written against "nine" would be stale before it landed. Stated as a
 count that moves, rather than a number to correct again.
 
+## Done looks like
+
 Done looks like: a new §4.x naming the kinds, the wire discriminator and
 `events.jsonl`'s one-file-per-task, no-rotation ceiling — by hand, after
 `SA-0040`, when the shape has stopped moving.

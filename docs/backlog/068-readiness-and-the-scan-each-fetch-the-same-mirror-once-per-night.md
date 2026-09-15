@@ -3,19 +3,15 @@ id: 68
 title: Readiness and the scan each fetch the same mirror, once per night
 status: done
 tier: 3
-specs: [SA-0054, SA-0055]
-prs: [123, 131]
+closed: 2026-09-05
+specs: [SA-0055]
+prs: [131]
 commits: [819cbff]
 cites: [§4.2.1, §4.4]
 related: [58]
 ---
 
 ## Problem
-
-**Status: done** — `SA-0055`, PR #131, merge `819cbff`. `_resolve_queue` takes
-an optional `PinnedBase`; `_batch` hands down the mirror, url and base_sha that
-`check_readiness` already established, and `saffron queue` — which runs no
-readiness check on purpose — still derives its own.
 
 **The first spec Saffron ran unattended.** `saffron batch` picked it up,
 drove the cell, packaged it and opened the pull request: 25 minutes, $6.68
@@ -45,9 +41,18 @@ Harmless at K=1 against one repo — two mirror fetches, seconds apart, the seco
 a no-op fetch — which is why this is Tier 3 rather than urgent. It stops being
 harmless at multi-repo, where it doubles the network cost of starting a night.
 
-**Done looks like** `_resolve_queue` accepting the mirror, url and base_sha a
+## Done looks like
+
+`_resolve_queue` accepting the mirror, url and base_sha a
 readiness check already established, rather than deriving its own. Note the
 ordering constraint that makes this awkward and worth doing carefully:
 readiness must run *first* (a scan that raises before the batch row exists is
 what item 58's review fixed), so the seam is readiness handing its results
 down, never the scan handing them up.
+
+## Record
+
+**Status: done** — `SA-0055`, PR #131, merge `819cbff`. `_resolve_queue` takes
+an optional `PinnedBase`; `_batch` hands down the mirror, url and base_sha that
+`check_readiness` already established, and `saffron queue` — which runs no
+readiness check on purpose — still derives its own.

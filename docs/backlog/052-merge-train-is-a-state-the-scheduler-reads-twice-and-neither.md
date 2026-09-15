@@ -3,9 +3,10 @@ id: 52
 title: '`MERGE_TRAIN` is a state the scheduler reads twice and neither authoritative document declares'
 status: open
 tier: 2
+by_hand: true
 specs: []
 prs: []
-commits: [6938c41, a4324f0]
+commits: []
 cites: [§3.3, §4.2.1, §6]
 related: [72, 75]
 ---
@@ -40,9 +41,13 @@ exit-code map and `report/index.py`'s `_STATE_RANK` both fall through to a
 documented default rather than raising, so an undeclared state degrades there
 rather than breaking. That is by design and stays.
 
-**Done looks like** `MERGE_TRAIN` declared once in `ontology/factory.ttl`, the
+## Done looks like
+
+`MERGE_TRAIN` declared once in `ontology/factory.ttl`, the
 derived surfaces regenerated, `TaskShape` updated, and a one-line note in §3.3 or
 §6 saying which of the two sets it joined and why.
+
+## Record
 
 ### Decided 2026-09-08, and the item grew
 

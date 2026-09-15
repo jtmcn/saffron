@@ -37,7 +37,9 @@ Routing is not a substitute for refusing. What is left is per-gate:
 - **`tests`** is a different question — pytest collects through its own config —
   and should be checked rather than assumed to share the defect.
 
-**Done looks like** a test per gate in the shape of
+## Done looks like
+
+a test per gate in the shape of
 `test_an_ignore_file_outside_the_diff_cannot_hide_a_violation`: a tracked file
 that violates, an ignore file naming it, and the gate still reporting `fail`. The
 `.git` directory in that fixture is load-bearing — the walker honours a

@@ -6,16 +6,12 @@ tier: null
 closed: 2026-08-23
 specs: []
 prs: []
-commits: []
+commits: [2a3e992, 3d27c4f]
 cites: [§5.4]
 related: [11]
 ---
 
 ## Problem
-
-**Status:** **done**, 2026-08-23 — both halves. The full account is in this
-item's own body below, which was written as the fix landed; this line exists so
-a scan of the file's status markers sees it.
 
 Promised by the split's spec (part 2.3) and not written until the fix wave.
 `census`'s subtraction is exact about the two lists it is handed, and both lists
@@ -44,7 +40,9 @@ one was evadable by a single adjacent added line and needed no `conftest.py` at
 all. The honest statement of what shipped is that **`census` buys exactness
 against an honest suite, not integrity against a hostile one.**
 
-**Done looks like:** a decision on the gate-runner trust boundary, which §5.4's
+## Done looks like
+
+a decision on the gate-runner trust boundary, which §5.4's
 `no-network` gate and the gate contract both currently assume is cooperative. The
 two candidate halves are independent: (a) gates run from a host-supplied copy of
 `.saffron/gates/` rather than the one in `/work`, so an in-cell edit — committed
@@ -52,6 +50,12 @@ or not — cannot reach the runner; (b) the host refuses a dirty worktree at gat
 time, or diffs `base_sha..worktree` so that an uncommitted edit is at least
 *visible* to `scope` and `integrity`. Neither is v0.5's to build, and this item
 exists so the choice is made deliberately rather than inherited.
+
+## Record
+
+**Status:** **done**, 2026-08-23 — both halves. The full account is in this
+item's own body below, which was written as the fix landed; this line exists so
+a scan of the file's status markers sees it.
 
 **Done, 2026-08-23.** Both halves, which this item leaves as alternatives.
 `.saffron/gates/` is exported from the mirror at `base_sha` and mounted read-only

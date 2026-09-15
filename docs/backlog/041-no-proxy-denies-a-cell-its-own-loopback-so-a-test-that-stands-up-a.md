@@ -3,11 +3,13 @@ id: 41
 title: '`NO_PROXY=""` denies a cell its own loopback, so a test that stands up a local server fails at baseline forever'
 status: done
 tier: null
+closed: 2026-09-01
 specs: [SA-0040]
-prs: []
+prs: [95]
 commits: []
 cites: [§5.1]
 related: []
+by_hand: true
 ---
 
 ## Problem
@@ -58,10 +60,11 @@ Three costs, in increasing order of seriousness:
   Ten lines per run that are one repo test talking to itself is noise in the
   one place noise is most expensive.
 
-Done looks like a decision, not a patch. `NO_PROXY=""` is the correct isolation
+## Done looks like
+
+a decision, not a patch. `NO_PROXY=""` is the correct isolation
 posture for anything off-box and must not be widened to hosts. The open
 question is whether loopback *inside the container* — which is the cell
 itself, and reaches nothing the cell does not already have — belongs behind
 the boundary at all. If it does, the alternative is that `saffron`'s own suite
-cannot contain a test that binds a socket, and `test_the_probe_script_itself
-_answers_a_401` should carry the `cell` marker and say so.
+cannot contain a test that binds a socket, and `test_the_probe_script_itself _answers_a_401` should carry the `cell` marker and say so.

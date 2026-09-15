@@ -3,26 +3,15 @@ id: 58
 title: Nothing runs a batch, and v1 is defined by a night that does
 status: done
 tier: null
-specs: [SA-0009, SA-0045, SA-0054]
+closed: 2026-09-05
+specs: [SA-0045, SA-0050, SA-0054]
 prs: []
 commits: [57b676c]
 cites: [§4.1, §4.4, §9]
-related: [16, 44, 56, 66]
+related: [16, 44, 66]
 ---
 
 ## Problem
-
-**Status: done** — seven specs, `SA-0045` through `SA-0054`, PRs #115/#116/#117
-/#120/#121/#122/#123, merged together as `57b676c`. `saffron batch --repo .
---budget 50 --until 06:30` exists, `saffron/batch.py` owns the loop, the
-`batches` table records the night, and `docs/host/dev.saffron.batch.plist` is
-the launchd job. Absorbed items **16** and half of **44**, both now closed
-above.
-
-**A night has been run, against an empty queue** — `DRAINED`, exit `0`, $0.00,
-2026-09-05 (`docs/evidence/2026-09-05-first-batch-drained.md`). That proves
-readiness, the mirror fetch, the scan, `reconcile`, the ledger row, the
-deadline resolving to tomorrow, and the exit code.
 
 **No cell has started under a batch.** So the budget gate, the breaker,
 `--until` firing, packaging, the orphan sweep and what a night costs are all
@@ -40,9 +29,6 @@ was inert — `400` read as valid, so it accepted any string at all (item **66**
 and `docs/evidence/2026-09-05-token-probe-request-shape.md`). None of that was
 caught by reading. It was caught by running the mutation, and by one live
 measurement.
-
-**Tier 0.** Not found by a run — found by asking what the other 29 items were
-being ordered *toward*, 2026-09-04.
 
 `saffron/cli.py` exposes four subcommands: `replay`, `cell`, `queue`,
 `reconcile`. There is no `run_batch` anywhere under `saffron/`. `queue` prints
@@ -79,3 +65,20 @@ spec.** §4.4 spans `cli.py`, a new orchestration module, `scheduler.py` and
 wide reaches a cell: `SA-0009`, $31.60, `EXHAUSTED`, zero lines merged. The
 plan itself is written by hand — §4.4 is design, and `DESIGN.md` is
 `protected`.
+
+## Record
+
+**Tier 0.** Not found by a run — found by asking what the other 29 items were
+being ordered *toward*, 2026-09-04.
+
+**A night has been run, against an empty queue** — `DRAINED`, exit `0`, $0.00,
+2026-09-05 (`docs/evidence/2026-09-05-first-batch-drained.md`). That proves
+readiness, the mirror fetch, the scan, `reconcile`, the ledger row, the
+deadline resolving to tomorrow, and the exit code.
+
+**Status: done** — seven specs, `SA-0045` through `SA-0054`, PRs #115/#116/#117
+/#120/#121/#122/#123, merged together as `57b676c`. `saffron batch --repo .
+--budget 50 --until 06:30` exists, `saffron/batch.py` owns the loop, the
+`batches` table records the night, and `docs/host/dev.saffron.batch.plist` is
+the launchd job. Absorbed items **16** and half of **44**, both now closed
+above.

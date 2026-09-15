@@ -50,7 +50,9 @@ interpreters, and nothing records which.
 finding in a new shape. A prek hook inherits the same hole wherever its
 interpreter is not 3.14.
 
-**Done looks like** one of these, chosen, with the choice written down:
+## Done looks like
+
+one of these, chosen, with the choice written down:
 
 - **The gate asserts its interpreter**, reporting `error` below 3.14 — not `pass`,
   and not `skip`, because a check that cannot run has said nothing (§5.4). On

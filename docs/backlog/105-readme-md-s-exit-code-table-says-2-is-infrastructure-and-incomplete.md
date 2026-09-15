@@ -3,9 +3,10 @@ id: 105
 title: '`README.md`''s exit-code table says `2` is infrastructure, and `INCOMPLETE` exits 2 too'
 status: open
 tier: 3
-specs: [SA-0067]
-prs: [216]
+specs: []
+prs: []
 commits: []
+by_hand: true
 cites: []
 related: []
 ---
@@ -19,4 +20,6 @@ described to the operator as the machine breaking. The README now sends a
 reader to the place the `batch: INCOMPLETE` line was written to keep them out
 of. `README.md` was outside the spec's `touches`.
 
-**Done looks like** the row saying what `2` means for each command, by hand.
+## Done looks like
+
+the row saying what `2` means for each command, by hand.

@@ -27,7 +27,9 @@ a control that reads as present and is not is Appendix I's founding defect, and
 validation is milliseconds so conditionality buys nothing here. That dodges the
 trap and leaves it armed for the second repo, which is why this is written down.
 
-**Done looks like** one of: `run_suite` filters on `when` against the diff's
+## Done looks like
+
+one of: `run_suite` filters on `when` against the diff's
 changed paths and a test proves a non-matching gate does not run; or `load_policy`
 rejects `when` outright until something reads it, and §5.4's illustration drops
 it. §5.4 now says the field is unread — that note comes out with the fix.

@@ -3,6 +3,7 @@ id: 109
 title: A mutant its witness survives is spelled out to the implementer in the repair turn
 status: done
 tier: 1
+filed: 2026-09-12
 closed: 2026-09-14
 specs: [SA-0078]
 prs: [243]
@@ -12,8 +13,6 @@ related: [80, 114]
 ---
 
 ## Problem
-
-**Status: merged, 2026-09-14 — `SA-0078`, PR #243, in stack #251.** The mutant that does not apply still reaches the critic: item 114.
 
 Found 2026-09-12 while deciding item 80. `witness_gate` builds the
 `survived-mutant` failure with a message quoting the mutant's `find`, its
@@ -29,7 +28,14 @@ turn, and no gate summary reaches any prompt. The message is the one path. It is
 filed apart from item 80 and ahead of it because every place 80 might store a
 mutant is undone by this.
 
-**Done looks like** the message naming the criterion's claim and its witness and
+## Done looks like
+
+the message naming
+the criterion's claim and its witness and
 carrying neither `find` nor `replace`, with a witness that asserts over the
 whole gate result. The pull request body loses the edit with it. That is
 intended: the operator has the spec.
+
+## Record
+
+**Status: merged, 2026-09-14 — `SA-0078`, PR #243, in stack #251.** The mutant that does not apply still reaches the critic: item 114.

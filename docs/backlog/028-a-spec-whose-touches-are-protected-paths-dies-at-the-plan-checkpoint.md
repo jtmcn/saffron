@@ -13,8 +13,6 @@ related: [13, 15, 18, 27]
 
 ## Problem
 
-**Status:** **done** — `SA-0023`, 2026-08-31.
-
 `SA-0021` — the spec that closes item 27 — declared `DESIGN.md` and `CONTEXT.md`
 in `touches`, which is the only honest declaration it could make. Run as a cell on
 2026-08-30 (ledger task 18) it ended `PLAN_REJECTED` in 2m44s having spent $0.82:
@@ -38,15 +36,6 @@ work" when the spec is as good as it can be. Every future attempt spends the sam
 $0.82 to reach the same wall. This is item 18's shape — a declaration with no
 reader — inverted: a rejection with no route.
 
-**Done looks like** a plan naming a protected path inside the spec's own declared
-`touches` ending at `SCOPE_REVIEW` rather than `PLAN_REJECTED`, carrying the
-protected paths as the proposal and the rejection reason as the root cause, so the
-work reaches the operator as a one-click "do this by hand" rather than as a dead
-task. A plan naming a protected path *outside* `touches` stays a rejection: that is
-an agent reaching for something it was never given, which is the case the check was
-written for. Until then, a docs spec over protected paths must be run by hand and
-say so in its own notes.
-
 **One tension to meet deliberately rather than at implementation time.** Such a
 proposal names only paths *inside* the declared `touches`, which is precisely what
 `validate_scope_proposal` refuses — "every proposed path is already inside touches".
@@ -55,6 +44,21 @@ carry two meanings: a scope to ratify, and "this one is yours to do by hand".
 `CONTEXT.md` defines **Ratify** as what the operator does to a *proposed `touches`
 set*, so the second meaning needs either a different state or a deliberate widening
 of that definition — not a quiet reuse.
+
+## Done looks like
+
+a plan naming a protected path inside the spec's own declared
+`touches` ending at `SCOPE_REVIEW` rather than `PLAN_REJECTED`, carrying the
+protected paths as the proposal and the rejection reason as the root cause, so the
+work reaches the operator as a one-click "do this by hand" rather than as a dead
+task. A plan naming a protected path *outside* `touches` stays a rejection: that is
+an agent reaching for something it was never given, which is the case the check was
+written for. Until then, a docs spec over protected paths must be run by hand and
+say so in its own notes.
+
+## Record
+
+**Status:** **done** — `SA-0023`, 2026-08-31.
 
 **Closed differently from this item's own "Done looks like."** Not a second
 `SCOPE_REVIEW` producer — the tension two paragraphs up is why: that state already

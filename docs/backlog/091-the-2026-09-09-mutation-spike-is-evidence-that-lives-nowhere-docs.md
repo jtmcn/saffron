@@ -13,11 +13,6 @@ related: [87]
 
 ## Problem
 
-**Done, 2026-09-09** — `docs/evidence/2026-09-09-adequacy-probe-spike.md`. The
-`f9f007c4` pair reproduces to the recorded `1250 passed` exactly; the
-`f76931df`/`91f56c69` pair is transcribed from the review reproduction, not
-re-run, and the file says so.
-
 **Tier 3 — real, not urgent.** Nothing fails; the risk is that a number
 outlives the record that justified it.
 
@@ -43,3 +38,10 @@ the review reproduction rather than re-run for that file. It was a
 **precondition of the plan** that spec leads to, not of the spec itself —
 filed here because a precondition recorded only inside the document that
 depends on it is a claim, not a record.
+
+## Record
+
+**Done, 2026-09-09** — `docs/evidence/2026-09-09-adequacy-probe-spike.md`. The
+`f9f007c4` pair reproduces to the recorded `1250 passed` exactly; the
+`f76931df`/`91f56c69` pair is transcribed from the review reproduction, not
+re-run, and the file says so.

@@ -3,7 +3,9 @@ id: 73
 title: The budget overshoot is one attempt, not one turn, and the design says 6.5%
 status: done
 tier: 1
+filed: 2026-09-06
 closed: 2026-09-12
+by_hand: true
 specs: [SA-0031, SA-0059]
 prs: []
 commits: []
@@ -12,12 +14,6 @@ related: [44]
 ---
 
 ## Problem
-
-**Status: done, 2026-09-12, by hand — the first answer below, *say it
-accurately*.** `DESIGN.md` §3, `CONTEXT.md`'s Task entry and item 44's closure
-now name the attempt as the unit and `SA-0059`'s $26.75 against $16 as the
-measurement. No behaviour changed: an unattended night can still end about
-1.7× a task's ceiling over budget, and that is now what the documents say.
 
 **Tier 1.** Measured 2026-09-06 driving `SA-0059`
 (`docs/evidence/2026-09-06-an-attempt-is-the-overshoot-bound.md`).
@@ -45,7 +41,13 @@ rather than one per task. A ten-task night does not drift ten times. The defect
 is that three documents describe that bound in a way that makes it sound like a
 rounding error.
 
-**Done looks like** a decision between two answers, taken deliberately:
+**Not** a finding about `SA-0059`'s size. Nine files at `elevated` exhausting
+two attempts is a spec too large for one cell, which is separate and is why
+`EXHAUSTED` was the honest outcome.
+
+## Done looks like
+
+a decision between two answers, taken deliberately:
 
 - **Say it accurately.** Amend §3, `CONTEXT.md` and item 44 to name the
   attempt as the unit and this run as the measurement. Cheapest, changes no
@@ -63,6 +65,10 @@ best-effort is that guessing a bound costs more than the overshoot; the same
 argument applies here, and the honest answer may be that only the documentation
 is wrong.
 
-**Not** a finding about `SA-0059`'s size. Nine files at `elevated` exhausting
-two attempts is a spec too large for one cell, which is separate and is why
-`EXHAUSTED` was the honest outcome.
+## Record
+
+**Status: done, 2026-09-12, by hand — the first answer below, *say it
+accurately*.** `DESIGN.md` §3, `CONTEXT.md`'s Task entry and item 44's closure
+now name the attempt as the unit and `SA-0059`'s $26.75 against $16 as the
+measurement. No behaviour changed: an unattended night can still end about
+1.7× a task's ceiling over budget, and that is now what the documents say.

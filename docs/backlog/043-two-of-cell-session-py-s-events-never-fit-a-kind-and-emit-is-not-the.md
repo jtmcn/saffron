@@ -42,6 +42,47 @@ so the double silently no-ops if those calls ever move. Done looks like the
 tenth kind `SA-0029` scoped out, or an `emit`-shaped sink for lines no kind
 carries; not a third `print`.
 
+The eighth did not migrate, and it is the mirror image of
+`events.FINDINGS[0]` above: `reverify`'s `"re-verify: {label} suite at {sha}"`
+is `events.FINDINGS[1]`'s own named exception — no `PhaseStart` label fits a
+lower-case, hyphenated step without widening `LineLabel`, which needs the
+forbidden `events.py` — so it stays a direct, unconditional `print()`.
+
+That leaves the second half of this item worse, not better, and review is what
+said so. `session.py`'s two `print`s are untouched (forbidden here), and
+`package.py` now adds a **third** — precisely the shape the done condition
+above rules out. It is also a small regression in kind: before, a caller could
+pass `package(watch=…)` and capture or silence the `re-verify:` line, and no
+caller can redirect it now. Done is unchanged: the tenth kind, or an
+`emit`-shaped sink for lines no kind carries. Three prints, not two.
+
+**A tenth kind now exists, and it is not this one.** `saffron/task.py` added
+`events.Ceilings` for the per-task ceilings line, so "the tenth kind
+`SA-0029` scoped out" is no longer an unbuilt thing and this item's done
+condition must not be read as met. The three prints above are a *terminal
+announcement*, a *rate-limit rejection* and `reverify`'s `re-verify:` step;
+`Ceilings` carries none of them, and none of the ten kinds does. What did change
+is the precedent — `events.py` is no longer a file
+nothing may add to, and the cost of adding a kind is now measured: the
+dataclass, the union, `_KINDS`, one `describe` branch, one `FAMILIES` row,
+two counts in `tests/test_events.py` and one render case.
+
+Two stale docstrings for whoever takes that on, both in `session.py` and so
+both unrepairable here. `_default_emit`'s says `cli.py` "never passes `emit`",
+and `run_one_cell`'s says the default "lives here, not in `cli.py` (forbidden
+to this spec)". `cli.py` is no longer forbidden, is the only production caller
+of `run_one_cell`, and now builds exactly that fan-out — so the `emit is None`
+branch is reached from tests alone.
+
+## Done looks like
+
+Done is
+unchanged: an eleventh kind for the two `session.py` lines and a `LineLabel`
+that fits a lower-case step, or an `emit`-shaped sink for lines no kind
+carries.
+
+## Record
+
 **Closed by `SA-0041`, 2026-09-02.** `phases/implement.py`, `phases/review.py`
 and `phases/rebut.py` were `forbidden` to `SA-0030` and called a plain
 `watch(str)` with a line they had already fully formatted — `agent: `,
@@ -66,37 +107,3 @@ already used — and hands the identical object to both `run_one_cell` and
 `package()`, so PACKAGE's events finally reach `events.jsonl` too. **Seven** of
 `package.py`'s eight `watch(str)` call sites and `cli._resolve_stacked_on`'s
 two are now `emit(<Event>)`, against existing kinds and with no message change.
-
-The eighth did not migrate, and it is the mirror image of
-`events.FINDINGS[0]` above: `reverify`'s `"re-verify: {label} suite at {sha}"`
-is `events.FINDINGS[1]`'s own named exception — no `PhaseStart` label fits a
-lower-case, hyphenated step without widening `LineLabel`, which needs the
-forbidden `events.py` — so it stays a direct, unconditional `print()`.
-
-That leaves the second half of this item worse, not better, and review is what
-said so. `session.py`'s two `print`s are untouched (forbidden here), and
-`package.py` now adds a **third** — precisely the shape the done condition
-above rules out. It is also a small regression in kind: before, a caller could
-pass `package(watch=…)` and capture or silence the `re-verify:` line, and no
-caller can redirect it now. Done is unchanged: the tenth kind, or an
-`emit`-shaped sink for lines no kind carries. Three prints, not two.
-
-**A tenth kind now exists, and it is not this one.** `saffron/task.py` added
-`events.Ceilings` for the per-task ceilings line, so "the tenth kind
-`SA-0029` scoped out" is no longer an unbuilt thing and this item's done
-condition must not be read as met. The three prints above are a *terminal
-announcement*, a *rate-limit rejection* and `reverify`'s `re-verify:` step;
-`Ceilings` carries none of them, and none of the ten kinds does. Done is
-unchanged: an eleventh kind for the two `session.py` lines and a `LineLabel`
-that fits a lower-case step, or an `emit`-shaped sink for lines no kind
-carries. What did change is the precedent — `events.py` is no longer a file
-nothing may add to, and the cost of adding a kind is now measured: the
-dataclass, the union, `_KINDS`, one `describe` branch, one `FAMILIES` row,
-two counts in `tests/test_events.py` and one render case.
-
-Two stale docstrings for whoever takes that on, both in `session.py` and so
-both unrepairable here. `_default_emit`'s says `cli.py` "never passes `emit`",
-and `run_one_cell`'s says the default "lives here, not in `cli.py` (forbidden
-to this spec)". `cli.py` is no longer forbidden, is the only production caller
-of `run_one_cell`, and now builds exactly that fan-out — so the `emit is None`
-branch is reached from tests alone.

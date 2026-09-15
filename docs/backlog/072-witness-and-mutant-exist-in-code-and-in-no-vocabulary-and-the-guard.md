@@ -4,23 +4,15 @@ title: '`witness` and `mutant` exist in code and in no vocabulary, and the guard
 status: done
 tier: 2
 closed: 2026-09-07
-specs: [SA-0045, SA-0056, SA-0057, SA-0058, SA-0063, SA-0064]
+by_hand: true
+specs: []
 prs: []
-commits: []
+commits: [504f87c, 0663823]
 cites: [§5.4.1]
 related: [65, 69, 71, 74]
 ---
 
 ## Problem
-
-**Status:** **done**, by hand, 2026-09-07. `factory:witness` is declared at
-`blockingWhenElevated` and named by `SizeTierShape`; `mutant` and `witness` are
-`CONTEXT.md` §4 entries and deliberately *not* vocabulary terms, because
-`test_no_dead_terms` rejects a class no shape reads. The guard now reads
-`saffron/gates/core/` off disk and was run against the unfixed tree, where it
-names `['witness']` — and declaring the triple then made `test_shapes` name
-`['witness']` too, which is `CLAUDE.md`'s promised guard firing for the first
-time on the case it was written for.
 
 **Tier 2.** Found reviewing `SA-0056` and again reviewing `SA-0058`, 2026-09-06.
 
@@ -75,13 +67,6 @@ touch: this is an operator's edit, or a spec that declares `ontology/**` in
 `touches` and hands the render to the operator. Worth deciding once rather than
 per term.
 
-**Done looks like** `factory:witness a factory:CoreGate` with a blocking level
-in `factory:SizeTierShape` — it moves with the tier exactly as `size` does, and
-it is the second such gate, so that shape's comment calling `size` "the one
-core gate a risk tier moves" needs amending too — a `mutant` entry in
-`CONTEXT.md`'s vocabulary, `uv run python -m ontology.render` re-run, and the
-closed-set tests green.
-
 **The pattern, decided.** Of the two arms — either the vocabulary stops being
 `forbidden` to the spec that introduces a term, or every such spec carries a
 follow-up filed when it is written rather than discovered three pull requests
@@ -113,3 +98,23 @@ declaring a ninth broke it; it now derives the tail from `render.members`. And
 `ontology.render` rewrites a closed set's enumeration but not the prose after
 it, so adding `witness` left a 90-character line in a file whose longest was 87
 — cosmetic, hand-rewrapped, and worth knowing before the next set grows.
+
+## Done looks like
+
+`factory:witness a factory:CoreGate` with a blocking level
+in `factory:SizeTierShape` — it moves with the tier exactly as `size` does, and
+it is the second such gate, so that shape's comment calling `size` "the one
+core gate a risk tier moves" needs amending too — a `mutant` entry in
+`CONTEXT.md`'s vocabulary, `uv run python -m ontology.render` re-run, and the
+closed-set tests green.
+
+## Record
+
+**Status:** **done**, by hand, 2026-09-07. `factory:witness` is declared at
+`blockingWhenElevated` and named by `SizeTierShape`; `mutant` and `witness` are
+`CONTEXT.md` §4 entries and deliberately *not* vocabulary terms, because
+`test_no_dead_terms` rejects a class no shape reads. The guard now reads
+`saffron/gates/core/` off disk and was run against the unfixed tree, where it
+names `['witness']` — and declaring the triple then made `test_shapes` name
+`['witness']` too, which is `CLAUDE.md`'s promised guard firing for the first
+time on the case it was written for.

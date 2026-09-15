@@ -13,8 +13,6 @@ related: [28]
 
 ## Problem
 
-**Status:** **done** — `SA-0021`, by hand on the host, 2026-08-30.
-
 `SA-0018` added a second producer of `SCOPE_REVIEW`: an IMPLEMENT attempt whose
 declared `touches` cannot satisfy its criteria proposes a set instead of grinding
 to a ceiling. The code shipped and works. The documents that define what the words
@@ -36,6 +34,10 @@ and `CONTEXT.md`. It was found by review instead. Note that a *proposal* naming
 those paths would have been recorded — `validate_scope_proposal` checks only that a
 path escapes `touches`, not that it escapes the deny lists — so the door was open;
 nothing pointed the implementer at it.
+
+## Record
+
+**Status:** **done** — `SA-0021`, by hand on the host, 2026-08-30.
 
 Closed by `SA-0021`, by hand on the host (see item 28), 2026-08-30: §3.3 draws
 `SCOPE_REVIEW` from IMPLEMENTING, §5.3.1 states the door's three rules, §5.2 no

@@ -3,6 +3,7 @@ id: 6
 title: The critic's lenses overlap, and the third does not exist
 status: done
 tier: null
+closed: 2026-09-02
 specs: [SA-0002, SA-0043]
 prs: [105]
 commits: [80a7a3e]
@@ -11,12 +12,6 @@ related: [2]
 ---
 
 ## Problem
-
-**Status:** **done** — `SA-0043`, PR #105 (`80a7a3e`). The third lens exists
-as `saffron/agents/prompts/review-adequacy.md`, wired at `phases/review.py:39`.
-The remit question this item raised was settled separately by #34, and
-`review.py:41` records the reasoning: the third lens is adequacy, not blast
-radius.
 
 Measured on the critic's first live run (Appendix L): **both lenses filed the
 same `touches` finding.** §5.5's no-voting rule rests on lenses being disjoint by
@@ -31,8 +26,18 @@ Lens 3 (blast radius) is not built because no risk tier is wired into
 the `srcPrefix` escape and the critic did not, because it lives in `session.py`
 rather than in the diff.
 
-**Done looks like:** remits that do not overlap, a risk tier on the task, and the
+## Done looks like
+
+remits that do not overlap, a risk tier on the task, and the
 third lens at `elevated`.
+
+## Record
+
+**Status:** **done** — `SA-0043`, PR #105 (`80a7a3e`). The third lens exists
+as `saffron/agents/prompts/review-adequacy.md`, wired at `phases/review.py:39`.
+The remit question this item raised was settled separately by #34, and
+`review.py:41` records the reasoning: the third lens is adequacy, not blast
+radius.
 
 **Amended 2026-08-25 by `SA-0002`, and the amendment changes what lens 3 should
 be.** The overlap did not recur: correctness filed the counting blocker,

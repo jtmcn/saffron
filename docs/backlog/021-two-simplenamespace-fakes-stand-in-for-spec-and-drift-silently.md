@@ -3,7 +3,8 @@ id: 21
 title: Two `SimpleNamespace` fakes stand in for `Spec` and drift silently
 status: done
 tier: null
-specs: [SA-0011, SA-0012, SA-0013]
+closed: 2026-08-27
+specs: [SA-0012]
 prs: [49]
 commits: [f31550c]
 cites: [§5.4]
@@ -11,13 +12,6 @@ related: [24]
 ---
 
 ## Problem
-
-**Status:** **done**, driven from `SA-0012`
-(`.saffron/specs/done/SA-0012-spec-doubles.md`) in PR #49 (`f31550c`). Both call sites
-now build a real `Spec` through `parse_spec`. Found by `SA-0011`. Review of that
-diff found the defect had moved rather than died — value drift where this was
-shape drift — which is item 24. Read what follows for why the fakes cost what
-they did, not as work outstanding.
 
 `tests/test_package.py:679` and `:783` build a `Spec` out of `SimpleNamespace`,
 carrying whatever attributes `package()` happened to read when they were written.
@@ -53,10 +47,21 @@ missing field indistinguishable from an empty one, which is §5.4's `tool` defec
 in a third costume — and it puts a default in production code to accommodate a
 test fake.
 
-**Done looks like** both call sites building a real `Spec` (via `parse_spec` on
+## Done looks like
+
+both call sites building a real `Spec` (via `parse_spec` on
 a string literal, as `tests/test_report.py` already does), so the next field
 `Spec` gains is a type error at construction rather than an `AttributeError` in
 an unrelated suite three tasks later. Roughly twenty lines.
+
+## Record
+
+**Status:** **done**, driven from `SA-0012`
+(`.saffron/specs/done/SA-0012-spec-doubles.md`) in PR #49 (`f31550c`). Both call sites
+now build a real `Spec` through `parse_spec`. Found by `SA-0011`. Review of that
+diff found the defect had moved rather than died — value drift where this was
+shape drift — which is item 24. Read what follows for why the fakes cost what
+they did, not as work outstanding.
 
 **One thing it left.** `SA-0011`'s `touches` still names `tests/test_package.py`
 (`.saffron/specs/done/SA-0011-criteria-have-witnesses.md:24`), declared only because

@@ -3,8 +3,9 @@ id: 81
 title: The guard against a spec refused on its own criteria never sees 31 of 53 specs
 status: done
 tier: 1
+filed: 2026-09-06
 closed: 2026-09-08
-specs: [SA-0001, SA-0011, SA-0015, SA-0016, SA-0021, SA-0060, SA-0063]
+specs: [SA-0001, SA-0011, SA-0016, SA-0021, SA-0060, SA-0063]
 prs: []
 commits: []
 cites: []
@@ -12,26 +13,6 @@ related: [82]
 ---
 
 ## Problem
-
-**Status: the diagnosis is wrong, the fix landed anyway, 2026-09-08.** The
-ordering claim below does not hold and did not hold when this was filed:
-`scheduler.py:687` is the criterion-path check and the `depends_on` loop is at
-697, so the dependency is decided *after*, not before. Measured by planting
-`saffron/nowhere/invented.py` in each spec's first checklist box in turn and
-reading what the queue refuses it for — of the **30** specs whose criteria
-`_criteria_texts` reads from the markdown checklist, **28 report the
-criterion-path refusal**. `SA-0016`, named below as a spec the guard cannot
-reach, is among the 28: it is caught. The remaining two are probe-dependent
-rather than a second class — `SA-0021` stops on an earlier `depends_on`
-refusal, and `SA-0001` is not refused at all because its own
-`forbidden: saffron/**` reads the planted token as a citation.
-
-**This paragraph first shipped with the denominator wrong, as 32 of which 4
-stopped earlier — caught in review of #166.** 32 is the count of specs carrying
-a `depends_on`, which is the very coincidence the next paragraph accuses the
-original item of. A corrected measurement that reproduces the error it corrects
-is worth recording rather than quietly fixing: the number was reasoned from the
-population the item named instead of read off the run.
 
 The "53 specs, 31 preempted, 22 examined" figure appears to have counted specs
 that carry a `depends_on` (32 of 54 today) rather than specs whose refusal
@@ -49,16 +30,6 @@ implemented as written:
 `_unmatched_criterion_path` over every spec `discover_specs` finds, with no
 ledger and no refusal ordering in front of it, and refuses to pass on a corpus
 it did not actually scan.
-
-**Its first version scanned 49 of the 54, and the wording here said 54.** It
-was built on `_real_corpus`, which copies `done/` alone — so the specs still
-live at the top of `.saffron/specs` were outside it, which is exactly the set a
-fresh defect appears in first. Caught in review of #166 and widened; the mutant
-is `saffron/nowhere/invented.py` planted in `SA-0060`, which the retired-only
-corpus passes blind. The discovery failures are no longer asserted empty
-either: a spec that does not parse cannot be asked this question, and item 82's
-validator makes exactly one such spec on the branch stacked above this one.
-
 
 Found filing `SA-0063`, 2026-09-06. That spec shipped with `/work` in an
 acceptance claim; `_unmatched_criterion_path` reads it as a path token, no
@@ -93,10 +64,43 @@ cannot see.
 `SA-0015` and is not — one of the two specs the test exists to remember is
 outside what it can reach.
 
-**Done looks like** the property asserted directly rather than through the queue:
+## Done looks like
+
+the property asserted directly rather than through the queue:
 `_unmatched_criterion_path` over every spec `discover_specs` finds, with no
 ledger, no `gh`, and no refusal ordering in front of it. That is what the test's
 name already promises, and it is one loop. Keep the queue-shaped test for what
 it does cover — the ordering is what makes it blind, not the corpus, so a fixture
 that satisfies every dependency would work too and would cost more to maintain
 than the property is worth.
+
+## Record
+
+**Status: the diagnosis is wrong, the fix landed anyway, 2026-09-08.** The
+ordering claim below does not hold and did not hold when this was filed:
+`scheduler.py:687` is the criterion-path check and the `depends_on` loop is at
+697, so the dependency is decided *after*, not before. Measured by planting
+`saffron/nowhere/invented.py` in each spec's first checklist box in turn and
+reading what the queue refuses it for — of the **30** specs whose criteria
+`_criteria_texts` reads from the markdown checklist, **28 report the
+criterion-path refusal**. `SA-0016`, named below as a spec the guard cannot
+reach, is among the 28: it is caught. The remaining two are probe-dependent
+rather than a second class — `SA-0021` stops on an earlier `depends_on`
+refusal, and `SA-0001` is not refused at all because its own
+`forbidden: saffron/**` reads the planted token as a citation.
+
+**This paragraph first shipped with the denominator wrong, as 32 of which 4
+stopped earlier — caught in review of #166.** 32 is the count of specs carrying
+a `depends_on`, which is the very coincidence the next paragraph accuses the
+original item of. A corrected measurement that reproduces the error it corrects
+is worth recording rather than quietly fixing: the number was reasoned from the
+population the item named instead of read off the run.
+
+**Its first version scanned 49 of the 54, and the wording here said 54.** It
+was built on `_real_corpus`, which copies `done/` alone — so the specs still
+live at the top of `.saffron/specs` were outside it, which is exactly the set a
+fresh defect appears in first. Caught in review of #166 and widened; the mutant
+is `saffron/nowhere/invented.py` planted in `SA-0060`, which the retired-only
+corpus passes blind. The discovery failures are no longer asserted empty
+either: a spec that does not parse cannot be asked this question, and item 82's
+validator makes exactly one such spec on the branch stacked above this one.

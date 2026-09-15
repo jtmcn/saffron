@@ -46,7 +46,9 @@ over tracked files:
     repos' source, where the scheduler reads it.
   - The repository itself, `jtmcn/saffron`.
 
-**Done looks like** a plan, not one spec — the shape item **58** took, for the
+## Done looks like
+
+a plan, not one spec — the shape item **58** took, for the
 reason item **56** measured: a change this wide through a cell ends `EXHAUSTED`.
 It opens with the one decision nobody has made, what the program is called once
 the factory is not, recorded as a settled naming decision before any rename

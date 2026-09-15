@@ -12,26 +12,6 @@ related: [55]
 
 ## Problem
 
-**Decided 2026-09-04, and the item's own open measurement is now taken.**
-`.gitignore` is the declaration. It already exists, `git status --porcelain`
-already honours it, and stating that as an onboarding requirement is the whole
-fix. **Tier 3.**
-
-This item asked to be tested before it was closed: *"if none of
-`format`/`lint`/`types`/`tests` writes either file then this item is right by
-accident and should say so for the right reason."* Measured — all five declared
-gates run against a clean tree, `git status --porcelain` diffed before and
-after: **zero untracked artifacts.** `.mypy_cache` is moot, because the
-typechecker is `ty` and it wrote no cache. `.coverage` came from a hand-run
-during #33, not from a declared gate. So this repo is right by accident,
-confirmed, and it stays right until a gate that writes an artifact is declared.
-
-**The narrower fallback is explicitly not being built**: `committed` ignoring
-untracked paths the baseline call also produced *by directory* would be a
-second identity rule sitting beside the baseline subtraction's, and `CLAUDE.md`
-warns in as many words against making those match. Item 55 (`dist/`) is the
-same family and is one line of `.gitignore`.
-
 `dirty_paths` is read after the declared suite on both calls so that an artifact
 a gate writes lands on baseline and head alike and `subtract_baseline` cancels it
 (§5.4). The cancellation is by identity — `(gate, file, code, message)` — so it
@@ -47,6 +27,18 @@ then fails it as a path outside `touches`. The attempts burn out and the run end
 
 Saffron's own `.gitignore` covers all three, which is why nothing here caught it;
 an onboarded repo whose ignores are looser is not covered.
+
+## Done looks like
+
+the repo declaring its build output, since which paths are
+artifacts is language knowledge §2.1 keeps out of core — `.gitignore` is already
+that declaration and `git status --porcelain` already honours it, so onboarding
+documentation stating the requirement may be the whole fix. If it is not, the
+narrower mechanism is `committed` ignoring untracked paths that the baseline call
+also produced *by directory* rather than by path — which is a second identity rule
+sitting next to the subtraction's, and CLAUDE.md warns against making those match.
+
+## Record
 
 **That sentence is false, measured 2026-08-25 (#30). It covers one of three.**
 `git check-ignore` against the shapes this item names: `__pycache__/*.pyc` is
@@ -72,10 +64,22 @@ Adding two lines to `.gitignore` closes this repo's instance and leaves the
 question — whose declaration is this? — exactly where it was. Worth doing; not a
 resolution.
 
-**Done looks like:** the repo declaring its build output, since which paths are
-artifacts is language knowledge §2.1 keeps out of core — `.gitignore` is already
-that declaration and `git status --porcelain` already honours it, so onboarding
-documentation stating the requirement may be the whole fix. If it is not, the
-narrower mechanism is `committed` ignoring untracked paths that the baseline call
-also produced *by directory* rather than by path — which is a second identity rule
-sitting next to the subtraction's, and CLAUDE.md warns against making those match.
+**Decided 2026-09-04, and the item's own open measurement is now taken.**
+`.gitignore` is the declaration. It already exists, `git status --porcelain`
+already honours it, and stating that as an onboarding requirement is the whole
+fix. **Tier 3.**
+
+This item asked to be tested before it was closed: *"if none of
+`format`/`lint`/`types`/`tests` writes either file then this item is right by
+accident and should say so for the right reason."* Measured — all five declared
+gates run against a clean tree, `git status --porcelain` diffed before and
+after: **zero untracked artifacts.** `.mypy_cache` is moot, because the
+typechecker is `ty` and it wrote no cache. `.coverage` came from a hand-run
+during #33, not from a declared gate. So this repo is right by accident,
+confirmed, and it stays right until a gate that writes an artifact is declared.
+
+**The narrower fallback is explicitly not being built**: `committed` ignoring
+untracked paths the baseline call also produced *by directory* would be a
+second identity rule sitting beside the baseline subtraction's, and `CLAUDE.md`
+warns in as many words against making those match. Item 55 (`dist/`) is the
+same family and is one line of `.gitignore`.

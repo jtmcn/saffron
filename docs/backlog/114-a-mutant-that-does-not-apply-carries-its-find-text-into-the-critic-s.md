@@ -3,6 +3,7 @@ id: 114
 title: A mutant that does not apply carries its `find` text into the critic's prompt
 status: open
 tier: 1
+filed: 2026-09-14
 specs: [SA-0078]
 prs: [243]
 commits: []
@@ -30,7 +31,9 @@ The mutant that does not apply is usually the code the implementer has yet to
 write, which makes it the one most worth withholding. `SA-0078`'s spec also says
 "No gate summary reaches any prompt"; that sentence is false.
 
-**Done looks like** the mutators' reasons naming a category — not found, ambiguous,
+## Done looks like
+
+the mutators' reasons naming a category — not found, ambiguous,
 unreadable — rather than the text, with the text kept where only the operator reads
 it, and a witness that dumps the whole `witness` result and the lens prompt and
 finds neither half of any mutant in either.

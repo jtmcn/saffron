@@ -3,8 +3,10 @@ id: 113
 title: '"Preflight" means three things, and `CONTEXT.md` defines one'
 status: open
 tier: 2
-specs: [SA-0029]
-prs: [91]
+filed: 2026-09-13
+by_hand: true
+specs: []
+prs: []
 commits: []
 cites: [§4.2.1, §5.1]
 related: [37]
@@ -31,7 +33,9 @@ it is on main unchanged.
 It stays quiet for item 37's reason: the senses overlap where they happen to
 agree — "image build" is in two of the three lists.
 
-**Done looks like** `CONTEXT.md` naming the per-task sense beside the per-repo
+## Done looks like
+
+`CONTEXT.md` naming the per-task sense beside the per-repo
 one — a terminal state already carries the word, so the term cannot stay
 batch-only — or `events.Preflight` renamed after §5.1's cell construction and
 `PREFLIGHT_FAILED` defined. The **Preflight** entry is hand-written, outside

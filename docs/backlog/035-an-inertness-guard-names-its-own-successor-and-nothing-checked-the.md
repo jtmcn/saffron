@@ -4,7 +4,7 @@ title: An inertness guard names its own successor, and nothing checked the succe
 status: done
 tier: null
 closed: 2026-09-01
-specs: [SA-0022, SA-0025, SA-0026, SA-0027, SA-0031]
+specs: [SA-0022, SA-0025, SA-0026, SA-0027]
 prs: []
 commits: []
 cites: [§2.1]
@@ -12,8 +12,6 @@ related: [16, 24, 28, 33]
 ---
 
 ## Problem
-
-**Status:** **done** — `SA-0027`, 2026-09-01.
 
 `SA-0022`, `SA-0025` and `SA-0026` each shipped a capability inert on purpose,
 asserting it with a test that the capability is off and a comment naming which
@@ -32,30 +30,6 @@ reason: the file was never one the spec retiring it could reach. A `git grep`
 against the mirror at `base_sha` costs no export, no working tree and no
 network; what it prevents is a full cell paying for a choice between a false
 green and a `scope` refusal on work the spec was right to do.
-
-**Done looks like, and is:** the convention, stated in code
-(`mirror.py`'s `retirement_markers` docstring, not only here) — a comment or
-docstring carrying `saffron:retired-by <SPEC-ID>` declares that its file
-asserts something that spec is expected to falsify.
-`mirror.retirement_markers(mirror, sha)` reads every marker out of a bare
-mirror with `git grep -n -z`, no export or checkout, answering `[]` rather
-than raising on a repository with none (`git grep` exits 1 on no match —
-`error` ≠ `fail`). `scheduler.retirement_refusal(spec, markers)` is a pure
-refusal in `protected_touch_refusal`'s own shape (item 28), read with
-`scope.matches` — the same function `scope`, `integrity`, `size` and item
-16's criterion-path refusal already share: a marker this spec's `touches`
-cannot reach refuses, naming the file and the declared `touches`; one inside
-the spec's own `forbidden` refuses too, worded differently, since "may not
-touch it at all" and "touches doesn't reach it" are different operator
-fixes. Empty `touches` skips the second check outright — item 16's own bug
-guard, since an empty list is a bug awaiting DIAGNOSE, not a spec that failed
-to declare — but not `forbidden`, which a bug spec can carry regardless.
-Wired into both pre-cell paths item 28's refusal reaches: `build_queue`
-(gate 0) and `cli._run_cell`, best-effort against the mirror the way
-`_protected_paths_at` already is. A marker naming a spec id nothing in the
-directory (or `specs/done/`) declares gets its own line in `build_queue`'s
-refusals — item 24's `done/` rule, applied to this class of dangling
-reference.
 
 **What this still cannot see.** Reachability, not intent: a marker naming an
 id that exists is not flagged even if that spec is long `MERGED` or
@@ -115,3 +89,33 @@ Three things this refusal still cannot see, all named rather than fixed:
   already holds. A marker in a protected path, named by a spec whose `touches`
   glob covers it, is admitted here and dies at the plan checkpoint instead —
   the same corpse this refusal exists to prevent, one list over.
+
+## Done looks like
+
+**Done looks like, and is:** the convention, stated in code
+(`mirror.py`'s `retirement_markers` docstring, not only here) — a comment or
+docstring carrying `saffron:retired-by <SPEC-ID>` declares that its file
+asserts something that spec is expected to falsify.
+`mirror.retirement_markers(mirror, sha)` reads every marker out of a bare
+mirror with `git grep -n -z`, no export or checkout, answering `[]` rather
+than raising on a repository with none (`git grep` exits 1 on no match —
+`error` ≠ `fail`). `scheduler.retirement_refusal(spec, markers)` is a pure
+refusal in `protected_touch_refusal`'s own shape (item 28), read with
+`scope.matches` — the same function `scope`, `integrity`, `size` and item
+16's criterion-path refusal already share: a marker this spec's `touches`
+cannot reach refuses, naming the file and the declared `touches`; one inside
+the spec's own `forbidden` refuses too, worded differently, since "may not
+touch it at all" and "touches doesn't reach it" are different operator
+fixes. Empty `touches` skips the second check outright — item 16's own bug
+guard, since an empty list is a bug awaiting DIAGNOSE, not a spec that failed
+to declare — but not `forbidden`, which a bug spec can carry regardless.
+Wired into both pre-cell paths item 28's refusal reaches: `build_queue`
+(gate 0) and `cli._run_cell`, best-effort against the mirror the way
+`_protected_paths_at` already is. A marker naming a spec id nothing in the
+directory (or `specs/done/`) declares gets its own line in `build_queue`'s
+refusals — item 24's `done/` rule, applied to this class of dangling
+reference.
+
+## Record
+
+**Status:** **done** — `SA-0027`, 2026-09-01.

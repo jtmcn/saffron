@@ -4,28 +4,14 @@ title: A task lost to a provider error leaves the night reporting `DRAINED`, exi
 status: done
 tier: 1
 closed: 2026-09-12
-specs: [SA-0048, SA-0057, SA-0067]
-prs: [136, 216]
+specs: [SA-0067]
+prs: [216]
 commits: []
 cites: [§4.2.1]
 related: [65]
 ---
 
 ## Problem
-
-**Status:** **done** — `SA-0067`, PR #216, merged 2026-09-12. A fifth
-stop reason, `INCOMPLETE`: it outranks `DRAINED`, `BUDGET` and `UNTIL`, and
-`INFRASTRUCTURE` outranks it. It exits 2 and leaves the breaker alone. **The
-by-hand half is done:** the vocabulary, `CONTEXT.md`, §4.2.1, `batch.StopReason`
-and the `CHECK` on `batches.status` landed together, because
-`tests/ontology/test_vocabulary_agrees_with_code.py` holds the vocabulary, the
-`Literal` and the `CHECK` equal, and `CONTEXT.md` and §4.2.1, which move with the
-vocabulary, are `protected`. The `CHECK` needed a table rebuild
-(`Ledger._widen_batch_status`), because `CREATE TABLE IF NOT EXISTS` leaves an
-existing ledger's old `CHECK` in force. Measured before the rebuild existed: a
-ledger with the old `CHECK` raised `IntegrityError` closing an `INCOMPLETE`
-night. What is left is `SA-0067`'s: the loop returning the value, and the command
-mapping it to exit 2.
 
 **Tier 1.** Measured 2026-09-06, driving `SA-0057` — the first unattended run
 in this repo to lose a task to something other than its own code.
@@ -63,7 +49,14 @@ very next run — `reconcile: task 52 -> ORPHANED`, re-run, `READY_FOR_REVIEW`,
 PR #136. The machine healed itself. What it did not do is *say* that it had to,
 or that the first attempt's $3.75 bought nothing.
 
-**Done looks like** an in-flight terminal state being visible in how the night
+**Not** re-running inside the same night. The scan is resolved once, before the
+loop, and that is what makes termination structural (`saffron/batch.py`). A
+retry inside the loop reintroduces the "does the queue change" question the
+`for` was written to avoid.
+
+## Done looks like
+
+an in-flight terminal state being visible in how the night
 ends. Three parts, and the third is the one to argue about:
 
 - **The stop reason.** `DRAINED` means the queue emptied. A queue that emptied
@@ -79,7 +72,18 @@ ends. Three parts, and the third is the one to argue about:
   the reporting is wrong — resolve this deliberately rather than by editing
   `ABORT_STATES` because it is the nearest set to hand.
 
-**Not** re-running inside the same night. The scan is resolved once, before the
-loop, and that is what makes termination structural (`saffron/batch.py`). A
-retry inside the loop reintroduces the "does the queue change" question the
-`for` was written to avoid.
+## Record
+
+**Status:** **done** — `SA-0067`, PR #216, merged 2026-09-12. A fifth
+stop reason, `INCOMPLETE`: it outranks `DRAINED`, `BUDGET` and `UNTIL`, and
+`INFRASTRUCTURE` outranks it. It exits 2 and leaves the breaker alone. **The
+by-hand half is done:** the vocabulary, `CONTEXT.md`, §4.2.1, `batch.StopReason`
+and the `CHECK` on `batches.status` landed together, because
+`tests/ontology/test_vocabulary_agrees_with_code.py` holds the vocabulary, the
+`Literal` and the `CHECK` equal, and `CONTEXT.md` and §4.2.1, which move with the
+vocabulary, are `protected`. The `CHECK` needed a table rebuild
+(`Ledger._widen_batch_status`), because `CREATE TABLE IF NOT EXISTS` leaves an
+existing ledger's old `CHECK` in force. Measured before the rebuild existed: a
+ledger with the old `CHECK` raised `IntegrityError` closing an `INCOMPLETE`
+night. What is left is `SA-0067`'s: the loop returning the value, and the command
+mapping it to exit 2.

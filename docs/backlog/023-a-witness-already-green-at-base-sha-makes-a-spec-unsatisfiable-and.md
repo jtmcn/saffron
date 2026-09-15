@@ -4,7 +4,7 @@ title: A witness already green at `base_sha` makes a spec unsatisfiable, and not
 status: done
 tier: 3
 closed: 2026-09-14
-specs: [SA-0005, SA-0011, SA-0084, SA-0085]
+specs: [SA-0084, SA-0085]
 prs: [250]
 commits: []
 cites: []
@@ -12,12 +12,6 @@ related: [18]
 ---
 
 ## Problem
-
-**Status:** merged, 2026-09-14 — `SA-0085`, PR #250, stacked on
-`SA-0084`, in stack #251. It names the witness before the first turn
-and does not stop the task: the attempts are still paid for. Found by review of `SA-0011`. The `watch()` line asked for below is now an
-event: it goes on `Baseline`, because `criteria` skips at baseline and nothing
-else there reads a witness.
 
 `saffron/gates/core/criteria.py` reports `witness-green-at-base` (`:100`) for a
 non-`preserves` witness that already passed at base. It is blocking, and no
@@ -33,6 +27,16 @@ suite already holds the answer: after `baseline = _suite([])`
 baseline's `collected` union is a spec that cannot pass, before a single repair
 attempt is spent finding that out the expensive way.
 
-**Done looks like** one `watch()` line there naming those witnesses, turning
+## Done looks like
+
+one `watch()` line there naming those witnesses, turning
 four dead attempts into a legible operator message on the first unattended
 night.
+
+## Record
+
+**Status:** merged, 2026-09-14 — `SA-0085`, PR #250, stacked on
+`SA-0084`, in stack #251. It names the witness before the first turn
+and does not stop the task: the attempts are still paid for. Found by review of `SA-0011`. The `watch()` line asked for below is now an
+event: it goes on `Baseline`, because `criteria` skips at baseline and nothing
+else there reads a witness.

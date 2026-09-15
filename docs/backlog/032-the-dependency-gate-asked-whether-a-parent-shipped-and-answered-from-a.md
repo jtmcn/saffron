@@ -13,14 +13,6 @@ related: []
 
 ## Problem
 
-**Status:** **done**, 2026-08-31, by hand on the host — `_retired_ids` at
-`saffron/scheduler.py:464`, read at `:757`. The account is in this item's own
-body below; this line exists so a scan of the file's status markers sees it.
-
-**Done, 2026-08-31**, by hand on the host — `_retired_ids` in
-`saffron/scheduler.py`, admitting a `depends_on` whose parent sits in
-`.saffron/specs/done/`.
-
 `SA-0020` narrowed the dependency refusal to admit a parent recorded `MERGED`,
 which is right for a parent a cell ran. **Only a cell writes a task.** So a
 spec a human implemented looks exactly like a spec nobody has run, and its
@@ -47,3 +39,13 @@ admitted for the same reason a merged one is — the child is cut from the
 default branch and the parent's commits are already in it. A parent that is
 merely `READY_FOR_REVIEW` is still refused, which is §4.2's own rule minus the
 half v0.5 cannot honour.
+
+## Record
+
+**Status:** **done**, 2026-08-31, by hand on the host — `_retired_ids` at
+`saffron/scheduler.py:464`, read at `:757`. The account is in this item's own
+body below; this line exists so a scan of the file's status markers sees it.
+
+**Done, 2026-08-31**, by hand on the host — `_retired_ids` in
+`saffron/scheduler.py`, admitting a `depends_on` whose parent sits in
+`.saffron/specs/done/`.

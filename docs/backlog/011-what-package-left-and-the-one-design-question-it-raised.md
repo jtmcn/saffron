@@ -13,12 +13,6 @@ related: []
 
 ## Problem
 
-**Status:** **done**, 2026-08-23 — all six, plus the design decision the
-first one asked for, in `DESIGN.md` rev 16. The full account is in this item's
-own body below. **One accepted risk stands and is not closed by it:** the
-credential refusal keeps a secret off the remote, not off the host, and §5.4's
-`secrets` gate is still v1's to build.
-
 Written at the close of sub-project A (PR #5). Every item was found by review or
 by measurement during that build; none is speculation. The first is a design
 decision, the rest are small.
@@ -89,6 +83,14 @@ The credential refusal keeps a secret off the *remote*, not off the *host*:
 `_CREDENTIAL_SHAPES` is a partial list under a `ponytail:` comment naming that
 ceiling, and the real answer is §5.4's `secrets` gate, which is still v1's to
 build.
+
+## Record
+
+**Status:** **done**, 2026-08-23 — all six, plus the design decision the
+first one asked for, in `DESIGN.md` rev 16. The full account is in this item's
+own body below. **One accepted risk stands and is not closed by it:** the
+credential refusal keeps a secret off the remote, not off the host, and §5.4's
+`secrets` gate is still v1's to build.
 
 **Done, 2026-08-23.** All six, and the design decision the first one asked for
 is written down: `DESIGN.md` rev 16 — §5.1 for the fetch, §5.4 for the gate

@@ -4,10 +4,11 @@ title: '`events.Terminal` and `CONTEXT.md`''s "terminal state" are two different
 status: open
 tier: 2
 specs: [SA-0029, SA-0030, SA-0038, SA-0040]
-prs: [91]
+prs: []
 commits: []
 cites: [§4.1]
 related: [36]
+by_hand: true
 ---
 
 ## Problem
@@ -20,6 +21,8 @@ easy to miss rather than hard.
 Renaming was deferred because `SA-0029`'s criteria and `SA-0030`/`SA-0040` all
 cite `Terminal`. An earlier draft of this item said the name was `DESIGN.md`
 §4.1's; it is not — see item 36. Found reviewing PR #91.
+
+## Done looks like
 
 Done looks like: `TurnEnded` across the three specs, or a `CONTEXT.md` entry
 saying the two terms are deliberately distinct. Protected either way, so by

@@ -38,3 +38,7 @@ in-cell suite runs 5.5x faster than the same tree on the host, and nobody has
 explained it. `probes.json` now records the gate's tool, collected count and
 summary per verdict, so the next pass can say whether the suite that answered
 was the whole one.
+
+## Done looks like
+
+_Not stated in the original item._

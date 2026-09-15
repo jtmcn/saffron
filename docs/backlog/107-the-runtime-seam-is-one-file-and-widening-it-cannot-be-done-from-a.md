@@ -7,20 +7,12 @@ closed: 2026-09-11
 specs: [SA-0077]
 prs: []
 commits: []
+by_hand: true
 cites: [§4.6, §10]
 related: [65, 72, 101, 108]
 ---
 
 ## Problem
-
-**Status:** **done**, by hand on the host, 2026-09-11 — for the reason below: a
-cell is refused at the plan checkpoint. `saffron/cell/runtime.py` names no
-product, `saffron/cell/runtimes/apple.py` is the only module that does, and
-`runtimes/__init__.py` carries the `Dialect` — every spelling member a
-difference **measured** between two runtimes rather than anticipated. The rule's
-exemption, its asserting test, `CONTEXT.md`'s **Cell runtime** entry and
-§10's layout moved with it. `SA-0077` is the cell-landable piece that came out
-of it: a missing runtime reporting as absent rather than as twenty-one failures.
 
 Two things worth keeping from doing it. The rule was re-proved rather than
 assumed: with the exemption moved, a `container` argv planted in `runtime.py`
@@ -53,7 +45,16 @@ path exactly. So the rule must change in the same commit, and it cannot:
   person saying so". That test is working exactly as designed. This item is the
   person saying so.
 
-**Done looks like** a by-hand commit on the host, in the shape item **101**
+**`ontology/factory.ttl` needs nothing.** It is a projection of the run record
+(§4.6) and the cell runtime is not in it — no class, no property, no closed set.
+A term whose only reader would be a comment is what `test_no_dead_terms` deletes,
+so the runtime earns an entry when a query or a shape reads it, which would mean
+recording per task which runtime ran it. That is worth doing and is a ledger
+change, not a vocabulary one; it is named in **108**.
+
+## Done looks like
+
+a by-hand commit on the host, in the shape item **101**
 describes: the protocol and the move, the rule's exemption and its asserting
 test, and `tests/test_runtime.py` following the code, all together, with the
 suite green either side and no behaviour change for a host that has
@@ -77,9 +78,13 @@ runtime that arrives second:
   item **108**, not here, and is named here so the gap between the two commits
   is a decision rather than an oversight.
 
-**`ontology/factory.ttl` needs nothing.** It is a projection of the run record
-(§4.6) and the cell runtime is not in it — no class, no property, no closed set.
-A term whose only reader would be a comment is what `test_no_dead_terms` deletes,
-so the runtime earns an entry when a query or a shape reads it, which would mean
-recording per task which runtime ran it. That is worth doing and is a ledger
-change, not a vocabulary one; it is named in **108**.
+## Record
+
+**Status:** **done**, by hand on the host, 2026-09-11 — for the reason below: a
+cell is refused at the plan checkpoint. `saffron/cell/runtime.py` names no
+product, `saffron/cell/runtimes/apple.py` is the only module that does, and
+`runtimes/__init__.py` carries the `Dialect` — every spelling member a
+difference **measured** between two runtimes rather than anticipated. The rule's
+exemption, its asserting test, `CONTEXT.md`'s **Cell runtime** entry and
+§10's layout moved with it. `SA-0077` is the cell-landable piece that came out
+of it: a missing runtime reporting as absent rather than as twenty-one failures.

@@ -8,6 +8,8 @@ prs: []
 commits: [0301518, 2b1afda, 3604f31, 851836a, ab8c9d4]
 cites: []
 related: [5, 97]
+filed: 2026-09-08
+by_hand: true
 ---
 
 ## Problem
@@ -56,7 +58,9 @@ applying because "three hours of commits moved `session.py` underneath it". The
 most-churned file is the one a packaged patch is likeliest to be invalidated by,
 and it is 27% of all movement under `saffron/`.
 
-**Done looks like** `_drive_cell` reading as the phase sequence it drives, with
+## Done looks like
+
+`_drive_cell` reading as the phase sequence it drives, with
 the phases that have no module of their own living beside `implement.py`,
 `review.py` and `rebut.py`. Not a line count: the test is whether one phase can
 be read without the 900 lines around it, and whether `current_tier`'s binding

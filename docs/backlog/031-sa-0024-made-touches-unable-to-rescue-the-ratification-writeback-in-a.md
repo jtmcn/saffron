@@ -32,7 +32,9 @@ ratification the operator just granted.
 already behind the base a cell diffs against. The mechanism is designed,
 documented and half-built, which is why this is an item rather than a note.
 
-**Done looks like** the recorded spec path exempted from the deny lists in the
+## Done looks like
+
+the recorded spec path exempted from the deny lists in the
 same place it joins `touches` — one exemption, host-added, never the model's —
 with a test that a ratified task's first commit passes `scope` in a repo whose
 spec directory is `protected`. Found by the review of `SA-0024`, not by a run.

@@ -24,7 +24,9 @@ The Python side of this is now closed as far as a structural rule reaches,
 including the contract serialized by hand as a single string — which is exactly
 the shape `format` uses, so it is what a new Python gate copies.
 
-**Done looks like** a `language: bash` rule in `.saffron/rules/` with its own
+## Done looks like
+
+a `language: bash` rule in `.saffron/rules/` with its own
 `invalid` snippet for `tool="<literal>"`, and `ruleDirs` already loads it. Cheap;
 it is here rather than in #145 because the rule needs its own false-positive
 measurement against the five wrappers and `format`'s own `case` arms.

@@ -3,27 +3,17 @@ id: 112
 title: A name bound to a suppression passes `integrity`'s scan
 status: done
 tier: 1
+filed: 2026-09-12
 closed: 2026-09-13
-specs: [SA-0077]
-prs: [232]
+by_hand: true
+specs: []
+prs: [241]
 commits: []
 cites: []
 related: []
 ---
 
 ## Problem
-
-**Status:** **done**, by hand, 2026-09-13, on
-`joel/suppression-aliases-and-inline-ignores`. `structure` carries
-`skip-is-spelled-in-full`, with no `files:` scope so a helper outside `tests/`
-is read too, and ast-grep's inline ignore comment is a `suppressions` token (the
-second half below). #241's review, and its fix, ran five more skips pytest
-honours that no token named, each under pytest 9.1.1: unittest's skip
-decorators, its skip exception and method, pytest's import-or-skip, and the skip
-marker added by string. The first four are tokens now; the fifth cannot be one —
-the word is a gate status — so the rule reads it. Left open: a name reached
-dynamically — `__import__`, `sys.modules`, a module's `__dict__` — the rule's
-`ponytail:`.
 
 **Tier 1.** Found reviewing `SA-0077` (PR #232), 2026-09-12 — in the wild, not
 by probe. The agent needed a legitimate skip in `tests/conftest.py`, found that
@@ -45,11 +35,27 @@ carries a suppression a person approved. Re-run in a cell, it fails
 for: a blocking gate reported `pass` on a diff whose own comment described
 getting past it, and none of the three lenses raised it.
 
-**Done looks like** the suppression tokens matched as what they resolve to
+## Done looks like
+
+the suppression tokens matched as what they resolve to
 rather than as text — an ast-grep rule over `tests/**` flagging any reference to
 pytest's skip or expected-failure objects, called or not, is the likely shape —
 with a witness built from `SA-0077`'s own alias, run against the substring scan
 to prove it passes there. `.saffron/**` is `protected`, so it lands by hand.
+
+## Record
+
+**Status:** **done**, by hand, 2026-09-13, on
+`joel/suppression-aliases-and-inline-ignores`. `structure` carries
+`skip-is-spelled-in-full`, with no `files:` scope so a helper outside `tests/`
+is read too, and ast-grep's inline ignore comment is a `suppressions` token (the
+second half below). #241's review, and its fix, ran five more skips pytest
+honours that no token named, each under pytest 9.1.1: unittest's skip
+decorators, its skip exception and method, pytest's import-or-skip, and the skip
+marker added by string. The first four are tokens now; the fifth cannot be one —
+the word is a gate status — so the rule reads it. Left open: a name reached
+dynamically — `__import__`, `sys.modules`, a module's `__dict__` — the rule's
+`ponytail:`.
 
 **Folded in, 2026-09-13: that rule would not have held either.** ast-grep
 honours its own inline ignore comment in `scan` — on the matched line, on the

@@ -8,6 +8,7 @@ prs: []
 commits: []
 cites: [§2.1, §5.4.1, §7]
 related: [71, 72]
+by_hand: true
 ---
 
 ## Problem
@@ -35,7 +36,9 @@ paragraph describing the world before it. This one costs something today: item
 `contract.witness_blocking` as the authority for `witness`'s blocking level, and
 a reader who follows the citation lands on a paragraph saying nothing reads it.
 
-**Done looks like** both sentences corrected by hand — `DESIGN.md` is
+## Done looks like
+
+both sentences corrected by hand — `DESIGN.md` is
 `protected` and its §7 table is not generated, so neither is a cell's to touch.
 Worth deciding separately whether the `revert`/`witness` distinction deserves a
 `CONTEXT.md` §4 line of its own, since three files now state it in three

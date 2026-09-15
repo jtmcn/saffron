@@ -27,11 +27,13 @@ boundary.
 attended is not reviewing each finding before the delegate acts on it, and the
 loop's value is that nobody has to.
 
-**Done looks like** the fix step running where the operator's credentials are not
+Not item 97: that is what the fix skips on the way out. This is what reaches the
+delegate on the way in.
+
+## Done looks like
+
+the fix step running where the operator's credentials are not
 — a cell of its own, where a finding is input to an implementer rather than to a
 delegate — or, short of that, the delegate that reads findings holding no push or
 `gh` credential, with the push a separate step taken after the operator reads the
 diff.
-
-Not item 97: that is what the fix skips on the way out. This is what reaches the
-delegate on the way in.

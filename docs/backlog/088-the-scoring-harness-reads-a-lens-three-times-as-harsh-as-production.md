@@ -1,26 +1,18 @@
 ---
 id: 88
 title: The scoring harness reads a lens three times as harsh as production, and the fixture is a suspect
-status: open
+status: done
 tier: 1
+closed: 2026-09-08
 specs: []
 prs: [154]
 commits: []
 cites: [§5.4, §5.5]
 related: [79]
+filed: 2026-09-07
 ---
 
 ## Problem
-
-**Status: the suspect is eliminated and the gap is unchanged, 2026-09-08**
-(`docs/evidence/2026-09-08-lens-scoring-second-pass.md`, $4.84). With the tools
-back in `gates.txt` and every other input held, anchored blockers per run are
-1, 1, 2 against the first pass's 1, 2, 1 — four either way, every run of both
-routing to REBUT against production's zero. Naming the tools moved the count by
-**zero**. What is left is the two candidates below that the pass does not
-narrow, and the item closes on its own fallback: the harness's absolute numbers
-steer nothing, its differences over one fixture do. The `tool` column landed
-anyway (`gate_results`, 2026-09-08) so the next fixture needs no splice.
 
 Two things the pass found that the item did not predict, both in the plan now:
 the per-defect scores *did* move — `dirty-restore` 2/3 → 1/3, `truncating-write`
@@ -53,14 +45,6 @@ see which did". A lens told fourteen gates ran and not one named a tool has
 structural reason to distrust them and dig harder — a bias in precisely the
 direction observed. Cheapest to test and the leading suspect.
 
-*Corrected and repaired 2026-09-08.* Production named **7 of 14**, not 14: six
-of the other seven are host-side core gates that execute nothing and report no
-tool there too, and `witness` inherits the `tests` tool but skipped a spec that
-declares no mutants — so the gap was 7 against 0. `gate_results` now carries a `tool`
-column, but the 14 rows predate it and a nullable column is null for every one —
-so the fixture was repaired instead, from the tools in the same run's
-`baseline.json`, by `docs/evidence/scripts/2026-09-08-sa0062-gate-tools.py`.
-
 **Budget and turns.** The original had $3.30 and 90 turns; the pass gave $4.00
 and 30. No lens came near either ceiling in either, so this is unlikely, but it
 is not held constant and the record says so. *Still open after the second pass,
@@ -73,7 +57,9 @@ n=3 twice and production still has n=1. A single production run that filed zero
 is not evidence that production files zero reliably, and no work on the harness
 can settle that — only running the range through production again would.*
 
-**Done looks like** a `tool` column on `gate_results`, or a fixture whose
+## Done looks like
+
+a `tool` column on `gate_results`, or a fixture whose
 `gates.txt` is captured at review time rather than rebuilt from the ledger —
 then one more pass, and the blocker count compared against production's zero.
 Until that is settled, the harness's absolute numbers steer nothing; only its
@@ -83,3 +69,23 @@ written against an absolute. *Done as written, 2026-09-08: the column, the
 repaired fixture and the pass. The comparison came back unchanged, so the
 closing sentence is the operative one rather than the fallback it was written
 as.*
+
+## Record
+
+*Corrected and repaired 2026-09-08.* Production named **7 of 14**, not 14: six
+of the other seven are host-side core gates that execute nothing and report no
+tool there too, and `witness` inherits the `tests` tool but skipped a spec that
+declares no mutants — so the gap was 7 against 0. `gate_results` now carries a `tool`
+column, but the 14 rows predate it and a nullable column is null for every one —
+so the fixture was repaired instead, from the tools in the same run's
+`baseline.json`, by `docs/evidence/scripts/2026-09-08-sa0062-gate-tools.py`.
+
+**Status: the suspect is eliminated and the gap is unchanged, 2026-09-08**
+(`docs/evidence/2026-09-08-lens-scoring-second-pass.md`, $4.84). With the tools
+back in `gates.txt` and every other input held, anchored blockers per run are
+1, 1, 2 against the first pass's 1, 2, 1 — four either way, every run of both
+routing to REBUT against production's zero. Naming the tools moved the count by
+**zero**. What is left is the two candidates below that the pass does not
+narrow, and the item closes on its own fallback: the harness's absolute numbers
+steer nothing, its differences over one fixture do. The `tool` column landed
+anyway (`gate_results`, 2026-09-08) so the next fixture needs no splice.
