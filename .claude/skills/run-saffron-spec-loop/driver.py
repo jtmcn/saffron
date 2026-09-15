@@ -1135,7 +1135,7 @@ def _known_specs() -> dict[str, Spec]:
 def _spec_at(spec_id: str, commit: str, cwd: Path = REPO) -> Spec | None:
     """The spec as it stood at `commit`, live or retired: a blind review's
     header must not show ceilings raised after the version it reviews."""
-    from saffron.intake import parse_spec
+    from saffron.intake import DisclosedMutantError, parse_spec
 
     names = _git(
         "ls-tree", "-r", "--name-only", commit, ".saffron/specs", cwd=cwd
@@ -1150,7 +1150,12 @@ def _spec_at(spec_id: str, commit: str, cwd: Path = REPO) -> Spec | None:
         return None
     if len(found) > 1:
         raise GitError(f"{len(found)} spec files for {spec_id}: {', '.join(found)}")
-    return parse_spec(_git("show", f"{commit}:{found[0]}", cwd=cwd))
+    try:
+        return parse_spec(_git("show", f"{commit}:{found[0]}", cwd=cwd))
+    except DisclosedMutantError as exc:
+        # A header only needs shape, not queue admission; scheduler._retired_ids
+        # credits the same carried spec for the same reason.
+        return exc.spec
 
 
 def _criteria_count(spec: Spec) -> int:

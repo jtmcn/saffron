@@ -893,6 +893,40 @@ def test_spec_at_reads_the_spec_as_it_stood_at_the_commit(tmp_path, monkeypatch)
     assert driver._spec_at("SA-0002", second, cwd=tmp_path) is None
 
 
+def test_spec_at_reads_a_spec_that_todays_intake_refuses_as_a_disclosed_mutant(
+    tmp_path, monkeypatch
+):
+    # SA-0063 predates item 82's check; `history` still needs its shape.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    _git(tmp_path, "init", "-q", "-b", "main")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
+    (tmp_path / ".saffron" / "specs").mkdir(parents=True)
+    text = (
+        "---\n"
+        "id: SA-0063\n"
+        "title: x\n"
+        "type: bug\n"
+        "max_turns: 42\n"
+        "acceptance:\n"
+        "  - claim: does the thing\n"
+        "    witness: tests/test_x.py::test_thing\n"
+        "    mutant:\n"
+        "      file: x.py\n"
+        "      find: 'return True'\n"
+        "---\n"
+        "The current code has `return True` at the end.\n"
+    )
+    commit = _commit(tmp_path, ".saffron/specs/SA-0063-x.md", text)
+
+    spec = driver._spec_at("SA-0063", commit, cwd=tmp_path)
+
+    assert spec is not None
+    assert spec.id == "SA-0063"
+    assert spec.max_turns == 42
+
+
 def test_commit_time_is_utc_in_the_ledgers_own_format(tmp_path):
     env = {
         **os.environ,
