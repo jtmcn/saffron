@@ -931,6 +931,28 @@ def test_spec_at_reads_a_spec_that_todays_intake_refuses_as_a_disclosed_mutant(
     assert spec.max_turns == 42
 
 
+def test_specs_at_reads_other_specs_as_they_stood_and_keeps_todays_where_absent(
+    tmp_path, monkeypatch
+):
+    # A blind review ranks past cells by shape; today's text for them is later
+    # than the base it reviews.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    _git(tmp_path, "init", "-q", "-b", "main")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
+    (tmp_path / ".saffron" / "specs").mkdir(parents=True)
+    then = _commit(tmp_path, ".saffron/specs/SA-0001-x.md", _spec_text(60))
+    _commit(tmp_path, ".saffron/specs/SA-0001-x.md", _spec_text(90))
+    today = {"SA-0001": _spec("SA-0001"), "SA-0002": _spec("SA-0002")}
+    today["SA-0001"].max_turns = 90
+
+    shapes = driver._specs_at(then, today, cwd=tmp_path)
+
+    assert shapes["SA-0001"].max_turns == 60
+    assert shapes["SA-0002"] is today["SA-0002"]  # no text at `then` to read
+
+
 def test_commit_time_is_utc_in_the_ledgers_own_format(tmp_path):
     env = {
         **os.environ,

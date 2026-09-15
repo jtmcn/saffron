@@ -1159,6 +1159,20 @@ def _spec_at(spec_id: str, commit: str, cwd: Path = REPO) -> Spec | None:
         return exc.spec
 
 
+def _specs_at(commit: str, specs: dict[str, Spec], cwd: Path = REPO) -> dict[str, Spec]:
+    """Each of `specs` as it stood at `commit`, so a blind review ranks past cells
+    by the shapes they ran at. Today's text stands in where none then parses."""
+    from saffron.intake import SpecError
+
+    shapes = {}
+    for spec_id, today in specs.items():
+        try:
+            shapes[spec_id] = _spec_at(spec_id, commit, cwd) or today
+        except (GitError, SpecError):
+            shapes[spec_id] = today
+    return shapes
+
+
 def _criteria_count(spec: Spec) -> int:
     return len(spec.acceptance) or len(spec.acceptance_criteria)
 
@@ -1267,8 +1281,8 @@ def _history_lines(target: Spec, cells: list[PastCell], limit: int = 12) -> list
 
 
 def cmd_history(args) -> int:
-    """What cells of this spec's shape spent before, for the spec reviewer.
-    `--before` is a blind run: the spec as it stood then, and none of its own
+    """What cells of this spec's shape spent before, for a spec review.
+    `--before` is blind: every spec as it stood then, and none of this one's
     cells; live use shows them, the best evidence for a re-queued spec."""
     from saffron.intake import SpecError
 
@@ -1280,6 +1294,7 @@ def cmd_history(args) -> int:
             before = _commit_time(args.before)
         except (GitError, SpecError) as err:
             return _fail(f"--before {args.before}: {err}")
+        specs = _specs_at(args.before, specs)
     else:
         target = specs.get(args.spec_id)
     if target is None:
