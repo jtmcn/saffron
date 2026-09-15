@@ -1819,8 +1819,8 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
     """Re-measured 2026-09-14, a twenty-sixth time: `SA-0074` to `SA-0086`
-    (item 118) all merged to `main` and retired to `done/`, so the live queue
-    holds only the chain's tail. `SA-0087` has `depends_on: []`, so it is the
+    all merged to `main` and retired to `done/`, so the live queue holds only
+    the tail of item 118's chain. `SA-0087` has `depends_on: []`, so it is the
     one candidate. `SA-0088` (`depends_on: [SA-0087]`) and `SA-0089`
     (`depends_on: [SA-0088]`) are both refused, and correctly: neither parent
     has a task at its current `spec_sha`, so nothing says it merged.

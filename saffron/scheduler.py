@@ -666,7 +666,7 @@ def _refuse(
     # `depends_on` entry is a dependency, not a base, and still refuses
     # below. Left un-exempted, this refusal shadows the dependency admission
     # entirely — a parent at `READY_FOR_REVIEW` has an open pull request by
-    # definition, and almost every spec here touches `docs/backlog/`
+    # definition, and almost every spec here touched the backlog file then
     # (`SA-0026`).
     for pr in open_prs:
         branch = pr.get("headRefName")
