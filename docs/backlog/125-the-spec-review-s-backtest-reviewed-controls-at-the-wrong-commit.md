@@ -21,12 +21,17 @@ related: [123, 124]
   SA-0054, SA-0040). None recurred when those controls were reviewed at their
   real bases; SA-0054, a stacked child, needed its parent's tree plus its own
   spec.
+- The shipped agent and `history` changed after scoring (`17129fe`, `df1672c`,
+  `3e1f8ad`), and the cases and the prompt were written with the corpus in
+  view, so its recall is in-sample.
 
 ## Done looks like
 
 a second backtest selects each control's version from its cell's recorded
-base, and scores against outcomes as well as the literal rule (the operator
-ruled outcome-contradicted blockers false).
+base, scores against outcomes as well as the literal rule (the operator ruled
+outcome-contradicted blockers false), runs the shipped spec review, and is
+pre-registered again with cases it was not tuned on, or reports its recall as
+in-sample.
 
 ## Record
 

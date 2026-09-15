@@ -422,11 +422,10 @@ for the four class-(a) controls.**
 
 **(ii) The same, with classes (b) and (c) counted false because their cells'
 outcomes contradicted them.**
-- The five blockers are SA-0060 3, SA-0027 1, SA-0061 3, SA-0054 2 and
-  SA-0055 1, all from the pre-registered reviews.
-- SA-0061 and SA-0054 were re-reviewed, and both (c) blockers recur
-  (SA-0061@95e9b95 1, SA-0054@f0fe0c8 1). Each is counted once, from the
-  real-base review.
+- The five blockers are SA-0060 3, SA-0027 1 and SA-0055 1 from the
+  pre-registered reviews, and SA-0061 3 and SA-0054 2, which recur at the real
+  bases (SA-0061@95e9b95 1, SA-0054@f0fe0c8 1). Each of those two is counted
+  once, from the real-base review.
 - K = **5**. **FAIL** (5 > 2).
 - Not among the five, and disputed: SA-0040@08aa1a4 3 fits class (b)'s
   definition, and SA-0040 2's consequence was contradicted by the outcome.
@@ -441,7 +440,7 @@ $8.24 across the four re-reviews (`total_cost_usd`: SA-0062 $1.95, SA-0061
 $2.10, SA-0040 $2.30, SA-0054 $1.89; 35–42 turns; no error records). This is
 outside the $71.38 above.
 
-## Verdict, 2026-09-14 (operator)
+## Operator's ruling, 2026-09-14
 
 **FAIL.** The operator ruled the five remaining disputed control blockers false:
 SA-0060 3 and SA-0027 1, whose ceilings "too low" was contradicted when both
@@ -452,6 +451,34 @@ a bar of 2, with recall 18/34 (bar 17). The four class-(a) blockers were
 artifacts of the control versions and do not count, since none recurred at the
 cells' real bases.
 
-The spec reviewer is **not promoted** to a spec-review cell. It stays advisory,
+The spec review is **not promoted** to a spec-review cell. It stays advisory,
 where Task 3 put it: the spec loop's step 1b and `docs/agents/issue-tracker.md`.
 Items 123–125 carry what a second backtest needs.
+
+## Disclosures, 2026-09-15, after the ruling
+
+Found reviewing the pull request. Nothing above changes; these qualify it.
+
+- **The cases' wording changed after pre-registration.** `8578d74` rewrote every
+  defect's text after `19a5cc9` committed the bar, and before any scored
+  review. The new text is the design's Appendix A, and several rows gained
+  outcome figures: SA-0031's "ceilings too low for its width" became
+  "`EXHAUSTED` at 141 of 140 turns, $19.17 of $18". The reviews never saw this
+  file, so only the scoring read it. The bar, the versions, the controls and
+  the scoring rule did not change. *The Correction*'s "unchanged" holds for
+  those four and not for the wording.
+- **The shipped spec review is not the one scored.** After the ruling:
+  - `17129fe` split REPAIR out of `history`'s implement column and widened
+    check 4's budget blocker to "the plan checkpoint, IMPLEMENT and REPAIR".
+    The scored `history` already summed REPAIR into implement, so the figures
+    compared are the same, but the label is new.
+  - `df1672c` made a blind `history` rank past cells by their specs' text at
+    the base. The scored reviews' rows were ranked by today's text.
+  - `3e1f8ad` reworded the prompt's description of a cell and gave `base` a
+    default.
+
+  No review was re-run, so the result above is evidence about the scored
+  version. A second backtest scores the shipped one (item 125).
+- **K could be higher.** Under reading (ii), SA-0040@08aa1a4's two disputed
+  blockers give K = 6 or 7. The ruling counted five, and the result is FAIL
+  either way.
