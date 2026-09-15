@@ -24,6 +24,7 @@ from saffron.scheduler import (
 REPO = Path(__file__).resolve().parents[1]
 SPECS = REPO / ".saffron" / "specs"
 QUEUED, UNPARSED = discover_specs(SPECS)
+RETIRED, STOPPED = _retired_ids(SPECS)
 
 
 def _markers() -> list[tuple[str, str]]:
@@ -39,21 +40,25 @@ def _markers() -> list[tuple[str, str]]:
 
 
 def _known_ids() -> frozenset[str]:
-    retired, _failures = _retired_ids(SPECS)
-    return frozenset(d.spec.id for d in QUEUED) | retired
+    return frozenset(d.spec.id for d in QUEUED) | RETIRED
 
 
 def test_every_queued_spec_parses():
     assert [f"{f.path.name}: {f.reason}" for f in UNPARSED] == []
 
 
+def test_every_retired_spec_still_parses():
+    # A `done/` spec that stops parsing credits no dependency, so `saffron
+    # queue` refuses every child that names it (`_retired_ids`).
+    assert [f"{f.path.name}: {f.reason}" for f in STOPPED] == []
+
+
 def test_no_two_specs_share_an_id():
     # The branch is `saffron/<id>`, so two specs with one id package onto one
     # branch and one pull request.
-    retired, _failures = _retired_ids(SPECS)
     ids = [d.spec.id for d in QUEUED]
     assert sorted({i for i in ids if ids.count(i) > 1}) == []
-    assert sorted(set(ids) & retired) == []
+    assert sorted(set(ids) & RETIRED) == []
 
 
 @pytest.mark.parametrize("queued", QUEUED, ids=lambda d: d.path.name)
@@ -78,4 +83,7 @@ def test_no_queued_spec_is_refused_on_its_own_text(queued):
 
 
 def test_every_retired_by_marker_names_a_spec():
-    assert [r.reason for r in _dangling_marker_refusals(_markers(), _known_ids())] == []
+    refusals = _dangling_marker_refusals(
+        _markers(), _known_ids(), unreadable=len(UNPARSED) + len(STOPPED)
+    )
+    assert [r.reason for r in refusals] == []
