@@ -1,5 +1,4 @@
-"""The one live check: the records hold. PR 1 points it at the good fixture;
-the migration (PR 2) points it at the repository root and never back."""
+"""The one live check: the records hold."""
 
 from pathlib import Path
 
@@ -7,8 +6,7 @@ from records.check import check_all
 from tests.test_citations import addresses
 
 REPO = Path(__file__).resolve().parents[2]
-FIXTURE = Path(__file__).resolve().parent / "fixtures" / "good"
-ROOT = FIXTURE  # PR 2 flips this to REPO
+ROOT = REPO
 
 
 def test_the_backlog_records_hold():
