@@ -126,6 +126,28 @@ def test_a_yaml_1_1_coercion_is_refused_naming_the_field(frontmatter, field):
         parse(_open_item(frontmatter), BACKLOG)
 
 
+_CLOSED_ITEM = "id: 1\ntitle: T\nstatus: done\nclosed: 2026-09-01\nspecs: [SA-0001]"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        _open_item("id: 1\ntitle: T\nstatus: open").replace("\n", "\r\n"),
+        f"---\n{_CLOSED_ITEM}\n---",
+    ],
+    ids=["crlf", "no-body"],
+)
+def test_frontmatter_that_intake_reads_a_record_reads(text):
+    assert parse(text, BACKLOG).model.id == 1
+
+
+def test_an_all_digit_commit_sha_loads_as_the_sha():
+    text = f"---\n{_CLOSED_ITEM}\ncommits: [1234567, 0123456, 57b676c]\n---\n"
+    assert parse(text, BACKLOG).model.model_dump(include={"commits"}) == {
+        "commits": ["1234567", "0123456", "57b676c"]
+    }
+
+
 def test_plain_decimals_booleans_and_dates_still_load():
     record = parse(
         _open_item(

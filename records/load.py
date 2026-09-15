@@ -13,7 +13,8 @@ from pydantic import ValidationError
 
 from records.kinds import CLOSED, Identified, Kind
 
-_FRONTMATTER = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
+# Character for character `saffron/intake.py`'s: a file one reads, the other must.
+_FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?(.*)\Z", re.DOTALL)
 _H2 = re.compile(r"^## (.+?)\s*$")
 _FENCE = re.compile(r"^\s*```")
 _DATE = re.compile(r"\b20\d\d-\d\d-\d\d\b")

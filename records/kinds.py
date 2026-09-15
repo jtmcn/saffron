@@ -40,7 +40,10 @@ class BacklogItem(Identified):
     by_hand: bool = False
     specs: list[str] = Field(default_factory=list)
     prs: list[Number] = Field(default_factory=list)
-    commits: list[str] = Field(default_factory=list)
+    # An unquoted all-digit short sha is a YAML int; str() of it is lossless.
+    commits: list[Annotated[str, Field(coerce_numbers_to_str=True)]] = Field(
+        default_factory=list
+    )
     cites: list[str] = Field(default_factory=list)
     related: list[Number] = Field(default_factory=list)
     superseded_by: Number | None = None
