@@ -3,6 +3,12 @@
 2026-09-14. Designed with the operator after the spec loop was used a second
 time (`docs/evidence/2026-09-14-spec-loop-skill-feedback-run-2.md`).
 
+**Status:** built; backtest FAIL on the operator's ruling. K = 5 false
+blockers against a bar of 2, or 6–7 if SA-0040@08aa1a4's two disputed
+blockers count, with recall 18/34. The spec review stays advisory. See
+`docs/evidence/2026-09-14-spec-reviewer-backtest.md` and BACKLOG items
+123–125.
+
 ## Why
 
 Of the cells whose failure a written record blames on something, the most
@@ -42,8 +48,9 @@ measures it before anything is promoted.
 2. **`driver.py history SA-NNNN [--before <commit>]`: the numbers.**
    Deterministic, and it reads the ledger only. For the spec's `type`, it
    prints past cells' plan-checkpoint turns and cost (the first `IMPLEMENTING`
-   attempt), IMPLEMENT turns and cost, REVIEW and REBUT spend, each
-   attempt's `subtype` and `terminal_reason`, and the last `size` gate
+   attempt), IMPLEMENT and REPAIR turns and cost, the longest single session,
+   REVIEW and REBUT spend, the `subtype` and `terminal_reason` of each attempt
+   that did not succeed, and the last `size` gate
    summary. Specs of similar shape come first, by `touches` count and criteria
    count. `--before` drops every task that started after the commit's date,
    along with the spec's own tasks. That closes the one leak a blind review
@@ -71,7 +78,9 @@ snapshot of the base, as the backtest's are:
 - the `DESIGN.md` sections the spec cites;
 - `docs/agents/issue-tracker.md`'s spec conventions;
 - the code the spec names;
-- `history` for the spec's `type`, limited to tasks before the base.
+- `history` for the spec's `type`. The backtest limits it to tasks before the
+  base; live use keeps every past cell, since a re-queued spec's own cells are
+  its best evidence.
 
 The delegate is never shown a cell's outcome.
 
@@ -85,7 +94,7 @@ trivial (`CONTEXT.md`'s severities).
 | Criteria vs invariants | A criterion built to the letter breaks a `CLAUDE.md` invariant or a `DESIGN.md` principle. The finding quotes both. |
 | Scope reaches the change | A file the change must edit is outside `touches` or inside `forbidden`: a caller of a changed signature, a consumer whose output the change makes false, a test file holding a guard, a fixture. The finding names the line that makes the file necessary. |
 | Witness/mutant discipline | Any of three: an edit spec has a criterion with no mutant whose witness a named plausible wrong implementation would pass; a `preserves` witness names a test absent at base; a non-`preserves` witness is already green at base. |
-| Ceilings vs history | `max_turns` or `budget_usd` is below what similar past cells spent on the plan checkpoint plus IMPLEMENT, citing `history` rows. It is a `concern` when the remainder cannot cover REVIEW and REBUT at their usual cost (item 120). |
+| Ceilings vs history | `max_turns` is at or below the longest single session of similar past cells, or `budget_usd` is below what they spent on the plan checkpoint, IMPLEMENT and REPAIR, citing `history` rows. It is a `concern` when the remainder cannot cover REVIEW and REBUT at their usual cost (item 120). |
 | Size vs ceiling | The criteria, `touches`, and the tests they demand imply more changed lines than the type's `size` ceiling, going by `history`'s past sizes (item 56's check, done by judgement rather than formula). |
 | Claims about current code | A factual sentence about the code at base is false and a criterion depends on it. It is a `concern` when nothing depends on it. |
 

@@ -111,9 +111,14 @@ def test_the_vocabulary_is_the_factorys_and_nothing_still_names_saffron():
     frozen_fixture_input = re.compile(
         r"^docs/evidence/fixtures/[^/]+/(claude|context|spec_body)\.md$"
     )
+    # Frozen model output quoting spec versions written before the rename, the
+    # same case as the fixtures: editing a report would falsify the record.
+    frozen_backtest_report = re.compile(
+        r"^docs/evidence/spec-reviewer-backtest/[^/]+\.md$"
+    )
     stale = []
     for name in filter(None, listed):
-        if frozen_fixture_input.match(name):
+        if frozen_fixture_input.match(name) or frozen_backtest_report.match(name):
             continue
         try:
             text = (root / name).read_text()

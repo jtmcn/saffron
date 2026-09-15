@@ -23,13 +23,15 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
     from saffron.gates.contract import GateResult
+    from saffron.intake import Spec
 
 REPO = Path(__file__).resolve().parents[3]
 STATE_DIR = REPO / ".saffron-loop"
+SPECS_DIR = REPO / ".saffron" / "specs"
 ORDER = STATE_DIR / "order.json"
 LEGACY_PLAN = STATE_DIR / "plan.json"
 ONTOLOGY = REPO / "ontology" / "factory.ttl"
@@ -1094,6 +1096,231 @@ def cmd_size(args) -> int:
     return 0 if result.status == "pass" else 1
 
 
+class Spend(NamedTuple):
+    turns: int
+    usd: float
+
+
+@dataclass
+class PastCell:
+    """One past cell's spend by phase, for a spec review's ceilings and size checks."""
+
+    spec_id: str
+    spec_type: str
+    touches: int
+    criteria: int
+    started_at: str
+    state: str
+    budget_usd: float | None
+    # The first IMPLEMENTING attempt; a checkpoint re-prompt counts as implement.
+    plan: Spend | None
+    implement: Spend  # every other IMPLEMENTING attempt
+    repair: Spend
+    peak_turns: int  # the largest single attempt of any phase; max_turns bounds each
+    review_usd: float
+    rebut_usd: float
+    endings: list[str]  # "<phase> <subtype>" for every attempt that did not succeed
+    size: str | None  # the last `size` gate summary, verbatim: it names the ceiling
+
+
+def _known_specs() -> dict[str, Spec]:
+    """Every spec by id, live or retired. The ledger's `spec_sha` is not a git
+    blob, so a past spec's shape is read from its text as it stands now."""
+    from saffron.intake import discover_specs
+
+    found: dict[str, Spec] = {}
+    for directory in (SPECS_DIR / "done", SPECS_DIR):
+        if not directory.is_dir():  # a repo with nothing retired yet has no `done/`
+            continue
+        specs, _failures = discover_specs(directory)
+        found.update({d.spec.id: d.spec for d in specs})
+    return found
+
+
+def _spec_at(spec_id: str, commit: str, cwd: Path = REPO) -> Spec | None:
+    """The spec as it stood at `commit`, live or retired: a blind review's
+    header must not show ceilings raised after the version it reviews."""
+    from saffron.intake import DisclosedMutantError, parse_spec
+
+    names = _git(
+        "ls-tree", "-r", "--name-only", commit, ".saffron/specs", cwd=cwd
+    ).splitlines()
+    found = [
+        n
+        for n in names
+        if str(Path(n).parent) in (".saffron/specs", ".saffron/specs/done")
+        and Path(n).name.startswith(f"{spec_id}-")
+    ]
+    if not found:
+        return None
+    if len(found) > 1:
+        raise GitError(f"{len(found)} spec files for {spec_id}: {', '.join(found)}")
+    try:
+        return parse_spec(_git("show", f"{commit}:{found[0]}", cwd=cwd))
+    except DisclosedMutantError as exc:
+        # A header only needs shape, not queue admission; scheduler._retired_ids
+        # credits the same carried spec for the same reason.
+        return exc.spec
+
+
+def _specs_at(commit: str, specs: dict[str, Spec], cwd: Path = REPO) -> dict[str, Spec]:
+    """Each of `specs` as it stood at `commit`, so a blind review ranks past cells
+    by no text later than its base. Today's stands in where none then parses."""
+    from saffron.intake import SpecError
+
+    shapes = {}
+    for spec_id, today in specs.items():
+        try:
+            shapes[spec_id] = _spec_at(spec_id, commit, cwd) or today
+        except (GitError, SpecError):
+            shapes[spec_id] = today
+    return shapes
+
+
+def _criteria_count(spec: Spec) -> int:
+    return len(spec.acceptance) or len(spec.acceptance_criteria)
+
+
+def _spend(attempts: list, phase: str) -> Spend:
+    """Turns and cost summed over `attempts` in `phase`."""
+    mine = [a for a in attempts if a["phase"] == phase]
+    return Spend(
+        sum(a["num_turns"] or 0 for a in mine),
+        sum(a["cost_usd_est"] or 0.0 for a in mine),
+    )
+
+
+def _commit_time(commit: str, cwd: Path = REPO) -> str:
+    """`commit`'s committer time the way the ledger writes `started_at`:
+    UTC, `YYYY-MM-DD HH:MM:SS`, so the two compare as strings."""
+    epoch = int(_git("log", "-1", "--format=%ct", commit, cwd=cwd))
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(epoch))
+
+
+def _past_cells(
+    ledger,
+    repo_id: int,
+    specs: dict[str, Spec],
+    *,
+    before: str | None = None,
+    exclude: str | None = None,
+) -> list[PastCell]:
+    budgets = {row["task_id"]: row["budget_usd"] for row in ledger.queue_lines()}
+    cells = []
+    for (spec_id, _sha), rows in ledger.tasks_by_spec(repo_id).items():
+        if spec_id == exclude or spec_id not in specs:
+            continue
+        spec = specs[spec_id]
+        for row in rows:
+            attempts = ledger.attempts(row["task_id"])
+            if not attempts or (
+                before is not None and attempts[0]["started_at"] >= before
+            ):
+                continue
+            implementing = [a for a in attempts if a["phase"] == "IMPLEMENTING"]
+            checkpoint = implementing[0] if implementing else None
+            sizes = [
+                r.summary
+                for r in ledger.task_results(row["task_id"])
+                if r.gate == "size"
+            ]
+            cells.append(
+                PastCell(
+                    spec_id=spec_id,
+                    spec_type=spec.type,
+                    touches=len(spec.touches),
+                    criteria=_criteria_count(spec),
+                    started_at=attempts[0]["started_at"],
+                    state=row["state"],
+                    budget_usd=budgets.get(row["task_id"]),
+                    plan=_spend([checkpoint], "IMPLEMENTING")
+                    if checkpoint is not None
+                    else None,
+                    implement=_spend(implementing[1:], "IMPLEMENTING"),
+                    repair=_spend(attempts, "REPAIRING"),
+                    peak_turns=max(a["num_turns"] or 0 for a in attempts),
+                    review_usd=_spend(attempts, "REVIEWING").usd,
+                    rebut_usd=_spend(attempts, "REBUTTING").usd,
+                    endings=[
+                        f"{a['phase']} {a['subtype']}"
+                        + (f" ({a['terminal_reason']})" if a["terminal_reason"] else "")
+                        for a in attempts
+                        if a["subtype"] not in (None, "success")
+                    ],
+                    size=sizes[-1] if sizes else None,
+                )
+            )
+    return cells
+
+
+def _cell_line(c: PastCell) -> str:
+    plan = f"plan {c.plan.turns}t ${c.plan.usd:.2f}" if c.plan else "plan -"
+    budget = f"${c.budget_usd:.2f}" if c.budget_usd is not None else "-"
+    ended = f"  ended: {'; '.join(c.endings)}" if c.endings else ""
+    size = f"  size: {c.size}" if c.size else ""
+    return (
+        f"{c.spec_id}  {c.spec_type}  touches={c.touches} criteria={c.criteria}  "
+        f"{c.started_at[:10]}  {c.state}  budget {budget}  {plan}  "
+        f"implement {c.implement.turns}t ${c.implement.usd:.2f}  "
+        f"repair {c.repair.turns}t ${c.repair.usd:.2f}  peak {c.peak_turns}t  "
+        f"review ${c.review_usd:.2f}  rebut ${c.rebut_usd:.2f}{size}{ended}"
+    )
+
+
+def _history_lines(target: Spec, cells: list[PastCell], limit: int = 12) -> list[str]:
+    """The target's own shape and ceilings, then past cells of its type, the
+    closest in `touches` and criteria count first, newest first on a tie."""
+    criteria = _criteria_count(target)
+    header = (
+        f"{target.id}  {target.type}  touches={len(target.touches)} "
+        f"criteria={criteria}  max_turns={target.max_turns} "
+        f"budget_usd={target.budget_usd}  max_attempts={target.max_attempts}"
+    )
+    same = [c for c in cells if c.spec_type == target.type]
+    same.sort(key=lambda c: c.started_at, reverse=True)
+    same.sort(
+        key=lambda c: abs(c.touches - len(target.touches)) + abs(c.criteria - criteria)
+    )
+    return [header, *(_cell_line(c) for c in same[:limit])]
+
+
+def cmd_history(args) -> int:
+    """What cells of this spec's shape spent before, for a spec review.
+    `--before` is blind: every spec as it stood then, and none of this one's
+    cells; live use shows them, the best evidence for a re-queued spec."""
+    from saffron.intake import SpecError
+
+    specs = _known_specs()
+    before = None
+    if args.before:
+        try:
+            target = _spec_at(args.spec_id, args.before)
+            before = _commit_time(args.before)
+        except (GitError, SpecError) as err:
+            return _fail(f"--before {args.before}: {err}")
+        specs = _specs_at(args.before, specs)
+    else:
+        target = specs.get(args.spec_id)
+    if target is None:
+        at = f" at {args.before}" if args.before else ""
+        return _fail(f"no spec declares {args.spec_id}{at}")
+    ledger, repo_id, _url = _ledger_and_repo()
+    try:
+        if repo_id is None:
+            return _fail("this repo has no ledger row yet")
+        cells = _past_cells(
+            ledger,
+            repo_id,
+            specs,
+            before=before,
+            exclude=args.spec_id if args.before else None,
+        )
+    finally:
+        ledger.close()
+    print("\n".join(_history_lines(target, cells, args.limit)))
+    return 0
+
+
 def cmd_pattern(_args) -> int:
     print(watch_pattern())
     return 0
@@ -1140,6 +1367,12 @@ def main() -> int:
     p = sub.add_parser("size", help="a branch's changed lines against its ceiling")
     p.add_argument("spec_id")
     p.set_defaults(func=cmd_size)
+
+    p = sub.add_parser("history", help="what cells of this spec's shape spent before")
+    p.add_argument("spec_id")
+    p.add_argument("--before", help="only cells that started before this commit")
+    p.add_argument("--limit", type=int, default=12)
+    p.set_defaults(func=cmd_history)
 
     p = sub.add_parser("pattern", help="print the Monitor's grep -E pattern")
     p.set_defaults(func=cmd_pattern)

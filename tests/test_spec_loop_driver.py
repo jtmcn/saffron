@@ -127,14 +127,21 @@ def _commit(cwd, name, text):
 
 
 @pytest.fixture
-def repo(tmp_path, monkeypatch):
-    """main at M0; `a` cut from M0; `b` a child of `a`; `c` a sibling cut from
-    M0; main then advances to M1, and `d` is a sibling cut from M1."""
+def empty_repo(tmp_path, monkeypatch):
+    """A git repo on `main` with no commits, blind to the host's git config."""
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.email", "t@example.com")
     _git(tmp_path, "config", "user.name", "t")
+    return tmp_path
+
+
+@pytest.fixture
+def repo(empty_repo):
+    """main at M0; `a` cut from M0; `b` a child of `a`; `c` a sibling cut from
+    M0; main then advances to M1, and `d` is a sibling cut from M1."""
+    tmp_path = empty_repo
     tips = {"M0": _commit(tmp_path, "base.txt", "base\n")}
     _git(tmp_path, "checkout", "-q", "-b", "a")
     tips["a"] = _commit(tmp_path, "a.txt", "a\n")
@@ -703,3 +710,323 @@ def test_a_resnapshot_keeps_what_the_loop_recorded(loop):
     assert rows[dropped].dropped == "operator's call"
     assert rows[new].state is None
     assert driver._stale(list(rows.values())) == []
+
+
+def _ledger_with_one_cell(tmp_path):
+    from saffron.gates.contract import GateResult
+    from saffron.ledger import Ledger
+
+    ledger = Ledger(tmp_path / "ledger.db")
+    repo_id = ledger.upsert_repo("r", "git@github.com:o/r.git", "/mirror", "policy")
+    task_id = ledger.create_task(
+        ledger.create_run(repo_id, "b" * 40),
+        "SA-0001",
+        "s" * 40,
+        "saffron/SA-0001",
+        budget_usd=6.0,
+    )
+    implement = None
+    for phase, turns, cost, subtype, terminal_reason in (
+        ("IMPLEMENTING", 20, 1.82, "success", None),  # the plan checkpoint
+        ("IMPLEMENTING", 41, 2.33, "error_max_turns", None),
+        ("REPAIRING", 7, 0.40, "success", None),
+        ("IMPLEMENTING", 3, 0.17, "success", None),  # the salvage turn
+        ("REVIEWING", 11, 0.80, "success", None),
+        ("REBUTTING", 45, 3.09, "error_max_budget_usd", "budget_exhausted"),
+    ):
+        attempt = ledger.open_attempt(task_id, phase)
+        ledger.close_attempt(
+            attempt,
+            session_id=None,
+            subtype=subtype,
+            terminal_reason=terminal_reason,
+            num_turns=turns,
+            cost_usd_est=cost,
+        )
+        if phase == "IMPLEMENTING":
+            implement = attempt
+    ledger.record_gate_result(
+        GateResult(
+            gate="size",
+            status="pass",
+            tool="size 1",
+            summary="269 changed lines within the bug ceiling of 300",
+        ),
+        attempt_id=implement,
+    )
+    ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+    return ledger, repo_id
+
+
+def _spec(spec_id, spec_type="bug", touches=2, criteria=3):
+    from saffron.intake import Spec
+
+    return Spec(
+        id=spec_id,
+        title=spec_id,
+        type=spec_type,
+        touches=[f"f{i}.py" for i in range(touches)],
+        acceptance_criteria=[f"c{i}" for i in range(criteria)],
+    )
+
+
+def test_known_specs_skips_a_missing_done_directory(tmp_path, monkeypatch):
+    # A repo with nothing retired yet has no `done/`, and `discover_specs`
+    # raises `SpecError` on a directory that does not exist.
+    specs_dir = tmp_path / ".saffron" / "specs"
+    specs_dir.mkdir(parents=True)
+    (specs_dir / "SA-0001-x.md").write_text(
+        "---\nid: SA-0001\ntitle: x\ntype: bug\n---\n"
+    )
+    monkeypatch.setattr(driver, "SPECS_DIR", specs_dir)
+
+    assert set(driver._known_specs()) == {"SA-0001"}
+
+
+def test_history_splits_a_cells_spend_by_phase_and_names_how_attempts_ended(tmp_path):
+    # SA-0087: 47 of 60 turns went to the plan checkpoint, and nothing showed
+    # the operator that a cell of its shape needed more.
+    ledger, repo_id = _ledger_with_one_cell(tmp_path)
+
+    [cell] = driver._past_cells(ledger, repo_id, {"SA-0001": _spec("SA-0001")})
+
+    assert cell.spec_id == "SA-0001"
+    assert cell.state == "READY_FOR_REVIEW"
+    assert cell.budget_usd == 6.0
+    assert cell.plan == (20, pytest.approx(1.82))
+    assert cell.implement == (44, pytest.approx(2.50))
+    assert cell.repair == (7, pytest.approx(0.40))  # REPAIR is its own phase
+    assert "implement 44t $2.50  repair 7t $0.40" in driver._cell_line(cell)
+    assert cell.peak_turns == 45  # REBUT runs under `max_turns` too
+    assert cell.review_usd == pytest.approx(0.80)
+    assert cell.rebut_usd == pytest.approx(3.09)
+    assert cell.endings == [
+        "IMPLEMENTING error_max_turns",
+        "REBUTTING error_max_budget_usd (budget_exhausted)",
+    ]
+    assert cell.size == "269 changed lines within the bug ceiling of 300"
+
+
+def test_history_before_a_commit_hides_later_cells_and_always_the_specs_own(tmp_path):
+    # A blind review must not see the outcome it is being scored against.
+    ledger, repo_id = _ledger_with_one_cell(tmp_path)
+    specs = {"SA-0001": _spec("SA-0001")}
+
+    assert (
+        driver._past_cells(ledger, repo_id, specs, before="2000-01-01 00:00:00") == []
+    )
+    assert (
+        len(driver._past_cells(ledger, repo_id, specs, before="2999-01-01 00:00:00"))
+        == 1
+    )
+    assert driver._past_cells(ledger, repo_id, specs, exclude="SA-0001") == []
+
+
+def test_history_before_a_cells_own_start_hides_it(tmp_path):
+    # "Started before": a cell that started at `before` itself is hidden.
+    ledger, repo_id = _ledger_with_one_cell(tmp_path)
+    [[row]] = ledger.tasks_by_spec(repo_id).values()
+    started = ledger.attempts(row["task_id"])[0]["started_at"]
+
+    assert (
+        driver._past_cells(
+            ledger, repo_id, {"SA-0001": _spec("SA-0001")}, before=started
+        )
+        == []
+    )
+
+
+def _cell(spec_id, spec_type, touches, criteria, started_at="2026-09-14 12:00:00"):
+    return driver.PastCell(
+        spec_id=spec_id,
+        spec_type=spec_type,
+        touches=touches,
+        criteria=criteria,
+        started_at=started_at,
+        state="READY_FOR_REVIEW",
+        budget_usd=6.0,
+        plan=driver.Spend(20, 1.82),
+        implement=driver.Spend(44, 2.5),
+        repair=driver.Spend(0, 0.0),
+        peak_turns=41,
+        review_usd=0.8,
+        rebut_usd=0.0,
+        endings=[],
+        size=None,
+    )
+
+
+def test_history_lists_only_the_same_type_most_similar_shape_first():
+    lines = driver._history_lines(
+        _spec("SA-0009", touches=2, criteria=3),
+        [
+            _cell("SA-0002", "feature", 2, 3),
+            _cell("SA-0003", "bug", 9, 9),
+            _cell("SA-0004", "bug", 2, 4),
+        ],
+    )
+
+    assert lines[0].startswith("SA-0009  bug  touches=2 criteria=3")
+    assert [line.split()[0] for line in lines[1:]] == ["SA-0004", "SA-0003"]
+
+
+def test_history_lists_the_newer_of_two_same_shape_cells_first():
+    lines = driver._history_lines(
+        _spec("SA-0009", touches=2, criteria=3),
+        [
+            _cell("SA-0002", "bug", 2, 3, started_at="2026-09-01 12:00:00"),
+            _cell("SA-0003", "bug", 2, 3, started_at="2026-09-10 12:00:00"),
+        ],
+    )
+
+    assert [line.split()[0] for line in lines[1:]] == ["SA-0003", "SA-0002"]
+
+
+def _spec_text(max_turns):
+    return f"---\nid: SA-0001\ntitle: x\ntype: bug\nmax_turns: {max_turns}\n---\n"
+
+
+def test_spec_at_reads_the_spec_as_it_stood_at_the_commit(empty_repo):
+    # SA-0087@24edb32's header showed its later 90 turns, not the 60 it was run at.
+    tmp_path = empty_repo
+    specs = tmp_path / ".saffron" / "specs"
+    (specs / "done").mkdir(parents=True)
+    first = _commit(tmp_path, ".saffron/specs/SA-0001-x.md", _spec_text(60))
+    _git(tmp_path, "mv", ".saffron/specs/SA-0001-x.md", ".saffron/specs/done/")
+    second = _commit(tmp_path, ".saffron/specs/done/SA-0001-x.md", _spec_text(90))
+
+    assert driver._spec_at("SA-0001", first, cwd=tmp_path).max_turns == 60
+    assert driver._spec_at("SA-0001", second, cwd=tmp_path).max_turns == 90
+    assert driver._spec_at("SA-0002", second, cwd=tmp_path) is None
+
+
+def test_spec_at_reads_a_spec_that_todays_intake_refuses_as_a_disclosed_mutant(
+    empty_repo,
+):
+    # SA-0063 predates item 82's check; `history` still needs its shape.
+    tmp_path = empty_repo
+    (tmp_path / ".saffron" / "specs").mkdir(parents=True)
+    text = (
+        "---\n"
+        "id: SA-0063\n"
+        "title: x\n"
+        "type: bug\n"
+        "max_turns: 42\n"
+        "acceptance:\n"
+        "  - claim: does the thing\n"
+        "    witness: tests/test_x.py::test_thing\n"
+        "    mutant:\n"
+        "      file: x.py\n"
+        "      find: 'return True'\n"
+        "---\n"
+        "The current code has `return True` at the end.\n"
+    )
+    commit = _commit(tmp_path, ".saffron/specs/SA-0063-x.md", text)
+
+    spec = driver._spec_at("SA-0063", commit, cwd=tmp_path)
+
+    assert spec is not None
+    assert spec.id == "SA-0063"
+    assert spec.max_turns == 42
+
+
+def test_specs_at_reads_other_specs_as_they_stood_and_keeps_todays_where_absent(
+    empty_repo,
+):
+    # A blind review ranks past cells by shape; today's text for them is later
+    # than the base it reviews.
+    tmp_path = empty_repo
+    (tmp_path / ".saffron" / "specs").mkdir(parents=True)
+    then = _commit(tmp_path, ".saffron/specs/SA-0001-x.md", _spec_text(60))
+    _commit(tmp_path, ".saffron/specs/SA-0001-x.md", _spec_text(90))
+    today = {"SA-0001": _spec("SA-0001"), "SA-0002": _spec("SA-0002")}
+    today["SA-0001"].max_turns = 90
+
+    shapes = driver._specs_at(then, today, cwd=tmp_path)
+
+    assert shapes["SA-0001"].max_turns == 60
+    assert shapes["SA-0002"] is today["SA-0002"]  # no text at `then` to read
+
+
+def test_history_before_shows_every_spec_as_it_stood_and_none_of_the_targets_cells(
+    empty_repo, monkeypatch, capsys
+):
+    # The helpers above were each tested; that `cmd_history` wires all four
+    # into `--before` was not, and a mutant dropping any one passed.
+    from saffron.ledger import Ledger
+
+    tmp_path = empty_repo
+    (tmp_path / ".saffron" / "specs").mkdir(parents=True)
+    monkeypatch.setenv(
+        "GIT_COMMITTER_DATE", "2000-01-01T00:00:00Z"
+    )  # before every cell
+    early = _commit(tmp_path, ".saffron/specs/SA-0001-x.md", _spec_text(60))
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2099-01-01T00:00:00Z")  # after every cell
+    then = _commit(
+        tmp_path,
+        ".saffron/specs/SA-0002-y.md",
+        "---\nid: SA-0002\ntitle: y\ntype: bug\ntouches: [a.py, b.py]\n---\n",
+    )
+    ledger, repo_id = _ledger_with_one_cell(tmp_path)
+    other = ledger.create_task(
+        ledger.create_run(repo_id, "b" * 40), "SA-0002", "t" * 40, "saffron/SA-0002"
+    )
+    ledger.close_attempt(
+        ledger.open_attempt(other, "IMPLEMENTING"),
+        session_id=None,
+        subtype="success",
+        terminal_reason=None,
+        num_turns=5,
+        cost_usd_est=0.5,
+    )
+    today = {"SA-0001": _spec("SA-0001"), "SA-0002": _spec("SA-0002", touches=9)}
+    today["SA-0001"].max_turns = 90
+    real_git = driver._git
+    monkeypatch.setattr(driver, "_git", lambda *a, cwd=None: real_git(*a, cwd=tmp_path))
+    monkeypatch.setattr(driver, "_known_specs", lambda: today)
+    ledger.close()
+    monkeypatch.setattr(  # `cmd_history` closes the ledger it is handed
+        driver,
+        "_ledger_and_repo",
+        lambda: (Ledger(tmp_path / "ledger.db"), repo_id, "u"),
+    )
+
+    args = SimpleNamespace(spec_id="SA-0001", before=early, limit=12)
+    assert driver.cmd_history(args) == 0
+    assert capsys.readouterr().out.splitlines()[1:] == []  # every cell started later
+
+    args = SimpleNamespace(spec_id="SA-0001", before=then, limit=12)
+    assert driver.cmd_history(args) == 0
+
+    header, *cells = capsys.readouterr().out.splitlines()
+    assert "max_turns=60" in header
+    assert [line.split()[0] for line in cells] == ["SA-0002"]
+    assert "touches=2" in cells[0]
+
+
+def test_commit_time_is_utc_in_the_ledgers_own_format(tmp_path):
+    env = {
+        **os.environ,
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_COMMITTER_DATE": "2026-09-14T12:00:00-07:00",
+        "GIT_AUTHOR_DATE": "2026-09-14T12:00:00-07:00",
+    }
+    for argv in (
+        ["git", "init", "-q", "-b", "main"],
+        [
+            "git",
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "c",
+        ],
+    ):
+        subprocess.run(argv, cwd=tmp_path, env=env, check=True)
+
+    assert driver._commit_time("HEAD", cwd=tmp_path) == "2026-09-14 19:00:00"
