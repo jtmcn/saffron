@@ -322,3 +322,121 @@ control finished inside them.**
   so the witnesses it wrote were not green at base.
 
 All nine ruled false gives K = 9.
+
+## Supplement, 2026-09-14, after scoring (operator-directed, post hoc)
+
+Recorded beside the result above, never in place of it. The operator directed
+both parts after reading `## Results`; nothing above this heading changed.
+
+### SA-0080 re-ruled missed
+
+- SA-0080 C1 was counted caught (*Close calls*), but the same pattern — a
+  different wrong build in the same witness — was counted missed for SA-0081,
+  SA-0085 and SA-0087@14f6357. The task reviewer found the inconsistency.
+- Ruled for consistency: SA-0080 is **missed**.
+- Totals: caught **18/34** (blocker-only still **12/34**); without
+  SA-0087@24edb32, **17/32**.
+- Two close calls stay counted as caught (SA-0019, SA-0025). One flipping
+  leaves 17/34; both flipping gives 16/34, a FAIL on recall.
+
+### Four controls re-reviewed at their cells' real bases
+
+Each class-(a) blocker said a dependency was missing. It was missing at the
+control's pre-registered version, the spec's last-touch commit, but each cell
+ran on a later base that had it. Each of the four was reviewed once more, blind
+as before, at the base its cell ran on (`tree_base` = `base_sha`). SA-0054's
+base is synthetic: `f0fe0c8` is `fe39b41`'s tree plus the spec file from
+`base_sha` `6a92e05`, with `fe39b41`'s committer date, because SA-0054 was a
+stacked child whose spec was not on its parent's branch. Reports:
+`docs/evidence/spec-reviewer-backtest/<SPEC>-<base>.{md,json}`. Every blocker
+was read at its report's base with `git show <base>:<path>`.
+
+| control | pre-registered | real base | blockers | false | hold | concerns / notes | class-(a) blocker recurs? |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| SA-0062 | 210b0d4 | 91b6eda | 2 | 0 | 2 | 5 / 2 | no |
+| SA-0061 | 210b0d4 | 95e9b95 | 2 | 0 | 2 (1 disputed) | 4 / 3 | no |
+| SA-0040 | 98ce586 | 08aa1a4 | 3 | 0 | 3 (2 disputed) | 5 / 3 | no |
+| SA-0054 | fdcbbad | f0fe0c8 | 2 | 0 | 2 (1 disputed) | 5 / 3 | no (a note only) |
+| **total** | | | **9** | **0** | **9 (4 disputed)** | 19 / 11 | **0 of 4** |
+
+- **SA-0062@91b6eda 1** (undoing with `git checkout HEAD` wipes uncommitted
+  work): holds. `witness` runs inside `run_suite` (`session.py:1004-1010`) and
+  `committed` after it (`:1045`); `committed.py:5-7`, `revert.py:174-179` and
+  `worktree.py:273-276` read as quoted. The same claim as 210b0d4's blocker 2
+  (*New finds* 1).
+- **SA-0062 2** (no criterion declares a `mutant`): holds. The frontmatter has
+  no `mutant:`, `intake.py:99` accepts one at this base, `session.py:1009`
+  supplies `stub_mutator`, and `witness.py:78-85` names criterion 4's case.
+- **SA-0061@95e9b95 1** (criterion 4's witness already passes at base): the
+  premise holds. `baseline.py:48-54` walks only failures, `:97` fires only on a
+  change to `skip`, and the fixture drops `acceptance` and `mutate`
+  (`tests/test_session.py:810-815`). This is 210b0d4's blocker 3, class (c),
+  recurring: the cell ran at this base and reached `READY_FOR_REVIEW` with
+  `criteria` and `revert` blocking. **Disputed.**
+- **SA-0061 2** (no mutants, and criteria 1–3 pass wrong builds): holds.
+  `runner.py:299` defaults `acceptance` to `()`, and `witness.py:117-121` then
+  returns `skip`; the tier is `current_tier` (`session.py:952`). Criterion 3's
+  half is 210b0d4's blocker 2 (*New finds* 4).
+- **SA-0040@08aa1a4 1** (the existing `detail` fields are the free-text escape
+  hatch criterion 2 does not ban): holds. `events.py:107-111` calls
+  `PhaseStart.detail` "the one place in this vocabulary where prose
+  survives", `detail: str` also sits at `:86`, `:195`, `:220` and `:232`, and
+  the spec has no `acceptance:` block.
+- **SA-0040 2** (the diff is likely over the 600-line ceiling, and the plan
+  checkpoint will say so): the size half holds, since the cell's own commit
+  `5e3fdf3` is 683 changed lines against `08aa1a4`. The consequence did not
+  follow: the plan checkpoint (`artifacts.py:269-272`) did not refuse the task,
+  which went on to `MERGED`, and `size` is advisory at `standard`
+  (`size.py:4-5`). **Disputed.**
+- **SA-0040 3** (`budget_usd: 12` is below the closest rows' plan plus
+  IMPLEMENT): the cited figures match the ledger (SA-0019 $1.96 + $12.43,
+  SA-0025 $2.93 + $11.68). But the cell finished at $8.45 of $12 with a
+  37-turn peak. That is class (b)'s shape, new at this base. **Disputed.**
+- **SA-0054@f0fe0c8 1** (criterion 4's witness passes at base): the premise
+  holds. There is no `batch` subparser (`cli.py:73-105`), and `revert.py:127-128`
+  and `:303-306`, the ontology's `revert` line (always blocking),
+  `.saffron/policy.yaml:28` and `DESIGN.md:837` read as quoted. This is fdcbbad's blocker 2, class (c),
+  recurring: the cell reached `READY_FOR_REVIEW` at this base. **Disputed.**
+- **SA-0054 2** (no criterion requires the adapter to run PACKAGE): holds.
+  `_run_cell` packages at `cli.py:469-486`, the loop's runner returns a
+  `CellOutcome` (`batch.py:97`), and no criterion names PACKAGE. fdcbbad raised
+  it only as a concern.
+
+**Class (a) did not recur.** None of the four raises a missing-dependency
+blocker at its real base. The nearest is SA-0054's note 9: `depends_on:
+SA-0051` names a spec with no file at `f0fe0c8`, and the same note says the
+extraction itself is present. Each class-(a) blocker was an artifact of the
+version choice.
+
+### K under two readings
+
+Both readings use recall 18/34, which clears the bar of 17.
+
+**(i) The pre-registered literal rule, with the real-base reviews substituted
+for the four class-(a) controls.**
+- K = **0**: 0 of 9 real-base blockers, and 0 across the other six controls'
+  pre-registered reviews.
+- **PASS** (18 ≥ 17, 0 ≤ 2).
+- Disputed under this reading: 7. That is the four above, plus SA-0060 3,
+  SA-0027 1 and SA-0055 1, carried over from the pre-registered reviews.
+
+**(ii) The same, with classes (b) and (c) counted false because their cells'
+outcomes contradicted them.**
+- The five blockers are SA-0060 3, SA-0027 1, SA-0061 3, SA-0054 2 and
+  SA-0055 1, all from the pre-registered reviews.
+- SA-0061 and SA-0054 were re-reviewed, and both (c) blockers recur
+  (SA-0061@95e9b95 1, SA-0054@f0fe0c8 1). Each is counted once, from the
+  real-base review.
+- K = **5**. **FAIL** (5 > 2).
+- Not among the five, and disputed: SA-0040@08aa1a4 3 fits class (b)'s
+  definition, and SA-0040 2's consequence was contradicted by the outcome.
+  Counting them under (ii) gives K = 6 or 7, a FAIL either way. Under (i)
+  neither is false.
+
+The operator rules on (b) and (c).
+
+### Cost
+
+$8.23 across the four re-reviews (`total_cost_usd`: SA-0062 $1.95, SA-0061
+$2.10, SA-0040 $2.30, SA-0054 $1.89; 35–42 turns; no error records). This is
+outside the $71.38 above.
