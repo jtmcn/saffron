@@ -189,7 +189,7 @@ def test_a_merged_task_never_moves_again(ledger):
     assert _state(ledger, task_id) == "MERGED"
 
 
-# --- A head past what PACKAGE pushed (`docs/BACKLOG.md` item 97) ---
+# --- A head past what PACKAGE pushed (backlog item 97) ---
 
 _PUSHED = "a" * 40
 _FIXED = "b" * 40

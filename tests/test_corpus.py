@@ -856,7 +856,7 @@ def test_every_shipped_fixture_s_head_declares_a_tests_gate():
 def test_the_baseline_pass_s_published_aggregate_is_re_derivable():
     """The record's headline, re-derived from the runs beside it rather than
     read from the prose. A record whose number nobody can recompute is the
-    defect `docs/BACKLOG.md` item 91 was filed for, one level up."""
+    defect backlog item 91 was filed for, one level up."""
     fixtures = corpus.load_corpus(FIXTURES)
     runs = {
         f.spec_id: [

@@ -167,7 +167,7 @@ class Baseline:
     found already passing at `base_sha` for a criterion that does not
     declare `preserves` — what `criteria` would fail with `witness-green-at-base`
     on any attempt whose head passes it, known before any turn runs
-    (`docs/BACKLOG.md` item 23). Defaulted to `()`, not required: a log
+    (backlog item 23). Defaulted to `()`, not required: a log
     written before this field existed carries no such key, and `read_log`'s
     per-field construction already treats a missing key as the dataclass
     default rather than dropping the event."""

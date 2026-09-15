@@ -216,7 +216,7 @@ def parse_spec(text: str) -> Spec:
     # would fire on an honest one. The reasoning for going without is that a
     # `find` has to match exactly once in its file, so a very short one is
     # already unusable; that argument thins as the text gets longer, and
-    # `docs/BACKLOG.md` item 82 carries what to do if it starts biting.
+    # backlog item 82 carries what to do if it starts biting.
     claims = [(c.witness, c.claim) for c in spec.acceptance]
     for criterion in spec.acceptance:
         if criterion.mutant is None:

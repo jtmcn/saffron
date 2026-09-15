@@ -1,4 +1,4 @@
-"""Tests for the `witness` gate (§5.4.1, `docs/BACKLOG.md` item 69).
+"""Tests for the `witness` gate (§5.4.1, backlog item 69).
 
 This spec's own acceptance criteria deliberately declare no mutants — a gate
 whose own tests depend on the gate is a circle — so everything here drives
@@ -478,7 +478,7 @@ def test_a_blocking_witness_failure_is_an_ordinary_blocking_failure(tmp_path):
     nothing in the whole suite.
 
     So this guards the *shape* half and not the *reaches* half. The reaches
-    half is now true: `docs/BACKLOG.md` item 71 made `witness` advisory below
+    half is now true: backlog item 71 made `witness` advisory below
     `elevated`, which now lives in `_advisory` (`saffron/gates/suite.py`),
     so a failure blocks at `elevated` only — this file has no way to drive `_advisory` or
     `session._blocking`, so it cannot assert that itself. Said here rather

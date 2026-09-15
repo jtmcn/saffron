@@ -11,7 +11,7 @@ after merge — so a fixture's range is recovered rather than read off:
 Byte-identity is the acceptance test, not a heuristic. `tree_base` is
 recorded beside `base_sha` precisely for a stacked child, where the patch is
 relative to the previous task's head rather than to `base_sha`
-(`docs/BACKLOG.md` item 33: "`SA-0022` records `tree_base` beside `base_sha`
+(backlog item 33: "`SA-0022` records `tree_base` beside `base_sha`
 precisely so that read can be made correct"). The batch tree's own record was
 right on all eight shipped fixtures; reading `base_sha` instead of `tree_base`
 was this module's bug, not a gap in what got recorded. `recover_range`'s

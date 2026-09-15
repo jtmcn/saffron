@@ -222,7 +222,7 @@ def terminal_for_rate_limit(status: str | None) -> str | None:
 @contextlib.contextmanager
 def stub_mutator(_mutant: Mutant) -> Iterator[str | None]:
     """The mutator a cell run supplied before `SA-0062` — `witness.Mutated`'s
-    shape, with no tree behind it at all (`docs/BACKLOG.md` item 71,
+    shape, with no tree behind it at all (backlog item 71,
     `SA-0060`/`SA-0061`).
 
     It reads no path, writes no byte, and reports the one honest thing it can:
@@ -336,7 +336,7 @@ class CellOutcome:
     proposed_touches: list[str] = field(default_factory=list)
     scope_root_cause: str = ""
     # The implementer's own account of something it saw but was told not to
-    # touch (`docs/BACKLOG.md` items 71/75/80, SA-0058/SA-0061/SA-0062) —
+    # touch (backlog items 71/75/80, SA-0058/SA-0061/SA-0062) —
     # extracted and hashed the instant it was produced, never re-read from
     # `/work` (§5.3's own rule). Empty on every path that returns before the
     # notes turn runs, and on one that ran it but had nothing to say.
@@ -1625,7 +1625,7 @@ def _drive_cell(
         # implementer's own account of something it saw but was told not to
         # touch, taken at the cheapest moment there will ever be — right after
         # its last repair attempt, on its own session, before REVIEW forks a
-        # critic's (`docs/BACKLOG.md` items 71/75/80, SA-0058/SA-0061/
+        # critic's (backlog items 71/75/80, SA-0058/SA-0061/
         # SA-0062). Runs whatever `outcome` repair_loop handed back — READY_
         # FOR_REVIEW, EXHAUSTED or GATE_ERROR alike, since "implementation
         # just stopped" is the fact this is timed against, not which gate

@@ -90,7 +90,7 @@ _RULE = re.compile(r"^\*\*(\d+[a-z]?)\. ")
 _CITATION = re.compile(
     r"(?:`?(?P<doc>[A-Za-z._-]+\.md)`?(?:'s)?[ ]+)?§[ ]{0,2}(?P<num>\d+(?:\.\d+)*[a-z]?)"
 )
-# Plural and ranged forms are real: "Appendices I–L" (`docs/BACKLOG.md`),
+# Plural and ranged forms are real: "Appendices I–L" (`docs/backlog/`),
 # "Appendices F and G" (`DESIGN.md`). A range checks its endpoints, not its middle.
 _APPENDIX_CITATION = re.compile(
     r"Appendi(?:x|ces) ((?:[A-Z]\b(?:[ ]*(?:[–—-]|,|and)[ ]*)?)+)"

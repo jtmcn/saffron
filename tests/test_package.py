@@ -718,7 +718,7 @@ def test_an_unmoved_base_makes_reverification_provably_redundant():
     here. It no longer licenses `package()` to skip re-verification, though:
     the cell that ran the suite is the one thing never trusted with its own
     gate results (§2), so an unmoved base is re-verified exactly like a moved one
-    (`docs/BACKLOG.md` item 118). This return value now only shapes the note
+    (backlog item 118). This return value now only shapes the note
     `package()` writes when a re-run finds new failures."""
     assert not needs_reverification("a" * 40, "a" * 40)
 
@@ -2087,7 +2087,7 @@ def test_the_queue_line_carries_the_sustained_blocker_count(packageable):
     sustained count is 1, not 2. This asserts at `package.package`, not by
     constructing a `QueueLine` and checking the value it was handed: the
     defect this task exists to fix shipped green under exactly that shape of
-    test (`docs/BACKLOG.md` item 18)."""
+    test (backlog item 18)."""
     packageable.outcome.rebut_result = rebut.RebutResult(
         state="READY_FOR_REVIEW",
         why="1 blocker(s) confirmed after the rebuttal, 1 argued",
@@ -2132,7 +2132,7 @@ def test_the_queue_line_carries_the_unkept_fix_count(packageable):
     `sustained`. This asserts at `package.package`, not by constructing a
     `QueueLine` and checking the value it was handed: the defect this task
     exists to fix shipped green under exactly that shape of test
-    (`docs/BACKLOG.md` item 18)."""
+    (backlog item 18)."""
     packageable.outcome.rebut_result = rebut.RebutResult(
         state="READY_FOR_REVIEW",
         why="1 blocker(s) confirmed after the rebuttal, 1 argued "
@@ -2203,7 +2203,7 @@ def test_reverify_is_handed_the_policy_from_the_commit_it_verifies_against(
 
 
 def test_an_unmoved_base_still_reverifies_the_packaged_commit(monkeypatch, packageable):
-    """`docs/BACKLOG.md` item 118: an unmoved base used to skip
+    """backlog item 118: an unmoved base used to skip
     re-verification and publish the cell's own gate table — the one thing a
     cell is never trusted with (§2), since it is root on a writable rootfs and
     controls every tool its own gates would call. `packageable`'s remote never
@@ -2855,7 +2855,7 @@ def test_reverification_runs_the_same_suite_shape_the_session_ran(
     assert comparison.run.results
 
 
-# `push_unpackaged_work` (`SA-0069`, `docs/BACKLOG.md` item 45) — a cell that
+# `push_unpackaged_work` (`SA-0069`, backlog item 45) — a cell that
 # did not end `READY_FOR_REVIEW` never reaches `package()`, so a diff
 # `export_patch` wrote at teardown was, until now, read by nobody. Every test
 # below imports the new names locally: a module-scope import would make the

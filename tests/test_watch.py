@@ -62,7 +62,7 @@ def test_a_log_renders_as_the_lines_its_terminal_printed(tmp_path):
 
 
 def _two_tasks(spec_id: str) -> tuple[list, list]:
-    """One spec driven twice, in one log — `docs/BACKLOG.md` item 64's own
+    """One spec driven twice, in one log — backlog item 64's own
     fixture. `Ceilings` is the first event `run_task` writes for every task,
     so each task below opens with one, exactly as production does; nothing
     hand-typed stands in for it."""

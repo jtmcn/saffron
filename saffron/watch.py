@@ -16,7 +16,7 @@ of a task having finished (a follower here runs until interrupted, the way
 killed cell never reaches it), and no rendering of a night's worth of tasks
 (that is the batch index, `saffron/report/**`, forbidden to this spec).
 
-`docs/BACKLOG.md` item 64 named a second way one task's log reads as
+backlog item 64 named a second way one task's log reads as
 another's: a spec driven twice writes both tasks into one `events.jsonl`,
 in order, with nothing between them, so the default view used to open on
 whichever task's lines happened to be oldest — a rejected plan from last
@@ -196,7 +196,7 @@ def follow(
     from offset `0` and so is the one whole-file read this ever does — is cut
     to `_since_newest_task`: a spec driven twice writes both tasks into one
     file, and an operator diagnosing the newer one must not open on the
-    older one's outcome (`docs/BACKLOG.md` item 64). Only that first read is
+    older one's outcome (backlog item 64). Only that first read is
     cut: a `Ceilings` a spec driven again writes while this follower is
     already running arrives on a later poll like anything else appended
     since the poll before it, and following continues past it rather than

@@ -1,5 +1,5 @@
 """Tests for wiring `witness` into the host-invoked runner (§5.4.1,
-`docs/BACKLOG.md` item 69).
+backlog item 69).
 
 `SA-0056` built the mutant/witness data model and `SA-0057` built
 `saffron/gates/core/witness.py`'s `witness_gate`, but nothing invoked it. This

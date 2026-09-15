@@ -1,6 +1,6 @@
 """Score REVIEW's lenses against a diff whose defects are already written down.
 
-`docs/BACKLOG.md` item 79: REVIEW filed 0 blockers on PR #154 and 0 findings on
+backlog item 79: REVIEW filed 0 blockers on PR #154 and 0 findings on
 PR #160, and nobody knows what it would say about a diff with a known defect in
 it, because no such diff was kept. Every lens change so far has been argued,
 which `CLAUDE.md`'s own rule — a measured fact beats a reasoned one — forbids.

@@ -172,8 +172,10 @@ Pre-release and single-operator. `saffron cell` and `saffron queue` are v0.5; `s
 batch` is v0.6; `replay` is v0 and v1 deletes it. The `ratify` and `gc` subcommands are
 designed but not built. Autonomous merge is a permanent non-goal, at any version.
 
-[docs/BACKLOG.md](docs/BACKLOG.md) is what v0.5 left undone, ordered by what would hurt
-most on the first unattended night.
+[docs/backlog/](docs/backlog/) is what v0.5 left undone, one record per item; `make backlog`
+lists them and `uv run python -m records show 118` prints one. `docs/backlog/PRIORITY.md` is
+the order to work in. Read it before picking up work; `docs/evidence/` holds the primary
+records.
 
 ## Documentation
 

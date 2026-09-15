@@ -68,7 +68,7 @@ acceptance:
 
 ## Context
 
-`docs/BACKLOG.md` item **118**, from threat-modelling Saffron on 2026-09-13.
+backlog item **118**, from threat-modelling Saffron on 2026-09-13.
 `SA-0086` moves the gate verdict of record out of the implementer's
 container. This spec does the same for the critic.
 

@@ -825,7 +825,7 @@ def _rebut_body(rebut_result):
 
 
 def test_a_rebuttal_turn_that_recorded_nothing_is_not_rendered_as_no_answer():
-    """SA-0040/PR#93 (`docs/BACKLOG.md` item 42): a trailing comma destroyed a
+    """SA-0040/PR#93 (backlog item 42): a trailing comma destroyed a
     real argument, and the table rendered the same `—` it renders for a
     blocker nobody answered. The critic's `confirmed: the implementer offered
     no argument` then read as agreed-with rather than as untested."""

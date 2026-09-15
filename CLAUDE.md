@@ -20,8 +20,9 @@ written into its appendix and never into the table (Appendix P).
 > instruction surface for agents running in a cell here (§8). Budget: ~200 lines. If it grows
 > past that, promote rules to gates rather than adding prose.
 
-`docs/BACKLOG.md` is what v0.5 left undone, ordered by what would hurt most on the first
-unattended night. Read it before picking up work; `docs/evidence/` holds the primary records.
+`docs/backlog/` is what v0.5 left undone, one record per item; `make backlog` lists them and
+`uv run python -m records show 118` prints one. `docs/backlog/PRIORITY.md` is the order to
+work in. Read it before picking up work; `docs/evidence/` holds the primary records.
 
 ## Commands
 

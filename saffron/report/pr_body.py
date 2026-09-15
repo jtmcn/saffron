@@ -89,7 +89,7 @@ def render_pr_body(
     a green pull request, and unmarked it would read like one (§5.6).
 
     `notes` is the implementer's own extraction-turn text, if any (SA-0063,
-    `docs/BACKLOG.md` items 71/75) — untrusted cell-authored prose, rendered
+    backlog items 71/75) — untrusted cell-authored prose, rendered
     last and clipped like every other such string here. Empty for every task
     that produced none, which is every task before this channel existed."""
     risk = effective_risk if effective_risk is not None else spec.risk
@@ -211,7 +211,7 @@ def _disagreements(
     fixed sentence below, and it gets it for every blocker, because there is
     no per-blocker answer to key on at all. That sentence never quotes
     `rebuttal.error` itself: it is untrusted, hostile-shaped model output
-    (`docs/BACKLOG.md` item 42), and this is the one place it would otherwise
+    (backlog item 42), and this is the one place it would otherwise
     reach a reader beside a critic's `confirmed`."""
     anchored = anchored_blockers(reviews)
     if not anchored:

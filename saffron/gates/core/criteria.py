@@ -1,6 +1,6 @@
 """The `criteria` gate: did each criterion's witness run, and turn green? (§5.4)
 
-Core, and it executes nothing — the route `census` took, and `docs/BACKLOG.md`'s
+Core, and it executes nothing — the route `census` took, and `docs/backlog/`'s
 reasoning applies unchanged. Both suites already ran the repo's tests, at
 `base_sha` for the baseline and at head on every attempt, so what a witness did
 on each side is two lists the host is already holding. Fetching it would need a
@@ -114,7 +114,7 @@ def witnesses_green_at_base(
 ) -> list[str]:
     """Witnesses `criteria` would fail with `witness-green-at-base` on any
     attempt whose head passes them — named here, from the baseline
-    alone, before any agent turn spends money learning it (`docs/BACKLOG.md`
+    alone, before any agent turn spends money learning it (backlog
     item 23). `_judge`'s own last branch, built on `_side` and `_green`,
     exposed once so `session.py` does not restate the rule: two copies of
     one rule is how they drift.

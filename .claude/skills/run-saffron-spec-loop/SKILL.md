@@ -181,10 +181,12 @@ the push run.
 
 ## 5. File what the reviews left
 
-Findings kept in step 2 become items in `docs/BACKLOG.md`, in its format and
-placed in its tier index, and each item a spec came from gets its `Status` line
-updated with the PR and the stack. They go in a standalone PR off the default
-branch unless the operator says otherwise.
+Findings kept in step 2 become a new `docs/backlog/NNN-slug.md` record each — the
+frontmatter shape of any open item, next id = highest existing + 1 — placed in
+`PRIORITY.md`'s tier index, with `uv run pytest tests/records -q` green before
+committing. Each item a spec came from gets its `## Record` section's `Status`
+line updated with the PR and the stack. They go in a standalone PR off the
+default branch unless the operator says otherwise.
 
 Every finding you verified that the in-cell critic did not raise, and that was
 fixed or kept, is a change requested on the operator's behalf — a rejection:

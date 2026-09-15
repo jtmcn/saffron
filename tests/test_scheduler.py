@@ -514,7 +514,7 @@ def test_the_stacking_parents_own_pull_request_is_not_an_overlap(tmp_path, ledge
     the parent's open pull request is what stacking is for. Left refused,
     this check shadowed the dependency admission entirely: a parent at
     `READY_FOR_REVIEW` has an open pull request by definition, and almost
-    every spec in this repository touches `docs/BACKLOG.md` (`SA-0026`)."""
+    every spec in this repository touches `docs/backlog/` (`SA-0026`)."""
     directory = _spec_dir(tmp_path)
     _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
     _write_spec(directory, "b.md", id="TE-0", touches=["b.py"])
@@ -1050,7 +1050,7 @@ def _spec_at(tmp_path, name, **kwargs):
     """A real `Spec`, parsed the way `build_queue` parses one — `_write_spec`
     writes the frontmatter, `load_spec` reads it back — so `retirement_refusal`
     is tested against the same object `_refuse` actually receives, not a
-    `SimpleNamespace` standing in for one (docs/BACKLOG.md item 21's own
+    `SimpleNamespace` standing in for one (backlog item 21's own
     lesson)."""
     directory = _spec_dir(tmp_path)
     _write_spec(directory, name, **kwargs)
@@ -1085,7 +1085,7 @@ def test_a_forbidden_glob_reaches_a_nested_marker_too(tmp_path):
         tmp_path, "a.md", id="TE-9", touches=["src/**"], forbidden=["docs/**"]
     )
 
-    reason = retirement_refusal(spec, [("docs/BACKLOG.md", "TE-9")])
+    reason = retirement_refusal(spec, [("docs/README.md", "TE-9")])
 
     assert reason is not None
     assert "forbidden" in reason
@@ -1261,7 +1261,7 @@ def test_a_marker_naming_a_retired_spec_is_not_dangling(tmp_path, ledger):
 def test_a_touches_entry_matching_a_protected_literal_path_is_refused(tmp_path, ledger):
     """`SA-0021`'s own shape: `DESIGN.md` declared in `touches` is exactly
     the collision that cost a cell, a turn and $0.82 before it reached
-    `validate_plan` (docs/BACKLOG.md item 28)."""
+    `validate_plan` (backlog item 28)."""
     directory = _spec_dir(tmp_path)
     _write_spec(directory, "a.md", id="TE-1", touches=["DESIGN.md", "saffron/x.py"])
 
@@ -1300,7 +1300,7 @@ def test_protected_matching_uses_the_glob_matcher_not_a_string_compare(
 
 def test_a_glob_protected_entry_is_not_decided_here(tmp_path, ledger):
     """`.saffron/**` is this repo's own fourth `protected` entry, and the one
-    that is not literal (docs/BACKLOG.md item 28, `SA-0023`'s own criteria).
+    that is not literal (backlog item 28, `SA-0023`'s own criteria).
     Deciding whether it can ever intersect a `touches` glob needs the file
     list at `base_sha`, which the scan does not have — `protected_touch_
     refusal`'s own `ponytail:` — so this is left to `validate_plan`'s

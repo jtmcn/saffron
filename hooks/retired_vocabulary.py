@@ -3,7 +3,7 @@
 
 `pygrep` (the previous engine here) matches one line at a time, and every prose
 file this hook covers is hard-wrapped, so a retired two-word term that happens
-to straddle a line break was invisible to it (docs/BACKLOG.md item 57). This
+to straddle a line break was invisible to it (backlog item 57). This
 script reads each file whole, joins the whitespace a line wrap introduced back
 into the shape the pattern already recognises on one line, and then runs the
 pattern unchanged.

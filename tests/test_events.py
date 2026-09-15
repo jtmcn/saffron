@@ -480,7 +480,7 @@ def test_a_gate_result_says_which_tree_it_ran_against(tmp_path):
 
 
 def test_a_baseline_naming_a_green_witness_renders_it(tmp_path):
-    """SA-0085, `docs/BACKLOG.md` item 23. The naming travels on the
+    """SA-0085, backlog item 23. The naming travels on the
     baseline's own event and is rendered by `describe`, so it reaches
     `events.jsonl` and `saffron watch`, not only the attended terminal that
     watched it live.
