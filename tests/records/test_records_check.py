@@ -242,6 +242,20 @@ def test_an_id_named_under_another_tier_in_prose_is_fine(broken):
     )
 
 
+def test_an_id_named_only_after_the_tier_index_is_not_credited_to_a_stale_tier(broken):
+    # Item 3 moves out of Tier 1's line into a footer heading; the tier scope
+    # must end there, or the stale `tier` value would still credit it.
+    _rewrite(
+        broken / "docs" / "backlog" / "PRIORITY.md",
+        "~~**1**~~, **3**.",
+        "~~**1**~~.\n\n### Notes\n\n**3** is discussed here.",
+    )
+    [v] = check_priority(
+        load(BACKLOG, broken), broken / "docs" / "backlog" / "PRIORITY.md"
+    )
+    assert v.field == "tier" and "3" in v.message
+
+
 def test_no_live_surface_names_the_old_path(broken):
     (broken / "saffron" / "example.py").write_text("# see docs/BACKLOG.md item 1\n")
     [v] = check_no_old_path(broken)

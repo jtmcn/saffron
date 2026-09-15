@@ -129,21 +129,27 @@ def cited_items(text: str) -> set[int]:
     return {int(n) for m in _ITEMS.finditer(text) for n in _NUM.findall(m.group(1))}
 
 
+def _walk(root: Path, surfaces: tuple[str, ...], skip: tuple[Path, ...]) -> list[Path]:
+    """Every file under `surfaces`, in `_SUFFIXES`, outside any `skip` prefix."""
+    out: list[Path] = []
+    for name in surfaces:
+        path = root / name
+        candidates = (
+            [path] if path.is_file() else path.rglob("*") if path.is_dir() else []
+        )
+        out.extend(
+            p
+            for p in candidates
+            if p.is_file()
+            and p.suffix in _SUFFIXES
+            and not any(s in p.parents for s in skip)
+        )
+    return sorted(out)
+
+
 def _citing_files(root: Path) -> list[Path]:
     # tests/records/ quotes citations as data, not promises — never scanned.
-    skip = root / "tests" / "records"
-    out: list[Path] = []
-    for name in CITING:
-        path = root / name
-        if path.is_file():
-            out.append(path)
-        elif path.is_dir():
-            out.extend(
-                p
-                for p in path.rglob("*")
-                if p.is_file() and p.suffix in _SUFFIXES and skip not in p.parents
-            )
-    return sorted(out)
+    return _walk(root, CITING, (root / "tests" / "records",))
 
 
 def check_item_citations(root: Path, ids: set[int]) -> list[Violation]:
@@ -183,6 +189,7 @@ LIVE_SURFACES = (
 )
 
 _TIER_HEADING = re.compile(r"^### Tier (\d)\b")
+_OTHER_HEADING = re.compile(r"^#{2,3} ")
 _STRUCK = re.compile(r"~~\*\*(\d+)\*\*~~")
 _BOLD = re.compile(r"(?<!~)\*\*(\d+)\*\*(?!~)")
 
@@ -241,6 +248,8 @@ def check_priority(records: list[Record], priority_md: Path) -> list[Violation]:
         if heading := _TIER_HEADING.match(line):
             tier = int(heading.group(1))
             continue
+        if _OTHER_HEADING.match(line) or line.strip() == "---":
+            tier = None  # scope ends; ids are still checked, just not credited
         for n in map(int, _STRUCK.findall(line)):
             if n not in by_id:
                 out.append(
@@ -283,26 +292,12 @@ def check_priority(records: list[Record], priority_md: Path) -> list[Violation]:
 
 def check_no_old_path(root: Path) -> list[Violation]:
     # tests/records/ quotes the old path as data; .saffron/specs/done/ is dated history.
-    skip = root / "tests" / "records"
-    out: list[Violation] = []
-    for name in LIVE_SURFACES:
-        path = root / name
-        files = (
-            [path]
-            if path.is_file()
-            else [p for p in path.rglob("*") if p.is_file()]
-            if path.is_dir()
-            else []
-        )
-        for file in files:
-            if "specs" in file.parts and "done" in file.parts:
-                continue
-            if skip in file.parents:
-                continue
-            if file.suffix in _SUFFIXES and OLD_PATH in file.read_text():
-                out.append(
-                    Violation(file, "path", f"names {OLD_PATH}, which no longer exists")
-                )
+    skip = (root / "tests" / "records", root / ".saffron" / "specs" / "done")
+    out = [
+        Violation(file, "path", f"names {OLD_PATH}, which no longer exists")
+        for file in _walk(root, LIVE_SURFACES, skip)
+        if OLD_PATH in file.read_text()
+    ]
     return sorted(out, key=lambda v: v.path)
 
 
