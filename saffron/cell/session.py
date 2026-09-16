@@ -1949,10 +1949,8 @@ def _drive_cell(
         # Same reason: REBUT reads this to attach a verdict to the row REVIEW
         # wrote, and the branch that fills it is the branch above.
         recorded: dict[int, int] = {}
-        # Same reason again: REBUT hands this to the verdict session as the
-        # tree its blockers' line numbers were filed against — the exact
-        # string `run_review` was handed, never re-exported — and the branch
-        # that fills it is the branch above (CONTEXT.md §5, backlog item 118).
+        # Bound here, not in the branch below: REVIEW fills it and REBUT reads
+        # it, and neither should depend on the other's control flow.
         reviewed_diff = ""
 
         if outcome == "READY_FOR_REVIEW":
@@ -2047,9 +2045,8 @@ def _drive_cell(
                         # implementer's — the diff it judges is the patch that
                         # ships, applied by a git the implementer never
                         # touched (CONTEXT.md §5, backlog item 118). Bound to
-                        # a name, not re-exported: REBUT hands this same
-                        # string to its verdict sessions below, as the tree
-                        # its blockers' line numbers were filed against.
+                        # a name so REBUT is handed this one, not a second
+                        # export of it (`SA-0091`).
                         reviewed_diff = worktree.export_patch(
                             critic_container, spec.tree_base
                         )
@@ -2203,9 +2200,7 @@ def _drive_cell(
                         ),
                         agent=agent,
                         spec_id=spec.spec_id,
-                        # The exact diff REVIEW's lenses were shown, never
-                        # re-exported — the tree the blockers' line numbers
-                        # were filed against (CONTEXT.md §5, backlog item 118).
+                        # The exact diff REVIEW's lenses were shown.
                         reviewed_diff=reviewed_diff,
                         emit=emit,
                         last_cost_usd=last_cost,

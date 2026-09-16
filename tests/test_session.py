@@ -3668,13 +3668,23 @@ def test_the_verdict_prompt_carries_the_diff_the_lenses_were_shown(
         "--- a/src/y.py\n+++ b/src/y.py\n@@ -1 +1 @@\n-old\n+the rebuttal's own fix\n"
     )
 
+    implementer_diff = (
+        "diff --git a/src/z.py b/src/z.py\n"
+        "--- a/src/z.py\n+++ b/src/z.py\n@@ -1 +1 @@\n-old\n+the implementer's git\n"
+    )
+
     def _export_patch(container, sha):
         cell.export_calls.append((container, sha))
-        # plan, implement, 3 lenses, rebuttal, extraction = 7 turns by the
-        # time REBUT asks for a critic cell; every earlier export is REVIEW's
-        # (the same threshold `test_rebut_verdicts_read_a_tree_rebuilt_from_
-        # the_post_rebuttal_patch` above uses).
-        return after_rebuttal if len(cell.turns) > 5 else _ANCHORING_DIFF
+        # plan, implement, 3 lenses, rebuttal, extraction = 7 turns by the time
+        # REBUT asks for a critic cell; every earlier export is REVIEW's (the
+        # same threshold `test_rebut_verdicts_read_a_tree_rebuilt_from_the_post
+        # _rebuttal_patch` above uses).
+        if len(cell.turns) > 5:
+            return after_rebuttal
+        # Keyed on the container too, not the turn alone: a second export taken
+        # from the implementer's own `.git` is item 118's defect, and a stub
+        # that answers the same bytes to every caller cannot see it.
+        return _ANCHORING_DIFF if container == _CRITIC_CONTAINER else implementer_diff
 
     monkeypatch.setattr("saffron.cell.worktree.export_patch", _export_patch)
 

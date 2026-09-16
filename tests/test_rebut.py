@@ -290,6 +290,29 @@ def test_the_diff_a_verdict_session_reads_comes_from_the_critic_container():
     assert "a diff read from critic-cell" in record[2]["options"]["system_prompt"]
 
 
+def test_run_rebut_hands_the_verdict_session_the_diff_its_lens_reviewed():
+    """Criterion 1 through `run_rebut`, which is what the spec's Notes ask for:
+    the prompt-level witness calls `verdict_prompt` directly, so `run_rebut`'s
+    own threading is unwitnessed here — dropping it, or swapping the two
+    kwargs at its call site, left this whole file green."""
+    record: list[dict] = []
+    result = _run(
+        "Fixed.",
+        _rebuttals(_fixed()),
+        _verdicts(_verdict()),
+        record=record,
+        reviewed_diff="the diff the lens reviewed",
+        diff=lambda _critic: "the diff after the rebuttal",
+    )
+    assert result.state == "READY_FOR_REVIEW"
+    prompt = record[2]["options"]["system_prompt"]
+    assert (
+        "## The diff your findings were filed against\n\nthe diff the lens reviewed"
+        in prompt
+    )
+    assert "## The diff, after the rebuttal\n\nthe diff after the rebuttal" in prompt
+
+
 def test_a_post_rebuttal_patch_that_will_not_apply_ends_exhausted():
     """§5.5, unchanged at REBUT: a bad patch is the agent's problem, produced
     as a `RebutResult` — the rebuttal turn and gate re-run are already paid
@@ -446,10 +469,18 @@ def test_the_verdict_prompt_carries_the_diff_its_blockers_were_filed_against():
     assert f"## The diff, after the rebuttal\n\n{after_rebuttal}" in prompt
     # Named by heading, not by position — the sentence must still be true if
     # the blocks are ever reordered for prompt caching (out of scope here).
+    # Wrap-insensitive: the template is prose and rewraps, but which heading
+    # the numbers belong to is the whole claim, so it stays pinned literally.
     assert (
         'from the tree under the heading "The diff your findings were filed '
         'against", not the tree under "The diff, after the rebuttal"'
-    ) in prompt
+    ) in " ".join(prompt.split())
+    # The other half of the same fix: "What to emit" said "the diff below" with
+    # two diffs below it. Reverting that clause left the whole suite green.
+    assert (
+        'the diff under "The diff, after the rebuttal" below is the change as '
+        "it now stands"
+    ) in " ".join(prompt.split())
 
 
 def test_the_verdict_prompt_carries_the_repo_s_claude_md():

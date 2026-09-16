@@ -466,8 +466,7 @@ def run_rebut(
     spec_id: str,
     # Required, not defaulted: a default would let a caller keep today's
     # behaviour — one diff, the post-rebuttal one — without noticing it had
-    # not threaded REVIEW's own diff through. The exact string `run_review`
-    # was handed, never re-exported (CONTEXT.md §5, backlog item 118).
+    # not threaded REVIEW's own diff through.
     reviewed_diff: str,
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
     last_cost_usd: float = 0.0,
