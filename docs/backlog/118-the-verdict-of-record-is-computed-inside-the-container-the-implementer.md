@@ -6,10 +6,10 @@ tier: 1
 filed: 2026-09-13
 by_hand: true
 specs: [SA-0086, SA-0087, SA-0088, SA-0089]
-prs: [255]
+prs: [255, 274]
 commits: [4ba8bdf]
 cites: [§5.4, §5.5, §5.7]
-related: [2, 40, 89, 97, 98, 102, 103, 119, 120]
+related: [2, 40, 89, 97, 98, 102, 103, 119, 120, 132, 133, 134, 135, 136]
 ---
 
 ## Problem
@@ -126,3 +126,18 @@ criterion's witness must anchor a finding outside every hunk and see
 `82258f0`, is discarded, and the next cell starts from the base.
 `DESIGN.md` §5.5 and §3.3 carve the binary stub out by hand in the same pull
 request. The budget rises to $20, because run 2 ran dry in REBUT (item 120).
+
+**2026-09-15, later:** `SA-0087`'s third cell reached `READY_FOR_REVIEW` on its
+first gate attempt — PR #274, $9.77 of $20, no repair round and no REBUT. The
+`type: feature` retype in #271 is what let it finish: the diff came to 515
+changed lines, and the `bug` ceiling `size` blocks on at `elevated` is 300.
+
+The review found six blockers the three lenses did not. One was a free way past
+the critic: `_apply_and_commit_patch` staged with `git add -A`, which re-runs
+the clean filters the patch's own `.gitattributes` installs, so a
+`working-tree-encoding` attribute leaves `git apply` at 0 and `git add` at 128 —
+`CellRuntimeError`, `ORPHANED`, exit 2, charged to nobody, no lens run, and
+re-queued. `git apply --index` replaces it. The other five were witnesses that
+could not fail. Items **132**–**136** are what the review left; the branch is
+644 changed lines against the `feature` ceiling of 600, accepted by the operator
+under item **40**.
