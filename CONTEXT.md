@@ -84,8 +84,9 @@ holds the specs, the policy, the cell image, and the repo's own gates.
 _Avoid_: "the project", "the codebase", "the client repo".
 
 **Agent**: Any model session inside a cell, when the specific role doesn't matter.
-The ontology's `prov:Agent` is wider — it includes the operator and their delegates
-(`DESIGN.md` §4.6).
+The ontology's `prov:Agent` is wider — it includes the operator, their delegates,
+and every gate, which is a `prov:SoftwareAgent` there because it asserts
+(`ontology/factory.ttl`, `DESIGN.md` §4.6).
 _Avoid_: "the AI", "the bot", "the LLM". "Model" means a model identifier.
 
 **Delegate**: A model session the operator starts on the host, outside any cell, to
@@ -220,9 +221,10 @@ _Avoid_: conflating with `forbidden`, which is enforced.
 
 **Risk tier**: `standard` or `elevated`. Set on the spec, or raised automatically
 when the diff touches a path in the repo's `elevate_on`. Elevated makes `size`
-blocking and marks the queue entry; it adds no lens, because every declared
-lens runs at every tier (`DESIGN.md` §5.5.1). It does **not** make `coverage`
-blocking — `coverage` is advisory at every tier (`DESIGN.md` §5.4).
+and `witness` blocking — the only two gates a tier moves (`DESIGN.md` §5.4.1) —
+and marks the queue entry; it adds no lens, because every declared lens runs at
+every tier (`DESIGN.md` §5.5.1). It does **not** make `coverage` blocking —
+`coverage` is advisory at every tier (`DESIGN.md` §5.4).
 _Avoid_: "priority" (a separate field), "severity" (that is a finding property),
 "critical", "high-risk".
 
@@ -382,7 +384,9 @@ semantics, contract & schema, test adequacy. Lenses are disjoint by construction
 which is why any single blocker routes to REBUT and why there is no vote.
 _Avoid_: "reviewer", "pass", "check", "critic #2".
 
-**Finding**: Anything a critic reports, pointing at a specific changed line.
+**Finding**: Anything a critic reports, pointing at one file and line. Whether
+that line is one the change reaches is **anchored** below, a separate property
+on the row: an unanchored finding is still a finding.
 _Avoid_: "issue", "comment", "bug", "problem".
 
 **Anchored**: A finding that either falls inside a diff hunk, or cites a line
