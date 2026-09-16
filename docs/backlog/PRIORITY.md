@@ -37,7 +37,7 @@ already names), **93**, **94**, ~~**109**~~ (filed 2026-09-12; it
 leaks a mutant wherever 80 stores one), **114** (109's other path, to the critic),
 **115** (a path hidden from `scope` by committed content), **80** (~~**83**~~, ~~**85**~~, ~~**84**~~,
 ~~**82**~~ and ~~**81**~~, pulled up from tier 3 as why 69's gate could not be
-declared against safely, are done — 2026-09-08), then **97**, ~~**102**~~, ~~**112**~~, **119**, **120** and **118**. Honesty second:
+declared against safely, are done — 2026-09-08), then **97**, ~~**102**~~, ~~**112**~~, **119**, **120**, **118** and **131**. Honesty second:
 ~~**73**~~, ~~**70**~~, ~~**45**~~, **51** (with **49**/**50**, which its fix closes),
 ~~**47**~~, **46** (with ~~**95**~~, which compounds it), **40**, ~~**26**~~,
 ~~**7**~~, and ~~**78**~~.
@@ -97,7 +97,7 @@ listed too.
 Operator visibility parts 2 and 3 — `SA-0032`–`SA-0039`, with the plan's Task 6
 rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
 **38**), plus **43**, **48**, **52**, **60**, **66**, **67**, ~~**72**~~, **98**, **103**,
-~~**104**~~, **113**.
+~~**104**~~, **113**, **135**.
 
 **72 is done** (2026-09-07, by hand), taken ahead of Track A by operator
 decision because it was the one item whose defect was a guard that could not
@@ -107,7 +107,7 @@ fire. Its number stays listed because item numbers are cited from `saffron/`.
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**,
-~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, ~~**110**~~, ~~**111**~~, **116**, **121**, **122**, **123**, **124**, **125**, **130**.
+~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, ~~**110**~~, ~~**111**~~, **116**, **121**, **122**, **123**, **124**, **125**, **130**, **132**, **133**, **134**.
 (**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived, and **69** is ranked there too.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
 is the same defect as filing one nowhere at all. **94** was filed here and moved
@@ -139,6 +139,9 @@ stack — **114**, **115** and **117** to tier 1, **116** to tier 3.
 **119**–**122** were filed open the same day from the loop's second run —
 **119** and **120** to tier 1, **121** and **122** to tier 3. **123**–**125**
 were filed open the same day from the spec review's backtest, all to tier 3.
-**130**, how to measure it again, was filed open on 2026-09-15, to tier 3.)
+**130**, how to measure it again, was filed open on 2026-09-15, to tier 3.
+**131**–**135** were filed open on 2026-09-15 from the spec loop's review of
+`SA-0087` (#274) — **131** to tier 1 beside 118, **135** to tier 2, and
+**132**–**134** to tier 3.)
 
 ---

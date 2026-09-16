@@ -338,3 +338,55 @@ judged by a mutant that cannot be declared safely. Four of the six have landed;
 78's `DESIGN.md` sentence and 80's stripping are open. That is not an argument
 against promotion — it is the cost of it, and it belongs in the reading rather
 than in a footnote.
+
+## 2026-09-15 — `SA-0087` (#274)
+
+Three lenses raised two concerns between them, both adequacy, both about a
+witness that cannot fail; the independent review found six more. The two the
+critic did raise are not repeated here.
+
+- `git add -A` in the critic cell re-ran the clean filters the patch's own
+  `.gitattributes` installs, so the agent could end its own task as
+  infrastructure — `ORPHANED`, exit 2, charged to nobody, no lens run, and
+  re-queued. Measured: a `working-tree-encoding=UTF-16` attribute committed
+  after the file it names leaves `git apply` at 0 and `git add` at 128.
+  **Bucket 3** — an agent-controlled input that reaches an uncharged end; no
+  gate reads which exception a control path raises. **Open.**
+- Four more witnesses passed under mutants that break what they claim: the
+  teardown one was satisfied by `critic_cell`'s own pre-clean, which removes the
+  same three names before anything is created; the creation one asserted a
+  container *name*, so deleting `prepare_worktree` entirely survived; the commit
+  had no test at all; and the new commit-failure classification had none either.
+  **Bucket 1** — `witness`, had the spec declared those mutants. **Open:** item
+  80 is why a spec author still cannot declare one safely.
+- The critic cell's `git apply` and `git commit` bypass `worktree._git`, so none
+  of the pins items 102, 103 and 110 bought reach them.
+  **Bucket 1** — a structure rule refusing a raw `runtime.exec_` git call
+  outside `worktree.py`. **Open:** item 131.
+- `cell_up`'s docstring still said a second caller cannot get a *nearly*
+  isolated cell, with `critic_cell` — that second caller — directly below it.
+  **Bucket 3** — a comment's claim checked against the code it describes, the
+  same line as `SA-0078`'s first. **Open.**
+- The `MAX_ARG_STRLEN` comment named "this same image" for a figure measured
+  against `saffron/cell-base:python`, and the `ponytail:` marker sat mid-sentence
+  where every declaring marker in `saffron/` starts its own line.
+  **Bucket 3** for the measurement's subject; **Bucket 1** for the marker, whose
+  placement is mechanically checkable. **Open.**
+- `EXHAUSTED` gained a third way in — the exported patch did not apply — that
+  neither `CONTEXT.md` §6 nor `DESIGN.md` §3.3 describes, while `GATE_ERROR`'s
+  arrow was widened for the critic cell in the same revision.
+  **Bucket 1** — the vocabulary test, which already reads the closed sets.
+  **Open:** item 132.
+- Three live sentences say the lenses still run in the implementer's cell, each
+  scoped to all of `SA-0087`–`SA-0089`, so no single spec's `scope` gate catches
+  them going false; and `session.py` now carries three copies of the teardown
+  closure and two of the leak-report loop `cell_down` records the cost of
+  paraphrasing.
+  **Bucket 1** — a structure rule for the duplication; the sentences are
+  **Bucket 3**. **Open:** items 133 and 134.
+- The critic cell shares its network with the implementer's container, which is
+  not torn down until after REVIEW, so the rootfs guarantee is established and
+  the network one is not.
+  **No bucket** — it names a probe that does not exist. **Open:** item 135,
+  behind item 127.
+
