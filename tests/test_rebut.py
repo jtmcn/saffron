@@ -261,7 +261,6 @@ def test_the_verdict_sessions_never_run_in_the_rebuttals_container():
         _verdicts(_verdict()),
         record=record,
         critic_calls=critic_calls,
-        critic_container_name="critic-cell",
     )
     assert result.state == "READY_FOR_REVIEW"
     assert critic_calls == [True]  # built once, after the rebuttal and re-run
@@ -284,7 +283,6 @@ def test_the_diff_a_verdict_session_reads_comes_from_the_critic_container():
         _verdicts(_verdict()),
         record=record,
         diff=lambda critic: f"a diff read from {critic}",
-        critic_container_name="critic-cell",
     )
     assert result.state == "READY_FOR_REVIEW"
     assert "a diff read from critic-cell" in record[2]["options"]["system_prompt"]

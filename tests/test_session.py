@@ -3421,6 +3421,9 @@ def test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch(
         if c == _CRITIC_CONTAINER and argv == ("git", "apply", "--index")
     ]
     assert applies == [_ANCHORING_DIFF, grown]
+    # Both exports came from the critic cell, never the implementer's `.git`:
+    # membership alone passes on REVIEW's own (item 118's omission).
+    assert [c for c, _ in cell.export_calls].count(_CRITIC_CONTAINER) == 2
     # Both critic cell instances — REVIEW's and REBUT's — were torn down.
     assert cell.removed.count(("container", _CRITIC_CONTAINER)) == 4
 

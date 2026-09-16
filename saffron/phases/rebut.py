@@ -445,10 +445,10 @@ def run_rebut(
     head_moved: Callable[[], bool],
     rerun_gates: Callable[[], str | None],
     # Zero-argument and called at most once, lazily — after `rerun_gates`
-    # answers — so the two early returns below never pay for a container a
+    # answers — so the two early returns below never pay for a critic cell a
     # plain argument would have made the caller build regardless.
     critic_container: Callable[[], str],
-    # Takes the critic container `critic_container()` just produced: the
+    # Takes the container `critic_container()` just produced: the
     # diff a verdict session is shown must come from that tree, never the
     # implementer's own (CONTEXT.md §5, backlog item 118).
     diff: Callable[[str], str],
@@ -460,7 +460,7 @@ def run_rebut(
     last_cost_usd: float = 0.0,
 ) -> RebutResult:
     """One rebuttal in the implementer's own container, the gate re-run there
-    too, then one verdict session per lens in a fresh critic container the
+    too, then one verdict session per lens in a fresh critic cell the
     rebutting implementer never ran in (CONTEXT.md §5, backlog item 118).
 
     `rerun_gates` returns a terminal state when the re-run is not green and
@@ -523,9 +523,8 @@ def run_rebut(
         return result
 
     # Local, not module-scope: `session.py` is REBUT's only caller and the
-    # one place a critic cell is built, and it already imports this module —
-    # a module-scope import here would cycle, and would also error a
-    # reverted collection rather than let `revert` read it as skip.
+    # one place a critic cell is built, and it already imports this module,
+    # so a module-scope import here would cycle.
     from saffron.cell.session import CriticPatchRejected, CriticPatchUnrepresentable
 
     try:
