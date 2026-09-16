@@ -5,7 +5,7 @@ status: open
 tier: 1
 filed: 2026-09-16
 by_hand: false
-specs: [SA-0089]
+specs: [SA-0089, SA-0093]
 prs: [282]
 commits: []
 cites: [§5.5]
