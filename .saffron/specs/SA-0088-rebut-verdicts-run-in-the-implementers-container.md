@@ -9,6 +9,7 @@ touches:
   - saffron/cell/session.py
   - tests/test_rebut.py
   - tests/test_session.py
+  - tests/test_events.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -100,9 +101,19 @@ wiring are new code, so no text exists yet that a mutant could pin honestly.
 **Build the critic cell after the rebuttal and the gate re-run, not before.**
 The verdicts judge the patch as the rebuttal left it. `run_rebut` returns
 early when nothing moved and nothing was argued, and when the re-run is red.
-Neither path runs a verdict, so neither should pay for a critic cell. The
-spelling is yours: a second container argument, or a callable that yields
-one. Either lets the caller skip the build on those paths.
+Neither path runs a verdict, so neither should pay for a critic cell.
+Take a zero-argument callable that returns the critic container, and call
+it only after `rerun_gates()` returns `None`. A plain container argument
+cannot do this: the caller evaluates it before `run_rebut` is entered, so
+both early paths pay for the cell anyway, and its tree is the one from
+*before* the rebuttal's commits — which criterion 2 and `DESIGN.md` §5.6
+both forbid.
+
+`tests/test_events.py` is the third caller of `run_rebut`
+(`test_the_watch_shaped_callable_phases_still_receive_does_not_raise`), and
+a required parameter makes it a `TypeError`. It is in `touches` for that
+line alone; `tests/fixtures/watch-golden.txt` must not change, and does
+not, because no green run reaches REBUT.
 
 **`diff()` and the verdicts must read the same tree.** Whatever the verdict
 prompt carries as the new diff has to come from the critic cell, not from the

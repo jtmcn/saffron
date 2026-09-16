@@ -96,7 +96,22 @@ forbidden here, so do not import from it: a network from
 `runtime.create_network`, which is always `--internal`; a volume;
 `worktree.prepare_worktree` with `network`, `env=dict(policy.thread_env)` and
 `gates_dir` passed explicitly, at `spec.tree_base`; teardown in a `finally`.
-Appendix I is why `network` and `env` are required. Then apply the patch
+Appendix I is why `network` and `env` are required. `prepare_worktree` also
+requires `mirror`, which `_drive_cell` already takes, and `image`, which is
+`saffron.repos.image.cell_tag(repo)` because `cell_up` discards the tag it
+built.
+
+**Pass that network an explicit subnet, and pre-clean every name.**
+`runtime.create_network` defaults to `DEFAULT_SUBNET`, and an overlapping
+create raises `CellRuntimeError`. `reverify` gets away with the default
+because PACKAGE runs after the cell is down; REVIEW does not — the
+implementer's `saffron-cells` network holds that subnet until `cell_down`
+in `_drive_cell`'s `finally`. Choose a non-overlapping subnet at the call
+site in `session.py`, since `runtime.py` is forbidden. Then, before
+creating each name, remove any leftover of the same name, tolerating
+absence, as `cell_up` does and `reverify` does not need to: its names
+change every attempt and a `spec_id`-keyed name does not. Both failures
+land at REVIEW, after IMPLEMENT is paid for. Then apply the patch
 inside it the way `SA-0087`'s critic cell does, with the same function if it
 can take the container as an argument. Record every name in the run's
 `created` ledger before the call that creates it.
@@ -108,15 +123,27 @@ the way `_judge`'s callers end an aborted suite, `GATE_ERROR`, never
 `READY_FOR_REVIEW` (§5.4). The advisory set for `gate_summary` is that run's
 own.
 
-**Test through `_drive`.** `_stub_the_runtime` records every container,
-volume and network created and removed, and `cell.system_prompts` holds each
-lens's system prompt. Make the stubbed gate report something different in
+**Test through `_drive`.** `_stub_the_runtime` records every *removal*, and
+`cell.system_prompts` holds each lens's system prompt. It does not record
+creations: `create_network` and `create_volume` are no-op stubs, and
+`_prepare_worktree` keeps only `base_sha`. Criterion 2 needs the gate
+cell's `env` and needs removal ordered against the first lens, so add that
+recording to the stub — including the subnet, so a witness can assert the
+gate cell is not on the implementer's. Make the stubbed gate report something different in
 the implementer's container and in the gate cell, and assert which one the
 lens prompts carry. Every new witness must fail with `session.py` reverted.
 Reverted, the lenses are shown the implementer's results and no gate cell
 exists, so honest tests of both criteria fail. Import nothing new at module
 scope: a module-scope import of a name you add turns the reverted run into a
 collection error, which `revert` reads as `skip`.
+
+**Print nothing new on the green path.**
+`tests/test_events.py::test_watch_output_matches_the_golden_fixture` drives a
+green run through REVIEW with this file's stubs and compares every printed
+line to `tests/fixtures/watch-golden.txt`. Both files are outside `touches`.
+`_rebut_gates`' callers `emit` an attempt event for every suite; the gate
+cell must emit a line only on its `GATE_ERROR` exit, or when a removal
+leaves something behind.
 
 **Write any helper as a `def`, not a `lambda`.** A `lambda` assigned to a name
 needs a `# noqa: E731` to pass `lint`, and that suppression fails `integrity`
