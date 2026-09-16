@@ -131,7 +131,10 @@ finding with `finding`, `verdict` and `reason`, exactly as it is.
 
 **Test the rebut half through `run_rebut`, not `verdict_prompt` alone.** Give
 it a reviewed diff and a `diff()` that returns something different, record the
-verdict session's options, and assert its system prompt carries both.
+verdict session's options, and assert its system prompt carries both — and the
+instruction above `## Your findings` with them. Two containment checks alone
+pass on a prompt whose second diff has no heading and no instruction, which
+leaves the critic exactly as unable to read a line number as it is today.
 
 **`run_rebut` has a caller outside `tests/test_rebut.py`.** `tests/test_events.py`
 drives it too, which is why that file is in `touches`. A new argument is
@@ -139,6 +142,12 @@ required, not defaulted, following `run_rebut`'s own `spec_id`. (That
 comment's stated reason is its own — the phase authors its own
 `PhaseStart` line. The reason here is that a default would let a caller
 keep today's behaviour without noticing.)
+
+**Pre-bind the reviewed diff, the way `session.py` pre-binds `reviews` and
+`recorded`.** `repair_loop` can hand back `EXHAUSTED` or `GATE_ERROR` and skip
+REVIEW entirely, so a name assigned only inside `if outcome ==
+"READY_FOR_REVIEW":` and read inside the REBUT branch reads as possibly-unbound
+to the blocking `types` gate. The comment above those two names says why.
 
 **Test the session half through `_drive`, with a patch stub that changes only
 in the new witness.** `_stub_the_runtime` in `tests/test_session.py` returns one
