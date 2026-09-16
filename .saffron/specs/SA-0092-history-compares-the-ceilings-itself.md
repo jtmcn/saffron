@@ -37,8 +37,7 @@ acceptance:
       cell needed rather than as what it used.
     witness: tests/test_spec_loop_driver.py::test_the_ceilings_line_calls_a_cut_off_rows_peak_a_floor
   - claim: >-
-      Each past cell's own line, and the header, carry the same fields they
-      carry today.
+      Each past cell's own line carries the same fields it carries today.
     witness: tests/test_spec_loop_driver.py::test_history_splits_a_cells_spend_by_phase_and_names_how_attempts_ended
     preserves: true
 ---
@@ -107,6 +106,20 @@ what the note above requires — and three more read the first token of each
 line. All four are inside `touches`, so update them: criterion 3's
 `preserves` is about the fields each row and the header carry, not about
 leaving these tests alone.
+
+**The header keeps its own ceilings.** The `ceilings:` line is added below
+the rows; `max_turns=` and `budget_usd=` stay in the header exactly as
+`_history_lines` renders them today. Moving either into the new line would keep
+every witness this spec declares green and still lose the header's record — the
+`preserves` witness reads `_past_cells` and `_cell_line`, and neither touches
+the header.
+
+**The criterion-1 witness prints at least two rows.** `_ledger_with_one_cell`
+builds exactly one cell, and against a single row "the highest `peak` among the
+rows it printed" cannot be told from "the only row's peak", so a wrong maximum
+passes. Build the rows the way the shape tests do — `_history_lines` with the
+`_cell(...)` fake — with peaks that differ, plan-plus-implement-plus-repair
+totals that differ, and the two maxima on different rows.
 
 **The tests load the driver by path** (`importlib`, top of
 `tests/test_spec_loop_driver.py`), and the history tests build a ledger with

@@ -27,7 +27,7 @@ forbidden:
   - saffron/cli.py
   - saffron/batch.py
   - saffron/replay.py
-budget_usd: 12
+budget_usd: 18
 max_attempts: 3
 max_turns: 90
 risk: elevated
@@ -91,8 +91,12 @@ the runner and SDK the lenses re-exec a moment later, which is the hole
 `SA-0087` closed. The gates get a cell of their own.
 
 **Build that cell the way `reverify` builds its gate-only cells.** Read
-`_gate_cell` inside `reverify` in `saffron/phases/package.py`, which is
-forbidden here, so do not import from it: a network from
+`_gate_cell` inside `reverify` in `saffron/phases/package.py` and copy its
+shape — it is a nested function, so there is nothing to import even though
+importing would be fine: `forbidden` bounds this spec's diff, not its import
+graph, and `_drive_cell` already imports `saffron.phases.package` and
+`saffron.repos.mirror` at base. That is also why calling
+`saffron.repos.image.cell_tag` below is allowed. What to copy: a network from
 `runtime.create_network`, which is always `--internal`; a volume;
 `worktree.prepare_worktree` with `network`, `env=dict(policy.thread_env)` and
 `gates_dir` passed explicitly, at `spec.tree_base`; teardown in a `finally`.
@@ -116,9 +120,19 @@ inside it the way `SA-0087`'s critic cell does, with the same function if it
 can take the container as an argument. Record every name in the run's
 `created` ledger before the call that creates it.
 
-**One run of the suite is enough.** The lenses need results, not new
-failures, so no baseline is needed. `suite.baseline(tree)` is a single run
-despite its name. An `error` in that run means the gate broke: end the task
+**Run the suite against the run's own pre-turn baseline** —
+`suite.against(tree, baseline)`, with the baseline the task already took before
+the agent had a single turn, not `suite.baseline(tree)`. A suite with an empty
+prior makes `census`, `criteria` and `revert` all report `skip`, and those are
+the three gates that speak to test honesty: `census: skip — no gate reported
+collected tests at base_sha` reads to a lens as "the suite did not enumerate",
+which is a worse table than the one this spec replaces. That baseline predates
+the agent's first turn, so it is not a forged-toolchain input in the sense this
+spec exists to close. `suite_drift` cannot fire either — not because the gate
+dict is the same, but because it keys on a gate's `tool` changing between the
+two suites and on one that ran at baseline skipping at head, and both execute
+the same image's toolchain over the same declared gates. An `error` means the
+gate broke: end the task
 the way `_judge`'s callers end an aborted suite, `GATE_ERROR`, never
 `READY_FOR_REVIEW` (§5.4). The advisory set for `gate_summary` is that run's
 own.
@@ -136,6 +150,28 @@ Reverted, the lenses are shown the implementer's results and no gate cell
 exists, so honest tests of both criteria fail. Import nothing new at module
 scope: a module-scope import of a name you add turns the reverted run into a
 collection error, which `revert` reads as `skip`.
+
+**Criterion 2's witness must assert the gate cell was created, not only that
+nothing leaked.** "Holds no credential", "no route out" and "removed before the
+first lens starts" are all trivially true of the reverted source, where no gate
+cell exists at all, and `revert` blocks a non-`preserves` witness that still
+passes reverted — a repair round spent on a defect item 118 already records
+against `SA-0087`'s second criterion. Assert the cell's name was recorded and
+its arguments read, then that it was removed, both before the first lens turn.
+The claim's "holds no credential and no route out" is a property a stubbed test
+cannot establish; what it can pin is the arguments. Item 131 carries the
+`cell`-marked test that probes the property itself.
+
+**Pass `state_volume` explicitly.** `_gate_cell` leaves it to
+`prepare_worktree`'s default, but the `tests/test_session.py` stub reads
+`k["state_volume"]` unconditionally, so a verbatim copy raises `KeyError` on the
+first driven test.
+
+**The gate-cell suite is the lens table only.** `latest` stays the
+implementer's: `_judge` reassigns it with `nonlocal`, so reassigning is the
+locally natural move, and `latest` also feeds `CellOutcome.gates`,
+`effective_risk` and `advisory_gates`. Bind the gate cell's suite to its own
+name.
 
 **Print nothing new on the green path.**
 `tests/test_events.py::test_watch_output_matches_the_golden_fixture` drives a
