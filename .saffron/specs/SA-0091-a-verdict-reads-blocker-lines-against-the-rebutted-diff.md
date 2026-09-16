@@ -51,8 +51,9 @@ acceptance:
       since moved.
     witness: tests/test_rebut.py::test_the_verdict_prompt_carries_the_diff_its_blockers_were_filed_against
   - claim: >-
-      A task hands REBUT the diff REVIEW's lenses were shown, not a diff
-      exported again after the rebuttal turn.
+      A task hands REBUT the diff REVIEW's lenses were shown, in addition
+      to the diff after the rebuttal, which it still exports. The reviewed
+      diff is not re-exported to stand in for it.
     witness: tests/test_session.py::test_the_verdict_prompt_carries_the_diff_the_lenses_were_shown
   - claim: >-
       A verdict still lands on the finding REVIEW recorded, under the number
@@ -123,7 +124,9 @@ same tree (`SA-0088`, Notes), and nothing here changes that.
 **Say which tree the numbers belong to, in the template.** The two diffs get
 headings that tell them apart, and the instruction above "Your findings" says
 the line numbers refer to the files as they stood when the findings were filed,
-which the first diff describes. Keep the verdict contract, one entry per
+which the first diff describes. "What to emit" already opens "the diff below
+is the change as it now stands" — with two diffs below it that sentence names
+neither, so make it say which one it means. Keep the verdict contract, one entry per
 finding with `finding`, `verdict` and `reason`, exactly as it is.
 
 **Test the rebut half through `run_rebut`, not `verdict_prompt` alone.** Give
@@ -132,8 +135,10 @@ verdict session's options, and assert its system prompt carries both.
 
 **`run_rebut` has a caller outside `tests/test_rebut.py`.** `tests/test_events.py`
 drives it too, which is why that file is in `touches`. A new argument is
-required, not defaulted, as `run_rebut`'s own `spec_id` comment says: a
-default would let a caller keep today's behaviour without noticing.
+required, not defaulted, following `run_rebut`'s own `spec_id`. (That
+comment's stated reason is its own — the phase authors its own
+`PhaseStart` line. The reason here is that a default would let a caller
+keep today's behaviour without noticing.)
 
 **Test the session half through `_drive`, with a patch stub that changes only
 in the new witness.** `_stub_the_runtime` in `tests/test_session.py` returns one

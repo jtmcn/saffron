@@ -100,6 +100,14 @@ cell needed at least that and may have needed more.
 **A spec of a shape with no rows still gets a line.** When `history` prints no
 rows, say so rather than printing a comparison against nothing.
 
+**Four existing assertions in `tests/test_spec_loop_driver.py` read the
+history output exactly, and an appended line breaks them.** The no-rows
+case asserts the output carries nothing after the header — the opposite of
+what the note above requires — and three more read the first token of each
+line. All four are inside `touches`, so update them: criterion 3's
+`preserves` is about the fields each row and the header carry, not about
+leaving these tests alone.
+
 **The tests load the driver by path** (`importlib`, top of
 `tests/test_spec_loop_driver.py`), and the history tests build a ledger with
 `_ledger_with_one_cell` and specs with `_spec`. Put the new tests beside them
