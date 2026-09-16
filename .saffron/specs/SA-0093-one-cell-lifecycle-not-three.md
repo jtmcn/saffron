@@ -41,10 +41,6 @@ acceptance:
       Today it has no such argument: it always runs on a network it did not
       create and never removes one.
     witness: tests/test_session.py::test_critic_cell_creates_its_own_network_only_when_it_is_not_given_one
-    mutant:
-      file: saffron/cell/session.py
-      find: '= "10.90.0.0/24"'
-      replace: '= "10.88.0.0/24"'
   - claim: >-
       `critic_cell` takes the container environment as an argument too, so the
       caller that wants a cell behind the proxy and the caller that wants one
@@ -137,9 +133,8 @@ results go.
 is the tuple in `runtime.py` and the pre-clean by value; `runtime.py` is
 `forbidden` here. Keep the subnet exactly where and what it is today — move it
 if the code around it moves, but do not change its value and do not add
-another. Write it exactly once in `saffron/cell/session.py`: a second copy of
-the literal, as a parameter default beside the constant, makes this spec's one
-mutant ambiguous and so unrunnable.
+another. Write it exactly once in `saffron/cell/session.py`, not again as a
+parameter default beside the constant.
 
 ## Notes for the agent
 
@@ -168,13 +163,13 @@ the `touches` boundary. That escape is for a spec whose `touches` forbids the
 change. This one's does not: both functions are in `session.py`, which is in
 `touches`. Write the one lifecycle.
 
-**Criteria 1–3 carry one mutant between them, and that is deliberate.**
-Criterion 1's absent-network branch, criterion 2's environment argument and
-criterion 3's delegation are all new control flow, so no text exists at base
-that a mutant could pin honestly, and `witness` will report `skip` for 2 and 3.
-Criterion 1 is the exception: the gate cell's subnet is a module constant today
-and must survive the move unchanged, so its mutant pins text this repo already
-determines rather than text this spec dictates.
+**No criterion carries a mutant, and that is deliberate.** Criterion 1's
+absent-network branch, criterion 2's environment argument and criterion 3's
+delegation are all new control flow, so no text exists at base that a mutant
+could pin honestly, and `witness` will report `skip` for all three. A mutant on
+the subnet constant was tried and cannot run: `session.py` is over the ~96 KiB
+file size `witness` can write a mutant of (`worktree._write_file`), so every
+mutant on it is `error`, which aborts the attempt.
 
 **Criterion 1's witness must not assert the subnet equals the module's own
 constant.** A test that reads the constant and compares the created network
@@ -236,24 +231,16 @@ environment. Read the proxy address once in `_drive_cell`, ahead of REVIEW,
 build the `cell_env(...)` mapping from it and pass that mapping at both sites —
 do not read it twice and do not leave the second site without an `env` to pass.
 
-Only REVIEW's site is observed today:
-`test_the_critic_cell_is_built_from_the_repos_image_at_the_tasks_tree_base`
-drives REVIEW alone, and criterion 2's witness calls `critic_cell` directly.
-Passing `policy.thread_env` at REBUT's site would pass them all while a real
-REBUT verdict lens could not reach the API. Add a test that drives through REBUT
-the way `test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch`
-does and asserts that *every* `saffron-critic-*` entry in `cell.worktrees`
-carries `HTTPS_PROXY`. It is not a declared criterion, because it passes at
-base; it guards the new call.
-
 Keep the raise that read performs when the address is `None`: it is
 infrastructure, not a task outcome, and `cell_env` cannot turn `None` into a
-`str`. Nothing at base observes it — `container_ip` is stubbed to a constant in
-`tests/test_session.py` and no test overrides it. `revert` would restore the
-raise inside `critic_cell`, so no declared witness can pin its move. Add an
-undeclared test anyway: override the `container_ip` stub to return `None` and
-assert `_drive` raises `CellRuntimeError`. That guards the raise at its new
-home.
+`str`.
+
+**Add no test that passes with `session.py` reverted.** `revert` judges every
+new test, declared or not, and fails the attempt if any passes without its
+source. Two properties here are true at base and so cannot be guarded from this
+cell: REBUT's critic cell carrying the proxied environment, and the raise above
+at its new home. The operator's review adds those tests after the cell; do not
+write them.
 
 **Keep both callers' names and teardown reporting.** The gate cell's container,
 volumes and network are `saffron-gate-*` keyed by `spec_id`; the critic's are
