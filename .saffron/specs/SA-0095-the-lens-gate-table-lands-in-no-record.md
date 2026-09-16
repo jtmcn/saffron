@@ -36,7 +36,8 @@ acceptance:
       The gate suite REVIEW's lenses are shown is written to a
       `lens-gates.json` in the task directory, beside the `baseline.json` the
       task already writes there, in the same shape — every result the suite
-      produced, as JSON. Today it is
+      produced, as JSON — whenever that suite returns, an aborted or drifted
+      suite included. Today it is
       rendered into a lens prompt and discarded, and no file, event or ledger
       row carries it.
     witness: tests/test_session.py::test_the_gate_table_the_lenses_were_shown_lands_beside_the_baseline
@@ -137,9 +138,20 @@ which.
 criterion 2 and it is the whole value of the record: a REVIEW that ends on a
 wall, a budget stop or an exception still leaves the table its lenses were
 shown. `tests/test_session.py` already has tests that stop the lenses partway
-— `test_a_wall_after_the_gates_go_green_stops_the_lenses` is one — and
-`_stub_the_runtime` records a shared `cell.order` timeline that makes "before
-the first lens turn" assertable rather than merely "both happened".
+— `test_a_wall_after_the_gates_go_green_stops_the_lenses` is one.
+
+`cell.order` alone cannot show "before": it records removals and agent turns,
+never a file write. And "the file exists once the test ends" is not enough. A
+write in a `finally` around the lens block runs *after* the lenses and still
+leaves the file behind. Observe it from inside the first lens turn: when the
+`_run_agent` stub is first called for the critic container, read
+`lens-gates.json` there and record what it found. Assert the file existed then,
+with the gate cell suite's results in it.
+
+**Write it whenever the suite returns, before the aborted/drift branch.**
+REVIEW's aborted-or-drifted comparison ends the task `GATE_ERROR` and runs no
+lens. That is the case where the record matters most as evidence, so the write
+goes before that branch, not inside the lens path.
 
 **Criterion 1's witness must read the file's contents, not its existence.**
 A test that asserts the path exists passes over a file containing `[]`, and an
@@ -177,8 +189,8 @@ run's advisory set, which is what marks an advisory `fail`. Criterion 1 says
 shape `baseline.json` carries. Do not widen it to carry the advisory set too.
 
 **Print nothing new on the green path.** Criterion 5 is the check.
-`_rebut_gates`' callers emit an attempt event for every suite; this write emits
-none.
+`_rebut_gates` emits an attempt event for every suite it judges; this write
+emits none.
 
 **Write any helper as a `def`, not a `lambda`.** A `lambda` assigned to a name
 needs a `# noqa: E731` to pass `lint`, and that suppression fails `integrity`

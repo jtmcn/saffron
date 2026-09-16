@@ -70,10 +70,13 @@ acceptance:
     witness: tests/test_session.py::test_the_lens_gate_cell_is_torn_down_when_its_own_suite_raises
     preserves: true
   - claim: >-
-      The critic cell is still built from the repo's image at the task's tree
-      base, and every lens still runs in a container the implementer never ran
-      in.
+      Every lens still runs in a container the implementer never ran in.
     witness: tests/test_session.py::test_every_lens_runs_in_a_container_the_implementer_never_ran_in
+    preserves: true
+  - claim: >-
+      The critic cell is still built from the repo's image at the task's tree
+      base, with an environment that routes through the task's proxy.
+    witness: tests/test_session.py::test_the_critic_cell_is_built_from_the_repos_image_at_the_tasks_tree_base
     preserves: true
 ---
 
@@ -151,10 +154,13 @@ of this spec catches it:
 `test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs`
 counts removals rather than testing membership, and asserts each of the gate
 cell's four names — container, both volumes **and its network** — is removed
-exactly twice, once by the pre-clean and once by the teardown. Its counterpart
-for the critic cell asserts exactly three names removed twice each, so the
-branch that is *given* a network must not pre-clean one either. A unified
-pre-clean that always removes a network, or never does, fails one of the two.
+exactly twice, once by the pre-clean and once by the teardown. That catches a
+unified lifecycle that never removes a network. Nothing at base catches the
+opposite: `test_the_critic_cell_is_torn_down_when_review_ends` counts only the
+critic's container and two volumes, and asserts nothing about networks. A
+lifecycle that always pre-cleans and tears down the network it is *given* would
+remove the task's own `saffron-cells` during REVIEW and REBUT, and pass every
+test at base. Criterion 1's witness is the guard for that branch (below).
 
 **The unification is the deliverable, not one of two options.** Item 140's
 "done looks like" offers a recorded decision that three copies is the price of
@@ -187,8 +193,10 @@ subnets is already true at base — `_gate_cell_suite` creates its own network o
 its own subnet today, and the `preserves` witness already asserts it — so a
 `_drive`-level test of it passes with `session.py` reverted and `revert` blocks
 the task. Call `session.critic_cell` itself: given a network name and an `env`,
-assert it creates no network at all; given `None`, assert it creates exactly one
-whose subnet does not overlap `runtime.DEFAULT_SUBNET`. At base `critic_cell`
+assert it creates no network at all **and that `("network", <that name>)` never
+appears in `cell.removed`**, before or after the `with` block; given `None`,
+assert it creates exactly one whose subnet does not overlap
+`runtime.DEFAULT_SUBNET`, and removes it. At base `critic_cell`
 has neither parameter, so both halves raise `TypeError` — red at base, and red
 again under `revert`.
 
@@ -199,8 +207,8 @@ gate suite's container came out of `critic_cell` — patch or wrap
 Reverted, `_gate_cell_suite` builds its own container and never calls it, so
 the test fails, which is what `revert` requires.
 
-**Three `preserves` criteria are the safety net, and they are the point.**
-A refactor whose behaviour changed is a failed refactor. Those three tests
+**Four `preserves` criteria are the safety net, and they are the point.**
+A refactor whose behaviour changed is a failed refactor. Those four tests
 exist at base — `git grep` them — and must be green at head without being
 rewritten to accommodate the new shape. If one of them cannot pass unchanged,
 the refactor is wrong; do not edit the test.
@@ -228,11 +236,24 @@ environment. Read the proxy address once in `_drive_cell`, ahead of REVIEW,
 build the `cell_env(...)` mapping from it and pass that mapping at both sites —
 do not read it twice and do not leave the second site without an `env` to pass.
 
+Only REVIEW's site is observed today:
+`test_the_critic_cell_is_built_from_the_repos_image_at_the_tasks_tree_base`
+drives REVIEW alone, and criterion 2's witness calls `critic_cell` directly.
+Passing `policy.thread_env` at REBUT's site would pass them all while a real
+REBUT verdict lens could not reach the API. Add a test that drives through REBUT
+the way `test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch`
+does and asserts that *every* `saffron-critic-*` entry in `cell.worktrees`
+carries `HTTPS_PROXY`. It is not a declared criterion, because it passes at
+base; it guards the new call.
+
 Keep the raise that read performs when the address is `None`: it is
 infrastructure, not a task outcome, and `cell_env` cannot turn `None` into a
 `str`. Nothing at base observes it — `container_ip` is stubbed to a constant in
-`tests/test_session.py` and no test overrides it — so no criterion here can
-witness it and no gate will catch its loss. It survives by your care alone.
+`tests/test_session.py` and no test overrides it. `revert` would restore the
+raise inside `critic_cell`, so no declared witness can pin its move. Add an
+undeclared test anyway: override the `container_ip` stub to return `None` and
+assert `_drive` raises `CellRuntimeError`. That guards the raise at its new
+home.
 
 **Keep both callers' names and teardown reporting.** The gate cell's container,
 volumes and network are `saffron-gate-*` keyed by `spec_id`; the critic's are
