@@ -47,11 +47,12 @@ acceptance:
       after IMPLEMENT is paid for.
     witness: tests/test_runtime.py::test_no_two_declared_subnets_overlap
   - claim: >-
-      Before the gate cell creates its network, the pre-clean removes whatever
-      network is holding that subnet, whatever that network is called — not
-      only the one bearing the name this task would use. A leftover from a
-      SIGKILLed run of a *different* spec no longer aborts REVIEW.
-    witness: tests/test_session.py::test_the_gate_cells_pre_clean_removes_the_holder_of_its_subnet_whatever_its_name
+      Before the gate cell creates its network, the pre-clean removes any
+      `saffron-`-prefixed network holding that subnet, whichever spec's name it
+      bears — not only the one bearing the name this task would use — and
+      leaves a holder with any other name alone. A leftover from a SIGKILLed
+      run of a *different* spec no longer aborts REVIEW.
+    witness: tests/test_session.py::test_the_gate_cells_pre_clean_removes_a_leftover_saffron_network_on_its_subnet_and_nothing_else
   - claim: >-
       The gate cell still holds no credential and is gone before the first lens
       turn, and the lenses are still shown a gate table computed outside the
@@ -86,7 +87,8 @@ told the agent to "choose a non-overlapping subnet", and the obvious next pick
 after reading the task's own is the proxy's. The amendment named both holders
 and dictated the third by hand. The next spec that adds a subnet has to redo
 that audit from prose, and the suite cannot see the collision at all because
-`_stub_the_runtime` stubs `create_network` to a no-op.
+`_stub_the_runtime`'s `create_network` only records the `(name, subnet)` pair
+it was asked for and never checks one against another.
 
 The second half is unfixed and is the defect proper. The gate cell pre-cleans
 by **name**, keyed on the spec id, but the collision is by **value**. A
@@ -124,6 +126,12 @@ default rather than spelling a literal, so the criterion is satisfied there
 without an edit — and `saffron/phases/**` is `forbidden` here, so an edit would
 be a scope failure. Audit it if you are enumerating allocation sites; change
 nothing in it.
+
+That default is the task network's own subnet, so `reverify` and `saffron-cells`
+share one value — safely, because PACKAGE runs after the task's cell is down.
+The declaration lists each distinct subnet once, not one entry per allocation
+site. A declaration keyed by site would carry that value twice and fail
+criterion 2's overlap test on a sharing that is correct.
 
 **The `cell`-marked isolation tests.** The property that a gate cell has no
 route out is item **131**'s live probe. This spec's witnesses run against the
@@ -168,8 +176,12 @@ gives.
 
 **Criterion 3's witness needs `networks_on_subnet` stubbed, because the real
 one shells out.** `_stub_the_runtime` does not stub it today. Add it there,
-returning a name the test chooses, and assert `remove_network` was called with
-that name before the create — `_stub_the_runtime` already records every removal
+returning names the test chooses. Have the witness ask for two holders — a
+`saffron-gate-net-` one for a different spec, and one with no `saffron-` prefix
+(`operator-net`, say). Assert the first was removed before the create, and that
+the second never appears in `cell.removed`. A single holder cannot tell the
+prefix filter from a pre-clean that removes every holder. Assert the first
+removal before the create — `_stub_the_runtime` already records every removal
 as a `(kind, name)` pair in `cell.removed` and appends to the shared
 `cell.order` timeline. The *create* side is not on that timeline — its stub
 only appends to `cell.networks_created` — so add a `created:network:<name>`
@@ -183,6 +195,11 @@ criterion 4's `preserves` witness counts each of the gate cell's four names as
 removed exactly twice. A `networks_on_subnet` stub returning the gate network
 for every test adds a third removal and fails it. Default to an empty list and
 let the one witness that needs a holder ask for one.
+
+**Not every test that reaches the create-its-own-network branch goes through
+`_stub_the_runtime`.** `SA-0093` added tests that call `critic_cell` directly.
+Check each one at your base: the new pre-clean calls `networks_on_subnet`, and
+unstubbed, that lists the host's real networks.
 
 **`exclude=` exists for a reason and the pre-clean should not pass it.**
 `create_network` passes `exclude=name` because it is explaining an error about
@@ -217,6 +234,11 @@ stay derived.** The comment above them says why — a second literal is a probe
 that silently covers nothing the day the subnet moves. Whatever the declaration
 looks like, `DEFAULT_SUBNET` keeps naming the task network's own, and
 `container_ip`'s default argument keeps working.
+
+**The comment above the gate cell's subnet in `session.py` goes stale.** It
+says the task's and the proxy's are "the only subnets `saffron/` declares".
+Once the declaration exists, that comment is false. Replace it with a pointer to
+the declaration, or delete it.
 
 **`proxy.py` is in `touches` for one line.** `EGRESS_SUBNET` is used at
 `proxy.py:36` as well as declared at `:21`; the declaration is what moves.
