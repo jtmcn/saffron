@@ -1267,9 +1267,48 @@ def _cell_line(c: PastCell) -> str:
     )
 
 
+def _pre_review_total(c: PastCell) -> float:
+    """Plan + implement + repair: what a cell spent before REVIEW touched it,
+    and so what the budget must have covered before that (item 123)."""
+    return (c.plan.usd if c.plan else 0.0) + c.implement.usd + c.repair.usd
+
+
+def _ceilings_line(target: Spec, rows: list[PastCell]) -> str:
+    """`max_turns` against the highest `peak_turns` among `rows`, and
+    `budget_usd` against the highest pre-review total among them — the
+    comparison a spec review used to redo by eye and get wrong both ways
+    (SA-0031, SA-0087@24edb32, and the false blockers on SA-0060, SA-0027)."""
+    if not rows:
+        return "ceilings: no past cells of this shape to compare against"
+
+    turns_row = max(rows, key=lambda c: c.peak_turns)
+    turns_diff = target.max_turns - turns_row.peak_turns
+    turns_word = "above" if turns_diff >= 0 else "below"
+    cut_off = any("error_max_turns" in e for e in turns_row.endings)
+    turns_label = "a floor — cut off at its own ceiling" if cut_off else "used"
+    turns_part = (
+        f"max_turns={target.max_turns} vs {turns_row.spec_id}'s peak "
+        f"{turns_row.peak_turns}t ({turns_label}), {turns_word} by "
+        f"{abs(turns_diff)}t"
+    )
+
+    budget_row = max(rows, key=_pre_review_total)
+    budget_total = _pre_review_total(budget_row)
+    budget_diff = target.budget_usd - budget_total
+    budget_word = "above" if budget_diff >= 0 else "below"
+    budget_part = (
+        f"budget_usd={target.budget_usd} vs {budget_row.spec_id}'s pre-review "
+        f"total ${budget_total:.2f}, {budget_word} by ${abs(budget_diff):.2f}"
+    )
+
+    return f"ceilings: {turns_part}; {budget_part}"
+
+
 def _history_lines(target: Spec, cells: list[PastCell], limit: int = 12) -> list[str]:
     """The target's own shape and ceilings, then past cells of its type, the
-    closest in `touches` and criteria count first, newest first on a tie."""
+    closest in `touches` and criteria count first, newest first on a tie, then
+    a `ceilings:` line comparing the target's own ceilings with what the
+    printed rows show (item 123)."""
     criteria = _criteria_count(target)
     header = (
         f"{target.id}  {target.type}  touches={len(target.touches)} "
@@ -1281,7 +1320,8 @@ def _history_lines(target: Spec, cells: list[PastCell], limit: int = 12) -> list
     same.sort(
         key=lambda c: abs(c.touches - len(target.touches)) + abs(c.criteria - criteria)
     )
-    return [header, *(_cell_line(c) for c in same[:limit])]
+    rows = same[:limit]
+    return [header, *(_cell_line(c) for c in rows), _ceilings_line(target, rows)]
 
 
 def cmd_history(args) -> int:

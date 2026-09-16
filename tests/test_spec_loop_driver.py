@@ -867,7 +867,8 @@ def test_history_lists_only_the_same_type_most_similar_shape_first():
     )
 
     assert lines[0].startswith("SA-0009  bug  touches=2 criteria=3")
-    assert [line.split()[0] for line in lines[1:]] == ["SA-0004", "SA-0003"]
+    assert [line.split()[0] for line in lines[1:-1]] == ["SA-0004", "SA-0003"]
+    assert lines[-1].startswith("ceilings:")
 
 
 def test_history_lists_the_newer_of_two_same_shape_cells_first():
@@ -879,7 +880,60 @@ def test_history_lists_the_newer_of_two_same_shape_cells_first():
         ],
     )
 
-    assert [line.split()[0] for line in lines[1:]] == ["SA-0003", "SA-0002"]
+    assert [line.split()[0] for line in lines[1:-1]] == ["SA-0003", "SA-0002"]
+    assert lines[-1].startswith("ceilings:")
+
+
+def test_history_compares_the_targets_ceilings_with_the_rows_it_printed():
+    # SA-0031 (EXHAUSTED at 141 of 140 turns) and SA-0087@24edb32 (60 turns
+    # against a 47-turn plan checkpoint) both read `checked` because nothing
+    # actually compared the target's ceilings with what its history showed.
+    target = _spec("SA-0009", touches=2, criteria=3)
+    target.max_turns = 100
+    target.budget_usd = 10.0
+
+    high_peak = _cell("SA-0002", "bug", 2, 3)
+    high_peak.peak_turns = 90
+    high_peak.plan = driver.Spend(1, 1.0)
+    high_peak.implement = driver.Spend(1, 1.0)
+    high_peak.repair = driver.Spend(0, 0.0)
+    high_spend = _cell("SA-0003", "bug", 2, 3)
+    high_spend.peak_turns = 30
+    high_spend.plan = driver.Spend(5, 5.0)
+    high_spend.implement = driver.Spend(5, 5.0)
+    high_spend.repair = driver.Spend(5, 5.0)
+
+    ceilings = driver._history_lines(target, [high_peak, high_spend])[-1]
+
+    assert ceilings.startswith("ceilings:")
+    assert "max_turns=100" in ceilings
+    assert "SA-0002's peak 90t (used), above by 10t" in ceilings
+    assert "budget_usd=10.0" in ceilings
+    assert "SA-0003's pre-review total $15.00, below by $5.00" in ceilings
+
+
+def test_the_ceilings_line_calls_a_cut_off_rows_peak_a_floor():
+    # A row whose worst attempt ended `error_max_turns` was cut off at its own
+    # ceiling: its peak says what it needed at least, not what it used.
+    target = _spec("SA-0009", touches=2, criteria=3)
+    target.max_turns = 80
+
+    cutoff = _cell("SA-0002", "bug", 2, 3)
+    cutoff.peak_turns = 60
+    cutoff.endings = ["IMPLEMENTING error_max_turns"]
+    other = _cell("SA-0003", "bug", 2, 3)
+    other.peak_turns = 30
+    other.endings = []
+
+    ceilings = driver._history_lines(target, [cutoff, other])[-1]
+    assert "SA-0002's peak 60t (a floor" in ceilings
+
+    # The same cutoff row, now not the highest peak: the row actually being
+    # compared did not hit its own ceiling, so no floor language belongs to it.
+    other.peak_turns = 90
+    ceilings = driver._history_lines(target, [cutoff, other])[-1]
+    assert "SA-0003's peak 90t (used)" in ceilings
+    assert "floor" not in ceilings
 
 
 def _spec_text(max_turns):
@@ -993,15 +1047,18 @@ def test_history_before_shows_every_spec_as_it_stood_and_none_of_the_targets_cel
 
     args = SimpleNamespace(spec_id="SA-0001", before=early, limit=12)
     assert driver.cmd_history(args) == 0
-    assert capsys.readouterr().out.splitlines()[1:] == []  # every cell started later
+    out = capsys.readouterr().out.splitlines()
+    assert out[1:] == ["ceilings: no past cells of this shape to compare against"]
 
     args = SimpleNamespace(spec_id="SA-0001", before=then, limit=12)
     assert driver.cmd_history(args) == 0
 
-    header, *cells = capsys.readouterr().out.splitlines()
+    header, *rest = capsys.readouterr().out.splitlines()
+    *cells, ceilings = rest
     assert "max_turns=60" in header
     assert [line.split()[0] for line in cells] == ["SA-0002"]
     assert "touches=2" in cells[0]
+    assert ceilings.startswith("ceilings:")
 
 
 def test_commit_time_is_utc_in_the_ledgers_own_format(tmp_path):
