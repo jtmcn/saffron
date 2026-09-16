@@ -16,7 +16,7 @@ import pytest
 from saffron.agents import artifacts
 from saffron.cell import runtime, session
 from saffron.cell.worktree import DIFF_FLAGS
-from saffron.events import Agent, Attempt, Baseline, describe
+from saffron.events import Agent, Attempt, Baseline, PhaseStart, describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
 from saffron.gates.suite import CellTree, SuiteComparison, SuiteRun
@@ -618,6 +618,12 @@ class _Cell:
         self.order: list[str] = []
         self.reverted: list[list[str]] = []
         self.mutated: list = []
+        # The critic cell (SA-0087, backlog item 118): which container each
+        # agent turn ran in, and which container each read of the tree — the
+        # diff export and a finding's anchor read alike — ran against.
+        self.turn_containers: list[str] = []
+        self.export_calls: list[tuple[str, str]] = []
+        self.read_head_calls: list[tuple[str, str]] = []
 
 
 _DIFF = """diff --git a/src/x.py b/src/x.py
@@ -676,6 +682,25 @@ def _stub_the_runtime(
     monkeypatch.setattr("saffron.cell.runtime.create_network", lambda *a, **k: None)
     monkeypatch.setattr("saffron.cell.runtime.create_volume", lambda *a, **k: None)
 
+    # The critic cell's own three, none stubbed before it existed (SA-0087):
+    # the proxy address `critic_cell` reads, and the two calls
+    # `_apply_and_commit_patch` makes inside it. All default to a clean
+    # success; a test overrides `exec_stream` alone to script an apply that
+    # cannot land.
+    monkeypatch.setattr(
+        "saffron.cell.runtime.container_ip", lambda *a, **k: "10.88.0.9"
+    )
+
+    def _exec_stream(_container, _command, *, stdin_data="", on_line=None, **k):
+        return runtime.Completed(0, "", "")
+
+    monkeypatch.setattr("saffron.cell.runtime.exec_stream", _exec_stream)
+
+    def _exec(_container, _command, **k):
+        return runtime.Completed(0, "", "")
+
+    monkeypatch.setattr("saffron.cell.runtime.exec_", _exec)
+
     # The order these run in is load-bearing, so it is recorded rather than
     # described: the runtime's routing depends on it (§5.1.1, evidence
     # 2026-08-28), and so does what the probe is told to look at.
@@ -733,9 +758,20 @@ def _stub_the_runtime(
 
     def _export_patch(_container, sha):
         cell.exported_from = sha
+        cell.export_calls.append((_container, sha))
         return patch
 
     monkeypatch.setattr("saffron.cell.worktree.export_patch", _export_patch)
+
+    def _read_at_head(_container, path):
+        # `None` by default — "no such file" — exactly as if nothing stubbed
+        # it: the default lens output (`{"findings": []}`) never reaches
+        # `_is_anchored`, so no test hits this unless it scripts a finding
+        # outside every hunk, at which point it overrides this itself.
+        cell.read_head_calls.append((_container, path))
+        return None
+
+    monkeypatch.setattr("saffron.cell.worktree.read_at_head", _read_at_head)
 
     def _commit_subjects(_container, sha):
         cell.subjects_from = sha
@@ -930,6 +966,7 @@ def _drive(
                 )
             )
         cell.turns.append(prompt)
+        cell.turn_containers.append(container)
         cell.system_prompts.append(options["system_prompt"])
         cell.turn_options.append(options)
         cell.resumes.append(resume)
@@ -2851,6 +2888,192 @@ def test_a_plan_rejected_on_shape_reports_both_turns_it_spent(monkeypatch, tmp_p
     assert outcome.state == "PLAN_REJECTED"
     assert outcome.spent_usd == 0.8
     assert any("$0.80 spent" in line for line in cell.watched)
+
+
+# --- the critic cell (SA-0087, backlog item 118) -----------------------------
+#
+# The implementer runs as root on a writable rootfs for the whole repair loop,
+# so a lens session in that same container re-execs a runner and an SDK the
+# implementer could have rewritten, and reads the diff and any out-of-hunk
+# file content through the implementer's own `.git`. These five prove the
+# fix is a container boundary, not merely a fresh session: every lens runs in
+# a fresh container from the repo's cell image, the diff and anchoring reads
+# come from that container's tree, a patch that cannot apply there ends the
+# task before any lens runs, and the container is torn down when REVIEW ends.
+
+_IMPLEMENTER_CONTAINER = "saffron-cell-SY-1"
+_CRITIC_CONTAINER = "saffron-critic-SY-1"
+_CRITIC_VOLUME = "saffron-critic-wt-SY-1"
+_CRITIC_STATE = "saffron-critic-st-SY-1"
+
+_OUTSIDE_HUNK_FINDING = {
+    "findings": [
+        {
+            "file": "src/x.py",
+            "line": 4,
+            "severity": "concern",
+            "claim": "a claim whose line sits outside every hunk",
+        }
+    ]
+}
+
+
+def _stub_critic_apply(monkeypatch, *, stderr: str, returncode: int) -> None:
+    """One shared stub for the two ways `_apply_and_commit_patch` ends the
+    task before any lens runs: an ordinary conflict, and a patch the export
+    could never carry (PACKAGE's own `_NO_FULL_INDEX` marker), told apart by
+    the marker's presence in `stderr` alone — never by `returncode`."""
+
+    def _exec_stream(_container, _command, *, stdin_data="", on_line=None, **k):
+        return runtime.Completed(returncode, "", stderr)
+
+    monkeypatch.setattr("saffron.cell.runtime.exec_stream", _exec_stream)
+
+
+def test_every_lens_runs_in_a_container_the_implementer_never_ran_in(
+    monkeypatch, tmp_path
+):
+    """Today `run_review` is handed the implementer's own container; this is
+    the regression backlog item 118 exists to prevent."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    # Plan, then implement — both in the implementer's own container.
+    assert cell.turn_containers[:2] == [_IMPLEMENTER_CONTAINER] * 2
+    # One session per declared lens, every one in the critic cell, none in
+    # the implementer's.
+    lens_containers = cell.turn_containers[2:]
+    assert len(lens_containers) == len(review.LENSES)
+    assert lens_containers == [_CRITIC_CONTAINER] * len(review.LENSES)
+
+
+def test_a_finding_outside_the_diff_is_anchored_against_the_critic_cells_tree(
+    monkeypatch, tmp_path
+):
+    """`anchor()` calls `read_head` only for a finding whose line is not in a
+    diff hunk. A lens stub returning `{"findings": []}` never reaches it, so
+    this scripts one outside every hunk of `_ANCHORING_DIFF` and checks not
+    merely that `read_at_head` ran, but that it ran against the critic
+    cell's container — the regression this spec exists to prevent. The diff
+    the lenses were shown is checked the same way, since the criterion claims
+    that comes from the critic cell too."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            _turn(_block(_OUTSIDE_HUNK_FINDING)),
+            _turn(_block({"findings": []})),
+            _turn(_block({"findings": []})),
+        ],
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert cell.read_head_calls == [(_CRITIC_CONTAINER, "src/x.py")]
+    # The gate suite itself reads the diff off the implementer's container
+    # more than once (`scope`, `size`), so the diff the lenses were shown is
+    # asserted by membership, not position: it must have been read back from
+    # the critic cell at least once, over the same tree base.
+    assert (_CRITIC_CONTAINER, "b" * 40) in cell.export_calls
+
+
+def test_a_patch_that_does_not_apply_to_its_base_never_reaches_review(
+    monkeypatch, tmp_path
+):
+    """A real apply failure is the agent's problem, not the toolchain's:
+    `EXHAUSTED`, with a reason that names the patch, not one that reads like
+    four red gate attempts."""
+    cell = _stub_the_runtime(monkeypatch)
+    _stub_critic_apply(monkeypatch, stderr="error: patch does not apply", returncode=1)
+    capture: list = []
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        capture=capture,
+    )
+    assert outcome.state == "EXHAUSTED"
+    # Plan and implement only — no lens ever ran.
+    assert len(cell.turns) == 2
+    (review_line,) = [
+        event
+        for event in capture
+        if isinstance(event, PhaseStart)
+        and event.phase == "REVIEW"
+        and "did not apply" in event.detail
+    ]
+    assert "patch does not apply" in review_line.detail
+
+
+def test_a_binary_change_the_export_cannot_carry_ends_in_gate_error(
+    monkeypatch, tmp_path
+):
+    """`worktree.DIFF_FLAGS` carries no `--binary`/`--full-index`, so a binary
+    change comes back as a stub no base can apply. Saffron's own ceiling, not
+    the agent's — `GATE_ERROR`, matching PACKAGE's own read of the marker,
+    checked whatever the exit code."""
+    cell = _stub_the_runtime(monkeypatch)
+    _stub_critic_apply(
+        monkeypatch,
+        stderr="fatal: cannot apply binary patch without full index line",
+        returncode=128,
+    )
+    capture: list = []
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        capture=capture,
+    )
+    assert outcome.state == "GATE_ERROR"
+    assert len(cell.turns) == 2
+    (review_line,) = [
+        event
+        for event in capture
+        if isinstance(event, PhaseStart)
+        and event.phase == "REVIEW"
+        and "binary change" in event.detail
+    ]
+    assert "full index" in review_line.detail
+
+
+def test_the_critic_cell_is_torn_down_when_review_ends(monkeypatch, tmp_path):
+    """The container, worktree volume and state volume created for the
+    lenses are removed when REVIEW ends — an ordinary green review, and one
+    where a lens raises."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "green",
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert ("container", _CRITIC_CONTAINER) in cell.removed
+    assert ("volume", _CRITIC_VOLUME) in cell.removed
+    assert ("volume", _CRITIC_STATE) in cell.removed
+
+    raising_cell = _stub_the_runtime(monkeypatch)
+    with pytest.raises(RuntimeError, match="lens boom"):
+        _drive(
+            monkeypatch,
+            tmp_path / "raised",
+            cell=raising_cell,
+            turns=[
+                _turn(_block(_PLAN)),
+                _turn(),
+                RuntimeError("lens boom"),
+            ],
+        )
+    assert ("container", _CRITIC_CONTAINER) in raising_cell.removed
+    assert ("volume", _CRITIC_VOLUME) in raising_cell.removed
+    assert ("volume", _CRITIC_STATE) in raising_cell.removed
 
 
 # Not a path _ANCHORING_DIFF touches, so it cannot anchor however real it reads.
