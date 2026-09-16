@@ -1,9 +1,10 @@
 ---
 id: 152
 title: A witness node id is checked by nothing until a cell has been paid for, so a spec can name a test that does not exist
-status: open
+status: done
 tier: 2
 filed: 2026-09-16
+closed: 2026-09-16
 by_hand: true
 specs: []
 prs: [290]
@@ -68,3 +69,24 @@ cell costs an attempt.
 ## Record
 
 **Filed 2026-09-16** from writing #290's three specs and reading their reviews.
+
+**2026-09-16, done, by hand.** `tests/test_queued_specs.py` resolves every
+queued witness. A `preserves` one must be a node id in the suite's collection,
+taken with the argv `.saffron/gates/tests` uses. Any other must have no `def` in
+its file **at the commit that last edited the spec**, not at HEAD. That is the
+one departure from this record's "Done looks like", and it is forced: the cell
+implementing a spec writes its witness, and from then until the spec retires
+to `done/`, HEAD holds it. A HEAD check would fail that cell's `tests` gate
+and `main` between the merge and the retirement. Absence is read with
+`git grep`, not by collection, because a checkout per spec costs too much, and
+for absence a grep is the stricter reading. An uncommitted spec edit is read
+against the working tree. CI now fetches full history, and a shallow clone
+fails its own test instead of passing quietly.
+
+Measured against planted defects: this record's own misnamed `SA-0094`
+witness, the right name in the wrong file, and a new-behaviour witness naming a
+test that exists all fail. A cell-written witness under a committed spec
+passes. The first draft's `git grep -E` spelled whitespace `\s`, which ERE
+reads as a literal `s`, so the committed-tree lookup never matched and the
+check passed everything. The planted cases missed it because they all went
+through the uncommitted branch. A test now pins the lookup.
