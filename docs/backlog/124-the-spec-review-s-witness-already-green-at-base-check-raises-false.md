@@ -3,6 +3,7 @@ id: 124
 title: The spec review's "witness already green at base" check raises false blockers
 status: open
 tier: 3
+by_hand: true
 filed: 2026-09-14
 specs: []
 prs: []
@@ -21,6 +22,9 @@ related: [123, 125]
   wrote failed at base. The claim confuses behaviour that exists with a
   witness that passes.
 - Two of these recur at the cells' real bases.
+- **By hand.** The check is prose in `.claude/agents/spec-reviewer.md`. No test
+  fails before a prompt is reworded and passes after, so a criterion here has
+  no honest witness and a cell cannot land it.
 
 ## Done looks like
 
