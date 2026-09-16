@@ -1283,13 +1283,19 @@ def _ceilings_line(target: Spec, rows: list[PastCell]) -> str:
 
     turns_row = max(rows, key=lambda c: c.peak_turns)
     turns_diff = target.max_turns - turns_row.peak_turns
-    turns_word = "above" if turns_diff >= 0 else "below"
+    # Three-way, where the budget half below is two: check 4's blocker is
+    # `max_turns` "at or below" the peak but `budget_usd` only "below"
+    # (.claude/agents/spec-reviewer.md), so equality is a blocker here and not
+    # there — and "above by 0t" reads as headroom at exactly that threshold.
+    if turns_diff == 0:
+        turns_gap = "level with it"
+    else:
+        turns_gap = f"{'above' if turns_diff > 0 else 'below'} by {abs(turns_diff)}t"
     cut_off = any("error_max_turns" in e for e in turns_row.endings)
     turns_label = "a floor — cut off at its own ceiling" if cut_off else "used"
     turns_part = (
         f"max_turns={target.max_turns} vs {turns_row.spec_id}'s peak "
-        f"{turns_row.peak_turns}t ({turns_label}), {turns_word} by "
-        f"{abs(turns_diff)}t"
+        f"{turns_row.peak_turns}t ({turns_label}), {turns_gap}"
     )
 
     budget_row = max(rows, key=_pre_review_total)

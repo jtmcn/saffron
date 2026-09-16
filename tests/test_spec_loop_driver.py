@@ -903,13 +903,66 @@ def test_history_compares_the_targets_ceilings_with_the_rows_it_printed():
     high_spend.implement = driver.Spend(5, 5.0)
     high_spend.repair = driver.Spend(5, 5.0)
 
-    ceilings = driver._history_lines(target, [high_peak, high_spend])[-1]
+    # Neither of these is printed — `_history_lines` filters to the target's
+    # own type and then to `_HISTORY_LIMIT` — so comparing against the
+    # unfiltered rows is the mis-comparison this line exists to prevent.
+    off_type = _cell("SA-0004", "feature", 2, 3)
+    off_type.peak_turns = 500
+    off_type.plan = driver.Spend(1, 500.0)
+    crowded = [_cell(f"SA-01{n:02d}", "bug", 2, 3) for n in range(12)]
+    for spare in crowded:
+        spare.peak_turns = 1
+        spare.plan = driver.Spend(1, 0.0)
+        spare.implement = driver.Spend(1, 0.0)
+        spare.repair = driver.Spend(0, 0.0)
+    overflow = crowded[-1]
+    overflow.spec_id = "SA-0999"
+    overflow.peak_turns = 400
+    overflow.plan = driver.Spend(1, 400.0)
+
+    rows = [high_peak, high_spend, *crowded[:-1], off_type, overflow]
+    ceilings = driver._history_lines(target, rows)[-1]
 
     assert ceilings.startswith("ceilings:")
     assert "max_turns=100" in ceilings
     assert "SA-0002's peak 90t (used), above by 10t" in ceilings
     assert "budget_usd=10.0" in ceilings
     assert "SA-0003's pre-review total $15.00, below by $5.00" in ceilings
+    assert "SA-0004" not in ceilings  # wrong type, never printed
+    assert "SA-0999" not in ceilings  # past the limit, never printed
+
+    # The mirrored directions. Witnessed one way each, hardcoding both words
+    # passes the whole suite — and ceiling-below-peak is SA-0031, the very
+    # case this line exists to catch.
+    target.max_turns = 50
+    target.budget_usd = 20.0
+    mirrored = driver._history_lines(target, [high_peak, high_spend])[-1]
+    assert "SA-0002's peak 90t (used), below by 40t" in mirrored
+    assert "SA-0003's pre-review total $15.00, above by $5.00" in mirrored
+
+
+def test_the_ceilings_line_does_not_call_an_equal_ceiling_headroom():
+    """`max_turns` equal to the peak is check 4's blocker, not headroom —
+    "at or below the peak a similar cell needed" (spec-reviewer.md). Printing
+    "above by 0t" there is the reading this whole line exists to end, and 9
+    live specs declare `max_turns: 120` against ledger peaks of exactly 120."""
+    target = _spec("SA-0009", touches=2, criteria=3)
+    target.max_turns = 140
+
+    level = _cell("SA-0002", "bug", 2, 3)
+    level.peak_turns = 140
+
+    ceilings = driver._history_lines(target, [level])[-1]
+
+    assert "SA-0002's peak 140t (used), level with it" in ceilings
+    assert "above" not in ceilings.split(";")[0]
+    assert "by 0t" not in ceilings
+
+    # One either side still reads as a gap, and in the right direction.
+    target.max_turns = 141
+    assert "above by 1t" in driver._history_lines(target, [level])[-1]
+    target.max_turns = 139
+    assert "below by 1t" in driver._history_lines(target, [level])[-1]
 
 
 def test_the_ceilings_line_calls_a_cut_off_rows_peak_a_floor():
@@ -920,7 +973,11 @@ def test_the_ceilings_line_calls_a_cut_off_rows_peak_a_floor():
 
     cutoff = _cell("SA-0002", "bug", 2, 3)
     cutoff.peak_turns = 60
-    cutoff.endings = ["IMPLEMENTING error_max_turns"]
+    # Not first in the list: reading only `endings[0]` must not pass.
+    cutoff.endings = [
+        "REVIEWING error_during_execution",
+        "IMPLEMENTING error_max_turns",
+    ]
     other = _cell("SA-0003", "bug", 2, 3)
     other.peak_turns = 30
     other.endings = []
@@ -931,6 +988,13 @@ def test_the_ceilings_line_calls_a_cut_off_rows_peak_a_floor():
     # The same cutoff row, now not the highest peak: the row actually being
     # compared did not hit its own ceiling, so no floor language belongs to it.
     other.peak_turns = 90
+    ceilings = driver._history_lines(target, [cutoff, other])[-1]
+    assert "SA-0003's peak 90t (used)" in ceilings
+    assert "floor" not in ceilings
+
+    # An abnormal ending that is not a turn ceiling is not a floor either:
+    # `bool(endings)` must not stand in for the predicate.
+    other.endings = ["IMPLEMENTING error_max_budget_usd (budget_exhausted)"]
     ceilings = driver._history_lines(target, [cutoff, other])[-1]
     assert "SA-0003's peak 90t (used)" in ceilings
     assert "floor" not in ceilings
@@ -1056,6 +1120,7 @@ def test_history_before_shows_every_spec_as_it_stood_and_none_of_the_targets_cel
     header, *rest = capsys.readouterr().out.splitlines()
     *cells, ceilings = rest
     assert "max_turns=60" in header
+    assert "budget_usd=" in header
     assert [line.split()[0] for line in cells] == ["SA-0002"]
     assert "touches=2" in cells[0]
     assert ceilings.startswith("ceilings:")
