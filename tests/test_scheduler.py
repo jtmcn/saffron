@@ -1818,7 +1818,14 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-15, a twenty-eighth time: `SA-0092`, from backlog
+    """Re-measured 2026-09-16, a twenty-ninth time: `SA-0087` merged as PR #274
+    and is retired to `done/`, so item 118's chain advances by one. `SA-0088`
+    becomes the candidate its parent was, because a parent in `done/` is the
+    operator asserting that work is in `main` — the one thing a `spec_sha` task
+    lookup cannot say on its own. `SA-0089` and `SA-0091` are still refused, now
+    on `SA-0088` and `SA-0089`, and `SA-0090` and `SA-0092` are unmoved.
+
+    Re-measured 2026-09-15, a twenty-eighth time: `SA-0092`, from backlog
     item 123. It edits the spec loop's driver and that file's tests, which
     nothing else queued touches, so it is refused by nothing and joins the
     candidates behind `SA-0087` and `SA-0090` — priority 3, and later by id.
@@ -1937,9 +1944,9 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == ["SA-0087", "SA-0090", "SA-0092"]
-    assert [r.path.name[:7] for r in refusals] == ["SA-0088", "SA-0089", "SA-0091"]
-    parents = ["SA-0087", "SA-0088", "SA-0089"]
+    assert [c.spec.id for c in candidates] == ["SA-0088", "SA-0090", "SA-0092"]
+    assert [r.path.name[:7] for r in refusals] == ["SA-0089", "SA-0091"]
+    parents = ["SA-0088", "SA-0089"]
     for refusal, parent in zip(refusals, parents, strict=True):
         assert f"depends_on {parent} has no task" in refusal.reason
     # A precondition, not the glob check: `done/` is populated, so the empty

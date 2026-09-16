@@ -141,3 +141,11 @@ re-queued. `git apply --index` replaces it. The other five were witnesses that
 could not fail. Items **132**–**136** are what the review left; the branch is
 644 changed lines against the `feature` ceiling of 600, accepted by the operator
 under item **40**.
+
+**2026-09-16:** `SA-0087` merged (PR #274) and its spec is retired to
+`.saffron/specs/done/`. Two of the four slices are now in `main`; the item stays
+`partial` for `SA-0088` and `SA-0089`. Retiring it advances the chain in the
+live queue: `SA-0088` becomes a candidate, because a parent in `done/` is the
+operator asserting that work is in `main`, which a `spec_sha` task lookup cannot
+say on its own. The scheduler smoke test is re-measured a twenty-ninth time.
+
