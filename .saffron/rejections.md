@@ -390,3 +390,65 @@ critic did raise are not repeated here.
   **No bucket** — it names a probe that does not exist. **Open:** item 135,
   behind item 127.
 
+
+## 2026-09-16 — `SA-0088`–`SA-0092` (fixes landed on #277, #278, #279, #282, #284)
+
+Five specs in one loop, stack #285. The three in-cell lenses filed **one** blocker
+across five cells; the two independent seats filed **twelve**, and eight of those
+mutants passed the *entire* default suite. Every line below is a rejection the
+lenses did not raise.
+
+- Three of item 118's four slices shipped the same omission: a witness that
+  records the fact its criterion turns on and never asserts it. `SA-0088` read
+  which container the verdict diff came from and asserted only where the session
+  ran; `SA-0089` never read `cell.execs` for the gate-only cell, so deleting the
+  patch apply made the lenses' table a measurement of the bare base tree;
+  `SA-0091` could take a second export from the implementer's own `.git`. Each
+  left the whole suite green. `SA-0087` was amended for this exact shape and both
+  later specs carry the corrective note.
+  **Bucket 1** — the `criteria` gate knows a criterion's claim and its witness;
+  what it cannot yet ask is whether the witness *reads* the seam the claim names.
+  **Open:** items 140, 141, 148, 149, 150.
+- A teardown witness satisfied by the pre-clean. `critic_cell` and
+  `_gate_cell_suite` both remove their names before creating anything, so
+  membership and ordering hold with the whole `finally` deleted; only a count of
+  two can tell. `tests/test_session.py` explains this in a comment one screen
+  above the witness that then did not do it.
+  **Bucket 1** — a rule, or a shared assertion helper, for teardown witnesses on
+  a lifecycle that pre-cleans. **Open:** item 140.
+- Direction words and boundary cases witnessed in one direction only. `SA-0092`'s
+  ceilings line read "above by 0t" at exactly the threshold its only consumer
+  calls a blocker, and hardcoding both direction words passed 2075 tests.
+  **Bucket 3** — a lens that asks, of any rendered comparison, whether both
+  directions and the equality case are observed. **Open:** item 123.
+- An env carried from policy, witnessed against a policy that declares none, so
+  `env={}` and `env=dict(thread_env)` were indistinguishable; and two assertions
+  that read as the credential check while being tautologies against `== {}`.
+  **Bucket 2** — a `CLAUDE.md` line: a witness for "carries X and nothing else"
+  needs a non-empty X. **Open.**
+- Prompt prose judged as prose rather than as contract. `SA-0091`'s `withdrawn`
+  rule — the sentence that licenses a withdrawal — still said "the diff" with two
+  diffs below it, and reverting the "What to emit" disambiguation passed the
+  entire suite. The spec named the second sentence and not the first.
+  **Bucket 3** — the lenses read `saffron/agents/prompts/**` as text; nothing
+  asks whether an instruction is true of every prompt the code can render.
+  **Open.**
+- Comments asserting the opposite of the code beside them: `_judge`'s said
+  `latest` is kept because "the critic is shown the gate results" in the same
+  revision that stopped showing it, and four new comments cited `CONTEXT.md` §5
+  and item 118 for a claim neither source makes. Same line as `SA-0078`'s first
+  and the `cell_up` docstring above it.
+  **Bucket 3** — a comment's claim checked against the code it describes. **Open.**
+- An operator-facing message naming the wrong cell on the exit-2 path:
+  `_apply_and_commit_patch` said "in the critic cell" once the gate-only cell
+  reached it first. The sibling message one screen away was fixed in the same
+  diff, so the author saw the class and missed this member.
+  **Bucket 1** — mechanically checkable: a message naming a cell inside a helper
+  with more than one caller. **Open:** item 142, which is where the vocabulary
+  for the third cell has to land first.
+- The loop's own tooling rejected three times, which is new: `size` measured a
+  stacked child against the default branch and reported a 176-line overrun that
+  was 123 lines of headroom; `pattern` showed a salvage starting and never its
+  outcome; and editing a spec with an open pull request silently refused its
+  dependents and dropped its pull request from the stack.
+  **Bucket 1** for all three. **Open:** items 137, 138, 139.

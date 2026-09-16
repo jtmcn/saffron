@@ -5,11 +5,11 @@ status: partial
 tier: 1
 filed: 2026-09-13
 by_hand: true
-specs: [SA-0086, SA-0087, SA-0088, SA-0089]
-prs: [255, 274]
+specs: [SA-0086, SA-0087, SA-0088, SA-0089, SA-0091]
+prs: [255, 274, 277, 282, 284]
 commits: [4ba8bdf]
 cites: [§5.4, §5.5, §5.7]
-related: [2, 40, 89, 97, 98, 102, 103, 119, 120, 132, 133, 134, 135, 136]
+related: [2, 40, 89, 97, 98, 102, 103, 119, 120, 132, 133, 134, 135, 136, 140, 141, 142, 143, 148, 149, 150]
 ---
 
 ## Problem
@@ -148,4 +148,34 @@ under item **40**.
 live queue: `SA-0088` becomes a candidate, because a parent in `done/` is the
 operator asserting that work is in `main`, which a `spec_sha` task lookup cannot
 say on its own. The scheduler smoke test is re-measured a twenty-ninth time.
+
+**2026-09-16, the remaining three slices ran** in one spec loop (stack #285).
+`SA-0088` moved REBUT's verdict sessions into a critic cell (PR #277),
+`SA-0089` moved the lenses' gate table into a gate-only cell (#282), and
+`SA-0091` gave the verdict session the diff its blockers were filed against
+(#284). All three are open drafts; the item stays `partial` until they merge.
+
+Two spec defects were caught by the pre-cell spec review and cost an amendment
+each rather than a cell. `SA-0089`'s notes named one holder of the subnet space
+and the obvious next pick was the proxy's, which would have raised at REVIEW
+after IMPLEMENT was paid (item **143**). `SA-0091` made the reviewed diff's
+*position* load-bearing while telling the agent block order was out of scope,
+which invites an append that ships the defect the spec exists to remove.
+
+What the independent review then found is the same shape as this item's own
+second criterion, three more times — a witness that could not fail on exactly
+the property the slice establishes:
+
+- `SA-0088`: criterion 2's witness recorded which container the verdict diff
+  came from and never asserted it. Reading it from the implementer's `.git`
+  left all 2078 tests green.
+- `SA-0089`: deleting the gate-only cell's patch apply made the lenses' table a
+  measurement of the *bare base tree*, with all 2080 tests green. Its teardown,
+  and its teardown when a gate raises, were equally unwitnessed.
+- `SA-0091`: a second export taken from the implementer's own `.git` stood in
+  for the reviewed diff, with 202 tests green.
+
+Three of the four slices shipped that omission, and each was found only by an
+independent seat walking the criterion. Items **140**–**143** and **148**–**150**
+are what these reviews left.
 
