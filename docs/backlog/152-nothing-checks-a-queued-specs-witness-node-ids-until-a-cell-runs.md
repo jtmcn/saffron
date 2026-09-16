@@ -72,16 +72,24 @@ cell costs an attempt.
 
 **2026-09-16, done, by hand.** `tests/test_queued_specs.py` resolves every
 queued witness. A `preserves` one must be a node id in the suite's collection,
-taken with the argv `.saffron/gates/tests` uses. Any other must have no `def` in
-its file **at the commit that last edited the spec**, not at HEAD. That is the
+taken with the flags `.saffron/gates/tests` uses. Any other must have no `def` in
+its file **at the commit that last changed the spec's `witness:` or
+`preserves:` lines**, not at HEAD. That is the
 one departure from this record's "Done looks like", and it is forced: the cell
 implementing a spec writes its witness, and from then until the spec retires
 to `done/`, HEAD holds it. A HEAD check would fail that cell's `tests` gate
 and `main` between the merge and the retirement. Absence is read with
 `git grep`, not by collection, because a checkout per spec costs too much, and
-for absence a grep is the stricter reading. An uncommitted spec edit is read
-against the working tree. CI now fetches full history, and a shallow clone
-fails its own test instead of passing quietly.
+for absence a grep is the stricter reading. An uncommitted change to those
+lines is read against the working tree. CI now fetches full history, and a
+shallow clone fails its own test instead of passing quietly.
+
+**What this gives up.** The check reads the tree where the witness was
+written, not the cell's eventual `base_sha`. A same-named test that lands
+*after* the spec was written, from another cell or by hand, passes here, and
+`criteria` still refuses it as `witness-green-at-base` once the cell has been
+paid for. Closing that would take a HEAD check that can tell a cell's own
+witness from anyone else's, and nothing records which commit wrote a test.
 
 Measured against planted defects: this record's own misnamed `SA-0094`
 witness, the right name in the wrong file, and a new-behaviour witness naming a
@@ -90,3 +98,13 @@ passes. The first draft's `git grep -E` spelled whitespace `\s`, which ERE
 reads as a literal `s`, so the committed-tree lookup never matched and the
 check passed everything. The planted cases missed it because they all went
 through the uncommitted branch. A test now pins the lookup.
+
+**2026-09-16, review of #294.** The first anchor was the spec's *last edit*
+of any kind. `run-saffron-spec-loop` says to edit a spec only after its pull
+request merges, and the spec stays queued until it is retired. So a prose-only
+fix in that window re-read a witness the cell had already written, and `main`
+went red. Replayed in a throwaway clone: at `3633b6c` a committed title edit
+fails the check, and with the anchor on witness lines it passes. A witness
+line changed to name an existing test still fails, committed or not. A second
+test pins that a committed spec resolves to a commit rather than falling back
+to the working tree, where the check would pass unread.

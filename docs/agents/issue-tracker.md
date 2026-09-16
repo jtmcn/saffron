@@ -109,11 +109,14 @@ GitHub issues remain in use only for research/evidence records under
   anti-theater gate checks nothing. Found reviewing `SA-0066`–`SA-0073`,
   2026-09-11, where it had been missed in five of eight specs.
 
-  `tests/test_queued_specs.py` holds the mechanical half on every commit: a
-  `preserves` witness must be a node id the suite collects, and any other
-  witness must have no `def` in its file at the commit that last edited the
-  spec (backlog item 152). Whether it *fails* with the source reverted is
-  still yours to reason out.
+- **A `preserves` witness names a test that exists now; any other names one
+  that does not.** `tests/test_queued_specs.py` holds both on every commit
+  (backlog item 152). The first is resolved by collection, so the right name in
+  the wrong file or class fails. The second is read at the commit that last
+  changed the spec's `witness:` or `preserves:` lines, because the cell that
+  implements the spec writes that test. Any `def` of the name in the file
+  counts, whatever its class. Whether the witness *fails* with the source
+  reverted is still yours to reason out.
 
 - **For each criterion, name the plausible wrong implementation its witness
   would pass, before you declare the witness.** If you can name one, the

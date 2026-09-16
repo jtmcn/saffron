@@ -86,8 +86,8 @@ def test_no_queued_spec_is_refused_on_its_own_text(queued):
 
 @pytest.fixture(scope="module")
 def collected() -> frozenset[str]:
-    # The argv `.saffron/gates/tests` collects with, so a witness resolves here
-    # iff `criteria` can see it.
+    # The flags `.saffron/gates/tests` collects with, so a witness resolves here
+    # as `criteria` would see it.
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "--collect-only"]
         + ["-p", "no:cacheprovider"],
@@ -117,13 +117,21 @@ def _git(*args: str) -> str:
     ).stdout
 
 
+_WITNESS_LINE = r"^[[:space:]-]*(witness|preserves):"
+
+
 def _authored_at(spec_path: Path) -> str | None:
-    """The commit that last edited this spec, or `None` while an edit is
-    uncommitted — then the working tree is the authoring state."""
+    """The commit that last changed this spec's witnesses, or `None` while such
+    a change is uncommitted — then the working tree is the authoring state.
+
+    Witness lines only: the spec loop edits a spec after its cell merged, and
+    a prose fix then must not re-read a witness that cell wrote."""
     rel = spec_path.relative_to(REPO).as_posix()
-    if _git("status", "--porcelain", "--", rel).strip():
+    pickaxe = f"-G{_WITNESS_LINE}"
+    untracked = not _git("ls-files", "--", rel).strip()
+    if untracked or _git("diff", "HEAD", "--name-only", pickaxe, "--", rel).strip():
         return None
-    return _git("log", "-1", "--format=%H", "--", rel).strip() or None
+    return _git("log", "-1", "--format=%H", pickaxe, "--", rel).strip() or None
 
 
 def _defined_at(witness: str, sha: str | None) -> bool:
@@ -152,6 +160,13 @@ def test_a_committed_tree_lookup_finds_a_test_that_is_there():
     here = "tests/test_queued_specs.py::test_every_queued_spec_parses"
     assert _defined_at(here, "HEAD")
     assert not _defined_at(here + "_not", "HEAD")
+
+
+def test_a_committed_spec_is_read_at_a_commit_not_the_working_tree():
+    # A `None` here sends every spec to the working tree, which a cell's
+    # witnesses have not reached yet, so the check would pass unread.
+    done = sorted((SPECS / "done").glob("SA-*.md"))[-1]
+    assert _authored_at(done)
 
 
 def test_the_checkout_has_the_history_the_witness_check_reads():
