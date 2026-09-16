@@ -1,7 +1,7 @@
 ---
 id: 123
 title: The spec review is blind to ceilings defects and raises ceilings blockers the outcome contradicts
-status: open
+status: partial
 tier: 3
 filed: 2026-09-14
 specs: [SA-0092]
@@ -54,4 +54,12 @@ cell then peaked at **60** turns and $8.39 of $16. Neither raise bound. The
 reasoning was sound before the fact and the raise cost nothing, which is the
 shape this item should expect: check 4's forecasts are weak in *both* directions,
 and the line is worth more than the judgement either way.
+
+**2026-09-16, partial.** `SA-0092` merged as PR #279, so `history` computes the
+comparison rather than asking a spec review to make it by eye. The item stays
+open in two places: `.claude/agents/spec-reviewer.md` check 4 still says to
+compare by eye and does not know the line exists (item **145**), so the line is
+computed and unread; and `endings` still hides an attempt that ended abnormally
+while its subtype read `success` (item **144**), six of which are in the live
+ledger.
 

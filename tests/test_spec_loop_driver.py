@@ -358,6 +358,89 @@ def test_the_watch_pattern_ignores_state_names_inside_the_agents_own_lines():
     assert pattern.search("Traceback (most recent call last):")
 
 
+def test_editing_a_spec_with_an_open_pull_request_names_what_it_refuses(
+    tmp_path, monkeypatch
+):
+    """Item 137. The bare "the spec changed after the snapshot" line said
+    nothing about the cost: the next `snapshot --force` holds the spec out of
+    the order, refuses every dependent, and drops its pull request from the
+    stack. It cost two pull requests on 2026-09-16, because the operator edited
+    a spec after reading its review, which is the normal thing to do."""
+    spec = tmp_path / "SA-0088.md"
+    spec.write_text("---\nid: SA-0088\n---\n")
+    monkeypatch.setattr(driver, "REPO", tmp_path)
+    monkeypatch.setattr(driver, "load_spec", None, raising=False)
+    monkeypatch.setattr(
+        "saffron.intake.load_spec", lambda _p: (object(), "the-new-sha")
+    )
+
+    parent = _row("SA-0088", pr=277)
+    parent.path = "SA-0088.md"
+    parent.spec_sha = "the-sha-its-task-ran-at"
+    child = _row("SA-0089", depends_on=["SA-0088"], pr=None, state=None)
+    grandchild = _row("SA-0091", depends_on=["SA-0089"], pr=None, state=None)
+    for row in (child, grandchild):
+        row.path = "SA-0088.md"
+        row.spec_sha = "the-new-sha"
+
+    traps = driver._edit_traps([parent, child, grandchild], lambda _n: "OPEN")
+
+    assert len(traps) == 1
+    assert "SA-0089" in traps[0] and "SA-0091" in traps[0]  # both, transitively
+    assert "#277" in traps[0]
+    assert "item 137" in traps[0]
+
+    # A merged pull request is the ordinary re-queue, not the trap.
+    assert driver._edit_traps([parent, child, grandchild], lambda _n: "MERGED") == []
+
+
+def test_the_watch_pattern_shows_whether_a_salvage_recovered_anything():
+    # Item 139: the Monitor showed `IMPLEMENT: cut off at the turn ceiling with
+    # nothing committed — spending one turn to salvage it` and then nothing, so
+    # whether the cell had anything left to gate was invisible.
+    pattern = re.compile(driver.watch_pattern())
+    assert pattern.search("SALVAGE: recovered 1 commit(s), $7.96 spent")
+    assert pattern.search("SALVAGE: nothing to recover")
+    assert not pattern.search('agent: Bash {"command": "echo SALVAGE: 1"}')
+
+
+def test_size_measures_from_a_parent_the_order_does_not_carry(monkeypatch):
+    """Item 138, whose cause is item 137. A spec whose text moved while its
+    pull request was open is held out of the order entirely, so the order-only
+    lookup returned no base and `size` measured from the default branch —
+    counting the parent's whole diff as the child's. `SA-0089` read 776 of a
+    600 ceiling for a branch that was 477."""
+    from saffron.intake import Spec
+
+    def _spec_with(spec_id, depends_on):
+        spec = object.__new__(Spec)
+        object.__setattr__(spec, "id", spec_id)
+        object.__setattr__(spec, "depends_on", list(depends_on))
+        return spec
+
+    known = {
+        "SA-0088": _spec_with("SA-0088", []),
+        "SA-0089": _spec_with("SA-0089", ["SA-0088"]),
+        "SA-0091": _spec_with("SA-0091", ["SA-0089"]),
+    }
+    monkeypatch.setattr(driver, "_known_specs", lambda: known)
+
+    # The order carries only the child: its parent was held out (item 137).
+    orphaned = [_row("SA-0089", depends_on=["SA-0088"])]
+    assert driver._bases_below("SA-0089", orphaned) == ["saffron/SA-0088"]
+
+    # Two deep, and still nearest first.
+    assert driver._bases_below(
+        "SA-0091", [_row("SA-0091", depends_on=["SA-0089"])]
+    ) == [
+        "saffron/SA-0089",
+        "saffron/SA-0088",
+    ]
+
+    # A spec with no parent still measures from the trunk.
+    assert driver._bases_below("SA-0088", [_row("SA-0088")]) == []
+
+
 def test_the_watch_pattern_shows_the_lines_that_decide_a_turn_ceiling():
     # SA-0087: a turn-ceiling line reads as non-terminal, and only the `budget:`
     # line after it said nothing could be salvaged. The Monitor never showed it.
@@ -948,6 +1031,30 @@ def test_history_compares_the_targets_ceilings_with_the_rows_it_printed():
     mirrored = driver._history_lines(target, [high_peak, high_spend])[-1]
     assert "SA-0002's peak 90t (used), below by 40t" in mirrored
     assert "SA-0003's pre-review total $15.00, above by $5.00" in mirrored
+
+
+def test_an_abnormal_ending_reaches_the_row_however_its_subtype_was_spelled(
+    tmp_path,
+):
+    """Item 144: `endings` filtered on `subtype not in (None, "success")`, so an
+    attempt that ended abnormally while its subtype read `success` never reached
+    the row at all. Six such rows are in the live ledger — `subtype=success,
+    terminal_reason=api_error` — including a 22-turn REVIEWING attempt, and a
+    spec review reading `history` could not see any of them."""
+    ledger, repo_id = _ledger_with_one_cell(tmp_path)
+    task_id = ledger.tasks_by_spec_id(repo_id, "SA-0001")[-1]["task_id"]
+    ledger.close_attempt(
+        ledger.open_attempt(task_id, "REVIEWING"),
+        session_id=None,
+        subtype="success",
+        terminal_reason="api_error",
+        num_turns=22,
+        cost_usd_est=0.9,
+    )
+    (cell,) = driver._past_cells(ledger, repo_id, {"SA-0001": _spec("SA-0001")})
+    ledger.close()
+
+    assert "REVIEWING success (api_error)" in cell.endings
 
 
 def test_a_peak_that_stopped_on_budget_is_not_called_a_turn_floor(tmp_path):

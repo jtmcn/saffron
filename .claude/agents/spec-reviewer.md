@@ -66,17 +66,40 @@ trivial.
    `git grep` for the test name). A non-`preserves` witness must not already
    pass at `base`: if the behaviour it claims is already true there, that is
    a blocker.
-4. **Ceilings vs history.** `max_turns` bounds each agent session, not their
-   sum, so compare it with the `peak` of the `history` rows closest in shape:
-   their longest single session. A row that ended `error_max_turns` was cut
-   off at its own ceiling, so its peak is a floor on what it needed, not what
-   it used. Compare `budget_usd` with those rows' total spend: plan,
-   implement, repair, review and rebut. It is a blocker if `max_turns` is at
-   or below the peak a similar cell needed, or `budget_usd` is below what
-   similar cells spent before REVIEW: the plan checkpoint, IMPLEMENT and
-   REPAIR. It is a concern
-   if what remains cannot cover REVIEW and REBUT at the rows' usual cost.
-   Cite the rows you compared.
+4. **Ceilings vs history.** `history`'s last line does this comparison for
+   you. Read it; do not redo it by eye — this check was promoted because a
+   review made it by eye and got it wrong in both directions (backlog item
+   123). Quote the line in your report. It reads:
+
+   ```
+   ceilings: max_turns=90 vs SA-0088's peak 81t (a floor — cut off at its own
+   ceiling), above by 9t; budget_usd=16.0 vs SA-0089's pre-review total $9.14,
+   above by $6.86
+   ```
+
+   Each half names the row it compared against, whether the declared ceiling
+   is above or below it and by how much, and — for turns — whether that peak
+   is a floor (the row was cut off at its own ceiling, so it says what the
+   cell *needed at least*, not what it used) or a use.
+
+   - **Blocker** when the turns half says `below by` or `level with it`: the
+     rule is at or below, and `level with it` is the equality case.
+   - **Blocker** when the budget half says `below by`: that is `budget_usd`
+     under what a similar cell spent before REVIEW.
+   - **Concern** when what remains after that pre-REVIEW total cannot cover
+     REVIEW and REBUT at the rows' usual cost. Read those from the rows
+     themselves — the line does not compute it, and REBUT is gated on budget
+     before the rebuttal turn, so a spec that draws a blocker and cannot pay
+     ends `EXHAUSTED` with no verdict.
+   - A peak marked **a floor** makes an `above by` narrower than it looks: the
+     row never found its own ceiling. Say so rather than treating the margin
+     as measured.
+   - `ceilings: no past cells of this shape to compare against` means the
+     check has no evidence. That is a note, not a pass and not a blocker.
+
+   The line compares against the rows it printed, which are the same type and
+   the closest in shape. A row of a different `type` is not in it — if the
+   nearest comparable cell is one, say so and read its row yourself.
 5. **Size vs ceiling.** Estimate the changed lines the criteria, `touches`,
    and the tests they demand imply. Compare with the `size:` summaries in
    similar `history` rows and the ceiling those summaries name. It is a

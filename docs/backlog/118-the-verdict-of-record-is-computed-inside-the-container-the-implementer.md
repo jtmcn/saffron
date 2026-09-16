@@ -1,9 +1,10 @@
 ---
 id: 118
 title: The verdict of record is computed inside the container the implementer controlled
-status: partial
+status: done
 tier: 1
 filed: 2026-09-13
+closed: 2026-09-16
 by_hand: true
 specs: [SA-0086, SA-0087, SA-0088, SA-0089, SA-0091]
 prs: [255, 274, 277, 282, 284]
@@ -178,4 +179,17 @@ the property the slice establishes:
 Three of the four slices shipped that omission, and each was found only by an
 independent seat walking the criterion. Items **140**–**143** and **148**–**150**
 are what these reviews left.
+
+**2026-09-16, done.** All four slices are in `main`: `SA-0086` (#255),
+`SA-0087` (#274), `SA-0088` (#277) and `SA-0089` (#282), with `SA-0091` (#284)
+closing the line-number half the last two opened. The verdict of record is no
+longer computed inside a container the implementer controlled — REVIEW's lenses
+and REBUT's verdict sessions run in a critic cell, the gate table they are shown
+is computed in a gate-only cell with no proxy and no credential, and a blocker's
+line number is read against the tree it was filed on.
+
+What the item leaves behind is in `CONTEXT.md` §5's new **Gate-only cell** entry,
+and in items 140-143 and 148-150 — the duplication three cell lifecycles bought,
+a judged suite that lands in no record, a subnet space nothing enumerates, and
+three small seams the reviews could not reach from inside their specs' `touches`.
 

@@ -41,6 +41,14 @@ stack the worse it gets: `SA-0091` on `SA-0089` on `SA-0088` would triple-count.
 The cost is not just noise — an operator who accepts one of these is accepting a
 number that means nothing.
 
+**Corrected after filing.** `cmd_size` does resolve a base below: `_own_base`
+takes the branches `_bases_below` returns. The defect is that `_bases_below`
+read the *order* and nothing else, and `SA-0088` had been held out of it by item
+137 — so the list came back empty and the measurement fell through to the
+trunk. The two items share a cause: the order is not a sound source for a
+spec's parents, because a spec can be absent from it while its branch is real.
+`depends_on` is on the spec itself and survives retirement to `done/`.
+
 ## Done looks like
 
 `size` measuring from the base the cell used — the parent's branch head for a

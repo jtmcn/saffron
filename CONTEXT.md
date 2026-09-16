@@ -368,10 +368,20 @@ image, on the task's network and proxy, whose worktree is the task's base with
 the exported patch applied by that cell's own git. It is never the implementer's
 cell. A fresh session in the container the implementer had root in re-execs a
 runner that container could have rewritten, and reads the tree through a `.git`
-the implementer wrote (`DESIGN.md` §5.5, Appendix Q). Until `SA-0087` and
-`SA-0088` land, the lenses still run in the implementer's cell.
+the implementer wrote (`DESIGN.md` §5.5, Appendix Q). REVIEW's lenses and
+REBUT's verdict sessions both run in one (`SA-0087`, `SA-0088`).
 _Avoid_: "review cell", "clean cell", "second cell", "the critic's container"
 when you mean the whole cell.
+
+**Gate-only cell**: The cell the gate table a critic is shown is computed in:
+the same rebuilt tree as the critic cell, but on a network of its own and
+carrying `policy.thread_env` and nothing else — no proxy, no agent, no
+credential, because it runs gates rather than a session. It is not the critic
+cell, and the distinction is the point: a gate runs model-authored code, and
+running it in the container the lenses then re-exec their runner from would
+hand that code root over the critic (`SA-0089`; `DESIGN.md` §5.5). PACKAGE's
+re-verification uses one too.
+_Avoid_: "the gate cell", "the suite cell", "the third cell".
 
 **Implementer**: The session that holds write tools during IMPLEMENT and REBUT. It
 acts on the operator's behalf, directly or through the delegate that started the

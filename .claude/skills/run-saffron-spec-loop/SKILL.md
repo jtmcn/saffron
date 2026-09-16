@@ -66,6 +66,16 @@ fix the spec, run it as written, or drop it. Concerns and notes are kept for
 step 5. A spec edited here changes its `spec_sha`, so run `snapshot --force`
 after the edit merges.
 
+**Only a spec that has not run.** Editing one whose pull request is already
+open — which is what an operator wants to do after reading its review — stops
+the ledger's task matching it, so `snapshot --force` holds it out of the order
+*and* refuses every dependent, and the held-out spec loses its recorded
+outcome, so step 3's `stack` silently omits its pull request. `status` names
+the cost now (item 137); it did not on 2026-09-16, and the recovery was a
+second pull request reverting the edit to the exact sha the task ran at. Hash
+the file before committing the revert and check it matches the order's
+`spec_sha`. If the edit must happen, let the pull request merge first.
+
 Two kinds of blocker failed the backtest, and reading the line at base does
 not filter them, because their premise holds there
 (`docs/evidence/2026-09-14-spec-reviewer-backtest.md`; BACKLOG items 123–124). One is a

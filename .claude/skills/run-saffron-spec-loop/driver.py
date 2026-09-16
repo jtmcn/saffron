@@ -54,6 +54,9 @@ WATCH_PREFIXES = (
     # line is the end (SA-0087).
     "PLAN",
     "budget:",
+    # The attempt line is an IMPLEMENT one; without this the watcher sees a
+    # salvage start and never whether it recovered anything (item 139).
+    "SALVAGE",
 )
 
 if not (REPO / "DESIGN.md").is_file():  # the skill was moved; say so, do not guess
@@ -344,7 +347,70 @@ def _stale(
     """Why the order no longer describes the repository, if it does not. A
     leftover order once listed a merged PR as reviewable and an unrun spec as
     next, and nothing said so (2026-09-12)."""
-    return [reason for p in rows for reason in _stale_reasons(p, pr_state)]
+    reasons = [reason for p in rows for reason in _stale_reasons(p, pr_state)]
+    return reasons + _edit_traps(rows, pr_state)
+
+
+def _edit_traps(
+    rows: list[OrderRow], pr_state: Callable[[int], str | None] = _pr_state
+) -> list[str]:
+    """What a spec edit costs when that spec's pull request is already open.
+
+    `spec_sha` is what the order and the dependency check key on, so editing a
+    spec that has already run stops the ledger's task matching it: the next
+    `snapshot --force` holds the spec out of the order *and* refuses every
+    dependent, and the held-out spec loses its recorded outcome, so `stack`
+    later omits its pull request. The bare "the spec changed" line above says
+    none of that, and an operator reading a review is exactly who edits one
+    (item 137). Two pull requests, 2026-09-16."""
+    from saffron.intake import load_spec
+
+    edited = []
+    for p in rows:
+        path = REPO / p.path
+        if not path.is_file() or not p.spec_sha:
+            continue
+        if load_spec(path)[1] == p.spec_sha:
+            continue
+        if p.pr and pr_state(p.pr) not in {"MERGED", "CLOSED"}:
+            edited.append(p.spec_id)
+    if not edited:
+        return []
+
+    out = []
+    for spec_id in edited:
+        blocked = _dependents_of(spec_id, rows)
+        held = (
+            f"{spec_id} is held out of the order and #{_pr_of(spec_id, rows)} with it"
+        )
+        if blocked:
+            out.append(
+                f"{spec_id}: editing it with its pull request open refuses "
+                f"{', '.join(blocked)} — {held}. Revert the edit to the sha its "
+                "task ran at, or let the pull request merge first (item 137)."
+            )
+        else:
+            out.append(f"{spec_id}: {held} (item 137)")
+    return out
+
+
+def _dependents_of(spec_id: str, rows: list[OrderRow]) -> list[str]:
+    """Every row that reaches `spec_id` through `depends_on`, nearest first."""
+    blocked: list[str] = []
+    frontier = {spec_id}
+    while frontier:
+        nxt = {
+            p.spec_id
+            for p in rows
+            if p.depends_on and p.depends_on[0] in frontier and p.spec_id not in blocked
+        }
+        blocked.extend(sorted(nxt))
+        frontier = nxt
+    return blocked
+
+
+def _pr_of(spec_id: str, rows: list[OrderRow]) -> int | None:
+    return next((p.pr for p in rows if p.spec_id == spec_id), None)
 
 
 def _previous() -> list[OrderRow]:
@@ -460,7 +526,32 @@ def _bases_below(spec_id: str, rows: list[OrderRow]) -> list[str]:
     candidate it had a parent measure 0 changed lines."""
     order, _warnings = _stack_order(rows)
     ids = [p.spec_id for p in order]
-    return [p.branch for p in order[: ids.index(spec_id)]] if spec_id in ids else []
+    below = [p.branch for p in order[: ids.index(spec_id)]] if spec_id in ids else []
+    # The order is not the only source of truth for a parent. A spec whose
+    # pull request is open and whose text moved is held out of it entirely
+    # (item 137), and then `below` is empty and the size is measured from the
+    # default branch — which counts the parent's whole diff as the child's
+    # (item 138). `depends_on` is on the spec itself, live or retired.
+    for ancestor in _depends_on_chain(spec_id):
+        branch = f"saffron/{ancestor}"
+        if branch not in below:
+            below.append(branch)
+    return below
+
+
+def _depends_on_chain(spec_id: str) -> list[str]:
+    """Every ancestor of `spec_id` by `depends_on`, nearest first. Reads the
+    spec files, so it holds for a parent already retired to `done/`."""
+    specs = _known_specs()
+    seen: list[str] = []
+    current = specs.get(spec_id)
+    while current is not None and current.depends_on:
+        parent = current.depends_on[0]
+        if parent in seen:  # nothing validates depends_on for cycles
+            break
+        seen.append(parent)
+        current = specs.get(parent)
+    return seen
 
 
 def _size(
@@ -1264,6 +1355,7 @@ def _past_cells(
                         + (f" ({a['terminal_reason']})" if a["terminal_reason"] else "")
                         for a in attempts
                         if a["subtype"] not in (None, "success")
+                        or (a["terminal_reason"] or "completed") != "completed"
                     ],
                     size=sizes[-1] if sizes else None,
                 )

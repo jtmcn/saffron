@@ -1,13 +1,13 @@
 ---
 id: 126
 title: The REVIEW lenses may pay to write the same prompt to the cache three times
-status: open
+status: partial
 filed: 2026-09-14
 specs: [SA-0090]
-prs: []
+prs: [278]
 commits: []
 cites: []
-related: []
+related: [146, 147]
 ---
 
 ## Problem
@@ -48,3 +48,18 @@ settled from the same numbers.
 
 - 2026-09-14: drafted as a spec in PR #261 and withdrawn in its review, because
   reordering the templates could not produce a cache read.
+
+**2026-09-16, partial.** `SA-0090` merged as PR #278: the runner now carries the
+four counts on the `result` event and the three per-turn counts once per
+`message_id`, so the measurement this item waits on can be taken.
+
+It has not been taken. Two things stand between the counts and an answer. The
+per-turn counts ride on the first event an assistant message produces, and
+`saffron/events.py` replaces any event over `BOUND_CHARS` with `event=None` — so
+they are dropped on exactly the largest messages (item **146**). And the SDK
+attributes the whole thing rests on cannot be checked from the host at all, since
+the host is forbidden to import the SDK: if `AssistantMessage` carries no
+`usage`, the per-turn half is vacuous in a live cell with every test still green
+(item **147**). Read one real event log after the next base-image rebuild before
+trusting the numbers this item is about.
+
