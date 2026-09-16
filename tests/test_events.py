@@ -2262,6 +2262,7 @@ def test_the_watch_shaped_callable_phases_still_receive_does_not_raise():
             ),
         ),
         spec_id="s",
+        reviewed_diff=diff,
         emit=rebut_captured.append,
     )
     rebut_lines = [describe(e) for e in rebut_captured]

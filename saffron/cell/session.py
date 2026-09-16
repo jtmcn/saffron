@@ -1949,6 +1949,11 @@ def _drive_cell(
         # Same reason: REBUT reads this to attach a verdict to the row REVIEW
         # wrote, and the branch that fills it is the branch above.
         recorded: dict[int, int] = {}
+        # Same reason again: REBUT hands this to the verdict session as the
+        # tree its blockers' line numbers were filed against — the exact
+        # string `run_review` was handed, never re-exported — and the branch
+        # that fills it is the branch above (CONTEXT.md §5, backlog item 118).
+        reviewed_diff = ""
 
         if outcome == "READY_FOR_REVIEW":
             ledger.set_task_state(task_id, "REVIEWING")
@@ -2038,15 +2043,19 @@ def _drive_cell(
                         created=created,
                         note=_critic_teardown,
                     ) as critic_container:
+                        # Read from the critic cell's own tree, not the
+                        # implementer's — the diff it judges is the patch that
+                        # ships, applied by a git the implementer never
+                        # touched (CONTEXT.md §5, backlog item 118). Bound to
+                        # a name, not re-exported: REBUT hands this same
+                        # string to its verdict sessions below, as the tree
+                        # its blockers' line numbers were filed against.
+                        reviewed_diff = worktree.export_patch(
+                            critic_container, spec.tree_base
+                        )
                         reviews = review.run_review(
                             critic_container,
-                            # Read from the critic cell's own tree, not the
-                            # implementer's — the diff it judges is the patch
-                            # that ships, applied by a git the implementer never
-                            # touched (CONTEXT.md §5, backlog item 118).
-                            diff=worktree.export_patch(
-                                critic_container, spec.tree_base
-                            ),
+                            diff=reviewed_diff,
                             read_head=lambda path: worktree.read_at_head(
                                 critic_container, path
                             ),
@@ -2194,6 +2203,10 @@ def _drive_cell(
                         ),
                         agent=agent,
                         spec_id=spec.spec_id,
+                        # The exact diff REVIEW's lenses were shown, never
+                        # re-exported — the tree the blockers' line numbers
+                        # were filed against (CONTEXT.md §5, backlog item 118).
+                        reviewed_diff=reviewed_diff,
                         emit=emit,
                         last_cost_usd=last_cost,
                     )

@@ -3652,6 +3652,72 @@ def test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch(
     assert cell.removed.count(("container", _CRITIC_CONTAINER)) == 4
 
 
+def test_the_verdict_prompt_carries_the_diff_the_lenses_were_shown(
+    monkeypatch, tmp_path
+):
+    """A task hands REBUT the diff REVIEW's lenses were shown, in addition to
+    the diff after the rebuttal, which it still exports and shows too. Only
+    this test grows the exported patch across the rebuttal — every other
+    session test, `preserves` witness included, anchors findings against a
+    fixed patch, so this is the one place the two diffs can be told apart."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+
+    after_rebuttal = (
+        "diff --git a/src/y.py b/src/y.py\n"
+        "--- a/src/y.py\n+++ b/src/y.py\n@@ -1 +1 @@\n-old\n+the rebuttal's own fix\n"
+    )
+
+    def _export_patch(container, sha):
+        cell.export_calls.append((container, sha))
+        # plan, implement, 3 lenses, rebuttal, extraction = 7 turns by the
+        # time REBUT asks for a critic cell; every earlier export is REVIEW's
+        # (the same threshold `test_rebut_verdicts_read_a_tree_rebuilt_from_
+        # the_post_rebuttal_patch` above uses).
+        return after_rebuttal if len(cell.turns) > 5 else _ANCHORING_DIFF
+
+    monkeypatch.setattr("saffron.cell.worktree.export_patch", _export_patch)
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_through_rebut(
+            _turn("Fixed."),
+            _turn(
+                _block(
+                    {
+                        "rebuttals": [
+                            {"finding": 1, "action": "fixed", "argument": "committed"}
+                        ]
+                    }
+                )
+            ),
+            _turn(
+                _block(
+                    {
+                        "verdicts": [
+                            {"finding": 1, "verdict": "withdrawn", "reason": "fixed"}
+                        ]
+                    }
+                )
+            ),
+        ),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    # The verdict session's own system prompt — the last turn run.
+    verdict_prompt = cell.system_prompts[-1]
+    # Each diff sits under its own heading — not merely present somewhere in
+    # the prompt, which a caller that swapped the reviewed and post-rebuttal
+    # diffs would also satisfy while recreating the exact bug this spec
+    # fixes: a blocker's line number read against the wrong tree.
+    assert (
+        f"## The diff your findings were filed against\n\n{_ANCHORING_DIFF}"
+        in verdict_prompt
+    )
+    assert f"## The diff, after the rebuttal\n\n{after_rebuttal}" in verdict_prompt
+
+
 def test_a_rebuttal_numbered_badly_records_the_answer_that_was_asked_for(
     monkeypatch, tmp_path
 ):

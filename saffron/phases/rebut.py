@@ -227,6 +227,7 @@ def verdict_prompt(
     claude_md: str | None,
     prompts_dir: Path,
     spec_body: str,
+    reviewed_diff: str,
     diff: str,
 ) -> str:
     """The verdict session's system prompt.
@@ -235,6 +236,12 @@ def verdict_prompt(
     §5.3's "REBUT injects nothing" — which is about the *resumed implementer* —
     does not reach it, and a session with no vocabulary would be verdicting
     against terms it was never given.
+
+    Two diffs, never one: `reviewed_diff` is the tree the blockers' line
+    numbers were filed against — REVIEW's own, exported once and handed
+    through, never re-exported — and `diff` is the tree as it now stands,
+    after the rebuttal. The template names both by heading so the critic
+    reads a blocker's line number against the tree it was actually filed on.
     """
     # Filtered to this lens's own blockers: `run_verdict` requires the verdict
     # set to match `blockers` exactly, so showing arguments it may not verdict
@@ -252,6 +259,7 @@ def verdict_prompt(
         template=template,
         spec=spec_body,
         diff=diff,
+        reviewed_diff=reviewed_diff,
         blockers=blocker_lines(blockers),
         rebuttal=argued or "The implementer recorded no argument.",
         standing_instructions=context.standing_instructions(claude_md),
@@ -456,6 +464,11 @@ def run_rebut(
     # Required, not defaulted — the same rule `review.run_review`'s own
     # `spec_id` states: this phase authors its own `PhaseStart` line below.
     spec_id: str,
+    # Required, not defaulted: a default would let a caller keep today's
+    # behaviour — one diff, the post-rebuttal one — without noticing it had
+    # not threaded REVIEW's own diff through. The exact string `run_review`
+    # was handed, never re-exported (CONTEXT.md §5, backlog item 118).
+    reviewed_diff: str,
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
     last_cost_usd: float = 0.0,
 ) -> RebutResult:
@@ -563,6 +576,7 @@ def run_rebut(
                     claude_md=claude_md,
                     prompts_dir=prompts_dir,
                     spec_body=spec_body,
+                    reviewed_diff=reviewed_diff,
                     diff=changed,
                 ),
                 max_turns=max_turns,

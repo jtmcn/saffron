@@ -104,6 +104,7 @@ def _run(
     critic_calls=None,
     critic_container_name="critic-cell",
     diff=None,
+    reviewed_diff=None,
 ):
     def _rerun_gates():
         if gate_suites is not None:
@@ -134,6 +135,7 @@ def _run(
         diff=diff or (lambda _critic: DIFF),
         agent=_agent(*texts, record=record),
         spec_id="SY-1",
+        reviewed_diff=reviewed_diff if reviewed_diff is not None else DIFF,
         emit=lambda _e: None,
     )
 
@@ -400,6 +402,7 @@ def test_the_verdict_prompt_carries_the_argument_the_finding_and_the_new_diff():
         claude_md=None,
         prompts_dir=PROMPTS,
         spec_body="fix the gap",
+        reviewed_diff=DIFF,
         diff=DIFF,
     )
     assert "1. [correctness] src/gap.py:1 — the tz default is wrong" in prompt
@@ -407,6 +410,46 @@ def test_the_verdict_prompt_carries_the_argument_the_finding_and_the_new_diff():
     assert "def gap(series, tz=" in prompt
     assert "fix the gap" in prompt
     assert "**Verdict**:" in prompt  # CONTEXT.md §5's vocabulary
+
+
+def test_the_verdict_prompt_carries_the_diff_its_blockers_were_filed_against():
+    """The prompt must carry two diffs, not one — the tree the blocker's line
+    number was filed against, and the tree as it now stands after the
+    rebuttal — and say, by heading, which is which. A critic told only "the
+    diff below" when two sit below cannot tell them apart (this spec)."""
+    turn = rebut.RebuttalTurn(
+        rebuttals=[
+            rebut.Rebuttal(finding=1, action="fixed", argument="committed the fix")
+        ]
+    )
+    after_rebuttal = (
+        "diff --git a/src/gap.py b/src/gap.py\n"
+        "--- a/src/gap.py\n+++ b/src/gap.py\n@@ -1,2 +1,2 @@\n"
+        '-def gap(series, tz="UTC"):\n+def gap(series, tz="America/New_York"):\n'
+        "     return series\n"
+    )
+    prompt = rebut.verdict_prompt(
+        "correctness",
+        blockers=[(1, _blocker())],
+        rebuttal=turn,
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        spec_body="fix the gap",
+        reviewed_diff=DIFF,
+        diff=after_rebuttal,
+    )
+    # Each diff sits under its own heading — not merely present somewhere in
+    # the prompt, which a caller that swapped `reviewed_diff` and `diff`
+    # would also satisfy while recreating the exact bug this spec fixes.
+    assert f"## The diff your findings were filed against\n\n{DIFF}" in prompt
+    assert f"## The diff, after the rebuttal\n\n{after_rebuttal}" in prompt
+    # Named by heading, not by position — the sentence must still be true if
+    # the blocks are ever reordered for prompt caching (out of scope here).
+    assert (
+        'from the tree under the heading "The diff your findings were filed '
+        'against", not the tree under "The diff, after the rebuttal"'
+    ) in prompt
 
 
 def test_the_verdict_prompt_carries_the_repo_s_claude_md():
@@ -425,6 +468,7 @@ def test_the_verdict_prompt_carries_the_repo_s_claude_md():
         claude_md="- Never collapse `error` into `fail`.\n",
         prompts_dir=PROMPTS,
         spec_body="fix the gap",
+        reviewed_diff=DIFF,
         diff=DIFF,
     )
     assert "## This repository's standing instructions" in prompt
@@ -449,6 +493,7 @@ def test_a_verdict_session_is_shown_only_its_own_lens_arguments():
         claude_md=None,
         prompts_dir=PROMPTS,
         spec_body="fix the gap",
+        reviewed_diff=DIFF,
         diff=DIFF,
     )
     assert "mine to answer" in prompt
