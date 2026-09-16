@@ -4,7 +4,7 @@ title: The spec review is blind to ceilings defects and raises ceilings blockers
 status: open
 tier: 3
 filed: 2026-09-14
-specs: []
+specs: [SA-0092]
 prs: []
 commits: []
 cites: []

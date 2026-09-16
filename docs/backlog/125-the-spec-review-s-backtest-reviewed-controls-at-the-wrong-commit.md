@@ -3,6 +3,7 @@ id: 125
 title: The spec review's backtest reviewed controls at the wrong commit and scored a spec review that has since changed
 status: open
 tier: 3
+by_hand: true
 filed: 2026-09-14
 specs: []
 prs: []
@@ -24,6 +25,11 @@ related: [123, 124]
 - The shipped agent and `history` changed after scoring (`cfa1a61`, `c2a4ee5`,
   `7986d0c`), and the cases and the prompt were written with the corpus in
   view, so its recall is in-sample.
+- **By hand.** The work is the backtest itself: 39 headless sessions, real
+  money, and `CLAUDE_CODE_OAUTH_TOKEN` scoped to the invocation, plus the
+  operator's ruling on disputed blockers. A cell carries no credentials beyond
+  its own agent token, and the drivers that spend money live in
+  `docs/evidence/scripts/` and are run by hand (`CLAUDE.md`).
 
 ## Done looks like
 
