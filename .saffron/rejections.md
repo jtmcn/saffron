@@ -362,7 +362,7 @@ critic did raise are not repeated here.
 - The critic cell's `git apply` and `git commit` bypass `worktree._git`, so none
   of the pins items 102, 103 and 110 bought reach them.
   **Bucket 1** — a structure rule refusing a raw `runtime.exec_` git call
-  outside `worktree.py`. **Open:** item 131.
+  outside `worktree.py`. **Open:** item 136.
 - `cell_up`'s docstring still said a second caller cannot get a *nearly*
   isolated cell, with `critic_cell` — that second caller — directly below it.
   **Bucket 3** — a comment's claim checked against the code it describes, the

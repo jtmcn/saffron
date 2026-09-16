@@ -1,5 +1,5 @@
 ---
-id: 131
+id: 136
 title: The critic cell's own git runs without the hardening every other in-cell git read carries
 status: open
 tier: 1

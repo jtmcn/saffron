@@ -7,7 +7,7 @@ cited here as "run 2, item N".
 
 **Outcome:** one reviewable pull request (#274, `SA-0087`) and $9.77 spent, on one
 cell. The operator chose to stop after `SA-0087` before any cell ran, so the
-other five specs are reviewed but unrun. Backlog items filed: 131–135.
+other five specs are reviewed but unrun. Backlog items filed: 132–136.
 
 ## Summary: what to change first
 
