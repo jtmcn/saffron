@@ -1,7 +1,7 @@
 ---
 id: SA-0088
 title: REBUT's verdict lenses run in the container the implementer just rebutted from, so the critic's second look has the same hole as its first
-type: feature
+type: bug
 priority: 1
 depends_on: [SA-0087]
 touches:
@@ -163,5 +163,5 @@ import of a name you add turns the reverted run into a collection error, which
 needs a `# noqa: E731` to pass `lint`, and that suppression fails `integrity`
 even inside `touches`.
 
-**The `size` gate counts tests.** A `feature` gets 600 changed lines, tests
+**The `size` gate counts tests.** A `bug` gets 300 changed lines, tests
 included.
