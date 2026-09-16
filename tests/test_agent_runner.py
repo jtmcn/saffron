@@ -78,6 +78,12 @@ def test_the_result_event_carries_what_the_supervisor_bounds_on():
         total_cost_usd=1.25,
         terminal_reason="completed",
         is_error=False,
+        usage={
+            "input_tokens": 200,
+            "output_tokens": 80,
+            "cache_read_input_tokens": 500,
+            "cache_creation_input_tokens": 25,
+        },
     )
     (event,) = runner.events(message)
     assert event == {
@@ -88,7 +94,92 @@ def test_the_result_event_carries_what_the_supervisor_bounds_on():
         "session_id": "sess-1",
         "terminal_reason": "completed",
         "is_error": False,
+        "input_tokens": 200,
+        "output_tokens": 80,
+        "cache_read_input_tokens": 500,
+        "cache_creation_input_tokens": 25,
     }
+
+
+def test_the_result_event_carries_the_sessions_token_counts():
+    """The four counts the Messages API names, exactly as reported, a zero
+    included — not summed, not reconciled, just carried (§ Notes for the
+    agent)."""
+    message = SimpleNamespace(
+        subtype="success",
+        num_turns=3,
+        session_id="sess-tokens",
+        total_cost_usd=0.42,
+        terminal_reason="completed",
+        is_error=False,
+        usage={
+            "input_tokens": 120,
+            "output_tokens": 45,
+            "cache_read_input_tokens": 300,
+            "cache_creation_input_tokens": 0,
+        },
+    )
+    (event,) = runner.events(message)
+    assert event["input_tokens"] == 120
+    assert event["output_tokens"] == 45
+    assert event["cache_read_input_tokens"] == 300
+    assert event["cache_creation_input_tokens"] == 0
+
+
+def test_a_result_that_reports_no_usage_has_null_token_counts_not_zero():
+    """Absent is null; a reported zero (above) stays zero. `in` is asserted
+    too, not only the value, so a reverted runner with no such keys at all
+    cannot pass this by accident."""
+    message = SimpleNamespace(
+        subtype="success",
+        num_turns=1,
+        session_id="sess-no-usage",
+        total_cost_usd=0.1,
+        terminal_reason="completed",
+        is_error=False,
+    )
+    (event,) = runner.events(message)
+    for key in (
+        "input_tokens",
+        "output_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+    ):
+        assert key in event
+        assert event[key] is None
+
+
+def test_the_counts_for_one_message_id_reach_the_log_once():
+    """One unit of work can be delivered as several assistant messages
+    sharing a message_id, each reporting the same usage. Only the first such
+    message's event carries the per-step counts."""
+    usage = {
+        "input_tokens": 50,
+        "cache_read_input_tokens": 10,
+        "cache_creation_input_tokens": 5,
+    }
+    first = SimpleNamespace(
+        content=[SimpleNamespace(text="hello")],
+        model="claude-test",
+        message_id="shared-msg-1",
+        usage=usage,
+    )
+    second = SimpleNamespace(
+        content=[SimpleNamespace(text="world")],
+        model="claude-test",
+        message_id="shared-msg-1",
+        usage=usage,
+    )
+
+    (first_event,) = runner.events(first)
+    assert first_event["input_tokens"] == 50
+    assert first_event["cache_read_input_tokens"] == 10
+    assert first_event["cache_creation_input_tokens"] == 5
+
+    (second_event,) = runner.events(second)
+    assert "input_tokens" not in second_event
+    assert "cache_read_input_tokens" not in second_event
+    assert "cache_creation_input_tokens" not in second_event
 
 
 def test_a_result_that_reports_no_cost_is_zero_not_none():
