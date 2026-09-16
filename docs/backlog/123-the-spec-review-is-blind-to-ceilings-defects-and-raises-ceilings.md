@@ -57,9 +57,9 @@ and the line is worth more than the judgement either way.
 
 **2026-09-16, partial.** `SA-0092` merged as PR #279, so `history` computes the
 comparison rather than asking a spec review to make it by eye. The item stays
-open in two places: `.claude/agents/spec-reviewer.md` check 4 still says to
-compare by eye and does not know the line exists (item **145**), so the line is
-computed and unread; and `endings` still hides an attempt that ended abnormally
-while its subtype read `success` (item **144**), six of which are in the live
-ledger.
+open in two places, both with a fix open as PR #287: `.claude/agents/spec-
+reviewer.md` check 4 said to compare by eye and did not know the line exists
+(item **145**), so the line was computed and unread; and `endings` hid an
+attempt that ended abnormally while its subtype read `success` (item **144**),
+six of which are in the live ledger. It closes when that merges.
 

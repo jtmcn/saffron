@@ -369,7 +369,6 @@ def test_editing_a_spec_with_an_open_pull_request_names_what_it_refuses(
     spec = tmp_path / "SA-0088.md"
     spec.write_text("---\nid: SA-0088\n---\n")
     monkeypatch.setattr(driver, "REPO", tmp_path)
-    monkeypatch.setattr(driver, "load_spec", None, raising=False)
     monkeypatch.setattr(
         "saffron.intake.load_spec", lambda _p: (object(), "the-new-sha")
     )
@@ -383,15 +382,45 @@ def test_editing_a_spec_with_an_open_pull_request_names_what_it_refuses(
         row.path = "SA-0088.md"
         row.spec_sha = "the-new-sha"
 
-    traps = driver._edit_traps([parent, child, grandchild], lambda _n: "OPEN")
+    # A second-position dependency is refused too: `scheduler._refuse` loops
+    # the whole list and `_order` admits only when *all* are in, so walking
+    # `depends_on[0]` would leave this one unnamed.
+    second = _row("SA-0093", depends_on=["SA-0000", "SA-0088"], pr=None, state=None)
+    # Already ran, so `_carried` keeps it and `_order` admits it — it is not
+    # refused, and neither is its own child.
+    ran = _row("SA-0094", depends_on=["SA-0088"], pr=278)
+    under_ran = _row("SA-0095", depends_on=["SA-0094"], pr=None, state=None)
+    for row in (second, ran, under_ran):
+        row.path = "SA-0088.md"
+        row.spec_sha = "the-new-sha"
+
+    rows = [parent, child, grandchild, second, ran, under_ran]
+    traps = driver._edit_traps(rows, lambda _n: "OPEN")
 
     assert len(traps) == 1
     assert "SA-0089" in traps[0] and "SA-0091" in traps[0]  # both, transitively
+    assert "SA-0093" in traps[0]  # named second, refused all the same
+    assert "SA-0094" not in traps[0]  # it ran; nothing refuses it
+    assert "SA-0095" not in traps[0]  # nor its child, which stacks on a kept row
     assert "#277" in traps[0]
     assert "item 137" in traps[0]
 
     # A merged pull request is the ordinary re-queue, not the trap.
     assert driver._edit_traps([parent, child, grandchild], lambda _n: "MERGED") == []
+
+
+def test_every_progress_line_the_cli_prints_reaches_the_watcher():
+    """Item 139's other half. `SALVAGE` was missing and so were `SCOPE` and
+    `REPAIR`, and nothing held the two lists together — the same reason
+    `watch_pattern` reads the ontology's terminal states rather than copying
+    them. `events.LineLabel` is the closed set of progress-line prefixes."""
+    from typing import get_args
+
+    from saffron.events import LineLabel
+
+    pattern = re.compile(driver.watch_pattern())
+    for label in get_args(LineLabel):
+        assert pattern.search(f"{label}: something happened"), label
 
 
 def test_the_watch_pattern_shows_whether_a_salvage_recovered_anything():
@@ -400,7 +429,7 @@ def test_the_watch_pattern_shows_whether_a_salvage_recovered_anything():
     # whether the cell had anything left to gate was invisible.
     pattern = re.compile(driver.watch_pattern())
     assert pattern.search("SALVAGE: recovered 1 commit(s), $7.96 spent")
-    assert pattern.search("SALVAGE: nothing to recover")
+    assert pattern.search("SALVAGE: cut off and could not be salvaged, $8.39 spent")
     assert not pattern.search('agent: Bash {"command": "echo SALVAGE: 1"}')
 
 

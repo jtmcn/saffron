@@ -98,7 +98,10 @@ trivial.
      check has no evidence. That is a note, not a pass and not a blocker.
 
    The line compares against the rows it printed, which are the same type and
-   the closest in shape. A row of a different `type` is not in it — if the
+   the closest in shape. The row it *names* is the one with the highest peak
+   (or the highest pre-REVIEW spend), not the one closest in shape — it is the
+   worst case among them, deliberately, so do not report it as the most
+   similar cell. A row of a different `type` is not printed at all: if the
    nearest comparable cell is one, say so and read its row yourself.
 5. **Size vs ceiling.** Estimate the changed lines the criteria, `touches`,
    and the tests they demand imply. Compare with the `size:` summaries in
