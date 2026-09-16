@@ -92,12 +92,22 @@ was shown the invariants it judged a diff against`, 2026-09-11,
 `docs/evidence/2026-09-11-lens-corpus-claude-md.md`) and its number stays
 listed too.
 
+**From the spec loop's run of 2026-09-16** (stack #285): **145**, then **141**,
+**143**, **140**, **137**. **145** first because `SA-0092` built the ceilings
+comparison and the prompt that should read it does not know it exists, so the
+whole item-123 fix is inert until it does. **141** and **143** are `SA-0089`'s
+two open edges — a judged suite that lands in no record, and a subnet space
+nothing enumerates whose collision surfaces at REVIEW after IMPLEMENT is paid.
+**140** is item 134's duplication grown by a third copy, in the same file.
+**137** is the loop refusing its own dependents when a spec is edited mid-flight.
+
 ### Tier 2 — the morning after
 
 Operator visibility parts 2 and 3 — `SA-0032`–`SA-0039`, with the plan's Task 6
 rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
 **38**), plus **43**, **48**, **52**, **60**, **66**, **67**, ~~**72**~~, **98**, **103**,
-~~**104**~~, **113**, **135**.
+~~**104**~~, **113**, **135**, and from stack #285: **147**, **146**, **144**,
+**149**, **148**, **142**, **138**.
 
 **72 is done** (2026-09-07, by hand), taken ahead of Track A by operator
 decision because it was the one item whose defect was a guard that could not
@@ -107,7 +117,7 @@ fire. Its number stays listed because item numbers are cited from `saffron/`.
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**,
-~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, ~~**110**~~, ~~**111**~~, **116**, **121**, **122**, **123**, **124**, **125**, **127**, **130**, **131**, **132**, **133**, **134**.
+~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, ~~**110**~~, ~~**111**~~, **116**, **121**, **122**, **123**, **124**, **125**, **127**, **130**, **131**, **132**, **133**, **134**, **139**, **150**.
 (**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived, and **69** is ranked there too.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
 is the same defect as filing one nowhere at all. **94** was filed here and moved
