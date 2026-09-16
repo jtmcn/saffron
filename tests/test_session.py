@@ -24,7 +24,7 @@ from saffron.intake import parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
 from saffron.phases import package as package_mod
-from saffron.repos import mirror
+from saffron.repos import image, mirror
 from saffron.repos import policy as policy_mod
 
 
@@ -630,6 +630,11 @@ class _Cell:
         # *name* never shows a container was created at all.
         self.worktrees: list[dict] = []
         self.read_head_calls: list[tuple[str, str]] = []
+        # The gate cell (backlog item 118, part 4): every network `create_
+        # network` was asked to build, name and subnet both, and how many
+        # times its own gate suite ran (never through `latest`'s own table).
+        self.networks_created: list[tuple[str, str]] = []
+        self.gate_cell_runs = 0
 
 
 _DIFF = """diff --git a/src/x.py b/src/x.py
@@ -667,6 +672,7 @@ def _stub_the_runtime(
     *,
     commits: int | Sequence[int] = 1,
     suites=(),
+    gate_cell_suite=None,
     patch=_DIFF,
     changed=("src/x.py",),
     subjects=("the agent's work",),
@@ -678,6 +684,10 @@ def _stub_the_runtime(
     def _remove(kind):
         def _f(name):
             cell.removed.append((kind, name))
+            # One shared timeline with `_run_agent`'s own `order` entries
+            # below, so a test can assert a removal happened *before* a given
+            # turn rather than merely that both happened somewhere.
+            cell.order.append(f"removed:{kind}:{name}")
             return runtime.Completed(0, "", "")
 
         return _f
@@ -685,7 +695,11 @@ def _stub_the_runtime(
     monkeypatch.setattr("saffron.cell.runtime.remove_container", _remove("container"))
     monkeypatch.setattr("saffron.cell.runtime.remove_network", _remove("network"))
     monkeypatch.setattr("saffron.cell.runtime.remove_volume", _remove("volume"))
-    monkeypatch.setattr("saffron.cell.runtime.create_network", lambda *a, **k: None)
+
+    def _create_network(name, subnet=runtime.DEFAULT_SUBNET):
+        cell.networks_created.append((name, subnet))
+
+    monkeypatch.setattr("saffron.cell.runtime.create_network", _create_network)
     monkeypatch.setattr("saffron.cell.runtime.create_volume", lambda *a, **k: None)
 
     # The critic cell's own three, none stubbed before it existed (SA-0087):
@@ -842,13 +856,35 @@ def _stub_the_runtime(
     monkeypatch.setattr("saffron.cell.worktree.commits_ahead", _commits_ahead)
 
     scripted = iter(suites)
+    # The very first call is always the task's own baseline (`_drive_cell`
+    # calls `suite.baseline(tree)` before any turn runs); held so the gate
+    # cell's own call below has something green to mirror by default.
+    baseline_declared: list[list] = []
 
-    def _run_suite(gates, **_kwargs):
+    def _run_suite(gates, *, executor=None, **_kwargs):
         # The paths the session actually hands the runner. Captured because
         # the cell tests name `GATES_MOUNT` themselves and so cannot tell
         # whether `_drive_cell` asked for the mount or for `/work` (§5.4).
         cell.gate_paths.append([str(path) for path in gates.values()])
-        return next(scripted, [])
+        container = getattr(executor, "container", None)
+        if container is not None and container.startswith("saffron-gate-"):
+            # The gate cell's own suite (backlog item 118, part 4): a call the
+            # implementer's cell never makes, so it is never allowed to
+            # silently consume from `suites=` — every one of this module's
+            # other tests already sizes that sequence exactly for the
+            # baseline and each repair-loop attempt, and a fourth consumer
+            # would desync all of them. Green by default, mirroring the
+            # task's own baseline exactly, unless a test names its own.
+            cell.gate_cell_runs += 1
+            if isinstance(gate_cell_suite, BaseException):
+                raise gate_cell_suite
+            if gate_cell_suite is not None:
+                return list(gate_cell_suite)
+            return list(baseline_declared[0]) if baseline_declared else []
+        result = next(scripted, [])
+        if not baseline_declared:
+            baseline_declared.append(result)
+        return result
 
     monkeypatch.setattr("saffron.gates.runner.run_suite", _run_suite)
     return cell
@@ -976,6 +1012,9 @@ def _drive(
             )
         cell.turns.append(prompt)
         cell.turn_containers.append(container)
+        # The same shared timeline `_remove`'s own entries land on, so a test
+        # can assert a removal happened *before* a given turn started.
+        cell.order.append(f"turn:{container}")
         cell.system_prompts.append(options["system_prompt"])
         cell.turn_options.append(options)
         cell.resumes.append(resume)
@@ -1676,9 +1715,10 @@ def test_the_suite_execs_the_gates_from_the_mount_never_the_worktree(
         gates=("tests",),
     )
     assert outcome.state == "READY_FOR_REVIEW"
-    # Baseline and head alike, and the whole path — not just its prefix: the
-    # mount holds the exported tree, so the gate sits under its own .saffron/.
-    assert cell.gate_paths == [["/gates/.saffron/gates/tests"]] * 2
+    # Baseline, the attempt, and the gate cell's own re-run alike, and the
+    # whole path — not just its prefix: the mount holds the exported tree, so
+    # the gate sits under its own .saffron/.
+    assert cell.gate_paths == [["/gates/.saffron/gates/tests"]] * 3
 
 
 def test_a_run_that_never_went_green_still_exports_its_commits(monkeypatch, tmp_path):
@@ -2915,6 +2955,14 @@ _CRITIC_CONTAINER = "saffron-critic-SY-1"
 _CRITIC_VOLUME = "saffron-critic-wt-SY-1"
 _CRITIC_STATE = "saffron-critic-st-SY-1"
 
+# The gate cell (backlog item 118, part 4): the table every lens is shown is
+# computed here, never in `_IMPLEMENTER_CONTAINER` and never in
+# `_CRITIC_CONTAINER` — a third container, network, and pair of volumes.
+_GATE_CONTAINER = "saffron-gate-SY-1"
+_GATE_NETWORK = "saffron-gate-net-SY-1"
+_GATE_VOLUME = "saffron-gate-wt-SY-1"
+_GATE_STATE = "saffron-gate-st-SY-1"
+
 _OUTSIDE_HUNK_FINDING = {
     "findings": [
         {
@@ -3195,6 +3243,182 @@ def test_the_critic_cell_is_torn_down_when_review_ends(monkeypatch, tmp_path):
     assert raising_cell.removed.count(("volume", _CRITIC_STATE)) == 2
 
 
+def test_the_lenses_are_shown_a_gate_table_computed_outside_the_implementers_cell(
+    monkeypatch, tmp_path
+):
+    """Today `run_review` is handed `review.gate_summary(latest.results, ...)`
+    — the implementer's own last suite, run in the container the agent had
+    root over. A forged toolchain there could tell every lens the tests
+    passed. The table every lens is shown must instead come from a suite run
+    on the task's base with the exported patch applied, in a container that
+    is neither the implementer's own nor the critic's (backlog item 118, part
+    4) — proved here by giving the two suites the same gate, same status and
+    same `tool` (so neither a new failure nor drift decides the outcome) and
+    a different `summary`, the one field `gate_summary` renders that neither
+    comparison logic reads at all."""
+    forged = [
+        GateResult(
+            gate="tests",
+            status="pass",
+            tool="pytest 8.3.2",
+            summary="reported by the implementer's own toolchain",
+        )
+    ]
+    honest = [
+        GateResult(
+            gate="tests",
+            status="pass",
+            tool="pytest 8.3.2",
+            summary="reported by the gate cell's own toolchain",
+        )
+    ]
+    cell = _stub_the_runtime(
+        monkeypatch, suites=(forged, forged), gate_cell_suite=honest
+    )
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        policy="gates:\n  tests: {}\n",
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert cell.gate_cell_runs == 1
+
+    implement_prompt = cell.system_prompts[0]
+    lens_prompts = [p for p in cell.system_prompts if p != implement_prompt]
+    assert len(lens_prompts) == len(review.LENSES)
+    assert all("the gate cell's own toolchain" in p for p in lens_prompts)
+    assert all("the implementer's own toolchain" not in p for p in lens_prompts)
+
+
+def test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs(
+    monkeypatch, tmp_path
+):
+    """The gate cell REVIEW's table comes from is created on a network of its
+    own, carries the repo's declared gate env and nothing else — no proxy, no
+    `CLAUDE_CODE_OAUTH_TOKEN`, no route out — and is fully torn down (its
+    container and both its volumes and its own network) before the first
+    lens turn ever starts (backlog item 118, part 4). Reverted, `session.py`
+    creates no such cell at all, so every assertion here fails honestly
+    against the unfixed code rather than passing on an absence."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        policy="gates: {}\nthread_env:\n  SAFFRON_GATE_MARK: '1'\n",
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert cell.gate_cell_runs == 1
+
+    (gate_worktree,) = [w for w in cell.worktrees if w["container"] == _GATE_CONTAINER]
+    # The repo's declared gate env, and nothing else: no proxy address, no
+    # cell credential, no route out (Appendix I; CONTEXT.md's "no target-repo
+    # credentials in a cell, ever"). Carriage and exclusivity in one: an empty
+    # `thread_env` cannot tell `dict(thread_env)` from `{}`.
+    assert gate_worktree["env"] == {"SAFFRON_GATE_MARK": "1"}
+    assert gate_worktree["network"] == _GATE_NETWORK
+    assert gate_worktree["volume"] == _GATE_VOLUME
+    assert gate_worktree["state_volume"] == _GATE_STATE
+
+    # The task's base, the repo's own cell image, and the exported patch
+    # applied *in this container* — the table the lenses read is computed over
+    # the tree that ships, never the bare base. Deleting the apply left the
+    # whole suite green (backlog item 118's own omission, one cell over).
+    assert gate_worktree["base_sha"] == "b" * 40
+    assert gate_worktree["image"] == image.cell_tag(tmp_path / "repo")
+    gate_execs = [run for run in cell.execs if run[0] == _GATE_CONTAINER]
+    assert [argv for _c, argv, _stdin in gate_execs] == [
+        ("git", "apply", "--index"),
+        ("git", "commit", "-q", "-m", "critic: exported patch, applied and committed"),
+    ]
+    assert gate_execs[0][2] == _DIFF
+
+    # Its own network, on its own subnet — never the task's own `saffron-
+    # cells` (10.88.0.0/24, still held by the still-live implementer's cell
+    # at this point) and never the proxy's `saffron-egress` (10.89.0.0/24).
+    assert (_GATE_NETWORK, "10.90.0.0/24") in cell.networks_created
+    assert all(
+        subnet != "10.90.0.0/24"
+        for name, subnet in cell.networks_created
+        if name != _GATE_NETWORK
+    )
+
+    # Gone — container, both volumes, and its own network — before the first
+    # lens turn starts: the shared timeline is what proves "before", not
+    # merely that both happened somewhere.
+    # Twice each, never `in`: this cell pre-cleans the same four names before
+    # it creates anything, so membership is satisfied with the whole teardown
+    # gone — which it was, across all 2080 tests.
+    for kind, name in [
+        ("container", _GATE_CONTAINER),
+        ("volume", _GATE_VOLUME),
+        ("volume", _GATE_STATE),
+        ("network", _GATE_NETWORK),
+    ]:
+        assert cell.removed.count((kind, name)) == 2, (kind, name)
+
+    first_lens_turn = cell.order.index(f"turn:{_CRITIC_CONTAINER}")
+    for kind, name in [
+        ("container", _GATE_CONTAINER),
+        ("volume", _GATE_VOLUME),
+        ("volume", _GATE_STATE),
+        ("network", _GATE_NETWORK),
+    ]:
+        indices = [
+            i for i, entry in enumerate(cell.order) if entry == f"removed:{kind}:{name}"
+        ]
+        assert indices, (kind, name)
+        assert all(i < first_lens_turn for i in indices), (kind, name)
+
+
+def test_the_lens_gate_cell_is_torn_down_when_its_own_suite_raises(
+    monkeypatch, tmp_path
+):
+    """Criterion 2's "including when a gate in it raises". The green path
+    removes each name twice on its own — pre-clean and teardown — so only a
+    raising run tells a `finally` from a success-path removal: moving the
+    teardown out of the `finally` left all 2080 tests green."""
+    raising = _stub_the_runtime(monkeypatch, gate_cell_suite=RuntimeError("gate boom"))
+    with pytest.raises(RuntimeError, match="gate boom"):
+        _drive(
+            monkeypatch,
+            tmp_path,
+            cell=raising,
+            turns=[_turn(_block(_PLAN)), _turn()],
+        )
+    for kind, name in [
+        ("container", _GATE_CONTAINER),
+        ("volume", _GATE_VOLUME),
+        ("volume", _GATE_STATE),
+        ("network", _GATE_NETWORK),
+    ]:
+        assert raising.removed.count((kind, name)) == 2, (kind, name)
+
+
+def test_a_gate_that_errors_in_the_lens_gate_cell_is_not_the_tasks_failure(
+    monkeypatch, tmp_path
+):
+    """`error` means the gate broke, not that the repo's code is wrong, so it
+    ends `GATE_ERROR` and no lens is ever bought (CLAUDE.md; DESIGN.md §5.4)."""
+    cell = _stub_the_runtime(
+        monkeypatch,
+        gate_cell_suite=[
+            GateResult(
+                gate="tests", status="error", tool="pytest 9.1.1", summary="boom"
+            )
+        ],
+    )
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert outcome.state == "GATE_ERROR"
+    assert f"turn:{_CRITIC_CONTAINER}" not in cell.order
+
+
 # Not a path _ANCHORING_DIFF touches, so it cannot anchor however real it reads.
 _UNANCHORABLE = {
     "findings": [
@@ -3428,6 +3652,82 @@ def test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch(
     assert cell.removed.count(("container", _CRITIC_CONTAINER)) == 4
 
 
+def test_the_verdict_prompt_carries_the_diff_the_lenses_were_shown(
+    monkeypatch, tmp_path
+):
+    """A task hands REBUT the diff REVIEW's lenses were shown, in addition to
+    the diff after the rebuttal, which it still exports and shows too. Only
+    this test grows the exported patch across the rebuttal — every other
+    session test, `preserves` witness included, anchors findings against a
+    fixed patch, so this is the one place the two diffs can be told apart."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+
+    after_rebuttal = (
+        "diff --git a/src/y.py b/src/y.py\n"
+        "--- a/src/y.py\n+++ b/src/y.py\n@@ -1 +1 @@\n-old\n+the rebuttal's own fix\n"
+    )
+
+    implementer_diff = (
+        "diff --git a/src/z.py b/src/z.py\n"
+        "--- a/src/z.py\n+++ b/src/z.py\n@@ -1 +1 @@\n-old\n+the implementer's git\n"
+    )
+
+    def _export_patch(container, sha):
+        cell.export_calls.append((container, sha))
+        # plan, implement, 3 lenses, rebuttal, extraction = 7 turns by the time
+        # REBUT asks for a critic cell; every earlier export is REVIEW's (the
+        # same threshold `test_rebut_verdicts_read_a_tree_rebuilt_from_the_post
+        # _rebuttal_patch` above uses).
+        if len(cell.turns) > 5:
+            return after_rebuttal
+        # Keyed on the container too, not the turn alone: a second export taken
+        # from the implementer's own `.git` is item 118's defect, and a stub
+        # that answers the same bytes to every caller cannot see it.
+        return _ANCHORING_DIFF if container == _CRITIC_CONTAINER else implementer_diff
+
+    monkeypatch.setattr("saffron.cell.worktree.export_patch", _export_patch)
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_through_rebut(
+            _turn("Fixed."),
+            _turn(
+                _block(
+                    {
+                        "rebuttals": [
+                            {"finding": 1, "action": "fixed", "argument": "committed"}
+                        ]
+                    }
+                )
+            ),
+            _turn(
+                _block(
+                    {
+                        "verdicts": [
+                            {"finding": 1, "verdict": "withdrawn", "reason": "fixed"}
+                        ]
+                    }
+                )
+            ),
+        ),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    # The verdict session's own system prompt — the last turn run.
+    verdict_prompt = cell.system_prompts[-1]
+    # Each diff sits under its own heading — not merely present somewhere in
+    # the prompt, which a caller that swapped the reviewed and post-rebuttal
+    # diffs would also satisfy while recreating the exact bug this spec
+    # fixes: a blocker's line number read against the wrong tree.
+    assert (
+        f"## The diff your findings were filed against\n\n{_ANCHORING_DIFF}"
+        in verdict_prompt
+    )
+    assert f"## The diff, after the rebuttal\n\n{after_rebuttal}" in verdict_prompt
+
+
 def test_a_rebuttal_numbered_badly_records_the_answer_that_was_asked_for(
     monkeypatch, tmp_path
 ):
@@ -3537,7 +3837,8 @@ def test_the_suite_runs_the_gates_base_sha_declares_not_the_working_copys(
         gates=("lint", "tests"),
     )
     assert outcome.state == "READY_FOR_REVIEW"
-    assert cell.gate_paths == [["/gates/.saffron/gates/tests"]] * 2
+    # Baseline, the attempt, and the gate cell's own re-run.
+    assert cell.gate_paths == [["/gates/.saffron/gates/tests"]] * 3
 
 
 def test_policy_sha_records_the_policy_that_governed_not_the_one_on_disk(
@@ -3844,7 +4145,9 @@ def test_a_cell_run_produces_a_witness_result(monkeypatch, tmp_path):
     # not `stub_mutator` — proved by the adapter it is bound to and by the
     # stubbed `worktree.source_mutated` actually having been reached with
     # this criterion's own mutant.
-    assert all(_bound_to_this_cell(mutate) for _acc, mutate in captured)
+    names = [_cell_container(mutate) for _acc, mutate in captured]
+    assert names.count("saffron-cell-SY-1") == len(names) - 1
+    assert names.count("saffron-gate-SY-1") == 1
     assert cell.mutated == [criterion.mutant] * len(captured)
 
 
@@ -3902,7 +4205,9 @@ def test_a_cell_run_supplies_the_real_mutator(monkeypatch, tmp_path):
     # The suite binds the real cell mutator, not the stub, to every call —
     # baseline and head alike — whether or not `witness_gate` ever ends up
     # calling it.
-    assert all(_bound_to_this_cell(mutate) for _acc, mutate in captured)
+    names = [_cell_container(mutate) for _acc, mutate in captured]
+    assert names.count("saffron-cell-SY-1") == len(names) - 1
+    assert names.count("saffron-gate-SY-1") == 1
     # And it never was called: the gate skipped on an empty `declared` list
     # before `mutate` was ever reached, not because the mutator failed.
     assert cell.mutated == []
@@ -4054,11 +4359,24 @@ def test_a_skipped_witness_blocks_nothing_at_either_tier(monkeypatch, tmp_path):
         assert all(list(acc) == [criterion] for acc, _mutate in captured), tier
 
 
-def _bound_to_this_cell(mutate) -> bool:
-    """The cell adapter's own mutator, bound to the container `_drive` starts —
-    never `stub_mutator`, and never another cell's tree."""
+def _cell_container(mutate) -> str | None:
+    """The container the cell adapter's own mutator is bound to, or `None` for
+    `stub_mutator` and any other tree. Widening this to a set of acceptable
+    names would let a head attempt's mutator bind to the gate-only cell and
+    still pass every caller, so callers assert which name, not merely that it
+    is one of them."""
     tree = getattr(mutate, "__self__", None)
-    return isinstance(tree, CellTree) and tree.container == "saffron-cell-SY-1"
+    if not isinstance(tree, CellTree):
+        return None
+    return tree.container
+
+
+def _bound_to_this_cell(mutate) -> bool:
+    """Kept for the callers that only care it is a real cell tree."""
+    return _cell_container(mutate) in (
+        "saffron-cell-SY-1",
+        "saffron-gate-SY-1",
+    )
 
 
 def _revert_tests(*names: str) -> list[GateResult]:
@@ -4129,9 +4447,12 @@ def test_revert_restores_before_committed_reads_the_tree(monkeypatch, tmp_path):
     changed test file is excluded from what it reverts."""
     cell = _stub_the_runtime(monkeypatch, changed=("src/x.py", "tests/test_x.py"))
     order: list[str] = []
-    scripted = iter(
-        [_revert_tests("t.py::test_a"), _revert_tests("t.py::test_a", "t.py::test_new")]
-    )
+    head = _revert_tests("t.py::test_a", "t.py::test_new")
+    # Three calls now, not two: baseline, the one repair-loop attempt, and the
+    # gate cell's own suite (backlog item 118, part 4) — judged against the
+    # same baseline, so it repeats the attempt's own declared results and
+    # triggers `revert` identically.
+    scripted = iter([_revert_tests("t.py::test_a"), head, head])
 
     def _run_suite(gates, **_kwargs):
         order.append("run_suite")
@@ -4170,15 +4491,23 @@ def test_revert_restores_before_committed_reads_the_tree(monkeypatch, tmp_path):
         gates=("tests",),
     )
     assert outcome.state == "READY_FOR_REVIEW"
-    # The changed source file, never the changed test file.
-    assert cell.reverted == [["src/x.py"]]
+    # The changed source file, never the changed test file — once for the
+    # repair-loop attempt and once more for the gate cell's own suite, judged
+    # against the same baseline.
+    assert cell.reverted == [["src/x.py"], ["src/x.py"]]
     # Baseline: `prior` is empty, so `revert` skips without touching the
-    # worktree at all. Attempt 1: it reads the tree *before* reverting — the
-    # restore checks out HEAD, so a source path with uncommitted work must be
-    # seen while that work still exists — then reverts, re-runs, and restores
-    # before `committed` ever reads the tree.
+    # worktree at all. Attempt 1, then the gate cell: each reads the tree
+    # *before* reverting — the restore checks out HEAD, so a source path with
+    # uncommitted work must be seen while that work still exists — then
+    # reverts, re-runs, and restores before `committed` ever reads the tree.
     assert order == [
         "run_suite",
+        "dirty_paths",
+        "run_suite",
+        "dirty_paths",
+        "revert:enter",
+        "run_gate",
+        "revert:exit",
         "dirty_paths",
         "run_suite",
         "dirty_paths",
@@ -4189,7 +4518,8 @@ def test_revert_restores_before_committed_reads_the_tree(monkeypatch, tmp_path):
     ]
     # That the attempt-1 read precedes the revert is the gate's own contract,
     # witnessed in `test_revert.py`; the exact list above is what pins the
-    # *wiring* — that `_suite` asks for it at all, and asks once per call.
+    # *wiring* — that `_suite` asks for it at all, and asks once per call,
+    # including the gate cell's.
 
 
 def test_revert_is_absent_when_the_repo_declares_no_tests_gate(monkeypatch, tmp_path):

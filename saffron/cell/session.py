@@ -41,7 +41,7 @@ from saffron.phases import implement, rebut, review
 from saffron.phases.implement import AttemptResult
 
 if TYPE_CHECKING:
-    from saffron.gates.suite import SuiteComparison
+    from saffron.gates.suite import GateSuite, SuiteComparison, SuiteRun
     from saffron.ledger import Ledger
 
 # Where this file lives inside the Saffron tree, used to locate CONTEXT.md and
@@ -1025,8 +1025,8 @@ def _apply_and_commit_patch(container: str, patch: str) -> None:
         # 124 as a refusal would charge the agent for a bound that is ours
         # (error != fail, CLAUDE.md).
         raise runtime.CellRuntimeError(
-            "applying the exported patch in the critic cell hit Saffron's "
-            f"own bound: {applied.stderr.strip()[:200]}"
+            "applying the exported patch hit Saffron's own bound: "
+            f"{applied.stderr.strip()[:200]}"
         )
     # Checked whatever the exit code, before the ordinary conflict check: the
     # stub this marker names is what a binary change becomes, whatever git
@@ -1130,6 +1130,103 @@ def critic_cell(
             ("container", container, runtime.remove_container(container)),
             ("volume", volume, runtime.remove_volume(volume)),
             ("volume", state, runtime.remove_volume(state)),
+        ]
+        for kind, name, done in removed:
+            if done.returncode != 0 and name in created:
+                note(
+                    "survived",
+                    False,
+                    f"{kind} {name} survived — {done.stderr.strip()[:160]}",
+                )
+
+
+# `saffron-cells` already holds `runtime.DEFAULT_SUBNET` (10.88.0.0/24) for the
+# task, and `saffron-egress` holds `proxy.EGRESS_SUBNET` (10.89.0.0/24) for the
+# proxy — neither torn down before this cell is created, and an overlapping
+# `create_network` raises. These two are the only subnets `saffron/` declares,
+# so the next one is the gate cell's own.
+_GATE_CELL_SUBNET = "10.90.0.0/24"
+
+
+def _gate_cell_suite(
+    *,
+    spec: CellSpec,
+    repo: Path,
+    mirror: Path,
+    gates_dir: Path,
+    thread_env: Mapping[str, str],
+    patch: str,
+    suite: GateSuite,
+    baseline: SuiteRun,
+    created: set[str],
+    note: Callable[[str, bool, str], None],
+) -> SuiteComparison:
+    """The gate suite REVIEW's lenses are shown, run in a cell of its own
+    (CONTEXT.md §5, backlog item 118): never the implementer's own container,
+    whose toolchain the agent had root over, and never the critic's either —
+    a gate executes model-authored code (the tests the implementer wrote) as
+    root, and running that in the container the lenses re-exec a moment later
+    is the hole `SA-0087` closed.
+
+    Built the way `reverify`'s own `_gate_cell` (`saffron/phases/package.py`)
+    builds its gate-only cells: a network of its own — always `--internal`,
+    on `_GATE_CELL_SUBNET` rather than the default the task's own
+    `saffron-cells` network still holds — a volume, `prepare_worktree` at
+    `spec.tree_base` with the repo's declared gate env and nothing else (no
+    proxy, no credential, no route out), and teardown in a `finally`. Every
+    name is pre-cleaned, tolerating absence, before its own create — a
+    `spec_id`-keyed name does not change between attempts the way `reverify`'s
+    own do — and recorded in `created` immediately before that create.
+
+    Judged against `baseline`, the run's own pre-turn suite: not a second,
+    freshly-taken one, so `census`, `criteria` and `revert` still have a real
+    prior to compare against rather than reporting `skip` across the board.
+
+    Never touches `latest`: that stays the implementer's own last suite, for
+    `CellOutcome.gates`/`effective_risk`/`advisory_gates` alike. This suite is
+    the lens table only.
+    """
+    from saffron.cell import runtime, worktree
+    from saffron.gates.suite import CellTree
+    from saffron.repos import image
+
+    network = f"saffron-gate-net-{spec.spec_id}"
+    volume = f"saffron-gate-wt-{spec.spec_id}"
+    state = f"saffron-gate-st-{spec.spec_id}"
+    container = f"saffron-gate-{spec.spec_id}"
+
+    runtime.remove_container(container)
+    runtime.remove_network(network)
+    runtime.remove_volume(volume)
+    runtime.remove_volume(state)
+    try:
+        created.add(network)
+        runtime.create_network(network, subnet=_GATE_CELL_SUBNET)
+        created.add(volume)
+        runtime.create_volume(volume)
+        worktree.prepare_worktree(
+            mirror=mirror,
+            volume=volume,
+            base_sha=spec.tree_base,
+            branch=spec.branch,
+            image=image.cell_tag(repo),
+            container=container,
+            network=network,
+            # The repo's declared gate env, and nothing else: no agent, no
+            # credential and no route out — this cell only runs gates.
+            env=dict(thread_env),
+            gates_dir=gates_dir,
+            state_volume=state,
+            created=created,
+        )
+        _apply_and_commit_patch(container, patch)
+        return suite.against(CellTree(container, cwd=repo), baseline)
+    finally:
+        removed = [
+            ("container", container, runtime.remove_container(container)),
+            ("volume", volume, runtime.remove_volume(volume)),
+            ("volume", state, runtime.remove_volume(state)),
+            ("network", network, runtime.remove_network(network)),
         ]
         for kind, name, done in removed:
             if done.returncode != 0 and name in created:
@@ -1726,8 +1823,9 @@ def _drive_cell(
         def _judge() -> SuiteComparison:
             nonlocal latest
             comparison = suite.against(tree, baseline)
-            # Kept for REVIEW as well: the critic is shown the gate results,
-            # and re-running the suite to fetch them costs a suite.
+            # Kept for the `CellOutcome`'s own gates, effective_risk and
+            # advisory_gates. Not for the critic: its table comes from the
+            # gate-only cell now, never the implementer's own run.
             latest = comparison.run
             # The turn that just closed, which is the repair turn under §5.4's
             # loop — the join the no-progress rule and §8 need, and the whole
@@ -1851,6 +1949,9 @@ def _drive_cell(
         # Same reason: REBUT reads this to attach a verdict to the row REVIEW
         # wrote, and the branch that fills it is the branch above.
         recorded: dict[int, int] = {}
+        # Bound here, not in the branch below: REVIEW fills it and REBUT reads
+        # it, and neither should depend on the other's control flow.
+        reviewed_diff = ""
 
         if outcome == "READY_FOR_REVIEW":
             ledger.set_task_state(task_id, "REVIEWING")
@@ -1867,54 +1968,44 @@ def _drive_cell(
                 )
 
             # The bytes the patch export leaves behind for the operator — fed
-            # to the critic cell's own git, never re-read from `/work` again.
+            # to the gate cell's own git and the critic cell's, never re-read
+            # from `/work` again.
             patch_to_review = worktree.export_patch(container, spec.tree_base)
+
+            # The table every lens is shown, computed in a cell of its own
+            # (CONTEXT.md §5, backlog item 118): the implementer had root over
+            # its own toolchain, so a table built from `latest` is a claim the
+            # agent could have forged, and a lens told the gates are green
+            # reads the diff differently. Judged against this run's own
+            # pre-turn baseline — taken before the agent had a single turn —
+            # never a second, freshly-taken one: that baseline is not a
+            # forged-toolchain input in the sense this cell exists to close.
             try:
-                with critic_cell(
+                gate_comparison = _gate_cell_suite(
                     spec=spec,
                     repo=repo,
                     mirror=mirror,
-                    network=network,
                     gates_dir=gates_dir,
                     thread_env=policy.thread_env,
                     patch=patch_to_review,
+                    suite=suite,
+                    baseline=baseline,
                     created=created,
                     note=_critic_teardown,
-                ) as critic_container:
-                    reviews = review.run_review(
-                        critic_container,
-                        # Read from the critic cell's own tree, not the
-                        # implementer's — the diff it judges is the patch
-                        # that ships, applied by a git the implementer never
-                        # touched (CONTEXT.md §5, backlog item 118).
-                        diff=worktree.export_patch(critic_container, spec.tree_base),
-                        read_head=lambda path: worktree.read_at_head(
-                            critic_container, path
-                        ),
-                        # A witnessed spec's claims live only in frontmatter
-                        # (§3.2); append them so the critic sees what a
-                        # markdown spec already gives.
-                        spec_body=spec.body + context.criteria_section(spec.acceptance),
-                        gates=review.gate_summary(
-                            latest.results, sorted(latest.advisory_gates)
-                        ),
-                        context_md=context_md,
-                        claude_md=claude_md,
-                        prompts_dir=_SAFFRON_PKG / "agents" / "prompts",
-                        max_turns=spec.max_turns,
-                        budget_usd=critic_budget(spec.budget_usd, spent),
-                        agent=agent,
-                        spec_id=spec.spec_id,
-                        emit=emit,
-                    )
+                )
             except CriticPatchRejected as rejected:
+                # The same patch the critic cell would otherwise have been the
+                # first to refuse — applying it here first only moves which
+                # cell notices. The agent's problem either way: `EXHAUSTED`.
+                gate_comparison = None
                 outcome = "EXHAUSTED"
                 _phase_start(
                     "REVIEW",
                     "REVIEW",
-                    f"the exported patch did not apply in the critic cell — {rejected}",
+                    f"the exported patch did not apply in the gate cell — {rejected}",
                 )
             except CriticPatchUnrepresentable as binary:
+                gate_comparison = None
                 outcome = "GATE_ERROR"
                 _phase_start(
                     "REVIEW",
@@ -1922,28 +2013,108 @@ def _drive_cell(
                     "the exported patch carries a binary change the export "
                     f"cannot carry — {binary}",
                 )
-            else:
-                # Deliberately not gated on the host ceiling: a green diff
-                # nobody reviewed is exactly the product Appendix K says
-                # means nothing.
-                spent += sum(r.cost_usd for r in reviews)
-                (task_dir / "findings.json").write_text(
-                    json.dumps([r.as_dict() for r in reviews], indent=2)
+            if gate_comparison is not None and (
+                gate_comparison.aborted or gate_comparison.drift
+            ):
+                # error != fail (§5.4): the gate itself broke, or the two
+                # suites disagree on shape — never a task's own new failure,
+                # and never READY_FOR_REVIEW. The same read `_judge`'s own
+                # callers give an aborted or drifted comparison. No lens runs.
+                outcome = "GATE_ERROR"
+                what = "errored" if gate_comparison.aborted else "drifted"
+                _phase_start(
+                    "REVIEW",
+                    "REVIEW",
+                    f"the suite at the exported patch {what} — "
+                    + "; ".join(gate_comparison.aborted or gate_comparison.drift),
                 )
-                # Keyed by identity rather than re-filtered: `anchored_blockers`
-                # is the single selection rule REBUT's callers share, and a
-                # second copy of it here would silently renumber the blockers
-                # (§5.5).
-                reported = [f for r in reviews for f in r.findings]
-                recorded = dict(
-                    zip(
-                        map(id, reported),
-                        ledger.record_findings(task_id, reported),
-                        strict=True,
+            elif gate_comparison is not None:
+                try:
+                    with critic_cell(
+                        spec=spec,
+                        repo=repo,
+                        mirror=mirror,
+                        network=network,
+                        gates_dir=gates_dir,
+                        thread_env=policy.thread_env,
+                        patch=patch_to_review,
+                        created=created,
+                        note=_critic_teardown,
+                    ) as critic_container:
+                        # Read from the critic cell's own tree, not the
+                        # implementer's — the diff it judges is the patch that
+                        # ships, applied by a git the implementer never
+                        # touched (CONTEXT.md §5, backlog item 118). Bound to
+                        # a name so REBUT is handed this one, not a second
+                        # export of it (`SA-0091`).
+                        reviewed_diff = worktree.export_patch(
+                            critic_container, spec.tree_base
+                        )
+                        reviews = review.run_review(
+                            critic_container,
+                            diff=reviewed_diff,
+                            read_head=lambda path: worktree.read_at_head(
+                                critic_container, path
+                            ),
+                            # A witnessed spec's claims live only in frontmatter
+                            # (§3.2); append them so the critic sees what a
+                            # markdown spec already gives.
+                            spec_body=spec.body
+                            + context.criteria_section(spec.acceptance),
+                            # The gate cell's own comparison, never `latest` —
+                            # the implementer's last suite is exactly the input
+                            # this cell exists to stop feeding the critic.
+                            gates=review.gate_summary(
+                                gate_comparison.run.results,
+                                sorted(gate_comparison.run.advisory_gates),
+                            ),
+                            context_md=context_md,
+                            claude_md=claude_md,
+                            prompts_dir=_SAFFRON_PKG / "agents" / "prompts",
+                            max_turns=spec.max_turns,
+                            budget_usd=critic_budget(spec.budget_usd, spent),
+                            agent=agent,
+                            spec_id=spec.spec_id,
+                            emit=emit,
+                        )
+                except CriticPatchRejected as rejected:
+                    outcome = "EXHAUSTED"
+                    _phase_start(
+                        "REVIEW",
+                        "REVIEW",
+                        "the exported patch did not apply in the critic cell — "
+                        f"{rejected}",
                     )
-                )
-                outcome, why = review.review_state(reviews)
-                _phase_start("REVIEW", "REVIEW", why)
+                except CriticPatchUnrepresentable as binary:
+                    outcome = "GATE_ERROR"
+                    _phase_start(
+                        "REVIEW",
+                        "REVIEW",
+                        "the exported patch carries a binary change the export "
+                        f"cannot carry — {binary}",
+                    )
+                else:
+                    # Deliberately not gated on the host ceiling: a green diff
+                    # nobody reviewed is exactly the product Appendix K says
+                    # means nothing.
+                    spent += sum(r.cost_usd for r in reviews)
+                    (task_dir / "findings.json").write_text(
+                        json.dumps([r.as_dict() for r in reviews], indent=2)
+                    )
+                    # Keyed by identity rather than re-filtered:
+                    # `anchored_blockers` is the single selection rule REBUT's
+                    # callers share, and a second copy of it here would
+                    # silently renumber the blockers (§5.5).
+                    reported = [f for r in reviews for f in r.findings]
+                    recorded = dict(
+                        zip(
+                            map(id, reported),
+                            ledger.record_findings(task_id, reported),
+                            strict=True,
+                        )
+                    )
+                    outcome, why = review.review_state(reviews)
+                    _phase_start("REVIEW", "REVIEW", why)
 
         # Same reasoning as `reviews` above: bound only inside the REBUTTING
         # branch below, and READY_FOR_REVIEW's own outcomes skip it entirely.
@@ -2029,6 +2200,8 @@ def _drive_cell(
                         ),
                         agent=agent,
                         spec_id=spec.spec_id,
+                        # The exact diff REVIEW's lenses were shown.
+                        reviewed_diff=reviewed_diff,
                         emit=emit,
                         last_cost_usd=last_cost,
                     )
