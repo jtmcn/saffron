@@ -835,6 +835,11 @@ def cell_up(
     describes: every mechanism reports success and applies to a different
     container. One copy, and the callers differ only in what they do after it.
 
+    `critic_cell` is the one sanctioned second path (SA-0087). It joins the
+    network this call already built, so the host-port probe and the proxy
+    reachability assert are properties it inherits rather than repeats; it
+    starts, stops and removes neither the network nor the proxy.
+
     `created` is the caller's leak ledger, appended to in place, so a failure
     part-way leaves the caller holding exactly what may survive. `note` takes
     the progress lines: `_drive_cell` sends them to `Preflight` events, and a
@@ -966,6 +971,173 @@ def cell_down(
                 False,
                 f"{kind} {name} survived — {done.stderr.strip()[:160]}",
             )
+
+
+class CriticPatchRejected(RuntimeError):
+    """The exported patch does not apply against its own base in a fresh
+    critic cell tree (CONTEXT.md §5, backlog item 118). The agent's problem,
+    not the toolchain's — the export ran clean, `git apply` just refused it —
+    so `EXHAUSTED` is the state that fits, the same one four red gate
+    attempts would reach."""
+
+
+class CriticPatchUnrepresentable(RuntimeError):
+    """The patch could never have applied: `worktree.DIFF_FLAGS` carries no
+    `--binary`/`--full-index`, so a binary change comes back as a
+    `_NO_FULL_INDEX` stub no base can apply — the same marker PACKAGE's own
+    `apply_patch` already reads as infrastructure. Saffron's ceiling, not the
+    agent's: `GATE_ERROR`, charged to nobody."""
+
+
+def _apply_and_commit_patch(container: str, patch: str) -> None:
+    """Apply the implementer's exported patch inside the critic cell's own
+    git, then commit it — so what the lenses judge is the patch that ships,
+    not a second read of the implementer's history (CONTEXT.md §5).
+
+    The patch travels on stdin, never as an argument: Linux caps a single
+    argv at `MAX_ARG_STRLEN` (measured against `saffron/cell-base:python` for
+    `worktree._write_file`'s mutant), and a limit that is Saffron's own must
+    not end a task the agent is charged for. `git apply` is the one in-cell git
+    call that cannot go through `worktree._git`, which carries no stdin.
+
+    `--index`, PACKAGE's own spelling, rather than a following `git add -A`:
+    staging re-runs the clean filters the patch's own `.gitattributes` just
+    installed. Measured — a file committed before an attribute naming it
+    `working-tree-encoding=UTF-16` leaves `git apply` at 0 and `git add` at
+    128 — which ended the task as infrastructure, charged to nobody and with
+    no lens run, and is the free way past a check `d3b9c51` names.
+    """
+    from saffron.cell import runtime, worktree
+    from saffron.phases.package import _NO_FULL_INDEX
+
+    def _ignore(_line: str) -> bool:
+        return False
+
+    applied = runtime.exec_stream(
+        container,
+        ["git", "apply", "--index"],
+        stdin_data=patch,
+        on_line=_ignore,
+        workdir=worktree.WORKTREE_MOUNT,
+    )
+    if applied.timed_out:
+        # Saffron's own wall or idle bound, not a refused apply — reading exit
+        # 124 as a refusal would charge the agent for a bound that is ours
+        # (error != fail, CLAUDE.md).
+        raise runtime.CellRuntimeError(
+            "applying the exported patch in the critic cell hit Saffron's "
+            f"own bound: {applied.stderr.strip()[:200]}"
+        )
+    # Checked whatever the exit code, before the ordinary conflict check: the
+    # stub this marker names is what a binary change becomes, whatever git
+    # apply's own exit status reads as.
+    # ponytail: an agent can reach this on purpose, by committing a file git
+    # reads as binary, and end its task uncharged — the same ceiling `size`
+    # and `integrity` already carry for a hidden binary (backlog item 103);
+    # nothing ships from it either, since only READY_FOR_REVIEW is packaged.
+    if _NO_FULL_INDEX in applied.stderr:
+        raise CriticPatchUnrepresentable(applied.stderr.strip()[:400])
+    if applied.returncode != 0:
+        raise CriticPatchRejected(applied.stderr.strip()[:400])
+
+    committed = runtime.exec_(
+        container,
+        ["git", "commit", "-q", "-m", "critic: exported patch, applied and committed"],
+        workdir=worktree.WORKTREE_MOUNT,
+    )
+    if committed.returncode != 0:
+        # The agent's content, so the agent's task: an exec that cannot launch
+        # raises `CellRuntimeError` from `exec_` itself, and anything this
+        # reaches is what the patch left in the index. Says which step it was,
+        # since the caller's reason names the apply.
+        raise CriticPatchRejected(
+            f"applied, but could not be committed: {committed.stderr.strip()[:360]}"
+        )
+
+
+@contextlib.contextmanager
+def critic_cell(
+    *,
+    spec: CellSpec,
+    repo: Path,
+    mirror: Path,
+    network: str,
+    gates_dir: Path,
+    thread_env: Mapping[str, str],
+    patch: str,
+    created: set[str],
+    note: Callable[[str, bool, str], None],
+) -> Iterator[str]:
+    """A fresh container from the repo's cell image, seeded at the task's tree
+    base and carrying the implementer's exported patch, applied and committed
+    by its own git — the container REVIEW's lenses run in and are shown the
+    diff from (CONTEXT.md §5, backlog item 118). Never the implementer's own
+    container: a fresh session there still re-execs a runner and an SDK that
+    container's root could have rewritten. `SA-0088` calls this again for
+    REBUT's verdict lenses, which is why the whole lifecycle lives in one
+    function rather than being inlined at this spec's one call site.
+
+    Uses the pieces `cell_up` already brings up for this task — the network
+    and the proxy — without starting, stopping or removing either; this only
+    creates and removes its own container and its own two volumes, on the
+    same `network` and behind the same proxy the implementer's cell used.
+
+    `created` is the caller's leak ledger, exactly as `cell_up`/`cell_down`
+    use it. `note` takes (step, ok, detail), the same shape `cell_down` gives
+    its own — called only when a removal leaves something behind, so REVIEW's
+    green path prints nothing this spec did not already print.
+    """
+    from saffron.cell import proxy, runtime, worktree
+    from saffron.repos import image
+
+    container = f"saffron-critic-{spec.spec_id}"
+    volume = f"saffron-critic-wt-{spec.spec_id}"
+    state = f"saffron-critic-st-{spec.spec_id}"
+
+    # Inside the guarantee, not above it — the same reason `cell_up` pre-cleans
+    # before adding a name to `created`: a leftover from a SIGKILLed run must
+    # not make this run's own create the first thing that fails.
+    runtime.remove_container(container)
+    runtime.remove_volume(volume)
+    runtime.remove_volume(state)
+    try:
+        proxy_ip = runtime.container_ip(proxy.PROXY_NAME)
+        if proxy_ip is None:
+            # Infrastructure, not a task outcome: the proxy this task already
+            # started is unreadable, which `cell_env` cannot turn into a `str`.
+            raise runtime.CellRuntimeError(
+                "the critic cell could not read the proxy's address"
+            )
+        created.add(volume)
+        runtime.create_volume(volume)
+        worktree.prepare_worktree(
+            mirror=mirror,
+            volume=volume,
+            base_sha=spec.tree_base,
+            branch=spec.branch,
+            image=image.cell_tag(repo),
+            container=container,
+            network=network,
+            env=cell_env(proxy_ip, thread_env),
+            gates_dir=gates_dir,
+            state_volume=state,
+            created=created,
+        )
+        _apply_and_commit_patch(container, patch)
+        yield container
+    finally:
+        removed = [
+            ("container", container, runtime.remove_container(container)),
+            ("volume", volume, runtime.remove_volume(volume)),
+            ("volume", state, runtime.remove_volume(state)),
+        ]
+        for kind, name, done in removed:
+            if done.returncode != 0 and name in created:
+                note(
+                    "survived",
+                    False,
+                    f"{kind} {name} survived — {done.stderr.strip()[:160]}",
+                )
 
 
 def _drive_cell(
@@ -1682,46 +1854,96 @@ def _drive_cell(
 
         if outcome == "READY_FOR_REVIEW":
             ledger.set_task_state(task_id, "REVIEWING")
-            reviews = review.run_review(
-                container,
-                # The critic sees the diff, not the cell's history: the same
-                # bytes the patch export leaves behind for the operator.
-                diff=worktree.export_patch(container, spec.tree_base),
-                read_head=lambda path: worktree.read_at_head(container, path),
-                # A witnessed spec's claims live only in frontmatter (§3.2);
-                # append them so the critic sees what a markdown spec already gives.
-                spec_body=spec.body + context.criteria_section(spec.acceptance),
-                gates=review.gate_summary(
-                    latest.results, sorted(latest.advisory_gates)
-                ),
-                context_md=context_md,
-                claude_md=claude_md,
-                prompts_dir=_SAFFRON_PKG / "agents" / "prompts",
-                max_turns=spec.max_turns,
-                budget_usd=critic_budget(spec.budget_usd, spent),
-                agent=agent,
-                spec_id=spec.spec_id,
-                emit=emit,
-            )
-            # Deliberately not gated on the host ceiling: a green diff nobody
-            # reviewed is exactly the product Appendix K says means nothing.
-            spent += sum(r.cost_usd for r in reviews)
-            (task_dir / "findings.json").write_text(
-                json.dumps([r.as_dict() for r in reviews], indent=2)
-            )
-            # Keyed by identity rather than re-filtered: `anchored_blockers` is
-            # the single selection rule REBUT's callers share, and a second copy
-            # of it here would silently renumber the blockers (§5.5).
-            reported = [f for r in reviews for f in r.findings]
-            recorded = dict(
-                zip(
-                    map(id, reported),
-                    ledger.record_findings(task_id, reported),
-                    strict=True,
+
+            def _critic_teardown(step: str, ok: bool, detail: str) -> None:
+                emit(
+                    Teardown(
+                        timestamp=time.time(),
+                        spec_id=spec.spec_id,
+                        step=step,
+                        ok=ok,
+                        detail=detail,
+                    )
                 )
-            )
-            outcome, why = review.review_state(reviews)
-            _phase_start("REVIEW", "REVIEW", why)
+
+            # The bytes the patch export leaves behind for the operator — fed
+            # to the critic cell's own git, never re-read from `/work` again.
+            patch_to_review = worktree.export_patch(container, spec.tree_base)
+            try:
+                with critic_cell(
+                    spec=spec,
+                    repo=repo,
+                    mirror=mirror,
+                    network=network,
+                    gates_dir=gates_dir,
+                    thread_env=policy.thread_env,
+                    patch=patch_to_review,
+                    created=created,
+                    note=_critic_teardown,
+                ) as critic_container:
+                    reviews = review.run_review(
+                        critic_container,
+                        # Read from the critic cell's own tree, not the
+                        # implementer's — the diff it judges is the patch
+                        # that ships, applied by a git the implementer never
+                        # touched (CONTEXT.md §5, backlog item 118).
+                        diff=worktree.export_patch(critic_container, spec.tree_base),
+                        read_head=lambda path: worktree.read_at_head(
+                            critic_container, path
+                        ),
+                        # A witnessed spec's claims live only in frontmatter
+                        # (§3.2); append them so the critic sees what a
+                        # markdown spec already gives.
+                        spec_body=spec.body + context.criteria_section(spec.acceptance),
+                        gates=review.gate_summary(
+                            latest.results, sorted(latest.advisory_gates)
+                        ),
+                        context_md=context_md,
+                        claude_md=claude_md,
+                        prompts_dir=_SAFFRON_PKG / "agents" / "prompts",
+                        max_turns=spec.max_turns,
+                        budget_usd=critic_budget(spec.budget_usd, spent),
+                        agent=agent,
+                        spec_id=spec.spec_id,
+                        emit=emit,
+                    )
+            except CriticPatchRejected as rejected:
+                outcome = "EXHAUSTED"
+                _phase_start(
+                    "REVIEW",
+                    "REVIEW",
+                    f"the exported patch did not apply in the critic cell — {rejected}",
+                )
+            except CriticPatchUnrepresentable as binary:
+                outcome = "GATE_ERROR"
+                _phase_start(
+                    "REVIEW",
+                    "REVIEW",
+                    "the exported patch carries a binary change the export "
+                    f"cannot carry — {binary}",
+                )
+            else:
+                # Deliberately not gated on the host ceiling: a green diff
+                # nobody reviewed is exactly the product Appendix K says
+                # means nothing.
+                spent += sum(r.cost_usd for r in reviews)
+                (task_dir / "findings.json").write_text(
+                    json.dumps([r.as_dict() for r in reviews], indent=2)
+                )
+                # Keyed by identity rather than re-filtered: `anchored_blockers`
+                # is the single selection rule REBUT's callers share, and a
+                # second copy of it here would silently renumber the blockers
+                # (§5.5).
+                reported = [f for r in reviews for f in r.findings]
+                recorded = dict(
+                    zip(
+                        map(id, reported),
+                        ledger.record_findings(task_id, reported),
+                        strict=True,
+                    )
+                )
+                outcome, why = review.review_state(reviews)
+                _phase_start("REVIEW", "REVIEW", why)
 
         # Same reasoning as `reviews` above: bound only inside the REBUTTING
         # branch below, and READY_FOR_REVIEW's own outcomes skip it entirely.
