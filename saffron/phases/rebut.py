@@ -444,7 +444,14 @@ def run_rebut(
     budget_usd: float,
     head_moved: Callable[[], bool],
     rerun_gates: Callable[[], str | None],
-    diff: Callable[[], str],
+    # Zero-argument and called at most once, lazily — after `rerun_gates`
+    # answers — so the two early returns below never pay for a container a
+    # plain argument would have made the caller build regardless.
+    critic_container: Callable[[], str],
+    # Takes the critic container `critic_container()` just produced: the
+    # diff a verdict session is shown must come from that tree, never the
+    # implementer's own (CONTEXT.md §5, backlog item 118).
+    diff: Callable[[str], str],
     agent: Callable[..., implement.AttemptResult],
     # Required, not defaulted — the same rule `review.run_review`'s own
     # `spec_id` states: this phase authors its own `PhaseStart` line below.
@@ -452,11 +459,13 @@ def run_rebut(
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
     last_cost_usd: float = 0.0,
 ) -> RebutResult:
-    """One rebuttal, the gate re-run, then one verdict session per lens.
+    """One rebuttal in the implementer's own container, the gate re-run there
+    too, then one verdict session per lens in a fresh critic container the
+    rebutting implementer never ran in (CONTEXT.md §5, backlog item 118).
 
     `rerun_gates` returns a terminal state when the re-run is not green and
-    `None` when it is. It runs before the verdicts because it costs no tokens
-    and because a red re-run ends the task either way (§5.6).
+    `None` when it is; it runs first because a red re-run ends the task
+    either way (§5.6), and `critic_container` is only ever called after.
     """
     # Numbered from 1: answering "1." for the first of one blocker is the
     # conventional reading, and `run_verdict` requires the verdict set to match
@@ -513,14 +522,38 @@ def run_rebut(
         )
         return result
 
-    changed = diff()
+    # Local, not module-scope: `session.py` is REBUT's only caller and the
+    # one place a critic cell is built, and it already imports this module —
+    # a module-scope import here would cycle, and would also error a
+    # reverted collection rather than let `revert` read it as skip.
+    from saffron.cell.session import CriticPatchRejected, CriticPatchUnrepresentable
+
+    try:
+        critic = critic_container()
+    except CriticPatchRejected as rejected:
+        # §5.5, unchanged at REBUT: a bad patch is the agent's problem, and
+        # the rebuttal turn plus the gate re-run are already paid for either
+        # way — produced here, not left to escape uncharged.
+        result.state = "EXHAUSTED"
+        result.why = (
+            f"the post-rebuttal patch did not apply in a critic cell — {rejected}"
+        )
+        return result
+    except CriticPatchUnrepresentable as binary:
+        # §5.5's one carve-out: a binary change the export cannot carry is
+        # Saffron's own ceiling, charged to nobody.
+        result.state = "GATE_ERROR"
+        result.why = f"the post-rebuttal patch carries a binary change — {binary}"
+        return result
+
+    changed = diff(critic)
     for lens in [
         lens for lens in review.LENSES if any(f.lens == lens for f in blockers)
     ]:
         mine = [(n, f) for n, f in numbered if f.lens == lens]
         result.verdicts.append(
             run_verdict(
-                container,
+                critic,
                 lens=lens,
                 blockers=mine,
                 system_prompt=verdict_prompt(

@@ -3358,6 +3358,73 @@ def test_a_successful_outcome_carries_its_attempts_failures_reviews_and_rebuttal
     assert outcome.rebut_result is not None
 
 
+def test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch(
+    monkeypatch, tmp_path
+):
+    """Item 118's REBUT half: verdicts run in a critic cell, never the
+    container the rebuttal just ran in, and that cell's tree is rebuilt from
+    the *post-rebuttal* patch — not REVIEW's already-applied one.
+    `export_patch` grows only once the implementer has taken its rebuttal and
+    extraction turns, so the two critic cells' applied patches are told
+    apart."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+
+    grown = _ANCHORING_DIFF + (
+        "diff --git a/src/y.py b/src/y.py\n"
+        "--- a/src/y.py\n+++ b/src/y.py\n@@ -1 +1 @@\n-old\n+the rebuttal's fix\n"
+    )
+
+    def _export_patch(container, sha):
+        cell.export_calls.append((container, sha))
+        # plan, implement, 3 lenses, rebuttal, extraction = 7 turns by the
+        # time REBUT asks for a critic cell; every earlier export is REVIEW's.
+        return grown if len(cell.turns) > 5 else _ANCHORING_DIFF
+
+    monkeypatch.setattr("saffron.cell.worktree.export_patch", _export_patch)
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_through_rebut(
+            _turn("Fixed."),
+            _turn(
+                _block(
+                    {
+                        "rebuttals": [
+                            {"finding": 1, "action": "fixed", "argument": "committed"}
+                        ]
+                    }
+                )
+            ),
+            _turn(
+                _block(
+                    {
+                        "verdicts": [
+                            {"finding": 1, "verdict": "withdrawn", "reason": "fixed"}
+                        ]
+                    }
+                )
+            ),
+        ),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    # The verdict session ran in the critic container, never the implementer's.
+    assert cell.turn_containers[-1] == _CRITIC_CONTAINER
+
+    # Two applies landed in that container name — REVIEW's own critic cell,
+    # then REBUT's own, rebuilt fresh from the rebuttal's own commit.
+    applies = [
+        stdin
+        for c, argv, stdin in cell.execs
+        if c == _CRITIC_CONTAINER and argv == ("git", "apply", "--index")
+    ]
+    assert applies == [_ANCHORING_DIFF, grown]
+    # Both critic cell instances — REVIEW's and REBUT's — were torn down.
+    assert cell.removed.count(("container", _CRITIC_CONTAINER)) == 4
+
+
 def test_a_rebuttal_numbered_badly_records_the_answer_that_was_asked_for(
     monkeypatch, tmp_path
 ):

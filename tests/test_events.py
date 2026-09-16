@@ -2250,7 +2250,8 @@ def test_the_watch_shaped_callable_phases_still_receive_does_not_raise():
         budget_usd=1.0,
         head_moved=lambda: True,
         rerun_gates=lambda: None,
-        diff=lambda: diff,
+        critic_container=lambda: "cell",
+        diff=lambda _critic: diff,
         agent=_scripted_agent(
             "ok",
             _block(

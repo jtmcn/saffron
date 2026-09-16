@@ -1976,28 +1976,62 @@ def _drive_cell(
                         return "GATE_ERROR"
                     return "EXHAUSTED" if comparison.new_failures else None
 
-                result = rebut.run_rebut(
-                    container,
-                    blockers=blockers,
-                    options=options,
-                    session_id=session_id,
-                    spec_body=spec.body + context.criteria_section(spec.acceptance),
-                    context_md=context_md,
-                    claude_md=claude_md,
-                    prompts_dir=_SAFFRON_PKG / "agents" / "prompts",
-                    max_turns=spec.max_turns,
-                    budget_usd=critic_budget(spec.budget_usd, spent),
-                    # Measured, never reported (§4.3): from the head the
-                    # rebuttal started at, so the implement turn's own commits
-                    # cannot satisfy it.
-                    head_moved=lambda: worktree.commits_ahead(container, before) > 0,
-                    rerun_gates=_rebut_gates,
-                    diff=lambda: worktree.export_patch(container, spec.tree_base),
-                    agent=agent,
-                    spec_id=spec.spec_id,
-                    emit=emit,
-                    last_cost_usd=last_cost,
-                )
+                with contextlib.ExitStack() as critic_stack:
+
+                    def _rebut_critic_container() -> str:
+                        """Called only once `run_rebut` has a green re-run to
+                        show a lens, never on an early return. Seeded from
+                        the implementer's *current* HEAD, so a rebuttal fix
+                        reaches the critic's tree (CONTEXT.md §5, item 118).
+                        `critic_stack` closes when `run_rebut` returns below,
+                        tearing the cell down the way REVIEW's is.
+                        """
+                        rebuttal_patch = worktree.export_patch(
+                            container, spec.tree_base
+                        )
+                        return critic_stack.enter_context(
+                            critic_cell(
+                                spec=spec,
+                                repo=repo,
+                                mirror=mirror,
+                                network=network,
+                                gates_dir=gates_dir,
+                                thread_env=policy.thread_env,
+                                patch=rebuttal_patch,
+                                created=created,
+                                note=_critic_teardown,
+                            )
+                        )
+
+                    result = rebut.run_rebut(
+                        container,
+                        blockers=blockers,
+                        options=options,
+                        session_id=session_id,
+                        spec_body=spec.body + context.criteria_section(spec.acceptance),
+                        context_md=context_md,
+                        claude_md=claude_md,
+                        prompts_dir=_SAFFRON_PKG / "agents" / "prompts",
+                        max_turns=spec.max_turns,
+                        budget_usd=critic_budget(spec.budget_usd, spent),
+                        # Measured, never reported (§4.3): from the head the
+                        # rebuttal started at, so the implement turn's own
+                        # commits cannot satisfy it.
+                        head_moved=lambda: (
+                            worktree.commits_ahead(container, before) > 0
+                        ),
+                        rerun_gates=_rebut_gates,
+                        critic_container=_rebut_critic_container,
+                        # Read from the critic cell's own tree, never the
+                        # implementer's own `.git` (CONTEXT.md §5).
+                        diff=lambda critic: worktree.export_patch(
+                            critic, spec.tree_base
+                        ),
+                        agent=agent,
+                        spec_id=spec.spec_id,
+                        emit=emit,
+                        last_cost_usd=last_cost,
+                    )
                 rebut_result = result
                 spent += result.cost_usd
                 session_id = result.rebuttal.session_id or session_id
