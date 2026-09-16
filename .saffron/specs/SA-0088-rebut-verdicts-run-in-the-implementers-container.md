@@ -9,6 +9,7 @@ touches:
   - saffron/cell/session.py
   - tests/test_rebut.py
   - tests/test_session.py
+  - tests/test_events.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -31,7 +32,7 @@ forbidden:
   - saffron/cli.py
   - saffron/batch.py
   - saffron/replay.py
-budget_usd: 12
+budget_usd: 16
 max_attempts: 3
 max_turns: 80
 risk: elevated
@@ -100,13 +101,53 @@ wiring are new code, so no text exists yet that a mutant could pin honestly.
 **Build the critic cell after the rebuttal and the gate re-run, not before.**
 The verdicts judge the patch as the rebuttal left it. `run_rebut` returns
 early when nothing moved and nothing was argued, and when the re-run is red.
-Neither path runs a verdict, so neither should pay for a critic cell. The
-spelling is yours: a second container argument, or a callable that yields
-one. Either lets the caller skip the build on those paths.
+Neither path runs a verdict, so neither should pay for a critic cell.
+Take a zero-argument callable that returns the critic container, and call
+it only after `rerun_gates()` returns `None`. A plain container argument
+cannot do this: the caller evaluates it before `run_rebut` is entered, so
+both early paths pay for the cell anyway, and its tree is the one from
+*before* the rebuttal's commits — which criterion 2 and `DESIGN.md` §5.6
+both forbid.
+
+`tests/test_events.py` is the third caller of `run_rebut`
+(`test_the_watch_shaped_callable_phases_still_receive_does_not_raise`), and
+a required parameter makes it a `TypeError`. It is in `touches` for that
+line alone; `tests/fixtures/watch-golden.txt` must not change, and does
+not, because no green run reaches REBUT.
 
 **`diff()` and the verdicts must read the same tree.** Whatever the verdict
 prompt carries as the new diff has to come from the critic cell, not from the
 implementer's `.git`.
+
+**Criterion 2 claims two things, so its witness observes both.** "The verdict
+sessions run in a critic cell" and "the diff they are shown is read from that
+cell" are separate, and a build that threads the critic container into the
+verdict sessions alone — leaving the `diff` closure reading the implementer's
+`.git`, as `session.py` does today — satisfies the first, passes a witness that
+watches only where the sessions ran, and leaves the half this spec exists for
+false. Item 118 records the identical omission in `SA-0087`'s second criterion,
+where pointing `read_head` at the implementer's own container passed all 157
+tests in `tests/test_session.py`; `SA-0087` was amended for it and now says to
+record which container `export_patch` ran in. Do the same here: record which
+container the call feeding the verdict prompt's diff ran in and assert it is
+the critic cell's, and assert the patch that cell applied carries the
+rebuttal's own commit.
+
+**The REBUT critic cell is torn down the way REVIEW's is.** `SA-0087` makes
+that a criterion of its own — container, worktree volume and state volume
+removed when the phase ends, a raising lens included. If the function you reuse
+owns that `finally` itself, reuse is enough; if its caller owns it, the caller
+in `session.py` repeats it here. A witness would see the leak: the
+`tests/test_session.py` runtime stub appends every removal to `cell.removed`,
+which is the seam `SA-0087`'s own teardown witness reads.
+
+**A post-rebuttal patch that will not apply ends the task the same two ways.**
+§5.5's rule does not change at REBUT: a patch that will not apply to its own
+base ends `EXHAUSTED`, and the binary-change exception ends `GATE_ERROR`. What
+does change is where the ending is produced — `run_rebut` returns a
+`RebutResult` carrying its own `state` and `why`, and the rebuttal turn and the
+gate re-run have already been paid for. An exception escaping `run_rebut`
+instead would be charged to nobody.
 
 **Test both halves at their own seams.** `tests/test_rebut.py` drives
 `run_rebut` with a recording agent. Hand it two distinct container names and
