@@ -1,9 +1,10 @@
 ---
 id: 137
 title: Editing a spec whose pull request is open refuses every dependent, and the order forgets it
-status: open
+status: done
 tier: 1
 filed: 2026-09-16
+closed: 2026-09-16
 by_hand: true
 specs: []
 prs: [280, 281]
@@ -63,3 +64,23 @@ does not silently lose a layer.
 **Filed 2026-09-16** from the spec loop's run of that day (stack #285).
 
 **2026-09-16, a fix is open as PR #287.** `status` now names the dependents an edit refuses and the pull request it drops. It stays `open` until that merges.
+
+**2026-09-16, done.** The third part landed in PR #288: a `--force` now keeps
+the row rather than excluding it.
+
+Excluding it was losing two things at once. The recorded outcome went with the
+row, so `stack` printed a stack missing that pull request — which would have
+retargeted a child off its parent onto the default branch. And the parent left
+`admitted`, so `_order` could no longer satisfy `all(d in admitted)` for any
+dependent, and every one of them stayed refused with nowhere to go. That is
+what stranded `SA-0089` and `SA-0091` on 2026-09-16, not the warning's absence.
+
+The row is kept at the `spec_sha` its task ran at, with the edit recorded in a
+new `edited_sha`. That field is what stops the order reading as stale forever:
+`next` refuses outright on any stale row, so a carried-but-stale row would have
+deadlocked the loop on a spec that cannot be re-queued until its pull request
+closes. A second edit makes it stale again, which is right — the
+acknowledgement is of one edit, not of the file. `status` reports it as a fact
+rather than as staleness, and the spec is not re-run because its recorded state
+leaves it not `pending`.
+

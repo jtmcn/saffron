@@ -667,9 +667,53 @@ def test_snapshot_shows_each_specs_title_and_budget_and_counts_every_root(loop, 
     assert out.count("  risk=") == 4  # item 5's table asked for it
 
 
-def test_a_resnapshot_holds_out_a_spec_edited_while_its_pr_is_open(loop, capsys):
-    # The scan looks past the loop's own PRs, so the edited spec came back as a
-    # fresh candidate, and its next cell would have packaged onto #10's branch.
+def test_a_child_is_admitted_once_its_edited_parent_is_kept(loop):
+    """The other half of item 137, and the half that actually stranded two
+    specs. `build_queue` refuses a child whose parent has no task at its
+    current sha; `_order` admits such a refusal only when every `depends_on`
+    is already admitted. Holding the parent out left the child refused with
+    nowhere to go — keeping it admits both."""
+    parent_id, _sibling, _merged, _new = loop.ids
+    child = driver.REPO / ".saffron" / "specs" / "SA-9999-child.md"
+    child.write_text(
+        "---\n"
+        "id: SA-9999\n"
+        "title: a child of the edited spec\n"
+        "type: bug\n"
+        "priority: 3\n"
+        f"depends_on: [{parent_id}]\n"
+        "touches:\n  - saffron/cli.py\n"
+        "budget_usd: 5\nmax_attempts: 3\nmax_turns: 40\nrisk: standard\n"
+        "acceptance:\n"
+        "  - claim: it does the thing\n"
+        "    witness: tests/test_cli.py::test_it\n"
+        "---\n\n## Context\n\nnothing\n"
+    )
+    refusal = SimpleNamespace(
+        path=child,
+        reason=f"depends_on {parent_id} has no task at its current spec_sha",
+    )
+    held = loop.row(0, state="READY_FOR_REVIEW", pr=10, spec_sha="edited")
+
+    # Held out, as it was: the child has no admitted parent and is stranded.
+    ordered, stranded = driver._order([], [refusal], [], frozenset({parent_id}))
+    assert [p.spec_id for p in ordered] == []
+    assert stranded == [child]
+
+    # Kept: the parent is admitted, so the child is too.
+    ordered, stranded = driver._order([], [refusal], [held], frozenset())
+    assert [p.spec_id for p in ordered] == [parent_id, "SA-9999"]
+    assert stranded == []
+
+
+def test_a_resnapshot_keeps_the_outcome_of_a_spec_edited_while_its_pr_is_open(
+    loop, capsys
+):
+    """Item 137. Holding the row out lost its recorded outcome with it: the
+    spec left the order, so `stack` printed a stack missing that pull request —
+    which would have retargeted a child off its parent onto the default branch.
+    It is kept now, at the sha its task ran at, and the edit is recorded as
+    acknowledged rather than leaving the order permanently stale."""
     edited, sibling, _merged, _new = loop.ids
     driver._save(
         [loop.row(0, state="READY_FOR_REVIEW", pr=10, spec_sha="edited"), loop.row(1)]
@@ -678,9 +722,29 @@ def test_a_resnapshot_holds_out_a_spec_edited_while_its_pr_is_open(loop, capsys)
 
     assert driver.cmd_snapshot(argparse.Namespace(force=True)) == 0
 
-    assert [p.spec_id for p in driver._load()] == [sibling]
+    rows = driver._load()
+    kept = {p.spec_id: p for p in rows}
+    assert edited in kept  # the row, and #10 with it
+    assert kept[edited].state == "READY_FOR_REVIEW"
+    assert kept[edited].pr == 10
+    assert kept[edited].spec_sha == "edited"  # the sha its task ran at, not the edit
+    assert kept[edited].edited_sha  # and the edit, acknowledged
+    assert sibling in kept
     assert "#10 is still open" in capsys.readouterr().out
     assert seen["loop_branches"] == {f"saffron/{edited}", f"saffron/{sibling}"}
+
+    # The order is not stale on its account, so `next` is not deadlocked by a
+    # spec that cannot be re-queued until its pull request closes.
+    assert [r for r in driver._stale(rows) if edited in r] == []
+
+    # And it is not re-run: it carries a recorded outcome, so it is not pending.
+    assert not kept[edited].pending
+
+    # Edited a second time, it is stale again — the acknowledgement is of one
+    # edit, not of the file.
+    spec_file = driver.REPO / kept[edited].path
+    spec_file.write_text(spec_file.read_text() + "\nA second edit.\n")
+    assert [r for r in driver._stale(rows) if edited in r] != []
 
 
 def test_a_resnapshot_looks_past_only_the_loops_own_open_prs():

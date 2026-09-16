@@ -108,6 +108,12 @@ class OrderRow:
     # What PACKAGE pushed, from the ledger; a branch head past it carries
     # review commits. Empty in an order written before `record` stored it.
     pushed_sha: str = ""
+    # The spec's sha on disk when a re-snapshot found it edited with its pull
+    # request still open. The row is kept at `spec_sha` — the sha its task
+    # actually ran at — and this records the edit as acknowledged, so the
+    # order does not read as stale forever and `next` is not deadlocked by a
+    # spec that cannot be re-queued until its pull request closes (item 137).
+    edited_sha: str = ""
 
     title: str = ""
     budget_usd: float = 0.0
@@ -338,7 +344,8 @@ def _stale_reasons(
     if not path.is_file():
         return [f"{p.spec_id}: {p.path} is gone"]
     reasons = []
-    if p.spec_sha and load_spec(path)[1] != p.spec_sha:
+    on_disk = load_spec(path)[1]
+    if p.spec_sha and on_disk != p.spec_sha and on_disk != p.edited_sha:
         reasons.append(f"{p.spec_id}: the spec changed after the snapshot")
     if p.pr and (state := pr_state(p.pr)) in {"MERGED", "CLOSED"}:
         reasons.append(f"{p.spec_id}: #{p.pr} is {state}")
@@ -374,8 +381,9 @@ def _edit_traps(
         path = REPO / p.path
         if not path.is_file() or not p.spec_sha:
             continue
-        if load_spec(path)[1] == p.spec_sha:
-            continue
+        on_disk = load_spec(path)[1]
+        if on_disk == p.spec_sha or on_disk == p.edited_sha:
+            continue  # unedited, or edited and already kept by a re-snapshot
         if p.pr and pr_state(p.pr) not in {"MERGED", "CLOSED"}:
             edited.append(p)
     if not edited:
@@ -433,6 +441,8 @@ def _carried(previous: list[OrderRow]) -> tuple[list[OrderRow], dict[str, str]]:
     the specs it holds out, with why. `build_queue` passes over a spec with a
     finished task, so an order rebuilt from the scan alone dropped every
     reviewable PR; and it hands back a spec edited while its PR is open as new."""
+    from saffron.intake import load_spec
+
     kept, held = [], {}
     for p in previous:
         if not (p.state or p.dropped or p.last_state):
@@ -442,6 +452,17 @@ def _carried(previous: list[OrderRow]) -> tuple[list[OrderRow], dict[str, str]]:
             kept.append(p)
         elif p.pr and _pr_state(p.pr) not in {"MERGED", "CLOSED"}:
             held[p.spec_id] = f"{'; '.join(reasons)}, and #{p.pr} is still open"
+            # Kept, not dropped. Excluding it lost the outcome with it: the
+            # spec left the order, `stack` printed a stack missing that pull
+            # request, and every dependent was refused for a parent with no
+            # task at its current sha. The row stays at the sha its task ran
+            # at; `edited_sha` records the edit so the order is not stale on
+            # its account, and its recorded state keeps `next` from re-running
+            # it while the pull request is open (item 137).
+            path = REPO / p.path
+            if path.is_file():
+                p.edited_sha = load_spec(path)[1]
+            kept.append(p)
     return kept, held
 
 
@@ -797,10 +818,14 @@ def cmd_snapshot(args) -> int:
     candidates, refusals = _scan(loop_branches=frozenset(p.branch for p in previous))
     ordered, stranded = _order(candidates, refusals, carried, frozenset(held_out))
     if held_out:
-        print(f"held out of the order ({len(held_out)}):")
+        print(f"edited while its pull request is open ({len(held_out)}):")
         for reason in held_out.values():
             print(f"  {reason}")
-        print("  close the PR to run the edited spec, or revert the edit to keep it")
+        print(
+            "  kept in the order at the sha its task ran at, so its pull request "
+            "stays in the stack;\n  it will not be re-run until the PR closes or "
+            "the edit is reverted"
+        )
         for trap in _edit_traps(previous):
             print(f"  {trap}")
         print()
@@ -1071,6 +1096,14 @@ def cmd_status(_args) -> int:
         print(f"  {p.spec_id:<{width}}  {label:<18} {pr:<5}{extra}")
     ready = [p for p in rows if p.reviewable]
     print(f"\n{len(ready)}/{len(rows)} reviewable")
+    if edited := [p for p in rows if p.edited_sha]:
+        print("\nedited since its task ran, and kept at the sha that ran:")
+        for p in edited:
+            pr = f"#{p.pr}" if p.pr else "its branch"
+            print(
+                f"  {p.spec_id}: {pr} stays in the stack; it is not re-run until "
+                "the pull request closes or the edit is reverted"
+            )
     if reasons := _stale(rows):
         print("\nstale — `snapshot --force` before the next cell:")
         for reason in reasons:
