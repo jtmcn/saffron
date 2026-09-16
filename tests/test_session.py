@@ -24,7 +24,7 @@ from saffron.intake import parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
 from saffron.phases import package as package_mod
-from saffron.repos import mirror
+from saffron.repos import image, mirror
 from saffron.repos import policy as policy_mod
 
 
@@ -876,6 +876,8 @@ def _stub_the_runtime(
             # would desync all of them. Green by default, mirroring the
             # task's own baseline exactly, unless a test names its own.
             cell.gate_cell_runs += 1
+            if isinstance(gate_cell_suite, BaseException):
+                raise gate_cell_suite
             if gate_cell_suite is not None:
                 return list(gate_cell_suite)
             return list(baseline_declared[0]) if baseline_declared else []
@@ -3303,7 +3305,11 @@ def test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs
     against the unfixed code rather than passing on an absence."""
     cell = _stub_the_runtime(monkeypatch)
     outcome, _ledger = _drive(
-        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        policy="gates: {}\nthread_env:\n  SAFFRON_GATE_MARK: '1'\n",
     )
     assert outcome.state == "READY_FOR_REVIEW"
     assert cell.gate_cell_runs == 1
@@ -3311,13 +3317,25 @@ def test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs
     (gate_worktree,) = [w for w in cell.worktrees if w["container"] == _GATE_CONTAINER]
     # The repo's declared gate env, and nothing else: no proxy address, no
     # cell credential, no route out (Appendix I; CONTEXT.md's "no target-repo
-    # credentials in a cell, ever").
-    assert gate_worktree["env"] == {}
-    assert "HTTPS_PROXY" not in gate_worktree["env"]
-    assert "CLAUDE_CODE_OAUTH_TOKEN" not in gate_worktree["env"]
+    # credentials in a cell, ever"). Carriage and exclusivity in one: an empty
+    # `thread_env` cannot tell `dict(thread_env)` from `{}`.
+    assert gate_worktree["env"] == {"SAFFRON_GATE_MARK": "1"}
     assert gate_worktree["network"] == _GATE_NETWORK
     assert gate_worktree["volume"] == _GATE_VOLUME
     assert gate_worktree["state_volume"] == _GATE_STATE
+
+    # The task's base, the repo's own cell image, and the exported patch
+    # applied *in this container* — the table the lenses read is computed over
+    # the tree that ships, never the bare base. Deleting the apply left the
+    # whole suite green (backlog item 118's own omission, one cell over).
+    assert gate_worktree["base_sha"] == "b" * 40
+    assert gate_worktree["image"] == image.cell_tag(tmp_path / "repo")
+    gate_execs = [run for run in cell.execs if run[0] == _GATE_CONTAINER]
+    assert [argv for _c, argv, _stdin in gate_execs] == [
+        ("git", "apply", "--index"),
+        ("git", "commit", "-q", "-m", "critic: exported patch, applied and committed"),
+    ]
+    assert gate_execs[0][2] == _DIFF
 
     # Its own network, on its own subnet — never the task's own `saffron-
     # cells` (10.88.0.0/24, still held by the still-live implementer's cell
@@ -3332,6 +3350,17 @@ def test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs
     # Gone — container, both volumes, and its own network — before the first
     # lens turn starts: the shared timeline is what proves "before", not
     # merely that both happened somewhere.
+    # Twice each, never `in`: this cell pre-cleans the same four names before
+    # it creates anything, so membership is satisfied with the whole teardown
+    # gone — which it was, across all 2080 tests.
+    for kind, name in [
+        ("container", _GATE_CONTAINER),
+        ("volume", _GATE_VOLUME),
+        ("volume", _GATE_STATE),
+        ("network", _GATE_NETWORK),
+    ]:
+        assert cell.removed.count((kind, name)) == 2, (kind, name)
+
     first_lens_turn = cell.order.index(f"turn:{_CRITIC_CONTAINER}")
     for kind, name in [
         ("container", _GATE_CONTAINER),
@@ -3344,6 +3373,50 @@ def test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs
         ]
         assert indices, (kind, name)
         assert all(i < first_lens_turn for i in indices), (kind, name)
+
+
+def test_the_lens_gate_cell_is_torn_down_when_its_own_suite_raises(
+    monkeypatch, tmp_path
+):
+    """Criterion 2's "including when a gate in it raises". The green path
+    removes each name twice on its own — pre-clean and teardown — so only a
+    raising run tells a `finally` from a success-path removal: moving the
+    teardown out of the `finally` left all 2080 tests green."""
+    raising = _stub_the_runtime(monkeypatch, gate_cell_suite=RuntimeError("gate boom"))
+    with pytest.raises(RuntimeError, match="gate boom"):
+        _drive(
+            monkeypatch,
+            tmp_path,
+            cell=raising,
+            turns=[_turn(_block(_PLAN)), _turn()],
+        )
+    for kind, name in [
+        ("container", _GATE_CONTAINER),
+        ("volume", _GATE_VOLUME),
+        ("volume", _GATE_STATE),
+        ("network", _GATE_NETWORK),
+    ]:
+        assert raising.removed.count((kind, name)) == 2, (kind, name)
+
+
+def test_a_gate_that_errors_in_the_lens_gate_cell_is_not_the_tasks_failure(
+    monkeypatch, tmp_path
+):
+    """`error` means the gate broke, not that the repo's code is wrong, so it
+    ends `GATE_ERROR` and no lens is ever bought (CLAUDE.md; DESIGN.md §5.4)."""
+    cell = _stub_the_runtime(
+        monkeypatch,
+        gate_cell_suite=[
+            GateResult(
+                gate="tests", status="error", tool="pytest 9.1.1", summary="boom"
+            )
+        ],
+    )
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert outcome.state == "GATE_ERROR"
+    assert f"turn:{_CRITIC_CONTAINER}" not in cell.order
 
 
 # Not a path _ANCHORING_DIFF touches, so it cannot anchor however real it reads.
@@ -3996,7 +4069,9 @@ def test_a_cell_run_produces_a_witness_result(monkeypatch, tmp_path):
     # not `stub_mutator` — proved by the adapter it is bound to and by the
     # stubbed `worktree.source_mutated` actually having been reached with
     # this criterion's own mutant.
-    assert all(_bound_to_this_cell(mutate) for _acc, mutate in captured)
+    names = [_cell_container(mutate) for _acc, mutate in captured]
+    assert names.count("saffron-cell-SY-1") == len(names) - 1
+    assert names.count("saffron-gate-SY-1") == 1
     assert cell.mutated == [criterion.mutant] * len(captured)
 
 
@@ -4054,7 +4129,9 @@ def test_a_cell_run_supplies_the_real_mutator(monkeypatch, tmp_path):
     # The suite binds the real cell mutator, not the stub, to every call —
     # baseline and head alike — whether or not `witness_gate` ever ends up
     # calling it.
-    assert all(_bound_to_this_cell(mutate) for _acc, mutate in captured)
+    names = [_cell_container(mutate) for _acc, mutate in captured]
+    assert names.count("saffron-cell-SY-1") == len(names) - 1
+    assert names.count("saffron-gate-SY-1") == 1
     # And it never was called: the gate skipped on an empty `declared` list
     # before `mutate` was ever reached, not because the mutator failed.
     assert cell.mutated == []
@@ -4206,13 +4283,21 @@ def test_a_skipped_witness_blocks_nothing_at_either_tier(monkeypatch, tmp_path):
         assert all(list(acc) == [criterion] for acc, _mutate in captured), tier
 
 
-def _bound_to_this_cell(mutate) -> bool:
-    """The cell adapter's own mutator, bound to a container `_drive` actually
-    started — the implementer's own, or the gate cell's own re-run of the
-    same suite (backlog item 118, part 4) — never `stub_mutator`, and never
-    some other tree."""
+def _cell_container(mutate) -> str | None:
+    """The container the cell adapter's own mutator is bound to, or `None` for
+    `stub_mutator` and any other tree. Widening this to a set of acceptable
+    names would let a head attempt's mutator bind to the gate-only cell and
+    still pass every caller, so callers assert which name, not merely that it
+    is one of them."""
     tree = getattr(mutate, "__self__", None)
-    return isinstance(tree, CellTree) and tree.container in (
+    if not isinstance(tree, CellTree):
+        return None
+    return tree.container
+
+
+def _bound_to_this_cell(mutate) -> bool:
+    """Kept for the callers that only care it is a real cell tree."""
+    return _cell_container(mutate) in (
         "saffron-cell-SY-1",
         "saffron-gate-SY-1",
     )

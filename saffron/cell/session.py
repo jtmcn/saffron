@@ -1025,8 +1025,8 @@ def _apply_and_commit_patch(container: str, patch: str) -> None:
         # 124 as a refusal would charge the agent for a bound that is ours
         # (error != fail, CLAUDE.md).
         raise runtime.CellRuntimeError(
-            "applying the exported patch in the critic cell hit Saffron's "
-            f"own bound: {applied.stderr.strip()[:200]}"
+            "applying the exported patch hit Saffron's own bound: "
+            f"{applied.stderr.strip()[:200]}"
         )
     # Checked whatever the exit code, before the ordinary conflict check: the
     # stub this marker names is what a binary change becomes, whatever git
@@ -1823,8 +1823,9 @@ def _drive_cell(
         def _judge() -> SuiteComparison:
             nonlocal latest
             comparison = suite.against(tree, baseline)
-            # Kept for REVIEW as well: the critic is shown the gate results,
-            # and re-running the suite to fetch them costs a suite.
+            # Kept for the `CellOutcome`'s own gates, effective_risk and
+            # advisory_gates. Not for the critic: its table comes from the
+            # gate-only cell now, never the implementer's own run.
             latest = comparison.run
             # The turn that just closed, which is the repair turn under §5.4's
             # loop — the join the no-progress rule and §8 need, and the whole
@@ -2021,7 +2022,7 @@ def _drive_cell(
                 _phase_start(
                     "REVIEW",
                     "REVIEW",
-                    f"the lens gate suite {what} — "
+                    f"the suite at the exported patch {what} — "
                     + "; ".join(gate_comparison.aborted or gate_comparison.drift),
                 )
             elif gate_comparison is not None:
