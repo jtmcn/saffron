@@ -33,6 +33,16 @@ def _load():
 runner = _load()
 
 
+@pytest.fixture(autouse=True)
+def _forget_seen_message_ids():
+    """One runner process is one `run_agent` call, but this module loads the
+    runner once for the whole session, so the set would outlive every test.
+    Absence is tolerated: under `revert` the source is the base runner, which
+    has no such set, and a fixture that raised there would error every test
+    in the file instead of failing the new ones."""
+    getattr(runner, "_seen_assistant_message_ids", set()).clear()
+
+
 def _assistant(*blocks):
     return SimpleNamespace(content=list(blocks), model="claude-test")
 
@@ -103,8 +113,7 @@ def test_the_result_event_carries_what_the_supervisor_bounds_on():
 
 def test_the_result_event_carries_the_sessions_token_counts():
     """The four counts the Messages API names, exactly as reported, a zero
-    included — not summed, not reconciled, just carried (§ Notes for the
-    agent)."""
+    included — not summed, not reconciled, just carried (`SA-0090`)."""
     message = SimpleNamespace(
         subtype="success",
         num_turns=3,
@@ -155,6 +164,7 @@ def test_the_counts_for_one_message_id_reach_the_log_once():
     message's event carries the per-step counts."""
     usage = {
         "input_tokens": 50,
+        "output_tokens": 999,
         "cache_read_input_tokens": 10,
         "cache_creation_input_tokens": 5,
     }
@@ -175,11 +185,55 @@ def test_the_counts_for_one_message_id_reach_the_log_once():
     assert first_event["input_tokens"] == 50
     assert first_event["cache_read_input_tokens"] == 10
     assert first_event["cache_creation_input_tokens"] == 5
+    # Out of scope by name: the SDK's own docs call it inaccurate per turn, and
+    # a real `usage` mapping does carry the key, so absence has to be asserted.
+    assert "output_tokens" not in first_event
 
     (second_event,) = runner.events(second)
     assert "input_tokens" not in second_event
     assert "cache_read_input_tokens" not in second_event
     assert "cache_creation_input_tokens" not in second_event
+
+
+def test_two_assistant_messages_with_no_id_each_carry_their_own_counts():
+    """`message_id` is `str | None`, and absence is not a key. Keyed on `None`
+    or on `""`, only the first id-less message would carry counts — and it
+    would fail that way in silence, because the fakes never notice."""
+    usage = {
+        "input_tokens": 7,
+        "cache_read_input_tokens": 1,
+        "cache_creation_input_tokens": 2,
+    }
+    made = [
+        SimpleNamespace(
+            content=[SimpleNamespace(text=text)], model="claude-test", usage=usage
+        )
+        for text in ("a", "b")
+    ]
+
+    for message in made:
+        (event,) = runner.events(message)
+        assert event["input_tokens"] == 7
+        assert event["cache_read_input_tokens"] == 1
+        assert event["cache_creation_input_tokens"] == 2
+
+
+def test_a_count_the_sdk_stops_sending_is_null_not_zero():
+    """ "An SDK that renames or drops a count must give nulls, never a crash"
+    — and never a silent zero, which reads as a measured fact."""
+    message = SimpleNamespace(
+        subtype="success",
+        num_turns=1,
+        session_id="sess-partial",
+        total_cost_usd=0.1,
+        usage={"input_tokens": 11},
+    )
+
+    (event,) = runner.events(message)
+    assert event["input_tokens"] == 11
+    for dropped in ("output_tokens", "cache_read_input_tokens"):
+        assert dropped in event
+        assert event[dropped] is None
 
 
 def test_a_result_that_reports_no_cost_is_zero_not_none():

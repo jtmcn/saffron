@@ -24,7 +24,7 @@ _MAX_STR = 200
 # The result's usage is cumulative over the whole query() call; an assistant
 # message's own usage is that one step's. output_tokens is not carried per
 # step: the SDK's own cost-tracking docs say it is not accurate there, and
-# only the total is in scope for it (spec's Out of scope).
+# only the total is in scope for it (`SA-0090`).
 _RESULT_USAGE_KEYS = (
     "input_tokens",
     "output_tokens",
