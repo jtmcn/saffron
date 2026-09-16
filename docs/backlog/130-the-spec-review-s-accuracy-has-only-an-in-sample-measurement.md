@@ -3,6 +3,7 @@ id: 130
 title: The spec review's accuracy has only an in-sample measurement, and step 1b keeps no report to score
 status: open
 tier: 3
+by_hand: true
 filed: 2026-09-15
 specs: []
 prs: []
@@ -26,6 +27,10 @@ related: [123, 124, 125]
   lives only in the loop's conversation, so nothing is left to score.
 - A blocker the operator acts on changes the spec, and its cell then never
   shows the defect. A score that reads outcomes alone counts it as unconfirmed.
+- **By hand.** Step 2 spends money on headless sessions, step 3's saving of
+  reports is prose in the loop skill, and the pre-registration and the scoring
+  are the operator's. A cell carries no credentials beyond its own agent token,
+  so none of it can go through one. Item 123's other half can: `SA-0092`.
 
 ## Done looks like
 
