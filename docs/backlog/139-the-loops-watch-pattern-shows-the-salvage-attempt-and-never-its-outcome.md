@@ -43,3 +43,9 @@ Item 67's `budget:` and `PLAN` were added for the same reason after run 2.
 
 `SALVAGE` in `WATCH_PREFIXES`, and a check that every line the CLI prints at the
 start of a phase has its outcome line in the same set.
+
+## Record
+
+**Filed 2026-09-16** from the spec loop's run of that day (stack #285).
+
+**2026-09-16, a fix is open as PR #287.** `SALVAGE` is in `WATCH_PREFIXES`. It stays `open` until that merges.

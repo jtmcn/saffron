@@ -54,3 +54,9 @@ spec's parents, because a spec can be absent from it while its branch is real.
 `size` measuring from the base the cell used — the parent's branch head for a
 spec with `depends_on`, which `task.py`'s `_stacked_on` already resolves and the
 ledger records — rather than from the default branch.
+
+## Record
+
+**Filed 2026-09-16** from the spec loop's run of that day (stack #285).
+
+**2026-09-16, a fix is open as PR #287.** `_bases_below` walks `depends_on` as well as the order, so a parent held out of it still supplies the base. It stays `open` until that merges.

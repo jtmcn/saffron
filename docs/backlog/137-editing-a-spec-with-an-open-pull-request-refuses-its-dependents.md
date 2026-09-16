@@ -57,3 +57,9 @@ would be refused. Either that, or the dependency check accepting a parent whose
 only difference from its task's sha is outside the frontmatter a cell reads. And
 a `--force` that keeps a recorded outcome for a spec it holds out, so the stack
 does not silently lose a layer.
+
+## Record
+
+**Filed 2026-09-16** from the spec loop's run of that day (stack #285).
+
+**2026-09-16, a fix is open as PR #287.** `status` now names the dependents an edit refuses and the pull request it drops. It stays `open` until that merges.

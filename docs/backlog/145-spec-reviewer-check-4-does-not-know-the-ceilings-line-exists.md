@@ -35,3 +35,9 @@ This is the by-hand half of item 123, and it is the whole payoff of `SA-0092`.
 Check 4 rewritten to read the `ceilings:` line as its input — quote it, and
 report the check against what it says — with the by-eye instruction removed so
 the two cannot disagree.
+
+## Record
+
+**Filed 2026-09-16** from the spec loop's run of that day (stack #285).
+
+**2026-09-16, a fix is open as PR #287.** Check 4 reads the `ceilings:` line instead of comparing by eye. It stays `open` until that merges.
