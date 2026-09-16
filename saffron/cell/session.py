@@ -835,6 +835,11 @@ def cell_up(
     describes: every mechanism reports success and applies to a different
     container. One copy, and the callers differ only in what they do after it.
 
+    `critic_cell` is the one sanctioned second path (SA-0087). It joins the
+    network this call already built, so the host-port probe and the proxy
+    reachability assert are properties it inherits rather than repeats; it
+    starts, stops and removes neither the network nor the proxy.
+
     `created` is the caller's leak ledger, appended to in place, so a failure
     part-way leaves the caller holding exactly what may survive. `note` takes
     the progress lines: `_drive_cell` sends them to `Preflight` events, and a
@@ -990,9 +995,17 @@ def _apply_and_commit_patch(container: str, patch: str) -> None:
     not a second read of the implementer's history (CONTEXT.md §5).
 
     The patch travels on stdin, never as an argument: Linux caps a single
-    argv at `MAX_ARG_STRLEN` (measured against this same image for
+    argv at `MAX_ARG_STRLEN` (measured against `saffron/cell-base:python` for
     `worktree._write_file`'s mutant), and a limit that is Saffron's own must
-    not end a task the agent is charged for.
+    not end a task the agent is charged for. `git apply` is the one in-cell git
+    call that cannot go through `worktree._git`, which carries no stdin.
+
+    `--index`, PACKAGE's own spelling, rather than a following `git add -A`:
+    staging re-runs the clean filters the patch's own `.gitattributes` just
+    installed. Measured — a file committed before an attribute naming it
+    `working-tree-encoding=UTF-16` leaves `git apply` at 0 and `git add` at
+    128 — which ended the task as infrastructure, charged to nobody and with
+    no lens run, and is the free way past a check `d3b9c51` names.
     """
     from saffron.cell import runtime, worktree
     from saffron.phases.package import _NO_FULL_INDEX
@@ -1002,7 +1015,7 @@ def _apply_and_commit_patch(container: str, patch: str) -> None:
 
     applied = runtime.exec_stream(
         container,
-        ["git", "apply"],
+        ["git", "apply", "--index"],
         stdin_data=patch,
         on_line=_ignore,
         workdir=worktree.WORKTREE_MOUNT,
@@ -1017,31 +1030,28 @@ def _apply_and_commit_patch(container: str, patch: str) -> None:
         )
     # Checked whatever the exit code, before the ordinary conflict check: the
     # stub this marker names is what a binary change becomes, whatever git
-    # apply's own exit status reads as. ponytail: an agent can reach this on
-    # purpose, by committing a file git reads as binary, and end its task
-    # uncharged — the same ceiling `size` and `integrity` already carry for a
-    # hidden binary (backlog item 103); nothing ships from it either, since
-    # only READY_FOR_REVIEW is packaged.
+    # apply's own exit status reads as.
+    # ponytail: an agent can reach this on purpose, by committing a file git
+    # reads as binary, and end its task uncharged — the same ceiling `size`
+    # and `integrity` already carry for a hidden binary (backlog item 103);
+    # nothing ships from it either, since only READY_FOR_REVIEW is packaged.
     if _NO_FULL_INDEX in applied.stderr:
         raise CriticPatchUnrepresentable(applied.stderr.strip()[:400])
     if applied.returncode != 0:
         raise CriticPatchRejected(applied.stderr.strip()[:400])
 
-    added = runtime.exec_(
-        container, ["git", "add", "-A"], workdir=worktree.WORKTREE_MOUNT
-    )
-    if added.returncode != 0:
-        raise runtime.CellRuntimeError(
-            f"git add in the critic cell failed: {added.stderr.strip()}"
-        )
     committed = runtime.exec_(
         container,
         ["git", "commit", "-q", "-m", "critic: exported patch, applied and committed"],
         workdir=worktree.WORKTREE_MOUNT,
     )
     if committed.returncode != 0:
-        raise runtime.CellRuntimeError(
-            f"git commit in the critic cell failed: {committed.stderr.strip()}"
+        # The agent's content, so the agent's task: an exec that cannot launch
+        # raises `CellRuntimeError` from `exec_` itself, and anything this
+        # reaches is what the patch left in the index. Says which step it was,
+        # since the caller's reason names the apply.
+        raise CriticPatchRejected(
+            f"applied, but could not be committed: {committed.stderr.strip()[:360]}"
         )
 
 

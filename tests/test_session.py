@@ -623,6 +623,12 @@ class _Cell:
         # diff export and a finding's anchor read alike — ran against.
         self.turn_containers: list[str] = []
         self.export_calls: list[tuple[str, str]] = []
+        # What ran in each container, and with what on stdin: a stub that
+        # drops `stdin_data` cannot tell the shipped patch from no patch.
+        self.execs: list[tuple[str, tuple[str, ...], str]] = []
+        # Each `prepare_worktree` call's own arguments: asserting a container
+        # *name* never shows a container was created at all.
+        self.worktrees: list[dict] = []
         self.read_head_calls: list[tuple[str, str]] = []
 
 
@@ -691,12 +697,14 @@ def _stub_the_runtime(
         "saffron.cell.runtime.container_ip", lambda *a, **k: "10.88.0.9"
     )
 
-    def _exec_stream(_container, _command, *, stdin_data="", on_line=None, **k):
+    def _exec_stream(container, command, *, stdin_data="", on_line=None, **k):
+        cell.execs.append((container, tuple(command), stdin_data))
         return runtime.Completed(0, "", "")
 
     monkeypatch.setattr("saffron.cell.runtime.exec_stream", _exec_stream)
 
-    def _exec(_container, _command, **k):
+    def _exec(container, command, **k):
+        cell.execs.append((container, tuple(command), ""))
         return runtime.Completed(0, "", "")
 
     monkeypatch.setattr("saffron.cell.runtime.exec_", _exec)
@@ -749,6 +757,7 @@ def _stub_the_runtime(
     def _prepare_worktree(**k):
         # The real one records each name against its own create; a stub that
         # does not is a stub whose teardown ledger is always empty.
+        cell.worktrees.append(dict(k))
         cell.worktree_base = k["base_sha"]
         if k.get("created") is not None:
             k["created"].update((k["state_volume"], k["container"]))
@@ -2918,14 +2927,23 @@ _OUTSIDE_HUNK_FINDING = {
 }
 
 
-def _stub_critic_apply(monkeypatch, *, stderr: str, returncode: int) -> None:
-    """One shared stub for the two ways `_apply_and_commit_patch` ends the
-    task before any lens runs: an ordinary conflict, and a patch the export
-    could never carry (PACKAGE's own `_NO_FULL_INDEX` marker), told apart by
-    the marker's presence in `stderr` alone — never by `returncode`."""
+def _stub_critic_apply(
+    monkeypatch,
+    cell: _Cell,
+    *,
+    stderr: str,
+    returncode: int,
+    timed_out: bool = False,
+) -> None:
+    """One shared stub for the three ways `_apply_and_commit_patch` ends the
+    task before any lens runs: an ordinary conflict, a patch the export could
+    never carry (PACKAGE's own `_NO_FULL_INDEX` marker) told apart by the
+    marker's presence in `stderr` alone — never by `returncode` — and a fired
+    bound, which is Saffron's own and charged to nobody."""
 
-    def _exec_stream(_container, _command, *, stdin_data="", on_line=None, **k):
-        return runtime.Completed(returncode, "", stderr)
+    def _exec_stream(container, command, *, stdin_data="", on_line=None, **k):
+        cell.execs.append((container, tuple(command), stdin_data))
+        return runtime.Completed(returncode, "", stderr, timed_out=timed_out)
 
     monkeypatch.setattr("saffron.cell.runtime.exec_stream", _exec_stream)
 
@@ -2980,6 +2998,65 @@ def test_a_finding_outside_the_diff_is_anchored_against_the_critic_cells_tree(
     # the critic cell at least once, over the same tree base.
     assert (_CRITIC_CONTAINER, "b" * 40) in cell.export_calls
 
+    # What the lenses read is the base *plus the exported patch*, so the patch
+    # itself must reach `git apply` in the critic cell and be committed there.
+    critic = [run for run in cell.execs if run[0] == _CRITIC_CONTAINER]
+    assert [argv for _c, argv, _in in critic] == [
+        ("git", "apply", "--index"),
+        ("git", "commit", "-q", "-m", "critic: exported patch, applied and committed"),
+    ]
+    assert critic[0][2] == _ANCHORING_DIFF
+
+
+def test_the_critic_cell_is_built_from_the_repos_image_at_the_tasks_tree_base(
+    monkeypatch, tmp_path
+):
+    """A container name proves nothing was created. The critic cell is a real
+    `prepare_worktree`, from the repo's own cell image so the rootfs is the
+    image's, at the task's tree base, with `network`, `env` and `gates_dir`
+    passed explicitly (Appendix I)."""
+    from saffron.repos import image
+
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    (critic,) = [w for w in cell.worktrees if w["container"] == _CRITIC_CONTAINER]
+    # The repo's own cell image, not the base and not the stubbed build: a
+    # new container's rootfs is the image's, which is the whole guarantee.
+    assert critic["image"] == image.cell_tag(tmp_path / "repo")
+    assert critic["base_sha"] == "b" * 40
+    assert critic["volume"] == _CRITIC_VOLUME
+    assert critic["state_volume"] == _CRITIC_STATE
+    assert critic["network"] and critic["gates_dir"]
+    # A real `cell_env` over the proxy this task already started, not an empty
+    # mapping: without it the cell reaches the network directly (Appendix I).
+    assert critic["env"]["HTTPS_PROXY"] == "http://10.88.0.9:3128"
+    assert "ANTHROPIC_API_KEY" not in critic["env"]
+
+
+def test_a_fired_bound_applying_the_patch_is_saffrons_own_not_the_agents(
+    monkeypatch, tmp_path
+):
+    """`exec_stream` reports a wall or idle bound as `timed_out`, not by
+    raising. Reading its exit 124 as a refused apply would charge the agent
+    for a bound that is Saffron's — `error` != `fail` (CLAUDE.md)."""
+    cell = _stub_the_runtime(monkeypatch)
+    _stub_critic_apply(monkeypatch, cell, stderr="", returncode=124, timed_out=True)
+    with pytest.raises(runtime.CellRuntimeError, match="own bound"):
+        _drive(
+            monkeypatch,
+            tmp_path,
+            cell=cell,
+            turns=[_turn(_block(_PLAN)), _turn()],
+        )
+    # Not EXHAUSTED, and no lens ran.
+    assert len(cell.turns) == 2
+
 
 def test_a_patch_that_does_not_apply_to_its_base_never_reaches_review(
     monkeypatch, tmp_path
@@ -2988,7 +3065,9 @@ def test_a_patch_that_does_not_apply_to_its_base_never_reaches_review(
     `EXHAUSTED`, with a reason that names the patch, not one that reads like
     four red gate attempts."""
     cell = _stub_the_runtime(monkeypatch)
-    _stub_critic_apply(monkeypatch, stderr="error: patch does not apply", returncode=1)
+    _stub_critic_apply(
+        monkeypatch, cell, stderr="error: patch does not apply", returncode=1
+    )
     capture: list = []
     outcome, _ledger = _drive(
         monkeypatch,
@@ -3010,6 +3089,42 @@ def test_a_patch_that_does_not_apply_to_its_base_never_reaches_review(
     assert "patch does not apply" in review_line.detail
 
 
+def test_a_commit_the_patchs_own_content_refuses_is_the_tasks_not_infrastructure(
+    monkeypatch, tmp_path
+):
+    """A commit the patch's own content refuses — an in-tree `.gitattributes`
+    filter is one measured way — is the agent's task, `EXHAUSTED`. Raised as
+    infrastructure it would be charged to nobody and re-queued, which is a
+    free way past the critic (`d3b9c51`)."""
+    cell = _stub_the_runtime(monkeypatch)
+
+    def _exec(container, command, **k):
+        cell.execs.append((container, tuple(command), ""))
+        if tuple(command)[:2] == ("git", "commit"):
+            return runtime.Completed(128, "", "fatal: BOM is required in 'a.txt'")
+        return runtime.Completed(0, "", "")
+
+    monkeypatch.setattr("saffron.cell.runtime.exec_", _exec)
+    capture: list = []
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        capture=capture,
+    )
+    assert outcome.state == "EXHAUSTED"
+    assert len(cell.turns) == 2
+    (review_line,) = [
+        event
+        for event in capture
+        if isinstance(event, PhaseStart)
+        and event.phase == "REVIEW"
+        and "could not be committed" in event.detail
+    ]
+    assert "BOM is required" in review_line.detail
+
+
 def test_a_binary_change_the_export_cannot_carry_ends_in_gate_error(
     monkeypatch, tmp_path
 ):
@@ -3020,6 +3135,7 @@ def test_a_binary_change_the_export_cannot_carry_ends_in_gate_error(
     cell = _stub_the_runtime(monkeypatch)
     _stub_critic_apply(
         monkeypatch,
+        cell,
         stderr="fatal: cannot apply binary patch without full index line",
         returncode=128,
     )
@@ -3055,9 +3171,12 @@ def test_the_critic_cell_is_torn_down_when_review_ends(monkeypatch, tmp_path):
         turns=[_turn(_block(_PLAN)), _turn()],
     )
     assert outcome.state == "READY_FOR_REVIEW"
-    assert ("container", _CRITIC_CONTAINER) in cell.removed
-    assert ("volume", _CRITIC_VOLUME) in cell.removed
-    assert ("volume", _CRITIC_STATE) in cell.removed
+    # Twice each, never `in`: `critic_cell` pre-cleans the same three names
+    # before it creates anything, so membership is satisfied with the whole
+    # teardown deleted.
+    assert cell.removed.count(("container", _CRITIC_CONTAINER)) == 2
+    assert cell.removed.count(("volume", _CRITIC_VOLUME)) == 2
+    assert cell.removed.count(("volume", _CRITIC_STATE)) == 2
 
     raising_cell = _stub_the_runtime(monkeypatch)
     with pytest.raises(RuntimeError, match="lens boom"):
@@ -3071,9 +3190,9 @@ def test_the_critic_cell_is_torn_down_when_review_ends(monkeypatch, tmp_path):
                 RuntimeError("lens boom"),
             ],
         )
-    assert ("container", _CRITIC_CONTAINER) in raising_cell.removed
-    assert ("volume", _CRITIC_VOLUME) in raising_cell.removed
-    assert ("volume", _CRITIC_STATE) in raising_cell.removed
+    assert raising_cell.removed.count(("container", _CRITIC_CONTAINER)) == 2
+    assert raising_cell.removed.count(("volume", _CRITIC_VOLUME)) == 2
+    assert raising_cell.removed.count(("volume", _CRITIC_STATE)) == 2
 
 
 # Not a path _ANCHORING_DIFF touches, so it cannot anchor however real it reads.
