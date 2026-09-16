@@ -1,7 +1,7 @@
 ---
 id: SA-0087
 title: every REVIEW lens runs in the container the implementer just had root in, and reads the tree through that container's own git
-type: bug
+type: feature
 priority: 1
 depends_on: []
 touches:
@@ -136,7 +136,9 @@ are already running, and `cell_down` removes them. The critic cell must not
 start, stop or remove either. What it needs:
 
 - the proxy's address: `runtime.container_ip(proxy.PROXY_NAME)`, because
-  `cell_up` does not keep it;
+  `cell_up` does not keep it. It returns `str | None` and `cell_env` takes
+  `str`, so `None` needs a branch or `types` fails: an unreadable proxy
+  address is infrastructure, and raises `CellRuntimeError`;
 - the environment: `cell_env(...)`, which carries the token the lenses need;
 - the repo's cell image, whose tag `cell_up` already built;
 - a worktree: `worktree.prepare_worktree(...)` with its own volume and state
@@ -181,8 +183,13 @@ base can apply, and `git apply` reports `without full index line`.
 (`_NO_FULL_INDEX` in `saffron/phases/package.py`,
 `test_a_binary_patch_is_an_error_not_a_conflict`). Match the same marker,
 imported inside the function, and end the task `GATE_ERROR`. Check the
-marker whatever the exit code. A timeout or a failed exec is Saffron's and
-raises `CellRuntimeError`; it is neither end.
+marker whatever the exit code. An exec that cannot launch is Saffron's and
+raises `CellRuntimeError`; it is neither end. A *timeout* does not raise:
+`exec_stream` reports a fired wall or idle bound as
+`Completed(returncode=124, timed_out=True)`. Read `timed_out` and raise
+`CellRuntimeError` on it. Reading exit 124 as a refused apply would charge
+the agent for Saffron's own bound, which is the `error` ≠ `fail` collapse
+`CLAUDE.md` forbids.
 
 The agent can reach the stub on purpose, by committing a file git reads as
 binary, and end its task uncharged. That is the ceiling `size` and
@@ -217,11 +224,15 @@ of a name you add turns the reverted run into a collection error, which
 needs a `# noqa: E731` to pass `lint`, and that suppression fails `integrity`
 even inside `touches`.
 
-**The `size` gate counts tests.** A `bug` gets 300 changed lines, tests
+**The `size` gate counts tests.** A `feature` gets 600 changed lines, tests
 included. Keep the critic cell's lifecycle in one function that REVIEW calls,
 so `SA-0088` can call it again. An earlier build of the other criteria came
 to about 290 lines, so share one stub and one setup helper across the
-witnesses rather than repeating them. `_stub_the_runtime` stubs neither
-`runtime.container_ip` nor `runtime.exec_stream` today; add both there once.
+witnesses rather than repeating them. `_stub_the_runtime` stubs none of
+`runtime.container_ip`, `runtime.exec_stream` or `runtime.exec_` today; add
+all three there once. `tests/conftest.py`'s autouse `no_host_tool_exec`
+raises for any unmarked test that reaches a runtime binary, and
+`tests/test_events.py` imports this stub, so a missing one fails tests
+outside `touches`.
 Fold the two apply witnesses onto one helper that takes the apply's stderr
 and exit code.
