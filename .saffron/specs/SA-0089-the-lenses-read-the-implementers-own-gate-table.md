@@ -1,7 +1,7 @@
 ---
 id: SA-0089
 title: every REVIEW lens is shown the gate table the implementer's own cell computed, so a forged toolchain still writes what the critic reads about the gates
-type: bug
+type: feature
 priority: 2
 depends_on: [SA-0088]
 touches:
@@ -110,10 +110,15 @@ built.
 create raises `CellRuntimeError`. `reverify` gets away with the default
 because PACKAGE runs after the cell is down; REVIEW does not — the
 implementer's `saffron-cells` network holds that subnet until `cell_down`
-in `_drive_cell`'s `finally`. Choose a non-overlapping subnet at the call
-site in `session.py`, since `runtime.py` is forbidden. Then, before
-creating each name, remove any leftover of the same name, tolerating
-absence, as `cell_up` does and `reverify` does not need to: its names
+in `_drive_cell`'s `finally`. Two subnets are held, not one: `saffron-cells`
+on `runtime.DEFAULT_SUBNET` (`10.88.0.0/24`), and the proxy's `saffron-egress`
+on `proxy.EGRESS_SUBNET` (`10.89.0.0/24`), which `_ensure_egress_network`
+creates once and neither `cell_down` nor `stop_proxy` removes — so
+`10.89.0.0/24`, the obvious next pick after reading `10.88.0.0/24`, is taken.
+Use `10.90.0.0/24`: those two are the only subnets `saffron/` declares.
+Write it at the call site in `session.py`, since `runtime.py` is forbidden.
+Then, before creating each name, remove any leftover of the same name,
+tolerating absence, as `cell_up` does and `reverify` does not need to: its names
 change every attempt and a `spec_id`-keyed name does not. Both failures
 land at REVIEW, after IMPLEMENT is paid for. Then apply the patch
 inside it the way `SA-0087`'s critic cell does, with the same function if it
@@ -185,5 +190,5 @@ leaves something behind.
 needs a `# noqa: E731` to pass `lint`, and that suppression fails `integrity`
 even inside `touches`.
 
-**The `size` gate counts tests.** A `bug` gets 300 changed lines, tests
+**The `size` gate counts tests.** A `feature` gets 600 changed lines, tests
 included.
