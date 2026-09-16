@@ -836,7 +836,15 @@ def test_history_before_a_cells_own_start_hides_it(tmp_path):
     )
 
 
-def _cell(spec_id, spec_type, touches, criteria, started_at="2026-09-14 12:00:00"):
+def _cell(
+    spec_id,
+    spec_type,
+    touches,
+    criteria,
+    started_at="2026-09-14 12:00:00",
+    *,
+    peak_cut_off=False,
+):
     return driver.PastCell(
         spec_id=spec_id,
         spec_type=spec_type,
@@ -852,6 +860,7 @@ def _cell(spec_id, spec_type, touches, criteria, started_at="2026-09-14 12:00:00
         review_usd=0.8,
         rebut_usd=0.0,
         endings=[],
+        peak_cut_off=peak_cut_off,
         size=None,
     )
 
@@ -941,6 +950,44 @@ def test_history_compares_the_targets_ceilings_with_the_rows_it_printed():
     assert "SA-0003's pre-review total $15.00, above by $5.00" in mirrored
 
 
+def test_a_peak_that_stopped_on_budget_is_not_called_a_turn_floor(tmp_path):
+    """The fixture peaks at 45 turns on a REBUTTING attempt that ran out of
+    budget, while the attempt that hit the turn ceiling ran 41. Reading the
+    label off the row's `endings` calls 45 "at least what it needed" — a
+    ceilings misreading of exactly the kind this line exists to end."""
+    ledger, repo_id = _ledger_with_one_cell(tmp_path)
+    (cell,) = driver._past_cells(ledger, repo_id, {"SA-0001": _spec("SA-0001")})
+    ledger.close()
+
+    assert cell.peak_turns == 45
+    assert "IMPLEMENTING error_max_turns" in cell.endings
+    assert cell.peak_cut_off is False
+
+    target = _spec("SA-0009", touches=2, criteria=3)
+    target.max_turns = 80
+    ceilings = driver._ceilings_line(target, [cell])
+    assert "peak 45t (used)" in ceilings
+    assert "floor" not in ceilings
+
+
+def test_a_turn_ceiling_carried_only_on_terminal_reason_is_still_a_floor():
+    """`session.py` reads `terminal_reason` as the primary field and keeps the
+    subtype so a result event arriving without one does not skip the control in
+    silence. A predicate on the subtype alone drops the primary half."""
+    assert driver._cut_off_at_turn_ceiling(
+        {"subtype": "error", "terminal_reason": "max_turns"}
+    )
+    assert driver._cut_off_at_turn_ceiling(
+        {"subtype": "error_max_turns", "terminal_reason": None}
+    )
+    assert not driver._cut_off_at_turn_ceiling(
+        {"subtype": "error_max_budget_usd", "terminal_reason": "budget_exhausted"}
+    )
+    assert not driver._cut_off_at_turn_ceiling(
+        {"subtype": "success", "terminal_reason": None}
+    )
+
+
 def test_the_ceilings_line_does_not_call_an_equal_ceiling_headroom():
     """`max_turns` equal to the peak is check 4's blocker, not headroom —
     "at or below the peak a similar cell needed" (spec-reviewer.md). Printing
@@ -971,13 +1018,11 @@ def test_the_ceilings_line_calls_a_cut_off_rows_peak_a_floor():
     target = _spec("SA-0009", touches=2, criteria=3)
     target.max_turns = 80
 
-    cutoff = _cell("SA-0002", "bug", 2, 3)
+    cutoff = _cell("SA-0002", "bug", 2, 3, peak_cut_off=True)
     cutoff.peak_turns = 60
-    # Not first in the list: reading only `endings[0]` must not pass.
-    cutoff.endings = [
-        "REVIEWING error_during_execution",
-        "IMPLEMENTING error_max_turns",
-    ]
+    # Endings the label must not be read off: the row ends `error_max_turns`
+    # on an attempt that is not the peak, which is the false floor below.
+    cutoff.endings = ["IMPLEMENTING error_max_turns"]
     other = _cell("SA-0003", "bug", 2, 3)
     other.peak_turns = 30
     other.endings = []
@@ -992,9 +1037,9 @@ def test_the_ceilings_line_calls_a_cut_off_rows_peak_a_floor():
     assert "SA-0003's peak 90t (used)" in ceilings
     assert "floor" not in ceilings
 
-    # An abnormal ending that is not a turn ceiling is not a floor either:
-    # `bool(endings)` must not stand in for the predicate.
-    other.endings = ["IMPLEMENTING error_max_budget_usd (budget_exhausted)"]
+    # An abnormal ending that is not a turn ceiling is not a floor either, and
+    # an `error_max_turns` ending on some *other* attempt does not make one.
+    other.endings = ["IMPLEMENTING error_max_turns"]
     ceilings = driver._history_lines(target, [cutoff, other])[-1]
     assert "SA-0003's peak 90t (used)" in ceilings
     assert "floor" not in ceilings

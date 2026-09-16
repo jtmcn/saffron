@@ -1101,6 +1101,16 @@ class Spend(NamedTuple):
     usd: float
 
 
+def _cut_off_at_turn_ceiling(attempt) -> bool:
+    """`saffron.cell.session.cut_off_at_turn_ceiling`'s rule over a ledger row.
+    Both fields, not just the subtype: that file reads `terminal_reason` as the
+    primary and keeps the subtype so a result event arriving without one does
+    not skip the control in silence."""
+    return attempt["terminal_reason"] == "max_turns" or (
+        attempt["subtype"] == "error_max_turns"
+    )
+
+
 @dataclass
 class PastCell:
     """One past cell's spend by phase, for a spec review's ceilings and size checks."""
@@ -1120,6 +1130,12 @@ class PastCell:
     review_usd: float
     rebut_usd: float
     endings: list[str]  # "<phase> <subtype>" for every attempt that did not succeed
+    # Whether the attempt `peak_turns` came from is the one that hit the turn
+    # ceiling. `endings` is flat over every attempt and `peak_turns` is a max
+    # over every attempt, so the two do not line up: this repo's own fixture
+    # peaks at 45 on a REBUTTING attempt that ran out of *budget* while its
+    # `error_max_turns` attempt ran 41, and calling 45 a turn floor is false.
+    peak_cut_off: bool
     size: str | None  # the last `size` gate summary, verbatim: it names the ceiling
 
 
@@ -1224,6 +1240,7 @@ def _past_cells(
                 for r in ledger.task_results(row["task_id"])
                 if r.gate == "size"
             ]
+            peak_attempt = max(attempts, key=lambda a: a["num_turns"] or 0)
             cells.append(
                 PastCell(
                     spec_id=spec_id,
@@ -1238,7 +1255,8 @@ def _past_cells(
                     else None,
                     implement=_spend(implementing[1:], "IMPLEMENTING"),
                     repair=_spend(attempts, "REPAIRING"),
-                    peak_turns=max(a["num_turns"] or 0 for a in attempts),
+                    peak_turns=peak_attempt["num_turns"] or 0,
+                    peak_cut_off=_cut_off_at_turn_ceiling(peak_attempt),
                     review_usd=_spend(attempts, "REVIEWING").usd,
                     rebut_usd=_spend(attempts, "REBUTTING").usd,
                     endings=[
@@ -1291,7 +1309,7 @@ def _ceilings_line(target: Spec, rows: list[PastCell]) -> str:
         turns_gap = "level with it"
     else:
         turns_gap = f"{'above' if turns_diff > 0 else 'below'} by {abs(turns_diff)}t"
-    cut_off = any("error_max_turns" in e for e in turns_row.endings)
+    cut_off = turns_row.peak_cut_off
     turns_label = "a floor — cut off at its own ceiling" if cut_off else "used"
     turns_part = (
         f"max_turns={target.max_turns} vs {turns_row.spec_id}'s peak "
