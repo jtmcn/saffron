@@ -37,18 +37,19 @@ forbidden:
   - saffron/cli.py
   - saffron/batch.py
   - saffron/replay.py
-budget_usd: 12
+budget_usd: 16
 max_attempts: 3
-max_turns: 80
+max_turns: 90
 risk: elevated
 acceptance:
   - claim: >-
       Each verdict session's system prompt carries the diff its lens reviewed,
       as well as the diff after the rebuttal, and says that the blocker line
-      numbers refer to the files as they stood when the findings were filed,
-      the tree the first diff describes. Today it carries only the diff after
-      the rebuttal, so a blocker whose fix was committed names a line that has
-      since moved.
+      numbers refer to the files as they stood when the findings were filed —
+      naming that block by its own heading, never by its position, so the
+      sentence stays true wherever the block sits. Today the prompt carries
+      only the diff after the rebuttal, so a blocker whose fix was committed
+      names a line that has since moved.
     witness: tests/test_rebut.py::test_the_verdict_prompt_carries_the_diff_its_blockers_were_filed_against
   - claim: >-
       A task hands REBUT the diff REVIEW's lenses were shown, in addition
@@ -104,11 +105,19 @@ the line's text as filed would need `Finding` to carry it, in
 **Where either diff is read from.** `SA-0087` moved REVIEW's diff to the critic
 cell and `SA-0088` moved `diff()` there. Keep both sources. Pass REBUT the
 exact diff string `run_review` was handed, and do not export it a second time.
-If the function that manages the critic cell reads that string internally,
-return it from there.
+`critic_cell` yields the container, not a diff, and the reviewed diff is
+exported at the `run_review` call site in `session.py`: bind that expression to
+a name and hand the name to both `run_review` and `run_rebut`. Criterion 2's
+"not re-exported" is already observable — `tests/test_session.py`'s
+`test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch` counts
+the critic container's exports, and a third one reds it.
 
-**The order of the verdict template's blocks.** Whether sessions can share a
-cached prompt is backlog item 126, and it waits on a measurement.
+**Reordering the verdict template's blocks for prompt caching.** Whether
+sessions can share a cached prompt is backlog item 126, and it waits on a
+measurement. This is not licence to leave the new block anywhere: wherever it
+goes, the instruction must name it by its heading, because an instruction that
+says "the first diff" above a block printed second tells the critic exactly the
+false thing this spec exists to remove.
 
 ## Notes for the agent
 
@@ -124,7 +133,9 @@ same tree (`SA-0088`, Notes), and nothing here changes that.
 **Say which tree the numbers belong to, in the template.** The two diffs get
 headings that tell them apart, and the instruction above "Your findings" says
 the line numbers refer to the files as they stood when the findings were filed,
-which the first diff describes. "What to emit" already opens "the diff below
+naming the block by its heading rather than by its position — "the first diff"
+is false the moment the block is appended instead, and every observation this
+spec declares still passes when it is. "What to emit" already opens "the diff below
 is the change as it now stands" — with two diffs below it that sentence names
 neither, so make it say which one it means. Keep the verdict contract, one entry per
 finding with `finding`, `verdict` and `reason`, exactly as it is.
