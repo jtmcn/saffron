@@ -107,7 +107,7 @@ fire. Its number stays listed because item numbers are cited from `saffron/`.
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**,
-~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, ~~**110**~~, ~~**111**~~, **116**, **121**, **122**, **123**, **124**, **125**.
+~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, ~~**110**~~, ~~**111**~~, **116**, **121**, **122**, **123**, **124**, **125**, **130**.
 (**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived, and **69** is ranked there too.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
 is the same defect as filing one nowhere at all. **94** was filed here and moved
@@ -138,6 +138,7 @@ landed first. **113** was filed open on 2026-09-13, to tier 2 beside 37 and 38.
 stack — **114**, **115** and **117** to tier 1, **116** to tier 3.
 **119**–**122** were filed open the same day from the loop's second run —
 **119** and **120** to tier 1, **121** and **122** to tier 3. **123**–**125**
-were filed open the same day from the spec review's backtest, all to tier 3.)
+were filed open the same day from the spec review's backtest, all to tier 3.
+**130**, how to measure it again, was filed open on 2026-09-15, to tier 3.)
 
 ---
