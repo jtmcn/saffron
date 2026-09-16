@@ -32,9 +32,10 @@ max_turns: 150
 risk: elevated
 acceptance:
   - claim: >-
-      `critic_cell` takes the network it runs on as an argument that may be
-      absent. Given a name, it uses that network and removes no network in its
-      teardown, as it does today. Given none, it creates a network of its own,
+      `critic_cell` takes the network it runs on as an explicit argument,
+      keyword-only and with no default. Given a name, it uses that network and
+      removes no network in its teardown, as it does today. Given `None`, it
+      creates a network of its own,
       on a subnet that does not overlap the one the task's own cell holds, and
       removes it in the same `finally` that removes its container and volumes.
       Today it has no such argument: it always runs on a network it did not
@@ -80,11 +81,19 @@ acceptance:
 
 Backlog item **140**, found reviewing `SA-0089` (PR #282) by diffing the two
 bodies. `critic_cell` and `_gate_cell_suite` in `saffron/cell/session.py` are
-73 and 81 lines with comments stripped and differ in **six** code lines: the
-network create/remove pair, the subnet, `cell_env(proxy_ip, thread_env)` versus
-`dict(thread_env)`, the proxy-IP read, and `yield container` versus running the
-suite. The 13-line `prepare_worktree` call, the pre-clean block and the 11-line
-`finally` teardown are verbatim in both.
+73 and 81 lines with comments stripped, and everything they do differently is
+the network, the environment and what they hand back. The gate cell names a
+network of its own and touches it in three places — `runtime.remove_network` in
+the pre-clean, `runtime.create_network` with the subnet inside the `try`, and a
+fourth `("network", …)` entry in the `finally` teardown list — where
+`critic_cell` runs on a network the caller already has and touches none of the
+three. It passes `env=dict(thread_env)` where `critic_cell` reads the proxy's
+address and passes `cell_env(proxy_ip, thread_env)`. And it runs the suite where
+`critic_cell` yields its container.
+
+Everything else is verbatim: the 13-line `prepare_worktree` call, the
+container-and-volume half of the pre-clean, and the `finally` loop that reports
+whatever a removal left behind.
 
 `critic_cell`'s own docstring states the rule the copy breaks, in this repo's
 words:
@@ -125,14 +134,27 @@ results go.
 is the tuple in `runtime.py` and the pre-clean by value; `runtime.py` is
 `forbidden` here. Keep the subnet exactly where and what it is today — move it
 if the code around it moves, but do not change its value and do not add
-another.
+another. Write it exactly once in `saffron/cell/session.py`: a second copy of
+the literal, as a parameter default beside the constant, makes this spec's one
+mutant ambiguous and so unrunnable.
 
 ## Notes for the agent
 
 **Read `_gate_cell_suite` and `critic_cell` side by side before planning.**
-The six differing lines above are the whole of the difference, and the plan
-should name how each is parameterised. `git diff` will not show you this — both
-functions are at base.
+The differences named in `## Context` are the whole of the difference, and the
+plan should name how each is parameterised. `git diff` will not show you this —
+both functions are at base.
+
+**The network is pre-cleaned on the branch that creates it, not only torn
+down.** This is the easiest thing to get wrong here, and a declared criterion
+of this spec catches it:
+`test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs`
+counts removals rather than testing membership, and asserts each of the gate
+cell's four names — container, both volumes **and its network** — is removed
+exactly twice, once by the pre-clean and once by the teardown. Its counterpart
+for the critic cell asserts exactly three names removed twice each, so the
+branch that is *given* a network must not pre-clean one either. A unified
+pre-clean that always removes a network, or never does, fails one of the two.
 
 **The unification is the deliverable, not one of two options.** Item 140's
 "done looks like" offers a recorded decision that three copies is the price of
@@ -159,6 +181,17 @@ comparison; `_stub_the_runtime` already records every create as a
 `(name, subnet)` pair in `cell.networks_created`, added by `SA-0089` for
 exactly this.
 
+**Criterion 1's witness calls `critic_cell` directly, both branches, and that
+is what makes it red at base.** Driven through `_drive`, the assertion about
+subnets is already true at base — `_gate_cell_suite` creates its own network on
+its own subnet today, and the `preserves` witness already asserts it — so a
+`_drive`-level test of it passes with `session.py` reverted and `revert` blocks
+the task. Call `session.critic_cell` itself: given a network name and an `env`,
+assert it creates no network at all; given `None`, assert it creates exactly one
+whose subnet does not overlap `runtime.DEFAULT_SUBNET`. At base `critic_cell`
+has neither parameter, so both halves raise `TypeError` — red at base, and red
+again under `revert`.
+
 **Criterion 3's witness reaches for `critic_cell` by name.** The claim is that
 one function serves both callers, and the honest observation of it is that the
 gate suite's container came out of `critic_cell` — patch or wrap
@@ -172,13 +205,34 @@ exist at base — `git grep` them — and must be green at head without being
 rewritten to accommodate the new shape. If one of them cannot pass unchanged,
 the refactor is wrong; do not edit the test.
 
+**Both new arguments are keyword-only and neither gets a default.** §5.1 and
+Appendix I: `network` and `env` are *required* arguments where a cell is
+created, because v0.5 shipped one created without either — every mechanism
+reported success and applied to a different container. `DESIGN.md` states it as
+"omission is an error, not a default", so `network: str | None = None` is the
+defaulted omission that rule refuses, and a REVIEW lens quoting it at the diff
+would be right. Write `network: str | None` with no default, have every caller
+pass it explicitly, and have the branch that creates one pass the network it
+created on to `prepare_worktree` exactly as the caller-supplied branch does.
+The value may be absent; the argument may not.
+
 **The environment argument is a `Mapping[str, str]`, and the proxy read moves
 with it.** Today `critic_cell` reads `runtime.container_ip(proxy.PROXY_NAME)`
 and raises `CellRuntimeError` when it is `None`, because `cell_env` cannot turn
 `None` into a `str`. That read belongs to the caller that wants a proxied
-environment, not to the lifecycle. Move it to the REVIEW call site in
-`_drive_cell` and keep the raise: it is infrastructure, not a task outcome, and
-`tests/test_session.py` has a test that drives it.
+environment, not to the lifecycle.
+
+`critic_cell` has **two** call sites in `_drive_cell`, not one: REVIEW's, and
+REBUT's verdict lenses, which `SA-0088` added and which needs the same proxied
+environment. Read the proxy address once in `_drive_cell`, ahead of REVIEW,
+build the `cell_env(...)` mapping from it and pass that mapping at both sites —
+do not read it twice and do not leave the second site without an `env` to pass.
+
+Keep the raise that read performs when the address is `None`: it is
+infrastructure, not a task outcome, and `cell_env` cannot turn `None` into a
+`str`. Nothing at base observes it — `container_ip` is stubbed to a constant in
+`tests/test_session.py` and no test overrides it — so no criterion here can
+witness it and no gate will catch its loss. It survives by your care alone.
 
 **Keep both callers' names and teardown reporting.** The gate cell's container,
 volumes and network are `saffron-gate-*` keyed by `spec_id`; the critic's are
@@ -202,7 +256,9 @@ change's size.** The `ceilings:` line compares a `refactor` spec against
 `SA-0031`, which was cut off at 141 turns with a $19.17 pre-REVIEW spend across
 16 `touches`. This spec has two. The ceilings clear that row because the rule
 is at-or-below, not because this change is expected to cost anything like it —
-`SA-0089`, the closest row in shape, peaked at 88 turns and $9.13.
+`SA-0089`, the closest cell in shape, peaked at 88 turns and $9.13 — read
+off its own `history` row directly, since it is a `feature` and so is not
+printed in a `refactor` comparison at all.
 
 **The `size` gate counts tests.** A `refactor` gets 1000 changed lines, tests
 included, and the source side of this one should be net negative.

@@ -42,8 +42,9 @@ acceptance:
     witness: tests/test_runtime.py::test_every_subnet_saffron_allocates_is_declared_in_one_place
   - claim: >-
       A test reads that declaration and fails if any two of the subnets in it
-      overlap. Today nothing compares them, and the first report of an overlap
-      is a `CellRuntimeError` raised at REVIEW.
+      overlap. Today nothing compares them, and for the gate cell's subnet the
+      first report of an overlap is a `CellRuntimeError` raised at REVIEW,
+      after IMPLEMENT is paid for.
     witness: tests/test_runtime.py::test_no_two_declared_subnets_overlap
   - claim: >-
       Before the gate cell creates its network, the pre-clean removes whatever
@@ -116,6 +117,14 @@ other two.
 **Which cell gets which subnet.** Keep today's three values. This spec moves
 where they are written, not what they are.
 
+**PACKAGE's own gate cells.** `reverify` in `saffron/phases/package.py`
+creates a network too, and is a fourth allocation site this spec's "every
+subnet Saffron allocates" reaches. It already takes `runtime.create_network`'s
+default rather than spelling a literal, so the criterion is satisfied there
+without an edit — and `saffron/phases/**` is `forbidden` here, so an edit would
+be a scope failure. Audit it if you are enumerating allocation sites; change
+nothing in it.
+
 **The `cell`-marked isolation tests.** The property that a gate cell has no
 route out is item **131**'s live probe. This spec's witnesses run against the
 stubs like the rest of `tests/test_session.py`.
@@ -128,12 +137,26 @@ that a mutant could pin honestly, and `witness` will report `skip` for all
 three. That is expected; `SA-0089` and `SA-0092` have the same shape. Criteria
 4 and 5 are `preserves` and name tests that exist at base — `git grep` them.
 
-**Criterion 1's witness must observe the second literal is gone, not merely
-that a tuple exists.** A tuple in `runtime.py` that nothing draws from
-satisfies "declares every subnet" and leaves the defect exactly where it was.
-Assert that the proxy's and the gate cell's subnets *are* members of the
-declaration — compare the values the two allocation sites actually pass
-against the declared set — so a module that keeps its own literal fails.
+**Criterion 1's witness must observe that the other two literals are gone,
+and membership cannot observe that.** A tuple in `runtime.py` that nothing
+draws from satisfies "declares every subnet" and leaves the defect exactly
+where it was — and because this spec keeps all three *values* unchanged, a test
+comparing what the allocation sites pass against the declared set passes on
+that wrong implementation exactly as it does on the right one. There is no
+mutant to fall back on either: `EGRESS_SUBNET` and `networks_on_subnet` both
+appear in this body, so intake would refuse a mutant naming them, and the
+witness is the only check there is.
+
+Make it source-level instead. Read the text of the two modules that hold a
+literal today and assert neither contains a quoted CIDR literal any more —
+`r'"\d{1,3}(?:\.\d{1,3}){3}/\d+"'` over each module's own file is the
+shape, with the module imported inside the test body rather than at module
+scope. Both literals are there at base, so it is red at base and red again
+under `revert`. Keep the membership comparison as its second half: together
+they say the declaration is the only place a subnet is written *and* that the
+sites draw the right ones from it. The quoted-literal pattern is deliberate —
+`proxy.py` carries an unquoted gateway address in a comment that a looser
+pattern would trip on, and that address is not an allocation.
 
 **Criterion 2's witness is the comparison, and it must read the declaration
 rather than a list of its own.** A test that spells the three subnets again
@@ -148,15 +171,34 @@ one shells out.** `_stub_the_runtime` does not stub it today. Add it there,
 returning a name the test chooses, and assert `remove_network` was called with
 that name before the create — `_stub_the_runtime` already records every removal
 as a `(kind, name)` pair in `cell.removed` and appends to the shared
-`cell.order` timeline, so "before" is assertable rather than merely "both
-happened". The name the test returns must differ from the one this task would
-use, or the witness cannot tell the new pre-clean from the old one.
+`cell.order` timeline. The *create* side is not on that timeline — its stub
+only appends to `cell.networks_created` — so add a `created:network:<name>`
+entry to it beside the existing `removed:` ones, or "before the create" is not
+assertable at all. The name the stub returns must differ from the one this task
+would use, or the witness cannot tell the new pre-clean from the old one.
+
+**That stub's default must not name the gate network.** `_stub_the_runtime` is
+shared by every driven test in the file and by `tests/test_events.py`, and
+criterion 4's `preserves` witness counts each of the gate cell's four names as
+removed exactly twice. A `networks_on_subnet` stub returning the gate network
+for every test adds a third removal and fails it. Default to an empty list and
+let the one witness that needs a holder ask for one.
 
 **`exclude=` exists for a reason and the pre-clean should not pass it.**
 `create_network` passes `exclude=name` because it is explaining an error about
 a network it was itself trying to create. A pre-clean that excludes its own
 name would skip the one leftover the by-name removal already handles; passing
 nothing is right, and removing a network that is not there is tolerated.
+
+**Remove only a network this factory could have created.** `networks_on_subnet`
+answers with *every* overlapping network the runtime lists, because its only
+caller today is decorating an error message and wants the widest possible
+answer. A pre-clean that removes all of them will delete an operator's
+unrelated idle network the day one happens to hold this subnet — a host-side
+destruction nothing in this repo sanctions. Restrict the removal to names this
+factory owns, by the `saffron-` prefix every name it creates carries. Every
+leftover criterion 3 is actually about is a `saffron-gate-net-` one, so the
+restriction costs the fix nothing.
 
 **Removing a holder is not always possible, and a failure there is not this
 task's failure.** A network with a live container on it will not go. Let

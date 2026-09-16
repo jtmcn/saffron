@@ -33,9 +33,10 @@ max_turns: 90
 risk: elevated
 acceptance:
   - claim: >-
-      The gate suite REVIEW's lenses are shown is written to the task
-      directory, beside the pre-turn baseline the task already writes there, in
-      the same shape — every result the suite produced, as JSON. Today it is
+      The gate suite REVIEW's lenses are shown is written to a
+      `lens-gates.json` in the task directory, beside the `baseline.json` the
+      task already writes there, in the same shape — every result the suite
+      produced, as JSON. Today it is
       rendered into a lens prompt and discarded, and no file, event or ledger
       row carries it.
     witness: tests/test_session.py::test_the_gate_table_the_lenses_were_shown_lands_beside_the_baseline
@@ -72,8 +73,9 @@ implementer's own container computed — is emitted nowhere, recorded nowhere
 and written to no file. It is rendered into a lens prompt and dropped.
 
 `CONTEXT.md` says a gate suite's number counts the gate suites judged in a
-task, and `DESIGN.md` §5.4 has a gate result belonging to an attempt. Both
-assume a judged suite lands somewhere. This one does not, so **nothing in the
+task, and `DESIGN.md` §4.1 has a gate result belonging to an attempt — except
+the baseline suite, which belongs to a run instead, and which the schema
+carries a `run_id` column for. Both assume a judged suite lands somewhere. This one does not, so **nothing in the
 ledger or the task directory distinguishes a run whose lenses saw an honest
 gate table from one where they saw a forged one** — which is the exact property
 `SA-0089` exists to establish. The spec establishes it and keeps no evidence
@@ -88,10 +90,15 @@ afterwards can read.
 
 **Recording the gate cell's results in the ledger with
 `ledger.record_gate_result`.** Item 141 offers the file or the ledger row; this
-spec takes the file, beside `baseline.json`, because it is the shape a reader
-already knows and because these results belong to no attempt — REVIEW is not an
-implementer attempt, and §5.4's rule is that a gate result belongs to one.
-Changing what an attempt is, is a larger question than this spec.
+spec takes the file, beside `baseline.json`, because it is the cheaper record
+and the shape a reader already knows.
+
+Not because the ledger could not hold it: §4.1's `run_id` column exists for
+exactly the case of a judged suite belonging to no attempt, and the baseline
+suite already uses it. The row is the better record and it is the larger
+change — it wants a `phase` or a `kind` distinguishing this suite from the
+baseline in the same column, and that is a schema question. Take the file now;
+the row stays open behind item 141.
 
 **The implementer's own suites, the baseline, and what either writes.**
 Unchanged. This adds one file; it removes nothing and rewrites nothing.
@@ -119,9 +126,12 @@ A reader comparing the two files should not have to learn a second format.
 
 **`task_dir` has to reach the function that runs the gate suite, and today it
 does not.** The call site in `_drive_cell` has it in scope. Pass it as an
-argument rather than recomputing it — `_drive_cell` builds `task_dir` once so
-that everything downstream agrees on the object it is being handed, and the
-comment at its definition says so.
+argument rather than recomputing it: `_drive_cell` builds `task_dir` once,
+hoisted above its own `try` so that teardown can export there too, and a second
+derivation of the same path is a second thing to keep in step. If `SA-0093` has
+left the suite running at the call site itself, where `task_dir` is already in
+scope, there is no argument to add — read the code at your base before deciding
+which.
 
 **Write the file before the lenses start, not after they finish.** That is
 criterion 2 and it is the whole value of the record: a REVIEW that ends on a
@@ -145,17 +155,26 @@ into a collection error, which `revert` reads as `skip` and the anti-theater
 gate then checks nothing. This was missed in five of eight specs in the
 `SA-0066`–`SA-0073` review, so check it explicitly before you finish.
 
-**The file is a control artifact, so write it from the value in hand.**
-Extract and write it at the moment the suite returns, never by re-reading
-anything out of `/work`. A file left in a cell's workspace is a claim, not a
-record, and this file exists to be the record.
+**Write it from the value in hand, at the moment the suite returns** — never
+by re-reading anything out of the cell's workspace. A file left there is a
+claim, not a record, and this file exists to be the record.
 
-**`EventLog.append` never raises, and neither should this write take the task
-down.** But do not swallow the failure silently either: the task directory is
-the host's own, a failure to write there is infrastructure, and `_drive_cell`
-already has the shape for reporting one. Follow what the `baseline.json` write
-does — it does not guard, because a task directory that cannot be written to
-has already failed the task — rather than inventing a third policy.
+It is not a *control artifact*, and do not call it one: `CONTEXT.md` reserves
+that term for a host-consumed file an **agent** produces, which is why a
+control artifact is hashed as well as extracted. This one the host's own gate
+runner produces, and like `baseline.json` it is not hashed.
+
+**Do not guard the write.** Follow what the `baseline.json` write does a few
+hundred lines up: it is bare, with no `try`, because a task directory that
+cannot be written to has already failed the task, and an `OSError` escaping
+`_drive_cell` is the right answer — infrastructure, not a task outcome. Do not
+wrap it, do not log-and-continue, and do not invent a third policy.
+
+**The file is the suite's results, not a reconstruction of the rendered
+table.** What the lenses read is a summary rendered from the results *and* the
+run's advisory set, which is what marks an advisory `fail`. Criterion 1 says
+"every result the suite produced", and that is the results alone — the same
+shape `baseline.json` carries. Do not widen it to carry the advisory set too.
 
 **Print nothing new on the green path.** Criterion 5 is the check.
 `_rebut_gates`' callers emit an attempt event for every suite; this write emits
