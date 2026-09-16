@@ -36,3 +36,9 @@ attempt. `endings` itself still filters on subtype.
 
 `endings` keyed on `terminal_reason != "completed" or subtype != "success"`, so
 an abnormal ending reaches the row however it was spelled.
+
+## Record
+
+**Filed 2026-09-16** from the spec loop's run of that day (stack #285).
+
+**2026-09-16, a fix is open as PR #287.** `endings` is keyed on `terminal_reason` as well as `subtype`. It stays `open` until that merges.

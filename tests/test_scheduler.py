@@ -1818,7 +1818,16 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-16, a twenty-ninth time: `SA-0087` merged as PR #274
+    """Re-measured 2026-09-16, a thirtieth time: the whole of item 118's chain
+    and both harness-patterns specs merged in one spec loop (stack #285) and are
+    retired to `done/`, so the live queue is **empty** — no candidate and no
+    refusal. `SA-0088` (#277), `SA-0089` (#282), `SA-0091` (#284), `SA-0090`
+    (#278) and `SA-0092` (#279) are all in `main`. An empty queue is the one
+    shape that would also be produced by a glob that recursed into `done/` and
+    then refused everything, so the `done/` population assertion below is what
+    keeps this a check rather than a scan of nothing.
+
+    Re-measured 2026-09-16, a twenty-ninth time: `SA-0087` merged as PR #274
     and is retired to `done/`, so item 118's chain advances by one. `SA-0088`
     becomes the candidate its parent was, because a parent in `done/` is the
     operator asserting that work is in `main` — the one thing a `spec_sha` task
@@ -1944,11 +1953,8 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == ["SA-0088", "SA-0090", "SA-0092"]
-    assert [r.path.name[:7] for r in refusals] == ["SA-0089", "SA-0091"]
-    parents = ["SA-0088", "SA-0089"]
-    for refusal, parent in zip(refusals, parents, strict=True):
-        assert f"depends_on {parent} has no task" in refusal.reason
+    assert [c.spec.id for c in candidates] == []
+    assert [r.path.name[:7] for r in refusals] == []
     # A precondition, not the glob check: `done/` is populated, so the empty
     # queue above is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30

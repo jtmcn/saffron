@@ -54,6 +54,13 @@ WATCH_PREFIXES = (
     # line is the end (SA-0087).
     "PLAN",
     "budget:",
+    # Every `events.LineLabel` member, held to that closed set by a test:
+    # `SALVAGE` was missing, so the watcher saw a salvage start and never
+    # whether it recovered anything, and `SCOPE`/`REPAIR` were never shown
+    # at all (item 139). `SCOPE` covers `SCOPE_REVIEW` as a prefix.
+    "SALVAGE",
+    "SCOPE",
+    "REPAIR",
 )
 
 if not (REPO / "DESIGN.md").is_file():  # the skill was moved; say so, do not guess
@@ -344,7 +351,74 @@ def _stale(
     """Why the order no longer describes the repository, if it does not. A
     leftover order once listed a merged PR as reviewable and an unrun spec as
     next, and nothing said so (2026-09-12)."""
-    return [reason for p in rows for reason in _stale_reasons(p, pr_state)]
+    reasons = [reason for p in rows for reason in _stale_reasons(p, pr_state)]
+    return reasons + _edit_traps(rows, pr_state)
+
+
+def _edit_traps(
+    rows: list[OrderRow], pr_state: Callable[[int], str | None] = _pr_state
+) -> list[str]:
+    """What a spec edit costs when that spec's pull request is already open.
+
+    `spec_sha` is what the order and the dependency check key on, so editing a
+    spec that has already run stops the ledger's task matching it: the next
+    `snapshot --force` holds the spec out of the order *and* refuses every
+    dependent, and the held-out spec loses its recorded outcome, so `stack`
+    later omits its pull request. The bare "the spec changed" line above says
+    none of that, and an operator reading a review is exactly who edits one
+    (item 137). Two pull requests, 2026-09-16."""
+    from saffron.intake import load_spec
+
+    edited: list[OrderRow] = []
+    for p in rows:
+        path = REPO / p.path
+        if not path.is_file() or not p.spec_sha:
+            continue
+        if load_spec(path)[1] == p.spec_sha:
+            continue
+        if p.pr and pr_state(p.pr) not in {"MERGED", "CLOSED"}:
+            edited.append(p)
+    if not edited:
+        return []
+
+    out = []
+    for p in edited:
+        blocked = _dependents_of(p.spec_id, rows)
+        refuses = f" and refuses {', '.join(blocked)}" if blocked else ""
+        out.append(
+            f"{p.spec_id}: editing it with its pull request open leaves it held "
+            f"out of the order, and #{p.pr} with it{refuses}. Revert the edit to "
+            "the `spec_sha` its task ran at, or let the pull request merge "
+            "first (item 137)."
+        )
+    return out
+
+
+def _dependents_of(spec_id: str, rows: list[OrderRow]) -> list[str]:
+    """Every row a re-snapshot would refuse for reaching `spec_id` through
+    `depends_on`, nearest first.
+
+    Every entry, not `depends_on[0]`: the base resolver consults only the
+    first, but the refusal does not — `scheduler._refuse` loops the whole list
+    and `_order` admits a deferral only when *all* of them are in, so a spec
+    naming the edited one second would go unnamed here. A row that already ran
+    is not refused at all: `_carried` keeps it and `_order` seeds `admitted`
+    with it, so the walk stops rather than claim a reviewable subtree is about
+    to be lost."""
+    blocked: list[str] = []
+    frontier = {spec_id}
+    while frontier:
+        nxt = {
+            p.spec_id
+            for p in rows
+            if any(d in frontier for d in p.depends_on)
+            and p.spec_id not in blocked
+            and p.spec_id != spec_id
+            and not (p.state or p.dropped or p.last_state)
+        }
+        blocked.extend(sorted(nxt))
+        frontier = nxt
+    return blocked
 
 
 def _previous() -> list[OrderRow]:
@@ -460,7 +534,30 @@ def _bases_below(spec_id: str, rows: list[OrderRow]) -> list[str]:
     candidate it had a parent measure 0 changed lines."""
     order, _warnings = _stack_order(rows)
     ids = [p.spec_id for p in order]
-    return [p.branch for p in order[: ids.index(spec_id)]] if spec_id in ids else []
+    below = [p.branch for p in order[: ids.index(spec_id)]] if spec_id in ids else []
+    # The order is not the only source of a parent: a spec held out of it by
+    # item 137 leaves this empty, and the size then falls through to the trunk
+    # and counts the parent's diff as the child's (item 138).
+    for ancestor in _depends_on_chain(spec_id):
+        branch = f"saffron/{ancestor}"
+        if branch not in below:
+            below.append(branch)
+    return below
+
+
+def _depends_on_chain(spec_id: str) -> list[str]:
+    """Every ancestor of `spec_id` by `depends_on`, nearest first. Reads the
+    spec files, so it holds for a parent already retired to `done/`."""
+    specs = _known_specs()
+    seen: list[str] = []
+    current = specs.get(spec_id)
+    while current is not None and current.depends_on:
+        parent = current.depends_on[0]
+        if parent in seen:  # nothing validates depends_on for cycles
+            break
+        seen.append(parent)
+        current = specs.get(parent)
+    return seen
 
 
 def _size(
@@ -703,7 +800,10 @@ def cmd_snapshot(args) -> int:
         print(f"held out of the order ({len(held_out)}):")
         for reason in held_out.values():
             print(f"  {reason}")
-        print("  close the PR to run the edited spec, or revert the edit to keep it\n")
+        print("  close the PR to run the edited spec, or revert the edit to keep it")
+        for trap in _edit_traps(previous):
+            print(f"  {trap}")
+        print()
     if not ordered:
         print("nothing to run: no candidate specs")
         for r in refusals:
@@ -1263,7 +1363,12 @@ def _past_cells(
                         f"{a['phase']} {a['subtype']}"
                         + (f" ({a['terminal_reason']})" if a["terminal_reason"] else "")
                         for a in attempts
+                        # Coalesced rather than the record's bare
+                        # `!= "completed"`: `terminal_reason` is NULL on every
+                        # clean attempt and on a row never closed, and marking
+                        # all 451 of those abnormal is worse than missing one.
                         if a["subtype"] not in (None, "success")
+                        or (a["terminal_reason"] or "completed") != "completed"
                     ],
                     size=sizes[-1] if sizes else None,
                 )

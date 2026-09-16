@@ -39,7 +39,22 @@ tailing the log by hand.
 
 Item 67's `budget:` and `PLAN` were added for the same reason after run 2.
 
+**Two more, found reviewing the fix.** `SCOPE:` and `REPAIR:` are printed
+(`saffron/events.py`) and were never in the set either — so a scope refusal and
+a whole repair turn were invisible to the watcher, not just the salvage
+outcome. Nothing held the two lists together, which is why the set could drift
+three members out of date without anyone noticing. `saffron/events.py`'s
+`LineLabel` is the closed set of progress-line prefixes, and is what the check
+below should read — the same way `watch_pattern` reads the ontology's terminal
+states rather than copying them.
+
 ## Done looks like
 
 `SALVAGE` in `WATCH_PREFIXES`, and a check that every line the CLI prints at the
 start of a phase has its outcome line in the same set.
+
+## Record
+
+**Filed 2026-09-16** from the spec loop's run of that day (stack #285).
+
+**2026-09-16, a fix is open as PR #287.** `SALVAGE` is in `WATCH_PREFIXES`. It stays `open` until that merges.
