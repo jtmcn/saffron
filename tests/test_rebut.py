@@ -77,7 +77,14 @@ def _agent(*texts, record=None):
 
     def run(container, *, prompt, options, **kwargs):
         if record is not None:
-            record.append({"prompt": prompt, "options": options, "kwargs": kwargs})
+            record.append(
+                {
+                    "container": container,
+                    "prompt": prompt,
+                    "options": options,
+                    "kwargs": kwargs,
+                }
+            )
         turn = next(scripted)
         if isinstance(turn, BaseException):
             raise turn
@@ -93,11 +100,22 @@ def _run(
     gates=None,
     record=None,
     gate_suites=None,
+    critic_container=None,
+    critic_calls=None,
+    critic_container_name="critic-cell",
+    diff=None,
 ):
     def _rerun_gates():
         if gate_suites is not None:
             gate_suites.append(True)
         return gates
+
+    def _default_critic_container():
+        # Distinct from "cell" by default, so no test accidentally proves
+        # the two are the same container.
+        if critic_calls is not None:
+            critic_calls.append(True)
+        return critic_container_name
 
     return rebut.run_rebut(
         "cell",
@@ -112,7 +130,8 @@ def _run(
         budget_usd=2.0,
         head_moved=lambda: moved,
         rerun_gates=_rerun_gates,
-        diff=lambda: DIFF,
+        critic_container=critic_container or _default_critic_container,
+        diff=diff or (lambda _critic: DIFF),
         agent=_agent(*texts, record=record),
         spec_id="SY-1",
         emit=lambda _e: None,
@@ -124,6 +143,7 @@ def test_a_claimed_fix_with_no_commit_and_no_argument_does_not_advance():
     is done: HEAD moved, or an explicit recorded argument — and "I fixed it" is
     neither. Nothing is bought after the measurement fails."""
     gate_suites: list[bool] = []
+    critic_calls: list[bool] = []
     record: list[dict] = []
     result = _run(
         "I have addressed the findings.",
@@ -131,11 +151,13 @@ def test_a_claimed_fix_with_no_commit_and_no_argument_does_not_advance():
         moved=False,
         record=record,
         gate_suites=gate_suites,
+        critic_calls=critic_calls,
     )
     assert result.state == "REBUTTING"
     assert "committed nothing" in result.why
     assert result.verdicts == []
     assert gate_suites == []  # HEAD did not move; the suite would answer twice
+    assert critic_calls == []  # nothing to verdict, no cell built to verdict it in
     assert len(record) == 2  # the attempt and its extraction turn, no verdict
 
 
@@ -175,23 +197,34 @@ def test_an_argument_the_critic_still_confirms_is_a_recorded_disagreement():
 
 def test_gates_red_after_the_rebuttal_exhausts_without_reopening_repair():
     record: list[dict] = []
+    critic_calls: list[bool] = []
     result = _run(
         "Fixed.",
         _rebuttals(_fixed()),
         moved=True,
         gates="EXHAUSTED",
         record=record,
+        critic_calls=critic_calls,
     )
     assert result.state == "EXHAUSTED"
     assert "does not re-enter the repair loop" in result.why
     # The rebuttal is kept, and no verdict session was bought for a dead task.
     assert [r.action for r in result.rebuttal.rebuttals] == ["fixed"]
     assert len(record) == 2
+    assert critic_calls == []  # a red re-run ends it before a cell is built
 
 
 def test_an_errored_gate_after_the_rebuttal_is_not_the_tasks_failure():
-    result = _run("Fixed.", _rebuttals(_fixed()), moved=True, gates="GATE_ERROR")
+    critic_calls: list[bool] = []
+    result = _run(
+        "Fixed.",
+        _rebuttals(_fixed()),
+        moved=True,
+        gates="GATE_ERROR",
+        critic_calls=critic_calls,
+    )
     assert result.state == "GATE_ERROR"
+    assert critic_calls == []
 
 
 def test_each_lens_verdicts_its_own_blockers_and_never_resumes():
@@ -214,6 +247,71 @@ def test_each_lens_verdicts_its_own_blockers_and_never_resumes():
         assert call["kwargs"].get("resume") is None
         assert "Bash" not in call["options"]["tools"]
     assert "Bash" in record[0]["options"]["tools"]
+
+
+def test_the_verdict_sessions_never_run_in_the_rebuttals_container():
+    """`run_rebut` takes one container for the rebuttal turn and a second,
+    zero-argument callable for the critic's. Hand it two distinct names and
+    assert which turns ran where (CONTEXT.md §5, backlog item 118)."""
+    record: list[dict] = []
+    critic_calls: list[bool] = []
+    result = _run(
+        "Fixed.",
+        _rebuttals(_fixed()),
+        _verdicts(_verdict()),
+        record=record,
+        critic_calls=critic_calls,
+    )
+    assert result.state == "READY_FOR_REVIEW"
+    assert critic_calls == [True]  # built once, after the rebuttal and re-run
+    containers = [call["container"] for call in record]
+    # Rebuttal, extraction, verdict — the last never the same as the first two.
+    assert containers == ["cell", "cell", "critic-cell"]
+
+
+def test_the_diff_a_verdict_session_reads_comes_from_the_critic_container():
+    """Criterion 2's second half: a build that threads the critic container
+    into the verdict sessions alone, while `diff` still reads the rebuttal's
+    own container, would pass the test above and leave this one false (item
+    118 records the identical omission in `SA-0087`'s own second criterion).
+    `diff` is called with whatever `critic_container()` returned, and its
+    result must reach the verdict session's own prompt."""
+    record: list[dict] = []
+    result = _run(
+        "Fixed.",
+        _rebuttals(_fixed()),
+        _verdicts(_verdict()),
+        record=record,
+        diff=lambda critic: f"a diff read from {critic}",
+    )
+    assert result.state == "READY_FOR_REVIEW"
+    assert "a diff read from critic-cell" in record[2]["options"]["system_prompt"]
+
+
+def test_a_post_rebuttal_patch_that_will_not_apply_ends_exhausted():
+    """§5.5, unchanged at REBUT: a bad patch is the agent's problem, produced
+    as a `RebutResult` — the rebuttal turn and gate re-run are already paid
+    for, so the exception must not escape uncharged."""
+    from saffron.cell.session import CriticPatchRejected
+
+    def _critic_container():
+        raise CriticPatchRejected("error: patch does not apply")
+
+    result = _run("Fixed.", _rebuttals(_fixed()), critic_container=_critic_container)
+    assert result.state == "EXHAUSTED"
+    assert "did not apply" in result.why
+
+
+def test_a_post_rebuttal_binary_change_ends_gate_error():
+    """§5.5's one carve-out: a binary change the export cannot carry is
+    Saffron's own ceiling, charged to nobody."""
+    from saffron.cell.session import CriticPatchUnrepresentable
+
+    def _critic_container():
+        raise CriticPatchUnrepresentable("fatal: cannot apply binary patch")
+
+    result = _run("Fixed.", _rebuttals(_fixed()), critic_container=_critic_container)
+    assert result.state == "GATE_ERROR"
 
 
 def test_a_lens_that_leaves_a_blocker_unverdicted_has_not_withdrawn_it():
