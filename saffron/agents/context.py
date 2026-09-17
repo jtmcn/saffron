@@ -1,4 +1,4 @@
-"""Per-phase vocabulary injection and turn-prompt loading (DESIGN.md §5.3).
+"""Per-phase vocabulary injection and turn-prompt loading (DESIGN.md §5.3 to §5.6).
 
 `CONTEXT.md` lives in Saffron, not in any target repo, so an agent inside a
 cell cannot follow a reference to it — it is injected. Only the sections the
@@ -148,7 +148,7 @@ def standing_instructions(claude_md: str | None) -> str:
 
 
 def turn_prompt(name: str) -> str:
-    """One turn's prompt, from `prompts/turns/<name>.md` (§5.3).
+    """One turn's prompt, from `prompts/turns/<name>.md` (§5.3 to §5.6).
 
     The text lives in Markdown for the same reason a system prompt does: it is
     prose a cell reads, and that is measured (Appendix R). `{extraction}` is

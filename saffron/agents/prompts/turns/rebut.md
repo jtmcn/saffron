@@ -1,5 +1,5 @@
-A critic reviewed your change and raised the blockers below. The host already
-checked that each one points at a line your diff changed. None of them is about
+A critic reviewed your change and raised the blockers below. The host has
+already checked that each one points at a line your diff changed. None of them is about
 code you did not touch.
 
 {blockers}

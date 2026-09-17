@@ -305,11 +305,15 @@ def test_a_rewritten_hit_is_not_new_and_an_added_one_is():
     assert [(n.gate, n.failure.code) for n in added] == [("prose", "sentence-length")]
 
 
-def test_scope_reaches_every_place_it_names():
-    prose = _prose()
-    listed = subprocess.run(
+def _tracked() -> list[str]:
+    return subprocess.run(
         ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
     ).stdout.splitlines()
+
+
+def test_scope_reaches_every_place_it_names():
+    prose = _prose()
+    listed = _tracked()
     for name in prose.ROOT_FILES:
         assert name in listed and prose.in_scope(name), name
     for directory in prose.INCLUDED_DIRS:
@@ -319,19 +323,10 @@ def test_scope_reaches_every_place_it_names():
 
 
 def test_scope_reaches_the_prompts_a_cell_reads():
-    """The agent reads these on every task, and they were the last prose in the
-    repo that grew unmeasured.
-
-    `test_scope_reaches_every_place_it_names` asks whether each named directory
-    reaches a file, never whether this directory is named, so dropping the entry
-    passes there and fails here. The paths are checked against `git ls-files`
-    because `in_scope` is a string predicate: a renamed prompt would otherwise
-    leave this green.
-    """
+    # Measured: with the `INCLUDED_DIRS` entry removed this fails and
+    # `every_place_it_names` passes, which asks a weaker question.
     prose = _prose()
-    listed = subprocess.run(
-        ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
-    ).stdout.splitlines()
+    listed = _tracked()
     for path in (
         "saffron/agents/prompts/implement.md",
         "saffron/agents/prompts/turns/plan.md",
