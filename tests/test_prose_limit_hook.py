@@ -1,4 +1,4 @@
-"""`hooks/prose_limit.py`: a staged file may not gain findings of any `prose` rule."""
+"""`hooks/prose_limit.py`: a staged file may not gain hits of any `prose` rule."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def test_an_added_long_sentence_fails(tmp_path):
     assert "README.md:3:" in done.stdout
 
 
-def test_a_rewritten_finding_passes(tmp_path):
+def test_a_rewritten_hit_passes(tmp_path):
     repo = _repo(tmp_path, {"README.md": LONG_A + "\n"})
     _stage(repo, "README.md", LONG_B + "\n")
     assert _hook(repo).returncode == 0

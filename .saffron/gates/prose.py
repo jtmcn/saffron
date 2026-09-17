@@ -3,7 +3,7 @@
 
 Design: `docs/superpowers/specs/2026-09-16-prose-ratchet-design.md`. Parsing
 adapts `strip_code` and `sentences` from AminBlg/SimpleEnglish
-(`evals/ste_lint.py`, MIT), changed to keep every newline so that a finding's
+(`evals/ste_lint.py`, MIT), changed to keep every newline so that a hit's
 line is its source line.
 
 Standard library only: a cell runs this under plain `python3`, from the base
@@ -114,7 +114,7 @@ _BOLD_TERM = re.compile(r"^\*\*([^*]+)\*\*", re.M)
 
 
 @dataclass(frozen=True)
-class Finding:
+class Hit:
     line: int
     code: str
     excerpt: str
@@ -275,13 +275,13 @@ def _filler_pattern(
     return re.compile(rf"\b(?:{alternation})\b", re.I)
 
 
-def _style(text: _Text, path: str, root: Path) -> list[Finding]:
+def _style(text: _Text, path: str, root: Path) -> list[Hit]:
     found = []
     spec = path.startswith(".saffron/specs/")
     for sentence in _sentences(text.body):
         if len(sentence.text.split()) > SENTENCE_LIMIT:
             found.append(
-                Finding(
+                Hit(
                     text.line(sentence.start),
                     "sentence-length",
                     _excerpt(sentence.text),
@@ -294,7 +294,7 @@ def _style(text: _Text, path: str, root: Path) -> list[Finding]:
             and not re.match(r"(?:if|when)\b", sentence.text, re.I)
         ):
             found.append(
-                Finding(
+                Hit(
                     text.line(sentence.start),
                     "trailing-condition",
                     _excerpt(sentence.text),
@@ -309,19 +309,19 @@ def _style(text: _Text, path: str, root: Path) -> list[Finding]:
     for code, pattern in rules:
         for match in pattern.finditer(unquoted):
             line = text.line(match.start())
-            found.append(Finding(line, code, _excerpt(text.line_text(match.start()))))
+            found.append(Hit(line, code, _excerpt(text.line_text(match.start()))))
     return found
 
 
-def check(text: str, path: str, gate: str, *, root: Path) -> list[Finding]:
-    """Every finding `gate` reports for `text`, read as the file at `path`."""
+def check(text: str, path: str, gate: str, *, root: Path) -> list[Hit]:
+    """Every hit `gate` reports for `text`, read as the file at `path`."""
     if gate not in GATES:
         raise ValueError(f"unknown gate: {gate}")
     try:
         rendered = _rendered(text, path, root)
     except ValueError as exc:
         # The repo's defect, not the gate's: a `fail` gets a REPAIR turn.
-        return [Finding(1, "rendered-span", _excerpt(str(exc)))]
+        return [Hit(1, "rendered-span", _excerpt(str(exc)))]
     for start, end in rendered:
         text = text[:start] + _spaces(text[start:end]) + text[end:]
     prepared = _Text(_prepare(text))
@@ -344,9 +344,9 @@ def _listed(root: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-# ponytail: every finding is one failure row per suite result (about 4,800 here
+# ponytail: every hit is one failure row per suite result (about 4,800 here
 # today), so rows grow with the prose; the ceiling is the ledger's size.
-# ponytail: identity includes the file, so an in-scope rename reads every finding
+# ponytail: identity includes the file, so an in-scope rename reads every hit
 # as new and fails `prose`, while `hooks/prose_limit.py` follows renames.
 def main(argv: list[str]) -> int:
     if argv == ["--version"]:
@@ -400,17 +400,17 @@ def main(argv: list[str]) -> int:
     try:
         for path in paths:
             text = (root / path).read_text(encoding="utf-8", errors="replace")
-            for finding in check(text, path, gate, root=root):
-                message = MESSAGES[finding.code] if gate == "prose" else finding.excerpt
+            for hit in check(text, path, gate, root=root):
+                message = MESSAGES[hit.code] if gate == "prose" else hit.excerpt
                 failures.append(
                     {
                         "file": path,
-                        "line": finding.line,
-                        "code": finding.code,
+                        "line": hit.line,
+                        "code": hit.code,
                         "message": message,
                     }
                 )
-                counts[finding.code] += 1
+                counts[hit.code] += 1
     except (OSError, ValueError) as exc:
         summary = f"{type(exc).__name__}: {exc}"
         return _emit(
@@ -424,7 +424,7 @@ def main(argv: list[str]) -> int:
             "status": "fail" if failures else "pass",
             "tool": tool,
             "failures": failures,
-            "summary": f"{len(failures)} findings in {len(paths)} files. {by_code}".strip(),
+            "summary": f"{len(failures)} failures in {len(paths)} files. {by_code}".strip(),
         }
     )
 

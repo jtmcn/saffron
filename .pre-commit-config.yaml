@@ -64,7 +64,7 @@ repos:
         exclude: '^(CONTEXT\.md|CLAUDE\.md|docs/superpowers/|docs/evidence/)'
 
   # The `prose` gate's rules per commit: a staged file in scope may not gain
-  # findings of any rule. Scope lives in `.saffron/gates/prose.py`.
+  # hits of any rule. Scope lives in `.saffron/gates/prose.py`.
   - repo: local
     hooks:
       - id: prose-limit

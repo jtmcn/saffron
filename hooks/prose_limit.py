@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The `prose` gate's limit, applied to a commit.
 
-Each staged Markdown file in scope may not carry more findings of any `prose`
+Each staged Markdown file in scope may not carry more hits of any `prose`
 rule than its `HEAD` version. A new file compares against zero, and a rename
 against its old path. The gate gets the same limit from baseline subtraction.
 Standard library only, like the gate it loads.
@@ -24,7 +24,7 @@ def load_prose() -> Any:
     if spec is None or spec.loader is None:
         raise FileNotFoundError(PROSE)
     module = importlib.util.module_from_spec(spec)
-    # Registered first: `Finding` is a dataclass under postponed annotations.
+    # Registered first: `Hit` is a dataclass under postponed annotations.
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
@@ -61,19 +61,19 @@ def staged(root: Path) -> list[tuple[str | None, str]]:
     return pairs
 
 
-def new_findings(
+def new_hits(
     prose: Any, root: Path, gate: str, path: str, old_text: str | None, new_text: str
 ) -> list[Any]:
-    """Findings in `new_text` with no matching excerpt in `old_text`, counted."""
+    """Hits in `new_text` with no matching excerpt in `old_text`, counted."""
     before = Counter(
         f.excerpt for f in prose.check(old_text or "", path, gate, root=root)
     )
     fresh = []
-    for finding in prose.check(new_text, path, gate, root=root):
-        if before[finding.excerpt]:
-            before[finding.excerpt] -= 1
+    for hit in prose.check(new_text, path, gate, root=root):
+        if before[hit.excerpt]:
+            before[hit.excerpt] -= 1
         else:
-            fresh.append(finding)
+            fresh.append(hit)
     return fresh
 
 
@@ -104,9 +104,9 @@ def commit_time(root: Path) -> int:
         for code, (was, now) in sorted(risen.items()):
             print(f"{new}: {code} rose from {was} to {now}")
             failed = True
-        for finding in new_findings(prose, root, "prose", new, old_text, new_text):
-            if finding.code in risen:
-                print(f"  {new}:{finding.line}: {finding.code}: {finding.excerpt}")
+        for hit in new_hits(prose, root, "prose", new, old_text, new_text):
+            if hit.code in risen:
+                print(f"  {new}:{hit.line}: {hit.code}: {hit.excerpt}")
     return 1 if failed else 0
 
 

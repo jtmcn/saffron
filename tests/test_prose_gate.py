@@ -25,7 +25,7 @@ def _prose():
     spec = importlib.util.spec_from_file_location("saffron_prose_gate", SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    # Registered first: `Finding` is a dataclass under postponed annotations.
+    # Registered first: `Hit` is a dataclass under postponed annotations.
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
@@ -122,10 +122,10 @@ def test_a_list_item_is_its_own_sentence():
     assert "sentence-length" not in _codes(items)
 
 
-def test_a_finding_names_its_source_line():
+def test_a_hit_names_its_source_line():
     text = "```\ncode\n```\n\nIntro.\n\nThe gate should pass.\n"
-    (finding,) = _prose().check(text, "README.md", "prose", root=REPO)
-    assert (finding.line, finding.code) == (7, "hedge")
+    (hit,) = _prose().check(text, "README.md", "prose", root=REPO)
+    assert (hit.line, hit.code) == (7, "hedge")
 
 
 def test_a_defined_term_is_never_filler(tmp_path):
@@ -177,12 +177,12 @@ def test_every_rule_code_has_a_message():
     assert all(word in prose.MESSAGES["filler"] for word in prose.FILLER[:3])
 
 
-def test_a_duplicated_closed_set_definition_is_a_finding():
+def test_a_duplicated_closed_set_definition_is_a_hit():
     context = "**Severity**: `a` or `b`.\n\n**Severity**: `c`.\n"
     assert _codes(context, "CONTEXT.md") == ["rendered-span"]
 
 
-def test_a_principle_index_without_its_header_is_a_finding():
+def test_a_principle_index_without_its_header_is_a_hit():
     design = "## Principles — an index\n\nNo table here.\n"
     assert _codes(design, "DESIGN.md") == ["rendered-span"]
 
@@ -273,7 +273,7 @@ def test_prose_errors_rather_than_passes_when_nothing_is_in_scope(tmp_path):
     assert "in scope" in result.summary
 
 
-def test_a_rewritten_finding_is_not_new_and_an_added_one_is():
+def test_a_rewritten_hit_is_not_new_and_an_added_one_is():
     """The per-file limit is baseline subtraction over `(file, code, message)`."""
     from saffron.gates.baseline import subtract_baseline
     from saffron.gates.contract import Failure, GateResult

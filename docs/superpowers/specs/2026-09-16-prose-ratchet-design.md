@@ -49,7 +49,7 @@ scratch scripts. Code spans and fenced code are stripped first.
 | perfect tense | 4 | 44 | 61 | 72 |
 | contraction | 3 | 66 | 8 | 6 |
 
-Three findings shaped the rules:
+Three measurements shaped the rules:
 
 - The modals split by use. "would" (282) and "could" (95) mostly carry
   counterfactuals, which the design needs. "should" (63) and "may" (67) are
@@ -84,7 +84,7 @@ One module, `.saffron/gates/prose.py`, standard library only, in three layers:
    its own sentence.
 2. **Rules.** Each rule is a function from the parsed text to a list of
    `(line, code, excerpt)`.
-3. **Emit.** The same findings print in three shapes, one per caller.
+3. **Emit.** The same hits print in three shapes, one per caller.
 
 The scope is one constant in `prose.py`, and every caller imports it:
 
@@ -123,7 +123,7 @@ the rule set. A changed rule reads as a different tool. The
    fails when any rule's count rose. A file absent at `HEAD` compares against
    zero. Renames follow `git diff --cached -M`. It runs `prose` only.
 3. **A PostToolUse hook** in the project `.claude/settings.json`, on Write and
-   Edit. It reports new findings for the edited file and exits so that the
+   Edit. It reports new hits for the edited file and exits so that the
    model sees them. It never blocks.
 
 No committed baseline file exists. Parallel pull requests and `gh stack`
