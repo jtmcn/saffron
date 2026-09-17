@@ -3,7 +3,7 @@ id: 63
 title: '`describe` renders three agent payload fields unclipped, straight to a terminal'
 status: partial
 tier: 1
-specs: [SA-0070, SA-0084]
+specs: [SA-0070, SA-0084, SA-0098]
 prs: [221, 249]
 commits: []
 cites: []

@@ -94,6 +94,12 @@ GitHub issues remain in use only for research/evidence records under
   a spec is when it is written, in `## Notes for the agent`, so a reviewer can
   tell an honest `skip` from a missing mutant.
 
+  *A mutant's file needs no `touches` entry.* Intake checks only the paths a
+  claim names. Listing a file the change must not edit lets `scope` pass an
+  edit to it, and makes the spec overlap any other spec's open pull request
+  that does edit it (`saffron/scheduler.py`'s overlap refusal). Put such a file
+  in `forbidden` instead, as `SA-0079` and `SA-0097` do.
+
 - **A witness must fail with the source reverted, not merely be missing at
   base.** `criteria` requires a non-`preserves` witness to be red at base, and a
   test that does not exist yet is red there by construction, so that check is

@@ -4,7 +4,7 @@ title: A committed `.gitmodules` hides a gitlink from every name-only read witho
 status: open
 tier: 1
 filed: 2026-09-14
-specs: [SA-0082]
+specs: [SA-0082, SA-0097]
 prs: [244]
 commits: []
 cites: []

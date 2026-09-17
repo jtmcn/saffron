@@ -4,7 +4,7 @@ title: A mutant that does not apply carries its `find` text into the critic's pr
 status: open
 tier: 1
 filed: 2026-09-14
-specs: [SA-0078]
+specs: [SA-0078, SA-0096]
 prs: [243]
 commits: []
 cites: []
