@@ -126,6 +126,40 @@ def test_a_clean_edit_and_a_file_elsewhere_say_nothing(tmp_path):
     assert _edited(repo, outside).returncode == 0
 
 
+def test_an_edit_beside_an_untouched_finding_says_nothing(tmp_path):
+    repo = _repo(tmp_path, {"README.md": "The agent works well — it helps a lot.\n"})
+    (repo / "README.md").write_text("The agent works nicely — it helps a lot.\n")
+    done = _edited(repo, repo / "README.md")
+    assert done.returncode == 0
+    assert done.stderr == ""
+
+
+def test_edited_with_malformed_stdin_says_nothing(tmp_path):
+    repo = _repo(tmp_path, {"README.md": "Short.\n"})
+    done = subprocess.run(
+        [sys.executable, str(HOOK), "--edited"],
+        cwd=repo,
+        input="not json",
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 0
+    assert done.stderr == ""
+
+
+def test_edited_with_null_tool_input_says_nothing(tmp_path):
+    repo = _repo(tmp_path, {"README.md": "Short.\n"})
+    done = subprocess.run(
+        [sys.executable, str(HOOK), "--edited"],
+        cwd=repo,
+        input=json.dumps({"tool_input": None}),
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 0
+    assert done.stderr == ""
+
+
 def test_claude_code_runs_the_hook_after_each_edit():
     settings = json.loads((REPO / ".claude" / "settings.json").read_text())
     (entry,) = settings["hooks"]["PostToolUse"]

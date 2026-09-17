@@ -117,7 +117,13 @@ def commit_time(root: Path) -> int:
 
 def edit_time(root: Path, event: dict[str, Any]) -> int:
     """Print the edited file's new findings for the model. The edit already happened."""
-    file_path = Path(event.get("tool_input", {}).get("file_path", ""))
+    tool_input = event.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return 0
+    raw_path = tool_input.get("file_path", "")
+    if not isinstance(raw_path, str):
+        return 0
+    file_path = Path(raw_path)
     if not file_path.is_absolute():
         file_path = Path(event.get("cwd", root)) / file_path
     try:
@@ -130,11 +136,14 @@ def edit_time(root: Path, event: dict[str, Any]) -> int:
     head = _git(root, "show", f"HEAD:{path}")
     old_text = head.stdout if head.returncode == 0 else None
     new_text = file_path.read_text(encoding="utf-8", errors="replace")
-    lines = [
-        f"{path}:{f.line}: {f.code}: {f.excerpt}"
-        for gate in prose.GATES
-        for f in new_findings(prose, root, gate, path, old_text, new_text)
-    ]
+    # Only report a code whose count actually rose, like `commit_time` does:
+    # an untouched finding sharing its line with an edit is not new.
+    lines = []
+    for gate in prose.GATES:
+        risen = rises(prose, root, gate, path, old_text, new_text)
+        for f in new_findings(prose, root, gate, path, old_text, new_text):
+            if f.code in risen:
+                lines.append(f"{path}:{f.line}: {f.code}: {f.excerpt}")
     if not lines:
         return 0
     print(
@@ -148,7 +157,11 @@ def edit_time(root: Path, event: dict[str, Any]) -> int:
 
 def main(argv: list[str]) -> int:
     if argv == ["--edited"]:
-        return edit_time(Path.cwd(), json.loads(sys.stdin.read() or "{}"))
+        try:
+            event = json.loads(sys.stdin.read() or "{}")
+        except json.JSONDecodeError:
+            return 0
+        return edit_time(Path.cwd(), event)
     if argv:
         print(f"unexpected arguments: {argv}", file=sys.stderr)
         return 2
