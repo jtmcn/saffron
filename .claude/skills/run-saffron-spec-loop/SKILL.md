@@ -76,6 +76,18 @@ second pull request reverting the edit to the exact sha the task ran at. Hash
 the file before committing the revert and check it matches the order's
 `spec_sha`. If the edit must happen, let the pull request merge first.
 
+**An edited spec is reviewed again before its cell.** The fix is spec text with
+no reader, and the cell that runs into it pays. The loop's run 5 lost an attempt
+to two tests an edit asked for that pass at base. It lost a repair turn to a
+parametrised witness an edit offered (backlog item 159). Dispatch a second
+`spec-reviewer` on the edited spec once the edit lands and `snapshot --force`
+runs, at the same `base: origin/main`. Review the whole spec, not the edit.
+Checks 4 and 5 read it entire, and a report whose six lines cover a diff is not
+one. Run 5's re-reviews also found a witness stub answering every subnet alike
+(#304). Two notes named code seams that do not exist (#306). Both sat in text
+the first review passed. A child spec edited here needs one re-review rather
+than two. Run that one at its parent's branch, below.
+
 Two kinds of blocker failed the backtest, and reading the line at base does
 not filter them, because their premise holds there
 (`docs/evidence/2026-09-14-spec-reviewer-backtest.md`; BACKLOG items 123–124). One is a
@@ -91,7 +103,8 @@ there. Review it again at its parent's pushed branch
 (`base: origin/saffron/<parent id>`) before its own cell starts.
 
 **Done when** every spec in the order has a report with six check lines, and
-every verified blocker has the operator's answer.
+every verified blocker has the operator's answer. A spec edited here carries a
+second such report, at the text its cell will run.
 
 ## 2. Run each spec
 

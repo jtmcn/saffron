@@ -103,9 +103,10 @@ GitHub issues remain in use only for research/evidence records under
 - **A witness must fail with the source reverted, not merely be missing at
   base.** `criteria` requires a non-`preserves` witness to be red at base, and a
   test that does not exist yet is red there by construction, so that check is
-  easy to pass. `revert` is the strict one. It re-runs every declared
-  non-`preserves` witness with the diff's source files reverted, and blocks any
-  that still pass (`saffron/gates/core/revert.py`). So a criterion describing
+  easy to pass. `revert` is the strict one. It re-runs **every test the diff
+  adds** — `collected(head) - collected(base)`, declared or not — with the
+  diff's source files reverted, and blocks any that still pass
+  (`saffron/gates/core/revert.py`). So a criterion describing
   behaviour that is already true at base — "nothing is pushed", "the breaker
   does not fire" — cannot be witnessed honestly as written. Reword it until its
   test must observe something only the change produces, or mark it `preserves`
@@ -123,6 +124,16 @@ GitHub issues remain in use only for research/evidence records under
   implements the spec writes that test. Any `def` of the name in the file
   counts, whatever its class. Whether the witness *fails* with the source
   reverted is still yours to reason out.
+
+- **A declared witness is a bare node id; never ask for a parametrised test.**
+  `criteria` collects each witness by exactly the id the spec names, and a
+  `pytest.mark.parametrize` test's ids carry a `[case]` suffix, so the bare name
+  collects nothing and the criterion fails `witness-not-collected`
+  (`saffron/gates/core/criteria.py`). Naming one case instead pins the spec to a
+  parameter list the cell has not written yet. Two cases in one criterion is a
+  plain `def` driving both. `SA-0095`'s re-review offered "parametrise the
+  witness or put both cases in it; keep its name" (#306); the cell took the
+  first half, and the repair turn cost it attempt 1 (backlog item 159).
 
 - **For each criterion, name the plausible wrong implementation its witness
   would pass, before you declare the witness.** If you can name one, the
@@ -151,6 +162,26 @@ GitHub issues remain in use only for research/evidence records under
   blockers in the same pull
   request. Every defect it finds there is a cell that never has to find it
   (`docs/superpowers/specs/2026-09-14-spec-reviewer-design.md`).
+
+- **A spec edited to answer its review is held to every rule above.** The fix
+  is spec text too, written by a reader who has just been thinking about the
+  code rather than about `acceptance`, and it gets no second reader unless one
+  is arranged — the spec loop's step 1b re-reviews an edited spec before its
+  cell. Two shapes cost run 5 a cell and a repair turn (backlog item 159):
+
+  *A test the edit asks for in prose is judged like any declared one.* `revert`
+  reads every new test, so "it is not a declared criterion, because it passes at
+  base; it guards the new call" — #292's own words in `SA-0093` — describes a
+  test that failed the attempt: `2 of 5 new test(s) passed without their
+  source`. #293 took both out, and the operator's review added them instead,
+  which is where a test that passes at base belongs.
+
+  *A claim widened in review names the witness that reaches the new half, in
+  the same edit.* #292 widened `SA-0095`'s criterion 1 to "whenever that suite
+  returns, an aborted or drifted suite included" and left the witness under it
+  unchanged, so a write on the lens path alone still passed it. The re-review
+  at the parent's branch found it (#306). A claim whose witness observes only
+  its old half is prose.
 
 ## Driving a spec
 
