@@ -313,7 +313,7 @@ def test_the_implement_prompt_never_calls_scope_proposal_diagnose_only():
     )
 
 
-_PROMPTS = Path(__file__).parent.parent / "saffron/agents/prompts"
+_PROMPTS = context.PROMPTS_DIR
 
 
 @pytest.mark.parametrize(

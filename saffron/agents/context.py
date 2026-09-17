@@ -15,7 +15,10 @@ from pathlib import Path
 
 from saffron.intake import Criterion
 
-TURNS_DIR = Path(__file__).resolve().parent / "prompts" / "turns"
+# One locator for the prompt tree. Callers that take a `prompts_dir` are handed
+# this, so a system prompt and a turn prompt cannot resolve to different trees.
+PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+TURNS_DIR = PROMPTS_DIR / "turns"
 _EXTRACTION_SLOT = "{extraction}"
 
 # CONTEXT.md's own table, in code. REPAIR and REBUT are deliberately absent:
@@ -158,8 +161,6 @@ def turn_prompt(name: str) -> str:
     consume it (the rule `build_system_prompt` follows for `{spec}`).
     """
     text = (TURNS_DIR / f"{name}.md").read_text().rstrip("\n")
-    if name == "extraction":
-        return text
     extraction = (TURNS_DIR / "extraction.md").read_text().rstrip("\n")
     return extraction.join(text.split(_EXTRACTION_SLOT))
 

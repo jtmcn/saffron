@@ -19,8 +19,10 @@ gate's scope.
 
 The gate reads Markdown listed by `git ls-files` and nothing else. A prompt
 written as a string literal in Python is invisible to it. That was the state of
-every turn prompt before #312: 13 hits of the house style, in prose a cell
-reads on every task, in files the gate never opened.
+every turn prompt before #312: 12 hits of the house style, in prose a cell
+reads on every task, in files the gate never opened. The count is the nine
+constants as PR #310 left them, passed to the gate's own `check`. The moved
+files measured the same 12, and PR #317 takes them to zero.
 
 Nothing stops the next prompt from being written the same way. The convention
 lives in a docstring and in the shape of a directory. The `tool` field and

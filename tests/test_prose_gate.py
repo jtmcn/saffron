@@ -320,10 +320,24 @@ def test_scope_reaches_every_place_it_names():
 
 def test_scope_reaches_the_prompts_a_cell_reads():
     """The agent reads these on every task, and they were the last prose in the
-    repo that grew unmeasured."""
+    repo that grew unmeasured.
+
+    `test_scope_reaches_every_place_it_names` asks whether each named directory
+    reaches a file, never whether this directory is named, so dropping the entry
+    passes there and fails here. The paths are checked against `git ls-files`
+    because `in_scope` is a string predicate: a renamed prompt would otherwise
+    leave this green.
+    """
     prose = _prose()
-    assert prose.in_scope("saffron/agents/prompts/implement.md")
-    assert prose.in_scope("saffron/agents/prompts/turns/plan.md")
+    listed = subprocess.run(
+        ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
+    ).stdout.splitlines()
+    for path in (
+        "saffron/agents/prompts/implement.md",
+        "saffron/agents/prompts/turns/plan.md",
+    ):
+        assert path in listed, path
+        assert prose.in_scope(path), path
 
 
 def test_scope_leaves_the_records_alone():
