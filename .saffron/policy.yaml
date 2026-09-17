@@ -111,6 +111,7 @@ integrity:
   gate_config:
     [
       "ontology/shapes/**",
+      # The `prose` gate executes ontology/spans.py, so this glob must keep covering it.
       "ontology/*.py",
       "**/pyproject.toml",
       ".saffron/**",

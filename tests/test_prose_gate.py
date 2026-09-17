@@ -38,6 +38,7 @@ def _codes(text: str, path: str = "README.md", root: Path = REPO) -> list[str]:
 HITS = [
     ("sentence-length", "word " * 26 + "end."),
     ("hedge", "The gate should pass."),
+    ("hedge", "The gate may pass."),
     ("em-dash", "The cell stops — then it restarts."),
     ("em-dash", "The cell stops -- then it restarts."),
     ("semicolon", "The cell stops; it restarts."),
@@ -59,6 +60,7 @@ MISSES = [
     ("sentence-length", "```\n" + "word " * 30 + "\n```\n"),
     ("hedge", 'The rule flags "should" in prose.'),
     ("hedge", "The gate calls `should_pass` first."),
+    ("hedge", "The design changed in May 2026."),
     ("em-dash", "Rows 3–5 hold the ranges."),
     ("em-dash", "- The first item.\n- The second item."),
     ("filler", "The suite has exactly one baseline."),
@@ -156,6 +158,23 @@ def test_a_rendered_closed_set_is_not_counted():
     assert _codes(context, "README.md") == ["sentence-length"]
 
 
+def test_every_rule_code_has_a_message():
+    prose = _prose()
+    codes = {code for code, _ in HITS} | {"trailing-condition", "rendered-span"}
+    assert set(prose.MESSAGES) == codes
+    assert all(word in prose.MESSAGES["filler"] for word in prose.FILLER[:3])
+
+
+def test_a_duplicated_closed_set_definition_is_a_finding():
+    context = "**Severity**: `a` or `b`.\n\n**Severity**: `c`.\n"
+    assert _codes(context, "CONTEXT.md") == ["rendered-span"]
+
+
+def test_a_principle_index_without_its_header_is_a_finding():
+    design = "## Principles — an index\n\nNo table here.\n"
+    assert _codes(design, "DESIGN.md") == ["rendered-span"]
+
+
 def _run_gate(name: str, cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(GATES / name)], cwd=cwd, capture_output=True, text=True, timeout=120
@@ -178,7 +197,8 @@ def test_prose_names_its_tool_and_reports_on_this_repo():
     result = parse_gate_json(done.stdout, expected_gate="prose")
     assert result.status in ("pass", "fail"), result.summary
     assert result.tool and result.tool.startswith("saffron-prose ")
-    assert all(f.message == f.code for f in result.failures)
+    messages = _prose().MESSAGES
+    assert all(f.message == messages[f.code] for f in result.failures)
 
 
 def test_prose_reports_the_version_the_script_printed():
@@ -209,6 +229,29 @@ def test_prose_passes_a_clean_tree_and_fails_a_long_sentence(tmp_path):
     ]
 
 
+def test_a_message_is_constant_per_rule(tmp_path):
+    from saffron.gates.contract import parse_gate_json
+
+    _init(tmp_path, {"README.md": "The gate should pass.\n\nThe cell might stop.\n"})
+    result = parse_gate_json(_run_gate("prose", tmp_path).stdout, expected_gate="prose")
+    assert [f.line for f in result.failures] == [1, 3]
+    assert len({f.message for f in result.failures}) == 1
+
+
+def test_a_mangled_closed_set_fails_rather_than_errors(tmp_path):
+    from saffron.gates.contract import parse_gate_json
+
+    context = "**Severity**: `a` or `b`.\n\n**Severity**: `c`.\n"
+    _init(tmp_path, {"CONTEXT.md": context})
+    (tmp_path / "ontology").mkdir()
+    shutil.copy(REPO / "ontology" / "spans.py", tmp_path / "ontology" / "spans.py")
+    result = parse_gate_json(_run_gate("prose", tmp_path).stdout, expected_gate="prose")
+    assert result.status == "fail", result.summary
+    assert [(f.file, f.code) for f in result.failures] == [
+        ("CONTEXT.md", "rendered-span")
+    ]
+
+
 def test_prose_errors_rather_than_passes_when_nothing_is_in_scope(tmp_path):
     from saffron.gates.contract import parse_gate_json
 
@@ -219,7 +262,7 @@ def test_prose_errors_rather_than_passes_when_nothing_is_in_scope(tmp_path):
 
 
 def test_a_rewritten_finding_is_not_new_and_an_added_one_is():
-    """The per-file limit is baseline subtraction over `(file, code, code)`."""
+    """The per-file limit is baseline subtraction over `(file, code, message)`."""
     from saffron.gates.baseline import subtract_baseline
     from saffron.gates.contract import Failure, GateResult
 
@@ -227,7 +270,12 @@ def test_a_rewritten_finding_is_not_new_and_an_added_one_is():
 
     def result(text: str) -> GateResult:
         failures = [
-            Failure(file="README.md", line=f.line, code=f.code, message=f.code)
+            Failure(
+                file="README.md",
+                line=f.line,
+                code=f.code,
+                message=prose.MESSAGES[f.code],
+            )
             for f in prose.check(text, "README.md", "prose", root=REPO)
         ]
         return GateResult(gate="prose", status="fail", tool="t", failures=failures)

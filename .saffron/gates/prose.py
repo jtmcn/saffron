@@ -6,12 +6,15 @@ adapts `strip_code` and `sentences` from AminBlg/SimpleEnglish
 (`evals/ste_lint.py`, MIT), changed to keep every newline so that a finding's
 line is its source line.
 
-A `prose` failure's `message` is its rule code, so baseline subtraction cancels
-one pre-existing finding per file and rule (§5.4). `hooks/prose_limit.py`
+A `prose` failure's `message` is fixed per rule code, so baseline subtraction
+cancels one pre-existing finding per file and rule (§5.4). `hooks/prose_limit.py`
 applies the same limit to a commit.
 
 Standard library only: this executes under a cell's plain `python3`, from the
-base commit's `.saffron/`, and reads everything else from the cwd.
+base commit's `.saffron/`. It reads the tree under judgement from the cwd,
+including `ontology/spans.py`, which it executes. `integrity`'s `gate_config`
+routes an edit to that file to a person. `tool` does not hash it, because every
+legitimate edit would read as drift.
 """
 
 from __future__ import annotations
@@ -62,7 +65,8 @@ FILLER = (
     "note that",
 )
 
-HEDGE = re.compile(r"\b(?:should|may|might)\b", re.I)
+# "May 2026" names a month.
+HEDGE = re.compile(r"\b(?:should|may(?!\s+\d)|might)\b", re.I)
 EM_DASH = re.compile(r"—|(?<!\d)–(?!\d)|(?<=\s)--(?=\s)|(?<=[A-Za-z]) - (?=[A-Za-z])")
 SEMICOLON = re.compile(";")
 PERFECT = re.compile(r"\b(?:has|have|had)\s+been\b|\b(?:has|have)\s+\w+ed\b", re.I)
@@ -77,6 +81,27 @@ WORD_RULES = (
     ("perfect-tense", PERFECT),
     ("contraction", CONTRACTION),
 )
+
+_OLDER = "The line shown can be an older one."
+# Fixed per code, so identity stays per file and rule. A REPAIR turn reads the text.
+MESSAGES = {
+    "sentence-length": f"this file gained a sentence over {SENTENCE_LIMIT} words;"
+    f" split one. {_OLDER}",
+    "hedge": "this file gained a should/may/might; say must, or state the fact."
+    f" {_OLDER}",
+    "em-dash": "this file gained an em-dash or spaced hyphen; use two sentences"
+    f" or name the relation. {_OLDER}",
+    "semicolon": f"this file gained a semicolon in prose; use two sentences. {_OLDER}",
+    "filler": f"this file gained a filler word ({', '.join(FILLER[:8])}, ...);"
+    f" delete it. {_OLDER}",
+    "perfect-tense": "this file gained a has/have/had been or has/have + -ed;"
+    f" use the simple past. {_OLDER}",
+    "trailing-condition": "a spec instruction gained a mid-sentence if/when;"
+    f" put the condition first. {_OLDER}",
+    "contraction": f"this file gained a contraction; write the words out. {_OLDER}",
+    "rendered-span": "a span ontology.render writes could not be located;"
+    " fix the definition or the principle index at its source.",
+}
 
 _FRONTMATTER = re.compile(r"\A---\n.*?\n---\n", re.S)
 _FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,}).*?^[ \t]*\1[^\n]*$", re.S | re.M)
@@ -231,7 +256,11 @@ def protected_words(root: Path) -> frozenset[str]:
     spans = _spans(root)
     for term in spans.SETS:
         if f"**{term}**" in text:
-            start, end = spans.definition_sentence(text, term)
+            try:
+                start, end = spans.definition_sentence(text, term)
+            except ValueError:
+                # `check` reports this file as `rendered-span`.
+                continue
             words.update(m.lower() for m in spans.MEMBER_TOKEN.findall(text[start:end]))
     return frozenset(words)
 
@@ -289,7 +318,12 @@ def check(text: str, path: str, gate: str, *, root: Path) -> list[Finding]:
     """Every finding `gate` reports for `text`, read as the file at `path`."""
     if gate not in GATES:
         raise ValueError(f"unknown gate: {gate}")
-    for start, end in _rendered(text, path, root):
+    try:
+        rendered = _rendered(text, path, root)
+    except ValueError as exc:
+        # The repo's defect, not the gate's: a `fail` gets a REPAIR turn.
+        return [Finding(1, "rendered-span", _excerpt(str(exc)))]
+    for start, end in rendered:
         text = text[:start] + re.sub(r"[^\n]", " ", text[start:end]) + text[end:]
     prepared = _Text(_prepare(text))
     found = _style(prepared, path, root)
@@ -311,6 +345,10 @@ def _listed(root: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+# ponytail: every finding is one failure row per suite result (about 4,800 here
+# today), so rows grow with the prose; the ceiling is the ledger's size.
+# ponytail: identity includes the file, so an in-scope rename reads every finding
+# as new and fails `prose`, while `hooks/prose_limit.py` follows renames.
 def main(argv: list[str]) -> int:
     if argv == ["--version"]:
         digest = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:12]
@@ -363,7 +401,7 @@ def main(argv: list[str]) -> int:
         for path in paths:
             text = (root / path).read_text(encoding="utf-8", errors="replace")
             for finding in check(text, path, gate, root=root):
-                message = finding.code if gate == "prose" else finding.excerpt
+                message = MESSAGES[finding.code] if gate == "prose" else finding.excerpt
                 failures.append(
                     {
                         "file": path,
