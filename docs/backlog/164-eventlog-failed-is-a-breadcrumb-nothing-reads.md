@@ -25,9 +25,10 @@ sets the flag, and returns. Its comment reads "`self.failed` is the breadcrumb".
 disk-full night "just stops growing `events.jsonl`, which `EventLog.failed` is
 the breadcrumb for".
 
-Nothing reads it. Searching `saffron/` and `tests/` for the attribute finds the
-two comments above, an unrelated `proxy.failed_egress` at
-`saffron/cell/session.py:959`, and a test double's own list.
+No production code reads it. Nothing under `saffron/` reads the attribute, and
+the only near miss is an unrelated `proxy.failed_egress` at
+`saffron/cell/session.py:959`. Two tests read it and neither surfaces it:
+`tests/test_events.py:802` and `tests/test_events.py:2400`.
 
 Four places own a log: `saffron/task.py:251`, `saffron/cell/session.py:798`, and
 `saffron/phases/package.py:624` and `:1046`. The production one is the first.
@@ -48,8 +49,8 @@ This item is about the log that holds nothing and does not say so.
 ## Done looks like
 
 A task whose log stops accepting writes says so on the terminal, naming the log
-that stopped growing. It warns once for the run rather than once per lost event.
-A task whose log wrote cleanly says nothing. The warning does not travel through the
+that stopped growing. It warns once per task rather than once per lost event. A
+task whose log wrote cleanly says nothing. The warning does not travel through the
 log, because the log is what failed. `append` still raises nothing, and a failed
 log still changes no task state and no exit code.
 

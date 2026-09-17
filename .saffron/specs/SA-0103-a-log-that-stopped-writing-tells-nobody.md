@@ -38,41 +38,48 @@ acceptance:
       records the failure has no reader.
     witness: tests/test_task.py::test_a_log_that_stopped_writing_says_so_and_a_clean_one_does_not
   - claim: >-
-      The warning appears once for the run rather than once per lost event, so a
-      log that refuses every write produces one line and not one per event.
+      A task whose log refuses many writes warns once, rather than once per lost
+      event. With several events emitted through the task's own emit and every
+      append failing, the terminal carries exactly one warning line.
     witness: tests/test_task.py::test_a_log_that_refused_every_write_warns_once
   - claim: >-
-      A log that fails on its very first write still warns, and the warning does
-      not travel through the same emit whose log just failed.
+      A task whose log fails its first write still warns, and the warning is
+      never appended to the log. With a log that refuses its first append and
+      accepts the rest, the terminal carries the warning and the log file holds no
+      event describing its own failure.
     witness: tests/test_task.py::test_a_log_that_failed_on_its_first_write_still_warns
 ---
 
 ## Context
 
-`EventLog` was built with this failure in mind, and its own comments say so
-twice.
+`events.jsonl` is a batch tree artifact, which §4.1 makes the record an operator
+greps when the ledger itself is what broke. `EventLog` was built with this
+failure in mind, and its own comments say so twice.
 
-`saffron/events.py` sets the flag in the constructor. Its comment there says "A
-disk-full night must not render as a night in which nothing happened". It adds
-that `append` "never raises", which is "how anyone can tell". The `except` clause in
-`append` catches `OSError`, `RecursionError`, `TypeError` and `ValueError`, sets
-`self.failed = True`, and returns. Its comment reads "`self.failed` is the
-breadcrumb — silence here must not read as 'nothing happened'."
+`saffron/events.py:388` sets the flag in the constructor. The comment above it
+says "A disk-full night must not render as a night in which nothing happened". It
+adds that `append` "never raises", which is "how anyone can tell". The `except`
+clause in `append` catches `OSError`, `RecursionError`, `TypeError` and
+`ValueError`, then sets the flag at `saffron/events.py:426` and returns. The
+comment there calls it "the breadcrumb".
 
-`saffron/cell/session.py:76-83` repeats the reasoning for `_default_emit`: a
-disk-full night "just stops growing `events.jsonl`, which `EventLog.failed` is
-the breadcrumb for."
+`saffron/cell/session.py:77-78`, inside `_default_emit`'s docstring, repeats the
+reasoning. A disk-full night "just stops growing `events.jsonl`, which
+`EventLog.failed` is the breadcrumb for".
 
-Nothing reads it. Searching `saffron/` and `tests/` for the attribute finds the
-two comments above, an unrelated `proxy.failed_egress` at
-`saffron/cell/session.py:959`, and a test double's own list. There is no reader,
-so the breadcrumb leads nowhere.
+No production code reads it. Nothing under `saffron/` reads the attribute at
+all, and the only near miss is an unrelated `proxy.failed_egress` at
+`saffron/cell/session.py:959`. Two tests read it, and neither surfaces it.
+`tests/test_events.py:802` asserts the flag is set after a swallowed write, and
+`tests/test_events.py:2400` asserts it is clear. So the flag is observable to the
+suite and to nobody driving a task.
 
 Four places own a log: `saffron/task.py:251`, `saffron/cell/session.py:798`, and
 `saffron/phases/package.py:624` and `:1046`. The production one is the first.
-`saffron/task.py:247-256` builds the log and a closure `emit` for a caller that
+`saffron/task.py:246-257` builds the log and a closure `emit` for a caller that
 passed none, then hands that closure down. So `session._default_emit` is not the
-seam a driven cell uses. Its own comment names the shape: "Print plus the task's
+seam a driven cell uses, and neither are the two fallbacks in
+`saffron/phases/package.py`. Its own comment names the shape: "Print plus the task's
 own log, the shape `session._default_emit` and `package()` both default to."
 
 So a night where the disk filled produces a task that reaches its terminal state
@@ -139,18 +146,56 @@ check that runs once at the start catches nothing.
 
 **Criterion 2's wrong implementation is a warning per lost event.** A disk that
 filled refuses every write for the rest of the night. A warning inside the
-failure branch then prints thousands of times and buries the run. Drive a log
-that refuses every write, and assert the terminal carries the warning once.
+failure branch then prints thousands of times and buries the task.
+
+**Criterion 2 needs more than one event to reach the closure.** Otherwise it
+checks nothing. `run_task` emits one event of its own on the ordinary path, the
+`Ceilings` line at `saffron/task.py:259`. Every other event arrives from
+`run_one_cell` and from PACKAGE, both of which your test doubles. So a double
+that emits nothing leaves a one-event stream, where warning per failed append and
+warning once are the same single line. Make the `run_one_cell` double emit at
+least three events through the `emit` it is handed, and assert the terminal
+carries exactly one warning.
 
 **Criterion 3's wrong implementation is a check placed after the first
-successful append.** The first event a task emits is its `Ceilings` line. A log
-unwritable from the start fails on that one. Make the first write observable,
-and assert the warning appears for it.
+successful append.** The first event a task emits is its `Ceilings` line, at
+`saffron/task.py:259`. A log unwritable from the start fails on that one.
+
+**Criterion 3 needs a log that fails once and then works.** The technique at
+`tests/test_events.py:2021-2022` puts a directory where the log file goes. Every
+append then fails forever. Under that log the second half of the claim cannot be
+observed: the closure prints `describe(event)` before it appends, at
+`saffron/task.py:254-257`. An implementation that routes the warning through
+`emit` therefore still prints it, and still passes a stdout-only assertion, while
+the append carrying it is swallowed. Build a log whose first append fails and whose later
+appends succeed. Then assert the terminal carries the warning and the log file
+holds no event describing its own failure.
 
 **`tests/test_task.py` is created by `SA-0100`, which this spec stacks on.** Add
-to that file rather than making a second one. Build the unwritable log the way
-`tests/test_events.py:2013` already does for a neighbouring property. Drive
-`run_task` with no `emit`, so the closure under test is the one that runs.
+to that file rather than making a second one. Drive `run_task` with no `emit`, so
+the closure under test is the one that runs.
+
+**The seams are patchable at module scope, and nothing at base drives
+`run_task`.** `saffron/task.py` imports `run_one_cell` into its own namespace, so
+a test replaces `saffron.task.run_one_cell`. It imports `package as
+package_phase`, so a test replaces `package` and `push_unpackaged_work` on that
+module object. Build the doubles from those two points and pass a real `out_dir`.
+If `SA-0100` has not landed, build that harness yourself rather than reaching for
+a fixture that does not exist.
+
+**Two stale comments in forbidden files contradict the seam above.** Both name
+`cli.py`. `saffron/cell/session.py:73-75` describes `_default_emit` as the
+fallback for "every direct caller today, and `cli.py`, which is forbidden here
+and never passes `emit`". `tests/test_session.py:984-985` says `use_default_emit` calls
+"`run_one_cell` exactly as `cli.py` does". Neither is true at this base:
+`saffron/cli.py:368` and `:410` call `run_task`, never `run_one_cell`. Both files
+are forbidden here, so leave them, and do not let either talk you out of reading
+`task.py` for yourself.
+
+**Name the log without reaching into it.** `EventLog` keeps its path private at
+`saffron/events.py:385`, and `saffron/events.py` is forbidden, so there is no
+accessor to add. Re-derive the path from `out_dir` and the spec id, which the
+closure already has in scope, rather than reading the private attribute.
 
 **Do not reach into `os.environ` or the real filesystem outside `tmp_path`.**
 `saffron/task.py`'s module docstring states the rule: a module that reaches into
