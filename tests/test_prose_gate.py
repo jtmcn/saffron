@@ -82,6 +82,21 @@ def test_a_trailing_condition_is_read_only_in_a_spec_instruction():
     )
 
 
+def test_a_numbered_item_is_read_as_its_own_list_item():
+    assert _codes(
+        "1. Run the gate when the cell stops.\n", ".saffron/specs/SA-0001-x.md"
+    ) == ["trailing-condition"]
+    assert _codes(
+        "  2. Run the gate when the cell stops.\n", ".saffron/specs/SA-0001-x.md"
+    ) == ["trailing-condition"]
+
+
+def test_a_numbered_reference_still_splits_the_sentence():
+    # Merged, this would be 29 words (over the limit); split, neither half is.
+    text = "word " * 6 + "rev 21. " + "word " * 20 + "end."
+    assert "sentence-length" not in _codes(text)
+
+
 def test_a_list_item_is_its_own_sentence():
     items = "".join(f"- {'word ' * 15}end\n" for _ in range(3))
     assert "sentence-length" not in _codes(items)

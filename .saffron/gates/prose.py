@@ -144,16 +144,26 @@ def _prepare(text: str) -> str:
     return _URL.sub(" URL ", text)
 
 
+_BARE_ORDINAL = re.compile(r"\A\d+\.\Z")
+
+
 def _sentences(body: str) -> Iterator[_Sentence]:
     pos = 0
+    carry_item = False
     for match in [*_BREAK.finditer(body), None]:
         end = match.start() if match else len(body)
         chunk = body[pos:end]
         item = _ITEM.match(chunk)
         offset = pos + (item.end() if item else len(chunk) - len(chunk.lstrip()))
         text = body[offset:end].strip()
-        if len(text.split()) >= 2:
-            yield _Sentence(offset, text, item is not None)
+        is_item = item is not None or carry_item
+        carry_item = False
+        # `_BREAK`'s own sentence-end split fires on a numbered marker's period
+        # before its text arrives; queue the marker instead of losing it.
+        if not is_item and match is not None and _BARE_ORDINAL.fullmatch(text):
+            carry_item = True
+        elif len(text.split()) >= 2:
+            yield _Sentence(offset, text, is_item)
         if match:
             pos = match.end()
 
