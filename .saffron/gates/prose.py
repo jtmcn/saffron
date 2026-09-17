@@ -34,6 +34,8 @@ INCLUDED_DIRS = (
     ".saffron/specs/",
     ".claude/agents/",
     ".claude/skills/",
+    # The system and turn prompts: the prose a cell reads on every task.
+    "saffron/agents/prompts/",
 )
 # A finished spec records what a cell was told, so it stays as written.
 EXCLUDED_DIRS = (".saffron/specs/done/",)

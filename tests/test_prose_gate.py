@@ -318,6 +318,14 @@ def test_scope_reaches_every_place_it_names():
         )
 
 
+def test_scope_reaches_the_prompts_a_cell_reads():
+    """The agent reads these on every task, and they were the last prose in the
+    repo that grew unmeasured."""
+    prose = _prose()
+    assert prose.in_scope("saffron/agents/prompts/implement.md")
+    assert prose.in_scope("saffron/agents/prompts/turns/plan.md")
+
+
 def test_scope_leaves_the_records_alone():
     prose = _prose()
     assert prose.EXCLUDED_DIRS == (".saffron/specs/done/",)
