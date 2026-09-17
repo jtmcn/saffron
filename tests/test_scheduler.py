@@ -1818,7 +1818,18 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-17, a thirty-third time: `SA-0095` merged as PR #307
+    """Re-measured 2026-09-17, a thirty-fourth time: `SA-0099` and `SA-0100`
+    queued for backlog items 161 and 162, the two gaps an inventory of what one
+    execution can be seen through turned up. `SA-0100` edits `saffron/task.py`
+    and a test file that does not exist yet, neither of which anything else
+    queued touches, so it joins the candidates last — priority 2, and ties run
+    by id. `SA-0099` is refused on `SA-0094`, and that is correct: it writes
+    `runs.preflight` from `saffron/cell/session.py`, which `SA-0093` and
+    `SA-0094` both edit, so it stacks behind that chain and waits for the night
+    after its parent packages. This is the thirty-first anchor's shape, one link
+    further down the same chain.
+
+    Re-measured 2026-09-17, a thirty-third time: `SA-0095` merged as PR #307
     and is retired to `done/`, so it leaves the queue and `SA-0094` is the only
     refusal left. The candidates are unmoved: `SA-0094` was refused on
     `SA-0093`, never on `SA-0095`, so retiring the child frees nothing.
@@ -1978,8 +1989,9 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0096",
         "SA-0097",
         "SA-0098",
+        "SA-0100",
     ]
-    assert [r.path.name[:7] for r in refusals] == ["SA-0094"]
+    assert [r.path.name[:7] for r in refusals] == ["SA-0094", "SA-0099"]
     # A precondition, not the glob check: `done/` is populated, so the empty
     # queue above is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30
