@@ -13,15 +13,9 @@ from pathlib import Path
 import rdflib
 
 from ontology import design_record
+from ontology.spans import MEMBER_TOKEN, SETS, definition_sentence
 
 NS = "urn:software-factory:ns#"
-
-# What counts as a member, and the *only* definition of it: the cross-check in
-# `test_vocabulary_agrees_with_context` imports this rather than keeping its own
-# copy, so "the write span cannot exceed the read span" holds by construction.
-# It rejects a token carrying a `.` or a `/`, which is why locating the span
-# from raw backticks let `` `DESIGN.md` `` start it and swallow the prose after.
-MEMBER_TOKEN = re.compile(r"`([A-Za-z_][A-Za-z0-9_-]*)`")
 
 
 def members(class_name: str, *, vocabulary: Path) -> list[str]:
@@ -49,18 +43,6 @@ def members(class_name: str, *, vocabulary: Path) -> list[str]:
 # bytes at 82, 83 and 84 and at no other width (76-92 searched). Re-measured
 # when the batch stop reasons joined: still those three widths and no others.
 _WIDTH = 83
-
-# CONTEXT.md bold term -> (ontology class, join style). The join styles are the
-# ones already committed; a generator that normalised them would rewrite prose
-# it does not own.
-SETS = {
-    "Terminal state": ("TerminalState", "comma"),
-    "Batch stop reason": ("BatchStopReason", "or-comma"),
-    "Severity": ("Severity", "or-comma"),
-    "Risk tier": ("RiskTier", "or-plain"),
-    "Gate role": ("GateRole", "comma"),
-    "Core gates": ("CoreGate", "comma"),
-}
 
 
 def _join(names: list[str], style: str) -> str:
@@ -121,26 +103,7 @@ def render_context(
             if _members is not None
             else members(class_name, vocabulary=vocabulary)
         )
-        if text.count(f"**{term}**") != 1:
-            raise ValueError(
-                f"{term}: expected exactly one definition, found "
-                f"{text.count(f'**{term}**')}"
-            )
-        start = text.index(f"**{term}**")
-        # Bounded at the definition's own blank line. Unbounded, a definition
-        # left without a trailing period matched a period paragraphs away and
-        # `main()` deleted everything between — and `main()` is what the
-        # currency test tells the operator to run.
-        block_end = text.find("\n\n", start)
-        if block_end == -1:
-            block_end = len(text)
-        # First sentence: up to a period followed by whitespace or end of text.
-        # Guarded, not asserted: a definition with no sentence end is a real
-        # input, and `ty` rejects `.start()` on `Match | None` regardless.
-        stop = re.search(r"\.(?:\s|$)", text[start:block_end])
-        if stop is None:
-            raise ValueError(f"{term}'s definition has no first sentence to rewrite")
-        end = stop.start() + start
+        start, end = definition_sentence(text, term)
         sentence = text[start:end]
         # From the tokens the reader accepts, never from raw backticks.
         found = list(MEMBER_TOKEN.finditer(sentence))

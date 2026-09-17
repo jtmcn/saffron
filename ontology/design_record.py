@@ -23,6 +23,8 @@ import re
 
 import rdflib
 
+from ontology.spans import PRINCIPLE_ANCHOR, PRINCIPLE_HEADER, principle_index
+
 NS = "urn:software-factory:ns#"
 FACTORY = rdflib.Namespace(NS)
 
@@ -139,8 +141,8 @@ def _escaped(claim: str) -> str:
     return claim.replace("|", r"\|")
 
 
-ANCHOR = "## Principles — an index"
-_HEADER = "| # | The claim | From |\n|---|---|---|\n"
+ANCHOR = PRINCIPLE_ANCHOR
+_HEADER = PRINCIPLE_HEADER
 
 
 def render_principles(text: str) -> str:
@@ -153,18 +155,10 @@ def render_principles(text: str) -> str:
     rows = principles(parse(text))
     if not rows:
         raise ValueError("the design record parsed to no principles")
-    if text.count(ANCHOR) != 1:
-        raise ValueError(f"{ANCHOR}: expected exactly one occurrence")
-
     body = "".join(
         f"| {n} | {_escaped(claim)} | {letter} |\n" for n, claim, letter in rows
     )
-    start = text.find(_HEADER, text.index(ANCHOR))
-    if start == -1:
-        raise ValueError(f"{ANCHOR}: no `{_HEADER.splitlines()[0]}` header under it")
-    end = start + len(_HEADER)
-    while end < len(text) and text[end] == "|":
-        end = text.index("\n", end) + 1
+    start, end = principle_index(text)
     # Confirm what is being replaced is a table body before overwriting prose in
     # the document every spec cites.
     replaced = text[start + len(_HEADER) : end]
