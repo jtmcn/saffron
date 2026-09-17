@@ -39,13 +39,19 @@ HITS = [
     ("sentence-length", "word " * 26 + "end."),
     ("hedge", "The gate should pass."),
     ("hedge", "The gate may pass."),
+    ("hedge", "The gate might pass."),
     ("em-dash", "The cell stops — then it restarts."),
     ("em-dash", "The cell stops -- then it restarts."),
+    ("em-dash", "The cell stops - then it restarts."),
     ("semicolon", "The cell stops; it restarts."),
     ("filler", "The gate actually passes."),
     ("filler", "The gate passes, in fact."),
     ("perfect-tense", "The gate has been declared."),
+    ("perfect-tense", "The gate has passed."),
     ("contraction", "The gate doesn't pass."),
+    ("contraction", "The cell stops, and it's done."),
+    ("contraction", "That's the gate."),
+    ("contraction", "Here's the gate."),
 ]
 
 
@@ -66,6 +72,7 @@ MISSES = [
     ("filler", "The suite has exactly one baseline."),
     ("filler", "The choice was made deliberately."),
     ("perfect-tense", "The gate had a result."),
+    ("contraction", "The gate's result is green."),
     ("trailing-condition", "The gate fails when the cell stops."),
 ]
 
@@ -83,6 +90,11 @@ def test_a_trailing_condition_is_read_only_in_a_spec_instruction():
         _codes("- If the cell stops, run the gate.\n", ".saffron/specs/SA-0001-x.md")
         == []
     )
+
+
+def test_a_quoted_condition_is_a_mention_in_a_spec_instruction():
+    item = '- Say "stop when done" to the agent.\n'
+    assert "trailing-condition" not in _codes(item, ".saffron/specs/SA-0001-x.md")
 
 
 def test_a_numbered_item_is_read_as_its_own_list_item():

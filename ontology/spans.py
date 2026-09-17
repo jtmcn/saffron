@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import re
 
-# What counts as a member, and the only definition of it: `render` and the
-# CONTEXT.md cross-check both import it, so the write span cannot exceed the
-# read span. It rejects a token carrying a `.` or a `/`.
+# The only definition of a member, shared by `render` and the CONTEXT.md
+# cross-check so the write span cannot exceed the read span.
 MEMBER_TOKEN = re.compile(r"`([A-Za-z_][A-Za-z0-9_-]*)`")
 
 # CONTEXT.md bold term -> (ontology class, join style). The join styles are the

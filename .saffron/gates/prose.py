@@ -6,15 +6,8 @@ adapts `strip_code` and `sentences` from AminBlg/SimpleEnglish
 (`evals/ste_lint.py`, MIT), changed to keep every newline so that a finding's
 line is its source line.
 
-A `prose` failure's `message` is fixed per rule code, so baseline subtraction
-cancels one pre-existing finding per file and rule (§5.4). `hooks/prose_limit.py`
-applies the same limit to a commit.
-
-Standard library only: this executes under a cell's plain `python3`, from the
-base commit's `.saffron/`. It reads the tree under judgement from the cwd,
-including `ontology/spans.py`, which it executes. `integrity`'s `gate_config`
-routes an edit to that file to a person. `tool` does not hash it, because every
-legitimate edit would read as drift.
+Standard library only: a cell runs this under plain `python3`, from the base
+commit's `.saffron/`, against the tree in the cwd.
 """
 
 from __future__ import annotations
@@ -70,8 +63,11 @@ HEDGE = re.compile(r"\b(?:should|may(?!\s+\d)|might)\b", re.I)
 EM_DASH = re.compile(r"—|(?<!\d)–(?!\d)|(?<=\s)--(?=\s)|(?<=[A-Za-z]) - (?=[A-Za-z])")
 SEMICOLON = re.compile(";")
 PERFECT = re.compile(r"\b(?:has|have|had)\s+been\b|\b(?:has|have)\s+\w+ed\b", re.I)
+# Any other 's reads as a possessive, so only these count.
 CONTRACTION = re.compile(
-    r"\b\w+(?:n['’]t|['’]ll|['’]re|['’]ve|['’]d)\b|\bit['’]s\b", re.I
+    r"\b\w+(?:n['’]t|['’]ll|['’]re|['’]ve|['’]d)\b"
+    r"|\b(?:it|that|there|here|what|who|where|let|he|she)['’]s\b",
+    re.I,
 )
 TRAILING = re.compile(r"\s(?:if|when)\s", re.I)
 WORD_RULES = (
@@ -154,8 +150,12 @@ def in_scope(path: str) -> bool:
     return path in ROOT_FILES or path.startswith(INCLUDED_DIRS)
 
 
+def _spaces(text: str) -> str:
+    return re.sub(r"[^\n]", " ", text)
+
+
 def _blank(match: re.Match[str]) -> str:
-    return re.sub(r"[^\n]", " ", match.group(0))
+    return _spaces(match.group(0))
 
 
 def _cells(match: re.Match[str]) -> str:
@@ -193,9 +193,8 @@ def _sentences(body: str) -> Iterator[_Sentence]:
         text = body[offset:end].strip()
         is_item = item is not None or carry_item
         carry_item = False
-        # `_BREAK`'s own sentence-end split fires on a numbered marker's period
-        # before its text arrives; queue the marker instead of losing it, but
-        # only at a line start — an orphan "N." mid-sentence is not a list item.
+        # `_BREAK` splits after a numbered marker's period, so carry the marker to
+        # the next chunk. Only at a line start: a mid-sentence "N." is no marker.
         if (
             not is_item
             and match is not None
@@ -291,7 +290,7 @@ def _style(text: _Text, path: str, root: Path) -> list[Finding]:
         if (
             spec
             and sentence.is_item
-            and TRAILING.search(sentence.text)
+            and TRAILING.search(_QUOTED.sub(" ", sentence.text))
             and not re.match(r"(?:if|when)\b", sentence.text, re.I)
         ):
             found.append(
@@ -324,7 +323,7 @@ def check(text: str, path: str, gate: str, *, root: Path) -> list[Finding]:
         # The repo's defect, not the gate's: a `fail` gets a REPAIR turn.
         return [Finding(1, "rendered-span", _excerpt(str(exc)))]
     for start, end in rendered:
-        text = text[:start] + re.sub(r"[^\n]", " ", text[start:end]) + text[end:]
+        text = text[:start] + _spaces(text[start:end]) + text[end:]
     prepared = _Text(_prepare(text))
     found = _style(prepared, path, root)
     return sorted(found, key=lambda f: (f.line, f.code))
@@ -351,6 +350,7 @@ def _listed(root: Path) -> subprocess.CompletedProcess[str]:
 # as new and fails `prose`, while `hooks/prose_limit.py` follows renames.
 def main(argv: list[str]) -> int:
     if argv == ["--version"]:
+        # Not `ontology/spans.py`, which this executes: `gate_config` guards it instead.
         digest = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:12]
         print(f"saffron-prose {digest}")
         return 0

@@ -103,8 +103,11 @@ two-line `sh` wrapper, like `structure`.
 | `prose` | blocking | the style rules |
 | `terms` | advisory | `avoided-term` |
 
-A `prose` failure carries the rule code as its `message`, and the excerpt goes
-to `summary`. `identity` is then `(gate, file, code, code)`. Baseline
+A `prose` failure carries one fixed `message` per rule code. It says what the
+rule counts and what to change, and it warns that the line shown can be an
+older instance. No excerpt is recorded. The message cannot carry one without
+leaving identity, and `repair_prompt` never shows `summary`. `identity` is then
+`(gate, file, code, message)`. Baseline
 subtraction counts identities (§5.4), so it removes one pre-existing failure
 per file and rule. That is the per-file limit, with no change to `saffron/`.
 
@@ -130,7 +133,7 @@ layers therefore cannot conflict on one.
 
 | Code | Hit | Exempt |
 |---|---|---|
-| `sentence-length` | over 25 words, a code span counting as one | headings |
+| `sentence-length` | over 25 words, a code span counting as one | headings, for every rule |
 | `hedge` | "should", "may", "might" | text in double quotes, for every word rule |
 | `em-dash` | `—`, spaced `--`, spaced hyphen between words | en-dash between digits |
 | `semicolon` | `;` in prose | |
