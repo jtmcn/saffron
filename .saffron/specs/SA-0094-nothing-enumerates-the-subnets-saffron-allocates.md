@@ -50,8 +50,9 @@ acceptance:
       Before the gate cell creates its network, the pre-clean removes any
       `saffron-`-prefixed network holding that subnet, whichever spec's name it
       bears — not only the one bearing the name this task would use — and
-      leaves a holder with any other name alone. A leftover from a SIGKILLed
-      run of a *different* spec no longer aborts REVIEW.
+      leaves a holder with any other name alone. A leftover network with
+      nothing attached, from a SIGKILLed run of a *different* spec, no longer
+      aborts REVIEW.
     witness: tests/test_session.py::test_the_gate_cells_pre_clean_removes_a_leftover_saffron_network_on_its_subnet_and_nothing_else
   - claim: >-
       The gate cell still holds no credential and is gone before the first lens
@@ -176,7 +177,12 @@ gives.
 
 **Criterion 3's witness needs `networks_on_subnet` stubbed, because the real
 one shells out.** `_stub_the_runtime` does not stub it today. Add it there,
-returning names the test chooses. Have the witness ask for two holders — a
+taking a mapping from subnet to holders and returning `[]` for any subnet not
+in it, and have the witness set holders only for the gate cell's own subnet,
+read from the declaration. A stub that answers the same names whatever subnet
+it is asked about passes a pre-clean that looks up the wrong one — the task's
+`runtime.DEFAULT_SUBNET`, say — which on a real host would try to remove the
+task's own live `saffron-cells` and never find the leftover. Have the witness ask for two holders — a
 `saffron-gate-net-` one for a different spec, and one with no `saffron-` prefix
 (`operator-net`, say). Assert the first was removed before the create, and that
 the second never appears in `cell.removed`. A single holder cannot tell the
@@ -196,10 +202,16 @@ removed exactly twice. A `networks_on_subnet` stub returning the gate network
 for every test adds a third removal and fails it. Default to an empty list and
 let the one witness that needs a holder ask for one.
 
-**Not every test that reaches the create-its-own-network branch goes through
-`_stub_the_runtime`.** `SA-0093` added tests that call `critic_cell` directly.
-Check each one at your base: the new pre-clean calls `networks_on_subnet`, and
-unstubbed, that lists the host's real networks.
+**Every test that reaches the create-its-own-network branch must have
+`networks_on_subnet` stubbed.** At your base, the tests that call `critic_cell`
+directly all call `_stub_the_runtime` first, so a default of `[]` covers them.
+Check any test you add does the same: unstubbed, the real one lists the host's
+networks.
+
+**Removing another run's network by subnet assumes one task at a time.** A
+second task's live gate-only cell on the same subnet would lose its network to
+this pre-clean. `saffron batch` runs one task at a time (§4.2.1), and that is
+the bound this change relies on; do not add locking for it.
 
 **`exclude=` exists for a reason and the pre-clean should not pass it.**
 `create_network` passes `exclude=name` because it is explaining an error about
@@ -218,7 +230,9 @@ leftover criterion 3 is actually about is a `saffron-gate-net-` one, so the
 restriction costs the fix nothing.
 
 **Removing a holder is not always possible, and a failure there is not this
-task's failure.** A network with a live container on it will not go. Let
+task's failure.** A network with a live container on it will not go, and a
+SIGKILLed run can leave its gate-only cell's container running. Removing that
+container is not this spec's change; criterion 3 covers the network alone. Let
 `create_network`'s own `CellRuntimeError` be what reports that, with the
 holders it already names — do not swallow a failed removal and do not raise a
 new error type for it.
