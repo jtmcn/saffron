@@ -249,7 +249,7 @@ Three pull requests, stacked with `gh stack`:
 - Rewriting existing prose. Each document is a separate backlog record, in the
   order `docs/backlog/PRIORITY.md` gives.
 - A principle for "a style rule limits growth, and never baselines a file". The
-  operator decides this at rollout step 3. If it is added, it goes in its
-  appendix, and `uv run python -m ontology.render` updates the index.
+  operator added it at rollout step 3, as principle 59 in `DESIGN.md`
+  Appendix R.
 - Prompts embedded in Python strings under `saffron/agents/`. The parser reads
   Markdown only.
