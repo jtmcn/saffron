@@ -1,8 +1,9 @@
 ---
 id: 69
 title: The adequacy lens reads where only running can answer, and nine tests got through
-status: partial
+status: done
 tier: 1
+closed: 2026-09-16
 specs: [SA-0056, SA-0057, SA-0058]
 prs: [135, 136, 139]
 commits: []
@@ -108,3 +109,9 @@ be filtered" apart from "the mutant killed its witness" and was not asked for.
 named edit left the fixture's suite green — the first numbers this item's
 question has ever had. Both are measurements of the gap. The mechanism is still
 item **71**'s seam: a `witness` result on a real attempt is what closes this.
+
+**2026-09-16, done.** The condition above is met: item **71** is done, and
+`SA-0063` and `SA-0064` each recorded `witness` as `pass` on a real attempt
+(item 71's record). The mechanism this item asked for exists and runs. What is
+left of the question is other items': **117** runs the probe the adequacy lens
+names, and **80** is the mutant withheld from the prompt.

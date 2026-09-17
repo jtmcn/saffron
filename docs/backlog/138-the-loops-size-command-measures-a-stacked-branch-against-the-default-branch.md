@@ -1,12 +1,13 @@
 ---
 id: 138
 title: The loop's `size` measures a stacked branch against the default branch, so a child counts its parents' diff
-status: open
+status: done
 tier: 2
 filed: 2026-09-16
+closed: 2026-09-16
 by_hand: false
 specs: []
-prs: [282]
+prs: [282, 287]
 commits: []
 cites: [§5.4]
 related: [40, 137]
@@ -60,3 +61,7 @@ ledger records — rather than from the default branch.
 **Filed 2026-09-16** from the spec loop's run of that day (stack #285).
 
 **2026-09-16, a fix is open as PR #287.** `_bases_below` walks `depends_on` as well as the order, so a parent held out of it still supplies the base. It stays `open` until that merges.
+
+**2026-09-16, done.** PR #287 merged (`1f64a99`). `_bases_below` walks
+`_depends_on_chain` as well as the order (`driver.py:552-566`). Closed
+2026-09-16 on review of the backlog: #287 wrote this record's "stays `open` until that merges" line itself, so the line could only land by the merge that should have closed it.

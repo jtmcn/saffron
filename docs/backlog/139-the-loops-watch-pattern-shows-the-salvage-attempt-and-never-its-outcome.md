@@ -1,12 +1,13 @@
 ---
 id: 139
 title: The loop's watch pattern shows a salvage starting and never whether it recovered anything
-status: open
+status: done
 tier: 3
 filed: 2026-09-16
+closed: 2026-09-16
 by_hand: false
 specs: []
-prs: [277]
+prs: [277, 287]
 commits: []
 cites: [§4.3]
 related: [67]
@@ -58,3 +59,7 @@ start of a phase has its outcome line in the same set.
 **Filed 2026-09-16** from the spec loop's run of that day (stack #285).
 
 **2026-09-16, a fix is open as PR #287.** `SALVAGE` is in `WATCH_PREFIXES`. It stays `open` until that merges.
+
+**2026-09-16, done.** PR #287 merged (`1f64a99`). `SALVAGE`, `SCOPE` and
+`REPAIR` are in `WATCH_PREFIXES` (`driver.py:57-63`), and a test holds that
+list to `LineLabel`. Closed 2026-09-16 on review of the backlog: #287 wrote this record's "stays `open` until that merges" line itself, so the line could only land by the merge that should have closed it.
