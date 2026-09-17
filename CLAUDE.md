@@ -5,15 +5,15 @@ an agent in an isolated cell, drives it through a hard gate loop, subjects the d
 adversarial critic, and packages the result. `DESIGN.md` is authoritative for what the system
 does; `CONTEXT.md` is authoritative for what the words mean. Both are read constantly — cite
 `DESIGN.md` by section number (`§5.4`), and use `CONTEXT.md`'s vocabulary exactly. For the
-closed sets `tests/ontology/test_vocabulary_agrees_with_context.py` names,
-`ontology/factory.ttl` is authoritative and both `CONTEXT.md` and
-`ontology/shapes/factory-shapes.ttl` are generated from it: edit the vocabulary and run
-`uv run python -m ontology.render`. Two shape lists stay hand-maintained because the
-vocabulary cannot imply them — a new core gate needs a blocking level in
-`factory:CoreGateBlockingShape`, a new terminal state a place in `factory:TaskShape`'s
-endedInState — and a test names the shape and the file when you forget. The same
-command also rewrites `DESIGN.md`'s principle index, and that one runs the other way:
-the appendices are authoritative and the index is their render, so a new principle is
+closed sets `tests/ontology/test_vocabulary_agrees_with_context.py` names, `ontology/factory.ttl`
+is authoritative and both `CONTEXT.md` and `ontology/shapes/factory-shapes.ttl` are generated
+from it: edit the vocabulary and run `uv run python -m ontology.render`. Two shape lists stay
+hand-maintained because the vocabulary cannot imply them — a new core gate needs a blocking level
+in `factory:CoreGateBlockingShape`, a new terminal state a place in `factory:TaskShape`'s
+endedInState — and a test names the shape and the file when you forget. The `shacl` gate
+validates every `.ttl` in the tree against those shapes, so a graph no test loads is still
+checked. The same command also rewrites `DESIGN.md`'s principle index, and that one runs the
+other way: the appendices are authoritative and the index is their render, so a new principle is
 written into its appendix and never into the table (Appendix P).
 
 > Saffron is also a *target repo* of itself (`.saffron/`), so this file is the standing
@@ -27,7 +27,7 @@ written into its appendix and never into the table (Appendix P).
 
 ```
 make install                 # uv sync + prek install
-make check                   # lint + test — the default target
+make check                   # lint + test — the default target (lint = prek run --all-files)
 make fmt                     # ruff check --fix . && ruff format .
 uv run pytest                # cell-marked tests excluded by default (pyproject addopts)
 uv run pytest tests/test_session.py::test_name    # one test
@@ -110,13 +110,13 @@ exception has a shape worth memorising: **core invokes declared gates, never too
   raises: **declared, never detected**. `session.py`, `worktree.py`, `proxy.py`.
 - `saffron/gates/` — `contract.py` is the gate JSON schema and the whole repo-agnostic
   surface; `runner.py` execs gates host-side (`LocalExecutor` / `CellExecutor`);
-  `baseline.py` subtracts pre-existing failures; `core/` holds the host-side gates
-  (`scope`, `integrity` read the diff; `census` reads other gates' results).
+  `baseline.py` subtracts pre-existing failures; `core/` holds the eight host-side gates.
+  `scope` and `integrity` read the diff, `census` reads other gates' results, and `committed`,
+  `criteria`, `revert`, `size` and `witness` sit beside them.
 - `saffron/phases/` — `implement.py` (plan checkpoint + repair turns), `review.py` (lenses),
-  `rebut.py`.
+  `rebut.py`, `package.py`.
 - `saffron/task.py` — `run_task` drives one task end to end, a cell *and* PACKAGE, and is the
-  **only** caller of `run_one_cell` (gated). `saffron cell` and `saffron batch` are adapters
-  over it; they built the same sixty lines twice until the copies drifted.
+  **only** caller of `run_one_cell` (gated). `saffron cell` and `saffron batch` adapt over it.
 - `saffron/agents/` — `context.py` injects `CONTEXT.md` sections per phase; `artifacts.py`
   the extraction turn and plan validation; `findings.py` anchors critic findings to the diff.
 - `images/agent_runner.py` — the **only** file permitted to import the Agent SDK (gated). It runs
@@ -131,7 +131,7 @@ exception has a shape worth memorising: **core invokes declared gates, never too
 
 ### Invariants worth knowing before editing
 
-The four marked **(gated)** are enforced by `.saffron/rules/`, run by the `structure` gate and
+The five marked **(gated)** are enforced by `.saffron/rules/`, run by the `structure` gate and
 a prek hook; the rest are still prose. Promote one when you find it broken — `ast-grep test`
 means a rule ships with the mutant that proves it fires. Both pass `-c .saffron/sgconfig.yml`
 rather than letting ast-grep find a config by walking, so the file naming the rules is inside
@@ -144,17 +144,19 @@ and its `r`/`f` prefix, and anchoring on those read only the spellings the autho
 - **The `tool` field** separates a gate that ran and passed from one that never ran. It must be
   obtained *by executing* the tool, never a string literal (§5.4, Appendix H). **(gated over
   Python; `.saffron/gates/format` builds its contract in `sh`, which no rule reads — item 77)**
+- **A skip is spelled in full where it is used.** `integrity` reads `.saffron/policy.yaml`'s
+  suppression tokens as *text*. One bound to a name, imported, or named by string spells none of
+  them, so every later use passes (item 112). **(gated over all Python, not only `tests/`)**
 - **One module drives a task.** `saffron/task.py` is the only caller of `run_one_cell`; both
   commands go through it. Two copies is what let the unattended path stop recording the
   ceilings that bound each task. **(gated over `saffron/`)**
 - **`error` ≠ `fail`.** `fail` means the repo's code is wrong; `error` means the gate broke,
   aborts the attempt, and is charged to nobody. Never collapse them.
-- **Baseline subtraction counts.** Identities collide legitimately — one baseline failure
-  cancels one head failure, not all of them. Never compare on line number.
 - **`census` compares sets; the baseline subtraction counts.** They sit beside each
   other and the rule is opposite, for a reason: failure identities collide
-  legitimately, so one baseline failure cancels one head failure — but a test name
-  is unique in a suite, so removal is a set difference. Do not make them match.
+  legitimately, so one baseline failure cancels one head failure, not all of them, and
+  never on line number — but a test name is unique in a suite, so removal is a set
+  difference. Do not make them match.
 - **Control artifacts are extracted and hashed the moment they are produced**, never re-read
   from `/work`. A file left in the workspace is a claim, not a record.
 - **Lenses are host-invoked fresh sessions, never subagents.** A lens that runs only when the
@@ -185,8 +187,8 @@ and its `r`/`f` prefix, and anchoring on those read only the spellings the autho
   guarding a property already true, against a mutant that breaks it.
 - Commit subjects are lowercase `type(scope): what changed`, written as a sentence about the
   defect rather than the file — see `git log`.
-- A pull request body you write follows `.github/pull_request_template.md`: `gh pr create
-  --body` skips the template, so read it first.
+- A pull request body you write follows `.github/pull_request_template.md`: `gh pr create --body`
+  skips the template, so read it first.
 
 ## Agent skills
 
