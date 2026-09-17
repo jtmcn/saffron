@@ -147,6 +147,12 @@ def _prepare(text: str) -> str:
 _BARE_ORDINAL = re.compile(r"\A\d+\.\Z")
 
 
+def _at_line_start(body: str, offset: int) -> bool:
+    """Only spaces or tabs precede `offset` on its own line."""
+    line_start = body.rfind("\n", 0, offset) + 1
+    return not body[line_start:offset].strip()
+
+
 def _sentences(body: str) -> Iterator[_Sentence]:
     pos = 0
     carry_item = False
@@ -159,8 +165,14 @@ def _sentences(body: str) -> Iterator[_Sentence]:
         is_item = item is not None or carry_item
         carry_item = False
         # `_BREAK`'s own sentence-end split fires on a numbered marker's period
-        # before its text arrives; queue the marker instead of losing it.
-        if not is_item and match is not None and _BARE_ORDINAL.fullmatch(text):
+        # before its text arrives; queue the marker instead of losing it, but
+        # only at a line start — an orphan "N." mid-sentence is not a list item.
+        if (
+            not is_item
+            and match is not None
+            and _BARE_ORDINAL.fullmatch(text)
+            and _at_line_start(body, offset)
+        ):
             carry_item = True
         elif len(text.split()) >= 2:
             yield _Sentence(offset, text, is_item)

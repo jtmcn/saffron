@@ -97,6 +97,11 @@ def test_a_numbered_reference_still_splits_the_sentence():
     assert "sentence-length" not in _codes(text)
 
 
+def test_a_mid_sentence_ordinal_is_not_read_as_a_list_item():
+    text = "The count is 3. 4. Stop the gate when it fails."
+    assert "trailing-condition" not in _codes(text, ".saffron/specs/SA-0001-x.md")
+
+
 def test_a_list_item_is_its_own_sentence():
     items = "".join(f"- {'word ' * 15}end\n" for _ in range(3))
     assert "sentence-length" not in _codes(items)
