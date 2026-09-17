@@ -7,7 +7,6 @@ depends_on: []
 touches:
   - saffron/phases/package.py
   - saffron/repos/mirror.py
-  - saffron/cell/worktree.py
   - tests/test_package.py
   - tests/test_mirror.py
 forbidden:
@@ -20,6 +19,7 @@ forbidden:
   - harness/**
   - saffron/cell/session.py
   - saffron/cell/runtime.py
+  - saffron/cell/worktree.py
   - saffron/gates/**
   - saffron/agents/**
   - saffron/report/**
@@ -125,15 +125,19 @@ forbidden.
 **The cell's listing** (`worktree.changed_files`). `SA-0082` fixed it, and a
 preserves witness holds it.
 
-**`saffron/cell/worktree.py`.** It is in `touches` only because both mutants
-are applied there. Do not edit `DIFF_FLAGS`.
+**`saffron/cell/worktree.py`.** Both mutants are applied there, which needs
+no `touches` entry, and the file is forbidden: do not edit `DIFF_FLAGS`. It
+also keeps this spec clear of `SA-0096`, which edits that file.
 
 ## Notes for the agent
 
 **Both reads take `DIFF_FLAGS`, not a copied flag.** The mutants remove the
 flag from `DIFF_FLAGS` itself, so a read that spells the flag out on its own
 survives them, and `witness` fails. Copies drifting apart is how these two
-reads were missed (backlog item 89). `saffron.repos` importing
+reads were missed (backlog item 89). Each witness must build a real gitlink
+and observe the listing or the push, never the argv a read passes to git: a
+test that only checks the flag is in the arguments dies to the mutant without
+proving that `scope` sees the path. `saffron.repos` importing
 `saffron.cell.worktree` creates no cycle: `worktree` imports only
 `saffron.cell.runtime` and `saffron.intake`, and `saffron/repos/image.py`
 already imports from `saffron.cell`.

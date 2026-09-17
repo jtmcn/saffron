@@ -1819,8 +1819,9 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
     """Re-measured 2026-09-16, a thirty-second time: `SA-0096`, `SA-0097` and
-    `SA-0098` queued for backlog items 114, 115 and 63. None edits
-    `session.py` or another queued spec's files, so all three are independent
+    `SA-0098` queued for backlog items 114, 115 and 63. No two queued specs
+    share a `touches` file (`SA-0097` applies its mutants to `worktree.py`,
+    which `SA-0096` edits, without listing it), so all three are independent
     and join the candidates behind `SA-0093`: every one is priority 2, and ties
     run by id. The refusals are unchanged.
 

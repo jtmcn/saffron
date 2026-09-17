@@ -7,7 +7,6 @@ depends_on: []
 touches:
   - saffron/mutation.py
   - saffron/cell/worktree.py
-  - saffron/gates/core/witness.py
   - tests/test_mutation.py
   - tests/test_worktree.py
   - tests/test_witness_gate.py
@@ -21,6 +20,7 @@ forbidden:
   - harness/**
   - saffron/cell/session.py
   - saffron/cell/runtime.py
+  - saffron/gates/**
   - saffron/phases/**
   - saffron/agents/**
   - saffron/report/**
@@ -124,8 +124,9 @@ they are.
 **`gate_summary` and the lens prompt.** `saffron/phases/**` is forbidden.
 Fix it where the reason is built, in the two appliers.
 
-**`saffron/gates/core/witness.py`.** It is in `touches` only because the
-third criterion's mutant is applied there. You should not need to edit it.
+**`saffron/gates/core/witness.py`.** The third criterion's mutant is
+applied there, which needs no `touches` entry, and `saffron/gates/**` is
+forbidden, so `scope` refuses an edit to it.
 
 ## Notes for the agent
 
@@ -141,11 +142,11 @@ reasons.
 
 **"No part of" means no fragment either.** A reason that keeps the first ten
 characters of the find text still discloses the edit, so the witness must fail
-on that. Start the find and replace text with a distinctive token, such as
-`find="QRVT_FIND_SENTINEL_7 = 1"` and `replace="QRVT_REPLACE_SENTINEL_7 = 2"`,
-and assert that a short leading fragment (`QRVT_`) is absent as well as each
-whole string. A token in the middle of the text does not work: a truncated
-prefix that stops before it passes. Make sure the fragment is not also part of
+on that, and so must one that keeps the last ten. Start *and* end the find
+and replace text with a distinctive fragment, such as
+`find="QRVT_FIND = QRVT_"` and `replace="QRVT_REPLACE = QRVT_"`, and assert
+that `QRVT_` is absent as well as each whole string. A token only in the
+middle does not work: a prefix or suffix that stops short of it passes. Make sure the fragment is not also part of
 the file name, the witness id or a claim, or the assertion cannot pass at all.
 
 **Two existing assertions state the old behaviour, and you must invert them.**
