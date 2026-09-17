@@ -1,16 +1,16 @@
 ---
 id: 141
 title: The gate-only cell's suite is the one judged gate suite that lands in no record
-status: open
+status: done
 tier: 1
 filed: 2026-09-16
+closed: 2026-09-17
 by_hand: false
 specs: [SA-0089, SA-0095]
-prs: [282]
+prs: [282, 307]
 commits: []
-awaiting: [307]
 cites: [§5.4, §5.5]
-related: [118, 140]
+related: [118, 140, 160]
 ---
 
 ## Problem
@@ -42,6 +42,14 @@ after the fact, which table the lenses were shown.
 
 ## Record
 
-**2026-09-17, open as PR #307**, `SA-0095` in the spec loop's run 5 (stack
+**Closed 2026-09-17 by PR #307**, `SA-0095` in the spec loop's run 5 (stack
 #308): the Gate-only cell's results land in `lens-gates.json`, for clean,
-aborted and drifted suites, before any lens. The ledger row stays open here.
+aborted and drifted suites, before any lens. That is the first of the two arms this
+item offered, and it is the arm that buys the property. A reader can now tell,
+after the fact, which table the lenses were shown.
+
+The ledger row was the other arm of an `or`, not a second thing owed. It is not
+taken. Taking it first needs an answer to what the suite belongs to. §4.1 sets
+exactly one of `attempt_id` and `run_id`. The Gate-only cell's suite is neither
+an implementer attempt nor the run's baseline, so no row shape fits it yet.
+Item 160 carries that question.
