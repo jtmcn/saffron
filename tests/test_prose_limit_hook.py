@@ -101,7 +101,7 @@ def _edited(repo: Path, file_path: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_an_edit_that_adds_a_finding_is_reported_to_the_model(tmp_path):
+def test_an_edit_that_adds_a_hit_is_reported_to_the_model(tmp_path):
     repo = _repo(tmp_path, {"README.md": "Short.\n"})
     (repo / "README.md").write_text("Short.\n\n" + LONG_A + "\n")
     done = _edited(repo, repo / "README.md")
@@ -126,7 +126,7 @@ def test_a_clean_edit_and_a_file_elsewhere_say_nothing(tmp_path):
     assert _edited(repo, outside).returncode == 0
 
 
-def test_an_edit_beside_an_untouched_finding_says_nothing(tmp_path):
+def test_an_edit_beside_an_untouched_hit_says_nothing(tmp_path):
     repo = _repo(tmp_path, {"README.md": "The agent works well — it helps a lot.\n"})
     (repo / "README.md").write_text("The agent works nicely — it helps a lot.\n")
     done = _edited(repo, repo / "README.md")

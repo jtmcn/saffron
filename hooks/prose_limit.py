@@ -6,7 +6,7 @@ rule than its `HEAD` version. A new file compares against zero, and a rename
 against its old path. The gate gets the same limit from baseline subtraction.
 Standard library only, like the gate it loads.
 
-With `--edited`, a Claude Code PostToolUse hook: the edited file's new findings
+With `--edited`, a Claude Code PostToolUse hook: the edited file's new hits
 for both gates go to stderr with exit 2, which Claude Code shows the model.
 PostToolUse cannot block, because the edit already happened.
 """
@@ -116,7 +116,7 @@ def commit_time(root: Path) -> int:
 
 
 def edit_time(root: Path, event: dict[str, Any]) -> int:
-    """Print the edited file's new findings for the model. The edit already happened."""
+    """Print the edited file's new hits for the model. The edit already happened."""
     tool_input = event.get("tool_input")
     if not isinstance(tool_input, dict):
         return 0
@@ -137,17 +137,17 @@ def edit_time(root: Path, event: dict[str, Any]) -> int:
     old_text = head.stdout if head.returncode == 0 else None
     new_text = file_path.read_text(encoding="utf-8", errors="replace")
     # Only report a code whose count actually rose, like `commit_time` does:
-    # an untouched finding sharing its line with an edit is not new.
+    # an untouched hit sharing its line with an edit is not new.
     lines = []
     for gate in prose.GATES:
         risen = rises(prose, root, gate, path, old_text, new_text)
-        for f in new_findings(prose, root, gate, path, old_text, new_text):
+        for f in new_hits(prose, root, gate, path, old_text, new_text):
             if f.code in risen:
                 lines.append(f"{path}:{f.line}: {f.code}: {f.excerpt}")
     if not lines:
         return 0
     print(
-        "New house-style findings (.saffron/gates/prose.py):",
+        "New house-style hits (.saffron/gates/prose.py):",
         *lines,
         sep="\n",
         file=sys.stderr,
