@@ -117,8 +117,9 @@ exception has a shape worth memorising: **core invokes declared gates, never too
   `rebut.py`, `package.py`.
 - `saffron/task.py` — `run_task` drives one task end to end, a cell *and* PACKAGE, and is the
   **only** caller of `run_one_cell` (gated). `saffron cell` and `saffron batch` adapt over it.
-- `saffron/agents/` — `context.py` injects `CONTEXT.md` sections per phase; `artifacts.py`
-  the extraction turn and plan validation; `findings.py` anchors critic findings to the diff.
+- `saffron/agents/` — `context.py` injects `CONTEXT.md` sections per phase and loads the
+  turn prompts. `artifacts.py` is the extraction turn and plan validation; `findings.py`
+  anchors critic findings to the diff.
 - `images/agent_runner.py` — the **only** file permitted to import the Agent SDK (gated). It runs
   inside the cell and emits Saffron's own event schema on stdout, one JSON line per event.
   The host never sees an SDK type.
