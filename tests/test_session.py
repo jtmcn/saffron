@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import ipaddress
 import itertools
 import json
 import shutil
@@ -10,6 +11,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -19,7 +21,7 @@ from saffron.cell.worktree import DIFF_FLAGS
 from saffron.events import Agent, Attempt, Baseline, PhaseStart, describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
-from saffron.gates.suite import CellTree, SuiteComparison, SuiteRun
+from saffron.gates.suite import CellTree, GateSuite, SuiteComparison, SuiteRun
 from saffron.intake import parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
@@ -676,6 +678,7 @@ def _stub_the_runtime(
     patch=_DIFF,
     changed=("src/x.py",),
     subjects=("the agent's work",),
+    networks_on_subnet: dict[str, list[str]] | None = None,
 ):
     """Everything past the ledger writes, stubbed. No test reached here before,
     which is why a shadowed volume name survived lint and 247 green tests."""
@@ -702,12 +705,25 @@ def _stub_the_runtime(
         if name != name.lower():
             raise runtime.CellRuntimeError(f"invalid network name: {name}")
         cell.networks_created.append((name, subnet))
+        # On the same shared timeline as `_remove`'s `removed:` entries, so a
+        # test can assert a removal happened *before* this create rather than
+        # merely that both happened somewhere.
+        cell.order.append(f"created:network:{name}")
 
     monkeypatch.setattr("saffron.cell.runtime.create_network", _create_network)
     monkeypatch.setattr("saffron.cell.runtime.create_volume", lambda *a, **k: None)
 
+    # Per subnet, so a pre-clean asking about the wrong one finds nothing;
+    # empty by default, or every twice-removed count gains a third.
+    _holders = {k: list(v) for k, v in (networks_on_subnet or {}).items()}
+
+    def _networks_on_subnet(subnet, exclude=""):
+        return [name for name in _holders.get(subnet, []) if name != exclude]
+
+    monkeypatch.setattr("saffron.cell.runtime.networks_on_subnet", _networks_on_subnet)
+
     # The critic cell's own three, none stubbed before it existed (SA-0087):
-    # the proxy address `critic_cell` reads, and the two calls
+    # the proxy address `_drive_cell` reads for it, and the two calls
     # `_apply_and_commit_patch` makes inside it. All default to a clean
     # success; a test overrides `exec_stream` alone to script an apply that
     # cannot land.
@@ -3247,6 +3263,93 @@ def test_the_critic_cell_is_torn_down_when_review_ends(monkeypatch, tmp_path):
     assert raising_cell.removed.count(("volume", _CRITIC_STATE)) == 2
 
 
+def test_critic_cell_creates_its_own_network_only_when_it_is_not_given_one(
+    monkeypatch, tmp_path
+):
+    """`critic_cell` takes the network it runs on as an explicit, keyword-only
+    argument with no default (backlog item 140). Given a name, it joins that
+    network and creates and removes none of its own. Given `None`, it makes
+    one on a subnet that does not overlap the task's own `saffron-cells`
+    (`runtime.DEFAULT_SUBNET`) and removes it in the same `finally`. Today
+    `critic_cell` takes no such argument at all, so both calls below raise
+    `TypeError` before either assertion is ever reached."""
+    cell = _stub_the_runtime(monkeypatch)
+    spec = _spec()
+    repo = tmp_path / "repo"
+    mirror_path = tmp_path / "mirror"
+    gates_dir = tmp_path / "gates"
+
+    with session.critic_cell(
+        spec=spec,
+        repo=repo,
+        mirror=mirror_path,
+        network="an-existing-network",
+        env={},
+        gates_dir=gates_dir,
+        patch=_DIFF,
+        created=set(),
+        note=lambda *a: None,
+    ):
+        pass
+    assert cell.networks_created == []
+    assert ("network", "an-existing-network") not in cell.removed
+    # Which network the container was put on, not only which were made:
+    # Appendix I's cell reported success on a different one.
+    assert [w["network"] for w in cell.worktrees] == ["an-existing-network"]
+
+    cell2 = _stub_the_runtime(monkeypatch)
+    with session.critic_cell(
+        spec=spec,
+        repo=repo,
+        mirror=mirror_path,
+        network=None,
+        env={},
+        gates_dir=gates_dir,
+        patch=_DIFF,
+        created=set(),
+        note=lambda *a: None,
+    ):
+        pass
+    assert len(cell2.networks_created) == 1
+    created_name, created_subnet = cell2.networks_created[0]
+    assert not ipaddress.ip_network(created_subnet).overlaps(
+        ipaddress.ip_network(runtime.DEFAULT_SUBNET)
+    )
+    # Twice, never `in`: `critic_cell` pre-cleans the same name before it
+    # creates anything, so membership is satisfied with the whole teardown
+    # gone — which the count below proves rather than assumes.
+    assert cell2.removed.count(("network", created_name)) == 2
+    assert [w["network"] for w in cell2.worktrees] == [created_name]
+
+
+def test_critic_cell_carries_the_environment_its_caller_asked_for(
+    monkeypatch, tmp_path
+):
+    """`critic_cell` takes the container environment as an argument too
+    (backlog item 140), so a caller behind the proxy and a caller with only
+    the repo's declared gate env both get it from the same function. Today
+    the proxy address is read inside `critic_cell` and the environment is
+    built there, so passing `env=` at all raises `TypeError` before the
+    assertion below runs."""
+    cell = _stub_the_runtime(monkeypatch)
+    spec = _spec()
+
+    with session.critic_cell(
+        spec=spec,
+        repo=tmp_path / "repo",
+        mirror=tmp_path / "mirror",
+        network="an-existing-network",
+        env={"SAFFRON_GATE_MARK": "1"},
+        gates_dir=tmp_path / "gates",
+        patch=_DIFF,
+        created=set(),
+        note=lambda *a: None,
+    ) as container:
+        pass
+    (worktree_call,) = [w for w in cell.worktrees if w["container"] == container]
+    assert worktree_call["env"] == {"SAFFRON_GATE_MARK": "1"}
+
+
 def test_the_lenses_are_shown_a_gate_table_computed_outside_the_implementers_cell(
     monkeypatch, tmp_path
 ):
@@ -3295,6 +3398,171 @@ def test_the_lenses_are_shown_a_gate_table_computed_outside_the_implementers_cel
     assert len(lens_prompts) == len(review.LENSES)
     assert all("the gate cell's own toolchain" in p for p in lens_prompts)
     assert all("the implementer's own toolchain" not in p for p in lens_prompts)
+
+
+def _drive_gate_table_scenario(monkeypatch, tmp_path, *, case):
+    """Shared body for the two scenarios
+    `test_the_gate_table_the_lenses_were_shown_lands_beside_the_baseline`
+    covers: `clean` (the suite feeds the lenses), and `aborted` and `drifted`
+    (no lens is bought, but the record is still left). Not parametrised: the
+    spec names the witness's bare node id."""
+    forged = [
+        GateResult(
+            gate="tests",
+            status="pass",
+            tool="pytest 8.3.2",
+            summary="reported by the implementer's own toolchain",
+        )
+    ]
+    if case == "aborted":
+        gate_cell_suite = [
+            GateResult(
+                gate="tests", status="error", tool="pytest 9.1.1", summary="boom"
+            )
+        ]
+    elif case == "drifted":
+        # A different tool from the baseline's is drift, not a failure.
+        gate_cell_suite = [
+            GateResult(gate="tests", status="pass", tool="pytest 9.9.9", summary="x")
+        ]
+    else:
+        gate_cell_suite = [
+            GateResult(
+                gate="tests",
+                status="pass",
+                tool="pytest 8.3.2",
+                summary="reported by the gate cell's own toolchain",
+            )
+        ]
+    cell = _stub_the_runtime(
+        monkeypatch, suites=(forged, forged), gate_cell_suite=gate_cell_suite
+    )
+    returned = []
+    real_suite = session._gate_cell_suite
+
+    def _recording_suite(**kwargs):
+        returned.append(real_suite(**kwargs))
+        return returned[-1]
+
+    monkeypatch.setattr(session, "_gate_cell_suite", _recording_suite)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        policy="gates:\n  tests: {}\n",
+        gates=("tests",),
+    )
+    assert outcome.state == ("READY_FOR_REVIEW" if case == "clean" else "GATE_ERROR")
+    task_dir = tmp_path / "out" / "SY-1"
+    assert (task_dir / "baseline.json").exists()
+    (comparison,) = returned
+    assert bool(comparison.aborted) == (case == "aborted")
+    assert bool(comparison.drift) == (case == "drifted")
+    written = (task_dir / "lens-gates.json").read_text()
+    # Every result the suite returned, byte for byte, indent included.
+    assert written == json.dumps(
+        [r.model_dump() for r in comparison.run.results], indent=2
+    )
+    recorded = json.loads(written)
+    assert len(recorded) > 1
+    (tests_result,) = [r for r in recorded if r["gate"] == "tests"]
+    assert tests_result == gate_cell_suite[0].model_dump()
+    assert tests_result["summary"] != "reported by the implementer's own toolchain"
+
+
+def test_the_gate_table_the_lenses_were_shown_lands_beside_the_baseline(
+    monkeypatch, tmp_path
+):
+    """The Gate-only cell's suite is written to `lens-gates.json` beside
+    `baseline.json`, whole and byte for byte, whether it came back clean,
+    aborted or drifted. Its `tests` entry differs from the implementer's, so
+    a file holding the wrong suite fails too."""
+    for case in ("clean", "aborted", "drifted"):
+        _drive_gate_table_scenario(monkeypatch, tmp_path / case, case=case)
+
+
+def test_the_lens_gate_table_is_written_before_the_first_lens_runs(
+    monkeypatch, tmp_path
+):
+    """Criterion 2: the write happens before the first lens turn, not after
+    the lens block finishes — so a REVIEW cut off partway (a wall, a budget
+    stop, an exception) still leaves the table its lenses were shown. `_drive`
+    calls `next(scripted, ...)` at the exact moment each turn is requested, so
+    a generator `turns` can observe the file's state at that moment: read
+    `lens-gates.json` from inside the generator, between yielding the
+    implement turn and yielding the first lens turn, and stash what was
+    found. Nothing is inferred from `cell.order`, which records removals and
+    turns but never a file write."""
+    honest = [
+        GateResult(
+            gate="tests",
+            status="pass",
+            tool="pytest 8.3.2",
+            summary="reported by the gate cell's own toolchain",
+        )
+    ]
+    cell = _stub_the_runtime(monkeypatch, gate_cell_suite=honest)
+    task_dir = tmp_path / "out" / "SY-1"
+    seen_before_first_lens: list[list[dict]] = []
+
+    def _turns():
+        yield _turn(_block(_PLAN))
+        yield _turn()
+        # The implement turn above is the last non-lens turn; the file must
+        # already exist by the moment the first lens turn is requested.
+        seen_before_first_lens.append(
+            json.loads((task_dir / "lens-gates.json").read_text())
+        )
+        for _ in range(len(review.LENSES)):
+            yield _turn(_block({"findings": []}))
+
+    outcome, _ledger = _drive(monkeypatch, tmp_path, cell=cell, turns=_turns())
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert len(seen_before_first_lens) == 1
+    (tests_result,) = [r for r in seen_before_first_lens[0] if r["gate"] == "tests"]
+    assert tests_result == honest[0].model_dump()
+
+
+def test_the_lens_gate_suite_runs_inside_the_one_cell_lifecycle(monkeypatch, tmp_path):
+    """The claim backlog item 140 makes is that one lifecycle serves both
+    callers: patch `critic_cell` itself and show the gate suite ran against
+    the container it yielded, not a second one `_gate_cell_suite` built for
+    itself. Reverted, `_gate_cell_suite` never calls `critic_cell` at all, so
+    the patched stand-in below is never entered and this fails honestly."""
+    calls: list[dict] = []
+
+    @contextlib.contextmanager
+    def _fake_critic_cell(**kwargs):
+        calls.append(kwargs)
+        yield "fake-gate-container"
+
+    monkeypatch.setattr(session, "critic_cell", _fake_critic_cell)
+
+    captured: dict = {}
+
+    class _FakeSuite:
+        def against(self, tree, baseline):
+            captured["container"] = tree.container
+            return SuiteComparison(SuiteRun([], "standard", frozenset()))
+
+    spec = _spec()
+    comparison = session._gate_cell_suite(
+        spec=spec,
+        repo=tmp_path / "repo",
+        mirror=tmp_path / "mirror",
+        gates_dir=tmp_path / "gates",
+        thread_env={"SAFFRON_GATE_MARK": "1"},
+        patch=_DIFF,
+        suite=cast(GateSuite, _FakeSuite()),
+        baseline=SuiteRun([], "standard", frozenset()),
+        created=set(),
+        note=lambda *a: None,
+    )
+    assert calls, "critic_cell was never called"
+    assert calls[0]["network"] is None
+    assert captured["container"] == "fake-gate-container"
+    assert comparison.new_failures == ()
 
 
 def test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs(
@@ -3377,6 +3645,49 @@ def test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs
         ]
         assert indices, (kind, name)
         assert all(i < first_lens_turn for i in indices), (kind, name)
+
+
+def test_the_gate_cells_pre_clean_removes_a_leftover_saffron_network_on_its_subnet_and_nothing_else(
+    monkeypatch, tmp_path
+):
+    """The by-name pre-clean only ever clears a leftover under *this* spec's
+    own name; the collision `create_network` raises on is by subnet, one name
+    over (backlog item 143). A SIGKILLed task of a *different* spec leaves
+    `saffron-gate-net-other-spec` on the Gate-only cell's subnet, and this
+    task's pre-clean must remove it — by value, before its own
+    create — while leaving a non-`saffron-`-prefixed holder on the same
+    subnet alone: a single holder cannot tell the prefix filter from a
+    pre-clean that removes every holder it is handed."""
+    other_spec_network = "saffron-gate-net-other-spec"
+    other_saffron_network = "saffron-leftover"
+    unrelated_network = "operator-net"
+    cell = _stub_the_runtime(
+        monkeypatch,
+        networks_on_subnet={
+            # Not first, and not all `saffron-gate-net-`: a filter narrower
+            # than the prefix, or a first-holder-only loop, still fails.
+            runtime.SUBNETS["gate"]: [
+                unrelated_network,
+                other_spec_network,
+                other_saffron_network,
+            ]
+        },
+    )
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+
+    assert ("network", other_spec_network) in cell.removed
+    assert ("network", other_saffron_network) in cell.removed
+    assert ("network", unrelated_network) not in cell.removed
+
+    created_at = cell.order.index(f"created:network:{_GATE_NETWORK}")
+    for holder in (other_spec_network, other_saffron_network):
+        assert cell.order.index(f"removed:network:{holder}") < created_at
 
 
 def test_the_lens_gate_cell_is_torn_down_when_its_own_suite_raises(
@@ -3654,6 +3965,110 @@ def test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch(
     assert [c for c, _ in cell.export_calls].count(_CRITIC_CONTAINER) == 2
     # Both critic cell instances — REVIEW's and REBUT's — were torn down.
     assert cell.removed.count(("container", _CRITIC_CONTAINER)) == 4
+
+
+def test_every_critic_cell_rebuts_included_is_behind_the_proxy(monkeypatch, tmp_path):
+    """REBUT's verdict lenses need the API as much as REVIEW's do, and since
+    item 140 the caller hands `critic_cell` its env: REVIEW's site is the only
+    one the image test drives, so REBUT's is checked here."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_through_rebut(
+            _turn("Fixed."),
+            _turn(
+                _block(
+                    {
+                        "rebuttals": [
+                            {"finding": 1, "action": "fixed", "argument": "committed"}
+                        ]
+                    }
+                )
+            ),
+            _turn(
+                _block(
+                    {
+                        "verdicts": [
+                            {"finding": 1, "verdict": "withdrawn", "reason": "fixed"}
+                        ]
+                    }
+                )
+            ),
+        ),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    critics = [w for w in cell.worktrees if w["container"] == _CRITIC_CONTAINER]
+    # REVIEW's and REBUT's: one alone is the half already covered.
+    assert len(critics) == 2
+    for critic in critics:
+        assert critic["env"]["HTTPS_PROXY"] == "http://10.88.0.9:3128"
+        assert "ANTHROPIC_API_KEY" not in critic["env"]
+
+
+def test_an_unreadable_proxy_address_at_review_is_infrastructure(monkeypatch, tmp_path):
+    """`cell_env` cannot take `None`, so REVIEW raises rather than building a
+    critic cell with no route to the API. `cell_up` reads the same address, so
+    it goes unreadable only once IMPLEMENT's two turns are spent."""
+    cell = _stub_the_runtime(monkeypatch)
+    monkeypatch.setattr(
+        "saffron.cell.runtime.container_ip",
+        lambda *a, **k: None if len(cell.turns) >= 2 else "10.88.0.9",
+    )
+    with pytest.raises(runtime.CellRuntimeError, match="proxy's address"):
+        _drive(
+            monkeypatch,
+            tmp_path,
+            cell=cell,
+            turns=[_turn(_block(_PLAN)), _turn()],
+        )
+    assert not [w for w in cell.worktrees if w["container"] == _CRITIC_CONTAINER]
+
+
+def test_a_gate_only_cells_network_goes_last_and_is_reported_if_it_survives(
+    monkeypatch, tmp_path
+):
+    """A network with a container still on it will not go, so it is removed
+    after the container; and it is in `created` before its create, so a
+    removal that fails is reported rather than silently leaked."""
+    cell = _stub_the_runtime(monkeypatch)
+    created: set[str] = set()
+    notes: list[tuple[str, bool, str]] = []
+
+    def _stuck_network(name):
+        cell.removed.append(("network", name))
+        cell.order.append(f"removed:network:{name}")
+        return runtime.Completed(1, "", "network has active endpoints")
+
+    def _note(step, ok, detail):
+        notes.append((step, ok, detail))
+
+    monkeypatch.setattr("saffron.cell.runtime.remove_network", _stuck_network)
+    with session.critic_cell(
+        spec=_spec(),
+        repo=tmp_path / "repo",
+        mirror=tmp_path / "mirror",
+        network=None,
+        env={},
+        gates_dir=tmp_path / "gates",
+        patch=_DIFF,
+        created=created,
+        note=_note,
+    ):
+        pass
+    last_container = max(
+        i
+        for i, entry in enumerate(cell.order)
+        if entry == f"removed:container:{_GATE_CONTAINER}"
+    )
+    assert cell.order[-1] == f"removed:network:{_GATE_NETWORK}"
+    assert len(cell.order) - 1 > last_container
+    assert _GATE_NETWORK in created
+    assert [detail.split(" survived")[0] for _, _, detail in notes] == [
+        f"network {_GATE_NETWORK}"
+    ]
 
 
 def test_the_verdict_prompt_carries_the_diff_the_lenses_were_shown(

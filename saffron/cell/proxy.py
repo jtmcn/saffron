@@ -18,7 +18,10 @@ PROXY_PORT = 3128
 # asserts it: this is what preflight probes, that is what lets it through.
 UPSTREAM_HOST = "api.anthropic.com"
 EGRESS_NETWORK = "saffron-egress"
-EGRESS_SUBNET = "10.89.0.0/24"
+# Drawn from the one declaration (runtime.SUBNETS, backlog item 143), never a
+# second literal — a stale copy here would still let this module claim a
+# subnet nothing else agrees it owns.
+EGRESS_SUBNET = runtime.SUBNETS["egress"]
 
 
 def _ensure_egress_network() -> None:

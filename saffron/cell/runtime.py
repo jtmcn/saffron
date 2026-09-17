@@ -160,6 +160,14 @@ def probe() -> str | None:
 
 DEFAULT_SUBNET = "10.88.0.0/24"
 
+# Every subnet Saffron allocates, one entry per distinct value (item 143).
+# `reverify` shares "cells": PACKAGE runs after the task's cell is down.
+SUBNETS: dict[str, str] = {
+    "cells": DEFAULT_SUBNET,  # saffron-cells, the task's own network
+    "egress": "10.89.0.0/24",  # saffron-egress, the proxy's network
+    "gate": "10.90.0.0/24",  # saffron-gate-net-<spec>, the Gate-only cell's
+}
+
 # §4.3's idle and completion bounds. Idle has to clear the longest single tool
 # call an agent makes — a gate suite runs minutes and emits nothing until it
 # returns — so it is the stall bound, not the impatience one. Completion is
@@ -315,8 +323,9 @@ def networks_on_subnet(subnet: str, exclude: str = "") -> list[str]:
     Overlap and not equality, because that is the failure being explained: the
     runtime rejects `10.89.0.128/25` against a holder on `10.89.0.0/24` with the
     same wording, and an equality test names nobody in exactly the case an
-    operator cannot work out by eye. Empty when the listing itself fails — this
-    only ever adds detail to an error already being raised."""
+    operator cannot work out by eye. Empty when the listing itself fails: the
+    error `create_network` is raising goes undecorated, and the Gate-only
+    cell's pre-clean removes nothing, leaving that create to raise instead."""
     done = _call([dialect().binary, "network", "list"], 60)
     if done.returncode != 0:
         return []
