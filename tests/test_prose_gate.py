@@ -97,6 +97,12 @@ def test_a_quoted_condition_is_a_mention_in_a_spec_instruction():
     assert "trailing-condition" not in _codes(item, ".saffron/specs/SA-0001-x.md")
 
 
+def test_a_quote_wrapped_onto_the_next_line_is_still_a_mention():
+    assert _codes('The rule flags "a word that\nshould go" in prose.') == []
+    # One break only: a stray quote cannot hide a paragraph.
+    assert _codes('A stray " quote.\nThe gate\nshould pass. "End.') == ["hedge"]
+
+
 def test_a_numbered_item_is_read_as_its_own_list_item():
     assert _codes(
         "1. Run the gate when the cell stops.\n", ".saffron/specs/SA-0001-x.md"
