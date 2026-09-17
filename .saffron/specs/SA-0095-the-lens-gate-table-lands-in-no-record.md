@@ -125,14 +125,12 @@ It is `json.dumps([r.model_dump() for r in baseline.results], indent=2)` into
 `task_dir`. Match it: the same serialisation, the same indent, a sibling name.
 A reader comparing the two files should not have to learn a second format.
 
-**`task_dir` has to reach the function that runs the gate suite, and today it
-does not.** The call site in `_drive_cell` has it in scope. Pass it as an
-argument rather than recomputing it: `_drive_cell` builds `task_dir` once,
-hoisted above its own `try` so that teardown can export there too, and a second
-derivation of the same path is a second thing to keep in step. If `SA-0093` has
-left the suite running at the call site itself, where `task_dir` is already in
-scope, there is no argument to add — read the code at your base before deciding
-which.
+**Write it at the call site in `_drive_cell`, and add no argument.**
+`_gate_cell_suite` hands its comparison back to `_drive_cell`, where `task_dir`
+is already in scope (built once, above its own `try`). Write after the
+`try`/`except` around that call and before the aborted-or-drifted branch,
+guarded only by the comparison not being `None`. Do not give `_gate_cell_suite`
+a `task_dir` parameter: `SA-0093`'s witness calls it without one.
 
 **Write the file before the lenses start, not after they finish.** That is
 criterion 2 and it is the whole value of the record: a REVIEW that ends on a
@@ -143,10 +141,13 @@ shown. `tests/test_session.py` already has tests that stop the lenses partway
 `cell.order` alone cannot show "before": it records removals and agent turns,
 never a file write. And "the file exists once the test ends" is not enough. A
 write in a `finally` around the lens block runs *after* the lenses and still
-leaves the file behind. Observe it from inside the first lens turn: when the
-`_run_agent` stub is first called for the critic container, read
-`lens-gates.json` there and record what it found. Assert the file existed then,
-with the gate cell suite's results in it.
+leaves the file behind. Observe it from inside the first lens turn. `_drive`
+draws each scripted turn with `next()` at the moment the agent is called, so
+pass `turns` as a generator that, before yielding the first lens turn, reads
+`lens-gates.json` from the task directory and records what it found. Assert the
+file existed then, with the gate cell suite's results in it. `_drive` and
+`_run_agent` need no new seam for this; if you add one anyway, keep it optional,
+because `tests/test_events.py` calls `_drive` too.
 
 **Write it whenever the suite returns, before the aborted/drift branch.**
 REVIEW's aborted-or-drifted comparison ends the task `GATE_ERROR` and runs no
@@ -159,6 +160,14 @@ empty table is precisely the failure mode a forged toolchain would produce.
 Make the stubbed gate cell suite report something the implementer's suite does
 not — `_stub_the_runtime` already takes a `gate_cell_suite` argument for
 exactly this, added by `SA-0089` — and assert the file carries *that*.
+
+**Criterion 1's witness covers the aborted suite too.** A write placed inside
+the lens branch passes both witnesses on the green path and writes nothing on
+the `GATE_ERROR` one. Drive a second case with a gate cell suite that errors,
+the way `test_a_gate_that_errors_in_the_lens_gate_cell_is_not_the_tasks_failure`
+does. Assert the task ends `GATE_ERROR` and that `lens-gates.json` holds that
+errored result. An aborted comparison still carries its results. Parametrise the
+witness or put both cases in it; keep its name.
 
 **Both new witnesses must fail with `session.py` reverted.** Reverted, no such
 file is written at all, so an honest test of either fails. Import nothing new
