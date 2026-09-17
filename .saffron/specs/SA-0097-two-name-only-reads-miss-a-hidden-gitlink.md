@@ -144,9 +144,9 @@ of a rename, which is what `scope` needs. The mirror's preserves witness has no
 rename, so its expected list stays the same. Keep `-z` and the `quotePath`
 override.
 
-**The PACKAGE witness has a trap.** `packageable`'s spec has
-`touches: ["src/**"]` (`tests/test_package.py:271`), so a root `.gitmodules`
-is already out of scope, and `scope` fails today for that reason alone. A
+**The PACKAGE witness has two traps.** First, the spec `packageable` passes
+to `push_unpackaged_work` has `touches: ["f.txt"]` (`tests/test_package.py:954`),
+so a root `.gitmodules` is already out of scope, and `scope` fails today for that reason alone. A
 witness that only checks for `scope fail` then passes at base, and `criteria`
 refuses it. The refusal note carries counts, not paths (`scope.py:144-156`).
 Make the submodule the thing that decides the result: give the task a spec
@@ -154,6 +154,16 @@ whose `touches` covers `.gitmodules` and not the submodule path, or assert on
 something that names the submodule.
 `test_unpackaged_work_outside_its_touches_is_not_pushed`
 (`tests/test_package.py:3033`) shows how to drive the push.
+
+Second, the patch export. That test writes its patch with the module's own
+`DIFF_FLAGS` (`tests/test_package.py:361-367`), a local list that lacks
+`--ignore-submodules=none`. With the ignoring `.gitmodules` committed, that
+export leaves the gitlink out, so the pushed commit never holds it and the
+witness cannot pass even after a correct fix. Exporting with
+`worktree.DIFF_FLAGS` instead is wrong the other way: the mutant then strips the
+gitlink from the test's own patch, and the witness dies whatever the listing
+does. Export with the local list plus an explicit `--ignore-submodules=none`,
+so the patch always carries the gitlink and only the listing decides the result.
 
 **The mirror witness sets config, not `.gitmodules`.** A `.gitmodules` in the
 commit proves nothing there: the bare mirror lists the submodule today

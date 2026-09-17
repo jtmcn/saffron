@@ -90,7 +90,7 @@ Both appliers put the find text into their refusal:
   and the matches-more-than-once reason at `:150-157` ends with the same
   `{mutant.find!r}` (`:155`).
 - `saffron/cell/worktree.py:562` yields the not-found reason with `{mutant.find!r}`,
-  and the matches-more-than-once reason at `:563-568` ends with it (`:567`).
+  and the matches-more-than-once reason at `:564-568` ends with it (`:567`).
 
 `saffron/gates/core/witness.py:165` records that reason as unproven, and
 `:266-270` joins every unproven reason into the result's `summary`.
@@ -140,12 +140,21 @@ likeliest wrong answer. Each witness should drive both cases and check both
 reasons.
 
 **"No part of" means no fragment either.** A reason that keeps the first ten
-characters of the find text still discloses the edit. Pick find and replace
-strings with a distinctive token in the middle, such as
-`QRVT_FIND_SENTINEL_7` and `QRVT_REPLACE_SENTINEL_7`, and assert that the token
-is absent. Asserting only that the whole string is absent lets a truncated
-reason pass. Make sure the token is not also part of the file name, the
-witness id or a claim, or the assertion cannot pass at all.
+characters of the find text still discloses the edit, so the witness must fail
+on that. Start the find and replace text with a distinctive token, such as
+`find="QRVT_FIND_SENTINEL_7 = 1"` and `replace="QRVT_REPLACE_SENTINEL_7 = 2"`,
+and assert that a short leading fragment (`QRVT_`) is absent as well as each
+whole string. A token in the middle of the text does not work: a truncated
+prefix that stops before it passes. Make sure the fragment is not also part of
+the file name, the witness id or a claim, or the assertion cannot pass at all.
+
+**Two existing assertions state the old behaviour, and you must invert them.**
+`tests/test_mutation.py:94` asserts the find text is in the host reason, under a
+comment saying the reason names "the file and the text", and `:252` asserts the
+same through `host_mutator`. Keep both tests and their names, since `census`
+compares test names. Keep the file-name assertion, and assert that the find
+text is absent. Correct the `apply_mutant` docstring too: `saffron/mutation.py:118-121`
+says a refusal names "the file and the text".
 
 **The reason must still say which case it was.** The two preserves witnesses
 check for "matches 2 times" and "not found" in the cell's reasons. Keep both

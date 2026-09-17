@@ -29,8 +29,8 @@ acceptance:
   - claim: >-
       Every `Teardown` line that renders a detail renders it with every
       control character replaced by a space, and clipped to the same bound a
-      `PhaseStart` detail gets. One of those details is the proxy's denial
-      list, which names hosts a cell asked to reach. Today a teardown detail
+      `PhaseStart` detail gets. Each proxy denial is one such detail, and it
+      names a host a cell asked to reach. Today a teardown detail
       is printed whole and with its control bytes.
     witness: tests/test_events.py::test_a_teardown_detail_is_stripped_and_clipped
   - claim: >-
@@ -44,11 +44,6 @@ acceptance:
       stderr when a cell will not reap. Today it is printed whole and with its
       control bytes.
     witness: tests/test_events.py::test_an_agent_detail_is_stripped_and_clipped
-  - claim: >-
-      Every call-site family still renders the exact line it did, for a
-      detail with no control characters that is shorter than the bound.
-    witness: tests/test_events.py::test_every_family_has_a_kind_and_renders
-    preserves: true
   - claim: >-
       A green run still prints exactly the lines the golden watch fixture
       holds.
@@ -138,6 +133,14 @@ strips without clipping, or clips without stripping, must fail its witness.
 **Import `_DETAIL_BOUND` inside the test body,** as that test does, and
 anything this change adds as well: a module-scope import of a new name turns
 `revert`'s reverted run into a collection error, which it reads as `skip`.
+
+**Every existing render line must stay the same.**
+`test_describe_renders_every_kind_and_variant` (`tests/test_events.py:1137`)
+pins the exact line for each branch, including `cell: c up`, `unstacked: gone`,
+`agent: reaped the cell after the kill` and `teardown: exported 42 bytes to
+/x/patch.diff`. It is parametrized, so it has no single node id a criterion can
+name, but it is part of the suite the `tests` gate executes, so any case it
+loses is a new failure.
 
 **The golden fixture must not move.** Its `preflight:` lines
 (`tests/fixtures/watch-golden.txt`) are short and plain, so they render the same either
