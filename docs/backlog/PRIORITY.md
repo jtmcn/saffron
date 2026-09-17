@@ -112,7 +112,7 @@ rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
 **38**), plus **43**, **48**, **52**, **60**, **66**, **67**, ~~**72**~~, **98**, **103**,
 ~~**104**~~, **113**, **135**, and from stack #285: **147**, **146**, ~~**144**~~,
 **149**, **148**, **142**, ~~**138**~~, then ~~**152**~~ and ~~**153**~~, and
-from stack #308: **159**, **157**, **158**.
+from stack #308: ~~**159**~~, **157**, **158**.
 
 **152 and 153 are the spec loop's authoring half**, filed 2026-09-16 from
 writing #290's three specs and reading their reviews. 152 is the mechanical

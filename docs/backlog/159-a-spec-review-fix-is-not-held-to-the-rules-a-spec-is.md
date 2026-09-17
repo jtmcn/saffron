@@ -1,12 +1,13 @@
 ---
 id: 159
 title: A spec edited to answer its review is not held to the rules a spec is, and three such edits cost a cell or a repair
-status: open
+status: done
 tier: 2
 filed: 2026-09-17
+closed: 2026-09-17
 by_hand: true
-specs: [SA-0093, SA-0094, SA-0095]
-prs: [292, 293, 304, 306]
+specs: []
+prs: [292, 293, 304, 306, 311]
 commits: []
 cites: [§5.4]
 related: [152, 153]
@@ -49,3 +50,34 @@ parent's branch.
 ## Record
 
 **Filed 2026-09-17** from the spec loop's run 5 (stack #308).
+
+**Closed 2026-09-17, by hand.** `docs/agents/issue-tracker.md` gained two
+bullets and a correction. `.claude/skills/run-saffron-spec-loop/SKILL.md` gained
+the re-review.
+
+The correction is the one worth naming. The `revert` bullet said the gate
+re-runs "every declared non-`preserves` witness". That is one arm of
+`revert.py`'s candidate set and not the whole of it. The subset is every test
+the diff adds, united with every declared witness collected at head, minus every
+`preserves` witness. #292 wrote "it is not a declared criterion, because it
+passes at base" into `SA-0093`. That is the old bullet believed, and the belief
+cost the attempt. The rule this record asked for was half written. What was
+missing is that the gate reaches undeclared tests.
+
+The new bullets are the parametrised witness, and "a spec edited to answer its
+review is held to every rule above". The second carries the widened-claim rule.
+
+**The `specs:` list is emptied, and that is a correction too.**
+`docs/backlog/README.md` gives the field to specs whose `## Context` cites this
+item. None of `SA-0093` to `SA-0095` cites 159. The item was filed from their
+run and after them, so the field was wrong on the day it was written.
+`check_done_specs_are_done` is what surfaced it. The cost is real: `uv run
+python -m records show SA-0093` no longer answers with this item. All three stay
+named in `## Problem`.
+
+**The re-review reads the whole spec, not the edit.** Cheaper was available and
+refused. Checks 5 and 6 read the spec entire, so a diff-scoped report cannot
+honestly print six check lines. The run's own evidence cuts the same way.
+#304's witness stub and #306's two absent code seams turned up in text the first
+review passed, which no edit had touched. One subagent against a cell at $8 to
+$22 is not a trade worth shaving.
