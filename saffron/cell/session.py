@@ -1088,8 +1088,8 @@ def critic_cell(
     why the whole lifecycle lives in one function rather than three inlined
     copies of it (backlog item 140).
 
-    `network` is the one thing that tells a critic cell from a gate cell.
-    Given a name, this joins it — the pieces `cell_up` already brought up for
+    `network` decides the names and who owns the network; the caller's `env`
+    is what keeps a Gate-only cell off the proxy. Given a name, this joins it — the pieces `cell_up` already brought up for
     the task, the network and the proxy behind it — and neither starts, stops
     nor removes it; the container and its two volumes are named
     `saffron-critic-*`. Given `None`, this makes a network of its own, on
@@ -1110,7 +1110,7 @@ def critic_cell(
     `created` is the caller's leak ledger, exactly as `cell_up`/`cell_down`
     use it. `note` takes (step, ok, detail), the same shape `cell_down` gives
     its own — called only when a removal leaves something behind, so a green
-    run prints nothing this spec did not already print.
+    path prints nothing this spec did not already print.
     """
     from saffron.cell import runtime, worktree
     from saffron.repos import image
@@ -1945,13 +1945,13 @@ def _drive_cell(
         # Bound here, not in the branch below: REVIEW fills it and REBUT reads
         # it, and neither should depend on the other's control flow.
         reviewed_diff = ""
+        # REVIEW binds it and REBUT reads it, like the three above.
+        critic_env: dict[str, str] = {}
 
         if outcome == "READY_FOR_REVIEW":
             ledger.set_task_state(task_id, "REVIEWING")
 
-            # Read once, ahead of REVIEW: REBUT's verdict lenses (`SA-0088`)
-            # need the same proxied environment, and a caller that wants
-            # neither — the gate cell — builds its own instead (item 140).
+            # Read once: REVIEW's and REBUT's critic cells share this env.
             proxy_ip = runtime.container_ip(proxy.PROXY_NAME)
             if proxy_ip is None:
                 # Infrastructure, not a task outcome: the proxy this task

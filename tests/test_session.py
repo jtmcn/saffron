@@ -709,7 +709,7 @@ def _stub_the_runtime(
     monkeypatch.setattr("saffron.cell.runtime.create_volume", lambda *a, **k: None)
 
     # The critic cell's own three, none stubbed before it existed (SA-0087):
-    # the proxy address `critic_cell` reads, and the two calls
+    # the proxy address `_drive_cell` reads for it, and the two calls
     # `_apply_and_commit_patch` makes inside it. All default to a clean
     # success; a test overrides `exec_stream` alone to script an apply that
     # cannot land.
@@ -3279,6 +3279,9 @@ def test_critic_cell_creates_its_own_network_only_when_it_is_not_given_one(
         pass
     assert cell.networks_created == []
     assert ("network", "an-existing-network") not in cell.removed
+    # Which network the container was put on, not only which were made:
+    # Appendix I's cell reported success on a different one.
+    assert [w["network"] for w in cell.worktrees] == ["an-existing-network"]
 
     cell2 = _stub_the_runtime(monkeypatch)
     with session.critic_cell(
@@ -3302,6 +3305,7 @@ def test_critic_cell_creates_its_own_network_only_when_it_is_not_given_one(
     # creates anything, so membership is satisfied with the whole teardown
     # gone — which the count below proves rather than assumes.
     assert cell2.removed.count(("network", created_name)) == 2
+    assert [w["network"] for w in cell2.worktrees] == [created_name]
 
 
 def test_critic_cell_carries_the_environment_its_caller_asked_for(
@@ -3780,6 +3784,110 @@ def test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch(
     assert [c for c, _ in cell.export_calls].count(_CRITIC_CONTAINER) == 2
     # Both critic cell instances — REVIEW's and REBUT's — were torn down.
     assert cell.removed.count(("container", _CRITIC_CONTAINER)) == 4
+
+
+def test_every_critic_cell_rebuts_included_is_behind_the_proxy(monkeypatch, tmp_path):
+    """REBUT's verdict lenses need the API as much as REVIEW's do, and since
+    item 140 the caller hands `critic_cell` its env: REVIEW's site is the only
+    one the image test drives, so REBUT's is checked here."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_through_rebut(
+            _turn("Fixed."),
+            _turn(
+                _block(
+                    {
+                        "rebuttals": [
+                            {"finding": 1, "action": "fixed", "argument": "committed"}
+                        ]
+                    }
+                )
+            ),
+            _turn(
+                _block(
+                    {
+                        "verdicts": [
+                            {"finding": 1, "verdict": "withdrawn", "reason": "fixed"}
+                        ]
+                    }
+                )
+            ),
+        ),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    critics = [w for w in cell.worktrees if w["container"] == _CRITIC_CONTAINER]
+    # REVIEW's and REBUT's: one alone is the half already covered.
+    assert len(critics) == 2
+    for critic in critics:
+        assert critic["env"]["HTTPS_PROXY"] == "http://10.88.0.9:3128"
+        assert "ANTHROPIC_API_KEY" not in critic["env"]
+
+
+def test_an_unreadable_proxy_address_at_review_is_infrastructure(monkeypatch, tmp_path):
+    """`cell_env` cannot take `None`, so REVIEW raises rather than building a
+    critic cell with no route to the API. `cell_up` reads the same address, so
+    it goes unreadable only once IMPLEMENT's two turns are spent."""
+    cell = _stub_the_runtime(monkeypatch)
+    monkeypatch.setattr(
+        "saffron.cell.runtime.container_ip",
+        lambda *a, **k: None if len(cell.turns) >= 2 else "10.88.0.9",
+    )
+    with pytest.raises(runtime.CellRuntimeError, match="proxy's address"):
+        _drive(
+            monkeypatch,
+            tmp_path,
+            cell=cell,
+            turns=[_turn(_block(_PLAN)), _turn()],
+        )
+    assert not [w for w in cell.worktrees if w["container"] == _CRITIC_CONTAINER]
+
+
+def test_a_gate_only_cells_network_goes_last_and_is_reported_if_it_survives(
+    monkeypatch, tmp_path
+):
+    """A network with a container still on it will not go, so it is removed
+    after the container; and it is in `created` before its create, so a
+    removal that fails is reported rather than silently leaked."""
+    cell = _stub_the_runtime(monkeypatch)
+    created: set[str] = set()
+    notes: list[tuple[str, bool, str]] = []
+
+    def _stuck_network(name):
+        cell.removed.append(("network", name))
+        cell.order.append(f"removed:network:{name}")
+        return runtime.Completed(1, "", "network has active endpoints")
+
+    def _note(step, ok, detail):
+        notes.append((step, ok, detail))
+
+    monkeypatch.setattr("saffron.cell.runtime.remove_network", _stuck_network)
+    with session.critic_cell(
+        spec=_spec(),
+        repo=tmp_path / "repo",
+        mirror=tmp_path / "mirror",
+        network=None,
+        env={},
+        gates_dir=tmp_path / "gates",
+        patch=_DIFF,
+        created=created,
+        note=_note,
+    ):
+        pass
+    last_container = max(
+        i
+        for i, entry in enumerate(cell.order)
+        if entry == f"removed:container:{_GATE_CONTAINER}"
+    )
+    assert cell.order[-1] == f"removed:network:{_GATE_NETWORK}"
+    assert len(cell.order) - 1 > last_container
+    assert _GATE_NETWORK in created
+    assert [detail.split(" survived")[0] for _, _, detail in notes] == [
+        f"network {_GATE_NETWORK}"
+    ]
 
 
 def test_the_verdict_prompt_carries_the_diff_the_lenses_were_shown(
