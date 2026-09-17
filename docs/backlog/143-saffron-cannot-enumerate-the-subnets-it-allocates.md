@@ -8,6 +8,7 @@ by_hand: false
 specs: [SA-0089, SA-0094]
 prs: [282]
 commits: []
+awaiting: [305]
 cites: [§5.1]
 related: [118, 140]
 ---
@@ -44,3 +45,9 @@ A `SUBNETS` tuple in `runtime.py` that every allocation draws from, a test that
 the declared subnets do not overlap, and a pre-clean that removes by value —
 `networks_on_subnet` already exists and is what the overlap error uses to name
 the holder.
+
+## Record
+
+**2026-09-17, open as PR #305**, `SA-0094` in the spec loop's run 5 (stack
+#308): `runtime.SUBNETS` declares each distinct subnet once, and the Gate-only
+cell's pre-clean removes a `saffron-` holder of its subnet by value.

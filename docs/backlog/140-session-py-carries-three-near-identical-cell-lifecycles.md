@@ -8,6 +8,7 @@ by_hand: false
 specs: [SA-0089, SA-0093]
 prs: [282]
 commits: []
+awaiting: [303]
 cites: [§5.5]
 related: [118, 134, 141]
 ---
@@ -52,3 +53,10 @@ This is how item 134's duplication grew by one more copy in the same file.
 and `env: Mapping[str, str]`, with `_gate_cell_suite` reduced to entering it and
 running the suite — or a recorded decision that three copies is the price of the
 `touches` boundary, with the reason written where the next spec will read it.
+
+## Record
+
+**2026-09-17, open as PR #303**, `SA-0093` in the spec loop's run 5 (stack
+#308): `critic_cell` takes `network: str | None` and `env`, and
+`_gate_cell_suite` enters it. `reverify`'s copy stays item 134's. The role
+coupling this left is item 155.
