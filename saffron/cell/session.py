@@ -1055,59 +1055,92 @@ def _apply_and_commit_patch(container: str, patch: str) -> None:
         )
 
 
+# `saffron-cells` already holds `runtime.DEFAULT_SUBNET` (10.88.0.0/24) for the
+# task, and `saffron-egress` holds `proxy.EGRESS_SUBNET` (10.89.0.0/24) for the
+# proxy — neither torn down before this cell is created, and an overlapping
+# `create_network` raises. These two are the only subnets `saffron/` declares,
+# so the next one is the gate cell's own.
+_GATE_CELL_SUBNET = "10.90.0.0/24"
+
+
 @contextlib.contextmanager
 def critic_cell(
     *,
     spec: CellSpec,
     repo: Path,
     mirror: Path,
-    network: str,
+    network: str | None,
+    env: Mapping[str, str],
     gates_dir: Path,
-    thread_env: Mapping[str, str],
     patch: str,
     created: set[str],
     note: Callable[[str, bool, str], None],
 ) -> Iterator[str]:
     """A fresh container from the repo's cell image, seeded at the task's tree
     base and carrying the implementer's exported patch, applied and committed
-    by its own git — the container REVIEW's lenses run in and are shown the
-    diff from (CONTEXT.md §5, backlog item 118). Never the implementer's own
-    container: a fresh session there still re-execs a runner and an SDK that
-    container's root could have rewritten. `SA-0088` calls this again for
-    REBUT's verdict lenses, which is why the whole lifecycle lives in one
-    function rather than being inlined at this spec's one call site.
+    by its own git (CONTEXT.md §5, backlog items 118 and 140). Never the
+    implementer's own container: a fresh session there still re-execs a
+    runner and an SDK that container's root could have rewritten.
 
-    Uses the pieces `cell_up` already brings up for this task — the network
-    and the proxy — without starting, stopping or removing either; this only
-    creates and removes its own container and its own two volumes, on the
-    same `network` and behind the same proxy the implementer's cell used.
+    Serves every short-lived cell that needs exactly this — REVIEW's lens
+    container, REBUT's verdict-lens container (`SA-0088`), and the gate suite
+    REVIEW's lenses are shown (`SA-0087`, backlog item 118 part 4) — which is
+    why the whole lifecycle lives in one function rather than three inlined
+    copies of it (backlog item 140).
+
+    `network` is the one thing that tells a critic cell from a gate cell.
+    Given a name, this joins it — the pieces `cell_up` already brought up for
+    the task, the network and the proxy behind it — and neither starts, stops
+    nor removes it; the container and its two volumes are named
+    `saffron-critic-*`. Given `None`, this makes a network of its own, on
+    `_GATE_CELL_SUBNET` rather than the task's own `saffron-cells`, and pre-
+    cleans and tears it down itself, in the same `finally` as everything
+    else it made; the container, its two volumes and this network are named
+    `saffron-gate-*`. Keyword-only with no default either way — v0.5 shipped
+    a cell with neither a declared network nor a declared env once, and every
+    mechanism reported success while applying to a different container
+    (Appendix I).
+
+    `env` is the container's environment, exactly as given — a caller behind
+    the proxy builds `cell_env(proxy_ip, thread_env)` itself and hands it in;
+    a caller that wants only the repo's declared gate env passes
+    `dict(thread_env)` and nothing more. This function reads no proxy address
+    and injects nothing.
 
     `created` is the caller's leak ledger, exactly as `cell_up`/`cell_down`
     use it. `note` takes (step, ok, detail), the same shape `cell_down` gives
-    its own — called only when a removal leaves something behind, so REVIEW's
-    green path prints nothing this spec did not already print.
+    its own — called only when a removal leaves something behind, so a green
+    run prints nothing this spec did not already print.
     """
-    from saffron.cell import proxy, runtime, worktree
+    from saffron.cell import runtime, worktree
     from saffron.repos import image
 
-    container = f"saffron-critic-{spec.spec_id}"
-    volume = f"saffron-critic-wt-{spec.spec_id}"
-    state = f"saffron-critic-st-{spec.spec_id}"
+    own_network = network is None
+    if own_network:
+        container = f"saffron-gate-{spec.spec_id}"
+        volume = f"saffron-gate-wt-{spec.spec_id}"
+        state = f"saffron-gate-st-{spec.spec_id}"
+        # Lowercased: apple/container refuses an uppercase network name
+        # (measured 2026-09-16), and a spec id is uppercase.
+        network = f"saffron-gate-net-{spec.spec_id.lower()}"
+    else:
+        container = f"saffron-critic-{spec.spec_id}"
+        volume = f"saffron-critic-wt-{spec.spec_id}"
+        state = f"saffron-critic-st-{spec.spec_id}"
 
     # Inside the guarantee, not above it — the same reason `cell_up` pre-cleans
     # before adding a name to `created`: a leftover from a SIGKILLed run must
-    # not make this run's own create the first thing that fails.
+    # not make this run's own create the first thing that fails. The network
+    # is pre-cleaned on the branch that creates it, not only torn down.
     runtime.remove_container(container)
+    if own_network:
+        runtime.remove_network(network)
     runtime.remove_volume(volume)
     runtime.remove_volume(state)
     try:
-        proxy_ip = runtime.container_ip(proxy.PROXY_NAME)
-        if proxy_ip is None:
-            # Infrastructure, not a task outcome: the proxy this task already
-            # started is unreadable, which `cell_env` cannot turn into a `str`.
-            raise runtime.CellRuntimeError(
-                "the critic cell could not read the proxy's address"
-            )
+        if own_network:
+            created.add(network)
+            runtime.create_network(network, subnet=_GATE_CELL_SUBNET)
         created.add(volume)
         runtime.create_volume(volume)
         worktree.prepare_worktree(
@@ -1118,7 +1151,7 @@ def critic_cell(
             image=image.cell_tag(repo),
             container=container,
             network=network,
-            env=cell_env(proxy_ip, thread_env),
+            env=env,
             gates_dir=gates_dir,
             state_volume=state,
             created=created,
@@ -1131,6 +1164,9 @@ def critic_cell(
             ("volume", volume, runtime.remove_volume(volume)),
             ("volume", state, runtime.remove_volume(state)),
         ]
+        if own_network:
+            # Removed last: a network with a container still on it will not go.
+            removed.append(("network", network, runtime.remove_network(network)))
         for kind, name, done in removed:
             if done.returncode != 0 and name in created:
                 note(
@@ -1138,14 +1174,6 @@ def critic_cell(
                     False,
                     f"{kind} {name} survived — {done.stderr.strip()[:160]}",
                 )
-
-
-# `saffron-cells` already holds `runtime.DEFAULT_SUBNET` (10.88.0.0/24) for the
-# task, and `saffron-egress` holds `proxy.EGRESS_SUBNET` (10.89.0.0/24) for the
-# proxy — neither torn down before this cell is created, and an overlapping
-# `create_network` raises. These two are the only subnets `saffron/` declares,
-# so the next one is the gate cell's own.
-_GATE_CELL_SUBNET = "10.90.0.0/24"
 
 
 def _gate_cell_suite(
@@ -1168,15 +1196,13 @@ def _gate_cell_suite(
     root, and running that in the container the lenses re-exec a moment later
     is the hole `SA-0087` closed.
 
-    Built the way `reverify`'s own `_gate_cell` (`saffron/phases/package.py`)
-    builds its gate-only cells: a network of its own — always `--internal`,
-    on `_GATE_CELL_SUBNET` rather than the default the task's own
-    `saffron-cells` network still holds — a volume, `prepare_worktree` at
-    `spec.tree_base` with the repo's declared gate env and nothing else (no
-    proxy, no credential, no route out), and teardown in a `finally`. Every
-    name is pre-cleaned, tolerating absence, before its own create — a
-    `spec_id`-keyed name does not change between attempts the way `reverify`'s
-    own do — and recorded in `created` immediately before that create.
+    The whole lifecycle — pre-clean, `prepare_worktree`, patch apply, teardown
+    in a `finally` — is `critic_cell`'s, entered here with `network=None` so
+    it makes and tears down a network of its own rather than joining the
+    task's, and `env=dict(thread_env)` so the container carries the repo's
+    declared gate env and nothing else: no proxy, no credential, no route out
+    (backlog item 140; item 134 is the same collapse for `reverify`'s own
+    `_gate_cell` in `saffron/phases/package.py`, out of reach here).
 
     Judged against `baseline`, the run's own pre-turn suite: not a second,
     freshly-taken one, so `census`, `criteria` and `revert` still have a real
@@ -1186,57 +1212,22 @@ def _gate_cell_suite(
     `CellOutcome.gates`/`effective_risk`/`advisory_gates` alike. This suite is
     the lens table only.
     """
-    from saffron.cell import runtime, worktree
     from saffron.gates.suite import CellTree
-    from saffron.repos import image
 
-    # Lowercased: apple/container refuses an uppercase network name (measured
-    # 2026-09-16), and a spec id is uppercase.
-    network = f"saffron-gate-net-{spec.spec_id.lower()}"
-    volume = f"saffron-gate-wt-{spec.spec_id}"
-    state = f"saffron-gate-st-{spec.spec_id}"
-    container = f"saffron-gate-{spec.spec_id}"
-
-    runtime.remove_container(container)
-    runtime.remove_network(network)
-    runtime.remove_volume(volume)
-    runtime.remove_volume(state)
-    try:
-        created.add(network)
-        runtime.create_network(network, subnet=_GATE_CELL_SUBNET)
-        created.add(volume)
-        runtime.create_volume(volume)
-        worktree.prepare_worktree(
-            mirror=mirror,
-            volume=volume,
-            base_sha=spec.tree_base,
-            branch=spec.branch,
-            image=image.cell_tag(repo),
-            container=container,
-            network=network,
-            # The repo's declared gate env, and nothing else: no agent, no
-            # credential and no route out — this cell only runs gates.
-            env=dict(thread_env),
-            gates_dir=gates_dir,
-            state_volume=state,
-            created=created,
-        )
-        _apply_and_commit_patch(container, patch)
+    with critic_cell(
+        spec=spec,
+        repo=repo,
+        mirror=mirror,
+        network=None,
+        # The repo's declared gate env, and nothing else: no agent, no
+        # credential and no route out — this cell only runs gates.
+        env=dict(thread_env),
+        gates_dir=gates_dir,
+        patch=patch,
+        created=created,
+        note=note,
+    ) as container:
         return suite.against(CellTree(container, cwd=repo), baseline)
-    finally:
-        removed = [
-            ("container", container, runtime.remove_container(container)),
-            ("volume", volume, runtime.remove_volume(volume)),
-            ("volume", state, runtime.remove_volume(state)),
-            ("network", network, runtime.remove_network(network)),
-        ]
-        for kind, name, done in removed:
-            if done.returncode != 0 and name in created:
-                note(
-                    "survived",
-                    False,
-                    f"{kind} {name} survived — {done.stderr.strip()[:160]}",
-                )
 
 
 def _drive_cell(
@@ -1251,7 +1242,7 @@ def _drive_cell(
 ) -> CellOutcome:
     """`run_one_cell`'s whole body. `exported` is teardown's way out."""
     from saffron.agents import artifacts, context
-    from saffron.cell import runtime, worktree
+    from saffron.cell import proxy, runtime, worktree
     from saffron.gates.core.criteria import witnesses_green_at_base
     from saffron.gates.suite import CellTree, GateSuite
     from saffron.repos import mirror as mirror_ops
@@ -1958,6 +1949,19 @@ def _drive_cell(
         if outcome == "READY_FOR_REVIEW":
             ledger.set_task_state(task_id, "REVIEWING")
 
+            # Read once, ahead of REVIEW: REBUT's verdict lenses (`SA-0088`)
+            # need the same proxied environment, and a caller that wants
+            # neither — the gate cell — builds its own instead (item 140).
+            proxy_ip = runtime.container_ip(proxy.PROXY_NAME)
+            if proxy_ip is None:
+                # Infrastructure, not a task outcome: the proxy this task
+                # already started is unreadable, which `cell_env` cannot turn
+                # into a `str`.
+                raise runtime.CellRuntimeError(
+                    "the critic cell could not read the proxy's address"
+                )
+            critic_env = cell_env(proxy_ip, policy.thread_env)
+
             def _critic_teardown(step: str, ok: bool, detail: str) -> None:
                 emit(
                     Teardown(
@@ -2037,8 +2041,8 @@ def _drive_cell(
                         repo=repo,
                         mirror=mirror,
                         network=network,
+                        env=critic_env,
                         gates_dir=gates_dir,
-                        thread_env=policy.thread_env,
                         patch=patch_to_review,
                         created=created,
                         note=_critic_teardown,
@@ -2168,8 +2172,8 @@ def _drive_cell(
                                 repo=repo,
                                 mirror=mirror,
                                 network=network,
+                                env=critic_env,
                                 gates_dir=gates_dir,
-                                thread_env=policy.thread_env,
                                 patch=rebuttal_patch,
                                 created=created,
                                 note=_critic_teardown,

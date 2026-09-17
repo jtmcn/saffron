@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import ipaddress
 import itertools
 import json
 import shutil
@@ -10,6 +11,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -19,7 +21,7 @@ from saffron.cell.worktree import DIFF_FLAGS
 from saffron.events import Agent, Attempt, Baseline, PhaseStart, describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
-from saffron.gates.suite import CellTree, SuiteComparison, SuiteRun
+from saffron.gates.suite import CellTree, GateSuite, SuiteComparison, SuiteRun
 from saffron.intake import parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
@@ -3247,6 +3249,89 @@ def test_the_critic_cell_is_torn_down_when_review_ends(monkeypatch, tmp_path):
     assert raising_cell.removed.count(("volume", _CRITIC_STATE)) == 2
 
 
+def test_critic_cell_creates_its_own_network_only_when_it_is_not_given_one(
+    monkeypatch, tmp_path
+):
+    """`critic_cell` takes the network it runs on as an explicit, keyword-only
+    argument with no default (backlog item 140). Given a name, it joins that
+    network and creates and removes none of its own. Given `None`, it makes
+    one on a subnet that does not overlap the task's own `saffron-cells`
+    (`runtime.DEFAULT_SUBNET`) and removes it in the same `finally`. Today
+    `critic_cell` takes no such argument at all, so both calls below raise
+    `TypeError` before either assertion is ever reached."""
+    cell = _stub_the_runtime(monkeypatch)
+    spec = _spec()
+    repo = tmp_path / "repo"
+    mirror_path = tmp_path / "mirror"
+    gates_dir = tmp_path / "gates"
+
+    with session.critic_cell(
+        spec=spec,
+        repo=repo,
+        mirror=mirror_path,
+        network="an-existing-network",
+        env={},
+        gates_dir=gates_dir,
+        patch=_DIFF,
+        created=set(),
+        note=lambda *a: None,
+    ):
+        pass
+    assert cell.networks_created == []
+    assert ("network", "an-existing-network") not in cell.removed
+
+    cell2 = _stub_the_runtime(monkeypatch)
+    with session.critic_cell(
+        spec=spec,
+        repo=repo,
+        mirror=mirror_path,
+        network=None,
+        env={},
+        gates_dir=gates_dir,
+        patch=_DIFF,
+        created=set(),
+        note=lambda *a: None,
+    ):
+        pass
+    assert len(cell2.networks_created) == 1
+    created_name, created_subnet = cell2.networks_created[0]
+    assert not ipaddress.ip_network(created_subnet).overlaps(
+        ipaddress.ip_network(runtime.DEFAULT_SUBNET)
+    )
+    # Twice, never `in`: `critic_cell` pre-cleans the same name before it
+    # creates anything, so membership is satisfied with the whole teardown
+    # gone — which the count below proves rather than assumes.
+    assert cell2.removed.count(("network", created_name)) == 2
+
+
+def test_critic_cell_carries_the_environment_its_caller_asked_for(
+    monkeypatch, tmp_path
+):
+    """`critic_cell` takes the container environment as an argument too
+    (backlog item 140), so a caller behind the proxy and a caller with only
+    the repo's declared gate env both get it from the same function. Today
+    the proxy address is read inside `critic_cell` and the environment is
+    built there, so passing `env=` at all raises `TypeError` before the
+    assertion below runs."""
+    cell = _stub_the_runtime(monkeypatch)
+    spec = _spec()
+
+    with session.critic_cell(
+        spec=spec,
+        repo=tmp_path / "repo",
+        mirror=tmp_path / "mirror",
+        network="an-existing-network",
+        env={"SAFFRON_GATE_MARK": "1"},
+        gates_dir=tmp_path / "gates",
+        patch=_DIFF,
+        created=set(),
+        note=lambda *a: None,
+    ) as container:
+        pass
+    (worktree_call,) = [w for w in cell.worktrees if w["container"] == container]
+    assert worktree_call["env"] == {"SAFFRON_GATE_MARK": "1"}
+
+
 def test_the_lenses_are_shown_a_gate_table_computed_outside_the_implementers_cell(
     monkeypatch, tmp_path
 ):
@@ -3295,6 +3380,47 @@ def test_the_lenses_are_shown_a_gate_table_computed_outside_the_implementers_cel
     assert len(lens_prompts) == len(review.LENSES)
     assert all("the gate cell's own toolchain" in p for p in lens_prompts)
     assert all("the implementer's own toolchain" not in p for p in lens_prompts)
+
+
+def test_the_lens_gate_suite_runs_inside_the_one_cell_lifecycle(monkeypatch, tmp_path):
+    """The claim backlog item 140 makes is that one lifecycle serves both
+    callers: patch `critic_cell` itself and show the gate suite ran against
+    the container it yielded, not a second one `_gate_cell_suite` built for
+    itself. Reverted, `_gate_cell_suite` never calls `critic_cell` at all, so
+    the patched stand-in below is never entered and this fails honestly."""
+    calls: list[dict] = []
+
+    @contextlib.contextmanager
+    def _fake_critic_cell(**kwargs):
+        calls.append(kwargs)
+        yield "fake-gate-container"
+
+    monkeypatch.setattr(session, "critic_cell", _fake_critic_cell)
+
+    captured: dict = {}
+
+    class _FakeSuite:
+        def against(self, tree, baseline):
+            captured["container"] = tree.container
+            return SuiteComparison(SuiteRun([], "standard", frozenset()))
+
+    spec = _spec()
+    comparison = session._gate_cell_suite(
+        spec=spec,
+        repo=tmp_path / "repo",
+        mirror=tmp_path / "mirror",
+        gates_dir=tmp_path / "gates",
+        thread_env={"SAFFRON_GATE_MARK": "1"},
+        patch=_DIFF,
+        suite=cast(GateSuite, _FakeSuite()),
+        baseline=SuiteRun([], "standard", frozenset()),
+        created=set(),
+        note=lambda *a: None,
+    )
+    assert calls, "critic_cell was never called"
+    assert calls[0]["network"] is None
+    assert captured["container"] == "fake-gate-container"
+    assert comparison.new_failures == ()
 
 
 def test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs(
