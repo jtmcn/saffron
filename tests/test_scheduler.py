@@ -1818,7 +1818,12 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-16, a thirty-second time: `SA-0096`, `SA-0097` and
+    """Re-measured 2026-09-17, a thirty-third time: `SA-0095` merged as PR #307
+    and is retired to `done/`, so it leaves the queue and `SA-0094` is the only
+    refusal left. The candidates are unmoved: `SA-0094` was refused on
+    `SA-0093`, never on `SA-0095`, so retiring the child frees nothing.
+
+    Re-measured 2026-09-16, a thirty-second time: `SA-0096`, `SA-0097` and
     `SA-0098` queued for backlog items 114, 115 and 63. No two queued specs
     share a `touches` file (`SA-0097` applies its mutants to `worktree.py`,
     which `SA-0096` edits, without listing it), so all three are independent
@@ -1974,7 +1979,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0097",
         "SA-0098",
     ]
-    assert [r.path.name[:7] for r in refusals] == ["SA-0094", "SA-0095"]
+    assert [r.path.name[:7] for r in refusals] == ["SA-0094"]
     # A precondition, not the glob check: `done/` is populated, so the empty
     # queue above is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30
