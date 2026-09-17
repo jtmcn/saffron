@@ -452,3 +452,40 @@ lenses did not raise.
   outcome; and editing a spec with an open pull request silently refused its
   dependents and dropped its pull request from the stack.
   **Bucket 1** for all three. **Open:** items 137, 138, 139.
+
+## 2026-09-17 — `SA-0093`, `SA-0094`, `SA-0095` (stack #308: #303, #305, #307)
+
+- A witness for "given a name, it uses that network" checked which networks
+  were created and removed, never which one the container was put on. The
+  whole default suite passed with `prepare_worktree` handed another network,
+  which is Appendix I's failure exactly. Three clean lenses preceded it (#303).
+  **Bucket 3** — the adequacy lens asks what a witness observes, not what the
+  claim says the code does to the cell. **Open.**
+- Three lines the refactor moved had no test that could see them move: REBUT's
+  critic cell getting the proxied env, the unreadable-proxy raise, and the
+  Gate-only cell's network going last and into `created` (#303).
+  **No bucket** — a guard for a property already true at base cannot be written
+  in a cell, because `revert` fails any new test that passes without its
+  source. The review wrote them. **Open:** item 159.
+- `critic_cell` choosing Gate-only or critic names from `network is None`,
+  against `CONTEXT.md`'s "it is not the critic cell" (#303). Kept.
+  **Bucket 3.** **Open:** item 155.
+- A pre-clean witness with one `saffron-` holder, listed first, so a filter
+  narrower than the prefix or a first-holder-only loop passed (#305).
+  **Bucket 3** — same class as the first line. **Open.**
+- `networks_on_subnet`'s docstring still said it "only ever adds detail to an
+  error" in the diff that made a pre-clean act on its answer (#305); and #307's
+  new comment said a `GATE_ERROR` REVIEW keeps "the table its lenses were
+  shown" above a branch where no lens runs.
+  **Bucket 3** — a comment's claim checked against the code it describes, as
+  on 2026-09-16. **Open.**
+- A witness for "every result the suite produced" checked the list had more
+  than one entry, and drove clean and aborted suites but not the drifted one
+  its claim names; the indent was unpinned too (#307). The adequacy lens raised
+  the subset half; the drifted case and the indent were the seats'.
+  **Bucket 3.** **Open.**
+- New comments of seven to thirteen lines restating the spec, and "the gate
+  cell" and "a SIGKILLed run" in new lines, in all three.
+  **Bucket 2** for the length — no line in this repo's `CLAUDE.md` says it.
+  **Bucket 1** for the words — the retired-vocabulary hook does not list them.
+  **Open:** item 156 for the words.

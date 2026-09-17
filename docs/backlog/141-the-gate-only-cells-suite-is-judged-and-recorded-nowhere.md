@@ -8,6 +8,7 @@ by_hand: false
 specs: [SA-0089, SA-0095]
 prs: [282]
 commits: []
+awaiting: [307]
 cites: [§5.4, §5.5]
 related: [118, 140]
 ---
@@ -38,3 +39,9 @@ The spec's "print nothing new on the green path" is a bar on stdout, for the
 The gate-only cell's results written to `task_dir/lens-gates.json` beside
 `baseline.json`, or recorded against the REVIEW attempt — so a reader can tell,
 after the fact, which table the lenses were shown.
+
+## Record
+
+**2026-09-17, open as PR #307**, `SA-0095` in the spec loop's run 5 (stack
+#308): the Gate-only cell's results land in `lens-gates.json`, for clean,
+aborted and drifted suites, before any lens. The ledger row stays open here.

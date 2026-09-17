@@ -43,3 +43,11 @@ rather than from anything the implementer's cell wrote.
 **Filed 2026-09-15**, to land after `SA-0089` merges. By hand, because a cell
 cannot run `cell`-marked tests: they need the cell runtime and its images on the
 host.
+
+**2026-09-16, the Gate-only cell ran live for the first time**, in `SA-0093`'s
+second cell (spec loop run 5), and died at REVIEW: apple/container refuses an
+uppercase network name, and the cell's was `saffron-gate-net-SA-0093`. Every
+live REVIEW on this runtime had ended `ORPHANED` since #285. Fixed by hand in
+#298, whose stub now refuses an uppercase network name the way the runtime
+does. That is one measured rule copied into a stub, not this item's probe,
+which is still open.
