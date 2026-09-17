@@ -103,12 +103,15 @@ GitHub issues remain in use only for research/evidence records under
 - **A witness must fail with the source reverted, not merely be missing at
   base.** `criteria` requires a non-`preserves` witness to be red at base, and a
   test that does not exist yet is red there by construction, so that check is
-  easy to pass. `revert` is the strict one. It re-runs **every test the diff
-  adds** — `collected(head) - collected(base)`, declared or not — with the
-  diff's source files reverted, and blocks any that still pass
-  (`saffron/gates/core/revert.py`). So a criterion describing
-  behaviour that is already true at base — "nothing is pushed", "the breaker
-  does not fire" — cannot be witnessed honestly as written. Reword it until its
+  easy to pass. `revert` is the strict one. It re-runs a subset with the diff's
+  source files reverted and blocks any that still pass: **every test the diff
+  adds, united with every declared witness the suite collected at head, minus
+  every `preserves` witness** (`saffron/gates/core/revert.py`). Two things
+  follow. A test the spec asks the cell to write is judged whether or not a
+  criterion declares it, so never ask in prose for a guard that passes at base.
+  And a criterion describing behaviour already true at base — "nothing is
+  pushed", "the breaker does not fire" — cannot be witnessed honestly as
+  written. Reword it until its
   test must observe something only the change produces, or mark it `preserves`
   and name a test that already exists. Watch the other way round too: a witness
   module that imports a name the change adds, at module scope, makes the
@@ -126,14 +129,16 @@ GitHub issues remain in use only for research/evidence records under
   reverted is still yours to reason out.
 
 - **A declared witness is a bare node id; never ask for a parametrised test.**
-  `criteria` collects each witness by exactly the id the spec names, and a
-  `pytest.mark.parametrize` test's ids carry a `[case]` suffix, so the bare name
-  collects nothing and the criterion fails `witness-not-collected`
-  (`saffron/gates/core/criteria.py`). Naming one case instead pins the spec to a
-  parameter list the cell has not written yet. Two cases in one criterion is a
-  plain `def` driving both. `SA-0095`'s re-review offered "parametrise the
-  witness or put both cases in it; keep its name" (#306); the cell took the
-  first half, and the repair turn cost it attempt 1 (backlog item 159).
+  `criteria` matches the id the spec names against the names the suite collected,
+  by exact string — it executes nothing and never parses a name
+  (`saffron/gates/core/criteria.py`). A `pytest.mark.parametrize` test collects
+  as `test_name[case]`, so a bare id is in no such set and the criterion fails
+  `witness-not-collected`. Naming one case instead pins the spec to a parameter
+  list the cell has not written yet. Two cases in one criterion is a plain `def`
+  driving both. `SA-0095`'s re-review offered "parametrise the witness or put
+  both cases in it; keep its name" (#306). The cell took the first half, which
+  failed `criteria` on attempt 1 and spent attempt 2 on the repair turn
+  (backlog item 159).
 
 - **For each criterion, name the plausible wrong implementation its witness
   would pass, before you declare the witness.** If you can name one, the
@@ -169,11 +174,10 @@ GitHub issues remain in use only for research/evidence records under
   is arranged — the spec loop's step 1b re-reviews an edited spec before its
   cell. Two shapes cost run 5 a cell and a repair turn (backlog item 159):
 
-  *A test the edit asks for in prose is judged like any declared one.* `revert`
-  reads every new test, so "it is not a declared criterion, because it passes at
-  base; it guards the new call" — #292's own words in `SA-0093` — describes a
-  test that failed the attempt: `2 of 5 new test(s) passed without their
-  source`. #293 took both out, and the operator's review added them instead,
+  *A test the edit asks for in prose is judged like any declared one*, by the
+  rule above. So "it is not a declared criterion, because it passes at base; it
+  guards the new call" — #292's own words in `SA-0093` — describes a test that
+  failed the attempt: `2 of 5 new test(s) passed without their source`. #293 took both out, and the operator's review added them instead,
   which is where a test that passes at base belongs.
 
   *A claim widened in review names the witness that reaches the new half, in
