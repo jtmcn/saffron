@@ -28,6 +28,12 @@ _CLOSES = re.compile(
 )
 _MENTION = re.compile(r"(?<![\w/])@(?=\w)")
 
+# A rendering concern, so deliberately not a parsed `Spec` field.
+_PROBLEM_SECTION = re.compile(
+    r"^##\s*Problem\s*$(.*?)(?=^##\s|\Z)", re.MULTILINE | re.DOTALL | re.IGNORECASE
+)
+_PROBLEM_LIMIT = 2000
+
 # GitHub rejects a pull request body over 65,536 characters. Left uncapped,
 # `gh pr create` fails *after* the push and the run exits 2 with no `pr_url`
 # and no queue line — the state `_finish` exists to avoid. A margin, because
@@ -93,25 +99,34 @@ def render_pr_body(
     last and clipped like every other such string here. Empty for every task
     that produced none, which is every task before this channel existed."""
     risk = effective_risk if effective_risk is not None else spec.risk
+    # The `##` headings match `.github/pull_request_template.md`; a test holds them equal.
     sections = [
-        f"## {spec.id} — {spec.title}",
-        "",
-        f"`{spec.type}` · risk `{risk}` · +{added}/−{removed} · "
-        f"{attempts} attempt{'' if attempts == 1 else 's'} · ${spent_usd:.2f}",
-        "",
+        _what(
+            spec,
+            risk=risk,
+            added=added,
+            removed=removed,
+            attempts=attempts,
+            spent_usd=spent_usd,
+        ),
         _criteria(spec, results),
+        _verification(verified_on),
         _new_failures(new_failures),
         _disagreements(reviews, rebut_result),
         None,  # _test_diff, sized last: it is the only unbounded section.
-        _verification(verified_on),
         _gate_table(results, advisory_gates),
         _findings(reviews),
         _provenance(spec, base_sha, head_sha, transcript_path),
-        # Last, deliberately: every status, checklist and table above is fully
-        # rendered before this ever starts, so cell-authored prose here cannot
-        # be mistaken for having moved any of them (SA-0044's reasoning, held
-        # unchanged). Falsy when there is nothing to report, so a task with no
-        # notes renders a body byte-identical to one from before this existed.
+        _not_covered(
+            spec,
+            results,
+            reviews,
+            advisory_gates=advisory_gates,
+            rebut_result=rebut_result,
+            has_notes=bool(notes.strip()),
+        ),
+        # Last, so cell-authored prose cannot appear to have moved a table
+        # (SA-0044). Falsy when there are no notes.
         _notes(notes),
     ]
     slot = sections.index(None)
@@ -138,6 +153,57 @@ def _cell(value: object) -> str:
     return neutralize(str(value).replace("|", "\\|").replace("\n", " "))
 
 
+def _what(
+    spec: Spec,
+    *,
+    risk: str,
+    added: int,
+    removed: int,
+    attempts: int,
+    spent_usd: float,
+) -> str:
+    """The spec, the tier, and what the change cost — under the heading the
+    template asks a person for."""
+    lines = [
+        "## What",
+        "",
+        f"**{spec.id} — {spec.title}**",
+        "",
+        f"`{spec.type}` · risk `{risk}` · +{added}/−{removed} · "
+        f"{attempts} attempt{'' if attempts == 1 else 's'} · ${spent_usd:.2f}",
+        "",
+    ]
+    if problem := _problem(spec.body):
+        lines += [problem, ""]
+    return "\n".join(lines)
+
+
+def _problem(body: str) -> str:
+    """The spec's `## Problem` section, verbatim, or nothing.
+
+    Operator-authored and out of a cell's reach by construction: the host parses
+    the spec at `base_sha` before the cell exists, and every render reads that
+    object rather than the worktree. Neutralized regardless, which `spec.title`
+    is not — a title is a phrase and this is prose long enough to carry a
+    `Fixes #12` written about the work, which would close an issue on merge that
+    nobody meant to close. Saffron's own work is not tracked as issues at all
+    (`docs/agents/issue-tracker.md`), so there is no reading of that keyword in a
+    spec worth honouring.
+    """
+    section = _PROBLEM_SECTION.search(body)
+    if section is None:
+        return ""
+    text = section.group(1).strip()
+    if not text:
+        return ""
+    if len(text) > _PROBLEM_LIMIT:
+        text = (
+            text[:_PROBLEM_LIMIT].rstrip()
+            + "\n\n… clipped at the problem ceiling; the spec is the record."
+        )
+    return neutralize(text)
+
+
 def _criteria(spec: Spec, results: Sequence[GateResult]) -> str:
     """The checklist, and which kind of unticked each box is.
 
@@ -146,10 +212,7 @@ def _criteria(spec: Spec, results: Sequence[GateResult]) -> str:
     (§5.4's `tool` defect, one layer up). A box ticks only from a `criteria`
     gate result; `skip` means nobody looked and must not render as a failure.
     """
-    # Last, not first: `_suite` appends the host-constructed result after every
-    # declared gate, so a repo declaring its own gate named `criteria` cannot
-    # shadow it.
-    result = next((r for r in reversed(list(results)) if r.gate == "criteria"), None)
+    result = _criteria_result(results)
     if spec.acceptance and result is not None and result.status in ("pass", "fail"):
         unmet = {f.file: f for f in result.failures}
         lines = ["### Acceptance criteria", ""]
@@ -169,6 +232,17 @@ def _criteria(spec: Spec, results: Sequence[GateResult]) -> str:
         + [f"- [ ] {claim}" for claim in claims]
         + [""]
     )
+
+
+def _criteria_result(results: Sequence[GateResult]) -> GateResult | None:
+    # Last, not first: `_suite` appends the host's result after every declared
+    # gate, so a repo gate also named `criteria` cannot shadow it.
+    return next((r for r in reversed(list(results)) if r.gate == "criteria"), None)
+
+
+def _rebuttal_errored(rebut_result: RebutResult | None) -> bool:
+    # `is not None`: `str(exc)` is empty for an exception with no message.
+    return rebut_result is not None and rebut_result.rebuttal.error is not None
 
 
 def _new_failures(new_failures: list[NewFailure]) -> str:
@@ -218,7 +292,7 @@ def _disagreements(
         return ""
     rebuttals = {}
     verdicts = {}
-    errored = rebut_result is not None and rebut_result.rebuttal.error is not None
+    errored = _rebuttal_errored(rebut_result)
     if rebut_result is not None:
         if not errored:
             rebuttals = first_answers(rebut_result.rebuttal)
@@ -350,14 +424,18 @@ def _test_diff(
 
 
 def _verification(verified_on: str) -> str:
+    """What the sections below were measured on. Both sentences are the ones
+    this already rendered; the spine only gave them a heading to sit under."""
     if verified_on == "base":
         return (
+            "## Verification\n\n"
             "Gates ran at `base_sha`, and were not re-run: the base had not "
-            "moved, so the packaged tree is byte-identical to the one they saw."
+            "moved, so the packaged tree is byte-identical to the one they saw.\n"
         )
     return (
+        "## Verification\n\n"
         "Gates were re-run on the **packaged commit**, in a gate-only cell "
-        "outside the one that built it (§5.7)."
+        "outside the one that built it (§5.7).\n"
     )
 
 
@@ -397,6 +475,97 @@ def _gate_table(results: list[GateResult], advisory_gates: Sequence[str] = ()) -
         "",
     ]
     return "\n".join(lines)
+
+
+def _not_covered(
+    spec: Spec,
+    results: Sequence[GateResult],
+    reviews: Sequence[LensReview],
+    *,
+    advisory_gates: Sequence[str] = (),
+    rebut_result: RebutResult | None = None,
+    has_notes: bool = False,
+) -> str:
+    """What this body does not stand behind, collected.
+
+    Every line is derivable from a section above — a `skip` row, an `(advisory)`
+    mark, the checklist's blockquote, an `anchored: no` cell — and each is one
+    cell of a wide table the operator is scanning for something else. §5.7 states
+    its own residual that way (the credential shapes the refusal does not know),
+    for the same reason: a reader who has to assemble it never does.
+
+    One thing that belongs here and is deliberately absent: gates that ran at
+    `base_sha` and were not re-run. §5.7 makes that case *provably* redundant —
+    the packaged tree is byte-identical to the tree they saw — so listing it as
+    a gap would be false, and `_verification` already says which case this is.
+    """
+    lines = []
+    if skipped := [r.gate for r in results if r.status == "skip"]:
+        lines.append(
+            "- Did not run: "
+            + ", ".join(f"`{_cell(gate)}`" for gate in skipped)
+            + " — the repo declares no such gate."
+        )
+    # PACKAGE aborts on `error`, but a renderer lists what it is handed rather
+    # than show the row and omit it here.
+    if broken := [r.gate for r in results if r.status == "error"]:
+        lines.append(
+            "- Broke rather than judged: "
+            + ", ".join(f"`{_cell(gate)}`" for gate in broken)
+            + " — an `error` is charged to nobody, and checks nothing either."
+        )
+    # `fail` only, exactly as the gate table's marker: an advisory gate that
+    # passed is not a gap, and keying on the gate alone would list it as one.
+    if advisory := [
+        r.gate for r in results if r.status == "fail" and r.gate in advisory_gates
+    ]:
+        lines.append(
+            "- Failed without blocking: "
+            + ", ".join(f"`{_cell(gate)}`" for gate in advisory)
+            + " — advisory at this risk tier, so the pull request is green anyway."
+        )
+    claims = [c.claim for c in spec.acceptance] or spec.acceptance_criteria
+    criteria = _criteria_result(results)
+    if claims and (criteria is None or criteria.status not in ("pass", "fail")):
+        lines.append(
+            f"- The {len(claims)} acceptance "
+            f"criteri{'on is' if len(claims) == 1 else 'a are'} not mechanically "
+            "checked: no `criteria` gate result stands behind the checklist."
+        )
+    # Unanchored findings skip REBUT and §6's concern count. Keyed on the
+    # review's lens, as `_findings` keys the `anchored: no` cells it points to.
+    if unanchored := [
+        (r.lens, f) for r in reviews for f in r.findings if not f.anchored
+    ]:
+        lenses = sorted({lens for lens, _ in unanchored})
+        lines.append(
+            f"- {len(unanchored)} finding"
+            f"{'' if len(unanchored) == 1 else 's'} could not be anchored to the "
+            "diff ("
+            + ", ".join(f"`{_cell(lens)}`" for lens in lenses)
+            + "), so neither the implementer nor the concern count ever saw "
+            + ("it." if len(unanchored) == 1 else "them.")
+        )
+    # A turn that recorded nothing, not one that argued nothing (§4.3). Its error
+    # string is never quoted: untrusted model output (backlog item 42).
+    blockers = anchored_blockers(reviews)
+    if blockers and _rebuttal_errored(rebut_result):
+        lines.append(
+            "- No implementer answer stands against "
+            + (
+                "the blocker"
+                if len(blockers) == 1
+                else f"any of the {len(blockers)} blockers"
+            )
+            + ": the rebuttal turn recorded nothing (see `rebuttal.json`)."
+        )
+    # With notes, `_notes` fills the section; "nothing" would contradict them.
+    if not lines and not has_notes:
+        lines.append(
+            "- Nothing: every gate and criterion above was judged and could "
+            "block, and every finding reached the implementer."
+        )
+    return "\n".join(["## Not covered", "", *lines, ""])
 
 
 _NOTES_LIMIT = 4000
