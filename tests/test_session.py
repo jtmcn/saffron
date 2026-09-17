@@ -713,14 +713,8 @@ def _stub_the_runtime(
     monkeypatch.setattr("saffron.cell.runtime.create_network", _create_network)
     monkeypatch.setattr("saffron.cell.runtime.create_volume", lambda *a, **k: None)
 
-    # The gate cell's by-value pre-clean (backlog item 143): a mapping from
-    # subnet to the names holding it, exactly as the real
-    # `runtime.networks_on_subnet` would answer. Empty for any subnet not
-    # named, and empty by default — a stub answering the same holders
-    # whatever subnet it is asked about would pass a pre-clean that looked up
-    # the wrong one, and a stub defaulting to the gate network's own name
-    # would silently add a third removal to every test that already counts
-    # it removed exactly twice.
+    # Per subnet, so a pre-clean asking about the wrong one finds nothing;
+    # empty by default, or every twice-removed count gains a third.
     _holders = {k: list(v) for k, v in (networks_on_subnet or {}).items()}
 
     def _networks_on_subnet(subnet, exclude=""):
@@ -3534,18 +3528,25 @@ def test_the_gate_cells_pre_clean_removes_a_leftover_saffron_network_on_its_subn
 ):
     """The by-name pre-clean only ever clears a leftover under *this* spec's
     own name; the collision `create_network` raises on is by subnet, one name
-    over (backlog item 143). A SIGKILLed run of a *different* spec's gate
-    cell leaves `saffron-gate-net-other-spec` on the gate cell's own subnet,
-    and this run's pre-clean must remove it — by value, before its own
+    over (backlog item 143). A SIGKILLed task of a *different* spec leaves
+    `saffron-gate-net-other-spec` on the Gate-only cell's subnet, and this
+    task's pre-clean must remove it — by value, before its own
     create — while leaving a non-`saffron-`-prefixed holder on the same
     subnet alone: a single holder cannot tell the prefix filter from a
     pre-clean that removes every holder it is handed."""
     other_spec_network = "saffron-gate-net-other-spec"
+    other_saffron_network = "saffron-leftover"
     unrelated_network = "operator-net"
     cell = _stub_the_runtime(
         monkeypatch,
         networks_on_subnet={
-            runtime.SUBNETS["gate"]: [other_spec_network, unrelated_network]
+            # Not first, and not all `saffron-gate-net-`: a filter narrower
+            # than the prefix, or a first-holder-only loop, still fails.
+            runtime.SUBNETS["gate"]: [
+                unrelated_network,
+                other_spec_network,
+                other_saffron_network,
+            ]
         },
     )
     outcome, _ledger = _drive(
@@ -3557,11 +3558,12 @@ def test_the_gate_cells_pre_clean_removes_a_leftover_saffron_network_on_its_subn
     assert outcome.state == "READY_FOR_REVIEW"
 
     assert ("network", other_spec_network) in cell.removed
+    assert ("network", other_saffron_network) in cell.removed
     assert ("network", unrelated_network) not in cell.removed
 
-    removed_at = cell.order.index(f"removed:network:{other_spec_network}")
     created_at = cell.order.index(f"created:network:{_GATE_NETWORK}")
-    assert removed_at < created_at
+    for holder in (other_spec_network, other_saffron_network):
+        assert cell.order.index(f"removed:network:{holder}") < created_at
 
 
 def test_the_lens_gate_cell_is_torn_down_when_its_own_suite_raises(

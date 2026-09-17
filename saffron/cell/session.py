@@ -1135,18 +1135,8 @@ def critic_cell(
     runtime.remove_container(container)
     if own_network:
         runtime.remove_network(network)
-        # By name only clears a leftover left under *this* spec's own name.
-        # The collision is by subnet, not by name: a SIGKILLed run of a
-        # *different* spec leaves its gate network on this same subnet under
-        # its own name, and the create below would fail on the subnet the
-        # way `create_network`'s own error already explains (backlog item
-        # 143). `networks_on_subnet` answers with every overlapping network
-        # the runtime lists — an operator's unrelated one included — so only
-        # a `saffron-`-prefixed holder, one this factory could itself have
-        # created, is taken. No `exclude=`: that argument exists for
-        # `create_network` to explain an error about a network it was itself
-        # trying to create, not for a pre-clean to skip the one leftover it
-        # exists to remove.
+        # The collision is by subnet, and another spec's leftover holds it
+        # under its own name: remove ours, never an operator's (item 143).
         for holder in runtime.networks_on_subnet(_GATE_CELL_SUBNET):
             if holder.startswith("saffron-"):
                 runtime.remove_network(holder)

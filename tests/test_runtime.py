@@ -673,6 +673,19 @@ def test_every_subnet_saffron_allocates_is_declared_in_one_place():
     assert runtime.SUBNETS["egress"] == proxy_module.EGRESS_SUBNET
     assert runtime.SUBNETS["gate"] == session_module._GATE_CELL_SUBNET
 
+    # Equal is not drawn: `"10.89.0.0" + "/24"` passes both checks above.
+    import ast
+
+    for src, name in [(proxy_src, "EGRESS_SUBNET"), (session_src, "_GATE_CELL_SUBNET")]:
+        (value,) = [
+            node.value
+            for node in ast.parse(src).body
+            if isinstance(node, ast.Assign)
+            and [ast.unparse(t) for t in node.targets] == [name]
+        ]
+        assert isinstance(value, ast.Subscript), name
+        assert ast.unparse(value.value) == "runtime.SUBNETS", name
+
 
 def test_no_two_declared_subnets_overlap():
     """Nothing compared the declared subnets against each other before this —
@@ -692,8 +705,8 @@ def test_no_two_declared_subnets_overlap():
 
 
 def test_a_listing_that_could_not_be_read_adds_no_detail_and_still_raises(monkeypatch):
-    """`networks_on_subnet` only ever decorates an error already being raised,
-    so a failed listing must not become a second failure."""
+    """A failed listing leaves `create_network`'s error undecorated, never a
+    second failure."""
 
     def fake_call(argv, timeout_s=120):
         if "create" in argv:
