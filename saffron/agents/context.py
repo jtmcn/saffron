@@ -11,8 +11,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from pathlib import Path
 
 from saffron.intake import Criterion
+
+TURNS_DIR = Path(__file__).resolve().parent / "prompts" / "turns"
+_EXTRACTION_SLOT = "{extraction}"
 
 # CONTEXT.md's own table, in code. REPAIR and REBUT are deliberately absent:
 # both resume a session that already carries the implementer's sections, and
@@ -138,6 +142,26 @@ def standing_instructions(claude_md: str | None) -> str:
             claude_md.rstrip(),
         ]
     )
+
+
+def turn_prompt(name: str) -> str:
+    """One turn's prompt, from `prompts/turns/<name>.md` (§5.3).
+
+    The text lives in Markdown for the same reason a system prompt does: it is
+    prose a cell reads, and prose a cell reads is measured. `{extraction}` is
+    filled here so the extraction rules have one copy — `notes` is built on
+    them rather than beside them, and a hand-written second copy is how the two
+    drift.
+
+    Filled by splitting on the slot, never `str.format`: `rebut` carries a
+    `{blockers}` slot its caller fills at runtime, and a `.format` here would
+    consume it (the rule `build_system_prompt` follows for `{spec}`).
+    """
+    text = (TURNS_DIR / f"{name}.md").read_text().rstrip("\n")
+    if name == "extraction":
+        return text
+    extraction = (TURNS_DIR / "extraction.md").read_text().rstrip("\n")
+    return extraction.join(text.split(_EXTRACTION_SLOT))
 
 
 def build_system_prompt(

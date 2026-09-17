@@ -24,40 +24,18 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationError
 
 from saffron.agents import context
-from saffron.agents.artifacts import EXTRACTION_PROMPT, parse_output_block
+from saffron.agents.artifacts import parse_output_block
 from saffron.agents.findings import Finding
 from saffron.events import Event, PhaseStart, describe
 from saffron.phases import implement, review
 
 VERDICT_PROMPT_FILE = "rebut-verdict.md"
 
-REBUT_PROMPT = (
-    "A critic reviewed your change and raised the blockers below. The host has "
-    "already checked that each one points at a line your diff really changed, "
-    "so none of them is about code you did not touch.\n\n"
-    "{blockers}\n\n"
-    "You get one attempt, and there is no second one. For each blocker, either "
-    "fix it and commit, or argue that the finding is wrong. Arguing is a "
-    "legitimate outcome and is recorded as one — a documented disagreement is "
-    "more useful to the operator than agreement. Claiming a fix you did not "
-    "commit is not an outcome at all: the host measures HEAD, not your report."
-)
+REBUT_PROMPT = context.turn_prompt("rebut")
 
-VERDICT_TURN_PROMPT = (
-    "Confirm or withdraw each of your findings now, given the rebuttal. Read "
-    "whatever you need to; you hold no tool that can change anything. "
-    + EXTRACTION_PROMPT
-)
+VERDICT_TURN_PROMPT = context.turn_prompt("verdict")
 
-EXTRACT_PROMPT = (
-    "Record your rebuttal now. The block is a JSON object with one key, "
-    "`rebuttals`, an array with one entry per blocker: `finding` (its number "
-    'above), `action` ("fixed" if you committed a change for it, "argued" if '
-    "you are arguing the finding is wrong) and `argument` (what you changed, or "
-    "why the finding is wrong). A person reads each `argument` in the pull "
-    "request's disagreements table. Write it in plain, specific language and "
-    "state each fact once. " + EXTRACTION_PROMPT
-)
+EXTRACT_PROMPT = context.turn_prompt("rebut-extract")
 
 
 class Rebuttal(BaseModel):

@@ -12,7 +12,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from saffron import events
-from saffron.agents.artifacts import EXTRACTION_PROMPT
+from saffron.agents import context
 from saffron.cell import runtime
 from saffron.cell.worktree import STATE_MOUNT, WORKTREE_MOUNT
 from saffron.events import Agent, Event, describe
@@ -33,16 +33,9 @@ RUNNER = "/opt/saffron/agent_runner.py"
 # first, and the SDK is not installed in it (measured).
 PYTHON = "/opt/saffron/python"
 
-PLAN_PROMPT = (
-    "Produce the plan for this task. Read whatever you need to; change no "
-    "file and make no commit. If the declared touches cannot satisfy the "
-    "acceptance criteria, propose scope instead of a plan. " + EXTRACTION_PROMPT
-)
+PLAN_PROMPT = context.turn_prompt("plan")
 
-IMPLEMENT_PROMPT = (
-    "The plan is accepted. Implement it now and commit your work. An attempt "
-    "that produces no commits failed, whatever you say about it."
-)
+IMPLEMENT_PROMPT = context.turn_prompt("implement")
 
 # session.py's one-turn salvage (SA-0028): spent only when the implement turn
 # was cut off at its own turn ceiling with the worktree still at zero commits
@@ -54,11 +47,7 @@ IMPLEMENT_PROMPT = (
 # would be the same defect one level down.
 SALVAGE_MAX_TURNS = 5
 
-SALVAGE_PROMPT = (
-    "This turn was cut off before anything was committed. Do not keep "
-    "implementing, do not re-read files, do not investigate further — commit "
-    "exactly what already exists in the worktree, as-is, right now."
-)
+SALVAGE_PROMPT = context.turn_prompt("salvage")
 
 
 class AgentFailed(RuntimeError):

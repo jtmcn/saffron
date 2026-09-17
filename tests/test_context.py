@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 
-from saffron.agents import context
-from saffron.phases import rebut
+from saffron.agents import artifacts, context
+from saffron.phases import implement, rebut, review
 
 REAL_CONTEXT_MD = (Path(__file__).parent.parent / "CONTEXT.md").read_text()
 
@@ -348,3 +349,51 @@ def test_prose_bound_for_the_pr_body_is_asked_for_in_plain_language(
     # A recipe, not a prohibition list: a trailing "no X, no Y" measurably
     # produces more of what it bans.
     assert "no analogies" not in flat
+
+
+# Every turn prompt, and the constant that loads it. A name here and no file on
+# disk is a prompt nothing can serve; a file here and no name is dead prose.
+TURN_PROMPTS = {
+    "plan": implement.PLAN_PROMPT,
+    "implement": implement.IMPLEMENT_PROMPT,
+    "salvage": implement.SALVAGE_PROMPT,
+    "review": review.REVIEW_PROMPT,
+    "rebut": rebut.REBUT_PROMPT,
+    "rebut-extract": rebut.EXTRACT_PROMPT,
+    "verdict": rebut.VERDICT_TURN_PROMPT,
+    "notes": artifacts.NOTES_PROMPT,
+    "extraction": artifacts.EXTRACTION_PROMPT,
+}
+
+
+def test_every_turn_prompt_file_is_loaded_by_something():
+    """A file nothing loads is prose the gate counts and no cell ever reads."""
+    assert {path.stem for path in context.TURNS_DIR.glob("*.md")} == set(TURN_PROMPTS)
+
+
+@pytest.mark.parametrize(("name", "constant"), sorted(TURN_PROMPTS.items()))
+def test_a_turn_prompt_constant_is_its_file(name, constant):
+    assert constant == context.turn_prompt(name)
+
+
+@pytest.mark.parametrize("name", sorted(TURN_PROMPTS))
+def test_a_loaded_turn_prompt_keeps_no_unfilled_slot(name):
+    """`{extraction}` is filled at load. Only `rebut` carries a runtime slot."""
+    rendered = context.turn_prompt(name)
+    assert re.findall(r"\{[a-z_]+\}", rendered) == (
+        ["{blockers}"] if name == "rebut" else []
+    )
+
+
+@pytest.mark.parametrize(
+    "name", ["plan", "review", "verdict", "rebut-extract", "notes"]
+)
+def test_a_prompt_declaring_the_slot_gets_the_extraction_rules(name):
+    assert context.turn_prompt("extraction") in context.turn_prompt(name)
+
+
+def test_the_rebuttal_prompt_still_formats_its_blockers():
+    """Filling `{extraction}` with `str.format` would consume this slot too."""
+    filled = rebut.REBUT_PROMPT.format(blockers="1. [lens] a.py:1 — a claim")
+    assert "1. [lens] a.py:1 — a claim" in filled
+    assert "{blockers}" not in filled

@@ -46,10 +46,7 @@ LENSES = {
 # notice the code being wrong — no mutation tool, no coverage gate, both
 # priced and both rejected in `docs/evidence/`.
 
-REVIEW_PROMPT = (
-    "Review this change now. Read whatever you need to; you hold no tool that "
-    "can change anything. " + EXTRACTION_PROMPT
-)
+REVIEW_PROMPT = context.turn_prompt("review")
 
 
 class _Reported(BaseModel):
