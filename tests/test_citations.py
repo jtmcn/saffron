@@ -380,3 +380,60 @@ def test_the_context_table_agrees_with_its_headings_and_the_injector():
             assert number not in injected, f"§{number} is tagged '—' but is injected"
         else:
             assert number in injected, f"§{number} names phases but reaches none"
+
+
+# Every rule in `.saffron/rules/`, mapped to the phrase in `CLAUDE.md` that carries
+# it. Two rules can share one invariant: the runtime pair is a single rule — spell
+# your own binary — enforced once per product, which is why the preamble's number
+# counts these values and not the files.
+GATED = {
+    "agent-sdk-import-is-runner-only": "file permitted to import the Agent SDK",
+    "container-runtime-is-runtime-only": "may spell their own binary",
+    "gate-tool-must-be-executed": "**The `tool` field**",
+    "one-task-driver": "**One module drives a task.**",
+    "podman-runtime-is-runtime-only": "may spell their own binary",
+    "skip-is-spelled-in-full": "**A skip is spelled in full where it is used.**",
+}
+COUNTED = ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
+
+
+def test_every_gated_rule_is_named_in_claude_md():
+    """A rule fires in a cell; `CLAUDE.md` is where an agent reads it first.
+
+    `skip-is-spelled-in-full` landed in PR #241 and reached no line of the standing
+    instructions, so for months an agent here could meet a blocking `structure`
+    gate the instruction surface never mentioned — which is how `SA-0077` burned a
+    turn on it (item 112). Nothing failed, because a rule's own existence is not a
+    claim that any reader checks.
+    """
+    ids = set()
+    for path in sorted((ROOT / ".saffron" / "rules").glob("*.yml")):
+        found = re.findall(r"^id: (\S+)$", path.read_text(), re.MULTILINE)
+        assert len(found) == 1, f"{path.name}: one `id:` expected, found {found}"
+        ids.add(found[0])
+    assert ids == set(GATED), (
+        f"{sorted(ids ^ set(GATED))}: a rule arrived or left. Give it a bullet in "
+        "CLAUDE.md's invariants and name it here, or drop it from both"
+    )
+
+    text = (ROOT / "CLAUDE.md").read_text()
+    unnamed = sorted(rule for rule, phrase in GATED.items() if phrase not in text)
+    assert unnamed == [], (
+        f"CLAUDE.md no longer carries {unnamed} — restore the bullet, or fix the "
+        "phrase here if the wording moved on"
+    )
+
+
+def test_the_invariants_preamble_counts_the_gated_invariants():
+    """`CLAUDE.md` said "four" for the whole life of its fifth gated rule.
+
+    The preamble promises to name the gated invariants, so the number is a claim
+    about the list below it. It is also the only line that a new rule silently
+    falsifies: the bullet can be written and the count left alone.
+    """
+    expected = len(set(GATED.values()))
+    claim = f"The {COUNTED[expected - 1]} marked **(gated)**"
+    assert claim in (ROOT / "CLAUDE.md").read_text(), (
+        f"CLAUDE.md's invariants preamble does not say {claim!r}, and "
+        f"{expected} gated invariants are named below it"
+    )
