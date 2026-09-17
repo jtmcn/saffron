@@ -62,3 +62,14 @@ repos:
         types: [text]
         entry: uv run hooks/retired_vocabulary.py
         exclude: '^(CONTEXT\.md|CLAUDE\.md|docs/superpowers/|docs/evidence/)'
+
+  # The `prose` gate's rules per commit: a staged file in scope may not gain
+  # findings of any rule. Scope lives in `.saffron/gates/prose.py`.
+  - repo: local
+    hooks:
+      - id: prose-limit
+        name: prose limit (the prose gate's rules)
+        language: system
+        entry: uv run hooks/prose_limit.py
+        pass_filenames: false
+        files: \.md$
