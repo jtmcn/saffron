@@ -18,9 +18,13 @@ from __future__ import annotations
 
 import bisect
 import functools
+import hashlib
 import importlib.util
+import json
 import re
+import subprocess
 import sys
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -292,8 +296,99 @@ def check(text: str, path: str, gate: str, *, root: Path) -> list[Finding]:
     return sorted(found, key=lambda f: (f.line, f.code))
 
 
+def _emit(payload: dict[str, object]) -> int:
+    print(json.dumps(payload))
+    return 0
+
+
+def _listed(root: Path) -> subprocess.CompletedProcess[str]:
+    # Untracked files count: a cell's edits reach the gates before any commit.
+    return subprocess.run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+
+
 def main(argv: list[str]) -> int:
-    raise NotImplementedError("Task 3")
+    if argv == ["--version"]:
+        digest = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:12]
+        print(f"saffron-prose {digest}")
+        return 0
+    if len(argv) != 1 or argv[0] not in GATES:
+        print(f"usage: prose.py --version | {' | '.join(GATES)}", file=sys.stderr)
+        return 2
+    gate = argv[0]
+    try:
+        version = subprocess.run(
+            [sys.executable, __file__, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return _emit(
+            {"gate": gate, "status": "error", "summary": f"--version failed: {exc}"}
+        )
+    tool = version.stdout.strip()
+    if version.returncode != 0 or not tool:
+        return _emit(
+            {"gate": gate, "status": "error", "summary": "--version printed nothing"}
+        )
+
+    root = Path.cwd()
+    listed = _listed(root)
+    if listed.returncode != 0:
+        summary = f"git ls-files failed: {listed.stderr.strip()}"
+        return _emit(
+            {"gate": gate, "status": "error", "tool": tool, "summary": summary}
+        )
+    paths = sorted(
+        {
+            p
+            for p in listed.stdout.split("\0")
+            if p and in_scope(p) and (root / p).is_file()
+        }
+    )
+    if not paths:
+        summary = "no Markdown file is in scope, so nothing was read"
+        return _emit(
+            {"gate": gate, "status": "error", "tool": tool, "summary": summary}
+        )
+
+    failures: list[dict[str, object]] = []
+    counts: Counter[str] = Counter()
+    try:
+        for path in paths:
+            text = (root / path).read_text(encoding="utf-8", errors="replace")
+            for finding in check(text, path, gate, root=root):
+                message = finding.code if gate == "prose" else finding.excerpt
+                failures.append(
+                    {
+                        "file": path,
+                        "line": finding.line,
+                        "code": finding.code,
+                        "message": message,
+                    }
+                )
+                counts[finding.code] += 1
+    except (OSError, ValueError) as exc:
+        summary = f"{type(exc).__name__}: {exc}"
+        return _emit(
+            {"gate": gate, "status": "error", "tool": tool, "summary": summary}
+        )
+
+    by_code = ", ".join(f"{code} {n}" for code, n in counts.most_common())
+    return _emit(
+        {
+            "gate": gate,
+            "status": "fail" if failures else "pass",
+            "tool": tool,
+            "failures": failures,
+            "summary": f"{len(failures)} findings in {len(paths)} files. {by_code}".strip(),
+        }
+    )
 
 
 if __name__ == "__main__":

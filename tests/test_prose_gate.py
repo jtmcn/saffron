@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -153,3 +154,111 @@ def test_a_rendered_closed_set_is_not_counted():
     context = f"**Risk tier**: {members}.\n"
     assert _codes(context, "CONTEXT.md") == []
     assert _codes(context, "README.md") == ["sentence-length"]
+
+
+def _run_gate(name: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(GATES / name)], cwd=cwd, capture_output=True, text=True, timeout=120
+    )
+
+
+def _init(repo: Path, files: dict[str, str]) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    for name, text in files.items():
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text(text)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+
+
+def test_prose_names_its_tool_and_reports_on_this_repo():
+    from saffron.gates.contract import parse_gate_json
+
+    done = _run_gate("prose", REPO)
+    assert done.returncode == 0, done.stderr
+    result = parse_gate_json(done.stdout, expected_gate="prose")
+    assert result.status in ("pass", "fail"), result.summary
+    assert result.tool and result.tool.startswith("saffron-prose ")
+    assert all(f.message == f.code for f in result.failures)
+
+
+def test_prose_reports_the_version_the_script_printed():
+    from saffron.gates.contract import parse_gate_json
+
+    printed = subprocess.run(
+        [sys.executable, str(SCRIPT), "--version"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    result = parse_gate_json(_run_gate("prose", REPO).stdout, expected_gate="prose")
+    assert result.tool == printed
+
+
+def test_prose_passes_a_clean_tree_and_fails_a_long_sentence(tmp_path):
+    from saffron.gates.contract import parse_gate_json
+
+    _init(tmp_path, {"README.md": "The gate passes.\n", "notes.txt": LONG_A})
+    clean = parse_gate_json(_run_gate("prose", tmp_path).stdout, expected_gate="prose")
+    assert (clean.status, clean.failures) == ("pass", [])
+
+    (tmp_path / "README.md").write_text(LONG_A + "\n")
+    red = parse_gate_json(_run_gate("prose", tmp_path).stdout, expected_gate="prose")
+    assert red.status == "fail"
+    assert [(f.file, f.line, f.code) for f in red.failures] == [
+        ("README.md", 1, "sentence-length")
+    ]
+
+
+def test_prose_errors_rather_than_passes_when_nothing_is_in_scope(tmp_path):
+    from saffron.gates.contract import parse_gate_json
+
+    _init(tmp_path, {"notes.txt": "nothing to read\n"})
+    result = parse_gate_json(_run_gate("prose", tmp_path).stdout, expected_gate="prose")
+    assert result.status == "error"
+    assert "in scope" in result.summary
+
+
+def test_a_rewritten_finding_is_not_new_and_an_added_one_is():
+    """The per-file limit is baseline subtraction over `(file, code, code)`."""
+    from saffron.gates.baseline import subtract_baseline
+    from saffron.gates.contract import Failure, GateResult
+
+    prose = _prose()
+
+    def result(text: str) -> GateResult:
+        failures = [
+            Failure(file="README.md", line=f.line, code=f.code, message=f.code)
+            for f in prose.check(text, "README.md", "prose", root=REPO)
+        ]
+        return GateResult(gate="prose", status="fail", tool="t", failures=failures)
+
+    base = [result(LONG_A + "\n")]
+    assert subtract_baseline([result("Intro.\n\n" + LONG_B + "\n")], base) == []
+    added = subtract_baseline([result(LONG_A + "\n\n" + LONG_B + "\n")], base)
+    assert [(n.gate, n.failure.code) for n in added] == [("prose", "sentence-length")]
+
+
+def test_scope_reaches_every_place_it_names():
+    prose = _prose()
+    listed = subprocess.run(
+        ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
+    ).stdout.splitlines()
+    for name in prose.ROOT_FILES:
+        assert name in listed and prose.in_scope(name), name
+    for directory in prose.INCLUDED_DIRS:
+        assert any(p.startswith(directory) and prose.in_scope(p) for p in listed), (
+            directory
+        )
+
+
+def test_scope_leaves_the_records_alone():
+    prose = _prose()
+    assert prose.EXCLUDED_DIRS == (".saffron/specs/done/",)
+    for record in (
+        ".saffron/specs/done/SA-0001-x.md",
+        "docs/evidence/2026-01-01-x.md",
+        "docs/superpowers/specs/x.md",
+        "docs/backlog/notes.txt",
+    ):
+        assert not prose.in_scope(record), record
+    assert prose.in_scope(".claude/skills/a/b/SKILL.md")

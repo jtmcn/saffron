@@ -19,6 +19,9 @@ gates:
   # so the `retired-vocabulary` pygrep hook's approach would false-positive on the
   # first three. Declared unconditionally, for the reason `shacl` gives above.
   structure: { blocking: true }
+  # House style over living Markdown. It fails at base as well: subtraction
+  # counts, so a task fails only when a file gains findings of one rule.
+  prose: { blocking: true }
 
 # Where a plausible-looking wrong change hurts most. Getting this right is most
 # of what onboarding actually means (DESIGN.md §5.6).
