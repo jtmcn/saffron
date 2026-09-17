@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The `prose` gate's limit, applied to a commit.
+"""The `prose` gate's limit, applied to a commit and to each edit.
 
 Each staged Markdown file in scope may not carry more hits of any `prose`
 rule than its `HEAD` version. A new file compares against zero, and a rename
@@ -91,6 +91,15 @@ def rises(
     return {code: (before[code], n) for code, n in after.items() if n > before[code]}
 
 
+def risen_hits(
+    prose: Any, root: Path, gate: str, path: str, old_text: str | None, new_text: str
+) -> tuple[dict[str, tuple[int, int]], list[Any]]:
+    """The codes whose count rose, and the new hits of those codes."""
+    risen = rises(prose, root, gate, path, old_text, new_text)
+    fresh = new_hits(prose, root, gate, path, old_text, new_text)
+    return risen, [hit for hit in fresh if hit.code in risen]
+
+
 def _show(root: Path, spec: str) -> str:
     done = _git(root, "show", spec)
     done.check_returncode()
@@ -105,18 +114,19 @@ def commit_time(root: Path) -> int:
             continue
         old_text = _show(root, f"HEAD:{old}") if old else None
         new_text = _show(root, f":{new}")
-        risen = rises(prose, root, "prose", new, old_text, new_text)
+        risen, hits = risen_hits(prose, root, "prose", new, old_text, new_text)
         for code, (was, now) in sorted(risen.items()):
             print(f"{new}: {code} rose from {was} to {now}")
             failed = True
-        for hit in new_hits(prose, root, "prose", new, old_text, new_text):
-            if hit.code in risen:
-                print(f"  {new}:{hit.line}: {hit.code}: {hit.excerpt}")
+        for hit in hits:
+            print(f"  {new}:{hit.line}: {hit.code}: {hit.excerpt}")
     return 1 if failed else 0
 
 
-def edit_time(root: Path, event: dict[str, Any]) -> int:
+def edit_time(root: Path, event: object) -> int:
     """Print the edited file's new hits for the model. The edit already happened."""
+    if not isinstance(event, dict):
+        return 0
     tool_input = event.get("tool_input")
     if not isinstance(tool_input, dict):
         return 0
@@ -125,7 +135,8 @@ def edit_time(root: Path, event: dict[str, Any]) -> int:
         return 0
     file_path = Path(raw_path)
     if not file_path.is_absolute():
-        file_path = Path(event.get("cwd", root)) / file_path
+        cwd = event.get("cwd")
+        file_path = (Path(cwd) if isinstance(cwd, str) else root) / file_path
     try:
         path = file_path.resolve().relative_to(root.resolve()).as_posix()
     except ValueError:
@@ -140,10 +151,8 @@ def edit_time(root: Path, event: dict[str, Any]) -> int:
     # an untouched hit sharing its line with an edit is not new.
     lines = []
     for gate in prose.GATES:
-        risen = rises(prose, root, gate, path, old_text, new_text)
-        for f in new_hits(prose, root, gate, path, old_text, new_text):
-            if f.code in risen:
-                lines.append(f"{path}:{f.line}: {f.code}: {f.excerpt}")
+        _, hits = risen_hits(prose, root, gate, path, old_text, new_text)
+        lines += [f"{path}:{hit.line}: {hit.code}: {hit.excerpt}" for hit in hits]
     if not lines:
         return 0
     print(

@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 REPO = Path(__file__).resolve().parent.parent
@@ -134,30 +135,53 @@ def test_an_edit_beside_an_untouched_hit_says_nothing(tmp_path):
     assert done.stderr == ""
 
 
-def test_edited_with_malformed_stdin_says_nothing(tmp_path):
-    repo = _repo(tmp_path, {"README.md": "Short.\n"})
-    done = subprocess.run(
+def _raw_event(repo: Path, event: object) -> subprocess.CompletedProcess[str]:
+    """`event` as JSON on stdin; bytes go through unencoded."""
+    return subprocess.run(
         [sys.executable, str(HOOK), "--edited"],
         cwd=repo,
-        input="not json",
+        input=event.decode() if isinstance(event, bytes) else json.dumps(event),
         capture_output=True,
         text=True,
     )
+
+
+def test_edited_with_malformed_stdin_says_nothing(tmp_path):
+    repo = _repo(tmp_path, {"README.md": "Short.\n"})
+    done = _raw_event(repo, b"not json")
     assert done.returncode == 0
     assert done.stderr == ""
 
 
 def test_edited_with_null_tool_input_says_nothing(tmp_path):
     repo = _repo(tmp_path, {"README.md": "Short.\n"})
-    done = subprocess.run(
-        [sys.executable, str(HOOK), "--edited"],
-        cwd=repo,
-        input=json.dumps({"tool_input": None}),
-        capture_output=True,
-        text=True,
-    )
+    done = _raw_event(repo, {"tool_input": None})
     assert done.returncode == 0
     assert done.stderr == ""
+
+
+@pytest.mark.parametrize("event", [[], "x"])
+def test_edited_with_an_event_that_is_not_an_object_says_nothing(tmp_path, event):
+    repo = _repo(tmp_path, {"README.md": "Short.\n"})
+    (repo / "README.md").write_text(LONG_A + "\n")
+    done = _raw_event(repo, event)
+    assert (done.returncode, done.stderr) == (0, "")
+
+
+def test_a_cwd_that_is_not_a_string_falls_back_to_the_repo(tmp_path):
+    repo = _repo(tmp_path, {"README.md": "Short.\n"})
+    (repo / "README.md").write_text(LONG_A + "\n")
+    done = _raw_event(repo, {"tool_input": {"file_path": "README.md"}, "cwd": 3})
+    assert done.returncode == 2
+    assert "README.md:1: sentence-length" in done.stderr
+
+
+def test_an_edit_the_gate_does_not_read_says_nothing(tmp_path):
+    repo = _repo(tmp_path, {"README.md": "Short.\n"})
+    evidence = repo / "docs" / "evidence" / "run.md"
+    evidence.parent.mkdir(parents=True)
+    evidence.write_text(LONG_A + "\n")
+    assert _edited(repo, evidence).returncode == 0
 
 
 def test_claude_code_runs_the_hook_after_each_edit():
@@ -165,4 +189,6 @@ def test_claude_code_runs_the_hook_after_each_edit():
     (entry,) = settings["hooks"]["PostToolUse"]
     assert entry["matcher"] == "Write|Edit"
     (hook,) = entry["hooks"]
-    assert hook["command"].endswith("python3 hooks/prose_limit.py --edited")
+    assert hook["command"] == (
+        'cd "$CLAUDE_PROJECT_DIR" && python3 hooks/prose_limit.py --edited'
+    )
