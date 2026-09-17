@@ -107,7 +107,7 @@ Operator visibility parts 2 and 3 — `SA-0032`–`SA-0039`, with the plan's Tas
 rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
 **38**), plus **43**, **48**, **52**, **60**, **66**, **67**, ~~**72**~~, **98**, **103**,
 ~~**104**~~, **113**, **135**, and from stack #285: **147**, **146**, **144**,
-**149**, **148**, **142**, **138**, then **152** and **153**.
+**149**, **148**, **142**, **138**, then ~~**152**~~ and ~~**153**~~.
 
 **152 and 153 are the spec loop's authoring half**, filed 2026-09-16 from
 writing #290's three specs and reading their reviews. 152 is the mechanical
@@ -118,7 +118,7 @@ one of the spec review's six checks, and the largest defect class in those three
 specs — five sentences about current code that were false — has no authoring
 rule at all. They rank here rather than in tier 1 because the spec review
 already catches both classes by hand, every spec, before any cell runs; what
-these buy is that it stops having to.
+these buy is that it stops having to. Both are done (2026-09-16, by hand).
 
 **72 is done** (2026-09-07, by hand), taken ahead of Track A by operator
 decision because it was the one item whose defect was a guard that could not

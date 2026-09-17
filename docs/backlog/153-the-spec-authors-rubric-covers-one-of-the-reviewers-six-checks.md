@@ -1,9 +1,10 @@
 ---
 id: 153
 title: The spec author's conventions cover one of the six checks the spec review runs, and the largest defect class has no rule at all
-status: open
+status: done
 tier: 2
 filed: 2026-09-16
+closed: 2026-09-16
 by_hand: true
 specs: []
 prs: [290]
@@ -90,3 +91,10 @@ defect is review-or-nothing and nothing closes it.
 
 **Filed 2026-09-16** from writing #290's three specs and reading their reviews.
 Item **152** is the mechanically checkable part of the same measurement.
+
+**2026-09-16, done, by hand.** Both rules are in `docs/agents/issue-tracker.md`'s
+conventions, in the order an author meets them: name the wrong implementation
+before declaring a witness (check 3's technique), and give every sentence about
+current code a `file:line` read while writing it (check 6). The witness
+bullets also point to item 152's test as the mechanical half. No template and no
+new gate, for the reasons "Done looks like" gives.

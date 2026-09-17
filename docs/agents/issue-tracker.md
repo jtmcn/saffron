@@ -109,6 +109,33 @@ GitHub issues remain in use only for research/evidence records under
   anti-theater gate checks nothing. Found reviewing `SA-0066`–`SA-0073`,
   2026-09-11, where it had been missed in five of eight specs.
 
+- **A `preserves` witness names a test that exists now; any other names one
+  that does not.** `tests/test_queued_specs.py` holds both on every commit
+  (backlog item 152). The first is resolved by collection, so the right name in
+  the wrong file or class fails. The second is read at the commit that last
+  changed the spec's `witness:` or `preserves:` lines, because the cell that
+  implements the spec writes that test. Any `def` of the name in the file
+  counts, whatever its class. Whether the witness *fails* with the source
+  reverted is still yours to reason out.
+
+- **For each criterion, name the plausible wrong implementation its witness
+  would pass, before you declare the witness.** If you can name one, the
+  witness is not yet a witness: tighten it until that implementation fails
+  it. This is the spec review's check 3, turned on your own criteria rather
+  than left for the review to run. Both blockers in `SA-0093`–`SA-0095` (#290)
+  were this shape, and the rules above had been read and quoted into those
+  specs' notes for the agent's witnesses, never applied to the author's
+  (backlog item 153).
+
+- **Every sentence that says what the code does now carries a `file:line` you
+  read while writing that sentence.** Not earlier in the session, and not a
+  backlog record's own words: re-read the file. This is the spec review's
+  check 6 moved upstream, and it costs ordering rather than effort. It was
+  the largest defect class in #290 — five false sentences about current code,
+  one a blocker copied from item 140's record without re-reading
+  `session.py`. No gate can hold it: `tests/test_citations.py` catches a
+  dangling `§` citation, never one pointing at the wrong section.
+
 - **Run a spec review before a spec's pull request merges.** Its agent
   definition is `.claude/agents/spec-reviewer.md`, with `base:` the head of the spec's own
   branch (the pull request's head, e.g. `origin/<branch>`), since the spec is
