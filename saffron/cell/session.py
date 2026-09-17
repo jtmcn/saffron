@@ -2024,6 +2024,22 @@ def _drive_cell(
                     "the exported patch carries a binary change the export "
                     f"cannot carry — {binary}",
                 )
+
+            # Every result the gate cell's suite produced, written the moment
+            # it returns — aborted, drifted or clean alike — and before the
+            # first lens turn, never after: a REVIEW that ends on a wall, a
+            # budget stop or GATE_ERROR still leaves the table its lenses
+            # were shown (backlog item 141). Same shape and serialisation as
+            # `baseline.json` above, and bare like it — a task directory that
+            # cannot be written to has already failed the task.
+            if gate_comparison is not None:
+                (task_dir / "lens-gates.json").write_text(
+                    json.dumps(
+                        [r.model_dump() for r in gate_comparison.run.results],
+                        indent=2,
+                    )
+                )
+
             if gate_comparison is not None and (
                 gate_comparison.aborted or gate_comparison.drift
             ):
