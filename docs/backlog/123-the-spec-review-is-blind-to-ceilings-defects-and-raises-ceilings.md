@@ -1,11 +1,12 @@
 ---
 id: 123
 title: The spec review is blind to ceilings defects and raises ceilings blockers the outcome contradicts
-status: partial
+status: done
 tier: 3
 filed: 2026-09-14
+closed: 2026-09-16
 specs: [SA-0092]
-prs: [279]
+prs: [279, 287]
 commits: []
 cites: []
 related: [124, 125, 144, 145]
@@ -63,3 +64,6 @@ reviewer.md` check 4 said to compare by eye and did not know the line exists
 attempt that ended abnormally while its subtype read `success` (item **144**),
 six of which are in the live ledger. It closes when that merges.
 
+**2026-09-16, done.** Both places named above closed with PR #287's merge
+(`1f64a99`): items **144** and **145**. This record said it "closes when that
+merges" and was left open when it did.

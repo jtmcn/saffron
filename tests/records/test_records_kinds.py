@@ -43,6 +43,12 @@ def test_a_superseded_item_names_its_successor():
         )
 
 
+def test_a_closed_item_awaits_nothing():
+    closed = {"status": "done", "closed": "2026-09-16", "prs": [1]}
+    with pytest.raises(ValidationError, match="awaiting"):
+        BacklogItem.model_validate({**MINIMAL, **closed, "awaiting": [2]})
+
+
 def test_an_open_item_may_not_carry_a_closed_date():
     with pytest.raises(ValidationError, match="closed"):
         BacklogItem.model_validate({**MINIMAL, "closed": "2026-09-14"})

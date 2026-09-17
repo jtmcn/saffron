@@ -5,6 +5,7 @@ function finds the one defect its broken fixture plants."""
 from __future__ import annotations
 
 import re
+import subprocess
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -322,6 +323,74 @@ def check_priority(records: list[Record], priority_md: Path) -> list[Violation]:
     return out
 
 
+_OPEN_AS = re.compile(r"\bopen as (?:PR )?#(\d+)")
+_MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) ")
+_PULL_REF = re.compile(r"^refs/pull/(\d+)/")
+
+
+def merged_prs(root: Path) -> frozenset[int]:
+    """Pull requests whose merge commit HEAD contains. Reads merge-commit
+    subjects, so it needs full history and a repo that does not squash."""
+    log = subprocess.run(
+        ["git", "-C", str(root), "log", "--merges", "--format=%s", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    return frozenset(
+        int(m.group(1))
+        for line in log.splitlines()
+        if (m := _MERGE_SUBJECT.match(line))
+    )
+
+
+def building_pr(github_ref: str | None) -> int | None:
+    """The pull request this CI run builds, from `GITHUB_REF`, or `None`."""
+    m = _PULL_REF.match(github_ref or "")
+    return int(m.group(1)) if m else None
+
+
+def _says_merged(text: str, n: int) -> bool:
+    return re.search(rf"(?:PR )?#{n} merged|merged as (?:PR )?#{n}\b", text) is not None
+
+
+def check_awaiting(
+    records: list[Record], merged: frozenset[int], building: int | None
+) -> list[Violation]:
+    """An open item waiting on a pull request says so in `awaiting`, and that
+    wait ends when the pull request merges. #287 wrote "open as PR #287 … stays
+    open until that merges" into its own records, which then never closed."""
+
+    def problem(n: int, awaited: bool, record: str) -> str | None:
+        if n == building:
+            return (
+                f"#{n} is this pull request: close the item in its own diff "
+                f"(status, closed, prs: [{n}]) rather than wait on itself"
+            )
+        if awaited:
+            if n in merged:
+                return f"#{n} has merged: close the item, or record what is left and move {n} to prs"
+            return None
+        if _says_merged(record, n):
+            return None
+        return (
+            f"the record says #{n} is open: list it in awaiting, or, if it "
+            f'merged, say "PR #{n} merged" and what that left'
+        )
+
+    out: list[Violation] = []
+    for r in records:
+        m = _backlog(r)
+        if m.status not in ("open", "partial"):
+            continue
+        record = r.sections.get("Record", "")
+        named = {int(x) for x in _OPEN_AS.findall(record)}
+        for n in sorted(set(m.awaiting) | named):
+            if (message := problem(n, n in m.awaiting, record)) is not None:
+                out.append(Violation(r.path, "awaiting", message))
+    return out
+
+
 def check_no_old_path(root: Path) -> list[Violation]:
     # tests/records/ quotes the old path as data; .saffron/specs/done/ is dated history.
     skip = (root / "tests" / "records", root / ".saffron" / "specs" / "done")
@@ -333,7 +402,12 @@ def check_no_old_path(root: Path) -> list[Violation]:
     return sorted(out, key=lambda v: v.path)
 
 
-def check_all(root: Path, sections: set[str]) -> list[Violation]:
+def check_all(
+    root: Path,
+    sections: set[str],
+    merged: frozenset[int] = frozenset(),
+    building: int | None = None,
+) -> list[Violation]:
     records = load(KINDS["backlog"], root)
     priority = root / KINDS["backlog"].directory / "PRIORITY.md"
     return (
@@ -347,4 +421,5 @@ def check_all(root: Path, sections: set[str]) -> list[Violation]:
         + check_specs_name_their_items(records, root)
         + check_priority(records, priority)
         + check_no_old_path(root)
+        + check_awaiting(records, merged, building)
     )

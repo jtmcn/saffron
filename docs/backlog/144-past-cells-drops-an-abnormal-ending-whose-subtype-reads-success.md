@@ -1,12 +1,13 @@
 ---
 id: 144
 title: A cell's history hides any attempt that ended abnormally while its subtype read `success`
-status: open
+status: done
 tier: 2
 filed: 2026-09-16
+closed: 2026-09-16
 by_hand: false
 specs: [SA-0092]
-prs: [279]
+prs: [279, 287]
 commits: []
 cites: [§4.3]
 related: [123, 34]
@@ -42,3 +43,7 @@ an abnormal ending reaches the row however it was spelled.
 **Filed 2026-09-16** from the spec loop's run of that day (stack #285).
 
 **2026-09-16, a fix is open as PR #287.** `endings` is keyed on `terminal_reason` as well as `subtype`. It stays `open` until that merges.
+
+**2026-09-16, done.** PR #287 merged (`1f64a99`). `endings` counts an attempt
+whose `terminal_reason` is not `completed` (`driver.py:1398-1404`). Closed
+2026-09-16 on review of the backlog: #287 wrote this record's "stays `open` until that merges" line itself, so the line could only land by the merge that should have closed it.
