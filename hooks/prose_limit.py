@@ -5,11 +5,16 @@ Each staged Markdown file in scope may not carry more hits of any `prose`
 rule than its `HEAD` version. A new file compares against zero, and a rename
 against its old path. The gate gets the same limit from baseline subtraction.
 Standard library only, like the gate it loads.
+
+With `--edited`, a Claude Code PostToolUse hook: the edited file's new findings
+for both gates go to stderr with exit 2, which Claude Code shows the model.
+PostToolUse cannot block, because the edit already happened.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 from collections import Counter
@@ -110,7 +115,40 @@ def commit_time(root: Path) -> int:
     return 1 if failed else 0
 
 
+def edit_time(root: Path, event: dict[str, Any]) -> int:
+    """Print the edited file's new findings for the model. The edit already happened."""
+    file_path = Path(event.get("tool_input", {}).get("file_path", ""))
+    if not file_path.is_absolute():
+        file_path = Path(event.get("cwd", root)) / file_path
+    try:
+        path = file_path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return 0
+    prose = load_prose()
+    if not prose.in_scope(path) or not file_path.is_file():
+        return 0
+    head = _git(root, "show", f"HEAD:{path}")
+    old_text = head.stdout if head.returncode == 0 else None
+    new_text = file_path.read_text(encoding="utf-8", errors="replace")
+    lines = [
+        f"{path}:{f.line}: {f.code}: {f.excerpt}"
+        for gate in prose.GATES
+        for f in new_findings(prose, root, gate, path, old_text, new_text)
+    ]
+    if not lines:
+        return 0
+    print(
+        "New house-style findings (.saffron/gates/prose.py):",
+        *lines,
+        sep="\n",
+        file=sys.stderr,
+    )
+    return 2
+
+
 def main(argv: list[str]) -> int:
+    if argv == ["--edited"]:
+        return edit_time(Path.cwd(), json.loads(sys.stdin.read() or "{}"))
     if argv:
         print(f"unexpected arguments: {argv}", file=sys.stderr)
         return 2

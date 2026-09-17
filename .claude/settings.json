@@ -1,5 +1,19 @@
 {
   "enabledPlugins": {
     "ast-grep@ast-grep-marketplace": true
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && python3 hooks/prose_limit.py --edited",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
   }
 }

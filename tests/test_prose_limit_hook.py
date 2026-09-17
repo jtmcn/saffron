@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -87,3 +88,47 @@ def test_prek_runs_the_hook_on_markdown():
     assert hook["entry"] == "uv run hooks/prose_limit.py"
     assert hook["pass_filenames"] is False
     assert hook["files"] == r"\.md$"
+
+
+def _edited(repo: Path, file_path: Path) -> subprocess.CompletedProcess[str]:
+    event = {"tool_input": {"file_path": str(file_path)}, "cwd": str(repo)}
+    return subprocess.run(
+        [sys.executable, str(HOOK), "--edited"],
+        cwd=repo,
+        input=json.dumps(event),
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_an_edit_that_adds_a_finding_is_reported_to_the_model(tmp_path):
+    repo = _repo(tmp_path, {"README.md": "Short.\n"})
+    (repo / "README.md").write_text("Short.\n\n" + LONG_A + "\n")
+    done = _edited(repo, repo / "README.md")
+    assert done.returncode == 2
+    assert "README.md:3: sentence-length" in done.stderr
+
+
+def test_an_edit_that_adds_an_avoided_phrase_is_reported(tmp_path):
+    repo = _repo(tmp_path, {"README.md": "Short.\n"})
+    (repo / "README.md").write_text("The agent runs in a sandbox.\n")
+    done = _edited(repo, repo / "README.md")
+    assert done.returncode == 2
+    assert 'sandbox: say "cell"' in done.stderr
+
+
+def test_a_clean_edit_and_a_file_elsewhere_say_nothing(tmp_path):
+    repo = _repo(tmp_path, {"README.md": "Short.\n"})
+    (repo / "README.md").write_text("Short. Still short.\n")
+    assert _edited(repo, repo / "README.md").returncode == 0
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.md"
+    outside.write_text(LONG_A + "\n")
+    assert _edited(repo, outside).returncode == 0
+
+
+def test_claude_code_runs_the_hook_after_each_edit():
+    settings = json.loads((REPO / ".claude" / "settings.json").read_text())
+    (entry,) = settings["hooks"]["PostToolUse"]
+    assert entry["matcher"] == "Write|Edit"
+    (hook,) = entry["hooks"]
+    assert hook["command"].endswith("python3 hooks/prose_limit.py --edited")
