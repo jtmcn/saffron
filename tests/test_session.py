@@ -3400,14 +3400,12 @@ def test_the_lenses_are_shown_a_gate_table_computed_outside_the_implementers_cel
     assert all("the implementer's own toolchain" not in p for p in lens_prompts)
 
 
-def _drive_gate_table_scenario(monkeypatch, tmp_path, *, aborted):
+def _drive_gate_table_scenario(monkeypatch, tmp_path, *, case):
     """Shared body for the two scenarios
     `test_the_gate_table_the_lenses_were_shown_lands_beside_the_baseline`
-    covers: `aborted=False` (a clean gate-cell suite feeds the lenses) and
-    `aborted=True` (a gate that errors in the gate cell buys no lens, but
-    still leaves the record). A plain helper rather than
-    `pytest.mark.parametrize`, so the witness collects under the exact node
-    id the spec names, with no `[True]`/`[False]` suffix."""
+    covers: `clean` (the suite feeds the lenses), and `aborted` and `drifted`
+    (no lens is bought, but the record is still left). Not parametrised: the
+    spec names the witness's bare node id."""
     forged = [
         GateResult(
             gate="tests",
@@ -3416,11 +3414,16 @@ def _drive_gate_table_scenario(monkeypatch, tmp_path, *, aborted):
             summary="reported by the implementer's own toolchain",
         )
     ]
-    if aborted:
+    if case == "aborted":
         gate_cell_suite = [
             GateResult(
                 gate="tests", status="error", tool="pytest 9.1.1", summary="boom"
             )
+        ]
+    elif case == "drifted":
+        # A different tool from the baseline's is drift, not a failure.
+        gate_cell_suite = [
+            GateResult(gate="tests", status="pass", tool="pytest 9.9.9", summary="x")
         ]
     else:
         gate_cell_suite = [
@@ -3434,6 +3437,14 @@ def _drive_gate_table_scenario(monkeypatch, tmp_path, *, aborted):
     cell = _stub_the_runtime(
         monkeypatch, suites=(forged, forged), gate_cell_suite=gate_cell_suite
     )
+    returned = []
+    real_suite = session._gate_cell_suite
+
+    def _recording_suite(**kwargs):
+        returned.append(real_suite(**kwargs))
+        return returned[-1]
+
+    monkeypatch.setattr(session, "_gate_cell_suite", _recording_suite)
     outcome, _ledger = _drive(
         monkeypatch,
         tmp_path,
@@ -3442,15 +3453,18 @@ def _drive_gate_table_scenario(monkeypatch, tmp_path, *, aborted):
         policy="gates:\n  tests: {}\n",
         gates=("tests",),
     )
-    expected_state = "GATE_ERROR" if aborted else "READY_FOR_REVIEW"
-    assert outcome.state == expected_state
+    assert outcome.state == ("READY_FOR_REVIEW" if case == "clean" else "GATE_ERROR")
     task_dir = tmp_path / "out" / "SY-1"
     assert (task_dir / "baseline.json").exists()
-    # Same shape as `baseline.json`: every result the suite produced, not
-    # merely the one declared gate — so the file is more than a one-entry
-    # list, and the declared gate inside it is the gate *cell's* own, never
-    # the implementer's forged one.
-    recorded = json.loads((task_dir / "lens-gates.json").read_text())
+    (comparison,) = returned
+    assert bool(comparison.aborted) == (case == "aborted")
+    assert bool(comparison.drift) == (case == "drifted")
+    written = (task_dir / "lens-gates.json").read_text()
+    # Every result the suite returned, byte for byte, indent included.
+    assert written == json.dumps(
+        [r.model_dump() for r in comparison.run.results], indent=2
+    )
+    recorded = json.loads(written)
     assert len(recorded) > 1
     (tests_result,) = [r for r in recorded if r["gate"] == "tests"]
     assert tests_result == gate_cell_suite[0].model_dump()
@@ -3460,23 +3474,12 @@ def _drive_gate_table_scenario(monkeypatch, tmp_path, *, aborted):
 def test_the_gate_table_the_lenses_were_shown_lands_beside_the_baseline(
     monkeypatch, tmp_path
 ):
-    """Backlog item 141: the gate cell's own comparison — the one `SA-0089`
-    built so the lenses would stop reading a table the implementer's own
-    container computed — is written to `lens-gates.json` beside
-    `baseline.json`, in the same shape, whenever the suite returns: on the
-    green path (a clean comparison feeds three lenses) and on the aborted
-    path alike (a gate that errors in the gate cell buys no lens at all, but
-    still leaves the record). Asserting the file's *contents* rather than
-    merely its existence: a table of `[]` would pass an existence check
-    while being exactly the failure mode a forged toolchain produces, so the
-    gate cell's own result is made to differ from the implementer's (a
-    different `summary`, the one field neither comparison logic reads) or,
-    for the aborted case, made to `error` outright. Both scenarios live in
-    this one witness, run against a fresh `tmp_path` each, rather than a
-    `pytest.mark.parametrize` that would collect under a different node id
-    than the one this spec names."""
-    _drive_gate_table_scenario(monkeypatch, tmp_path / "clean", aborted=False)
-    _drive_gate_table_scenario(monkeypatch, tmp_path / "aborted", aborted=True)
+    """The Gate-only cell's suite is written to `lens-gates.json` beside
+    `baseline.json`, whole and byte for byte, whether it came back clean,
+    aborted or drifted. Its `tests` entry differs from the implementer's, so
+    a file holding the wrong suite fails too."""
+    for case in ("clean", "aborted", "drifted"):
+        _drive_gate_table_scenario(monkeypatch, tmp_path / case, case=case)
 
 
 def test_the_lens_gate_table_is_written_before_the_first_lens_runs(

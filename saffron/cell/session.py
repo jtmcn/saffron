@@ -2025,13 +2025,8 @@ def _drive_cell(
                     f"cannot carry — {binary}",
                 )
 
-            # Every result the gate cell's suite produced, written the moment
-            # it returns — aborted, drifted or clean alike — and before the
-            # first lens turn, never after: a REVIEW that ends on a wall, a
-            # budget stop or GATE_ERROR still leaves the table its lenses
-            # were shown (backlog item 141). Same shape and serialisation as
-            # `baseline.json` above, and bare like it — a task directory that
-            # cannot be written to has already failed the task.
+            # The Gate-only cell's results, before any lens and before the
+            # `GATE_ERROR` branch; bare, like `baseline.json`'s write.
             if gate_comparison is not None:
                 (task_dir / "lens-gates.json").write_text(
                     json.dumps(
