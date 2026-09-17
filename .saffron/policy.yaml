@@ -19,6 +19,11 @@ gates:
   # so the `retired-vocabulary` pygrep hook's approach would false-positive on the
   # first three. Declared unconditionally, for the reason `shacl` gives above.
   structure: { blocking: true }
+  # House style over living Markdown. It fails at base as well: subtraction
+  # counts, so a task fails only when a file gains hits of one rule.
+  prose: { blocking: true }
+  # Curated avoided phrases from CONTEXT.md, advisory.
+  terms: { blocking: false }
 
 # Where a plausible-looking wrong change hurts most. Getting this right is most
 # of what onboarding actually means (DESIGN.md §5.6).
@@ -108,6 +113,7 @@ integrity:
   gate_config:
     [
       "ontology/shapes/**",
+      # The `prose` gate executes ontology/spans.py, so this glob must keep covering it.
       "ontology/*.py",
       "**/pyproject.toml",
       ".saffron/**",
