@@ -129,6 +129,9 @@ array. Each element has exactly these fields:
   cover the collateral change too. A probe that crashes the program is discarded, and your
   finding goes uncounted with it.
 
+A person reads your `claim` in the pull request's findings table. Write it
+in plain, specific language and state each fact once.
+
 An empty array is a real answer, and it is the honest one when you find nothing.
 The host reconciles every finding against the diff and drops any it cannot
 anchor to a real line, so a finding pointing at a line you did not read is worth

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from saffron.agents import context
+from saffron.phases import rebut
 
 REAL_CONTEXT_MD = (Path(__file__).parent.parent / "CONTEXT.md").read_text()
 
@@ -309,3 +310,41 @@ def test_the_implement_prompt_never_calls_scope_proposal_diagnose_only():
         "the plural confines proposal to a spec type again, which is the "
         f"restriction this test exists to keep out of the prompt: {touches!r}"
     )
+
+
+_PROMPTS = Path(__file__).parent.parent / "saffron/agents/prompts"
+
+
+@pytest.mark.parametrize(
+    ("source", "field", "table"),
+    [
+        ("review-correctness.md", "claim", "findings"),
+        ("review-contract.md", "claim", "findings"),
+        ("review-adequacy.md", "claim", "findings"),
+        ("rebut-verdict.md", "reason", "disagreements"),
+        ("EXTRACT_PROMPT", "argument", "disagreements"),
+    ],
+)
+def test_prose_bound_for_the_pr_body_is_asked_for_in_plain_language(
+    source, field, table
+):
+    """Each of these fields is a cell of a table in the PR body.
+
+    `pr_body.py` prints `claim` in `### Findings` and prints `reason` and
+    `argument` in `### Disagreements`, so the table a prompt names is a fact
+    about the report and not a turn of phrase.
+    """
+    text = (
+        rebut.EXTRACT_PROMPT
+        if source == "EXTRACT_PROMPT"
+        else (_PROMPTS / source).read_text()
+    )
+    flat = " ".join(text.split())
+    assert f"A person reads your `{field}`" in flat or (
+        f"A person reads each `{field}`" in flat
+    )
+    assert f"the pull request's {table} table" in flat
+    assert "plain, specific language and state each fact once" in flat
+    # A recipe, not a prohibition list: a trailing "no X, no Y" measurably
+    # produces more of what it bans.
+    assert "no analogies" not in flat
