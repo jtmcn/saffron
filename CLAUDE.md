@@ -185,6 +185,8 @@ and its `r`/`f` prefix, and anchoring on those read only the spellings the autho
   guarding a property already true, against a mutant that breaks it.
 - Commit subjects are lowercase `type(scope): what changed`, written as a sentence about the
   defect rather than the file — see `git log`.
+- A pull request body you write follows `.github/pull_request_template.md`: `gh pr create
+  --body` skips the template, so read it first.
 
 ## Agent skills
 
