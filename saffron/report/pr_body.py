@@ -28,10 +28,7 @@ _CLOSES = re.compile(
 )
 _MENTION = re.compile(r"(?<![\w/])@(?=\w)")
 
-# The spec's own statement of the defect, so `## What` answers the question its
-# heading asks instead of restating the title. Shaped like `intake`'s
-# `_CRITERIA_SECTION`, and deliberately not a parsed `Spec` field: the heading is
-# a rendering concern, and a spec that omits it renders exactly as before.
+# A rendering concern, so deliberately not a parsed `Spec` field.
 _PROBLEM_SECTION = re.compile(
     r"^##\s*Problem\s*$(.*?)(?=^##\s|\Z)", re.MULTILINE | re.DOTALL | re.IGNORECASE
 )
@@ -102,12 +99,7 @@ def render_pr_body(
     last and clipped like every other such string here. Empty for every task
     that produced none, which is every task before this channel existed."""
     risk = effective_risk if effective_risk is not None else spec.risk
-    # The three `##` headings are the spine `.github/pull_request_template.md`
-    # asks a person for, in that order, and a test holds the two lists equal. The
-    # bodies cannot be one file — this one is rendered from the ledger and its
-    # section *order* is load-bearing twice over (see `_notes` and `_test_diff`
-    # below), where the template's is guidance someone edits freely — so the
-    # shape is coupled by that test and nothing else.
+    # The `##` headings match `.github/pull_request_template.md`; a test holds them equal.
     sections = [
         _what(
             spec,
@@ -131,14 +123,10 @@ def render_pr_body(
             reviews,
             advisory_gates=advisory_gates,
             rebut_result=rebut_result,
+            has_notes=bool(notes.strip()),
         ),
-        # Last, deliberately: every status, checklist and table above is fully
-        # rendered before this ever starts, so cell-authored prose here cannot
-        # be mistaken for having moved any of them (SA-0044's reasoning, held
-        # unchanged). Falsy when there is nothing to report, so a task with no
-        # notes renders a body byte-identical to one from before this existed.
-        # It sits under `## Not covered` because that is what it is: the
-        # implementer's account of something it saw and was not asked to fix.
+        # Last, so cell-authored prose cannot appear to have moved a table
+        # (SA-0044). Falsy when there are no notes.
         _notes(notes),
     ]
     slot = sections.index(None)
@@ -224,10 +212,7 @@ def _criteria(spec: Spec, results: Sequence[GateResult]) -> str:
     (§5.4's `tool` defect, one layer up). A box ticks only from a `criteria`
     gate result; `skip` means nobody looked and must not render as a failure.
     """
-    # Last, not first: `_suite` appends the host-constructed result after every
-    # declared gate, so a repo declaring its own gate named `criteria` cannot
-    # shadow it.
-    result = next((r for r in reversed(list(results)) if r.gate == "criteria"), None)
+    result = _criteria_result(results)
     if spec.acceptance and result is not None and result.status in ("pass", "fail"):
         unmet = {f.file: f for f in result.failures}
         lines = ["### Acceptance criteria", ""]
@@ -247,6 +232,17 @@ def _criteria(spec: Spec, results: Sequence[GateResult]) -> str:
         + [f"- [ ] {claim}" for claim in claims]
         + [""]
     )
+
+
+def _criteria_result(results: Sequence[GateResult]) -> GateResult | None:
+    # Last, not first: `_suite` appends the host's result after every declared
+    # gate, so a repo gate also named `criteria` cannot shadow it.
+    return next((r for r in reversed(list(results)) if r.gate == "criteria"), None)
+
+
+def _rebuttal_errored(rebut_result: RebutResult | None) -> bool:
+    # `is not None`: `str(exc)` is empty for an exception with no message.
+    return rebut_result is not None and rebut_result.rebuttal.error is not None
 
 
 def _new_failures(new_failures: list[NewFailure]) -> str:
@@ -296,7 +292,7 @@ def _disagreements(
         return ""
     rebuttals = {}
     verdicts = {}
-    errored = rebut_result is not None and rebut_result.rebuttal.error is not None
+    errored = _rebuttal_errored(rebut_result)
     if rebut_result is not None:
         if not errored:
             rebuttals = first_answers(rebut_result.rebuttal)
@@ -488,12 +484,13 @@ def _not_covered(
     *,
     advisory_gates: Sequence[str] = (),
     rebut_result: RebutResult | None = None,
+    has_notes: bool = False,
 ) -> str:
     """What this body does not stand behind, collected.
 
     Every line is derivable from a section above — a `skip` row, an `(advisory)`
     mark, the checklist's blockquote, an `anchored: no` cell — and each is one
-    cell of a wide table a reviewer is scanning for something else. §5.7 states
+    cell of a wide table the operator is scanning for something else. §5.7 states
     its own residual that way (the credential shapes the refusal does not know),
     for the same reason: a reader who has to assemble it never does.
 
@@ -509,10 +506,8 @@ def _not_covered(
             + ", ".join(f"`{_cell(gate)}`" for gate in skipped)
             + " — the repo declares no such gate."
         )
-    # PACKAGE aborts on an errored gate, so a packaged body does not carry one.
-    # It is here because this is a renderer and the caller decides what it is
-    # handed: a body that shows an `error` row and then omits it from the list of
-    # what went unjudged is the narrower lie of the two.
+    # PACKAGE aborts on `error`, but a renderer lists what it is handed rather
+    # than show the row and omit it here.
     if broken := [r.gate for r in results if r.status == "error"]:
         lines.append(
             "- Broke rather than judged: "
@@ -530,19 +525,15 @@ def _not_covered(
             + " — advisory at this risk tier, so the pull request is green anyway."
         )
     claims = [c.claim for c in spec.acceptance] or spec.acceptance_criteria
-    criteria = next((r for r in reversed(list(results)) if r.gate == "criteria"), None)
+    criteria = _criteria_result(results)
     if claims and (criteria is None or criteria.status not in ("pass", "fail")):
         lines.append(
             f"- The {len(claims)} acceptance "
             f"criteri{'on is' if len(claims) == 1 else 'a are'} not mechanically "
             "checked: no `criteria` gate result stands behind the checklist."
         )
-    # Anchoring is what `anchored_blockers` and `anchored_concerns` both filter
-    # on, so an unanchored finding is absent from REBUT *and* from the concern
-    # count the morning queue sorts on (§6). Nothing else in the body says so.
-    # Keyed on the review's lens, not the finding's own `lens` field, because
-    # `_findings` builds the table carrying the `anchored: no` cells that way and
-    # this line exists to be cross-referenced against it.
+    # Unanchored findings skip REBUT and §6's concern count. Keyed on the
+    # review's lens, as `_findings` keys the `anchored: no` cells it points to.
     if unanchored := [
         (r.lens, f) for r in reviews for f in r.findings if not f.anchored
     ]:
@@ -555,18 +546,10 @@ def _not_covered(
             + "), so neither the implementer nor the concern count ever saw "
             + ("it." if len(unanchored) == 1 else "them.")
         )
-    # `rebuttal.error` is set when the turn recorded *nothing* — it failed, or
-    # its output was not the schema — which §4.3 holds distinct from a turn that
-    # was read and argued nothing. So every blocker went unanswered, rather than
-    # each being answered with a `—` the table renders either way. Guarded on
-    # there being a blocker at all: with none there was nothing to answer, and
-    # the sentence would name a gap of zero.
-    #
-    # The error string is never quoted here, exactly as `_disagreements` never
-    # quotes it: it is untrusted, hostile-shaped model output (backlog item 42),
-    # and a residual list is no better a place for it than a table.
+    # A turn that recorded nothing, not one that argued nothing (§4.3). Its error
+    # string is never quoted: untrusted model output (backlog item 42).
     blockers = anchored_blockers(reviews)
-    if blockers and rebut_result is not None and rebut_result.rebuttal.error:
+    if blockers and _rebuttal_errored(rebut_result):
         lines.append(
             "- No implementer answer stands against "
             + (
@@ -576,10 +559,11 @@ def _not_covered(
             )
             + ": the rebuttal turn recorded nothing (see `rebuttal.json`)."
         )
-    if not lines:
+    # With notes, `_notes` fills the section; "nothing" would contradict them.
+    if not lines and not has_notes:
         lines.append(
-            "- No gate reported `skip`, no failure was advisory, and every "
-            "finding anchored to the diff."
+            "- Nothing: every gate and criterion above was judged and could "
+            "block, and every finding reached the implementer."
         )
     return "\n".join(["## Not covered", "", *lines, ""])
 

@@ -251,7 +251,7 @@ def test_the_body_and_the_template_declare_the_same_spine():
 
 def test_not_covered_collects_the_checks_that_never_judged_the_code():
     """`skip` and `error` each have a footnote under the gate table explaining
-    the word. Neither says which gates they were, and a reviewer scanning a wide
+    the word. Neither says which gates they were, and the operator scanning a wide
     table for a red row does not assemble that."""
     section = body().split("## Not covered", 1)[1]
     assert "`coverage`" in section
@@ -345,6 +345,39 @@ def test_not_covered_says_when_no_rebuttal_was_recorded_at_all():
     assert "No implementer answer stands against the blocker" in section
 
 
+def test_an_empty_rebuttal_error_is_still_a_turn_that_recorded_nothing():
+    """`str(exc)` is empty for an exception with no message. The table keys on
+    `is not None`, so the residual list must too, or the two disagree."""
+    rendered = _with_blocker(_rebutted(error=""))
+    assert "no rebuttal was recorded" in rendered
+    assert "No implementer answer" in rendered.split("## Not covered", 1)[1]
+
+
+def test_not_covered_names_an_unchecked_checklist():
+    """The checklist's blockquote says so above; the residual list repeats it,
+    and a `criteria` result that judged the boxes removes it."""
+    assert (
+        "2 acceptance criteria are not mechanically checked"
+        in body().split("## Not covered", 1)[1]
+    )
+    spec = parse_spec(
+        "---\nid: TE-9005\ntitle: A witnessed one\ntype: bug\n"
+        "acceptance:\n  - claim: It holds.\n    witness: tests/test_x.py::test_y\n"
+        "---\n"
+    )
+    checked = render_pr_body(
+        spec,
+        [GateResult(gate="criteria", status="pass", summary="1 met")],
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+    )
+    assert "not mechanically checked" not in checked.split("## Not covered", 1)[1]
+
+
 def test_a_turn_that_argued_nothing_is_not_a_turn_that_recorded_nothing():
     """§4.3 holds the two apart, and so does `_disagreements`. An implementer
     that was read and chose to answer nothing has answered; keying this line on
@@ -402,7 +435,26 @@ def test_not_covered_says_so_when_there_is_nothing():
         transcript_path="/t",
     )
     section = rendered.split("## Not covered", 1)[1]
-    assert "No gate reported `skip`" in section
+    assert "- Nothing:" in section
+
+
+def test_not_covered_does_not_claim_nothing_above_the_implementers_notes():
+    """The notes render under this heading, so "nothing" would contradict them."""
+    spec = parse_spec("---\nid: TE-9002\ntitle: A clean one\ntype: chore\n---\n")
+    rendered = render_pr_body(
+        spec,
+        [GateResult(gate="lint", status="pass", summary="clean")],
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        notes="The retry helper swallows timeouts.",
+    )
+    section = rendered.split("## Not covered", 1)[1]
+    assert "- Nothing:" not in section
+    assert "swallows timeouts" in section
 
 
 def test_the_specs_problem_reaches_what_so_the_heading_answers_itself():
