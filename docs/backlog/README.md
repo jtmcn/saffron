@@ -51,3 +51,26 @@ item's `specs:` list in the same commit.
 - An open item with no stated exit criterion writes `_Not stated in the original item._` under
   `## Done looks like`.
 - Quote commit shas in YAML (`commits: ["0123456"]`) so an all-digit sha is not read as a number.
+
+## Closing an item
+
+**The pull request that finishes an item closes it in its own diff**: `status: done`,
+`closed:`, its own number in `prs:`, and a dated `## Record` entry. Never write "open until
+this merges". The record lands only if the pull request merges, so the item is already done
+by the time anyone reads it. #287 did this in five records, and four of them stayed open on
+`main` until #296.
+
+**An item waiting on a *different* pull request lists it in `awaiting:`**, and the record
+says "open as PR #N". `tests/records` enforces the rest:
+
+- An `awaiting` pull request that has merged fails the check, on every branch, until the item
+  is closed, or its record says what is left and the number moves to `prs`.
+- In a pull request's own CI, `awaiting` naming that same pull request fails. That is the
+  #287 shape, caught before merge.
+- A record in an open item that says "open as PR #N" must list N in `awaiting`, or say
+  "PR #N merged" in a later entry.
+
+The check reads merge-commit subjects (`Merge pull request #N from …`), so it depends on this
+repository merging rather than squashing, and on CI's full clone. It does not see an item
+waiting on something other than a pull request, such as another item or a live run. Item 69
+waited on one of those for eight days.

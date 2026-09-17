@@ -12,7 +12,9 @@ import pytest
 import records.check
 from records.check import (
     Violation,
+    building_pr,
     check_all,
+    check_awaiting,
     check_cites_resolve,
     check_done_specs_are_done,
     check_ids,
@@ -26,7 +28,7 @@ from records.check import (
     cited_items,
 )
 from records.kinds import KINDS, Identified
-from records.load import load
+from records.load import Record, load
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "good"
 BACKLOG = KINDS["backlog"]
@@ -339,3 +341,61 @@ def test_tests_records_may_name_the_old_path(broken):
     target.parent.mkdir(parents=True)
     target.write_text("# docs/BACKLOG.md\n")
     assert check_no_old_path(broken) == []
+
+
+_OPEN = "003-a-corpse-reads-as-drained.md"
+
+
+def _with_record(root: Path, record: str, front: str = "") -> list[Record]:
+    path = _item(root, _OPEN)
+    if front:
+        _rewrite(path, "tier: 1\n", f"tier: 1\n{front}")
+    path.write_text(path.read_text() + f"\n## Record\n\n{record}\n")
+    return load(BACKLOG, root)
+
+
+def test_an_item_awaiting_an_unmerged_pull_request_holds(broken):
+    records = _with_record(broken, "A fix is open as PR #300.", "awaiting: [300]\n")
+    assert check_awaiting(records, frozenset({287}), building=296) == []
+
+
+def test_an_item_awaiting_a_merged_pull_request_is_a_violation(broken):
+    records = _with_record(broken, "Waiting.", "awaiting: [287]\n")
+    [v] = check_awaiting(records, frozenset({287}), building=None)
+    assert v.field == "awaiting" and "#287 has merged" in v.message
+
+
+def test_an_item_awaiting_the_pull_request_that_carries_it_is_a_violation(broken):
+    # What #287 did: the wait could only end by the merge that lands it.
+    records = _with_record(broken, "A fix is open as PR #296.", "awaiting: [296]\n")
+    [v] = check_awaiting(records, frozenset(), building=296)
+    assert "#296 is this pull request" in v.message
+
+
+def test_a_record_saying_a_pull_request_is_open_must_await_it(broken):
+    records = _with_record(broken, "A fix is open as PR #287.")
+    [v] = check_awaiting(records, frozenset({287}), building=None)
+    assert "says #287 is open" in v.message
+
+
+def test_a_record_that_says_the_pull_request_merged_needs_no_wait(broken):
+    records = _with_record(
+        broken, "A fix is open as PR #287.\n\nPR #287 merged; half is left."
+    )
+    assert check_awaiting(records, frozenset({287}), building=None) == []
+
+
+def test_a_closed_item_is_not_read_for_waits(broken):
+    _rewrite(
+        _item(broken, _OPEN),
+        "status: open\n",
+        "status: done\nclosed: 2026-09-16\nprs: [287]\n",
+    )
+    records = _with_record(broken, "A fix is open as PR #287.")
+    assert check_awaiting(records, frozenset({287}), building=None) == []
+
+
+def test_building_pr_reads_only_a_pull_request_ref():
+    assert building_pr("refs/pull/296/merge") == 296
+    assert building_pr("refs/heads/main") is None
+    assert building_pr(None) is None

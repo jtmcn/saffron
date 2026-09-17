@@ -52,6 +52,9 @@ class BacklogItem(Identified):
     cites: list[str] = Field(default_factory=list)
     related: list[Number] = Field(default_factory=list)
     superseded_by: Number | None = None
+    awaiting: list[Number] = Field(default_factory=list)
+    """Open pull requests this item waits on — never the one carrying the
+    edit, which closes the item in its own diff instead."""
 
     @field_validator("commits", mode="before")
     @classmethod
@@ -85,6 +88,11 @@ class BacklogItem(Identified):
                 raise ValueError(f"closed: required when status is {self.status}")
             if not (self.specs or self.prs or self.commits):
                 raise ValueError("specs, prs or commits: a close names what closed it")
+            if self.awaiting:
+                raise ValueError(
+                    f"awaiting: a {self.status} item waits on nothing; "
+                    f"move {self.awaiting} to prs"
+                )
         elif self.closed is not None:
             raise ValueError(f"closed: set on an item whose status is {self.status}")
         if self.status == "superseded" and self.superseded_by is None:
