@@ -33,7 +33,7 @@ uv run pytest                # cell-marked tests excluded by default (pyproject 
 uv run pytest tests/test_session.py::test_name    # one test
 uv run ast-grep test -c .saffron/sgconfig.yml     # the structure rules' own tests
 uv run ast-grep test -c .saffron/sgconfig.yml --update-all   # after adding a snippet
-.saffron/gates/structure && .saffron/gates/prose    # what those gates run; prose limits new findings
+.saffron/gates/structure                          # what the `structure` gate runs; `prose` rules live in .saffron/gates/prose.py
 uv run pytest -m cell        # needs apple/container + the images below
 ```
 
