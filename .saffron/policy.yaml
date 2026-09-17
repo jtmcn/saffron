@@ -22,7 +22,7 @@ gates:
   # House style over living Markdown. It fails at base as well: subtraction
   # counts, so a task fails only when a file gains hits of one rule.
   prose: { blocking: true }
-  # Curated avoided phrases from CONTEXT.md; reported, never blocking.
+  # Curated avoided phrases from CONTEXT.md, advisory.
   terms: { blocking: false }
 
 # Where a plausible-looking wrong change hurts most. Getting this right is most

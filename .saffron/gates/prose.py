@@ -344,8 +344,11 @@ def check(text: str, path: str, gate: str, *, root: Path) -> list[Hit]:
     try:
         rendered = _rendered(text, path, root)
     except ValueError as exc:
-        # The repo's defect, not the gate's: a `fail` gets a REPAIR turn.
-        return [Hit(1, "rendered-span", _excerpt(str(exc)))]
+        # The repo's defect, not the gate's: a `fail` gets a REPAIR turn. The
+        # blocking gate reports it once; `terms` reads the file unexempted.
+        if gate == "prose":
+            return [Hit(1, "rendered-span", _excerpt(str(exc)))]
+        rendered = []
     for start, end in rendered:
         text = text[:start] + _spaces(text[start:end]) + text[end:]
     prepared = _Text(_prepare(text))

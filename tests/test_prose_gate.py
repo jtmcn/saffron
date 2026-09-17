@@ -392,8 +392,19 @@ def test_the_agreement_notices_a_removed_quote():
     ]
 
 
-def test_terms_reports_fail_and_still_exits_zero(tmp_path):
+def test_a_broken_rendered_span_is_reported_by_prose_alone():
+    context = "**Severity**: `a` or `b`.\n\n**Severity**: `c`.\n\nA sandbox.\n"
+    assert _codes(context, "CONTEXT.md") == ["rendered-span"]
+    terms = _prose().check(context, "CONTEXT.md", "terms", root=REPO)
+    assert [f.code for f in terms] == ["avoided-term"]
+
+
+def test_terms_reports_fail_and_is_declared_advisory(tmp_path):
     from saffron.gates.contract import parse_gate_json
+    from saffron.repos.policy import load_policy
+
+    policy, _ = load_policy(REPO)
+    assert policy.gates["terms"].blocking is False
 
     _init(tmp_path, {"README.md": "The agent runs in a sandbox.\n"})
     done = _run_gate("terms", tmp_path)

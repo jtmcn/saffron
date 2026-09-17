@@ -177,11 +177,12 @@ AVOIDED = {
 - **`CONTEXT.md` stays authoritative.** A test asserts that each entry is quoted
   on the `_Avoid_` line of the term it maps to. The list can narrow
   `CONTEXT.md`. It cannot extend or contradict it.
-- **One rule, `avoided-term`.** The message names the replacement: "sandbox: say
-  cell (CONTEXT.md §1)". This is SimpleEnglish's synonym-rotation rule with
+- **One rule, `avoided-term`.** The message names the replacement: `sandbox:
+  say "cell" (CONTEXT.md §1)`. This is SimpleEnglish's synonym-rotation rule with
   Saffron's own sets, so no second rule exists.
-- **"Docker"** is exempt before "Desktop", "API" and "socket", and in
-  `DESIGN.md` Appendix G.
+- **"Docker" is not an entry.** It fails the entry bar: some hits in scope
+  name the product itself (`DESIGN.md`'s `--cpu` note, a backlog record's
+  "Docker socket"), so no exemption list can clear them.
 - **Relation to `retired-vocabulary`.** That hook is unchanged. A retired term
   blocks, and an avoided term is advisory. Promotion moves a phrase from
   `AVOIDED` to `RETIRED_TERMS`.
@@ -218,7 +219,7 @@ A test is trusted after it fails against the unfixed code or a mutant.
 
 - **Each rule:** one text that hits and one that does not. The misses are the
   measured false positives: "exactly one", a bare "elevated", "fails when the
-  cell stops" outside a spec, "Docker Desktop", a quoted avoided word.
+  cell stops" outside a spec, a quoted avoided word.
 - **Protected words:** a fixture adds a defined term and a closed-set member to
   the filler list, and the loaded list drops both.
 - **Scope:** each include pattern matches a tracked file, and the exclude list
