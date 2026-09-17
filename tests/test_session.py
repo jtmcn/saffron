@@ -697,6 +697,10 @@ def _stub_the_runtime(
     monkeypatch.setattr("saffron.cell.runtime.remove_volume", _remove("volume"))
 
     def _create_network(name, subnet=runtime.DEFAULT_SUBNET):
+        # Measured on apple/container 2026-09-16: `network create` refuses any
+        # uppercase name as invalid, which containers and volumes do not.
+        if name != name.lower():
+            raise runtime.CellRuntimeError(f"invalid network name: {name}")
         cell.networks_created.append((name, subnet))
 
     monkeypatch.setattr("saffron.cell.runtime.create_network", _create_network)
@@ -2959,7 +2963,7 @@ _CRITIC_STATE = "saffron-critic-st-SY-1"
 # computed here, never in `_IMPLEMENTER_CONTAINER` and never in
 # `_CRITIC_CONTAINER` — a third container, network, and pair of volumes.
 _GATE_CONTAINER = "saffron-gate-SY-1"
-_GATE_NETWORK = "saffron-gate-net-SY-1"
+_GATE_NETWORK = "saffron-gate-net-sy-1"
 _GATE_VOLUME = "saffron-gate-wt-SY-1"
 _GATE_STATE = "saffron-gate-st-SY-1"
 

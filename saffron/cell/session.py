@@ -1190,7 +1190,9 @@ def _gate_cell_suite(
     from saffron.gates.suite import CellTree
     from saffron.repos import image
 
-    network = f"saffron-gate-net-{spec.spec_id}"
+    # Lowercased: apple/container refuses an uppercase network name (measured
+    # 2026-09-16), and a spec id is uppercase.
+    network = f"saffron-gate-net-{spec.spec_id.lower()}"
     volume = f"saffron-gate-wt-{spec.spec_id}"
     state = f"saffron-gate-st-{spec.spec_id}"
     container = f"saffron-gate-{spec.spec_id}"
