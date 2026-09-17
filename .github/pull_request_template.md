@@ -5,7 +5,7 @@ which suppresses the template (DESIGN.md §5.7, `saffron/report/pr_body.py`).
 
 Delete a heading you have nothing to put under it, and delete these comments as
 you go. A section left empty is a claim that there was nothing to say, and a
-reviewer here reads it that way.
+operator reads it that way.
 -->
 
 ## What
@@ -43,7 +43,7 @@ the mutant you broke the property with and say the test killed it.
 ## Not covered
 
 <!--
-The residual: what a reviewer would reasonably take as verified and is not. A
+The residual: what the operator would reasonably take as verified and is not. A
 stub standing in for a real cell, a path reasoned about rather than measured, a
 ceiling a `ponytail:` comment names, a follow-up filed instead of fixed. Stating
 it costs a line here and a review round if it is found later.
