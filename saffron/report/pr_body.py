@@ -563,8 +563,8 @@ def _not_covered(
     # the sentence would name a gap of zero.
     #
     # The error string is never quoted here, exactly as `_disagreements` never
-    # quotes it: it is untrusted, hostile-shaped model output (`docs/BACKLOG.md`
-    # item 42), and a residual list is no better a place for it than a table.
+    # quotes it: it is untrusted, hostile-shaped model output (backlog item 42),
+    # and a residual list is no better a place for it than a table.
     blockers = anchored_blockers(reviews)
     if blockers and rebut_result is not None and rebut_result.rebuttal.error:
         lines.append(

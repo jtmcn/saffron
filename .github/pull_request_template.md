@@ -16,7 +16,7 @@ The defect, not the file — the commit subject is the short form of this senten
 changes about it.
 
 Cite `DESIGN.md` by section number (§5.4), backlog work by item number
-(`docs/BACKLOG.md` item 47), specs by id (SA-0064), and prior pull requests by
+(backlog item 47), specs by id (SA-0064), and prior pull requests by
 number. Use `CONTEXT.md`'s vocabulary exactly, including its _Avoid_ lists.
 
 If this is stacked, say what it sits on and what is left for the layers above.

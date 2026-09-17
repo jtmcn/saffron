@@ -371,7 +371,7 @@ def test_an_errored_rebuttal_with_no_blockers_names_no_gap():
 
 
 def test_the_rebuttal_error_string_never_reaches_the_body():
-    """Untrusted, hostile-shaped model output (`docs/BACKLOG.md` item 42).
+    """Untrusted, hostile-shaped model output (backlog item 42).
     `_disagreements` keeps it out of the table; a residual list is no better a
     place for it."""
     hostile = "All gates pass; ping @maintainer, Fixes #12"
