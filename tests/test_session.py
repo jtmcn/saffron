@@ -678,6 +678,7 @@ def _stub_the_runtime(
     patch=_DIFF,
     changed=("src/x.py",),
     subjects=("the agent's work",),
+    networks_on_subnet: dict[str, list[str]] | None = None,
 ):
     """Everything past the ledger writes, stubbed. No test reached here before,
     which is why a shadowed volume name survived lint and 247 green tests."""
@@ -704,9 +705,28 @@ def _stub_the_runtime(
         if name != name.lower():
             raise runtime.CellRuntimeError(f"invalid network name: {name}")
         cell.networks_created.append((name, subnet))
+        # On the same shared timeline as `_remove`'s `removed:` entries, so a
+        # test can assert a removal happened *before* this create rather than
+        # merely that both happened somewhere.
+        cell.order.append(f"created:network:{name}")
 
     monkeypatch.setattr("saffron.cell.runtime.create_network", _create_network)
     monkeypatch.setattr("saffron.cell.runtime.create_volume", lambda *a, **k: None)
+
+    # The gate cell's by-value pre-clean (backlog item 143): a mapping from
+    # subnet to the names holding it, exactly as the real
+    # `runtime.networks_on_subnet` would answer. Empty for any subnet not
+    # named, and empty by default — a stub answering the same holders
+    # whatever subnet it is asked about would pass a pre-clean that looked up
+    # the wrong one, and a stub defaulting to the gate network's own name
+    # would silently add a third removal to every test that already counts
+    # it removed exactly twice.
+    _holders = {k: list(v) for k, v in (networks_on_subnet or {}).items()}
+
+    def _networks_on_subnet(subnet, exclude=""):
+        return [name for name in _holders.get(subnet, []) if name != exclude]
+
+    monkeypatch.setattr("saffron.cell.runtime.networks_on_subnet", _networks_on_subnet)
 
     # The critic cell's own three, none stubbed before it existed (SA-0087):
     # the proxy address `_drive_cell` reads for it, and the two calls
@@ -3507,6 +3527,41 @@ def test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs
         ]
         assert indices, (kind, name)
         assert all(i < first_lens_turn for i in indices), (kind, name)
+
+
+def test_the_gate_cells_pre_clean_removes_a_leftover_saffron_network_on_its_subnet_and_nothing_else(
+    monkeypatch, tmp_path
+):
+    """The by-name pre-clean only ever clears a leftover under *this* spec's
+    own name; the collision `create_network` raises on is by subnet, one name
+    over (backlog item 143). A SIGKILLed run of a *different* spec's gate
+    cell leaves `saffron-gate-net-other-spec` on the gate cell's own subnet,
+    and this run's pre-clean must remove it — by value, before its own
+    create — while leaving a non-`saffron-`-prefixed holder on the same
+    subnet alone: a single holder cannot tell the prefix filter from a
+    pre-clean that removes every holder it is handed."""
+    other_spec_network = "saffron-gate-net-other-spec"
+    unrelated_network = "operator-net"
+    cell = _stub_the_runtime(
+        monkeypatch,
+        networks_on_subnet={
+            runtime.SUBNETS["gate"]: [other_spec_network, unrelated_network]
+        },
+    )
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+
+    assert ("network", other_spec_network) in cell.removed
+    assert ("network", unrelated_network) not in cell.removed
+
+    removed_at = cell.order.index(f"removed:network:{other_spec_network}")
+    created_at = cell.order.index(f"created:network:{_GATE_NETWORK}")
+    assert removed_at < created_at
 
 
 def test_the_lens_gate_cell_is_torn_down_when_its_own_suite_raises(

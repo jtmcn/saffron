@@ -160,6 +160,25 @@ def probe() -> str | None:
 
 DEFAULT_SUBNET = "10.88.0.0/24"
 
+# Every subnet this factory allocates, declared once (backlog item 143). A
+# caller draws its own from here rather than spelling a second literal in its
+# own module — `proxy.EGRESS_SUBNET` and `session._GATE_CELL_SUBNET` are both
+# a lookup into this dict, never a CIDR of their own. `create_network`'s own
+# overlap error already names the network holding a colliding subnet; nothing
+# before this checked the declared values against *each other*, so the first
+# report of a collision between two of Saffron's own was a `CellRuntimeError`
+# raised at REVIEW, after IMPLEMENT was paid for.
+# ("reverify" in saffron/phases/package.py takes create_network's own default
+# — this same DEFAULT_SUBNET — rather than spelling a literal, so it shares
+# "cells" rather than needing a fourth entry: the same value used twice on
+# purpose, since PACKAGE's own gate cell only ever runs after the task's own
+# cell is down.)
+SUBNETS: dict[str, str] = {
+    "cells": DEFAULT_SUBNET,  # saffron-cells, the task's own network
+    "egress": "10.89.0.0/24",  # saffron-egress, the proxy's network
+    "gate": "10.90.0.0/24",  # saffron-gate-net-<spec>, the gate cell's own
+}
+
 # §4.3's idle and completion bounds. Idle has to clear the longest single tool
 # call an agent makes — a gate suite runs minutes and emits nothing until it
 # returns — so it is the stall bound, not the impatience one. Completion is

@@ -4,9 +4,11 @@ that actually chose this runtime live in spikes/cell-runtime.sh."""
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -640,6 +642,53 @@ def test_a_partial_overlap_names_the_holder_too(monkeypatch):
 
     monkeypatch.setattr(runtime, "_call", fake_call)
     assert runtime.networks_on_subnet("10.89.0.128/25") == ["saffron-egress"]
+
+
+_QUOTED_CIDR = re.compile(r'"\d{1,3}(?:\.\d{1,3}){3}/\d+"')
+
+
+def test_every_subnet_saffron_allocates_is_declared_in_one_place():
+    """`runtime.SUBNETS` is the one place a subnet is written (backlog item
+    143); `proxy.EGRESS_SUBNET` and `session._GATE_CELL_SUBNET` draw theirs
+    from it rather than spelling a second literal in their own module.
+
+    Keeping all three *values* unchanged means a membership check alone
+    cannot tell this from the unfixed shape — a tuple in runtime.py nothing
+    draws from would satisfy it too. Source-level instead: neither module
+    that held a literal at base may still contain a quoted CIDR, imported
+    here rather than at module scope so a reverted run collects cleanly and
+    fails honestly on the assertions below instead of at import time.
+    """
+    import saffron.cell.proxy as proxy_module
+    import saffron.cell.session as session_module
+
+    proxy_src = Path(proxy_module.__file__).read_text()
+    session_src = Path(session_module.__file__).read_text()
+    assert not _QUOTED_CIDR.search(proxy_src), "proxy.py still spells a subnet literal"
+    assert not _QUOTED_CIDR.search(session_src), (
+        "session.py still spells a subnet literal"
+    )
+
+    assert runtime.SUBNETS["cells"] == runtime.DEFAULT_SUBNET
+    assert runtime.SUBNETS["egress"] == proxy_module.EGRESS_SUBNET
+    assert runtime.SUBNETS["gate"] == session_module._GATE_CELL_SUBNET
+
+
+def test_no_two_declared_subnets_overlap():
+    """Nothing compared the declared subnets against each other before this —
+    the first report of a collision between two of Saffron's own was
+    `create_network`'s `CellRuntimeError`, raised at REVIEW, after IMPLEMENT
+    was paid for (backlog item 143). Iterates the declaration itself, by
+    name, so a fourth subnet added to `SUBNETS` and not here is still
+    checked."""
+    import ipaddress as ip
+
+    names = sorted(runtime.SUBNETS)
+    for i, a in enumerate(names):
+        net_a = ip.ip_network(runtime.SUBNETS[a])
+        for b in names[i + 1 :]:
+            net_b = ip.ip_network(runtime.SUBNETS[b])
+            assert not net_a.overlaps(net_b), (a, b)
 
 
 def test_a_listing_that_could_not_be_read_adds_no_detail_and_still_raises(monkeypatch):

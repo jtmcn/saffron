@@ -19,6 +19,7 @@ from functools import partial, wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from saffron.cell import runtime
 from saffron.events import (
     Attempt,
     Baseline,
@@ -1055,12 +1056,11 @@ def _apply_and_commit_patch(container: str, patch: str) -> None:
         )
 
 
-# `saffron-cells` already holds `runtime.DEFAULT_SUBNET` (10.88.0.0/24) for the
-# task, and `saffron-egress` holds `proxy.EGRESS_SUBNET` (10.89.0.0/24) for the
-# proxy — neither torn down before this cell is created, and an overlapping
-# `create_network` raises. These two are the only subnets `saffron/` declares,
-# so the next one is the gate cell's own.
-_GATE_CELL_SUBNET = "10.90.0.0/24"
+# Drawn from the one declaration (runtime.SUBNETS, backlog item 143): neither
+# `saffron-cells` (the task's, still up when this cell is created) nor
+# `saffron-egress` (the proxy's) is torn down first, so this has to be a value
+# nothing else holds — see runtime.py for every subnet Saffron allocates.
+_GATE_CELL_SUBNET = runtime.SUBNETS["gate"]
 
 
 @contextlib.contextmanager
@@ -1135,6 +1135,21 @@ def critic_cell(
     runtime.remove_container(container)
     if own_network:
         runtime.remove_network(network)
+        # By name only clears a leftover left under *this* spec's own name.
+        # The collision is by subnet, not by name: a SIGKILLed run of a
+        # *different* spec leaves its gate network on this same subnet under
+        # its own name, and the create below would fail on the subnet the
+        # way `create_network`'s own error already explains (backlog item
+        # 143). `networks_on_subnet` answers with every overlapping network
+        # the runtime lists — an operator's unrelated one included — so only
+        # a `saffron-`-prefixed holder, one this factory could itself have
+        # created, is taken. No `exclude=`: that argument exists for
+        # `create_network` to explain an error about a network it was itself
+        # trying to create, not for a pre-clean to skip the one leftover it
+        # exists to remove.
+        for holder in runtime.networks_on_subnet(_GATE_CELL_SUBNET):
+            if holder.startswith("saffron-"):
+                runtime.remove_network(holder)
     runtime.remove_volume(volume)
     runtime.remove_volume(state)
     try:
