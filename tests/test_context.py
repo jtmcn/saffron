@@ -323,7 +323,7 @@ _PROMPTS = Path(__file__).parent.parent / "saffron/agents/prompts"
         ("review-contract.md", "claim", "findings"),
         ("review-adequacy.md", "claim", "findings"),
         ("rebut-verdict.md", "reason", "disagreements"),
-        ("EXTRACT_PROMPT", "argument", "disagreements"),
+        ("turns/rebut-extract.md", "argument", "disagreements"),
     ],
 )
 def test_prose_bound_for_the_pr_body_is_asked_for_in_plain_language(
@@ -335,19 +335,14 @@ def test_prose_bound_for_the_pr_body_is_asked_for_in_plain_language(
     `argument` in `### Disagreements`, so the table a prompt names is a fact
     about the report and not a turn of phrase.
     """
-    text = (
-        rebut.EXTRACT_PROMPT
-        if source == "EXTRACT_PROMPT"
-        else (_PROMPTS / source).read_text()
-    )
-    flat = " ".join(text.split())
+    flat = " ".join((_PROMPTS / source).read_text().split())
     assert f"A person reads your `{field}`" in flat or (
         f"A person reads each `{field}`" in flat
     )
     assert f"the pull request's {table} table" in flat
     assert "plain, specific language and state each fact once" in flat
     # A recipe, not a prohibition list: a trailing "no X, no Y" measurably
-    # produces more of what it bans.
+    # produces more of what it bans, so the ban must not come back (item 162).
     assert "no analogies" not in flat
 
 
