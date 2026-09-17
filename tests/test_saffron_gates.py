@@ -39,6 +39,7 @@ def test_the_policy_parses():
         "shacl",
         "structure",
         "prose",
+        "terms",
     }
 
 

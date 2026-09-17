@@ -7,6 +7,7 @@ gate re-runs a new witness with the script deleted.
 from __future__ import annotations
 
 import importlib.util
+import re
 import shutil
 import subprocess
 import sys
@@ -328,3 +329,76 @@ def test_scope_leaves_the_records_alone():
     ):
         assert not prose.in_scope(record), record
     assert prose.in_scope(".claude/skills/a/b/SKILL.md")
+
+
+def _terms(text: str) -> list[str]:
+    return [f.excerpt for f in _prose().check(text, "README.md", "terms", root=REPO)]
+
+
+def test_an_avoided_phrase_names_the_term_to_use():
+    assert _terms("The agent runs in a sandbox.") == [
+        'sandbox: say "cell" (CONTEXT.md §1)'
+    ]
+    assert _terms("A soft\nfail is reported.") == [
+        'soft fail: say "advisory" (CONTEXT.md §4)'
+    ]
+
+
+def test_a_quoted_or_coded_phrase_is_a_mention():
+    assert _terms('Say "cell", not "sandbox".') == []
+    assert _terms("It calls `sandbox.exec()`.") == []
+
+
+def _definitions(context: str) -> dict[str, tuple[str, str]]:
+    """Bold term part -> (its block, its `## N.` section)."""
+    found: dict[str, tuple[str, str]] = {}
+    section = ""
+    for block in context.split("\n\n"):
+        heading = re.match(r"## (\d+)\.", block)
+        if heading:
+            section = f"§{heading.group(1)}"
+        bold = re.match(r"\*\*([^*]+)\*\*", block.strip())
+        if bold:
+            for part in bold.group(1).split("/"):
+                # The first definition wins; a later bold lead is not the term.
+                found.setdefault(part.strip().lower(), (block, section))
+    return found
+
+
+def _check_avoided_agrees(context: str) -> list[str]:
+    problems = []
+    definitions = _definitions(context)
+    for phrase, (term, section) in _prose().AVOIDED.items():
+        if term not in definitions:
+            problems.append(f"{term}: no bold definition")
+            continue
+        block, found_section = definitions[term]
+        avoid = block[block.find("_Avoid_") :] if "_Avoid_" in block else ""
+        if f'"{phrase}"'.lower() not in avoid.lower():
+            problems.append(f"{phrase}: not quoted on {term}'s _Avoid_ line")
+        if found_section != section:
+            problems.append(f"{phrase}: {term} is in {found_section}, not {section}")
+    return problems
+
+
+def test_every_avoided_phrase_is_on_its_terms_avoid_line():
+    assert _check_avoided_agrees((REPO / "CONTEXT.md").read_text()) == []
+
+
+def test_the_agreement_notices_a_removed_quote():
+    context = (REPO / "CONTEXT.md").read_text().replace('"sandbox"', "sandbox", 1)
+    assert _check_avoided_agrees(context) == [
+        "sandbox: not quoted on cell's _Avoid_ line"
+    ]
+
+
+def test_terms_reports_fail_and_still_exits_zero(tmp_path):
+    from saffron.gates.contract import parse_gate_json
+
+    _init(tmp_path, {"README.md": "The agent runs in a sandbox.\n"})
+    done = _run_gate("terms", tmp_path)
+    assert done.returncode == 0
+    result = parse_gate_json(done.stdout, expected_gate="terms")
+    assert result.status == "fail"
+    assert [(f.code, f.line) for f in result.failures] == [("avoided-term", 1)]
+    assert result.tool and result.tool.startswith("saffron-prose ")

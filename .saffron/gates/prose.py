@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The `prose` gate: Saffron's house style over its living Markdown.
+"""The `prose` and `terms` gates: Saffron's house style and vocabulary over its living Markdown.
 
 Design: `docs/superpowers/specs/2026-09-16-prose-ratchet-design.md`. Parsing
 adapts `strip_code` and `sentences` from AminBlg/SimpleEnglish
@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-GATES = ("prose",)
+GATES = ("prose", "terms")
 
 ROOT_FILES = ("CONTEXT.md", "CLAUDE.md", "DESIGN.md", "README.md")
 INCLUDED_DIRS = (
@@ -112,6 +112,18 @@ _QUOTED = re.compile(r'"[^"\n]*(?:\n[^"\n]*)?"|“[^”\n]*(?:\n[^”\n]*)?”')
 _BREAK = re.compile(r"(?<=[.!?:])\s+|\n[ \t]*\n\s*|\n(?=[ \t]*(?:[-*+]|\d+\.)[ \t])")
 _ITEM = re.compile(r"[ \t]*(?:[-*+]|\d+\.)[ \t]+(?:\[[ xX]\][ \t]+)?")
 _BOLD_TERM = re.compile(r"^\*\*([^*]+)\*\*", re.M)
+
+# Phrase -> (the Saffron term, its CONTEXT.md section). An entry is quoted on
+# that term's _Avoid_ line, and every hit in scope was a misuse when it entered.
+AVOIDED = {
+    "sandbox": ("cell", "§1"),
+    "ticket": ("spec", "§2"),
+    "work item": ("task", "§2"),
+    "the denylist": ("protected paths", "§3"),
+    "soft fail": ("advisory", "§4"),
+    "self-heal": ("repair", "§4"),
+    "auto-fix": ("repair", "§4"),
+}
 
 
 @dataclass(frozen=True)
@@ -314,6 +326,17 @@ def _style(text: _Text, path: str, root: Path) -> list[Hit]:
     return found
 
 
+def _avoided(text: _Text) -> list[Hit]:
+    unquoted = _QUOTED.sub(_blank, text.body)
+    found = []
+    for phrase, (term, section) in AVOIDED.items():
+        spelled = re.escape(phrase).replace(r"\ ", r"\s+")
+        message = f'{phrase}: say "{term}" (CONTEXT.md {section})'
+        for match in re.finditer(rf"\b{spelled}\b", unquoted, re.I):
+            found.append(Hit(text.line(match.start()), "avoided-term", message))
+    return found
+
+
 def check(text: str, path: str, gate: str, *, root: Path) -> list[Hit]:
     """Every hit `gate` reports for `text`, read as the file at `path`."""
     if gate not in GATES:
@@ -326,7 +349,7 @@ def check(text: str, path: str, gate: str, *, root: Path) -> list[Hit]:
     for start, end in rendered:
         text = text[:start] + _spaces(text[start:end]) + text[end:]
     prepared = _Text(_prepare(text))
-    found = _style(prepared, path, root)
+    found = _style(prepared, path, root) if gate == "prose" else _avoided(prepared)
     return sorted(found, key=lambda f: (f.line, f.code))
 
 
