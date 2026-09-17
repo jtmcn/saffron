@@ -25,10 +25,10 @@ Ten of those twelve can never appear on the page.
 
 `append_queue_line` has exactly two callers. `saffron/replay.py:143` is v0 and
 agent-free. `saffron/phases/package.py:966` sits inside `_finish`, which a task
-reaches only by reaching PACKAGE. `saffron/task.py:316` gates that on
-`outcome.state == "READY_FOR_REVIEW"`. Every other outcome takes the branch at
-`saffron/task.py:331`, prints one line at `:352`, and returns at `:353`. No row
-is written.
+reaches only by reaching PACKAGE. `saffron/task.py:317` gates that on
+`outcome.state == "READY_FOR_REVIEW"`. Every other outcome takes the `else:` at
+`saffron/task.py:335`, calls `push_unpackaged_work` at `:341`, prints one line at
+`:352`, and returns at `:353`. No row is written.
 
 Measured against `~/.saffron/ledger.db` and
 `~/.saffron/batches/v0/queue.json`: the ledger holds 99 tasks and the store holds

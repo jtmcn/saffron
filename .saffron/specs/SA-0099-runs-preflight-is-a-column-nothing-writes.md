@@ -28,8 +28,8 @@ forbidden:
   - saffron/task.py
   - saffron/cli.py
   - saffron/events.py
-budget_usd: 12
-max_turns: 80
+budget_usd: 16
+max_turns: 90
 acceptance:
   - claim: >-
       A run whose baseline suite aborted records a preflight outcome saying the
@@ -47,8 +47,9 @@ acceptance:
   - claim: >-
       The recorded outcome is one of a closed set. Asking the ledger to store a
       value outside that set raises, and the row keeps the value it had rather
-      than carrying an invented word, the way an unknown batch stop reason is
-      already refused.
+      than carrying an invented word. This holds on a ledger built by the
+      previous schema as well as on a fresh one, because the ledger this defect
+      is measured on already has its runs table.
     witness: tests/test_ledger.py::test_a_preflight_outcome_outside_the_closed_set_is_refused
   - claim: >-
       A ledger written by the previous schema still opens and still accepts a
@@ -110,6 +111,16 @@ calls the shape a column written at scan and read by nobody. It asserts over
 `batches` and `tasks` only, and reaches no column of `runs`. That is why this
 defect survived.
 
+**Which of §6's six header fields this column is.** State it once, so a later
+spec does not guess. §6 lists per-repo preflight status and base-suite status as
+two fields, and §4.1 gives a run "its own preflight outcome, and its own
+baseline". They are different things. This column is the preflight one. Criterion
+1 sources it from the baseline suite anyway, because a readiness failure happens
+before `create_run` and reaches no run row at all. `DESIGN.md:266-267`
+already reads `PREFLIGHT_FAILED ◀── the baseline suite errored`, which is the
+same reading. Say so in the pull request body, so the header spec does not render
+a base-suite fact under a preflight label.
+
 ## Problem
 
 - **The column exists and nothing assigns it.** This is a write that was never
@@ -127,9 +138,10 @@ defect survived.
 **Rendering it.** `saffron/report/**` is forbidden. The batch header belongs to
 a later spec. A written column with no reader beats a reader inventing one.
 
-**The other five header fields.** Wall clock has no source until §4.2.1's
-`batches` table grows one. The diff stat and the trailing accept rate are their
-own specs. Do not widen this spec to any of them.
+**The other five header fields.** The diff stat and the trailing accept rate
+have no source yet, and each is its own question. Wall clock has one already, in
+`batches.started_at` and `batches.ended_at` at `saffron/ledger.py:38-39`. Do not
+widen this spec to any of them.
 
 **Changing what preflight checks.** `saffron/preflight.py` is forbidden. This
 spec records an outcome. It does not alter one, and it adds no step.
@@ -143,6 +155,10 @@ blocked on it. It is the same shape as this defect, in the same region of the
 same file. Preflight computes something and discards it. It is a different
 value. Taking it is an unasked-for fix riding inside a bug fix. Name it in the
 pull request body, and do not fix it.
+
+**The vocabulary entry for the closed set.** `ontology/` and `CONTEXT.md` are
+both forbidden. The second is generated from the first, so a cell cannot move them
+together. The follow-up is filed by hand as item 166 with this spec.
 
 **A tenth event kind, or a new table.** `saffron/events.py` is forbidden.
 `Preflight` already exists as a kind, and already carries every step. This spec
@@ -159,11 +175,30 @@ report `skip` for those three. The fourth criterion is `preserves` over
 **The outcome is an enumeration, not a free string.** `events.Budget`'s
 docstring in `saffron/events.py` states the principle for the ceiling that
 stopped a task: a typed field over an enumeration, never a free string.
-`batches.status` implements that as a SQL `CHECK`, tested by
-`tests/test_ledger.py:635`. Follow that shape. Refuse at the write rather than
-sanitise the value, and add no free-text reason column. A bounded reason string
-was this spec's sketch in the plan, and it is the weaker answer. It invites the
+`batches.status` carries a closed set of that kind, tested by
+`tests/test_ledger.py:635`. Take the set, and read the next paragraph before
+taking its `CHECK`. Add no free-text reason column. A bounded reason string was
+this spec's sketch in the plan, and it is the weaker answer. It invites the
 terminal's prose into a column an operator wants to `GROUP BY`.
+
+**A `CHECK` in `SCHEMA` alone protects no ledger that already exists.** That
+includes the only ledger this defect is measured on. `saffron/ledger.py:47`
+declares `CREATE TABLE IF NOT EXISTS runs`, and `_widen_batch_status` at
+`saffron/ledger.py:222-226` states the consequence in its own words. A
+`CREATE TABLE IF NOT EXISTS` "leaves an existing table's CHECK as it was", so a
+ledger from before `INCOMPLETE` refused the first night to end that way. So a
+`CHECK`
+added to `SCHEMA` passes a witness built on a fresh `tmp_path` database. The
+99-run ledger keeps accepting any invented word. Put the refusal in the Python
+write, where it holds on every ledger. A `CHECK` for fresh ledgers is welcome
+beside it, and is not the refusal criterion 3 asks for. Retrofitting one is the
+12-step rebuild `_widen_batch_status` performs, and `tasks.run_id` and
+`gate_results.run_id` both reference `runs`, so it costs more than it buys here.
+
+**Criterion 3 drives two ledgers in one plain test.** A fresh one, and one built
+by the previous schema. `tests/test_ledger.py:273` and `:1137` both open an older
+database already, so copy whichever shape fits. Keep it one `def` rather than a
+parametrised test, because `criteria` matches a bare node id by exact string.
 
 **Two values are the floor, not the target.** A passed value and a failed value
 satisfy criterion 1. A run that never reached the baseline suite is a different

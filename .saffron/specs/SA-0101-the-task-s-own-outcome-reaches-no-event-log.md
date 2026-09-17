@@ -34,14 +34,15 @@ max_turns: 90
 acceptance:
   - claim: >-
       A caller that supplies its own emit receives the task's terminal
-      announcement through it, and process stdout carries no copy of that line.
-      Today the line is a direct print, so a caller supplying emit gets a line
-      it cannot redirect.
+      announcement through it, and nothing the supervisor writes reaches process
+      stdout without passing through that emit. Today the announcement is a
+      direct print, so a caller supplying emit never receives it and cannot
+      redirect it.
     witness: tests/test_session.py::test_the_terminal_announcement_reaches_emit_and_not_stdout
   - claim: >-
       The rate-limit rejection behaves the same way through the RateLimited
-      path. It reaches the caller's emit, it names the reopening time when one
-      is known, and process stdout carries no copy of it.
+      path. It reaches the caller's own emit, it names the reopening time when
+      one is known, and it reaches process stdout only through that emit.
     witness: tests/test_session.py::test_the_rate_limit_rejection_reaches_emit_and_not_stdout
   - claim: >-
       The outcome the task ended on reaches events.jsonl, so reading the log
@@ -154,12 +155,47 @@ not pass its gates are different outcomes and say different things. Whatever
 field carries the state must keep them apart, and the rendered line for each
 must stay distinguishable.
 
+**The rate-limit path has no session id, and reading one there raises.**
+`session_id` is first bound at `saffron/cell/session.py:1587`, inside the `try:`
+at `:1362`. `except RateLimited` at `:2290` catches a raise from anywhere in that
+body, and a wall on the plan turn unwinds before `:1587` runs. The code already
+pre-binds `spent` at `:1357-1359` for that reason, and its comment says so. Make
+the session id optional on the new kind, and pre-bind it beside `spent`.
+`tests/test_session.py:2812` drives a wall on the plan turn, and `:2834` drives
+four junk reopen values. Both must stay green.
+
+**Store the raw reopen time, never a rendered string.** `describe` already calls
+`when()` at `saffron/events.py:596-613`. A pre-rendered string field is the
+`message: str` hatch this vocabulary exists to refuse.
+
+**An eleventh kind moves six more things in `tests/test_events.py`.** Each is in
+`touches`, and each is real work. Three counts: the kinds at `:574`, `FAMILIES` at
+`:1199-1200`, `FINDINGS` at `:1585`. Three tables: `_ONE_OF_EACH` at `:74`, then
+`_CASES` and `_JOINED` at `:1713-1869`. And
+`test_events_jsonl_reproduces_what_the_terminal_printed` at `:1946-1957`. The last
+one fails by construction once the outcome reaches the log, because it strips the
+outcome from the printed side before comparing.
+
+**`FINDINGS[0]` is deleted, and its shape becomes a `FAMILIES` row.** That shifts
+two prose citations of `FINDINGS[1]`, at `tests/test_package.py:1177` and
+`tests/test_package_cell.py:28`. Both are comments, neither file is in `touches`,
+and no test fails. Leave them, and name them in the pull request body.
+
 **Criterion 1's wrong implementation is an event beside the print.** The seam
 stays broken. Adding the emit and leaving the print still satisfies "the caller
-receives it". So the witness must assert the line is absent from stdout. Drive it
-through the fixture's `use_default_emit` path, rather than the `session.print`
-double at `tests/test_session.py:1072`. A witness that keeps that double cannot
-observe this at all.
+receives it".
+
+**Neither existing fixture mode can observe criterion 1, so add a third.**
+`tests/test_session.py:1056-1064` is the `use_default_emit` mode. It passes no
+`emit`, so `_default_emit` prints the line at `saffron/cell/session.py:80-82`.
+That print is correct and stays, and `tests/test_events.py:1925` pins it, so a
+witness asserting absence from stdout fails at head on that path. The other mode
+patches `session.print` away at `tests/test_session.py:1072`. The line is
+therefore already missing from real stdout at base, and the same witness is green
+there.
+Add a mode that passes a custom `emit` and leaves `session.print` alone. Under it,
+assert the announcement is among the captured events, and assert through `capsys`
+that stdout carries no copy. Criterion 2 needs that mode too.
 
 **Criterion 3's wrong implementation is a kind that renders differently.** An
 operator learned the old line. `saffron watch` also replays old logs beside new

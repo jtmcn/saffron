@@ -7,8 +7,8 @@ depends_on: []
 touches:
   - saffron/task.py
   - tests/test_task.py
-  - tests/test_report.py
 forbidden:
+  - tests/test_report.py
   - DESIGN.md
   - CONTEXT.md
   - .saffron/**
@@ -27,8 +27,8 @@ forbidden:
   - saffron/cli.py
   - saffron/replay.py
   - saffron/events.py
-budget_usd: 12
-max_turns: 80
+budget_usd: 16
+max_turns: 90
 acceptance:
   - claim: >-
       A task whose cell ended in a state other than READY_FOR_REVIEW reaches
@@ -43,9 +43,11 @@ acceptance:
     witness: tests/test_task.py::test_an_unpackaged_row_carries_no_pull_request_link
   - claim: >-
       A spec whose first task ended unpackaged and whose second task packaged
-      leaves one row, holding the packaged outcome. The earlier unpackaged row
-      is replaced rather than joined by a second row for the same spec.
-    witness: tests/test_task.py::test_a_later_package_replaces_the_unpackaged_row
+      leaves one row, holding the packaged outcome and still carrying the pull
+      request link PACKAGE wrote. The earlier unpackaged row is replaced rather
+      than joined by a second row, and the new write never replaces a packaged
+      row's link with an empty one.
+    witness: tests/test_task.py::test_a_later_package_replaces_the_unpackaged_row_and_keeps_its_link
   - claim: >-
       Appending a row for a spec that already has one still replaces it rather
       than doubling it, keyed on repo and spec id together.
@@ -71,10 +73,10 @@ Ten of those twelve states can never appear on the page.
 `append_queue_line` has exactly two callers. One is `saffron/replay.py:143`,
 which is v0 and agent-free. The other is `saffron/phases/package.py:966`,
 inside `_finish`. A task reaches `_finish` only by reaching PACKAGE, and
-`saffron/task.py:316` gates that on one condition: `outcome.state ==
-"READY_FOR_REVIEW"`. Every other outcome takes the branch at
-`saffron/task.py:331`, which calls `push_unpackaged_work`, prints one line at
-`saffron/task.py:352`, and returns at `:353`. No row is written.
+`saffron/task.py:317` gates that on one condition: `outcome.state ==
+"READY_FOR_REVIEW"`. Every other outcome takes the `else:` at
+`saffron/task.py:335`, which calls `push_unpackaged_work` at `:341`, prints one
+line at `:352`, and returns at `:353`. No row is written.
 
 Measured 2026-09-17 against `~/.saffron/ledger.db` and
 `~/.saffron/batches/v0/queue.json`: the ledger holds **99** tasks and the store
@@ -170,11 +172,39 @@ index, and the diffs live in GitHub (§6). An empty link is correct.
 Assert the branch name is absent from the row, not only that the link is falsy.
 
 **Criterion 3 is the upsert exercised through the new path.** One row must
-survive. A spec that fails once and packages later keeps the packaged
-outcome.
-Writing the unpackaged row after the packaged one, or keying on the spec id
-alone, produces two rows or the wrong survivor. Drive the unpackaged task
-first, then the packaged one, and assert the store holds one row.
+survive, and it must keep its link. Writing the unpackaged row after the packaged
+one, or keying on the spec id alone, produces two rows or the wrong survivor.
+Drive the unpackaged task first, then the packaged one, and assert the store
+holds one row whose link is the pull request address.
+
+**The write goes inside the `else:` at `saffron/task.py:335`, and nowhere else.**
+This is the one placement that matters. A write at the end of `run_task` passes
+criteria 1 and 2. It also passes criterion 3's first wording, while it destroys
+every pull request link in the index. The packaged branch reaches
+`_finish`, which writes the row with `link=result.pr_url`
+(`saffron/phases/package.py:966-978`). Then `saffron/task.py:334` assigns
+`outcome.state = result.state`. So a later upsert keyed on the same repo and spec
+replaces that row. The surviving state reads as the packaged one, and the link
+reads empty. That is `_finish`'s own warning with the sign reversed: a row whose
+link points nowhere, for every task that succeeded.
+
+**The upsert key is `repo.name`.** `_finish` takes it as its fifth positional
+argument (`saffron/phases/package.py:690`), and `append_queue_line` keys on repo
+and spec id together. A new write using `str(repo)` or a resolved path produces
+two rows per spec in production while the witness shows one. Assert the row's
+`repo` equals `repo.name` rather than trusting the count alone.
+
+**Share one builder across the three tests.** Each needs a `Spec`, a
+`ResolvedCeilings`, a `PinnedBase`, a ledger, two doubles and a real `out_dir`.
+Written out three times that is most of the `bug` ceiling of 300 changed lines,
+before the fix itself. One helper and three short tests fit.
+
+**`tests/test_cli.py` drives this branch and is forbidden.**
+`tests/test_cli.py:117-127` and `:174-177` push `EXHAUSTED` and
+`PREFLIGHT_FAILED` outcomes through `run_task`, so both will newly write a
+`queue.json`. Neither asserts on the store, and `append_queue_line` makes its own
+directory, so both stay green. If one breaks, `scope` forbids you from fixing it.
+Stop and say so in the pull request body rather than widening the diff.
 
 **The row's state is the cell's own terminal state.** Never map an unpackaged
 outcome onto a packaging state. A row reading `READY_FOR_REVIEW` for a task

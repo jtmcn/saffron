@@ -8,6 +8,8 @@ depends_on:
 touches:
   - saffron/cell/session.py
   - tests/test_session.py
+  - tests/test_events.py
+  - tests/fixtures/watch-golden.txt
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -38,14 +40,18 @@ acceptance:
       and no event per gate.
     witness: tests/test_session.py::test_each_baseline_gate_result_reaches_the_log_as_its_own_event
   - claim: >-
-      Every gate result an attempt's suite produced reaches the log as its own
-      event, carrying that attempt's number. Two attempts produce two sets, and
-      each set carries its own number rather than the latest one.
+      Every gate result the repair loop's suite produced reaches the log as its
+      own event, carrying that attempt's number. Two attempts produce two sets,
+      and each set carries its own number rather than the latest one. The suite
+      the post-rebuttal re-run judges emits none of these, because it belongs to
+      neither an attempt nor a run.
     witness: tests/test_session.py::test_each_attempts_gate_results_carry_their_own_attempt_number
   - claim: >-
-      A gate that errored is emitted with the errored status and never the
-      failed one, and the count of new failures it contributed is absent rather
-      than zero, because a gate that broke computed no count.
+      In an attempt's suite, a gate that errored is emitted with the errored
+      status and never the failed one, and the count of new failures it
+      contributed is absent rather than zero, because a gate that broke computed
+      no count. A gate that passed in the same suite carries a count of zero,
+      which is a measurement rather than an absence.
     witness: tests/test_session.py::test_an_errored_gate_is_emitted_as_errored_and_counts_nothing
 ---
 
@@ -94,6 +100,15 @@ is shown lands in `lens-gates.json` and in no ledger row. §4.1 sets exactly one
 of `attempt_id` and `run_id`, and that suite is neither. So `rebuttal` stays
 unproduced until item 160 decides what the suite belongs to.
 
+**The attempt site serves two different suites, and one of them is not this
+spec's.** `_judge` is defined at `saffron/cell/session.py:1821` and called twice.
+`repair_loop` takes it as `judge=_judge` at `:1885`, and `_rebut_gates` calls it
+directly at `:2157` for the §5.6 post-rebuttal re-run. The ledger write at `:1836`
+books that second suite under the rebuttal's extraction turn, which its comment at
+`:1828-1833` explains. An unguarded emit at `:1836` therefore files a rebuttal
+suite as an attempt's, with a borrowed number. That is the conflation `against`
+exists to prevent.
+
 ## Problem
 
 - **The event log cannot name the gate that caused a repair turn.** That is the
@@ -136,14 +151,38 @@ report `skip` for all three.
 
 **Emit beside the existing write, from the same object.** Both
 `record_gate_result` calls already hold the `GateResult` the gate contract
-produced. Read its gate, status and duration from there rather than recomputing
-any of it. A second source for the same fact is how the two records come to
-disagree.
+produced. Read its gate and status from there rather than recomputing either. A
+second source for the same fact is how the two records come to disagree. The event
+kind carries no duration field, and `saffron/events.py` is forbidden, so duration
+stays ledger-only after this spec.
+
+**Emit nothing from the post-rebuttal call.** `_judge` needs to know which caller
+it serves. Give it a parameter, and pass the emitting value only from
+`repair_loop`. Do not reach for the rebuttal value instead. That suite has no
+owner until item 160 decides one, and a borrowed attempt number is worse than
+silence. Criterion 2's last sentence is what pins this.
+
+**The attempt number is not in scope at the emit site.**
+`saffron/cell/session.py:633` holds the loop `for attempt in range(1, max_attempts
++ 1)`, and that loop belongs to `repair_loop`, which invokes the callback as
+`comparison = judge()` at `:634`. Inside `_judge` the only number at hand is the
+ledger's `attempt_id` at `:1834`. That is a row id counting every turn, plan,
+notes and rebut extraction included, rather than the gate attempt. Thread the real
+number in from `repair_loop`. Both `attempt_id` and the length of
+`ledger.attempts(...)` are wrong, and criterion 2's witness catches both.
 
 **`error` is not `fail`.** `fail` means the repo's code is wrong, and `error`
 means the gate broke and is charged to nobody. The kind's docstring says all
 four statuses are representable and neither is inferred from the other. Carry
 the contract's status through unchanged.
+
+**Criterion 3 must drive an attempt's suite, never the baseline.** At the
+baseline site no gate has a count. The count is then absent for every gate
+whatever the implementation does, so a wrong attempt-site implementation still
+passes. The converse is unguarded too. A count written to fall back to absent
+whenever it is zero satisfies the errored half. It also collapses a measured zero
+on a passing gate into an absence. Drive the errored gate through an attempt's suite,
+and assert that a passing gate in the same suite carries zero.
 
 **`new_failures` is `None` and never `0` for a gate that did not compute one.**
 The field's own comment says why: a skipped or errored gate had no count. Zero
@@ -160,9 +199,22 @@ or `attempt_id` was passed reproduces today's shape. The field's own comment
 says it is required rather than defaulted, so a forgotten keyword cannot file a
 baseline result as an attempt's. Pass it explicitly at each site.
 
-**The two sites are in one function and one file.** Keep the diff to those two
-places plus the tests. `census` compares test names, so rename nothing, and two
-queued specs also name `tests/test_session.py`.
+**The golden fixture changes, and that is why it is in `touches`.**
+`tests/test_events.py:1682-1695` drives two whole cells. It compares the captured
+lines byte for byte against `tests/fixtures/watch-golden.txt`. Its green run
+carries one joined baseline line at `:8` and one `gates: attempt 1` line, so a
+per-gate block lands in both runs. Add a `GateResult` row to `_JOINED` as well, or
+`test_the_join_covers_every_captured_line_a_kind_renders` at
+`tests/test_events.py:1882-1898` fails on lines it has never seen.
+
+**`census` compares test names, so rename nothing.** Two queued specs also name
+`tests/test_session.py`, and `SA-0098` names `tests/test_events.py`. `SA-0098` is
+an ancestor through `SA-0101`, so the open-pull-request overlap refusal exempts it.
+
+**`events.GateResult` needs an aliased import.** `saffron/cell/session.py:39`
+already binds that name from `saffron.gates.contract`, which is the gate contract
+rather than the host's own record. Import the event kind under another name, and
+do not shadow the contract.
 
 **Import anything new inside the test body.** Module scope does not work. A
 module-scope import of a name this change adds turns `revert`'s reverted run
