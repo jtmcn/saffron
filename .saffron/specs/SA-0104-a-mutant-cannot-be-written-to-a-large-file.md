@@ -70,7 +70,7 @@ argument at `MAX_ARG_STRLEN`. Measured against `saffron/cell-base:python`:
 131,000 bytes of argument run, and 131,071 and above fail. Base64 grows a file
 by a third, so any file over about 96 KiB cannot carry a mutant.
 
-`saffron/cell/session.py` is 106,361 bytes at `cc4d417`, and still growing.
+`saffron/cell/session.py` is 106,783 bytes at `65b1886`, and still growing.
 Every mutant against it is now `error`, which aborts the attempt and is charged
 to nobody. `SA-0093`'s mutant aborted its first cell (`GATE_ERROR`, $4.42) and
 was dropped by #293. `SA-0099`, `SA-0101` and `SA-0102` all edit `session.py`,
@@ -105,7 +105,7 @@ every caller's view of the cell runtime (Appendix G), and it is forbidden.
 Item 154 allows "several arguments under the cap, appended in order, or another
 channel". This spec picks the first, because the host-side tests fake
 `runtime.exec_` and nothing else (`_host_git`, `tests/test_worktree.py:764`).
-`exec_stream` carries stdin, and `session.py:1017-1023` writes a patch through
+`exec_stream` carries stdin, and `session.py:1021-1027` writes a patch through
 it. But a write through it would get past the witness's fake without being
 checked. The largest argument measured to run is 131,000 bytes, so keep each
 whole argument under that, script text included. Name the cap once, as a
