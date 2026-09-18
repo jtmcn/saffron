@@ -61,7 +61,7 @@ Backlog item **176**, found by both seats reviewing `SA-0097` (PR #321) on
 2026-09-17.
 
 `SA-0097` made `mirror.changed_files` take its flags from
-`saffron.cell.worktree.DIFF_FLAGS` (`saffron/repos/mirror.py:125-149`, import
+`saffron.cell.worktree.DIFF_FLAGS` (`saffron/repos/mirror.py:127-149`, import
 at `:17`). `diff_stat` in the same file (`:152-165`) still runs a bare
 `git diff --shortstat base..head` and reads two counts out of it with `_ADDED`
 and `_REMOVED` (`:19-20`). Its callers are PACKAGE, for the pull request's
@@ -122,11 +122,10 @@ like one.
 Say why in a short comment on the read.
 
 **Both witnesses build real commits and read the counts.** A test that checks
-the argument list dies to the mutants. It proves nothing about the counts. Build the commits in the `origin` fixture's repository
-(`tests/test_mirror.py:27`), then clone it with `ensure_mirror`.
-`test_changed_files_lists_a_submodule_the_git_config_ignores` (`:93`) does
-both.
-That test also shows how to add a gitlink with `update-index --cacheinfo` and
+the argument list proves nothing about the counts. Build the commits in the
+`origin` fixture's repository (`tests/test_mirror.py:27`), then clone it with
+`ensure_mirror`. `test_changed_files_lists_a_submodule_the_git_config_ignores`
+(`:93`) does both. That test also shows how to add a gitlink with `update-index --cacheinfo` and
 how to set `GIT_CONFIG_GLOBAL` with `monkeypatch.setenv`.
 
 **The submodule witness has to catch the patch trap too.** Put both changes
@@ -143,6 +142,5 @@ commit. Git's default rename detection is what reports nothing today. Set
 `GIT_CONFIG_GLOBAL` to a file with `diff.renames = true` anyway, so an
 operator's config cannot change what the test measures.
 
-**Each mutant removes one flag from `DIFF_FLAGS` itself.** A read that spells
-`--ignore-submodules=none` or `--no-renames` out on its own survives the
-mutant, and `witness` fails. Import `DIFF_FLAGS`, as `changed_files` does.
+**Import `DIFF_FLAGS`, as `changed_files` does.** Do not copy the flags. Copies
+drifting apart is how this read was missed (backlog item 89).
