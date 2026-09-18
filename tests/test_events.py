@@ -1579,6 +1579,101 @@ def test_a_phase_or_terminal_detail_is_clipped():
     )
 
 
+def test_a_teardown_detail_is_stripped_and_clipped():
+    """Item 63 (deferred part): `cell_down` reports the proxy's own denials
+    as a `Teardown.detail` (`proxy DENIED …`, naming a host the cell tried to
+    reach), and `export_patch`'s failure detail quotes an exception — both
+    cell-influenced. Every non-`start` `Teardown` line must strip control
+    characters from its detail and clip it to `_DETAIL_BOUND`, the same as a
+    `PhaseStart`."""
+    from saffron.events import _DETAIL_BOUND
+
+    for code in (*range(0x20), 0x7F):
+        line = describe(
+            Teardown(
+                timestamp=1.0,
+                spec_id="x",
+                step="container",
+                ok=False,
+                detail=f"proxy DENIED A{chr(code)}B",
+            )
+        )
+        assert chr(code) not in line, hex(code)
+        assert line == "teardown: proxy DENIED A B"
+
+    long_detail = "HEAD " + "x" * (_DETAIL_BOUND + 400)
+    clipped = long_detail[:_DETAIL_BOUND]
+    clipped_line = describe(
+        Teardown(
+            timestamp=1.0, spec_id="x", step="network", ok=False, detail=long_detail
+        )
+    )
+    assert clipped_line == f"teardown: {clipped}"
+
+
+def test_a_preflight_detail_is_stripped_and_clipped():
+    """Item 63 (deferred part): the `cell_up`, `unstacked`, and general
+    `Preflight` branches all render a `detail` that can carry cell-influenced
+    text — `str(gone)` from a `ParentGone` on `unstacked`, a spec-drift
+    description on the general branch, and the cell runtime's own build/probe
+    output on `cell_up`. Each must strip control characters and clip to
+    `_DETAIL_BOUND`."""
+    from saffron.events import _DETAIL_BOUND
+
+    branches = {
+        "cell_up": "cell",
+        "unstacked": "unstacked",
+        "proxy_start": "preflight",
+    }
+    for step, prefix in branches.items():
+        for code in (*range(0x20), 0x7F):
+            line = describe(
+                Preflight(
+                    timestamp=1.0,
+                    spec_id="x",
+                    step=step,
+                    detail=f"A{chr(code)}B",
+                )
+            )
+            assert chr(code) not in line, (step, hex(code))
+            assert line == f"{prefix}: A B", (step, line)
+
+        long_detail = "HEAD " + "x" * (_DETAIL_BOUND + 400)
+        clipped = long_detail[:_DETAIL_BOUND]
+        clipped_line = describe(
+            Preflight(timestamp=1.0, spec_id="x", step=step, detail=long_detail)
+        )
+        assert clipped_line == f"{prefix}: {clipped}"
+
+
+def test_an_agent_detail_is_stripped_and_clipped():
+    """Item 63 (deferred part): an `Agent` event with no cell event behind it
+    at all — `implement.py`'s `the cell would not reap — {reaped.stderr…}`
+    among others — carries a host `detail` that quotes cell-influenced text
+    (the cell runtime's own stderr). It must strip control characters and
+    clip to `_DETAIL_BOUND`, the same as a `PhaseStart`."""
+    from saffron.events import _DETAIL_BOUND
+
+    for code in (*range(0x20), 0x7F):
+        line = describe(
+            Agent(
+                timestamp=1.0,
+                spec_id="x",
+                raw=False,
+                detail=f"the cell would not reap — A{chr(code)}B",
+            )
+        )
+        assert chr(code) not in line, hex(code)
+        assert line == "agent: the cell would not reap — A B"
+
+    long_detail = "HEAD " + "x" * (_DETAIL_BOUND + 400)
+    clipped = long_detail[:_DETAIL_BOUND]
+    clipped_line = describe(
+        Agent(timestamp=1.0, spec_id="x", raw=False, detail=long_detail)
+    )
+    assert clipped_line == f"agent: {clipped}"
+
+
 def test_findings_name_what_the_table_could_not_type():
     """The two call-site shapes `FAMILIES` refused to force into a
     `message: str` are named, not silently dropped."""
