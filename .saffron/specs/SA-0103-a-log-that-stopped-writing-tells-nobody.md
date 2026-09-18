@@ -69,14 +69,14 @@ reasoning. A disk-full night "just stops growing `events.jsonl`, which
 
 No production code reads it. Nothing under `saffron/` reads the attribute at
 all, and the only near miss is an unrelated `proxy.failed_egress` at
-`saffron/cell/session.py:959`. Two tests read it, and neither surfaces it.
+`saffron/cell/session.py:963`. Two tests read it, and neither surfaces it.
 `tests/test_events.py:802` asserts the flag is set after a swallowed write, and
-`tests/test_events.py:2400` asserts it is clear. So the flag is observable to the
+`tests/test_events.py:2495` asserts it is clear. So the flag is observable to the
 suite and to nobody driving a task.
 
-Four places own a log: `saffron/task.py:251`, `saffron/cell/session.py:798`, and
+Four places own a log: `saffron/task.py:254`, `saffron/cell/session.py:802`, and
 `saffron/phases/package.py:624` and `:1046`. The production one is the first.
-`saffron/task.py:246-257` builds the log and a closure `emit` for a caller that
+`saffron/task.py:249-260` builds the log and a closure `emit` for a caller that
 passed none, then hands that closure down. So `session._default_emit` is not the
 seam a driven cell uses, and neither are the two fallbacks in
 `saffron/phases/package.py`. Its own comment names the shape: "Print plus the task's
@@ -150,7 +150,7 @@ failure branch then prints thousands of times and buries the task.
 
 **Criterion 2 needs more than one event to reach the closure.** Otherwise it
 checks nothing. `run_task` emits one event of its own on the ordinary path, the
-`Ceilings` line at `saffron/task.py:259`. Every other event arrives from
+`Ceilings` line at `saffron/task.py:262`. Every other event arrives from
 `run_one_cell` and from PACKAGE, both of which your test doubles. So a double
 that emits nothing leaves a one-event stream, where warning per failed append and
 warning once are the same single line. Make the `run_one_cell` double emit at
@@ -159,29 +159,30 @@ carries exactly one warning.
 
 **Criterion 3's wrong implementation is a check placed after the first
 successful append.** The first event a task emits is its `Ceilings` line, at
-`saffron/task.py:259`. A log unwritable from the start fails on that one.
+`saffron/task.py:262`. A log unwritable from the start fails on that one.
 
-**Criterion 3 needs a log that fails once and then works.** The technique at
-`tests/test_events.py:2021-2022` puts a directory where the log file goes. Every
-append then fails forever. Under that log the second half of the claim cannot be
-observed: the closure prints `describe(event)` before it appends, at
-`saffron/task.py:254-257`. An implementation that routes the warning through
-`emit` therefore still prints it, and still passes a stdout-only assertion, while
-the append carrying it is swallowed. Build a log whose first append fails and whose later
-appends succeed. Then assert the terminal carries the warning and the log file
-holds no event describing its own failure.
+**Criterion 3's log fails its first append by count.** That append is the
+`Ceilings` emit at `saffron/task.py:262`, which runs before `run_one_cell`. A
+warning routed through `emit` is appended inside that same first call. Consider
+a log made unwritable on disk, such as a directory where the file goes
+(`tests/test_events.py:2117`). It is still unwritable when the warning's own
+append runs. Removing the directory inside the `run_one_cell` double comes too
+late, and the wrong implementation passes. `saffron/task.py` imports `EventLog`
+into its own namespace and builds the log there. So replace
+`saffron.task.EventLog` with a subclass. Its first `append` sets
+`self.failed = True` and returns without writing. Its later appends call the
+real one. Then assert the terminal carries the warning. Also assert that
+`events.jsonl` holds exactly the events the `run_one_cell` double emitted, in
+order, and nothing else.
 
-**`tests/test_task.py` is created by `SA-0100`, which this spec stacks on.** Add
-to that file rather than making a second one. Drive `run_task` with no `emit`, so
-the closure under test is the one that runs.
-
-**The seams are patchable at module scope, and nothing at base drives
-`run_task`.** `saffron/task.py` imports `run_one_cell` into its own namespace, so
-a test replaces `saffron.task.run_one_cell`. It imports `package as
-package_phase`, so a test replaces `package` and `push_unpackaged_work` on that
-module object. Build the doubles from those two points and pass a real `out_dir`.
-If `SA-0100` has not landed, build that harness yourself rather than reaching for
-a fixture that does not exist.
+**Extend `_drive` in `tests/test_task.py`, and write no second driver.**
+`SA-0100` made `_drive`. It builds a `CellOutcome` and replaces
+`saffron.task.run_one_cell` with a double that emits nothing. Then it calls
+`run_task` with no `emit`, so the closure under test is the one that runs.
+Criteria 2 and 3 need a double that emits through the `emit` it is handed. Give
+`_drive` an optional list of events for its double to emit through `k["emit"]`
+before it returns the outcome. Every state other than `READY_FOR_REVIEW` also
+reaches `push_unpackaged_work`, which `_push` replaces.
 
 **Two stale comments in forbidden files contradict the seam above.** Both name
 `cli.py`. `saffron/cell/session.py:73-75` describes `_default_emit` as the
