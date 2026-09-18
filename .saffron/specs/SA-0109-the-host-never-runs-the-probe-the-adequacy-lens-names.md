@@ -36,9 +36,9 @@ forbidden:
   - saffron/agents/prompts/**
   - tests/test_probe_check.py
   - tests/test_corpus.py
-budget_usd: 24
+budget_usd: 26
 max_attempts: 3
-max_turns: 120
+max_turns: 140
 acceptance:
   - claim: >-
       An anchored adequacy finding filed as a `concern`, whose probe leaves the
@@ -55,7 +55,8 @@ acceptance:
       `tests` gate a new failure, is dropped. It is neither a blocker nor a
       concern, so a review with no other finding ends `READY_FOR_REVIEW` and no
       REBUT turn runs. `findings.json` still carries the finding with its
-      verdict, and REVIEW's line for the adequacy lens counts it as killed.
+      `probe_verdict`, and the REVIEW line emitted after probing counts it as
+      killed.
     witness: tests/test_session.py::test_a_blocker_whose_probe_is_killed_does_not_reach_rebut
     mutant:
       file: saffron/probe.py
@@ -71,15 +72,17 @@ acceptance:
       find: 'return ProbeResult("unproven", refusal, baseline=record)'
       replace: 'return ProbeResult("unproven", "", baseline=record)'
   - claim: >-
-      A probe whose file matches one of the repo's declared
-      `integrity.test_paths` globs is recorded `unproven` and never applied: the
-      mutator is not entered for it. The globs are the policy's, whatever they
-      say. The witness declares a test path other than `tests/**`.
-    witness: tests/test_session.py::test_a_probe_on_a_declared_test_path_is_never_applied
+      `probes.json` records a probe as `unproven` when its file, once
+      normalised, matches one of the repo's declared `integrity.test_paths`
+      globs, and the mutator is never entered for it. The globs are the
+      policy's, whatever they say. The witness declares a test path other than
+      `tests/**`, and spells one probe's file with a leading `./`.
+    witness: tests/test_session.py::test_a_probe_on_a_declared_test_path_is_recorded_unproven_and_never_applied
   - claim: >-
       REBUT's blocker list shows a blocker whose probe survived with that
       probe's file, `find` and `replace`, so the implementer is shown the edit
-      the tests did not notice.
+      the tests did not notice. A blocker whose probe was `unproven` is listed
+      without its probe.
     witness: tests/test_rebut.py::test_a_blocker_whose_probe_survived_names_the_probe_to_the_implementer
   - claim: >-
       A blocker from a lens that carries no probe still routes to REBUT
@@ -143,19 +146,31 @@ Build the step between REVIEW and REBUT that answers it:
      `findings.json` with its verdict.
    - `unproven`: the finding stays as filed.
 
-   `review_state` and everything after it read the decided findings, so the
-   ledger rows, `findings.json`, the queue's concern count and REBUT's
-   numbering all agree.
+   The field is `probe_verdict`, never `verdict`. `CONTEXT.md` defines
+   *Verdict* as the critic's own at REBUT, and the ledger's `verdict` column
+   holds that one (`saffron/ledger.py:781`). `review_state` and everything
+   after it read the decided findings, so the ledger rows, `findings.json`,
+   the queue's concern count and REBUT's numbering all agree.
 4. **What it records.** Write `probes.json` in the task directory: one entry
    per probe, with the probe and every `ProbeResult` field. The corpus
-   driver's `_write_probes` is the precedent for the shape. REVIEW's line for
-   the adequacy lens gains the survived, killed and unproven counts.
+   driver's `_write_probes` is the precedent for the shape. `run_review`
+   emits each lens's line inside the critic cell
+   (`saffron/phases/review.py:319-327`). So emit one more REVIEW line after
+   probing, with the survived, killed and unproven counts. Leave `_describe`
+   where it is.
 
-A probe on a file the policy's `integrity.test_paths` globs match is
-`unproven` and is never applied. Match with `saffron.gates.core.scope.matches`
-(`saffron/gates/core/scope.py:31`), the rule `revert` uses. `check_probe`'s own
-`test_paths` argument compares path prefixes, and `saffron/probe.py` is
-forbidden here, so the glob check happens before `check_probe` is called.
+A probe on a test file is `unproven` and is never applied. The host first
+normalises the model-authored path with `posixpath.normpath` and refuses an
+absolute path or one that escapes the tree. It then matches the result against
+the policy's `integrity.test_paths` globs with
+`saffron.gates.core.scope.matches` (`saffron/gates/core/scope.py:31`), the
+rule `revert` uses. `check_probe`'s own `test_paths` compares path prefixes,
+and `saffron/probe.py` is forbidden here. So the host does this check before
+calling `check_probe`, and passes it an empty `test_paths`.
+
+A repo that declares no `tests` gate gets no probe cell. Every probe is
+`unproven` with that reason, as the corpus driver does
+(`docs/evidence/scripts/2026-09-08-lens-corpus.py:244-252`).
 
 An infrastructure failure while probing is not the task's fault and not a
 verdict on the lens. That covers the cell not coming up, the baseline
@@ -163,12 +178,15 @@ reporting `error`, and a failed undo raising. Every probe not yet answered is
 then `unproven` with the reason, and the task continues on the findings as
 filed.
 
+Line numbers in `session.py` were read at `0ed431e`. `SA-0102`, the parent,
+edits that file, so expect them to differ. Find each site by name.
+
 ## Out of scope
 
 - Probing again after REBUT, or asking the lens for a fresh probe each round.
 - Any lens prompt, including `review-adequacy.md`.
-- The pull-request body's findings table (`saffron/report/pr_body.py`). A
-  killed finding still renders there. File the follow-up if it matters.
+- The pull-request body (`saffron/report/pr_body.py`), where a killed finding
+  still renders at its filed severity. Backlog item b-7c41e0 owns it.
 - The ledger schema. The findings row keeps its columns, and a killed finding's
   row is whatever `record_findings` writes for the decided finding.
 - `DESIGN.md` §5.5.1 and `CONTEXT.md`'s *vacuity probe* entry, which says a
@@ -181,19 +199,30 @@ filed.
   mutant (§5.4.1). The three mutants pin `saffron/probe.py`, which already
   exists and which this spec forbids you to edit. They prove the witnesses reach
   the real `check_probe` rather than a copy of its rule. So never stub
-  `saffron.probe` in a witness. Stub the runtime, `worktree.source_mutated`
-  and the gate runner, the way `_stub_the_runtime`
-  (`tests/test_session.py:672`) and `_drive` (`:966`) already do.
-- `revert` re-runs every test you add with the source reverted and blocks any
-  that pass. Import any name you add inside the test body, not at module scope.
-  A module-scope import makes the reverted run a collection error, which
-  `revert` reads as `skip`.
+  `saffron.probe` in a witness.
+- Because their mutants' file is outside the diff, `revert` exempts the first
+  three witnesses (`saffron/gates/core/revert.py:193-209`). Nothing but their
+  shape proves they depend on the new session code. So each of the five
+  session witnesses drives a task through `_drive` (`tests/test_session.py:966`)
+  and asserts on task-level output: `outcome.state`, `probes.json`,
+  `findings.json`. None of them calls `check_probe` directly.
+- `_drive`'s default policy declares no gates, and `_stub_the_runtime`
+  (`:672`) stubs `runner.run_suite`, not `run_gate`. So these witnesses
+  declare a `tests` gate and stub `run_gate` and `worktree.source_mutated`
+  themselves. Put that in one shared helper, since `size` is blocking on this
+  elevated diff and its ceiling is 600 lines, tests included.
+- `revert` re-runs the other tests you add with the source reverted and
+  blocks any that pass. Import any name you add inside the test body, not at
+  module scope. A module-scope import makes the reverted run a collection
+  error, which `revert` reads as `skip`.
 - Each witness is a plain `def`, never parametrised.
 - Each witness must fail on one wrong implementation. For the survived
   witness, it is one that promotes every probed finding. For the killed
   witness, it is one that drops every probed finding. For the test-path
-  witness, it is one that hard-codes `tests/`.
-- A probe runs the whole suite, which takes about a minute in a cell. That
+  witness, it is one that hard-codes `tests/` or skips normalising. For the
+  REBUT witness, it is one that shows every blocker's probe.
+- In production a probe runs the repo's whole suite, about a minute in a cell.
+  The witnesses stub it, so they pay none of that. That
   costs wall clock, not model spend, and REVIEW is not gated on the spend
   ceiling (§5.5). Do not add a cap on the probe count. If you think one is
   needed, say so in your notes.
