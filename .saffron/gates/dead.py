@@ -8,7 +8,10 @@ symbol it will bring into use by listing it under `pending_symbols`.
 
 from __future__ import annotations
 
+import json
 import re
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -98,3 +101,80 @@ def pending(specs_dir: Path) -> dict[str, str]:
             raise ValueError(f"{path.name}: {exc}") from exc
         found.update(dict.fromkeys(listed, path.name))
     return found
+
+
+def _emit(payload: dict[str, object]) -> int:
+    print(json.dumps(payload))
+    return 0
+
+
+def _error(summary: str, tool: str | None = None) -> int:
+    return _emit({"gate": GATE, "status": "error", "tool": tool, "summary": summary})
+
+
+def main(argv: list[str]) -> int:
+    report = argv == ["--report"]
+    if argv and not report:
+        print("usage: dead.py [--report]", file=sys.stderr)
+        return 2
+    try:
+        version = subprocess.run(
+            ["vulture", "--version"], capture_output=True, text=True
+        )
+    # Not just FileNotFoundError: a present-but-unrunnable binary raises PermissionError.
+    except OSError as exc:
+        return _error(f"vulture could not be run: {exc}")
+    tool = version.stdout.strip()
+    if version.returncode != 0 or not tool:
+        return _error("vulture reported no version")
+    if not WHITELIST.is_file():
+        return _error(f"no whitelist at {WHITELIST}", tool)
+    roots = [r for r in ROOTS if Path(r).is_dir()]
+    if not roots:
+        return _error(
+            f"none of {', '.join(ROOTS)} is here, so nothing was scanned", tool
+        )
+    scan = subprocess.run(
+        ["vulture", *roots, str(WHITELIST), "--min-confidence", MIN_CONFIDENCE],
+        capture_output=True,
+        text=True,
+    )
+    if scan.returncode not in OK_EXITS:
+        detail = (scan.stderr or scan.stdout).strip()[-400:]
+        return _error(f"vulture exited {scan.returncode}: {detail}", tool)
+    try:
+        found = parse(scan.stdout)
+        deferred = pending(SPECS)
+    except (ImportError, OSError, ValueError) as exc:
+        return _error(f"{type(exc).__name__}: {exc}", tool)
+
+    failures = [u for u in found if u.symbol not in deferred]
+    reported = {u.symbol for u in found}
+    stale = sorted(e for e in deferred if e not in reported)
+    summary = (
+        f"{len(failures)} unused, {len(found) - len(failures)} deferred by open specs, "
+        f"{len(stale)} stale pending entries"
+    )
+    if report:
+        for u in failures:
+            print(f"{u.file}:{u.line}: {u.message}")
+        for entry in stale:
+            print(f"stale: {entry} ({deferred[entry]})")
+        print(summary)
+        return 0
+    return _emit(
+        {
+            "gate": GATE,
+            "status": "fail" if failures else "pass",
+            "tool": tool,
+            "failures": [
+                {"file": u.file, "line": u.line, "code": u.code, "message": u.message}
+                for u in failures
+            ],
+            "summary": summary,
+        }
+    )
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
