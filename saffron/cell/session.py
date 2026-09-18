@@ -200,6 +200,10 @@ def _close_attempt(
     ledger.close_attempt(
         attempt_id,
         session_id=attempt.session_id if attempt else None,
+        # Not yet available: AttemptResult carries no model, because the
+        # runner's result event doesn't either (agent_runner.py) — only an
+        # assistant message does, and nothing captures it from there yet.
+        model=None,
         # A turn that produced no result at all is not a turn that succeeded,
         # and $0.00 here is measured absence, not a crash's zeroed fields.
         subtype=attempt.subtype if attempt else "error",
@@ -1343,6 +1347,9 @@ def _drive_cell(
         # The declaration these gates actually ran under, read above from the
         # export at base_sha — never the working copy (§5.4, backlog item 16).
         policy_sha=policy_sha,
+        # The prompt tree the cell was given, digested as authored — the
+        # third input beside spec_sha and policy_sha (§4.1).
+        prompt_sha=context.prompt_sha(),
     )
 
     # Only what this run reached the creation of can leak. `volume rm` on a

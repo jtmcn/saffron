@@ -32,6 +32,10 @@ the command and its result, never "tests pass":
 - `uv run pytest -m cell`: N passed — expected when the change reaches
   `saffron/cell/`, and it needs the images CLAUDE.md names.
 - `uv run ast-grep test -c .saffron/sgconfig.yml`, when a rule changed.
+- The pass a prompt change was measured against, when the diff reaches
+  `saffron/agents/prompts/`: name the two arms and the decision rule, and say
+  it was fixed before the numbers existed. An effect smaller than the noise
+  floor is recorded as unmeasured, which is an answer.
 - `uv run python -m ontology.render` leaves the tree unchanged, when the change
   reaches `ontology/` or a generated span of `CONTEXT.md` / `DESIGN.md`.
 

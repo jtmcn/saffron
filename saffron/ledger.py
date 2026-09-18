@@ -68,12 +68,14 @@ CREATE TABLE IF NOT EXISTS tasks (
     pr_url     TEXT,
     spent_usd_est REAL NOT NULL DEFAULT 0.0,
     policy_sha TEXT,
+    prompt_sha  TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- `phase` is the state the task was in when the turn started, and `n` numbers
--- within it (§4.1). `model` is declared and not written: the runner's result
--- event does not carry it, and only assistant messages do (agent_runner.py).
+-- within it (§4.1). `close_attempt` now writes `model`, but `session.py`'s
+-- own call site still passes `None`: the runner's result event does not
+-- carry it, and only assistant messages do (agent_runner.py).
 CREATE TABLE IF NOT EXISTS attempts (
     attempt_id      INTEGER PRIMARY KEY,
     task_id         INTEGER NOT NULL REFERENCES tasks(task_id),
@@ -174,7 +176,7 @@ class Ledger:
             row["name"]
             for row in self._db.execute("PRAGMA table_info(tasks)").fetchall()
         }
-        for column in ("pushed_sha", "pr_url", "policy_sha"):
+        for column in ("pushed_sha", "pr_url", "policy_sha", "prompt_sha"):
             if column not in existing:
                 self._db.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
         if "spent_usd_est" not in existing:
@@ -353,10 +355,12 @@ class Ledger:
     def tasks_by_repo(self, repo_id: int) -> list[sqlite3.Row]:
         """`task_id`/`state`/`pr_url`/`pushed_sha` for every task in one repo,
         ungrouped — what `reconcile` (`saffron/reconcile.py`) needs to update
-        one task at a time."""
+        one task at a time. `spec_id` and `prompt_sha` ride beside them for a
+        caller that wants to name the task and what it ran under."""
         return list(
             self._db.execute(
-                """SELECT t.task_id, t.state, t.pr_url, t.pushed_sha
+                """SELECT t.task_id, t.spec_id, t.state, t.pr_url, t.pushed_sha,
+                          t.prompt_sha
                      FROM tasks t
                      JOIN runs r ON r.run_id = t.run_id
                     WHERE r.repo_id = ?
@@ -556,16 +560,29 @@ class Ledger:
         risk: str = "standard",
         budget_usd: float | None = None,
         policy_sha: str | None = None,
+        prompt_sha: str | None = None,
     ) -> int:
         """`policy_sha` is the declaration the cell's gates ran under — read
-        from the export at `base_sha` (§5.4) — and defaults to `None`: every
-        caller that predates this parameter (`saffron/replay.py` included)
-        still records a task, just one that cannot say what it ran under."""
+        from the export at `base_sha` (§5.4). `prompt_sha` is
+        `context.prompt_sha()`, the prompt tree the cell was given. Both
+        default to `None`: every caller that predates the parameter
+        (`saffron/replay.py` included) still records a task, just one that
+        cannot say what it ran under."""
         cursor = self._db.execute(
             """INSERT INTO tasks
-                   (run_id, spec_id, spec_sha, state, risk, branch, budget_usd, policy_sha)
-               VALUES (?, ?, ?, 'QUEUED', ?, ?, ?, ?)""",
-            (run_id, spec_id, spec_sha, risk, branch, budget_usd, policy_sha),
+                   (run_id, spec_id, spec_sha, state, risk, branch, budget_usd,
+                    policy_sha, prompt_sha)
+               VALUES (?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?)""",
+            (
+                run_id,
+                spec_id,
+                spec_sha,
+                risk,
+                branch,
+                budget_usd,
+                policy_sha,
+                prompt_sha,
+            ),
         )
         self._db.commit()
         return _inserted_id(cursor)
@@ -611,6 +628,7 @@ class Ledger:
         attempt_id: int,
         *,
         session_id: str | None,
+        model: str | None = None,
         subtype: str,
         terminal_reason: str | None,
         num_turns: int,
@@ -618,10 +636,19 @@ class Ledger:
     ) -> None:
         self._db.execute(
             """UPDATE attempts
-                  SET ended_at = datetime('now'), session_id = ?, subtype = ?,
-                      terminal_reason = ?, num_turns = ?, cost_usd_est = ?
+                  SET ended_at = datetime('now'), session_id = ?, model = ?,
+                      subtype = ?, terminal_reason = ?, num_turns = ?,
+                      cost_usd_est = ?
                 WHERE attempt_id = ?""",
-            (session_id, subtype, terminal_reason, num_turns, cost_usd_est, attempt_id),
+            (
+                session_id,
+                model,
+                subtype,
+                terminal_reason,
+                num_turns,
+                cost_usd_est,
+                attempt_id,
+            ),
         )
         self._db.commit()
 

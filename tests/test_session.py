@@ -15,7 +15,7 @@ from typing import cast
 
 import pytest
 
-from saffron.agents import artifacts
+from saffron.agents import artifacts, context
 from saffron.cell import runtime, session
 from saffron.cell.worktree import DIFF_FLAGS
 from saffron.events import Agent, Attempt, Baseline, PhaseStart, describe
@@ -2464,6 +2464,25 @@ def test_a_task_records_the_policy_its_gates_ran_under(monkeypatch, tmp_path):
         "SELECT policy_sha FROM tasks WHERE task_id = ?", (outcome.task_id,)
     ).fetchone()
     assert row["policy_sha"] == hashlib.sha256(base_policy.encode()).hexdigest()
+
+
+def test_a_task_records_the_prompt_tree_it_ran_under(monkeypatch, tmp_path):
+    """`context.prompt_sha()` is the third input beside `spec_sha` and
+    `policy_sha` (§4.1). Deleting the `prompt_sha=` kwarg at its one call
+    site in `session.py` leaves the column null for every real task while
+    the rest of the suite stays green, so the production wiring needs its
+    own witness rather than relying on a unit test of `prompt_sha()` alone."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+    )
+    row = ledger._db.execute(
+        "SELECT prompt_sha FROM tasks WHERE task_id = ?", (outcome.task_id,)
+    ).fetchone()
+    assert row["prompt_sha"] == context.prompt_sha()
 
 
 def test_the_repo_level_policy_sha_is_still_written(monkeypatch, tmp_path):
