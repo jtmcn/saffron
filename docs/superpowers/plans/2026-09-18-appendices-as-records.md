@@ -71,11 +71,6 @@ docs/evidence/scripts/2026-09-18-split-appendices.py   # PR 2: split and cut
 Append to `tests/records/test_records_kinds.py`:
 
 ```python
-from pydantic import ValidationError
-
-from records.kinds import KINDS, Appendix, Identified
-
-
 def test_an_appendix_is_an_id_a_title_revisions_and_a_question():
     a = Appendix(id="G", title="rev 8: the cell runtime", revisions=[8, 10], question="Which runtime?")
     assert (a.id, a.revisions) == ("G", [8, 10])
@@ -110,7 +105,7 @@ def test_the_appendix_kind_is_registered():
     assert re.match(kind.pattern, "a-lower.md") is None
 ```
 
-Add `import re` and `import pytest` at the top if the file lacks them. The parametrized test is not a declared spec witness, so the no-parametrize rule for witnesses does not apply here.
+Imports go at the top of the file, never in the appended block: ruff selects `E` and `I`, and `--fix` does not move an E402 import. Add `import re`, and widen the existing `from records.kinds import …` to `KINDS, Appendix, BacklogItem, Identified, new_id`. `pytest` and `ValidationError` are already imported. The parametrized test is not a declared spec witness, so the no-parametrize rule for witnesses does not apply here.
 
 - [ ] **Step 2: Run them to see them fail**
 
@@ -386,8 +381,6 @@ git commit -m "fix(records): the backlog's section rules ran on every kind and w
 Append to `tests/records/test_records_check.py`:
 
 ```python
-from records.check import appendix_letters, check_appendix_letters
-
 APPENDIX = KINDS["appendix"]
 
 
@@ -418,7 +411,7 @@ def test_a_letter_used_twice_is_a_violation(tmp_path: Path):
     assert "['A', 'B', 'B']" in v.message
 ```
 
-Use the imports the file already has for `shutil`, `Path`, `KINDS`, `load` and `FIXTURE`, and add any it lacks.
+Put `APPENDIX` beside `BACKLOG` at the top, and add `appendix_letters` and `check_appendix_letters` to the existing `from records.check import (…)` list, never an import in the appended block (E402). The file already has `Path`, `KINDS`, `load` and `FIXTURE`, and adds `shutil` if it lacks it.
 
 - [ ] **Step 2: Run them to see them fail**
 
@@ -647,8 +640,11 @@ def cut() -> None:
     for r in load(KINDS["appendix"], ROOT):
         assert isinstance(r.model, Appendix)
         rebuilt += f"## Appendix {r.model.id} — {r.model.title}\n{r.body}"
-    if kept + "\n" + rebuilt != text:
+    # `kept` already ends with the newline before `## Appendix A`.
+    if kept + rebuilt != text:
         sys.exit("the records do not rebuild DESIGN.md's appendix range; nothing cut")
+    # The `---` that closed the principle index before Appendix A closes nothing now.
+    kept = kept.rstrip().removesuffix("---").rstrip() + "\n"
     DESIGN.write_text(kept)
     print(f"cut {len(text) - len(kept)} bytes from DESIGN.md")
 
@@ -1040,8 +1036,8 @@ In `records/check.py`, `CITING` and `LIVE_SURFACES` each gain `"docs/appendices"
 
 - [ ] **Step 9: Run everything**
 
-Run: `uv run python -m ontology.render && git diff --exit-code DESIGN.md CONTEXT.md ontology/ && make check`
-Expected: the render changes nothing (both indexes reproduce the committed rows byte for byte), and `make check` is green. A diff here means a record's `question` or `revisions` differs from its row: fix the split script and rerun Task 6, never the row.
+Run: `git add ontology/ tests/ records/check.py && uv run python -m ontology.render && git diff --exit-code DESIGN.md CONTEXT.md ontology/ && make check`
+Staging first matters: this task's own `ontology/` edits are uncommitted, and an unstaged diff of them would exit 1 before `make check` runs. Expected: the render changes nothing (both indexes reproduce the committed rows byte for byte), and `make check` is green. A diff here means a record's `question` or `revisions` differs from its row: fix the split script and rerun Task 6, never the row.
 
 - [ ] **Step 10: Mutant for the two-letter reader**
 
@@ -1096,7 +1092,7 @@ Expected: `test_design_md_holds_no_appendix` FAILS, listing the twenty headings 
 - [ ] **Step 3: Cut**
 
 Run: `uv run python docs/evidence/scripts/2026-09-18-split-appendices.py cut`
-Expected: `cut … bytes from DESIGN.md`. `DESIGN.md` now ends at the `---` rule after the principle index.
+Expected: `cut … bytes from DESIGN.md`. `DESIGN.md` now ends at the principle index's last row, with one trailing newline and no dangling `---`.
 
 - [ ] **Step 4: Run everything**
 
@@ -1385,7 +1381,8 @@ Re-run the grep. Expected: no output.
 
 - [ ] **Step 7: Run everything**
 
-Run: `uv run python -m ontology.render && git diff --exit-code -- ontology/ && make check && uv run hooks/prose_limit.py`
+Run: `git add -A ontology/ && uv run python -m ontology.render && git diff --exit-code -- ontology/ && make check && uv run hooks/prose_limit.py`
+The sweep may edit files under `ontology/`, so they are staged before the diff checks only what the render changed.
 Expected: green. The prose hook checks every edited file in scope, `CONTEXT.md`, `DESIGN.md`, `CLAUDE.md` and `docs/agents/` among them, and `.saffron/rules/*.yml` are read by the `structure` gate's own tests.
 
 - [ ] **Step 8: Commit**
