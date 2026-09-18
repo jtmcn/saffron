@@ -60,6 +60,9 @@ the whole turn as one. Each element has exactly these fields:
   or the argument does not settle it; if you are withdrawing, what changed your
   mind.
 
+A person reads your `reason` in the pull request's disagreements table. Write
+it in plain, specific language and state each fact once.
+
 {standing_instructions}
 
 ## The diff your findings were filed against

@@ -16,14 +16,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
+from saffron.agents import context
 from saffron.gates.core.scope import matches
 from saffron.gates.core.size import _CEILINGS, _DEFAULT_CEILING
 
-EXTRACTION_PROMPT = (
-    "Emit a single <output> block as the last thing in your response. "
-    "Do not change files. Do not run commands. "
-    "Do not include text outside the block."
-)
+EXTRACTION_PROMPT = context.turn_prompt("extraction")
 
 _BLOCK = re.compile(r"<output>(.*?)</output>", re.DOTALL)
 
@@ -203,19 +200,9 @@ def hash_artifact(raw: str) -> str:
 
 # The notes extraction turn's own prompt (backlog items 71/75,
 # SA-0058/SA-0061/SA-0062): the cheapest moment the implementer will ever have
-# to say it saw a thing it was told not to touch. Built on `EXTRACTION_PROMPT`
-# rather than beside it: every rule that turn already states ("no tools", "the
-# last block wins") applies here unchanged, and repeating them by hand is how
-# the two drift.
-NOTES_PROMPT = (
-    "Extraction turn. Think back over this whole task. If you saw something "
-    "you were told not to touch — a path outside `touches`, a `forbidden` or "
-    "protected path, a comment or a signature you had to leave wrong to stay "
-    "inside scope — say so now, in your own words, in a paragraph or two. "
-    "Nobody adjudicates this and nothing acts on it; a person reads it later. "
-    "If there is nothing to report, reply with an empty <output></output> "
-    "block.\n\n" + EXTRACTION_PROMPT
-)
+# to say it saw a thing it was told not to touch. Why it is built on the shared
+# extraction rules rather than beside them is `context.turn_prompt`.
+NOTES_PROMPT = context.turn_prompt("notes")
 
 
 def extract_notes(raw: str) -> str:
