@@ -1134,7 +1134,7 @@ def test_a_mutant_that_does_not_apply_in_a_cell_names_neither_half_of_its_edit(
 
     # Absent from the same tree — a different find text than what is on
     # disk, so this needs no second commit.
-    absent_find = "QRVT_FIND = QRVT_MISSING"
+    absent_find = "QRVT_MISSING = QRVT_"
     absent = Mutant(file="src/guard.py", find=absent_find, replace=replace)
     with worktree.source_mutated("c", absent) as reason:
         assert reason is not None
