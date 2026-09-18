@@ -44,6 +44,24 @@ def test_the_preamble_is_never_injected():
     assert "belongs to nobody" not in out
 
 
+def test_avoid_lists_stay_out_of_the_injected_sections():
+    """A prohibition puts the banned word in the prompt (item 162). The headword
+    already names the term to use; the lists serve the operator and `terms`."""
+    sample = (
+        "## 1. Core\n\n"
+        "**Cell**: the isolation unit.\n"
+        '_Avoid_: "sandbox", which\nwraps a line.\n\n'
+        "**Worktree**: the tree a task edits.\n"
+    )
+    out = context.sections_for("IMPLEMENT", sample, sections=(1,))
+    assert "sandbox" not in out
+    assert "wraps a line" not in out
+    assert "the isolation unit" in out
+    assert "the tree a task edits" in out
+    for phase in context.SECTIONS_BY_PHASE:
+        assert "_Avoid_" not in context.sections_for(phase, REAL_CONTEXT_MD)
+
+
 def test_implement_gets_scope_and_verification():
     assert 3 in context.SECTIONS_BY_PHASE["IMPLEMENT"]
     assert 4 in context.SECTIONS_BY_PHASE["IMPLEMENT"]

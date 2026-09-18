@@ -34,6 +34,11 @@ SECTIONS_BY_PHASE: dict[str, tuple[int, ...]] = {
 # CONTEXT.md's trailing "## Settled naming decisions"), just never selected.
 _HEADING = re.compile(r"^## (?:(\d+)\. )?", re.MULTILINE)
 
+# An `_Avoid_` paragraph, through its wrapped lines, up to the blank line. A
+# prohibition puts the banned word in the prompt (item 162); the headword names
+# the term to use, and the lists stay in the file for the operator and `terms`.
+_AVOID = re.compile(r"^_Avoid_.*(?:\n(?!\n).*)*\n?", re.MULTILINE)
+
 
 def sections_for(
     phase: str, context_md: str, sections: tuple[int, ...] | None = None
@@ -49,7 +54,7 @@ def sections_for(
         end = (
             matches[index + 1].start() if index + 1 < len(matches) else len(context_md)
         )
-        chunks.append(context_md[match.start() : end].rstrip())
+        chunks.append(_AVOID.sub("", context_md[match.start() : end]).rstrip())
     return "\n\n".join(chunks)
 
 
