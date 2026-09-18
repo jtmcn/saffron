@@ -134,9 +134,12 @@ both forbidden.
 
 **A task that never returned an outcome.** `run_one_cell` stamps `ORPHANED`
 on the ledger and re-raises (`saffron/cell/session.py:2331-2334`), and
-`reconcile` stamps it with no task running. `REVIEWING` and `REBUTTING` are
-states a night leaves a task in mid-phase. None of them reaches the `else:`, so
-this spec writes no row for them, and 8 of the 31 stay missing.
+`reconcile` stamps it with no task running. `REVIEWING` is a state a night
+leaves a task in mid-phase. Neither reaches the `else:`, so this spec writes no
+row for them, and the 7 `ORPHANED` tasks stay missing. `REBUTTING` is
+different: a REBUT that halts returns it (`saffron/phases/rebut.py:315-319`),
+so it takes the `else:` and gets a row like any other unpackaged state. Guard
+the write on no state list.
 
 **An unpackaged task after a packaged one.** The newest task's row wins. A spec
 re-run after its pull request opened, for example on `CHANGES_REQUESTED`, that
@@ -199,6 +202,11 @@ exactly empty and the note names the branch.
 **Criterion 3 is the upsert exercised through the new path.** One row must
 survive, and it must keep its link. Writing the unpackaged row after the packaged
 one, or keying on the spec id alone, produces two rows or the wrong survivor.
+In the same test, drive a `READY_FOR_REVIEW` task for a third spec id whose
+`package` double raises, and assert that spec has no row. Consider a write placed
+before the `if` at `saffron/task.py:317`. It passes every other assertion here.
+It also leaves a row with an empty link for a pull request never opened.
+
 Drive the unpackaged task first and assert the store holds one row, in the
 unpackaged state, with an empty link. That half is what fails with the source
 reverted: at base the unpackaged task writes nothing, and the `package` double
