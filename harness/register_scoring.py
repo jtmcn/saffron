@@ -20,6 +20,17 @@ from pathlib import Path
 
 
 @dataclass(frozen=True)
+class Manifest:
+    """What produced a pass. Prose in an evidence record until now."""
+
+    prompt_sha: str
+    model: str
+    fixtures: tuple[str, ...]
+    driver: str
+    date: str
+
+
+@dataclass(frozen=True)
 class Claim:
     """One `claim` string, tagged with what produced it."""
 
@@ -45,6 +56,21 @@ def claims_in(pass_dir: Path) -> list[Claim]:
                     if text:
                         found.append(Claim(fixture.name, run, lens["lens"], text))
     return found
+
+
+def read_manifest(pass_dir: Path) -> Manifest | None:
+    """The pass's arm, or `None` for a pass written before manifests existed."""
+    path = pass_dir / "manifest.json"
+    if not path.exists():
+        return None
+    raw = json.loads(path.read_text())
+    return Manifest(
+        raw["prompt_sha"],
+        raw["model"],
+        tuple(raw["fixtures"]),
+        raw["driver"],
+        raw["date"],
+    )
 
 
 # Not a spec and not a root document: `trailing-condition` is spec-only and

@@ -4,7 +4,17 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from harness.register_scoring import Claim, claims_in, load_gate, score_claim
+from harness.register_scoring import (
+    Claim,
+    Manifest,
+    RunScore,
+    claims_in,
+    load_gate,
+    read_manifest,
+    score_claim,
+    score_pass,
+    spread,
+)
 
 REPO = Path(__file__).resolve().parent.parent
 SPREAD = REPO / "docs/evidence/passes/2026-09-11-lens-corpus-spread"
@@ -73,21 +83,15 @@ def test_a_claim_is_not_read_as_a_spec_instruction():
 
 def test_a_run_is_scored_per_thousand_words_not_per_hit():
     """An arm that files fewer findings has fewer hits trivially."""
-    from harness.register_scoring import RunScore
-
     score = RunScore(run=1, claims=2, words=500, hits=Counter({"em-dash": 1}))
     assert score.per_1k == 2.0
 
 
 def test_a_run_with_no_words_scores_zero_rather_than_dividing_by_zero():
-    from harness.register_scoring import RunScore
-
     assert RunScore(run=1, claims=0, words=0, hits=Counter()).per_1k == 0.0
 
 
 def test_a_pass_is_scored_one_row_per_run(tmp_path):
-    from harness.register_scoring import score_pass
-
     directory = _pass(
         tmp_path,
         {
@@ -109,11 +113,35 @@ def test_a_pass_is_scored_one_row_per_run(tmp_path):
 
 
 def test_the_spread_is_the_lowest_and_highest_count_per_rule():
-    from harness.register_scoring import RunScore, spread
-
     scores = [
         RunScore(1, 1, 100, Counter({"em-dash": 2})),
         RunScore(2, 1, 100, Counter({"em-dash": 5})),
         RunScore(3, 1, 100, Counter({"em-dash": 3, "hedge": 1})),
     ]
     assert spread(scores) == {"em-dash": (2, 5), "hedge": (0, 1)}
+
+
+def test_a_pass_manifest_names_the_arm(tmp_path):
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "prompt_sha": "b" * 64,
+                "model": "claude-opus-5",
+                "fixtures": ["SA-0045"],
+                "driver": "docs/evidence/scripts/2026-09-08-lens-corpus.py",
+                "date": "2026-09-17",
+            }
+        )
+    )
+    assert read_manifest(tmp_path) == Manifest(
+        "b" * 64,
+        "claude-opus-5",
+        ("SA-0045",),
+        "docs/evidence/scripts/2026-09-08-lens-corpus.py",
+        "2026-09-17",
+    )
+
+
+def test_a_pass_written_before_manifests_existed_reads_as_none(tmp_path):
+    """The five passes on disk predate this. They are not errors."""
+    assert read_manifest(tmp_path) is None
