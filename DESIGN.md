@@ -2979,10 +2979,18 @@ merged history. The comparator is the checked walk: §4.1's foreign keys, with
 every stored file checked to exist. The claim is that Q4 drops at least one
 merged pull request the checked walk reports as whole. A missing file cannot
 carry the claim, because the checked walk sees one too. A task that cannot be
-tied to its own events counts for neither side. A single instance carries it. Zero instances across every merged pull request refutes the operational
-case, as the queries refuted the analytical one. The emitter then returns to the
-drawer with a third negative result. That answer is worth the weekend on §9's own
+tied to its own events counts for neither side. A single instance carries it.
+Zero instances across every merged pull request refutes the operational case, as
+the queries refuted the analytical one. The emitter then returns to the drawer
+with a third negative result. That answer is worth the weekend on §9's own
 logic, whichever way it lands.
+
+A positive result is narrower than it will read. Every instance comes from the
+record check, and a SQL walk given the same check finds the same set. So one
+instance shows that N5 needs that check at every batch end. It does not show
+the check needs a graph. The emitter keeps its place only if Q4 over the
+projection stays cheaper to hold than the SQL walk with the check added. That
+is the RATIONALE's own standard.
 
 ### What this costs, stated rather than discovered
 
