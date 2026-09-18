@@ -43,6 +43,10 @@ A spec edited while its PR is open is held out of the new order and named.
 a PR merged or closed, and `next` refuses a stale one. A spec queued since the
 snapshot is not in it: re-snapshot to add it.
 
+A new loop starts with `snapshot --new`. A drop is one loop's call, and
+`--force` carries it into the next (item 172). `--new` refuses while the last
+loop has a pull request open.
+
 **Done when** `status` lists the specs you mean to run, reports nothing stale,
 and the operator has seen `snapshot`'s table in your reply: each spec's title
 and budget, the total, and every spec it refused.
@@ -62,8 +66,9 @@ is reviewed at that branch's head.
 
 Verify each blocker before acting on it: read its line at `origin/main`. A
 verified blocker goes to the operator before that spec's cell, as a question:
-fix the spec, run it as written, or drop it. Concerns and notes are kept for
-step 5. A spec edited here changes its `spec_sha`, so run `snapshot --force`
+fix the spec, run it as written, or drop it. A concern the cell's diff will
+settle goes into that PR's `{KNOWN}` for the Spec seat (step 2c). Other concerns
+and notes are kept for step 5. A spec edited here changes its `spec_sha`, so run `snapshot --force`
 after the edit merges.
 
 **Only a spec that has not run.** Editing one whose pull request is already
@@ -120,7 +125,8 @@ a priority, the order puts the parent with most descendants first, so its
 children have something to run beside its review. `next` holds back a child
 whose parent has no reviewable branch — rate-limited, decided otherwise, or
 dropped — because `saffron cell` would cut it from main, and names the child it
-held back.
+held back. Pulling `main` mid-loop is safe for the same reason. `status` says
+whether the pull made the order stale.
 
 ### a. Start the cell in the background
 
@@ -141,6 +147,10 @@ tail -F /tmp/SA-NNNN.log | grep -E --line-buffered "$(uv run .claude/skills/run-
 closed set, anchored where the CLI prints one. A cell takes 30–60 minutes, and a
 Monitor expires after 30. Re-arm it with `tail -n 0 -F` so it doesn't replay the
 log. A silent Monitor ends nothing; only the process exit does (b).
+
+The `baseline:` line names each gate's status on the cell's base. A `fail` there
+is red on `main`: subtraction spares the cell, and also hides that failure from
+every cell after it. Take it to the operator and keep it for step 5 (item 173).
 
 ### b. Record it once the process exits
 
@@ -186,7 +196,9 @@ to the operator (GOTCHAS, Recording).
 
    ```bash
    make check > /tmp/check.log 2>&1; echo "make exit: $?"; tail -3 /tmp/check.log
-   git add <files> && git commit -m "review(SA-NNNN): <the defect, as a sentence>" && git push -q origin HEAD
+   git add <files>
+   git commit -m "review(SA-NNNN): <the defect, as a sentence>"
+   git push -q origin HEAD
    uv run .claude/skills/run-saffron-spec-loop/driver.py size SA-NNNN
    uv run .claude/skills/run-saffron-spec-loop/driver.py stack             # dry run
    ```
