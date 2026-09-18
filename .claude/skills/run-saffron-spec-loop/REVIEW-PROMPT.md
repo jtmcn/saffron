@@ -14,8 +14,11 @@ the placeholders filled:
 
 - `{REPO}` — the checkout driving the loop (`git rev-parse --show-toplevel`)
 - `{PR}`, `{BRANCH}` (`saffron/SA-NNNN`), `{SPEC}` (the spec's path)
-- `{BASE}` — `git merge-base origin/main origin/{BRANCH}`; for a spec with
-  `depends_on`, `origin/saffron/<parent id>` in place of `origin/main`
+- `{BASE}` — the commit the cell was cut from, on the log's `cell:` line
+  (`worktree at <sha>`); for a spec with `depends_on`, the parent's pushed
+  head. In run 7, `git merge-base origin/main origin/{BRANCH}` gave `main` as
+  it stood at PACKAGE, a later commit, and a witness must fail at the cell's
+  base
 - `{HEAD}` — `git rev-parse origin/{BRANCH}`
 - `{WHAT}` — two sentences on what the diff does, and its `git diff --stat`
 - `{KNOWN}` — the in-cell critic's findings you have already verified or

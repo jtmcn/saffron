@@ -110,7 +110,10 @@ trivial.
 6. **Claims about current code.** Check every sentence that says what the
    code does now ("Today …", "X returns …", "only when …") against `base`.
    If it is false and a criterion depends on it, it is a blocker; otherwise a
-   concern.
+   concern. A claim about a tool's behaviour, such as git's output, holds only
+   where it was measured. The cell runs the `tests` gate with its image's
+   tools (git 2.39.5 in `saffron/cell-base:python` on 2026-09-18). The host
+   runs its own. Say where the spec measured it.
 
 ## Report
 

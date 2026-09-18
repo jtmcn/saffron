@@ -652,7 +652,9 @@ def test_snapshot_shows_each_specs_title_and_budget_and_counts_every_root(loop, 
     # spec(s) declare no depends_on" of four that did.
     loop.scan_returns(0, 1, 2, 3)
 
-    assert driver.cmd_snapshot(argparse.Namespace(force=False, new=False)) == 0
+    assert (
+        driver.cmd_snapshot(argparse.Namespace(force=False, new=False, add=False)) == 0
+    )
 
     out = capsys.readouterr().out
     for title in (
@@ -720,7 +722,9 @@ def test_a_resnapshot_keeps_the_outcome_of_a_spec_edited_while_its_pr_is_open(
     )
     seen = loop.scan_returns(0, 1)
 
-    assert driver.cmd_snapshot(argparse.Namespace(force=True, new=False)) == 0
+    assert (
+        driver.cmd_snapshot(argparse.Namespace(force=True, new=False, add=False)) == 0
+    )
 
     rows = driver._load()
     kept = {p.spec_id: p for p in rows}
@@ -878,7 +882,7 @@ def test_a_resnapshot_keeps_what_the_loop_recorded(loop):
     # tasks (or a drop the ledger knows nothing of), and one spec is new.
     loop.scan_returns(1, 3)
 
-    assert driver.cmd_snapshot(argparse.Namespace(force=True, new=False)) == 0
+    assert driver.cmd_snapshot(argparse.Namespace(force=True, new=False, add=True)) == 0
 
     rows = {p.spec_id: p for p in driver._load()}
     assert set(rows) == {ready, dropped, new}  # a merged PR leaves the loop
@@ -886,6 +890,23 @@ def test_a_resnapshot_keeps_what_the_loop_recorded(loop):
     assert rows[dropped].dropped == "operator's call"
     assert rows[new].state is None
     assert driver._stale(list(rows.values())) == []
+
+
+def test_a_resnapshot_names_a_new_spec_and_leaves_it_out_unasked(loop, capsys):
+    # Run 7 (2026-09-18): `--force` after a spec edit took in two specs whose
+    # parent had become reviewable, unannounced and unreviewed (item b-afec7c).
+    ready, _dropped, _merged, new = loop.ids
+    driver._save([loop.row(0, state="READY_FOR_REVIEW", pr=10)])
+    loop.scan_returns(0, 3)
+
+    assert (
+        driver.cmd_snapshot(argparse.Namespace(force=True, new=False, add=False)) == 0
+    )
+
+    assert [p.spec_id for p in driver._load()] == [ready]
+    out = capsys.readouterr().out
+    assert "new since the last snapshot, left out (1):" in out
+    assert new in out.split("order:")[0]
 
 
 def test_a_new_loop_forgets_the_last_loops_drops(loop):
@@ -900,7 +921,9 @@ def test_a_new_loop_forgets_the_last_loops_drops(loop):
     )
     loop.scan_returns(1)
 
-    assert driver.cmd_snapshot(argparse.Namespace(force=False, new=True)) == 0
+    assert (
+        driver.cmd_snapshot(argparse.Namespace(force=False, new=True, add=False)) == 0
+    )
 
     [row] = driver._load()
     assert (row.spec_id, row.dropped) == (dropped, None)
@@ -912,7 +935,9 @@ def test_a_new_loop_is_refused_while_the_last_one_has_an_open_pull_request(
     driver._save([loop.row(0, state="READY_FOR_REVIEW", pr=10)])
     loop.scan_returns(1)
 
-    assert driver.cmd_snapshot(argparse.Namespace(force=False, new=True)) == 1
+    assert (
+        driver.cmd_snapshot(argparse.Namespace(force=False, new=True, add=False)) == 1
+    )
     assert "#10" in capsys.readouterr().err
     assert [p.pr for p in driver._load()] == [10]
 
@@ -1426,3 +1451,37 @@ def test_commit_time_is_utc_in_the_ledgers_own_format(tmp_path):
         subprocess.run(argv, cwd=tmp_path, env=env, check=True)
 
     assert driver._commit_time("HEAD", cwd=tmp_path) == "2026-09-14 19:00:00"
+
+
+def test_a_linked_stack_is_marked_ready_only_once_every_base_reads_back(
+    loop, monkeypatch
+):
+    # Operator decision (2026-09-18): drafts are PACKAGE's, and a reviewed,
+    # linked stack is handed over ready.
+    rows = [
+        loop.row(0, state="READY_FOR_REVIEW", pr=10),
+        loop.row(1, state="READY_FOR_REVIEW", pr=11),
+    ]
+    ran = []
+    monkeypatch.setattr(driver, "_load", lambda: rows)
+    monkeypatch.setattr(driver, "_stack_order", lambda _rows: (rows, []))
+    monkeypatch.setattr(driver, "_merge_conflicts", lambda _a, _b: [])
+    monkeypatch.setattr(driver, "_trunk", lambda: "origin/main")
+    monkeypatch.setattr(
+        driver.subprocess,
+        "run",
+        lambda cmd, **_k: ran.append(cmd) or subprocess.CompletedProcess(cmd, 0),
+    )
+    bases = {10: "main", 11: rows[0].branch}
+    monkeypatch.setattr(driver, "_gh_pr_field", lambda n, _name: bases[n])
+
+    assert driver.cmd_stack(argparse.Namespace(execute=True)) == 0
+    assert [c for c in ran if c[:3] == ["gh", "pr", "ready"]] == [
+        ["gh", "pr", "ready", "10"],
+        ["gh", "pr", "ready", "11"],
+    ]
+
+    ran.clear()
+    bases[11] = "main"
+    assert driver.cmd_stack(argparse.Namespace(execute=True)) == 1
+    assert not [c for c in ran if c[:3] == ["gh", "pr", "ready"]]

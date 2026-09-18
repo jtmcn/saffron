@@ -835,6 +835,12 @@ def cmd_snapshot(args) -> int:
         carried, held_out = _carried(previous)
     candidates, refusals = _scan(loop_branches=frozenset(p.branch for p in previous))
     ordered, stranded = _order(candidates, refusals, carried, frozenset(held_out))
+    # A spec whose parent became reviewable joins a re-snapshot unasked, with no
+    # spec review (item b-afec7c): name it, and keep it out unless `--add`.
+    known = {p.spec_id for p in previous}
+    arrived = [p for p in ordered if args.force and p.spec_id not in known]
+    if arrived and not args.add:
+        ordered = [p for p in ordered if p.spec_id in known]
     if held_out:
         print(f"edited while its pull request is open ({len(held_out)}):")
         for reason in held_out.values():
@@ -854,6 +860,14 @@ def cmd_snapshot(args) -> int:
         return 1
     _save(ordered)
 
+    if arrived:
+        verb = "added" if args.add else "left out"
+        print(f"new since the last snapshot, {verb} ({len(arrived)}):")
+        for p in arrived:
+            print(f"  {p.spec_id}  {p.title}")
+        if not args.add:
+            print("  `snapshot --force --add` takes them in; review each spec first")
+        print()
     print(f"order: {len(ordered)} spec(s), bottom of the stack first\n")
     for i, p in enumerate(ordered, 1):
         dep = f"  depends_on={p.depends_on}" if p.depends_on else ""
@@ -1156,7 +1170,7 @@ def cmd_stack(args) -> int:
     command = ["gh", "stack", "link", *(str(p.pr) for p in order)]
     print(f"\n  {' '.join(command)}")
     print(
-        "\nPRs stay drafts (§5.7); marking one ready is `gh pr ready <n>`, the operator's."
+        "\nPACKAGE opens drafts (§5.7); --execute marks each ready once its base reads back."
     )
     if not args.execute:
         print("\n(dry run — pass --execute to link)")
@@ -1175,7 +1189,18 @@ def cmd_stack(args) -> int:
         print(
             f"  #{p.pr}  base={got}" + ("" if got == want else f"  — expected {want}")
         )
-    return 1 if mismatched else 0
+    if mismatched:
+        return 1
+    # A reviewed stack is ready for the operator; the draft was the cell's.
+    unready = [
+        p.pr
+        for p in order
+        if subprocess.run(["gh", "pr", "ready", str(p.pr)], cwd=REPO).returncode
+    ]
+    if unready:
+        return _fail(f"gh pr ready failed for {', '.join(f'#{n}' for n in unready)}")
+    print(f"\nmarked ready: {' '.join(f'#{p.pr}' for p in order)}")
+    return 0
 
 
 def cmd_rebase(args) -> int:
@@ -1563,6 +1588,11 @@ def main() -> int:
         "--new",
         action="store_true",
         help="start another loop once every pull request of the last has closed",
+    )
+    p.add_argument(
+        "--add",
+        action="store_true",
+        help="with --force, take in specs that became runnable since the last snapshot",
     )
     p.set_defaults(func=cmd_snapshot)
 
