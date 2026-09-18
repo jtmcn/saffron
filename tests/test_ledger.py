@@ -1246,3 +1246,64 @@ def test_a_ledger_whose_batch_check_predates_incomplete_accepts_it(tmp_path):
             "INSERT INTO batches (budget_usd, status) VALUES (50, 'CRASHED')"
         )
     ledger.close()
+
+
+def test_a_task_records_the_prompt_tree_that_ran_it(ledger):
+    """`spec_sha` and `policy_sha` are already here. The prompts were not."""
+    repo_id = ledger.upsert_repo("thermal-edge", "/o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+    task_id = ledger.create_task(
+        run_id,
+        spec_id="TE-9001",
+        spec_sha="s" * 64,
+        branch="saffron/TE-9001",
+        prompt_sha="c" * 64,
+    )
+    (row,) = [r for r in ledger.tasks_by_repo(repo_id) if r["task_id"] == task_id]
+    assert row["prompt_sha"] == "c" * 64
+
+
+def test_a_task_written_by_a_caller_predating_the_column_still_records(ledger, task):
+    """`policy_sha`'s own rule: a caller that predates the parameter still
+    records a task, just one that cannot say what prompts it ran under."""
+    _, task_id = task
+    (row,) = [r for r in ledger.tasks_by_repo(1) if r["task_id"] == task_id]
+    assert row["prompt_sha"] is None
+
+
+def test_an_older_ledger_gains_the_column_without_losing_a_row(tmp_path):
+    """Additive only — never a migration that can lose a row (`ledger.py`)."""
+    path = tmp_path / "ledger.db"
+    first = Ledger(path)
+    repo_id = first.upsert_repo("thermal-edge", "/o", "/m.git", policy_sha="p" * 64)
+    run_id = first.create_run(repo_id, base_sha="a" * 40)
+    first.create_task(
+        run_id, spec_id="TE-9001", spec_sha="s" * 64, branch="saffron/TE-9001"
+    )
+    first._db.execute("ALTER TABLE tasks DROP COLUMN prompt_sha")
+    first._db.commit()
+    first.close()
+
+    second = Ledger(path)
+    assert [r["spec_id"] for r in second.tasks_by_repo(repo_id)] == ["TE-9001"]
+    columns = {r["name"] for r in second._db.execute("PRAGMA table_info(tasks)")}
+    assert "prompt_sha" in columns
+    second.close()
+
+
+def test_an_attempt_records_the_model_it_ran_on(ledger, task):
+    """Declared in SCHEMA since v0.5 and never written. A prompt comparison
+    means nothing if the model moved underneath it."""
+    _, task_id = task
+    attempt_id = ledger.open_attempt(task_id, phase="REVIEW")
+    ledger.close_attempt(
+        attempt_id,
+        session_id="s",
+        model="claude-opus-5",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=3,
+        cost_usd_est=0.4,
+    )
+    (row,) = ledger.attempts(task_id)
+    assert row["model"] == "claude-opus-5"

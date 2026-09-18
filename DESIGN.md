@@ -303,7 +303,8 @@ repos        (repo_id, name, origin, mirror_path, policy_sha, image_tag,
 runs         (run_id, batch_id, repo_id, base_sha, preflight, started_at,
               ended_at, status)
 tasks        (task_id, run_id, spec_id, spec_sha, state, risk, branch, policy_sha,
-              parent_task_id, worktree, volume, budget_usd, spent_usd_est, updated_at)
+              prompt_sha, parent_task_id, worktree, volume, budget_usd,
+              spent_usd_est, updated_at)
 attempts     (attempt_id, task_id, phase, n, session_id, model, started_at,
               ended_at, subtype, terminal_reason, num_turns, cost_usd_est)
 gate_results (gate_result_id, attempt_id, run_id, gate, status, tool,
@@ -335,6 +336,8 @@ needs the distinction and the first that enforces it.
 `terminal_reason` exists for the same reason the supervisor measures doneness from git (§4.3): the agent runtime distinguishes a clean finish from an abort, and a crashed session (`subtype = error_during_execution`) **may report every cost field as zero**. An attempt that burned $4 and then crashed records $0 unless the supervisor falls back to the last good figure it saw before the crash. Unattended overnight, this is the difference between a budget that holds and one that silently stops counting.
 
 `spec_sha` matters: edit a spec while a batch is running and the task is invalidated rather than silently building the old thing. `policy_sha` does the same one level up — change a repo's gate declarations mid-batch and its in-flight tasks are invalidated, because a task judged against a policy that no longer exists is not evidence of anything. `image_built_at` versus the `.saffron/Dockerfile` mtime is what triggers a rebuild at preflight.
+
+`prompt_sha` is a digest of `saffron/agents/prompts/**` as authored, the third input beside `spec_sha` and `policy_sha`. `attempts.model` is now written by `close_attempt`, so an attempt records the model that ran it.
 
 **Both invalidations need a moment to fire at, and it is a mirror refetch at task scheduling.** Preflight fetches once and pins `base_sha` (§4.4), so nothing else in the batch ever re-reads the repo — which would leave these two columns recording a check that structurally cannot happen. The scheduler therefore refetches the mirror before each task starts and compares both shas then; it is a local `git fetch` against a bare repo, it costs milliseconds, and it is the only point in a batch where a mid-flight edit can be noticed at all. Note what this deliberately does *not* do: `base_sha` stays pinned for the whole run, so a refetch invalidates tasks and never moves the baseline out from under them.
 
