@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
 from harness.register_scoring import Claim, claims_in, load_gate, score_claim
@@ -68,3 +69,51 @@ def test_a_claim_is_not_read_as_a_spec_instruction():
     gate = load_gate(REPO)
     codes = score_claim(gate, "- Run the gate when the cell stops.", REPO)
     assert "trailing-condition" not in codes
+
+
+def test_a_run_is_scored_per_thousand_words_not_per_hit():
+    """An arm that files fewer findings has fewer hits trivially."""
+    from harness.register_scoring import RunScore
+
+    score = RunScore(run=1, claims=2, words=500, hits=Counter({"em-dash": 1}))
+    assert score.per_1k == 2.0
+
+
+def test_a_run_with_no_words_scores_zero_rather_than_dividing_by_zero():
+    from harness.register_scoring import RunScore
+
+    assert RunScore(run=1, claims=0, words=0, hits=Counter()).per_1k == 0.0
+
+
+def test_a_pass_is_scored_one_row_per_run(tmp_path):
+    from harness.register_scoring import score_pass
+
+    directory = _pass(
+        tmp_path,
+        {
+            "SA-0001": {
+                1: [
+                    {
+                        "lens": "correctness",
+                        "findings": [{"claim": "It stops; it goes."}],
+                    }
+                ],
+                2: [{"lens": "correctness", "findings": [{"claim": "It stops."}]}],
+            }
+        },
+    )
+    scores = score_pass(directory, REPO)
+    assert [s.run for s in scores] == [1, 2]
+    assert scores[0].hits["semicolon"] == 1
+    assert scores[1].hits["semicolon"] == 0
+
+
+def test_the_spread_is_the_lowest_and_highest_count_per_rule():
+    from harness.register_scoring import RunScore, spread
+
+    scores = [
+        RunScore(1, 1, 100, Counter({"em-dash": 2})),
+        RunScore(2, 1, 100, Counter({"em-dash": 5})),
+        RunScore(3, 1, 100, Counter({"em-dash": 3, "hedge": 1})),
+    ]
+    assert spread(scores) == {"em-dash": (2, 5), "hedge": (0, 1)}

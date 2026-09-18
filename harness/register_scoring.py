@@ -13,6 +13,8 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -70,3 +72,49 @@ def score_claim(gate, text: str, repo: Path) -> tuple[str, ...]:
     own vocabulary must not read as filler.
     """
     return tuple(hit.code for hit in gate.check(text, _CLAIM_PATH, "prose", root=repo))
+
+
+@dataclass(frozen=True)
+class RunScore:
+    """One run's claims, scored. `per_1k` is the comparable number."""
+
+    run: int
+    claims: int
+    words: int
+    hits: Counter[str]
+
+    @property
+    def per_1k(self) -> float:
+        if not self.words:
+            return 0.0
+        return 1000 * sum(self.hits.values()) / self.words
+
+
+def score_pass(pass_dir: Path, repo: Path) -> list[RunScore]:
+    """Every run in a pass, scored, in run order."""
+    gate = load_gate(repo)
+    claims: dict[int, list[Claim]] = {}
+    for claim in claims_in(pass_dir):
+        claims.setdefault(claim.run, []).append(claim)
+    scores = []
+    for run in sorted(claims):
+        hits: Counter[str] = Counter()
+        words = 0
+        for claim in claims[run]:
+            hits.update(score_claim(gate, claim.text, repo))
+            words += len(claim.text.split())
+        scores.append(RunScore(run, len(claims[run]), words, hits))
+    return scores
+
+
+def spread(scores: Sequence[RunScore]) -> dict[str, tuple[int, int]]:
+    """The lowest and highest count of each rule across runs.
+
+    With the prompts unchanged this is the metric's noise floor: a prompt
+    change counts as measured only when it moves a rule further than this.
+    """
+    codes = {code for score in scores for code in score.hits}
+    return {
+        code: (min(s.hits[code] for s in scores), max(s.hits[code] for s in scores))
+        for code in sorted(codes)
+    }
