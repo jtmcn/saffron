@@ -90,6 +90,44 @@ def test_changed_files_lists_only_what_moved(tmp_path, origin):
     assert changed_files(mirror, base, head) == ["a.py", "b.py"]
 
 
+def test_changed_files_lists_a_submodule_the_git_config_ignores(
+    tmp_path, origin, monkeypatch
+):
+    """`diff.ignoreSubmodules=all` in the operator's own global git config
+    drops a submodule path a commit added from a bare name-only listing.
+    `mirror.changed_files` reads a bare clone, which never sees a committed
+    `.gitmodules` — what hides the path here is config, not content
+    (`SA-0082`; backlog item 115)."""
+    base = git(origin, "rev-parse", "HEAD")
+    git(
+        origin,
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        f"160000,{'1' * 40},vendor/sub",
+    )
+    git(origin, "commit", "-qm", "add a submodule")
+    head = git(origin, "rev-parse", "HEAD")
+
+    mirror = ensure_mirror(origin, tmp_path / "m.git")
+
+    config = tmp_path / "gitconfig-global"
+    config.write_text("[diff]\n\tignoreSubmodules = all\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+
+    # Prove the setting bites first: a bare listing under the same config
+    # loses the submodule path entirely.
+    bare = subprocess.run(
+        ["git", "-C", str(mirror), "diff", "--name-only", f"{base}..{head}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert bare == []
+
+    assert changed_files(mirror, base, head) == ["vendor/sub"]
+
+
 def test_diff_stat_counts_lines(tmp_path, origin):
     mirror = ensure_mirror(origin, tmp_path / "m.git")
     base, head, _ = resolve_pull_request(mirror, 42)
