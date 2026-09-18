@@ -252,29 +252,19 @@ def run_task(
         # get `events.jsonl`. A print-only default is the defect item 43 is
         # about, and is not this.
         log = EventLog(out_dir / spec.id)
-        # Re-derived rather than read off `log`: `EventLog` keeps its path
-        # private, and `saffron/events.py` is forbidden here, so there is no
-        # accessor to add. This must match `EventLog.__init__`'s own join.
+        # ponytail: re-derives `EventLog`'s private path, since it has no accessor.
         log_path = out_dir / spec.id / "events.jsonl"
-        warned = False
 
         def emit(event: Event) -> None:
-            nonlocal warned
             line = describe(event)
             if line:
                 print(line)
-            # Compared around this one call, not once at the end: the flag
-            # can flip on the very first append (the `Ceilings` line below),
-            # and every append after the first failure leaves it already
-            # `True`, so this warns exactly once for the whole task no
-            # matter how many later writes are also refused. Printed, never
-            # appended: the log that failed is not where its own failure
-            # belongs.
+            # `failed` never resets, so its flip is seen once. Printed, never
+            # appended: the log is what failed.
             was_failed = log.failed
             log.append(event)
-            if log.failed and not was_failed and not warned:
-                warned = True
-                print(f"warning: {log_path} stopped accepting writes")
+            if log.failed and not was_failed:
+                print(f"warning: {log_path} refused a write; events may be missing")
 
     emit(
         Ceilings(
