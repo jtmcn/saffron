@@ -32,7 +32,8 @@ max_turns: 90
 acceptance:
   - claim: >-
       A task whose run_one_cell returned a state other than READY_FOR_REVIEW reaches
-      the index with a row carrying that state. Two different such states each
+      the index with a row carrying that state, its spend and its attempts,
+      whether or not its work was pushed. Two different such states each
       produce their own row, and each row reads back with the state its own
       cell ended in. Today neither reaches the store at all.
     witness: tests/test_task.py::test_a_task_that_never_packaged_still_reaches_the_index
@@ -46,8 +47,7 @@ acceptance:
       A spec whose first task ended unpackaged and whose second task packaged
       leaves one row, holding the packaged outcome and still carrying the pull
       request link PACKAGE wrote. The earlier unpackaged row is replaced rather
-      than joined by a second row, and the packaged row keeps the link PACKAGE
-      wrote.
+      than joined by a second row.
     witness: tests/test_task.py::test_a_later_package_replaces_the_unpackaged_row_and_keeps_its_link
   - claim: >-
       Appending a row for a spec that already has one still replaces it rather
@@ -69,7 +69,7 @@ level. Its own comment says why each was added: "Absent, they fell to
 `_ORDINARY` and sorted below elevated-risk green tasks: a task that could not
 pass its own gates, or one whose cell died, reading as reviewable."
 
-Eleven of those twelve states can never appear on the page. PACKAGE writes
+Outside v0 replay, eleven of those twelve states can never appear on the page. PACKAGE writes
 only `MERGE_FAILED` among them.
 
 `append_queue_line` has exactly two callers. One is `saffron/replay.py:143`,
@@ -183,7 +183,12 @@ shapes do it. A write guarded by a state list, and a write placed inside a
 branch only some outcomes reach. Each satisfies a single-state test and leaves
 the hole open. Drive two states that differ, under two different spec ids, and
 assert each row carries its own. The store keys on repo and spec id, so two
-states for one spec leave one row.
+states for one spec leave one row. Have one of the two push doubles return what
+production returns for a cell that left no patch,
+`PushResult(pushed=False, note="no commits, nothing to push")`
+(`saffron/phases/package.py:1070-1073`). A write guarded on `pushed.pushed`
+then fails. Give the two outcomes different non-zero `spent_usd` and `attempts`,
+and assert each row carries its own: the header's spend sums `cost_usd_est`.
 
 **Criterion 2's plausible wrong implementation is the cell branch in `link`.**
 `push_unpackaged_work` returns a branch and a pushed sha on success. Putting
@@ -215,7 +220,8 @@ store holds one row whose link is the pull request address.
 
 **The write goes inside the `else:` at `saffron/task.py:335`, and nowhere else.**
 This is the one placement that matters. A write at the end of `run_task` passes
-criteria 1 and 2. It also passes criterion 3's first wording, while it destroys
+criteria 1 and 2. It also passes a criterion 3 test that asserts only the
+final row, while it destroys
 every pull request link in the index. The packaged branch reaches
 `_finish`, which writes the row with `link=result.pr_url`
 (`saffron/phases/package.py:966-978`). Then `saffron/task.py:334` assigns
