@@ -1,12 +1,13 @@
 ---
 id: 154
 title: No mutant can be written to `session.py` any more, and trying wedged the cell
-status: open
+status: done
+closed: 2026-09-18
 tier: 1
 filed: 2026-09-16
 by_hand: false
 specs: [SA-0093, SA-0104]
-prs: [293]
+prs: [293, 335]
 commits: []
 cites: [§5.4]
 related: [80, 140]
@@ -53,3 +54,8 @@ over the ceiling at the spec's base, naming the ceiling, so it costs no cell.
 
 **Filed 2026-09-16** from the spec loop's run 5 (stack #308). `SA-0093`'s mutant
 was dropped by #293 rather than wait on this.
+
+- 2026-09-18: open as PR #335 (`SA-0104`, spec loop run 7), stacked in
+  #335 ← #338 ← #339 ← #342 ← #340.
+- 2026-09-18: done. PR #335 merged (`SA-0104`), and the spec retires to
+  `.saffron/specs/done/`.

@@ -1818,7 +1818,13 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-17, a thirty-ninth time: `SA-0106` queued for
+    """Re-measured 2026-09-18, a fortieth time: the spec loop's run 7 merged
+    `SA-0104`, `SA-0099`, `SA-0100`, `SA-0103` and `SA-0105` (#335, #338, #339,
+    #342, #340), and all five retire to `done/`. `SA-0101`'s parent `SA-0099` is
+    done, so it joins the candidates ahead of `SA-0106` by priority. `SA-0102`
+    stays refused on `SA-0101`.
+
+    Re-measured 2026-09-17, a thirty-ninth time: `SA-0106` queued for
     backlog item b-d6bff7, the batch's one scan. It edits `batch.py` and `cli.py`,
     which nothing else queued touches, so it has no `depends_on` and joins the
     candidates last, at priority 3 and after `SA-0105` by id.
@@ -2023,18 +2029,8 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == [
-        "SA-0104",
-        "SA-0099",
-        "SA-0100",
-        "SA-0105",
-        "SA-0106",
-    ]
-    assert [r.path.name[:7] for r in refusals] == [
-        "SA-0101",
-        "SA-0102",
-        "SA-0103",
-    ]
+    assert [c.spec.id for c in candidates] == ["SA-0101", "SA-0106"]
+    assert [r.path.name[:7] for r in refusals] == ["SA-0102"]
     # A precondition, not the glob check: `done/` is populated, so the empty
     # queue above is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30

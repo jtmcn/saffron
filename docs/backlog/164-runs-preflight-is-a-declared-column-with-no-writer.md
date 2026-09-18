@@ -1,10 +1,11 @@
 ---
 id: 164
 title: runs.preflight is a declared column with no writer, so the batch header's preflight field has no source
-status: open
+status: done
+closed: 2026-09-18
 filed: 2026-09-17
 specs: [SA-0099]
-prs: []
+prs: [338]
 commits: []
 cites: [§4.1, §6]
 related: []
@@ -59,3 +60,8 @@ earlier. The 99 existing rows stay NULL.
 
 **Filed 2026-09-17**, from an inventory of what one execution can be seen
 through. `SA-0099` carries it.
+
+- 2026-09-18: open as PR #338 (`SA-0099`, spec loop run 7), stacked in
+  #335 ← #338 ← #339 ← #342 ← #340.
+- 2026-09-18: done. PR #338 merged (`SA-0099`), and the spec retires to
+  `.saffron/specs/done/`.

@@ -512,3 +512,40 @@ lenses did not raise.
   lines where the spec asked for a short one (#321).
   **Bucket 1** for the word — `terms` neither lists it nor reads Python.
   **Open:** item 174. **Bucket 2** for the length. **Open.**
+
+## 2026-09-18 — `SA-0104`, `SA-0099`, `SA-0100`, `SA-0103`, `SA-0105` (stack #335 ← #338 ← #339 ← #342 ← #340)
+
+- A witness for a claim about the value a row keeps, or the note it carries,
+  that started from a state every wrong implementation also leaves: a refused
+  write asserted `None` on a row that was already `None`, so a refusal that
+  cleared the row passed (#338). The preserves witness for "no backfill" never
+  read the column (#338). No test pinned an unpushed row's note, so an empty or
+  invented note passed (#339). Each probe survived every test until the seats'
+  review commit.
+  **Bucket 3** — the adequacy lens asks what a witness observes. The spec
+  review predicted the #338 backfill gap before the cell ran. **Open.**
+- Four docstrings and comments still describing the one-argument write the
+  diff replaced (#335). #342 said an import was local to keep it out of `revert`'s
+  collection when the name was not new, and #339 cited a `CONTEXT.md` gap
+  and section that do not exist.
+  **Bucket 3** — a comment's claim checked against the code it describes, as
+  on 2026-09-16 and 2026-09-17. **Open.**
+- A chunk size 23% under a cap measured once, on a cell runtime the comment
+  does not name, where the same runtime wedged a cell on an oversize exec
+  before (#335). The operator chose 64 KiB.
+  **Bucket 3** — a margin against a single measurement is a judgement the
+  critic did not make. **Open:** item b-bc9951.
+- New comments of 7 to 18 lines in all five pull requests, including an
+  18-line docstring where #340's spec asked for "a short comment on the read".
+  Every one was cut by a review commit.
+  **Bucket 2** — the third loop running with this rejection, and still no line
+  in this repo's `CLAUDE.md` says it. **Open:** item b-122686.
+- A branch 14 lines over its `size` ceiling, most of it six hand-built test
+  doubles differing in two fields (#339). The review folded them into one
+  builder and landed at 293.
+  **Bucket 1** — `size` measured it, and nothing reaches the cell before
+  PACKAGE to say so. **Open.**
+- A `warned` flag beside a before/after comparison that already warns once,
+  because the flag it compares never resets (#342). Every probe of either guard
+  alone survived.
+  **Bucket 3.** **Open.**
