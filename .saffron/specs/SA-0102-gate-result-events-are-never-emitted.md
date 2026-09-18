@@ -36,8 +36,8 @@ acceptance:
   - claim: >-
       Every gate result the baseline suite produced reaches the log as its own
       event, each naming its gate, its status, and the baseline as what it was
-      measured against. Today the log carries one joined line naming every gate
-      and no event per gate.
+      measured against, and none carries a count of new failures. Today the
+      log carries one joined line naming every gate and no event per gate.
     witness: tests/test_session.py::test_each_baseline_gate_result_reaches_the_log_as_its_own_event
   - claim: >-
       Every gate result the repair loop's suite produced reaches the log as its
@@ -179,8 +179,12 @@ silence. Criterion 2's last sentence is what pins this, and only a whole cell
 driven through REBUT can see it: a unit test over `repair_loop` never reaches
 `_rebut_gates`, and a parameter defaulted to emitting passes it. Drive the
 witness through `_drive` and REBUT, the way
-`test_the_gate_check_after_the_rebuttal_continues_the_gate_count` does, and
-assert no `GateResult` follows the `Attempt` whose phase is `REBUT`.
+`test_the_gate_check_after_the_rebuttal_continues_the_gate_count` does. Anchor
+on no `Attempt` event: `_rebut_gates` calls `_judge()` (`session.py:2178`)
+before it emits the REBUT `Attempt` (`:2181-2188`), so a stray set lands before
+that event, not after it. Assert instead that the `against == "attempt"` events
+are exactly two sets, each the suite's gate names, numbered 1 and 2, and
+nothing else. A `_judge` defaulted to emitting writes a third set.
 
 **The attempt number is not in scope at the emit site.**
 `saffron/cell/session.py:646` holds the loop `for attempt in range(1, max_attempts
@@ -213,8 +217,7 @@ else it is `None`.
 also writes zero on every other gate of an aborted suite, a failing one
 included. Drive an attempt's suite with one errored gate, one failing gate and
 one passing gate, and assert all three carry no count. Drive it through an
-attempt, never the baseline: at the baseline no gate has a count whatever the
-implementation does. Criterion 2 carries the converse. A count written to fall
+attempt. Criterion 2 carries the converse. A count written to fall
 back to absent whenever it is zero collapses a passing gate's measured zero. So
 criterion 2's witness asserts that zero in a suite with no errored gate. It also
 drives a blocking gate that fails identically at baseline and attempt, and
@@ -239,7 +242,7 @@ says it is required rather than defaulted, so a forgotten keyword cannot file a
 baseline result as an attempt's. Pass it explicitly at each site.
 
 **The golden fixture changes, and that is why it is in `touches`.**
-`test_watch_output_matches_the_golden_fixture` (`tests/test_events.py:1762`)
+`test_watch_output_matches_the_golden_fixture` (`tests/test_events.py:1780`)
 drives two whole cells. It compares the captured lines byte for byte against
 `tests/fixtures/watch-golden.txt`. Its green run carries one joined baseline line
 at `:8` and one `gates: attempt 1` line, so a per-gate block lands in both runs.
@@ -261,8 +264,15 @@ which `.saffron/policy.yaml`'s `elevate_on` elevates. At elevated, `size` is not
 advisory (`_advisory` in `saffron/gates/suite.py`). The
 spec review estimated 255 to 300 lines, which counted seven `_JOINED` rows
 that are no longer added. Write one
-shared helper that drives a
-cell and collects its `GateResult` events, and use it in all three witnesses.
+shared helper that drives a cell and collects its `GateResult` events, and use
+it in all three witnesses. Fold criterion 2's two attempts, its identical
+failure and its REBUT into one drive, with the suites
+`test_the_gate_check_after_the_rebuttal_continues_the_gate_count` uses:
+`suites=([], _results(failing), [], [])`.
+
+**The three witnesses are the only new test functions.** Prefix any helper
+with `_`. A new test of `describe(GateResult(...))` passes with the source
+reverted, and `revert` blocks on it.
 
 **`census` compares test names, so rename nothing.**
 
