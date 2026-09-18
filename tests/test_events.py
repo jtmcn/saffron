@@ -1,5 +1,5 @@
 """SA-0029/SA-0040: the host event vocabulary, its durable log, and
-`describe()` — the renderer that proves the ten kinds are sufficient for the
+`describe()` — the renderer that proves the kinds are sufficient for the
 64 `watch(...)` call sites. `SA-0030` is the first real producer — the tests
 from "The seam" heading down drive `saffron.cell.session.run_one_cell` for
 real (stubbed runtime, no network, no cell) and read back what it emitted.
@@ -577,7 +577,7 @@ def test_the_wire_keys_are_pinned_for_every_kind(tmp_path, event):
 
 
 def test_the_union_and_the_wire_table_cannot_drift(tmp_path):
-    """Both are hand-maintained lists of the same ten kinds."""
+    """Both are hand-maintained lists of the same kinds."""
     assert set(typing.get_args(Event)) == set(_KINDS.values())
     assert len(_KINDS) == 11
     for cls in _KINDS.values():
@@ -1183,7 +1183,7 @@ def test_every_family_has_a_kind_and_renders():
 
 def test_every_row_cites_a_file_and_symbol_that_exist():
     """AC2, the half the assertion above cannot make. `family.kind in
-    _KINDS.values()` is true of *any* row carrying any of the ten types, so
+    _KINDS.values()` is true of *any* row carrying any of the kinds, so
     the table could cite anything: a row reading
     `_Family("QQQQ", "no/such/file.py:nope", Teardown)` passed every check
     here. Resolve each citation instead — the file exists, and the symbol is
@@ -1206,7 +1206,7 @@ def test_every_row_cites_a_file_and_symbol_that_exist():
 def test_the_table_did_not_quietly_lose_a_row():
     """AC2 again, and the mutation neither assertion above catches: deleting
     three rows — `unstacked:`, `baseline errored in`, `PACKAGE: (pr_url)` —
-    left every test in this file passing. The table is the proof the ten
+    left every test in this file passing. The table is the proof the
     kinds cover all 64 call sites and is what `SA-0030`/`SA-0031` read to find
     their work, so losing a row silently is the failure that matters.
 

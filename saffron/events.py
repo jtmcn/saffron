@@ -6,11 +6,11 @@ them for the operator. Host-side the arrangement is inverted — 64 call sites
 across `cell/session.py`, `phases/*.py` and `task.py` author prose straight into
 `watch()`, and the structure behind each line dies with the terminal scroll.
 
-This module is the fix: ten frozen dataclasses — one per kind, never one
+This module is the fix: frozen dataclasses — one per kind, never one
 class with a `type` string, so a future renderer knows what it holds — an
-`Event` union naming all ten, a tiny durable log, and `describe()`, which
+`Event` union naming every one, a tiny durable log, and `describe()`, which
 turns one back into the prose above. `FAMILIES` below is the proof that the
-ten kinds are sufficient: one row per call-site shape, citing the file and
+kinds are sufficient: one row per call-site shape, citing the file and
 symbol it lives in (never a line number — DESIGN.md's own citation rule) and
 the kind `describe()` renders it from. One shape resisted typing outright and
 is named as `FINDINGS` instead of forced into a `message: str` — the escape
@@ -333,7 +333,7 @@ class Terminal:
 
 @dataclass(frozen=True, slots=True)
 class TaskOutcome:
-    """The task's own terminal announcement — item 43's `FINDINGS[0]`, typed.
+    """The task's own terminal announcement — item 43's untyped print, typed.
     One kind, two shapes: the ordinary announcement, and `RATE_LIMITED`, which
     has no session id and a reopening time instead — a clean `int` or else
     `resets_at_unreadable`, since a wrong shape drops the event (`_shape_ok`)."""
@@ -614,9 +614,9 @@ def read_log_since(task_dir: Path, offset: int) -> tuple[list[Event], int]:
 def when(stamp: int | None) -> str:
     """The one place a unix reset time becomes something an operator can act
     on: "when can I retry", in local time, the day dropped unless it isn't
-    today. Its callers are the `except RateLimited` handler in
-    `cell/session.py` and `describe()`'s `rate_limit` branch below; item 104
-    deleted the unguarded copy in `phases.implement`.
+    today. Its one caller is `describe()`: the `rate_limit` branch and the
+    `TaskOutcome` one below; item 104 deleted the unguarded copy in
+    `phases.implement`.
 
     `stamp` arrives from an untrusted cell's `resets_at`, unchecked by any
     shape gate — it is a value, not a shape, so `read_log` would not refuse
@@ -626,8 +626,8 @@ def when(stamp: int | None) -> str:
 
     `None` also renders `"unknown"` here, rather than `time.localtime`'s own
     reading of it as *now* — which would print a reset time already past.
-    Both callers guard with a truthiness check before calling this, so the
-    branch is not reachable through either today; it is still handled
+    Both branches guard with an `is not None` check before calling this, so
+    it is not reachable through either today; it is still handled
     deliberately, not left to accident, since a caller that stops guarding is
     a caller this function must not silently mislead."""
     import time
@@ -721,7 +721,7 @@ def describe(event: Event) -> str:
     Dispatches on `type(event)`, never a `type` string field — the module's
     own rule (line 9 above) applies here too. `FAMILIES` below is the table
     proving every one of the 64 call sites this exists to replace reaches a
-    branch here; `FINDINGS` names the two that do not.
+    branch here; `FINDINGS` names the one that does not.
     """
     if isinstance(event, Preflight):
         if event.step == "cell_up":
@@ -796,8 +796,8 @@ def describe(event: Event) -> str:
         # No call site prints one alone today — every printed line joins
         # several (`Baseline`) or reports only a count (`Attempt`). Still
         # rendered: a future consumer (a report page, `SA-0036`) reads one
-        # `GateResult` at a time, and "the ten kinds render" cannot mean
-        # "eight of them."
+        # `GateResult` at a time, and "every kind renders" cannot mean
+        # "all but one."
         return f"gates: {event.gate}={event.status}"
 
     if isinstance(event, Budget):
@@ -873,7 +873,7 @@ class _Family:
     kind: type
 
 
-# The proof this vocabulary's ten kinds are sufficient for the 64 call sites across
+# The proof this vocabulary's kinds are sufficient for the 64 call sites across
 # `cell/session.py`, `phases/{implement,package,review,rebut}.py` and
 # `task.py`. Grouped by rendered shape, not by literal call site: two call
 # sites that print the same shape (both `SALVAGE: the session failed — …`
@@ -915,7 +915,7 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("PLAN: accepted", _S, PhaseStart),
     _Family("PLAN: rejected", _S, Terminal),
     _Family("{outcome}: $N spent, session …", _S, TaskOutcome),
-    _Family("rate limit: rejected — not exhausted", _S, TaskOutcome),
+    _Family("rate limit: rejected — stopping, not exhausted", _S, TaskOutcome),
     _Family("IMPLEMENT: system prompt", _S, PhaseStart),
     _Family("IMPLEMENT: the session failed", _S, PhaseStart),
     _Family("IMPLEMENT: cut off … spending one turn", _S, PhaseStart),
