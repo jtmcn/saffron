@@ -252,8 +252,8 @@ the push run.
 
 ## 5. File what the reviews left
 
-Findings kept in step 2 become a new `docs/backlog/NNN-slug.md` record each — the
-frontmatter shape of any open item, next id = highest existing + 1 — placed in
+Findings kept in step 2 become a new `docs/backlog/b-xxxxxx-slug.md` record each — the
+frontmatter shape of any open item, id from `uv run python -m records new-id` — placed in
 `PRIORITY.md`'s tier index, with `uv run pytest tests/records -q` green before
 committing. Each item a spec came from gets its frontmatter `status` / `closed`
 / `prs` (and `specs`/`commits` as applicable) set and a dated line added to

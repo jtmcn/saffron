@@ -2,6 +2,8 @@
 on one screen. Run as a subprocess, the way `tests/test_cli.py` runs `saffron`."""
 
 import os
+import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -149,3 +151,26 @@ def test_a_broken_directory_exits_two_naming_the_file(tmp_path):
     )
     assert proc.returncode == 2
     assert "001-x.md" in proc.stderr
+
+
+def test_show_list_and_new_id_take_random_ids(tmp_path):
+    root = tmp_path / "root"
+    shutil.copytree(FIXTURE, root)
+    (root / "docs" / "backlog" / "b-3f9a2c-later.md").write_text(
+        "---\nid: b-3f9a2c\ntitle: Later\nstatus: open\n---\n\n"
+        "## Problem\n\nx\n\n## Done looks like\n\ny\n"
+    )
+
+    def at(*args: str) -> str:
+        return subprocess.run(
+            [sys.executable, "-m", "records", *args, "--root", str(root)],
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+            check=False,
+        ).stdout
+
+    assert at("show", "b-3f9a2c").startswith("---\nid: b-3f9a2c\n")
+    assert at("list", "backlog").splitlines()[-1].split()[0] == "b-3f9a2c"
+    fresh = at("new-id").strip()
+    assert re.fullmatch(r"b-[0-9a-f]{6}", fresh) and fresh != "b-3f9a2c"

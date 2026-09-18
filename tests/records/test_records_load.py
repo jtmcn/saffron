@@ -2,6 +2,7 @@
 that breaks a rule is refused with the file and the field named."""
 
 import datetime as dt
+import shutil
 from pathlib import Path
 
 import pytest
@@ -183,4 +184,31 @@ def test_prose_before_the_first_heading_is_refused(tmp_path):
         "## Problem\n\nx\n\n## Done looks like\n\ny\n"
     )
     with pytest.raises(RecordError, match="001-x.md"):
+        load(BACKLOG, tmp_path)
+
+
+def _hash_item(root: Path, item_id: str, filed: str | None = None) -> Path:
+    path = root / "docs" / "backlog" / f"{item_id}-a-later-item.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    filed_line = f"filed: {filed}\n" if filed else ""
+    path.write_text(
+        f"---\nid: {item_id}\ntitle: Later\nstatus: open\n{filed_line}---\n\n"
+        "## Problem\n\nx\n\n## Done looks like\n\ny\n"
+    )
+    return path
+
+
+def test_random_ids_load_after_the_numbered_items_in_filing_order(tmp_path):
+    root = tmp_path / "root"
+    shutil.copytree(FIXTURE, root)
+    _hash_item(root, "b-000001", "2026-09-18")
+    _hash_item(root, "b-ffffff", "2026-09-17")
+    ids = [r.model.id for r in load(BACKLOG, root)]
+    assert ids == [1, 2, 3, "b-ffffff", "b-000001"]
+
+
+def test_a_random_id_filename_disagreeing_with_its_id_is_refused(tmp_path):
+    path = _hash_item(tmp_path, "b-3f9a2c")
+    path.rename(path.with_name("b-3f9a2d-a-later-item.md"))
+    with pytest.raises(RecordError, match="b-3f9a2d.*id"):
         load(BACKLOG, tmp_path)

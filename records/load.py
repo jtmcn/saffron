@@ -4,6 +4,7 @@ import it, because `records/` stays outside `saffron/`."""
 
 from __future__ import annotations
 
+import datetime as dt
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -154,9 +155,21 @@ def load(kind: Kind, root: Path) -> list[Record]:
                 path,
             )
         record = parse(path.read_text(), kind, path)
-        if int(match.group(1)) != record.model.id:
+        prefix = match.group(1)
+        if (int(prefix) if prefix.isdigit() else prefix) != record.model.id:
             raise RecordError(
                 f"filename prefix {match.group(1)} but id {record.model.id}", path
             )
         records.append(record)
-    return sorted(records, key=lambda r: r.model.id)
+    return sorted(records, key=order)
+
+
+def order(record: Record) -> tuple[bool, dt.date, int | str]:
+    """Numbered items by number, then random ids by filing date."""
+    m = record.model
+    filed = getattr(m, "filed", None) or dt.date.max
+    return (
+        isinstance(m.id, str),
+        filed if isinstance(m.id, str) else dt.date.min,
+        m.id,
+    )

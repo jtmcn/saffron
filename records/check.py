@@ -10,7 +10,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from records.kinds import KINDS, BacklogItem
+from records.kinds import HASH_ID, KINDS, LAST_NUMBERED, BacklogItem
 from records.load import _FRONTMATTER, Record, load, split_sections
 
 # Where a live `item N` is a promise someone can follow today. Not
@@ -19,14 +19,15 @@ CITING = ("saffron", "tests", ".saffron/specs", "DESIGN.md")
 _SUFFIXES = {".py", ".md", ".yaml", ".yml", ".toml", ".sh"}
 
 # `item 33`, `items 65, 72`, `items **81**–**85**`, `BACKLOG item 118`,
-# `items 71/75/80`. A digit run is not followed by another digit, so
-# `item 1000` does not read as `item 100`. A range reads its endpoints, as
-# the § citation test does for appendices.
+# `items 71/75/80`, `item b-3f9a2c`. A digit run is not followed by another
+# digit, so `item 1000` does not read as `item 100`. A range reads its
+# endpoints, as the § citation test does for appendices.
+_ID = rf"(?-i:{HASH_ID})\b|\d{{1,3}}(?!\d)"
 _ITEMS = re.compile(
     r"(?i)\b(?:backlog\s+)?items?\s+"
-    r"((?:\*{0,2}\d{1,3}(?!\d)\*{0,2}(?:\s*(?:,|and|–|—|-|/)\s*)?)+)"
+    rf"((?:\*{{0,2}}(?:{_ID})\*{{0,2}}(?:\s*(?:,|and|–|—|-|/)\s*)?)+)"
 )
-_NUM = re.compile(r"\d+")
+_NUM = re.compile(rf"{HASH_ID}|\d+")
 _SPEC_FILENAME = re.compile(r"^([A-Za-z0-9]+-\d+)-")
 
 
@@ -40,7 +41,7 @@ class Violation:
         return f"{self.path}: {self.field}: {self.message}"
 
 
-def _ids(records: list[Record]) -> dict[int, Record]:
+def _ids(records: list[Record]) -> dict[int | str, Record]:
     return {r.model.id: r for r in records}
 
 
@@ -59,7 +60,17 @@ def check_ids(records: list[Record]) -> list[Violation]:
     for r in records:
         if counts[r.model.id] > 1:
             out.append(Violation(r.path, "id", f"{r.model.id} is used more than once"))
-    present = set(counts)
+    for r in records:
+        if isinstance(r.model.id, int) and r.model.id > LAST_NUMBERED:
+            out.append(
+                Violation(
+                    r.path,
+                    "id",
+                    f"numbered ids end at {LAST_NUMBERED}; take one from "
+                    "`python -m records new-id`",
+                )
+            )
+    present = {n for n in counts if isinstance(n, int)}
     if present:
         missing = sorted(set(range(1, max(present) + 1)) - present)
         if missing:
@@ -157,8 +168,12 @@ def check_cites_resolve(records: list[Record], sections: set[str]) -> list[Viola
     ]
 
 
-def cited_items(text: str) -> set[int]:
-    return {int(n) for m in _ITEMS.finditer(text) for n in _NUM.findall(m.group(1))}
+def _as_id(token: str) -> int | str:
+    return int(token) if token.isdigit() else token
+
+
+def cited_items(text: str) -> set[int | str]:
+    return {_as_id(n) for m in _ITEMS.finditer(text) for n in _NUM.findall(m.group(1))}
 
 
 def _walk(root: Path, surfaces: tuple[str, ...], skip: tuple[Path, ...]) -> list[Path]:
@@ -184,23 +199,23 @@ def _citing_files(root: Path) -> list[Path]:
     return _walk(root, CITING, (root / "tests" / "records",))
 
 
-def check_item_citations(root: Path, ids: set[int]) -> list[Violation]:
+def check_item_citations(root: Path, ids: set[int | str]) -> list[Violation]:
     out: list[Violation] = []
     for path in _citing_files(root):
-        for n in sorted(cited_items(path.read_text()) - ids):
+        for n in sorted(cited_items(path.read_text()) - ids, key=str):
             out.append(
                 Violation(path, "item", f"cites backlog item {n}, which does not exist")
             )
     return out
 
 
-def first_cited_item(text: str) -> int | None:
+def first_cited_item(text: str) -> int | str | None:
     """The first number of the first `_ITEMS` match, in document order — the
     item a spec's `## Context` came from, not the background it also names."""
     match = _ITEMS.search(text)
     if match is None:
         return None
-    return int(_NUM.findall(match.group(1))[0])
+    return _as_id(_NUM.findall(match.group(1))[0])
 
 
 def _context_section(spec_text: str) -> str:
@@ -222,8 +237,8 @@ LIVE_SURFACES = (
 
 _TIER_HEADING = re.compile(r"^### Tier (\d)\b")
 _OTHER_HEADING = re.compile(r"^#{2,3} ")
-_STRUCK = re.compile(r"~~\*\*(\d+)\*\*~~")
-_BOLD = re.compile(r"(?<!~)\*\*(\d+)\*\*(?!~)")
+_STRUCK = re.compile(rf"~~\*\*({HASH_ID}|\d+)\*\*~~")
+_BOLD = re.compile(rf"(?<!~)\*\*({HASH_ID}|\d+)\*\*(?!~)")
 
 
 def check_done_specs_are_done(records: list[Record], root: Path) -> list[Violation]:
@@ -276,7 +291,7 @@ def check_priority(records: list[Record], priority_md: Path) -> list[Violation]:
         return [Violation(priority_md, "index", "does not exist")]
     by_id = _ids(records)
     out: list[Violation] = []
-    named_under: dict[int, set[int]] = {}
+    named_under: dict[int | str, set[int]] = {}
     tier: int | None = None
     for line in priority_md.read_text().splitlines():
         if heading := _TIER_HEADING.match(line):
@@ -284,8 +299,9 @@ def check_priority(records: list[Record], priority_md: Path) -> list[Violation]:
             continue
         if _OTHER_HEADING.match(line) or line.strip() == "---":
             tier = None  # scope ends; ids are still checked, just not credited
-        struck, bold = _STRUCK.findall(line), _BOLD.findall(line)
-        for n in map(int, struck):
+        struck = [_as_id(n) for n in _STRUCK.findall(line)]
+        bold = [_as_id(n) for n in _BOLD.findall(line)]
+        for n in struck:
             if n not in by_id:
                 out.append(
                     Violation(
@@ -300,7 +316,7 @@ def check_priority(records: list[Record], priority_md: Path) -> list[Violation]:
                         f"strikes item {n}, which is {by_id[n].model.status}",
                     )
                 )
-        for n in map(int, bold):
+        for n in bold:
             if n not in by_id:
                 out.append(
                     Violation(
@@ -308,7 +324,7 @@ def check_priority(records: list[Record], priority_md: Path) -> list[Violation]:
                     )
                 )
         if tier is not None:
-            for n in map(int, struck + bold):
+            for n in struck + bold:
                 named_under.setdefault(n, set()).add(tier)
     for n, r in by_id.items():
         t = _backlog(r).tier

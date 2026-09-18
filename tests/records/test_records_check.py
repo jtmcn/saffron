@@ -68,6 +68,74 @@ def test_ids_must_be_unique(broken):
     assert any(v.field == "id" and "twice" in str(v) for v in violations)
 
 
+def _hash_item(root: Path, item_id: str, extra: str = "") -> Path:
+    path = _item(root, f"{item_id}-a-later-item.md")
+    path.write_text(
+        f"---\nid: {item_id}\ntitle: Later\nstatus: open\n{extra}---\n\n"
+        "## Problem\n\nx\n\n## Done looks like\n\ny\n"
+    )
+    return path
+
+
+def test_random_ids_leave_no_gap_in_the_numbered_ids(broken):
+    _hash_item(broken, "b-3f9a2c")
+    assert check_ids(load(BACKLOG, broken)) == []
+
+
+def test_a_numbered_id_past_the_last_is_a_violation(broken, monkeypatch):
+    monkeypatch.setattr(records.check, "LAST_NUMBERED", 2)
+    [v] = check_ids(load(BACKLOG, broken))
+    assert v.path == _item(broken, "003-a-corpse-reads-as-drained.md")
+    assert "new-id" in v.message
+
+
+def test_a_random_id_must_be_unique(broken):
+    _hash_item(broken, "b-3f9a2c")
+    shutil.copy(
+        _item(broken, "b-3f9a2c-a-later-item.md"), _item(broken, "b-3f9a2c-twice.md")
+    )
+    violations = check_ids(load(BACKLOG, broken))
+    assert any("b-3f9a2c is used more than once" in str(v) for v in violations)
+
+
+def test_links_resolve_to_random_ids(broken):
+    _hash_item(broken, "b-3f9a2c", "related: [1]\n")
+    _rewrite(
+        _item(broken, "002-the-index-drifts.md"),
+        "related: [1]",
+        "related: [1, b-3f9a2c, b-000000]",
+    )
+    [v] = check_links(load(BACKLOG, broken))
+    assert v.message == "names item b-000000, which does not exist"
+
+
+def test_priority_names_random_ids(broken):
+    _hash_item(broken, "b-3f9a2c", "tier: 2\n")
+    priority = broken / "docs" / "backlog" / "PRIORITY.md"
+    _rewrite(priority, "**2**.", "**2**, **b-3f9a2c**, **b-000000**.")
+    [v] = check_priority(load(BACKLOG, broken), priority)
+    assert v.message == "names item b-000000, which does not exist"
+
+
+def test_a_citation_of_a_missing_random_id_is_a_violation(broken):
+    (broken / "saffron" / "example.py").write_text(
+        "# backlog items b-3f9a2c and b-000000\n"
+    )
+    [v] = check_item_citations(broken, {1, 2, 3, "b-3f9a2c"})
+    assert v.message == "cites backlog item b-000000, which does not exist"
+
+
+def test_a_spec_context_names_its_random_id_item(broken):
+    _hash_item(broken, "b-3f9a2c")
+    spec = broken / ".saffron" / "specs" / "done" / "SA-0001-a-gate.md"
+    _rewrite(spec, "backlog item 1.", "backlog item b-3f9a2c.")
+    violations = check_specs_name_their_items(load(BACKLOG, broken), broken)
+    assert {v.message for v in violations} == {
+        "SA-0001 cites this item and is not listed",
+        "open, but SA-0001 is in done/",
+    }
+
+
 def test_related_must_resolve(broken):
     _rewrite(
         _item(broken, "002-the-index-drifts.md"), "related: [1]", "related: [1, 9]"
@@ -139,6 +207,10 @@ def test_cites_must_resolve_to_a_design_section():
         ("items 71/75/80, SA-0058", {71, 75, 80}),
         ("items 71/75", {71, 75}),
         ("item 3/4 of the way", {3, 4}),
+        ("item b-3f9a2c says so", {"b-3f9a2c"}),
+        ("items **b-3f9a2c**, 12 and b-00aa11", {"b-3f9a2c", 12, "b-00aa11"}),
+        ("item B-3F9A2C, uppercase", set()),
+        ("item b-3f9a2cc is not an id", set()),
     ],
 )
 def test_cited_items_reads_every_form_the_corpus_uses(text, expected):
