@@ -1,53 +1,52 @@
-"""The design record as a graph, parsed from `DESIGN.md`.
+"""The design record as a graph, parsed from the appendix records.
 
-`CONTEXT.md` §11 names the genres the factory records a decision in. Two of them are
-modelled here — a **principle** and the **revision appendix** that contributed it
-— because those two have instances a document already carries and a surface that
-reads them. `EvidenceRecord` and `SpikeVerdict` are named in `CONTEXT.md` §11 and
-deliberately absent from the vocabulary: they have no reader yet, and a term with
-no reader is what `tests/ontology/test_no_dead_terms.py` deletes.
+`CONTEXT.md` §11 names the genres the factory records a decision in. Two are
+modelled here: a **principle**, and the **revision appendix** that contributed
+it, read from `docs/appendices/`. `EvidenceRecord` and `SpikeVerdict` are
+deliberately absent: they have no reader yet.
 
-**`DESIGN.md` stays authoritative.** The prose is not stored in the vocabulary and
-is never written back to; this module reads it and renders one index from it. That
-is the opposite direction from `render.py`, where the vocabulary is authoritative
-and `CONTEXT.md` is its render, and the asymmetry is the point: a closed set is a
-decision the vocabulary owns, while a principle is prose an appendix owns.
-
-Dev-only and outside `saffron/`, for `render.py`'s reason: `pyproject.toml` says
-nothing under `saffron/` imports a graph library.
+**The appendix records are authoritative.** This module reads them and renders
+two indexes into `DESIGN.md` from them, the opposite direction from `render.py`'s
+vocabulary renders. Dev-only and outside `saffron/`: nothing there imports a
+graph library.
 """
 
-from __future__ import annotations
-
 import re
+from pathlib import Path
 
 import rdflib
 
-from ontology.spans import PRINCIPLE_ANCHOR, PRINCIPLE_HEADER, principle_index
+from ontology.spans import (
+    APPENDIX_HEADER,
+    PRINCIPLE_ANCHOR,
+    PRINCIPLE_HEADER,
+    appendix_index,
+    principle_index,
+)
+from records.kinds import KINDS, Appendix
+from records.load import Record, load
 
 NS = "urn:software-factory:ns#"
 FACTORY = rdflib.Namespace(NS)
 
-# The two halves of "an appendix heading", and the *only* definitions of them:
-# `tests/test_citations.py` imports these rather than keeping its own copy. They
-# diverged once — a hyphen for the em dash matched `OPENS` and not `APPENDIX`,
-# and the loop carried the previous letter forward and credited it that
-# appendix's principles.
-APPENDIX = re.compile(r"^## Appendix ([A-Z]) — .*$")
-# Deliberately looser than the heading level and spacing `APPENDIX` accepts: what
-# it is for is catching a heading this file cannot read, so it must reach further
-# than the reader, not the same distance.
+# An appendix heading at any level or spacing. Nothing reads one in `DESIGN.md`
+# any more, so the guard test uses this to refuse one written there.
 APPENDIX_OPENS = re.compile(r"^#{2,}\s*Appendix\b")
 # A principle opens a line and its claim is the bolded lead. Three wrap before
-# the closing `**`, so the claim is read to that marker rather than to the end
-# of the line.
+# the closing `**`, so the claim is read to that marker rather than to the end.
 _PRINCIPLE = re.compile(r"^(\d+)\. \*\*")
-# The `Rev` column of the appendix index, which carries what a heading cannot:
-# Appendix G covers rev 8 and rev 10, and rev 10 appears in no title.
-_INDEX_ROW = re.compile(r"^\| \*\*([A-Z])\*\* \| ([0-9, ]+) \|")
-# Every appendix title states a rev, so the hand-written `Rev` cell above has
-# a second reading to agree with. It is the row that carries the extra ones.
-_HEADING_REVISION = re.compile(r"\brev (\d+)\b")
+# Most titles state a rev, so the hand-written `revisions` has a second reading.
+_TITLE_REVISION = re.compile(r"\brev (\d+)\b")
+
+
+def appendices(root: Path) -> list[Record]:
+    return load(KINDS["appendix"], root)
+
+
+def _appendix(record: Record) -> Appendix:
+    if not isinstance(record.model, Appendix):
+        raise TypeError(f"{record.path}: not an appendix record")
+    return record.model
 
 
 def _claim(lines: list[str], start: int) -> str:
@@ -65,47 +64,33 @@ def _claim(lines: list[str], start: int) -> str:
     return claim.rstrip(".")
 
 
-def parse(design: str) -> rdflib.Graph:
-    """Every principle and revision appendix `DESIGN.md` declares."""
+def parse(records: list[Record]) -> rdflib.Graph:
+    """Every principle and revision appendix the appendix records declare."""
     graph = rdflib.Graph()
     graph.bind("factory", FACTORY)
-    lines = design.splitlines()
-
-    covers: dict[str, list[int]] = {}
-    for line in lines:
-        if row := _INDEX_ROW.match(line):
-            covers[row.group(1)] = [
-                int(n) for n in row.group(2).replace(" ", "").split(",")
-            ]
-
-    appendix: rdflib.URIRef | None = None
-    for number, line in enumerate(lines):
-        if APPENDIX_OPENS.match(line) and not APPENDIX.match(line):
-            raise ValueError(f"{line!r}: an appendix heading this cannot read")
-        if found := APPENDIX.match(line):
-            letter = found.group(1)
-            appendix = FACTORY[f"Appendix{letter}"]
-            revisions = covers.get(letter, [])
-            stated = _HEADING_REVISION.search(line)
-            # A row with no letter is `RevisionAppendixShape`'s to refuse; this
-            # catches the typo'd cell, which is well-formed and wrong.
-            if stated and revisions and int(stated.group(1)) not in revisions:
-                raise ValueError(
-                    f"Appendix {letter}: the heading says rev {stated.group(1)}, "
-                    f"the index row says {revisions}"
+    for record in records:
+        m = _appendix(record)
+        stated = _TITLE_REVISION.search(m.title)
+        if stated and int(stated.group(1)) not in m.revisions:
+            raise ValueError(
+                f"Appendix {m.id}: the title says rev {stated.group(1)}, "
+                f"revisions says {m.revisions}"
+            )
+        appendix = FACTORY[f"Appendix{m.id}"]
+        graph.add((appendix, rdflib.RDF.type, FACTORY.RevisionAppendix))
+        graph.add((appendix, FACTORY.appendixLetter, rdflib.Literal(m.id)))
+        for revision in m.revisions:
+            graph.add((appendix, FACTORY.coversRevision, rdflib.Literal(revision)))
+        lines = record.body.splitlines()
+        for number, line in enumerate(lines):
+            if found := _PRINCIPLE.match(line):
+                node = FACTORY[f"principle-{found.group(1)}"]
+                graph.add((node, rdflib.RDF.type, FACTORY.Principle))
+                graph.add(
+                    (node, FACTORY.principleNumber, rdflib.Literal(int(found.group(1))))
                 )
-            graph.add((appendix, rdflib.RDF.type, FACTORY.RevisionAppendix))
-            graph.add((appendix, FACTORY.appendixLetter, rdflib.Literal(letter)))
-            for revision in revisions:
-                graph.add((appendix, FACTORY.coversRevision, rdflib.Literal(revision)))
-            continue
-        if (found := _PRINCIPLE.match(line)) and appendix is not None:
-            index = int(found.group(1))
-            node = FACTORY[f"principle-{index}"]
-            graph.add((node, rdflib.RDF.type, FACTORY.Principle))
-            graph.add((node, FACTORY.principleNumber, rdflib.Literal(index)))
-            graph.add((node, FACTORY.claim, rdflib.Literal(_claim(lines, number))))
-            graph.add((node, FACTORY.contributedBy, appendix))
+                graph.add((node, FACTORY.claim, rdflib.Literal(_claim(lines, number))))
+                graph.add((node, FACTORY.contributedBy, appendix))
     return graph
 
 
@@ -145,14 +130,14 @@ ANCHOR = PRINCIPLE_ANCHOR
 _HEADER = PRINCIPLE_HEADER
 
 
-def render_principles(text: str) -> str:
-    """Rewrite the principle index's table body from `DESIGN.md`'s own appendices.
+def render_principles(text: str, graph: rdflib.Graph) -> str:
+    """Rewrite the principle index's table body from the appendix records.
 
     The header locates the span and is re-emitted rather than left in place, so
     a drifted one is refused by name below. Matching it loosely instead would
     append the new rows underneath the old ones.
     """
-    rows = principles(parse(text))
+    rows = principles(graph)
     if not rows:
         raise ValueError("the design record parsed to no principles")
     body = "".join(
@@ -165,3 +150,28 @@ def render_principles(text: str) -> str:
     if replaced and not all(ln.startswith("| ") for ln in replaced.splitlines()):
         raise ValueError("the span after the principle header is not a table body")
     return text[:start] + _HEADER + body + text[end:]
+
+
+def _principle_cell(numbers: list[int]) -> str:
+    if not numbers:
+        return ""
+    lo, hi = min(numbers), max(numbers)
+    return str(lo) if lo == hi else f"{lo}–{hi}"
+
+
+def render_appendix_index(text: str, records: list[Record], graph: rdflib.Graph) -> str:
+    """Rewrite the appendix index's table body from the appendix records."""
+    blocks: dict[str, list[int]] = {}
+    for number, _, letter in principles(graph):
+        blocks.setdefault(letter, []).append(number)
+    body = ""
+    for record in records:
+        m = _appendix(record)
+        revisions = ", ".join(str(n) for n in m.revisions)
+        cell = _principle_cell(blocks.get(m.id, []))
+        body += f"| **{m.id}** | {revisions} | {_escaped(m.question)} | {cell} |\n"
+    start, end = appendix_index(text)
+    replaced = text[start + len(APPENDIX_HEADER) : end]
+    if replaced and not all(ln.startswith("| ") for ln in replaced.splitlines()):
+        raise ValueError("the span after the appendix header is not a table body")
+    return text[:start] + APPENDIX_HEADER + body + text[end:]

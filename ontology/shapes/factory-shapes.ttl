@@ -279,6 +279,6 @@ factory:PrincipleShape a sh:NodeShape ;
 factory:RevisionAppendixShape a sh:NodeShape ;
     sh:targetClass factory:RevisionAppendix ;
     sh:property [ sh:path factory:appendixLetter ; sh:minCount 1 ; sh:maxCount 1 ;
-        sh:datatype xsd:string ; sh:pattern "^[A-Z]$" ] ;
+        sh:datatype xsd:string ; sh:pattern "^[A-Z]{1,2}$" ] ;
     sh:property [ sh:path factory:coversRevision ; sh:minCount 1 ;
         sh:datatype xsd:integer ; sh:minInclusive 1 ] .
