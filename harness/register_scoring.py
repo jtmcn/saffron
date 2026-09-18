@@ -10,7 +10,9 @@ every claim it scores is already stored in `docs/evidence/passes/*/run-N.json`.
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,3 +43,30 @@ def claims_in(pass_dir: Path) -> list[Claim]:
                     if text:
                         found.append(Claim(fixture.name, run, lens["lens"], text))
     return found
+
+
+# Not a spec and not a root document: `trailing-condition` is spec-only and
+# `_rendered` looks for spans only in DESIGN.md and CONTEXT.md. A claim is
+# neither, and naming one here would score it as something it is not.
+_CLAIM_PATH = "claim.md"
+
+
+def load_gate(repo: Path):
+    """The `prose` gate script, loaded by path as `tests/test_prose_gate.py` does."""
+    script = repo / ".saffron" / "gates" / "prose.py"
+    spec = importlib.util.spec_from_file_location("saffron_prose_gate", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    # Registered first: `Hit` is a dataclass under postponed annotations.
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def score_claim(gate, text: str, repo: Path) -> tuple[str, ...]:
+    """The house-style rule codes this claim carries.
+
+    `root` is the repo because `protected_words` reads `CONTEXT.md`: Saffron's
+    own vocabulary must not read as filler.
+    """
+    return tuple(hit.code for hit in gate.check(text, _CLAIM_PATH, "prose", root=repo))
