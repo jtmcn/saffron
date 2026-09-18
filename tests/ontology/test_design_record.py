@@ -224,3 +224,21 @@ def test_a_drifted_table_header_is_refused():
     assert mutant != committed, "the fixture header was not found — has it drifted?"
     with pytest.raises(ValueError, match="header under it"):
         design_record.render_principles(mutant, _graph())
+
+
+def _appendix_headings(text: str) -> list[str]:
+    return [ln for ln in text.splitlines() if design_record.APPENDIX_OPENS.match(ln)]
+
+
+def test_design_md_holds_no_appendix():
+    """An appendix written into `DESIGN.md` the old way is read by nothing: its
+    principles never reach the index, and every other test stays green."""
+    assert _appendix_headings(DESIGN.read_text()) == [], (
+        "DESIGN.md has an appendix heading. Appendices are records: "
+        "write it under docs/appendices/."
+    )
+
+
+def test_the_guard_would_catch_an_appendix_written_the_old_way():
+    mutant = DESIGN.read_text() + "\n## Appendix Q — rev 21: written the old way\n"
+    assert _appendix_headings(mutant)
