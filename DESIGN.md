@@ -2,7 +2,7 @@
 
 An agentic software factory: spec files in, reviewed pull requests out, running unattended overnight on one Mac.
 
-**Status:** rev 23 — **a threshold that names one cause is read as naming the only cause**. `CLAUDE.md`'s ~200-line budget named one remedy, promote to a gate. The overflow it kept firing on was reference the tree already states (Appendix S, principle 60). §8 orders the cut. Prior: rev 22, **a style rule limits growth, and never exempts a whole file**. Saffron's own prose now has a blocking `prose` gate and an advisory `terms` gate (Appendix R, principle 59). No file can gain hits of any rule, and existing prose stays as written. Prior: rev 21, **the verdict of record leaves the implementer's container.** The final gate suite and every critic lens ran in the container the implementer had spent the repair loop in as root. PACKAGE's re-verification, the one check outside it, was skipped on an unmoved base as "provably redundant". It now re-verifies every packaged commit, and the lenses move to a critic cell rebuilt from the exported patch (§5.4 to §5.7, Appendix Q, principle 58). `SA-0086` to `SA-0089` build it. Prior: rev 20 — the vocabulary covers the design record as well as the run record. `CONTEXT.md` §11 named the genres a decision here is written in and nothing carried them; `factory:Principle` and `factory:RevisionAppendix` now do, with shapes as their readers and `DESIGN.md`'s generated principle index as the surface that renders from them (Appendix P). What §9's v2.5 closed is **the emitter** — the ledger→RDF projection — and it is deferred rather than finished: `ontology/RATIONALE.md` carries its own revisit clause and it will be asked again. "`ontology/` is a completed project" was shorthand for that verdict plus Appendix O's, and it read as a third and wider decision neither of them made — principle 57. §1.4 is untouched: no shape controls execution, and the design record projects from no §4.1 table. Prior: rev 19 — the vocabulary is authoritative for the run record's closed sets and generates them: `CONTEXT.md`'s enumerations and the shapes' `sh:in` lists render from `ontology/factory.ttl`, so a set declared in one place reaches all three (§4.6). Two shape lists stay hand-maintained because the vocabulary cannot imply them — `CoreGateBlockingShape`'s blocking levels and `TaskShape`'s `endedInState` superset — and a test names the file when one is forgotten. **And Appendix O's spike ran and closed §1.4.** The refusal predicate built as shapes against the Python answered *no* on questions 1 and 4, so §1.4's bullet stands and no scheduling decision reads a triple. (Rev 20 narrows what that sentence originally claimed: it said `ontology/` was a completed project, which is not what either verdict decided.) Two corrections landed with it — the appendix's premise that the predicate is "pure set containment" is wrong, four of its eight refusals being glob matching; and the spike's own first claim that glob matching is inexpressible in SHACL was false and is retracted (Appendix O *The result*, `docs/evidence/2026-09-04-refusal-predicate-two-arms.md`). A fourth defect the modelling found: `MERGE_TRAIN` is a state §3.3 shows a task entering and `scheduler.py` reads twice, and it is in neither `CONTEXT.md` nor the vocabulary. Prior: rev 18 `SA-0001` built and answered: five queries, five SQL equivalents, don't build the emitter (`ontology/RATIONALE.md`). The vocabulary is gated by `shacl` and cross-checked against `CONTEXT.md`'s closed sets; the *operational* question the RATIONALE never tested is stated in Appendix O and left to a spike, and §1.4's bullet stands until that spike runs. Prior: rev 17 the first night's scheduler decided against the queue that exists rather than the deep one §4.2 is written for (§4.2.1), and §6's ranking corrected against the real ledger after it sorted a sustained blocker last (`docs/evidence/2026-08-25-morning-queue-from-real-rows.md`). Prior: rev 16 the tree a task is cut from and the executables that judge it are both host-supplied, closing the two trust boundaries backlog items 11 and 12 left open (Appendix N). Prior: rev 15 the cell moved off the API key onto a Claude Code subscription token, and the ceiling reasoning corrected against a measured run (`docs/evidence/2026-08-21-subscription-turn-accounting.md`, Appendix M); rev 14 the critic built and measured against a known-bad diff (Appendix L); rev 13 three tasks run, one reviewed, and the review said no (Appendix K); rev 12 v0.5 run against a live model (Appendix J); rev 11 v0.5 built and reviewed (Appendix I); rev 10 the cell runtime chosen by spike (Appendix G); rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime named (Appendix G); rev 9 v0 built and replayed (Appendix H)
+**Status:** rev 24: **a check that runs only on fixtures verifies the check, not the subject**. N5's derivation-chain query ran only against hand-authored graphs, so no merged change was ever its subject. The emitter is reopened on `ontology/RATIONALE.md`'s own revisit clause, under a decision rule stated before the run (Appendix T, principle 61). §1.4 is untouched: no scheduling decision reads a triple. Prior: rev 23 — **a threshold that names one cause is read as naming the only cause**. `CLAUDE.md`'s ~200-line budget named one remedy, promote to a gate. The overflow it kept firing on was reference the tree already states (Appendix S, principle 60). §8 orders the cut. Prior: rev 22, **a style rule limits growth, and never exempts a whole file**. Saffron's own prose now has a blocking `prose` gate and an advisory `terms` gate (Appendix R, principle 59). No file can gain hits of any rule, and existing prose stays as written. Prior: rev 21, **the verdict of record leaves the implementer's container.** The final gate suite and every critic lens ran in the container the implementer had spent the repair loop in as root. PACKAGE's re-verification, the one check outside it, was skipped on an unmoved base as "provably redundant". It now re-verifies every packaged commit, and the lenses move to a critic cell rebuilt from the exported patch (§5.4 to §5.7, Appendix Q, principle 58). `SA-0086` to `SA-0089` build it. Prior: rev 20 — the vocabulary covers the design record as well as the run record. `CONTEXT.md` §11 named the genres a decision here is written in and nothing carried them; `factory:Principle` and `factory:RevisionAppendix` now do, with shapes as their readers and `DESIGN.md`'s generated principle index as the surface that renders from them (Appendix P). What §9's v2.5 closed is **the emitter** — the ledger→RDF projection — and it is deferred rather than finished: `ontology/RATIONALE.md` carries its own revisit clause and it will be asked again. "`ontology/` is a completed project" was shorthand for that verdict plus Appendix O's, and it read as a third and wider decision neither of them made — principle 57. §1.4 is untouched: no shape controls execution, and the design record projects from no §4.1 table. Prior: rev 19 — the vocabulary is authoritative for the run record's closed sets and generates them: `CONTEXT.md`'s enumerations and the shapes' `sh:in` lists render from `ontology/factory.ttl`, so a set declared in one place reaches all three (§4.6). Two shape lists stay hand-maintained because the vocabulary cannot imply them — `CoreGateBlockingShape`'s blocking levels and `TaskShape`'s `endedInState` superset — and a test names the file when one is forgotten. **And Appendix O's spike ran and closed §1.4.** The refusal predicate built as shapes against the Python answered *no* on questions 1 and 4, so §1.4's bullet stands and no scheduling decision reads a triple. (Rev 20 narrows what that sentence originally claimed: it said `ontology/` was a completed project, which is not what either verdict decided.) Two corrections landed with it — the appendix's premise that the predicate is "pure set containment" is wrong, four of its eight refusals being glob matching; and the spike's own first claim that glob matching is inexpressible in SHACL was false and is retracted (Appendix O *The result*, `docs/evidence/2026-09-04-refusal-predicate-two-arms.md`). A fourth defect the modelling found: `MERGE_TRAIN` is a state §3.3 shows a task entering and `scheduler.py` reads twice, and it is in neither `CONTEXT.md` nor the vocabulary. Prior: rev 18 `SA-0001` built and answered: five queries, five SQL equivalents, don't build the emitter (`ontology/RATIONALE.md`). The vocabulary is gated by `shacl` and cross-checked against `CONTEXT.md`'s closed sets; the *operational* question the RATIONALE never tested is stated in Appendix O and left to a spike, and §1.4's bullet stands until that spike runs. Prior: rev 17 the first night's scheduler decided against the queue that exists rather than the deep one §4.2 is written for (§4.2.1), and §6's ranking corrected against the real ledger after it sorted a sustained blocker last (`docs/evidence/2026-08-25-morning-queue-from-real-rows.md`). Prior: rev 16 the tree a task is cut from and the executables that judge it are both host-supplied, closing the two trust boundaries backlog items 11 and 12 left open (Appendix N). Prior: rev 15 the cell moved off the API key onto a Claude Code subscription token, and the ceiling reasoning corrected against a measured run (`docs/evidence/2026-08-21-subscription-turn-accounting.md`, Appendix M); rev 14 the critic built and measured against a known-bad diff (Appendix L); rev 13 three tasks run, one reviewed, and the review said no (Appendix K); rev 12 v0.5 run against a live model (Appendix J); rev 11 v0.5 built and reviewed (Appendix I); rev 10 the cell runtime chosen by spike (Appendix G); rev 2 post adversarial review (Appendix A); rev 3 factory ontology (Appendix B); rev 4 repo-agnostic (Appendix C); rev 5 prior art (Appendix D); rev 6 vocabulary corrections (Appendix E); rev 7 read-through defects (Appendix F); rev 8 cell runtime named (Appendix G); rev 9 v0 built and replayed (Appendix H)
 
 **Companion document:** `CONTEXT.md` — the controlled vocabulary. It is authoritative for what words mean; this document is authoritative for what the system does. Where they disagree, one of them has a bug.
 **Scope:** language- and stack-agnostic. Saffron develops *any* repo that can satisfy the gate contract (§5.4). First repo is Saffron itself; `thermal-edge` is the first external one.
@@ -1404,7 +1404,7 @@ Success criterion: a batch spans two repos, and the diff to Saffron's source req
 
 Only if `ontology/RATIONALE.md` says the queries are worth reading: ledger → RDF projection, pyoxigraph store, materialization at batch end, SHACL validation of the projection.
 
-It says otherwise (rev 18). `ontology/queries/` therefore stays where it is, as worked examples that `tests/ontology/` runs — moving them under `docs/` would cost the only thing keeping them honest. The vocabulary stays as documentation with two readers the queries are not: the `shacl` gate and the `CONTEXT.md` cross-check. Appendix O's spike is the only thing that reopens an emitter. **That is a completed project, not an abandoned one** — you will have bought a precise answer to "is the relational model costing me anything?" for the price of a weekend, which is the cheapest that answer is ever available.
+It says otherwise (rev 18). `ontology/queries/` therefore stays where it is, as worked examples that `tests/ontology/` runs — moving them under `docs/` would cost the only thing keeping them honest. The vocabulary stays as documentation with two readers the queries are not: the `shacl` gate and the `CONTEXT.md` cross-check. Appendix O's spike is one of two things that reopen an emitter. The other is the RATIONALE's own clause, and rev 24 is where it fires: N5's query runs over the merged history rather than over fixtures, and Appendix T carries the decision rule. **The analytical question is a completed project, not an abandoned one** — you will have bought a precise answer to "is the relational model costing me anything?" for the price of a weekend, which is the cheapest that answer is ever available.
 
 ### v3 — the generality test, then only if v2 is earning its keep
 
@@ -1557,6 +1557,7 @@ disagrees with an appendix, the appendix is right.
 | **Q** | 21 | Where the verdict of record is computed: outside the container the implementer had root in, on the tree the exported patch describes | 58 |
 | **R** | 22 | How a style rule holds prose that already breaks it: it limits growth, and it skips no file | 59 |
 | **S** | 23 | A budget that names one remedy: over ~200 lines the cut is ordered, and the file a cell reads whole is the one it binds | 60 |
+| **T** | 24 | The emitter reopened on the RATIONALE's own clause: N5's query ran only against fixtures, so no merged change was ever its subject | 61 |
 
 **Two revisions have no appendix, and neither needs one.** Rev 1 is the document.
 Rev 17 is in §4.2.1 and §6 with
@@ -1650,6 +1651,7 @@ compresses an appendix, and the appendix is where the case that found it lives.
 | 58 | A check that is redundant only if its subject was honest is not redundant | Q |
 | 59 | A style rule limits growth, and never exempts a whole file | R |
 | 60 | A threshold that names one cause is read as naming the only cause | S |
+| 61 | A check that runs only on fixtures verifies the check, not the subject | T |
 
 ---
 
@@ -2914,3 +2916,142 @@ Conventions 20, Agent skills 14.
 
 **What it does not change.** The ~200 figure. `CONTEXT.md`'s exemption, which
 §5.3 earns by filtering the vocabulary per phase. Nothing under `saffron/`.
+
+## Appendix T — rev 24: the emitter, reopened on the clause it carried
+
+`SA-0001` answered the analytical question and answered it no. Five queries,
+five SQL wins, do not build the emitter (`ontology/RATIONALE.md`). That verdict
+stands. The RATIONALE carried one condition that would reopen it, and Appendix P
+restated the status as deferred rather than refused: asked again when
+reconstructibility must be enforced continuously rather than spot-checked. This
+appendix argues that the condition now holds, and it is a different question
+from the one `SA-0001` tested (principle 56).
+
+### N5 is asserted for real work and checked only for fixtures
+
+N5 is a numbered requirement in §1: any merged change reconstructible from
+stored artifacts alone, expressed as a derivation-chain query so it is checkable
+rather than asserted. Q4 is that query. It exists, it is tested, and every input
+it ever ran against was written by hand.
+`tests/ontology/test_queries.py` builds each task, spec and diff as Turtle text
+in the test body. No merged pull request was ever its subject. Q4 therefore
+proves that the query is well formed. It proves nothing about any change this
+repository shipped.
+
+61. **A check that runs only on fixtures verifies the check, not the subject.**
+    Q4 encodes N5 and passes against a hand-authored graph. Passing establishes
+    that the query is well formed. It establishes nothing about any merged
+    change, because no merged change was ever its input. A requirement checked
+    that way is asserted with extra steps.
+
+### What changed since rev 18
+
+Two things, and neither existed when the RATIONALE was written.
+
+- **Backlog item 118, and Appendix Q.** The verdict of record was computed
+  inside the container the implementer controlled. Every git-config forgery this
+  backlog closed is one instance of that class. An audit trail matters more once
+  the thing it audits was, for a period, forgeable from inside.
+- **Q4's own header states the win, while arguing the other side.** The
+  derivation edges are stated rather than reconstructed from a path template.
+  That is what lets a broken chain be absent from the result, instead of
+  rendering as a missing file. A break that renders as a missing file is the
+  `tool` field one level up. A chain that never linked reads identically to one
+  that did.
+
+The second point is the whole argument, and it needs narrowing to survive.
+§4.1's foreign keys carry the chain, and plan and diff are file paths rather
+than rows. A walk that checks each path exists already tells a missing file from
+a present one. What it cannot tell is a present file that is not this task's.
+The batch tree is keyed by spec, so a later task of the same spec writes over
+the earlier task's plan and diff. The event log still holds what each task
+recorded at extraction. An edge stated only when the stored file matches that
+record drops the overwritten chain. The checked walk calls it whole.
+
+### The decision rule, named before the run
+
+Appendix G named a product only after a spike returned four assertions.
+Appendix O named its rule before running and then honoured the answer. The same
+shape applies here, and the claim is falsifiable.
+
+Build the projection from the whole ledger, then run Q4 over it across the
+merged history. The comparator is the checked walk: §4.1's foreign keys, with
+every stored file checked to exist. The claim is that Q4 drops at least one
+merged pull request the checked walk reports as whole. A missing file cannot
+carry the claim, because the checked walk sees one too. A task that cannot be
+tied to its own events counts for neither side. A single instance carries it.
+Zero instances across every merged pull request refutes the operational case, as
+the queries refuted the analytical one. The emitter then returns to the drawer
+with a third negative result. That answer is worth the weekend on §9's own
+logic, whichever way it lands.
+
+A positive result is narrower than it will read. Every instance comes from the
+record check, and a SQL walk given the same check finds the same set. So one
+instance shows that N5 needs that check. It does not show the check needs a
+graph. The emitter keeps its place only if Q4 over the projection stays cheaper
+to hold than the SQL walk with the check added. That is the RATIONALE's own
+standard.
+
+### Backlog item 170 bounds the question
+
+Item 170 makes commits on `refs/saffron/*` the authoritative record and the
+ledger an index folded out of it. It also moves artifacts to a store named by
+content hash. No later task can then overwrite an earlier one's plan or diff,
+and the record carries a hash for every artifact, the diff included. The one
+case this rule can find stops arising once item 170 lands.
+
+So the rule measures history recorded before item 170, and it runs once over
+that history rather than at every batch end. That makes it urgent rather than
+moot. Item 170 has still to decide whether the tasks already recorded are
+migrated or abandoned, and abandoning them removes the evidence. Each break the
+rule finds is a chain the old layout already lost, which is an input to that
+decision. A standing N5 check belongs to the record item 170 builds, not to the
+batch tree it replaces.
+
+The same item reverses §4.6's first rule, which the next section cites. The
+projection's derivation from the ledger holds either way. Once the ledger is an
+index, the projection is derived from a derivation.
+
+### What this costs, stated rather than discovered
+
+- **§4.6's first rule.** Divergence in an audit trail is worse than either store
+  alone. The projection is therefore derived and never authored, rebuilt from
+  the ledger rather than updated in place. It is validated against the shapes
+  as it is built, since the `shacl` gate reads only the tree. Q4 runs over it
+  as a check on real history, rather than beside it as a test.
+- **A graph library becomes a runtime import.** `pyproject.toml`,
+  `ontology/render.py` and `ontology/design_record.py` each state that nothing
+  under `saffron/` imports one. The emitter falsifies that sentence in three
+  places. All three are forbidden to the spec's cell, and the dependency move
+  needs the protected `uv.lock`, so the operator does both at merge.
+- **Coverage stays downstream of readers.** Appendix O measured the full
+  `CONTEXT.md` expansion at roughly thirty terms and ruled that coverage follows
+  readers. The emitter adds one reader for the terms Q4 already names. It
+  licenses no other term, and `tests/ontology/test_no_dead_terms.py` still
+  governs.
+
+### What this does not reopen
+
+§1.4's bullet stands. The factory ontology describes the run record. It never
+controls execution, no scheduling decision reads a triple, and the shapes gate
+no state transition. Appendix O's rule closed that question on 2026-09-04 on
+evidence, and this appendix touches none of that evidence.
+
+The operator states an intent to revisit it, on grounds of growing complexity in
+the control plane. That intent is recorded here and decides nothing. Appendix O
+is explicit that an ontology controlling execution needs this emitter. It is
+equally explicit that the reason must be argued on its own evidence, rather than
+arriving through a side door. Naming the intent in advance is the opposite
+of the side door, and the bullet still moves only on a measured result.
+
+What the emitter does supply is the instrument. The 2026-09-04 spike answered
+its question 3, the cost of keeping the graph current per scheduled task, from a
+hand-authored graph of in-flight tasks. A projection built from the ledger
+measures part of question 3 on real rows, as a byproduct of work done for N5.
+It builds once over history rather than per scheduled task, so it prices a
+rebuild and not the per-task upkeep.
+Questions 1 and 4 are what closed the spike, and neither is answered by this. On
+question 1 the cause was recorded and is narrower than it reads: the shape arm
+stated no refusal the Python left implicit, because `_unmatched_criterion_path`
+carries a `forbidden` carve-out §4.2.1 never states. The prose was incomplete,
+not the shapes. Anyone reopening §1.4 starts there, with §4.2.1 first.
