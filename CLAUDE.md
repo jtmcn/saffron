@@ -110,13 +110,11 @@ exception has a shape worth memorising: **core invokes declared gates, never too
   raises: **declared, never detected**. `session.py`, `worktree.py`, `proxy.py`.
 - `saffron/gates/` — `contract.py` is the gate JSON schema and the whole repo-agnostic
   surface; `runner.py` execs gates host-side (`LocalExecutor` / `CellExecutor`);
-  `baseline.py` subtracts pre-existing failures; `core/` holds the eight host-side gates.
-  `scope` and `integrity` read the diff, `census` reads other gates' results, and `committed`,
-  `criteria`, `revert`, `size` and `witness` sit beside them.
+  `baseline.py` subtracts pre-existing failures; `core/` holds the host-side gates.
 - `saffron/phases/` — `implement.py` (plan checkpoint + repair turns), `review.py` (lenses),
   `rebut.py`, `package.py`.
-- `saffron/task.py` — `run_task` drives one task end to end, a cell *and* PACKAGE, and is the
-  **only** caller of `run_one_cell` (gated). `saffron cell` and `saffron batch` adapt over it.
+- `saffron/task.py` — `run_task` drives one task end to end, a cell *and* PACKAGE.
+  `saffron cell` and `saffron batch` adapt over it.
 - `saffron/agents/` — `context.py` injects `CONTEXT.md` sections per phase and loads turn prompts.
   `artifacts.py` holds the extraction turn and plan validation; `findings.py` anchors findings to the diff.
 - `images/agent_runner.py` — the **only** file permitted to import the Agent SDK (gated). It runs
@@ -133,13 +131,8 @@ exception has a shape worth memorising: **core invokes declared gates, never too
 
 The five marked **(gated)** are enforced by `.saffron/rules/`, run by the `structure` gate and
 a prek hook; the rest are still prose. Promote one when you find it broken — `ast-grep test`
-means a rule ships with the mutant that proves it fires. Both pass `-c .saffron/sgconfig.yml`
-rather than letting ast-grep find a config by walking, so the file naming the rules is inside
-the subtree `integrity` guards, and both refuse every ignore source and state their own file
-set with `--globs`: a `.gitignore` naming itself reaches no diff, so routing an edit to a person
-cannot close that. A rule's `files:` glob is checked for reach by a test, its `ignores:` asserted
-exactly, and its regexes match a string's *content* — a `string` node's text carries its quotes
-and its `r`/`f` prefix, and anchoring on those read only the spellings the author typed.
+means a rule ships with the mutant that proves it fires. Read `.saffron/sgconfig.yml` before
+writing one.
 
 - **The `tool` field** separates a gate that ran and passed from one that never ran. It must be
   obtained *by executing* the tool, never a string literal (§5.4, Appendix H). **(gated over
@@ -192,15 +185,5 @@ and its `r`/`f` prefix, and anchoring on those read only the spellings the autho
 
 ## Agent skills
 
-### Issue tracker
-
-Work is tracked as spec files in `.saffron/specs/SA-NNNN-*.md`, driven by `saffron cell`. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-The five canonical roles, each label string equal to its name. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context: `CONTEXT.md` at the root. Decisions are principles and appendices in
-`DESIGN.md`, never ADRs (`CONTEXT.md` §11). See `docs/agents/domain.md`.
+`docs/agents/` holds how skills read this repo: spec files as the issue tracker, the five
+triage labels, and the domain docs (no ADRs, `CONTEXT.md` §11).

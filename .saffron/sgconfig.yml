@@ -5,6 +5,13 @@
 # guards. Here, the file that decides which rules run is inside `.saffron/**`,
 # which is `protected` and in `integrity.gate_config`, exactly like the rules.
 # The gate and the prek hook both pass `-c`, so nothing is discovered by walking.
+#
+# Both also refuse every ignore source and state their own file set with
+# `--globs`: a `.gitignore` naming itself reaches no diff, so routing an edit to
+# a person cannot close that. A rule's `files:` glob is checked for reach by a
+# test and its `ignores:` asserted exactly. Its regexes match a string's
+# *content*: a `string` node's text carries its quotes and its `r`/`f` prefix,
+# and anchoring on those reads only the spellings the author typed.
 ruleDirs:
   - rules
 
