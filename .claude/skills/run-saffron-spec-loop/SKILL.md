@@ -41,11 +41,12 @@ An existing order is kept until `snapshot --force`, which rescans and keeps
 every recorded outcome still true — a reviewable PR, a drop, an undecided cell.
 A spec edited while its PR is open is held out of the new order and named. A
 spec that became runnable since the last snapshot, such as a child whose parent
-is now reviewable, is named and left out. `snapshot --force --add` takes it in,
-once the operator agrees and it has had its step 1b review (item b-afec7c).
+is now reviewable, is named and left out. `snapshot --force --add SA-NNNN`
+takes it in, once the operator agrees and it has had its step 1b review (item b-afec7c).
 `status` and `next` call an order **stale** when a spec file moved or changed or
 a PR merged or closed, and `next` refuses a stale one. A spec queued since the
-snapshot is not in it: re-snapshot to add it.
+snapshot is not in it: `snapshot --force --add SA-NNNN` adds it, after its step
+1b review. `--add` with no id takes every new spec.
 
 A new loop starts with `snapshot --new`. A drop is one loop's call, and
 `--force` carries it into the next (item 172). `--new` refuses while the last
@@ -98,17 +99,18 @@ operator's decisions and the deferred findings in the prompt, so the review
 spends itself on what is still open. Nobody else reads your own edit, and two
 of run 7's blockers were in the delegate's edits.
 
+Review the whole spec, not the edit. Checks 5 and 6 read it entire, and a report
+whose six lines cover a diff is not one. Run 5's re-reviews also found a witness
+stub answering every subnet alike (#304). Two notes named code seams that do not
+exist (#306). Both sat in text the first review passed. An edited child needs
+one re-review rather than two, and the parent-branch review below is that one.
+
 **A review with no blocker and no concern ends the round.** Its notes go to
 step 5. `SA-0100` took five reviews in run 7. Each of the middle three found
 a new witness hole. Expect more than one round on a spec with several
 criteria. Until the edit merges, `hold SA-NNNN --why "#N"` keeps `next` off
 the spec, whose old text a cell would otherwise run. The re-snapshot after the
 merge releases it.
-Review the whole spec, not the edit. Checks 5 and 6 read it entire, and a report
-whose six lines cover a diff is not one. Run 5's re-reviews also found a witness
-stub answering every subnet alike (#304). Two notes named code seams that do not
-exist (#306). Both sat in text the first review passed. An edited child needs
-one re-review rather than two, and the parent-branch review below is that one.
 
 Two kinds of blocker failed the backtest, and reading the line at base does
 not filter them, because their premise holds there

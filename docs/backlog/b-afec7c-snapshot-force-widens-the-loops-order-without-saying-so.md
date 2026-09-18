@@ -40,3 +40,5 @@ A spec added that way still needs its spec review before `next` names it.
   #342 ← #340). Surfaced while stacking #340.
 - 2026-09-18: done by #346. `snapshot --force` names each spec that became
   runnable since the last snapshot and leaves it out unless `--add`.
+  `--add SA-NNNN` takes one spec at a time. Its step 1b review is the operator's
+  to run first: `next` does not check that a review happened.
