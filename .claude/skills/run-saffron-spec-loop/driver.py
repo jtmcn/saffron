@@ -816,6 +816,8 @@ def cmd_snapshot(args) -> int:
             f"{ORDER.relative_to(REPO)} exists — pass --force to re-snapshot this "
             "loop, or --new to start another"
         )
+    if args.add is not None and not args.force:
+        return _fail("--add takes in specs new to a re-snapshot: pass --force too")
     previous = _previous() if (args.force or args.new) else []
     if args.new:
         # A drop is this loop's call, so a new loop carries none (item 172);
@@ -838,9 +840,13 @@ def cmd_snapshot(args) -> int:
     # A spec whose parent became reviewable joins a re-snapshot unasked, with no
     # spec review (item b-afec7c): name it, and keep it out unless `--add`.
     known = {p.spec_id for p in previous}
-    arrived = [p for p in ordered if args.force and p.spec_id not in known]
-    if arrived and not args.add:
-        ordered = [p for p in ordered if p.spec_id in known]
+    arrived = [p for p in ordered if args.force and known and p.spec_id not in known]
+    wanted = {p.spec_id for p in arrived} if args.add == [] else set(args.add or ())
+    if unknown := wanted - {p.spec_id for p in arrived}:
+        return _fail(f"not new since the last snapshot: {', '.join(sorted(unknown))}")
+    added = [p for p in arrived if p.spec_id in wanted]
+    left_out = [p for p in arrived if p.spec_id not in wanted]
+    ordered = [p for p in ordered if p not in left_out]
     if held_out:
         print(f"edited while its pull request is open ({len(held_out)}):")
         for reason in held_out.values():
@@ -853,6 +859,15 @@ def cmd_snapshot(args) -> int:
         for trap in _edit_traps(previous):
             print(f"  {trap}")
         print()
+    for verb, specs in (("added", added), ("left out", left_out)):
+        if specs:
+            print(f"new since the last snapshot, {verb} ({len(specs)}):")
+            for p in specs:
+                print(f"  {p.spec_id}  {p.title}")
+    if left_out:
+        print("  `snapshot --force --add SA-NNNN` takes one in; review each spec first")
+    if arrived:
+        print()
     if not ordered:
         print("nothing to run: no candidate specs")
         for r in refusals:
@@ -860,14 +875,6 @@ def cmd_snapshot(args) -> int:
         return 1
     _save(ordered)
 
-    if arrived:
-        verb = "added" if args.add else "left out"
-        print(f"new since the last snapshot, {verb} ({len(arrived)}):")
-        for p in arrived:
-            print(f"  {p.spec_id}  {p.title}")
-        if not args.add:
-            print("  `snapshot --force --add` takes them in; review each spec first")
-        print()
     print(f"order: {len(ordered)} spec(s), bottom of the stack first\n")
     for i, p in enumerate(ordered, 1):
         dep = f"  depends_on={p.depends_on}" if p.depends_on else ""
@@ -1591,8 +1598,10 @@ def main() -> int:
     )
     p.add_argument(
         "--add",
-        action="store_true",
-        help="with --force, take in specs that became runnable since the last snapshot",
+        nargs="*",
+        metavar="SA-NNNN",
+        help="with --force, take in specs new since the last snapshot: those named, "
+        "or every one",
     )
     p.set_defaults(func=cmd_snapshot)
 
