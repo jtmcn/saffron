@@ -21,16 +21,21 @@ Appendices O, P and T. Nothing marks a decision replaced.
 
 ## Done looks like
 
-A record kind holding one decision per file, designed and landed, with the
-reversal the new appendix, U, records migrated into it first. The design
+A record kind holding one decision per file, designed and landed. The design
 answers four things:
 
-- Numbering. Principles are one sequence each appendix claims a block of, which
-  is why per-decision files written in parallel were refused. The backlog's
-  answer, random ids after item 177, is the one to try first.
-- Supersession. `superseded_by` holds one id, and a decision can be replaced
-  by several.
-- The name. "ADR" is on `CONTEXT.md`'s _Avoid_ list, and "decision record"
-  already means prior art's records there. It goes into `ontology/factory.ttl`
-  when chosen.
-- Which decisions migrate, and whether an appendix then cites them.
+- **Numbering.** Principles are one sequence each appendix claims a block of,
+  which is why per-decision files written in parallel were refused
+  (`DESIGN.md:1569`). The backlog's answer, random ids after item 177
+  (`records/kinds.py:34`), is the one to try first.
+- **Supersession.** `BacklogItem.superseded_by` holds one id. A decision
+  split into several, or replaced by several, needs a list.
+- **The name.** "ADR" is on `CONTEXT.md`'s _Avoid_ list because every
+  `ADR-NNNN` the design record cites is prior art's, now in
+  `docs/appendices/D-lessons-from-prior-art.md`. "Decision record" collides
+  too: `CONTEXT.md:639` uses it for prior art's records, and §11's own title
+  is "Design record". The name is chosen when the kind is designed, and it
+  goes into `ontology/factory.ttl` then.
+- **The first record.** The reversal U records, migrated out of U. It is
+  short, self-contained and states its own reason, so it tests the kind and
+  the migration path on the smallest case.
