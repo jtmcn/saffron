@@ -1,15 +1,15 @@
 ---
 id: 176
 title: '`mirror.diff_stat` reads without `DIFF_FLAGS`, so operator git config moves the queue line''s counts'
-status: open
+status: done
+closed: 2026-09-18
 tier: 3
 filed: 2026-09-17
 specs: [SA-0105]
-prs: []
+prs: [340]
 commits: []
 cites: []
 related: [115, 171]
-awaiting: [340]
 ---
 
 ## Problem
@@ -30,3 +30,5 @@ Splice `DIFF_FLAGS` into `diff_stat` too, with a witness that sets
 
 - 2026-09-18: open as PR #340 (`SA-0105`, spec loop run 7), stacked in
   #335 ← #338 ← #339 ← #342 ← #340.
+- 2026-09-18: done. PR #340 merged (`SA-0105`), and the spec retires to
+  `.saffron/specs/done/`.

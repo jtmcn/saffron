@@ -1,14 +1,14 @@
 ---
 id: 167
 title: EventLog.failed is the breadcrumb for a log that stopped writing and nothing reads it
-status: open
+status: done
+closed: 2026-09-18
 filed: 2026-09-17
 specs: [SA-0103]
-prs: []
+prs: [342]
 commits: []
 cites: [§4.1]
 related: [46]
-awaiting: [342]
 ---
 
 ## Problem
@@ -62,3 +62,5 @@ through. `SA-0103` carries it.
 
 - 2026-09-18: open as PR #342 (`SA-0103`, spec loop run 7), stacked in
   #335 ← #338 ← #339 ← #342 ← #340.
+- 2026-09-18: done. PR #342 merged (`SA-0103`), and the spec retires to
+  `.saffron/specs/done/`.

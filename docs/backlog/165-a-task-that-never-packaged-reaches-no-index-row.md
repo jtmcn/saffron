@@ -1,14 +1,14 @@
 ---
 id: 165
 title: A task that never reached PACKAGE reaches no index row, so the page ranks ten states it can never show
-status: open
+status: done
+closed: 2026-09-18
 filed: 2026-09-17
 specs: [SA-0100]
-prs: []
+prs: [339]
 commits: []
 cites: [§6, §5.7]
 related: [45]
-awaiting: [339]
 ---
 
 ## Problem
@@ -67,3 +67,5 @@ through. `SA-0100` carries it.
 
 - 2026-09-18: open as PR #339 (`SA-0100`, spec loop run 7), stacked in
   #335 ← #338 ← #339 ← #342 ← #340.
+- 2026-09-18: done. PR #339 merged (`SA-0100`), and the spec retires to
+  `.saffron/specs/done/`.
