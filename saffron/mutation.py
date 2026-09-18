@@ -71,7 +71,7 @@ class MutationResult:
 
     `ok=False` is not a weaker `ok=True` — a mutant that does not apply must
     read as "this mutant did not apply", not as "the witness survived", and a
-    reason that names the file and which of the two cases it was — never the
+    reason that names the file and what kept it from applying — never the
     edit itself — is what makes that reading possible for whoever is looking
     at the result.
     """
@@ -122,9 +122,10 @@ def apply_mutant(tree: Path, mutant: Mutant) -> MutationResult:
     which of the two cases it was, never the edit itself, and never as a
     silent edit of the first occurrence.
 
-    The reason carries no part of `find` or `replace`: it reaches a REPAIR
-    turn through `witness`'s summary, and a mutant an implementer can read
-    back is a mutant chosen to be killed (`CONTEXT.md`, Mutant).
+    The reason carries no part of `find` or `replace`: through `witness`'s
+    summary it reaches the gate table REVIEW's lenses are shown, a lens can
+    quote it back in REBUT, and a mutant an implementer can read back is a
+    mutant chosen to be killed (`CONTEXT.md`, Mutant).
 
     Returns the exact bytes it displaced, and the offset it displaced them
     at, so the caller can put them back with `restore_mutant` — including for

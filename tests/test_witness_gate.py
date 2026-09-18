@@ -129,17 +129,11 @@ def test_an_unapplied_mutant_reaches_neither_the_result_nor_the_lens_table(tmp_p
     """Item 114: an unapplied mutant's find/replace text used to reach the
     result's `summary` through the `unproven` note, and from there
     `review.gate_summary` repeats every gate's summary into the table
-    REVIEW's lenses are shown, which a REBUT-round lens can quote back to the
-    implementer. Driven end to end with one criterion whose mutant applies
+    REVIEW's lenses are shown, which a lens can quote back to the implementer
+    in REBUT. Driven end to end with one criterion whose mutant applies
     and whose witness survives — so `witness` fails for an ordinary reason —
     and one whose mutant does not apply at all, and neither half of either
-    mutant's edit may appear in the serialized result or the rendered table.
-
-    Imported inside the test body, not at module scope: a module-scope import
-    of a name this change adds would turn `revert`'s reverted run into a
-    collection error, which it reads as `skip` (`saffron/gates/**` and
-    `saffron/phases/**` are both forbidden to this spec's edits, but nothing
-    forbids reading them from a test)."""
+    mutant's edit may appear in the serialized result or the rendered table."""
     from saffron.phases.review import gate_summary
 
     find = "QRVT_FIND = QRVT_"
