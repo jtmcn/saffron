@@ -738,6 +738,11 @@ def test_a_ledger_built_by_the_previous_schema_still_opens_and_writes(tmp_path):
         "SELECT batch_id FROM runs WHERE run_id = ?", (run_id,)
     ).fetchone()
     assert row["batch_id"] is None
+    # No run nobody observed gains a preflight outcome by backfill.
+    old_row = ledger._db.execute(
+        "SELECT preflight FROM runs WHERE run_id = 1"
+    ).fetchone()
+    assert old_row["preflight"] is None
     ledger.close()
 
 
@@ -842,11 +847,13 @@ def test_a_preflight_outcome_outside_the_closed_set_is_refused(tmp_path):
     # The shape the 99-run ledger this defect is measured against actually
     # has: `preflight` present, with no CHECK on it at all.
     old_path = tmp_path / "old.db"
-    before = SCHEMA.replace(
-        "    preflight  TEXT CHECK (preflight IN ('PASSED', 'FAILED')),\n",
-        "    preflight  TEXT,\n",
+    checked = next(
+        line
+        for line in SCHEMA.splitlines(keepends=True)
+        if line.lstrip().startswith("preflight")
     )
-    assert before != SCHEMA  # otherwise this proves nothing
+    assert "CHECK" in checked  # otherwise this proves nothing
+    before = SCHEMA.replace(checked, "    preflight  TEXT,\n")
     old_conn = sqlite3.connect(old_path)
     old_conn.executescript(before)
     old_conn.execute(
@@ -857,10 +864,11 @@ def test_a_preflight_outcome_outside_the_closed_set_is_refused(tmp_path):
     old_conn.close()
 
     old = Ledger(old_path)
+    old.set_run_preflight(1, "PASSED")
     with pytest.raises(ValueError):
         old.set_run_preflight(1, "SIDEWAYS")
     row = old._db.execute("SELECT preflight FROM runs WHERE run_id = 1").fetchone()
-    assert row["preflight"] is None
+    assert row["preflight"] == "PASSED"
     old.close()
 
 

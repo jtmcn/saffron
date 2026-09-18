@@ -2253,7 +2253,7 @@ def test_the_baseline_scope_neither_invents_nor_cancels_an_escape(
 def test_a_run_records_whether_its_preflight_passed(monkeypatch, tmp_path):
     """§4.1: a run's own preflight outcome, sourced from its baseline suite —
     never derived from the task state that same branch also sets, which would
-    answer the same question with a join instead of an observation (Notes)."""
+    answer the same question with a join instead of an observation."""
     passing = _stub_the_runtime(monkeypatch)
     _, ready_ledger = _drive(
         monkeypatch,

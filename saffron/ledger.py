@@ -13,7 +13,11 @@ from pathlib import Path
 from saffron.agents.findings import Finding
 from saffron.gates.contract import Failure, GateResult
 
-SCHEMA = """
+# The closed set `set_run_preflight` writes; the `CHECK` below is built from it.
+RUN_PREFLIGHT_OUTCOMES = ("PASSED", "FAILED")
+_PREFLIGHT_IN = ", ".join(f"'{outcome}'" for outcome in RUN_PREFLIGHT_OUTCOMES)
+
+SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS repos (
     repo_id     INTEGER PRIMARY KEY,
     name        TEXT NOT NULL,
@@ -44,27 +48,14 @@ CREATE TABLE IF NOT EXISTS batches (
                                          'INFRASTRUCTURE', 'INCOMPLETE'))
 );
 
--- `preflight` is a run's own outcome (§4.1, CONTEXT.md §2), distinct from
--- `status` (how the run ended) and from a repo's baseline gate results, which
--- this value is read off of exclusively — never derived from `tasks.state` or
--- `runs.status`, which each answer a different question. NULL means "never
--- reached the baseline suite" — the driver raised before `suite.baseline`
--- ever returned — and is satisfied by the CHECK the same way a still-open
--- batch's `status` is; it is deliberately left NULL rather than invented,
--- because a run in that state was never observed for this purpose (§4.1's
--- warning against backfill applies to it too). `'PASSED'`/`'FAILED'` are the
--- two the baseline suite can actually report, written once, in
--- `saffron/cell/session.py`. This CHECK protects only a ledger created after
--- it was added — `CREATE TABLE IF NOT EXISTS` cannot retrofit it onto the one
--- ledger this defect is measured against, which already has this table
--- (`_widen_batch_status`'s own lesson, one table over) — so `set_run_preflight`
--- refuses the same closed set in Python regardless of when the ledger was built.
+-- A run's own preflight outcome, read off its baseline suite (CONTEXT.md §2).
+-- NULL: the run never reached the baseline suite.
 CREATE TABLE IF NOT EXISTS runs (
     run_id     INTEGER PRIMARY KEY,
     repo_id    INTEGER NOT NULL REFERENCES repos(repo_id),
     batch_id   INTEGER REFERENCES batches(batch_id),
     base_sha   TEXT NOT NULL,
-    preflight  TEXT CHECK (preflight IN ('PASSED', 'FAILED')),
+    preflight  TEXT CHECK (preflight IN ({_PREFLIGHT_IN})),
     started_at TEXT NOT NULL DEFAULT (datetime('now')),
     ended_at   TEXT,
     status     TEXT
@@ -159,12 +150,6 @@ CREATE INDEX IF NOT EXISTS gate_results_by_attempt ON gate_results(attempt_id);
 CREATE INDEX IF NOT EXISTS attempts_by_task ON attempts(task_id);
 CREATE INDEX IF NOT EXISTS findings_by_task ON findings(task_id);
 """
-
-
-# The closed set `set_run_preflight` writes and refuses outside of — held as
-# one name so the CHECK above and the Python guard below can never drift into
-# two different lists (item 18's own pattern, on a different pair of lists).
-RUN_PREFLIGHT_OUTCOMES = ("PASSED", "FAILED")
 
 
 def _inserted_id(cursor: sqlite3.Cursor) -> int:
@@ -450,20 +435,10 @@ class Ledger:
         self._db.commit()
 
     def set_run_preflight(self, run_id: int, outcome: str) -> None:
-        """Whether the machine was fit to start, written once, where the
-        baseline suite's own outcome is known — `_drive_cell`, right after
-        `suite.baseline` returns (§4.1, §6). `'PASSED'` and `'FAILED'` are the
-        closed set; nothing else is invented, including a value for a run
-        whose driver aborted before the baseline suite ever ran — that run's
-        column stays NULL, a different fact from one whose suite ran and
-        aborted, and not this method's to assign.
+        """Record a run's preflight outcome, one of `RUN_PREFLIGHT_OUTCOMES`.
 
-        Validated here, before the UPDATE runs, rather than left to the
-        `CHECK` alone: a `CHECK` added to `SCHEMA` protects only a ledger
-        created after it was added, and the one ledger this defect is
-        measured against already has this table. A rejected value raises
-        before touching the row, so the row keeps whatever it already
-        carried rather than a write half landing."""
+        Refused here as well as by the `CHECK`: a ledger built before the
+        `CHECK` existed keeps its old `runs` table."""
         if outcome not in RUN_PREFLIGHT_OUTCOMES:
             raise ValueError(
                 f"preflight outcome {outcome!r} is not one of {RUN_PREFLIGHT_OUTCOMES}"
