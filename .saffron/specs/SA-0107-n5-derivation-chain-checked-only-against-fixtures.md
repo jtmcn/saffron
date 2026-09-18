@@ -51,16 +51,20 @@ acceptance:
       A merged task whose stored plan or diff no longer matches what its own
       event log recorded is among the tasks the materialization kept, and is
       absent from Q4's result. A later task of the same spec overwriting it is
-      the case. A sibling merged task that still matches, and shares its pull
+      the case, and the overwritten task has a gate suite and a finding. A sibling merged task that still matches, and shares its pull
       request URL, stays in the same result with every kind the projection
       states.
     witness: tests/test_projection.py::test_an_artifact_a_later_task_overwrote_drops_only_the_earlier_chain
   - claim: >-
-      A materialization returns the tasks it kept and every task it left out,
-      each with a reason from a closed set. A spec whose `Ceilings` spans match
-      its tasks in count but not in time has its tasks returned as
-      unattributable, and so does a merged task whose span recorded only one of
-      the plan hash and the diff length. None of them is projected. A task that
+      A materialization returns each kept task's id mapped to its
+      `PullRequest` IRI, the node Q4 returns as `?pr`, and every task it left
+      out, each with a reason from a closed set. A spec whose `Ceilings` spans
+      match its tasks in count but not in time has its tasks returned as
+      unattributable, and so does a merged task whose span lacks the plan hash
+      or the diff length. None of them is projected. A merged task whose
+      `spec_sha` matches no committed spec version is left out with its own
+      reason, and so is one whose matched version has no criterion. The other
+      tasks are still projected and the shapes pass. A task that
       never merged and recorded neither line is kept. A merged task whose
       stored file a recorded line points at is missing is left out with its own
       reason, and the call returns normally. A run started in the same whole
@@ -181,8 +185,9 @@ version no longer parses or has no criterion. Both default to empty
 every other task.
 
 **Which kinds.** State `Spec`, `Plan`, `Diff`, `GateSuite`, `Finding` and
-`PullRequest` edges. State no `ScopeProposal`, `TouchesSet` or `Rebuttal`. Their
-shapes need a ratifying operator and a stance
+`PullRequest` edges. State no `ScopeProposal`, `TouchesSet` or `Rebuttal`.
+`ScopeProposal` has no shape, and the ledger holds no scope proposal to derive
+one from. The other two shapes need a ratifying operator and a stance
 (`ontology/shapes/factory-shapes.ttl:170-195`). The ledger records the
 critic's verdict and not the implementer's stance, and no ratifier
 (the `findings` table, `saffron/ledger.py:133`). Stating one would author the record rather than
@@ -274,10 +279,18 @@ its whole sibling the same `pr_url`, so an IRI minted from it fails. Assert the
 overwritten task's id is in the kept set. A left-out reason there would empty
 `SA-0108`'s count. Drive the plan case and the diff case in the one test.
 
+**A mismatch removes one edge, not the task's nodes.** A diff mismatch drops the
+`PullRequest`→`Diff` edge, and a plan mismatch drops `Diff`→`Plan`. The `Diff`
+node stays, because it is the finding's `earl:subject`
+(`ontology/shapes/factory-shapes.ttl:157`) and the finding's shape needs it.
+
 The fourth criterion's test drives these cases:
 - spans misaligned in time.
 - a merged task's span with no plan-hash line, and one with no diff-length line.
 - a task that never merged and recorded neither line, which is kept.
+- a merged task whose `spec_sha` matches no committed version, and one whose
+  matched version has no criterion. Each is left out with its own reason, and
+  the other tasks still pass the shapes (`factory-shapes.ttl:41-42`).
 - a merged task's `patch.diff` deleted, with a missing-file reason returned by a
   call that returns normally.
 - a run in second N whose `Ceilings.timestamp` is N+0.7, under `TZ=JST-9`
