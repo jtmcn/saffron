@@ -16,6 +16,7 @@ forbidden:
   - uv.lock
   - .saffron/**
   - ontology/**
+  - tests/ontology/**
   - docs/**
   - images/**
   - harness/**
@@ -41,30 +42,31 @@ acceptance:
     witness: tests/test_projection.py::test_a_materialization_projects_every_ended_task_and_replaces_the_last
   - claim: >-
       A merged task whose stored artifacts match what its own event log recorded
-      at extraction reaches Q4's result with every kind in its chain. The query
-      is the committed `ontology/queries/Q4-derivation-chain.rq`, read from the
-      tree rather than restated in the test.
+      at extraction reaches Q4's result with every kind the projection states.
+      The query is the committed `ontology/queries/Q4-derivation-chain.rq`, read
+      from the tree rather than restated in the test.
     witness: tests/test_projection.py::test_q4_over_the_projection_reaches_a_merged_pull_request
   - claim: >-
       A merged task whose stored plan or diff no longer matches what its own
       event log recorded is absent from Q4's result. A later task of the same
       spec overwriting it is the case. A sibling merged task that still matches
-      stays in the same result with every kind.
+      stays in the same result with every kind the projection states.
     witness: tests/test_projection.py::test_an_artifact_a_later_task_overwrote_drops_only_the_earlier_chain
   - claim: >-
-      The command that materializes the projection also reports every merged pull
-      request Q4 drops while the checked walk calls its chain whole. A task it
-      cannot attribute to its own events is counted apart and never reported as
-      a break.
-    witness: tests/test_projection.py::test_the_report_names_a_break_the_checked_walk_calls_whole
+      The command that materializes the projection also prints every merged pull
+      request Q4 drops while the checked walk calls its chain whole. It does not
+      print one whose stored file is missing, which the checked walk sees too. A
+      task it cannot attribute to its own events is counted apart and never
+      printed as a break.
+    witness: tests/test_projection.py::test_the_output_names_a_break_the_checked_walk_calls_whole
   - claim: >-
       A projection that fails the shapes is reported as an error and leaves no
       projection behind, so a reader finds none rather than the last one.
     witness: tests/test_projection.py::test_a_projection_that_fails_the_shapes_leaves_none_behind
   - claim: >-
-      `saffron batch` materializes once, after its loop returns. A
-      materialization that raises leaves the batch's exit code as the loop
-      decided it.
+      `saffron batch` materializes once, after its loop returns, whatever stop
+      reason the loop returned. A materialization that raises leaves the
+      batch's exit code as the loop decided it.
     witness: tests/test_projection.py::test_a_batch_materializes_once_and_a_raise_leaves_its_exit_code
 ---
 
@@ -106,7 +108,8 @@ The event log keeps what each task recorded when the artifact was produced. It
 is one log per spec, and each task opens its span with a `Ceilings` event
 (`saffron/task.py:259-260`, `saffron/watch.py:116-132`). The plan's line carries
 the first 12 hex digits of its sha256 (`saffron/cell/session.py:1583-1587`). The
-diff's line carries its length in bytes (`saffron/cell/session.py:768`). An edge
+diff's line carries its length in characters, though it says bytes: `patch` is a
+`str` (`saffron/cell/worktree.py:234`, `saffron/cell/session.py:768`). An edge
 stated only when the stored file still matches that record drops the overwritten
 chain from Q4's result, which the checked walk cannot do.
 
@@ -120,18 +123,19 @@ chain from Q4's result, which the checked walk cannot do.
   `docs/agents/issue-tracker.md` gives. A cell that finds a term missing must
   stop and say so rather than invent one. Item b-606ea3 owns the terms this
   spec's code uses and the glossary lacks.
-- **The dependency move and three stale sentences are the operator's.**
-  `pyproject.toml:21-22`, `ontology/render.py:3-4` and
-  `ontology/design_record.py:16-17` each state that nothing under `saffron/`
-  imports a graph library. The operator amends all three at merge, and moves
-  pyoxigraph and pyshacl out of the `dev` group (`pyproject.toml:35-36`) with
-  `uv lock`. `uv.lock` is `protected` (`.saffron/policy.yaml:59`), so a cell
+- **The dependency move and four stale sentences are the operator's.**
+  `pyproject.toml:21-22`, `ontology/render.py:3-4`,
+  `ontology/design_record.py:16-17` and
+  `tests/ontology/test_vocabulary_agrees_with_code.py:21-22` each state that
+  nothing under `saffron/` imports a graph library. The operator amends all four
+  at merge, and moves pyoxigraph and pyshacl out of the `dev` group
+  (`pyproject.toml:35-36`) with `uv lock`. `uv.lock` is `protected` (`.saffron/policy.yaml:60`), so a cell
   cannot land that move. Both packages are installed wherever this code runs
   today, because the `dev` group is.
-- **Recording a full hash for the diff.** Only its byte count is recorded
+- **Recording a full hash for the diff.** Only its length is recorded
   today. Adding a hash means editing `saffron/cell/session.py`, which is
   forbidden here. A diff overwritten by one of the same length goes undetected,
-  and the report says so rather than hiding it.
+  and the command's output says so rather than hiding it.
 - **Q1, Q2, Q3 and Q5 stay worked examples.** They lost on the analytical case
   and this spec reopens nothing for them.
 
@@ -148,28 +152,54 @@ build the projection to that shape.
 
 **Which rows.** Project a task only in an end state that `TaskShape` lists
 (`ontology/shapes/factory-shapes.ttl:12-20`). Omit every other task, and count
-the omissions in the report. `MERGE_TRAIN` is one: `saffron/scheduler.py:67`
+the omissions in the command's output. `MERGE_TRAIN` is one: `saffron/scheduler.py:67`
 reads it, and the vocabulary does not have it. `SpecShape` needs a type and at
 least one criterion (`ontology/shapes/factory-shapes.ttl:36-42`). Read both
-from the spec file in the repo whose sha256 equals the task's `spec_sha`,
-searching `.saffron/specs/` and `.saffron/specs/done/`. A task whose spec file
-no longer has those bytes is omitted and counted.
+from the version of the spec whose sha256 equals the task's `spec_sha`. Search
+every committed version of `.saffron/specs/`, not only the working tree. A spec
+re-runs only once its `spec_sha` changes (`saffron/scheduler.py:59-69`), so an
+overwritten task's spec bytes are usually gone from the tree. A task no
+committed version matches is omitted and counted.
 
-**Attribution.** A spec's tasks, ordered by `task_id`, map in order onto the
-`Ceilings` spans of that spec's `events.jsonl`. A spec whose count of spans
-differs from its count of tasks is unattributable. Omit its tasks and count
-them apart. Never report one of them as a break.
+**Which kinds.** State `Spec`, `Plan`, `Diff`, `GateSuite`, `Finding` and
+`PullRequest` edges. State no `ScopeProposal`, `TouchesSet` or `Rebuttal`. Their
+shapes need a ratifying operator and a stance
+(`ontology/shapes/factory-shapes.ttl:170-195`), and the ledger records neither
+(`saffron/ledger.py:136-138`). Stating one would author the record rather than
+derive it.
+
+**Attribution.** Tie a task to a `Ceilings` span of its spec's `events.jsonl`
+by time, not by position. The task's `runs.started_at` must fall after the
+span's `Ceilings` timestamp and before the next one (`saffron/ledger.py:53`).
+The first is UTC text and the second is epoch seconds. Position alone is wrong
+in both directions. A span can have no task, because `Ceilings` is written
+(`saffron/task.py:259-270`) before the task row exists
+(`saffron/cell/session.py:1336`). A task can have no span: `saffron/replay.py:55`
+writes none, and nor did any task before `Ceilings` existed. A task no single
+span holds is unattributable. Omit it, count it apart, and never print it as a
+break. Build the fixture for the fourth criterion so the counts match and the
+positions do not.
 
 **The checked walk** is the comparator Appendix T names. It follows §4.1's
 foreign keys for a merged task and asks only whether each stored file exists.
-Build it beside the projection, from the same rows, so the report compares like
+Build it beside the projection, from the same rows, so the output compares like
 with like.
 
-**Where the batch tree is.** `saffron/cli.py:152` resolves it from `--home`.
-Pass that path in, and never spell `~/.saffron` inside the new module.
+**Where things are.** `saffron/cli.py:152` resolves the batch tree from
+`--home`. Pass that path in, and never spell `~/.saffron` inside the new
+module. Write the projection under `--home`, beside the ledger. Read Q4 and the
+shapes from Saffron's own source tree, never from `--repo`. `pyproject.toml:44-45`
+packages only `saffron/`, and another repo has no `ontology/`.
+
+**Compare lengths in characters.** The diff's recorded number is `len` of a
+`str`. Compare it with the length of the stored file read as text, never with
+its size on disk. Put a non-ASCII character in every fixture diff, since this
+repo's diffs carry them and an ASCII fixture passes either way.
 
 **Materialize from `saffron/cli.py`,** after `run_batch` returns
-(`saffron/cli.py:776`), and not from `saffron/batch.py`. The loop's stop
+(`saffron/cli.py:776`) and before any exit-code branch, not from
+`saffron/batch.py`. The sixth criterion's witness drives `INCOMPLETE` as well
+as `DRAINED`. The loop's stop
 reasons are a closed set (`saffron/batch.py:36`), and a materialization that
 raises must not become one. `SA-0106` edits the same command's scan, so read
 what it landed first. Materialization runs once per batch and not once per
