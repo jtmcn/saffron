@@ -4,7 +4,7 @@ title: '`mirror.diff_stat` reads without `DIFF_FLAGS`, so operator git config mo
 status: open
 tier: 3
 filed: 2026-09-17
-specs: []
+specs: [SA-0105]
 prs: []
 commits: []
 cites: []

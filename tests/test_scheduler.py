@@ -1818,7 +1818,11 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-17, a thirty-seventh time: `SA-0104` queued for
+    """Re-measured 2026-09-17, a thirty-eighth time: `SA-0105` queued for
+    backlog item 176, `mirror.diff_stat`'s bare read. Only it edits `mirror.py`,
+    so it has no `depends_on` and joins the candidates last, at priority 3.
+
+    Re-measured 2026-09-17, a thirty-seventh time: `SA-0104` queued for
     backlog item 154, the mutant write that cannot carry a file over 96 KiB. It
     edits `worktree.py`, which nothing else queued touches, so it has no
     `depends_on` and leads the candidates at priority 1.
@@ -2018,6 +2022,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0104",
         "SA-0099",
         "SA-0100",
+        "SA-0105",
     ]
     assert [r.path.name[:7] for r in refusals] == [
         "SA-0101",
