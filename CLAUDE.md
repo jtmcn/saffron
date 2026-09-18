@@ -15,7 +15,7 @@ validates every `.ttl` in the tree against those shapes, so a graph no test load
 checked. The same command also rewrites `DESIGN.md`'s principle and appendix indexes, and those
 run the other way: the appendix records in `docs/appendices/` are authoritative and the indexes
 are their render, so a new principle is written into its appendix record and never into a table
-(Appendix U).
+(Appendices P and U).
 
 > Saffron is also a *target repo* of itself (`.saffron/`), so this file is the standing
 > instruction surface for agents running in a cell here (§8). Budget: ~200 lines. If it grows
