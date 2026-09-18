@@ -1523,7 +1523,7 @@ def test_a_resnapshot_releases_a_hold(loop):
 
 def _probe(root, find, replace, *command):
     return argparse.Namespace(
-        file="mod.py", find=find, replace=replace, root=root, command=["--", *command]
+        file="mod.py", find=find, replace=replace, root=root, run=["--", *command]
     )
 
 
@@ -1567,3 +1567,16 @@ def test_a_probe_reports_its_verdict_and_restores_the_file(
 
     assert capsys.readouterr().out.startswith(verdict)
     assert (tmp_path / "mod.py").read_text() == "x = 1\n"
+
+
+def test_probe_parses_its_options_before_the_command(tmp_path, monkeypatch, capsys):
+    # Run 7: `nargs=REMAINDER` after the file swallowed `--find`, and the tests
+    # above call `cmd_probe` directly, so none saw it.
+    (tmp_path / "mod.py").write_text("x = 1\n")
+    argv = ["probe", "mod.py", "--find", "x = 1", "--replace", "x = 2"]
+    argv += ["--root", str(tmp_path), "--", sys.executable, "-c", "import mod"]
+    monkeypatch.setattr(sys, "argv", ["driver.py", *argv])
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    assert driver.main() == 0
+    assert capsys.readouterr().out.startswith("survived:")

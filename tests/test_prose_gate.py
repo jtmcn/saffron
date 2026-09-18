@@ -183,6 +183,7 @@ def test_every_rule_code_has_a_message():
         "trailing-condition",
         "rendered-span",
         "comment-block",
+        "docstring-length",
     }
     assert set(prose.MESSAGES) == codes
     assert all(word in prose.MESSAGES["filler"] for word in prose.FILLER[:3])
@@ -461,3 +462,25 @@ def test_scope_reaches_python_a_cell_writes_and_leaves_evidence_scripts():
     assert prose.in_scope("saffron/task.py")
     assert prose.in_scope("tests/test_task.py")
     assert not prose.in_scope("docs/evidence/scripts/x.py")
+
+
+def _docstring(name: str, lines: int, indent: str = "    ") -> str:
+    body = "\n".join(f"{indent}line {i}" for i in range(2, lines + 1))
+    return f'def {name}():\n{indent}"""line 1\n{body}"""\n'
+
+
+def _docstring_hits(text: str) -> list[str]:
+    found = _prose().check(text, "saffron/x.py", "prose", root=REPO)
+    return [f.excerpt for f in found if f.code == "docstring-length"]
+
+
+def test_a_docstring_over_ten_lines_is_a_hit_and_ten_are_not():
+    # Run 7: SA-0105's cell answered "a short comment" with an 18-line docstring.
+    text = _docstring("short", 10) + _docstring("test_long", 11)
+    assert _docstring_hits(text) == ["test_long: line 1"]
+
+
+def test_a_module_docstring_is_exempt_and_a_class_docstring_is_not():
+    long = "\n".join(f"line {i}" for i in range(1, 13))
+    text = f'"""{long}"""\n\nclass C:\n    """{long}"""\n'
+    assert _docstring_hits(text) == ["C: line 1"]

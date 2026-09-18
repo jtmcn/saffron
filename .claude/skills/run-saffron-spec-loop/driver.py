@@ -1122,7 +1122,7 @@ def cmd_probe(args) -> int:
     """One vacuity probe, applied only if its find text matches exactly once,
     and always restored. A find that misses, or an edit that never lands,
     prints a result that reads like "survived" (run 7, #338)."""
-    command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    command = args.run[1:] if args.run[:1] == ["--"] else args.run
     if not command:
         return _fail("give the command to run after --")
     target = args.root / args.file
@@ -1702,7 +1702,9 @@ def main() -> int:
     p.add_argument("--find", required=True)
     p.add_argument("--replace", required=True)
     p.add_argument("--root", type=Path, default=Path.cwd(), help="default: the cwd")
-    p.add_argument("command", nargs=argparse.REMAINDER, help="after --, e.g. pytest")
+    p.add_argument(
+        "run", nargs="*", metavar="command", help="after --, e.g. uv run pytest"
+    )
     p.set_defaults(func=cmd_probe)
 
     p = sub.add_parser("status", help="show the order, what has run, and staleness")

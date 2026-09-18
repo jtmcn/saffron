@@ -13,6 +13,7 @@ commit's `.saffron/`, against the tree in the cwd.
 
 from __future__ import annotations
 
+import ast
 import bisect
 import functools
 import hashlib
@@ -56,6 +57,8 @@ CODE_DIRS = (
 )
 # A comment names the non-obvious why in one or two lines (CLAUDE.md, item b-122686).
 COMMENT_LIMIT = 2
+# A summary and two short paragraphs; a module docstring describes a file and is exempt.
+DOCSTRING_LIMIT = 10
 
 SENTENCE_LIMIT = 25
 # Saffron's own intensifiers, measured. "exactly" and "deliberately" carry meaning here.
@@ -116,6 +119,9 @@ MESSAGES = {
     "contraction": f"this file gained a contraction; write the words out. {_OLDER}",
     "comment-block": f"this file gained a comment over {COMMENT_LIMIT} lines; keep the"
     f" why, and move the rationale to the commit or the PR body. {_OLDER}",
+    "docstring-length": "this file gained a function, class or test docstring over"
+    f" {DOCSTRING_LIMIT} lines; keep what a caller needs, and move the rest to the"
+    f" commit or the PR body. {_OLDER}",
     "rendered-span": "a span ontology.render writes could not be located;"
     " fix the definition or the principle index at its source.",
 }
@@ -207,6 +213,24 @@ def _comment_blocks(text: str) -> list[Hit]:
                 found.append(Hit(run[0][0], "comment-block", _excerpt(run[0][1])))
             run = []
         run.append((number, comment))
+    return found
+
+
+def _long_docstrings(text: str) -> list[Hit]:
+    """Function, class and test docstrings longer than `DOCSTRING_LIMIT` lines."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return []  # unparseable Python is the `lint` gate's to report
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        doc = ast.get_docstring(node, clean=False)
+        if doc is not None and doc.count("\n") + 1 > DOCSTRING_LIMIT:
+            first = doc.strip().splitlines()[0] if doc.strip() else ""
+            excerpt = _excerpt(f"{node.name}: {first}")
+            found.append(Hit(node.body[0].lineno, "docstring-length", excerpt))
     return found
 
 
@@ -389,7 +413,12 @@ def check(text: str, path: str, gate: str, *, root: Path) -> list[Hit]:
     if gate not in GATES:
         raise ValueError(f"unknown gate: {gate}")
     if path.endswith(".py"):
-        return _comment_blocks(text) if gate == "prose" else []
+        if gate != "prose":
+            return []
+        return sorted(
+            _comment_blocks(text) + _long_docstrings(text),
+            key=lambda f: (f.line, f.code),
+        )
     try:
         rendered = _rendered(text, path, root)
     except ValueError as exc:
