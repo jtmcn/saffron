@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+import secrets
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
@@ -28,18 +29,36 @@ _COMMIT_SHA = r"^[0-9a-f]{7,40}$"
 # Strict: a string or bool is refused by name rather than coerced to an int.
 Number = Annotated[int, Strict(), Field(ge=1)]
 
+# Items 1–177 keep their numbers; every later item takes a random id, so two
+# branches filing at once almost never claim the same one (`check_ids` catches it).
+LAST_NUMBERED = 177
+RANDOM_ID = r"b-[0-9a-f]{6}"
+RandomId = Annotated[str, Field(pattern=rf"^{RANDOM_ID}$")]
+ItemId = Number | RandomId
+
+
+def as_id(token: str) -> ItemId:
+    """A backlog id as written: a filename prefix, a citation, an argument."""
+    return int(token) if token.isdigit() else token
+
+
+def new_id(taken: set[ItemId]) -> str:
+    while (candidate := f"b-{secrets.token_hex(3)}") in taken:
+        pass
+    return candidate
+
 
 class Identified(BaseModel):
     """What every kind's model has — an id the filename repeats, and a status."""
 
     model_config = ConfigDict(extra="forbid")
 
-    id: Annotated[int, Strict()]
+    id: Annotated[int, Strict()] | str
     status: str
 
 
 class BacklogItem(Identified):
-    id: Number
+    id: ItemId
     title: str = Field(min_length=1)
     status: Status
     tier: Annotated[int, Strict(), Field(ge=0, le=3)] | None = None
@@ -50,8 +69,8 @@ class BacklogItem(Identified):
     prs: list[Number] = Field(default_factory=list)
     commits: list[str] = Field(default_factory=list)
     cites: list[str] = Field(default_factory=list)
-    related: list[Number] = Field(default_factory=list)
-    superseded_by: Number | None = None
+    related: list[ItemId] = Field(default_factory=list)
+    superseded_by: ItemId | None = None
     awaiting: list[Number] = Field(default_factory=list)
     """Open pull requests this item waits on — never the one carrying the
     edit, which closes the item in its own diff instead."""
@@ -119,7 +138,7 @@ KINDS: dict[str, Kind] = {
     "backlog": Kind(
         "backlog",
         "docs/backlog",
-        r"^(\d{3})-[a-z0-9-]+\.md$",
+        rf"^(\d{{3}}|{RANDOM_ID})-[a-z0-9-]+\.md$",
         BacklogItem,
         frozenset({"README.md", "PRIORITY.md"}),
     ),

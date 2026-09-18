@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from records.kinds import KINDS, BacklogItem
+from records.kinds import KINDS, BacklogItem, new_id
 
 MINIMAL = {"id": 7, "title": "Seven", "status": "open"}
 
@@ -112,3 +112,22 @@ def test_backlog_is_a_registered_kind():
     kind = KINDS["backlog"]
     assert kind.directory == "docs/backlog"
     assert kind.model is BacklogItem
+
+
+def test_a_random_id_validates_and_may_be_named_in_links():
+    item = BacklogItem.model_validate(
+        {**MINIMAL, "id": "b-3f9a2c", "related": [7, "b-00aa11"]}
+    )
+    assert item.id == "b-3f9a2c" and item.related == [7, "b-00aa11"]
+
+
+@pytest.mark.parametrize("bad", ["3f9a2c", "b-3F9A2C", "b-3f9a2", "b-3f9a2cc", "7"])
+def test_an_id_that_is_neither_a_number_nor_a_random_id_is_refused(bad):
+    with pytest.raises(ValidationError, match="id"):
+        BacklogItem.model_validate({**MINIMAL, "id": bad})
+
+
+def test_new_id_is_a_random_id_not_already_taken(monkeypatch):
+    tokens = iter(["3f9a2c", "00aa11"])
+    monkeypatch.setattr("records.kinds.secrets.token_hex", lambda n: next(tokens))
+    assert new_id({1, "b-3f9a2c"}) == "b-00aa11"

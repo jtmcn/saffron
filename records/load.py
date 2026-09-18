@@ -4,6 +4,7 @@ import it, because `records/` stays outside `saffron/`."""
 
 from __future__ import annotations
 
+import datetime as dt
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,7 +12,7 @@ from pathlib import Path
 import yaml
 from pydantic import ValidationError
 
-from records.kinds import CLOSED, Identified, Kind
+from records.kinds import CLOSED, Identified, ItemId, Kind, as_id
 
 # Character for character `saffron/intake.py`'s: a file one reads, the other must.
 _FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?(.*)\Z", re.DOTALL)
@@ -154,9 +155,20 @@ def load(kind: Kind, root: Path) -> list[Record]:
                 path,
             )
         record = parse(path.read_text(), kind, path)
-        if int(match.group(1)) != record.model.id:
+        if as_id(match.group(1)) != record.model.id:
             raise RecordError(
                 f"filename prefix {match.group(1)} but id {record.model.id}", path
             )
         records.append(record)
-    return sorted(records, key=lambda r: r.model.id)
+    return sorted(records, key=order)
+
+
+def order(record: Record) -> tuple[bool, dt.date, ItemId]:
+    """Numbered items by number, then random ids by filing date."""
+    m = record.model
+    filed = getattr(m, "filed", None) or dt.date.max
+    return (
+        isinstance(m.id, str),
+        filed if isinstance(m.id, str) else dt.date.min,
+        m.id,
+    )

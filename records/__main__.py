@@ -1,4 +1,4 @@
-"""`python -m records`: list, show, grep. Plain text, one record per line for
+"""`python -m records`: list, show, grep, new-id. Plain text, one record per line for
 `list`, so it composes with grep and reads cleanly in a tool result."""
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import get_args
 
-from records.kinds import KINDS, BacklogItem, Status
+from records.kinds import KINDS, RANDOM_ID, BacklogItem, Status, as_id, new_id
 from records.load import Record, RecordError, load
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -34,7 +34,7 @@ def _item(record: Record) -> BacklogItem:
 def _line(record: Record) -> str:
     m = _item(record)
     tier = "-" if m.tier is None else str(m.tier)
-    return f"{m.id:>3}  {m.status:<10}  {tier}  {m.title}"
+    return f"{m.id!s:>8}  {m.status:<10}  {tier}  {m.title}"
 
 
 def _render(record: Record, section: str | None) -> str | None:
@@ -63,8 +63,8 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 def cmd_show(args: argparse.Namespace) -> int:
     records = load(KINDS["backlog"], args.root)
-    if args.id.isdigit():
-        wanted = [r for r in records if r.model.id == int(args.id)]
+    if args.id.isdigit() or re.fullmatch(RANDOM_ID, args.id):
+        wanted = [r for r in records if r.model.id == as_id(args.id)]
         if not wanted:
             print(f"no backlog item {args.id}", file=sys.stderr)
             return 1
@@ -100,10 +100,15 @@ def cmd_grep(args: argparse.Namespace) -> int:
         hits = [line for line in record.body.splitlines() if pattern.search(line)]
         if hits:
             matched = True
-            print(f"{record.model.id:>3}  {_item(record).title}")
+            print(f"{record.model.id!s:>8}  {_item(record).title}")
             for hit in hits:
                 print(f"     {hit}")
     return 0 if matched else 1
+
+
+def cmd_new_id(args: argparse.Namespace) -> int:
+    print(new_id({r.model.id for r in load(KINDS["backlog"], args.root)}))
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -127,6 +132,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("pattern")
     _add_root(p)
     p.set_defaults(func=cmd_grep)
+
+    p = sub.add_parser("new-id", help="an unused id for a new backlog item")
+    _add_root(p)
+    p.set_defaults(func=cmd_new_id)
 
     args = parser.parse_args(argv)
     try:
