@@ -3,7 +3,7 @@ id: b-946f03
 title: N5's derivation chain never ran over a merged change, so a chain a later task overwrote reads as whole
 status: open
 filed: 2026-09-18
-specs: [SA-0107]
+specs: [SA-0107, SA-0108]
 prs: []
 commits: []
 cites: [§1, §4.1, §4.6, §9]
