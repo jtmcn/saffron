@@ -1,11 +1,12 @@
 ---
 id: 106
 title: One test fails in every cell's baseline and passes on the host
-status: open
+status: done
+closed: 2026-09-18
 tier: 3
 specs: []
 prs: []
-commits: []
+commits: [cecdb1b]
 cites: []
 related: []
 ---
@@ -34,3 +35,8 @@ explain it.
 the failure reproduced in a cell and its cause named, then
 the test or the cell fixed — not the test skipped in a cell, which is a `pass`
 nobody checked.
+
+## Record
+
+- 2026-09-18: done by hand, with item 173, which refiled it. The cause was no
+  `python3` in `/usr/bin` in the cell image, not the execute bit.

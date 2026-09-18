@@ -105,7 +105,7 @@ nothing enumerates whose collision surfaces at REVIEW after IMPLEMENT is paid.
 on `session.py` is now `error`, and the one that tried wedged its cell on this
 host.
 
-**From the spec loop's run 6, 2026-09-17** (stack #320 ← #321 ← #323): **173**.
+**From the spec loop's run 6, 2026-09-17** (stack #320 ← #321 ← #323): ~~**173**~~.
 A test red only in the cell is subtracted from every cell's result.
 
 ### Tier 2 — the morning after

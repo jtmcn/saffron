@@ -1,12 +1,13 @@
 ---
 id: 173
 title: Main's baseline is red in the cell, so every cell subtracts a failure the host never sees
-status: open
+status: done
+closed: 2026-09-18
 tier: 1
 filed: 2026-09-17
 specs: []
 prs: []
-commits: []
+commits: [cecdb1b]
 cites: [§5.4]
 related: []
 ---
@@ -42,3 +43,10 @@ the `baseline:` line and take a red gate on `main` to the operator.
 
 - 2026-09-18: still red in every run-7 cell (`tests` and `prose`, same two failures), at
   `1549f41`, `0188327`, `666d21f` and `9db478d`.
+- 2026-09-18: done by hand. The cell image has no `/usr/bin/python3`, so under
+  the test's `PATH` the `structure` gate's `exec python3` found nothing and
+  printed no contract. Reproduced in `saffron/cell:saffron`. The test now puts a
+  `python3` link in its stub directory, and passes in the image and on the host.
+  `prose` has no base to find: it fails at base by design, and subtraction
+  counts its hits per file (`.saffron/policy.yaml`). The loop's step 2 and
+  `GOTCHAS.md` now say so.
