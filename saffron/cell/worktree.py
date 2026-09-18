@@ -446,13 +446,10 @@ def _read_file(container: str, path: str) -> bytes:
 
 # Linux caps a single argv string at `MAX_ARG_STRLEN` whatever `ARG_MAX` is.
 # Measured against `saffron/cell-base:python`: 131,000 bytes of argv run,
-# 131,071 and above fail — the largest safe single argument (`_write_file`'s
-# own `ponytail:` below).
+# 131,071 and above fail.
 _MAX_ARG_BYTES = 131_000
 
-# Each piece plus the script text wrapped around it (the append command and
-# the quoted scratch path) must still clear `_MAX_ARG_BYTES` with room to
-# spare, and a multiple of 4 so no piece ever splits base64 mid-symbol.
+# A piece plus the append command around it must still clear `_MAX_ARG_BYTES`.
 _CHUNK_BYTES = 100_000
 
 
@@ -483,11 +480,11 @@ def _write_file(container: str, path: str, content: bytes) -> None:
     turn, does — so an argument is the only channel across, and a mutant's
     `find`/`replace` can hold anything a shell would otherwise misread: a
     quote, a backslash, a newline. Base64 has no such character left, which
-    is what makes one `printf | base64 -d` line safe for an edit this
-    function never has to inspect the content of.
+    is what makes each `printf` of a piece safe for an edit this function
+    never has to inspect the content of.
 
-    ponytail: one argv string still caps at `_MAX_ARG_BYTES`. The payload is
-    now pieces under it, appended to a `/tmp` scratch file and decoded once.
+    ponytail: one exec per `_CHUNK_BYTES` of base64, appended to a `/tmp`
+    scratch file and decoded once; a file's size now costs round trips.
     """
     encoded = base64.b64encode(content).decode()
     pieces = [
@@ -505,10 +502,7 @@ def _write_file(container: str, path: str, content: bytes) -> None:
         script = f"printf '%s' {shlex.quote(piece)} >> {shlex.quote(scratch)}"
         done = runtime.exec_(container, ["sh", "-euc", script], workdir=WORKTREE_MOUNT)
         if done.returncode != 0:
-            # A piece never reaches `path` at all — only the scratch file —
-            # so nothing here has truncated it yet. The restore still runs,
-            # for the same reason every other step's does: one path decides
-            # what "failed" leaves behind, not each step separately.
+            # A piece reaches only the scratch file, so `path` is untouched.
             _fail_write(container, path, scratch, done.stderr)
 
     script = f"base64 -d < {shlex.quote(scratch)} > {shlex.quote(path)}"

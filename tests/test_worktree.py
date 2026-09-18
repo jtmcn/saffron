@@ -1226,12 +1226,16 @@ def test_a_write_that_fails_does_not_leave_the_file_truncated(tmp_path, monkeypa
     target = tmp_path / "src" / "guard.py"
     mutant = Mutant(file="src/guard.py", find="value = 1", replace="value = 2")
     real_exec = worktree.runtime.exec_
+    scratches: list[str] = []
 
     def truncate_then_fail(container, command, *, workdir=None, timeout_s=900):
         if command[:2] == ["sh", "-euc"] and "base64 -d" in command[2]:
             target.write_text("")  # what `>` has already done by this point
             return runtime.Completed(1, "", "exec connection lost")
-        return real_exec(container, command, workdir=workdir, timeout_s=timeout_s)
+        done = real_exec(container, command, workdir=workdir, timeout_s=timeout_s)
+        if command == ["sh", "-euc", "mktemp"]:
+            scratches.append(done.stdout.strip())
+        return done
 
     monkeypatch.setattr(worktree.runtime, "exec_", truncate_then_fail)
 
@@ -1243,6 +1247,7 @@ def test_a_write_that_fails_does_not_leave_the_file_truncated(tmp_path, monkeypa
 
     assert target.read_text() == "value = 1\n"
     assert _porcelain(tmp_path) == ""
+    assert not any(os.path.exists(scratch) for scratch in scratches)
 
 
 def test_a_failed_undo_does_not_replace_an_exception_in_flight(tmp_path, monkeypatch):
@@ -1312,8 +1317,8 @@ def test_a_mutant_on_a_file_larger_than_one_argument_is_applied_and_undone(
     tmp_path, monkeypatch
 ):
     """A single `sh -euc` argument caps at `worktree._MAX_ARG_BYTES` — Linux's
-    `MAX_ARG_STRLEN`, measured against `saffron/cell-base:python` (the module
-    docstring above `_MAX_ARG_BYTES`). `_write_file` must never hand
+    `MAX_ARG_STRLEN`, measured against `saffron/cell-base:python` (the comment
+    above `_MAX_ARG_BYTES`). `_write_file` must never hand
     `runtime.exec_` one argument holding the whole base64 payload of a file
     this large; it must split it into several arguments, each under the cap,
     appended to a scratch file outside `/work` and decoded once at the end.
@@ -1331,11 +1336,15 @@ def test_a_mutant_on_a_file_larger_than_one_argument_is_applied_and_undone(
     mutant = Mutant(file="src/guard.py", find="value = 1", replace="value = 2")
 
     real_exec = worktree.runtime.exec_
+    scratches: list[str] = []
 
     def capped(container, command, *, workdir=None, timeout_s=900):
         if any(len(arg) > 131_000 for arg in command):
             return runtime.Completed(1, "", "argv too long for this cell runtime")
-        return real_exec(container, command, workdir=workdir, timeout_s=timeout_s)
+        done = real_exec(container, command, workdir=workdir, timeout_s=timeout_s)
+        if command == ["sh", "-euc", "mktemp"]:
+            scratches.append(done.stdout.strip())
+        return done
 
     monkeypatch.setattr(worktree.runtime, "exec_", capped)
 
@@ -1346,6 +1355,7 @@ def test_a_mutant_on_a_file_larger_than_one_argument_is_applied_and_undone(
 
     assert target.read_bytes() == original
     assert _porcelain(tmp_path) == ""
+    assert scratches and not any(os.path.exists(scratch) for scratch in scratches)
 
 
 @pytest.mark.cell
