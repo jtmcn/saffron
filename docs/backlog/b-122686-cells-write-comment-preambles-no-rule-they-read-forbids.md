@@ -6,7 +6,7 @@ closed: 2026-09-18
 tier: 2
 filed: 2026-09-18
 specs: []
-prs: [346]
+prs: [346, 347]
 commits: []
 cites: [§8]
 related: []
@@ -43,3 +43,5 @@ stronger fix, since `CLAUDE.md` asks that rules be promoted to gates.
   #340.
 - 2026-09-18: done by #346, as a `CLAUDE.md` line (bucket 2). The `prose` or
   `structure` rule this item calls stronger is not built.
+- 2026-09-18: #347 builds the gate half. `prose` counts Python comment runs over
+  two lines per file, as rule `comment-block`. Docstrings are not counted.
