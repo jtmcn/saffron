@@ -3,7 +3,7 @@ id: 46
 title: '`events.jsonl` now persists an untrusted cell''s raw output verbatim, and nothing bounds or scans it'
 status: partial
 tier: 1
-specs: [SA-0041, SA-0068]
+specs: [SA-0041, SA-0068, SA-0103]
 prs: [213]
 commits: []
 cites: [§5.4, §9]
