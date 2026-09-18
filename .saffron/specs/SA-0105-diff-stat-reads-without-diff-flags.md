@@ -119,7 +119,10 @@ when `--no-patch` sits between `DIFF_FLAGS` and `--shortstat`, so a host-only
 check passes what the cell fails. On 2.39.5, `diff *DIFF_FLAGS --shortstat`
 prints the summary as its first line, then a blank line and the patch, and an
 empty diff prints nothing. Take the first line, and read `(0, 0)` when there
-is none. Say why in a short comment on the read.
+is none. Say why in a short comment on the read. `_git` strips its output, so
+`splitlines()[0]` raises on an empty range where the read today returns
+`(0, 0)`. Have the submodule witness also assert that a range from a commit to
+itself reads `(0, 0)`.
 
 **Both witnesses build real commits and read the counts.** A test that checks
 the argument list proves nothing about the counts. Build the commits in the
