@@ -45,15 +45,30 @@ def definition_sentence(text: str, term: str) -> tuple[int, int]:
     return start, start + stop.start()
 
 
-def principle_index(text: str) -> tuple[int, int]:
-    """`(start, end)` of the principle index table, its header included."""
-    if text.count(PRINCIPLE_ANCHOR) != 1:
-        raise ValueError(f"{PRINCIPLE_ANCHOR}: expected exactly one occurrence")
-    start = text.find(PRINCIPLE_HEADER, text.index(PRINCIPLE_ANCHOR))
+APPENDIX_ANCHOR = "## Appendices — an index"
+APPENDIX_HEADER = (
+    "| App. | Rev | The question it settles | Principles |\n|---|---|---|---|\n"
+)
+
+
+def _table(text: str, anchor: str, header: str) -> tuple[int, int]:
+    """`(start, end)` of the table under `anchor`, its header included."""
+    if text.count(anchor) != 1:
+        raise ValueError(f"{anchor}: expected exactly one occurrence")
+    start = text.find(header, text.index(anchor))
     if start == -1:
-        header = PRINCIPLE_HEADER.splitlines()[0]
-        raise ValueError(f"{PRINCIPLE_ANCHOR}: no `{header}` header under it")
-    end = start + len(PRINCIPLE_HEADER)
+        raise ValueError(f"{anchor}: no `{header.splitlines()[0]}` header under it")
+    end = start + len(header)
     while end < len(text) and text[end] == "|":
         end = text.index("\n", end) + 1
     return start, end
+
+
+def principle_index(text: str) -> tuple[int, int]:
+    """`(start, end)` of the principle index table, its header included."""
+    return _table(text, PRINCIPLE_ANCHOR, PRINCIPLE_HEADER)
+
+
+def appendix_index(text: str) -> tuple[int, int]:
+    """`(start, end)` of the appendix index table, its header included."""
+    return _table(text, APPENDIX_ANCHOR, APPENDIX_HEADER)
