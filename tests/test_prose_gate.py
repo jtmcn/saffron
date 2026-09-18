@@ -305,17 +305,34 @@ def test_a_rewritten_hit_is_not_new_and_an_added_one_is():
     assert [(n.gate, n.failure.code) for n in added] == [("prose", "sentence-length")]
 
 
-def test_scope_reaches_every_place_it_names():
-    prose = _prose()
-    listed = subprocess.run(
+def _tracked() -> list[str]:
+    return subprocess.run(
         ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
     ).stdout.splitlines()
+
+
+def test_scope_reaches_every_place_it_names():
+    prose = _prose()
+    listed = _tracked()
     for name in prose.ROOT_FILES:
         assert name in listed and prose.in_scope(name), name
     for directory in prose.INCLUDED_DIRS:
         assert any(p.startswith(directory) and prose.in_scope(p) for p in listed), (
             directory
         )
+
+
+def test_scope_reaches_the_prompts_a_cell_reads():
+    # Measured: with the `INCLUDED_DIRS` entry removed this fails and
+    # `every_place_it_names` passes, which asks a weaker question.
+    prose = _prose()
+    listed = _tracked()
+    for path in (
+        "saffron/agents/prompts/implement.md",
+        "saffron/agents/prompts/turns/plan.md",
+    ):
+        assert path in listed, path
+        assert prose.in_scope(path), path
 
 
 def test_scope_leaves_the_records_alone():

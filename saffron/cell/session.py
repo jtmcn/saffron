@@ -45,10 +45,10 @@ if TYPE_CHECKING:
     from saffron.gates.suite import GateSuite, SuiteComparison, SuiteRun
     from saffron.ledger import Ledger
 
-# Where this file lives inside the Saffron tree, used to locate CONTEXT.md and
-# the prompt templates — Saffron's own files, never the target repo's (§5.3).
+# Where this file lives inside the Saffron tree, used to locate CONTEXT.md —
+# Saffron's own files, never the target repo's (§5.3). The prompt tree has its
+# one locator in `context.PROMPTS_DIR`.
 _SAFFRON_ROOT = Path(__file__).resolve().parents[2]
-_SAFFRON_PKG = Path(__file__).resolve().parents[1]
 
 # §4.3's wall clock, per turn, set here rather than inherited: this is the bound
 # the operator sits through, so it belongs where the task is driven. Fifteen
@@ -1419,7 +1419,7 @@ def _drive_cell(
 
         # The agent runs inside the cell, at /work, on the cell's own key (§5.1).
         context_md = (_SAFFRON_ROOT / "CONTEXT.md").read_text()
-        template = (_SAFFRON_PKG / "agents" / "prompts" / "implement.md").read_text()
+        template = (context.PROMPTS_DIR / "implement.md").read_text()
         system_prompt = context.build_system_prompt(
             "IMPLEMENT",
             context_md,
@@ -2092,7 +2092,7 @@ def _drive_cell(
                             ),
                             context_md=context_md,
                             claude_md=claude_md,
-                            prompts_dir=_SAFFRON_PKG / "agents" / "prompts",
+                            prompts_dir=context.PROMPTS_DIR,
                             max_turns=spec.max_turns,
                             budget_usd=critic_budget(spec.budget_usd, spent),
                             agent=agent,
@@ -2204,7 +2204,7 @@ def _drive_cell(
                         spec_body=spec.body + context.criteria_section(spec.acceptance),
                         context_md=context_md,
                         claude_md=claude_md,
-                        prompts_dir=_SAFFRON_PKG / "agents" / "prompts",
+                        prompts_dir=context.PROMPTS_DIR,
                         max_turns=spec.max_turns,
                         budget_usd=critic_budget(spec.budget_usd, spent),
                         # Measured, never reported (§4.3): from the head the

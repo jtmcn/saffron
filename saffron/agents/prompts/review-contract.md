@@ -88,6 +88,9 @@ array. Each element has exactly these fields:
 - `claim` (string) — what is wrong, and why the gates did not catch it. Two or
   three sentences, concrete enough that a reader can check it at that line.
 
+A person reads your `claim` in the pull request's findings table. Write it
+in plain, specific language and state each fact once.
+
 An empty array is a real answer, and it is the honest one when you find nothing.
 The host reconciles every finding against the diff and drops any it cannot
 anchor to a real line, so a finding pointing at a line you did not read is worth
