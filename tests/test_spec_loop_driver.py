@@ -652,7 +652,7 @@ def test_snapshot_shows_each_specs_title_and_budget_and_counts_every_root(loop, 
     # spec(s) declare no depends_on" of four that did.
     loop.scan_returns(0, 1, 2, 3)
 
-    assert driver.cmd_snapshot(argparse.Namespace(force=False)) == 0
+    assert driver.cmd_snapshot(argparse.Namespace(force=False, new=False)) == 0
 
     out = capsys.readouterr().out
     for title in (
@@ -720,7 +720,7 @@ def test_a_resnapshot_keeps_the_outcome_of_a_spec_edited_while_its_pr_is_open(
     )
     seen = loop.scan_returns(0, 1)
 
-    assert driver.cmd_snapshot(argparse.Namespace(force=True)) == 0
+    assert driver.cmd_snapshot(argparse.Namespace(force=True, new=False)) == 0
 
     rows = driver._load()
     kept = {p.spec_id: p for p in rows}
@@ -878,7 +878,7 @@ def test_a_resnapshot_keeps_what_the_loop_recorded(loop):
     # tasks (or a drop the ledger knows nothing of), and one spec is new.
     loop.scan_returns(1, 3)
 
-    assert driver.cmd_snapshot(argparse.Namespace(force=True)) == 0
+    assert driver.cmd_snapshot(argparse.Namespace(force=True, new=False)) == 0
 
     rows = {p.spec_id: p for p in driver._load()}
     assert set(rows) == {ready, dropped, new}  # a merged PR leaves the loop
@@ -886,6 +886,35 @@ def test_a_resnapshot_keeps_what_the_loop_recorded(loop):
     assert rows[dropped].dropped == "operator's call"
     assert rows[new].state is None
     assert driver._stale(list(rows.values())) == []
+
+
+def test_a_new_loop_forgets_the_last_loops_drops(loop):
+    # Run 6 (2026-09-17): `--force` over run 5's finished order brought back
+    # three specs `dropped` for a reason that was true of run 5 only.
+    merged, dropped, *_ = loop.ids
+    driver._save(
+        [
+            loop.row(0, state="READY_FOR_REVIEW", pr=11),
+            loop.row(1, dropped="kept the loop to another chain"),
+        ]
+    )
+    loop.scan_returns(1)
+
+    assert driver.cmd_snapshot(argparse.Namespace(force=False, new=True)) == 0
+
+    [row] = driver._load()
+    assert (row.spec_id, row.dropped) == (dropped, None)
+
+
+def test_a_new_loop_is_refused_while_the_last_one_has_an_open_pull_request(
+    loop, capsys
+):
+    driver._save([loop.row(0, state="READY_FOR_REVIEW", pr=10)])
+    loop.scan_returns(1)
+
+    assert driver.cmd_snapshot(argparse.Namespace(force=False, new=True)) == 1
+    assert "#10" in capsys.readouterr().err
+    assert [p.pr for p in driver._load()] == [10]
 
 
 def _ledger_with_one_cell(tmp_path):

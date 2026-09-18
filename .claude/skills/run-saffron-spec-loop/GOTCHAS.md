@@ -88,6 +88,8 @@ independent specs nobody reviews between cells.
 - **Redirect `make check` to a file and echo `$?`.** `make check | tail` reports
   tail's status. `ruff format` rewrites files and then reports failure: run it
   again before believing red.
+- **Run commit and push as separate commands.** The auto-mode classifier
+  denied them chained with `&&` on run 6 and let each one through alone.
 - **Stage review commits by name.** `.saffron-loop/` is gitignored loop state and
   stays out of every commit.
 

@@ -811,10 +811,28 @@ def watch_pattern() -> str:
 
 
 def cmd_snapshot(args) -> int:
-    if ORDER.is_file() and not args.force:
-        return _fail(f"{ORDER.relative_to(REPO)} exists — pass --force to re-snapshot")
-    previous = _previous() if args.force else []
-    carried, held_out = _carried(previous)
+    if ORDER.is_file() and not (args.force or args.new):
+        return _fail(
+            f"{ORDER.relative_to(REPO)} exists — pass --force to re-snapshot this "
+            "loop, or --new to start another"
+        )
+    previous = _previous() if (args.force or args.new) else []
+    if args.new:
+        # A drop is this loop's call, so a new loop carries none (item 172);
+        # an open pull request would leave the stack with it.
+        still_open = [
+            f"#{p.pr}"
+            for p in previous
+            if p.pr and _pr_state(p.pr) not in {"MERGED", "CLOSED"}
+        ]
+        if still_open:
+            return _fail(
+                f"the last loop still has {', '.join(still_open)} open — "
+                "`snapshot --force` to keep it in this loop"
+            )
+        carried, held_out = [], {}
+    else:
+        carried, held_out = _carried(previous)
     candidates, refusals = _scan(loop_branches=frozenset(p.branch for p in previous))
     ordered, stranded = _order(candidates, refusals, carried, frozenset(held_out))
     if held_out:
@@ -1533,7 +1551,17 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("snapshot", help="write the loop's order, before any PR exists")
-    p.add_argument("--force", action="store_true", help="replace an existing order")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--force",
+        action="store_true",
+        help="re-snapshot this loop, keeping its outcomes",
+    )
+    mode.add_argument(
+        "--new",
+        action="store_true",
+        help="start another loop once every pull request of the last has closed",
+    )
     p.set_defaults(func=cmd_snapshot)
 
     p = sub.add_parser("next", help="print the next spec to start a cell for")

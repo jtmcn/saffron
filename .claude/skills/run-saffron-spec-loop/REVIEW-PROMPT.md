@@ -19,7 +19,8 @@ the placeholders filled:
 - `{HEAD}` — `git rev-parse origin/{BRANCH}`
 - `{WHAT}` — two sentences on what the diff does, and its `git diff --stat`
 - `{KNOWN}` — the in-cell critic's findings you have already verified or
-  fixed, and any blocker a lens withdrew after REBUT
+  fixed, and any blocker a lens withdrew after REBUT. Add step 1b's concerns
+  for this spec.
 
 ## Opening
 
