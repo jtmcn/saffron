@@ -286,8 +286,8 @@ class Agent:
     event, so `event` is `None` here rather than a partial one), stored as
     that serialization sliced to `BOUND_CHARS` characters, with
     `original_chars` naming how large it really was; or `detail` — a
-    host-authored fact with no cell event behind it at all (a reap outcome, a
-    pipe closing). `raw` is the field that must survive the log: a raw line
+    host-authored fact with no cell event behind it (a reap outcome, a pipe
+    closing), which can still quote the cell runtime's stderr. `raw` is the field that must survive the log: a raw line
     that loses its flag on round-trip is a quarantine that stopped being one.
     `bounded` is the same kind of fact for the fourth shape — a bounded event
     that loses its flag reads as a whole one, which is worse than the

@@ -1593,7 +1593,7 @@ def test_a_teardown_detail_is_stripped_and_clipped():
             Teardown(
                 timestamp=1.0,
                 spec_id="x",
-                step="container",
+                step="proxy_denied",
                 ok=False,
                 detail=f"proxy DENIED A{chr(code)}B",
             )
@@ -1614,16 +1614,16 @@ def test_a_teardown_detail_is_stripped_and_clipped():
 def test_a_preflight_detail_is_stripped_and_clipped():
     """Item 63 (deferred part): the `cell_up`, `unstacked`, and general
     `Preflight` branches all render a `detail` that can carry cell-influenced
-    text — `str(gone)` from a `ParentGone` on `unstacked`, a spec-drift
-    description on the general branch, and the cell runtime's own build/probe
-    output on `cell_up`. Each must strip control characters and clip to
-    `_DETAIL_BOUND`."""
+    text — `str(gone)` from a `ParentGone` on `unstacked` and a spec-drift
+    description on the general branch. `cell_up` carries only host text today
+    and is driven so every branch that renders a detail stays alike. Each must
+    strip control characters and clip to `_DETAIL_BOUND`."""
     from saffron.events import _DETAIL_BOUND
 
     branches = {
         "cell_up": "cell",
         "unstacked": "unstacked",
-        "proxy_start": "preflight",
+        "spec_drift": "preflight",
     }
     for step, prefix in branches.items():
         for code in (*range(0x20), 0x7F):
