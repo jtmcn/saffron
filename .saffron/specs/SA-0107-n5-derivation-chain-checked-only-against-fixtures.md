@@ -304,3 +304,8 @@ merged or not, run start, `pr_url`, plan text and diff text. It writes the ledge
 `events.jsonl` spans, the committed spec versions and the batch-tree files. The
 feature ceiling is 600 changed lines, and five hand-built fixtures would pass
 it.
+
+**Commit as you go.** Each turn has a 15-minute wall clock
+(`TURN_TIMEOUT_S`, `saffron/cell/session.py:58`). The first cell for this spec
+hit it with nothing committed, and the work was lost. Commit once the builder
+exists, and again each time a criterion's test passes.
