@@ -11,8 +11,9 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from harness import corpus, lens_scoring, probe_check, recovery
+from harness import corpus, lens_scoring, recovery
 from harness.lens_scoring import LensReview
+from saffron import probe as probe_check
 from saffron.agents.findings import Finding
 from saffron.cell.runtime import CellRuntimeError
 from saffron.gates import runner

@@ -80,8 +80,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 
-from harness import corpus, lens_scoring, probe_check  # noqa: E402
+from harness import corpus, lens_scoring  # noqa: E402
 from saffron import events  # noqa: E402
+from saffron import probe as probe_check  # noqa: E402
 from saffron.agents import context  # noqa: E402
 from saffron.cell import runtime, session, worktree  # noqa: E402
 from saffron.gates import runner  # noqa: E402

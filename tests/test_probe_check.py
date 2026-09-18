@@ -15,7 +15,7 @@ import inspect
 
 import pytest
 
-from harness import probe_check
+from saffron import probe as probe_check
 from saffron.gates.contract import Failure, GateResult, GateStatus
 from saffron.intake import Mutant
 
