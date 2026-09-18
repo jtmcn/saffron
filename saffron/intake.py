@@ -10,10 +10,17 @@ import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+    field_validator,
+)
 
 SpecType = Literal["feature", "bug", "refactor", "test", "docs", "chore"]
 RiskTier = Literal["standard", "elevated"]
@@ -35,6 +42,9 @@ _CRITERIA_SECTION = re.compile(
     r"^##\s*Acceptance criteria\s*$(.*?)(?=^##\s|\Z)",
     re.MULTILINE | re.DOTALL | re.IGNORECASE,
 )
+
+# What vulture reports, as `.saffron/gates/dead.py` keys it; that script reads this field itself.
+PENDING_SYMBOL = r"^[^\s:]+::[A-Za-z_][A-Za-z0-9_]*$"
 
 
 class SpecError(ValueError):
@@ -134,6 +144,10 @@ class Spec(BaseModel):
     envelope: list[str] = Field(default_factory=list)
     touches: list[str] = Field(default_factory=list)
     forbidden: list[str] = Field(default_factory=list)
+    # Dead symbols this spec will bring into use; the `dead` gate skips them while it is open.
+    pending_symbols: list[Annotated[str, StringConstraints(pattern=PENDING_SYMBOL)]] = (
+        Field(default_factory=list)
+    )
     # The three ceilings, and this is now where their defaults live: `cli`
     # discards nothing and `CellSpec`'s copies are only reached by tests.
     # 12.0, not the 10.0 that stood here — nothing read this field until now,
