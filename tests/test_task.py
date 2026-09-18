@@ -1,12 +1,6 @@
 """`run_task` end to end: what reaches the queue store for a task that never
-packaged (`CONTEXT.md` §6, the morning index).
-
-Nothing tested `run_task` directly before this file — `tests/test_cli.py` and
-`tests/test_package.py` name it only in comments — so this is the first place
-it is driven on its own, with `run_one_cell` and the two `package_phase` entry
-points it calls (`push_unpackaged_work`, `package`) replaced by doubles at
-module scope, the seams `saffron/task.py`'s own docstring names.
-"""
+packaged (`DESIGN.md` §6). `run_one_cell`, `push_unpackaged_work` and
+`package` are replaced at module scope."""
 
 from __future__ import annotations
 
@@ -22,34 +16,7 @@ from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
 from saffron.task import PinnedBase, ResolvedCeilings
 
-
-def _spec(spec_id: str) -> Spec:
-    return Spec(
-        id=spec_id,
-        title="A spec",
-        type="feature",
-        touches=["src/**"],
-        acceptance_criteria=["it works"],
-    )
-
-
-def _ceilings() -> ResolvedCeilings:
-    return ResolvedCeilings(
-        budget_usd=12.0,
-        max_attempts=4,
-        max_turns=60,
-        budget_source="default",
-        attempts_source="default",
-        turns_source="default",
-    )
-
-
-def _base(tmp_path: Path) -> PinnedBase:
-    return PinnedBase(
-        mirror=tmp_path / "mirror.git",
-        url="https://github.com/o/r.git",
-        base_sha="a" * 40,
-    )
+_NO_COMMITS = "no commits, nothing to push"
 
 
 def _drive(
@@ -57,98 +24,102 @@ def _drive(
     monkeypatch,
     *,
     spec_id: str,
-    outcome: CellOutcome,
+    state: str,
+    task_id: int,
     out_dir: Path,
+    spent_usd: float = 1.0,
+    attempts: int = 0,
+    **outcome_fields,
 ) -> CellOutcome:
-    """One `run_task` call, with `run_one_cell` stubbed to hand back `outcome`
-    and everything else — the ledger, the base, the ceilings, the repo path —
-    built the same way for every test here."""
+    """One `run_task` call whose cell ends in `state`."""
+    outcome = CellOutcome(
+        state=state,
+        task_id=task_id,
+        run_id=task_id,
+        task_dir=out_dir / spec_id,
+        spent_usd=spent_usd,
+        attempts=attempts,
+        **outcome_fields,
+    )
     monkeypatch.setattr(task_module, "run_one_cell", lambda *a, **k: outcome)
-    ledger = Ledger(tmp_path / f"{spec_id}.db")
     return task_module.run_task(
-        _spec(spec_id),
+        Spec(
+            id=spec_id,
+            title="A spec",
+            type="feature",
+            touches=["src/**"],
+            acceptance_criteria=["it works"],
+        ),
         "s" * 40,
-        ceilings=_ceilings(),
-        base=_base(tmp_path),
+        ceilings=ResolvedCeilings(
+            budget_usd=12.0,
+            max_attempts=4,
+            max_turns=60,
+            budget_source="default",
+            attempts_source="default",
+            turns_source="default",
+        ),
+        base=PinnedBase(
+            mirror=tmp_path / "mirror.git",
+            url="https://github.com/o/r.git",
+            base_sha="a" * 40,
+        ),
         repo_id=1,
         repo=tmp_path / "target-repo",
-        ledger=ledger,
+        ledger=Ledger(tmp_path / f"{spec_id}.db"),
         out_dir=out_dir,
         token=None,
     )
 
 
+def _push(monkeypatch, result: package_phase.PushResult) -> None:
+    monkeypatch.setattr(package_phase, "push_unpackaged_work", lambda *a, **k: result)
+
+
 def _rows(out_dir: Path) -> list[dict]:
     store = out_dir / "queue.json"
-    if not store.is_file():
-        return []
-    return json.loads(store.read_text())
+    return json.loads(store.read_text()) if store.is_file() else []
 
 
 def test_a_task_that_never_packaged_still_reaches_the_index(tmp_path, monkeypatch):
-    """Two different unpackaged states, for two different specs, each land
-    their own row — not just one state, and not one row overwriting the
-    other."""
+    """Two unpackaged states, for two specs, each land their own row."""
     out_dir = tmp_path / "out"
-    monkeypatch.setattr(
-        package_phase,
-        "push_unpackaged_work",
-        lambda *a, **k: package_phase.PushResult(
-            pushed=False, note="no commits, nothing to push"
-        ),
-    )
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
 
-    _drive(
-        tmp_path,
-        monkeypatch,
-        spec_id="SY-1",
-        outcome=CellOutcome(
-            state="EXHAUSTED",
-            task_id=1,
-            run_id=1,
-            task_dir=out_dir / "SY-1",
-            spent_usd=3.5,
-            attempts=4,
-        ),
-        out_dir=out_dir,
-    )
-    _drive(
-        tmp_path,
-        monkeypatch,
-        spec_id="SY-2",
-        outcome=CellOutcome(
-            state="NOT_IMPLEMENTED",
-            task_id=2,
-            run_id=2,
-            task_dir=out_dir / "SY-2",
-            spent_usd=1.25,
-            attempts=2,
-        ),
-        out_dir=out_dir,
-    )
+    for spec_id, state, task_id, spent, attempts in (
+        ("SY-1", "EXHAUSTED", 1, 3.5, 4),
+        ("SY-2", "NOT_IMPLEMENTED", 2, 1.25, 2),
+    ):
+        _drive(
+            tmp_path,
+            monkeypatch,
+            spec_id=spec_id,
+            state=state,
+            task_id=task_id,
+            out_dir=out_dir,
+            spent_usd=spent,
+            attempts=attempts,
+        )
 
     rows = {row["spec_id"]: row for row in _rows(out_dir)}
     assert rows.keys() == {"SY-1", "SY-2"}
     assert rows["SY-1"]["state"] == "EXHAUSTED"
     assert rows["SY-1"]["cost_usd_est"] == 3.5
     assert rows["SY-1"]["attempts"] == 4
+    assert rows["SY-1"]["note"] == _NO_COMMITS
     assert rows["SY-2"]["state"] == "NOT_IMPLEMENTED"
     assert rows["SY-2"]["cost_usd_est"] == 1.25
     assert rows["SY-2"]["attempts"] == 2
 
 
 def test_an_unpackaged_row_carries_no_pull_request_link(tmp_path, monkeypatch):
-    """The link is empty — no pull request exists — and the operator's route
-    back to the work is the branch name in the note, not the link."""
+    """The link is empty, and the pushed branch is in the note."""
     out_dir = tmp_path / "out"
-    monkeypatch.setattr(
-        package_phase,
-        "push_unpackaged_work",
-        lambda *a, **k: package_phase.PushResult(
-            pushed=True,
-            branch="saffron/SY-3",
-            pushed_sha="b" * 40,
-            note=f"pushed saffron/SY-3 @ {'b' * 12}",
+    note = f"pushed saffron/SY-3 @ {'b' * 12}"
+    _push(
+        monkeypatch,
+        package_phase.PushResult(
+            pushed=True, branch="saffron/SY-3", pushed_sha="b" * 40, note=note
         ),
     )
 
@@ -156,52 +127,34 @@ def test_an_unpackaged_row_carries_no_pull_request_link(tmp_path, monkeypatch):
         tmp_path,
         monkeypatch,
         spec_id="SY-3",
-        outcome=CellOutcome(
-            state="RATE_LIMITED",
-            task_id=3,
-            run_id=3,
-            task_dir=out_dir / "SY-3",
-            spent_usd=0.9,
-            attempts=1,
-        ),
+        state="RATE_LIMITED",
+        task_id=3,
         out_dir=out_dir,
     )
 
     rows = _rows(out_dir)
     assert len(rows) == 1
     assert rows[0]["link"] == ""
-    assert "saffron/SY-3" in rows[0]["note"]
+    assert rows[0]["note"] == note
     assert rows[0]["repo"] == (tmp_path / "target-repo").name
 
 
 def test_a_later_package_replaces_the_unpackaged_row_and_keeps_its_link(
     tmp_path, monkeypatch
 ):
-    """A spec whose first task never packaged and whose second task does
-    leaves one row, holding the packaged outcome and its pull request link —
-    never a second row, and never the earlier, linkless one surviving on
-    top."""
+    """One row survives, holding the packaged outcome and its link, and a
+    PACKAGE that raises leaves no row."""
+    from saffron.report import index as index_report
+
     out_dir = tmp_path / "out"
-    monkeypatch.setattr(
-        package_phase,
-        "push_unpackaged_work",
-        lambda *a, **k: package_phase.PushResult(
-            pushed=False, note="no commits, nothing to push"
-        ),
-    )
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
 
     _drive(
         tmp_path,
         monkeypatch,
         spec_id="SY-4",
-        outcome=CellOutcome(
-            state="EXHAUSTED",
-            task_id=4,
-            run_id=4,
-            task_dir=out_dir / "SY-4",
-            spent_usd=2.0,
-            attempts=3,
-        ),
+        state="EXHAUSTED",
+        task_id=4,
         out_dir=out_dir,
     )
     rows = _rows(out_dir)
@@ -209,12 +162,8 @@ def test_a_later_package_replaces_the_unpackaged_row_and_keeps_its_link(
     assert rows[0]["state"] == "EXHAUSTED"
     assert rows[0]["link"] == ""
 
-    from saffron.report import index as index_report
-
     def _package_ok(outcome, *, spec, repo, **kwargs):
-        """Stands in for `_finish`: the packaged row's own write, with the
-        pull request address as its link — `package.py:966-983`'s shape,
-        reproduced here since the real `package()` is replaced wholesale."""
+        """Stands in for `_finish`, which writes the packaged row itself."""
         result = package_phase.PackageResult(
             state="READY_FOR_REVIEW",
             pr_url="https://github.com/o/r/pull/9",
@@ -242,14 +191,8 @@ def test_a_later_package_replaces_the_unpackaged_row_and_keeps_its_link(
         tmp_path,
         monkeypatch,
         spec_id="SY-4",
-        outcome=CellOutcome(
-            state="READY_FOR_REVIEW",
-            task_id=5,
-            run_id=5,
-            task_dir=out_dir / "SY-4",
-            spent_usd=4.0,
-            attempts=1,
-        ),
+        state="READY_FOR_REVIEW",
+        task_id=5,
         out_dir=out_dir,
     )
     rows = _rows(out_dir)
@@ -266,17 +209,62 @@ def test_a_later_package_replaces_the_unpackaged_row_and_keeps_its_link(
             tmp_path,
             monkeypatch,
             spec_id="SY-5",
-            outcome=CellOutcome(
-                state="READY_FOR_REVIEW",
-                task_id=6,
-                run_id=6,
-                task_dir=out_dir / "SY-5",
-                spent_usd=1.0,
-                attempts=1,
-            ),
+            state="READY_FOR_REVIEW",
+            task_id=6,
             out_dir=out_dir,
         )
+    assert {row["spec_id"] for row in _rows(out_dir)} == {"SY-4"}
 
-    rows = {row["spec_id"] for row in _rows(out_dir)}
-    assert "SY-5" not in rows
-    assert rows == {"SY-4"}
+
+def test_an_unpackaged_row_counts_its_review_and_rebuttal(tmp_path, monkeypatch):
+    """Concerns, sustained blockers and unkept fixes each reach the row as
+    their own count, as `_finish` counts them for a packaged task."""
+    from saffron.agents.findings import Finding
+    from saffron.phases import rebut
+    from saffron.phases.review import LensReview
+
+    concern = Finding(
+        lens="correctness",
+        severity="concern",
+        file="a.py",
+        line=1,
+        claim="c",
+        anchored=True,
+    )
+    verdicts = [
+        rebut.Verdict(finding=n, verdict="confirmed", reason="r") for n in (1, 2, 3)
+    ]
+    rebut_result = rebut.RebutResult(
+        state="REBUTTING",
+        why="halted",
+        rebuttal=rebut.RebuttalTurn(
+            rebuttals=[
+                rebut.Rebuttal(finding=1, action="argued", argument="wrong"),
+                rebut.Rebuttal(finding=2, action="fixed", argument="fixed it"),
+                rebut.Rebuttal(finding=3, action="fixed", argument="fixed it"),
+            ]
+        ),
+        verdicts=[rebut.LensVerdicts(lens="correctness", verdicts=verdicts)],
+        moved=False,
+        cost_usd=0.0,
+    )
+    assert (
+        rebut.sustained_blockers(rebut_result),
+        rebut.unkept_fixes(rebut_result),
+    ) == (1, 2)
+    out_dir = tmp_path / "out"
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-6",
+        state="REBUTTING",
+        task_id=7,
+        out_dir=out_dir,
+        reviews=[LensReview(lens="correctness", findings=[concern] * 3)],
+        rebut_result=rebut_result,
+    )
+
+    (row,) = _rows(out_dir)
+    assert (row["concerns"], row["sustained"], row["unkept"]) == (3, 1, 2)

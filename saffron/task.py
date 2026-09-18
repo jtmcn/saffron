@@ -352,17 +352,8 @@ def run_task(
             token=token,
             emit=emit,
         )
-        # PACKAGE never ran, so `_finish` never wrote this task's row — the
-        # gap `CONTEXT.md`'s own index section calls out: a task ranked
-        # `_STATE_RANK` never reaches the page it was ranked for. `link` is
-        # always empty here — never `pushed.branch` or `pushed.pushed_sha` —
-        # because no pull request exists; the branch `pushed` reached, if
-        # any, lives in `note` instead, which is exactly what
-        # `push_unpackaged_work` already wrote (`SA-0069`). `added`/`removed`
-        # are 0 because PACKAGE never computed a diff stat. This is the one
-        # place this write happens: the packaged branch above already wrote
-        # its own row, with its own link, through `_finish`, and a write here
-        # too would blank it on the next upsert.
+        # `_finish` never ran, so this is the task's only row. No pull request
+        # exists, so `link` stays empty; a pushed branch is already in `note`.
         index_report.append_queue_line(
             out_dir,
             index_report.QueueLine(
