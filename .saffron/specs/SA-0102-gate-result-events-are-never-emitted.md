@@ -73,7 +73,7 @@ times over". It carries `gate`, `status`, `against` with the three values
 optional `new_failures` count.
 
 Nothing constructs one. The name appears in `saffron/events.py` at `:142`,
-`:237`, `:241`, `:368`, `:384` and `:795`, all inside that module, and in
+`:237`, `:241`, `:368`, `:384`, `:795` and `:799`, all inside that module, and in
 `tests/test_events.py`. The only mention elsewhere in `saffron/` is a comment at
 `saffron/cell/session.py:625`. `describe` says so itself at
 `saffron/events.py:796-800`: "No call site prints one alone today". It stays
@@ -140,8 +140,9 @@ regression this spec must not cause.
 owner, which is backlog item 160 and a schema decision. Do not invent a site for
 it, and do not emit a borrowed attempt number.
 
-**`saffron/events.py`, except two lines of prose.** The kind, its fields and
-its renderer all exist and need no change. The change does make two things there
+**`saffron/events.py`, except a comment and one row.** The kind, its fields
+and its renderer all exist and need no change. The permitted edit is a 5-line
+comment rewrite plus one `_Family` row. The change does make two things there
 false, and those two change with it. `describe`'s comment at `:796-800` says no
 call site prints a `GateResult` alone. `FAMILIES` (`:899`) is the proof its kinds
 cover every call site. It gains one row for the new `gates: {gate}={status}`
@@ -182,9 +183,11 @@ witness through `_drive` and REBUT, the way
 `test_the_gate_check_after_the_rebuttal_continues_the_gate_count` does. Anchor
 on no `Attempt` event: `_rebut_gates` calls `_judge()` (`session.py:2178`)
 before it emits the REBUT `Attempt` (`:2181-2188`), so a stray set lands before
-that event, not after it. Assert instead that the `against == "attempt"` events
-are exactly two sets, each the suite's gate names, numbered 1 and 2, and
-nothing else. A `_judge` defaulted to emitting writes a third set.
+that event, not after it. Assert instead on the `against == "attempt"` events,
+as an ordered list of `(attempt, gate)` pairs. It equals
+`[(1, g) for g in names1] + [(2, g) for g in names2]`, each list the suite's
+gate names, and nothing else. A `_judge` defaulted to emitting writes a third
+set. A set or a dict would collapse a third set that borrowed the number 2.
 
 **The attempt number is not in scope at the emit site.**
 `saffron/cell/session.py:646` holds the loop `for attempt in range(1, max_attempts
@@ -235,8 +238,9 @@ runs once per attempt, and the loop variable is easy to lose. Every event then
 carries the last number. Drive two attempts, and assert the first set still
 carries 1 after the second set is written.
 
-**Criterion 1's wrong implementation is `against` inferred from the id.** That
-couples the event to the ledger call. Deriving the value from whether `run_id`
+**Pass `against` explicitly, never inferred from the id.** No witness can see
+the difference, so this is style guidance. Inferring it couples the event to the
+ledger call. Deriving the value from whether `run_id`
 or `attempt_id` was passed reproduces today's shape. The field's own comment
 says it is required rather than defaulted, so a forgotten keyword cannot file a
 baseline result as an attempt's. Pass it explicitly at each site.
@@ -266,9 +270,19 @@ spec review estimated 255 to 300 lines, which counted seven `_JOINED` rows
 that are no longer added. Write one
 shared helper that drives a cell and collects its `GateResult` events, and use
 it in all three witnesses. Fold criterion 2's two attempts, its identical
-failure and its REBUT into one drive, with the suites
-`test_the_gate_check_after_the_rebuttal_continues_the_gate_count` uses:
-`suites=([], _results(failing), [], [])`.
+failure and its REBUT into one drive:
+
+```python
+base = [GateResult(gate="types", status="fail", tool="t 1", failures=[f2])]
+suites = (base, base + _results(failing), base, base)
+```
+
+This differs from the suites of
+`test_the_gate_check_after_the_rebuttal_continues_the_gate_count`, because
+`_results` builds only `lint`. The `types` failure is identical at baseline and
+every attempt, so the subtraction cancels it. The drive still goes green at
+attempt 2 and reaches REBUT, and `types` asserts status `fail` with a count of
+0. Keep each witness docstring to two or three lines.
 
 **The three witnesses are the only new test functions.** Prefix any helper
 with `_`. A new test of `describe(GateResult(...))` passes with the source
