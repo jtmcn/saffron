@@ -1374,3 +1374,10 @@ def test_structure_errors_when_its_tool_is_present_but_not_runnable(tmp_path):
     result = parse_gate_json(done.stdout, expected_gate="structure")
     assert result.status == "error", result.summary
     assert "could not be run" in result.summary
+
+
+def test_the_dead_code_whitelist_is_kept_from_the_linter_and_the_type_checker():
+    """vulture's whitelist is bare `_.name` lines, which ruff and ty both reject."""
+    config = tomllib.loads((REPO / "pyproject.toml").read_text())
+    assert ".saffron/deadcode-allow.py" in config["tool"]["ruff"]["extend-exclude"]
+    assert ".saffron/deadcode-allow.py" in config["tool"]["ty"]["src"]["exclude"]
