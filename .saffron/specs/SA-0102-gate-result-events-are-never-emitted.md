@@ -30,8 +30,8 @@ forbidden:
   - saffron/cli.py
   - saffron/watch.py
   - saffron/replay.py
-budget_usd: 14
-max_turns: 90
+budget_usd: 20
+max_turns: 120
 acceptance:
   - claim: >-
       Every gate result the baseline suite produced reaches the log as its own
@@ -63,7 +63,8 @@ acceptance:
 `saffron/events.py` defines ten kinds. Nine of them have a producer.
 
 (`SA-0101`, the parent, adds an eleventh. Every count of kinds below is
-at `origin/main`, and each is one higher on the parent's branch.)
+at `origin/main`, and each is one higher on the parent's branch. Every line
+number in this spec is at the parent's branch, `origin/saffron/SA-0101`.)
 
 `GateResult` at `saffron/events.py:237-254` is the tenth. Its docstring calls it
 "the host's own typed record of the fact a watch line already carried a hundred
@@ -72,12 +73,12 @@ times over". It carries `gate`, `status`, `against` with the three values
 optional `new_failures` count.
 
 Nothing constructs one. The name appears in `saffron/events.py` at `:142`,
-`:237`, `:241`, `:352`, `:367` and `:777`, all inside that module, and in
+`:237`, `:241`, `:368`, `:384` and `:795`, all inside that module, and in
 `tests/test_events.py`. The only mention elsewhere in `saffron/` is a comment at
-`saffron/cell/session.py:616`. `describe` says so itself at
-`saffron/events.py:778-782`: "No call site prints one alone today". It stays
+`saffron/cell/session.py:625`. `describe` says so itself at
+`saffron/events.py:796-800`: "No call site prints one alone today". It stays
 rendered for a stated reason. A future consumer "reads one `GateResult` at a
-time, and 'the ten kinds render' cannot mean 'eight of them'".
+time, and 'every kind renders' cannot mean 'all but one.'"
 
 Measured 2026-09-17 across the 54 event logs under `~/.saffron/batches/v0/`:
 `Agent` 56004, `PhaseStart` 475, `Preflight` 390, `Attempt` 154, `Teardown` 134,
@@ -95,8 +96,8 @@ What the log carries instead is two lossy summaries.
   `gates: attempt 2, 0 new failures -> green`. Which gate failed is absent.
 
 The ledger has all of it. `record_gate_result` is called at
-`saffron/cell/session.py:1409` for the baseline, with `run_id`, and at
-`saffron/cell/session.py:1848` for each attempt, with `attempt_id`. So a person
+`saffron/cell/session.py:1418` for the baseline, with `run_id`, and at
+`saffron/cell/session.py:1857` for each attempt, with `attempt_id`. So a person
 holding the event log alone cannot answer which gate sent a task back to REPAIR,
 while a person holding the ledger can.
 
@@ -108,11 +109,11 @@ of `attempt_id` and `run_id`, and that suite is neither. So `rebuttal` stays
 unproduced until item 160 decides what the suite belongs to.
 
 **The attempt site serves two different suites, and one of them is not this
-spec's.** `_judge` is defined at `saffron/cell/session.py:1833` and called twice.
-`repair_loop` takes it as `judge=_judge` at `:1897`, and `_rebut_gates` calls it
-directly at `:2169` for the §5.6 post-rebuttal re-run. The ledger write at `:1848`
+spec's.** `_judge` is defined at `saffron/cell/session.py:1842` and called twice.
+`repair_loop` takes it as `judge=_judge` at `:1906`, and `_rebut_gates` calls it
+directly at `:2178` for the §5.6 post-rebuttal re-run. The ledger write at `:1857`
 books that second suite under the rebuttal's extraction turn, which its comment at
-`:1840-1845` explains. An unguarded emit at `:1848` therefore files a rebuttal
+`:1849-1854` explains. An unguarded emit at `:1857` therefore files a rebuttal
 suite as an attempt's, with a borrowed number. That is the conflation `against`
 exists to prevent.
 
@@ -141,10 +142,10 @@ it, and do not emit a borrowed attempt number.
 
 **`saffron/events.py`, except two lines of prose.** The kind, its fields and
 its renderer all exist and need no change. The change does make two things there
-false, and those two change with it. `describe`'s comment at `:778-782` says no
-call site prints a `GateResult` alone. `FAMILIES` (`:867`) is the proof its kinds
+false, and those two change with it. `describe`'s comment at `:796-800` says no
+call site prints a `GateResult` alone. `FAMILIES` (`:899`) is the proof its kinds
 cover every call site. It gains one row for the new `gates: {gate}={status}`
-line, with a prefix distinct from the four `gates:` rows at `:898-901`.
+line, with a prefix distinct from the four `gates:` rows at `:932-935`.
 `test_the_table_did_not_quietly_lose_a_row` in `tests/test_events.py` moves its
 count by one, from whatever `SA-0101`'s branch left it at. A diff touching
 anything else in `events.py` is a sign the events are being reshaped rather than
@@ -182,10 +183,10 @@ witness through `_drive` and REBUT, the way
 assert no `GateResult` follows the `Attempt` whose phase is `REBUT`.
 
 **The attempt number is not in scope at the emit site.**
-`saffron/cell/session.py:637` holds the loop `for attempt in range(1, max_attempts
+`saffron/cell/session.py:646` holds the loop `for attempt in range(1, max_attempts
 + 1)`, and that loop belongs to `repair_loop`, which invokes the callback as
-`comparison = judge()` at `:638`. Inside `_judge` the only number at hand is the
-ledger's `attempt_id` at `:1846`. That is a row id counting every turn, plan,
+`comparison = judge()` at `:647`. Inside `_judge` the only number at hand is the
+ledger's `attempt_id` at `:1855`. That is a row id counting every turn, plan,
 notes and rebut extraction included, rather than the gate attempt. Thread the real
 number in from `repair_loop`. Both `attempt_id` and the length of
 `ledger.attempts(...)` are wrong, and criterion 2's witness catches both.
@@ -215,7 +216,12 @@ one passing gate, and assert all three carry no count. Drive it through an
 attempt, never the baseline: at the baseline no gate has a count whatever the
 implementation does. Criterion 2 carries the converse. A count written to fall
 back to absent whenever it is zero collapses a passing gate's measured zero. So
-criterion 2's witness asserts that zero in a suite with no errored gate.
+criterion 2's witness asserts that zero in a suite with no errored gate. It also
+drives a blocking gate that fails identically at baseline and attempt, and
+asserts status `fail` with a count of 0: counting the gate's raw failures,
+rather than the new ones, fails it. Criterion 3's drifted drive first asserts
+that the emitted gates are exactly the suite's gate names, then that each count
+is `None`.
 
 **`new_failures` is `None` and never `0` for a gate that did not compute one.**
 The field's own comment says why: a skipped or errored gate had no count. Zero
@@ -237,21 +243,32 @@ baseline result as an attempt's. Pass it explicitly at each site.
 drives two whole cells. It compares the captured lines byte for byte against
 `tests/fixtures/watch-golden.txt`. Its green run carries one joined baseline line
 at `:8` and one `gates: attempt 1` line, so a per-gate block lands in both runs.
-`test_the_join_covers_every_captured_line_a_kind_renders` (`:1977`) needs every
-distinct captured line joined, so `_JOINED` (`:1810`) gains one `GateResult` row
-per distinct `gates: {gate}={status}` line, about seven. The header comment at
-`:1744-1745` says `GateResult` is never captured, and changes with them.
-Append the new rows at the end of `_JOINED`. Its cases have no ids, so an
-insertion renumbers the cases after it, and `census` reads that as tests
-removed (`:1948-1953`).
+`test_the_join_covers_every_captured_line_a_kind_renders` (`:2015`) needs every
+distinct captured line joined. The header comment at `:1762-1763` says
+`GateResult` is never captured, and changes with them.
+
+**Add no row to `_JOINED` (`:1827`).** Each row is a new parametrized id of
+`test_describe_reproduces_a_line_the_fixture_captured` (`:2006`). A new
+`GateResult` row passes with the source reverted: the fixture is under
+`tests/**`, and the renderer exists at base. `revert` reads a new id that passes
+reverted as theatre (`saffron/gates/core/revert.py:127`), and `revert` always
+blocks. Join each captured `gates: X=Y` line inline instead, inside
+`test_the_join_covers_every_captured_line_a_kind_renders`, through
+`describe(GateResult(...))`.
 
 **`size` blocks at 300 lines here.** This diff touches `saffron/cell/**`,
 which `.saffron/policy.yaml`'s `elevate_on` elevates. At elevated, `size` is not
 advisory (`_advisory` in `saffron/gates/suite.py`). The
-spec review estimated 255 to 300 lines. Write one shared helper that drives a
+spec review estimated 255 to 300 lines, which counted seven `_JOINED` rows
+that are no longer added. Write one
+shared helper that drives a
 cell and collects its `GateResult` events, and use it in all three witnesses.
 
 **`census` compares test names, so rename nothing.**
+
+**Backlog item 166 closes by hand after merge.** `docs/**` is forbidden, so
+`docs/backlog/166-the-gateresult-kind-renders-and-nothing-constructs-it.md`
+is the operator's to close.
 
 **`events.GateResult` needs an aliased import.** `saffron/cell/session.py:39`
 already binds that name from `saffron.gates.contract`, which is the gate contract
