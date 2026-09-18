@@ -26,8 +26,8 @@ forbidden:
   - saffron/task.py
   - saffron/scheduler.py
   - saffron/ledger.py
-budget_usd: 17
-max_turns: 90
+budget_usd: 18
+max_turns: 100
 acceptance:
   - claim: >-
       A spec refused at the night's opening scan because its `depends_on`
@@ -40,7 +40,7 @@ acceptance:
   - claim: >-
       After the first task, the latest rescan decides what runs, and a spec is
       started at most once a night. When a rescan offers again a spec whose
-      task ended `RATE_LIMITED` earlier that night, the night skips it. An
+      task ended `RATE_LIMITED` earlier that night, the night does not start it. An
       opening candidate the rescan no longer offers is not started.
     witness: tests/test_batch.py::test_a_spec_the_rescan_requeues_is_not_started_twice_in_one_night
   - claim: >-
@@ -71,7 +71,7 @@ refused in that scan (`saffron/scheduler.py:595`). A parent at
 `READY_FOR_REVIEW`, `APPROVED` or `MERGE_TRAIN` admits it
 (`DEPENDENCY_WAITING_STATES`, `saffron/scheduler.py:91`), and `run_task` then
 cuts the child from the parent's branch (`task._resolve_stacked_on`,
-`saffron/task.py:114`). So the admission and the stacking both exist. Only the
+`saffron/task.py:117`). So the admission and the stacking both exist. Only the
 second scan is missing.
 
 ## Problem
@@ -98,12 +98,12 @@ updates it by hand after this merges. Do not cite it as a reason to stop:
 - `DESIGN.md:400`: priority is "sorted once in memory".
 - `DESIGN.md:404`: the next scan stamps a task left in flight `ORPHANED`.
 - `DESIGN.md:408`: priority is "read exactly once, at scan".
-- `saffron/task.py:130-133`: a grandchild is out of reach by design.
+- `task._resolve_stacked_on` (`saffron/task.py:133-136`): a grandchild is out of reach by design.
 - The spec loop's `GOTCHAS.md`: `run_batch` resolves its candidates once.
 
 **A rescan that raises.** It ends the night `INFRASTRUCTURE` through
 `run_batch`'s existing `finally` (`saffron/batch.py:122-130`), and `_batch`
-re-raises it to `main` (`saffron/cli.py:785-789`). Printing a rescan's `gh`
+re-raises it to `main` (`_batch`'s `except`, `saffron/cli.py:786-792`). Printing a rescan's `gh`
 gaps, which `_print_scan_gaps` does only for the opening scan
 (`saffron/cli.py:668`), is also not this spec's.
 
@@ -130,14 +130,18 @@ prints matches the first task the night starts.
 **The latest rescan decides.** After each task, start the first spec the
 rescan offers that has not started tonight. Do not merge its list with the
 opening one. A live rescan runs the open-PR overlap refusal
-(`saffron/scheduler.py:669-692`), and a draft PACKAGE opened tonight can make
+(`saffron/scheduler.py:671-693`), and a draft PACKAGE opened tonight can make
 an opening candidate refused. Criterion 2's witness includes an opening
 candidate the rescan leaves out, and checks it never starts.
 
 **Skip by spec id.** A rescan returns a new `Candidate`. A spec that ended in a
 re-queueing state (`saffron/scheduler.py:103`) comes back with its `task_id`
 set, so comparing candidates as values starts it a second time. The pinned
-base is fixed for the night, so one spec id is one `spec_sha`.
+base is fixed for the night, so one spec id is one `spec_sha`. In criterion
+2's witness, the rescan offers the `RATE_LIMITED` spec as a `Candidate` whose
+`task_id` is set. Write the ledger row and rescan with `build_queue`, or
+construct a `Candidate(task_id=…)` that differs from the opening one. Either
+way, a value comparison fails the witness.
 
 **Rescan with `stamp_orphaned=False`.** `True` asserts that nothing is in
 flight, which holds at the opening scan (`saffron/cli.py:472-477`). Mid-night,
@@ -150,7 +154,7 @@ rescan fetches again.
 the opening `resolved` (`saffron/cli.py:763`) and passes its `repo_id` to every
 task (`:417`). On a repo's first night that is `None`, and the parent's own run
 creates the row. `_resolve_stacked_on` returns no parent when `repo_id` is
-`None` (`saffron/task.py:176`), so a child the rescan admitted would be cut
+`None` (`saffron/task.py:179`), so a child the rescan admitted would be cut
 from `base_sha` without its parent's changes. In criterion 3's witness, the
 second `_resolve_queue` result has a `repo_id` the first lacked, and
 `cli.run_task` is a recorder. The fake `run_batch` calls the rescan, then the
@@ -171,7 +175,7 @@ frontmatter shape is `_write_spec`, `tests/test_scheduler.py:139`, outside
 with `build_queue(directory, repo_id, ledger)`. The fake runner records the
 parent's outcome in the ledger the way a real task leaves it:
 `create_run`, `create_task` at the candidate's `spec_sha`, then
-`set_task_state(task_id, "READY_FOR_REVIEW")` (`saffron/ledger.py:590`). Read
+`set_task_state(task_id, "READY_FOR_REVIEW")` (`saffron/ledger.py:610`). Read
 the opening candidates from `build_queue` too, so the child is refused there
 for the reason a real night refuses it. Capture `emit` and check a line naming
 the child comes before the runner's call for it. That line also names the
@@ -186,4 +190,18 @@ given. Assert that the second `_resolve_queue` call received the first call's
 
 **Give every existing `run_batch` call a rescan.** In `tests/test_batch.py`, a
 rescan that returns the opening list leaves each test's result unchanged.
-Criterion 4 holds one of them to that.
+Criterion 4 holds one of them to that. Import nothing new from `saffron.batch`
+at module scope in `tests/test_batch.py`. A collection error there makes
+`revert` skip.
+
+**`_batch_runner` has six direct test callers** (`tests/test_cli.py:2843`,
+`:2957`, `:3025`, `:3083`, `:3159`, `:3223`). A change to its signature
+updates all six.
+
+**Update the docstrings the change makes false, in place.** In
+`saffron/batch.py`, the module docstring says a K=1 `for` loop runs over
+`build_queue`'s candidates. `run_batch`'s says `candidates` is `build_queue`'s
+own return value. In `saffron/cli.py`, fix `_batch_runner`'s "paid for once by
+`_resolve_queue`" and `_batch`'s "Resolves the queue…". `_resolve_queue`'s
+`stamp_orphaned` paragraph (`saffron/cli.py:472-479`) says `False` is what
+`saffron queue` passes. The rescan passes it too, so name both callers.
