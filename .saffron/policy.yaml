@@ -23,6 +23,9 @@ gates:
   # code. It fails at base as well: subtraction
   # counts, so a task fails only when a file gains hits of one rule.
   prose: { blocking: true }
+  # Code no production caller reaches. It fails at base too, so only a task's new
+  # failures count; an open spec's `pending_symbols` defers one.
+  dead: { blocking: true }
   # Curated avoided phrases from CONTEXT.md, advisory.
   terms: { blocking: false }
 
