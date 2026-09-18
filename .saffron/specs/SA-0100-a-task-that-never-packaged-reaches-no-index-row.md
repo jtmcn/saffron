@@ -31,22 +31,23 @@ budget_usd: 16
 max_turns: 90
 acceptance:
   - claim: >-
-      A task whose cell ended in a state other than READY_FOR_REVIEW reaches
-      the index with a row carrying that state. Two different such states each
+      A task whose run_one_cell returned a state other than READY_FOR_REVIEW reaches
+      the index with a row carrying that state, its spend and its attempts,
+      whether or not its work was pushed. Two different such states each
       produce their own row, and each row reads back with the state its own
       cell ended in. Today neither reaches the store at all.
     witness: tests/test_task.py::test_a_task_that_never_packaged_still_reaches_the_index
   - claim: >-
-      The row for a task that never packaged carries an empty link. It carries
-      no branch name, no mirror path and no invented pull request address, and
-      its note says what happened instead.
+      The row for a task that never packaged carries an empty link: no branch
+      name, no mirror path and no invented pull request address. Its note says
+      what happened instead, and for a task whose work was pushed it names the
+      branch the work went to.
     witness: tests/test_task.py::test_an_unpackaged_row_carries_no_pull_request_link
   - claim: >-
       A spec whose first task ended unpackaged and whose second task packaged
       leaves one row, holding the packaged outcome and still carrying the pull
       request link PACKAGE wrote. The earlier unpackaged row is replaced rather
-      than joined by a second row, and the new write never replaces a packaged
-      row's link with an empty one.
+      than joined by a second row.
     witness: tests/test_task.py::test_a_later_package_replaces_the_unpackaged_row_and_keeps_its_link
   - claim: >-
       Appending a row for a spec that already has one still replaces it rather
@@ -68,7 +69,8 @@ level. Its own comment says why each was added: "Absent, they fell to
 `_ORDINARY` and sorted below elevated-risk green tasks: a task that could not
 pass its own gates, or one whose cell died, reading as reviewable."
 
-Ten of those twelve states can never appear on the page.
+Outside v0 replay, eleven of those twelve states can never appear on the page. PACKAGE writes
+only `MERGE_FAILED` among them.
 
 `append_queue_line` has exactly two callers. One is `saffron/replay.py:143`,
 which is v0 and agent-free. The other is `saffron/phases/package.py:966`,
@@ -109,13 +111,12 @@ already knows the terminal state, and already prints it.
 
 ## Problem
 
-- **Ten of twelve ranked states cannot reach the page.** The ranking was
+- **Eleven of twelve ranked states cannot reach the page.** The ranking was
   written, reviewed and tested against states no row can carry.
 - **A third of this repo's own tasks are invisible.** 31 of 99, and every one
   of them is a task that needed a person.
-- **The two states an operator most needs are the two most often missing.** A
-  cell that died leaves `ORPHANED`. A task that could not pass its own gates
-  leaves `EXHAUSTED`. Together they account for 16 of the 31.
+- **The most urgent state is the most often missing.** `EXHAUSTED` is a task
+  that could not pass its own gates. It is 9 of the 31.
 - **The header undercounts.** `tasks` and `spend` are computed from the stored
   rows, so both report a night smaller and cheaper than it was.
 
@@ -130,6 +131,21 @@ source "currently undecided rather than chosen". The ledger cannot reproduce
 the store today, because the diff stat sits in no column. That decision belongs
 to a person, not to this cell. `saffron/report/**` and `saffron/ledger.py` are
 both forbidden.
+
+**A task that never returned an outcome.** `run_one_cell` stamps `ORPHANED`
+on the ledger and re-raises (`saffron/cell/session.py:2331-2334`), and
+`reconcile` stamps it with no task running. `REVIEWING` is a state a night
+leaves a task in mid-phase. Neither reaches the `else:`, so this spec writes no
+row for them, and the 7 `ORPHANED` tasks stay missing. `REBUTTING` is
+different: a REBUT that halts returns it (`saffron/phases/rebut.py:315-319`),
+so it takes the `else:` and gets a row like any other unpackaged state. Guard
+the write on no state list.
+
+**An unpackaged task after a packaged one.** The newest task's row wins. A spec
+re-run after its pull request opened, for example on `CHANGES_REQUESTED`, that
+ends `EXHAUSTED` replaces the row, link included. That is what the upsert does
+today, and keeping the old link would mean reading the store from
+`saffron/task.py` through a reader `saffron/report/**` keeps private.
 
 **The batch header's six fields.** Wall clock, per-repo preflight and the
 trailing accept rate all have their own gaps. This spec adds rows, and the
@@ -156,30 +172,56 @@ only in comments. Create the file and drive `run_task` in it.
 **The seams are patchable at module scope.** `saffron/task.py` imports
 `run_one_cell` into its own namespace, so a test replaces
 `saffron.task.run_one_cell`. It imports `package as package_phase`, so a test
-replaces `push_unpackaged_work` on that module object. Build the doubles from
-those two points and pass a real `out_dir`.
+replaces `push_unpackaged_work` on that module object, and `package` beside it.
+Build the doubles from those three points and pass a real `out_dir`. Criterion
+3's `package` double stands in for `_finish`. It must write the packaged row
+itself, with `link` set to the pull request address, as
+`saffron/phases/package.py:966-983` does.
 
 **Criterion 1's plausible wrong implementation is a row for one state.** Two
 shapes do it. A write guarded by a state list, and a write placed inside a
 branch only some outcomes reach. Each satisfies a single-state test and leaves
-the hole open. Drive two states that differ, and assert each row carries its
-own.
+the hole open. Drive two states that differ, under two different spec ids, and
+assert each row carries its own. The store keys on repo and spec id, so two
+states for one spec leave one row. Have one of the two push doubles return what
+production returns for a cell that left no patch,
+`PushResult(pushed=False, note="no commits, nothing to push")`
+(`saffron/phases/package.py:1070-1073`). A write guarded on `pushed.pushed`
+then fails. Give the two outcomes different non-zero `spent_usd` and `attempts`,
+and assert each row carries its own: the header's spend sums `cost_usd_est`.
 
 **Criterion 2's plausible wrong implementation is the cell branch in `link`.**
 `push_unpackaged_work` returns a branch and a pushed sha on success. Putting
 either in `link` renders a row whose link is not a pull request. The index is an
-index, and the diffs live in GitHub (§6). An empty link is correct.
-Assert the branch name is absent from the row, not only that the link is falsy.
+index, and the diffs live in GitHub (§6). An empty link is correct. The branch
+belongs in the note: it is the operator's route back to work PACKAGE never
+packaged (`tests/test_cli.py:142-143`). Have the `push_unpackaged_work` double
+return the note production writes on a successful push,
+`pushed <branch> @ <sha>` (`saffron/phases/package.py:1175`). Assert the link is
+exactly empty and the note names the branch.
+
+**The row's other fields.** `cost_usd_est` is `outcome.spent_usd` and
+`attempts` is `outcome.attempts`, so the header's spend counts the task.
+`added` and `removed` are 0, because PACKAGE never computed a diff stat.
 
 **Criterion 3 is the upsert exercised through the new path.** One row must
 survive, and it must keep its link. Writing the unpackaged row after the packaged
 one, or keying on the spec id alone, produces two rows or the wrong survivor.
-Drive the unpackaged task first, then the packaged one, and assert the store
-holds one row whose link is the pull request address.
+In the same test, drive a `READY_FOR_REVIEW` task for a third spec id whose
+`package` double raises, and assert that spec has no row. Consider a write placed
+before the `if` at `saffron/task.py:317`. It passes every other assertion here.
+It also leaves a row with an empty link for a pull request never opened.
+
+Drive the unpackaged task first and assert the store holds one row, in the
+unpackaged state, with an empty link. That half is what fails with the source
+reverted: at base the unpackaged task writes nothing, and the `package` double
+writes the final row either way. Then drive the packaged one and assert the
+store holds one row whose link is the pull request address.
 
 **The write goes inside the `else:` at `saffron/task.py:335`, and nowhere else.**
 This is the one placement that matters. A write at the end of `run_task` passes
-criteria 1 and 2. It also passes criterion 3's first wording, while it destroys
+criteria 1 and 2. It also passes a criterion 3 test that asserts only the
+final row, while it destroys
 every pull request link in the index. The packaged branch reaches
 `_finish`, which writes the row with `link=result.pr_url`
 (`saffron/phases/package.py:966-978`). Then `saffron/task.py:334` assigns

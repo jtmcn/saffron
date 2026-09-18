@@ -110,16 +110,19 @@ line, a blank line, then every hunk. `_ADDED` and `_REMOVED` then search the
 whole output, and a missing count is taken from the first hunk line that looks
 like one.
 
-**`--no-patch` fixes that only in one position.** It must come after
-`DIFF_FLAGS` and before `--shortstat`. Measured on git 2.54, with
-`--no-patch` placed:
-
-- after `--shortstat`: the output is empty, and `diff_stat` reads `(0, 0)` for
-  every diff, with no error.
-- between `DIFF_FLAGS` and `--shortstat`: the summary line alone.
-- before `DIFF_FLAGS`: the `--unified=3` after it turns the patch back on.
-
-Say why in a short comment on the read.
+**Read the summary line, and nothing after it.** `--no-patch` is no fix. On
+the cell image's git 2.39.5, `diff *DIFF_FLAGS --no-patch --shortstat` prints
+nothing, whether `--no-patch` comes before `--shortstat` or after it. The
+read would then give `(0, 0)` for every diff, with no error. Measured
+2026-09-17 in `saffron/cell:saffron`. Git 2.54 on the host keeps the summary
+when `--no-patch` sits between `DIFF_FLAGS` and `--shortstat`, so a host-only
+check passes what the cell fails. On 2.39.5, `diff *DIFF_FLAGS --shortstat`
+prints the summary as its first line, then a blank line and the patch, and an
+empty diff prints nothing. Take the first line, and read `(0, 0)` when there
+is none. Say why in a short comment on the read. `_git` strips its output, so
+`splitlines()[0]` raises on an empty range where the read today returns
+`(0, 0)`. Have the submodule witness also assert that a range from a commit to
+itself reads `(0, 0)`.
 
 **Both witnesses build real commits and read the counts.** A test that checks
 the argument list proves nothing about the counts. Build the commits in the
@@ -131,10 +134,11 @@ how to set `GIT_CONFIG_GLOBAL` with `monkeypatch.setenv`.
 **The submodule witness has to catch the patch trap too.** Put both changes
 in one commit: the gitlink, and a new file whose only line is text that
 `_REMOVED` matches, such as `9 deletions(-)`. The correct counts are `(2, 0)`.
-Today the config hides the gitlink, which gives `(1, 0)`. A splice without
-`--no-patch` gives `(2, 9)`, because the summary has no deletions and the
-search finds the file's line in the hunk. `--no-patch` after `--shortstat`
-gives `(0, 0)`. Each wrong implementation fails the same assertion.
+Today the config hides the gitlink, which gives `(1, 0)`. A splice that
+searches the whole output gives `(2, 9)`, because the summary has no deletions
+and the search finds the file's line in the hunk. Adding `--no-patch` gives
+`(0, 0)` on the cell's git. Each wrong implementation fails the same
+assertion.
 
 **The rename witness needs no config.** Commit a file of known length. Then
 commit a rename of it with no other change, and read `diff_stat` across that
