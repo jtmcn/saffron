@@ -71,6 +71,9 @@ def check_ids(records: list[Record]) -> list[Violation]:
                     "`uv run python -m records new-id`",
                 )
             )
+        if isinstance(r.model.id, str) and _backlog(r).filed is None:
+            # A random id carries no order; `filed:` is what lists it.
+            out.append(Violation(r.path, "filed", "a random id needs `filed:`"))
     present = {n for n in counts if isinstance(n, int)}
     if present:
         missing = sorted(set(range(1, max(present) + 1)) - present)

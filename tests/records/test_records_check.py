@@ -68,10 +68,13 @@ def test_ids_must_be_unique(broken):
     assert any(v.field == "id" and "twice" in str(v) for v in violations)
 
 
-def _hash_item(root: Path, item_id: str, extra: str = "") -> Path:
+def _hash_item(
+    root: Path, item_id: str, extra: str = "", filed: str | None = "2026-09-18"
+) -> Path:
     path = _item(root, f"{item_id}-a-later-item.md")
+    dated = "" if filed is None else f"filed: {filed}\n"
     path.write_text(
-        f"---\nid: {item_id}\ntitle: Later\nstatus: open\n{extra}---\n\n"
+        f"---\nid: {item_id}\ntitle: Later\nstatus: open\n{dated}{extra}---\n\n"
         "## Problem\n\nx\n\n## Done looks like\n\ny\n"
     )
     return path
@@ -87,6 +90,13 @@ def test_a_numbered_id_past_the_last_is_a_violation(broken, monkeypatch):
     [v] = check_ids(load(BACKLOG, broken))
     assert v.path == _item(broken, "003-a-corpse-reads-as-drained.md")
     assert "new-id" in v.message
+
+
+def test_a_random_id_must_say_when_it_was_filed(broken):
+    path = _hash_item(broken, "b-3f9a2c", filed=None)
+    [v] = check_ids(load(BACKLOG, broken))
+    assert v.path == path
+    assert "filed:" in v.message
 
 
 def test_a_random_id_must_be_unique(broken):
