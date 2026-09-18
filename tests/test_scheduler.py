@@ -1818,7 +1818,12 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-17, a thirty-fifth time: `SA-0098` merged as PR #323
+    """Re-measured 2026-09-17, a thirty-sixth time: `SA-0093`, `SA-0094`,
+    `SA-0096` and `SA-0097` merged (PRs #303, #305, #320, #321) and retire to
+    `done/`. `SA-0099` was refused on `SA-0094`, so it joins the candidates;
+    `SA-0101` and `SA-0102` stay refused down its chain, `SA-0103` on `SA-0100`.
+
+    Re-measured 2026-09-17, a thirty-fifth time: `SA-0098` merged as PR #323
     and is retired to `done/`, so it leaves the candidates. The refusals are
     unchanged: `SA-0101` named it as a second `depends_on`, and is still refused
     on its first, `SA-0099`.
@@ -2005,14 +2010,10 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
     assert [c.spec.id for c in candidates] == [
-        "SA-0093",
-        "SA-0096",
-        "SA-0097",
+        "SA-0099",
         "SA-0100",
     ]
     assert [r.path.name[:7] for r in refusals] == [
-        "SA-0094",
-        "SA-0099",
         "SA-0101",
         "SA-0102",
         "SA-0103",

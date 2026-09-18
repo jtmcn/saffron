@@ -34,8 +34,8 @@ That is the gate now.
 
 Soundness first: **79**, ~~**69**~~, **117** (69 answered by running the probe the lens
 already names), **93**, **94**, ~~**109**~~ (filed 2026-09-12; it
-leaks a mutant wherever 80 stores one), **114** (109's other path, to the critic),
-**115** (a path hidden from `scope` by committed content), **80** (~~**83**~~, ~~**85**~~, ~~**84**~~,
+leaks a mutant wherever 80 stores one), ~~**114**~~ (109's other path, to the critic),
+~~**115**~~ (a path hidden from `scope` by committed content), **80** (~~**83**~~, ~~**85**~~, ~~**84**~~,
 ~~**82**~~ and ~~**81**~~, pulled up from tier 3 as why 69's gate could not be
 declared against safely, are done — 2026-09-08), then **97**, ~~**102**~~, ~~**112**~~, **119**, **120**, **118** and **136**. Honesty second:
 ~~**73**~~, ~~**70**~~, ~~**45**~~, **51** (with **49**/**50**, which its fix closes),
@@ -93,7 +93,7 @@ was shown the invariants it judged a diff against`, 2026-09-11,
 listed too.
 
 **From the spec loop's run of 2026-09-16** (stack #285): ~~**145**~~, then ~~**141**~~,
-**143**, **140**, **137**. **145** first because `SA-0092` built the ceilings
+~~**143**~~, ~~**140**~~, **137**. **145** first because `SA-0092` built the ceilings
 comparison and the prompt that should read it does not know it exists, so the
 whole item-123 fix is inert until it does. **141** and **143** are `SA-0089`'s
 two open edges — a judged suite that lands in no record, and a subnet space
