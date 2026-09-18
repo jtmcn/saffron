@@ -5,12 +5,14 @@ packaged (`DESIGN.md` §6). `run_one_cell`, `push_unpackaged_work` and
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
 from saffron import task as task_module
 from saffron.cell.session import CellOutcome
+from saffron.events import Event
 from saffron.intake import Spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
@@ -29,9 +31,15 @@ def _drive(
     out_dir: Path,
     spent_usd: float = 1.0,
     attempts: int = 0,
+    events: Sequence[Event] | None = None,
     **outcome_fields,
 ) -> CellOutcome:
-    """One `run_task` call whose cell ends in `state`."""
+    """One `run_task` call whose cell ends in `state`.
+
+    `events`, when given, are emitted through the `emit` the `run_one_cell`
+    double is handed, before it returns — the only way to drive the
+    default `emit` closure `run_task` builds when a caller passes none, since
+    that closure lives inside `run_task` itself and is never returned."""
     outcome = CellOutcome(
         state=state,
         task_id=task_id,
@@ -41,7 +49,13 @@ def _drive(
         attempts=attempts,
         **outcome_fields,
     )
-    monkeypatch.setattr(task_module, "run_one_cell", lambda *a, **k: outcome)
+
+    def _run_one_cell(*a, **k):
+        for event in events or ():
+            k["emit"](event)
+        return outcome
+
+    monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell)
     return task_module.run_task(
         Spec(
             id=spec_id,
@@ -268,3 +282,171 @@ def test_an_unpackaged_row_counts_its_review_and_rebuttal(tmp_path, monkeypatch)
 
     (row,) = _rows(out_dir)
     assert (row["concerns"], row["sustained"], row["unkept"]) == (3, 1, 2)
+
+
+def test_a_log_that_stopped_writing_says_so_and_a_clean_one_does_not(
+    tmp_path, monkeypatch, capsys
+):
+    """`run_task`'s default `emit` warns the terminal, naming the log that
+    stopped growing, when the log cannot be written; a log that writes
+    cleanly leaves no such line."""
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+
+    broken_dir = tmp_path / "broken"
+    log_path = broken_dir / "SY-7" / "events.jsonl"
+    log_path.parent.mkdir(parents=True)
+    log_path.mkdir()  # events.jsonl occupied by a directory, not a file
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-7",
+        state="EXHAUSTED",
+        task_id=8,
+        out_dir=broken_dir,
+    )
+    broken_output = capsys.readouterr().out
+    assert f"{log_path} stopped accepting writes" in broken_output
+
+    clean_dir = tmp_path / "clean"
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-8",
+        state="EXHAUSTED",
+        task_id=9,
+        out_dir=clean_dir,
+    )
+    clean_output = capsys.readouterr().out
+    assert "stopped accepting writes" not in clean_output
+
+
+def test_a_log_that_refused_every_write_warns_once(tmp_path, monkeypatch, capsys):
+    """Several events, every append failing, still carries exactly one
+    warning line — not one per lost event."""
+    from saffron.events import Teardown  # local: kept out of the revert's collection
+
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+
+    out_dir = tmp_path / "out"
+    log_path = out_dir / "SY-9" / "events.jsonl"
+    log_path.parent.mkdir(parents=True)
+    log_path.mkdir()  # events.jsonl occupied by a directory, not a file
+
+    events = [
+        Teardown(timestamp=float(i), spec_id="SY-9", step=f"step-{i}", ok=True)
+        for i in range(3)
+    ]
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-9",
+        state="EXHAUSTED",
+        task_id=10,
+        out_dir=out_dir,
+        events=events,
+    )
+    output = capsys.readouterr().out
+    assert output.count("stopped accepting writes") == 1
+
+
+def test_a_log_that_failed_on_its_first_write_still_warns(
+    tmp_path, monkeypatch, capsys
+):
+    """A log unwritable from the very first append — the task's own
+    `Ceilings` line — still warns once, and the warning is never appended to
+    the log: `events.jsonl` ends up holding exactly the events the
+    `run_one_cell` double emitted, in order, and nothing else."""
+    from saffron.events import Teardown, read_log  # local, see above
+
+    class _FailFirst(task_module.EventLog):
+        """The first `append` fails without writing; every later one is the
+        real thing. `saffron.task.EventLog` is what `run_task` builds from,
+        so this is where the substitution has to land."""
+
+        def __init__(self, task_dir):
+            super().__init__(task_dir)
+            self._first = True
+
+        def append(self, event):
+            if self._first:
+                self._first = False
+                self.failed = True
+                return
+            super().append(event)
+
+    monkeypatch.setattr(task_module, "EventLog", _FailFirst)
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+
+    out_dir = tmp_path / "out"
+    events = [
+        Teardown(timestamp=float(i), spec_id="SY-10", step=f"step-{i}", ok=True)
+        for i in range(3)
+    ]
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-10",
+        state="EXHAUSTED",
+        task_id=11,
+        out_dir=out_dir,
+        events=events,
+    )
+    output = capsys.readouterr().out
+    log_path = out_dir / "SY-10" / "events.jsonl"
+    assert f"{log_path} stopped accepting writes" in output
+    assert output.count("stopped accepting writes") == 1
+    assert read_log(out_dir / "SY-10") == events
+
+
+def test_a_log_that_starts_failing_partway_through_still_warns(
+    tmp_path, monkeypatch, capsys
+):
+    """The disk filling mid-run, not at the first line: several appends
+    succeed for real, and only later ones start refusing. A check that only
+    ever looks at the very first `emit` call — and never again after — would
+    see that first call succeed here and print nothing, so this is the case
+    that check would miss."""
+    from saffron.events import Teardown, read_log  # local, see above
+
+    class _FailAfterTwo(task_module.EventLog):
+        """The first two appends — the task's own `Ceilings` line, then the
+        double's first event — write for real; every append from the third
+        onward fails without writing, as a disk that fills partway through a
+        night would."""
+
+        def __init__(self, task_dir):
+            super().__init__(task_dir)
+            self._count = 0
+
+        def append(self, event):
+            self._count += 1
+            if self._count <= 2:
+                super().append(event)
+            else:
+                self.failed = True
+
+    monkeypatch.setattr(task_module, "EventLog", _FailAfterTwo)
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+
+    out_dir = tmp_path / "out"
+    events = [
+        Teardown(timestamp=float(i), spec_id="SY-11", step=f"step-{i}", ok=True)
+        for i in range(4)
+    ]
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-11",
+        state="EXHAUSTED",
+        task_id=12,
+        out_dir=out_dir,
+        events=events,
+    )
+    output = capsys.readouterr().out
+    log_path = out_dir / "SY-11" / "events.jsonl"
+    assert f"{log_path} stopped accepting writes" in output
+    assert output.count("stopped accepting writes") == 1
+
+    logged = read_log(out_dir / "SY-11")
+    assert len(logged) == 2, "only the two appends that ran before the flip land"
+    assert logged[1] == events[0]
