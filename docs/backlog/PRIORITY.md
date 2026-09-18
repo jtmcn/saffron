@@ -115,7 +115,7 @@ rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
 **38**), plus **43**, **48**, **52**, **60**, **66**, **67**, ~~**72**~~, **98**, **103**,
 ~~**104**~~, **113**, **135**, and from stack #285: **147**, **146**, ~~**144**~~,
 **149**, **148**, **142**, ~~**138**~~, then ~~**152**~~ and ~~**153**~~, and
-from stack #308: ~~**159**~~, **157**, **158**, and from run 6: **172**. Then **160**, which is what
+from stack #308: ~~**159**~~, **157**, **158**, and from run 6: **172**, and from run 7: **b-b5f379**. Then **160**, which is what
 item 141's close left. The Gate-only cell's suite is in a file because the
 ledger has no owner column that fits it.
 
