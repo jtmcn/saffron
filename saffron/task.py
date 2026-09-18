@@ -39,6 +39,9 @@ from saffron.events import Ceilings, CeilingSource, Event, EventLog, Preflight, 
 from saffron.intake import Spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
+from saffron.phases.rebut import sustained_blockers, unkept_fixes
+from saffron.phases.review import anchored_concerns
+from saffron.report import index as index_report
 from saffron.repos import image as repo_image
 from saffron.scheduler import DEPENDENCY_WAITING_STATES
 
@@ -348,6 +351,35 @@ def run_task(
             ledger=ledger,
             token=token,
             emit=emit,
+        )
+        # PACKAGE never ran, so `_finish` never wrote this task's row — the
+        # gap `CONTEXT.md`'s own index section calls out: a task ranked
+        # `_STATE_RANK` never reaches the page it was ranked for. `link` is
+        # always empty here — never `pushed.branch` or `pushed.pushed_sha` —
+        # because no pull request exists; the branch `pushed` reached, if
+        # any, lives in `note` instead, which is exactly what
+        # `push_unpackaged_work` already wrote (`SA-0069`). `added`/`removed`
+        # are 0 because PACKAGE never computed a diff stat. This is the one
+        # place this write happens: the packaged branch above already wrote
+        # its own row, with its own link, through `_finish`, and a write here
+        # too would blank it on the next upsert.
+        index_report.append_queue_line(
+            out_dir,
+            index_report.QueueLine(
+                repo=repo.name,
+                spec_id=spec.id,
+                state=outcome.state,
+                attempts=outcome.attempts,
+                cost_usd_est=outcome.spent_usd,
+                concerns=anchored_concerns(outcome.reviews),
+                added=0,
+                removed=0,
+                link="",
+                note=pushed.note,
+                risk=outcome.effective_risk,
+                sustained=sustained_blockers(outcome.rebut_result),
+                unkept=unkept_fixes(outcome.rebut_result),
+            ),
         )
         print(f"{spec.id:<10} {outcome.state}  {pushed.note}")
     return outcome
