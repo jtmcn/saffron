@@ -178,6 +178,7 @@ writing one.
 - `ponytail:` comments mark deliberate simplifications and name their ceiling; leave them.
 - A comment is one or two lines naming the non-obvious why. The rationale behind it goes in
   the commit message or the PR body, and a spec's notes are that rationale, not comment text.
+  **(gated: `prose` counts Python comment runs over two lines, per file)**
 - A new test is not trusted until it has been run against the unfixed code — or, for one
   guarding a property already true, against a mutant that breaks it.
 - Commit subjects are lowercase `type(scope): what changed`, written as a sentence about the
