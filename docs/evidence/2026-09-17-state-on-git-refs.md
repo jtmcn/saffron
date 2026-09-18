@@ -13,8 +13,8 @@ Saffron's state lives in SQLite at `~/.saffron/ledger.db`, and `DESIGN.md` §4.6
 rule 1 says so deliberately: *"SQLite remains the system of record. The graph is
 a projection with no write path back."*
 `docs/superpowers/specs/2026-09-02-ontology-authoritative-design.md` says it
-twice more — *"The ledger is authoritative for facts"* (§2) and *"The ledger
-stays the system of record"* (§3).
+twice more — *"The ledger is authoritative for facts"* (its section 2) and *"The
+ledger stays the system of record"* (its section 3).
 
 The proposal this spike was run against inverts that: the authoritative record
 becomes commits on `refs/saffron/*` in each target repo, pushed to the real
