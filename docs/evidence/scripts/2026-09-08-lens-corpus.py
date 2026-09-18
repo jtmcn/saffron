@@ -70,6 +70,7 @@ raise inside a cell at fixture seven must not take the six before it with it.
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import subprocess
 import sys
@@ -81,6 +82,7 @@ sys.path.insert(0, str(ROOT))
 
 from harness import corpus, lens_scoring, probe_check  # noqa: E402
 from saffron import events  # noqa: E402
+from saffron.agents import context  # noqa: E402
 from saffron.cell import runtime, session, worktree  # noqa: E402
 from saffron.gates import runner  # noqa: E402
 from saffron.gates.contract import GateResult  # noqa: E402
@@ -88,6 +90,30 @@ from saffron.intake import Mutant  # noqa: E402
 from saffron.phases import implement, review  # noqa: E402
 from saffron.repos import mirror as mirror_ops  # noqa: E402
 from saffron.repos.policy import load_policy  # noqa: E402
+
+DRIVER_PATH = Path(__file__).resolve().relative_to(ROOT).as_posix()
+
+
+def _write_manifest(out: Path, fixtures: list[corpus.Fixture]) -> None:
+    """The pass's arm, beside its `run-N.json` files — the provenance
+    `harness/register_scoring.read_manifest` expects, matched key for key.
+
+    `model` is written empty: nothing in this driver captures the model a
+    lens ran under (`docs/superpowers/specs/2026-09-17-prompt-change-measurement-design.md`,
+    "What this is not"), and a placeholder would be a fabricated value.
+    """
+    (out / "manifest.json").write_text(
+        json.dumps(
+            {
+                "prompt_sha": context.prompt_sha(),
+                "model": "",
+                "fixtures": [fixture.spec_id for fixture in fixtures],
+                "driver": DRIVER_PATH,
+                "date": datetime.date.today().isoformat(),
+            },
+            indent=2,
+        )
+    )
 
 TEST_PATHS = ("tests/",)
 """This repo's test root as a path prefix, which is not
@@ -503,6 +529,11 @@ def main() -> int:
                 file=sys.stderr,
             )
             break
+
+    if not args.score_only:
+        # After the loop, so a --max-spend-usd trip still records the arm
+        # that produced whatever landed before it stopped.
+        _write_manifest(args.out, fixtures)
 
     runs = {
         fixture.spec_id: [
