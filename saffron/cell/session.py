@@ -1413,6 +1413,8 @@ def _drive_cell(
         )
 
         if baseline.aborted:
+            # Written where it is known, never derived from `tasks.state`.
+            ledger.set_run_preflight(run_id, "FAILED")
             ledger.set_task_state(task_id, "PREFLIGHT_FAILED")
             ledger.finish_run(run_id, "COMPLETE")
             return CellOutcome(
@@ -1423,6 +1425,9 @@ def _drive_cell(
                 effective_risk=latest.effective_risk,
                 advisory_gates=sorted(latest.advisory_gates),
             )
+
+        # Once, here: a later abort says nothing about fitness to start.
+        ledger.set_run_preflight(run_id, "PASSED")
 
         # The agent runs inside the cell, at /work, on the cell's own key (§5.1).
         context_md = (_SAFFRON_ROOT / "CONTEXT.md").read_text()

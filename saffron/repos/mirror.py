@@ -150,15 +150,20 @@ def changed_files(mirror: Path, base: str, head: str) -> list[str]:
 
 
 def diff_stat(mirror: Path, base: str, head: str) -> tuple[int, int]:
-    """Added and removed line counts, for the queue line.
+    """Added and removed line counts, for the queue line and the pull
+    request body, read with `DIFF_FLAGS` so they match the patch the gates
+    judged whatever the operator's git config says (item 176).
 
     Two searches rather than one optional-group pattern: every group in the
     combined form is optional, so it matches the empty string at position 0
     and reports (0, 0) for every diff.
     """
-    summary = _git(mirror, "diff", "--shortstat", f"{base}..{head}")
-    added = _ADDED.search(summary)
-    removed = _REMOVED.search(summary)
+    summary = _git(mirror, "diff", *DIFF_FLAGS, "--shortstat", f"{base}..{head}")
+    # `--unified` turns the patch back on, and `--no-patch` empties the output on
+    # git 2.39.5 (measured in `saffron/cell:saffron`): read only the summary line.
+    first_line = summary.splitlines()[0] if summary else ""
+    added = _ADDED.search(first_line)
+    removed = _REMOVED.search(first_line)
     return (
         int(added.group(1)) if added else 0,
         int(removed.group(1)) if removed else 0,

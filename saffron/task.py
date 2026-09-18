@@ -39,6 +39,9 @@ from saffron.events import Ceilings, CeilingSource, Event, EventLog, Preflight, 
 from saffron.intake import Spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
+from saffron.phases.rebut import sustained_blockers, unkept_fixes
+from saffron.phases.review import anchored_concerns
+from saffron.report import index as index_report
 from saffron.repos import image as repo_image
 from saffron.scheduler import DEPENDENCY_WAITING_STATES
 
@@ -249,12 +252,19 @@ def run_task(
         # get `events.jsonl`. A print-only default is the defect item 43 is
         # about, and is not this.
         log = EventLog(out_dir / spec.id)
+        # ponytail: re-derives `EventLog`'s private path, since it has no accessor.
+        log_path = out_dir / spec.id / "events.jsonl"
 
         def emit(event: Event) -> None:
             line = describe(event)
             if line:
                 print(line)
+            # `failed` never resets, so its flip is seen once. Printed, never
+            # appended: the log is what failed.
+            was_failed = log.failed
             log.append(event)
+            if log.failed and not was_failed:
+                print(f"warning: {log_path} refused a write; events may be missing")
 
     emit(
         Ceilings(
@@ -348,6 +358,26 @@ def run_task(
             ledger=ledger,
             token=token,
             emit=emit,
+        )
+        # `_finish` never ran, so this is the task's only row. No pull request
+        # exists, so `link` stays empty; a pushed branch is already in `note`.
+        index_report.append_queue_line(
+            out_dir,
+            index_report.QueueLine(
+                repo=repo.name,
+                spec_id=spec.id,
+                state=outcome.state,
+                attempts=outcome.attempts,
+                cost_usd_est=outcome.spent_usd,
+                concerns=anchored_concerns(outcome.reviews),
+                added=0,
+                removed=0,
+                link="",
+                note=pushed.note,
+                risk=outcome.effective_risk,
+                sustained=sustained_blockers(outcome.rebut_result),
+                unkept=unkept_fixes(outcome.rebut_result),
+            ),
         )
         print(f"{spec.id:<10} {outcome.state}  {pushed.note}")
     return outcome

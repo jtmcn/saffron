@@ -2250,6 +2250,57 @@ def test_the_baseline_scope_neither_invents_nor_cancels_an_escape(
     ] == ["1 changed files within touches"]
 
 
+def test_a_run_records_whether_its_preflight_passed(monkeypatch, tmp_path):
+    """§4.1: a run's own preflight outcome, sourced from its baseline suite —
+    never derived from the task state that same branch also sets, which would
+    answer the same question with a join instead of an observation."""
+    passing = _stub_the_runtime(monkeypatch)
+    _, ready_ledger = _drive(
+        monkeypatch,
+        tmp_path / "ready",
+        cell=passing,
+        turns=[_turn(_block(_PLAN)), _turn()],
+    )
+    (ready_row,) = ready_ledger._db.execute("SELECT preflight FROM runs").fetchall()
+    assert ready_row["preflight"] == "PASSED"
+
+    errored = GateResult(gate="tests", status="error", summary="toolchain missing")
+    failing = _stub_the_runtime(monkeypatch, suites=([errored],))
+    outcome, failed_ledger = _drive(
+        monkeypatch, tmp_path / "failed", cell=failing, turns=[]
+    )
+    assert outcome.state == "PREFLIGHT_FAILED"
+    (failed_row,) = failed_ledger._db.execute("SELECT preflight FROM runs").fetchall()
+    assert failed_row["preflight"] == "FAILED"
+
+    # The plausible wrong answer is one value written on both runs — non-NULL
+    # everywhere, and asserting nothing.
+    assert ready_row["preflight"] != failed_row["preflight"]
+
+
+def test_an_abort_after_a_passing_preflight_is_not_a_preflight_failure(
+    monkeypatch, tmp_path
+):
+    """I1's own shape, aimed at the column rather than at `runs.status`: the
+    `except BaseException` abort path closes the run `ABORTED`, but its
+    `preflight` was already written the moment the baseline suite passed — an
+    interrupt during IMPLEMENT says nothing about whether the machine was fit
+    to start an hour earlier. The plausible wrong answer is `FAILED` on every
+    `ABORTED` run, which is the easy read of that path and is wrong here."""
+    cell = _stub_the_runtime(monkeypatch)
+
+    # The very first agent turn is the plan checkpoint, reached only after the
+    # baseline suite has already run clean and `PASSED` has already landed.
+    with pytest.raises(KeyboardInterrupt):
+        _drive(monkeypatch, tmp_path, cell=cell, turns=[KeyboardInterrupt()])
+
+    ledger = Ledger(tmp_path / "ledger.db")
+    (row,) = ledger._db.execute("SELECT status, preflight FROM runs").fetchall()
+    assert row["status"] == "ABORTED"
+    assert row["preflight"] == "PASSED"
+    ledger.close()
+
+
 def test_a_repair_turn_that_fails_does_not_discard_committed_work(
     monkeypatch, tmp_path
 ):
