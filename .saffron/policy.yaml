@@ -60,7 +60,7 @@ elevate_on:
 protected:
   - DESIGN.md
   - CONTEXT.md
-  # The design record left DESIGN.md as records, and stays as protected.
+  # The design record left DESIGN.md as records, and stays as protected (Appendix U).
   - docs/appendices/**
   - .saffron/**
   - uv.lock
