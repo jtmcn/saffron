@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -82,13 +83,24 @@ def test_a_file_out_of_scope_is_not_read(tmp_path):
     assert _hook(repo).returncode == 0
 
 
-def test_prek_runs_the_hook_on_markdown():
+def test_a_commit_of_python_alone_is_limited(tmp_path):
+    repo = _repo(tmp_path, {"saffron/m.py": "x = 1\n"})
+    _stage(repo, "saffron/m.py", "# one\n# two\n# three\nx = 1\n")
+    done = _hook(repo)
+    assert done.returncode == 1
+    assert "saffron/m.py: comment-block rose from 0 to 1" in done.stdout
+
+
+def test_prek_runs_the_hook_on_markdown_and_python():
+    # prek skips a hook no staged file matches, so a `.md` filter never ran
+    # the comment rules on a commit of Python alone.
     config = yaml.safe_load((REPO / ".pre-commit-config.yaml").read_text())
     hooks = [hook for repo in config["repos"] for hook in repo["hooks"]]
     (hook,) = [hook for hook in hooks if hook["id"] == "prose-limit"]
     assert hook["entry"] == "uv run hooks/prose_limit.py"
     assert hook["pass_filenames"] is False
-    assert hook["files"] == r"\.md$"
+    assert re.search(hook["files"], "README.md")
+    assert re.search(hook["files"], "saffron/task.py")
 
 
 def _edited(repo: Path, file_path: Path) -> subprocess.CompletedProcess[str]:

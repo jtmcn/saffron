@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The `prose` gate's limit, applied to a commit and to each edit.
 
-Each staged Markdown file in scope may not carry more hits of any `prose`
-rule than its `HEAD` version. A new file compares against zero, and a rename
+Each staged file in scope, Markdown or Python, may not carry more hits of
+any `prose` rule than its `HEAD` version. A new file compares against zero, and a rename
 against its old path. The gate gets the same limit from baseline subtraction.
 Standard library only, like the gate it loads.
 

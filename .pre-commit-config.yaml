@@ -72,4 +72,4 @@ repos:
         language: system
         entry: uv run hooks/prose_limit.py
         pass_filenames: false
-        files: \.md$
+        files: \.(md|py)$
