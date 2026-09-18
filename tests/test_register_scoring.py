@@ -54,10 +54,13 @@ def test_a_claim_is_scored_by_the_house_rules():
     assert codes == ("semicolon",)
 
 
-def test_a_saffron_term_is_never_filler_in_a_claim():
-    """`protected_words` reads CONTEXT.md, so the root must be the repo."""
+def test_a_saffron_term_is_never_filler_in_a_claim(tmp_path, monkeypatch):
+    """`protected_words` reads `CONTEXT.md` from `root`, so a Saffron term that
+    is also a filler word scores clean here and as filler anywhere else."""
     gate = load_gate(REPO)
+    monkeypatch.setattr(gate, "FILLER", (*gate.FILLER, "elevated"))
     assert "filler" not in score_claim(gate, "The task is elevated.", REPO)
+    assert "filler" in score_claim(gate, "The task is elevated.", tmp_path)
 
 
 def test_a_claim_is_not_read_as_a_spec_instruction():
