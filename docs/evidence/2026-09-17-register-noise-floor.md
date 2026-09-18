@@ -137,4 +137,19 @@ Points relevant to that call:
   for a different metric under the same pass, three points support a range statement and nothing
   about how the samples are shaped between the endpoints.
 
-DECISION: <pending controller ruling>
+DECISION: build the scorer. Tasks 2, 3 and 4 proceed.
+
+The floor is 3.3 per 1k, 8.1% of the mean. The design this spike serves is
+explicit that it wants a guard against a large regression rather than an
+instrument for a small win, and a floor at 8% is consistent with that purpose.
+The two rules carrying most of the signal, `sentence-length` and `em-dash`, are
+the two a register instruction aims at.
+
+The rule the first comparison is judged against reads in two tiers, because
+three runs give a range and not a distribution. A delta above 6.6 per 1k, twice
+the observed range, is **measured**. A delta between 3.3 and 6.6 is
+**suggestive**, and buys another pass rather than a conclusion. A delta below
+3.3 is **unmeasured**. Being wrong about the middle tier costs one pass that was
+not needed, which is the safe direction to err in.
+
+Ruled by the controller, 2026-09-17.
