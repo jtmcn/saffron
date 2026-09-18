@@ -1819,22 +1819,22 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
     """Re-measured 2026-09-17, a thirty-fourth time: five specs queued for
-    backlog items 161 to 164 and 43, the observability gaps an inventory of what
+    backlog items 164 to 167 and 43, the observability gaps an inventory of what
     one execution can be seen through turned up. They form **two chains**, and
     only the head of one is a candidate.
 
-    `SA-0100` (item 162, a task that never packaged reaching no index row) edits
+    `SA-0100` (item 165, a task that never packaged reaching no index row) edits
     `saffron/task.py` and a `tests/test_task.py` that does not exist yet. Nothing
     else queued touches either, so it has `depends_on: []` and joins the
-    candidates last — priority 2, and ties run by id. `SA-0103` (item 164, the
+    candidates last — priority 2, and ties run by id. `SA-0103` (item 167, the
     unread `EventLog.failed`) stacks on it, because the reader belongs in the
     same closure at `task.py:251` and its witness goes in the file `SA-0100`
     creates.
 
-    The other chain hangs off the existing `session.py` one. `SA-0099` (item 161,
+    The other chain hangs off the existing `session.py` one. `SA-0099` (item 164,
     `runs.preflight`) is refused on `SA-0094`, then `SA-0101` (item 43's second
     half, the terminal announcement that reaches no log) on `SA-0099`, then
-    `SA-0102` (item 163, the `GateResult` kind nothing constructs) on `SA-0101`.
+    `SA-0102` (item 166, the `GateResult` kind nothing constructs) on `SA-0101`.
     All four edit `saffron/cell/session.py`, so the chain is the thirty-first
     anchor's shape three links further down. `SA-0101` also carries a second
     `depends_on`, `SA-0098`, because both edit `saffron/events.py`: a second

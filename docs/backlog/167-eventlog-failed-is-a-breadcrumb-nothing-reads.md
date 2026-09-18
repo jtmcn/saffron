@@ -1,5 +1,5 @@
 ---
-id: 164
+id: 167
 title: EventLog.failed is the breadcrumb for a log that stopped writing and nothing reads it
 status: open
 filed: 2026-09-17

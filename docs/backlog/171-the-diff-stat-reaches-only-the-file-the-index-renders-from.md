@@ -1,5 +1,5 @@
 ---
-id: 168
+id: 171
 title: The diff stat reaches only the file the index renders from, so no authoritative record holds it
 status: open
 filed: 2026-09-17
@@ -7,7 +7,7 @@ specs: []
 prs: []
 commits: []
 cites: [§5.7, §6]
-related: [162, 167]
+related: [165, 170]
 ---
 
 ## Problem
@@ -35,11 +35,11 @@ both the store and the only source of these two numbers, and the page cannot be
 regenerated from anything but itself. Delete the file and the counts are gone
 even though every commit that produced them survives.
 
-This is the narrow half of item 167, and it is the half a cell can land. Item 167
+This is the narrow half of item 170, and it is the half a cell can land. Item 170
 edits `DESIGN.md` and `CONTEXT.md`, so it is by hand. This is a write beside an
 existing write.
 
-**It is direction-independent.** Item 167 offers two arms, and both need these
+**It is direction-independent.** Item 170 offers two arms, and both need these
 two numbers in whatever the authoritative record turns out to be. Only the
 representation follows from that decision.
 
@@ -57,18 +57,18 @@ deleting the rendered page loses nothing.
 A task that never packaged carries no counts rather than two zeros.
 `PackageResult` defaults both to `0` (`saffron/phases/package.py:585-586`), and a
 stored zero is indistinguishable from a measured empty diff. That is §4.1's
-warning about a column named for a measurement it cannot make. Item 162 adds rows
+warning about a column named for a measurement it cannot make. Item 165 adds rows
 for exactly the tasks with no stat to give.
 
 Whether that record is two ledger columns or two fields in a state commit follows
-item 167, and this item does not decide it.
+item 170, and this item does not decide it.
 
 ## Record
 
 **Filed 2026-09-17**, from an inventory of what one execution can be seen
 through. It was the last gap that inventory found with no item behind it.
 
-Carved out of item 167 rather than left inside it, for the reason item 160 was
+Carved out of item 170 rather than left inside it, for the reason item 160 was
 carved out of item 141: the two halves have different owners. A sentence inside a
 by-hand architectural item lands when that architecture lands, and this one needs
 a cell and a few lines.

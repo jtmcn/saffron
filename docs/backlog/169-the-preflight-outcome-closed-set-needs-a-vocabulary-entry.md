@@ -1,5 +1,5 @@
 ---
-id: 166
+id: 169
 title: The preflight outcome closed set needs a vocabulary entry no cell can write, because CONTEXT.md is generated from the ontology
 status: open
 filed: 2026-09-17
@@ -8,7 +8,7 @@ specs: []
 prs: []
 commits: []
 cites: [§4.1, §6]
-related: [161, 165, 65, 72]
+related: [164, 168, 65, 72]
 ---
 
 ## Problem
@@ -41,7 +41,7 @@ The preflight outcome values are a closed set in `ontology/factory.ttl`, and
 `CLOSED_SETS` names the new set, so the cross-check reaches it. The words the
 ledger stores are the words the glossary defines. `DESIGN.md` §4.1 names the set
 where it describes the column, and §6 says which of its six header fields the
-column feeds. Worth doing in one pass with item 165, which is the same
+column feeds. Worth doing in one pass with item 168, which is the same
 constraint one spec along.
 
 ## Record

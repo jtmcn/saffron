@@ -1,5 +1,5 @@
 ---
-id: 163
+id: 166
 title: The GateResult kind renders and nothing constructs it, so no event log names the gate that caused a repair turn
 status: open
 filed: 2026-09-17

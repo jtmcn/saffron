@@ -1,5 +1,5 @@
 ---
-id: 161
+id: 164
 title: runs.preflight is a declared column with no writer, so the batch header's preflight field has no source
 status: open
 filed: 2026-09-17

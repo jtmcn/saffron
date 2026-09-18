@@ -1,5 +1,5 @@
 ---
-id: 167
+id: 170
 title: Three records of a night and no rule says which wins, so the ledger's claim to be authoritative is already false of the page an operator reads
 status: open
 filed: 2026-09-17
@@ -8,7 +8,7 @@ specs: []
 prs: []
 commits: []
 cites: [§4.1, §4.6, §6]
-related: [43, 160, 162, 163, 164]
+related: [43, 160, 165, 166, 167]
 ---
 
 ## Problem
@@ -90,7 +90,7 @@ so a stale writer is refused rather than trusted.
 A command rebuilds the index from the record, and the suite proves the fold loses
 nothing. Deleting the index and rebuilding it produces the same rows.
 
-Items 43, 163 and 164 land first. A record with no terminal outcome, no per-gate
+Items 43, 166 and 167 land first. A record with no terminal outcome, no per-gate
 result, and a write failure nothing reports is not a record. Those three specs
 fix one each.
 

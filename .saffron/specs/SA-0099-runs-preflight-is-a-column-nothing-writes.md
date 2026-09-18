@@ -158,7 +158,7 @@ pull request body, and do not fix it.
 
 **The vocabulary entry for the closed set.** `ontology/` and `CONTEXT.md` are
 both forbidden. The second is generated from the first, so a cell cannot move them
-together. The follow-up is filed by hand as item 166 with this spec.
+together. The follow-up is filed by hand as item 169 with this spec.
 
 **A tenth event kind, or a new table.** `saffron/events.py` is forbidden.
 `Preflight` already exists as a kind, and already carries every step. This spec
