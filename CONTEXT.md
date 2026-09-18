@@ -673,7 +673,7 @@ defect rather than a word choice (Appendix E).
    and `docs/agents/domain.md` promised `docs/adr/` from the day the engineering
    skills were given a repo config to read (`26ce379`); the directory was the
    skill's own example structure, pasted, and no decision here ever went in one.
-   Meanwhile every `ADR-NNNN` in `DESIGN.md` cites *prior art's* records, so the
+   Meanwhile every `ADR-NNNN` in the design record cites *prior art's* records, so the
    word already meant something else. Same shape as 3: a name that read as a
    decision nobody had made, surviving because nothing greps for a promise
    (principle 32). The genres are now named in §11.

@@ -1583,11 +1583,12 @@ Every principle in one place, which the appendices cannot give you: each is stat
 where it was found, and finding one means knowing which revision found it.
 
 **This table is generated.** `uv run python -m ontology.render` rewrites it from the
-appendix records in `docs/appendices/`, so a principle cannot be added to one and missed by the other, and
-a hand edit here is discarded rather than kept. `ontology/design_record.py` parses
-it into `factory:Principle` and `factory:RevisionAppendix`; the shapes hold what
-Markdown cannot say about itself, and `tests/ontology/test_design_record.py` holds
-contiguity, which SHACL has no form for.
+appendix records in `docs/appendices/`, so a principle cannot be added to one and
+missed by the other, and a hand edit here is discarded rather than kept.
+`ontology/design_record.py` parses it into `factory:Principle` and
+`factory:RevisionAppendix`; the shapes hold what Markdown cannot say about itself,
+and `tests/ontology/test_design_record.py` holds contiguity, which SHACL has no form
+for.
 
 The claim is the lead sentence. It is an index, not a substitute: a principle
 compresses an appendix, and the appendix is where the case that found it lives.
