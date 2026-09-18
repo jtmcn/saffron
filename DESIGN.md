@@ -1404,7 +1404,7 @@ Success criterion: a batch spans two repos, and the diff to Saffron's source req
 
 Only if `ontology/RATIONALE.md` says the queries are worth reading: ledger → RDF projection, pyoxigraph store, materialization at batch end, SHACL validation of the projection.
 
-It says otherwise (rev 18). `ontology/queries/` therefore stays where it is, as worked examples that `tests/ontology/` runs — moving them under `docs/` would cost the only thing keeping them honest. The vocabulary stays as documentation with two readers the queries are not: the `shacl` gate and the `CONTEXT.md` cross-check. Appendix O's spike is one of two things that reopen an emitter. The other is the RATIONALE's own clause, and rev 24 is where it fires: N5 is enforced continuously rather than spot-checked, and Appendix T carries the decision rule. **That is a completed project, not an abandoned one** — you will have bought a precise answer to "is the relational model costing me anything?" for the price of a weekend, which is the cheapest that answer is ever available.
+It says otherwise (rev 18). `ontology/queries/` therefore stays where it is, as worked examples that `tests/ontology/` runs — moving them under `docs/` would cost the only thing keeping them honest. The vocabulary stays as documentation with two readers the queries are not: the `shacl` gate and the `CONTEXT.md` cross-check. Appendix O's spike is one of two things that reopen an emitter. The other is the RATIONALE's own clause, and rev 24 is where it fires: N5 is to be checked at every batch end rather than spot-checked, and Appendix T carries the decision rule. **The analytical question is a completed project, not an abandoned one** — you will have bought a precise answer to "is the relational model costing me anything?" for the price of a weekend, which is the cheapest that answer is ever available.
 
 ### v3 — the generality test, then only if v2 is earning its keep
 
@@ -2959,11 +2959,14 @@ Two things, and neither existed when the RATIONALE was written.
   `tool` field one level up. A chain that never linked reads identically to one
   that did.
 
-The second point is the whole argument. §4.1's foreign keys carry the chain, and
-scope, plan and diff are file paths rather than rows. A path that resolves to
-nothing is indistinguishable from an artifact that was never produced. Stated
-edges collapse that ambiguity, and the query returns nothing rather than
-something empty.
+The second point is the whole argument, and it needs narrowing to survive.
+§4.1's foreign keys carry the chain, and plan and diff are file paths rather
+than rows. A walk that checks each path exists already tells a missing file from
+a present one. What it cannot tell is a present file that is not this task's.
+The batch tree is keyed by spec, so a later task of the same spec writes over
+the earlier task's plan and diff. The event log still holds what each task
+recorded at extraction. An edge stated only when the stored file matches that
+record drops the overwritten chain. The checked walk calls it whole.
 
 ### The decision rule, named before the run
 
@@ -2971,10 +2974,12 @@ Appendix G named a product only after a spike returned four assertions.
 Appendix O named its rule before running and then honoured the answer. The same
 shape applies here, and the claim is falsifiable.
 
-Build the projection, then run Q4 over it across the whole merged history. The
-claim is that Q4 finds at least one merged pull request whose chain breaks,
-where the §4.1 walk reports that same change as whole. A single instance carries
-it. Zero instances across every merged pull request refutes the operational
+Build the projection from the whole ledger, then run Q4 over it across the
+merged history. The comparator is the checked walk: §4.1's foreign keys, with
+every stored file checked to exist. The claim is that Q4 drops at least one
+merged pull request the checked walk reports as whole. A missing file cannot
+carry the claim, because the checked walk sees one too. A task that cannot be
+tied to its own events counts for neither side. A single instance carries it. Zero instances across every merged pull request refutes the operational
 case, as the queries refuted the analytical one. The emitter then returns to the
 drawer with a third negative result. That answer is worth the weekend on §9's own
 logic, whichever way it lands.
@@ -2983,12 +2988,14 @@ logic, whichever way it lands.
 
 - **§4.6's first rule.** Divergence in an audit trail is worse than either store
   alone. The projection is therefore derived and never authored, rebuilt from
-  the ledger rather than updated in place. The `shacl` gate validates it, and Q4
-  runs over it as a check rather than beside it as a test.
+  the ledger rather than updated in place. It is validated against the shapes
+  as it is built, since the `shacl` gate reads only the tree. Q4 runs over it at
+  every batch end as a check, rather than beside it as a test.
 - **A graph library becomes a runtime import.** `pyproject.toml`,
   `ontology/render.py` and `ontology/design_record.py` each state that nothing
   under `saffron/` imports one. The emitter falsifies that sentence in three
-  places, and the spec amends all three rather than leaving one stale.
+  places. All three are forbidden to the spec's cell, and the dependency move
+  needs the protected `uv.lock`, so the operator does both at merge.
 - **Coverage stays downstream of readers.** Appendix O measured the full
   `CONTEXT.md` expansion at roughly thirty terms and ruled that coverage follows
   readers. The emitter adds one reader for the terms Q4 already names. It
@@ -3006,8 +3013,8 @@ The operator states an intent to revisit it, on grounds of growing complexity in
 the control plane. That intent is recorded here and decides nothing. Appendix O
 is explicit that an ontology controlling execution needs this emitter. It is
 equally explicit that the reason must be argued on its own evidence, rather than
-arriving through a side door. Naming the intent in advance is the opposite of the side door, and
-the bullet still moves only on a measured result.
+arriving through a side door. Naming the intent in advance is the opposite
+of the side door, and the bullet still moves only on a measured result.
 
 What the emitter does supply is the instrument. The 2026-09-04 spike answered
 its question 3, the cost of keeping the graph current per scheduled task, from a
