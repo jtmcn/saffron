@@ -392,3 +392,33 @@ def test_the_rebuttal_prompt_still_formats_its_blockers():
     filled = rebut.REBUT_PROMPT.format(blockers="1. [lens] a.py:1 — a claim")
     assert "1. [lens] a.py:1 — a claim" in filled
     assert "{blockers}" not in filled
+
+
+def test_the_prompt_sha_covers_every_prompt_file(tmp_path, monkeypatch):
+    """The digest is over the tree as authored, so editing any prompt moves it."""
+    tree = tmp_path / "prompts"
+    (tree / "turns").mkdir(parents=True)
+    (tree / "implement.md").write_text("system\n")
+    (tree / "turns" / "plan.md").write_text("turn\n")
+    monkeypatch.setattr(context, "PROMPTS_DIR", tree)
+
+    before = context.prompt_sha()
+    assert len(before) == 64
+
+    (tree / "turns" / "plan.md").write_text("turn, edited\n")
+    assert context.prompt_sha() != before
+
+
+def test_the_prompt_sha_is_stable_across_calls():
+    assert context.prompt_sha() == context.prompt_sha()
+
+
+def test_the_prompt_sha_ignores_a_file_that_is_not_a_prompt(tmp_path, monkeypatch):
+    tree = tmp_path / "prompts"
+    tree.mkdir(parents=True)
+    (tree / "implement.md").write_text("system\n")
+    monkeypatch.setattr(context, "PROMPTS_DIR", tree)
+
+    before = context.prompt_sha()
+    (tree / "notes.txt").write_text("not a prompt\n")
+    assert context.prompt_sha() == before

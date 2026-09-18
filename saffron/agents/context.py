@@ -9,6 +9,7 @@ instructions that actually change behaviour.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Sequence
 from pathlib import Path
@@ -190,3 +191,22 @@ def build_system_prompt(
         for part in template.split("{spec}")
     ]
     return values.get("spec", "").join(parts)
+
+
+def prompt_sha() -> str:
+    """A digest over the prompt tree as authored (§5.3 to §5.6).
+
+    `tasks` already records `spec_sha` and `policy_sha`. The prompt tree is the
+    third input that decides what a cell was told, and a number measured against
+    one prompt version means nothing without it.
+
+    Over the files, never the assembled prompt: that carries the spec body and
+    the per-phase `CONTEXT.md` sections, so it varies per task.
+    """
+    digest = hashlib.sha256()
+    for path in sorted(PROMPTS_DIR.rglob("*.md")):
+        digest.update(path.relative_to(PROMPTS_DIR).as_posix().encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
