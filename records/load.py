@@ -12,7 +12,7 @@ from pathlib import Path
 import yaml
 from pydantic import ValidationError
 
-from records.kinds import CLOSED, Identified, ItemId, Kind, as_id
+from records.kinds import CLOSED, BacklogItem, Identified, ItemId, Kind, as_id
 
 # Character for character `saffron/intake.py`'s: a file one reads, the other must.
 _FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?(.*)\Z", re.DOTALL)
@@ -117,14 +117,15 @@ def parse(text: str, kind: Kind, path: Path | None = None) -> Record:
             f"sections out of order: {list(sections)}; the order is {REQUIRED_SECTIONS}",
             path,
         )
-    _check_sections(model, sections, path)
+    if isinstance(model, BacklogItem):
+        _check_sections(model, sections, path)
     return Record(
         model=model, path=path or Path("<text>"), body=body, sections=sections
     )
 
 
 def _check_sections(
-    model: Identified, sections: dict[str, str], path: Path | None
+    model: BacklogItem, sections: dict[str, str], path: Path | None
 ) -> None:
     if "Problem" not in sections:
         raise RecordError("missing required `## Problem` section", path)

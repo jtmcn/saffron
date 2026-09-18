@@ -289,14 +289,14 @@ def test_a_non_backlog_record_is_refused_naming_the_file():
     # A field read via getattr(..., default) on the wrong model would silently
     # check nothing; narrowing to BacklogItem must refuse it instead.
     records = load(BACKLOG, FIXTURE)
-    bogus = replace(records[0], model=Identified(id=records[0].model.id, status="open"))
+    bogus = replace(records[0], model=Identified(id=records[0].model.id))
     with pytest.raises(TypeError, match=str(bogus.path)):
         check_links([bogus])
 
 
 def test_the_priority_check_refuses_a_non_backlog_record_too():
     records = load(BACKLOG, FIXTURE)
-    bogus = replace(records[0], model=Identified(id=records[0].model.id, status="open"))
+    bogus = replace(records[0], model=Identified(id=records[0].model.id))
     with pytest.raises(TypeError, match=str(bogus.path)):
         check_priority([bogus], FIXTURE / "docs" / "backlog" / "PRIORITY.md")
 
