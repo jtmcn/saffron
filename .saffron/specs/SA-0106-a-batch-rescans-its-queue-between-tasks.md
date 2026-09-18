@@ -26,7 +26,7 @@ forbidden:
   - saffron/task.py
   - saffron/scheduler.py
   - saffron/ledger.py
-budget_usd: 16
+budget_usd: 17
 max_turns: 90
 acceptance:
   - claim: >-
@@ -34,7 +34,8 @@ acceptance:
       parent had no task starts later that night, once the parent's task
       reaches `READY_FOR_REVIEW`. It starts right after the parent, ahead of an
       opening candidate of lower priority, and the log names it before it
-      starts. Today the night runs only the opening candidates.
+      starts. A grandchild waiting on that child starts after the child, the
+      same night. Today the night runs only the opening candidates.
     witness: tests/test_batch.py::test_a_child_refused_at_the_opening_scan_runs_after_its_parent_packages
   - claim: >-
       After the first task, the latest rescan decides what runs, and a spec is
@@ -90,8 +91,15 @@ edit.
 
 **One run per repo** (backlog item 177). Each task still mints its own run.
 
-**`DESIGN.md` §4.2.1's "sorted once in memory".** Item b-d6bff7 updates it by hand
-after this merges, with the spec loop's `GOTCHAS.md`.
+**Prose in forbidden files that this change makes false.** Item b-d6bff7
+updates it by hand after this merges. Do not cite it as a reason to stop:
+
+- `DESIGN.md:385`: nothing is legitimately in flight when a scan happens.
+- `DESIGN.md:400`: priority is "sorted once in memory".
+- `DESIGN.md:404`: the next scan stamps a task left in flight `ORPHANED`.
+- `DESIGN.md:408`: priority is "read exactly once, at scan".
+- `saffron/task.py:130-133`: a grandchild is out of reach by design.
+- The spec loop's `GOTCHAS.md`: `run_batch` resolves its candidates once.
 
 **A rescan that raises.** It ends the night `INFRASTRUCTURE` through
 `run_batch`'s existing `finally` (`saffron/batch.py:122-130`), and `_batch`
@@ -108,7 +116,10 @@ mutant.
 opening candidates that are still waiting. Criterion 1's witness is built so
 that rescanning only once the list is empty fails it: the opening queue holds
 the parent at priority 1 and an unrelated spec at priority 3, and the child is
-priority 1. The expected order is parent, child, then the unrelated spec.
+priority 1. A grandchild at priority 1 waits on the child, so rescanning only
+once, after the first task, fails it too. The fake runner records each of the
+three chain specs `READY_FOR_REVIEW`. The expected order is parent, child,
+grandchild, then the unrelated spec.
 
 **`batch.py` cannot import `cli.py`** (its module docstring,
 `saffron/batch.py:10-16`). Hand `run_batch` the rescan as a callable that

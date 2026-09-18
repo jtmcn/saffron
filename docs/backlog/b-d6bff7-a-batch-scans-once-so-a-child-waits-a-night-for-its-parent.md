@@ -36,8 +36,15 @@ packaged earlier in the night runs the same night, cut from the parent's branch.
 
 The spec loop still runs attended cells, because it pushes review commits to a
 parent before its child is cut (`.claude/skills/run-saffron-spec-loop/GOTCHAS.md`).
-Once this lands, update the first half of that section's reason, and §4.2.1's
-"sorted once in memory".
+Once this lands, update by hand the prose it makes false, none of which a cell
+can edit:
+
+- The first half of that `GOTCHAS.md` section's reason.
+- `DESIGN.md:385`: nothing is in flight at a scan.
+- `DESIGN.md:400`: "sorted once in memory".
+- `DESIGN.md:404`: the next scan stamps a task left in flight.
+- `DESIGN.md:408`: priority is "read exactly once, at scan".
+- `saffron/task.py:130-133`: a grandchild out of reach by design.
 
 ## Record
 
