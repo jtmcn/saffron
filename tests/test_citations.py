@@ -20,9 +20,9 @@ the union of all three documents — the first version of this file — left **3
 of them unfalsifiable, because `CONTEXT.md` defines exactly `1`–`11` and so shadows
 every top-level `DESIGN.md` section: renumbering `## 9.` dangled nothing.
 
-Written while deciding *against* splitting `DESIGN.md` into per-decision files. The
-uninsured citation count was the argument for "not now" rather than "not ever",
-which makes this the test that would change that answer.
+Written while deciding *against* splitting `DESIGN.md` into per-decision files.
+It is what let the appendices move out as records with every letter intact
+(Appendix U).
 """
 
 from __future__ import annotations
@@ -305,7 +305,7 @@ def test_a_bolded_rule_is_an_address():
 
 
 def test_saffron_keeps_no_adrs():
-    """`CONTEXT.md` §11 settled this, and prose is what failed last time.
+    """`CONTEXT.md` §11 refuses a `docs/adr/` tree beside the appendix records, and prose is what failed last time.
 
     `CLAUDE.md` and `docs/agents/domain.md` promised `docs/adr/` for months. The
     promise was wrong from the day it landed and nothing noticed, because a claim

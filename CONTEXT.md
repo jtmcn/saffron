@@ -64,7 +64,7 @@ _Avoid_ also: "the container" when you mean the whole cell, "worker", "runner".
 creates and destroys. Use only when that object itself is the subject.
 
 **Cell runtime**: The program that creates cells. `apple/container` — a VM per
-cell — chosen in rev 10 against a four-assertion spike (`DESIGN.md` Appendix G).
+cell — chosen in rev 10 against a four-assertion spike (Appendix G).
 Say "the cell runtime". The seam is `saffron/cell/runtime.py`, which every caller
 uses and which names no product at all; each runtime's own module under
 `saffron/cell/runtimes/` names exactly one, and nothing else in `saffron/` may
@@ -235,7 +235,7 @@ executable that emits one JSON object: `gate`, `status`, `tool`, `failures[]`,
 
 **`tool`**: The identifier a gate obtains *by executing* its tool (`ruff 0.14.2`),
 and the only thing separating a gate that ran and passed from one that never ran
-(`DESIGN.md` §5.4, Appendix H).
+(Appendix H, `DESIGN.md` §5.4).
 _Avoid_: "the version", "the tool name" — it is neither on its own, and a string
 literal in a gate script is not a `tool` value at all.
 
@@ -364,7 +364,7 @@ image, on the task's network and proxy, whose worktree is the task's base with
 the exported patch applied by that cell's own git. It is never the implementer's
 cell. A fresh session in the container the implementer had root in re-execs a
 runner that container could have rewritten, and reads the tree through a `.git`
-the implementer wrote (`DESIGN.md` §5.5, Appendix Q). REVIEW's lenses and
+the implementer wrote (Appendix Q, `DESIGN.md` §5.5). REVIEW's lenses and
 REBUT's verdict sessions both run in one (`SA-0087`, `SA-0088`).
 _Avoid_: "review cell", "clean cell", "second cell", "the critic's container"
 when you mean the whole cell.
@@ -615,7 +615,7 @@ three senses here (a rule of conduct in `CLAUDE.md`, a numbered rule inside a
 `DESIGN.md` section such as §4.6.2b, and the rules a gate runs), so it cannot
 also carry this one.
 
-**Revision appendix**: A `DESIGN.md` appendix recording what a revision found —
+**Revision appendix**: A record under `docs/appendices/` recording what a revision found —
 the live run, the spike, or the read-through, and what it cost. It carries the
 narrative a principle compresses. Cited by letter: "Appendix G". Usually one per
 revision, and not reliably so: a revision that *closes* an earlier revision's
@@ -636,19 +636,20 @@ answer, carrying the clause that would reopen it (`ontology/RATIONALE.md`). A
 verdict may be negative and still be the deliverable (principle 10).
 _Avoid_: "ADR", "the analysis", "the recommendation".
 
-**ADR**: Prior art's. The term appears in `DESIGN.md` only when citing another
-project's decision records (Appendix D), and `docs/adr/` does not exist here.
-**Saffron keeps no ADRs.** A decision becomes a principle, a revision appendix, a
+**ADR**: Prior art's. The term appears in the design record only when citing
+another project's decision records (Appendix D), and `docs/adr/` does not exist here.
+**Saffron keeps no `docs/adr/`.** A decision becomes a principle, a revision appendix, a
 `DESIGN.md` subsection, or a settled naming decision below. A parallel `docs/adr/`
-tree would be a second address space for what §-numbers already address, and the
-first two records to disagree would do it undetectably.
+tree would be a second address space for what §-numbers and letters already address,
+and the first two records to disagree would do it undetectably. The appendices are
+themselves records, in the one address space their letters name (Appendix U).
 
 ---
 
 ## Settled naming decisions
 
 Recorded because each was a live ambiguity and each turned out to be a design
-defect rather than a word choice (`DESIGN.md` Appendix E).
+defect rather than a word choice (Appendix E).
 
 1. **run vs. batch** — *not* synonyms. A **batch** is one night across repos and
    owns the budget; a **run** is one repo's slice and owns `base_sha` and the
@@ -666,7 +667,7 @@ defect rather than a word choice (`DESIGN.md` Appendix E).
    adversarial review on that basis. The runtime is chosen at v0.5 against a
    four-assertion spike; until then the word is **cell runtime**. Same shape as
    the two above: a word hiding a design defect rather than a word choice
-   (`DESIGN.md` Appendix G, principle 32).
+   (Appendix G, principle 32).
 
 4. **ADR vs. the design record** — Saffron keeps no ADRs, and never did. `CLAUDE.md`
    and `docs/agents/domain.md` promised `docs/adr/` from the day the engineering
@@ -676,6 +677,9 @@ defect rather than a word choice (`DESIGN.md` Appendix E).
    word already meant something else. Same shape as 3: a name that read as a
    decision nobody had made, surviving because nothing greps for a promise
    (principle 32). The genres are now named in §11.
+   Narrowed in rev 25: the refusal was argued against a parallel tree, and the
+   appendices became records under `docs/appendices/` with their letters intact
+   (Appendix U, principle 62).
 
 5. **Claude Code vs. the delegate** — a model session on the host had no name, so
    it was called by its product, and the product name hid the fact that shapes
