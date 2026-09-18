@@ -25,8 +25,9 @@ do; the measurement behind it follows.
   after the work is done: SA-0028's first cell had green gates and hit it in
   REBUT at $7.92 of $14. PACKAGE never ran, so there was no branch, and the
   next cell started over. The loop's cost is not bounded by the specs' budgets.
-- **`baseline: … tests=fail` on every cell is expected.** One host-only test
-  fails in every cell (backlog item 106); baseline subtraction cancels it.
+- **`baseline: … prose=fail` on every cell is expected.** The gate reports every
+  hit in the tree, and subtraction counts them per file. Any other gate red at
+  base is red on `main` (items 106 and 173).
 
 ## Recording
 
