@@ -4,8 +4,9 @@ title: '`describe` renders three agent payload fields unclipped, straight to a t
 status: partial
 tier: 1
 specs: [SA-0070, SA-0084, SA-0098]
-prs: [221, 249]
+prs: [221, 249, 323]
 commits: []
+awaiting: [323]
 cites: []
 related: [61]
 ---
@@ -38,6 +39,10 @@ characters other than nothing at all stripped in `describe` — once, where the
 single renderer is, not in each caller.
 
 ## Record
+
+**2026-09-17, open as PR #323**, `SA-0098` in the spec loop's run 6: the
+`Preflight`, `Teardown` and host `Agent.detail` lines pass through `_clean` at
+`_DETAIL_BOUND`.
 
 **Status: done for the `Agent` event, with item 61 — `SA-0070`, PR #221, merged
 2026-09-12.** It covers the `Agent` event only. `Terminal.detail` on a rejected plan and

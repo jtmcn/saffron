@@ -489,3 +489,26 @@ lenses did not raise.
   **Bucket 2** for the length — no line in this repo's `CLAUDE.md` says it.
   **Bucket 1** for the words — the retired-vocabulary hook does not list them.
   **Open:** item 156 for the words.
+
+## 2026-09-17 — `SA-0096`, `SA-0097`, `SA-0098` (stack #320 ← #321 ← #323)
+
+- A witness for "the reason carries no part of the find text" ended its absent
+  find text on `MISSING`, not on the token the spec said to put at both ends,
+  so a reason leaking the tail passed (#320). Three clean lenses preceded it.
+  **Bucket 3** — the adequacy lens asks what a witness observes, and a
+  token placed only at one end observes half the claim. **Open.**
+- New docstrings that misstated the code beside them: #320 routed the leak
+  through REPAIR, which `repair_prompt` says never sees a gate summary; #323
+  left `Agent` calling `detail` host-only while `_clean`'s now said otherwise,
+  and said `cell_up` carries runtime output when its one emitter writes a
+  container name; #321 named one of `DIFF_FLAGS`'s two reasons where the spec
+  said to name each.
+  **Bucket 3** — a comment's claim checked against the code it describes, as
+  on 2026-09-16. **Open.**
+- #323's witnesses drove steps no emitter uses (`container` for a denial,
+  `proxy_start`), where the spec names `proxy_denied` and spec drift.
+  **Bucket 3.** **Open.**
+- "a REBUT-round lens" in a new test docstring (#320), and new comments of four
+  lines where the spec asked for a short one (#321).
+  **Bucket 1** for the word — `terms` neither lists it nor reads Python.
+  **Open:** item 174. **Bucket 2** for the length. **Open.**

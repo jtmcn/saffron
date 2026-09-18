@@ -5,8 +5,9 @@ status: open
 tier: 1
 filed: 2026-09-14
 specs: [SA-0078, SA-0096]
-prs: [243]
+prs: [243, 320]
 commits: []
+awaiting: [320]
 cites: []
 related: []
 ---
@@ -37,3 +38,9 @@ the mutators' reasons naming a category — not found, ambiguous,
 unreadable — rather than the text, with the text kept where only the operator reads
 it, and a witness that dumps the whole `witness` result and the lens prompt and
 finds neither half of any mutant in either.
+
+## Record
+
+**2026-09-17, open as PR #320**, `SA-0096` in the spec loop's run 6 (stack
+#320 ← #321 ← #323): both appliers' reasons name the file and the case, never
+the edit. The lens corpus's console line lost its probe name with it, item 175.
