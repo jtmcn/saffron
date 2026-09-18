@@ -1,11 +1,12 @@
 ---
 id: b-122686
 title: Cells write multi-paragraph comments because no rule they read says not to
-status: open
+status: done
+closed: 2026-09-18
 tier: 2
 filed: 2026-09-18
 specs: []
-prs: []
+prs: [346]
 commits: []
 cites: [§8]
 related: []
@@ -40,3 +41,5 @@ stronger fix, since `CLAUDE.md` asks that rules be promoted to gates.
 - 2026-09-18: filed from the spec loop's run 7 (stack #335 ← #338 ← #339 ←
   #342 ← #340). Surfaced by the review commits on #335, #338, #339, #342 and
   #340.
+- 2026-09-18: done by #346, as a `CLAUDE.md` line (bucket 2). The `prose` or
+  `structure` rule this item calls stronger is not built.
