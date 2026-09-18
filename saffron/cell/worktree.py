@@ -449,8 +449,9 @@ def _read_file(container: str, path: str) -> bytes:
 # 131,071 and above fail.
 _MAX_ARG_BYTES = 131_000
 
-# A piece plus the append command around it must still clear `_MAX_ARG_BYTES`.
-_CHUNK_BYTES = 100_000
+# Half the cap, not near it: the measurement names no cell runtime, and an
+# oversize exec has wedged an apple/container cell before.
+_CHUNK_BYTES = 65_536
 
 
 def _fail_write(container: str, path: str, scratch: str | None, stderr: str) -> None:
