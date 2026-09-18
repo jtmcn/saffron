@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""The `prose` and `terms` gates: Saffron's house style and vocabulary over its living Markdown.
+"""The `prose` and `terms` gates: Saffron's house style and vocabulary over its living Markdown,
+and the length of the comments in its Python.
 
 Design: `docs/superpowers/specs/2026-09-16-prose-ratchet-design.md`. Parsing
 adapts `strip_code` and `sentences` from AminBlg/SimpleEnglish
@@ -12,14 +13,17 @@ commit's `.saffron/`, against the tree in the cwd.
 
 from __future__ import annotations
 
+import ast
 import bisect
 import functools
 import hashlib
 import importlib.util
+import io
 import json
 import re
 import subprocess
 import sys
+import tokenize
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -39,6 +43,22 @@ INCLUDED_DIRS = (
 )
 # A finished spec records what a cell was told, so it stays as written.
 EXCLUDED_DIRS = (".saffron/specs/done/",)
+# Python whose comments a cell or a person writes; `docs/` holds evidence scripts.
+CODE_DIRS = (
+    "saffron/",
+    "tests/",
+    "harness/",
+    "hooks/",
+    "images/",
+    "ontology/",
+    "records/",
+    ".saffron/",
+    ".claude/",
+)
+# A comment names the non-obvious why in one or two lines (CLAUDE.md, item b-122686).
+COMMENT_LIMIT = 2
+# A summary and two short paragraphs; a module docstring describes a file and is exempt.
+DOCSTRING_LIMIT = 10
 
 SENTENCE_LIMIT = 25
 # Saffron's own intensifiers, measured. "exactly" and "deliberately" carry meaning here.
@@ -97,6 +117,11 @@ MESSAGES = {
     "trailing-condition": "a spec instruction gained a mid-sentence if/when;"
     f" put the condition first. {_OLDER}",
     "contraction": f"this file gained a contraction; write the words out. {_OLDER}",
+    "comment-block": f"this file gained a comment over {COMMENT_LIMIT} lines; keep the"
+    f" why, and move the rationale to the commit or the PR body. {_OLDER}",
+    "docstring-length": "this file gained a function, class or test docstring over"
+    f" {DOCSTRING_LIMIT} lines; keep what a caller needs, and move the rest to the"
+    f" commit or the PR body. {_OLDER}",
     "rendered-span": "a span ontology.render writes could not be located;"
     " fix the definition or the principle index at its source.",
 }
@@ -160,9 +185,53 @@ class _Text:
 
 
 def in_scope(path: str) -> bool:
+    if path.endswith(".py"):
+        return path.startswith(CODE_DIRS)
     if not path.endswith(".md") or path.startswith(EXCLUDED_DIRS):
         return False
     return path in ROOT_FILES or path.startswith(INCLUDED_DIRS)
+
+
+def _comment_blocks(text: str) -> list[Hit]:
+    """Runs of full-line comments longer than `COMMENT_LIMIT`. `tokenize`, not a
+    regex, so a `#` inside a string is not a comment."""
+    lines = []
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(text).readline):
+            if (
+                token.type == tokenize.COMMENT
+                and not token.line[: token.start[1]].strip()
+                and not token.string.startswith("#!")
+            ):
+                lines.append((token.start[0], token.string))
+    except (tokenize.TokenError, SyntaxError):
+        return []  # unparseable Python is the `lint` gate's to report
+    found, run = [], []
+    for number, comment in [*lines, (-1, "")]:
+        if run and number != run[-1][0] + 1:
+            if len(run) > COMMENT_LIMIT:
+                found.append(Hit(run[0][0], "comment-block", _excerpt(run[0][1])))
+            run = []
+        run.append((number, comment))
+    return found
+
+
+def _long_docstrings(text: str) -> list[Hit]:
+    """Function, class and test docstrings longer than `DOCSTRING_LIMIT` lines."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return []  # unparseable Python is the `lint` gate's to report
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        doc = ast.get_docstring(node, clean=False)
+        if doc is not None and doc.count("\n") + 1 > DOCSTRING_LIMIT:
+            first = doc.strip().splitlines()[0] if doc.strip() else ""
+            excerpt = _excerpt(f"{node.name}: {first}")
+            found.append(Hit(node.body[0].lineno, "docstring-length", excerpt))
+    return found
 
 
 def _spaces(text: str) -> str:
@@ -343,6 +412,13 @@ def check(text: str, path: str, gate: str, *, root: Path) -> list[Hit]:
     """Every hit `gate` reports for `text`, read as the file at `path`."""
     if gate not in GATES:
         raise ValueError(f"unknown gate: {gate}")
+    if path.endswith(".py"):
+        if gate != "prose":
+            return []
+        return sorted(
+            _comment_blocks(text) + _long_docstrings(text),
+            key=lambda f: (f.line, f.code),
+        )
     try:
         rendered = _rendered(text, path, root)
     except ValueError as exc:
@@ -419,7 +495,7 @@ def main(argv: list[str]) -> int:
         }
     )
     if not paths:
-        summary = "no Markdown file is in scope, so nothing was read"
+        summary = "no file is in scope, so nothing was read"
         return _emit(
             {"gate": gate, "status": "error", "tool": tool, "summary": summary}
         )

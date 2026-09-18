@@ -1537,3 +1537,146 @@ def test_a_linked_stack_is_marked_ready_only_once_every_base_reads_back(
     bases[11] = "main"
     assert driver.cmd_stack(argparse.Namespace(execute=True)) == 1
     assert not [c for c in ran if c[:3] == ["gh", "pr", "ready"]]
+
+
+def test_a_held_spec_is_passed_over_until_released(loop):
+    # Run 7: `next` named SA-0100 while its edit sat in an open pull request,
+    # and a cell started then would have run the old text.
+    first, second, *_ = loop.ids
+    driver._save([loop.row(0), loop.row(1)])
+
+    assert (
+        driver.cmd_hold(argparse.Namespace(spec_id=first, why="#333", release=False))
+        == 0
+    )
+    chosen, note = driver._next_spec(driver._load(), again=False)
+    assert chosen.spec_id == second
+    assert f"held {first}: #333" in note
+
+    assert (
+        driver.cmd_hold(argparse.Namespace(spec_id=first, why=None, release=True)) == 0
+    )
+    chosen, _note = driver._next_spec(driver._load(), again=False)
+    assert chosen.spec_id == first
+
+
+def test_a_resnapshot_releases_a_hold(loop):
+    held, *_ = loop.ids
+    driver._save([loop.row(0, held="#333", last_state="RATE_LIMITED")])
+    loop.scan_returns(0)
+
+    assert driver.cmd_snapshot(argparse.Namespace(force=True, new=False, add=None)) == 0
+
+    [row] = driver._load()
+    assert (row.spec_id, row.held) == (held, None)
+
+
+def _probe(root, find, replace, *command):
+    return argparse.Namespace(
+        file="mod.py", find=find, replace=replace, root=root, run=list(command)
+    )
+
+
+def test_a_probe_whose_find_misses_runs_nothing(tmp_path, capsys):
+    # Run 7, #338: two probes whose find text missed still printed "1 passed",
+    # which reads exactly like a survivor.
+    (tmp_path / "mod.py").write_text("x = 1\n")
+    marker = tmp_path / "ran"
+    args = _probe(
+        tmp_path, "x = 2", "x = 3", sys.executable, "-c", f"open({str(marker)!r}, 'w')"
+    )
+
+    assert driver.cmd_probe(args) == 1
+    assert "matches 0 times" in capsys.readouterr().err
+    assert not marker.exists()
+    assert (tmp_path / "mod.py").read_text() == "x = 1\n"
+
+
+@pytest.mark.parametrize(
+    ("script", "verdict"),
+    [
+        ("import mod; assert mod.x == 1", "killed:"),
+        ("import mod", "survived:"),
+        (
+            "print('FAILED t.py::a - TypeError: boom'); raise SystemExit(1)",
+            "killed only by errors",
+        ),
+    ],
+)
+def test_a_probe_reports_its_verdict_and_restores_the_file(
+    tmp_path, capsys, script, verdict
+):
+    (tmp_path / "mod.py").write_text("x = 1\n")
+
+    assert (
+        driver.cmd_probe(
+            _probe(tmp_path, "x = 1", "x = 2", sys.executable, "-c", script)
+        )
+        == 0
+    )
+
+    assert capsys.readouterr().out.startswith(verdict)
+    assert (tmp_path / "mod.py").read_text() == "x = 1\n"
+
+
+@pytest.mark.parametrize(
+    "test_body",
+    [
+        # pytest wraps its summary at COLUMNS, and a long name loses the
+        # ` - AttributeError` the verdict reads.
+        "def test_a_sentence_long_enough_that_pytest_cuts_its_summary_row_short():\n"
+        "    assert mod.C.value == 1\n",
+        # A captured log line starts with ERROR too, and matched no error name.
+        "def test_logs():\n"
+        "    logging.getLogger().error('boom')\n"
+        "    assert mod.C.value == 1\n",
+    ],
+    ids=["long-name", "logged-error"],
+)
+def test_a_probe_that_only_raised_is_not_killed_under_real_pytest(
+    tmp_path, monkeypatch, capsys, test_body
+):
+    monkeypatch.setenv("COLUMNS", "80")
+    (tmp_path / "mod.py").write_text("class C:\n    value = 1\n")
+    (tmp_path / "test_mod.py").write_text(
+        "import logging\nimport mod\n\n\n" + test_body
+    )
+    command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+
+    assert (
+        driver.cmd_probe(
+            _probe(tmp_path, "value = 1", "other = 1", *command, "test_mod.py")
+        )
+        == 0
+    )
+
+    assert capsys.readouterr().out.startswith("killed only by errors")
+
+
+def test_a_probe_whose_command_is_missing_fails_and_restores(tmp_path, capsys):
+    (tmp_path / "mod.py").write_text("x = 1\n")
+
+    assert driver.cmd_probe(_probe(tmp_path, "x = 1", "x = 2", "no-such-binary")) == 1
+    assert "no-such-binary" in capsys.readouterr().err
+    assert (tmp_path / "mod.py").read_text() == "x = 1\n"
+
+
+def test_probe_parses_its_options_before_the_command(tmp_path, monkeypatch, capsys):
+    # Run 7: `nargs=REMAINDER` after the file swallowed `--find`, and the tests
+    # above call `cmd_probe` directly, so none saw it.
+    (tmp_path / "mod.py").write_text("x = 1\n")
+    argv = ["probe", "mod.py", "--find", "x = 1", "--replace", "x = 2"]
+    argv += ["--root", str(tmp_path), "--", sys.executable, "-c", "import mod"]
+    monkeypatch.setattr(sys, "argv", ["driver.py", *argv])
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    assert driver.main() == 0
+    assert capsys.readouterr().out.startswith("survived:")
+
+
+def test_only_probe_takes_a_command_after_the_separator(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["driver.py", "status", "--", "true"])
+
+    with pytest.raises(SystemExit) as exit_:
+        driver.main()
+    assert exit_.value.code == 2

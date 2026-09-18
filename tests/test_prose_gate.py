@@ -179,7 +179,12 @@ def test_a_rendered_closed_set_is_not_counted():
 
 def test_every_rule_code_has_a_message():
     prose = _prose()
-    codes = {code for code, _ in HITS} | {"trailing-condition", "rendered-span"}
+    codes = {code for code, _ in HITS} | {
+        "trailing-condition",
+        "rendered-span",
+        "comment-block",
+        "docstring-length",
+    }
     assert set(prose.MESSAGES) == codes
     assert all(word in prose.MESSAGES["filler"] for word in prose.FILLER[:3])
 
@@ -266,7 +271,8 @@ def test_a_mangled_closed_set_fails_rather_than_errors(tmp_path):
     shutil.copy(REPO / "ontology" / "spans.py", tmp_path / "ontology" / "spans.py")
     result = parse_gate_json(_run_gate("prose", tmp_path).stdout, expected_gate="prose")
     assert result.status == "fail", result.summary
-    assert [(f.file, f.code) for f in result.failures] == [
+    # The copied `spans.py` is in scope for `comment-block`, which this does not test.
+    assert [(f.file, f.code) for f in result.failures if f.code != "comment-block"] == [
         ("CONTEXT.md", "rendered-span")
     ]
 
@@ -430,3 +436,51 @@ def test_terms_reports_fail_and_is_declared_advisory(tmp_path):
     assert result.status == "fail"
     assert [(f.code, f.line) for f in result.failures] == [("avoided-term", 1)]
     assert result.tool and result.tool.startswith("saffron-prose ")
+
+
+def _comment_hits(text: str, gate: str = "prose") -> list[int]:
+    return [f.line for f in _prose().check(text, "saffron/x.py", gate, root=REPO)]
+
+
+def test_a_comment_over_two_lines_is_a_hit_and_two_lines_are_not():
+    # Run 7: every cell wrote a 4- to 18-line comment, and review cut each one.
+    text = "# one\n# two\nx = 1\n\n# one\n# two\n# three\ny = 2\n"
+    assert _comment_hits(text) == [5]
+
+
+def test_a_hash_in_a_string_or_after_code_is_not_a_comment_line():
+    text = '#!/usr/bin/env python3\n# a\n# b\ns = """\n# c\n# d\n"""\nx = 1  # e\n'
+    assert _comment_hits(text) == []
+
+
+def test_terms_reads_no_python():
+    assert _comment_hits("x = 1  # The agent runs in a sandbox.\n", gate="terms") == []
+
+
+def test_scope_reaches_python_a_cell_writes_and_leaves_evidence_scripts():
+    prose = _prose()
+    assert prose.in_scope("saffron/task.py")
+    assert prose.in_scope("tests/test_task.py")
+    assert not prose.in_scope("docs/evidence/scripts/x.py")
+
+
+def _docstring(name: str, lines: int, indent: str = "    ") -> str:
+    body = "\n".join(f"{indent}line {i}" for i in range(2, lines + 1))
+    return f'def {name}():\n{indent}"""line 1\n{body}"""\n'
+
+
+def _docstring_hits(text: str) -> list[str]:
+    found = _prose().check(text, "saffron/x.py", "prose", root=REPO)
+    return [f.excerpt for f in found if f.code == "docstring-length"]
+
+
+def test_a_docstring_over_ten_lines_is_a_hit_and_ten_are_not():
+    # Run 7: SA-0105's cell answered "a short comment" with an 18-line docstring.
+    text = _docstring("short", 10) + _docstring("test_long", 11)
+    assert _docstring_hits(text) == ["test_long: line 1"]
+
+
+def test_a_module_docstring_is_exempt_and_a_class_docstring_is_not():
+    long = "\n".join(f"line {i}" for i in range(1, 13))
+    text = f'"""{long}"""\n\nclass C:\n    """{long}"""\n'
+    assert _docstring_hits(text) == ["C: line 1"]

@@ -68,6 +68,8 @@ suite; `pytest -m cell` is the operator's. Run every probe with
 `PYTHONDONTWRITEBYTECODE=1` and `-p no:cacheprovider`, and confirm the edit
 applied before reading its result: a stale `.pyc` and an edit that never landed
 both read as "survived", and a mutant that raises `TypeError` reads as "killed".
+The loop's driver checks all three for you:
+`uv run {REPO}/.claude/skills/run-saffron-spec-loop/driver.py probe <file> --find … --replace … --root <worktree> -- uv run pytest …`.
 
 ## Standards seat
 
