@@ -136,8 +136,9 @@ def score_pass(pass_dir: Path, repo: Path) -> list[RunScore]:
 def spread(scores: Sequence[RunScore]) -> dict[str, tuple[int, int]]:
     """The lowest and highest count of each rule across runs.
 
-    With the prompts unchanged this is the metric's noise floor: a prompt
-    change counts as measured only when it moves a rule further than this.
+    Per-rule dispersion, not the decision metric: the ratified rule judges
+    `RunScore.per_1k` against twice its observed range, not a per-rule count
+    against this spread (`docs/evidence/2026-09-17-register-decision-rule.md`).
     """
     codes = {code for score in scores for code in score.hits}
     return {
