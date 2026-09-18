@@ -136,6 +136,80 @@ def test_diff_stat_counts_lines(tmp_path, origin):
     assert removed == 1
 
 
+def test_diff_stat_counts_a_submodule_the_git_config_ignores(
+    tmp_path, origin, monkeypatch
+):
+    """`diff.ignoreSubmodules=all` in the operator's own global git config
+    drops an added submodule's line from a bare `--shortstat` read, the same
+    way it drops the path from a bare name-only listing
+    (`test_changed_files_lists_a_submodule_the_git_config_ignores`). The
+    commit also carries a file whose one line reads like a deletion count,
+    to catch a splice that searches the whole `--shortstat` output — once
+    `DIFF_FLAGS` turns patch printing back on, that line sits in a hunk, not
+    the summary (item 176)."""
+    base = git(origin, "rev-parse", "HEAD")
+    git(
+        origin,
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        f"160000,{'1' * 40},vendor/sub",
+    )
+    (origin / "decoy.py").write_text("9 deletions(-)\n")
+    # `git add -A` here would stage a *deletion* of the gitlink just added:
+    # `vendor/sub` is not a real path on disk for `-A` to find, so an
+    # unqualified add-all undoes `update-index --cacheinfo`. Add the decoy
+    # file by name instead, the same way
+    # `test_changed_files_lists_a_submodule_the_git_config_ignores` commits.
+    git(origin, "add", "decoy.py")
+    git(origin, "commit", "-qm", "add a submodule and a decoy line")
+    head = git(origin, "rev-parse", "HEAD")
+
+    mirror = ensure_mirror(origin, tmp_path / "m.git")
+
+    config = tmp_path / "gitconfig-global"
+    config.write_text("[diff]\n\tignoreSubmodules = all\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+
+    assert diff_stat(mirror, base, head) == (2, 0)
+    # An empty range (`_git` strips its output to "") must not raise on the
+    # first-line split.
+    assert diff_stat(mirror, head, head) == (0, 0)
+
+
+def test_diff_stat_counts_a_rename_as_the_patch_carries_it(tmp_path, monkeypatch):
+    """A pure rename reports as 0 insertions and 0 deletions under git's
+    default rename detection, and as the file's own line count under
+    `diff.renames=false` — but the patch `size` judges is cut with
+    `DIFF_FLAGS`, which carries `--no-renames`, so `diff_stat` must agree
+    with that patch under every rename setting (item 176). Set
+    `diff.renames=true` explicitly, the setting that would give (0, 0) under
+    a bare read, so an operator's config cannot change what this test
+    measures."""
+    repo = tmp_path / "renamed"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "config", "user.email", "t@example.com")
+    git(repo, "config", "user.name", "Test")
+    contents = "\n".join(f"line {i}" for i in range(20)) + "\n"
+    (repo / "old.py").write_text(contents)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "base")
+    base = git(repo, "rev-parse", "HEAD")
+
+    git(repo, "mv", "old.py", "new.py")
+    git(repo, "commit", "-qm", "rename, no content change")
+    head = git(repo, "rev-parse", "HEAD")
+
+    mirror = ensure_mirror(repo, tmp_path / "renamed.git")
+
+    config = tmp_path / "gitconfig-global"
+    config.write_text("[diff]\n\trenames = true\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+
+    assert diff_stat(mirror, base, head) == (20, 20)
+
+
 def test_add_worktree_checks_out_the_requested_sha(tmp_path, origin):
     mirror = ensure_mirror(origin, tmp_path / "m.git")
     base, head, _ = resolve_pull_request(mirror, 42)

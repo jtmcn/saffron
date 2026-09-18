@@ -150,15 +150,35 @@ def changed_files(mirror: Path, base: str, head: str) -> list[str]:
 
 
 def diff_stat(mirror: Path, base: str, head: str) -> tuple[int, int]:
-    """Added and removed line counts, for the queue line.
+    """Added and removed line counts, for the queue line and the pull
+    request body.
+
+    `DIFF_FLAGS`, as `changed_files` uses it: an operator's
+    `diff.ignoreSubmodules=all` would otherwise drop an added submodule's
+    line from the count, and git's default rename detection would otherwise
+    report a pure rename as no change at all, though the exported patch
+    `size` judged (also cut with `DIFF_FLAGS`, which carries `--no-renames`)
+    carries every line of it (item 176).
+
+    `DIFF_FLAGS` carries `--unified=3`, a context-size flag, so splicing it
+    into `--shortstat` turns patch output back on: `diff *DIFF_FLAGS
+    --shortstat` prints the summary line, a blank line, then every hunk
+    (measured on git 2.54). Searching that whole string would find a count
+    inside a hunk's own text. `--no-patch` is no fix — on the cell image's
+    git 2.39.5, `diff *DIFF_FLAGS --no-patch --shortstat` prints nothing at
+    all, in either flag order, which would silently read every diff as
+    (0, 0). Read the first line instead: it is the summary whether or not a
+    patch follows, and empty when there is none. `_git` strips its output,
+    so an empty range (base == head) leaves nothing to split on.
 
     Two searches rather than one optional-group pattern: every group in the
     combined form is optional, so it matches the empty string at position 0
     and reports (0, 0) for every diff.
     """
-    summary = _git(mirror, "diff", "--shortstat", f"{base}..{head}")
-    added = _ADDED.search(summary)
-    removed = _REMOVED.search(summary)
+    summary = _git(mirror, "diff", *DIFF_FLAGS, "--shortstat", f"{base}..{head}")
+    first_line = summary.splitlines()[0] if summary else ""
+    added = _ADDED.search(first_line)
+    removed = _REMOVED.search(first_line)
     return (
         int(added.group(1)) if added else 0,
         int(removed.group(1)) if removed else 0,
