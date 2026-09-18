@@ -5,8 +5,9 @@ status: open
 tier: 1
 filed: 2026-09-14
 specs: [SA-0082, SA-0097]
-prs: [244]
+prs: [244, 321]
 commits: []
+awaiting: [321]
 cites: []
 related: []
 ---
@@ -31,3 +32,9 @@ end to end through `apply_patch` and `commit_squash`.
 both reads taking `--ignore-submodules=none`, ideally by
 importing `worktree.DIFF_FLAGS`, each with a witness that commits a gitlink under an
 `ignore = all` `.gitmodules` and finds the path listed.
+
+## Record
+
+**2026-09-17, open as PR #321**, `SA-0097` in the spec loop's run 6: PACKAGE's
+listing and `mirror.changed_files` splice `DIFF_FLAGS`. `mirror.diff_stat` still
+does not, item 176.

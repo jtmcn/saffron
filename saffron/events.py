@@ -286,8 +286,8 @@ class Agent:
     event, so `event` is `None` here rather than a partial one), stored as
     that serialization sliced to `BOUND_CHARS` characters, with
     `original_chars` naming how large it really was; or `detail` — a
-    host-authored fact with no cell event behind it at all (a reap outcome, a
-    pipe closing). `raw` is the field that must survive the log: a raw line
+    host-authored fact with no cell event behind it (a reap outcome, a pipe
+    closing), which can still quote the cell runtime's stderr. `raw` is the field that must survive the log: a raw line
     that loses its flag on round-trip is a quarantine that stopped being one.
     `bounded` is the same kind of fact for the fourth shape — a bounded event
     that loses its flag reads as a whole one, which is worse than the
@@ -638,9 +638,10 @@ def _clean(value: object, limit: int) -> str:
     and retitle their terminal — and `saffron watch` can replay that into a
     fresh terminal long after the run — so the strip happens once, here,
     rather than in each branch below. Fields that carry only host-authored
-    text (the `, resets …` suffix, `Agent.detail`) skip this;
-    `PhaseStart.detail`/`Terminal.detail` mix host and cell text (item 63),
-    so they pass through it."""
+    text (the `, resets …` suffix) skip this; `PhaseStart.detail`,
+    `Terminal.detail`, `Preflight.detail`, `Teardown.detail`, and
+    `Agent.detail` all mix host and cell text (item 63), so they pass
+    through it."""
     return str(value).translate(_CONTROL_TRANSLATION)[:limit]
 
 
@@ -706,10 +707,10 @@ def describe(event: Event) -> str:
     """
     if isinstance(event, Preflight):
         if event.step == "cell_up":
-            return f"cell: {event.detail}"
+            return f"cell: {_clean(event.detail, _DETAIL_BOUND)}"
         if event.step == "unstacked":
-            return f"unstacked: {event.detail}"
-        return f"preflight: {event.detail}"
+            return f"unstacked: {_clean(event.detail, _DETAIL_BOUND)}"
+        return f"preflight: {_clean(event.detail, _DETAIL_BOUND)}"
 
     if isinstance(event, Ceilings):
         # The line `cli._run_cell` printed verbatim before this kind existed:
@@ -794,7 +795,7 @@ def describe(event: Event) -> str:
             return f"agent: (raw) {_clean(event.line or '', 160)}"
         if event.event is not None:
             return _describe_agent_event(event.event)
-        return f"agent: {event.detail}"
+        return f"agent: {_clean(event.detail, _DETAIL_BOUND)}"
 
     if isinstance(event, Terminal):
         if event.reason == "cut_off_no_salvage_room":
@@ -823,7 +824,7 @@ def describe(event: Event) -> str:
     if isinstance(event, Teardown):
         if event.step == "start":
             return "teardown"
-        return f"teardown: {event.detail}"
+        return f"teardown: {_clean(event.detail, _DETAIL_BOUND)}"
 
     raise TypeError(f"describe() has no branch for {type(event).__name__}")
 

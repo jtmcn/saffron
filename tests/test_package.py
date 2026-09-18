@@ -3053,6 +3053,60 @@ def test_unpackaged_work_outside_its_touches_is_not_pushed(packageable):
     assert remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work) == ""
 
 
+def test_unpackaged_work_adding_a_hidden_submodule_outside_its_touches_is_not_pushed(
+    packageable,
+):
+    """A committed `.gitmodules` with `ignore = all` hides a gitlink from a
+    bare `--name-only` listing (`SA-0082`, `tests/test_worktree.py`). Without
+    `DIFF_FLAGS` on this host-side read, `push_unpackaged_work` never learns
+    the submodule exists, and `scope` cannot object to a path it was never
+    given (backlog item 115)."""
+    from saffron.phases.package import push_unpackaged_work
+
+    work = packageable.work
+    git(work, "checkout", "-q", "cell")
+    (work / ".gitmodules").write_text(
+        '[submodule "sub"]\n\tpath = vendor/sub\n\turl = ./sub\n\tignore = all\n'
+    )
+    git(work, "add", ".gitmodules")
+    # Not `git add -A`: a gitlink has nothing on disk at that path, and an
+    # add-all would re-stage it away before the commit below.
+    git(work, "update-index", "--add", "--cacheinfo", f"160000,{'1' * 40},vendor/sub")
+    git(work, "commit", "-qm", "add a hidden submodule")
+    patch = packageable.outcome.task_dir / "patch.diff"
+    # This module's own DIFF_FLAGS (above) lacks --ignore-submodules=none;
+    # add it explicitly so the exported patch always carries the gitlink and
+    # only the listing under test decides whether `scope` ever sees it.
+    patch.write_text(
+        git(
+            work,
+            "diff",
+            *DIFF_FLAGS,
+            "--ignore-submodules=none",
+            f"{packageable.base}..HEAD",
+        )
+        + "\n"
+    )
+    git(work, "checkout", "-q", "main")
+
+    packageable.outcome.state = "EXHAUSTED"
+    # `.gitmodules` is in scope; only the submodule is not — so the result
+    # turns on whether the listing saw `vendor/sub`, not on `.gitmodules`.
+    kwargs = dict(
+        packageable.unpackaged_kwargs,
+        spec=_spec(touches=["f.txt", ".gitmodules"], criteria=["it works"]),
+    )
+    result = push_unpackaged_work(packageable.outcome, **kwargs)
+
+    assert result.pushed is False
+    # f.txt, .gitmodules and vendor/sub changed; only vendor/sub is outside
+    # touches. A listing that dropped the submodule would see only two
+    # changed files, both in touches, and `scope` would pass.
+    assert result.note.startswith("scope fail")
+    assert "1 of 3 changed files outside touches" in result.note
+    assert remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work) == ""
+
+
 def test_unpackaged_work_does_not_replace_a_pull_request_awaiting_review(
     packageable,
 ):

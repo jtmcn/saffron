@@ -559,13 +559,10 @@ def source_mutated(container: str, mutant: Mutant) -> Iterator[str | None]:
     find = mutant.find.encode()
     count = content.count(find)
     if count == 0:
-        yield f"{mutant.file}: find text not found: {mutant.find!r}"
+        yield f"{mutant.file}: find text not found"
         return
     if count > 1:
-        yield (
-            f"{mutant.file}: find text matches {count} times, expected "
-            f"exactly once: {mutant.find!r}"
-        )
+        yield (f"{mutant.file}: find text matches {count} times, expected exactly once")
         return
     _write_file(
         container, mutant.file, content.replace(find, mutant.replace.encode(), 1)
