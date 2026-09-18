@@ -1573,7 +1573,7 @@ def test_a_resnapshot_releases_a_hold(loop):
 
 def _probe(root, find, replace, *command):
     return argparse.Namespace(
-        file="mod.py", find=find, replace=replace, root=root, run=["--", *command]
+        file="mod.py", find=find, replace=replace, root=root, run=list(command)
     )
 
 
@@ -1672,3 +1672,11 @@ def test_probe_parses_its_options_before_the_command(tmp_path, monkeypatch, caps
 
     assert driver.main() == 0
     assert capsys.readouterr().out.startswith("survived:")
+
+
+def test_only_probe_takes_a_command_after_the_separator(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["driver.py", "status", "--", "true"])
+
+    with pytest.raises(SystemExit) as exit_:
+        driver.main()
+    assert exit_.value.code == 2

@@ -1131,7 +1131,7 @@ def cmd_probe(args) -> int:
     """One vacuity probe, applied only if its find text matches exactly once,
     and always restored. A find that misses, or an edit that never lands,
     prints a result that reads like "survived" (run 7, #338)."""
-    command = args.run[1:] if args.run[:1] == ["--"] else args.run
+    command = args.run
     if not command:
         return _fail("give the command to run after --")
     target = args.root / args.file
@@ -1712,15 +1712,16 @@ def main() -> int:
     p.add_argument("--release", action="store_true", help="let next name it again")
     p.set_defaults(func=cmd_hold)
 
-    p = sub.add_parser("probe", help="apply one find/replace, run a command, restore")
+    p = sub.add_parser(
+        "probe",
+        help="apply one find/replace, run a command, restore",
+        usage="driver.py probe file --find F --replace R [--root DIR] -- command ...",
+    )
     p.add_argument("file", help="the file to edit, relative to --root")
     p.add_argument("--find", required=True)
     p.add_argument("--replace", required=True)
     p.add_argument("--root", type=Path, default=Path.cwd(), help="default: the cwd")
-    p.add_argument(
-        "run", nargs="*", metavar="command", help="after --, e.g. uv run pytest"
-    )
-    p.set_defaults(func=cmd_probe)
+    p.set_defaults(func=cmd_probe, run=[])
 
     p = sub.add_parser("status", help="show the order, what has run, and staleness")
     p.set_defaults(func=cmd_status)
@@ -1748,7 +1749,15 @@ def main() -> int:
     p = sub.add_parser("pattern", help="print the Monitor's grep -E pattern")
     p.set_defaults(func=cmd_pattern)
 
-    args = parser.parse_args()
+    # Split by hand: 3.12.3's argparse (CI's) left everything after `--`
+    # unrecognized once a `nargs="*"` positional had matched empty.
+    argv = sys.argv[1:]
+    cut = argv.index("--") if "--" in argv else len(argv)
+    args = parser.parse_args(argv[:cut])
+    if cut < len(argv):
+        if args.command != "probe":
+            parser.error("only probe takes a command after --")
+        args.run = argv[cut + 1 :]
     return args.func(args)
 
 
