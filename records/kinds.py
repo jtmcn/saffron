@@ -1,7 +1,8 @@
 """One pydantic model per record kind, and the registry that names them.
 
-Every field is a scalar or a list of ids — never prose — so a later lift into
-the ontology graph is mechanical (spec, "Follow-ons")."""
+Every field is a scalar or a list of ids, so a later lift into the ontology
+graph is mechanical. An appendix's `title` and `question` are the exception:
+short prose the appendix index renders."""
 
 from __future__ import annotations
 
@@ -49,12 +50,11 @@ def new_id(taken: set[ItemId]) -> str:
 
 
 class Identified(BaseModel):
-    """What every kind's model has — an id the filename repeats, and a status."""
+    """What every kind's model has: an id the filename repeats."""
 
     model_config = ConfigDict(extra="forbid")
 
     id: Annotated[int, Strict()] | str
-    status: str
 
 
 class BacklogItem(Identified):
@@ -125,6 +125,19 @@ class BacklogItem(Identified):
         return self
 
 
+# A to Z, then AA: letters are permanent ids, and six remain after U.
+APPENDIX_ID = r"[A-Z]{1,2}"
+
+
+class Appendix(Identified):
+    """What one revision found. Never replaced, so it has no status."""
+
+    id: Annotated[str, Field(pattern=rf"^{APPENDIX_ID}$")]
+    title: str = Field(min_length=1)
+    revisions: list[Number] = Field(min_length=1)
+    question: str = Field(min_length=1)
+
+
 @dataclass(frozen=True)
 class Kind:
     name: str
@@ -141,5 +154,11 @@ KINDS: dict[str, Kind] = {
         rf"^(\d{{3}}|{RANDOM_ID})-[a-z0-9-]+\.md$",
         BacklogItem,
         frozenset({"README.md", "PRIORITY.md"}),
+    ),
+    "appendix": Kind(
+        "appendix",
+        "docs/appendices",
+        rf"^({APPENDIX_ID})-[a-z0-9-]+\.md$",
+        Appendix,
     ),
 }
