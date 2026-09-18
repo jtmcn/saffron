@@ -12,8 +12,8 @@ class with a `type` string, so a future renderer knows what it holds — an
 turns one back into the prose above. `FAMILIES` below is the proof that the
 ten kinds are sufficient: one row per call-site shape, citing the file and
 symbol it lives in (never a line number — DESIGN.md's own citation rule) and
-the kind `describe()` renders it from. Two shapes resisted typing outright and
-are named as `FINDINGS` instead of forced into a `message: str` — the escape
+the kind `describe()` renders it from. One shape resisted typing outright and
+is named as `FINDINGS` instead of forced into a `message: str` — the escape
 hatch this vocabulary exists to close.
 
 Nothing here emits an `Event` yet; `SA-0030`/`SA-0031` migrate the 64 call
@@ -332,6 +332,22 @@ class Terminal:
 
 
 @dataclass(frozen=True, slots=True)
+class TaskOutcome:
+    """The task's own terminal announcement — item 43's `FINDINGS[0]`, typed.
+    One kind, two shapes: the ordinary announcement, and `RATE_LIMITED`, which
+    has no session id and a reopening time instead — a clean `int` or else
+    `resets_at_unreadable`, since a wrong shape drops the event (`_shape_ok`)."""
+
+    timestamp: float
+    spec_id: str
+    outcome: str
+    spent_usd_est: float
+    session_id: str | None = None
+    resets_at: int | None = None
+    resets_at_unreadable: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class Teardown:
     """One fact from the cell's teardown — the patch export, a proxy denial or
     failure, or a container/network/volume that would not go away."""
@@ -353,6 +369,7 @@ Event = (
     | Budget
     | Agent
     | Terminal
+    | TaskOutcome
     | Teardown
 )
 
@@ -368,6 +385,7 @@ _KINDS: dict[str, type[Event]] = {
         Budget,
         Agent,
         Terminal,
+        TaskOutcome,
         Teardown,
     )
 }
@@ -821,6 +839,20 @@ def describe(event: Event) -> str:
             f"{_clean(event.detail, _DETAIL_BOUND)}"
         )
 
+    if isinstance(event, TaskOutcome):
+        if event.outcome == "RATE_LIMITED":
+            if event.resets_at is not None:
+                suffix = f"; window reopens {when(event.resets_at)}"
+            elif event.resets_at_unreadable:
+                suffix = "; window reopens unknown"
+            else:
+                suffix = ""
+            return "rate limit: rejected — stopping, not exhausted" + suffix
+        return (
+            f"{event.outcome}: ${event.spent_usd_est:.2f} spent, "
+            f"session {_clean(event.session_id, 160)}"
+        )
+
     if isinstance(event, Teardown):
         if event.step == "start":
             return "teardown"
@@ -882,6 +914,8 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("PLAN: the session failed", _S, PhaseStart),
     _Family("PLAN: accepted", _S, PhaseStart),
     _Family("PLAN: rejected", _S, Terminal),
+    _Family("{outcome}: $N spent, session …", _S, TaskOutcome),
+    _Family("rate limit: rejected — not exhausted", _S, TaskOutcome),
     _Family("IMPLEMENT: system prompt", _S, PhaseStart),
     _Family("IMPLEMENT: the session failed", _S, PhaseStart),
     _Family("IMPLEMENT: cut off … spending one turn", _S, PhaseStart),
@@ -932,19 +966,10 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("PACKAGE: could not remove", _PKG, PhaseStart),
 )
 
-# The two call-site shapes `FAMILIES` above could not fit into the ten kinds
+# The one call-site shape `FAMILIES` above could not fit into a typed kind
 # without a `message: str` standing in for a shape of its own — named here
 # rather than forced, per this spec's own acceptance criteria.
 FINDINGS: tuple[tuple[str, str, str], ...] = (
-    (
-        "{outcome}: $N spent, session … / rate limit: rejected — not exhausted",
-        _S,
-        "Both are the task's own terminal announcement, not a kind's. "
-        "`Terminal` is scoped to the five zero-commit ways one IMPLEMENT turn "
-        "ends (backlog item 37); `Budget` carries a ceiling/value/limit triple, "
-        "not an arbitrary outcome word and a session id. Typing this needs a "
-        "eleventh kind, out of scope here.",
-    ),
     (
         "re-verify: {label} suite at {sha}",
         "phases/package.py:reverify",

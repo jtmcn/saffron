@@ -974,12 +974,16 @@ def _drive(
     base_policy=None,
     gates=(),
     use_default_emit=False,
+    patch_print=True,
     capture=None,
     agent_says=None,
     claude_md=None,
     base_claude_md=None,
 ):
     """Run one whole cell against the stubbed runtime and return its outcome.
+
+    `patch_print=False`: leave `session.print` alone and pass a custom `emit`,
+    so `capsys` observes real stdout while `capture` still sees `emit` (item 43).
 
     `use_default_emit`: skip the `emit=`/`session.print` doubles above and
     call `run_one_cell` exactly as `cli.py` does — no `emit` argument at all
@@ -1063,13 +1067,9 @@ def _drive(
         )
         return outcome, ledger
 
-    # `events.FINDINGS[0]`'s two lines (the outcome announcement, and the
-    # rate-limit rejection) are direct `print()` calls in `session.py` —
-    # nothing describable fits either shape (§0's own out-of-scope note).
-    # Monkeypatching the module's own `print` name, not `builtins.print`,
-    # is what routes exactly those two lines into `cell.watched` alongside
-    # everything `emit` captures below, in the order both actually run.
-    monkeypatch.setattr(session, "print", cell.watched.append, raising=False)
+    if patch_print:
+        # Routes any stray `print()` into `cell.watched` alongside `emit`.
+        monkeypatch.setattr(session, "print", cell.watched.append, raising=False)
 
     def _emit(event):
         cell.watched.append(describe(event))
@@ -2931,6 +2931,108 @@ def test_an_unreadable_reset_time_still_stops_rate_limited(monkeypatch, tmp_path
         (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
         assert run_row["status"] == "COMPLETE", resets_at
         assert not any(str(resets_at) in line for line in cell.watched), resets_at
+
+
+def _task_outcome(tmp_path, spec_id="SY-1"):
+    """The one `TaskOutcome` a `use_default_emit=True` run logged."""
+    from saffron.events import TaskOutcome, read_log
+
+    (outcome,) = [
+        e for e in read_log(tmp_path / "out" / spec_id) if isinstance(e, TaskOutcome)
+    ]
+    return outcome
+
+
+def test_the_terminal_announcement_reaches_emit_and_not_stdout(
+    monkeypatch, tmp_path, capsys
+):
+    """Item 43: a caller's own `emit` gets the outcome; stdout does not."""
+    from saffron.events import TaskOutcome
+
+    cell = _stub_the_runtime(monkeypatch)
+    captured: list = []
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        patch_print=False,
+        capture=captured,
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    (announcement,) = [e for e in captured if isinstance(e, TaskOutcome)]
+    assert announcement.outcome == "READY_FOR_REVIEW"
+    assert announcement.session_id == "sess-1"
+    assert "READY_FOR_REVIEW" not in capsys.readouterr().out
+
+
+def test_the_rate_limit_rejection_reaches_emit_and_not_stdout(
+    monkeypatch, tmp_path, capsys
+):
+    """Same seam, the RateLimited path: still names the reopening time."""
+    from saffron.events import TaskOutcome
+
+    cell = _stub_the_runtime(monkeypatch)
+    captured: list = []
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[implement.AgentFailed("api_error", attempt=_rejected())],
+        patch_print=False,
+        capture=captured,
+    )
+    assert outcome.state == "RATE_LIMITED"
+    (rejection,) = [e for e in captured if isinstance(e, TaskOutcome)]
+    assert rejection.outcome == "RATE_LIMITED"
+    assert rejection.resets_at == 1755800000
+    printed = capsys.readouterr().out
+    assert "rate limit" not in printed
+    assert "1755800000" not in printed
+
+
+def test_the_outcome_event_round_trips_and_describes_as_its_old_line(
+    monkeypatch, tmp_path
+):
+    """Reading the log back and describing it reproduces the old print."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        use_default_emit=True,
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    logged = _task_outcome(tmp_path)
+    assert (logged.outcome, logged.spent_usd_est) == ("READY_FOR_REVIEW", 0.5)
+    assert logged.session_id == "sess-1"
+    assert describe(logged) == "READY_FOR_REVIEW: $0.50 spent, session sess-1"
+
+
+def test_a_rate_limited_outcome_survives_the_log_whatever_reopen_time_was_reported(
+    monkeypatch, tmp_path
+):
+    """The four junk `resets_at` shapes from the test above all reach the
+    log: string/list/NaN unreadable, an int past `time_t` kept as reported."""
+    for i, resets_at in enumerate(("soon", [1], 10**20, float("nan"))):
+        cell = _stub_the_runtime(monkeypatch)
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / str(i),
+            cell=cell,
+            turns=[
+                implement.AgentFailed(
+                    "api_error", attempt=_rejected(resets_at=resets_at)
+                )
+            ],
+            use_default_emit=True,
+        )
+        assert outcome.state == "RATE_LIMITED", resets_at
+        logged = _task_outcome(tmp_path / str(i))
+        want = (10**20, False) if resets_at == 10**20 else (None, True)
+        assert (logged.resets_at, logged.resets_at_unreadable) == want, resets_at
+        assert describe(logged).endswith("window reopens unknown"), resets_at
 
 
 def test_a_wall_after_the_gates_go_green_stops_the_lenses(monkeypatch, tmp_path):

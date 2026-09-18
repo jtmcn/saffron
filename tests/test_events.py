@@ -35,6 +35,7 @@ from saffron.events import (
     Phase,
     PhaseStart,
     Preflight,
+    TaskOutcome,
     Teardown,
     Terminal,
     TerminalReason,
@@ -109,6 +110,13 @@ _ONE_OF_EACH = [
     Agent(timestamp=7.0, spec_id="SA-0029", raw=False, event={"type": "text"}),
     Terminal(
         timestamp=8.0, spec_id="SA-0029", reason="finished_empty", spent_usd_est=0.5
+    ),
+    TaskOutcome(
+        timestamp=8.5,
+        spec_id="SA-0029",
+        outcome="READY_FOR_REVIEW",
+        spent_usd_est=1.25,
+        session_id="sess-9",
     ),
     Teardown(timestamp=9.0, spec_id="SA-0029", step="container", ok=True),
 ]
@@ -571,7 +579,7 @@ def test_the_wire_keys_are_pinned_for_every_kind(tmp_path, event):
 def test_the_union_and_the_wire_table_cannot_drift(tmp_path):
     """Both are hand-maintained lists of the same ten kinds."""
     assert set(typing.get_args(Event)) == set(_KINDS.values())
-    assert len(_KINDS) == 10
+    assert len(_KINDS) == 11
     for cls in _KINDS.values():
         assert "kind" not in {f.name for f in dc_fields(cls)}, "would clobber the tag"
 
@@ -1113,6 +1121,16 @@ _CASES: list[tuple[Event, str]] = [
         ),
         "PLAN: rejected, $0.10 spent — not the schema",
     ),
+    (
+        TaskOutcome(
+            timestamp=1.0,
+            spec_id="x",
+            outcome="READY_FOR_REVIEW",
+            spent_usd_est=0.5,
+            session_id="sess-1",
+        ),
+        "READY_FOR_REVIEW: $0.50 spent, session sess-1",
+    ),
     (Teardown(timestamp=1.0, spec_id="x", step="start", ok=True), "teardown"),
     (
         Teardown(
@@ -1196,8 +1214,8 @@ def test_the_table_did_not_quietly_lose_a_row():
     That is the point: moving it is a deliberate edit, not a silent one.
     `SA-0085` moved it again, deliberately, for the one new line shape it adds
     — a witness already green at base_sha, named on the baseline's own event."""
-    assert len(FAMILIES) == 60
-    assert len({f.prefix for f in FAMILIES}) == 60
+    assert len(FAMILIES) == 62
+    assert len({f.prefix for f in FAMILIES}) == 62
 
 
 def test_the_duplicated_agent_renderer_still_matches_its_original():
@@ -1675,9 +1693,9 @@ def test_an_agent_detail_is_stripped_and_clipped():
 
 
 def test_findings_name_what_the_table_could_not_type():
-    """The two call-site shapes `FAMILIES` refused to force into a
-    `message: str` are named, not silently dropped."""
-    assert len(FINDINGS) == 2
+    """The one call-site shape `FAMILIES` refused to force into a
+    `message: str` is named, not silently dropped."""
+    assert len(FINDINGS) == 1
     for prefix, where, note in FINDINGS:
         assert prefix and where and note
 
@@ -1805,8 +1823,7 @@ def test_watch_output_matches_the_golden_fixture(monkeypatch, tmp_path):
 #
 # Not joinable, and deliberately absent: the normalised lines (`<LAN-ADDR>`,
 # `<N>`, `<TASK_DIR>`), where `describe` renders the real value the normaliser
-# replaced; and `{outcome}: $N spent, session …`, which `FINDINGS[0]` records
-# as needing a tenth kind.
+# replaced.
 _JOINED: tuple[tuple[Event, str], ...] = (
     (
         Preflight(
@@ -1961,6 +1978,27 @@ _JOINED: tuple[tuple[Event, str], ...] = (
         ),
         "REVIEW: adequacy: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.10",
     ),
+    # Appended: same renumbering hazard as the `adequacy` row above.
+    (
+        TaskOutcome(
+            timestamp=1.0,
+            spec_id="x",
+            outcome="READY_FOR_REVIEW",
+            spent_usd_est=0.5,
+            session_id="sess-1",
+        ),
+        "READY_FOR_REVIEW: $0.50 spent, session sess-1",
+    ),
+    (
+        TaskOutcome(
+            timestamp=1.0,
+            spec_id="x",
+            outcome="EXHAUSTED",
+            spent_usd_est=0.3,
+            session_id="sess-1",
+        ),
+        "EXHAUSTED: $0.30 spent, session sess-1",
+    ),
 )
 
 
@@ -1984,13 +2022,7 @@ def test_the_join_covers_every_captured_line_a_kind_renders():
         if line and not line.startswith("#")
     ]
     joined = {line for _, line in _JOINED}
-    unchecked = [
-        line
-        for line in captured
-        if line not in joined
-        and "<" not in line
-        and not re.match(r"^(READY_FOR_REVIEW|EXHAUSTED):", line)
-    ]
+    unchecked = [line for line in captured if line not in joined and "<" not in line]
     assert unchecked == [], f"captured but joined to no kind: {unchecked}"
 
 
@@ -2023,12 +2055,8 @@ def test_run_one_cell_with_no_emit_argument_still_prints(monkeypatch, tmp_path, 
 def test_events_jsonl_reproduces_what_the_terminal_printed(
     monkeypatch, tmp_path, capsys
 ):
-    """AC4: the default `emit` fans out to both consumers, and `read_log` +
-    `describe` must reproduce the same sequence `capsys` captured — except
-    the two lines `events.FINDINGS[0]` names, which `session._drive_cell`
-    prints directly rather than forcing into a tenth kind, and which the join
-    test above already excludes from every other kind-level check the same
-    way (`re.match(r"^(READY_FOR_REVIEW|EXHAUSTED):", line)`)."""
+    """AC4: `read_log` + `describe` reproduce the same sequence `capsys`
+    captured, the task's own outcome line included."""
     cell = _stub_the_runtime(monkeypatch)
     outcome, _ledger = _drive(
         monkeypatch,
@@ -2039,18 +2067,13 @@ def test_events_jsonl_reproduces_what_the_terminal_printed(
     )
     assert outcome.state == "READY_FOR_REVIEW"
     printed = [line for line in capsys.readouterr().out.split("\n") if line]
-    without_outcome = [
-        line
-        for line in printed
-        if not re.match(r"^(READY_FOR_REVIEW|EXHAUSTED):", line)
-    ]
     logged = [
         line
         for event in read_log(tmp_path / "out" / "SY-1")
         for line in describe(event).split("\n")
         if line
     ]
-    assert without_outcome == logged
+    assert printed == logged
 
     # `spec_id` is written at 21 sites in `session.py` and read by no test:
     # measured, replacing every one with a wrong literal passed all 1149.
