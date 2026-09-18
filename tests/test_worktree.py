@@ -1109,6 +1109,44 @@ def test_a_find_that_does_not_match_once_applies_nothing(tmp_path, monkeypatch):
     assert _porcelain(tmp_path) == ""
 
 
+def test_a_mutant_that_does_not_apply_in_a_cell_names_neither_half_of_its_edit(
+    tmp_path, monkeypatch
+):
+    """Item 114's cell-side half: the reason `source_mutated` yields must name
+    the file and which of the two cases it was, and carry no part of `find`
+    or `replace` — not even a fragment, which is why both are bookended with
+    the same distinctive token rather than differing only in the middle."""
+    find = "QRVT_FIND = QRVT_"
+    replace = "QRVT_REPLACE = QRVT_"
+    _repo_with_a_file(tmp_path, monkeypatch, f"{find}\n{find}\n")
+    target = tmp_path / "src" / "guard.py"
+
+    twice = Mutant(file="src/guard.py", find=find, replace=replace)
+    with worktree.source_mutated("c", twice) as reason:
+        assert reason is not None
+        assert "src/guard.py" in reason
+        assert "matches 2 times" in reason
+        assert find not in reason
+        assert replace not in reason
+        assert "QRVT_" not in reason
+    assert target.read_text() == f"{find}\n{find}\n"
+    assert _porcelain(tmp_path) == ""
+
+    # Absent from the same tree — a different find text than what is on
+    # disk, so this needs no second commit.
+    absent_find = "QRVT_FIND = QRVT_MISSING"
+    absent = Mutant(file="src/guard.py", find=absent_find, replace=replace)
+    with worktree.source_mutated("c", absent) as reason:
+        assert reason is not None
+        assert "src/guard.py" in reason
+        assert "not found" in reason
+        assert absent_find not in reason
+        assert replace not in reason
+        assert "QRVT_" not in reason
+    assert target.read_text() == f"{find}\n{find}\n"
+    assert _porcelain(tmp_path) == ""
+
+
 def test_a_failed_undo_raises_rather_than_reporting_a_verdict(tmp_path, monkeypatch):
     """A tree `source_mutated` could not restore is the one outcome that must
     not read as a witness doing its job — `witness_gate` turns this into

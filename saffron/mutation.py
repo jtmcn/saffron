@@ -71,8 +71,9 @@ class MutationResult:
 
     `ok=False` is not a weaker `ok=True` — a mutant that does not apply must
     read as "this mutant did not apply", not as "the witness survived", and a
-    reason that names the file and the text is what makes that reading
-    possible for whoever is looking at the result.
+    reason that names the file and which of the two cases it was — never the
+    edit itself — is what makes that reading possible for whoever is looking
+    at the result.
     """
 
     ok: bool
@@ -118,7 +119,12 @@ def apply_mutant(tree: Path, mutant: Mutant) -> MutationResult:
     mutant does not name one property, and picking one of them silently is
     how a check comes to measure something other than what it claims — both
     are refused the same way, as `ok=False` with a reason naming the file and
-    the text, never as a silent edit of the first occurrence.
+    which of the two cases it was, never the edit itself, and never as a
+    silent edit of the first occurrence.
+
+    The reason carries no part of `find` or `replace`: it reaches a REPAIR
+    turn through `witness`'s summary, and a mutant an implementer can read
+    back is a mutant chosen to be killed (`CONTEXT.md`, Mutant).
 
     Returns the exact bytes it displaced, and the offset it displaced them
     at, so the caller can put them back with `restore_mutant` — including for
@@ -145,14 +151,13 @@ def apply_mutant(tree: Path, mutant: Mutant) -> MutationResult:
     if count == 0:
         return MutationResult(
             ok=False,
-            reason=f"{mutant.file}: find text not found: {mutant.find!r}",
+            reason=f"{mutant.file}: find text not found",
         )
     if count > 1:
         return MutationResult(
             ok=False,
             reason=(
-                f"{mutant.file}: find text matches {count} times, expected "
-                f"exactly once: {mutant.find!r}"
+                f"{mutant.file}: find text matches {count} times, expected exactly once"
             ),
         )
 

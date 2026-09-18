@@ -125,6 +125,63 @@ def test_a_surviving_mutant_names_its_claim_and_not_its_edit(tmp_path):
     assert criterion.mutant.replace not in dumped
 
 
+def test_an_unapplied_mutant_reaches_neither_the_result_nor_the_lens_table(tmp_path):
+    """Item 114: an unapplied mutant's find/replace text used to reach the
+    result's `summary` through the `unproven` note, and from there
+    `review.gate_summary` repeats every gate's summary into the table
+    REVIEW's lenses are shown, which a REBUT-round lens can quote back to the
+    implementer. Driven end to end with one criterion whose mutant applies
+    and whose witness survives — so `witness` fails for an ordinary reason —
+    and one whose mutant does not apply at all, and neither half of either
+    mutant's edit may appear in the serialized result or the rendered table.
+
+    Imported inside the test body, not at module scope: a module-scope import
+    of a name this change adds would turn `revert`'s reverted run into a
+    collection error, which it reads as `skip` (`saffron/gates/**` and
+    `saffron/phases/**` are both forbidden to this spec's edits, but nothing
+    forbids reading them from a test)."""
+    from saffron.phases.review import gate_summary
+
+    find = "QRVT_FIND = QRVT_"
+    replace = "QRVT_REPLACE = QRVT_"
+    _write(tmp_path, "a.py", f"{find}\n")
+
+    survives = _criterion(
+        claim="the total is clamped at zero",
+        witness="tests/test_a.py::test_a",
+        file="a.py",
+        find=find,
+        replace=replace,
+    )
+    absent_find = "QRVT_ABSENT_FIND = QRVT_"
+    absent_replace = "QRVT_ABSENT_REPLACE = QRVT_"
+    not_applied = _criterion(
+        claim="unrelated claim",
+        witness="tests/test_b.py::test_b",
+        file="a.py",
+        find=absent_find,
+        replace=absent_replace,
+    )
+
+    def run_tests(subset):
+        assert subset == [survives.witness]
+        return _tests(status="pass", collected=(survives.witness,))
+
+    result = witness_gate(
+        acceptance=[survives, not_applied],
+        mutate=host_mutator(tmp_path),
+        run_tests=run_tests,
+    )
+
+    assert result.status == "fail"
+
+    dumped = result.model_dump_json()
+    summary = gate_summary([result])
+    for leaked in (find, replace, absent_find, absent_replace, "QRVT_"):
+        assert leaked not in dumped
+        assert leaked not in summary
+
+
 def test_the_tree_is_unchanged_however_the_gate_ends(tmp_path):
     """Byte-identical once the gate is done, whether the witness died,
     survived, or the mutant never applied. It executes inside the worktree
