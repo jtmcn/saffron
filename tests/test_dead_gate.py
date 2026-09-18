@@ -248,3 +248,18 @@ def test_a_failure_keeps_its_identity_when_its_line_moves(tmp_path):
     after = _run(tree).failures
     assert after[0].line != 1
     assert [identity("dead", f) for f in after] == before
+
+
+def test_the_report_lists_each_failure_and_each_stale_entry(tmp_path):
+    tree = _tree(tmp_path)
+    (tree / "saffron" / "extra.py").write_text(ORPHAN)
+    _spec(tree, "saffron/core.py::used")
+    lines = _script(tree, "--report").splitlines()
+    assert lines[0].startswith("saffron/extra.py:1: unused function 'orphan'")
+    assert "stale: saffron/core.py::used (SA-9001-x.md)" in lines
+    assert lines[-1] == "1 unused, 0 deferred by open specs, 1 stale pending entries"
+
+
+def test_make_deadcode_runs_the_report():
+    makefile = (REPO / "Makefile").read_text()
+    assert "deadcode:\n\tuv run python .saffron/gates/dead.py --report\n" in makefile
