@@ -30,9 +30,9 @@ max_turns: 80
 acceptance:
   - claim: >-
       A mutant on a tracked file whose base64 is longer than one argument can
-      carry (131,072 bytes) is applied inside the cell with every byte it did
-      not name intact, and undone with the tree clean afterwards, when no
-      argument the write passes to the cell exceeds that cap. Today the whole
+      carry is applied inside the cell with every byte it did not name intact,
+      and undone with the tree clean afterwards, when no argument the write
+      passes to the cell exceeds 131,000 bytes, the largest measured to run. Today the whole
       file crosses as one argument, so the write fails and the mutant is
       `error`.
     witness: tests/test_worktree.py::test_a_mutant_on_a_file_larger_than_one_argument_is_applied_and_undone
@@ -105,10 +105,11 @@ every caller's view of the cell runtime (Appendix G), and it is forbidden.
 Item 154 allows "several arguments under the cap, appended in order, or another
 channel". This spec picks the first, because the host-side tests fake
 `runtime.exec_` and nothing else (`_host_git`, `tests/test_worktree.py:764`).
-`exec_stream` carries stdin, but it is the agent turn's streaming channel, and
-a write through it would get past the witness's fake without being checked.
-Leave headroom under 131,072 for the script text around each piece. Name the
-cap once, as a module constant, with the measurement it comes from.
+`exec_stream` carries stdin, and `session.py:1017-1023` writes a patch through
+it. But a write through it would get past the witness's fake without being
+checked. The largest argument measured to run is 131,000 bytes, so keep each
+whole argument under that, script text included. Name the cap once, as a
+module constant, with the measurement it comes from.
 
 **Where the pieces go.** A base64 string decodes piecewise only at multiples of
 four characters. Appending each encoded piece to a scratch file and decoding
@@ -116,6 +117,11 @@ once at the end avoids that question entirely. Put any scratch file **outside
 `/work`** (the cell's `/tmp` will do) and remove it. `source_mutated`'s undo is
 `git checkout HEAD -- <file>`, which never removes an untracked file. A scratch
 file left in the worktree would dirty the tree that `committed` judges next.
+Make each write start from an empty scratch file: create it with `mktemp`, or
+truncate it with `>` on the first piece. Remove it on failure as well as on
+success. Otherwise a failed write leaves pieces behind, and the next mutant in
+the same cell decodes them along with its own. The witness cannot see `/tmp`,
+so this rests on you.
 
 **A failure part-way must still restore.** Today one failed exec leaves the
 file truncated, and the code restores it from `HEAD` before raising
@@ -129,12 +135,13 @@ does.
 
 **The witness.** Build it on `_repo_with_a_file` (`tests/test_worktree.py:1041`)
 and `_host_git`. Wrap `worktree.runtime.exec_` with a fake that refuses any
-argument longer than 131,072 bytes, as the kernel does, returning a non-zero
-`runtime.Completed` rather than running it. Make the file over 300,000 bytes,
-so its base64 needs at least three pieces. Give it a byte that is not valid
-UTF-8 and a CRLF, as
+argument longer than 131,000 bytes, the largest measured to run. It returns a
+non-zero `runtime.Completed` rather than running the command. Make the file
+over 300,000 bytes, so its base64 needs at least three pieces. Give it a byte
+that is not valid UTF-8 and a CRLF, as
 `test_a_mutant_applied_in_a_real_cell_keeps_the_bytes_it_did_not_name`
-(`:1312`) does. Inside the block, assert the file's exact bytes are the
+(`:1312`) does. The helper writes with `write_text` (`:1048`), so write those
+bytes yourself and commit again. Inside the block, assert the file's exact bytes are the
 mutated ones. After it, assert the exact original bytes and that `_porcelain`
 is empty. Each check catches a plausible wrong implementation. The fake
 catches pieces still over the cap. The byte comparisons catch pieces decoded at
@@ -145,7 +152,9 @@ a scratch file left in `/work`.
 nothing in it can be pinned. The mutant sits on the existing call in
 `source_mutated`: it makes the write send the unmutated content, so a witness
 that never looks at the bytes inside the block survives it. The split itself is
-held by the witness's byte comparisons alone.
+held by the witness's byte comparisons alone. Keep `_write_file`'s name and
+signature, and leave its call in `source_mutated` as it is. A reflowed call
+stops the mutant from applying, and `witness` then gives no verdict.
 
 **The cell-marked test.** `test_a_mutant_applied_in_a_real_cell_keeps_the_bytes_it_did_not_name`
 is the only test that runs the write in a real cell. It cannot run inside
