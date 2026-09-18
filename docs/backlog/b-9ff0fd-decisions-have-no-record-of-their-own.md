@@ -24,9 +24,9 @@ Appendices O, P and T. Nothing marks a decision replaced.
 A record kind holding one decision per file, designed and landed. The design
 answers four things:
 
-- **Numbering.** Principles are one sequence each appendix claims a block of,
-  which is why per-decision files written in parallel were refused
-  (`DESIGN.md:1569`). The backlog's answer, random ids after item 177
+- **Numbering.** Principles are one sequence each appendix claims a block of:
+  per-decision files written in parallel were refused (`DESIGN.md`,
+  "Appendices — an index"). The backlog's answer, random ids after item 177
   (`records/kinds.py:34`), is the one to try first.
 - **Supersession.** `BacklogItem.superseded_by` holds one id. A decision
   split into several, or replaced by several, needs a list.
