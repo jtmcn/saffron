@@ -62,6 +62,10 @@ def test_show_prints_the_record_and_nothing_else():
     assert "A gate that never ran" not in out
 
 
+def test_show_takes_the_zero_padded_filename_prefix():
+    assert run("show", "002").stdout.startswith("---\nid: 2\n")
+
+
 def test_show_one_section():
     out = run("show", "1", "--section", "Done looks like").stdout
     assert out.strip() == "`tool` is obtained by executing the tool."

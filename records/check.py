@@ -10,7 +10,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from records.kinds import HASH_ID, KINDS, LAST_NUMBERED, BacklogItem
+from records.kinds import KINDS, LAST_NUMBERED, RANDOM_ID, BacklogItem, ItemId, as_id
 from records.load import _FRONTMATTER, Record, load, split_sections
 
 # Where a live `item N` is a promise someone can follow today. Not
@@ -22,12 +22,13 @@ _SUFFIXES = {".py", ".md", ".yaml", ".yml", ".toml", ".sh"}
 # `items 71/75/80`, `item b-3f9a2c`. A digit run is not followed by another
 # digit, so `item 1000` does not read as `item 100`. A range reads its
 # endpoints, as the § citation test does for appendices.
-_ID = rf"(?-i:{HASH_ID})\b|\d{{1,3}}(?!\d)"
+_ID = rf"(?-i:{RANDOM_ID})\b|\d{{1,3}}(?!\d)"
 _ITEMS = re.compile(
     r"(?i)\b(?:backlog\s+)?items?\s+"
     rf"((?:\*{{0,2}}(?:{_ID})\*{{0,2}}(?:\s*(?:,|and|–|—|-|/)\s*)?)+)"
 )
-_NUM = re.compile(rf"{HASH_ID}|\d+")
+_ANY_ID = rf"{RANDOM_ID}|\d+"
+_NUM = re.compile(_ANY_ID)
 _SPEC_FILENAME = re.compile(r"^([A-Za-z0-9]+-\d+)-")
 
 
@@ -41,7 +42,7 @@ class Violation:
         return f"{self.path}: {self.field}: {self.message}"
 
 
-def _ids(records: list[Record]) -> dict[int | str, Record]:
+def _ids(records: list[Record]) -> dict[ItemId, Record]:
     return {r.model.id: r for r in records}
 
 
@@ -67,7 +68,7 @@ def check_ids(records: list[Record]) -> list[Violation]:
                     r.path,
                     "id",
                     f"numbered ids end at {LAST_NUMBERED}; take one from "
-                    "`python -m records new-id`",
+                    "`uv run python -m records new-id`",
                 )
             )
     present = {n for n in counts if isinstance(n, int)}
@@ -168,12 +169,8 @@ def check_cites_resolve(records: list[Record], sections: set[str]) -> list[Viola
     ]
 
 
-def _as_id(token: str) -> int | str:
-    return int(token) if token.isdigit() else token
-
-
-def cited_items(text: str) -> set[int | str]:
-    return {_as_id(n) for m in _ITEMS.finditer(text) for n in _NUM.findall(m.group(1))}
+def cited_items(text: str) -> set[ItemId]:
+    return {as_id(n) for m in _ITEMS.finditer(text) for n in _NUM.findall(m.group(1))}
 
 
 def _walk(root: Path, surfaces: tuple[str, ...], skip: tuple[Path, ...]) -> list[Path]:
@@ -199,7 +196,7 @@ def _citing_files(root: Path) -> list[Path]:
     return _walk(root, CITING, (root / "tests" / "records",))
 
 
-def check_item_citations(root: Path, ids: set[int | str]) -> list[Violation]:
+def check_item_citations(root: Path, ids: set[ItemId]) -> list[Violation]:
     out: list[Violation] = []
     for path in _citing_files(root):
         for n in sorted(cited_items(path.read_text()) - ids, key=str):
@@ -209,13 +206,13 @@ def check_item_citations(root: Path, ids: set[int | str]) -> list[Violation]:
     return out
 
 
-def first_cited_item(text: str) -> int | str | None:
-    """The first number of the first `_ITEMS` match, in document order — the
+def first_cited_item(text: str) -> ItemId | None:
+    """The first id of the first `_ITEMS` match, in document order — the
     item a spec's `## Context` came from, not the background it also names."""
     match = _ITEMS.search(text)
     if match is None:
         return None
-    return _as_id(_NUM.findall(match.group(1))[0])
+    return as_id(_NUM.findall(match.group(1))[0])
 
 
 def _context_section(spec_text: str) -> str:
@@ -237,8 +234,8 @@ LIVE_SURFACES = (
 
 _TIER_HEADING = re.compile(r"^### Tier (\d)\b")
 _OTHER_HEADING = re.compile(r"^#{2,3} ")
-_STRUCK = re.compile(rf"~~\*\*({HASH_ID}|\d+)\*\*~~")
-_BOLD = re.compile(rf"(?<!~)\*\*({HASH_ID}|\d+)\*\*(?!~)")
+_STRUCK = re.compile(rf"~~\*\*({_ANY_ID})\*\*~~")
+_BOLD = re.compile(rf"(?<!~)\*\*({_ANY_ID})\*\*(?!~)")
 
 
 def check_done_specs_are_done(records: list[Record], root: Path) -> list[Violation]:
@@ -291,7 +288,7 @@ def check_priority(records: list[Record], priority_md: Path) -> list[Violation]:
         return [Violation(priority_md, "index", "does not exist")]
     by_id = _ids(records)
     out: list[Violation] = []
-    named_under: dict[int | str, set[int]] = {}
+    named_under: dict[ItemId, set[int]] = {}
     tier: int | None = None
     for line in priority_md.read_text().splitlines():
         if heading := _TIER_HEADING.match(line):
@@ -299,8 +296,8 @@ def check_priority(records: list[Record], priority_md: Path) -> list[Violation]:
             continue
         if _OTHER_HEADING.match(line) or line.strip() == "---":
             tier = None  # scope ends; ids are still checked, just not credited
-        struck = [_as_id(n) for n in _STRUCK.findall(line)]
-        bold = [_as_id(n) for n in _BOLD.findall(line)]
+        struck = [as_id(n) for n in _STRUCK.findall(line)]
+        bold = [as_id(n) for n in _BOLD.findall(line)]
         for n in struck:
             if n not in by_id:
                 out.append(

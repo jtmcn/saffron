@@ -30,14 +30,19 @@ _COMMIT_SHA = r"^[0-9a-f]{7,40}$"
 Number = Annotated[int, Strict(), Field(ge=1)]
 
 # Items 1–177 keep their numbers; every later item takes a random id, so two
-# branches filing at once cannot claim the same one.
+# branches filing at once almost never claim the same one (`check_ids` catches it).
 LAST_NUMBERED = 177
-HASH_ID = r"b-[0-9a-f]{6}"
-HashId = Annotated[str, Field(pattern=rf"^{HASH_ID}$")]
-ItemId = Number | HashId
+RANDOM_ID = r"b-[0-9a-f]{6}"
+RandomId = Annotated[str, Field(pattern=rf"^{RANDOM_ID}$")]
+ItemId = Number | RandomId
 
 
-def new_id(taken: set[int | str]) -> str:
+def as_id(token: str) -> ItemId:
+    """A backlog id as written: a filename prefix, a citation, an argument."""
+    return int(token) if token.isdigit() else token
+
+
+def new_id(taken: set[ItemId]) -> str:
     while (candidate := f"b-{secrets.token_hex(3)}") in taken:
         pass
     return candidate
@@ -133,7 +138,7 @@ KINDS: dict[str, Kind] = {
     "backlog": Kind(
         "backlog",
         "docs/backlog",
-        rf"^(\d{{3}}|{HASH_ID})-[a-z0-9-]+\.md$",
+        rf"^(\d{{3}}|{RANDOM_ID})-[a-z0-9-]+\.md$",
         BacklogItem,
         frozenset({"README.md", "PRIORITY.md"}),
     ),

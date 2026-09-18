@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import get_args
 
-from records.kinds import HASH_ID, KINDS, BacklogItem, Status, new_id
+from records.kinds import KINDS, RANDOM_ID, BacklogItem, Status, as_id, new_id
 from records.load import Record, RecordError, load
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -63,8 +63,8 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 def cmd_show(args: argparse.Namespace) -> int:
     records = load(KINDS["backlog"], args.root)
-    if args.id.isdigit() or re.fullmatch(HASH_ID, args.id):
-        wanted = [r for r in records if str(r.model.id) == args.id]
+    if args.id.isdigit() or re.fullmatch(RANDOM_ID, args.id):
+        wanted = [r for r in records if r.model.id == as_id(args.id)]
         if not wanted:
             print(f"no backlog item {args.id}", file=sys.stderr)
             return 1
