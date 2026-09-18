@@ -70,7 +70,12 @@ acceptance:
 `ontology/RATIONALE.md`'s own revisit clause. Read the appendix first. It carries
 the decision rule this spec and `SA-0108` make runnable, and it states what the
 work does not license. This spec builds the projection. `SA-0108` builds the
-comparator, prints the result and materializes at batch end.
+comparator and a command that runs it once over the merged history.
+
+The rule measures history recorded before backlog item 170. That item moves
+artifacts to a store named by content hash, so the overwrite this projection
+detects stops arising once it lands. Build against today's ledger and batch
+tree, and do not anticipate item 170's interface, which is not designed yet.
 
 N5 is a numbered requirement in §1. Any merged change must be reconstructible
 from stored artifacts alone, expressed as a derivation-chain query so it is
@@ -109,8 +114,8 @@ chain from Q4's result.
 
 ## Out of scope
 
-- **The comparator, the printed result and the batch-end call.** `SA-0108`
-  builds all three. This spec adds no command and edits no existing file.
+- **The comparator and the command.** `SA-0108` builds both. Nothing
+  materializes at batch end. This spec adds no command and edits no existing file.
 - **Nothing here controls execution.** §1.4's bullet stands. No scheduling
   decision reads a triple, and the shapes gate no state transition. The
   projection describes the run record after the fact.

@@ -1404,7 +1404,7 @@ Success criterion: a batch spans two repos, and the diff to Saffron's source req
 
 Only if `ontology/RATIONALE.md` says the queries are worth reading: ledger → RDF projection, pyoxigraph store, materialization at batch end, SHACL validation of the projection.
 
-It says otherwise (rev 18). `ontology/queries/` therefore stays where it is, as worked examples that `tests/ontology/` runs — moving them under `docs/` would cost the only thing keeping them honest. The vocabulary stays as documentation with two readers the queries are not: the `shacl` gate and the `CONTEXT.md` cross-check. Appendix O's spike is one of two things that reopen an emitter. The other is the RATIONALE's own clause, and rev 24 is where it fires: N5 is to be checked at every batch end rather than spot-checked, and Appendix T carries the decision rule. **The analytical question is a completed project, not an abandoned one** — you will have bought a precise answer to "is the relational model costing me anything?" for the price of a weekend, which is the cheapest that answer is ever available.
+It says otherwise (rev 18). `ontology/queries/` therefore stays where it is, as worked examples that `tests/ontology/` runs — moving them under `docs/` would cost the only thing keeping them honest. The vocabulary stays as documentation with two readers the queries are not: the `shacl` gate and the `CONTEXT.md` cross-check. Appendix O's spike is one of two things that reopen an emitter. The other is the RATIONALE's own clause, and rev 24 is where it fires: N5's query runs over the merged history rather than over fixtures, and Appendix T carries the decision rule. **The analytical question is a completed project, not an abandoned one** — you will have bought a precise answer to "is the relational model costing me anything?" for the price of a weekend, which is the cheapest that answer is ever available.
 
 ### v3 — the generality test, then only if v2 is earning its keep
 
@@ -2987,18 +2987,38 @@ logic, whichever way it lands.
 
 A positive result is narrower than it will read. Every instance comes from the
 record check, and a SQL walk given the same check finds the same set. So one
-instance shows that N5 needs that check at every batch end. It does not show
-the check needs a graph. The emitter keeps its place only if Q4 over the
-projection stays cheaper to hold than the SQL walk with the check added. That
-is the RATIONALE's own standard.
+instance shows that N5 needs that check. It does not show the check needs a
+graph. The emitter keeps its place only if Q4 over the projection stays cheaper
+to hold than the SQL walk with the check added. That is the RATIONALE's own
+standard.
+
+### Backlog item 170 bounds the question
+
+Item 170 makes commits on `refs/saffron/*` the authoritative record and the
+ledger an index folded out of it. It also moves artifacts to a store named by
+content hash. No later task can then overwrite an earlier one's plan or diff,
+and the record carries a hash for every artifact, the diff included. The one
+case this rule can find stops arising once item 170 lands.
+
+So the rule measures history recorded before item 170, and it runs once over
+that history rather than at every batch end. That makes it urgent rather than
+moot. Item 170 has still to decide whether the tasks already recorded are
+migrated or abandoned, and abandoning them removes the evidence. Each break the
+rule finds is a chain the old layout already lost, which is an input to that
+decision. A standing N5 check belongs to the record item 170 builds, not to the
+batch tree it replaces.
+
+The same item reverses §4.6's first rule, which the next section cites. The
+projection's derivation from the ledger holds either way. Once the ledger is an
+index, the projection is derived from a derivation.
 
 ### What this costs, stated rather than discovered
 
 - **§4.6's first rule.** Divergence in an audit trail is worse than either store
   alone. The projection is therefore derived and never authored, rebuilt from
   the ledger rather than updated in place. It is validated against the shapes
-  as it is built, since the `shacl` gate reads only the tree. Q4 runs over it at
-  every batch end as a check, rather than beside it as a test.
+  as it is built, since the `shacl` gate reads only the tree. Q4 runs over it
+  as a check on real history, rather than beside it as a test.
 - **A graph library becomes a runtime import.** `pyproject.toml`,
   `ontology/render.py` and `ontology/design_record.py` each state that nothing
   under `saffron/` imports one. The emitter falsifies that sentence in three

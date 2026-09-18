@@ -7,7 +7,7 @@ specs: [SA-0107, SA-0108]
 prs: []
 commits: []
 cites: [§1, §4.1, §4.6, §9]
-related: [118]
+related: [118, 170]
 ---
 
 ## Problem
@@ -27,11 +27,13 @@ the diff's byte count (`saffron/cell/session.py:768,1583-1587`).
 
 ## Done looks like
 
-A projection of the whole ledger is rebuilt at every batch end. Each derivation
-edge in it is stated only when the stored file matches its task's record. A
+A projection of the whole ledger is built on demand. Each derivation edge in
+it is stated only when the stored file matches its task's record. A
 report lists the merged pull requests Q4 drops that the checked walk calls whole.
 Appendix T's decision rule is then run over the merged history and its answer
-recorded, whichever way it lands.
+recorded, whichever way it lands. Item 170 closes the overwrite case for
+later history, so this answer bears on its choice to migrate or abandon the
+tasks already recorded.
 
 ## Record
 

@@ -1823,9 +1823,8 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     the RATIONALE's own revisit clause. `SA-0107` creates two files and edits
     none, so it has no `depends_on` and joins the candidates at priority 2, after
     `SA-0101` by id. `SA-0108` is refused, and the refusal is correct: it stacks
-    on `SA-0107` and `SA-0106`, it shares `saffron/cli.py` with `SA-0106`, and
-    neither parent has a task at its current `spec_sha`. This is the seventeenth
-    anchor's shape.
+    on `SA-0107`, which has no task at its current `spec_sha`. This is the
+    seventeenth anchor's shape.
 
     Re-measured 2026-09-18, a fortieth time: the spec loop's run 7 merged
     `SA-0104`, `SA-0099`, `SA-0100`, `SA-0103` and `SA-0105` (#335, #338, #339,

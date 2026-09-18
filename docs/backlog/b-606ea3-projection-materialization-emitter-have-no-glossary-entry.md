@@ -15,7 +15,8 @@ related: [65, 72, b-946f03]
 
 Found 2026-09-18, writing `SA-0107`.
 
-`SA-0107` creates `saffron/projection.py`, and `SA-0108` materializes it at batch end.
+`SA-0107` creates `saffron/projection.py`, and `SA-0108` a command that
+materializes it.
 `DESIGN.md` §9 v2.5 and Appendix T call the whole the emitter. None of the three
 words is in `CONTEXT.md`. `ontology/` is forbidden to the spec for the reason
 `docs/agents/issue-tracker.md` gives, so the cell cannot add them.

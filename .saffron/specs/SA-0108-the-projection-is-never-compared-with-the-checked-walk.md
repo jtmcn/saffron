@@ -3,7 +3,7 @@ id: SA-0108
 title: The projection is never compared with the checked walk, so Appendix T's decision rule has no instrument
 type: feature
 priority: 2
-depends_on: [SA-0107, SA-0106]
+depends_on: [SA-0107]
 touches:
   - saffron/chain_walk.py
   - saffron/cli.py
@@ -32,7 +32,7 @@ forbidden:
   - saffron/task.py
   - saffron/replay.py
   - saffron/events.py
-budget_usd: 18
+budget_usd: 15
 max_turns: 100
 acceptance:
   - claim: >-
@@ -50,11 +50,11 @@ acceptance:
       compared cannot read as a refutation.
     witness: tests/test_chain_walk.py::test_the_output_names_only_breaks_the_checked_walk_calls_whole
   - claim: >-
-      `saffron batch` materializes once, after its loop returns, whatever stop
-      reason the loop returned, and prints the result. A materialization that
-      raises prints a line naming the exception and leaves the batch's exit code
-      as the loop decided it.
-    witness: tests/test_chain_walk.py::test_a_batch_materializes_once_and_a_raise_leaves_its_exit_code
+      `saffron chains` materializes the projection over the whole ledger,
+      prints the comparison and exits 0, whatever number of breaks it found. A
+      materialization that raises prints a line naming the exception and exits
+      2, since the instrument broke rather than the chains.
+    witness: tests/test_chain_walk.py::test_saffron_chains_exits_0_on_a_run_and_2_on_a_raise
 ---
 
 ## Context
@@ -62,35 +62,33 @@ acceptance:
 `DESIGN.md` Appendix T (rev 24) and backlog item b-946f03 reopened the emitter.
 The appendix names a decision rule. Q4 must drop at least one merged pull
 request that the checked walk reports as whole. `SA-0107` builds the projection
-Q4 runs over. This spec builds the other half of the comparison, prints the
-result and runs it at the end of every batch. Read the appendix and
+Q4 runs over. This spec builds the other half of the comparison and a command
+that runs it once over the merged history. Read the appendix and
 `saffron/projection.py` as `SA-0107` landed it before writing anything.
 Item b-606ea3 owns the terms this spec's code uses and the glossary lacks.
 
-**Run this spec only after both parents merge.** A cell stacks on
-`depends_on[0]` alone (`saffron/task.py:130-133`, `saffron/task.py:176`). The
-scheduler admits it once each parent has a task in review. Cut from one
-parent's branch, it would lack the other parent's change.
+The rule measures history recorded before backlog item 170. That item moves
+artifacts to a store named by content hash, so no later task can overwrite an
+earlier one's plan or diff. The case this command looks for then cannot arise.
+Its answer feeds item 170's choice to migrate or abandon the tasks already
+recorded.
 
 ## Problem
 
 Nothing compares the projection with anything. The checked walk the rule names
 does not exist. The projection is not materialized by any command, so the rule
-never runs over the merged history.
-
-`saffron batch` calls `run_batch` (`saffron/cli.py:776`) and then branches on
-its stop reason to choose an exit code (`saffron/cli.py:794-810`). The loop's
-stop reasons are a closed set (`saffron/batch.py:36`). A materialization that
-raises must not become one, and must not change the exit code.
+never runs over the merged history. Every subcommand is dispatched from one
+block in `main` (`saffron/cli.py:155-168`), and none of them reaches the
+projection.
 
 ## Out of scope
 
 - **The projection itself.** `SA-0107` owns `saffron/projection.py`, and it is
   forbidden here. A defect found in it is reported, not fixed in this spec.
-- **A scan that raised.** It returns before any stop reason exists
-  (`saffron/cli.py:786-792`), so no materialization runs on that path.
-- **An on-demand command.** Every materialization covers the whole ledger. The
-  first batch after this lands therefore runs the rule over the merged history.
+- **A check at every batch end.** It would check today's batch tree until
+  item 170 lands. After that it would need to read the record, where the
+  overwrite case cannot arise. `saffron batch` and `saffron/batch.py` stay as
+  they are.
 - **Nothing here controls execution.** §1.4's bullet stands. No scheduling
   decision reads the projection or the comparison.
 - **The recorded diff length.** A diff overwritten by one of the same length is
@@ -113,22 +111,21 @@ comparison would say nothing.
 
 **Compare like with like.** Run the walk over the same tasks the projection
 kept, which its materialization returns. A task the projection left out, for
-any reason, is counted apart by that reason and never printed as a break. Take the reasons from what `SA-0107`'s
-materialization returns, rather than deciding them again.
+any reason, is counted apart by that reason and never printed as a break. Take
+the reasons from what `SA-0107`'s materialization returns, rather than deciding
+them again.
 
 **Where things are.** `saffron/cli.py:152` resolves the batch tree from
 `--home`. Pass that path, the ledger and an output path under `--home` into the
 materialization. Never spell `~/.saffron` in `saffron/chain_walk.py`.
 
-**Materialize from `saffron/cli.py`,** after `run_batch` returns and before any
-exit-code branch. The third criterion's witness drives `INCOMPLETE` as well as
-`DRAINED`, because only the exit-0 path would pass a `DRAINED`-only test.
-Import `saffron.chain_walk` inside the guarded call, not at the top of
-`saffron/cli.py`. The graph libraries are still `dev`-only
-(`pyproject.toml:35-36`), and a module-scope import would break every command
-on a host without them.
-`SA-0106` edits the same command's scan, so read what it landed first.
-Materialization runs once per batch and not once per rescan.
+**Add the subcommand beside the others** (`saffron/cli.py:76-125`). It takes
+`--home` like the rest and no `--repo`, because the projection covers every
+repo in the ledger. Import `saffron.chain_walk` inside its branch, not at the top
+of `saffron/cli.py`. The graph libraries are still `dev`-only
+(`pyproject.toml:35-37`), and a module-scope import would break every command
+on a host without them. While `SA-0106` has an open pull request editing
+`saffron/cli.py`, the queue refuses the overlap.
 
 **Build the second criterion's fixture with three merged tasks.** One is whole.
 One has a later task of the same spec overwriting its diff. One has its diff
