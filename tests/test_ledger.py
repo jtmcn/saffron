@@ -738,6 +738,11 @@ def test_a_ledger_built_by_the_previous_schema_still_opens_and_writes(tmp_path):
         "SELECT batch_id FROM runs WHERE run_id = ?", (run_id,)
     ).fetchone()
     assert row["batch_id"] is None
+    # No run nobody observed gains a preflight outcome by backfill.
+    old_row = ledger._db.execute(
+        "SELECT preflight FROM runs WHERE run_id = 1"
+    ).fetchone()
+    assert old_row["preflight"] is None
     ledger.close()
 
 
@@ -819,6 +824,52 @@ def test_the_schema_adds_no_column_that_nothing_reads(ledger):
     }
     assert "concurrency" not in batches_columns
     assert "priority" not in tasks_columns
+
+
+def test_a_preflight_outcome_outside_the_closed_set_is_refused(tmp_path):
+    """The recorded outcome is one of a closed set, refused in the Python
+    write itself — not only by a `CHECK` a ledger built before this change
+    never gained (`_widen_batch_status`'s lesson, one table over). Both a
+    fresh ledger and one carrying the previous, unconstrained schema refuse
+    the same value the same way, and the row keeps whatever it had rather
+    than carrying an invented word."""
+    fresh = Ledger(tmp_path / "fresh.db")
+    repo_id = fresh.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    run_id = fresh.create_run(repo_id, base_sha="a" * 40)
+    with pytest.raises(ValueError):
+        fresh.set_run_preflight(run_id, "SIDEWAYS")
+    row = fresh._db.execute(
+        "SELECT preflight FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    assert row["preflight"] is None
+    fresh.close()
+
+    # The shape the 99-run ledger this defect is measured against actually
+    # has: `preflight` present, with no CHECK on it at all.
+    old_path = tmp_path / "old.db"
+    checked = next(
+        line
+        for line in SCHEMA.splitlines(keepends=True)
+        if line.lstrip().startswith("preflight")
+    )
+    assert "CHECK" in checked  # otherwise this proves nothing
+    before = SCHEMA.replace(checked, "    preflight  TEXT,\n")
+    old_conn = sqlite3.connect(old_path)
+    old_conn.executescript(before)
+    old_conn.execute(
+        "INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')"
+    )
+    old_conn.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old_conn.commit()
+    old_conn.close()
+
+    old = Ledger(old_path)
+    old.set_run_preflight(1, "PASSED")
+    with pytest.raises(ValueError):
+        old.set_run_preflight(1, "SIDEWAYS")
+    row = old._db.execute("SELECT preflight FROM runs WHERE run_id = 1").fetchone()
+    assert row["preflight"] == "PASSED"
+    old.close()
 
 
 def test_an_attempt_against_no_task_raises_rather_than_naming_another(ledger, task):

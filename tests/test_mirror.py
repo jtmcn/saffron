@@ -136,6 +136,63 @@ def test_diff_stat_counts_lines(tmp_path, origin):
     assert removed == 1
 
 
+def test_diff_stat_counts_a_submodule_the_git_config_ignores(
+    tmp_path, origin, monkeypatch
+):
+    """`diff.ignoreSubmodules=all` drops an added submodule from a bare
+    `--shortstat` (item 176). The decoy's line reads like a deletion count,
+    so a read that searches past the summary into the patch fails."""
+    base = git(origin, "rev-parse", "HEAD")
+    git(
+        origin,
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        f"160000,{'1' * 40},vendor/sub",
+    )
+    (origin / "decoy.py").write_text("9 deletions(-)\n")
+    # `add -A` would stage the gitlink's deletion: it has no path on disk.
+    git(origin, "add", "decoy.py")
+    git(origin, "commit", "-qm", "add a submodule and a decoy line")
+    head = git(origin, "rev-parse", "HEAD")
+
+    mirror = ensure_mirror(origin, tmp_path / "m.git")
+
+    config = tmp_path / "gitconfig-global"
+    config.write_text("[diff]\n\tignoreSubmodules = all\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+
+    assert diff_stat(mirror, base, head) == (2, 0)
+    assert diff_stat(mirror, head, head) == (0, 0)
+
+
+def test_diff_stat_counts_a_rename_as_the_patch_carries_it(tmp_path, monkeypatch):
+    """A pure rename counts as the patch carries it, `--no-renames`, even
+    under `diff.renames=true`, which gives (0, 0) to a bare read (item 176)."""
+    repo = tmp_path / "renamed"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "config", "user.email", "t@example.com")
+    git(repo, "config", "user.name", "Test")
+    contents = "\n".join(f"line {i}" for i in range(20)) + "\n"
+    (repo / "old.py").write_text(contents)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "base")
+    base = git(repo, "rev-parse", "HEAD")
+
+    git(repo, "mv", "old.py", "new.py")
+    git(repo, "commit", "-qm", "rename, no content change")
+    head = git(repo, "rev-parse", "HEAD")
+
+    mirror = ensure_mirror(repo, tmp_path / "renamed.git")
+
+    config = tmp_path / "gitconfig-global"
+    config.write_text("[diff]\n\trenames = true\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+
+    assert diff_stat(mirror, base, head) == (20, 20)
+
+
 def test_add_worktree_checks_out_the_requested_sha(tmp_path, origin):
     mirror = ensure_mirror(origin, tmp_path / "m.git")
     base, head, _ = resolve_pull_request(mirror, 42)

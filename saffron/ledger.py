@@ -13,7 +13,11 @@ from pathlib import Path
 from saffron.agents.findings import Finding
 from saffron.gates.contract import Failure, GateResult
 
-SCHEMA = """
+# The closed set `set_run_preflight` writes; the `CHECK` below is built from it.
+RUN_PREFLIGHT_OUTCOMES = ("PASSED", "FAILED")
+_PREFLIGHT_IN = ", ".join(f"'{outcome}'" for outcome in RUN_PREFLIGHT_OUTCOMES)
+
+SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS repos (
     repo_id     INTEGER PRIMARY KEY,
     name        TEXT NOT NULL,
@@ -44,12 +48,14 @@ CREATE TABLE IF NOT EXISTS batches (
                                          'INFRASTRUCTURE', 'INCOMPLETE'))
 );
 
+-- A run's own preflight outcome, read off its baseline suite (CONTEXT.md §2).
+-- NULL: the run never reached the baseline suite.
 CREATE TABLE IF NOT EXISTS runs (
     run_id     INTEGER PRIMARY KEY,
     repo_id    INTEGER NOT NULL REFERENCES repos(repo_id),
     batch_id   INTEGER REFERENCES batches(batch_id),
     base_sha   TEXT NOT NULL,
-    preflight  TEXT,
+    preflight  TEXT CHECK (preflight IN ({_PREFLIGHT_IN})),
     started_at TEXT NOT NULL DEFAULT (datetime('now')),
     ended_at   TEXT,
     status     TEXT
@@ -425,6 +431,20 @@ class Ledger:
         self._db.execute(
             "UPDATE runs SET status = ?, ended_at = datetime('now') WHERE run_id = ?",
             (status, run_id),
+        )
+        self._db.commit()
+
+    def set_run_preflight(self, run_id: int, outcome: str) -> None:
+        """Record a run's preflight outcome, one of `RUN_PREFLIGHT_OUTCOMES`.
+
+        Refused here as well as by the `CHECK`: a ledger built before the
+        `CHECK` existed keeps its old `runs` table."""
+        if outcome not in RUN_PREFLIGHT_OUTCOMES:
+            raise ValueError(
+                f"preflight outcome {outcome!r} is not one of {RUN_PREFLIGHT_OUTCOMES}"
+            )
+        self._db.execute(
+            "UPDATE runs SET preflight = ? WHERE run_id = ?", (outcome, run_id)
         )
         self._db.commit()
 
