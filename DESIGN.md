@@ -3046,8 +3046,10 @@ of the side door, and the bullet still moves only on a measured result.
 
 What the emitter does supply is the instrument. The 2026-09-04 spike answered
 its question 3, the cost of keeping the graph current per scheduled task, from a
-hand-authored graph of in-flight tasks. A projection rebuilt every batch answers
-question 3 from real runs, continuously, as a byproduct of work done for N5.
+hand-authored graph of in-flight tasks. A projection built from the ledger
+measures part of question 3 on real rows, as a byproduct of work done for N5.
+It builds once over history rather than per scheduled task, so it prices a
+rebuild and not the per-task upkeep.
 Questions 1 and 4 are what closed the spike, and neither is answered by this. On
 question 1 the cause was recorded and is narrower than it reads: the shape arm
 stated no refusal the Python left implicit, because `_unmatched_criterion_path`
