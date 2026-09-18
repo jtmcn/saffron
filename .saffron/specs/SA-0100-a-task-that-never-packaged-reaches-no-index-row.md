@@ -37,9 +37,10 @@ acceptance:
       cell ended in. Today neither reaches the store at all.
     witness: tests/test_task.py::test_a_task_that_never_packaged_still_reaches_the_index
   - claim: >-
-      The row for a task that never packaged carries an empty link. It carries
-      no branch name, no mirror path and no invented pull request address, and
-      its note says what happened instead.
+      The row for a task that never packaged carries an empty link: no branch
+      name, no mirror path and no invented pull request address. Its note says
+      what happened instead, and for a task whose work was pushed it names the
+      branch the work went to.
     witness: tests/test_task.py::test_an_unpackaged_row_carries_no_pull_request_link
   - claim: >-
       A spec whose first task ended unpackaged and whose second task packaged
@@ -156,26 +157,37 @@ only in comments. Create the file and drive `run_task` in it.
 **The seams are patchable at module scope.** `saffron/task.py` imports
 `run_one_cell` into its own namespace, so a test replaces
 `saffron.task.run_one_cell`. It imports `package as package_phase`, so a test
-replaces `push_unpackaged_work` on that module object. Build the doubles from
-those two points and pass a real `out_dir`.
+replaces `push_unpackaged_work` on that module object, and `package` beside it.
+Build the doubles from those three points and pass a real `out_dir`. Criterion
+3's `package` double stands in for `_finish`. It must write the packaged row
+itself, with `link` set to the pull request address, as
+`saffron/phases/package.py:966-983` does.
 
 **Criterion 1's plausible wrong implementation is a row for one state.** Two
 shapes do it. A write guarded by a state list, and a write placed inside a
 branch only some outcomes reach. Each satisfies a single-state test and leaves
-the hole open. Drive two states that differ, and assert each row carries its
-own.
+the hole open. Drive two states that differ, under two different spec ids, and
+assert each row carries its own. The store keys on repo and spec id, so two
+states for one spec leave one row.
 
 **Criterion 2's plausible wrong implementation is the cell branch in `link`.**
 `push_unpackaged_work` returns a branch and a pushed sha on success. Putting
 either in `link` renders a row whose link is not a pull request. The index is an
-index, and the diffs live in GitHub (§6). An empty link is correct.
-Assert the branch name is absent from the row, not only that the link is falsy.
+index, and the diffs live in GitHub (§6). An empty link is correct. The branch
+belongs in the note: it is the operator's route back to work PACKAGE never
+packaged (`tests/test_cli.py:142-143`). Have the `push_unpackaged_work` double
+return the note production writes on a successful push,
+`pushed <branch> @ <sha>` (`saffron/phases/package.py:1175`). Assert the link is
+exactly empty and the note names the branch.
 
 **Criterion 3 is the upsert exercised through the new path.** One row must
 survive, and it must keep its link. Writing the unpackaged row after the packaged
 one, or keying on the spec id alone, produces two rows or the wrong survivor.
-Drive the unpackaged task first, then the packaged one, and assert the store
-holds one row whose link is the pull request address.
+Drive the unpackaged task first and assert the store holds one row, in the
+unpackaged state, with an empty link. That half is what fails with the source
+reverted: at base the unpackaged task writes nothing, and the `package` double
+writes the final row either way. Then drive the packaged one and assert the
+store holds one row whose link is the pull request address.
 
 **The write goes inside the `else:` at `saffron/task.py:335`, and nowhere else.**
 This is the one placement that matters. A write at the end of `run_task` passes
