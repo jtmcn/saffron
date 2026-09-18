@@ -1137,7 +1137,9 @@ def cmd_stack(args) -> int:
 
     command = ["gh", "stack", "link", *(str(p.pr) for p in order)]
     print(f"\n  {' '.join(command)}")
-    print("\nPRs stay drafts (§5.7); ratifying is `gh pr ready <n>`, the operator's.")
+    print(
+        "\nPRs stay drafts (§5.7); marking one ready is `gh pr ready <n>`, the operator's."
+    )
     if not args.execute:
         print("\n(dry run — pass --execute to link)")
         return 0

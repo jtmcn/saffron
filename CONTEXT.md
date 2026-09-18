@@ -123,9 +123,10 @@ and a cell. A spec is the input; a task is the execution. Its budget is a
 **best-effort** bound: it is checked between attempts and an attempt's cost is
 not knowable until the attempt ends, so a task admitted under its ceiling can
 finish over it by up to one whole attempt — 67% on `SA-0059` (`DESIGN.md` §3).
-The bound that is actually enforced is the batch's, checked between tasks
-(`DESIGN.md` §4.2.1) — itself exceedable by at most one task's overshoot, since
-it admits a task on that task's declared ceiling.
+In a batch, the bound that is actually enforced is the batch's, checked between
+tasks (`DESIGN.md` §4.2.1) — itself exceedable by at most one task's overshoot,
+since it admits a task on that task's declared ceiling. A task started by
+`saffron cell` belongs to no batch, and its own best-effort bound is the only one.
 _Avoid_: "job", "work item", "unit".
 
 **Batch**: One night's execution, spanning every selected repo. One budget, one
@@ -716,3 +717,13 @@ in a commit message is an ambiguity that comes back.
    vocabulary. Left open deliberately: coining a supertype before §4.1 reconciles
    would put a word here that nothing says. Resolve when the schema does — or record
    that it never will.
+
+2. **Approve names an act GitHub refuses the operator.** PACKAGE opens every pull
+   request as the operator. GitHub does not let an author approve their own pull
+   request. Nothing else writes `APPROVED` either: reconcile reads `reviewDecision`
+   only for `CHANGES_REQUESTED`. So the step that admits a task to the merge train
+   (`DESIGN.md` §6.1) has no signal, and the operator's acceptance today is the
+   merge itself. The likely signal is marking
+   PACKAGE's draft ready, which is the operator's own act and readable from GitHub.
+   Until a train exists that act carries no judgement, and it is called "mark
+   ready". Resolve with backlog item 52, which holds the train's other state.

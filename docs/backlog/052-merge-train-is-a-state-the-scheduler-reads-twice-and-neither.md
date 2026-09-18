@@ -177,3 +177,17 @@ its output committed — which a cell cannot prove it did honestly.
 **Tier 2 still.** Larger than when it was sorted, and it competes with tier 1's
 soundness items. Sequencing it behind them is the backlog's own rule working,
 not a reason to shrink the item.
+
+### 2026-09-17: the state before the train has no writer
+
+`APPROVED`, the state that admits a task to the train, cannot be reached as §6.1
+describes it. PACKAGE opens each pull request as the operator: #62, #112 and #119
+are all authored by `jtmcn`. GitHub does not let an author approve their own pull
+request. `reconcile._next_state` also maps no
+`reviewDecision` of `APPROVED`. The operator's acceptance today is `gh pr merge`,
+which reconcile records as `MERGED` and which skips the train entirely.
+
+So declaring `MERGE_TRAIN` settles a state that nothing can enter yet. The design
+question comes first: what signal admits a task to the train. Marking PACKAGE's
+draft ready is the candidate, since it is the operator's own act and GitHub
+records it. `CONTEXT.md`'s open naming decision 2 holds the vocabulary half.

@@ -213,7 +213,7 @@ its parent. The dry run prints it, runs `git merge-tree` on every adjacent pair,
 and shows the `gh stack link` command. `link` retargets each PR onto the one
 below; its diff stays right and only what merging it would do changes. A
 `CONFLICT` between neighbours, and a child whose parent is not in the stack,
-go to the operator before linking (GOTCHAS, Stacking). Every PR stays a draft: ratifying is `gh pr ready <n>`, the
+go to the operator before linking (GOTCHAS, Stacking). Every PR stays a draft: marking one ready is `gh pr ready <n>`, the
 operator's.
 
 **Done when** `--execute` reports every PR's base as the branch below it.

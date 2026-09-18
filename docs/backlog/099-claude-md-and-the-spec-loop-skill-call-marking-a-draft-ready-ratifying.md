@@ -1,10 +1,12 @@
 ---
 id: 99
 title: '`CLAUDE.md` and the spec-loop skill call marking a draft ready "ratifying" it'
-status: open
+status: done
 tier: 3
+closed: 2026-09-17
+by_hand: true
 specs: []
-prs: []
+prs: [322]
 commits: []
 cites: [§5.7]
 related: []
@@ -28,3 +30,16 @@ retired word.
 quoted output regenerated to match — or, if that act turns out to carry a judgement
 worth a word, an entry under `CONTEXT.md`'s open naming decisions rather than a
 third sense arriving in prose.
+
+## Record
+
+**Closed 2026-09-17, by hand.** `CLAUDE.md`, `SKILL.md` and `driver.py` now say
+"mark ready". The driver's line had moved to `:1140`, and `SKILL.md` no longer
+quotes its output. The copies of the old line in `docs/evidence/fixtures/*/claude.md`
+are frozen records and keep it.
+
+Marking ready carries no judgement today. GitHub merges no draft, so it is the
+step before `gh pr merge`, and the ledger never reads it: `reconcile._next_state`
+reads `state` and `reviewDecision`, never `isDraft`. It could become the signal
+for **Approve** once a merge train exists, which is `CONTEXT.md`'s open naming
+decision 2 and item 52's record. The word would then be "approve", not "ratify".
