@@ -31,7 +31,7 @@ budget_usd: 16
 max_turns: 90
 acceptance:
   - claim: >-
-      A task whose cell ended in a state other than READY_FOR_REVIEW reaches
+      A task whose run_one_cell returned a state other than READY_FOR_REVIEW reaches
       the index with a row carrying that state. Two different such states each
       produce their own row, and each row reads back with the state its own
       cell ended in. Today neither reaches the store at all.
@@ -46,8 +46,8 @@ acceptance:
       A spec whose first task ended unpackaged and whose second task packaged
       leaves one row, holding the packaged outcome and still carrying the pull
       request link PACKAGE wrote. The earlier unpackaged row is replaced rather
-      than joined by a second row, and the new write never replaces a packaged
-      row's link with an empty one.
+      than joined by a second row, and the packaged row keeps the link PACKAGE
+      wrote.
     witness: tests/test_task.py::test_a_later_package_replaces_the_unpackaged_row_and_keeps_its_link
   - claim: >-
       Appending a row for a spec that already has one still replaces it rather
@@ -69,7 +69,8 @@ level. Its own comment says why each was added: "Absent, they fell to
 `_ORDINARY` and sorted below elevated-risk green tasks: a task that could not
 pass its own gates, or one whose cell died, reading as reviewable."
 
-Ten of those twelve states can never appear on the page.
+Eleven of those twelve states can never appear on the page. PACKAGE writes
+only `MERGE_FAILED` among them.
 
 `append_queue_line` has exactly two callers. One is `saffron/replay.py:143`,
 which is v0 and agent-free. The other is `saffron/phases/package.py:966`,
@@ -110,13 +111,12 @@ already knows the terminal state, and already prints it.
 
 ## Problem
 
-- **Ten of twelve ranked states cannot reach the page.** The ranking was
+- **Eleven of twelve ranked states cannot reach the page.** The ranking was
   written, reviewed and tested against states no row can carry.
 - **A third of this repo's own tasks are invisible.** 31 of 99, and every one
   of them is a task that needed a person.
-- **The two states an operator most needs are the two most often missing.** A
-  cell that died leaves `ORPHANED`. A task that could not pass its own gates
-  leaves `EXHAUSTED`. Together they account for 16 of the 31.
+- **The most urgent state is the most often missing.** `EXHAUSTED` is a task
+  that could not pass its own gates. It is 9 of the 31.
 - **The header undercounts.** `tasks` and `spend` are computed from the stored
   rows, so both report a night smaller and cheaper than it was.
 
@@ -131,6 +131,18 @@ source "currently undecided rather than chosen". The ledger cannot reproduce
 the store today, because the diff stat sits in no column. That decision belongs
 to a person, not to this cell. `saffron/report/**` and `saffron/ledger.py` are
 both forbidden.
+
+**A task that never returned an outcome.** `run_one_cell` stamps `ORPHANED`
+on the ledger and re-raises (`saffron/cell/session.py:2331-2334`), and
+`reconcile` stamps it with no task running. `REVIEWING` and `REBUTTING` are
+states a night leaves a task in mid-phase. None of them reaches the `else:`, so
+this spec writes no row for them, and 8 of the 31 stay missing.
+
+**An unpackaged task after a packaged one.** The newest task's row wins. A spec
+re-run after its pull request opened, for example on `CHANGES_REQUESTED`, that
+ends `EXHAUSTED` replaces the row, link included. That is what the upsert does
+today, and keeping the old link would mean reading the store from
+`saffron/task.py` through a reader `saffron/report/**` keeps private.
 
 **The batch header's six fields.** Wall clock, per-repo preflight and the
 trailing accept rate all have their own gaps. This spec adds rows, and the
@@ -179,6 +191,10 @@ packaged (`tests/test_cli.py:142-143`). Have the `push_unpackaged_work` double
 return the note production writes on a successful push,
 `pushed <branch> @ <sha>` (`saffron/phases/package.py:1175`). Assert the link is
 exactly empty and the note names the branch.
+
+**The row's other fields.** `cost_usd_est` is `outcome.spent_usd` and
+`attempts` is `outcome.attempts`, so the header's spend counts the task.
+`added` and `removed` are 0, because PACKAGE never computed a diff stat.
 
 **Criterion 3 is the upsert exercised through the new path.** One row must
 survive, and it must keep its link. Writing the unpackaged row after the packaged
