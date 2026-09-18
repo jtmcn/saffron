@@ -241,6 +241,15 @@ at `:8` and one `gates: attempt 1` line, so a per-gate block lands in both runs.
 distinct captured line joined, so `_JOINED` (`:1810`) gains one `GateResult` row
 per distinct `gates: {gate}={status}` line, about seven. The header comment at
 `:1744-1745` says `GateResult` is never captured, and changes with them.
+Append the new rows at the end of `_JOINED`. Its cases have no ids, so an
+insertion renumbers the cases after it, and `census` reads that as tests
+removed (`:1948-1953`).
+
+**`size` blocks at 300 lines here.** This diff touches `saffron/cell/**`,
+which `.saffron/policy.yaml`'s `elevate_on` elevates. At elevated, `size` is not
+advisory (`_advisory` in `saffron/gates/suite.py`). The
+spec review estimated 255 to 300 lines. Write one shared helper that drives a
+cell and collects its `GateResult` events, and use it in all three witnesses.
 
 **`census` compares test names, so rename nothing.**
 

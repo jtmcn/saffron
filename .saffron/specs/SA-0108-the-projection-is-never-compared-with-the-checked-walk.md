@@ -144,7 +144,7 @@ repo in the ledger. Put its dispatch branch after `watch`'s
 (`saffron/cli.py:868`). Name the subcommand in the module docstring's list
 (`saffron/cli.py:1-2`). Import `saffron.chain_walk` inside its branch, not at
 the top of `saffron/cli.py`. The graph libraries are still `dev`-only
-(`pyproject.toml:35-37`), and a module-scope import would break every command
+(`pyproject.toml:34-36`), and a module-scope import would break every command
 on a host without them.
 
 A raise needs no handler of its own. `main`'s catch-all already prints the

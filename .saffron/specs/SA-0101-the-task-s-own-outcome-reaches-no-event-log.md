@@ -52,11 +52,13 @@ acceptance:
     witness: tests/test_session.py::test_the_outcome_event_round_trips_and_describes_as_its_old_line
   - claim: >-
       A rate-limited outcome reaches events.jsonl whatever reopen time the cell
-      reported. A string, a list, an integer past time_t's range and NaN each
-      leave an event that reading the log back keeps, and describing it renders
-      the reopen time as unknown, as the print does today. An event whose field
-      has the wrong shape is dropped on read, so storing the value as reported
-      would lose the task's terminal record in exactly these cases.
+      reported. A string, a list and NaN each leave an event that reading the
+      log back keeps, with no reopen time and a mark that one was reported and
+      could not be read. An integer past time_t's range is kept as it came.
+      Describing any of the four renders the reopen time as unknown, as the
+      print does today. An event whose field has the wrong shape is dropped on
+      read, so storing the value as reported would lose the task's terminal
+      record.
     witness: tests/test_session.py::test_a_rate_limited_outcome_survives_the_log_whatever_reopen_time_was_reported
   - claim: >-
       Every kind still round-trips through the log and still has its wire keys
@@ -127,7 +129,7 @@ is right, and the `session.py` comment counts from a draft that had nine.
 `saffron/phases/package.py` is forbidden. Its problem is a `LineLabel` casing
 rule, not a missing kind, and it stays item 43's.
 
-**The `stacked on` line.** `saffron/task.py:287-291` prints it under a
+**The `stacked on` line.** `saffron/task.py:301` prints it under a
 `ponytail:` comment citing item 43, and `saffron/task.py` is forbidden. No kind
 carries `CellSpec.stacked_on` at all, which is a wider change than this one.
 
@@ -193,7 +195,13 @@ field whose shape always passes. `describe` renders that case as
 `window reopens unknown`, which is what `when()` (`saffron/events.py:596`)
 prints for it today. An `int` past `time_t` is kept, and `when()` already
 renders it as unknown. Criterion 4's witness drives all four values from
-`test_an_unreadable_reset_time_still_stops_rate_limited` through the log.
+`test_an_unreadable_reset_time_still_stops_rate_limited` through the log. It
+asserts the read-back field, not only the rendered line. So a field typed wide
+enough to hold the value as reported fails it.
+
+**A falsy reopen time changes its line, and that is intended.** The old print
+skipped one (`if stopped.resets_at`, `saffron/cell/session.py:2309`). Keep `0`
+as an `int` and render it. An empty string or list is unreadable like any other.
 
 **An eleventh kind moves six more things in `tests/test_events.py`.** Each is in
 `touches`, and each is real work. Three counts: the kinds at `:574`, `FAMILIES` at
@@ -202,6 +210,21 @@ at `:903` and `_JOINED` at `:1810`. And
 `test_events_jsonl_reproduces_what_the_terminal_printed` at `:2023`. The last
 one fails by construction once the outcome reaches the log, because it strips the
 outcome from the printed side before comparing.
+
+**The spend field is `spent_usd_est`.**
+`test_the_wire_keys_are_pinned_for_every_kind` (`tests/test_events.py:568`)
+rejects any other spelling of a spend.
+
+**`size` blocks at 300 changed lines here.** Touching `saffron/cell/**` raises
+the tier to elevated (`.saffron/policy.yaml`'s `elevate_on`, and `_advisory` in
+`saffron/gates/suite.py`). Write one shared helper for the four new witnesses.
+Criterion 5 needs the new kind only in `_ONE_OF_EACH` and in `_CASES`, which
+`test_every_family_has_a_kind_and_renders` requires. Entries in `_JOINED` for the
+outcome lines are optional, since nothing forces them.
+
+**Append any new `_JOINED` entry at the end.** `_JOINED` has no ids, so an
+insertion renumbers the cases after it (`tests/test_events.py:1948-1953`).
+`census` reads each renumbered case as a removed test.
 
 **`FINDINGS[0]` is deleted, and its shape becomes a `FAMILIES` row.** That
 shifts three prose citations of `FINDINGS[1]`: `tests/test_package.py:1177`,
@@ -243,8 +266,7 @@ rather than the local variable.
 
 **Correct the stale comment while you are in it.** `saffron/cell/session.py:2280`
 says "a tenth kind" and there are ten kinds today. Once this spec lands the
-count changes again, so leave no sentence claiming a number that was never
-right.
+count changes again, so leave no sentence claiming a count.
 
 **`census` compares test names, so rename nothing.** `SA-0102` also names
 `tests/test_session.py` and `tests/test_events.py`, and runs on this branch. Keep the diff to

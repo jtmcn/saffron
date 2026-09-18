@@ -192,4 +192,6 @@ Criterion 4 holds one of them to that.
 `saffron/batch.py`, the module docstring says a K=1 `for` loop runs over
 `build_queue`'s candidates. `run_batch`'s says `candidates` is `build_queue`'s
 own return value. In `saffron/cli.py`, fix `_batch_runner`'s "paid for once by
-`_resolve_queue`" and `_batch`'s "Resolves the queue…".
+`_resolve_queue`" and `_batch`'s "Resolves the queue…". `_resolve_queue`'s
+`stamp_orphaned` paragraph (`saffron/cli.py:472-479`) says `False` is what
+`saffron queue` passes. The rescan passes it too, so name both callers.

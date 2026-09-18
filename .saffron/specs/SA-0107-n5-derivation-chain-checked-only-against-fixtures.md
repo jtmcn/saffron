@@ -41,24 +41,31 @@ acceptance:
     witness: tests/test_projection.py::test_a_materialization_projects_every_ended_task_and_replaces_the_last
   - claim: >-
       A merged task whose stored artifacts match what its own event log recorded
-      at extraction reaches Q4's result with every kind the projection states.
+      at extraction reaches Q4's result with every kind the projection states:
+      `Spec`, `Plan`, `Diff`, `GateSuite`, `Finding` and `PullRequest`. The
+      fixture's task has a gate suite and a finding.
       The query is the committed `ontology/queries/Q4-derivation-chain.rq`, read
       from the tree rather than restated in the test.
     witness: tests/test_projection.py::test_q4_over_the_projection_reaches_a_merged_pull_request
   - claim: >-
       A merged task whose stored plan or diff no longer matches what its own
-      event log recorded is absent from Q4's result. A later task of the same
-      spec overwriting it is the case. A sibling merged task that still matches
-      stays in the same result with every kind the projection states.
+      event log recorded is among the tasks the materialization kept, and is
+      absent from Q4's result. A later task of the same spec overwriting it is
+      the case. A sibling merged task that still matches, and shares its pull
+      request URL, stays in the same result with every kind the projection
+      states.
     witness: tests/test_projection.py::test_an_artifact_a_later_task_overwrote_drops_only_the_earlier_chain
   - claim: >-
       A materialization returns the tasks it kept and every task it left out,
       each with a reason from a closed set. A spec whose `Ceilings` spans match
       its tasks in count but not in time has its tasks returned as
-      unattributable, and so does a pushed task whose span recorded no plan hash
-      or diff length. None of them is projected. A run started in the same whole
+      unattributable, and so does a merged task whose span recorded only one of
+      the plan hash and the diff length. None of them is projected. A task that
+      never merged and recorded neither line is kept. A merged task whose
+      stored file a recorded line points at is missing is left out with its own
+      reason, and the call returns normally. A run started in the same whole
       second as its span's `Ceilings` is attributed to that span, on a host
-      whose local zone is not UTC.
+      whose local zone is east of UTC.
     witness: tests/test_projection.py::test_tasks_that_match_their_spans_in_count_but_not_time_are_unattributable
   - claim: >-
       A projection that fails the shapes raises and leaves no projection
@@ -133,7 +140,7 @@ chain from Q4's result.
   `tests/ontology/test_vocabulary_agrees_with_code.py:21-22` each state that
   nothing under `saffron/` imports a graph library. The operator amends all four
   at merge, and moves pyoxigraph, pyshacl and rdflib out of the `dev` group
-  (`pyproject.toml:35-37`) with `uv lock`. `uv.lock` is `protected`
+  (`pyproject.toml:34-36`) with `uv lock`. `uv.lock` is `protected`
   (`.saffron/policy.yaml:61`), so a cell cannot land that move. All three packages
   are installed wherever this code runs today, because the `dev` group is.
 - **Recording a full hash for the diff.** Only its length is recorded today.
@@ -183,27 +190,31 @@ by time, not by position. The task's `runs.started_at` must fall after the
 span's `Ceilings` timestamp and before the next one (`saffron/ledger.py:59`).
 The first is UTC text and the second is epoch seconds. Position alone is wrong
 in both directions. A span can have no task, because `Ceilings` is written
-(`saffron/task.py:270`) before the task row exists
-(`saffron/cell/session.py:1335`). A task can have no span: `saffron/replay.py:54`
+(`saffron/task.py:270`) before the task's run row exists
+(`ledger.create_run`, `saffron/cell/session.py:1335`). A task can have no span: `saffron/replay.py:54`
 writes none, and nor did any task before `Ceilings` existed. A task no single
 span holds is unattributable, and so is every task in a span that holds more
 than one. Leave each such task out and return it with that reason.
 
 **Where the two lines are.** The plan hash is the `detail` of a `PhaseStart`
-with phase `IMPLEMENT` and step `PLAN`, reading `accepted, sha256 <12 hex>`.
+with phase `IMPLEMENT` and label `PLAN`, reading `accepted, sha256 <12 hex>`.
 The diff length is the `detail` of a `Teardown` with step `exported`, reading
-`exported <N> bytes to …`. An older log worded differently has neither.
+`exported <N> bytes to …`. An older log worded differently has neither. Read each log with
+`saffron.events.read_log`, and have the fixture builder write through
+`EventLog`, so the fixture and the parser cannot agree on a wrong key.
 
-**A missing line counts only where the artifact exists.** A task with a
-`pushed_sha` produced both a plan and a diff. Every merged task has one. A span
-of such a task lacking either line makes it unattributable. `EventLog.append`
+**A missing line counts only where the artifact exists.** A merged task
+produced both a plan and a diff. A span of a merged task lacking either line
+makes it unattributable. A `pushed_sha` is no proof, because
+`push_unpackaged_work` pushes tasks that never became ready. `EventLog.append`
 never raises (`saffron/events.py:390`), so a lost line is possible and silent.
-A task with no `pushed_sha` can end without a plan or a diff. `PREFLIGHT_FAILED`,
+A task that never merged can end without a plan or a diff. `PREFLIGHT_FAILED`,
 `PLAN_REJECTED` and a `NOT_IMPLEMENTED` with no commits are the cases. Its
 missing line states no edge and leaves it projected.
 
-**A stored file that is missing leaves the task out with its own reason,** never
-raises. An old merged task can lack one, and `SA-0108` runs this over all of them.
+**A stored file a recorded line points at that is missing leaves the task out
+with its own reason,** and never raises. A `PREFLIGHT_FAILED` task with no
+`plan.json` recorded no line, so it stays projected. An old merged task can lack one, and `SA-0108` runs this over all of them.
 
 **Mint one `PullRequest` node per task.** Never mint it from `pr_url`. A re-queued task
 at the same `spec_sha` inherits the first one's pull request
@@ -215,15 +226,15 @@ resolution and `Ceilings.timestamp` is `time.time()` (`saffron/task.py:271`).
 Compare the run's start with the floor of the timestamp, or a run started in the
 same second as its `Ceilings` reads as earlier. `runs.started_at` is SQLite's
 `datetime('now')`, UTC with no offset. Parse it as UTC, never as local time. The
-fourth criterion's test sets `TZ` to a non-UTC zone with `time.tzset()`. It
-drives a run in the same second as its `Ceilings`. The cell runs in UTC, and a
-naive parse passes there.
+fourth criterion's test sets `TZ` east of UTC, because the cell runs in UTC and
+a naive parse passes there.
 
 **What it returns.** The kept task ids, and each left-out task with a reason
 from a closed set that names `unattributable` apart from the rest. `SA-0108`
 reads both rather than deciding them again.
 
-**Where things are.** Take the ledger, the batch-tree root and the output path
+**Where things are.** Take the ledger, the `out_dir` each `task_dir` is built from (`saffron/cli.py:152`,
+`~/.saffron/batches/v0` by default) and the output path
 as arguments. Never spell `~/.saffron` inside the module. Read Q4 and the shapes
 from Saffron's own source tree, never from a target repo. `pyproject.toml:44-45`
 packages only `saffron/`, and another repo has no `ontology/`. Validate with
@@ -233,7 +244,9 @@ through its subclass axioms.
 
 **Compare lengths in characters.** The diff's recorded number is `len` of a
 `str`. Compare it with the length of the stored file read as text, never with
-its size on disk, and read it without newline translation. Put a non-ASCII
+its size on disk. Read it with `open(path, newline="")`, since Python 3.12's
+`read_text` takes no `newline`. Hash `plan.json` from its bytes, as
+`hash_artifact` hashes the encoded text. Put a non-ASCII
 character in every fixture diff, since this
 repo's diffs carry them and an ASCII fixture passes either way.
 
@@ -248,14 +261,24 @@ anti-theater gate then checks nothing.
 
 Write each test against the unfixed code before trusting it. The third
 criterion matters most. Build its fixture from two merged tasks of one spec,
-the second overwriting the first's stored file. Drive the plan case and the
-diff case in the one test. The fourth criterion's test likewise drives its
-cases: spans misaligned in time, a pushed task's span with no plan-hash line,
-and the same-second run under a non-UTC `TZ`.
+the second overwriting the first's stored file. Give the overwritten task and
+its whole sibling the same `pr_url`, so an IRI minted from it fails. Assert the
+overwritten task's id is in the kept set. A left-out reason there would empty
+`SA-0108`'s count. Drive the plan case and the diff case in the one test.
+
+The fourth criterion's test drives these cases:
+- spans misaligned in time.
+- a merged task's span with no plan-hash line, and one with no diff-length line.
+- a task that never merged and recorded neither line, which is kept.
+- a merged task's `patch.diff` deleted, with a missing-file reason returned by a
+  call that returns normally.
+- a run in second N whose `Ceilings.timestamp` is N+0.5, under
+  `TZ=Asia/Tokyo` with `time.tzset()`. Restore `TZ` and call `time.tzset()`
+  again in a `finally`.
 
 **Keep the fixtures compact.** Write one builder in the test file for all five
 tests. It takes a list of tasks, each with its spec version, state,
-`pushed_sha`, run start, plan text and diff text. It writes the ledger rows, the
+merged or not, run start, `pr_url`, plan text and diff text. It writes the ledger rows, the
 `events.jsonl` spans, the committed spec versions and the batch-tree files. The
 feature ceiling is 600 changed lines, and five hand-built fixtures would pass
 it.
