@@ -9,6 +9,7 @@ prs: []
 commits: []
 cites: []
 related: [115, 171]
+awaiting: [340]
 ---
 
 ## Problem
@@ -24,3 +25,8 @@ never reaches `scope`.
 
 Splice `DIFF_FLAGS` into `diff_stat` too, with a witness that sets
 `GIT_CONFIG_GLOBAL` as #321's mirror witness does.
+
+## Record
+
+- 2026-09-18: open as PR #340 (`SA-0105`, spec loop run 7), stacked in
+  #335 ← #338 ← #339 ← #342 ← #340.

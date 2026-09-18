@@ -8,6 +8,7 @@ prs: []
 commits: []
 cites: [§4.1]
 related: [46]
+awaiting: [342]
 ---
 
 ## Problem
@@ -58,3 +59,6 @@ log still changes no task state and no exit code.
 
 **Filed 2026-09-17**, from an inventory of what one execution can be seen
 through. `SA-0103` carries it.
+
+- 2026-09-18: open as PR #342 (`SA-0103`, spec loop run 7), stacked in
+  #335 ← #338 ← #339 ← #342 ← #340.

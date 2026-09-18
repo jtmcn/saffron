@@ -8,6 +8,7 @@ prs: []
 commits: []
 cites: [§6, §5.7]
 related: [45]
+awaiting: [339]
 ---
 
 ## Problem
@@ -63,3 +64,6 @@ packaged outcome. A PACKAGE that raises still writes nothing.
 
 **Filed 2026-09-17**, from an inventory of what one execution can be seen
 through. `SA-0100` carries it.
+
+- 2026-09-18: open as PR #339 (`SA-0100`, spec loop run 7), stacked in
+  #335 ← #338 ← #339 ← #342 ← #340.

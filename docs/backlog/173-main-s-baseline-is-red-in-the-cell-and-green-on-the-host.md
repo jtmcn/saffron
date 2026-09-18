@@ -37,3 +37,8 @@ line, so a gate red on `main` reaches nobody.
 The test passes whatever directory the image installs its toolchain in. The
 prose gate's base in a cell is found and fixed. The loop's step 2 says to read
 the `baseline:` line and take a red gate on `main` to the operator.
+
+## Record
+
+- 2026-09-18: still red in every run-7 cell (`tests` and `prose`, same two failures), at
+  `1549f41`, `0188327`, `666d21f` and `9db478d`.

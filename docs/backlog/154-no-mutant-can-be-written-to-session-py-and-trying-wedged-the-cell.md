@@ -10,6 +10,7 @@ prs: [293]
 commits: []
 cites: [§5.4]
 related: [80, 140]
+awaiting: [335]
 ---
 
 ## Problem
@@ -53,3 +54,6 @@ over the ceiling at the spec's base, naming the ceiling, so it costs no cell.
 
 **Filed 2026-09-16** from the spec loop's run 5 (stack #308). `SA-0093`'s mutant
 was dropped by #293 rather than wait on this.
+
+- 2026-09-18: open as PR #335 (`SA-0104`, spec loop run 7), stacked in
+  #335 ← #338 ← #339 ← #342 ← #340.
