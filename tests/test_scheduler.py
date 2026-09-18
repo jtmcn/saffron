@@ -1818,7 +1818,12 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-17, a thirty-fourth time: five specs queued for
+    """Re-measured 2026-09-17, a thirty-fifth time: `SA-0098` merged as PR #323
+    and is retired to `done/`, so it leaves the candidates. The refusals are
+    unchanged: `SA-0101` named it as a second `depends_on`, and is still refused
+    on its first, `SA-0099`.
+
+    Re-measured 2026-09-17, a thirty-fourth time: five specs queued for
     backlog items 164 to 167 and 43, the observability gaps an inventory of what
     one execution can be seen through turned up. They form **two chains**, and
     only the head of one is a candidate.
@@ -2003,7 +2008,6 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0093",
         "SA-0096",
         "SA-0097",
-        "SA-0098",
         "SA-0100",
     ]
     assert [r.path.name[:7] for r in refusals] == [
