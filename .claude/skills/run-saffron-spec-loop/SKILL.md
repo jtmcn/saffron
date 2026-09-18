@@ -101,8 +101,9 @@ of run 7's blockers were in the delegate's edits.
 **A review with no blocker and no concern ends the round.** Its notes go to
 step 5. `SA-0100` took five reviews in run 7. Each of the middle three found
 a new witness hole. Expect more than one round on a spec with several
-criteria. Until the edit merges, `next` still names the spec at its old
-text: start the next spec in the order by its path instead.
+criteria. Until the edit merges, `hold SA-NNNN --why "#N"` keeps `next` off
+the spec, whose old text a cell would otherwise run. The re-snapshot after the
+merge releases it.
 Review the whole spec, not the edit. Checks 5 and 6 read it entire, and a report
 whose six lines cover a diff is not one. Run 5's re-reviews also found a witness
 stub answering every subnet alike (#304). Two notes named code seams that do not
@@ -200,7 +201,10 @@ to the operator (GOTCHAS, Recording).
    finds the defects — in stack #233 each of four reviews found a witness that
    survived an edit breaking its line, after three clean lenses.
 3. **Verify every finding yourself** before acting: read the line and re-run
-   its probe. A finding's claim to have been verified is part of what you are
+   its probe with the driver:
+   `driver.py probe <file> --find … --replace … --root <worktree> -- uv run pytest …`.
+   It refuses a find that matches other than once, restores
+   the file, and says when only errors killed the probe. A finding's claim to have been verified is part of what you are
    reviewing.
 4. **A diff that gets past a gate goes to the operator** as a question — keep
    it, spell it plainly, or exempt it — and the gate's hole is kept for step 5

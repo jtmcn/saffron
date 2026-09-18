@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import subprocess
 import sys
 import time
@@ -114,6 +116,9 @@ class OrderRow:
     # order does not read as stale forever and `next` is not deadlocked by a
     # spec that cannot be re-queued until its pull request closes (item 137).
     edited_sha: str = ""
+    # Why `next` passes over this spec: its edit is open as a pull request, so
+    # a cell would run the old text. A re-snapshot releases it.
+    held: str | None = None
 
     title: str = ""
     budget_usd: float = 0.0
@@ -833,6 +838,8 @@ def cmd_snapshot(args) -> int:
         carried, held_out = [], {}
     else:
         carried, held_out = _carried(previous)
+    for p in carried:
+        p.held = None  # the edit a hold waited on has merged, or will be held again
     candidates, refusals = _scan(loop_branches=frozenset(p.branch for p in previous))
     ordered, stranded = _order(candidates, refusals, carried, frozenset(held_out))
     # A spec whose parent became reviewable joins a re-snapshot unasked, with no
@@ -923,6 +930,9 @@ def _next_spec(
     notes = []
     for p in rows:
         if not (p.pending and (again or p.last_state is None)):
+            continue
+        if p.held:
+            notes.append(f"held {p.spec_id}: {p.held}")
             continue
         unready = [
             (d, by_id[d])
@@ -1102,6 +1112,72 @@ def cmd_drop(args) -> int:
     return 0
 
 
+# pytest's exit codes: 1 is a failed test; 2-5 are an interrupt, an internal
+# error, a usage error and no tests collected, none of which is a verdict.
+_PYTEST_NOT_A_VERDICT = {2, 3, 4, 5}
+_ERROR_KILL = re.compile(r" - (?!AssertionError)\w+Error\b")
+
+
+def cmd_probe(args) -> int:
+    """One vacuity probe, applied only if its find text matches exactly once,
+    and always restored. A find that misses, or an edit that never lands,
+    prints a result that reads like "survived" (run 7, #338)."""
+    command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    if not command:
+        return _fail("give the command to run after --")
+    target = args.root / args.file
+    try:
+        original = target.read_bytes()
+    except OSError as err:
+        return _fail(f"cannot read {target}: {err}")
+    text = original.decode()
+    count = text.count(args.find)
+    if count != 1:
+        return _fail(f"--find matches {count} times in {args.file}; a probe needs one")
+    target.write_bytes(text.replace(args.find, args.replace).encode())
+    try:
+        if target.read_bytes() == original:
+            return _fail("the replacement left the file unchanged")
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        done = subprocess.run(
+            command, cwd=args.root, env=env, capture_output=True, text=True
+        )
+    finally:
+        target.write_bytes(original)
+    if target.read_bytes() != original:
+        return _fail(f"{args.file} was not restored — check it by hand")
+    output = (done.stdout + done.stderr).splitlines()
+    failed = [line for line in output if line.startswith(("FAILED", "ERROR"))]
+    is_pytest = any("pytest" in part for part in command)
+    if done.returncode == 0:
+        verdict = "survived"
+    elif is_pytest and done.returncode in _PYTEST_NOT_A_VERDICT:
+        verdict = f"no verdict (pytest exited {done.returncode})"
+    elif failed and all(_ERROR_KILL.search(line) for line in failed):
+        # A mutant that raises is not one a test caught (REVIEW-PROMPT.md).
+        verdict = "killed only by errors, not by an assertion"
+    else:
+        verdict = "killed"
+    print(f"{verdict}: {output[-1] if output else f'exit {done.returncode}'}")
+    for line in failed[:5]:
+        print(f"  {line}")
+    return 0
+
+
+def cmd_hold(args) -> int:
+    """Keep `next` off a spec whose edit is still an open pull request."""
+    rows = _load()
+    match = next((p for p in rows if p.spec_id == args.spec_id), None)
+    if match is None:
+        return _fail(f"{args.spec_id} is not in the order")
+    if not args.release and not args.why:
+        return _fail("say why with --why, or pass --release")
+    match.held = None if args.release else args.why
+    _save(rows)
+    print(f"{match.spec_id}  {'released' if args.release else f'held: {args.why}'}")
+    return 0
+
+
 def cmd_status(_args) -> int:
     rows = _load()
     if not rows:
@@ -1111,6 +1187,8 @@ def cmd_status(_args) -> int:
         pr = f"#{p.pr}" if p.pr else ""
         if p.dropped:
             label, extra = "dropped", f"  ({p.dropped})"
+        elif p.held and p.pending:
+            label, extra = "held", f"  ({p.held})"
         else:
             label = p.state or "pending"
             extra = (
@@ -1612,6 +1690,20 @@ def main() -> int:
     p.add_argument("spec_id")
     p.add_argument("--why", required=True, help="what the operator should know")
     p.set_defaults(func=cmd_drop)
+
+    p = sub.add_parser("hold", help="keep next off a spec whose edit is still open")
+    p.add_argument("spec_id")
+    p.add_argument("--why", help="the pull request the edit is waiting in")
+    p.add_argument("--release", action="store_true", help="let next name it again")
+    p.set_defaults(func=cmd_hold)
+
+    p = sub.add_parser("probe", help="apply one find/replace, run a command, restore")
+    p.add_argument("file", help="the file to edit, relative to --root")
+    p.add_argument("--find", required=True)
+    p.add_argument("--replace", required=True)
+    p.add_argument("--root", type=Path, default=Path.cwd(), help="default: the cwd")
+    p.add_argument("command", nargs=argparse.REMAINDER, help="after --, e.g. pytest")
+    p.set_defaults(func=cmd_probe)
 
     p = sub.add_parser("status", help="show the order, what has run, and staleness")
     p.set_defaults(func=cmd_status)
