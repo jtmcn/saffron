@@ -1,13 +1,13 @@
 ---
 id: 114
 title: A mutant that does not apply carries its `find` text into the critic's prompt
-status: open
+status: done
 tier: 1
 filed: 2026-09-14
+closed: 2026-09-17
 specs: [SA-0078, SA-0096]
 prs: [243, 320]
 commits: []
-awaiting: [320]
 cites: []
 related: []
 ---
@@ -41,6 +41,7 @@ finds neither half of any mutant in either.
 
 ## Record
 
-**2026-09-17, open as PR #320**, `SA-0096` in the spec loop's run 6 (stack
-#320 ← #321 ← #323): both appliers' reasons name the file and the case, never
-the edit. The lens corpus's console line lost its probe name with it, item 175.
+**Closed 2026-09-17: `SA-0096`, PR #320, merged**, from the spec loop's run 6
+(stack #320 ← #321 ← #323). Both appliers' reasons name the file and the case,
+never the edit (`saffron/mutation.py:155`, `saffron/cell/worktree.py:562`). The
+lens corpus's console line lost its probe name with it, item 175.

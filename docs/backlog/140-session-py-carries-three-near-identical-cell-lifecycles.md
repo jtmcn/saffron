@@ -1,14 +1,14 @@
 ---
 id: 140
 title: Three near-identical cell lifecycles live in `session.py`, and the second one's docstring says why there should be one
-status: open
+status: done
 tier: 1
 filed: 2026-09-16
+closed: 2026-09-17
 by_hand: false
 specs: [SA-0089, SA-0093]
-prs: [282]
+prs: [282, 303]
 commits: []
-awaiting: [303]
 cites: [§5.5]
 related: [118, 134, 141]
 ---
@@ -56,7 +56,7 @@ running the suite — or a recorded decision that three copies is the price of t
 
 ## Record
 
-**2026-09-17, open as PR #303**, `SA-0093` in the spec loop's run 5 (stack
-#308): `critic_cell` takes `network: str | None` and `env`, and
-`_gate_cell_suite` enters it. `reverify`'s copy stays item 134's. The role
-coupling this left is item 155.
+**Closed 2026-09-17: `SA-0093`, PR #303, merged**, from the spec loop's run 5
+(stack #308). `critic_cell` takes `network: str | None` and `env`
+(`saffron/cell/session.py:1067`), and `_gate_cell_suite` enters it. `reverify`'s
+copy stays item 134's. The role coupling this left is item 155.

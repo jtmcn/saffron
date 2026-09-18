@@ -1,13 +1,13 @@
 ---
 id: 115
 title: A committed `.gitmodules` hides a gitlink from every name-only read without the flag
-status: open
+status: done
 tier: 1
 filed: 2026-09-14
+closed: 2026-09-17
 specs: [SA-0082, SA-0097]
 prs: [244, 321]
 commits: []
-awaiting: [321]
 cites: []
 related: []
 ---
@@ -35,6 +35,7 @@ importing `worktree.DIFF_FLAGS`, each with a witness that commits a gitlink unde
 
 ## Record
 
-**2026-09-17, open as PR #321**, `SA-0097` in the spec loop's run 6: PACKAGE's
-listing and `mirror.changed_files` splice `DIFF_FLAGS`. `mirror.diff_stat` still
+**Closed 2026-09-17: `SA-0097`, PR #321, merged**, from the spec loop's run 6.
+PACKAGE's listing (`saffron/phases/package.py:1149`) and `mirror.changed_files`
+(`saffron/repos/mirror.py:143`) splice `DIFF_FLAGS`. `mirror.diff_stat` still
 does not, item 176.
