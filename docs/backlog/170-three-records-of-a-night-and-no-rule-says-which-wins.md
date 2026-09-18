@@ -7,7 +7,7 @@ by_hand: true
 specs: []
 prs: []
 commits: []
-cites: [§4.1, §4.6, §6]
+cites: [§4.1, §4.4, §4.6, §6]
 related: [43, 160, 165, 166, 167]
 ---
 
@@ -97,6 +97,19 @@ fix one each.
 The unproven items in the spike are either closed by measurement or accepted in
 writing with what each costs if wrong.
 
+The record holds facts and content hashes, never artifacts. `baseline.json`,
+`lens-gates.json` and transcripts go to a content-addressed store the record
+names by hash, so a target's repository never grows by a night's output.
+
+The batch budget has a named home. §4.4 makes it one budget across every repo,
+and a per-target ref has nowhere to hold a counter that spans targets. The design
+names a Saffron-owned state repository for it, and says which of a target's facts
+move there when that target refuses `refs/saffron/*`.
+
+The record is specified as an interface: an append-only log per task, a
+compare-and-swap budget, and artifact references by hash. Refs are its first
+implementation, so a later store replaces the backend and leaves the fold alone.
+
 ## Record
 
 **Filed 2026-09-17 by hand**, from §6's open question and a decision to move
@@ -111,3 +124,21 @@ written yet, and two questions open it. Whether the existing 99 tasks are
 migrated or abandoned. A faithful migration imports a `risk` value that is
 sometimes a default wearing a measurement's clothes. And whether `queue.json`
 goes at once or becomes a render first.
+
+**2026-09-17, what the record has to carry, measured.** `~/.saffron/ledger.db` is
+6.7 MB for 102 tasks: 518 attempts, 2,826 gate results, 30,662 failures and 127
+findings, so about 65 KB of facts per task. `~/.saffron/batches/v0/` is 132 MB,
+about 1.3 MB per task. At ten tasks a night that is roughly 5 GB a year per
+repository before compression, which is why artifacts stay out of the record.
+
+Write contention does not bound this design. Each task ref has one writer, and the
+budget is written at attempt boundaries, a few times an hour at K=3. Three limits
+do bound it, reasoned rather than measured. A per-task ref that is never deleted
+grows ref advertisement without limit, so finished tasks fold into one history per
+period. Liveness across hosts cannot ride on pushes: a per-attempt lease with
+steal-on-expiry holds for a handful of workers and needs a lock service past that.
+`saffron watch` tails a live `events.jsonl`, which git cannot stream, so that file
+stays local and is never the record.
+
+GitHub issues were weighed as the alternative the same day and change none of
+this. They would replace the queue, and every row above is task state.
