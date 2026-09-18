@@ -444,6 +444,38 @@ def _read_file(container: str, path: str) -> bytes:
     return base64.b64decode(done.stdout)
 
 
+# Linux caps a single argv string at `MAX_ARG_STRLEN` whatever `ARG_MAX` is.
+# Measured against `saffron/cell-base:python`: 131,000 bytes of argv run,
+# 131,071 and above fail — the largest safe single argument (`_write_file`'s
+# own `ponytail:` below).
+_MAX_ARG_BYTES = 131_000
+
+# Each piece plus the script text wrapped around it (the append command and
+# the quoted scratch path) must still clear `_MAX_ARG_BYTES` with room to
+# spare, and a multiple of 4 so no piece ever splits base64 mid-symbol.
+_CHUNK_BYTES = 100_000
+
+
+def _fail_write(container: str, path: str, scratch: str | None, stderr: str) -> None:
+    """Best-effort scratch cleanup, then the same restore-and-raise every
+    failure of `_write_file` needs, whichever step failed: a step before the
+    last never touched `path` at all, so the checkout is a no-op there, but
+    calling it unconditionally is what keeps this one path the only place
+    that decides what "failed" leaves behind (`item 78`).
+    """
+    if scratch is not None:
+        runtime.exec_(
+            container,
+            ["sh", "-euc", f"rm -f {shlex.quote(scratch)}"],
+            workdir=WORKTREE_MOUNT,
+        )
+    undo = _git(container, "checkout", "HEAD", "--", path)
+    restored = "restored from HEAD" if undo.returncode == 0 else "AND NOT RESTORED"
+    raise runtime.CellRuntimeError(
+        f"writing {path}'s mutant failed ({restored}): {stderr.strip()}"
+    )
+
+
 def _write_file(container: str, path: str, content: bytes) -> None:
     """Write `content` to `path` inside the cell.
 
@@ -454,15 +486,32 @@ def _write_file(container: str, path: str, content: bytes) -> None:
     is what makes one `printf | base64 -d` line safe for an edit this
     function never has to inspect the content of.
 
-    ponytail: the whole script, payload included, is one argv string, and
-    Linux caps a single one at `MAX_ARG_STRLEN` whatever `ARG_MAX` is.
-    Measured against `saffron/cell-base:python`: 131,000 bytes of argv run,
-    131,071 and above fail, so the cap is 131,072 and the ceiling is a source
-    file near 96 KiB, above which every mutant on it is `error` rather than a
-    verdict. The exec never starts, so `>` never truncates.
+    ponytail: one argv string still caps at `_MAX_ARG_BYTES`. The payload is
+    now pieces under it, appended to a `/tmp` scratch file and decoded once.
     """
     encoded = base64.b64encode(content).decode()
-    script = f"printf '%s' {shlex.quote(encoded)} | base64 -d > {shlex.quote(path)}"
+    pieces = [
+        encoded[i : i + _CHUNK_BYTES] for i in range(0, len(encoded), _CHUNK_BYTES)
+    ] or [""]
+
+    done = runtime.exec_(container, ["sh", "-euc", "mktemp"], workdir=WORKTREE_MOUNT)
+    if done.returncode != 0 or not done.stdout.strip():
+        _fail_write(
+            container, path, None, done.stderr or "mktemp printed no scratch path"
+        )
+    scratch = done.stdout.strip()
+
+    for piece in pieces:
+        script = f"printf '%s' {shlex.quote(piece)} >> {shlex.quote(scratch)}"
+        done = runtime.exec_(container, ["sh", "-euc", script], workdir=WORKTREE_MOUNT)
+        if done.returncode != 0:
+            # A piece never reaches `path` at all — only the scratch file —
+            # so nothing here has truncated it yet. The restore still runs,
+            # for the same reason every other step's does: one path decides
+            # what "failed" leaves behind, not each step separately.
+            _fail_write(container, path, scratch, done.stderr)
+
+    script = f"base64 -d < {shlex.quote(scratch)} > {shlex.quote(path)}"
     done = runtime.exec_(container, ["sh", "-euc", script], workdir=WORKTREE_MOUNT)
     if done.returncode != 0:
         # `>` truncated before `base64 -d` wrote a byte, so the file is empty
@@ -470,11 +519,13 @@ def _write_file(container: str, path: str, content: bytes) -> None:
         # `__enter__` as "could not apply" — its `applied` flag is not set yet
         # — so leaving the tree like this understates it exactly as that
         # gate's own contract comment says it must not (`item 78`).
-        undo = _git(container, "checkout", "HEAD", "--", path)
-        restored = "restored from HEAD" if undo.returncode == 0 else "AND NOT RESTORED"
-        raise runtime.CellRuntimeError(
-            f"writing {path}'s mutant failed ({restored}): {done.stderr.strip()}"
-        )
+        _fail_write(container, path, scratch, done.stderr)
+
+    runtime.exec_(
+        container,
+        ["sh", "-euc", f"rm -f {shlex.quote(scratch)}"],
+        workdir=WORKTREE_MOUNT,
+    )
 
 
 @contextlib.contextmanager

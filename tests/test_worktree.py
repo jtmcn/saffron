@@ -1308,6 +1308,46 @@ def test_a_mutation_leaves_bytes_it_did_not_name_alone(tmp_path, monkeypatch):
     assert _porcelain(tmp_path) == ""
 
 
+def test_a_mutant_on_a_file_larger_than_one_argument_is_applied_and_undone(
+    tmp_path, monkeypatch
+):
+    """A single `sh -euc` argument caps at `worktree._MAX_ARG_BYTES` — Linux's
+    `MAX_ARG_STRLEN`, measured against `saffron/cell-base:python` (the module
+    docstring above `_MAX_ARG_BYTES`). `_write_file` must never hand
+    `runtime.exec_` one argument holding the whole base64 payload of a file
+    this large; it must split it into several arguments, each under the cap,
+    appended to a scratch file outside `/work` and decoded once at the end.
+
+    The fake below refuses any argument over the cap outright, so a write
+    that still tries to send one whole payload argument fails loudly instead
+    of quietly working here and failing only against a real cell.
+    """
+    _repo_with_a_file(tmp_path, monkeypatch, "placeholder\n")
+    target = tmp_path / "src" / "guard.py"
+    filler = b"x" * 300_000
+    original = b"# marker\r\n" + filler + b"\xff\r\nvalue = 1\n"
+    target.write_bytes(original)
+    _commit(tmp_path, "a file over one argument")
+    mutant = Mutant(file="src/guard.py", find="value = 1", replace="value = 2")
+
+    real_exec = worktree.runtime.exec_
+
+    def capped(container, command, *, workdir=None, timeout_s=900):
+        if any(len(arg) > 131_000 for arg in command):
+            return runtime.Completed(1, "", "argv too long for this cell runtime")
+        return real_exec(container, command, workdir=workdir, timeout_s=timeout_s)
+
+    monkeypatch.setattr(worktree.runtime, "exec_", capped)
+
+    mutated = original.replace(b"value = 1", b"value = 2", 1)
+    with worktree.source_mutated("c", mutant) as reason:
+        assert reason is None
+        assert target.read_bytes() == mutated
+
+    assert target.read_bytes() == original
+    assert _porcelain(tmp_path) == ""
+
+
 @pytest.mark.cell
 def test_a_mutant_applied_in_a_real_cell_keeps_the_bytes_it_did_not_name(
     tmp_path, network
