@@ -20,7 +20,7 @@ outcome `SA-0001` names as a successful one.
 
 Nor does it beat the glossary rival of §4.6.2b: `CONTEXT.md` already is that
 glossary. Revisit at v2.5 (§9) only if reconstructibility must be *enforced
-continuously* rather than spot-checked — or if Appendix O's spike reopens §1.4.
+continuously* rather than spot-checked — or if Appendix O's spike reopens §1.4. **That clause fired at rev 24** (`DESIGN.md` Appendix T): the verdict below stands, and the new question is not the one it tested.
 
 ## What the modelling found, which is the part that paid
 
