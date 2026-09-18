@@ -30,10 +30,10 @@ from saffron.events import (
     Phase,
     PhaseStart,
     Preflight,
+    TaskOutcome,
     Teardown,
     Terminal,
     describe,
-    when,
 )
 from saffron.gates.baseline import NewFailure, is_no_progress
 from saffron.gates.contract import GateResult
@@ -140,6 +140,15 @@ class RateLimited(RuntimeError):
     def __init__(self, resets_at: int | None) -> None:
         super().__init__("rate limit: rejected")
         self.resets_at = resets_at
+
+
+def _resets_at_fields(resets_at: object) -> tuple[int | None, bool]:
+    """`RateLimited.resets_at`, shaped for `TaskOutcome`: `None`, a clean `int`, or unreadable."""
+    if resets_at is None:
+        return None, False
+    if isinstance(resets_at, int) and not isinstance(resets_at, bool):
+        return resets_at, False
+    return None, True
 
 
 def stop_on_rejected(
@@ -2276,13 +2285,16 @@ def _drive_cell(
                 outcome, why = result.state, result.why
                 _phase_start("REBUT", "REBUT", why)
 
-        # `events.FINDINGS[0]`: the task's own terminal announcement is
-        # neither a `Terminal` (scoped to the five zero-commit IMPLEMENT
-        # endings) nor a `Budget` (a ceiling/value/limit triple, not an
-        # arbitrary outcome word and a session id) — typing it needs a tenth
-        # kind, out of scope here, so it stays a direct `print`, same as the
-        # `rate limit: rejected` line in the `except RateLimited` branch below.
-        print(f"{outcome}: ${spent:.2f} spent, session {session_id}")
+        # The task's own outcome — `events.FAMILIES`' two `TaskOutcome` rows.
+        emit(
+            TaskOutcome(
+                timestamp=time.time(),
+                spec_id=spec.spec_id,
+                outcome=outcome,
+                spent_usd_est=spent,
+                session_id=session_id,
+            )
+        )
         ledger.set_task_state(task_id, outcome)
         ledger.finish_run(run_id, "COMPLETE")
         return CellOutcome(
@@ -2302,29 +2314,31 @@ def _drive_cell(
             notes_sha256=notes_sha256,
         )
     except RateLimited as stopped:
-        # `events.FINDINGS[0]`, second half — see the comment above the
-        # outcome announcement this shares its exemption with.
-        print(
-            "rate limit: rejected — stopping, not exhausted"
-            + (
-                f"; window reopens {when(stopped.resets_at)}"
-                if stopped.resets_at
-                else ""
-            )
-        )
-        ledger.set_task_state(task_id, "RATE_LIMITED")
-        ledger.finish_run(run_id, "COMPLETE")
         # Read back, not reported: `spent` loses the walled turn — the raise
         # comes from outside it, past the `spent +=` — and loses the whole
         # tally when the window closed inside plan_checkpoint's frame. Every
         # turn recorded its own attempt before the rate limit was raised, so
-        # the roll-up above is the figure that survived both.
+        # the roll-up here is the figure that survived both.
+        spent_read_back = ledger.task_spend(task_id)
+        resets_at, resets_at_unreadable = _resets_at_fields(stopped.resets_at)
+        emit(
+            TaskOutcome(
+                timestamp=time.time(),
+                spec_id=spec.spec_id,
+                outcome="RATE_LIMITED",
+                spent_usd_est=spent_read_back,
+                resets_at=resets_at,
+                resets_at_unreadable=resets_at_unreadable,
+            )
+        )
+        ledger.set_task_state(task_id, "RATE_LIMITED")
+        ledger.finish_run(run_id, "COMPLETE")
         return CellOutcome(
             state="RATE_LIMITED",
             task_id=task_id,
             run_id=run_id,
             task_dir=task_dir,
-            spent_usd=ledger.task_spend(task_id),
+            spent_usd=spent_read_back,
             effective_risk=latest.effective_risk,
             advisory_gates=sorted(latest.advisory_gates),
         )
