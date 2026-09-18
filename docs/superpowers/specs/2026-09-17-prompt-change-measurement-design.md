@@ -55,6 +55,12 @@ it. This wants a backlog item, and one could not be filed on this branch: the
 records check requires contiguous ids, and every id between here and the open
 pull requests is already claimed.
 
+It does not yet exercise the manifest writer. `docs/evidence/scripts/2026-09-08-lens-corpus.py`
+writes `manifest.json` beside a pass's `run-N.json` files, but that driver spends
+money and by convention carries no test, so the writer ships unexercised until
+someone runs a paid pass. `model` is written empty there for the same reason
+the paragraph above gives: nothing supplies a real value yet.
+
 ## The design
 
 ### 1. What identifies an arm
@@ -70,9 +76,12 @@ the per-phase `CONTEXT.md` sections, so it varies per task and identifies
 nothing. The function belongs in `context.py`, which owns the tree through
 `PROMPTS_DIR`.
 
-`attempts.model` is written at the same time. A prompt comparison means nothing
-if the model moved underneath it, and recording `prompt_sha` while `model` stays
-null buys a number that is still unattributable.
+`attempts.model` is not written at the same time. A prompt comparison means
+nothing if the model moved underneath it, so the gap matters, but no call site
+supplies a value today (see "What this is not"): `images/agent_runner.py`
+would need to emit the model in its event schema and `implement.py` to carry
+it through to `close_attempt`. Until that lands, a comparison's manifest
+records `model` empty rather than guessing.
 
 A pass gains a manifest beside its `run-N.json` files: `prompt_sha`, model,
 fixture ids, driver path, date. Today that provenance is prose in the evidence
