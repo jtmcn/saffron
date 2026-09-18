@@ -1143,9 +1143,10 @@ def push_unpackaged_work(
             unpackaged_state=outcome.state,
         )
         # PACKAGE pushes only a diff `scope` passed; without the same check, a
-        # workflow edit reaches CI that runs on every push.
+        # workflow edit reaches CI that runs on every push. `DIFF_FLAGS` so a
+        # gitlink a committed .gitmodules hides still reaches it (item 115).
         changed = _run(
-            worktree_path, "diff", "--name-only", "-z", "--no-renames", tree_base
+            worktree_path, "diff", *DIFF_FLAGS, "--name-only", "-z", tree_base
         )
         if changed.returncode != 0:
             raise PackageError(

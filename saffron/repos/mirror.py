@@ -14,6 +14,8 @@ import subprocess
 import tarfile
 from pathlib import Path
 
+from saffron.cell.worktree import DIFF_FLAGS
+
 _ADDED = re.compile(r"(\d+) insertions?\(\+\)")
 _REMOVED = re.compile(r"(\d+) deletions?\(-\)")
 
@@ -128,12 +130,17 @@ def changed_files(mirror: Path, base: str, head: str) -> list[str]:
     git quotes and octal-escapes any path outside plain ASCII by default, and
     `"src/caf\303\251.py"` matches no glob a human wrote. -z also keeps a
     newline in a path from splitting into two entries.
+
+    `DIFF_FLAGS` so an operator's `diff.ignoreSubmodules=all` cannot hide an
+    added submodule, and a rename lists both paths, as the cell's listing
+    does (item 115).
     """
     output = _git(
         mirror,
         "-c",
         "core.quotePath=false",
         "diff",
+        *DIFF_FLAGS,
         "--name-only",
         "-z",
         f"{base}..{head}",

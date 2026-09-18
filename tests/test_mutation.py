@@ -89,10 +89,48 @@ def test_a_find_that_matches_nothing_does_not_apply(tmp_path):
     assert not result.ok
     assert result.displaced is None
     # Must read as "this mutant did not apply", never as "the witness
-    # survived" — which means naming the file and the text, not just failing.
+    # survived" — which means naming the file, never the edit (item 114): a
+    # mutant that does not apply is usually one aimed at code the implementer
+    # has not written yet, the one most worth withholding.
     assert "a.py" in result.reason
-    assert "max(x, 0)" in result.reason
+    assert "max(x, 0)" not in result.reason
     assert target.read_text() == original
+
+
+def test_a_mutant_that_does_not_apply_names_neither_half_of_its_edit(tmp_path):
+    """Item 114: a mutant that does not apply is the ordinary case when an
+    implementation reads differently from what the spec anticipated, and it
+    is usually aimed at code the implementer has not written yet — the one
+    case most worth withholding. The reason must still say which of the two
+    cases it was, and still name the file, but must carry no part of `find`
+    or `replace` — not even a fragment, which is why both are bookended with
+    the same distinctive token rather than differing only in the middle."""
+    target = tmp_path / "a.py"
+    find = "QRVT_FIND = QRVT_"
+    replace = "QRVT_REPLACE = QRVT_"
+
+    target.write_text("unrelated content\n")
+    absent = Mutant(file="a.py", find=find, replace=replace)
+    result = apply_mutant(tmp_path, absent)
+
+    assert not result.ok
+    assert "a.py" in result.reason
+    assert "not found" in result.reason
+    assert find not in result.reason
+    assert replace not in result.reason
+    assert "QRVT_" not in result.reason
+
+    target.write_text(f"{find}\n{find}\n")
+    twice = Mutant(file="a.py", find=find, replace=replace)
+    result = apply_mutant(tmp_path, twice)
+
+    assert not result.ok
+    assert "a.py" in result.reason
+    assert "matches 2 times" in result.reason
+    assert find not in result.reason
+    assert replace not in result.reason
+    assert "QRVT_" not in result.reason
+    assert target.read_text() == f"{find}\n{find}\n"
 
 
 def test_apply_then_restore_is_byte_identical(tmp_path):
@@ -245,11 +283,13 @@ def test_the_host_mutator_applies_and_restores_byte_identically(tmp_path):
     assert target.read_bytes() == b"moved\n", "left mutated, not spliced"
 
     # A mutant that cannot apply reports its reason through the `as` binding,
-    # never an exception and never a restore attempt.
+    # never an exception and never a restore attempt — and never the edit
+    # itself (item 114).
     target.write_bytes(b"unrelated content\n")
     with mutate(mutant) as reason:
         assert reason is not None
-        assert "max(x, 0)" in reason
+        assert "a.py" in reason
+        assert "max(x, 0)" not in reason
     assert target.read_bytes() == b"unrelated content\n"
 
 
