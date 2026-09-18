@@ -121,7 +121,9 @@ over the graph it wrote. Read the query from Saffron's own source tree, the way
 `SA-0107` reads it, never from a target repo. Q4 returns pull requests
 (`ontology/queries/Q4-derivation-chain.rq:25`), and several tasks can share one
 `pr_url` (`saffron/scheduler.py:645-650`). `SA-0107` mints the pull request
-node per task, never from `pr_url`, so key the comparison by that IRI. Were
+node per task, never from `pr_url`, and returns each kept task's IRI in its
+result, keyed by task id. Key the comparison by that mapping, and never spell
+the IRI format here. Were
 it minted from `pr_url`, a whole sibling would hide an overwritten task, which
 is why the second criterion's fixture includes a shared one.
 
@@ -144,7 +146,7 @@ repo in the ledger. Put its dispatch branch after `watch`'s
 (`saffron/cli.py:868`). Name the subcommand in the module docstring's list
 (`saffron/cli.py:1-2`). Import `saffron.chain_walk` inside its branch, not at
 the top of `saffron/cli.py`. The graph libraries are still `dev`-only
-(`pyproject.toml:34-36`), and a module-scope import would break every command
+(`pyproject.toml:35-37`), and a module-scope import would break every command
 on a host without them.
 
 A raise needs no handler of its own. `main`'s catch-all already prints the

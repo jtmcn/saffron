@@ -69,7 +69,10 @@ acceptance:
     witness: tests/test_projection.py::test_tasks_that_match_their_spans_in_count_but_not_time_are_unattributable
   - claim: >-
       A projection that fails the shapes raises and leaves no projection
-      behind, so a reader finds none rather than the last one.
+      behind, so a reader finds none rather than the last one. The shapes are
+      an argument that defaults to the repo's
+      `ontology/shapes/factory-shapes.ttl`, and the test passes a stricter shape
+      the fixture's graph fails.
     witness: tests/test_projection.py::test_a_projection_that_fails_the_shapes_leaves_none_behind
 ---
 
@@ -140,7 +143,7 @@ chain from Q4's result.
   `tests/ontology/test_vocabulary_agrees_with_code.py:21-22` each state that
   nothing under `saffron/` imports a graph library. The operator amends all four
   at merge, and moves pyoxigraph, pyshacl and rdflib out of the `dev` group
-  (`pyproject.toml:34-36`) with `uv lock`. `uv.lock` is `protected`
+  (`pyproject.toml:35-37`) with `uv lock`. `uv.lock` is `protected`
   (`.saffron/policy.yaml:61`), so a cell cannot land that move. All three packages
   are installed wherever this code runs today, because the `dev` group is.
 - **Recording a full hash for the diff.** Only its length is recorded today.
@@ -212,9 +215,12 @@ A task that never merged can end without a plan or a diff. `PREFLIGHT_FAILED`,
 `PLAN_REJECTED` and a `NOT_IMPLEMENTED` with no commits are the cases. Its
 missing line states no edge and leaves it projected.
 
-**A stored file a recorded line points at that is missing leaves the task out
-with its own reason,** and never raises. A `PREFLIGHT_FAILED` task with no
-`plan.json` recorded no line, so it stays projected. An old merged task can lack one, and `SA-0108` runs this over all of them.
+**A merged task missing a stored file a recorded line points at is left out
+with its own reason,** and the call never raises. An old merged task can lack
+one, and `SA-0108` runs this over all of them. A merged task that lacks both a
+line and a file is returned as missing a line. A task that never merged is not
+held to this rule, so a `PREFLIGHT_FAILED` task with no `plan.json` stays
+projected.
 
 **Mint one `PullRequest` node per task.** Never mint it from `pr_url`. A re-queued task
 at the same `spec_sha` inherits the first one's pull request
@@ -229,9 +235,11 @@ same second as its `Ceilings` reads as earlier. `runs.started_at` is SQLite's
 fourth criterion's test sets `TZ` east of UTC, because the cell runs in UTC and
 a naive parse passes there.
 
-**What it returns.** The kept task ids, and each left-out task with a reason
-from a closed set that names `unattributable` apart from the rest. `SA-0108`
-reads both rather than deciding them again.
+**What it returns.** Each kept task's id maps to its `PullRequest` IRI. Each
+left-out task comes with a reason from a closed set that names `unattributable`
+apart from the rest. `SA-0108` reads both rather than deciding them again, and
+keys its comparison by that IRI. The third criterion's test reads both tasks'
+IRIs from this value, never from a string it spells.
 
 **Where things are.** Take the ledger, the `out_dir` each `task_dir` is built from (`saffron/cli.py:152`,
 `~/.saffron/batches/v0` by default) and the output path
@@ -244,7 +252,7 @@ through its subclass axioms.
 
 **Compare lengths in characters.** The diff's recorded number is `len` of a
 `str`. Compare it with the length of the stored file read as text, never with
-its size on disk. Read it with `open(path, newline="")`, since Python 3.12's
+its size on disk. Read it with `open(path, newline="", encoding="utf-8")`, since Python 3.12's
 `read_text` takes no `newline`. Hash `plan.json` from its bytes, as
 `hash_artifact` hashes the encoded text. Put a non-ASCII
 character in every fixture diff, since this
@@ -272,8 +280,9 @@ The fourth criterion's test drives these cases:
 - a task that never merged and recorded neither line, which is kept.
 - a merged task's `patch.diff` deleted, with a missing-file reason returned by a
   call that returns normally.
-- a run in second N whose `Ceilings.timestamp` is N+0.5, under
-  `TZ=Asia/Tokyo` with `time.tzset()`. Restore `TZ` and call `time.tzset()`
+- a run in second N whose `Ceilings.timestamp` is N+0.7, under `TZ=JST-9`
+  with `time.tzset()`. A POSIX zone string needs no zone data, as
+  `tests/test_events.py:1323` shows, and `round()` of N+0.5 is N for an even N. Restore `TZ` and call `time.tzset()`
   again in a `finally`.
 
 **Keep the fixtures compact.** Write one builder in the test file for all five

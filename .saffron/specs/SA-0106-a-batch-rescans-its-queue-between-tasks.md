@@ -40,7 +40,7 @@ acceptance:
   - claim: >-
       After the first task, the latest rescan decides what runs, and a spec is
       started at most once a night. When a rescan offers again a spec whose
-      task ended `RATE_LIMITED` earlier that night, the night skips it. An
+      task ended `RATE_LIMITED` earlier that night, the night does not start it. An
       opening candidate the rescan no longer offers is not started.
     witness: tests/test_batch.py::test_a_spec_the_rescan_requeues_is_not_started_twice_in_one_night
   - claim: >-
@@ -130,14 +130,18 @@ prints matches the first task the night starts.
 **The latest rescan decides.** After each task, start the first spec the
 rescan offers that has not started tonight. Do not merge its list with the
 opening one. A live rescan runs the open-PR overlap refusal
-(`saffron/scheduler.py:669-692`), and a draft PACKAGE opened tonight can make
+(`saffron/scheduler.py:671-693`), and a draft PACKAGE opened tonight can make
 an opening candidate refused. Criterion 2's witness includes an opening
 candidate the rescan leaves out, and checks it never starts.
 
 **Skip by spec id.** A rescan returns a new `Candidate`. A spec that ended in a
 re-queueing state (`saffron/scheduler.py:103`) comes back with its `task_id`
 set, so comparing candidates as values starts it a second time. The pinned
-base is fixed for the night, so one spec id is one `spec_sha`.
+base is fixed for the night, so one spec id is one `spec_sha`. In criterion
+2's witness, the rescan offers the `RATE_LIMITED` spec as a `Candidate` whose
+`task_id` is set. Write the ledger row and rescan with `build_queue`, or
+construct a `Candidate(task_id=…)` that differs from the opening one. Either
+way, a value comparison fails the witness.
 
 **Rescan with `stamp_orphaned=False`.** `True` asserts that nothing is in
 flight, which holds at the opening scan (`saffron/cli.py:472-477`). Mid-night,
@@ -186,7 +190,13 @@ given. Assert that the second `_resolve_queue` call received the first call's
 
 **Give every existing `run_batch` call a rescan.** In `tests/test_batch.py`, a
 rescan that returns the opening list leaves each test's result unchanged.
-Criterion 4 holds one of them to that.
+Criterion 4 holds one of them to that. Import nothing new from `saffron.batch`
+at module scope in `tests/test_batch.py`. A collection error there makes
+`revert` skip.
+
+**`_batch_runner` has six direct test callers** (`tests/test_cli.py:2843`,
+`:2957`, `:3025`, `:3083`, `:3159`, `:3223`). A change to its signature
+updates all six.
 
 **Update the docstrings the change makes false, in place.** In
 `saffron/batch.py`, the module docstring says a K=1 `for` loop runs over

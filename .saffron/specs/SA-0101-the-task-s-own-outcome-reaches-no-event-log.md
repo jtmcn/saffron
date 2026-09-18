@@ -219,8 +219,14 @@ rejects any other spelling of a spend.
 the tier to elevated (`.saffron/policy.yaml`'s `elevate_on`, and `_advisory` in
 `saffron/gates/suite.py`). Write one shared helper for the four new witnesses.
 Criterion 5 needs the new kind only in `_ONE_OF_EACH` and in `_CASES`, which
-`test_every_family_has_a_kind_and_renders` requires. Entries in `_JOINED` for the
-outcome lines are optional, since nothing forces them.
+`test_every_family_has_a_kind_and_renders` requires. Keep each rewritten comment
+to one line. If the count nears 300, trim duplication in the test helpers first,
+never a witness. The estimate is 290 to 310.
+
+**Join the two outcome lines, and drop their exclusion.** Add two `_JOINED`
+entries for the golden lines at `tests/fixtures/watch-golden.txt:17` and `:34`.
+Then delete the `READY_FOR_REVIEW|EXHAUSTED` regex exclusion at
+`tests/test_events.py:1992`, whose reason was `FINDINGS[0]`.
 
 **Append any new `_JOINED` entry at the end.** `_JOINED` has no ids, so an
 insertion renumbers the cases after it (`tests/test_events.py:1948-1953`).
@@ -266,7 +272,18 @@ rather than the local variable.
 
 **Correct the stale comment while you are in it.** `saffron/cell/session.py:2280`
 says "a tenth kind" and there are ten kinds today. Once this spec lands the
-count changes again, so leave no sentence claiming a count.
+count changes again, so leave no sentence claiming a count. The same goes for
+`saffron/events.py` at `:11`, `:13`, `:15`, `:599`, `:611`, `:706`, `:844` and
+`:935`. Rewrite each as one line and add no prose.
+
+**`when` leaves `session.py`.** Its import at `saffron/cell/session.py:36` is
+unused once both prints go. Remove it.
+
+**The session id passes through `_clean` in `describe`**
+(`saffron/events.py:629`). A real id is unchanged by it, so criterion 3 holds.
+
+**Name one behaviour change in the pull request body.** A float reopen time now
+renders as unknown.
 
 **`census` compares test names, so rename nothing.** `SA-0102` also names
 `tests/test_session.py` and `tests/test_events.py`, and runs on this branch. Keep the diff to
