@@ -137,6 +137,9 @@ class Appendix(Identified):
     question: str = Field(min_length=1)
 
 
+BACKLOG_SECTIONS = ("Problem", "Done looks like", "Record")
+
+
 @dataclass(frozen=True)
 class Kind:
     name: str
@@ -144,6 +147,8 @@ class Kind:
     pattern: str
     model: type[Identified]
     hand_written: frozenset[str] = frozenset()
+    # Required `## ` headings, in order. Empty means the body is free prose.
+    sections: tuple[str, ...] = ()
 
 
 KINDS: dict[str, Kind] = {
@@ -153,6 +158,7 @@ KINDS: dict[str, Kind] = {
         rf"^(\d{{3}}|{RANDOM_ID})-[a-z0-9-]+\.md$",
         BacklogItem,
         frozenset({"README.md", "PRIORITY.md"}),
+        sections=BACKLOG_SECTIONS,
     ),
     "appendix": Kind(
         "appendix",
