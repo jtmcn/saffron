@@ -178,3 +178,27 @@ def test_show_list_and_new_id_take_random_ids(tmp_path):
     assert at("list", "backlog").splitlines()[-1].split()[0] == "b-3f9a2c"
     fresh = at("new-id").strip()
     assert re.fullmatch(r"b-[0-9a-f]{6}", fresh) and fresh != "b-3f9a2c"
+
+
+def test_list_appendix_prints_one_line_per_appendix_in_letter_order():
+    result = run("list", "appendix")
+    assert result.returncode == 0, result.stderr
+    out = result.stdout.splitlines()
+    assert [line.split()[0] for line in out] == ["A", "B"]
+    assert out[1].split(maxsplit=2) == ["B", "3", "rev 3: a second revision"]
+
+
+def test_list_appendix_refuses_backlog_filters():
+    result = run("list", "appendix", "--tier", "1")
+    assert result.returncode == 2 and "appendices have neither" in result.stderr
+
+
+def test_show_a_letter_prints_the_appendix():
+    result = run("show", "B")
+    assert result.returncode == 0, result.stderr
+    assert "The whole body is prose" in result.stdout
+
+
+def test_show_an_unknown_letter_says_so():
+    result = run("show", "Z")
+    assert result.returncode == 1 and "no appendix Z" in result.stderr
