@@ -2259,7 +2259,7 @@ def test_told_not_to_stamp_it_leaves_an_in_flight_task_alone(tmp_path):
 
 def _source_calls(fn, name, *, keyword=None, value=None, present=False):
     """Whether `fn`'s body contains a call to `name` — and, if a `keyword` is
-    given, a literal keyword argument matching `value`.
+    given, a literal keyword argument matching `value` (in any matching call).
 
     `present=True` asks a different question: is the keyword passed *at all*,
     whatever the node. The `value` form matches only an `ast.Constant`, so
@@ -2267,14 +2267,6 @@ def _source_calls(fn, name, *, keyword=None, value=None, present=False):
     the usual intent, since a variable is exactly what a regression would
     pass. Use `present` to assert a call site does not route through an
     argument; use `value` to assert which literal it routes with.
-
-    Keeps looking across *every* `ast.Call` node matching `name`, not just the
-    first: `cli._batch` now calls `_resolve_queue` twice — the opening scan
-    with `stamp_orphaned=True`, a rescan closure nested inside it with
-    `stamp_orphaned=False` — and stopping at whichever call `ast.walk` visits
-    first (an order this function does not control) would make a `value=`
-    assertion answer for the wrong call. A match on *any* matching call
-    satisfies this; only exhausting every one without a match returns `False`.
 
     AST over `inspect.getsource`, not a substring search — a comment or a
     docstring merely naming `name` must not satisfy this — and not a call
@@ -2590,24 +2582,31 @@ def test_the_batch_rescans_through_the_pinned_base_without_stamping_orphans(
 
     resolve_calls: list[dict] = []
     recorded_repo_ids: list[int | None] = []
+    candidate = Candidate(
+        path=Path("SY-1.md"),
+        spec=intake.Spec(id="SY-1", title="t", type="chore"),
+        spec_sha="s" * 64,
+        task_id=None,
+    )
+    rescanned = Candidate(
+        path=Path("SY-2.md"),
+        spec=intake.Spec(id="SY-2", title="t", type="chore"),
+        spec_sha="r" * 64,
+        task_id=None,
+    )
 
     def _fake_resolve_queue(repo, home_arg, ledger, *, stamp_orphaned, pinned=None):
         resolve_calls.append({"stamp_orphaned": stamp_orphaned, "pinned": pinned})
-        # `None` on the opening call, a real id on the rescan.
-        repo_id = None if len(resolve_calls) == 1 else 99
-        return _fake_batch_resolution(tmp_path, repo_id=repo_id)
+        # The opening call: `None`, no candidates. The rescan: an id, its own list.
+        if len(resolve_calls) == 1:
+            return _fake_batch_resolution(tmp_path, repo_id=None)
+        return _fake_batch_resolution(tmp_path, repo_id=99, candidates=[rescanned])
 
     def _fake_run_batch(
         candidates, ledger, budget_usd, until, runner, *, rescan, **kwargs
     ):
-        # Calls the rescan it was given, then starts a task.
-        rescan()
-        candidate = Candidate(
-            path=Path("SY-1.md"),
-            spec=intake.Spec(id="SY-1", title="t", type="chore"),
-            spec_sha="s" * 64,
-            task_id=None,
-        )
+        # The rescan's own list, not the opening one or an empty one.
+        assert list(rescan()) == [rescanned]
         runner(candidate)
         return "DRAINED"
 

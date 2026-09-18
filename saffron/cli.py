@@ -404,22 +404,11 @@ def _batch_runner(
 
     Two things differ from the attended path, and only two. The spec comes
     from a candidate the scan already resolved, not a path an operator
-    typed — `pinned` is this run's own, the same mirror/url/base_sha the
-    opening scan and every rescan after it share, and paid for once
-    (`_resolve_queue` never re-fetches it, `stamp_orphaned` aside). And the
-    ceilings come straight off the spec's own fields: a batch has no
-    per-task flag to override them with, so there is nothing for `_ceilings`
-    to arbitrate.
-
-    `repo_id` is a callable, not a value, and read fresh for every candidate
-    rather than once at construction: on a repo's first night it starts
-    `None`, and the first task to run — the parent of a stack, say — is what
-    mints the row a later rescan can then resolve. A child that same rescan
-    admits must stack against *that* `repo_id`, not the `None` the opening
-    scan closed over, or `task._resolve_stacked_on` finds no parent row and
-    cuts the child from `base_sha` with none of the parent's changes in it.
-    `cli._batch` is the only caller, and it hands this a small closure over
-    the latest rescan's own answer.
+    typed — `pinned` is the night's own, shared by every scan. And the
+    ceilings come off the spec's own fields: a batch has no per-task flag, so
+    there is nothing for `_ceilings` to arbitrate. `repo_id` is read per
+    task: on a repo's first night it starts `None`, and a child must stack
+    against the row its parent's task minted.
     """
 
     def run(candidate: Candidate) -> CellOutcome:
@@ -492,15 +481,9 @@ def _resolve_queue(
     whichever one forgets to think about it. `True` asserts §4.2.1's
     batch-scan premise — one batch runs at a time, so an in-flight task found
     here is a corpse a dead scan left behind, and `reconcile` records it
-    `ORPHANED` before this resolution filters — and only the *opening* scan
-    of a night passes it. `False` is what `saffron queue` passes: an operator
-    can run this at will, mid-phase included, and must never have a live task
-    stamped a corpse for having been looked at. `saffron batch`'s own rescan,
-    called mid-night after every task the loop runs (`saffron/batch.py`),
-    passes `False` for the identical reason: a task *this same run* left in
-    flight is live work the night is still watching, not a corpse a dead scan
-    left behind — `True`'s premise does not hold a second time inside one
-    night.
+    `ORPHANED` before this resolution filters. `False` is what `saffron
+    queue` and `saffron batch`'s rescan pass: neither may have a live task
+    stamped a corpse for having been looked at.
 
     `pinned` is optional, and optional is the decision: given one, this uses
     it and derives nothing. Given none — `saffron queue`'s own call, always —
@@ -509,9 +492,7 @@ def _resolve_queue(
     one caller with something to share: it already paid for `ensure_mirror`,
     `real_remote` and `fetch_default_branch` inside `check_readiness`, and
     passing that answer down here is what stops this function from paying for
-    them again, seconds later, against the same remote — its rescan passes
-    the very same `PinnedBase` object the opening call did, so a rescan never
-    re-fetches either.
+    them again, seconds later, against the same remote, or on each rescan.
 
     This writes to the ledger, which a function named for resolving a queue
     does not obviously do: `reconcile`'s pull-request half runs first, so the
@@ -704,18 +685,15 @@ def _print_batch_plan(
 
 def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     """`saffron batch --repo . --budget 50 --until 06:30` — §4.2.1's night,
-    driven. Resolves the opening queue, asserting the batch-only premise
-    `saffron queue` refuses (`stamp_orphaned=True`: one batch runs at a time,
-    so an in-flight row found here is a corpse, not live work an operator is
+    driven. Resolves the queue, asserting the batch-only premise `saffron
+    queue` refuses (`stamp_orphaned=True`: one batch runs at a time, so an
+    in-flight row found here is a corpse, not live work an operator is
     watching); binds a real readiness check to this run's own paths and
     token, never the loop's "proceed" default; builds the adapter that turns
-    a candidate into a cell (`_batch_runner`) and the rescan `run_batch` calls
-    after every task it runs (`stamp_orphaned=False` — a task this same night
-    left in flight is not a corpse, §4.2.1's batch-scan premise only holding
-    once, at the opening scan); and hands it all to `saffron.batch.run_batch`,
-    which owns the loop itself and is the only thing in this module that
-    calls `ledger.create_batch`/`close_batch` — true whether the night gets
-    past readiness or not.
+    a candidate into a cell (`_batch_runner`) and the rescan; and hands them
+    to `saffron.batch.run_batch`, which owns the loop itself and is the only
+    thing in this module that calls `ledger.create_batch`/`close_batch` —
+    true whether the night gets past readiness or not.
 
     Exit codes are `run_batch`'s own five stop reasons, mapped per §4.2.1:
     `0` for `DRAINED`, `BUDGET` and `UNTIL`, `2` for `INFRASTRUCTURE` and for
