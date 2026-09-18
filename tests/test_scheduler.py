@@ -1818,7 +1818,12 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-18, a forty-first time: `SA-0107` and `SA-0108` queued
+    """Re-measured 2026-09-18, a forty-second time: `SA-0109` queued for
+    backlog item 117, the adequacy probe no task runs. It edits `session.py`
+    and `test_session.py`, so it stacks on `SA-0102`, the tail of that chain,
+    and is refused until `SA-0102` has a task. The candidates are unmoved.
+
+    Re-measured 2026-09-18, a forty-first time: `SA-0107` and `SA-0108` queued
     for backlog item b-946f03 and `DESIGN.md` Appendix T, the emitter reopened on
     the RATIONALE's own revisit clause. `SA-0107` creates two files and edits
     none, so it has no `depends_on` and joins the candidates at priority 2, after
@@ -2038,7 +2043,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
     assert [c.spec.id for c in candidates] == ["SA-0101", "SA-0107", "SA-0106"]
-    assert [r.path.name[:7] for r in refusals] == ["SA-0102", "SA-0108"]
+    assert [r.path.name[:7] for r in refusals] == ["SA-0102", "SA-0108", "SA-0109"]
     # A precondition, not the glob check: `done/` is populated, so the empty
     # queue above is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30

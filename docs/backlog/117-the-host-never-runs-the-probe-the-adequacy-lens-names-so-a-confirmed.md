@@ -4,7 +4,7 @@ title: The host never runs the probe the adequacy lens names, so a confirmed vac
 status: open
 tier: 1
 filed: 2026-09-14
-specs: []
+specs: [SA-0109]
 prs: []
 commits: []
 cites: [§5.4.1]
