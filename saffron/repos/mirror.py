@@ -131,10 +131,9 @@ def changed_files(mirror: Path, base: str, head: str) -> list[str]:
     `"src/caf\303\251.py"` matches no glob a human wrote. -z also keeps a
     newline in a path from splitting into two entries.
 
-    `DIFF_FLAGS`, not a copied flag: it carries --ignore-submodules=none, so
-    an operator's global `diff.ignoreSubmodules=all` cannot drop a submodule
-    a pull request added from the list matched against `touches` (backlog
-    item 115).
+    `DIFF_FLAGS` so an operator's `diff.ignoreSubmodules=all` cannot hide an
+    added submodule, and a rename lists both paths, as the cell's listing
+    does (item 115).
     """
     output = _git(
         mirror,
