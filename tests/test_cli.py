@@ -2268,6 +2268,14 @@ def _source_calls(fn, name, *, keyword=None, value=None, present=False):
     pass. Use `present` to assert a call site does not route through an
     argument; use `value` to assert which literal it routes with.
 
+    Keeps looking across *every* `ast.Call` node matching `name`, not just the
+    first: `cli._batch` now calls `_resolve_queue` twice — the opening scan
+    with `stamp_orphaned=True`, a rescan closure nested inside it with
+    `stamp_orphaned=False` — and stopping at whichever call `ast.walk` visits
+    first (an order this function does not control) would make a `value=`
+    assertion answer for the wrong call. A match on *any* matching call
+    satisfies this; only exhausting every one without a match returns `False`.
+
     AST over `inspect.getsource`, not a substring search — a comment or a
     docstring merely naming `name` must not satisfy this — and not a call
     into the real function either: this is a structural check that a
@@ -2290,8 +2298,8 @@ def _source_calls(fn, name, *, keyword=None, value=None, present=False):
                 continue
             if present:
                 return True
-            if isinstance(kw.value, ast.Constant):
-                return kw.value.value == value
+            if isinstance(kw.value, ast.Constant) and kw.value.value == value:
+                return True
     return False
 
 
@@ -2568,6 +2576,63 @@ def test_the_batch_scan_asks_for_the_stamping_the_attended_one_refuses():
     )
 
 
+def test_the_batch_rescans_through_the_pinned_base_without_stamping_orphans(
+    tmp_path, monkeypatch
+):
+    """`saffron batch` rescans through `_resolve_queue`, against the exact
+    `PinnedBase` the opening call used, with `stamp_orphaned=False` — a task
+    this same night left in flight is live, not a corpse. A task started
+    after that rescan receives the `repo_id` the rescan resolved, not the
+    opening scan's, which matters on a repo's first night when the opening
+    `repo_id` is `None` (backlog item b-d6bff7)."""
+    home = tmp_path / "home"
+    monkeypatch.chdir(tmp_path)
+
+    resolve_calls: list[dict] = []
+    recorded_repo_ids: list[int | None] = []
+
+    def _fake_resolve_queue(repo, home_arg, ledger, *, stamp_orphaned, pinned=None):
+        resolve_calls.append({"stamp_orphaned": stamp_orphaned, "pinned": pinned})
+        # `None` on the opening call, a real id on the rescan.
+        repo_id = None if len(resolve_calls) == 1 else 99
+        return _fake_batch_resolution(tmp_path, repo_id=repo_id)
+
+    def _fake_run_batch(
+        candidates, ledger, budget_usd, until, runner, *, rescan, **kwargs
+    ):
+        # Calls the rescan it was given, then starts a task.
+        rescan()
+        candidate = Candidate(
+            path=Path("SY-1.md"),
+            spec=intake.Spec(id="SY-1", title="t", type="chore"),
+            spec_sha="s" * 64,
+            task_id=None,
+        )
+        runner(candidate)
+        return "DRAINED"
+
+    def _recording_run_task(spec, spec_sha, *, repo_id, **kwargs):
+        recorded_repo_ids.append(repo_id)
+        return CellOutcome(
+            state="READY_FOR_REVIEW", task_id=1, run_id=1, task_dir=tmp_path
+        )
+
+    _readiness_passes(monkeypatch)
+    monkeypatch.setattr(cli, "_resolve_queue", _fake_resolve_queue)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(cli, "run_batch", _fake_run_batch)
+    monkeypatch.setattr(cli, "run_task", _recording_run_task)
+
+    assert main(["--home", str(home), "batch"]) == 0
+
+    assert len(resolve_calls) == 2
+    assert resolve_calls[0]["stamp_orphaned"] is True
+    assert resolve_calls[1]["stamp_orphaned"] is False
+    assert resolve_calls[0]["pinned"] is not None
+    assert resolve_calls[1]["pinned"] is resolve_calls[0]["pinned"]
+    assert recorded_repo_ids == [99]
+
+
 def test_a_deadline_earlier_than_now_resolves_to_tomorrow():
     """`06:30` is a time of day, not a duration: resolved at 22:00 the same
     night it means 06:30 *tomorrow*, not a window that closed sixteen hours
@@ -2828,20 +2893,12 @@ def test_the_adapter_packages_a_ready_task_and_reports_what_packaging_made_of_it
     ledger = Ledger(tmp_path / "l.db")
     repo_id = _seed_repo(ledger, url)
 
-    resolved = cli.QueueResolution(
-        repo_id=repo_id,
-        mirror=mirror,
-        base_sha="a" * 40,
-        repo_slug=None,
-        exported=tmp_path,
-        candidates=[],
-        refusals=[],
-        reconciled=cli.ReconcileResult(),
-        gh_failures=[],
-        policy_unread=[],
-    )
     runner = cli._batch_runner(
-        resolved, repo=repo, ledger=ledger, out_dir=tmp_path / "out", url=url
+        pinned=task.PinnedBase(mirror=mirror, url=url, base_sha="a" * 40),
+        repo_id=lambda: repo_id,
+        repo=repo,
+        ledger=ledger,
+        out_dir=tmp_path / "out",
     )
 
     task_id = _seed_task(ledger, repo_id, spec_id="SY-1", state="READY_FOR_REVIEW")
@@ -2942,20 +2999,12 @@ def test_the_unattended_path_records_the_ceilings_that_bound_each_task(
     ledger = Ledger(tmp_path / "l.db")
     repo_id = _seed_repo(ledger, url)
 
-    resolved = cli.QueueResolution(
-        repo_id=repo_id,
-        mirror=mirror,
-        base_sha="a" * 40,
-        repo_slug=None,
-        exported=tmp_path,
-        candidates=[],
-        refusals=[],
-        reconciled=cli.ReconcileResult(),
-        gh_failures=[],
-        policy_unread=[],
-    )
     runner = cli._batch_runner(
-        resolved, repo=repo, ledger=ledger, out_dir=tmp_path / "out", url=url
+        pinned=task.PinnedBase(mirror=mirror, url=url, base_sha="a" * 40),
+        repo_id=lambda: repo_id,
+        repo=repo,
+        ledger=ledger,
+        out_dir=tmp_path / "out",
     )
 
     task_id = _seed_task(ledger, repo_id, spec_id="SY-1", state="EXHAUSTED")
@@ -3010,20 +3059,12 @@ def test_the_adapter_stacks_a_child_on_its_parents_branch(tmp_path, monkeypatch)
     parent = _seed_task(ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW")
     ledger.record_push(parent, "d" * 40)
 
-    resolved = cli.QueueResolution(
-        repo_id=repo_id,
-        mirror=mirror,
-        base_sha="a" * 40,
-        repo_slug=None,
-        exported=tmp_path,
-        candidates=[],
-        refusals=[],
-        reconciled=cli.ReconcileResult(),
-        gh_failures=[],
-        policy_unread=[],
-    )
     runner = cli._batch_runner(
-        resolved, repo=repo, ledger=ledger, out_dir=tmp_path / "out", url=url
+        pinned=task.PinnedBase(mirror=mirror, url=url, base_sha="a" * 40),
+        repo_id=lambda: repo_id,
+        repo=repo,
+        ledger=ledger,
+        out_dir=tmp_path / "out",
     )
 
     captured: dict = {}
@@ -3068,20 +3109,12 @@ def test_the_adapter_stacks_on_the_first_dependency_only(tmp_path, monkeypatch):
     second = _seed_task(ledger, repo_id, spec_id="SY-2", state="READY_FOR_REVIEW")
     ledger.record_push(second, "b" * 40)
 
-    resolved = cli.QueueResolution(
-        repo_id=repo_id,
-        mirror=mirror,
-        base_sha="a" * 40,
-        repo_slug=None,
-        exported=tmp_path,
-        candidates=[],
-        refusals=[],
-        reconciled=cli.ReconcileResult(),
-        gh_failures=[],
-        policy_unread=[],
-    )
     runner = cli._batch_runner(
-        resolved, repo=repo, ledger=ledger, out_dir=tmp_path / "out", url=url
+        pinned=task.PinnedBase(mirror=mirror, url=url, base_sha="a" * 40),
+        repo_id=lambda: repo_id,
+        repo=repo,
+        ledger=ledger,
+        out_dir=tmp_path / "out",
     )
 
     captured: dict = {}
@@ -3144,20 +3177,12 @@ def test_the_adapter_packages_a_stacked_child_against_its_parents_branch(
     parent = _seed_task(ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW")
     ledger.record_push(parent, "d" * 40)
 
-    resolved = cli.QueueResolution(
-        repo_id=repo_id,
-        mirror=mirror,
-        base_sha="a" * 40,
-        repo_slug=None,
-        exported=tmp_path,
-        candidates=[],
-        refusals=[],
-        reconciled=cli.ReconcileResult(),
-        gh_failures=[],
-        policy_unread=[],
-    )
     runner = cli._batch_runner(
-        resolved, repo=repo, ledger=ledger, out_dir=tmp_path / "out", url=url
+        pinned=task.PinnedBase(mirror=mirror, url=url, base_sha="a" * 40),
+        repo_id=lambda: repo_id,
+        repo=repo,
+        ledger=ledger,
+        out_dir=tmp_path / "out",
     )
 
     task_id = _seed_task(ledger, repo_id, spec_id="SY-1", state="READY_FOR_REVIEW")
@@ -3208,20 +3233,12 @@ def test_an_unstacked_task_is_packaged_against_no_parent(tmp_path, monkeypatch):
     ledger = Ledger(tmp_path / "l.db")
     repo_id = _seed_repo(ledger, url)
 
-    resolved = cli.QueueResolution(
-        repo_id=repo_id,
-        mirror=mirror,
-        base_sha="a" * 40,
-        repo_slug=None,
-        exported=tmp_path,
-        candidates=[],
-        refusals=[],
-        reconciled=cli.ReconcileResult(),
-        gh_failures=[],
-        policy_unread=[],
-    )
     runner = cli._batch_runner(
-        resolved, repo=repo, ledger=ledger, out_dir=tmp_path / "out", url=url
+        pinned=task.PinnedBase(mirror=mirror, url=url, base_sha="a" * 40),
+        repo_id=lambda: repo_id,
+        repo=repo,
+        ledger=ledger,
+        out_dir=tmp_path / "out",
     )
 
     task_id = _seed_task(ledger, repo_id, spec_id="SY-2", state="READY_FOR_REVIEW")
