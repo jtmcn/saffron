@@ -1020,8 +1020,13 @@ def test_a_child_refused_at_the_opening_scan_runs_after_its_parent_packages(
     assert [c.spec.id for c in opening] == ["TE-0001", "TE-0004"]
     assert {r.path.name for r in refusals} == {"child.md", "grandchild.md"}
 
-    runner = PackagingRunner(ledger, repo_id)
+    packaging = PackagingRunner(ledger, repo_id)
     lines: list[str] = []
+    last_line_at_call: list[str] = []
+
+    def runner(candidate):
+        last_line_at_call.append(lines[-1] if lines else "")
+        return packaging(candidate)
 
     reason = run_batch(
         opening,
@@ -1035,12 +1040,11 @@ def test_a_child_refused_at_the_opening_scan_runs_after_its_parent_packages(
     )
 
     assert reason == "DRAINED"
-    order = [c.spec.id for c in runner.calls]
+    order = [c.spec.id for c in packaging.calls]
     assert order == ["TE-0001", "TE-0002", "TE-0003", "TE-0004"]
 
-    # The log names each task before it starts, in run order.
-    starting_lines = [line for line in lines if "starting" in line]
-    assert starting_lines == [f"{spec_id:<10} starting" for spec_id in order]
+    # The log names each task before it starts: the last line at each call.
+    assert last_line_at_call == [f"{spec_id:<10} starting" for spec_id in order]
 
 
 def test_a_spec_the_rescan_requeues_is_not_started_twice_in_one_night(ledger, repo_id):
