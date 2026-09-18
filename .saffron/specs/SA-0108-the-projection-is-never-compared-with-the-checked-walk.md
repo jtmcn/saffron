@@ -45,7 +45,8 @@ acceptance:
   - claim: >-
       Every merged pull request Q4 drops while the checked walk calls its chain
       whole is printed. One whose stored file is missing is not printed, since
-      the checked walk sees it too. Every task the projection left out, whatever
+      the checked walk sees it too. A task whose pull request another task
+      shares is judged on its own. Every task the projection left out, whatever
       its reason, is counted apart by reason and never printed as a break. The
       output states how many merged tasks were compared, so a zero over zero
       compared cannot read as a refutation.
@@ -105,12 +106,13 @@ This spec creates `saffron/chain_walk.py` and its tests, and edits
 `saffron/cli.py`. No criterion pins text the existing code determines, so each
 declares a witness and no mutant, and `witness` will report `skip` for them.
 
-**The comparator.** The checked walk follows the ledger's foreign keys
-(`saffron/ledger.py:58-139`). Whole means a `runs` row, at least one `attempts`
-row and a `pr_url`, and a `plan.json` and `patch.diff` in the task's batch-tree
-directory (`saffron/cell/session.py:751,1285,1582`). Other stored files are
-written only on some paths, so the walk does not ask for them. It must not read
-`events.jsonl` or compare hashes. Doing so would make it the projection, and the
+**The comparator.** The checked walk follows the ledger's foreign keys (the
+`runs`, `tasks` and `attempts` tables, `saffron/ledger.py:53-102`). Whole needs
+four things: a `runs` row, at least one `attempts` row, a `pr_url`, and a
+`plan.json` and `patch.diff` in the task's batch-tree directory. `_drive_cell`
+writes the two files (`saffron/cell/session.py:751,1587`). Other stored files
+are written only on some paths, so the walk does not ask for them. Appendix T
+records that narrowing. The walk must not read `events.jsonl` or compare hashes. Doing so would make it the projection, and the
 comparison would say nothing.
 
 **Run Q4 yourself.** `SA-0107`'s materialization returns task ids and reasons,
@@ -118,14 +120,18 @@ not Q4's result. Run the committed `ontology/queries/Q4-derivation-chain.rq`
 over the graph it wrote. Read the query from Saffron's own source tree, the way
 `SA-0107` reads it, never from a target repo. Q4 returns pull requests
 (`ontology/queries/Q4-derivation-chain.rq:25`), and several tasks can share one
-`pr_url` (`saffron/scheduler.py:645-650`). Key the comparison by task, through
-the pull request IRI `SA-0107` states for that task.
+`pr_url` (`saffron/scheduler.py:645-650`). `SA-0107` mints the pull request
+node per task, never from `pr_url`, so key the comparison by that IRI. Were
+it minted from `pr_url`, a whole sibling would hide an overwritten task, which
+is why the second criterion's fixture includes a shared one.
 
 **Compare like with like.** Run the walk over the same tasks the projection
 kept, which its materialization returns. A task the projection left out, for
 any reason, is counted apart by that reason and never printed as a break. Take
 the reasons from what `SA-0107`'s materialization returns, rather than deciding
-them again.
+them again. A task missing its `plan.json` or `patch.diff` is one of them:
+`SA-0107` leaves it out with a named reason rather than raising, so old tasks
+lacking files are counted and `saffron chains` still exits 0.
 
 **Where things are.** `saffron/cli.py:152` resolves the batch tree from
 `--home`. Pass that path, the ledger and an output path under `--home` into the
@@ -142,8 +148,11 @@ the top of `saffron/cli.py`. The graph libraries are still `dev`-only
 on a host without them.
 
 A raise needs no handler of its own. `main`'s catch-all already prints the
-exception and returns 2 (`saffron/cli.py:179-186`). The third criterion's test
-asserts the count line on the 0 path. It must not catch `SystemExit`: with the
+exception and returns 2 (`saffron/cli.py:179-186`). The third criterion's 0
+path runs over the second criterion's fixture, so it finds at least one break.
+It asserts the break line, the count line and exit 0. An implementation that
+returns 1 when it finds breaks, copying `CELL_EXIT`'s "did not make it"
+(`saffron/cli.py:40-49`), must fail it. It must not catch `SystemExit`: with the
 source reverted, argparse exits on the unknown subcommand, and a caught exit
 would turn the raise half green.
 
@@ -158,8 +167,9 @@ Assert each broken. Remove an unrelated stored file from another and assert it
 whole.
 
 **Build the second criterion's fixture with three merged tasks.** One is whole.
-One has a later task of the same spec overwriting its diff. One has its diff
-deleted. Only the second is printed. Add a task the projection returned as
+One has a later task of the same spec overwriting its diff, and shares its
+`pr_url` with a whole task. One has its diff deleted. Only the second is
+printed. Add a task the projection returned as
 unattributable, and one whose `spec_sha` matches no committed version. Assert
 that both are counted by reason and neither is printed, and assert the count of
 tasks compared. Reuse the fixture builders in `tests/test_projection.py` only

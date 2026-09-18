@@ -34,9 +34,9 @@ budget_usd: 20
 max_turns: 100
 acceptance:
   - claim: >-
-      A materialization projects every task in the ledger that reached an end
-      state, from any batch and from any attended cell. It does not project only
-      the rows of one batch. It replaces the previous projection rather than
+      A materialization projects every ended task in the ledger that it does not
+      return as left out, from any batch and from any attended cell. It does not
+      project only the rows of one batch. It replaces the previous projection rather than
       adding to it. Today no projection is written at all.
     witness: tests/test_projection.py::test_a_materialization_projects_every_ended_task_and_replaces_the_last
   - claim: >-
@@ -55,8 +55,10 @@ acceptance:
       A materialization returns the tasks it kept and every task it left out,
       each with a reason from a closed set. A spec whose `Ceilings` spans match
       its tasks in count but not in time has its tasks returned as
-      unattributable, and so does a span that recorded no plan hash or diff
-      length. None of them is projected.
+      unattributable, and so does a pushed task whose span recorded no plan hash
+      or diff length. None of them is projected. A run started in the same whole
+      second as its span's `Ceilings` is attributed to that span, on a host
+      whose local zone is not UTC.
     witness: tests/test_projection.py::test_tasks_that_match_their_spans_in_count_but_not_time_are_unattributable
   - claim: >-
       A projection that fails the shapes raises and leaves no projection
@@ -94,19 +96,20 @@ query, which the RATIONALE never tested (principle 56).
 Q4 walks spec to scope to plan to diff to pull request, plus gate suites,
 findings and rebuttals (`ontology/queries/Q4-derivation-chain.rq:25-62`). The
 ledger holds the ends of that chain and not its middle. `tasks`, `attempts`,
-`gate_results` and `findings` are tables (`saffron/ledger.py:58-139`). Plan and
+`gate_results` and `findings` are tables (`saffron/ledger.py`'s `SCHEMA`, from `tasks` at :64). Plan and
 diff are files in the batch tree.
 
 The batch tree is keyed by spec, not by task. `task_dir` is `out_dir /
 spec.spec_id` (`saffron/cell/session.py:1285`). A later task of the same spec
-writes over `plan.json` (`saffron/cell/session.py:1582`) and `patch.diff`
+writes over `plan.json` (`saffron/cell/session.py:1587`) and `patch.diff`
 (`saffron/cell/session.py:751`). The earlier task's chain then points at a file
 that exists and is not its own.
 
 The event log keeps what each task recorded when the artifact was produced. It
 is one log per spec, and each task opens its span with a `Ceilings` event
-(`saffron/task.py:259-260`, `saffron/watch.py:116-132`). The plan's line carries
-the first 12 hex digits of its sha256 (`saffron/cell/session.py:1583-1587`). The
+(`run_task` at `saffron/task.py:270-271`, and `saffron/watch.py:116-132`). The plan's
+line carries the first 12 hex digits of its sha256
+(`saffron/cell/session.py:1588-1592`). The
 diff's line carries its length in characters, though it says bytes: `patch` is a
 `str` (`saffron/cell/worktree.py:234`, `saffron/cell/session.py:768`). An edge
 stated only when the stored file still matches that record drops the overwritten
@@ -131,7 +134,7 @@ chain from Q4's result.
   nothing under `saffron/` imports a graph library. The operator amends all four
   at merge, and moves pyoxigraph, pyshacl and rdflib out of the `dev` group
   (`pyproject.toml:35-37`) with `uv lock`. `uv.lock` is `protected`
-  (`.saffron/policy.yaml:60`), so a cell cannot land that move. All three packages
+  (`.saffron/policy.yaml:61`), so a cell cannot land that move. All three packages
   are installed wherever this code runs today, because the `dev` group is.
 - **Recording a full hash for the diff.** Only its length is recorded today.
   Adding a hash means editing `saffron/cell/session.py`, which is forbidden
@@ -158,7 +161,7 @@ it, and the vocabulary does not have it. `SpecShape` needs a type and at least
 one criterion (`ontology/shapes/factory-shapes.ttl:36-42`). Read both from the
 version of the spec whose sha256 equals the task's `spec_sha`. Search every
 committed version of `.saffron/specs/` on every ref of the repo's mirror, which
-the ledger names in `repos.mirror_path` (`saffron/ledger.py:21`). A task's repo
+the ledger names in `repos.mirror_path` (`saffron/ledger.py:25`). A task's repo
 is reached through its run. A spec
 re-runs only once its `spec_sha` changes (`saffron/scheduler.py:59-69`), so an
 overwritten task's spec bytes are usually gone from the tree. A task no
@@ -172,27 +175,49 @@ every other task.
 shapes need a ratifying operator and a stance
 (`ontology/shapes/factory-shapes.ttl:170-195`). The ledger records the
 critic's verdict and not the implementer's stance, and no ratifier
-(`saffron/ledger.py:123-138`). Stating one would author the record rather than
+(the `findings` table, `saffron/ledger.py:133`). Stating one would author the record rather than
 derive it.
 
 **Attribution.** Tie a task to a `Ceilings` span of its spec's `events.jsonl`
 by time, not by position. The task's `runs.started_at` must fall after the
-span's `Ceilings` timestamp and before the next one (`saffron/ledger.py:53`).
+span's `Ceilings` timestamp and before the next one (`saffron/ledger.py:59`).
 The first is UTC text and the second is epoch seconds. Position alone is wrong
 in both directions. A span can have no task, because `Ceilings` is written
-(`saffron/task.py:259-270`) before the task row exists
-(`saffron/cell/session.py:1336`). A task can have no span: `saffron/replay.py:55`
+(`saffron/task.py:270`) before the task row exists
+(`saffron/cell/session.py:1335`). A task can have no span: `saffron/replay.py:54`
 writes none, and nor did any task before `Ceilings` existed. A task no single
 span holds is unattributable, and so is every task in a span that holds more
-than one. A span with no plan-hash or diff-length line makes its task
-unattributable too. `EventLog.append` never raises (`saffron/events.py:386-388`),
-so a lost line is possible and silent. Leave each such task out and return it
-with that reason.
+than one. Leave each such task out and return it with that reason.
+
+**Where the two lines are.** The plan hash is the `detail` of a `PhaseStart`
+with phase `IMPLEMENT` and step `PLAN`, reading `accepted, sha256 <12 hex>`.
+The diff length is the `detail` of a `Teardown` with step `exported`, reading
+`exported <N> bytes to …`. An older log worded differently has neither.
+
+**A missing line counts only where the artifact exists.** A task with a
+`pushed_sha` produced both a plan and a diff. Every merged task has one. A span
+of such a task lacking either line makes it unattributable. `EventLog.append`
+never raises (`saffron/events.py:390`), so a lost line is possible and silent.
+A task with no `pushed_sha` can end without a plan or a diff. `PREFLIGHT_FAILED`,
+`PLAN_REJECTED` and a `NOT_IMPLEMENTED` with no commits are the cases. Its
+missing line states no edge and leaves it projected.
+
+**A stored file that is missing leaves the task out with its own reason,** never
+raises. An old merged task can lack one, and `SA-0108` runs this over all of them.
+
+**Mint one `PullRequest` node per task.** Never mint it from `pr_url`. A re-queued task
+at the same `spec_sha` inherits the first one's pull request
+(`saffron/scheduler.py:647-650`), so two tasks share a `pr_url`. One node for
+both would hide an overwritten chain behind its whole sibling in Q4's result. `SA-0108` keys its comparison by task through this IRI.
 
 **Compare times at whole seconds.** `runs.started_at` has whole-second
-resolution and `Ceilings.timestamp` is `time.time()` (`saffron/task.py:261`).
+resolution and `Ceilings.timestamp` is `time.time()` (`saffron/task.py:271`).
 Compare the run's start with the floor of the timestamp, or a run started in the
-same second as its `Ceilings` reads as earlier.
+same second as its `Ceilings` reads as earlier. `runs.started_at` is SQLite's
+`datetime('now')`, UTC with no offset. Parse it as UTC, never as local time. The
+fourth criterion's test sets `TZ` to a non-UTC zone with `time.tzset()`. It
+drives a run in the same second as its `Ceilings`. The cell runs in UTC, and a
+naive parse passes there.
 
 **What it returns.** The kept task ids, and each left-out task with a reason
 from a closed set that names `unattributable` apart from the rest. `SA-0108`
@@ -224,5 +249,13 @@ anti-theater gate then checks nothing.
 Write each test against the unfixed code before trusting it. The third
 criterion matters most. Build its fixture from two merged tasks of one spec,
 the second overwriting the first's stored file. Drive the plan case and the
-diff case in the one test. The fourth criterion's test likewise drives both of
-its cases: spans misaligned in time, and a span with no plan-hash line.
+diff case in the one test. The fourth criterion's test likewise drives its
+cases: spans misaligned in time, a pushed task's span with no plan-hash line,
+and the same-second run under a non-UTC `TZ`.
+
+**Keep the fixtures compact.** Write one builder in the test file for all five
+tests. It takes a list of tasks, each with its spec version, state,
+`pushed_sha`, run start, plan text and diff text. It writes the ledger rows, the
+`events.jsonl` spans, the committed spec versions and the batch-tree files. The
+feature ceiling is 600 changed lines, and five hand-built fixtures would pass
+it.
