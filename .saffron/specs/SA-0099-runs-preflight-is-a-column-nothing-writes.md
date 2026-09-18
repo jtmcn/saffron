@@ -116,7 +116,7 @@ spec does not guess. §6 lists per-repo preflight status and base-suite status a
 two fields, and §4.1 gives a run "its own preflight outcome, and its own
 baseline". They are different things. This column is the preflight one. Criterion
 1 sources it from the baseline suite anyway, because a readiness failure happens
-before `create_run` and reaches no run row at all. `DESIGN.md:266-267`
+before `create_run` and reaches no run row at all. `DESIGN.md:267-268`
 already reads `PREFLIGHT_FAILED ◀── the baseline suite errored`, which is the
 same reading. Say so in the pull request body, so the header spec does not render
 a base-suite fact under a preflight label.
