@@ -1,19 +1,26 @@
 """The batch loop — a night, driven (DESIGN.md §4.2.1).
 
 `saffron queue` resolves candidates and prints them; nothing consumed the
-list. This module is the consumer: `run_batch` is a K=1 `for` loop over the
-sorted candidates `build_queue` already produced, calling an injected runner
-once per candidate and stopping five ways — the queue drains, the budget is
-gone, `--until` hits, the breaker fires, or a task comes back mid-phase
-having reached no end state at all (`INCOMPLETE`, backlog item 70).
+list. This module is the consumer: `run_batch` is a K=1 loop, driven by an
+injected runner, that stops five ways — the queue drains, the budget is gone,
+`--until` hits, the breaker fires, or a task comes back mid-phase having
+reached no end state at all (`INCOMPLETE`, backlog item 70). It runs the
+opening scan's candidates first, then — after every task, not only once the
+list runs out — rescans through an injected `rescan` callable and starts the
+first spec it offers that has not already started tonight, so a child whose
+parent packages mid-night runs the same night rather than waiting for
+tomorrow's scan (backlog item b-d6bff7).
 
-Deliberately not here: resolving the scan (`cli._queue` already does it and
-`cli.py` is forbidden to this module), driving a task (`task.run_task` owns
-that, and both commands go through it — this loop takes it as `runner` rather
-than importing it, so what a night runs stays the caller's to say), concurrency
-(K=1, §4.2.1), multi-repo (v2, §9), and stamping a corpse `ORPHANED` (that is
-the batch
-*scan*'s job, not this loop's).
+Deliberately not here: resolving the scan (`cli._resolve_queue` already does
+it and `cli.py` is forbidden to this module — `rescan` is taken the same way
+`runner` and `readiness_check` already are, an injected callable rather than
+an import), driving a task (`task.run_task` owns that, and both commands go
+through it — this loop takes it as `runner` rather than importing it, so
+what a night runs stays the caller's to say), concurrency (K=1, §4.2.1),
+multi-repo (v2, §9), and stamping a corpse `ORPHANED` (that is the batch
+*scan*'s job, not this loop's — every rescan this loop triggers passes
+`stamp_orphaned=False`, since a task this same night left in flight is not a
+corpse a dead scan left behind).
 """
 
 from __future__ import annotations
@@ -53,18 +60,22 @@ def run_batch(
     until: datetime | None,
     runner: Callable[[Candidate], CellOutcome],
     *,
+    rescan: Callable[[], Sequence[Candidate]],
     clock: Callable[[], datetime] = datetime.now,
     readiness_check: Callable[[], Readiness],
     emit: Callable[[str], None] = print,
 ) -> StopReason:
-    """Drive one night against one repo's already-sorted candidates.
+    """Drive one night, starting from the opening scan's already-sorted
+    candidates and rescanning after every task for the rest of the night.
 
-    `candidates` is `build_queue`'s own return value — this module never
-    re-derives the scan (`cli.py` is forbidden here, and re-deriving it would
-    mean copying four `cli`-private helpers). `ledger` is an ordinary
-    argument, never a keyword default: every witness that involves money
-    reads the batch's spend back through it rather than trusting a tally kept
-    here, which is exactly what a caller cut mid-loop would lose.
+    `candidates` is `build_queue`'s own return value for the *opening* scan
+    only — this module never re-derives it (`cli.py` is forbidden here, and
+    re-deriving it would mean copying four `cli`-private helpers). It decides
+    only which candidate runs first; every candidate after that comes from
+    `rescan`. `ledger` is an ordinary argument, never a keyword default: every
+    witness that involves money reads the batch's spend back through it
+    rather than trusting a tally kept here, which is exactly what a caller cut
+    mid-loop would lose.
 
     `runner` takes no default, and the reason changed without the decision
     changing. It used to be that no real default was *constructible*: building
@@ -85,6 +96,23 @@ def run_batch(
     expired token — which is precisely what §4.4 step 1 exists to prevent. A
     night with no readiness gate is now something a caller has to say out
     loud. `clock` keeps its real default, because `datetime.now` is one.
+
+    `rescan` takes no default either, for `readiness_check`'s own reason: no
+    real one is constructible here (`cli.py` is forbidden, and a rescan needs
+    the pinned base, the ledger, and the repo's own policy and specs at that
+    base — all of it `cli._resolve_queue`'s to build). Called after every
+    task this loop runs — never only once the opening list is exhausted — and
+    expected to return the *current* candidates over the same pinned base,
+    resolved with `stamp_orphaned=False`: a task this same night left in
+    flight is live work, not a corpse a dead scan should stamp. Its return
+    value **replaces** the loop's notion of what is left to run; it is never
+    merged with the opening list or any earlier rescan, because a spec the
+    latest rescan no longer offers (an open-pull-request overlap a sibling
+    task just created, say) must not run anyway. The loop tracks what it has
+    started tonight by `Candidate.spec.id`, never by comparing whole
+    `Candidate`s — a spec that ended in a re-queueing state comes back from a
+    rescan as a *new* `Candidate` carrying its resumed `task_id`, and value
+    equality would start it a second time.
 
     Returns the stop reason itself, one of `DRAINED`, `BUDGET`, `UNTIL`,
     `INFRASTRUCTURE`, `INCOMPLETE` — never a boolean or an exit code.
@@ -112,6 +140,7 @@ def run_batch(
             budget_usd,
             until,
             runner,
+            rescan,
             batch_id=batch_id,
             clock=clock,
             readiness_check=readiness_check,
@@ -136,6 +165,7 @@ def _drive(
     budget_usd: float,
     until: datetime | None,
     runner: Callable[[Candidate], CellOutcome],
+    rescan: Callable[[], Sequence[Candidate]],
     *,
     batch_id: int,
     clock: Callable[[], datetime],
@@ -156,8 +186,31 @@ def _drive(
         return _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
 
     consecutive_aborts = 0
+    # Every spec id this night has already started, whatever task_id it ran
+    # under — checked by identity, never by comparing whole `Candidate`s: a
+    # spec a rescan re-offers after a `RATE_LIMITED` task comes back as a
+    # *new* `Candidate` carrying the resumed `task_id`, so value equality
+    # would start it a second time.
+    started: set[str] = set()
+    # The opening scan's own list decides only the first task — everything
+    # after it comes from `rescan`, replacing this outright rather than
+    # merging with it, so a spec the latest rescan no longer offers (an
+    # open-pull-request overlap a sibling task just created, say) does not
+    # run just because an earlier scan once offered it.
+    pending: Sequence[Candidate] = candidates
 
-    for candidate in candidates:
+    while True:
+        candidate = next((c for c in pending if c.spec.id not in started), None)
+        if candidate is None:
+            if consecutive_aborts >= _BREAKER_THRESHOLD:
+                # The breaker is consulted before a task, so a queue whose
+                # last candidates all aborted falls out of the loop with the
+                # count standing. Reporting `DRAINED` there would exit 0, and
+                # launchd would record a successful night in which every task
+                # died of one global condition.
+                return _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
+            return _stop(ledger, batch_id, "DRAINED", in_flight, emit)
+
         # Before each task, in this order: the deadline, then the budget,
         # then the breaker's standing count (§4.2.1's ordering, named once
         # here rather than re-derived at each check).
@@ -170,6 +223,12 @@ def _drive(
 
         if consecutive_aborts >= _BREAKER_THRESHOLD:
             return _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
+
+        # The log names a task before it starts — the one place an operator
+        # (or a rescan's own witness) can see which candidate the *latest*
+        # scan chose to run next, ahead of calling into it.
+        emit(f"{candidate.spec.id:<10} starting")
+        started.add(candidate.spec.id)
 
         high_water = ledger.max_run_id()
         try:
@@ -193,41 +252,26 @@ def _drive(
             # stop reason and no traceback anywhere.
             emit(f"{candidate.spec.id:<10} raised {type(exc).__name__}: {exc}")
             ledger.attach_orphan_runs_to_batch(batch_id, high_water)
-            continue
-
-        # `create_run` mints the row with no `batch_id` (`run_one_cell`,
-        # forbidden here, passes none) — this stamps it on after the fact,
-        # the shape `record_push` and `set_task_package` already use on
-        # `tasks`: the row exists, then the fact about it arrives.
-        ledger.attach_run_to_batch(outcome.run_id, batch_id)
-
-        if outcome.state in ABORT_STATES:
-            consecutive_aborts += 1
         else:
-            # Any state a task earned resets the counter, `EXHAUSTED`
-            # included — "any terminal state" would also reset on
-            # `GATE_ERROR` and `PREFLIGHT_FAILED` themselves, and the counter
-            # would never reach two. An in-flight state resets it the same
-            # way: two provider blips in a row must not end a night that
-            # would have recovered on its third task (backlog item 70).
-            consecutive_aborts = 0
+            # `create_run` mints the row with no `batch_id`; stamped on after
+            # the fact, the shape `record_push` already uses on `tasks`.
+            ledger.attach_run_to_batch(outcome.run_id, batch_id)
 
-        if outcome.state in IN_FLIGHT_STATES:
-            # Read from `reconcile`, never copied: the next batch scan's own
-            # definition of "in flight" is what decides a corpse there, and a
-            # second list here is how the two would come to disagree about
-            # what a finished task is.
-            in_flight.append((candidate.spec.id, outcome.state))
+            if outcome.state in ABORT_STATES:
+                consecutive_aborts += 1
+            else:
+                # Any earned state resets the counter (`EXHAUSTED` included),
+                # in-flight states too — two blips must not end a recoverable night.
+                consecutive_aborts = 0
 
-    if consecutive_aborts >= _BREAKER_THRESHOLD:
-        # The breaker is consulted before a task, so a queue whose last
-        # candidates all aborted falls out of the loop with the count
-        # standing. Reporting `DRAINED` there would exit 0, and launchd would
-        # record a successful night in which every task died of one global
-        # condition.
-        return _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
+            if outcome.state in IN_FLIGHT_STATES:
+                # Read from `reconcile`, never copied, so the two share one
+                # definition of "in flight".
+                in_flight.append((candidate.spec.id, outcome.state))
 
-    return _stop(ledger, batch_id, "DRAINED", in_flight, emit)
+        # Rescanned after every task, success or not, so a child whose parent
+        # just packaged is reachable tonight rather than tomorrow.
+        pending = rescan()
 
 
 def _stop(
