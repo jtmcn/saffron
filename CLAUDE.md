@@ -83,7 +83,7 @@ env CLAUDE_CODE_OAUTH_TOKEN=(bash -c 'source ~/.secrets; printf %s $CLAUDE_CODE_
 
 Exit codes are load-bearing: `0` reviewable, `1` the task did not make it, `2` infrastructure
 failed (`saffron/cli.py`).
-PACKAGE opens the PR as a draft (§5.7): ratifying one means `gh pr ready <n>` before `gh pr merge`.
+PACKAGE opens the PR as a draft (§5.7): mark it ready with `gh pr ready <n>` before `gh pr merge`.
 
 ## Architecture
 
