@@ -82,7 +82,7 @@ acceptance:
 
 ## Context
 
-`DESIGN.md` Appendix T (rev 24) and backlog item b-946f03 reopened the emitter on
+Appendix T (rev 24) and backlog item b-946f03 reopened the emitter on
 `ontology/RATIONALE.md`'s own revisit clause. Read the appendix first. It carries
 the decision rule this spec and `SA-0108` make runnable, and it states what the
 work does not license. This spec builds the projection. `SA-0108` builds the

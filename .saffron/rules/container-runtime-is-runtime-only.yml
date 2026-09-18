@@ -3,7 +3,7 @@ language: python
 severity: error
 message: only saffron/cell/runtimes/apple.py may build a `container` argv
 note: |
-  DESIGN.md Appendix G. One module per runtime names its own product, and
+  Appendix G. One module per runtime names its own product, and
   `saffron/cell/runtime.py` — which every caller uses — names none, so adding a
   second runtime is a new file beside this rule's exemption rather than an edit
   spread through the tree. `runtime.py` exports `RUNTIME` and reaches the rest

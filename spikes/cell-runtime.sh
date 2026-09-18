@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The cell-runtime spike — DESIGN.md Appendix G, "The decision, and when it gets made".
+# The cell-runtime spike — Appendix G, "The decision, and when it gets made".
 #
 # Four assertions against a real cell on an internal network. All four hold under
 # apple/container, take it; otherwise fall back to a shared VM (Docker Desktop

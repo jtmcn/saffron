@@ -13,7 +13,7 @@ related: [118, 170]
 
 ## Problem
 
-Found 2026-09-18, reviewing `DESIGN.md` Appendix T.
+Found 2026-09-18, reviewing Appendix T.
 
 Q4 encodes N5 and has only ever run over a hand-authored graph
 (`tests/ontology/fixtures/lifecycle.ttl`, loaded at

@@ -56,7 +56,7 @@ seen), and a port drops out only when every listener on it is tolerated. The
 preflight line names what was tolerated on every run, because an exception that
 goes quiet is the hazard the probe exists for. Enumeration that cannot run
 still raises. **This is an accepted risk, not a fix** — an agent in a cell can
-reach that socket, and `DESIGN.md` Appendix G says so and says what it costs.
+reach that socket, and Appendix G says so and says what it costs.
 Renamed with it: `host_listening_ports()` → `host_probe_ports()`, which now
 returns the ports probed *and* the listeners tolerated.
 

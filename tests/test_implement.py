@@ -220,7 +220,7 @@ def test_the_stream_becomes_an_attempt_result():
 
 def test_an_absent_result_event_is_an_error_not_a_success():
     """A green result and an absent result are the same bytes unless something
-    refuses to conflate them (DESIGN.md Appendix H, principle 34)."""
+    refuses to conflate them (Appendix H, principle 34)."""
     with pytest.raises(implement.AgentFailed):
         implement.run_agent(
             "cell",

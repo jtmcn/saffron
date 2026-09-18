@@ -65,7 +65,7 @@ class GateResult(BaseModel):
     tool: str | None = None
     """What the gate ran, obtained by executing it — `ruff --version`, never a
     string literal. The only thing separating a gate that ran and passed from
-    one that never ran (DESIGN.md §5.4, Appendix H). Optional on the model so a
+    one that never ran (DESIGN.md §5.4; Appendix H). Optional on the model so a
     malformed result still parses into something the runner can reject with a
     useful message; the runner is where it is required."""
     collected: list[str] | None = None

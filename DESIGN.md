@@ -1422,6 +1422,7 @@ It says otherwise (rev 18). `ontology/queries/` therefore stays where it is, as 
 ~/Code/saffron/
   pyproject.toml
   DESIGN.md              # what the system does
+  docs/appendices/       # the revision appendices, one record each (Appendix U)
   CONTEXT.md             # what the words mean — injected per phase (§5.3)
   saffron/
     cli.py                 # batch, run, queue, ratify, gc
@@ -1533,8 +1534,9 @@ And the other half of the layout — the part that lives in every target repo, a
 ## Appendices — an index
 
 The appendices are ordered by *when* a thing was learned, which is the wrong order
-for finding one. This is the other index. It is navigation, not authority: where it
-disagrees with an appendix, the appendix is right.
+for finding one. This is the other index. It is generated from the appendix records,
+and its questions are navigation, not authority: where one disagrees with its
+appendix, the appendix is right.
 
 | App. | Rev | The question it settles | Principles |
 |---|---|---|---|
@@ -1581,7 +1583,7 @@ Every principle in one place, which the appendices cannot give you: each is stat
 where it was found, and finding one means knowing which revision found it.
 
 **This table is generated.** `uv run python -m ontology.render` rewrites it from the
-appendices below, so a principle cannot be added to one and missed by the other, and
+appendix records in `docs/appendices/`, so a principle cannot be added to one and missed by the other, and
 a hand edit here is discarded rather than kept. `ontology/design_record.py` parses
 it into `factory:Principle` and `factory:RevisionAppendix`; the shapes hold what
 Markdown cannot say about itself, and `tests/ontology/test_design_record.py` holds
