@@ -530,3 +530,28 @@ def test_a_mutant_pinning_text_the_code_determines_parses():
     )
     declared = spec.acceptance[0]
     assert declared.mutant is not None
+
+
+def test_a_spec_defers_the_symbols_it_will_bring_into_use():
+    spec = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: chore\n"
+        "pending_symbols:\n  - saffron/events.py::GateResult\n---\n"
+    )
+    assert spec.pending_symbols == ["saffron/events.py::GateResult"]
+
+
+def test_a_spec_defers_nothing_by_default():
+    assert (
+        parse_spec("---\nid: TE-1\ntitle: t\ntype: chore\n---\n").pending_symbols == []
+    )
+
+
+@pytest.mark.parametrize(
+    "entry",
+    ["GateResult", "saffron/events.py:GateResult", "saffron/events.py::1x", "a b::c"],
+)
+def test_a_pending_symbol_not_of_the_form_path_and_name_is_rejected(entry):
+    with pytest.raises(SpecError):
+        parse_spec(
+            f"---\nid: TE-1\ntitle: t\ntype: chore\npending_symbols: ['{entry}']\n---\n"
+        )
