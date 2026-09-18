@@ -1619,6 +1619,48 @@ def test_a_probe_reports_its_verdict_and_restores_the_file(
     assert (tmp_path / "mod.py").read_text() == "x = 1\n"
 
 
+@pytest.mark.parametrize(
+    "test_body",
+    [
+        # pytest wraps its summary at COLUMNS, and a long name loses the
+        # ` - AttributeError` the verdict reads.
+        "def test_a_sentence_long_enough_that_pytest_cuts_its_summary_row_short():\n"
+        "    assert mod.C.value == 1\n",
+        # A captured log line starts with ERROR too, and matched no error name.
+        "def test_logs():\n"
+        "    logging.getLogger().error('boom')\n"
+        "    assert mod.C.value == 1\n",
+    ],
+    ids=["long-name", "logged-error"],
+)
+def test_a_probe_that_only_raised_is_not_killed_under_real_pytest(
+    tmp_path, monkeypatch, capsys, test_body
+):
+    monkeypatch.setenv("COLUMNS", "80")
+    (tmp_path / "mod.py").write_text("class C:\n    value = 1\n")
+    (tmp_path / "test_mod.py").write_text(
+        "import logging\nimport mod\n\n\n" + test_body
+    )
+    command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+
+    assert (
+        driver.cmd_probe(
+            _probe(tmp_path, "value = 1", "other = 1", *command, "test_mod.py")
+        )
+        == 0
+    )
+
+    assert capsys.readouterr().out.startswith("killed only by errors")
+
+
+def test_a_probe_whose_command_is_missing_fails_and_restores(tmp_path, capsys):
+    (tmp_path / "mod.py").write_text("x = 1\n")
+
+    assert driver.cmd_probe(_probe(tmp_path, "x = 1", "x = 2", "no-such-binary")) == 1
+    assert "no-such-binary" in capsys.readouterr().err
+    assert (tmp_path / "mod.py").read_text() == "x = 1\n"
+
+
 def test_probe_parses_its_options_before_the_command(tmp_path, monkeypatch, capsys):
     # Run 7: `nargs=REMAINDER` after the file swallowed `--find`, and the tests
     # above call `cmd_probe` directly, so none saw it.

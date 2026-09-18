@@ -1123,6 +1123,8 @@ def cmd_drop(args) -> int:
 # error, a usage error and no tests collected, none of which is a verdict.
 _PYTEST_NOT_A_VERDICT = {2, 3, 4, 5}
 _ERROR_KILL = re.compile(r" - (?!AssertionError)\w+Error\b")
+# One space: a captured log line pads its level (`ERROR    root:...`).
+_SUMMARY_ROW = re.compile(r"^(FAILED|ERROR) \S")
 
 
 def cmd_probe(args) -> int:
@@ -1145,16 +1147,20 @@ def cmd_probe(args) -> int:
     try:
         if target.read_bytes() == original:
             return _fail("the replacement left the file unchanged")
-        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
-        done = subprocess.run(
-            command, cwd=args.root, env=env, capture_output=True, text=True
-        )
+        # pytest cuts a summary row at COLUMNS, and with it the error's name.
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "COLUMNS": "10000"}
+        try:
+            done = subprocess.run(
+                command, cwd=args.root, env=env, capture_output=True, text=True
+            )
+        except OSError as err:
+            return _fail(f"cannot run {command[0]}: {err}")
     finally:
         target.write_bytes(original)
     if target.read_bytes() != original:
         return _fail(f"{args.file} was not restored — check it by hand")
     output = (done.stdout + done.stderr).splitlines()
-    failed = [line for line in output if line.startswith(("FAILED", "ERROR"))]
+    failed = [line for line in output if _SUMMARY_ROW.match(line)]
     is_pytest = any("pytest" in part for part in command)
     if done.returncode == 0:
         verdict = "survived"
