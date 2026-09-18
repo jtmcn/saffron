@@ -339,7 +339,7 @@ needs the distinction and the first that enforces it.
 
 **Both invalidations need a moment to fire at, and it is a mirror refetch at task scheduling.** Preflight fetches once and pins `base_sha` (§4.4), so nothing else in the batch ever re-reads the repo — which would leave these two columns recording a check that structurally cannot happen. The scheduler therefore refetches the mirror before each task starts and compares both shas then; it is a local `git fetch` against a bare repo, it costs milliseconds, and it is the only point in a batch where a mid-flight edit can be noticed at all. Note what this deliberately does *not* do: `base_sha` stays pinned for the whole run, so a refetch invalidates tasks and never moves the baseline out from under them.
 
-`prompt_sha` is a digest of `saffron/agents/prompts/**` as authored, the third input beside `spec_sha` and `policy_sha`. `attempts.model` is writable through `close_attempt`. No call site supplies a value yet (backlog item 177).
+`prompt_sha` is a digest of `saffron/agents/prompts/**` as authored, the third input beside `spec_sha` and `policy_sha`. `attempts.model` is writable through `close_attempt`. No call site supplies a value yet.
 
 Artifacts — transcripts, diffs, gate logs, coverage XML — go in a **plain directory tree**, not a content-addressed store:
 

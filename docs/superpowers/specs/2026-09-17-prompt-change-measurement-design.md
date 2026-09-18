@@ -44,6 +44,17 @@ control fixtures would be a corpus change with its own spend. Backlog item 130's
 backtest has the shape, with ten controls and a bar of two false blockers. Hold
 it until junk findings are observed rather than supposed, which is §8's ordering.
 
+It does not yet supply a real `model` at the one place that writes it.
+`attempts.model` is writable through `close_attempt`, but no call site
+supplies a value, because `images/agent_runner.py` uses
+`hasattr(message, "model")` only as a branch check and never extracts it, and
+`AttemptResult` carries no such field. Closing it means the runner emitting
+the model in its event schema and `implement.py` carrying it to the close.
+Until then a prompt comparison cannot tell whether the model moved underneath
+it. This wants a backlog item, and one could not be filed on this branch: the
+records check requires contiguous ids, and every id between here and the open
+pull requests is already claimed.
+
 ## The design
 
 ### 1. What identifies an arm
