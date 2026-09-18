@@ -89,6 +89,26 @@ def check_ids(records: list[Record]) -> list[Violation]:
     return out
 
 
+def appendix_letters(n: int) -> list[str]:
+    """The first `n` appendix ids: A to Z, then AA, AB, and on."""
+    singles = [chr(c) for c in range(ord("A"), ord("Z") + 1)]
+    return (singles + [a + b for a in singles for b in singles])[:n]
+
+
+def check_appendix_letters(records: list[Record]) -> list[Violation]:
+    ids = [str(r.model.id) for r in records]
+    expected = appendix_letters(len(ids))
+    if ids == expected:
+        return []
+    return [
+        Violation(
+            records[-1].path,
+            "id",
+            f"appendix letters are {ids}; they run from A with no gap or repeat: {expected}",
+        )
+    ]
+
+
 def check_links(records: list[Record]) -> list[Violation]:
     by_id = _ids(records)
     out: list[Violation] = []

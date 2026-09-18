@@ -12,8 +12,10 @@ import pytest
 import records.check
 from records.check import (
     Violation,
+    appendix_letters,
     building_pr,
     check_all,
+    check_appendix_letters,
     check_awaiting,
     check_cites_resolve,
     check_done_specs_are_done,
@@ -32,6 +34,7 @@ from records.load import Record, load
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "good"
 BACKLOG = KINDS["backlog"]
+APPENDIX = KINDS["appendix"]
 
 
 @pytest.fixture
@@ -261,11 +264,14 @@ def test_the_good_fixture_passes_every_check():
 
 def test_check_all_runs_every_check(monkeypatch):
     # The expected set is every `check_*` the module defines, not check_all's body.
+    # check_appendix_letters is not wired in yet; a later task does that.
+    UNWIRED = {"check_appendix_letters"}
     names = {
         name
         for name, fn in inspect.getmembers(records.check, inspect.isfunction)
         if name.startswith("check_")
         and name != "check_all"
+        and name not in UNWIRED
         and fn.__module__ == "records.check"
     }
     for name in names:
@@ -481,3 +487,30 @@ def test_building_pr_reads_only_a_pull_request_ref():
     assert building_pr("refs/pull/296/merge") == 296
     assert building_pr("refs/heads/main") is None
     assert building_pr(None) is None
+
+
+def test_appendix_letters_run_a_to_z_then_aa():
+    letters = appendix_letters(28)
+    assert letters[:2] == ["A", "B"] and letters[25:] == ["Z", "AA", "AB"]
+
+
+def test_the_fixture_appendices_are_contiguous():
+    assert check_appendix_letters(load(APPENDIX, FIXTURE)) == []
+
+
+def test_a_skipped_letter_is_a_violation(tmp_path: Path):
+    shutil.copytree(FIXTURE, tmp_path, dirs_exist_ok=True)
+    directory = tmp_path / APPENDIX.directory
+    (directory / "B-a-second-revision.md").rename(directory / "C-a-second-revision.md")
+    text = (directory / "C-a-second-revision.md").read_text()
+    (directory / "C-a-second-revision.md").write_text(text.replace("id: B", "id: C"))
+    [v] = check_appendix_letters(load(APPENDIX, tmp_path))
+    assert v.field == "id" and "['A', 'C']" in v.message
+
+
+def test_a_letter_used_twice_is_a_violation(tmp_path: Path):
+    shutil.copytree(FIXTURE, tmp_path, dirs_exist_ok=True)
+    directory = tmp_path / APPENDIX.directory
+    shutil.copy(directory / "B-a-second-revision.md", directory / "B-again.md")
+    [v] = check_appendix_letters(load(APPENDIX, tmp_path))
+    assert "['A', 'B', 'B']" in v.message
