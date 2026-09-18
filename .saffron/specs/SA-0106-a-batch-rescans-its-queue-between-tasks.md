@@ -57,7 +57,7 @@ acceptance:
 
 ## Context
 
-Backlog item **178**, found 2026-09-17 asking why the spec loop runs attended
+Backlog item **b-d6bff7**, found 2026-09-17 asking why the spec loop runs attended
 cells rather than `saffron batch`.
 
 `_batch` resolves the queue once, after readiness passes
@@ -90,7 +90,7 @@ edit.
 
 **One run per repo** (backlog item 177). Each task still mints its own run.
 
-**`DESIGN.md` §4.2.1's "sorted once in memory".** Item 178 updates it by hand
+**`DESIGN.md` §4.2.1's "sorted once in memory".** Item b-d6bff7 updates it by hand
 after this merges, with the spec loop's `GOTCHAS.md`.
 
 **A rescan that raises.** It ends the night `INFRASTRUCTURE` through

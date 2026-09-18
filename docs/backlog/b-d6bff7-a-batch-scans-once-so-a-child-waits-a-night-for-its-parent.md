@@ -1,5 +1,5 @@
 ---
-id: 178
+id: b-d6bff7
 title: A batch scans its queue once, so a child waits a night for a parent that packaged hours earlier
 status: open
 tier: 3
