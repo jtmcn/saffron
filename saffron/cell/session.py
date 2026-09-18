@@ -1413,6 +1413,10 @@ def _drive_cell(
         )
 
         if baseline.aborted:
+            # The run's own outcome, written where it is known — never
+            # re-derived from the task state this same branch is about to set
+            # (CONTEXT.md §4, `saffron/ledger.py:set_run_preflight`).
+            ledger.set_run_preflight(run_id, "FAILED")
             ledger.set_task_state(task_id, "PREFLIGHT_FAILED")
             ledger.finish_run(run_id, "COMPLETE")
             return CellOutcome(
@@ -1423,6 +1427,11 @@ def _drive_cell(
                 effective_risk=latest.effective_risk,
                 advisory_gates=sorted(latest.advisory_gates),
             )
+
+        # Written once, here, and never revisited: an abort later in this same
+        # run (`except BaseException` below) says nothing about whether the
+        # machine was fit to start an hour earlier.
+        ledger.set_run_preflight(run_id, "PASSED")
 
         # The agent runs inside the cell, at /work, on the cell's own key (§5.1).
         context_md = (_SAFFRON_ROOT / "CONTEXT.md").read_text()
