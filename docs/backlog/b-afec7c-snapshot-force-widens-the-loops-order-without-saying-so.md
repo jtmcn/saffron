@@ -1,11 +1,12 @@
 ---
 id: b-afec7c
 title: '`snapshot --force` widens the loop''s order without saying so'
-status: open
+status: done
+closed: 2026-09-18
 tier: 2
 filed: 2026-09-18
 specs: []
-prs: []
+prs: [346]
 commits: []
 cites: []
 related: [157, 172]
@@ -37,3 +38,7 @@ A spec added that way still needs its spec review before `next` names it.
 
 - 2026-09-18: filed from the spec loop's run 7 (stack #335 ← #338 ← #339 ←
   #342 ← #340). Surfaced while stacking #340.
+- 2026-09-18: done by #346. `snapshot --force` names each spec that became
+  runnable since the last snapshot and leaves it out unless `--add`.
+  `--add SA-NNNN` takes one spec at a time. Its step 1b review is the operator's
+  to run first: `next` does not check that a review happened.

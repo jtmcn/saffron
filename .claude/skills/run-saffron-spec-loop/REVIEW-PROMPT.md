@@ -15,7 +15,11 @@ the placeholders filled:
 - `{REPO}` — the checkout driving the loop (`git rev-parse --show-toplevel`)
 - `{PR}`, `{BRANCH}` (`saffron/SA-NNNN`), `{SPEC}` (the spec's path)
 - `{BASE}` — `git merge-base origin/main origin/{BRANCH}`; for a spec with
-  `depends_on`, `origin/saffron/<parent id>` in place of `origin/main`
+  `depends_on`, `origin/saffron/<parent id>` in place of `origin/main`.
+  `{CELL_BASE}` is the commit the cell was cut from, on the log's `cell:` line
+  (`worktree at <sha>`). PACKAGE applies the patch to `main` as it stands then.
+  In run 7 `{BASE}` was that later commit, and a witness must fail at the
+  cell's base.
 - `{HEAD}` — `git rev-parse origin/{BRANCH}`
 - `{WHAT}` — two sentences on what the diff does, and its `git diff --stat`
 - `{KNOWN}` — the in-cell critic's findings you have already verified or
@@ -51,7 +55,7 @@ would miss: delete it, invert it, a near-miss value, a narrower exception, the
 same call on a different path. Run the criterion's witness under each probe and
 report killed or survived. A probe that survives its witness is a finding; so is
 a criterion satisfied only by a comment. Show each `preserves: true` criterion
-still holds, and each new witness failing at `{BASE}`.
+still holds, and each new witness failing at `{CELL_BASE}`.
 
 Then look past the criteria: behaviour the spec did not ask for; call sites the
 fix should also cover; the spec's `touches` boxing the fix in; and anything the

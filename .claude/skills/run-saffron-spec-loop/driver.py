@@ -816,6 +816,8 @@ def cmd_snapshot(args) -> int:
             f"{ORDER.relative_to(REPO)} exists — pass --force to re-snapshot this "
             "loop, or --new to start another"
         )
+    if args.add is not None and not args.force:
+        return _fail("--add takes in specs new to a re-snapshot: pass --force too")
     previous = _previous() if (args.force or args.new) else []
     if args.new:
         # A drop is this loop's call, so a new loop carries none (item 172);
@@ -835,6 +837,16 @@ def cmd_snapshot(args) -> int:
         carried, held_out = _carried(previous)
     candidates, refusals = _scan(loop_branches=frozenset(p.branch for p in previous))
     ordered, stranded = _order(candidates, refusals, carried, frozenset(held_out))
+    # A spec whose parent became reviewable joins a re-snapshot unasked, with no
+    # spec review (item b-afec7c): name it, and keep it out unless `--add`.
+    known = {p.spec_id for p in previous}
+    arrived = [p for p in ordered if args.force and known and p.spec_id not in known]
+    wanted = {p.spec_id for p in arrived} if args.add == [] else set(args.add or ())
+    if unknown := wanted - {p.spec_id for p in arrived}:
+        return _fail(f"not new since the last snapshot: {', '.join(sorted(unknown))}")
+    added = [p for p in arrived if p.spec_id in wanted]
+    left_out = [p for p in arrived if p.spec_id not in wanted]
+    ordered = [p for p in ordered if p not in left_out]
     if held_out:
         print(f"edited while its pull request is open ({len(held_out)}):")
         for reason in held_out.values():
@@ -846,6 +858,15 @@ def cmd_snapshot(args) -> int:
         )
         for trap in _edit_traps(previous):
             print(f"  {trap}")
+        print()
+    for verb, specs in (("added", added), ("left out", left_out)):
+        if specs:
+            print(f"new since the last snapshot, {verb} ({len(specs)}):")
+            for p in specs:
+                print(f"  {p.spec_id}  {p.title}")
+    if left_out:
+        print("  `snapshot --force --add SA-NNNN` takes one in; review each spec first")
+    if arrived:
         print()
     if not ordered:
         print("nothing to run: no candidate specs")
@@ -1156,7 +1177,7 @@ def cmd_stack(args) -> int:
     command = ["gh", "stack", "link", *(str(p.pr) for p in order)]
     print(f"\n  {' '.join(command)}")
     print(
-        "\nPRs stay drafts (§5.7); marking one ready is `gh pr ready <n>`, the operator's."
+        "\nPACKAGE opens drafts (§5.7); --execute marks each ready once its base reads back."
     )
     if not args.execute:
         print("\n(dry run — pass --execute to link)")
@@ -1175,7 +1196,18 @@ def cmd_stack(args) -> int:
         print(
             f"  #{p.pr}  base={got}" + ("" if got == want else f"  — expected {want}")
         )
-    return 1 if mismatched else 0
+    if mismatched:
+        return 1
+    # A reviewed stack is ready for the operator; the draft was the cell's.
+    unready = [
+        p.pr
+        for p in order
+        if subprocess.run(["gh", "pr", "ready", str(p.pr)], cwd=REPO).returncode
+    ]
+    if unready:
+        return _fail(f"gh pr ready failed for {', '.join(f'#{n}' for n in unready)}")
+    print(f"\nmarked ready: {' '.join(f'#{p.pr}' for p in order)}")
+    return 0
 
 
 def cmd_rebase(args) -> int:
@@ -1563,6 +1595,13 @@ def main() -> int:
         "--new",
         action="store_true",
         help="start another loop once every pull request of the last has closed",
+    )
+    p.add_argument(
+        "--add",
+        nargs="*",
+        metavar="SA-NNNN",
+        help="with --force, take in specs new since the last snapshot: those named, "
+        "or every one",
     )
     p.set_defaults(func=cmd_snapshot)
 

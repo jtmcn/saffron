@@ -9,8 +9,9 @@ Every queued spec goes through an attended `saffron cell`, an independent
 review, and review commits; the pull requests are then linked into one stack
 for the operator. **Nothing is merged.** You are the operator's delegate
 (`CONTEXT.md`), so ask them once, before the first cell, which pushes are yours:
-ordinary pushes to the loop's `saffron/SA-NNNN` branches, force-pushes to them
-with a lease, and step 5's branch and draft PR. Every other branch, and every
+ordinary pushes to the loop's `saffron/SA-NNNN` branches, and force-pushes to
+them with a lease. They also cover marking the stack's PRs ready (step 3), and
+step 5's branch and PR. Every other branch, and every
 gate-policy call, is asked separately, each time.
 
 The driver is `.claude/skills/run-saffron-spec-loop/driver.py`, run with
@@ -38,10 +39,14 @@ order — and every later command reads that file.
 
 An existing order is kept until `snapshot --force`, which rescans and keeps
 every recorded outcome still true — a reviewable PR, a drop, an undecided cell.
-A spec edited while its PR is open is held out of the new order and named.
+A spec edited while its PR is open is held out of the new order and named. A
+spec that became runnable since the last snapshot, such as a child whose parent
+is now reviewable, is named and left out. `snapshot --force --add SA-NNNN`
+takes it in, once the operator agrees and it has had its step 1b review (item b-afec7c).
 `status` and `next` call an order **stale** when a spec file moved or changed or
 a PR merged or closed, and `next` refuses a stale one. A spec queued since the
-snapshot is not in it: re-snapshot to add it.
+snapshot is not in it: `snapshot --force --add SA-NNNN` adds it, after its step
+1b review. `--add` with no id takes every new spec.
 
 A new loop starts with `snapshot --new`. A drop is one loop's call, and
 `--force` carries it into the next (item 172). `--new` refuses while the last
@@ -85,14 +90,26 @@ the file before committing the revert and check it matches the order's
 no reader, and the cell that runs into it pays. The loop's run 5 lost an attempt
 to two tests an edit asked for that pass at base. It lost a repair turn to a
 parametrised witness an edit offered (backlog item 159). Dispatch a second
-`spec-reviewer` on the edited spec once the edit lands and `snapshot --force`
-runs. Its `base` is the commit a cell would now be cut from, which is
-`origin/main`, or the parent's pushed branch for a spec with `depends_on`.
+`spec-reviewer` on the edited spec file on its unmerged branch, and merge the
+edit once a review is clean. Its `base` is the commit a cell would now be cut
+from, which is `origin/main`, or the parent's pushed branch for a spec with
+`depends_on`. Before dispatching, walk every earlier concern against the edit:
+run 7's second blocker on `SA-0100` was its first review's concern. Name the
+operator's decisions and the deferred findings in the prompt, so the review
+spends itself on what is still open. Nobody else reads your own edit, and two
+of run 7's blockers were in the delegate's edits.
+
 Review the whole spec, not the edit. Checks 5 and 6 read it entire, and a report
 whose six lines cover a diff is not one. Run 5's re-reviews also found a witness
 stub answering every subnet alike (#304). Two notes named code seams that do not
 exist (#306). Both sat in text the first review passed. An edited child needs
 one re-review rather than two, and the parent-branch review below is that one.
+
+**A review with no blocker and no concern ends the round.** Its notes go to
+step 5. `SA-0100` took five reviews in run 7. Each of the middle three found
+a new witness hole. Expect more than one round on a spec with several
+criteria. Until the edit merges, `next` still names the spec at its old
+text: pass over it, and start the spec after it with `saffron cell <its path>`.
 
 Two kinds of blocker failed the backtest, and reading the line at base does
 not filter them, because their premise holds there
@@ -177,7 +194,7 @@ to the operator (GOTCHAS, Recording).
 1. **The in-cell critic's findings** are in
    `~/.saffron/batches/v0/SA-NNNN/findings.json`: a list of lenses, each with
    `findings` carrying `severity`, `file`, `line` and `claim`, and an adequacy
-   finding a `probe`. A blocker a lens withdrew after REBUT is in
+   finding a `probe`, which is a `{file, find, replace}` object. A blocker a lens withdrew after REBUT is in
    `rebuttal.json` beside it, with the implementer's argument.
 2. **Independent review:** two background `general-purpose` subagents per PR,
    the Spec seat and the Standards seat, prompted from
@@ -195,6 +212,7 @@ to the operator (GOTCHAS, Recording).
 6. **Fix on the branch, check, commit, push:**
 
    ```bash
+   make fmt
    make check > /tmp/check.log 2>&1; echo "make exit: $?"; tail -3 /tmp/check.log
    git add <files>
    git commit -m "review(SA-NNNN): <the defect, as a sentence>"
@@ -205,7 +223,8 @@ to the operator (GOTCHAS, Recording).
 
    `size` measures what was pushed, so it runs after the push; the PR is a
    draft, so a branch over its ceiling is still the operator's to answer. The
-   dry `stack` finds a conflict between neighbours while the branch is fresh.
+   dry `stack` finds a conflict between neighbours while the branch is fresh. It
+needs two reviewable PRs, so it errors after the first.
 
 **Done when** each criterion has a file:line and a probe result, each finding is
 fixed, answered, or kept, every witness the review added fails at the spec's
@@ -217,7 +236,7 @@ the commit is pushed.
 
 ```bash
 uv run .claude/skills/run-saffron-spec-loop/driver.py stack             # dry run
-uv run .claude/skills/run-saffron-spec-loop/driver.py stack --execute   # gh stack link, then bases read back
+uv run .claude/skills/run-saffron-spec-loop/driver.py stack --execute   # gh stack link, bases read back, then gh pr ready
 ```
 
 The stack order is the loop's order rearranged so each child sits directly above
@@ -225,10 +244,13 @@ its parent. The dry run prints it, runs `git merge-tree` on every adjacent pair,
 and shows the `gh stack link` command. `link` retargets each PR onto the one
 below; its diff stays right and only what merging it would do changes. A
 `CONFLICT` between neighbours, and a child whose parent is not in the stack,
-go to the operator before linking (GOTCHAS, Stacking). Every PR stays a draft: marking one ready is `gh pr ready <n>`, the
-operator's.
+go to the operator before linking (GOTCHAS, Stacking). PACKAGE opens each PR
+as a draft (§5.7). A reviewed, linked stack is the operator's to merge, so once
+every base reads back, `--execute` marks each PR ready. A base that reads back
+wrong leaves every PR a draft.
 
-**Done when** `--execute` reports every PR's base as the branch below it.
+**Done when** `--execute` reports every PR's base as the branch below it and
+prints `marked ready`.
 
 ## 4. Chain the siblings — when the operator asks
 

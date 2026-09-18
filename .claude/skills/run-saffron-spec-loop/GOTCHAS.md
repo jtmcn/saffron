@@ -99,8 +99,9 @@ independent specs nobody reviews between cells.
   already opened and keeps no local tracking — the `gh-stack` skill's own path
   for branches another tool manages. `submit` works from local stack state and
   force-pushes every branch.
-- **Link without `--open`.** It flips every draft PACKAGE opened on purpose
-  (§5.7).
+- **Link without `--open`.** It flips every draft at once, before the bases
+  are read back. `stack --execute` marks each PR ready only after every base
+  reads back right.
 - **`link` retargets bases.** Each PR's diff stays right, because GitHub
   computes it from the merge base; what changes is what merging it would do.
   Siblings that both append to one document collide on the number as well as
