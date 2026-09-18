@@ -3013,9 +3013,12 @@ def test_the_outcome_event_round_trips_and_describes_as_its_old_line(
 def test_a_rate_limited_outcome_survives_the_log_whatever_reopen_time_was_reported(
     monkeypatch, tmp_path
 ):
-    """The four junk `resets_at` shapes from the test above all reach the
-    log: string/list/NaN unreadable, an int past `time_t` kept as reported."""
-    for i, resets_at in enumerate(("soon", [1], 10**20, float("nan"))):
+    """Every reported `resets_at` reaches the log: string/list/NaN/bool
+    unreadable, an int kept (0 and one past `time_t` included), None absent."""
+    cases: list[tuple[object, int | None, bool]] = [("soon", None, True)]
+    cases += [([1], None, True), (float("nan"), None, True), (True, None, True)]
+    cases += [(10**20, 10**20, False), (0, 0, False)]
+    for i, (resets_at, kept, unreadable) in enumerate([*cases, (None, None, False)]):
         cell = _stub_the_runtime(monkeypatch)
         outcome, _ledger = _drive(
             monkeypatch,
@@ -3030,9 +3033,11 @@ def test_a_rate_limited_outcome_survives_the_log_whatever_reopen_time_was_report
         )
         assert outcome.state == "RATE_LIMITED", resets_at
         logged = _task_outcome(tmp_path / str(i))
-        want = (10**20, False) if resets_at == 10**20 else (None, True)
-        assert (logged.resets_at, logged.resets_at_unreadable) == want, resets_at
-        assert describe(logged).endswith("window reopens unknown"), resets_at
+        assert (logged.resets_at, logged.resets_at_unreadable) == (kept, unreadable)
+        tail = "stopping, not exhausted" if resets_at is None else "window reopens"
+        assert tail in describe(logged), resets_at
+        if unreadable:
+            assert describe(logged).endswith("window reopens unknown"), resets_at
 
 
 def test_a_wall_after_the_gates_go_green_stops_the_lenses(monkeypatch, tmp_path):
@@ -3062,11 +3067,12 @@ def test_a_wall_after_the_gates_go_green_reports_what_was_spent(monkeypatch, tmp
         tmp_path,
         cell=cell,
         turns=[_turn(_block(_PLAN)), _turn(), _rejected()],
+        use_default_emit=True,
     )
     assert outcome.state == "RATE_LIMITED"
     # Plan and implement, each the default turn cost — REVIEW's own turn is
     # never credited, since the window closed before its cost was added.
-    assert outcome.spent_usd == 0.2
+    assert outcome.spent_usd == 0.2 == _task_outcome(tmp_path).spent_usd_est
 
 
 def test_a_denied_connect_reaches_the_operator(monkeypatch, tmp_path):
