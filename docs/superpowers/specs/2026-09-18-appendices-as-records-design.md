@@ -6,7 +6,7 @@ left it as a vocabulary decision to record when it was made. This is that
 decision. `DESIGN.md`'s twenty appendices, A to T, become one file each under
 `records/`'s second kind, `appendix`. They keep their letters, so no citation
 moves. The move is the first step toward recording decisions as their own
-records, and it is written down as that intent in a new Appendix U.
+records, and it is written down as that intent in a new appendix, U.
 
 ## The problem, measured
 
@@ -62,17 +62,21 @@ The letter, then a slug cut from the heading's title less any `rev N:`. The
 `Kind.pattern` is `^([A-Z]{1,2})-[a-z0-9-]+\.md$`, with the capture group
 `records/load.py:158` reads as the id. Two letters because U is the
 twenty-first and Z is the twenty-sixth: six appendices remain in one letter.
-After Z comes AA. Every reader of an appendix letter widens with the pattern, or
-"Appendix AA" is a citation nothing checks:
+After Z comes AA. Every reader of an appendix letter that survives the move
+widens with the pattern, or a citation of AA is one nothing checks:
 
-- `ontology/design_record.py:36`, `APPENDIX`.
-- `ontology/design_record.py:47`, `_INDEX_ROW`, if the rendered index keeps its
-  row form.
 - `ontology/shapes/factory-shapes.ttl:282`, `sh:pattern "^[A-Z]$"`, which is
   hand-maintained.
-- `tests/test_citations.py:95`, `_APPENDIX_CITATION`, which matches `[A-Z]\b`.
+- `tests/test_citations.py:95`, `_APPENDIX_CITATION`, which matches `[A-Z]\b`,
+  and `:174`, which splits the matched run with `re.findall(r"[A-Z]", …)`.
+  Widening `:95` alone would read AA as two citations of A and pass it.
 - `records/load.py:166`, `order()`, which sorts string ids lexically, so `AA`
   would sort before `B`. The appendix kind sorts by length, then letter.
+
+`ontology/design_record.py`'s `APPENDIX` (`:36`) and `_INDEX_ROW` (`:47`) have
+no reader after the move: letters come from record ids and revisions from
+frontmatter. They are deleted, not widened. `APPENDIX_OPENS` (`:40`) stays, for
+the guard under Validation.
 
 ### Frontmatter
 
@@ -110,10 +114,14 @@ are `records/check.py:115`, `:248`, `:282`, `:311` and `:316`, and
 `BacklogItem`. `tests/records/test_records_check.py:292` and `:299` build
 `Identified(..., status="open")` and change with it.
 
-`records/__main__.py:119` offers `choices=sorted(KINDS)`, so `appendix` becomes
-a choice for every subcommand. `_item()` at `:28` refuses a non-backlog record,
-so the subcommands that read backlog fields refuse the appendix kind by name,
-and `list` and `show` print what an appendix has.
+`records/__main__.py` changes in two places. Only `list` takes a kind
+(`choices=sorted(KINDS)`, `:119`), and `cmd_list` narrows every record through
+`_item` (`:55`), which raises "not a backlog item" (`:30`). So `records list
+appendix` would exit 2 on its first record. `list` gains a line format per
+kind. `show` (`:65`) loads only the backlog, and an id that is neither a number
+nor a random id falls to the spec-id lookup (`:82`), so `records show P` prints
+"no backlog item names P". `show` resolves a letter against the appendix kind
+first. `grep` (`:99`) and `new-id` (`:110`) stay backlog-only.
 
 Principles are not declared in frontmatter. They stay numbered lines in the
 body, and `design_record.py` keeps reading them there, so a principle is
@@ -121,7 +129,7 @@ written once.
 
 ### Body
 
-The appendix's prose, verbatim, without its `## Appendix X —` heading. The
+The appendix's prose, verbatim, without its `## Appendix <letter> —` heading. The
 appendices use `###` subheadings (49 of them) and no `##`, so the body has no
 `## ` sections.
 
@@ -155,12 +163,15 @@ specs join as a kind (its lines 297–298). It happens here instead.
   (`tests/ontology/test_design_record.py:86`). An appendix with no principle
   renders an empty cell.
 - **`.saffron/gates/prose.py:314`**, `_rendered`, exempts the principle index
-  in `DESIGN.md`. It exempts the appendix index as well, because a long line
-  there is fixed at its source. The source is `question`, and the gate strips
-  frontmatter before it reads a file, so the rule reaches `question` nowhere.
-  That is accepted: `question` is navigation.
+  in `DESIGN.md`, because each claim is checked where it is written, in its
+  appendix body. It does **not** exempt the appendix index. The gate strips
+  frontmatter, so the rendered row is the only copy of `question` any rule
+  reads, and principle 59 says no file can gain hits of any rule. A new
+  `question` that breaks a rule fails the `DESIGN.md` hook, and the fix is made
+  in the record's frontmatter. `prose.py` therefore needs no change for the
+  appendix index.
 - **`tests/test_citations.py`** takes `APPENDICES` from the records directory,
-  not from `APPENDIX` over `DESIGN.md` (`:36`, `:179`). Every `Appendix X`
+  not from `APPENDIX` over `DESIGN.md` (`:36`, `:179`). Every appendix
   citation still has to resolve.
 - **`records/check.py`** scans `DESIGN.md` for `item N` citations (`CITING`,
   `:18`) and for the old backlog path (`LIVE_SURFACES`, `:228`). Twenty lines
@@ -173,7 +184,7 @@ In `tests/records/`, against the live directory, beside the backlog's:
 
 - Ids unique, the filename prefix equals `id`, and the letters run
   contiguously from A to the last one, in the kind's own order.
-- Every `Appendix X` citation resolves, as above.
+- Every appendix citation resolves, as above.
 
 `tests/ontology/test_design_record.py` holds the principles to one global
 sequence, a contiguous block per appendix, and every appendix reached. Those
@@ -186,8 +197,13 @@ properties stay. The tests do not run unchanged, and each rewrite is named:
   heading (`:148`), the Appendix G heading (`:162`), Appendix G's index row
   (`:180`) and principle 57's claim (`:190`). Each moves onto the record text
   it names. `test_a_heading_it_cannot_read_is_refused` (`:138`) tests a heading
-  that no longer exists and is deleted with it.
-- `CONTRIBUTES_NO_PRINCIPLE` (`:109`) gains `"U"` if Appendix U contributes no
+  the parser no longer reads, and is replaced by the guard below.
+- **No appendix heading in `DESIGN.md`.** After the move, an appendix written
+  into `DESIGN.md` the old way is read by nothing: its principles never reach
+  the index, and the contiguity and currency tests stay green. A test asserts
+  no line of `DESIGN.md` matches `APPENDIX_OPENS` (`design_record.py:40`), and
+  is run against a mutant that adds one.
+- `CONTRIBUTES_NO_PRINCIPLE` (`:109`) gains `"U"` if U contributes no
   principle.
 
 ## Protection
@@ -217,7 +233,15 @@ hook loads the gate from the working tree (`:24`), so the `INCLUDED_DIRS` edit
 is not made until the move has committed. The scope change then commits with
 no appendix file staged, and the moved prose is the baseline.
 
-**Pass 2, Appendix U, after the scope commit.** Principle 59 says no file can
+**No commit that removes prose hits from `DESIGN.md` carries a prose edit to
+it.** The hook counts hits per rule (`hooks/prose_limit.py:85`), so a commit
+that removes hundreds, as the move does, would hide any new ones added in the
+same file. The move commit is a pure move. The appendix index render reproduces
+the committed rows byte for byte when it first lands, so it removes and adds
+nothing. Every `DESIGN.md` prose edit, including U's status line and pass 3,
+is in a later commit of its own.
+
+**Pass 2, appendix U, after the scope commit.** Principle 59 says no file can
 gain hits of any rule, and U is new prose, not moved prose. Written before the
 scope commit, it would become baseline unchecked. Written after, the hook
 compares it against zero like any new file.
@@ -235,10 +259,10 @@ line gains rev 25.
   and the **ADR** entry keeps its point about prior art's `ADR-NNNN` but drops
   "Saffron keeps no ADRs" for what U says. Naming decision 4 gains the
   reversal.
-- `DESIGN.md:1535`: the appendix index is rendered, so "where it disagrees with
+- `DESIGN.md:1536`: the appendix index is rendered, so "where it disagrees with
   an appendix, the appendix is right" becomes a statement about `question`
   alone.
-- `DESIGN.md:1581`: "rewrites it from the appendices below". They are no
+- `DESIGN.md:1582`: "rewrites it from the appendices below". They are no
   longer below.
 - `DESIGN.md`'s §10 tree (`:1424`) gains `docs/appendices/`.
 - `DESIGN.md:1571`'s paragraph on why an appendix is coarse stays. It states
@@ -246,8 +270,21 @@ line gains rev 25.
 - `docs/agents/domain.md:8` ("the appendices that carry the design record"),
   `:11` (the refusal of `docs/adr/`), and its tree at `:18`.
 - `CLAUDE.md:15`–`17`, on where a new principle is written.
-- `tests/test_citations.py:23` and `:232`, both saying only `DESIGN.md` has
-  appendices.
+- `tests/test_citations.py:232`, "only `DESIGN.md` has appendices", and the
+  module docstring at `:23`, written "while deciding *against* splitting
+  `DESIGN.md` into per-decision files".
+- `tests/test_citations.py:298`, `test_saffron_keeps_no_adrs`, which holds
+  `CONTEXT.md` §11's refusal and changes with it.
+- `records/kinds.py:3` ("never prose", which `question` now is),
+  `records/kinds.py:52` ("an id the filename repeats, and a status"), and
+  `records/check.py:50` ("the only registered kind today").
+- **The `DESIGN.md` qualifier.** Twenty lines outside `docs/evidence/`, done
+  specs and design docs cite "`DESIGN.md` Appendix <letter>" or "`DESIGN.md` §N,
+  Appendix <letter>", among them `CONTEXT.md:67`, `saffron/cell/runtime.py:1` and
+  `saffron/gates/contract.py:68`. The letter still resolves, and the file named
+  is wrong. They are swept to the bare "Appendix <letter>" form, as the backlog move
+  swept `docs/BACKLOG.md` paths. Found with
+  `grep -rnE "DESIGN\.md\`? (§[0-9.]+, )?Appendi"`.
 
 ## Delivery
 
@@ -255,7 +292,8 @@ A two-pull-request stack with `gh stack`, as the backlog was:
 
 1. **`records/`**: the `appendix` kind, the four loader rules onto `Kind`,
    `status` onto `BacklogItem` and its readers narrowed, the per-kind order,
-   loader tests on a fixture directory.
+   `records/__main__.py`'s `list` and `show`, loader tests on a fixture
+   directory.
 2. **The move**: pass 1, the prose scope commit, pass 2, pass 3, the readers
    switched to the records, the appendix index render, `protected`, and the
    backlog item below.
@@ -280,6 +318,6 @@ What it has to answer, stated now so it is not rediscovered:
   `CONTEXT.md:639` uses it for prior art's records, and §11's own title is
   "Design record". The name is chosen when the kind is designed, and it goes
   into `ontology/factory.ttl` then.
-- **The first record.** Appendix U's reversal, migrated out of U. It is short,
+- **The first record.** The reversal U records, migrated out of U. It is short,
   self-contained and states its own reason, so it tests the kind and the
   migration path on the smallest case.
