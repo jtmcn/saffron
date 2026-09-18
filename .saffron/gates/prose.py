@@ -495,7 +495,7 @@ def main(argv: list[str]) -> int:
         }
     )
     if not paths:
-        summary = "no Markdown file is in scope, so nothing was read"
+        summary = "no file is in scope, so nothing was read"
         return _emit(
             {"gate": gate, "status": "error", "tool": tool, "summary": summary}
         )

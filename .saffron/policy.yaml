@@ -19,7 +19,8 @@ gates:
   # so the `retired-vocabulary` pygrep hook's approach would false-positive on the
   # first three. Declared unconditionally, for the reason `shacl` gives above.
   structure: { blocking: true }
-  # House style over living Markdown. It fails at base as well: subtraction
+  # House style over living Markdown, and comment and docstring length over
+  # code. It fails at base as well: subtraction
   # counts, so a task fails only when a file gains hits of one rule.
   prose: { blocking: true }
   # Curated avoided phrases from CONTEXT.md, advisory.

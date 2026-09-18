@@ -44,4 +44,5 @@ stronger fix, since `CLAUDE.md` asks that rules be promoted to gates.
 - 2026-09-18: done by #346, as a `CLAUDE.md` line (bucket 2). The `prose` or
   `structure` rule this item calls stronger is not built.
 - 2026-09-18: #347 builds the gate half. `prose` counts Python comment runs over
-  two lines per file, as rule `comment-block`. Docstrings are not counted.
+  two lines per file, as rule `comment-block`, and function, class and test
+  docstrings over ten lines, as `docstring-length`.
