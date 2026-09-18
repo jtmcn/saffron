@@ -52,13 +52,15 @@ acceptance:
       stays in the same result with every kind the projection states.
     witness: tests/test_projection.py::test_an_artifact_a_later_task_overwrote_drops_only_the_earlier_chain
   - claim: >-
-      A materialization returns every task it left out, each with its reason.
-      A spec whose `Ceilings` spans match its tasks in count but not in time has
-      its tasks returned as unattributable, and none of them is projected.
+      A materialization returns the tasks it kept and every task it left out,
+      each with a reason from a closed set. A spec whose `Ceilings` spans match
+      its tasks in count but not in time has its tasks returned as
+      unattributable, and so does a span that recorded no plan hash or diff
+      length. None of them is projected.
     witness: tests/test_projection.py::test_tasks_that_match_their_spans_in_count_but_not_time_are_unattributable
   - claim: >-
-      A projection that fails the shapes is reported as an error and leaves no
-      projection behind, so a reader finds none rather than the last one.
+      A projection that fails the shapes raises and leaves no projection
+      behind, so a reader finds none rather than the last one.
     witness: tests/test_projection.py::test_a_projection_that_fails_the_shapes_leaves_none_behind
 ---
 
@@ -122,9 +124,9 @@ chain from Q4's result.
   `ontology/design_record.py:16-17` and
   `tests/ontology/test_vocabulary_agrees_with_code.py:21-22` each state that
   nothing under `saffron/` imports a graph library. The operator amends all four
-  at merge, and moves pyoxigraph and pyshacl out of the `dev` group
-  (`pyproject.toml:35-36`) with `uv lock`. `uv.lock` is `protected`
-  (`.saffron/policy.yaml:60`), so a cell cannot land that move. Both packages
+  at merge, and moves pyoxigraph, pyshacl and rdflib out of the `dev` group
+  (`pyproject.toml:35-37`) with `uv lock`. `uv.lock` is `protected`
+  (`.saffron/policy.yaml:60`), so a cell cannot land that move. All three packages
   are installed wherever this code runs today, because the `dev` group is.
 - **Recording a full hash for the diff.** Only its length is recorded today.
   Adding a hash means editing `saffron/cell/session.py`, which is forbidden
@@ -150,16 +152,22 @@ return it with its reason. `MERGE_TRAIN` is one: `saffron/scheduler.py:67` reads
 it, and the vocabulary does not have it. `SpecShape` needs a type and at least
 one criterion (`ontology/shapes/factory-shapes.ttl:36-42`). Read both from the
 version of the spec whose sha256 equals the task's `spec_sha`. Search every
-committed version of `.saffron/specs/`, not only the working tree. A spec
+committed version of `.saffron/specs/` on every ref of the repo's mirror, which
+the ledger names in `repos.mirror_path` (`saffron/ledger.py:21`). A task's repo
+is reached through its run. A spec
 re-runs only once its `spec_sha` changes (`saffron/scheduler.py:59-69`), so an
 overwritten task's spec bytes are usually gone from the tree. A task no
-committed version matches is left out and returned.
+committed version matches is left out and returned. So is a task whose matched
+version no longer parses or has no criterion. Both default to empty
+(`saffron/intake.py:153-154`), and one such task must not fail the shapes for
+every other task.
 
 **Which kinds.** State `Spec`, `Plan`, `Diff`, `GateSuite`, `Finding` and
 `PullRequest` edges. State no `ScopeProposal`, `TouchesSet` or `Rebuttal`. Their
 shapes need a ratifying operator and a stance
-(`ontology/shapes/factory-shapes.ttl:170-195`), and the ledger records neither
-(`saffron/ledger.py:136-138`). Stating one would author the record rather than
+(`ontology/shapes/factory-shapes.ttl:170-195`). The ledger records the
+critic's verdict and not the implementer's stance, and no ratifier
+(`saffron/ledger.py:123-138`). Stating one would author the record rather than
 derive it.
 
 **Attribution.** Tie a task to a `Ceilings` span of its spec's `events.jsonl`
@@ -170,16 +178,33 @@ in both directions. A span can have no task, because `Ceilings` is written
 (`saffron/task.py:259-270`) before the task row exists
 (`saffron/cell/session.py:1336`). A task can have no span: `saffron/replay.py:55`
 writes none, and nor did any task before `Ceilings` existed. A task no single
-span holds is unattributable. Leave it out and return it with that reason.
+span holds is unattributable, and so is every task in a span that holds more
+than one. A span with no plan-hash or diff-length line makes its task
+unattributable too. `EventLog.append` never raises (`saffron/events.py:386-388`),
+so a lost line is possible and silent. Leave each such task out and return it
+with that reason.
+
+**Compare times at whole seconds.** `runs.started_at` has whole-second
+resolution and `Ceilings.timestamp` is `time.time()` (`saffron/task.py:261`).
+Compare the run's start with the floor of the timestamp, or a run started in the
+same second as its `Ceilings` reads as earlier.
+
+**What it returns.** The kept task ids, and each left-out task with a reason
+from a closed set that names `unattributable` apart from the rest. `SA-0108`
+reads both rather than deciding them again.
 
 **Where things are.** Take the ledger, the batch-tree root and the output path
 as arguments. Never spell `~/.saffron` inside the module. Read Q4 and the shapes
 from Saffron's own source tree, never from a target repo. `pyproject.toml:44-45`
-packages only `saffron/`, and another repo has no `ontology/`.
+packages only `saffron/`, and another repo has no `ontology/`. Validate with
+`ontology/factory.ttl` loaded into the data graph, as
+`tests/ontology/test_shapes.py:43-46` does. The shapes check class membership
+through its subclass axioms.
 
 **Compare lengths in characters.** The diff's recorded number is `len` of a
 `str`. Compare it with the length of the stored file read as text, never with
-its size on disk. Put a non-ASCII character in every fixture diff, since this
+its size on disk, and read it without newline translation. Put a non-ASCII
+character in every fixture diff, since this
 repo's diffs carry them and an ASCII fixture passes either way.
 
 Distinguish `error` from `fail`. A projection that fails the shapes is an error
@@ -194,4 +219,5 @@ anti-theater gate then checks nothing.
 Write each test against the unfixed code before trusting it. The third
 criterion matters most. Build its fixture from two merged tasks of one spec,
 the second overwriting the first's stored file. Drive the plan case and the
-diff case in the one test.
+diff case in the one test. The fourth criterion's test likewise drives both of
+its cases: spans misaligned in time, and a span with no plan-hash line.
