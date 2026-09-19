@@ -391,7 +391,7 @@ def source_reverted(
 def _confined(file: str) -> bool:
     """Whether `file` names a path inside the worktree.
 
-    `saffron.mutation._resolve_target` is the host half of this refusal and
+    `tests.mutation._resolve_target` is the host half of this refusal and
     the reason is the same: a spec is data the operator writes, but `..` in a
     declared path is the shape that turns a check into an arbitrary write, and
     a cell mounts more than the worktree (`/agent-state` among them). Refused
@@ -426,7 +426,7 @@ def _read_file(container: str, path: str) -> bytes:
     decodes with `errors="replace"`: read as text and written back, every byte
     that was not valid UTF-8 returns as U+FFFD and a CRLF may not return at
     all. The tests would then run against a file differing from `HEAD` in ways
-    the mutant never declared — the thing `saffron.mutation` handles raw bytes
+    the mutant never declared — the thing `tests.mutation` handles raw bytes
     to prevent, restated here because the failure mode is the same one.
 
     A non-zero exit here becomes `error` in `witness_gate`, not a yielded
@@ -531,7 +531,7 @@ def source_mutated(container: str, mutant: Mutant) -> Iterator[str | None]:
 
     Applies `mutant.find` -> `mutant.replace` to the working tree for the
     block. The undo is plain `git checkout HEAD -- <file>`, not a replay of
-    displaced bytes the way `saffron.mutation.host_mutator` restores — so it
+    displaced bytes the way `tests.mutation.host_mutator` restores — so it
     is only correct over a file that *is* at `HEAD`, and this refuses to run
     otherwise. `SA-0062` claimed `committed` guaranteed that; it does not.
     `committed_gate` runs after `run_suite`, which is where this is called
@@ -561,7 +561,7 @@ def source_mutated(container: str, mutant: Mutant) -> Iterator[str | None]:
     # `HEAD` to come back from. A symlink is worse than either: the read and
     # the write follow it, `git checkout` restores the link — which never
     # changed — and exits 0, so the mutation survives inside a success.
-    # `saffron.mutation` never meets that because it writes bytes back to the
+    # `tests.mutation` never meets that because it writes bytes back to the
     # path it read them from; here the two halves resolve differently.
     listed = _git(container, "ls-tree", "HEAD", "--", mutant.file)
     if listed.returncode != 0:
@@ -618,7 +618,7 @@ def source_mutated(container: str, mutant: Mutant) -> Iterator[str | None]:
     # raised there replaces whatever was already propagating through, so a
     # `KeyboardInterrupt` in flight would come out as `CellRuntimeError` with
     # the interrupt demoted to `__context__`, where nothing looks.
-    # `saffron.mutation._mutated` carries the same shape for the same reason.
+    # `tests.mutation._mutated` carries the same shape for the same reason.
     failed_to_undo: runtime.CellRuntimeError | None = None
     try:
         yield None

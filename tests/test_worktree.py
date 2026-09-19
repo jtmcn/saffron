@@ -1087,7 +1087,7 @@ def test_the_undo_restores_the_committed_file_not_a_byte_copy(tmp_path, monkeypa
 
 def test_a_find_that_does_not_match_once_applies_nothing(tmp_path, monkeypatch):
     """Zero matches and two matches are both "not exactly once" — the same
-    rule `saffron.mutation.apply_mutant` follows for a host tree, matched
+    rule `tests.mutation.apply_mutant` follows for a host tree, matched
     here rather than re-derived. A mutant that names two places names no
     property, and picking one silently is how a check comes to measure
     something other than what it claims."""
@@ -1252,7 +1252,7 @@ def test_a_write_that_fails_does_not_leave_the_file_truncated(tmp_path, monkeypa
 
 def test_a_failed_undo_does_not_replace_an_exception_in_flight(tmp_path, monkeypatch):
     """An exception raised inside a `finally` replaces whatever was already
-    propagating through it — `saffron.mutation._mutated` records this defect
+    propagating through it — `tests.mutation._mutated` records this defect
     as already paid for once, and demoting a `KeyboardInterrupt` to
     `__context__` puts it where nothing looks. Raise after the `finally`,
     which Python never reaches while an exception is still in flight.
@@ -1276,7 +1276,7 @@ def test_a_mutant_path_outside_the_worktree_applies_nothing(tmp_path, monkeypatc
     """`Mutant.file`'s only validator is "not blank" (`intake.py`), and a cell
     mounts more than the worktree — `/agent-state` among them. `..` in a
     declared path is the shape that turns a check into an arbitrary write,
-    which is why `saffron.mutation._resolve_target` refuses it before either
+    which is why `tests.mutation._resolve_target` refuses it before either
     half reads or writes a byte. The cell sibling owes the same refusal.
     """
     _repo_with_a_file(tmp_path, monkeypatch, "value = 1\n")
@@ -1295,7 +1295,7 @@ def test_a_mutation_leaves_bytes_it_did_not_name_alone(tmp_path, monkeypatch):
     """`runtime.exec_` decodes with `errors="replace"`, so reading a file as
     text and writing it back re-encodes every byte that was not valid UTF-8 as
     U+FFFD. The tests then run against a file differing from `HEAD` in ways the
-    mutant never declared, which is the whole thing `saffron.mutation` reads
+    mutant never declared, which is the whole thing `tests.mutation` reads
     and writes raw bytes to prevent: "anything it does must be undone exactly:
     byte-identical". A CRLF line ending is the same defect, cheaper to trip.
     """
@@ -1437,7 +1437,7 @@ def test_a_mutant_on_a_path_git_cannot_restore_applies_nothing(tmp_path, monkeyp
     one. A gitignored or untracked path is clean to `git status` and has
     nothing at `HEAD` to come back from; a nonexistent one is the ordinary
     case `gates/core/witness.py` calls "the spec anticipated a different
-    implementation", which `saffron.mutation.apply_mutant` answers with a
+    implementation", which `tests.mutation.apply_mutant` answers with a
     reason and `error` would wrongly charge to the attempt.
     """
     _repo_with_a_file(tmp_path, monkeypatch, "value = 1\n")
@@ -1461,7 +1461,7 @@ def test_a_symlinked_mutant_path_applies_nothing(tmp_path, monkeypatch):
     restores the link — which never changed — and exits 0. The mutation is
     left behind on the file the link points at, reported as a clean success.
 
-    `saffron.mutation` never meets this because it writes bytes back to the
+    `tests.mutation` never meets this because it writes bytes back to the
     same path it read them from. Here the two halves resolve differently, so
     the mode at `HEAD` has to be read rather than assumed.
     """
