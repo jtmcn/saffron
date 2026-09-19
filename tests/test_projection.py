@@ -3,7 +3,7 @@
 Every test imports `saffron.projection` inside its own body, never at module
 scope: a module-scope import of a name this diff adds turns the `revert`
 gate's reverted run into a collection error for the whole file, and `revert`
-reads a collection error as `skip` (CLAUDE.md).
+reads a collection error as `skip` (`DESIGN.md` §5.5.1).
 """
 
 from __future__ import annotations
@@ -48,8 +48,8 @@ def _commit_spec(mirror: Path, spec_id: str, text: str, version: int) -> None:
 
 
 def spec_text(spec_id: str, *, criteria: bool = True, marker: str = "") -> str:
-    """A minimal, valid committed spec version. A non-ASCII `marker` (used by
-    the diff-content tests) is never spelled here; specs stay plain ASCII."""
+    """A minimal, valid committed spec version; `marker` varies its bytes, so
+    two versions of one spec_id hash apart."""
     body = "\n## Acceptance criteria\n\n- [ ] does the thing\n" if criteria else "\n"
     return f"---\nid: {spec_id}\ntitle: t {marker}\ntype: feature\n---\n{body}"
 
@@ -265,9 +265,14 @@ def test_a_materialization_projects_every_ended_task_and_replaces_the_last(tmp_p
         ],
         ledger=ledger,
     )
+    mirror = tmp_path / "mirror"
+    (mirror / ".saffron" / "specs" / "done").mkdir()
+    _git(mirror, "mv", ".saffron/specs/SA-8001-v1.md", ".saffron/specs/done/")
+    _git(mirror, "commit", "-q", "-m", "retire SA-8001")
 
     output_path = tmp_path / "projection.ttl"
     result1 = materialize(ledger, out_dir, output_path)
+    assert a in result1.kept, result1.left_out.get(a)
     assert result1.kept[a] is not None
     assert result1.kept[b] is not None
 
@@ -315,10 +320,28 @@ def test_q4_over_the_projection_reaches_a_merged_pull_request(tmp_path):
         ],
     )
 
+    # IMPLEMENT 2 is the last attempt with gate results; a later REVIEWING one has none.
+    gated = ledger.open_attempt(task_id, phase="IMPLEMENT")
+    ledger.record_gate_result(
+        GateResult(gate="tests", status="pass", tool="pytest 1.0"), attempt_id=gated
+    )
+    ledger.open_attempt(task_id, phase="REVIEWING")
+
     output_path = tmp_path / "projection.ttl"
     result = materialize(ledger, out_dir, output_path)
     pr_iri = result.kept[task_id]
     assert pr_iri is not None
+
+    import rdflib
+
+    g = rdflib.Graph().parse(output_path, format="turtle")
+    factory = rdflib.Namespace("urn:software-factory:ns#")
+    prov = rdflib.Namespace("http://www.w3.org/ns/prov#")
+    attempts = set(g.subjects(rdflib.RDF.type, factory.Attempt))
+    assert sorted(int(str(g.value(at, factory.n))) for at in attempts) == [1, 1, 2]
+    assert len(set(g.subjects(rdflib.RDF.type, factory.Phase))) == 2
+    generators = [at for at in attempts if g.value(at, prov.generated)]
+    assert [int(str(g.value(at, factory.n))) for at in generators] == [2]
 
     rows = _run_q4(output_path)
     kinds = {
@@ -332,55 +355,102 @@ def test_q4_over_the_projection_reaches_a_merged_pull_request(tmp_path):
 def test_an_artifact_a_later_task_overwrote_drops_only_the_earlier_chain(tmp_path):
     from saffron.projection import materialize
 
-    plan_a, diff_a = '{"v": "a"}', "diff --git a/a b/a\n+â\n"
-    plan_b, diff_b = '{"v": "b, longer"}', "diff --git a/b b/b\n+â longer\n"
-    shared_pr = "https://example/pr/shared"
+    # Pair 1: b overwrites a's plan only (same diff length). Pair 2: d overwrites
+    # c's diff only (same plan). Each pair shares one pr_url.
+    plan_a, plan_b = '{"v": "a"}', '{"v": "b, longer"}'
+    diff_b = "diff --git a/b b/b\n+â\n"
+    plan_d, diff_c, diff_d = (
+        '{"v": "d"}',
+        "diff --git a/c b/c\n+â\n",
+        "diff --git a/d b/d\n+â longer\n",
+    )
 
-    ledger, out_dir, (a, b) = build(
+    def merged(spec_id, pr, started, **kw):
+        return T(
+            spec_id,
+            "MERGED",
+            spec_text=spec_text(spec_id),
+            pr_url=pr,
+            started_at=started,
+            plan_line=True,
+            diff_line=True,
+            gate_result=True,
+            finding=True,
+            **kw,
+        )
+
+    ledger, out_dir, (a, b, c, d) = build(
         tmp_path,
         [
-            T(
+            merged(
                 "SA-8201",
-                "MERGED",
-                spec_text=spec_text("SA-8201"),
-                pr_url=shared_pr,
-                started_at="2026-01-01 00:00:00",
-                plan_line=True,
+                "https://example/pr/shared-1",
+                "2026-01-01 00:00:00",
                 plan_line_hash=hashlib.sha256(plan_a.encode()).hexdigest()[:12],
-                diff_line=True,
-                diff_line_length=len(diff_a),
-                # The file gets overwritten below by b's own write.
-                gate_result=True,
-                finding=True,
+                diff_line_length=len(diff_b),
             ),
-            T(
+            merged(
                 "SA-8201",
-                "MERGED",
-                spec_text=spec_text("SA-8201"),
-                pr_url=shared_pr,
-                started_at="2026-01-01 00:05:00",
-                plan_line=True,
+                "https://example/pr/shared-1",
+                "2026-01-01 00:05:00",
                 plan_file=plan_b,
-                diff_line=True,
                 diff_file=diff_b,
-                gate_result=True,
-                finding=True,
+            ),
+            merged(
+                "SA-8202",
+                "https://example/pr/shared-2",
+                "2026-01-01 00:00:00",
+                plan_line_hash=hashlib.sha256(plan_d.encode()).hexdigest()[:12],
+                diff_line_length=len(diff_c),
+            ),
+            merged(
+                "SA-8202",
+                "https://example/pr/shared-2",
+                "2026-01-01 00:05:00",
+                plan_file=plan_d,
+                diff_file=diff_d,
             ),
         ],
     )
-    # Task a's own recorded lines pointed at plan_a/diff_a; only b's content
-    # is ever written to disk, so a's chain is now stale.
     output_path = tmp_path / "projection.ttl"
     result = materialize(ledger, out_dir, output_path)
 
-    assert a in result.kept and b in result.kept
-    assert result.kept[a] is not None and result.kept[b] is not None
-    assert result.kept[a] != result.kept[b]
+    for overwritten, sibling in ((a, b), (c, d)):
+        assert overwritten in result.kept and sibling in result.kept
+        assert result.kept[overwritten] is not None
+        assert result.kept[overwritten] != result.kept[sibling]
 
     rows = _run_q4(output_path)
     prs_in_q4 = {row["pr"].value for row in rows}
-    assert result.kept[b] in prs_in_q4
     assert result.kept[a] not in prs_in_q4
+    assert result.kept[c] not in prs_in_q4
+    for sibling in (b, d):
+        kinds = {
+            row["kind"].value.rsplit("#", 1)[-1]
+            for row in rows
+            if row["pr"].value == result.kept[sibling]
+        }
+        assert kinds == {"Spec", "Plan", "Diff", "GateSuite", "Finding", "PullRequest"}
+
+    # A mismatch drops one edge: every task's Diff is still a finding's
+    # subject and a gate suite's input.
+    import rdflib
+
+    g = rdflib.Graph().parse(output_path, format="turtle")
+    factory = rdflib.Namespace("urn:software-factory:ns#")
+    earl = rdflib.Namespace("http://www.w3.org/ns/earl#")
+    prov = rdflib.Namespace("http://www.w3.org/ns/prov#")
+    diffs = set(g.subjects(rdflib.RDF.type, factory.Diff))
+    assert len(diffs) == 4
+    for diff in diffs:
+        assert any(
+            (f, rdflib.RDF.type, factory.Finding) in g
+            for f in g.subjects(earl.subject, diff)
+        )
+        assert any(
+            (s, rdflib.RDF.type, factory.GateSuite) in g
+            for s in g.subjects(prov.used, diff)
+        )
 
 
 def test_spec_version_is_chosen_by_content_hash_not_by_being_seen_first(tmp_path):
@@ -485,6 +555,32 @@ def test_tasks_that_match_their_spans_in_count_but_not_time_are_unattributable(
             diff_line=True,
             diff_line_length=123,
         ),
+        # (i) merged, plan line recorded, plan.json never written.
+        T(
+            "SA-8309",
+            "MERGED",
+            spec_text=spec_text("SA-8309"),
+            plan_line=True,
+            plan_line_hash="0" * 12,
+            diff_line=True,
+            diff_file=diff,
+        ),
+        # (j) two Ceilings in second N and one run in N: unattributable. Its
+        # sibling's run predates both spans.
+        T(
+            "SA-8310",
+            "PREFLIGHT_FAILED",
+            spec_text=spec_text("SA-8310"),
+            started_at="2026-01-01 00:00:00",
+            ceilings_ts=_epoch("2026-01-01 00:00:00") + 0.2,
+        ),
+        T(
+            "SA-8310",
+            "PREFLIGHT_FAILED",
+            spec_text=spec_text("SA-8310"),
+            started_at="2025-12-31 00:00:00",
+            ceilings_ts=_epoch("2026-01-01 00:00:00") + 0.6,
+        ),
         # (h) TZ edge: run in second N, Ceilings at N+0.7, under JST-9.
         T(
             "SA-8308",
@@ -510,17 +606,30 @@ def test_tasks_that_match_their_spans_in_count_but_not_time_are_unattributable(
             os.environ["TZ"] = old_tz
         time.tzset()
 
-    a1, a2, b_, c_, d_, e_, f_, g_, h_ = ids
+    a1, a2, b_, c_, d_, e_, f_, g_, i_, j1, j2, h_ = ids
+    reasons = {t: lo.reason for t, lo in result.left_out.items()}
 
-    assert result.left_out[a1].reason == "unattributable"
-    assert result.left_out[a2].reason == "unattributable"
-    assert result.left_out[b_].reason == "unattributable"
-    assert result.left_out[c_].reason == "unattributable"
+    assert reasons.get(a1) == "unattributable"
+    assert reasons.get(a2) == "unattributable"
+    assert reasons.get(b_) == "unattributable"
+    assert reasons.get(c_) == "unattributable"
     assert d_ in result.kept
-    assert result.left_out[e_].reason == "spec_not_found"
-    assert result.left_out[f_].reason == "spec_unusable"
-    assert result.left_out[g_].reason == "missing_artifact"
+    assert reasons.get(e_) == "spec_not_found"
+    assert reasons.get(f_) == "spec_unusable"
+    assert reasons.get(g_) == "missing_artifact"
+    assert reasons.get(i_) == "missing_artifact"
+    assert reasons.get(j1) == "unattributable"
+    assert reasons.get(j2) == "unattributable"
     assert h_ in result.kept
+
+    import rdflib
+
+    g = rdflib.Graph().parse(tmp_path / "projection.ttl", format="turtle")
+    terms = {str(term) for triple in g for term in triple}
+    left_specs = {tasks[ids.index(t)].spec_id for t in result.left_out}
+    assert not any(spec_id in term for spec_id in left_specs for term in terms)
+    task_class = rdflib.URIRef("urn:software-factory:ns#Task")
+    assert len(set(g.subjects(rdflib.RDF.type, task_class))) == len(result.kept)
 
 
 def test_a_projection_that_fails_the_shapes_leaves_none_behind(tmp_path):
