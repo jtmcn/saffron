@@ -37,7 +37,7 @@ This is item 69's question answered the way that item says it must be, by runnin
 and without a spec author declaring anything. That matters because §5.4.1 lets a
 spec creating new code declare no mutant at all, and four of the five probes above
 edit lines the diff itself added. The machinery exists: the `witness` gate's cell
-mutator applies a `Mutant` and restores it (`saffron/mutation.py`, `SA-0062`), and
+mutator applies a `Mutant` and restores it (`tests/mutation.py`, `SA-0062`), and
 the repo's `tests` gate accepts a subset. What a probe lacks that a spec mutant has
 is its witness — it names the edit, not the test that should die — so it runs under
 the spec's declared witnesses and the diff's own added tests.
