@@ -9,6 +9,7 @@ symbol it will bring into use by listing it under `pending_symbols`.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -17,6 +18,8 @@ from pathlib import Path
 
 GATE = "dead"
 ROOTS = ("saffron", "harness", "images", ".saffron/gates")
+# ponytail: vulture matches names globally, so a new function named like any
+# attribute used anywhere, or listed in `__all__`, is not reported.
 MIN_CONFIDENCE = "60"
 # Anchored on this file, as `structure.py` anchors its config: a cell runs the base's copy.
 SAFFRON_DIR = Path(__file__).resolve().parent.parent
@@ -29,6 +32,11 @@ _LINE = re.compile(
     r"^(?P<file>.+?):(?P<line>\d+): (?P<message>.+ \(\d+% confidence\))$"
 )
 _UNUSED = re.compile(r"^unused (?P<kind>\w+) '(?P<name>[^']+)'")
+# Every message in vulture 2.16's `reachability.py`.
+_UNREACHABLE = re.compile(
+    r"^(unreachable code after|unreachable 'else' (block|expression)"
+    r"|unsatisfiable '\w+' condition|redundant if-condition) "
+)
 _FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?(.*)\Z", re.DOTALL)
 # The same pattern as `saffron.intake.PENDING_SYMBOL`; a test holds the two readers together.
 _ENTRY = re.compile(r"^[^\s:]+::[A-Za-z_][A-Za-z0-9_]*$")
@@ -62,7 +70,7 @@ def parse(stdout: str) -> list[Unused]:
         unused = _UNUSED.match(message)
         if unused:
             code, name = f"unused-{unused['kind']}", unused["name"]
-        elif message.startswith("unreachable code"):
+        elif _UNREACHABLE.match(message):
             code, name = "unreachable-code", None
         else:
             raise ValueError(f"cannot read vulture line: {raw[:200]}")
@@ -85,22 +93,27 @@ def entries(text: str) -> list[str]:
         raise ValueError("frontmatter is not a mapping")
     listed = fields.get("pending_symbols") or []
     if not isinstance(listed, list) or not all(
-        isinstance(e, str) and _ENTRY.match(e) for e in listed
+        isinstance(e, str) and _ENTRY.fullmatch(e) for e in listed
     ):
         raise ValueError(f"pending_symbols is not a list of <path>::<name>: {listed!r}")
     return listed
 
 
-def pending(specs_dir: Path) -> dict[str, str]:
-    """Each open spec's entries, mapped to the spec file that names it."""
+def pending(specs_dir: Path) -> tuple[dict[str, str], list[str]]:
+    """Each open spec's entries mapped to the spec naming it, and the specs skipped.
+
+    A spec that does not parse defers nothing: intake refuses it, so no task runs it.
+    """
     found: dict[str, str] = {}
+    skipped: list[str] = []
     for path in sorted(specs_dir.glob("*.md")):
         try:
             listed = entries(path.read_text(encoding="utf-8"))
-        except ValueError as exc:
-            raise ValueError(f"{path.name}: {exc}") from exc
+        except ValueError:
+            skipped.append(path.name)
+            continue
         found.update(dict.fromkeys(listed, path.name))
-    return found
+    return found, skipped
 
 
 def _emit(payload: dict[str, object]) -> int:
@@ -134,17 +147,20 @@ def main(argv: list[str]) -> int:
         return _error(
             f"none of {', '.join(ROOTS)} is here, so nothing was scanned", tool
         )
-    scan = subprocess.run(
-        ["vulture", *roots, str(WHITELIST), "--min-confidence", MIN_CONFIDENCE],
-        capture_output=True,
-        text=True,
-    )
+    # `--config` names an empty file so the scanned tree's `pyproject.toml` cannot hide a name.
+    argv = ["vulture", *roots, str(WHITELIST), "--min-confidence", MIN_CONFIDENCE]
+    try:
+        scan = subprocess.run(
+            [*argv, "--config", os.devnull], capture_output=True, text=True
+        )
+    except OSError as exc:
+        return _error(f"vulture could not be run: {exc}", tool)
     if scan.returncode not in OK_EXITS:
         detail = (scan.stderr or scan.stdout).strip()[-400:]
         return _error(f"vulture exited {scan.returncode}: {detail}", tool)
     try:
         found = parse(scan.stdout)
-        deferred = pending(SPECS)
+        deferred, skipped = pending(SPECS)
     except (ImportError, OSError, ValueError) as exc:
         return _error(f"{type(exc).__name__}: {exc}", tool)
 
@@ -155,6 +171,8 @@ def main(argv: list[str]) -> int:
         f"{len(failures)} unused, {len(found) - len(failures)} deferred by open specs, "
         f"{len(stale)} stale pending entries"
     )
+    if skipped:
+        summary += f", skipped unreadable specs: {', '.join(skipped)}"
     if report:
         for u in failures:
             print(f"{u.file}:{u.line}: {u.message}")

@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from saffron.gates.contract import identity, parse_gate_json
-from saffron.intake import parse_spec
+from saffron.intake import SpecError, parse_spec
 
 REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / ".saffron" / "gates" / "dead.py"
@@ -45,11 +45,22 @@ def test_each_vulture_line_becomes_one_failure_keyed_by_kind_and_symbol():
     assert unused.symbol == "saffron/util.py::visible_cpus"
 
 
-def test_unreachable_code_is_a_failure_with_no_symbol_to_defer():
-    [unused] = _dead().parse(
-        "saffron/util.py:30: unreachable code after 'return' (100% confidence)\n"
-    )
+@pytest.mark.parametrize(
+    "message",
+    [
+        "unreachable code after 'return'",
+        "unsatisfiable 'if' condition",
+        "unsatisfiable 'while' condition",
+        "unsatisfiable 'ternary' condition",
+        "redundant if-condition",
+        "unreachable 'else' block",
+        "unreachable 'else' expression",
+    ],
+)
+def test_each_reachability_line_is_unreachable_code_with_no_symbol(message):
+    [unused] = _dead().parse(f"saffron/util.py:30: {message} (100% confidence)\n")
     assert unused.code == "unreachable-code"
+    assert unused.message == f"{message} (100% confidence)"
     assert unused.symbol is None
 
 
@@ -65,9 +76,10 @@ def test_an_open_spec_defers_the_symbols_it_lists(tmp_path):
     (tmp_path / "SA-9001-x.md").write_text(
         SPEC.format(extra="pending_symbols:\n  - saffron/util.py::visible_cpus\n")
     )
-    assert _dead().pending(tmp_path) == {
-        "saffron/util.py::visible_cpus": "SA-9001-x.md"
-    }
+    assert _dead().pending(tmp_path) == (
+        {"saffron/util.py::visible_cpus": "SA-9001-x.md"},
+        [],
+    )
 
 
 def test_a_retired_spec_defers_nothing(tmp_path):
@@ -75,7 +87,7 @@ def test_a_retired_spec_defers_nothing(tmp_path):
     (tmp_path / "done" / "SA-9001-x.md").write_text(
         SPEC.format(extra="pending_symbols:\n  - saffron/util.py::visible_cpus\n")
     )
-    assert _dead().pending(tmp_path) == {}
+    assert _dead().pending(tmp_path) == ({}, [])
 
 
 @pytest.mark.parametrize(
@@ -108,6 +120,15 @@ def test_the_gate_reads_the_same_entries_intake_does(text):
     assert _dead().entries(text) == parse_spec(text).pending_symbols
 
 
+def test_both_readers_refuse_an_entry_that_ends_in_a_newline():
+    """`re`'s `$` matches before a trailing newline, and pydantic's does not."""
+    text = SPEC.format(extra='pending_symbols:\n  - "saffron/a.py::b\\n"\n')
+    with pytest.raises(SpecError):
+        parse_spec(text)
+    with pytest.raises(ValueError):
+        _dead().entries(text)
+
+
 CLEAN = "def used():\n    return 1\n\n\nprint(used())\n"
 ORPHAN = "def orphan():\n    return 2\n"
 
@@ -130,9 +151,11 @@ def _env(path: str | None = None) -> dict[str, str]:
     return {**os.environ, "PATH": path or f"{venv_bin}{os.pathsep}{os.environ['PATH']}"}
 
 
-def _script(tree: Path, *args: str, python=(sys.executable,), env=None) -> str:
+def _script(
+    tree: Path, *args: str, python=(sys.executable,), env=None, base=None
+) -> str:
     done = subprocess.run(
-        [*python, str(tree / ".saffron" / "gates" / "dead.py"), *args],
+        [*python, str((base or tree) / ".saffron" / "gates" / "dead.py"), *args],
         cwd=tree,
         capture_output=True,
         text=True,
@@ -142,8 +165,19 @@ def _script(tree: Path, *args: str, python=(sys.executable,), env=None) -> str:
     return done.stdout
 
 
-def _run(tree: Path, python=(sys.executable,), env=None):
-    return parse_gate_json(_script(tree, python=python, env=env), expected_gate="dead")
+def _run(tree: Path, python=(sys.executable,), env=None, base=None):
+    return parse_gate_json(
+        _script(tree, python=python, env=env, base=base), expected_gate="dead"
+    )
+
+
+def _stub_vulture(tmp_path: Path, body: str, mode: int) -> dict[str, str]:
+    """A PATH whose only vulture is `body`; `/usr/bin` and `/bin` carry no other."""
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    (stub / "vulture").write_text(f"#!/bin/sh\n{body}")
+    (stub / "vulture").chmod(mode)
+    return _env(path=f"{stub}:/usr/bin:/bin")
 
 
 def _spec(tree: Path, entry: str, folder: str = "") -> None:
@@ -219,25 +253,82 @@ def test_a_stale_pending_entry_does_not_fail_the_gate(tmp_path):
 def test_a_missing_vulture_is_an_error(tmp_path):
     result = _run(_tree(tmp_path), env=_env(path=str(tmp_path / "no-bin")))
     assert result.status == "error"
+    assert "could not be run" in result.summary
+
+
+def test_a_vulture_present_but_not_executable_is_an_error(tmp_path):
+    """`execvp` skips a candidate it cannot run, so the PATH holds no other vulture."""
+    env = _stub_vulture(tmp_path, "echo 'vulture 0.0-stub'\n", 0o644)
+    result = _run(_tree(tmp_path / "repo"), env=env)
+    assert result.status == "error", result.summary
+    assert "could not be run" in result.summary
+
+
+def test_a_vulture_that_stops_being_runnable_after_its_version_is_an_error(tmp_path):
+    body = 'chmod -x "$0"\necho "vulture 0.0-stub"\n'
+    env = _stub_vulture(tmp_path, body, 0o755)
+    result = _run(_tree(tmp_path / "repo"), env=env)
+    assert result.status == "error", result.summary
+    assert "could not be run" in result.summary
 
 
 def test_a_missing_pyyaml_is_an_error(tmp_path):
     tree = _tree(tmp_path)
     _spec(tree, "saffron/core.py::used")
     # `-S` drops site-packages, where pyyaml lives; vulture is still on PATH.
-    assert _run(tree, python=(sys.executable, "-S")).status == "error"
+    result = _run(tree, python=(sys.executable, "-S"))
+    assert result.status == "error"
+    assert "No module named 'yaml'" in result.summary
 
 
 def test_a_file_vulture_cannot_read_is_an_error_not_a_failure(tmp_path):
     tree = _tree(tmp_path)
     (tree / "saffron" / "broken.py").write_text("def (:\n")
-    assert _run(tree).status == "error"
+    result = _run(tree)
+    assert result.status == "error"
+    assert "vulture exited 1" in result.summary
 
 
-def test_a_malformed_spec_is_an_error(tmp_path):
+def test_a_condition_that_never_holds_is_a_failure_not_an_error(tmp_path):
     tree = _tree(tmp_path)
-    _spec(tree, "orphan")
-    assert _run(tree).status == "error"
+    (tree / "saffron" / "extra.py").write_text("if False:\n    print(1)\n")
+    result = _run(tree)
+    assert result.status == "fail", result.summary
+    assert [f.code for f in result.failures] == ["unreachable-code"]
+
+
+def test_a_malformed_spec_is_skipped_and_named_while_the_gate_still_runs(tmp_path):
+    """Intake refuses the spec, so no task can use its entries: none is deferred."""
+    tree = _tree(tmp_path)
+    (tree / "saffron" / "extra.py").write_text(ORPHAN)
+    (tree / ".saffron" / "specs" / "SA-9001-x.md").write_text(
+        SPEC.format(
+            extra="pending_symbols:\n  - saffron/extra.py::orphan\n  - orphan\n"
+        )
+    )
+    result = _run(tree)
+    assert result.status == "fail", result.summary
+    assert result.summary.endswith(", skipped unreadable specs: SA-9001-x.md")
+
+
+def test_the_scanned_tree_cannot_configure_vulture(tmp_path):
+    tree = _tree(tmp_path)
+    (tree / "saffron" / "extra.py").write_text(ORPHAN)
+    (tree / "pyproject.toml").write_text('[tool.vulture]\nignore_names = ["orphan*"]\n')
+    assert [(f.file, f.code) for f in _run(tree).failures] == [
+        ("saffron/extra.py", "unused-function")
+    ]
+
+
+def test_the_specs_that_defer_are_the_bases_not_the_scanned_trees(tmp_path):
+    """A cell runs the base's `.saffron/` as `/gates`, so a spec it writes defers nothing."""
+    base = _tree(tmp_path / "base")
+    tree = _tree(tmp_path / "head")
+    (tree / "saffron" / "extra.py").write_text(ORPHAN)
+    _spec(tree, "saffron/extra.py::orphan")
+    result = _run(tree, base=base)
+    assert result.status == "fail", result.summary
+    assert [f.file for f in result.failures] == ["saffron/extra.py"]
 
 
 def test_a_failure_keeps_its_identity_when_its_line_moves(tmp_path):

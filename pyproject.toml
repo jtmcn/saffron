@@ -23,7 +23,7 @@ saffron = "saffron.cli:main"
 # ty is pinned exactly, not floored: the `types` gate parses its JSON output
 # and it is pre-1.0 — a schema change on a routine resolve would turn a batch
 # red overnight rather than at review. ast-grep-cli and vulture are pinned for
-# the same reason: the structure and dead gates parse their output and their
+# the same reason: the `structure` and `dead` gates parse their output and their
 # schemas are likewise pre-1.0. This is the version a cell gets, baked into
 # /opt/venv; on the host the gate takes whatever `ast-grep` is on PATH, exactly
 # as `lint` takes `ruff`, and reports the version it actually ran.
