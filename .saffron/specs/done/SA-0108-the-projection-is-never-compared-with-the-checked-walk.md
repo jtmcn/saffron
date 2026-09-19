@@ -63,7 +63,7 @@ acceptance:
 
 ## Context
 
-`DESIGN.md` Appendix T (rev 24) and backlog item b-946f03 reopened the emitter.
+Appendix T (rev 24) and backlog item b-946f03 reopened the emitter.
 The appendix names a decision rule. Q4 must drop at least one merged pull
 request that the checked walk reports as whole. `SA-0107` builds the projection
 Q4 runs over. This spec builds the other half of the comparison and a command

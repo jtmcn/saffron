@@ -19,7 +19,7 @@ LAST_NUMBERED = 177
 
 # Where a live `item N` is a promise someone can follow today. Not
 # `docs/evidence/`: dated primary records, true on their date.
-CITING = ("saffron", "tests", ".saffron/specs", "DESIGN.md")
+CITING = ("saffron", "tests", ".saffron/specs", "DESIGN.md", "docs/appendices")
 _SUFFIXES = {".py", ".md", ".yaml", ".yml", ".toml", ".sh"}
 
 # `item 33`, `items 65, 72`, `items **81**–**85**`, `BACKLOG item 118`,
@@ -51,9 +51,8 @@ def _ids(records: list[Record]) -> dict[ItemId, Record]:
 
 
 def _backlog(r: Record) -> BacklogItem:
-    """Narrow a record's model to `BacklogItem`, the only registered kind
-    today — a field read via `getattr(..., default)` on the wrong model
-    would silently check nothing instead of refusing it."""
+    """Narrow a record's model to `BacklogItem`. A field read via `getattr` on
+    another kind's model would silently check nothing instead of refusing it."""
     if not isinstance(r.model, BacklogItem):
         raise TypeError(f"{r.path}: not a BacklogItem")
     return r.model
@@ -94,6 +93,26 @@ def check_ids(records: list[Record]) -> list[Violation]:
     return out
 
 
+def appendix_letters(n: int) -> list[str]:
+    """The first `n` appendix ids: A to Z, then AA, AB, and on."""
+    singles = [chr(c) for c in range(ord("A"), ord("Z") + 1)]
+    return (singles + [a + b for a in singles for b in singles])[:n]
+
+
+def check_appendix_letters(records: list[Record]) -> list[Violation]:
+    ids = [str(r.model.id) for r in records]
+    expected = appendix_letters(len(ids))
+    if ids == expected:
+        return []
+    return [
+        Violation(
+            records[-1].path,
+            "id",
+            f"appendix letters are {ids}; they run from A with no gap or repeat: {expected}",
+        )
+    ]
+
+
 def check_links(records: list[Record]) -> list[Violation]:
     by_id = _ids(records)
     out: list[Violation] = []
@@ -116,7 +135,7 @@ def check_links(records: list[Record]) -> list[Violation]:
                         f"names item {target}, which does not exist",
                     )
                 )
-            elif by_id[target].model.status == "superseded":
+            elif _backlog(by_id[target]).status == "superseded":
                 out.append(
                     Violation(
                         r.path, "superseded_by", f"item {target} is itself superseded"
@@ -237,6 +256,7 @@ LIVE_SURFACES = (
     "DESIGN.md",
     "README.md",
     "docs/agents",
+    "docs/appendices",
 )
 
 _TIER_HEADING = re.compile(r"^### Tier (\d)\b")
@@ -249,7 +269,7 @@ def check_done_specs_are_done(records: list[Record], root: Path) -> list[Violati
     specs = spec_files(root)
     out: list[Violation] = []
     for r in records:
-        if r.model.status != "done":
+        if _backlog(r).status != "done":
             continue
         for spec in _backlog(r).specs:
             path = specs.get(spec)
@@ -283,7 +303,7 @@ def check_specs_name_their_items(records: list[Record], root: Path) -> list[Viol
                     item.path, "specs", f"{spec_id} cites this item and is not listed"
                 )
             )
-        if path.parent.name == "done" and item.model.status == "open":
+        if path.parent.name == "done" and _backlog(item).status == "open":
             out.append(
                 Violation(item.path, "status", f"open, but {spec_id} is in done/")
             )
@@ -312,12 +332,12 @@ def check_priority(records: list[Record], priority_md: Path) -> list[Violation]:
                         priority_md, "index", f"strikes item {n}, which does not exist"
                     )
                 )
-            elif by_id[n].model.status not in ("done", "superseded"):
+            elif _backlog(by_id[n]).status not in ("done", "superseded"):
                 out.append(
                     Violation(
                         priority_md,
                         "index",
-                        f"strikes item {n}, which is {by_id[n].model.status}",
+                        f"strikes item {n}, which is {_backlog(by_id[n]).status}",
                     )
                 )
         for n in bold:
@@ -442,4 +462,5 @@ def check_all(
         + check_priority(records, priority)
         + check_no_old_path(root)
         + check_awaiting(records, merged, building)
+        + check_appendix_letters(load(KINDS["appendix"], root))
     )

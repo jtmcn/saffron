@@ -14,8 +14,10 @@ from records.kinds import KINDS, Identified
 from records.load import Record, load
 from tests.records.check import (
     Violation,
+    appendix_letters,
     building_pr,
     check_all,
+    check_appendix_letters,
     check_awaiting,
     check_cites_resolve,
     check_done_specs_are_done,
@@ -32,6 +34,7 @@ from tests.records.check import (
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "good"
 BACKLOG = KINDS["backlog"]
+APPENDIX = KINDS["appendix"]
 
 
 @pytest.fixture
@@ -289,14 +292,14 @@ def test_a_non_backlog_record_is_refused_naming_the_file():
     # A field read via getattr(..., default) on the wrong model would silently
     # check nothing; narrowing to BacklogItem must refuse it instead.
     records = load(BACKLOG, FIXTURE)
-    bogus = replace(records[0], model=Identified(id=records[0].model.id, status="open"))
+    bogus = replace(records[0], model=Identified(id=records[0].model.id))
     with pytest.raises(TypeError, match=str(bogus.path)):
         check_links([bogus])
 
 
 def test_the_priority_check_refuses_a_non_backlog_record_too():
     records = load(BACKLOG, FIXTURE)
-    bogus = replace(records[0], model=Identified(id=records[0].model.id, status="open"))
+    bogus = replace(records[0], model=Identified(id=records[0].model.id))
     with pytest.raises(TypeError, match=str(bogus.path)):
         check_priority([bogus], FIXTURE / "docs" / "backlog" / "PRIORITY.md")
 
@@ -481,3 +484,30 @@ def test_building_pr_reads_only_a_pull_request_ref():
     assert building_pr("refs/pull/296/merge") == 296
     assert building_pr("refs/heads/main") is None
     assert building_pr(None) is None
+
+
+def test_appendix_letters_run_a_to_z_then_aa():
+    letters = appendix_letters(28)
+    assert letters[:2] == ["A", "B"] and letters[25:] == ["Z", "AA", "AB"]
+
+
+def test_the_fixture_appendices_are_contiguous():
+    assert check_appendix_letters(load(APPENDIX, FIXTURE)) == []
+
+
+def test_a_skipped_letter_is_a_violation(tmp_path: Path):
+    shutil.copytree(FIXTURE, tmp_path, dirs_exist_ok=True)
+    directory = tmp_path / APPENDIX.directory
+    (directory / "B-a-second-revision.md").rename(directory / "C-a-second-revision.md")
+    text = (directory / "C-a-second-revision.md").read_text()
+    (directory / "C-a-second-revision.md").write_text(text.replace("id: B", "id: C"))
+    [v] = check_appendix_letters(load(APPENDIX, tmp_path))
+    assert v.field == "id" and "['A', 'C']" in v.message
+
+
+def test_a_letter_used_twice_is_a_violation(tmp_path: Path):
+    shutil.copytree(FIXTURE, tmp_path, dirs_exist_ok=True)
+    directory = tmp_path / APPENDIX.directory
+    shutil.copy(directory / "B-a-second-revision.md", directory / "B-again.md")
+    [v] = check_appendix_letters(load(APPENDIX, tmp_path))
+    assert "['A', 'B', 'B']" in v.message

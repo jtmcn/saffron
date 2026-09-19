@@ -11,7 +11,7 @@ ROOT = REPO
 
 
 def test_the_backlog_records_hold():
-    sections, _ = addresses(ROOT / "DESIGN.md")
+    sections = addresses(ROOT / "DESIGN.md")
     violations = check_all(
         ROOT,
         sections,

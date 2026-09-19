@@ -1,9 +1,11 @@
 """The frontmatter model refuses what the spec says it refuses, naming the field."""
 
+import re
+
 import pytest
 from pydantic import ValidationError
 
-from records.kinds import KINDS, BacklogItem, new_id
+from records.kinds import KINDS, Appendix, BacklogItem, Identified, new_id
 
 MINIMAL = {"id": 7, "title": "Seven", "status": "open"}
 
@@ -131,3 +133,51 @@ def test_new_id_is_a_random_id_not_already_taken(monkeypatch):
     tokens = iter(["3f9a2c", "00aa11"])
     monkeypatch.setattr("records.kinds.secrets.token_hex", lambda n: next(tokens))
     assert new_id({1, "b-3f9a2c"}) == "b-00aa11"
+
+
+def test_an_appendix_is_an_id_a_title_revisions_and_a_question():
+    a = Appendix(
+        id="G",
+        title="rev 8: the cell runtime",
+        revisions=[8, 10],
+        question="Which runtime?",
+    )
+    assert (a.id, a.revisions) == ("G", [8, 10])
+
+
+@pytest.mark.parametrize("bad", ["g", "ABC", "", "1"])
+def test_an_appendix_id_is_one_or_two_capitals(bad: str):
+    with pytest.raises(ValidationError):
+        Appendix(id=bad, title="t", revisions=[1], question="q")
+
+
+def test_an_appendix_names_at_least_one_revision():
+    with pytest.raises(ValidationError):
+        Appendix(id="A", title="t", revisions=[], question="q")
+
+
+def test_an_appendix_has_no_status():
+    """An appendix is never replaced, so a status field is refused, not ignored."""
+    with pytest.raises(ValidationError):
+        Appendix.model_validate(
+            {
+                "id": "A",
+                "title": "t",
+                "revisions": [1],
+                "question": "q",
+                "status": "open",
+            }
+        )
+
+
+def test_identified_carries_only_an_id():
+    with pytest.raises(ValidationError):
+        Identified.model_validate({"id": 1, "status": "open"})
+
+
+def test_the_appendix_kind_is_registered():
+    kind = KINDS["appendix"]
+    assert kind.directory == "docs/appendices" and kind.model is Appendix
+    match = re.match(kind.pattern, "AA-a-slug.md")
+    assert match and match.group(1) == "AA"
+    assert re.match(kind.pattern, "a-lower.md") is None

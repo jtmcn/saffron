@@ -3,7 +3,7 @@ language: python
 severity: error
 message: the `tool` field must be obtained by executing the tool, never a literal
 note: |
-  DESIGN.md §5.4, Appendix H. The `tool` field is what separates a gate that ran
+  DESIGN.md §5.4; Appendix H. The `tool` field is what separates a gate that ran
   and passed from one that never ran. A literal is indistinguishable from a real
   version string in the ledger, so it reads as evidence while proving nothing.
   Run the tool and use its reported version: `subprocess.run([t, "--version"])`.

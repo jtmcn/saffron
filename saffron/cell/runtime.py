@@ -1,4 +1,4 @@
-"""The cell runtime — every caller's whole view of it (DESIGN.md Appendix G).
+"""The cell runtime — every caller's whole view of it (Appendix G).
 
 This module holds the surface: create a network and a volume, run a container on
 it with limits, exec, inspect, destroy. It names no runtime. Which one is

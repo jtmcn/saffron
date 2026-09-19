@@ -12,18 +12,42 @@ what the appendices currently say.
 
 from __future__ import annotations
 
+import re
+from collections.abc import Callable
+from dataclasses import replace
+
 import pytest
 import rdflib
 from ontology_paths import ONTOLOGY, SHAPES, VOCABULARY
 from pyshacl import validate
 
 from ontology import design_record
+from records.load import Record
 
-DESIGN = ONTOLOGY.parent / "DESIGN.md"
+REPO = ONTOLOGY.parent
+DESIGN = REPO / "DESIGN.md"
+
+
+def _records() -> list[Record]:
+    return design_record.appendices(REPO)
 
 
 def _graph() -> rdflib.Graph:
-    return design_record.parse(DESIGN.read_text())
+    return design_record.parse(_records())
+
+
+def _edited(letter: str, edit: Callable[[str], str]) -> list[Record]:
+    """The records with one appendix's body edited, for a mutant."""
+    out = []
+    for r in _records():
+        if r.model.id == letter:
+            body = edit(r.body)
+            assert body != r.body, (
+                f"the fixture text was not found in appendix {letter}"
+            )
+            r = replace(r, body=body)
+        out.append(r)
+    return out
 
 
 def _numbers(graph: rdflib.Graph) -> list[int]:
@@ -85,7 +109,7 @@ def test_each_appendix_contributed_a_contiguous_block():
 
 def test_the_committed_index_is_current_with_the_appendices():
     committed = DESIGN.read_text()
-    assert design_record.render_principles(committed) == committed, (
+    assert design_record.render_principles(committed, _graph()) == committed, (
         "DESIGN.md's principle index and its appendices disagree. The appendices "
         "are authoritative: run `uv run python -m ontology.render`. An edit made "
         "in the table is discarded — make it in the appendix that owns the prose."
@@ -99,7 +123,40 @@ def test_the_currency_check_would_catch_a_dropped_row():
     lines = committed.splitlines(keepends=True)
     without = "".join(ln for ln in lines if not ln.startswith("| 12 | "))
     assert without != committed, "the fixture row was not found — has the index moved?"
-    assert design_record.render_principles(without) != without
+    assert design_record.render_principles(without, _graph()) != without
+
+
+def test_the_committed_appendix_index_is_current_with_the_records():
+    committed = DESIGN.read_text()
+    rendered = design_record.render_appendix_index(committed, _records(), _graph())
+    assert rendered == committed, (
+        "DESIGN.md's appendix index and the appendix records disagree: run "
+        "`uv run python -m ontology.render`. Fix a question in its record's frontmatter."
+    )
+
+
+def test_the_appendix_currency_check_would_catch_a_dropped_row():
+    committed = DESIGN.read_text()
+    without = "".join(
+        ln
+        for ln in committed.splitlines(keepends=True)
+        if not ln.startswith("| **M** | ")
+    )
+    assert without != committed, "the fixture row was not found — has the index moved?"
+    assert design_record.render_appendix_index(without, _records(), _graph()) != without
+
+
+def test_an_appendix_with_no_principle_renders_an_empty_last_cell():
+    """`_principle_cell` returns "" for `[]`, not a stray number or a raise — an
+    appendix that lost every principle still gets a row, with a blank cell."""
+    numbered = re.compile(r"^\d+\. \*\*")
+    mutant = _edited(
+        "M", lambda b: "\n".join(ln for ln in b.splitlines() if not numbered.match(ln))
+    )
+    graph = design_record.parse(mutant)
+    rendered = design_record.render_appendix_index(DESIGN.read_text(), mutant, graph)
+    row = next(ln for ln in rendered.splitlines() if ln.startswith("| **M** | "))
+    assert row.endswith("|  |"), row
 
 
 # An appendix that contributes no principle is well-formed — `RevisionAppendixShape`
@@ -113,13 +170,10 @@ def test_the_index_reaches_every_appendix():
     """A parser that silently stopped early would leave a shorter index that is
     internally consistent and wrong — the absent-result shape of principle 34.
 
-    Against the headings rather than a count: a floor is satisfied by the very
+    Against the record ids rather than a count: a floor is satisfied by the very
     drop it is watching for, and this one was — 16 appendices passed `>= 15`.
     """
-    source = DESIGN.read_text()
-    headings = {
-        m.group(1) for m in map(design_record.APPENDIX.match, source.splitlines()) if m
-    }
+    headings = {str(r.model.id) for r in _records()}
     letters = {letter for _, _, letter in design_record.principles(_graph())}
     assert headings - letters == CONTRIBUTES_NO_PRINCIPLE, (
         "appendices the parser did not reach: "
@@ -130,75 +184,46 @@ def test_the_index_reaches_every_appendix():
     )
 
 
-@pytest.mark.parametrize(
-    "typo",
-    ["## Appendix P - ", "### Appendix P — ", "##  Appendix P — ", "## Appendix P\n"],
-    ids=["hyphen", "heading level", "double space", "no title"],
-)
-def test_a_heading_it_cannot_read_is_refused(typo: str):
-    """The property above is already true, so the check is trusted by mutants.
-
-    An em dash typed as a hyphen used to credit Appendix P's principles to O,
-    leaving 1..57 contiguous, 15 letters, and only the index reading stale —
-    which `ontology.render` then rewrote to say O. The other three break the
-    heading in ways `APPENDIX` also cannot read, which is why `APPENDIX_OPENS`
-    reaches past the level and spacing it accepts.
-    """
-    committed = DESIGN.read_text()
-    mutant = committed.replace("## Appendix P — ", typo, 1)
-    assert mutant != committed, (
-        "the fixture heading was not found — has Appendix P moved?"
-    )
-    with pytest.raises(ValueError, match="an appendix heading this cannot read"):
-        design_record.parse(mutant)
-
-
 def test_a_principle_number_claimed_twice_is_refused():
     """`_PRINCIPLE` reads any numbered list inside an appendix whose first item
     opens bold, so the wrong direction is two claims rather than none — and
     `graph.value` picks one of them without saying it chose.
     """
-    committed = DESIGN.read_text()
-    heading = "## Appendix G — rev 8: the cell runtime\n"
-    mutant = committed.replace(
-        heading,
-        heading + "\n1. **A numbered list that opens bold**, not a principle.\n",
-    )
-    assert mutant != committed, (
-        "the fixture heading was not found — has Appendix G moved?"
+    mutant = _edited(
+        "G",
+        lambda b: "\n1. **A numbered list that opens bold**, not a principle.\n" + b,
     )
     with pytest.raises(ValueError, match="2 values for"):
         design_record.principles(design_record.parse(mutant))
 
 
-def test_a_rev_cell_that_contradicts_its_heading_is_refused():
-    """The `Rev` column is hand-written and every heading states its own rev, so
-    a typo'd cell has a second reading to disagree with. Without this it writes a
-    well-formed wrong triple: the shapes ask for *a* revision, not the right one.
-    """
-    committed = DESIGN.read_text()
-    mutant = committed.replace("| **G** | 8, 10 |", "| **G** | 9, 10 |")
-    assert mutant != committed, "the fixture row was not found — has the index moved?"
-    with pytest.raises(ValueError, match="the heading says rev 8"):
-        design_record.parse(mutant)
+def test_revisions_that_contradict_the_title_are_refused():
+    """`revisions` is hand-written and the title states a rev, so a typo has a
+    second reading. Without this the shapes accept a well-formed wrong triple."""
+    records = [
+        replace(r, model=r.model.model_copy(update={"revisions": [9, 10]}))
+        if r.model.id == "G"
+        else r
+        for r in _records()
+    ]
+    with pytest.raises(ValueError, match="the title says rev 8"):
+        design_record.parse(records)
 
 
 def test_a_pipe_in_a_claim_keeps_the_row_three_cells_wide():
     """A `|` would close its cell early, and the currency test compares render to
     render — it stays green over a table that has silently lost a column."""
-    committed = DESIGN.read_text()
-    mutant = committed.replace(
-        "a third decision, and nobody made it.**",
-        "a third decision | nobody made it.**",
+    mutant = _edited(
+        "P",
+        lambda b: b.replace(
+            "a third decision, and nobody made it.**",
+            "a third decision | nobody made it.**",
+        ),
     )
-    assert mutant != committed, (
-        "the fixture claim was not found — has principle 57 moved?"
+    rendered = design_record.render_principles(
+        DESIGN.read_text(), design_record.parse(mutant)
     )
-    row = next(
-        line
-        for line in design_record.render_principles(mutant).splitlines()
-        if line.startswith("| 57 | ")
-    )
+    row = next(line for line in rendered.splitlines() if line.startswith("| 57 | "))
     assert r"\|" in row, row
     assert row.count("|") - row.count(r"\|") == 4, row
 
@@ -212,4 +237,22 @@ def test_a_drifted_table_header_is_refused():
     )
     assert mutant != committed, "the fixture header was not found — has it drifted?"
     with pytest.raises(ValueError, match="header under it"):
-        design_record.render_principles(mutant)
+        design_record.render_principles(mutant, _graph())
+
+
+def _appendix_headings(text: str) -> list[str]:
+    return [ln for ln in text.splitlines() if design_record.APPENDIX_OPENS.match(ln)]
+
+
+def test_design_md_holds_no_appendix():
+    """An appendix written into `DESIGN.md` the old way is read by nothing: its
+    principles never reach the index, and every other test stays green."""
+    assert _appendix_headings(DESIGN.read_text()) == [], (
+        "DESIGN.md has an appendix heading. Appendices are records: "
+        "write it under docs/appendices/."
+    )
+
+
+def test_the_guard_would_catch_an_appendix_written_the_old_way():
+    mutant = DESIGN.read_text() + "\n## Appendix Q — rev 21: written the old way\n"
+    assert _appendix_headings(mutant)

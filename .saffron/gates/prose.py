@@ -35,6 +35,7 @@ GATES = ("prose", "terms")
 ROOT_FILES = ("CONTEXT.md", "CLAUDE.md", "DESIGN.md", "README.md")
 INCLUDED_DIRS = (
     "docs/backlog/",
+    "docs/appendices/",
     ".saffron/specs/",
     ".claude/agents/",
     ".claude/skills/",
