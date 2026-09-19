@@ -2911,7 +2911,9 @@ def test_a_probe_that_raises_stops_probing_and_keeps_the_verdicts_given(
     _stub_probe_gates(
         monkeypatch,
         cell,
-        gate_results=[_GREEN_TESTS, _GREEN_TESTS, _GREEN_TESTS],
+        # Four for three probes: a fourth run is the "goes on probing"
+        # implementation, which the mutator assertion below must be reached to kill.
+        gate_results=[_GREEN_TESTS, _GREEN_TESTS, _GREEN_TESTS, _GREEN_TESTS],
         mutate=_mutate,
     )
 
@@ -2947,6 +2949,101 @@ def test_a_probe_that_raises_stops_probing_and_keeps_the_verdicts_given(
     assert by_claim["c3"]["severity"] == "concern"
     assert by_claim["c3"]["probe_verdict"] == "unproven"
     assert [m.file for m in cell.mutated] == ["src/a.py", "src/b.py"]
+
+
+def test_two_findings_naming_one_probe_are_decided_by_a_single_suite_run(
+    monkeypatch, tmp_path
+):
+    """One edit, asked once, deciding every finding that named it (item 117).
+    A grouping that keeps only the last finding per edit leaves the first at
+    the severity the lens filed, with no verdict and no line in `probes.json`.
+    The REVIEW line counts the edit once, as `probes.json` does."""
+    killed = Failure(file="t.py", code="t.py::test_a", message="boom")
+    mutated = GateResult(
+        gate="tests",
+        status="fail",
+        tool="pytest 8.0",
+        collected=["t.py::test_a"],
+        failures=[killed],
+    )
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _stub_probe_gates(monkeypatch, cell, gate_results=[_GREEN_TESTS, mutated])
+
+    shared = ("src/a.py", "if x < 0:", "if False:")
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_adequacy_turns(
+            {
+                "findings": [
+                    _adequacy_finding("first names the edit", *shared),
+                    _adequacy_finding("second names the same edit", *shared),
+                ]
+            }
+        ),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert [m.file for m in cell.mutated] == ["src/a.py"]
+    (entry,) = json.loads((tmp_path / "out" / "SY-1" / "probes.json").read_text())
+    assert entry["probe_verdict"] == "killed"
+    assert [f["filed_severity"] for f in entry["findings"]] == ["concern", "concern"]
+    assert [f["file"] for f in entry["findings"]] == ["src/x.py", "src/x.py"]
+    assert entry["probe"]["find"] == "if x < 0:"
+    assert entry["failures"] == ["t.py::test_a"]
+    assert entry["tool"] == "pytest 8.0"
+    assert entry["collected"] == 1
+    assert entry["baseline_tool"] == "pytest 8.0"
+    assert entry["baseline_collected"] == 1
+    assert entry["baseline_failures"] == []
+    findings = json.loads((tmp_path / "out" / "SY-1" / "findings.json").read_text())
+    (adequacy,) = [r for r in findings if r["lens"] == "adequacy"]
+    assert [f["severity"] for f in adequacy["findings"]] == ["note", "note"]
+    assert [f["probe_verdict"] for f in adequacy["findings"]] == ["killed", "killed"]
+    (line,) = [x for x in cell.watched if x.startswith("REVIEW: probes:")]
+    assert line == "REVIEW: probes: 0 survived, 1 killed, 0 unproven"
+
+
+def test_a_probe_cell_that_never_comes_up_leaves_the_findings_as_filed(
+    monkeypatch, tmp_path
+):
+    """A probe cell that cannot be entered is one more infrastructure failure:
+    every probe `unproven`, every finding as the lens filed it, and the REVIEW
+    the task already paid for still written."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _stub_probe_gates(monkeypatch, cell, gate_results=[])
+    import inspect
+
+    real_critic_cell = session.critic_cell
+
+    def _refuse(**kwargs):
+        # By caller, because every cell here is created through one function.
+        if any(f.function == "_probe_adequacy" for f in inspect.stack()):
+            raise runtime.CellRuntimeError("the probe cell never came up")
+        return real_critic_cell(**kwargs)
+
+    monkeypatch.setattr("saffron.cell.session.critic_cell", _refuse)
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_adequacy_turns(_CONCERN_WITH_PROBE),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert cell.mutated == []
+    (entry,) = json.loads((tmp_path / "out" / "SY-1" / "probes.json").read_text())
+    assert entry["probe_verdict"] == "unproven"
+    assert "the probe cell never came up" in entry["reason"]
+    findings = json.loads((tmp_path / "out" / "SY-1" / "findings.json").read_text())
+    (adequacy,) = [r for r in findings if r["lens"] == "adequacy"]
+    (finding,) = adequacy["findings"]
+    assert finding["severity"] == "concern"
+    assert finding["probe_verdict"] == "unproven"
 
 
 def test_gates_red_after_the_rebuttal_exhausts_and_keeps_the_diff(

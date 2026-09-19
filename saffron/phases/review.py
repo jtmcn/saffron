@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import time
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -357,8 +357,8 @@ def anchored_blockers(reviews: Sequence[LensReview]) -> list[Finding]:
 
 
 def adequacy_probes(reviews: Sequence[LensReview]) -> list[Finding]:
-    """Anchored adequacy findings that carry a probe — the set the probe cell
-    is asked about (backlog item 117). Unanchored ones are excluded: they
+    """Anchored adequacy findings that carry a probe — the set the Gate-only
+    cell is asked about (backlog item 117). Unanchored ones are excluded: they
     never reach `anchored_blockers`/`anchored_concerns` either way, so
     promoting one would spend a suite run on a finding that decides nothing."""
     return [
@@ -369,10 +369,10 @@ def adequacy_probes(reviews: Sequence[LensReview]) -> list[Finding]:
     ]
 
 
-def probe_key(mutant: Mutant) -> tuple[str, str, str]:
+def probe_key(probe: Mutant) -> tuple[str, str, str]:
     """The identity two probes share when they are the same edit. `Mutant` is
     not frozen, so this is what stands in for it as a dict key."""
-    return (mutant.file, mutant.find, mutant.replace)
+    return (probe.file, probe.find, probe.replace)
 
 
 def distinct_probes(findings: Sequence[Finding]) -> list[Mutant]:
@@ -399,11 +399,11 @@ def apply_probe_verdict(finding: Finding, verdict: probe.Verdict) -> None:
         finding.severity = "note"
 
 
-def describe_probes(findings: Sequence[Finding]) -> str:
-    """The REVIEW line probing adds, once every probe in `findings` has a
-    verdict — survived, killed and unproven counts, the number the operator
-    reads without opening `probes.json`."""
-    counts = Counter(f.probe_verdict for f in findings)
+def describe_probes(entries: Sequence[Mapping[str, object]]) -> str:
+    """The REVIEW line probing adds, counted over `probes.json`'s own entries
+    — one per distinct edit, not per finding, so the line and the record it
+    summarises cannot disagree when two findings name one probe."""
+    counts = Counter(e["probe_verdict"] for e in entries)
     return (
         f"probes: {counts['survived']} survived, {counts['killed']} killed, "
         f"{counts['unproven']} unproven"

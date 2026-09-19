@@ -1358,24 +1358,35 @@ def _probe_adequacy(
             executor=runner.CellExecutor(container),
         )
 
-    with critic_cell(
-        spec=spec,
-        repo=repo,
-        mirror=mirror,
-        network=None,
-        env=dict(thread_env),  # the repo's declared gate env, nothing more
-        gates_dir=gates_dir,
-        patch=patch,
-        created=created,
-        note=note,
-    ) as container:
+    # Entered through a stack so a cell that never comes up is one more
+    # infrastructure failure, not an exception that discards a paid REVIEW.
+    stack = contextlib.ExitStack()
+    try:
+        container = stack.enter_context(
+            critic_cell(
+                spec=spec,
+                repo=repo,
+                mirror=mirror,
+                network=None,
+                env=dict(thread_env),  # the repo's declared gate env, nothing more
+                gates_dir=gates_dir,
+                patch=patch,
+                created=created,
+                note=note,
+            )
+        )
+    except runtime.CellRuntimeError as exc:
+        unproven(remaining, f"the probe cell could not be entered: {exc}")
+        return entries
+    with stack:
         run_tests = partial(_run_tests, container, gates["tests"], repo)
         try:
             baseline = run_tests([])
         except runtime.CellRuntimeError as exc:
             unproven(remaining, f"the baseline tests gate could not run: {exc}")
             return entries
-        # What every verdict below is subtracted from (item 94).
+        # `check_probe` builds its own for each result it returns, so this
+        # copy is only for the entries the host authors: the raise path's.
         record = probe_check.BaselineRecord.of(baseline)
         for index, p in enumerate(remaining):
             try:
@@ -2358,7 +2369,7 @@ def _drive_cell(
                         _phase_start(
                             "REVIEW",
                             "REVIEW",
-                            review.describe_probes(review.adequacy_probes(reviews)),
+                            review.describe_probes(probed),
                         )
 
                     # Deliberately not gated on the host ceiling: a green diff
