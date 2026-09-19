@@ -1002,8 +1002,8 @@ def _apply_and_commit_patch(container: str, patch: str) -> None:
     The patch travels on stdin, never as an argument: Linux caps a single
     argv at `MAX_ARG_STRLEN` (measured against `saffron/cell-base:python` for
     `worktree._write_file`'s mutant), and a limit that is Saffron's own must
-    not end a task the agent is charged for. `git apply` is the one in-cell git
-    call that cannot go through `worktree._git`, which carries no stdin.
+    not end a task the agent is charged for. `worktree._git` carries no stdin,
+    so both calls take its pins from `worktree.git_argv` (backlog item 136).
 
     `--index`, PACKAGE's own spelling, rather than a following `git add -A`:
     staging re-runs the clean filters the patch's own `.gitattributes` just
@@ -1020,7 +1020,7 @@ def _apply_and_commit_patch(container: str, patch: str) -> None:
 
     applied = runtime.exec_stream(
         container,
-        ["git", "apply", "--index"],
+        worktree.git_argv("apply", "--index"),
         stdin_data=patch,
         on_line=_ignore,
         workdir=worktree.WORKTREE_MOUNT,
@@ -1047,7 +1047,9 @@ def _apply_and_commit_patch(container: str, patch: str) -> None:
 
     committed = runtime.exec_(
         container,
-        ["git", "commit", "-q", "-m", "critic: exported patch, applied and committed"],
+        worktree.git_argv(
+            "commit", "-q", "-m", "critic: exported patch, applied and committed"
+        ),
         workdir=worktree.WORKTREE_MOUNT,
     )
     if committed.returncode != 0:
