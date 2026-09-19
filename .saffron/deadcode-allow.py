@@ -42,3 +42,10 @@ _.CPU_OFFSET  # DESIGN.md §5.1 names it; runtime.__getattr__ serves it
 _.visible_cpus  # the cell-marked tests/test_image.py measures CPU_OFFSET with it
 _.FAMILIES  # tests/test_events.py checks every call site against it; SA-0101 and SA-0102 edit it
 _.FINDINGS  # tests/test_events.py checks every call site against it; SA-0101 edits it
+
+# Kept by an operator decision.
+_.read_manifest  # harness/register_scoring.py: the pending instrument of docs/superpowers/specs/2026-09-17-prompt-change-measurement-design.md
+_.per_1k  # harness/register_scoring.py: the pending instrument of docs/superpowers/specs/2026-09-17-prompt-change-measurement-design.md
+_.spread  # harness/register_scoring.py: the pending instrument of docs/superpowers/specs/2026-09-17-prompt-change-measurement-design.md
+_.driver  # harness/register_scoring.py: the pending instrument of docs/superpowers/specs/2026-09-17-prompt-change-measurement-design.md
+_.baseline_results  # Ledger: the read-side partner of task_results, read by the ledger tests
