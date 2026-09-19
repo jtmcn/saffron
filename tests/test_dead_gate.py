@@ -281,6 +281,12 @@ def test_a_missing_pyyaml_is_an_error(tmp_path):
     assert "No module named 'yaml'" in result.summary
 
 
+def test_a_missing_pyyaml_is_an_error_with_no_open_spec(tmp_path):
+    result = _run(_tree(tmp_path), python=(sys.executable, "-S"))
+    assert result.status == "error", result.summary
+    assert "No module named 'yaml'" in result.summary
+
+
 def test_a_file_vulture_cannot_read_is_an_error_not_a_failure(tmp_path):
     tree = _tree(tmp_path)
     (tree / "saffron" / "broken.py").write_text("def (:\n")

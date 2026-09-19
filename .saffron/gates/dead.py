@@ -8,6 +8,7 @@ symbol it will bring into use by listing it under `pending_symbols`.
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
@@ -88,7 +89,7 @@ def parse(stdout: str) -> list[Unused]:
 
 def entries(text: str) -> list[str]:
     """One spec's `pending_symbols`, validated as `saffron.intake` validates it."""
-    import yaml  # here, so a cell without pyyaml reports `error` after the version probe
+    import yaml  # `main` probes it after the version probe
 
     match = _FRONTMATTER.match(text)
     if match is None:
@@ -148,6 +149,11 @@ def main(argv: list[str]) -> int:
     tool = version.stdout.strip()
     if version.returncode != 0 or not tool:
         return _error("vulture reported no version")
+    # Probed here, not only where a spec is read, so no open spec still reports `error`.
+    try:
+        importlib.import_module("yaml")
+    except ImportError as exc:
+        return _error(f"{type(exc).__name__}: {exc}", tool)
     if not WHITELIST.is_file():
         return _error(f"no whitelist at {WHITELIST}", tool)
     roots = [r for r in ROOTS if Path(r).is_dir()]
