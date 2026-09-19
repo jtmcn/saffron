@@ -26,8 +26,7 @@ do; the measurement behind it follows.
   REBUT at $7.92 of $14. PACKAGE never ran, so there was no branch, and the
   next cell started over. The loop's cost is not bounded by the specs' budgets.
 - **`baseline: … prose=fail` on every cell is expected.** The gate reports every
-  hit in the tree, and subtraction counts them per file. Any other gate red at
-  base is red on `main` (items 106 and 173).
+  hit in the tree, and subtraction counts them per file (item 173).
 
 ## Recording
 
