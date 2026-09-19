@@ -26,7 +26,7 @@ class Manifest:
     prompt_sha: str
     model: str
     fixtures: tuple[str, ...]
-    driver: str
+    driver_path: str  # the `driver` key on disk
     date: str
 
 
@@ -133,7 +133,7 @@ def score_pass(pass_dir: Path, repo: Path) -> list[RunScore]:
     return scores
 
 
-def spread(scores: Sequence[RunScore]) -> dict[str, tuple[int, int]]:
+def register_spread(scores: Sequence[RunScore]) -> dict[str, tuple[int, int]]:
     """The lowest and highest count of each rule across runs.
 
     Per-rule dispersion, not the decision metric: the ratified rule judges

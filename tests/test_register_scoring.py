@@ -11,9 +11,9 @@ from harness.register_scoring import (
     claims_in,
     load_gate,
     read_manifest,
+    register_spread,
     score_claim,
     score_pass,
-    spread,
 )
 
 REPO = Path(__file__).resolve().parent.parent
@@ -118,7 +118,7 @@ def test_the_spread_is_the_lowest_and_highest_count_per_rule():
         RunScore(2, 1, 100, Counter({"em-dash": 5})),
         RunScore(3, 1, 100, Counter({"em-dash": 3, "hedge": 1})),
     ]
-    assert spread(scores) == {"em-dash": (2, 5), "hedge": (0, 1)}
+    assert register_spread(scores) == {"em-dash": (2, 5), "hedge": (0, 1)}
 
 
 def test_a_pass_manifest_names_the_arm(tmp_path):
