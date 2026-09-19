@@ -212,3 +212,33 @@ def test_a_random_id_filename_disagreeing_with_its_id_is_refused(tmp_path):
     path.rename(path.with_name("b-3f9a2d-a-later-item.md"))
     with pytest.raises(RecordError, match="b-3f9a2d.*id"):
         load(BACKLOG, tmp_path)
+
+
+APPENDIX = KINDS["appendix"]
+
+
+def test_an_appendix_body_with_no_h2_heading_loads():
+    """The backlog refuses prose before the first `## `; an appendix is all such prose."""
+    records = load(APPENDIX, FIXTURE)
+    assert [r.model.id for r in records] == ["A", "B"]
+    assert records[1].body.startswith("\nThe whole body is prose")
+    assert records[0].sections == {}
+
+
+def test_letters_sort_a_to_z_then_aa(tmp_path: Path):
+    directory = tmp_path / APPENDIX.directory
+    directory.mkdir(parents=True)
+    for letter in ("AA", "B", "A"):
+        (directory / f"{letter}-x.md").write_text(
+            f'---\nid: {letter}\ntitle: "t"\nrevisions: [1]\nquestion: "q"\n---\n\nx\n'
+        )
+    assert [r.model.id for r in load(APPENDIX, tmp_path)] == ["A", "B", "AA"]
+
+
+def test_the_backlog_still_refuses_prose_before_its_first_heading(tmp_path: Path):
+    shutil.copytree(FIXTURE, tmp_path, dirs_exist_ok=True)
+    item = next((tmp_path / "docs" / "backlog").glob("001-*.md"))
+    text = item.read_text()
+    item.write_text(text.replace("## Problem", "stray prose\n\n## Problem", 1))
+    with pytest.raises(RecordError, match="prose before the first"):
+        load(BACKLOG, tmp_path)

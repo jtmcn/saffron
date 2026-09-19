@@ -12,15 +12,13 @@ from pathlib import Path
 import yaml
 from pydantic import ValidationError
 
-from records.kinds import CLOSED, Identified, ItemId, Kind, as_id
+from records.kinds import CLOSED, Appendix, BacklogItem, Identified, ItemId, Kind, as_id
 
 # Character for character `saffron/intake.py`'s: a file one reads, the other must.
 _FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?(.*)\Z", re.DOTALL)
 _H2 = re.compile(r"^## (.+?)\s*$")
 _FENCE = re.compile(r"^\s*```")
 _DATE = re.compile(r"\b20\d\d-\d\d-\d\d\b")
-
-REQUIRED_SECTIONS = ("Problem", "Done looks like", "Record")
 
 _INT, _BOOL = "tag:yaml.org,2002:int", "tag:yaml.org,2002:bool"
 
@@ -102,29 +100,38 @@ def parse(text: str, kind: Kind, path: Path | None = None) -> Record:
     except ValidationError as exc:
         raise RecordError(f"frontmatter is invalid: {exc}", path) from exc
 
-    preamble = _preamble(body)
-    if preamble:
-        raise RecordError(f"prose before the first `## ` heading: {preamble!r}", path)
-    sections = split_sections(body)
-    unknown = [s for s in sections if s not in REQUIRED_SECTIONS]
-    if unknown:
-        raise RecordError(
-            f"unknown section(s) {unknown}; the body is {REQUIRED_SECTIONS}", path
-        )
-    order = [s for s in REQUIRED_SECTIONS if s in sections]
-    if list(sections) != order:
-        raise RecordError(
-            f"sections out of order: {list(sections)}; the order is {REQUIRED_SECTIONS}",
-            path,
-        )
-    _check_sections(model, sections, path)
+    if kind.sections:
+        sections = _sectioned(body, kind.sections, path)
+    else:
+        sections = split_sections(body)
+    if isinstance(model, BacklogItem):
+        _check_sections(model, sections, path)
     return Record(
         model=model, path=path or Path("<text>"), body=body, sections=sections
     )
 
 
+def _sectioned(
+    body: str, required: tuple[str, ...], path: Path | None
+) -> dict[str, str]:
+    """A body that is `## ` sections only, drawn from `required`, in its order."""
+    preamble = _preamble(body)
+    if preamble:
+        raise RecordError(f"prose before the first `## ` heading: {preamble!r}", path)
+    sections = split_sections(body)
+    unknown = [s for s in sections if s not in required]
+    if unknown:
+        raise RecordError(f"unknown section(s) {unknown}; the body is {required}", path)
+    order = [s for s in required if s in sections]
+    if list(sections) != order:
+        raise RecordError(
+            f"sections out of order: {list(sections)}; the order is {required}", path
+        )
+    return sections
+
+
 def _check_sections(
-    model: Identified, sections: dict[str, str], path: Path | None
+    model: BacklogItem, sections: dict[str, str], path: Path | None
 ) -> None:
     if "Problem" not in sections:
         raise RecordError("missing required `## Problem` section", path)
@@ -160,7 +167,7 @@ def load(kind: Kind, root: Path) -> list[Record]:
                 f"filename prefix {match.group(1)} but id {record.model.id}", path
             )
         records.append(record)
-    return sorted(records, key=order)
+    return sorted(records, key=letter_order if kind.model is Appendix else order)
 
 
 def order(record: Record) -> tuple[bool, dt.date, ItemId]:
@@ -172,3 +179,8 @@ def order(record: Record) -> tuple[bool, dt.date, ItemId]:
         filed if isinstance(m.id, str) else dt.date.min,
         m.id,
     )
+
+
+def letter_order(record: Record) -> tuple[int, str]:
+    """By length first, so AA sorts after Z rather than before B."""
+    return len(str(record.model.id)), str(record.model.id)

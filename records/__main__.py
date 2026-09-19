@@ -10,7 +10,16 @@ import sys
 from pathlib import Path
 from typing import get_args
 
-from records.kinds import KINDS, RANDOM_ID, BacklogItem, Status, as_id, new_id
+from records.kinds import (
+    APPENDIX_ID,
+    KINDS,
+    RANDOM_ID,
+    Appendix,
+    BacklogItem,
+    Status,
+    as_id,
+    new_id,
+)
 from records.load import Record, RecordError, load
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +46,18 @@ def _line(record: Record) -> str:
     return f"{m.id!s:>8}  {m.status:<10}  {tier}  {m.title}"
 
 
+def _appendix(record: Record) -> Appendix:
+    if not isinstance(record.model, Appendix):
+        raise RecordError("not an appendix", record.path)
+    return record.model
+
+
+def _appendix_line(record: Record) -> str:
+    m = _appendix(record)
+    revisions = ",".join(str(n) for n in m.revisions)
+    return f"{m.id:>8}  {revisions:<10}  {m.title}"
+
+
 def _render(record: Record, section: str | None) -> str | None:
     if section is None:
         return record.path.read_text()
@@ -51,6 +72,16 @@ def _render(record: Record, section: str | None) -> str | None:
 
 
 def cmd_list(args: argparse.Namespace) -> int:
+    if KINDS[args.kind].model is Appendix:
+        if args.status or args.tier is not None:
+            print(
+                "--status and --tier filter backlog items; appendices have neither",
+                file=sys.stderr,
+            )
+            return 2
+        for record in load(KINDS[args.kind], args.root):
+            print(_appendix_line(record))
+        return 0
     for record in load(KINDS[args.kind], args.root):
         m = _item(record)
         if args.status and m.status != args.status:
@@ -62,6 +93,16 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 
 def cmd_show(args: argparse.Namespace) -> int:
+    if re.fullmatch(APPENDIX_ID, args.id):
+        found = [r for r in load(KINDS["appendix"], args.root) if r.model.id == args.id]
+        if not found:
+            print(f"no appendix {args.id}", file=sys.stderr)
+            return 1
+        text = _render(found[0], args.section)
+        if text is None:
+            return 1
+        print(text, end="")
+        return 0
     records = load(KINDS["backlog"], args.root)
     if args.id.isdigit() or re.fullmatch(RANDOM_ID, args.id):
         wanted = [r for r in records if r.model.id == as_id(args.id)]
@@ -122,7 +163,9 @@ def main(argv: list[str] | None = None) -> int:
     _add_root(p)
     p.set_defaults(func=cmd_list)
 
-    p = sub.add_parser("show", help="one record, or the records naming a spec id")
+    p = sub.add_parser(
+        "show", help="one record by id or letter, or the records naming a spec id"
+    )
     p.add_argument("id")
     p.add_argument("--section")
     _add_root(p)
