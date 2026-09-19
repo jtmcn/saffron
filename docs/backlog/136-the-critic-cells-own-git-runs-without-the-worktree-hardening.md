@@ -1,13 +1,14 @@
 ---
 id: 136
 title: The critic cell's own git runs without the hardening every other in-cell git read carries
-status: open
+status: done
+closed: 2026-09-19
 tier: 1
 filed: 2026-09-15
 by_hand: true
 specs: [SA-0087]
-prs: [274]
-commits: []
+prs: [274, 365]
+commits: ["fe1a23a"]
 cites: [§5.5]
 related: [102, 103, 110, 118]
 ---
@@ -47,3 +48,13 @@ private, so neither calling it nor widening it was available to that cell.
 decision recorded about `git apply`: either a stdin-capable variant of `_git`,
 or a comment at the call site naming which pins it forgoes and why that is
 tolerable for an apply into a fresh tree.
+
+## Record
+
+- 2026-09-19: done by hand. `_git`'s argv is now the public `worktree.git_argv`.
+  The critic cell's `git apply --index` and `git commit` both take it, so
+  neither forgoes a pin. Measured applying and
+  committing under git 2.54 on the host and git 2.39 in `saffron/cell:saffron`.
+  One correction to the problem above: `core.attributesFile=/dev/null` nulls
+  only the user-level attributes file, never an in-tree `.gitattributes`, so it
+  was not the pin that answered the patch's own attributes. `--index` is.
