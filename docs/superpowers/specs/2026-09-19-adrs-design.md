@@ -111,10 +111,10 @@ judges the ADR.
 - with an empty `principles`, the section is one line that begins
   `Judged against no principle.`, so "none" is written down, not omitted.
 
-`records/` imports nothing from `saffron/`, and today nothing from `ontology/`.
-The principle numbers reach `check_all` as an argument, the way `sections`
-already does, so `records/` stays free of the graph library. Its live test passes
-them in from `ontology.design_record`.
+The integrity checks live in `tests/records/check.py`, since `1fb6c55` moved
+them out of `records/`. The principle numbers reach `check_all` as an argument,
+the way `sections` already does, so a fixture passes its own set. The live test
+passes them in from `ontology.design_record`.
 
 ### Reviewed
 
@@ -137,7 +137,7 @@ run on work no cell produces.
 
 - **`records/`.** `records list adr` prints `id  status  title`.
   `records show --kind adr 1` prints one ADR, and a bare `records show 1` stays
-  backlog item 1. `check_all` gains `check_adr_ids`, `check_adr_supersession`,
+  backlog item 1. `check_all` in `tests/records/check.py` gains `check_adr_ids`, `check_adr_supersession`,
   `check_adr_principles`, and a check that every `appendices` letter exists.
   `CITING` and `LIVE_SURFACES` gain `docs/adr`.
 - **`ontology/`.** `factory.ttl` gains `factory:ADR` (`rdfs:label "ADR"`) with

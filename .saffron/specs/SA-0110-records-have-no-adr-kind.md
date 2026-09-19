@@ -7,7 +7,6 @@ depends_on: []
 touches:
   - records/kinds.py
   - records/load.py
-  - records/check.py
   - records/__main__.py
   - tests/records/**
 forbidden:
@@ -80,8 +79,8 @@ Backlog item **b-9ff0fd**: decisions have no record of their own. The design is
 its "Readers" beyond `records/` land by hand afterwards.
 
 `records/` has two kinds today, `backlog` and `appendix` (`KINDS`,
-`records/kinds.py:155-169`). `Kind.sections` names the `## ` headings a body is
-allowed, in order (`records/kinds.py:152`), and `_sectioned` refuses an unknown or
+`records/kinds.py:154-169`). `Kind.sections` names the `## ` headings a body is
+allowed, in order (`records/kinds.py:151`), and `_sectioned` refuses an unknown or
 out-of-order one (`records/load.py:114-130`). Nothing refuses a *missing*
 heading except `_check_sections`, which runs for the backlog only
 (`records/load.py:107-108`, `:133-146`). The ADR kind needs a heading to be
@@ -97,10 +96,10 @@ its supersession, or hold its declared principles.
 **`docs/adr/` itself, ADR 1, and wiring the new checks into `check_all`.** They
 land by hand after this merges. `CONTEXT.md` and `.saffron/policy.yaml` are
 `protected`, and the design orders ADR 1 after them. So `check_all`
-(`records/check.py:441-462`) does not call the four new `check_adr_*`
+(`tests/records/check.py:445-466`) does not call the four new `check_adr_*`
 functions. `test_check_all_runs_every_check`
 (`tests/records/test_records_check.py:265`) finds every `check_*` in
-`records.check` by reflection and fails on one `check_all` does not run. Give it
+`tests.records.check` by reflection and fails on one `check_all` does not run. Give it
 an exclusion set naming exactly those four, with a one-line comment saying the
 by-hand layer removes it with ADR 1.
 
@@ -109,8 +108,8 @@ They live in `ontology/` and `tests/test_citations.py`, and are by hand.
 
 **Where the principle numbers come from.** `check_adr_principles` and
 `check_adr_appendices` take the existing numbers and letters as arguments.
-`records/` imports nothing from `ontology/` (its graph library is dev-only), and
-the by-hand layer passes them in from `ontology.design_record`.
+A fixture passes its own small set, and the by-hand layer passes the live one
+in from `ontology.design_record`.
 
 ## Notes for the agent
 
@@ -136,19 +135,19 @@ only that one.
 integer ≥ 1 (`Number`, `records/kinds.py:31`), `title` non-empty, `status` one of
 the three, `date` a `dt.date`, and four lists defaulting empty: `supersedes`,
 `superseded_by` and `principles` of `Number`, `appendices` of strings matching
-`APPENDIX_ID` (`records/kinds.py:129`). `Identified` already forbids extra keys
-(`records/kinds.py:52-56`).
+`APPENDIX_ID` (`records/kinds.py:128`). `Identified` already forbids extra keys
+(`records/kinds.py:51-56`).
 
 **The kind.** Directory `docs/adr`, pattern `^(\d{4})-[a-z0-9-]+\.md$`. `load`
-compares the prefix to the id through `as_id` (`records/load.py:164-167` and
-`records/kinds.py:41`), which turns `0001` into `1`, so `0001` matches id 1 as
+compares the prefix to the id through `as_id` (`records/load.py:165-168` and
+`records/kinds.py:40`), which turns `0001` into `1`, so `0001` matches id 1 as
 written. The pattern's `\d{4}` refuses a prefix of any other length. The claim's "not the
 id zero-padded" case is `0002-x.md` holding `id: 1`. Sorting is by id: `order`
 (`records/load.py:173`) already sorts integer ids by value.
 
 **Required headings.** Add a field to `Kind` for the subset of `sections` that
 must appear, and have `_sectioned` refuse a missing one, naming it. The backlog
-declares `("Problem",)`. The comment on `sections` (`records/kinds.py:151`) says
+declares `("Problem",)`. The comment on `sections` (`records/kinds.py:150`) says
 its headings are required. Once the new field exists they are only allowed, so
 correct it. Its status-dependent rules stay in `_check_sections`.
 Keep the backlog's current behaviour exactly, which criterion 3 holds.
@@ -158,7 +157,8 @@ every added test with this diff's source reverted. A test module that imports a
 name this change adds, at module scope, then fails to collect, and `revert`
 reads that as `skip`. So in `tests/records/test_records_check.py` and
 `tests/records/test_records_load.py`, reach new names through the module:
-`records.check.check_adr_ids`, `KINDS["adr"]` looked up inside the test, and
+`tests.records.check.check_adr_ids` (the module is imported whole at the top
+of `tests/records/test_records_check.py`), `KINDS["adr"]` looked up inside the test, and
 `records.kinds.Adr` through `import records.kinds` (already importable at base).
 Do not add them to a `from … import` line at the top of either file.
 
@@ -177,7 +177,7 @@ fixture to `tmp_path` and breaks one thing, as the existing appendix tests do
 (`test_a_skipped_letter_is_a_violation`, `tests/records/test_records_check.py`).
 
 **The four checks return `list[Violation]`**, like every other `check_*` in
-`records/check.py`. `check_adr_principles(records, principles: set[int])` and
+`tests/records/check.py`, where they go. `check_adr_principles(records, principles: set[int])` and
 `check_adr_appendices(records, letters: set[str])` take the existing sets as
 arguments. Read a bullet as `- **<n>** <verb>.` at the start of a line inside
 `record.sections["Principles"]`.
@@ -191,9 +191,9 @@ Add `--kind` with choices from `KINDS`, defaulting to today's behaviour, so a
 bare `records show 1` is unchanged. `--kind adr` looks the id up among ADRs,
 and a missing one prints `no ADR <n>` and exits 1.
 
-**`CITING` and `LIVE_SURFACES` gain `"docs/adr"`** (`records/check.py:18`,
-`:247`). A missing directory yields no files through `_walk`
-(`records/check.py:198-213`), so the live test is unaffected until ADRs exist.
+**`CITING` and `LIVE_SURFACES` gain `"docs/adr"`** (`tests/records/check.py:22`,
+`:251`). A missing directory yields no files through `_walk`
+(`tests/records/check.py:202-217`), so the live test is unaffected until ADRs exist.
 
 **The queued-spec smoke test.** Adding this spec changes the live queue that
 `tests/test_scheduler.py::test_saffron_queue_smoke_reproduces_this_repos_measured_queue`
