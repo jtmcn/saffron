@@ -62,14 +62,16 @@ shape applies here, and the claim is falsifiable.
 
 Build the projection from the whole ledger, then run Q4 over it across the
 merged history. The comparator is the checked walk: §4.1's foreign keys, with
-every stored file checked to exist. The claim is that Q4 drops at least one
-merged pull request the checked walk reports as whole. A missing file cannot
-carry the claim, because the checked walk sees one too. A task that cannot be
-tied to its own events counts for neither side. A single instance carries it.
-Zero instances across every merged pull request refutes the operational case, as
-the queries refuted the analytical one. The emitter then returns to the drawer
-with a third negative result. That answer is worth the weekend on §9's own
-logic, whichever way it lands.
+every stored file checked to exist. Narrowed on 2026-09-18, before the run:
+"stored file" means the plan and the diff, the only stored files Q4 reads, since
+the rest are written on some paths only (`SA-0108`). The claim is that Q4 drops
+at least one merged pull request the checked walk reports as whole. A missing
+file cannot carry the claim, because the checked walk sees one too. A task that
+cannot be tied to its own events counts for neither side. A single instance
+carries it. Zero instances across every merged pull request refutes the
+operational case, as the queries refuted the analytical one. The emitter then
+returns to the drawer with a third negative result. That answer is worth the
+weekend on §9's own logic, whichever way it lands.
 
 A positive result is narrower than it will read. Every instance comes from the
 record check, and a SQL walk given the same check finds the same set. So one
