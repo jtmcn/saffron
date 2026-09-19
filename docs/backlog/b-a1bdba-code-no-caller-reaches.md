@@ -49,8 +49,10 @@ reports `0 unused`.
 - 2026-09-18: filed alongside the `dead` gate's declaration in
   `.saffron/policy.yaml` (Task 5 of the dead-code-gate plan).
 - 2026-09-18: triaged on `joel/dead-code-triage`. Of the 64, four were
-  removed. Two moved into `tests/`: `host_mutator` with its module, and
-  `visible_cpus`. 57 were whitelisted under 40 names, each with its caller or
-  reason, and none is deferred. One remains:
+  removed. Five moved into `tests/`: `host_mutator` with its module,
+  `visible_cpus`, and `check_all`, `merged_prs` and `building_pr` with
+  `records/check.py`. 54 were whitelisted, each with its caller or reason, and
+  none is deferred. The move surfaced `BacklogItem.related`, a pydantic field,
+  which is whitelisted too. The whitelist holds 38 names. One remains:
   `saffron/events.py::read_log`, until `SA-0107` (PR #355) merges and gives
   it a caller.
