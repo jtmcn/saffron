@@ -47,3 +47,8 @@ decision says the event log is their only home.
 
 - 2026-09-19: filed from the spec loop's run 8 (stack #351 ← #360 ← #355 ←
   #366 ← #353).
+- 2026-09-19: base rebuilt by hand with `container build`, and timed. The
+  rebuild after the runner changed took 8.2 s. The apt, SDK and binary layers
+  were cached, and the runner layer onward re-ran. A second build straight after,
+  with all 8 steps cached, took 4.8 s. The image now carries the token fields.
+  A base rebuild at every cell would cost about 5 s.
