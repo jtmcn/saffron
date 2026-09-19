@@ -20,6 +20,8 @@ forbidden:
   - images/**
   - harness/**
   - saffron/**
+pending_symbols:
+  - records/kinds.py::supersedes
 budget_usd: 23
 max_turns: 135
 acceptance:
@@ -161,6 +163,15 @@ reads that as `skip`. So in `tests/records/test_records_check.py` and
 of `tests/records/test_records_check.py`), `KINDS["adr"]` looked up inside the test, and
 `records.kinds.Adr` through `import records.kinds` (already importable at base).
 Do not add them to a `from … import` line at the top of either file.
+
+`tests/records/check.py` is the third module this governs, and it is the one
+that needs `Adr` to narrow `r.model`, as it narrows `BacklogItem` at `_backlog`
+(`tests/records/check.py:53-58`). It is a test path
+(`.saffron/policy.yaml:69`), so `revert` leaves it at head
+(`saffron/gates/core/revert.py:165-168`) while `records/kinds.py` goes back.
+A new name on its `from records.kinds import …` line at `:14` therefore breaks
+collection of every module importing it. `revert` reads that as `skip` for the
+whole subset. Reach `Adr` there through `import records.kinds` too.
 
 **Fixtures.** Add `tests/records/fixtures/good/docs/adr/0001-*.md` (status
 `superseded`, `superseded_by: [2]`) and `0002-*.md` (status `accepted`,

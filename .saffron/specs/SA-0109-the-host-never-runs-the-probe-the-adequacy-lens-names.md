@@ -43,8 +43,8 @@ acceptance:
   - claim: >-
       An anchored adequacy finding filed as a `concern`, whose probe leaves the
       repo's `tests` gate with no new failure against that gate's result on the
-      unprobed tree, reaches REBUT as a blocker. The task ends `REBUTTING` or
-      later, never `READY_FOR_REVIEW`. When the same review also holds a
+      unprobed tree, reaches REBUT as a blocker, so the task does not end
+      `READY_FOR_REVIEW` without REBUT running. When the same review also holds a
       correctness blocker with no probe, `rebuttal.json` names both, each
       under its own number.
     witness: tests/test_session.py::test_a_concern_whose_probe_survives_is_rebutted_as_a_blocker
@@ -218,6 +218,11 @@ edits that file, so expect them to differ. Find each site by name.
 
 ## Notes for the agent
 
+- **Your own injected glossary is stale here.** `CONTEXT.md` §4's *vacuity
+  probe* entry says a probe is applied "never during a task". Section 4 reaches
+  IMPLEMENT and REVIEW (`saffron/agents/context.py:28-32`). Backlog item
+  b-f2a9d1 owns that sentence, and `CONTEXT.md` is protected, so you can
+  neither edit it nor hedge the design against it.
 - This change is **new code**, so most criteria declare a witness and no
   mutant (§5.4.1). The three mutants pin `saffron/probe.py`, which already
   exists and which this spec forbids you to edit. They prove the witnesses reach
@@ -252,10 +257,16 @@ edits that file, so expect them to differ. Find each site by name.
   is one that removes the finding instead of demoting it. For the test-path
   witness, it is one that hard-codes `tests/` or skips normalising. For the
   REBUT witness, it is one that shows every blocker's probe. For the raise
-  witness, it is one that lets `CellRuntimeError` end the task, or one that
-  catches it per probe and goes on probing. The raise witness therefore files
-  two probes on different files and makes the first undo raise. A failed undo
-  leaves the first edit in the tree, so a later probe runs over both edits.
+  witness, it is one that lets `CellRuntimeError` end the task. It is also one
+  that catches the raise per probe and goes on probing. It is also one that
+  answers the raise by rebuilding every entry as `unproven`. That last one dies
+  only against a probe already answered when the raise arrives. So the raise
+  witness files **three** probes on three files. The first is answered
+  `survived`, and so promotes its finding. The second's undo raises. The third
+  never reaches the mutator. Assert the first finding keeps the severity its
+  probe decided, with its `probe_verdict`. Assert the later two are `unproven`
+  naming the error, and that the mutator was entered exactly twice. A failed
+  undo leaves the second edit in the tree, so nothing after it runs clean.
 - Under the criterion-1 mutant the task still reaches `REBUTTING`, because
   the correctness blocker is there. Only `rebuttal.json` holding two blockers
   kills that mutant, so assert on it.
