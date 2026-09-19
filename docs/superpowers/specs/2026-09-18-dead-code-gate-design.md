@@ -29,7 +29,7 @@ only by tests. At `--min-confidence 100` the count is 0.
 
 Review added `records/`, `ontology/` and `hooks/` to the roots, since they are
 production Python too. On this branch the count over all seven roots is 64,
-and 58 once pydantic validators are ignored by decorator.
+and 58 once pydantic validators are ignored by decorator. On `11224ec` it is 46.
 
 A spike with ast-grep found 10 of vulture's 22 unused functions and methods.
 ast-grep matches one node in one file and has no project-wide symbol table.
