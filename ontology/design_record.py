@@ -23,7 +23,7 @@ import re
 
 import rdflib
 
-from ontology.spans import PRINCIPLE_ANCHOR, PRINCIPLE_HEADER, principle_index
+from ontology.spans import PRINCIPLE_HEADER, principle_index
 
 NS = "urn:software-factory:ns#"
 FACTORY = rdflib.Namespace(NS)
@@ -141,7 +141,6 @@ def _escaped(claim: str) -> str:
     return claim.replace("|", r"\|")
 
 
-ANCHOR = PRINCIPLE_ANCHOR
 _HEADER = PRINCIPLE_HEADER
 
 

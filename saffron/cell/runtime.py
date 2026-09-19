@@ -83,8 +83,8 @@ def dialect() -> Dialect:
     return _selected
 
 
-# Module attributes for callers outside the package (`proxy.py`, `image.py`), resolved
-# through `dialect()` so that reading one is a use, not an import.
+# Module attributes resolved through `dialect()`, so reading one is a use, not an import.
+# `proxy.py` and `image.py` read RUNTIME; only the cell-marked image test reads CPU_OFFSET.
 if TYPE_CHECKING:
     RUNTIME: str
     CPU_OFFSET: int
@@ -602,11 +602,3 @@ def container_ip(name: str, subnet_prefix: str = SUBNET_PREFIX) -> str | None:
     if done.returncode != 0:
         return None
     return _first_address(done.stdout, subnet_prefix)
-
-
-def visible_cpus(image: str, cpus: int) -> int:
-    """What `nproc` reports inside a cell allocated `cpus`. See CPU_OFFSET."""
-    done = run_ephemeral(image, ["nproc"], cpus=cpus, timeout_s=120)
-    if done.returncode != 0:
-        raise CellRuntimeError(f"nproc failed in {image}: {done.stderr.strip()}")
-    return int(done.stdout.strip().splitlines()[-1])

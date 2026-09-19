@@ -120,7 +120,7 @@ except Exception as exc:  # a graph that will not parse is not a conformance res
     error(f"{type(exc).__name__}: {exc}", tool)
 
 try:
-    conforms, results, _ = validate(data, shacl_graph=shapes_graph, advanced=True)
+    _, results, _ = validate(data, shacl_graph=shapes_graph, advanced=True)
 except Exception as exc:
     error(f"pyshacl raised {type(exc).__name__}: {exc}", tool)
 
