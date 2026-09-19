@@ -3,7 +3,7 @@ id: 97
 title: A delegate's review fixes reach a task's pull request and no gate, critic or record
 status: partial
 tier: 1
-specs: []
+specs: [SA-0111]
 prs: [189]
 commits: []
 cites: [§5.1, §5.4]
@@ -59,3 +59,9 @@ that runs a gate suite on any tree and returns a suite comparison, adopted by th
 session and then by PACKAGE, so the re-gate is its third caller rather than a
 third hand-built suite (principle 54). The record stays this item's: a
 `gate_results` row needs an attempt or a run, and a re-gate has neither.
+
+**The record half is `SA-0111`, specced 2026-09-19.** It takes the narrow
+shape: the head GitHub reports for a merging pull request lands on the task
+row, in the one scan that can still ask for it. The re-gate is not in it, since
+`saffron/gates/**` and `saffron/cell/**` are `forbidden` there, so this item
+stays `partial` until the re-gate ships.

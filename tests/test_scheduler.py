@@ -1818,7 +1818,14 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-19, a forty-fourth time: `SA-0110` queued for
+    """Re-measured 2026-09-19, a forty-fifth time: `SA-0111` queued for
+    backlog item 97's record half, the head a merging pull request is at. It
+    edits `ledger.py` and `reconcile.py` and their tests, none of which
+    anything else queued touches, so it has no `depends_on` and joins the
+    candidates between `SA-0109` and `SA-0110` — priority 2, and ties run by
+    filename.
+
+    Re-measured 2026-09-19, a forty-fourth time: `SA-0110` queued for
     backlog item b-9ff0fd, the ADR record kind. It edits only `records/` and
     `tests/records/`, which nothing else queued touches, so it has no
     `depends_on` and joins the candidates after `SA-0109`.
@@ -2052,7 +2059,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == ["SA-0109", "SA-0110"]
+    assert [c.spec.id for c in candidates] == ["SA-0109", "SA-0111", "SA-0110"]
     assert refusals == []
     # A precondition, not the glob check: `done/` is populated, so the empty
     # queue above is a check rather than a scan of nothing.
