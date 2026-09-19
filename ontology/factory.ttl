@@ -182,8 +182,8 @@ factory:disputes a factory:Role . factory:concedes  a factory:Role .
 ## The design record — CONTEXT.md §11. Not part of the run record: nothing here
 ## projects from a §4.1 table and no scheduling decision reads it, so §1.4's
 ## non-goal is untouched. What it models is the document, and the reader that
-## earns it is `ontology/design_record.py`, which renders DESIGN.md's principle
-## index from these two classes.
+## earns it is `ontology/design_record.py`, which reads the appendix records
+## and renders DESIGN.md's two indexes from these two classes.
 ##
 ## `CONTEXT.md` §11 names four genres the factory records a decision in — ADR is the
 ## fifth entry and disowns itself. `EvidenceRecord` and `SpikeVerdict` are

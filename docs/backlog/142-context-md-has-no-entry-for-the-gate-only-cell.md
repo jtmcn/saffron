@@ -27,7 +27,7 @@ cell".
 
 Its entry needs the thing that distinguishes it from the critic cell: **its own
 `--internal` network and `dict(policy.thread_env)` — no proxy, no credential**,
-which is what `DESIGN.md`'s Appendix already learned the hard way.
+which is what Appendix N already learned the hard way.
 
 Separately, three sentences are now false or half-false:
 

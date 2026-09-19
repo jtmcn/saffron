@@ -1,4 +1,4 @@
-"""`apple/container` — the cell runtime, chosen in rev 10 (DESIGN.md Appendix G).
+"""`apple/container` — the cell runtime, chosen in rev 10 (Appendix G).
 
 **The only module in `saffron/` permitted to name the product**, enforced by
 `.saffron/rules/container-runtime-is-runtime-only.yml`. Everything a caller

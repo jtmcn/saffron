@@ -264,14 +264,11 @@ def test_the_good_fixture_passes_every_check():
 
 def test_check_all_runs_every_check(monkeypatch):
     # The expected set is every `check_*` the module defines, not check_all's body.
-    # check_appendix_letters is not wired in yet; a later task does that.
-    UNWIRED = {"check_appendix_letters"}
     names = {
         name
         for name, fn in inspect.getmembers(records.check, inspect.isfunction)
         if name.startswith("check_")
         and name != "check_all"
-        and name not in UNWIRED
         and fn.__module__ == "records.check"
     }
     for name in names:

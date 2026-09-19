@@ -13,7 +13,7 @@ same next number. The header line here used to claim the file was ordered by wha
 most on the first unattended night; it never was, and as items were appended it
 drifted further. **The order to work in is `PRIORITY.md`.**
 
-**Where the evidence lives.** `DESIGN.md` Appendices I–L narrate what building
+**Where the evidence lives.** Appendices I–L narrate what building
 and running v0.5 found. The per-task briefs and implementation reports were
 written under `.superpowers/`, which is gitignored and does **not** survive a
 merge — anything from them worth keeping was moved into the appendices or into

@@ -15,7 +15,7 @@ from records.load import _FRONTMATTER, Record, load, split_sections
 
 # Where a live `item N` is a promise someone can follow today. Not
 # `docs/evidence/`: dated primary records, true on their date.
-CITING = ("saffron", "tests", ".saffron/specs", "DESIGN.md")
+CITING = ("saffron", "tests", ".saffron/specs", "DESIGN.md", "docs/appendices")
 _SUFFIXES = {".py", ".md", ".yaml", ".yml", ".toml", ".sh"}
 
 # `item 33`, `items 65, 72`, `items **81**–**85**`, `BACKLOG item 118`,
@@ -252,6 +252,7 @@ LIVE_SURFACES = (
     "DESIGN.md",
     "README.md",
     "docs/agents",
+    "docs/appendices",
 )
 
 _TIER_HEADING = re.compile(r"^### Tier (\d)\b")
@@ -457,4 +458,5 @@ def check_all(
         + check_priority(records, priority)
         + check_no_old_path(root)
         + check_awaiting(records, merged, building)
+        + check_appendix_letters(load(KINDS["appendix"], root))
     )

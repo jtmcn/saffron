@@ -12,9 +12,10 @@ hand-maintained because the vocabulary cannot imply them — a new core gate nee
 in `factory:CoreGateBlockingShape`, a new terminal state a place in `factory:TaskShape`'s
 endedInState — and a test names the shape and the file when you forget. The `shacl` gate
 validates every `.ttl` in the tree against those shapes, so a graph no test loads is still
-checked. The same command also rewrites `DESIGN.md`'s principle index, and that one runs the
-other way: the appendices are authoritative and the index is their render, so a new principle is
-written into its appendix and never into the table (Appendix P).
+checked. The same command also rewrites `DESIGN.md`'s principle and appendix indexes, and those
+run the other way: the appendix records in `docs/appendices/` are authoritative and the indexes
+are their render, so a new principle is written into its appendix record and never into a table
+(Appendices P and U).
 
 > Saffron is also a *target repo* of itself (`.saffron/`), so this file is the standing
 > instruction surface for agents running in a cell here (§8). Budget: ~200 lines. If it grows

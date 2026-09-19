@@ -63,3 +63,15 @@ def test_render_reads_its_spans_from_the_one_module():
     assert render.SETS is spans.SETS
     assert render.MEMBER_TOKEN is spans.MEMBER_TOKEN
     assert design_record.ANCHOR == spans.PRINCIPLE_ANCHOR
+
+
+def test_the_appendix_index_span_is_the_whole_table():
+    from ontology import spans
+
+    text = (REPO / "DESIGN.md").read_text()
+    start, end = spans.appendix_index(text)
+    table = text[start:end]
+    assert table.startswith(spans.APPENDIX_HEADER)
+    rows = table.removeprefix(spans.APPENDIX_HEADER).splitlines()
+    assert rows and all(row.startswith("| **") for row in rows)
+    assert not text[end:].startswith("|"), "the span stopped inside the table"

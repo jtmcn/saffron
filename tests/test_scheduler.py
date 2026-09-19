@@ -1819,7 +1819,7 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
     """Re-measured 2026-09-18, a forty-first time: `SA-0107` and `SA-0108` queued
-    for backlog item b-946f03 and `DESIGN.md` Appendix T, the emitter reopened on
+    for backlog item b-946f03 and Appendix T, the emitter reopened on
     the RATIONALE's own revisit clause. `SA-0107` creates two files and edits
     none, so it has no `depends_on` and joins the candidates at priority 2, after
     `SA-0101` by id. `SA-0108` is refused, and the refusal is correct: it stacks

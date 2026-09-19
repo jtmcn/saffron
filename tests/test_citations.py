@@ -20,9 +20,9 @@ the union of all three documents — the first version of this file — left **3
 of them unfalsifiable, because `CONTEXT.md` defines exactly `1`–`11` and so shadows
 every top-level `DESIGN.md` section: renumbering `## 9.` dangled nothing.
 
-Written while deciding *against* splitting `DESIGN.md` into per-decision files. The
-uninsured citation count was the argument for "not now" rather than "not ever",
-which makes this the test that would change that answer.
+Written while deciding *against* splitting `DESIGN.md` into per-decision files.
+It is what let the appendices move out as records with every letter intact
+(Appendix U).
 """
 
 from __future__ import annotations
@@ -33,7 +33,8 @@ from pathlib import Path
 
 import pytest
 
-from ontology.design_record import APPENDIX
+from records.kinds import KINDS
+from records.load import load
 from saffron.agents import context
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -90,14 +91,23 @@ _RULE = re.compile(r"^\*\*(\d+[a-z]?)\. ")
 _CITATION = re.compile(
     r"(?:`?(?P<doc>[A-Za-z._-]+\.md)`?(?:'s)?[ ]+)?§[ ]{0,2}(?P<num>\d+(?:\.\d+)*[a-z]?)"
 )
-# Plural and ranged forms are real: "Appendices I–L" (`docs/backlog/`),
-# "Appendices F and G" (`DESIGN.md`). A range checks its endpoints, not its middle.
+# Plural and ranged forms are real: "Appendices I–L" (`docs/backlog/`), "Appendices
+# F and G" (`docs/appendices/H-what-v0-found.md`). A range checks its endpoints, not its middle.
 _APPENDIX_CITATION = re.compile(
-    r"Appendi(?:x|ces) ((?:[A-Z]\b(?:[ ]*(?:[–—-]|,|and)[ ]*)?)+)"
+    r"Appendi(?:x|ces) ((?:[A-Z]{1,2}\b(?:[ ]*(?:[–—-]|,|and)[ ]*)?)+)"
 )
 
 
-def addresses(document: Path) -> tuple[set[str], set[str]]:
+def cited_letters(line: str) -> list[str]:
+    """Every appendix letter a line cites, a range read at its endpoints."""
+    return [
+        letter
+        for match in _APPENDIX_CITATION.finditer(line)
+        for letter in re.findall(r"\b[A-Z]{1,2}\b", match.group(1))
+    ]
+
+
+def addresses(document: Path) -> set[str]:
     """Every address a document defines: headings, plus the bolded numbered rules
     under the heading they appear beneath.
 
@@ -106,7 +116,6 @@ def addresses(document: Path) -> tuple[set[str], set[str]]:
     headings, and a numbered line under one of those is the example's, not §3.2's.
     """
     sections: set[str] = set()
-    appendices: set[str] = set()
     section: str | None = None
     fenced = False
     for line in document.read_text().splitlines():
@@ -118,24 +127,18 @@ def addresses(document: Path) -> tuple[set[str], set[str]]:
         if heading := _HEADING.match(line):
             section = heading.group(1)
             sections.add(section)
-        elif appendix := APPENDIX.match(line):
-            appendices.add(appendix.group(1))
-            section = None
         elif _ANY_H2.match(line):
             section = None
         elif (rule := _RULE.match(line)) and section:
             sections.add(f"{section}.{rule.group(1)}")
-    return sections, appendices
+    return sections
 
 
-def _by_document() -> tuple[dict[str, set[str]], set[str]]:
+def _by_document() -> dict[str, set[str]]:
     per_document: dict[str, set[str]] = {}
-    appendices: set[str] = set()
     for name in NUMBERED:
-        sections, found = addresses(ROOT / name)
-        per_document[Path(name).name] = sections
-        appendices |= found
-    return per_document, appendices
+        per_document[Path(name).name] = addresses(ROOT / name)
+    return per_document
 
 
 def _citing_files() -> list[Path]:
@@ -170,13 +173,12 @@ def _cited() -> tuple[
         for number, line in enumerate(text.splitlines(), 1):
             for match in _CITATION.finditer(line):
                 sections.append((path, number, match.group("num"), match.group("doc")))
-            for match in _APPENDIX_CITATION.finditer(line):
-                for letter in re.findall(r"[A-Z]", match.group(1)):
-                    appendices.append((path, number, letter))
+            appendices.extend((path, number, letter) for letter in cited_letters(line))
     return sections, appendices
 
 
-PER_DOCUMENT, APPENDICES = _by_document()
+PER_DOCUMENT = _by_document()
+APPENDICES = {str(r.model.id) for r in load(KINDS["appendix"], ROOT)}
 SECTION_CITATIONS, APPENDIX_CITATIONS = _cited()
 
 
@@ -191,6 +193,13 @@ def _resolves_against(path: Path, document: str | None) -> set[str]:
         return PER_DOCUMENT.get(document, set())
     own = PER_DOCUMENT.get(path.name, set()) if path.name in PER_DOCUMENT else set()
     return PER_DOCUMENT[DEFAULT] | own
+
+
+def test_a_two_letter_appendix_citation_is_read_whole():
+    """Split into single capitals, AA read as two citations of A and passed."""
+    # Joined so this file does not itself cite the two-letter id it tests.
+    line = " ".join(["Appendix", "AA", "and", "Appendices", "I–L"])
+    assert cited_letters(line) == ["AA", "I", "L"]
 
 
 def test_every_section_citation_resolves():
@@ -229,7 +238,7 @@ def test_the_widening_stays_six_citations_wide():
 
 
 def test_every_appendix_citation_resolves():
-    """An appendix letter is unambiguous — only `DESIGN.md` has appendices."""
+    """An appendix letter is unambiguous: every appendix is a record in `docs/appendices/`."""
     dangling = [
         f"{path.relative_to(ROOT)}:{line} cites Appendix {letter}"
         for path, line, letter in APPENDIX_CITATIONS
@@ -296,7 +305,7 @@ def test_a_bolded_rule_is_an_address():
 
 
 def test_saffron_keeps_no_adrs():
-    """`CONTEXT.md` §11 settled this, and prose is what failed last time.
+    """`CONTEXT.md` §11 refuses a `docs/adr/` tree beside the appendix records, and prose is what failed last time.
 
     `CLAUDE.md` and `docs/agents/domain.md` promised `docs/adr/` for months. The
     promise was wrong from the day it landed and nothing noticed, because a claim
@@ -338,22 +347,6 @@ def test_every_path_claude_md_cites_exists():
     assert missing == [], f"CLAUDE.md cites paths that do not exist: {missing}"
 
 
-def test_the_appendix_index_lists_every_appendix():
-    """`DESIGN.md`'s index is a hand-written table over a set the file defines.
-
-    Its rows read `**G**` rather than the spelled-out form, so the citation test
-    above cannot see them: a sixteenth appendix would leave the index one row
-    short and nothing would say so.
-    """
-    design = (ROOT / "DESIGN.md").read_text()
-    indexed = set(re.findall(r"^\| \*\*([A-Z])\*\* \|", design, re.MULTILINE))
-    assert indexed == APPENDICES, (
-        f"the appendix index and the appendices disagree: "
-        f"indexed only {sorted(indexed - APPENDICES)}, "
-        f"missing {sorted(APPENDICES - indexed)}"
-    )
-
-
 def test_the_context_table_agrees_with_its_headings_and_the_injector():
     """`CONTEXT.md`'s header table names each section and the phases receiving it.
 
@@ -369,7 +362,7 @@ def test_the_context_table_agrees_with_its_headings_and_the_injector():
             r"^\| (\d+) \| ([^|]+) \| ([^|]+) \|$", text, re.MULTILINE
         )
     }
-    headings = {int(n) for n in addresses(ROOT / "CONTEXT.md")[0]}
+    headings = {int(n) for n in addresses(ROOT / "CONTEXT.md")}
     assert set(rows) == headings, (
         f"table rows {sorted(set(rows) ^ headings)} have no heading, or vice versa"
     )
