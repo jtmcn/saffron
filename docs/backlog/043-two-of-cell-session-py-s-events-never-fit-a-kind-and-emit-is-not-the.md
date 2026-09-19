@@ -4,8 +4,7 @@ title: Two of `cell/session.py`'s events never fit a kind, and `emit` is not the
 status: partial
 tier: 2
 specs: [SA-0029, SA-0030, SA-0031, SA-0041, SA-0042, SA-0101]
-prs: []
-awaiting: [351]
+prs: [351]
 commits: []
 cites: []
 related: []
@@ -113,3 +112,7 @@ two are now `emit(<Event>)`, against existing kinds and with no message change.
   #360 ← #355 ← #366 ← #353. It types the task's outcome announcement and the
   rate-limit line as `TaskOutcome`, an eleventh kind. Four stale `FINDINGS`
   index cites outside its `touches` are item b-397edd.
+- 2026-09-19: #351 merged, so the task's outcome and the rate-limit line reach
+  `events.jsonl` as `TaskOutcome`. One `FINDINGS` entry is left:
+  `re-verify: {label} suite at {sha}` in `phases/package.py`, which stays a
+  free string. The item stays partial on it.

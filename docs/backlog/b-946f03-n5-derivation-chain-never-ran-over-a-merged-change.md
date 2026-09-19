@@ -1,11 +1,11 @@
 ---
 id: b-946f03
 title: N5's derivation chain never ran over a merged change, so a chain a later task overwrote reads as whole
-status: open
+status: done
+closed: 2026-09-19
 filed: 2026-09-18
 specs: [SA-0107, SA-0108]
-prs: []
-awaiting: [355, 366]
+prs: [355, 366]
 commits: []
 cites: [§1, §4.1, §4.6, §9]
 related: [118, 170]
@@ -46,3 +46,6 @@ for.
   ← #366 ← #353. Over a copy of the real ledger, #366 compared 38 of 76 merged
   tasks and found 0 breaks. The one real overwrite is among those left out (item
   b-952c34).
+- 2026-09-19: #355 and #366 merged. `saffron chains` materializes the
+  projection over the real ledger and compares Q4 with the checked walk. Half
+  the merged tasks never reach the comparison, and that is item b-952c34.

@@ -1,7 +1,7 @@
 ---
 id: 160
 title: The Gate-only cell's suite belongs to no attempt and no run, so no ledger row fits it
-status: open
+status: partial
 tier: 2
 filed: 2026-09-17
 by_hand: true
@@ -47,3 +47,7 @@ judged in a task" then agrees with the answer.
 **Filed 2026-09-17 by hand**, from item 141's close. By hand because the change
 spans `DESIGN.md` §4.1, `ontology/factory.ttl` and the `CONTEXT.md` generated
 from it. A cell cannot move the generated half with the vocabulary in one task.
+- 2026-09-19: #360 (`SA-0102`) merged. The baseline and attempt suites now emit
+  one `GateResult` per gate. The post-rebuttal suite, the one this item asks
+  about, still has no `against` value and emits none. The item stays partial on
+  it.
