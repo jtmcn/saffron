@@ -6,9 +6,21 @@ preflight: building saffron/cell:repo
 preflight: probing 1 host ports at 10.88.0.1, <LAN-ADDR>; tolerating rapportd:49152
 cell: saffron-cell-SY-1 up, worktree at bbbbbbbb
 baseline: scope=pass, integrity=skip, size=pass, committed=pass, census=skip, criteria=skip
+gates: scope=pass
+gates: integrity=skip
+gates: size=pass
+gates: committed=pass
+gates: census=skip
+gates: criteria=skip
 IMPLEMENT: system prompt <N> chars
 PLAN: accepted, sha256 841501830587
 IMPLEMENT: 1 commit(s), $0.20 spent
+gates: scope=pass
+gates: integrity=skip
+gates: size=pass
+gates: committed=pass
+gates: census=skip
+gates: criteria=skip
 gates: attempt 1, 0 new failures -> green
 REVIEW: correctness: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.10
 REVIEW: contract: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.10
@@ -26,10 +38,30 @@ preflight: building saffron/cell:repo
 preflight: probing 1 host ports at 10.88.0.1, <LAN-ADDR>; tolerating rapportd:49152
 cell: saffron-cell-SY-1 up, worktree at bbbbbbbb
 baseline: scope=pass, integrity=skip, size=pass, committed=pass, census=skip, criteria=skip
+gates: scope=pass
+gates: integrity=skip
+gates: size=pass
+gates: committed=pass
+gates: census=skip
+gates: criteria=skip
 IMPLEMENT: system prompt <N> chars
 PLAN: accepted, sha256 841501830587
 IMPLEMENT: 1 commit(s), $0.20 spent
+gates: scope=pass
+gates: integrity=skip
+gates: size=pass
+gates: lint=fail
+gates: committed=pass
+gates: census=skip
+gates: criteria=skip
 gates: attempt 1, 1 new failures -> repair
+gates: scope=pass
+gates: integrity=skip
+gates: size=pass
+gates: lint=fail
+gates: committed=pass
+gates: census=skip
+gates: criteria=skip
 gates: attempt 2, 1 new failures -> no-progress
 EXHAUSTED: $0.30 spent, session sess-1
 teardown

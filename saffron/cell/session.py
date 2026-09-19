@@ -13,6 +13,7 @@ import json
 import os
 import re
 import time
+from collections import Counter
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import partial, wraps
@@ -30,11 +31,14 @@ from saffron.events import (
     Phase,
     PhaseStart,
     Preflight,
+    TaskOutcome,
     Teardown,
     Terminal,
     describe,
-    when,
 )
+
+# Aliased: `GateResult` below is the gate contract's; this is `events.GateResult`.
+from saffron.events import GateResult as GateResultEvent
 from saffron.gates.baseline import NewFailure, is_no_progress
 from saffron.gates.contract import GateResult
 from saffron.intake import Criterion, Mutant
@@ -140,6 +144,15 @@ class RateLimited(RuntimeError):
     def __init__(self, resets_at: int | None) -> None:
         super().__init__("rate limit: rejected")
         self.resets_at = resets_at
+
+
+def _resets_at_fields(resets_at: object) -> tuple[int | None, bool]:
+    """`RateLimited.resets_at`, shaped for `TaskOutcome`: `None`, a clean `int`, or unreadable."""
+    if resets_at is None:
+        return None, False
+    if isinstance(resets_at, int) and not isinstance(resets_at, bool):
+        return resets_at, False
+    return None, True
 
 
 def stop_on_rejected(
@@ -610,7 +623,9 @@ def attempt_event(
 
 def repair_loop(
     *,
-    judge: Callable[[], SuiteComparison],
+    # The gate suite's attempt number, which only this loop holds; never the
+    # ledger's attempt_id, a row id over every turn (item 47).
+    judge: Callable[[int], SuiteComparison],
     max_attempts: int,
     repair: Callable[[Sequence[NewFailure]], str | None],
     # Required, not defaulted, for the reason `events.GateResult.against`
@@ -635,7 +650,7 @@ def repair_loop(
     """
     previous: list[NewFailure] = []
     for attempt in range(1, max_attempts + 1):
-        comparison = judge()
+        comparison = judge(attempt)
         if comparison.aborted or comparison.drift:
             emit(
                 attempt_event(
@@ -1409,6 +1424,17 @@ def _drive_cell(
         )
         for result in baseline.results:
             ledger.record_gate_result(result, run_id=run_id)
+            # Beside the joined `Baseline` line, not replacing it. No count:
+            # a baseline is measured against, never a subject of one.
+            emit(
+                GateResultEvent(
+                    timestamp=time.time(),
+                    spec_id=spec.spec_id,
+                    gate=result.gate,
+                    status=result.status,
+                    against="baseline",
+                )
+            )
 
         (task_dir / "baseline.json").write_text(
             json.dumps([r.model_dump() for r in baseline.results], indent=2)
@@ -1832,7 +1858,7 @@ def _drive_cell(
                 advisory_gates=sorted(latest.advisory_gates),
             )
 
-        def _judge() -> SuiteComparison:
+        def _judge(attempt: int | None = None) -> SuiteComparison:
             nonlocal latest
             comparison = suite.against(tree, baseline)
             # Kept for the `CellOutcome`'s own gates, effective_risk and
@@ -1848,6 +1874,35 @@ def _drive_cell(
             attempt_id = ledger.attempts(task_id)[-1]["attempt_id"]
             for result in latest.results:
                 ledger.record_gate_result(result, attempt_id=attempt_id)
+            # `None` unless `repair_loop` is calling: `_rebut_gates` calls
+            # `_judge()` bare, since `against: "rebuttal"` has no owner yet (item 160).
+            if attempt is not None:
+                # `None`, not a measured `0`, for an aborted/drifted suite or
+                # a skipped/errored/advisory gate: none of those ran a count.
+                counted = (
+                    None
+                    if comparison.aborted or comparison.drift
+                    else Counter(nf.gate for nf in comparison.new_failures)
+                )
+                for result in latest.results:
+                    count = None
+                    if (
+                        counted is not None
+                        and result.status not in ("skip", "error")
+                        and result.gate not in latest.advisory_gates
+                    ):
+                        count = counted.get(result.gate, 0)
+                    emit(
+                        GateResultEvent(
+                            timestamp=time.time(),
+                            spec_id=spec.spec_id,
+                            gate=result.gate,
+                            status=result.status,
+                            against="attempt",
+                            attempt=attempt,
+                            new_failures=count,
+                        )
+                    )
             return comparison
 
         def _repair(new: Sequence[NewFailure]) -> str | None:
@@ -2276,13 +2331,16 @@ def _drive_cell(
                 outcome, why = result.state, result.why
                 _phase_start("REBUT", "REBUT", why)
 
-        # `events.FINDINGS[0]`: the task's own terminal announcement is
-        # neither a `Terminal` (scoped to the five zero-commit IMPLEMENT
-        # endings) nor a `Budget` (a ceiling/value/limit triple, not an
-        # arbitrary outcome word and a session id) — typing it needs a tenth
-        # kind, out of scope here, so it stays a direct `print`, same as the
-        # `rate limit: rejected` line in the `except RateLimited` branch below.
-        print(f"{outcome}: ${spent:.2f} spent, session {session_id}")
+        # The task's own outcome — `events.FAMILIES`' two `TaskOutcome` rows.
+        emit(
+            TaskOutcome(
+                timestamp=time.time(),
+                spec_id=spec.spec_id,
+                outcome=outcome,
+                spent_usd_est=spent,
+                session_id=session_id,
+            )
+        )
         ledger.set_task_state(task_id, outcome)
         ledger.finish_run(run_id, "COMPLETE")
         return CellOutcome(
@@ -2302,29 +2360,31 @@ def _drive_cell(
             notes_sha256=notes_sha256,
         )
     except RateLimited as stopped:
-        # `events.FINDINGS[0]`, second half — see the comment above the
-        # outcome announcement this shares its exemption with.
-        print(
-            "rate limit: rejected — stopping, not exhausted"
-            + (
-                f"; window reopens {when(stopped.resets_at)}"
-                if stopped.resets_at
-                else ""
-            )
-        )
-        ledger.set_task_state(task_id, "RATE_LIMITED")
-        ledger.finish_run(run_id, "COMPLETE")
         # Read back, not reported: `spent` loses the walled turn — the raise
         # comes from outside it, past the `spent +=` — and loses the whole
         # tally when the window closed inside plan_checkpoint's frame. Every
         # turn recorded its own attempt before the rate limit was raised, so
-        # the roll-up above is the figure that survived both.
+        # the roll-up here is the figure that survived both.
+        spent_read_back = ledger.task_spend(task_id)
+        resets_at, resets_at_unreadable = _resets_at_fields(stopped.resets_at)
+        emit(
+            TaskOutcome(
+                timestamp=time.time(),
+                spec_id=spec.spec_id,
+                outcome="RATE_LIMITED",
+                spent_usd_est=spent_read_back,
+                resets_at=resets_at,
+                resets_at_unreadable=resets_at_unreadable,
+            )
+        )
+        ledger.set_task_state(task_id, "RATE_LIMITED")
+        ledger.finish_run(run_id, "COMPLETE")
         return CellOutcome(
             state="RATE_LIMITED",
             task_id=task_id,
             run_id=run_id,
             task_dir=task_dir,
-            spent_usd=ledger.task_spend(task_id),
+            spent_usd=spent_read_back,
             effective_risk=latest.effective_risk,
             advisory_gates=sorted(latest.advisory_gates),
         )

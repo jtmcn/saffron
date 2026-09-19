@@ -504,7 +504,7 @@ def _loop(*rounds, max_attempts=4):
     repairs = []
     state, attempts, new = session.repair_loop(
         spec_id="SA-TEST",
-        judge=lambda: next(comparisons),
+        judge=lambda _attempt: next(comparisons),
         max_attempts=max_attempts,
         repair=repairs.append,
         emit=lambda _event: None,
@@ -974,12 +974,16 @@ def _drive(
     base_policy=None,
     gates=(),
     use_default_emit=False,
+    patch_print=True,
     capture=None,
     agent_says=None,
     claude_md=None,
     base_claude_md=None,
 ):
     """Run one whole cell against the stubbed runtime and return its outcome.
+
+    `patch_print=False`: leave `session.print` alone and pass a custom `emit`,
+    so `capsys` observes real stdout while `capture` still sees `emit` (item 43).
 
     `use_default_emit`: skip the `emit=`/`session.print` doubles above and
     call `run_one_cell` exactly as `cli.py` does — no `emit` argument at all
@@ -1063,13 +1067,9 @@ def _drive(
         )
         return outcome, ledger
 
-    # `events.FINDINGS[0]`'s two lines (the outcome announcement, and the
-    # rate-limit rejection) are direct `print()` calls in `session.py` —
-    # nothing describable fits either shape (§0's own out-of-scope note).
-    # Monkeypatching the module's own `print` name, not `builtins.print`,
-    # is what routes exactly those two lines into `cell.watched` alongside
-    # everything `emit` captures below, in the order both actually run.
-    monkeypatch.setattr(session, "print", cell.watched.append, raising=False)
+    if patch_print:
+        # Routes any stray `print()` into `cell.watched` alongside `emit`.
+        monkeypatch.setattr(session, "print", cell.watched.append, raising=False)
 
     def _emit(event):
         cell.watched.append(describe(event))
@@ -2727,6 +2727,135 @@ def test_the_gate_check_after_the_rebuttal_continues_the_gate_count(
     assert rebut.attempt == 3
 
 
+def _gate_result_events(monkeypatch, tmp_path, *, cell, turns, **kwargs):
+    """Drives one cell; returns its outcome plus every `events.GateResult` it
+    emitted, in order — what SA-0102's three witnesses share. Imported here,
+    not at module scope, to avoid colliding with `contract.GateResult` above."""
+    from saffron.events import GateResult as GateResultEvent
+
+    captured: list = []
+    outcome, ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=turns, capture=captured, **kwargs
+    )
+    return outcome, ledger, [e for e in captured if isinstance(e, GateResultEvent)]
+
+
+def test_each_baseline_gate_result_reaches_the_log_as_its_own_event(
+    monkeypatch, tmp_path
+):
+    """AC1: every baseline gate reaches the log as its own event, naming its
+    gate and status against "baseline", with no attempt or count — a
+    baseline is measured against, never a subject of one."""
+    cell = _stub_the_runtime(monkeypatch, suites=([], []))
+    outcome, _ledger, gate_events = _gate_result_events(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    baseline = [e for e in gate_events if e.against == "baseline"]
+    assert [(e.gate, e.status) for e in baseline] == [
+        ("scope", "pass"),
+        ("integrity", "skip"),
+        ("size", "pass"),
+        ("committed", "pass"),
+        ("census", "skip"),
+        ("criteria", "skip"),
+    ]
+    assert all(e.attempt is None and e.new_failures is None for e in baseline)
+
+
+def test_each_attempts_gate_results_carry_their_own_attempt_number(
+    monkeypatch, tmp_path
+):
+    """AC2, folded into one drive through REBUT: `types` fails identically at
+    baseline and both attempts, cancelling to a measured zero; `lint`, new
+    only at attempt 1, carries a 1; attempt 1's set survives attempt 2's
+    being written; and the post-rebuttal re-run emits nothing — no borrowed
+    attempt 3."""
+    f_types = Failure(file="a.py", code="T1", message="bad type")
+    f_lint = Failure(file="b.py", code="E501", message="too long")
+    base = [GateResult(gate="types", status="fail", tool="t 1", failures=[f_types])]
+    suites = (base, base + _results(f_lint), base, base)
+    cell = _stub_the_runtime(monkeypatch, suites=suites, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    turns = [
+        _turn(_block(_PLAN)),
+        _turn(),
+        _turn(),  # the repair turn after attempt 1
+        _turn(_block(_BLOCKER)),
+        _turn(_block({"findings": []})),
+        _turn(_block({"findings": []})),
+        _turn("Fixed it."),
+        _turn(_block(_CLAIMED_FIX)),
+    ]
+    _outcome, _ledger, gate_events = _gate_result_events(
+        monkeypatch, tmp_path, cell=cell, turns=turns
+    )
+    attempt = [e for e in gate_events if e.against == "attempt"]
+    names1 = [e.gate for e in attempt if e.attempt == 1]
+    names2 = [e.gate for e in attempt if e.attempt == 2]
+    assert [(e.attempt, e.gate) for e in attempt] == [(1, g) for g in names1] + [
+        (2, g) for g in names2
+    ]
+    assert "lint" in names1 and "lint" not in names2
+    base_names = [e.gate for e in gate_events if e.against == "baseline"]
+    assert names2 == base_names and sorted(names1) == sorted([*base_names, "lint"])
+    by1 = {e.gate: e for e in attempt if e.attempt == 1}
+    by2 = {e.gate: e for e in attempt if e.attempt == 2}
+    assert (by1["types"].status, by1["types"].new_failures) == ("fail", 0)
+    assert (by1["lint"].status, by1["lint"].new_failures) == ("fail", 1)
+    assert (by2["types"].status, by2["types"].new_failures) == ("fail", 0)
+    assert (by1["committed"].status, by1["committed"].new_failures) == ("pass", 0)
+    assert all(by1[g].new_failures is None for g in ("integrity", "census", "criteria"))
+    # `size` is advisory at this suite's `standard` tier: a passing advisory
+    # gate carries no count, unlike a passing blocking gate's measured zero.
+    assert by1["size"].status == "pass" and by1["size"].new_failures is None
+    assert by2["size"].status == "pass" and by2["size"].new_failures is None
+
+
+def test_an_aborted_or_drifted_suite_counts_nothing_on_any_gate(monkeypatch, tmp_path):
+    """AC3: an errored gate keeps its own status, never `fail`, and no gate in
+    an aborted suite carries a count. A drifted suite carries no count
+    either, and its emitted gates are exactly the suite's own."""
+    errored = GateResult(gate="tests", status="error", summary="toolchain missing")
+    failing = GateResult(
+        gate="lint",
+        status="fail",
+        tool="t 1",
+        failures=[Failure(file="a.py", code="E501", message="too long")],
+    )
+    passing = GateResult(gate="format", status="pass", tool="f 1")
+    cell = _stub_the_runtime(monkeypatch, suites=([], [errored, failing, passing]))
+    outcome, _ledger, aborted = _gate_result_events(
+        monkeypatch, tmp_path / "a", cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert outcome.state == "GATE_ERROR"
+    attempt = [e for e in aborted if e.against == "attempt"]
+    statuses = {e.gate: e.status for e in attempt}
+    assert statuses["tests"] == "error"
+    assert statuses["lint"] == "fail"
+    assert statuses["format"] == "pass"
+    assert all(e.new_failures is None for e in attempt)
+
+    drift_cell = _stub_the_runtime(
+        monkeypatch,
+        suites=(
+            [GateResult(gate="tests", status="pass", tool="pytest 1")],
+            [GateResult(gate="tests", status="skip")],
+        ),
+    )
+    outcome, _ledger, drift = _gate_result_events(
+        monkeypatch,
+        tmp_path / "d",
+        cell=drift_cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+    )
+    assert outcome.state == "GATE_ERROR"
+    base_names = {e.gate for e in drift if e.against == "baseline"}
+    attempt_names = {e.gate for e in drift if e.against == "attempt"}
+    assert attempt_names == base_names
+    assert all(e.new_failures is None for e in drift if e.against == "attempt")
+
+
 def test_a_bound_firing_on_the_implement_turn_still_measures_the_worktree(
     monkeypatch, tmp_path
 ):
@@ -2933,6 +3062,113 @@ def test_an_unreadable_reset_time_still_stops_rate_limited(monkeypatch, tmp_path
         assert not any(str(resets_at) in line for line in cell.watched), resets_at
 
 
+def _task_outcome(tmp_path, spec_id="SY-1"):
+    """The one `TaskOutcome` a `use_default_emit=True` run logged."""
+    from saffron.events import TaskOutcome, read_log
+
+    (outcome,) = [
+        e for e in read_log(tmp_path / "out" / spec_id) if isinstance(e, TaskOutcome)
+    ]
+    return outcome
+
+
+def test_the_terminal_announcement_reaches_emit_and_not_stdout(
+    monkeypatch, tmp_path, capsys
+):
+    """Item 43: a caller's own `emit` gets the outcome; stdout does not."""
+    from saffron.events import TaskOutcome
+
+    cell = _stub_the_runtime(monkeypatch)
+    captured: list = []
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        patch_print=False,
+        capture=captured,
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    (announcement,) = [e for e in captured if isinstance(e, TaskOutcome)]
+    assert announcement.outcome == "READY_FOR_REVIEW"
+    assert announcement.session_id == "sess-1"
+    assert "READY_FOR_REVIEW" not in capsys.readouterr().out
+
+
+def test_the_rate_limit_rejection_reaches_emit_and_not_stdout(
+    monkeypatch, tmp_path, capsys
+):
+    """Same seam, the RateLimited path: still names the reopening time."""
+    from saffron.events import TaskOutcome
+
+    cell = _stub_the_runtime(monkeypatch)
+    captured: list = []
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[implement.AgentFailed("api_error", attempt=_rejected())],
+        patch_print=False,
+        capture=captured,
+    )
+    assert outcome.state == "RATE_LIMITED"
+    (rejection,) = [e for e in captured if isinstance(e, TaskOutcome)]
+    assert rejection.outcome == "RATE_LIMITED"
+    assert rejection.resets_at == 1755800000
+    printed = capsys.readouterr().out
+    assert "rate limit" not in printed
+    assert "1755800000" not in printed
+
+
+def test_the_outcome_event_round_trips_and_describes_as_its_old_line(
+    monkeypatch, tmp_path
+):
+    """Reading the log back and describing it reproduces the old print."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        use_default_emit=True,
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    logged = _task_outcome(tmp_path)
+    assert (logged.outcome, logged.spent_usd_est) == ("READY_FOR_REVIEW", 0.5)
+    assert logged.session_id == "sess-1"
+    assert describe(logged) == "READY_FOR_REVIEW: $0.50 spent, session sess-1"
+
+
+def test_a_rate_limited_outcome_survives_the_log_whatever_reopen_time_was_reported(
+    monkeypatch, tmp_path
+):
+    """Every reported `resets_at` reaches the log: string/list/NaN/bool
+    unreadable, an int kept (0 and one past `time_t` included), None absent."""
+    cases: list[tuple[object, int | None, bool]] = [("soon", None, True)]
+    cases += [([1], None, True), (float("nan"), None, True), (True, None, True)]
+    cases += [(10**20, 10**20, False), (0, 0, False)]
+    for i, (resets_at, kept, unreadable) in enumerate([*cases, (None, None, False)]):
+        cell = _stub_the_runtime(monkeypatch)
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / str(i),
+            cell=cell,
+            turns=[
+                implement.AgentFailed(
+                    "api_error", attempt=_rejected(resets_at=resets_at)
+                )
+            ],
+            use_default_emit=True,
+        )
+        assert outcome.state == "RATE_LIMITED", resets_at
+        logged = _task_outcome(tmp_path / str(i))
+        assert (logged.resets_at, logged.resets_at_unreadable) == (kept, unreadable)
+        tail = "stopping, not exhausted" if resets_at is None else "window reopens"
+        assert tail in describe(logged), resets_at
+        if unreadable:
+            assert describe(logged).endswith("window reopens unknown"), resets_at
+
+
 def test_a_wall_after_the_gates_go_green_stops_the_lenses(monkeypatch, tmp_path):
     """REVIEW had no guard of its own: every lens failed against the closed
     window, `review_state` read the errors as an incomplete review, and the run
@@ -2960,11 +3196,12 @@ def test_a_wall_after_the_gates_go_green_reports_what_was_spent(monkeypatch, tmp
         tmp_path,
         cell=cell,
         turns=[_turn(_block(_PLAN)), _turn(), _rejected()],
+        use_default_emit=True,
     )
     assert outcome.state == "RATE_LIMITED"
     # Plan and implement, each the default turn cost — REVIEW's own turn is
     # never credited, since the window closed before its cost was added.
-    assert outcome.spent_usd == 0.2
+    assert outcome.spent_usd == 0.2 == _task_outcome(tmp_path).spent_usd_est
 
 
 def test_a_denied_connect_reaches_the_operator(monkeypatch, tmp_path):
