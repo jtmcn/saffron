@@ -44,7 +44,7 @@ _.FINDINGS  # open specs SA-0101 and SA-0102 edit this table
 # Kept by an operator decision.
 _.read_manifest  # harness/register_scoring.py: the pending instrument of docs/superpowers/specs/2026-09-17-prompt-change-measurement-design.md
 _.per_1k  # harness/register_scoring.py: the pending instrument of docs/superpowers/specs/2026-09-17-prompt-change-measurement-design.md
-_.spread  # harness/register_scoring.py: the pending instrument of docs/superpowers/specs/2026-09-17-prompt-change-measurement-design.md
-_.driver  # harness/register_scoring.py: the pending instrument of docs/superpowers/specs/2026-09-17-prompt-change-measurement-design.md
+_.register_spread  # harness/register_scoring.py: the pending instrument of docs/superpowers/specs/2026-09-17-prompt-change-measurement-design.md
+_.driver_path  # harness/register_scoring.py: the pending instrument of docs/superpowers/specs/2026-09-17-prompt-change-measurement-design.md
 _.baseline_results  # Ledger: the read-side partner of task_results, read by the ledger tests
 _.batch_runs  # ledger read API, kept like baseline_results by operator decision
