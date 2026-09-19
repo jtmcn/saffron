@@ -44,9 +44,9 @@ reports `0 unused`.
 
 - 2026-09-18: filed alongside the `dead` gate's declaration in
   `.saffron/policy.yaml` (Task 5 of the dead-code-gate plan).
-- 2026-09-18: triaged 58 of the 64 on `joel/dead-code-triage`. Four were
-  removed, one was deferred to `SA-0107`, and 53 were whitelisted under 36 names with
-  their callers. Six wait on an operator decision. `saffron/mutation.py` and
-  `harness/register_scoring.py` are reached only from tests as whole modules,
-  and `Ledger.baseline_results` is read only by the tests that check the
-  ledger's writes.
+- 2026-09-18: triaged on `joel/dead-code-triage`. Of the 64, four were
+  removed and `host_mutator` moved with `saffron/mutation.py` to
+  `tests/mutation.py`. 58 were whitelisted under 41 names, each with its
+  caller or reason, and none is deferred. One remains:
+  `saffron/events.py::read_log`, until `SA-0107` (PR #355) merges and gives
+  it a caller.
