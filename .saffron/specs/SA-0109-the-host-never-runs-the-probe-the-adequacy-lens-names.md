@@ -92,7 +92,7 @@ acceptance:
       the error as the reason, and the mutator is never entered for a later
       one. Verdicts given before the raise stand. The task reaches the state
       those verdicts, and the other findings as filed, give it.
-    witness: tests/test_session.py::test_a_probe_that_raises_leaves_the_findings_as_filed
+    witness: tests/test_session.py::test_a_probe_that_raises_stops_probing_and_keeps_the_verdicts_given
   - claim: >-
       A blocker from a lens that carries no probe still routes to REBUT
       exactly as it does today.
@@ -149,8 +149,9 @@ Build the step between REVIEW and REBUT that answers it:
    tests are the repo's declared `tests` gate at `worktree.GATES_MOUNT`, run
    through `runner.run_gate` with a `CellExecutor`. Core invokes declared
    gates, never a tool (§2.1). This runs the whole suite, where item 117 asked
-   for the spec's witnesses and the diff's added tests. `check_probe` runs
-   the whole suite (`saffron/probe.py:197`) and is forbidden here. The whole
+   for the spec's witnesses and the diff's added tests. Narrowing it is not
+   this spec's to do: `check_probe` runs the whole suite
+   (`saffron/probe.py:197`), and that file is forbidden here. The whole
    suite is also what the corpus measures, so a lens's kill rate in a task
    and in the corpus mean the same thing.
 3. **What the verdict decides.**
@@ -196,10 +197,11 @@ A repo that declares no `tests` gate gets no probe cell. Every probe is
 (`docs/evidence/scripts/2026-09-08-lens-corpus.py:244-252`).
 
 An infrastructure failure while probing is not the task's fault and not a
-verdict on the lens. That covers the cell not coming up, the baseline
-reporting `error`, and a failed undo raising. Every probe not yet answered is
-then `unproven` with the reason, and the task continues on the findings as
-filed.
+verdict on the lens. Every probe not yet answered is `unproven` with the
+reason. The cell not coming up and the baseline reporting `error` happen before
+any probe is answered, so every finding stays as filed. A failed undo raises
+part-way through, so the verdicts already given stand, and only the probes
+after it are `unproven`.
 
 Line numbers in `session.py` were read at `0ed431e`. `SA-0102`, the parent,
 edits that file, so expect them to differ. Find each site by name.
@@ -241,8 +243,10 @@ edits that file, so expect them to differ. Find each site by name.
   elevated diff and its ceiling is 600 lines, tests included. The helper's
   `run_gate` stub answers only calls into a `saffron-gate-` container and
   passes every other call through, as `_run_suite` routes
-  (`tests/test_session.py:889-903`). IMPLEMENT's own gates reach `run_gate`
-  too.
+  (`tests/test_session.py:889-903`). Under these witnesses nothing else reaches
+  `run_gate`, because IMPLEMENT's gates reach it inside `run_suite`
+  (`saffron/gates/suite.py:170`), which is stubbed. The pass-through is there so
+  the stub does not silently answer a call it was not written for.
 - Decide the findings before `ledger.record_findings` runs. REBUT looks each
   blocker up by object identity in `recorded` (`saffron/cell/session.py:2143`),
   so a finding copied after that write raises `KeyError` there.
