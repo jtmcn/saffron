@@ -37,8 +37,7 @@ from saffron.events import (
     describe,
 )
 
-# Aliased: `GateResult` is already bound below to the gate *contract*'s
-# result, and this is the host's own typed record of it (events.py:237-254).
+# Aliased: `GateResult` below is the gate contract's; this is `events.GateResult`.
 from saffron.events import GateResult as GateResultEvent
 from saffron.gates.baseline import NewFailure, is_no_progress
 from saffron.gates.contract import GateResult
@@ -624,8 +623,8 @@ def attempt_event(
 
 def repair_loop(
     *,
-    # The gate-suite attempt number: the only caller that knows it, so
-    # `_judge` carries it rather than a ledger row id (item 47's mistake).
+    # The gate suite's attempt number, which only this loop holds; never the
+    # ledger's attempt_id, a row id over every turn (item 47).
     judge: Callable[[int], SuiteComparison],
     max_attempts: int,
     repair: Callable[[Sequence[NewFailure]], str | None],
@@ -1876,7 +1875,7 @@ def _drive_cell(
             for result in latest.results:
                 ledger.record_gate_result(result, attempt_id=attempt_id)
             # `None` unless `repair_loop` is calling: `_rebut_gates` calls
-            # `_judge()` bare, since `against: "rebuttal"` has no owner yet.
+            # `_judge()` bare, since `against: "rebuttal"` has no owner yet (item 160).
             if attempt is not None:
                 # `None`, not a measured `0`, for an aborted/drifted suite or
                 # a skipped/errored/advisory gate: none of those ran a count.
