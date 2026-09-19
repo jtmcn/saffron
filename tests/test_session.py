@@ -4874,9 +4874,8 @@ def test_a_cell_run_produces_a_witness_result(monkeypatch, tmp_path):
     assert captured
     assert all(acc == [criterion] for acc, _mutate in captured)
     # The suite binds the real cell mutator to this attempt's own container,
-    # not `stub_mutator` — proved by the adapter it is bound to and by the
-    # stubbed `worktree.source_mutated` actually having been reached with
-    # this criterion's own mutant.
+    # proved by the adapter it is bound to and by the stubbed
+    # `worktree.source_mutated` having been reached with this criterion's mutant.
     names = [_cell_container(mutate) for _acc, mutate in captured]
     assert names.count("saffron-cell-SY-1") == len(names) - 1
     assert names.count("saffron-gate-SY-1") == 1
@@ -5069,8 +5068,7 @@ def test_a_skipped_witness_blocks_nothing_at_either_tier(monkeypatch, tmp_path):
 
 def _cell_container(mutate) -> str | None:
     """The container the cell adapter's own mutator is bound to, or `None` for
-    `stub_mutator` and any other tree. Widening this to a set of acceptable
-    names would let a head attempt's mutator bind to the gate-only cell and
+    any other mutator. Widening this to a set of acceptable names would let a head attempt's mutator bind to the gate-only cell and
     still pass every caller, so callers assert which name, not merely that it
     is one of them."""
     tree = getattr(mutate, "__self__", None)
