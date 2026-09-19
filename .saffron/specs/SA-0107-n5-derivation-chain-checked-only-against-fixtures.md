@@ -30,8 +30,6 @@ forbidden:
   - saffron/task.py
   - saffron/replay.py
   - saffron/events.py
-pending_symbols:
-  - saffron/events.py::read_log
 budget_usd: 20
 max_turns: 100
 acceptance:
