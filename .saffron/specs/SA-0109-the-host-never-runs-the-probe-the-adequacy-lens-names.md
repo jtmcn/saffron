@@ -89,8 +89,9 @@ acceptance:
   - claim: >-
       A probe whose undo raises `CellRuntimeError` does not end the task. That
       probe and every later one are recorded `unproven` in `probes.json` with
-      the error as the reason, and the task reaches the state its findings as
-      filed give it.
+      the error as the reason, and the mutator is never entered for a later
+      one. Verdicts given before the raise stand. The task reaches the state
+      those verdicts, and the other findings as filed, give it.
     witness: tests/test_session.py::test_a_probe_that_raises_leaves_the_findings_as_filed
   - claim: >-
       A blocker from a lens that carries no probe still routes to REBUT
@@ -251,7 +252,13 @@ edits that file, so expect them to differ. Find each site by name.
   is one that removes the finding instead of demoting it. For the test-path
   witness, it is one that hard-codes `tests/` or skips normalising. For the
   REBUT witness, it is one that shows every blocker's probe. For the raise
-  witness, it is one that lets `CellRuntimeError` end the task.
+  witness, it is one that lets `CellRuntimeError` end the task, or one that
+  catches it per probe and goes on probing. The raise witness therefore files
+  two probes on different files and makes the first undo raise. A failed undo
+  leaves the first edit in the tree, so a later probe runs over both edits.
+- Under the criterion-1 mutant the task still reaches `REBUTTING`, because
+  the correctness blocker is there. Only `rebuttal.json` holding two blockers
+  kills that mutant, so assert on it.
 - In production a probe runs the repo's whole suite, about a minute in a cell.
   The witnesses stub it, so they pay none of that. That
   costs wall clock, not model spend, and REVIEW is not gated on the spend
