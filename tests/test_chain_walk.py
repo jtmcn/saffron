@@ -13,14 +13,13 @@ from __future__ import annotations
 import hashlib
 import shutil
 
-from tests.test_projection import T, build, spec_text
-
 # Every fixture diff below carries a non-ASCII character: `_diff_length`
 # reads UTF-8, and an ASCII-only suite can't catch a byte/character miscount.
 
 
 def test_the_checked_walk_needs_the_rows_and_the_files_and_nothing_else(tmp_path):
     from saffron.chain_walk import checked_walk
+    from tests.test_projection import T, build, spec_text
 
     plan = '{"café": true}'
     diff = "diff --git a/x b/x\n+café\n"
@@ -90,32 +89,25 @@ def test_the_checked_walk_needs_the_rows_and_the_files_and_nothing_else(tmp_path
     a, b, c, d, e = ids
     ledger.open_attempt(a, phase="IMPLEMENT")  # no gate result recorded on it
 
-    assert (
-        checked_walk(ledger, out_dir, a, "SA-9001", "https://example/pr/9001") is False
-    )
-    assert checked_walk(ledger, out_dir, b, "SA-9002", None) is False
-    assert (
-        checked_walk(ledger, out_dir, c, "SA-9003", "https://example/pr/9003") is False
-    )
-    assert (
-        checked_walk(ledger, out_dir, d, "SA-9004", "https://example/pr/9004") is False
-    )
+    assert checked_walk(ledger, out_dir, a) is False
+    assert checked_walk(ledger, out_dir, b) is False  # its null pr_url is the ledger's
+    assert checked_walk(ledger, out_dir, c) is False
+    assert checked_walk(ledger, out_dir, d) is False
 
     # An unrelated stored file (the event log) missing does not break the walk.
     (out_dir / "SA-9005" / "events.jsonl").unlink()
-    assert (
-        checked_walk(ledger, out_dir, e, "SA-9005", "https://example/pr/9005") is True
-    )
+    assert checked_walk(ledger, out_dir, e) is True
 
 
-def _nine_task_fixture(tmp_path, ledger=None):
-    """The second criterion's fixture: three merged tasks the checked walk
-    must judge, plus the reasons `Projection.left_out` already names for the
-    rest — one break (an overwritten diff sharing a `pr_url` with a whole
-    sibling), one merged-and-kept task with no gate result at all (walk
-    broken, Q4 drops it too — not a break), three merged-and-left-out tasks
-    by three different reasons, and two never-merged tasks (kept and left
-    out alike) that must never reach the comparison."""
+def _ten_task_fixture(tmp_path, ledger=None):
+    """The second criterion's fixture: one break (an overwritten diff sharing
+    a `pr_url` with a whole sibling), two merged-and-kept tasks the walk calls
+    broken (no gate result; no `pr_url`) — Q4 drops them too, so no break —
+    three merged-and-left-out tasks by three different reasons, and two
+    never-merged tasks (kept and left out alike) that never reach the
+    comparison."""
+    from tests.test_projection import T, build, spec_text
+
     plan = '{"v": "café"}'
 
     whole = T(
@@ -212,6 +204,17 @@ def _nine_task_fixture(tmp_path, ledger=None):
         "RUNNING",
         spec_text=spec_text("SA-9108"),
     )
+    no_pr = T(
+        "SA-9109",
+        "MERGED",
+        spec_text=spec_text("SA-9109"),
+        pr_url=None,
+        plan_line=True,
+        plan_file=plan,
+        diff_line=True,
+        diff_file="diff --git a/n b/n\n+café\n",
+        gate_result=True,
+    )
 
     return build(
         tmp_path,
@@ -225,6 +228,7 @@ def _nine_task_fixture(tmp_path, ledger=None):
             spec_missing,
             rejected,
             running,
+            no_pr,
         ],
         ledger=ledger,
     )
@@ -234,7 +238,7 @@ def test_the_output_names_only_breaks_the_checked_walk_calls_whole(tmp_path):
     from saffron.chain_walk import compare_chains
     from saffron.projection import materialize
 
-    ledger, out_dir, ids = _nine_task_fixture(tmp_path)
+    ledger, out_dir, ids = _ten_task_fixture(tmp_path)
     (
         whole_id,
         overwritten_id,
@@ -245,16 +249,19 @@ def test_the_output_names_only_breaks_the_checked_walk_calls_whole(tmp_path):
         spec_missing_id,
         rejected_id,
         running_id,
+        no_pr_id,
     ) = ids
 
     output_path = tmp_path / "projection.ttl"
     result = materialize(ledger, out_dir, output_path)
     comparison = compare_chains(ledger, out_dir, result, output_path)
 
-    assert comparison.compared == 4  # whole, overwritten, sibling, no_gate_result
+    # whole, overwritten, sibling, no_gate_result, no_pr
+    assert comparison.compared == 5
     assert [(b.task_id, b.spec_id) for b in comparison.breaks] == [
         (overwritten_id, "SA-9102")
     ]
+    assert no_pr_id not in {b.task_id for b in comparison.breaks}
     assert comparison.left_out == {
         "missing_artifact": 1,
         "unattributable": 1,
@@ -272,7 +279,8 @@ def test_saffron_chains_prints_its_count_and_exits_0_or_2_on_a_raise(
     home = tmp_path / "home"
     home.mkdir()
     ledger = Ledger(home / "ledger.db")
-    ledger, out_dir, ids = _nine_task_fixture(tmp_path, ledger=ledger)
+    ledger, out_dir, ids = _ten_task_fixture(tmp_path, ledger=ledger)
+    overwritten_id = ids[1]
     ledger.close()
 
     (home / "batches").mkdir()
@@ -280,9 +288,13 @@ def test_saffron_chains_prints_its_count_and_exits_0_or_2_on_a_raise(
 
     exit_code = cli.main(["--home", str(home), "chains"])
     out = capsys.readouterr().out
-    assert "chains: break task" in out
-    assert "SA-9102" in out
-    assert "4 merged task(s) compared, 1 break(s)" in out
+    lines = out.splitlines()
+    assert f"chains: break task {overwritten_id} SA-9102" in lines
+    for reason in ("missing_artifact", "spec_not_found", "unattributable"):
+        assert f"chains: 1 merged task(s) left out ({reason})" in lines
+    assert "unsupported_end_state" not in out
+    assert "chains: 5 merged task(s) compared, 1 break(s)" in lines
+    assert lines.count(cli._DIFF_LENGTH_CAVEAT) == 1
     assert exit_code == 0
 
     def _raise(*args, **kwargs):

@@ -1,28 +1,9 @@
-"""The checked walk — the other half of Q4's comparison (`SA-0108`,
-`DESIGN.md` Appendix T, backlog item b-946f03).
+"""The checked walk, and its comparison with Q4 (`DESIGN.md` Appendix T).
 
-`saffron.projection.materialize` (`SA-0107`) builds the RDF projection Q4
-runs over. Nothing yet runs Q4 over it, and nothing compares Q4's answer
-against anything — Appendix T's decision rule needs an independent notion of
-"whole", built without reading the graph the projection wrote, or the
-comparison would just be the projection agreeing with itself.
-
-The walk here follows the ledger's own foreign keys (`runs`, `tasks`,
-`attempts`, `gate_results` — `saffron/ledger.py`) and the batch tree's stored
-files directly, never `saffron/projection.py` (forbidden to this spec) and
-never `events.jsonl` (reading the log would make this the projection, and the
-comparison would say nothing). A task's chain is whole only when its ledger
-rows reach an attempt holding a gate result and a pull request, and its
-stored `plan.json` and `patch.diff` exist — the four things, no more: a
-`patch.json` sits beside `patch.diff` but Q4 never reads it, so neither does
-this.
-
-`compare_chains` then runs the walk over every merged task the projection
-kept (`Projection.kept`, `SA-0107`'s own comparison key, since a `pr_url` can
-be shared by more than one task) and reports the ones Q4 dropped anyway — a
-break. A merged task the projection left out is counted apart, by the reason
-`Projection.left_out` already gives it, and never printed as a break: it
-never reached the comparison at all.
+The walk judges a task's chain from the ledger's own rows and the batch tree's
+stored files, never from the projection's graph or `events.jsonl`, so the
+comparison is not the projection agreeing with itself. `compare_chains` keys
+the comparison by `Projection.kept`, since several tasks can share a `pr_url`.
 """
 
 from __future__ import annotations
@@ -60,36 +41,36 @@ class ChainComparison:
     left_out: dict[LeftOutReason, int]
 
 
+_TASK_ROWS = """SELECT t.task_id, t.spec_id, t.state, t.pr_url
+                  FROM tasks t
+                  JOIN runs r ON r.run_id = t.run_id"""
+
+
 def _task_rows(ledger: Ledger) -> dict[int, dict]:
     """`task_id -> {spec_id, state, pr_url}`, joined through `runs` — the walk's
     own first hop, even though a task with no `runs` row cannot exist (the
     foreign key forbids it): this is what makes the read "reach" through the
     ledger's tables rather than assume the column sits on `tasks` alone."""
-    rows = ledger._db.execute(
-        """SELECT t.task_id, t.spec_id, t.state, t.pr_url
-             FROM tasks t
-             JOIN runs r ON r.run_id = t.run_id
-            ORDER BY t.task_id"""
-    ).fetchall()
+    rows = ledger._db.execute(_TASK_ROWS + " ORDER BY t.task_id").fetchall()
     return {row["task_id"]: dict(row) for row in rows}
 
 
-def checked_walk(
-    ledger: Ledger, out_dir: Path, task_id: int, spec_id: str, pr_url: str | None
-) -> bool:
+def checked_walk(ledger: Ledger, out_dir: Path, task_id: int) -> bool:
     """Whole iff the ledger holds an attempt with a gate result and a pull
     request, and the batch tree still holds this task's `plan.json` and
-    `patch.diff` — the four things Appendix T narrows this walk to, no
-    fifth. Reads no event log and states no edge; it only answers whole or
-    broken for one task."""
-    if pr_url is None:
+    `patch.diff` — the plan and the diff, the only stored files Q4 reads
+    (Appendix T). Reads no event log and states no edge; it only answers
+    whole or broken for one task."""
+    row = ledger._db.execute(_TASK_ROWS + " WHERE t.task_id = ?", (task_id,)).fetchone()
+    if row is None or row["pr_url"] is None:
         return False
     has_gated_attempt = any(
-        ledger.attempt_results(row["attempt_id"]) for row in ledger.attempts(task_id)
+        ledger.attempt_results(attempt["attempt_id"])
+        for attempt in ledger.attempts(task_id)
     )
     if not has_gated_attempt:
         return False
-    task_dir = out_dir / spec_id
+    task_dir = out_dir / row["spec_id"]
     return (task_dir / "plan.json").is_file() and (task_dir / "patch.diff").is_file()
 
 
@@ -123,7 +104,7 @@ def compare_chains(
         if row["state"] != "MERGED":
             continue
         compared += 1
-        whole = checked_walk(ledger, out_dir, task_id, row["spec_id"], row["pr_url"])
+        whole = checked_walk(ledger, out_dir, task_id)
         reached = pr_iri is not None and pr_iri in q4_prs
         if whole and not reached:
             breaks.append(Break(task_id=task_id, spec_id=row["spec_id"]))

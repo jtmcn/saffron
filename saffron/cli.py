@@ -149,8 +149,8 @@ def main(argv: list[str] | None = None) -> int:
 
     subcommands.add_parser(
         "chains",
-        help="materialize the projection and run the checked walk over the "
-        "merged ledger, once (SA-0108)",
+        help="materialize the projection and compare Q4 with the checked walk "
+        "over every merged task, once",
     )
 
     args = parser.parse_args(argv)
@@ -929,16 +929,9 @@ _DIFF_LENGTH_CAVEAT = (
 
 
 def _chains(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
-    """`saffron chains` — SA-0108: materialize the projection over the whole
-    ledger (every repo, hence no `--repo`) and run the checked walk against
-    it, once, printing the comparison. Imported here, not at module scope:
-    the graph libraries the projection needs are still `dev`-only
-    (`pyproject.toml`), and importing them unconditionally would break every
-    other command on a host that lacks them. Exits 0 whatever it found — a
-    break count is what this instrument reports, not a gate it enforces — and
-    raises no handler of its own: `main`'s catch-all already prints an
-    exception and returns 2.
-    """
+    """`saffron chains`: materialize the projection over the whole ledger and
+    print its comparison with the checked walk. Exits 0 whatever it finds."""
+    # graph libraries are dev-only (pyproject.toml)
     import saffron.chain_walk as chain_walk
 
     output_path = args.home / "projection.ttl"
