@@ -23,7 +23,7 @@ says that the host runs that edit.
 
 `SA-0109` makes the host apply every anchored adequacy probe after REVIEW. A
 probe's verdict then decides the finding: `survived` becomes a blocker,
-`killed` drops the finding, and `unproven` leaves it as filed. Both documents
+`killed` demotes it to a `note`, and `unproven` leaves it as filed. Both documents
 are `protected`, and `CONTEXT.md` is generated from `ontology/factory.ttl`, so
 the cell cannot change either.
 

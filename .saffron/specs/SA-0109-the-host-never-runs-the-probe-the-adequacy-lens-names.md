@@ -52,12 +52,12 @@ acceptance:
       replace: "if new:"
   - claim: >-
       An anchored adequacy finding filed as a `blocker`, whose probe gives the
-      `tests` gate a new failure, is dropped. It is neither a blocker nor a
-      concern, so a review with no other finding ends `READY_FOR_REVIEW` and no
-      REBUT turn runs. `findings.json` still carries the finding with its
-      `probe_verdict`, and the REVIEW line emitted after probing counts it as
-      killed.
-    witness: tests/test_session.py::test_a_blocker_whose_probe_is_killed_does_not_reach_rebut
+      `tests` gate a new failure, is demoted to a `note`. It is neither a
+      blocker nor a concern, so a review with no other finding ends
+      `READY_FOR_REVIEW` and no REBUT turn runs. `findings.json` carries the
+      finding as a `note` with its `probe_verdict`, and the REVIEW line emitted
+      after probing counts it as killed.
+    witness: tests/test_session.py::test_a_blocker_whose_probe_is_killed_is_demoted_to_a_note
     mutant:
       file: saffron/probe.py
       find: "new = subtract_baseline([mutated], [baseline])"
@@ -142,8 +142,10 @@ Build the step between REVIEW and REBUT that answers it:
    gates, never a tool (§2.1).
 3. **What the verdict decides.**
    - `survived`: the finding becomes a `blocker`, whatever the lens filed.
-   - `killed`: the finding is dropped from both counts but kept in
-     `findings.json` with its verdict.
+   - `killed`: the finding becomes a `note`, whatever the lens filed. It is
+     not dropped. `check_probe` cannot tell a test doing its job from a probe
+     that crashed the program at runtime (`saffron/probe.py:13-18`), so a
+     person still sees the finding.
    - `unproven`: the finding stays as filed.
 
    The field is `probe_verdict`, never `verdict`. `CONTEXT.md` defines
@@ -185,8 +187,8 @@ edits that file, so expect them to differ. Find each site by name.
 
 - Probing again after REBUT, or asking the lens for a fresh probe each round.
 - Any lens prompt, including `review-adequacy.md`.
-- The pull-request body (`saffron/report/pr_body.py`), where a killed finding
-  still renders at its filed severity. Backlog item b-7c41e0 owns it.
+- The pull-request body (`saffron/report/pr_body.py`), which renders a demoted
+  finding as a `note` with no mark saying why. Backlog item b-7c41e0 owns it.
 - The ledger schema. The findings row keeps its columns, and a killed finding's
   row is whatever `record_findings` writes for the decided finding.
 - `DESIGN.md` §5.5.1 and `CONTEXT.md`'s *vacuity probe* entry, which says a
@@ -218,7 +220,7 @@ edits that file, so expect them to differ. Find each site by name.
 - Each witness is a plain `def`, never parametrised.
 - Each witness must fail on one wrong implementation. For the survived
   witness, it is one that promotes every probed finding. For the killed
-  witness, it is one that drops every probed finding. For the test-path
+  witness, it is one that removes the finding instead of demoting it. For the test-path
   witness, it is one that hard-codes `tests/` or skips normalising. For the
   REBUT witness, it is one that shows every blocker's probe.
 - In production a probe runs the repo's whole suite, about a minute in a cell.
