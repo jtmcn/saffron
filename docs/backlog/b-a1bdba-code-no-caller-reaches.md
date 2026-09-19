@@ -45,8 +45,8 @@ reports `0 unused`.
 - 2026-09-18: filed alongside the `dead` gate's declaration in
   `.saffron/policy.yaml` (Task 5 of the dead-code-gate plan).
 - 2026-09-18: triaged on `joel/dead-code-triage`. Of the 64, four were
-  removed and `host_mutator` moved with `saffron/mutation.py` to
-  `tests/mutation.py`. 58 were whitelisted under 41 names, each with its
-  caller or reason, and none is deferred. One remains:
+  removed. Two moved into `tests/`: `host_mutator` with its module, and
+  `visible_cpus`. 57 were whitelisted under 40 names, each with its caller or
+  reason, and none is deferred. One remains:
   `saffron/events.py::read_log`, until `SA-0107` (PR #355) merges and gives
   it a caller.
