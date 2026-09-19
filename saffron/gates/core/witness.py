@@ -58,7 +58,7 @@ RunTests = Callable[[list[str]], GateResult]
 
 # `revert.Reverted`, one noun over: a callable from a `Mutant` to a context
 # manager that applies it on entry and undoes it on exit. This gate performs
-# no file I/O of its own and holds no path — `saffron.mutation.host_mutator`
+# no file I/O of its own and holds no path — `tests.mutation.host_mutator`
 # is the host-tree implementation, and a cell's volume can supply
 # another without this module changing at all (`SA-0060`).
 #
@@ -151,7 +151,7 @@ def witness_gate(
         # `mutate`'s exit is where restoration happens now — a context
         # manager's exit is the one place a `BaseException` cannot route
         # around, unlike a `finally` this gate would have to write by hand
-        # (`saffron.mutation._mutated` carries the history of what that hand
+        # (`tests.mutation._mutated` carries the history of what that hand
         # gets wrong). Only a `BaseException` from `run_tests` skips straight
         # through both handlers — and `mutate`'s exit still restores on the
         # way past. Why `run_tests`'s ordinary exception is recorded rather

@@ -17,7 +17,7 @@ import pytest
 from saffron.gates.contract import Failure, GateResult, GateStatus, identity
 from saffron.gates.core.witness import witness_gate
 from saffron.intake import Criterion, Mutant
-from saffron.mutation import host_mutator
+from tests.mutation import host_mutator
 
 
 def _tests(
@@ -441,7 +441,7 @@ def test_an_interrupt_during_a_mutated_run_is_not_swallowed(tmp_path):
 def test_a_clean_interrupt_still_restores_through_the_real_mutator(tmp_path):
     """The spy in `test_an_interrupt_still_propagates_through_the_new_seam`
     proves this gate lets *any* injected context manager's exit run; it says
-    nothing about `saffron.mutation`'s real restore path, and every other
+    nothing about `tests.mutation`'s real restore path, and every other
     interrupt test in this file corrupts or deletes the file before
     interrupting, so `KeyboardInterrupt` would propagate whether or not
     `restore_mutant` was ever called. This one does neither: the file is left

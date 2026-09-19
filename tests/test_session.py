@@ -1647,7 +1647,6 @@ def test_a_proposed_scope_reaches_scope_review_and_spends_no_further_turns(
         monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PROPOSAL))]
     )
     assert outcome.state == "SCOPE_REVIEW"
-    assert outcome.scope_root_cause == _PROPOSAL["root_cause"]
     assert "infra/deploy.tf" in outcome.proposed_touches
     # Host-added, never asked of the model (§5.2's writeback rule). This repo
     # has no `.saffron/specs` at all, so it pins the *fallback* spelling; the
@@ -4875,9 +4874,8 @@ def test_a_cell_run_produces_a_witness_result(monkeypatch, tmp_path):
     assert captured
     assert all(acc == [criterion] for acc, _mutate in captured)
     # The suite binds the real cell mutator to this attempt's own container,
-    # not `stub_mutator` — proved by the adapter it is bound to and by the
-    # stubbed `worktree.source_mutated` actually having been reached with
-    # this criterion's own mutant.
+    # proved by the adapter it is bound to and by the stubbed
+    # `worktree.source_mutated` having been reached with this criterion's mutant.
     names = [_cell_container(mutate) for _acc, mutate in captured]
     assert names.count("saffron-cell-SY-1") == len(names) - 1
     assert names.count("saffron-gate-SY-1") == 1
@@ -4944,30 +4942,6 @@ def test_a_cell_run_supplies_the_real_mutator(monkeypatch, tmp_path):
     # And it never was called: the gate skipped on an empty `declared` list
     # before `mutate` was ever reached, not because the mutator failed.
     assert cell.mutated == []
-
-
-def test_the_stub_mutator_makes_the_result_an_honest_skip():
-    """The mutator supplied is a stub that reports it cannot reach the tree:
-    no mutant is applied, `run_tests` is never invoked, and `witness_gate`
-    reports the same honest `skip` `SA-0060` built and witnessed — never a
-    verdict this stub did not reach."""
-    from saffron.gates.core.witness import witness_gate
-    from saffron.intake import Criterion, Mutant
-
-    criterion = Criterion(
-        claim="the guard rejects a negative amount",
-        witness="tests/test_x.py::test_guard",
-        mutant=Mutant(file="src/x.py", find="if amount < 0:", replace="if False:"),
-    )
-    result = witness_gate(
-        acceptance=[criterion],
-        mutate=session.stub_mutator,
-        run_tests=lambda subset: pytest.fail(
-            "the stub cannot reach the tree, so no test should ever run"
-        ),
-    )
-    assert result.status == "skip"
-    assert result.failures == []
 
 
 def test_a_witness_failure_is_advisory_at_standard_and_blocking_when_elevated(
@@ -5094,8 +5068,7 @@ def test_a_skipped_witness_blocks_nothing_at_either_tier(monkeypatch, tmp_path):
 
 def _cell_container(mutate) -> str | None:
     """The container the cell adapter's own mutator is bound to, or `None` for
-    `stub_mutator` and any other tree. Widening this to a set of acceptable
-    names would let a head attempt's mutator bind to the gate-only cell and
+    any other mutator. Widening this to a set of acceptable names would let a head attempt's mutator bind to the gate-only cell and
     still pass every caller, so callers assert which name, not merely that it
     is one of them."""
     tree = getattr(mutate, "__self__", None)

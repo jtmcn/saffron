@@ -1,6 +1,7 @@
 """One pure function per integrity rule, each returning the violations it
 found. The live test asserts the list is empty; the unit tests assert each
-function finds the one defect its broken fixture plants."""
+function finds the one defect its broken fixture plants. Test support, moved from
+`records/`: only these tests ran it."""
 
 from __future__ import annotations
 
@@ -10,8 +11,11 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from records.kinds import KINDS, LAST_NUMBERED, RANDOM_ID, BacklogItem, ItemId, as_id
+from records.kinds import KINDS, RANDOM_ID, BacklogItem, ItemId, as_id
 from records.load import _FRONTMATTER, Record, load, split_sections
+
+# Items 1–177 keep their numbers (`records/kinds.py`); `check_ids` refuses a later number.
+LAST_NUMBERED = 177
 
 # Where a live `item N` is a promise someone can follow today. Not
 # `docs/evidence/`: dated primary records, true on their date.

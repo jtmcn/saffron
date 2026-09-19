@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := check
-.PHONY: install lint fmt test check backlog
+.PHONY: install lint fmt test check backlog deadcode
 
 install:
 	uv sync
@@ -19,3 +19,6 @@ check: lint test
 
 backlog:
 	uv run python -m records list backlog
+
+deadcode:
+	uv run python .saffron/gates/dead.py --report

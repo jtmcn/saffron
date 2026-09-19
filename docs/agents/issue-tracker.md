@@ -10,9 +10,14 @@ GitHub issues remain in use only for research/evidence records under
 - **One spec per file**: `.saffron/specs/SA-NNNN-<slug>.md`, numbered from the
   highest existing `SA-` id + 1 (e.g. after `SA-0011`, next is `SA-0012`).
 - **Frontmatter** (YAML between `---` fences). `id`, `title` and `type` are
-  required. The rest default: `priority` 3; `depends_on`, `envelope`, `touches`
-  and `forbidden` empty; the ceilings `budget_usd` 12, `max_attempts` 4,
-  `max_turns` 60 and `risk` `standard`. An unknown key is refused, not ignored.
+  required. The rest default: `priority` 3; `depends_on`, `envelope`, `touches`,
+  `forbidden` and `pending_symbols` empty; the ceilings `budget_usd` 12,
+  `max_attempts` 4, `max_turns` 60 and `risk` `standard`. An unknown key is
+  refused, not ignored.
+- **`pending_symbols`** lists dead code this spec will bring into use, one
+  `<path>::<name>` per entry (`saffron/events.py::GateResult`). The `dead` gate
+  defers each one while the spec is open, so a parent spec can add what only its
+  child calls. A method is named without its class.
 - **Acceptance criteria are `acceptance:` in the frontmatter**, one entry per
   criterion: a `claim` (the prose the PR body renders) and a `witness` (a test
   node id), plus `preserves: true` or a `mutant` where the bullets below say so.

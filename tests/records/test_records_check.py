@@ -9,8 +9,10 @@ from pathlib import Path
 
 import pytest
 
-import records.check
-from records.check import (
+import tests.records.check
+from records.kinds import KINDS, Identified
+from records.load import Record, load
+from tests.records.check import (
     Violation,
     building_pr,
     check_all,
@@ -27,8 +29,6 @@ from records.check import (
     check_specs_resolve,
     cited_items,
 )
-from records.kinds import KINDS, Identified
-from records.load import Record, load
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "good"
 BACKLOG = KINDS["backlog"]
@@ -86,7 +86,7 @@ def test_random_ids_leave_no_gap_in_the_numbered_ids(broken):
 
 
 def test_a_numbered_id_past_the_last_is_a_violation(broken, monkeypatch):
-    monkeypatch.setattr(records.check, "LAST_NUMBERED", 2)
+    monkeypatch.setattr(tests.records.check, "LAST_NUMBERED", 2)
     [v] = check_ids(load(BACKLOG, broken))
     assert v.path == _item(broken, "003-a-corpse-reads-as-drained.md")
     assert "new-id" in v.message
@@ -263,15 +263,15 @@ def test_check_all_runs_every_check(monkeypatch):
     # The expected set is every `check_*` the module defines, not check_all's body.
     names = {
         name
-        for name, fn in inspect.getmembers(records.check, inspect.isfunction)
+        for name, fn in inspect.getmembers(tests.records.check, inspect.isfunction)
         if name.startswith("check_")
         and name != "check_all"
-        and fn.__module__ == "records.check"
+        and fn.__module__ == "tests.records.check"
     }
     for name in names:
         sentinel = Violation(Path(name), "sentinel", name)
         monkeypatch.setattr(
-            records.check, name, lambda *_, sentinel=sentinel: [sentinel]
+            tests.records.check, name, lambda *_, sentinel=sentinel: [sentinel]
         )
     ran = {v.message for v in check_all(FIXTURE, set())}
     assert ran == names
