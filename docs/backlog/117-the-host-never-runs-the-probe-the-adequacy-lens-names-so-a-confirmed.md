@@ -36,9 +36,10 @@ head, and each was a defect the review round then fixed:
 This is item 69's question answered the way that item says it must be, by running,
 and without a spec author declaring anything. That matters because §5.4.1 lets a
 spec creating new code declare no mutant at all, and four of the five probes above
-edit lines the diff itself added. The machinery exists: the `witness` gate's cell
-mutator applies a `Mutant` and restores it (`tests/mutation.py`, `SA-0062`), and
-the repo's `tests` gate accepts a subset. What a probe lacks that a spec mutant has
+edit lines the diff itself added. The machinery exists: the cell's mutator,
+`worktree.source_mutated` (`SA-0062`), applies a `Mutant` and restores it. The
+witness-gate tests' host mutator is `tests/mutation.py`. The repo's `tests` gate
+accepts a subset. What a probe lacks that a spec mutant has
 is its witness — it names the edit, not the test that should die — so it runs under
 the spec's declared witnesses and the diff's own added tests.
 
