@@ -35,3 +35,6 @@ find. Every Monitor after that was armed with `|^saffron: ` added by hand.
 ## Record
 
 **Filed 2026-09-16** from the spec loop's run 5 (stack #308).
+
+- 2026-09-19: still open in the spec loop's run 8. The Monitor was armed with
+  `Error` added by hand, and that also matches agent lines (item b-4589be).

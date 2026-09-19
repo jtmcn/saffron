@@ -46,3 +46,7 @@ stronger fix, since `CLAUDE.md` asks that rules be promoted to gates.
 - 2026-09-18: #347 builds the gate half. `prose` counts Python comment runs over
   two lines per file, as rule `comment-block`, and function, class and test
   docstrings over ten lines, as `docstring-length`.
+- 2026-09-19: both halves were in force for run 8, and #353 still grew five
+  over-limit docstrings. It added three comment blocks and cut three older ones
+  under the limit, so the per-file count stayed level (item b-044ae7). #366's
+  docstrings restated its spec, and review commit `5b838d4` cut them.

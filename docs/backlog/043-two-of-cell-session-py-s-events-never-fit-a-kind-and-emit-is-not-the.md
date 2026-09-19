@@ -5,6 +5,7 @@ status: partial
 tier: 2
 specs: [SA-0029, SA-0030, SA-0031, SA-0041, SA-0042, SA-0101]
 prs: []
+awaiting: [351]
 commits: []
 cites: []
 related: []
@@ -107,3 +108,8 @@ already used — and hands the identical object to both `run_one_cell` and
 `package()`, so PACKAGE's events finally reach `events.jsonl` too. **Seven** of
 `package.py`'s eight `watch(str)` call sites and `cli._resolve_stacked_on`'s
 two are now `emit(<Event>)`, against existing kinds and with no message change.
+
+- 2026-09-19: open as PR #351 (`SA-0101`, spec loop run 8), stacked in #351 ←
+  #360 ← #355 ← #366 ← #353. It types the task's outcome announcement and the
+  rate-limit line as `TaskOutcome`, an eleventh kind. Four stale `FINDINGS`
+  index cites outside its `touches` are item b-397edd.

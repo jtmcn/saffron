@@ -5,6 +5,7 @@ status: open
 filed: 2026-09-17
 specs: [SA-0102]
 prs: []
+awaiting: [360]
 commits: []
 cites: [§4.1, §5.4]
 related: [160]
@@ -56,3 +57,7 @@ the `Attempt` count both stay.
 
 **Filed 2026-09-17**, from an inventory of what one execution can be seen
 through. `SA-0102` carries it.
+
+- 2026-09-19: open as PR #360 (`SA-0102`, spec loop run 8), stacked in #351 ←
+  #360 ← #355 ← #366 ← #353. `docs/**` is forbidden to the spec, so this item
+  closes by hand after #360 merges.
