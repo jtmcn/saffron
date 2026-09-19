@@ -12,6 +12,7 @@ what the appendices currently say.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import replace
 
@@ -143,6 +144,19 @@ def test_the_appendix_currency_check_would_catch_a_dropped_row():
     )
     assert without != committed, "the fixture row was not found — has the index moved?"
     assert design_record.render_appendix_index(without, _records(), _graph()) != without
+
+
+def test_an_appendix_with_no_principle_renders_an_empty_last_cell():
+    """`_principle_cell` returns "" for `[]`, not a stray number or a raise — an
+    appendix that lost every principle still gets a row, with a blank cell."""
+    numbered = re.compile(r"^\d+\. \*\*")
+    mutant = _edited(
+        "M", lambda b: "\n".join(ln for ln in b.splitlines() if not numbered.match(ln))
+    )
+    graph = design_record.parse(mutant)
+    rendered = design_record.render_appendix_index(DESIGN.read_text(), mutant, graph)
+    row = next(ln for ln in rendered.splitlines() if ln.startswith("| **M** | "))
+    assert row.endswith("|  |"), row
 
 
 # An appendix that contributes no principle is well-formed — `RevisionAppendixShape`

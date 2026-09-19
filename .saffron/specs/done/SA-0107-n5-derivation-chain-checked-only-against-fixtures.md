@@ -143,12 +143,12 @@ chain from Q4's result.
   spec's code uses and the glossary lacks.
 - **The dependency move and four stale sentences are the operator's.**
   `pyproject.toml:21-22`, `ontology/render.py:3-4`,
-  `ontology/design_record.py:16-17` and
+  `ontology/design_record.py:10-11` and
   `tests/ontology/test_vocabulary_agrees_with_code.py:21-22` each state that
   nothing under `saffron/` imports a graph library. The operator amends all four
   at merge, and moves pyoxigraph, pyshacl and rdflib out of the `dev` group
   (`pyproject.toml:35-37`) with `uv lock`. `uv.lock` is `protected`
-  (`.saffron/policy.yaml:61`), so a cell cannot land that move. All three packages
+  (`.saffron/policy.yaml:63`), so a cell cannot land that move. All three packages
   are installed wherever this code runs today, because the `dev` group is.
 - **Recording a full hash for the diff.** Only its length is recorded today.
   Adding a hash means editing `saffron/cell/session.py`, which is forbidden

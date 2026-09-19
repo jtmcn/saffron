@@ -204,8 +204,8 @@ def main() -> None:
     graph = design_record.parse(records)
     text = design_record.render_principles(design.read_text(), graph)
     rendered[design] = design_record.render_appendix_index(text, records, graph)
-    # Nothing is written until every render succeeds: this one refuses a heading
-    # it cannot read, and a half-applied render leaves two surfaces current.
+    # Nothing is written until every render succeeds: this one refuses a record
+    # it cannot read or a title contradicting its revisions; a half-applied render leaves two surfaces current.
     for path, text in rendered.items():
         path.write_text(text)
 

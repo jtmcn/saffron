@@ -27,7 +27,9 @@ decision 4 now refuse only a parallel tree. Design:
 
 **What did not change.** There is still no `docs/adr/`, and ADR still means
 prior art's records. An appendix is still a permanent record of what one
-revision found. It is never replaced and has no status.
+revision found. It is never replaced and has no status. In A to T, "this
+document", "above" and "below" still mean `DESIGN.md` as it stood before the
+move.
 
 **The intent.** Decisions are to be recorded one per file, as their own kind,
 and migrated out of the appendices. That kind is not designed here. Its name,
