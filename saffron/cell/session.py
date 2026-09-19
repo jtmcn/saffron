@@ -13,6 +13,7 @@ import json
 import os
 import re
 import time
+from collections import Counter
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import partial, wraps
@@ -35,6 +36,10 @@ from saffron.events import (
     Terminal,
     describe,
 )
+
+# Aliased: `GateResult` is already bound below to the gate *contract*'s
+# result, and this is the host's own typed record of it (events.py:237-254).
+from saffron.events import GateResult as GateResultEvent
 from saffron.gates.baseline import NewFailure, is_no_progress
 from saffron.gates.contract import GateResult
 from saffron.intake import Criterion, Mutant
@@ -619,7 +624,9 @@ def attempt_event(
 
 def repair_loop(
     *,
-    judge: Callable[[], SuiteComparison],
+    # The gate-suite attempt number: the only caller that knows it, so
+    # `_judge` carries it rather than a ledger row id (item 47's mistake).
+    judge: Callable[[int], SuiteComparison],
     max_attempts: int,
     repair: Callable[[Sequence[NewFailure]], str | None],
     # Required, not defaulted, for the reason `events.GateResult.against`
@@ -644,7 +651,7 @@ def repair_loop(
     """
     previous: list[NewFailure] = []
     for attempt in range(1, max_attempts + 1):
-        comparison = judge()
+        comparison = judge(attempt)
         if comparison.aborted or comparison.drift:
             emit(
                 attempt_event(
@@ -1416,6 +1423,17 @@ def _drive_cell(
         )
         for result in baseline.results:
             ledger.record_gate_result(result, run_id=run_id)
+            # Beside the joined `Baseline` line, not replacing it. No count:
+            # a baseline is measured against, never a subject of one.
+            emit(
+                GateResultEvent(
+                    timestamp=time.time(),
+                    spec_id=spec.spec_id,
+                    gate=result.gate,
+                    status=result.status,
+                    against="baseline",
+                )
+            )
 
         (task_dir / "baseline.json").write_text(
             json.dumps([r.model_dump() for r in baseline.results], indent=2)
@@ -1839,7 +1857,7 @@ def _drive_cell(
                 advisory_gates=sorted(latest.advisory_gates),
             )
 
-        def _judge() -> SuiteComparison:
+        def _judge(attempt: int | None = None) -> SuiteComparison:
             nonlocal latest
             comparison = suite.against(tree, baseline)
             # Kept for the `CellOutcome`'s own gates, effective_risk and
@@ -1855,6 +1873,35 @@ def _drive_cell(
             attempt_id = ledger.attempts(task_id)[-1]["attempt_id"]
             for result in latest.results:
                 ledger.record_gate_result(result, attempt_id=attempt_id)
+            # `None` unless `repair_loop` is calling: `_rebut_gates` calls
+            # `_judge()` bare, since `against: "rebuttal"` has no owner yet.
+            if attempt is not None:
+                # `None`, not a measured `0`, for an aborted/drifted suite or
+                # a skipped/errored/advisory gate: none of those ran a count.
+                counted = (
+                    None
+                    if comparison.aborted or comparison.drift
+                    else Counter(nf.gate for nf in comparison.new_failures)
+                )
+                for result in latest.results:
+                    count = None
+                    if (
+                        counted is not None
+                        and result.status not in ("skip", "error")
+                        and result.gate not in latest.advisory_gates
+                    ):
+                        count = counted.get(result.gate, 0)
+                    emit(
+                        GateResultEvent(
+                            timestamp=time.time(),
+                            spec_id=spec.spec_id,
+                            gate=result.gate,
+                            status=result.status,
+                            against="attempt",
+                            attempt=attempt,
+                            new_failures=count,
+                        )
+                    )
             return comparison
 
         def _repair(new: Sequence[NewFailure]) -> str | None:

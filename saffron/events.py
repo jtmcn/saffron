@@ -793,11 +793,11 @@ def describe(event: Event) -> str:
         return f"IMPLEMENT: {event.commits} commit(s), ${event.spent_usd_est:.2f} spent"
 
     if isinstance(event, GateResult):
-        # No call site prints one alone today — every printed line joins
-        # several (`Baseline`) or reports only a count (`Attempt`). Still
-        # rendered: a future consumer (a report page, `SA-0036`) reads one
-        # `GateResult` at a time, and "every kind renders" cannot mean
-        # "all but one."
+        # Emitted beside, not instead of, `Baseline`'s joined line and
+        # `Attempt`'s count — `cell/session.py`'s baseline block and `_judge`
+        # each write one per gate now. Still rendered on its own here too: a
+        # future consumer (a report page, `SA-0036`) reads one `GateResult`
+        # at a time.
         return f"gates: {event.gate}={event.status}"
 
     if isinstance(event, Budget):
@@ -933,6 +933,7 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("gates: … errored — infrastructure", _RL, Attempt),
     _Family("gates: … distrusting the subtraction", _RL, Attempt),
     _Family("gates: N new failures after the rebuttal", _S, Attempt),
+    _Family("gates: {gate}={status}", _S, GateResult),
     _Family("REPAIR: the session failed", _S, PhaseStart),
     _Family("REPAIR: uncommitted work checkpointed", _S, PhaseStart),
     _Family("REVIEW:", _S, PhaseStart),

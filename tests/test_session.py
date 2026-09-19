@@ -504,7 +504,7 @@ def _loop(*rounds, max_attempts=4):
     repairs = []
     state, attempts, new = session.repair_loop(
         spec_id="SA-TEST",
-        judge=lambda: next(comparisons),
+        judge=lambda _attempt: next(comparisons),
         max_attempts=max_attempts,
         repair=repairs.append,
         emit=lambda _event: None,
@@ -2725,6 +2725,131 @@ def test_the_gate_check_after_the_rebuttal_continues_the_gate_count(
     (rebut,) = [e for e in events if isinstance(e, Attempt) and e.phase == "REBUT"]
     assert [e.attempt for e in gates] == [1, 2]
     assert rebut.attempt == 3
+
+
+def _gate_result_events(monkeypatch, tmp_path, *, cell, turns, **kwargs):
+    """Drives one cell; returns its outcome plus every `events.GateResult` it
+    emitted, in order — what SA-0102's three witnesses share. Imported here,
+    not at module scope, to avoid colliding with `contract.GateResult` above."""
+    from saffron.events import GateResult as GateResultEvent
+
+    captured: list = []
+    outcome, ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=turns, capture=captured, **kwargs
+    )
+    return outcome, ledger, [e for e in captured if isinstance(e, GateResultEvent)]
+
+
+def test_each_baseline_gate_result_reaches_the_log_as_its_own_event(
+    monkeypatch, tmp_path
+):
+    """AC1: every baseline gate reaches the log as its own event, naming its
+    gate and status against "baseline", with no attempt or count — a
+    baseline is measured against, never a subject of one."""
+    cell = _stub_the_runtime(monkeypatch, suites=([], []))
+    outcome, _ledger, gate_events = _gate_result_events(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    baseline = [e for e in gate_events if e.against == "baseline"]
+    assert [(e.gate, e.status) for e in baseline] == [
+        ("scope", "pass"),
+        ("integrity", "skip"),
+        ("size", "pass"),
+        ("committed", "pass"),
+        ("census", "skip"),
+        ("criteria", "skip"),
+    ]
+    assert all(e.attempt is None and e.new_failures is None for e in baseline)
+
+
+def test_each_attempts_gate_results_carry_their_own_attempt_number(
+    monkeypatch, tmp_path
+):
+    """AC2, folded into one drive through REBUT: `types` fails identically at
+    baseline and both attempts, cancelling to a measured zero; `lint`, new
+    only at attempt 1, carries a 1; attempt 1's set survives attempt 2's
+    being written; and the post-rebuttal re-run emits nothing — no borrowed
+    attempt 3."""
+    f_types = Failure(file="a.py", code="T1", message="bad type")
+    f_lint = Failure(file="b.py", code="E501", message="too long")
+    base = [GateResult(gate="types", status="fail", tool="t 1", failures=[f_types])]
+    suites = (base, base + _results(f_lint), base, base)
+    cell = _stub_the_runtime(monkeypatch, suites=suites, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    turns = [
+        _turn(_block(_PLAN)),
+        _turn(),
+        _turn(),  # the repair turn after attempt 1
+        _turn(_block(_BLOCKER)),
+        _turn(_block({"findings": []})),
+        _turn(_block({"findings": []})),
+        _turn("Fixed it."),
+        _turn(_block(_CLAIMED_FIX)),
+    ]
+    _outcome, _ledger, gate_events = _gate_result_events(
+        monkeypatch, tmp_path, cell=cell, turns=turns
+    )
+    attempt = [e for e in gate_events if e.against == "attempt"]
+    names1 = [e.gate for e in attempt if e.attempt == 1]
+    names2 = [e.gate for e in attempt if e.attempt == 2]
+    assert [(e.attempt, e.gate) for e in attempt] == [(1, g) for g in names1] + [
+        (2, g) for g in names2
+    ]
+    assert "lint" in names1 and "lint" not in names2
+    by1 = {e.gate: e for e in attempt if e.attempt == 1}
+    by2 = {e.gate: e for e in attempt if e.attempt == 2}
+    assert (by1["types"].status, by1["types"].new_failures) == ("fail", 0)
+    assert (by1["lint"].status, by1["lint"].new_failures) == ("fail", 1)
+    assert (by2["types"].status, by2["types"].new_failures) == ("fail", 0)
+    # `size` is advisory at this suite's `standard` tier: a passing advisory
+    # gate carries no count, unlike a passing blocking gate's measured zero.
+    assert by1["size"].status == "pass" and by1["size"].new_failures is None
+    assert by2["size"].status == "pass" and by2["size"].new_failures is None
+
+
+def test_an_aborted_or_drifted_suite_counts_nothing_on_any_gate(monkeypatch, tmp_path):
+    """AC3: an errored gate keeps its own status, never `fail`, and no gate in
+    an aborted suite carries a count. A drifted suite carries no count
+    either, and its emitted gates are exactly the suite's own."""
+    errored = GateResult(gate="tests", status="error", summary="toolchain missing")
+    failing = GateResult(
+        gate="lint",
+        status="fail",
+        tool="t 1",
+        failures=[Failure(file="a.py", code="E501", message="too long")],
+    )
+    passing = GateResult(gate="format", status="pass", tool="f 1")
+    cell = _stub_the_runtime(monkeypatch, suites=([], [errored, failing, passing]))
+    outcome, _ledger, aborted = _gate_result_events(
+        monkeypatch, tmp_path / "a", cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert outcome.state == "GATE_ERROR"
+    attempt = [e for e in aborted if e.against == "attempt"]
+    statuses = {e.gate: e.status for e in attempt}
+    assert statuses["tests"] == "error"
+    assert statuses["lint"] == "fail"
+    assert statuses["format"] == "pass"
+    assert all(e.new_failures is None for e in attempt)
+
+    drift_cell = _stub_the_runtime(
+        monkeypatch,
+        suites=(
+            [GateResult(gate="tests", status="pass", tool="pytest 1")],
+            [GateResult(gate="tests", status="skip")],
+        ),
+    )
+    outcome, _ledger, drift = _gate_result_events(
+        monkeypatch,
+        tmp_path / "d",
+        cell=drift_cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+    )
+    assert outcome.state == "GATE_ERROR"
+    base_names = {e.gate for e in drift if e.against == "baseline"}
+    attempt_names = {e.gate for e in drift if e.against == "attempt"}
+    assert attempt_names == base_names
+    assert all(e.new_failures is None for e in drift if e.against == "attempt")
 
 
 def test_a_bound_firing_on_the_implement_turn_still_measures_the_worktree(
