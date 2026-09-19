@@ -17,7 +17,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 GATE = "dead"
-ROOTS = ("saffron", "harness", "images", ".saffron/gates")
+ROOTS = (
+    "saffron",
+    "harness",
+    "images",
+    "records",
+    "ontology",
+    "hooks",
+    ".saffron/gates",
+)
 # ponytail: vulture matches names globally, so a new function named like any
 # attribute used anywhere, or listed in `__all__`, is not reported.
 MIN_CONFIDENCE = "60"
