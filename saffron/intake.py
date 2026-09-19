@@ -144,7 +144,7 @@ class Spec(BaseModel):
     envelope: list[str] = Field(default_factory=list)
     touches: list[str] = Field(default_factory=list)
     forbidden: list[str] = Field(default_factory=list)
-    # Dead symbols this spec will bring into use; the `dead` gate skips them while it is open.
+    # Dead symbols this spec will bring into use; the `dead` gate defers them while it is open.
     pending_symbols: list[Annotated[str, StringConstraints(pattern=PENDING_SYMBOL)]] = (
         Field(default_factory=list)
     )

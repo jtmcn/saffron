@@ -16,7 +16,7 @@ GitHub issues remain in use only for research/evidence records under
   refused, not ignored.
 - **`pending_symbols`** lists dead code this spec will bring into use, one
   `<path>::<name>` per entry (`saffron/events.py::GateResult`). The `dead` gate
-  skips each one while the spec is open, so a parent spec can add what only its
+  defers each one while the spec is open, so a parent spec can add what only its
   child calls. A method is named without its class.
 - **Acceptance criteria are `acceptance:` in the frontmatter**, one entry per
   criterion: a `claim` (the prose the PR body renders) and a `witness` (a test
