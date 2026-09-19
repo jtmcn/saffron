@@ -27,14 +27,18 @@ From commit `66c71ca` with vulture 2.16 at `--min-confidence 60`, over
 With `tests/` counted as callers, the total is 37. So 18 symbols are called
 only by tests. At `--min-confidence 100` the count is 0.
 
+Review added `records/`, `ontology/` and `hooks/` to the roots, since they are
+production Python too. On this branch the count over all seven roots is 64.
+
 A spike with ast-grep found 10 of vulture's 22 unused functions and methods.
 ast-grep matches one node in one file and has no project-wide symbol table.
 Matching vulture means rebuilding its name tables, so ast-grep was rejected.
 
 ## Decisions
 
-1. **Dead means no production caller.** Only `saffron/`, `harness/`, `images/`
-   and `.saffron/gates/` are scanned. A symbol that only a test calls is dead.
+1. **Dead means no production caller.** Only `saffron/`, `harness/`, `images/`,
+   `records/`, `ontology/`, `hooks/` and `.saffron/gates/` are scanned. A symbol
+   that only a test calls is dead.
 2. **The gate blocks new dead code only.** It fails at base as well, and the
    baseline subtraction (§5.4) means a task fails only when it adds a failure.
    A task can add dead code only through an entry a person wrote: a
@@ -53,11 +57,13 @@ Matching vulture means rebuilding its name tables, so ast-grep was rejected.
 as `structure`.
 
 1. Run `vulture --version`. Its output fills `tool` (§5.4, Appendix H).
-2. Run vulture over the four roots at `--min-confidence 60`, with
-   `.saffron/deadcode-allow.py` as its whitelist.
+2. Run vulture over the seven roots at `--min-confidence 60`, with
+   `.saffron/deadcode-allow.py` as its whitelist. `--config` names an empty
+   file, so the scanned tree's `pyproject.toml` cannot hide a name.
 3. Parse each line of the form `path:line: unused <kind> '<name>' (N%
    confidence)` into a failure. `file` is the path, `code` is `unused-<kind>`
-   and `message` is vulture's text.
+   and `message` is vulture's text. A reachability line, such as
+   `unsatisfiable 'if' condition`, is a failure with `code` `unreachable-code`.
 4. Drop each failure that an open spec lists in `pending_symbols`.
 
 The identity is `contract.identity`: gate, file, code and the normalized
@@ -86,7 +92,8 @@ that name in the file.
 which is what `intake.py` uses. It imports pyyaml after the version probe, as
 `shacl.py` imports rdflib. It does not import `saffron.intake`, because a cell
 can edit that file. A test asserts that both readers return the same entries
-for every spec in the tree.
+for every spec in the tree. A spec whose field does not parse defers nothing,
+and the gate names it in its summary.
 
 An entry is **stale** when vulture does not report its symbol. That covers a
 symbol that has a caller, one that does not exist, and one the whitelist
@@ -115,7 +122,11 @@ The whitelist is bare expressions. It is excluded from ruff and ty in
 - vulture is missing, cannot run or reports no version,
 - vulture exits with a code other than 0 or 3 (3 means it reported dead code),
 - pyyaml cannot be imported,
-- a spec's frontmatter does not parse.
+- a vulture line matches no form the gate knows.
+
+A spec whose frontmatter or `pending_symbols` does not parse is skipped, and the
+summary names it. Intake refuses that spec, so skipping it defers nothing a
+task could use.
 
 ### Tracking
 
