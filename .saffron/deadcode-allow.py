@@ -12,7 +12,6 @@ _.understanding  # Plan field (§5.3): validates the extraction turn's plan.json
 _.approach  # Plan field (§5.3): validates the extraction turn's plan.json
 _.test_strategy  # Plan field (§5.3): validates the extraction turn's plan.json
 _.risks  # Plan field (§5.3): validates the extraction turn's plan.json
-_.timestamp  # event dataclass field: EventLog writes it through asdict, saffron/events.py
 _.row_factory  # sqlite3 reads it on every query, saffron/ledger.py
 _.__getattr__  # module attribute hook: saffron/cell/runtime.py, saffron/phases/implement.py
 
