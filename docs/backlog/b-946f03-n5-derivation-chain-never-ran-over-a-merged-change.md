@@ -5,6 +5,7 @@ status: open
 filed: 2026-09-18
 specs: [SA-0107, SA-0108]
 prs: []
+awaiting: [355, 366]
 commits: []
 cites: [§1, §4.1, §4.6, §9]
 related: [118, 170]
@@ -39,3 +40,9 @@ tasks already recorded.
 
 **Filed 2026-09-18** with `SA-0107`, as the origin item Appendix T had stood in
 for.
+
+- 2026-09-19: open as PR #355 (`SA-0107`, the projection) and PR #366
+  (`SA-0108`, the checked walk). Spec loop run 8 stacked them in #351 ← #360 ← #355
+  ← #366 ← #353. Over a copy of the real ledger, #366 compared 38 of 76 merged
+  tasks and found 0 breaks. The one real overwrite is among those left out (item
+  b-952c34).

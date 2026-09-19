@@ -26,3 +26,10 @@ spends a REBUT round arguing".
 
 `AVOIDED` lists "round" with its term. `terms` reads Python docstrings and
 comments, or a recorded decision says why not. `review.py:144` is fixed.
+
+## Record
+
+- 2026-09-19: still open after the spec loop's run 8. `check()` returns no hit
+  for a `.py` file under `terms` (`.saffron/gates/prose.py:415-418`). So
+  `CONTEXT.md`'s _Avoid_ words in a Python comment or docstring reach no gate,
+  and the loop's Standards seat reads them by hand.

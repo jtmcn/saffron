@@ -549,3 +549,84 @@ lenses did not raise.
   because the flag it compares never resets (#342). Every probe of either guard
   alone survived.
   **Bucket 3.** **Open.**
+
+## 2026-09-19 — `SA-0101`, `SA-0102`, `SA-0107`, `SA-0108`, `SA-0106` (stack #351 ← #360 ← #355 ← #366 ← #353)
+
+Every line below was fixed in the pull request's review commit: `13f3dfa`
+(#351), `1be044a` (#360), `5bce64a` (#355), `5b838d4` (#366) and `9a8e7c4`
+(#353). Not listed, because the critic raised them: #351's stale "ten kinds"
+counts and its `bool` and `None` reopen times, #355's kept docstring and its
+same-second span, and #366's per-reason lines.
+
+**#351 (`SA-0101`)**
+
+- `when()`'s docstring still named a caller the diff removed and a truthiness
+  guard the diff replaced, and `TaskOutcome`'s docstring cited the
+  `FINDINGS[0]` entry the same diff deleted.
+  **Bucket 3** — a comment's claim checked against the code it describes, the
+  fourth loop running. **Open.**
+- A reported reopen time of `0` now renders, where the old guard printed none.
+  The pull request called it a behaviour change, and no test drove it.
+  **Bucket 1, and the gate does not exist.** **Open:** item b-2750d5.
+- The spend a rate-limited outcome writes to the event log was never asserted,
+  only the spend it returns.
+  **Bucket 1, and the gate does not exist.** **Open:** item b-2750d5.
+
+**#353 (`SA-0106`)**
+
+- Criterion 1's witness passed a start line printed after the runner call,
+  and criterion 3's fake ignored the rescan's return, so a dropped rescan
+  passed. Three lenses were clean with no findings.
+  **Bucket 1, and the gate does not exist.** **Open:** item b-2750d5.
+- Five over-limit docstrings grew (`run_batch` from 33 lines to 53), three new
+  comment blocks were added, and three older comments lost their reasons,
+  item 70's among them, so the per-file count stayed level.
+  **Bucket 1** — `prose` measured it and counts per file. **Open:** item
+  b-044ae7.
+- "a task *this same run* left in flight", where the thing meant is the batch.
+  **Bucket 1** for the word — `terms` does not read Python. **Open:** item 174.
+- False claims in `_batch_runner`'s docstring, checked against the code by the
+  delegate.
+  **Bucket 3** — a comment's claim checked against the code. **Open.**
+
+**#355 (`SA-0107`)**
+
+- The spec lookup read `.saffron/specs/` and missed `done/`, so 75 of 76
+  merged tasks were left out. Found only by running the module over a copy of
+  the real ledger.
+  **Bucket 1, and the gate does not exist.** **Open:** item b-a8270f.
+- Every task got an authored `Phase` and an `Attempt` with `n=1`, which
+  Appendix T forbids and the spec's notes named.
+  **Bucket 3** — the contract lens reads the spec's notes against the diff.
+  **Open.**
+- Plan-only and diff-only tampering were not told apart, a missing plan had no
+  witness, the sibling chain's kinds were never asserted, and nothing checked
+  that a mismatched `Diff` stays a finding's subject.
+  **Bucket 1, and the gate does not exist.** **Open:** item b-2750d5.
+- A task left out still left triples in the graph.
+  **Bucket 3** — the adequacy lens asks what a failed path leaves behind, as
+  item 79 found. **Open.**
+- `_SPEC_TYPES` restated the shapes' closed set in Python.
+  **Bucket 1** — a test can compare the two. **Open:** item b-60d804.
+- The projection was written in place, so a failed write could leave half a
+  file.
+  **Bucket 3.** **Open.**
+
+**#360 (`SA-0102`)**
+
+- The attempt witness passed a rebuttal set that borrowed attempt 2's gates, a
+  skipped gate carrying a count, and a passing gate without its zero.
+  **Bucket 1, and the gate does not exist.** **Open:** item b-2750d5.
+- `describe`'s `GateResult` comment said where the kind is emitted, not what
+  its rendered line leaves out. The comment on `against: "rebuttal"` having no
+  owner named no item (item 160).
+  **Bucket 3** — a comment's claim checked against the code. **Open.**
+
+**#366 (`SA-0108`)**
+
+- The walk took its pull request from the caller, not the ledger, and nothing
+  witnessed the ledger read. The break line's task id had no witness either.
+  **Bucket 1, and the gate does not exist.** **Open:** item b-2750d5.
+- The module and `_chains` docstrings restated the spec.
+  **Bucket 2** — `CLAUDE.md` says it since #346, and the cell read it. **Open:**
+  item b-044ae7 for the gate half.

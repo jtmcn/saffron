@@ -42,3 +42,5 @@ A spec added that way still needs its spec review before `next` names it.
   runnable since the last snapshot and leaves it out unless `--add`.
   `--add SA-NNNN` takes one spec at a time. Its step 1b review is the operator's
   to run first: `next` does not check that a review happened.
+- 2026-09-19: behaved in run 8. `snapshot --force` after #350 merged kept the
+  order at five and added nothing.

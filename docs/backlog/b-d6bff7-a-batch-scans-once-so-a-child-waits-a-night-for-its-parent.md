@@ -6,6 +6,7 @@ tier: 3
 filed: 2026-09-17
 specs: [SA-0106]
 prs: []
+awaiting: [353]
 commits: []
 cites: [§4.2, §4.2.1]
 related: [67, 70, 177]
@@ -49,3 +50,7 @@ can edit:
 ## Record
 
 **Filed 2026-09-17** with `SA-0106`.
+
+- 2026-09-19: open as PR #353 (`SA-0106`, spec loop run 8), stacked in #351 ←
+  #360 ← #355 ← #366 ← #353. The `DESIGN.md` lines above are still this item's
+  to edit after #353 merges.

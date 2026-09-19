@@ -50,3 +50,7 @@ the `baseline:` line and take a red gate on `main` to the operator.
   `prose` has no base to find: it fails at base by design, and subtraction
   counts its hits per file (`.saffron/policy.yaml`). The loop's step 2 and
   `GOTCHAS.md` now say so.
+- 2026-09-19: still red in every run-8 cell, with the same two failures: `tests`
+  on `test_structure_errors_when_its_tool_is_present_but_not_runnable`, and
+  `prose` on `.claude/agents/spec-reviewer.md`. Every run-8 cell was cut before
+  #354 merged (2026-09-19 11:54), so none ran the fix.

@@ -42,3 +42,7 @@ checked out, saying which.
 ## Record
 
 **Filed 2026-09-17** from the spec loop's run 5 (stack #308).
+
+- 2026-09-19: met again in the spec loop's run 8 through `history`, which is
+  item b-4589be. A stacked child's branch also carries its spec as of the
+  parent's cut, which item b-65e7e2 removes.
