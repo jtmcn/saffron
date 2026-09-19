@@ -30,6 +30,8 @@ ROOTS = (
 # ponytail: vulture matches names globally, so a new function named like any
 # attribute used anywhere, or listed in `__all__`, is not reported.
 MIN_CONFIDENCE = "60"
+# pydantic calls these; ignoring them by decorator keeps each new one off the whitelist.
+IGNORE_DECORATORS = "@field_validator,@model_validator"
 # Anchored on this file, as `structure.py` anchors its config: a cell runs the base's copy.
 SAFFRON_DIR = Path(__file__).resolve().parent.parent
 WHITELIST = SAFFRON_DIR / "deadcode-allow.py"
@@ -162,7 +164,15 @@ def main(argv: list[str]) -> int:
             f"none of {', '.join(ROOTS)} is here, so nothing was scanned", tool
         )
     # `--config` names an empty file so the scanned tree's `pyproject.toml` cannot hide a name.
-    argv = ["vulture", *roots, str(WHITELIST), "--min-confidence", MIN_CONFIDENCE]
+    argv = [
+        "vulture",
+        *roots,
+        str(WHITELIST),
+        "--min-confidence",
+        MIN_CONFIDENCE,
+        "--ignore-decorators",
+        IGNORE_DECORATORS,
+    ]
     try:
         scan = subprocess.run(
             [*argv, "--config", os.devnull], capture_output=True, text=True

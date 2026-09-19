@@ -225,6 +225,39 @@ def test_a_function_only_a_test_calls_is_a_failure(tmp_path):
     assert _run(tree).status == "fail"
 
 
+VALIDATED = """from pydantic import BaseModel, field_validator, model_validator
+
+
+class Model(BaseModel):
+    name: str
+
+    @field_validator("name", mode="before")
+    def _name_is_set(cls, v):
+        return v or cls.__name__
+
+    @model_validator(mode="after")
+    def _whole(self):
+        return self
+
+    def orphan(self):
+        return 2
+
+
+print(Model(name="x").name)
+"""
+
+
+def test_a_pydantic_validator_is_not_a_failure_but_its_undecorated_neighbour_is(
+    tmp_path,
+):
+    tree = _tree(tmp_path)
+    (tree / "saffron" / "extra.py").write_text(VALIDATED)
+    result = _run(tree)
+    assert [f.message.split(" (")[0] for f in result.failures] == [
+        "unused method 'orphan'"
+    ], result.summary
+
+
 def test_an_open_spec_defers_the_symbol_it_lists(tmp_path):
     tree = _tree(tmp_path)
     (tree / "saffron" / "extra.py").write_text(ORPHAN)

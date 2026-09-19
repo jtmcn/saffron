@@ -28,7 +28,8 @@ With `tests/` counted as callers, the total is 37. So 18 symbols are called
 only by tests. At `--min-confidence 100` the count is 0.
 
 Review added `records/`, `ontology/` and `hooks/` to the roots, since they are
-production Python too. On this branch the count over all seven roots is 64.
+production Python too. On this branch the count over all seven roots is 64,
+and 58 once pydantic validators are ignored by decorator.
 
 A spike with ast-grep found 10 of vulture's 22 unused functions and methods.
 ast-grep matches one node in one file and has no project-wide symbol table.
@@ -60,6 +61,8 @@ as `structure`.
 2. Run vulture over the seven roots at `--min-confidence 60`, with
    `.saffron/deadcode-allow.py` as its whitelist. `--config` names an empty
    file, so the scanned tree's `pyproject.toml` cannot hide a name.
+   `--ignore-decorators` drops pydantic's `field_validator` and
+   `model_validator` methods, so a new one needs no whitelist entry.
 3. Parse each line of the form `path:line: unused <kind> '<name>' (N%
    confidence)` into a failure. `file` is the path, `code` is `unused-<kind>`
    and `message` is vulture's text. A reachability line, such as
@@ -107,7 +110,7 @@ lists stale entries instead.
 ### False positives
 
 `.saffron/deadcode-allow.py` holds vulture's whitelist. Examples are pydantic
-validators, `typer` commands and the entry point of `images/agent_runner.py`.
+fields, `typer` commands and the entry point of `images/agent_runner.py`.
 Each entry carries a one-line reason. The gate reads the whitelist from the
 base, so an entry counts only once it has merged: a task cannot whitelist its
 own code, and a person adds the entry before the task runs. `integrity` also
@@ -152,9 +155,8 @@ Two stacked pull requests.
 
 ## Not in this design
 
-The `spec-reviewer` agent is not taught to check `pending_symbols`. A missing
-entry shows up as a `dead` failure in the task that adds the symbol, and the
-fix is a one-line spec edit.
+The gate does not tell a real caller from a name in `__all__` or an attribute
+of the same name elsewhere, so a cell under repair can pass it through either.
 
 ## Testing
 
