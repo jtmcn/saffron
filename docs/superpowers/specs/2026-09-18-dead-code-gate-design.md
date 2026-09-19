@@ -108,9 +108,11 @@ lists stale entries instead.
 
 `.saffron/deadcode-allow.py` holds vulture's whitelist. Examples are pydantic
 validators, `typer` commands and the entry point of `images/agent_runner.py`.
-Each entry carries a one-line reason. `integrity` fails a change to a file
-under `.saffron/**` unless the task's spec declares it in `touches`, and a
-person writes the spec.
+Each entry carries a one-line reason. The gate reads the whitelist from the
+base, so an entry counts only once it has merged: a task cannot whitelist its
+own code, and a person adds the entry before the task runs. `integrity` also
+fails a change to a file under `.saffron/**` unless the task's spec declares it
+in `touches`, and a person writes the spec.
 
 The whitelist is bare expressions. It is excluded from ruff and ty in
 `pyproject.toml`, or `lint` and `types` report it (F821, B018).
