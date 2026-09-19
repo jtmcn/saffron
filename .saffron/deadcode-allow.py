@@ -20,3 +20,25 @@ _.risks  # Plan field (§5.3): validates the extraction turn's plan.json
 _.timestamp  # event dataclass field: EventLog writes it through asdict, saffron/events.py
 _.row_factory  # sqlite3 reads it on every query, saffron/ledger.py
 _.__getattr__  # module attribute hook: saffron/cell/runtime.py, saffron/phases/implement.py
+
+# Called from outside the scanned roots.
+_.load_corpus  # docs/evidence/scripts/2026-09-08-lens-corpus.py
+_.calibrate_corpus  # docs/evidence/scripts/2026-09-08-lens-corpus.py
+_.graded_per_run  # docs/evidence/scripts/2026-09-08-lens-corpus.py
+_.score_probes  # docs/evidence/scripts/2026-09-08-lens-corpus.py
+_.render_corpus_table  # docs/evidence/scripts/2026-09-08-lens-corpus.py
+_.check_probe  # docs/evidence/scripts/2026-09-08-lens-corpus.py
+_.render_table  # docs/evidence/scripts/2026-09-07-lens-scoring.py
+_.recover_fixture  # docs/evidence/scripts/2026-09-08-recover-fixture.py
+_.FIXTURE_FILES  # docs/evidence/scripts/2026-09-08-recover-fixture.py
+_.task_results  # .claude/skills/run-saffron-spec-loop/driver.py
+_.check_all  # tests/records/test_records_integrity.py is the records check make check runs
+_.merged_prs  # tests/records/test_records_integrity.py is the records check make check runs
+_.building_pr  # tests/records/test_records_integrity.py is the records check make check runs
+
+# Cited by name in DESIGN.md, or read as a table by a test that pins it.
+_.batch_runs  # DESIGN.md §4.2.1 lists it among the batch writers and readers
+_.CPU_OFFSET  # DESIGN.md §5.1 names it; runtime.__getattr__ serves it
+_.visible_cpus  # the cell-marked tests/test_image.py measures CPU_OFFSET with it
+_.FAMILIES  # tests/test_events.py checks every call site against it; SA-0101 and SA-0102 edit it
+_.FINDINGS  # tests/test_events.py checks every call site against it; SA-0101 edits it
