@@ -78,8 +78,8 @@ class Mutant(BaseModel):
     notice.
 
     Only "empty" is judged here. A `find` that matches more than once, or not
-    at all, can only be judged against a tree, and `saffron/mutation.py` is
-    where that half lives — this module never reads the repo it describes.
+    at all, can only be judged against a tree, and `saffron/cell/worktree.py`
+    is where that half lives — this module never reads the repo it describes.
     """
 
     model_config = ConfigDict(extra="forbid")

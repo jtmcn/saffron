@@ -16,7 +16,7 @@ from saffron.gates.contract import GateResult, witness_blocking
 from saffron.gates.core.witness import witness_gate
 from saffron.gates.runner import run_suite, run_witness
 from saffron.intake import Criterion, Mutant
-from saffron.mutation import host_mutator
+from tests.mutation import host_mutator
 
 
 def _gate_script(tmp_path: Path, name: str, body: str) -> Path:

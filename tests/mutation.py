@@ -1,4 +1,7 @@
-"""Applying and undoing a criterion's `mutant` (DESIGN.md §5.4.1).
+"""Applying and undoing a criterion's `mutant` (DESIGN.md §5.4.1), on a host tree.
+
+Test support, moved from `saffron/`: no production caller reached it, and a
+cell's mutator is `saffron/cell/worktree.py`'s `source_mutated`.
 
 This module builds no gate — `saffron/gates/**` is `forbidden` to this spec,
 and `SA-0057` is where the applier below is wired to the repo's `tests` gate.

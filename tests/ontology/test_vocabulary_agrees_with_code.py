@@ -95,8 +95,8 @@ CORE_GATES = ONTOLOGY.parent / "saffron" / "gates" / "core"
 
 def _core_gate_modules() -> set[str]:
     """The package's own two conventions, which nothing else enforces: one
-    module per gate, and no helper modules under `core/` (`mutation.py` sits at
-    `saffron/mutation.py` for this reason). A helper dropped here would demand a
+    module per gate, and no helper modules under `core/` (the mutant applier
+    lives in `saffron/cell/worktree.py` for this reason). A helper dropped here would demand a
     vocabulary entry it should not have; a gate shipped as `core/foo/__init__
     .py` would be invisible to this glob, which is item 72's hole reopened.
     """

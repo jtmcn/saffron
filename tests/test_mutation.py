@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from saffron.intake import Mutant
-from saffron.mutation import (
+from tests.mutation import (
     MutationError,
     MutationResult,
     apply_mutant,
