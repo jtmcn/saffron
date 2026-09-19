@@ -202,3 +202,8 @@ def test_show_a_letter_prints_the_appendix():
 def test_show_an_unknown_letter_says_so():
     result = run("show", "Z")
     assert result.returncode == 1 and "no appendix Z" in result.stderr
+
+
+def test_list_appendix_refuses_a_status_filter():
+    result = run("list", "appendix", "--status", "open")
+    assert result.returncode == 2 and "appendices have neither" in result.stderr
