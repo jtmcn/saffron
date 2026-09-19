@@ -1214,8 +1214,8 @@ def test_the_table_did_not_quietly_lose_a_row():
     That is the point: moving it is a deliberate edit, not a silent one.
     `SA-0085` moved it again, deliberately, for the one new line shape it adds
     — a witness already green at base_sha, named on the baseline's own event."""
-    assert len(FAMILIES) == 62
-    assert len({f.prefix for f in FAMILIES}) == 62
+    assert len(FAMILIES) == 63
+    assert len({f.prefix for f in FAMILIES}) == 63
 
 
 def test_the_duplicated_agent_renderer_still_matches_its_original():
@@ -1747,7 +1747,8 @@ def test_normalise_replaces_exactly_the_three_volatile_substrings():
 # branch, not the kind. A kind appearing here does not mean its branches do.
 #
 # Captured: `preflight:` (4 of 5 steps), `cell:`, `baseline:` (the joined
-# line only), `PLAN: accepted`, `IMPLEMENT: system prompt`, `IMPLEMENT: N
+# line only), `gates: {gate}={status}` (one per gate, at baseline and each
+# attempt), `PLAN: accepted`, `IMPLEMENT: system prompt`, `IMPLEMENT: N
 # commit(s)`, `gates: attempt N …` (green, repair, no-progress), `REVIEW:`
 # per-lens and summary, the outcome line, `teardown` and `teardown: exported
 # N bytes`.
@@ -1759,8 +1760,6 @@ def test_normalise_replaces_exactly_the_three_volatile_substrings():
 #
 # Not captured though the kind above it is — the gaps easiest to mistake for
 # coverage:
-#   * `GateResult` entirely. No call site prints one alone; it renders for a
-#     future consumer (`SA-0036`) and this file proves nothing about it.
 #   * `Baseline`'s `aborted` variant — both driven runs have every declared
 #     gate report, so the second `baseline errored in [...]` line never
 #     appears. Proven only by the `describe` case above.
@@ -2014,15 +2013,43 @@ def test_describe_reproduces_a_line_the_fixture_captured(event, line):
 
 def test_the_join_covers_every_captured_line_a_kind_renders():
     """A join that silently shrinks proves less each time it is edited. Every
-    fixture line is either joined above, normalised, or named in `FINDINGS`;
-    nothing else is allowed to go unchecked."""
+    fixture line is either joined above, normalised, named in `FINDINGS`, or
+    joined here inline as `GateResult`'s own per-gate render — not a new
+    `_JOINED` row, which would pass with the source reverted (the renderer
+    already exists at base)."""
+    from saffron.events import GateResult as GateResultEvent
+
     captured = [
         line
         for line in _golden_fixture_path().read_text().splitlines()
         if line and not line.startswith("#")
     ]
     joined = {line for _, line in _JOINED}
-    unchecked = [line for line in captured if line not in joined and "<" not in line]
+    per_gate = {
+        describe(
+            GateResultEvent(
+                timestamp=1.0,
+                spec_id="x",
+                gate=gate,
+                status=status,
+                against="baseline",
+            )
+        )
+        for gate, status in (
+            ("scope", "pass"),
+            ("integrity", "skip"),
+            ("size", "pass"),
+            ("committed", "pass"),
+            ("census", "skip"),
+            ("criteria", "skip"),
+            ("lint", "fail"),
+        )
+    }
+    unchecked = [
+        line
+        for line in captured
+        if line not in joined and line not in per_gate and "<" not in line
+    ]
     assert unchecked == [], f"captured but joined to no kind: {unchecked}"
 
 
