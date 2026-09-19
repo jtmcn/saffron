@@ -68,9 +68,9 @@ acceptance:
     witness: tests/records/test_records_check.py::test_an_adr_cites_only_appendices_that_exist
   - claim: >-
       `records list adr` prints one line per ADR in id order: id, status,
-      title. `records show --kind adr 1` prints ADR 1, and a bare
-      `records show 1` still prints backlog item 1.
-    witness: tests/records/test_records_cli.py::test_list_adr_and_show_by_kind_leave_a_bare_number_to_the_backlog
+      title. It refuses `--status` and `--tier`, as the appendix branch does.
+      A bare `records show 1` still prints backlog item 1.
+    witness: tests/records/test_records_cli.py::test_list_adr_prints_the_adrs_and_leaves_a_bare_number_to_the_backlog
 ---
 
 ## Context
@@ -107,6 +107,16 @@ by-hand layer removes it with ADR 1.
 
 **The ontology, `DESIGN.md`'s ADR index, and the citation reader for "ADR N".**
 They live in `ontology/` and `tests/test_citations.py`, and are by hand.
+
+**`records show` by kind.** A first cell planned 620 changed lines against the
+600 ceiling and was refused before it edited anything. So `--kind` and the
+id-resolution it needs are a later spec. `show` keeps today's behaviour
+exactly: a digit is a backlog item, a letter an appendix.
+
+`list adr` is not optional in the same way. `list`'s `kind` argument reads
+`choices=sorted(KINDS)` (`records/__main__.py:160`), so adding the kind makes
+`records list adr` a command. Without its own branch it falls into the backlog
+branch and raises `not a backlog item` (`:37-40`).
 
 **Where the principle numbers come from.** `check_adr_principles` and
 `check_adr_appendices` take the existing numbers and letters as arguments.
@@ -203,11 +213,10 @@ arguments. Read a bullet as `- **<n>** <verb>.` at the start of a line inside
 **The CLI.** In `records/__main__.py`, `list` takes a kind already
 (`records/__main__.py:160`), and `cmd_list` branches on `Appendix`
 (`:74-92`). Add an ADR branch printing `id  status  title`, refusing `--status`
-and `--tier` as the appendix branch does. `show` takes no kind today
-(`:169-170`), and `cmd_show` reads a digit id as a backlog item (`:106-114`).
-Add `--kind` with choices from `KINDS`, defaulting to today's behaviour, so a
-bare `records show 1` is unchanged. `--kind adr` looks the id up among ADRs,
-and a missing one prints `no ADR <n>` and exits 1.
+and `--tier` as the appendix branch does. That is the whole CLI change. Leave
+`cmd_show` (`:96-130`) and `show`'s parser (`:169-170`) alone, and add no
+`--kind`: the criterion's witness holds a bare `records show 1` to the backlog
+item it prints today.
 
 **`CITING` and `LIVE_SURFACES` gain `"docs/adr"`** (`tests/records/check.py:22`,
 `:251`). A missing directory yields no files through `_walk`
