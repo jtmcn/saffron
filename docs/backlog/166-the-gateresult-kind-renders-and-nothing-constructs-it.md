@@ -1,11 +1,11 @@
 ---
 id: 166
 title: The GateResult kind renders and nothing constructs it, so no event log names the gate that caused a repair turn
-status: open
+status: done
+closed: 2026-09-19
 filed: 2026-09-17
 specs: [SA-0102]
-prs: []
-awaiting: [360]
+prs: [360]
 commits: []
 cites: [§4.1, §5.4]
 related: [160]
@@ -61,3 +61,6 @@ through. `SA-0102` carries it.
 - 2026-09-19: open as PR #360 (`SA-0102`, spec loop run 8), stacked in #351 ←
   #360 ← #355 ← #366 ← #353. `docs/**` is forbidden to the spec, so this item
   closes by hand after #360 merges.
+- 2026-09-19: #360 merged, so each baseline and attempt suite emits one
+  `GateResult` per gate, with a count only where a subtraction ran. The
+  post-rebuttal suite still emits none, which is item 160's.
