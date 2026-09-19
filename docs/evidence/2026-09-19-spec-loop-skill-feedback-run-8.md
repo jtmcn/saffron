@@ -289,3 +289,12 @@ below all six.
     (b-5d5b56). Module-scope parametrize lists in `tests/test_events.py` make
     the reverted run a collection error, so `revert` skips. `SA-0101` was the
     first case.
+
+24. **The loop has no step after the stack merges** (b-6f7f8d). Step 5's
+    `awaiting:` entries turned `main` red the moment the stack merged, until
+    #370. The specs stayed out of `done/` until #372.
+
+25. **Two traps in retiring a spec** (b-6f7f8d). A move to `done/` that is not
+    yet committed fails `tests/test_queued_specs.py`, because `_authored_at`
+    returns `None`. And every item naming the spec in `specs:` must leave
+    `open`, not only its origin item: item 160 became `partial`.
