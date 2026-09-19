@@ -58,7 +58,8 @@ trivial.
    it changes (a rendered sentence that becomes false counts), tests that
    assert the old behaviour, fixtures. Each one outside `touches` or inside
    `forbidden` is a blocker. Name the line at `base` that makes the file
-   necessary.
+   necessary. A symbol the change adds that only a later spec calls needs a
+   `pending_symbols` entry, or the `dead` gate fails the task: a blocker.
 3. **Witness/mutant discipline.** A spec whose change edits existing code
    declares a `mutant` per criterion. Where one is missing, name a plausible
    wrong implementation its witness would pass; if you can, that is a
