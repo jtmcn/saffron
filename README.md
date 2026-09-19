@@ -4,7 +4,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue)](pyproject.toml)
 [![License: MIT](https://img.shields.io/github/license/jtmcn/saffron)](LICENSE)
 
-A Python orchestrator that turns spec files into reviewable pull requests.
+Turns spec files into draft pull requests for one operator to review, running a coding agent overnight in isolated cells.
 
 Spec files in, reviewed pull requests out, running unattended overnight on one Mac.
 Saffron reads specs committed to a target repo, runs each one as an agent in an isolated
@@ -57,6 +57,7 @@ refusals: 5
 ## Requirements
 
 Saffron runs on macOS with Apple silicon; the cell runtime is a per-cell Linux VM.
+Measured on macOS 26.6 with `container` 1.3.0. Older versions are untested.
 
 - **`apple/container`** — `brew install container`, then
   `container system kernel set --recommended`
@@ -69,6 +70,10 @@ Saffron runs on macOS with Apple silicon; the cell runtime is a per-cell Linux V
   packaging shell out to `gh`
 - **`CLAUDE_CODE_OAUTH_TOKEN`** — from `claude setup-token`; needed only by `cell` and
   `batch`
+
+On a Linux host that cannot run `apple/container`, set `SAFFRON_CELL_RUNTIME=podman`.
+Cells then share the host kernel instead of getting a VM each. The trade is measured in
+[docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md](docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md).
 
 Full host setup, including which macOS services must be off before a batch runs, is in
 [docs/HOST-HARDENING.md](docs/HOST-HARDENING.md).
@@ -83,7 +88,9 @@ cd saffron
 make install
 ```
 
-Cell-marked tests need two images, built by hand once:
+`saffron cell` and `saffron batch` run inside two images you build once, and
+again after editing either Dockerfile. The repo's own image is built from these
+automatically.
 
 ```sh
 container build -t saffron/cell-base:python -f images/cell-base.python.Dockerfile .
@@ -163,7 +170,7 @@ The gate contract is the whole repo-agnostic surface: `saffron/gates/contract.py
 make check          # lint + test — the default target
 make fmt            # ruff check --fix . && ruff format .
 uv run pytest       # cell-marked tests excluded by default
-uv run pytest -m cell   # needs the images above
+uv run pytest -m cell   # needs the images from Install
 ```
 
 ## Status
@@ -173,9 +180,7 @@ batch` is v0.6; `replay` is v0 and v1 deletes it. The `ratify` and `gc` subcomma
 designed but not built. Autonomous merge is a permanent non-goal, at any version.
 
 [docs/backlog/](docs/backlog/) is what v0.5 left undone, one record per item; `make backlog`
-lists them and `uv run python -m records show 118` prints one. `docs/backlog/PRIORITY.md` is
-the order to work in. Read it before picking up work; `docs/evidence/` holds the primary
-records.
+lists them.
 
 ## Documentation
 
