@@ -44,6 +44,12 @@ class Finding(BaseModel):
     optional here on purpose: every fixture recorded before this field existed
     is rebuilt through `Finding(**f)`, and `calibrate_corpus` runs that before
     every paid pass."""
+    probe_verdict: Literal["survived", "killed", "unproven"] | None = None
+    """What running `probe` answered (backlog item 117), decided before
+    `ledger.record_findings` ever sees this finding. Never `verdict` — that
+    name is REBUT's own, on the ledger's `verdict` column (`CONTEXT.md`).
+    `None` for a finding with no probe, or one REVIEW never got to probe.
+    `rebut.blocker_lines` is this field's one reader."""
 
 
 @dataclass(frozen=True)

@@ -11,6 +11,7 @@ import contextlib
 import hashlib
 import json
 import os
+import posixpath
 import re
 import time
 from collections import Counter
@@ -20,6 +21,7 @@ from functools import partial, wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from saffron.agents.findings import Finding
 from saffron.cell import runtime
 from saffron.events import (
     Attempt,
@@ -41,7 +43,8 @@ from saffron.events import (
 from saffron.events import GateResult as GateResultEvent
 from saffron.gates.baseline import NewFailure, is_no_progress
 from saffron.gates.contract import GateResult
-from saffron.intake import Criterion
+from saffron.gates.core.scope import matches
+from saffron.intake import Criterion, Mutant
 from saffron.phases import implement, rebut, review
 from saffron.phases.implement import AttemptResult
 
@@ -1237,6 +1240,174 @@ def _gate_cell_suite(
         return suite.against(CellTree(container, cwd=repo), baseline)
 
 
+def _declared_test_path(file: str, test_paths: Sequence[str]) -> bool:
+    """`file`, normalised, against the repo's declared `integrity.test_paths`
+    globs — `scope.matches`, the rule `revert` uses, because `check_probe`'s
+    own `test_paths` compares prefixes and `saffron/probe.py` is forbidden
+    here (backlog item 117)."""
+    normalised = posixpath.normpath(file)
+    escapes = normalised == ".." or normalised.startswith("../")
+    if posixpath.isabs(normalised) or escapes:
+        return False
+    return any(matches(normalised, pattern) for pattern in test_paths)
+
+
+def _probe_adequacy(
+    *,
+    spec: CellSpec,
+    repo: Path,
+    mirror: Path,
+    gates_dir: Path,
+    thread_env: Mapping[str, str],
+    test_paths: Sequence[str],
+    gates: dict[str, Path],
+    patch: str,
+    reviews: list[review.LensReview],
+    created: set[str],
+    note: Callable[[str, bool, str], None],
+) -> list[dict]:
+    """Every anchored adequacy finding's vacuity probe, asked once each
+    (backlog item 117), in a Gate-only cell entered *after* REVIEW's own
+    critic cell is torn down — never inside it, the hole `SA-0087` closed.
+
+    Decides each finding's `severity`/`probe_verdict` in place before
+    returning, so the caller's later `ledger.record_findings` sees the
+    decided findings. Returns `probes.json`'s own list; writes nothing.
+    """
+    from saffron import probe as probe_check
+    from saffron.cell import worktree
+    from saffron.gates import runner
+
+    targets = review.adequacy_probes(reviews)
+    if not targets:
+        return []
+    # Captured before anything is decided, or a promotion loses it.
+    filed = {id(f): f.severity for f in targets}
+    by_probe: dict[tuple[str, str, str], list[Finding]] = {}
+    for f in targets:
+        assert f.probe is not None  # adequacy_probes already filtered this
+        by_probe.setdefault(review.probe_key(f.probe), []).append(f)
+
+    entries: list[dict] = []
+
+    def decide(probe: Mutant, result) -> None:
+        findings = by_probe[review.probe_key(probe)]
+        for f in findings:
+            review.apply_probe_verdict(f, result.verdict)
+        record = result.baseline
+        entries.append(
+            {
+                "probe": probe.model_dump(),
+                "probe_verdict": result.verdict,
+                "reason": result.reason,
+                "failures": list(result.failures),
+                "tool": result.tool,
+                "collected": result.collected,
+                "summary": result.summary,
+                "baseline_failures": None if record is None else list(record.failures),
+                "baseline_tool": None if record is None else record.tool,
+                "baseline_collected": None if record is None else record.collected,
+                "baseline_summary": None if record is None else record.summary,
+                "findings": [
+                    {
+                        "lens": f.lens,
+                        "file": f.file,
+                        "line": f.line,
+                        "filed_severity": filed[id(f)],
+                    }
+                    for f in findings
+                ],
+            }
+        )
+
+    def unproven(pending: list[Mutant], reason: str, record=None) -> None:
+        for p in pending:
+            decide(p, probe_check.ProbeResult("unproven", reason, baseline=record))
+
+    probes = review.distinct_probes(targets)
+    on_test_path = {
+        review.probe_key(p) for p in probes if _declared_test_path(p.file, test_paths)
+    }
+    # The mutator is never entered for a declared test path (item 117).
+    for p in probes:
+        if review.probe_key(p) in on_test_path:
+            decide(
+                p,
+                probe_check.ProbeResult(
+                    "unproven", f"{p.file} is a declared test path"
+                ),
+            )
+    remaining = [p for p in probes if review.probe_key(p) not in on_test_path]
+    if not remaining:
+        return entries
+    if "tests" not in gates:
+        # As the lens-corpus driver's own `_apply_probes` does: no cell.
+        unproven(
+            remaining,
+            "this repo's head declares no `tests` gate, so nothing could "
+            "answer the probe",
+        )
+        return entries
+
+    def _run_tests(container: str, executable: Path, cwd: Path, subset: list[str]):
+        return runner.run_gate(
+            "tests",
+            executable,
+            cwd,
+            subset=subset,
+            executor=runner.CellExecutor(container),
+        )
+
+    with critic_cell(
+        spec=spec,
+        repo=repo,
+        mirror=mirror,
+        network=None,
+        env=dict(thread_env),  # the repo's declared gate env, nothing more
+        gates_dir=gates_dir,
+        patch=patch,
+        created=created,
+        note=note,
+    ) as container:
+        run_tests = partial(_run_tests, container, gates["tests"], repo)
+        try:
+            baseline = run_tests([])
+        except runtime.CellRuntimeError as exc:
+            unproven(remaining, f"the baseline tests gate could not run: {exc}")
+            return entries
+        # What every verdict below is subtracted from (item 94).
+        record = probe_check.BaselineRecord.of(baseline)
+        for index, p in enumerate(remaining):
+            try:
+                result = probe_check.check_probe(
+                    p,
+                    baseline=baseline,
+                    mutate=partial(worktree.source_mutated, container),
+                    run_tests=run_tests,
+                    test_paths=(),  # the host already refused a test path above
+                )
+            except runtime.CellRuntimeError as exc:
+                # A failed undo leaves the tree untrustworthy (item 117): no
+                # later probe reaches the mutator either.
+                decide(
+                    p,
+                    probe_check.ProbeResult(
+                        "unproven",
+                        f"the probe could not be applied or asked: {exc}",
+                        baseline=record,
+                    ),
+                )
+                unproven(
+                    remaining[index + 1 :],
+                    "an earlier probe left this cell's tree in an unknown "
+                    "state, so nothing after it was asked",
+                    record,
+                )
+                break
+            decide(p, result)
+    return entries
+
+
 def _drive_cell(
     spec: CellSpec,
     *,
@@ -2165,6 +2336,31 @@ def _drive_cell(
                         f"cannot carry — {binary}",
                     )
                 else:
+                    # Backlog item 117: every probed adequacy finding's own
+                    # verdict, decided before the ledger write below.
+                    probed = _probe_adequacy(
+                        spec=spec,
+                        repo=repo,
+                        mirror=mirror,
+                        gates_dir=gates_dir,
+                        thread_env=policy.thread_env,
+                        test_paths=policy.integrity.test_paths,
+                        gates=gates,
+                        patch=patch_to_review,
+                        reviews=reviews,
+                        created=created,
+                        note=_critic_teardown,
+                    )
+                    if probed:
+                        (task_dir / "probes.json").write_text(
+                            json.dumps(probed, indent=2)
+                        )
+                        _phase_start(
+                            "REVIEW",
+                            "REVIEW",
+                            review.describe_probes(review.adequacy_probes(reviews)),
+                        )
+
                     # Deliberately not gated on the host ceiling: a green diff
                     # nobody reviewed is exactly the product Appendix K says
                     # means nothing.
