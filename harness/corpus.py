@@ -21,8 +21,8 @@ from harness.lens_scoring import (
     load_fixture,
     score_pass,
 )
-from harness.probe_check import ProbeResult
 from saffron.phases.review import LENSES, LensReview
+from saffron.probe import ProbeResult
 
 
 def load_corpus(root: Path) -> list[Fixture]:
