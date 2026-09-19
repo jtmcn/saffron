@@ -3,13 +3,10 @@
 Test support, moved from `saffron/`: no production caller reached it, and a
 cell's mutator is `saffron/cell/worktree.py`'s `source_mutated`.
 
-This module builds no gate — `saffron/gates/**` is `forbidden` to this spec,
-and `SA-0057` is where the applier below is wired to the repo's `tests` gate.
-What lives here is the mechanism a gate needs: turn a `Mutant` (`saffron.intake`)
-into a byte edit against a real tree, and turn it back, with no opinion on
-what an unapplied mutant *means* — that is `ok=False` and a `reason`, never an
-exception and never a status. Whether that becomes a `skip`, a `fail` or a
-refusal is `SA-0057`'s code, not this one's.
+The witness-gate tests drive `witness_gate` through `host_mutator` here. It
+turns a `Mutant` (`saffron.intake`) into a byte edit against a real tree and
+back, with no opinion on what an unapplied mutant *means*: that is `ok=False`
+and a `reason`, never an exception and never a status.
 
 Everything here reads and writes raw bytes, never text. A file opened in text
 mode has its line endings translated on the way in and, depending on how it is

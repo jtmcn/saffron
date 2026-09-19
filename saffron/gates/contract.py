@@ -114,7 +114,7 @@ def witness_blocking(tier: RiskTier) -> bool:
 
     This is the level, not a green light. Two things this decision is made in
     full knowledge of, neither of which this module can change (`witness.py`
-    and `worktree.py` are both out of reach here): a `tests` gate that errors
+    and the mutator are both out of reach here): a `tests` gate that errors
     on a later criterion discards an earlier criterion's real survivor
     finding in the same call (`witness_gate` returns on the first inner
     `error`), and `witness` answers that same inner-`error` trap with `error`
