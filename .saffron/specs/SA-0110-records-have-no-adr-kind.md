@@ -21,8 +21,8 @@ forbidden:
   - images/**
   - harness/**
   - saffron/**
-budget_usd: 18
-max_turns: 100
+budget_usd: 23
+max_turns: 135
 acceptance:
   - claim: >-
       A file under `docs/adr/` named `0001-<slug>.md` loads as an ADR whose id
@@ -116,6 +116,22 @@ the by-hand layer passes them in from `ontology.design_record`.
 
 This change is **new** code, so each criterion declares a witness and no mutant.
 
+**This diff runs ahead of `CONTEXT.md` §11 on purpose.** §11 still says "ADR"
+means prior art's records and that Saffron keeps no `docs/adr/`
+(`CONTEXT.md:639-645`). The design reverses that, and `CONTEXT.md` is
+`protected`, so its entry is rewritten by hand after this merges. Saffron's own
+ADR kind here is that design's first step, not a use of a word the glossary
+refuses.
+
+**Each witness plants every case its claim lists**, one broken copy of the
+fixture per case, and asserts each is reported. Criterion 1's witness also
+asserts `1-x.md` and `00001-x.md` holding `id: 1` are refused, so a pattern of
+`\d+` fails it. Criterion 2's plants each of the four required headings
+missing in turn, an unknown heading, and two headings swapped. Criterion 5's
+plants all six supersession defects, and criterion 6's all four principle
+defects. A witness that plants one case passes an implementation that checks
+only that one.
+
 **The model.** Add `Adr(Identified)` in `records/kinds.py`: `id` a strict
 integer ≥ 1 (`Number`, `records/kinds.py:31`), `title` non-empty, `status` one of
 the three, `date` a `dt.date`, and four lists defaulting empty: `supersedes`,
@@ -132,7 +148,9 @@ id zero-padded" case is `0002-x.md` holding `id: 1`. Sorting is by id: `order`
 
 **Required headings.** Add a field to `Kind` for the subset of `sections` that
 must appear, and have `_sectioned` refuse a missing one, naming it. The backlog
-declares `("Problem",)`. Its status-dependent rules stay in `_check_sections`.
+declares `("Problem",)`. The comment on `sections` (`records/kinds.py:151`) says
+its headings are required. Once the new field exists they are only allowed, so
+correct it. Its status-dependent rules stay in `_check_sections`.
 Keep the backlog's current behaviour exactly, which criterion 3 holds.
 
 **Witness modules must collect with the source reverted.** `revert` re-runs
@@ -149,7 +167,12 @@ Do not add them to a `from … import` line at the top of either file.
 `supersedes: [1]`), each with every required section. Give one `principles:
 [1]` with a `- **1** upholds.` bullet, and the other an empty list with the
 `Judged against no principle.` line. Their `appendices` name letters the
-fixture's `docs/appendices/` holds (A and B). Each witness copies the good
+fixture's `docs/appendices/` holds (A and B). Two readers scan the fixture
+prose. `tests/test_citations.py` resolves every appendix letter and `§`
+citation in it against the real repo. Once `CITING` gains `docs/adr`,
+`check_all(FIXTURE, …)` also reads the fixture ADRs for backlog item citations,
+which the fixture must hold (`tests/records/test_records_check.py:261`). Keep the fixture
+ADRs' prose free of any citation. Each witness copies the good
 fixture to `tmp_path` and breaks one thing, as the existing appendix tests do
 (`test_a_skipped_letter_is_a_violation`, `tests/records/test_records_check.py`).
 
