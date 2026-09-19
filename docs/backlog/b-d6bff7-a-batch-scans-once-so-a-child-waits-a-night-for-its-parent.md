@@ -1,12 +1,11 @@
 ---
 id: b-d6bff7
 title: A batch scans its queue once, so a child waits a night for a parent that packaged hours earlier
-status: open
+status: partial
 tier: 3
 filed: 2026-09-17
 specs: [SA-0106]
-prs: []
-awaiting: [353]
+prs: [353]
 commits: []
 cites: [§4.2, §4.2.1]
 related: [67, 70, 177]
@@ -54,3 +53,6 @@ can edit:
 - 2026-09-19: open as PR #353 (`SA-0106`, spec loop run 8), stacked in #351 ←
   #360 ← #355 ← #366 ← #353. The `DESIGN.md` lines above are still this item's
   to edit after #353 merges.
+- 2026-09-19: #353 merged, so `saffron batch` rescans after each task. The
+  prose above is still unedited: `GOTCHAS.md`'s reason, `DESIGN.md:385`, `:400`,
+  `:404`, `:408` and `saffron/task.py:130-133`. The item closes when they are.
