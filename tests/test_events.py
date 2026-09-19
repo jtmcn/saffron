@@ -2017,8 +2017,6 @@ def test_the_join_covers_every_captured_line_a_kind_renders():
     joined here inline as `GateResult`'s own per-gate render — not a new
     `_JOINED` row, which would pass with the source reverted (the renderer
     already exists at base)."""
-    from saffron.events import GateResult as GateResultEvent
-
     captured = [
         line
         for line in _golden_fixture_path().read_text().splitlines()
@@ -2027,7 +2025,7 @@ def test_the_join_covers_every_captured_line_a_kind_renders():
     joined = {line for _, line in _JOINED}
     per_gate = {
         describe(
-            GateResultEvent(
+            GateResult(
                 timestamp=1.0,
                 spec_id="x",
                 gate=gate,

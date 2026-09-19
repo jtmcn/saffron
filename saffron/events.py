@@ -793,11 +793,8 @@ def describe(event: Event) -> str:
         return f"IMPLEMENT: {event.commits} commit(s), ${event.spent_usd_est:.2f} spent"
 
     if isinstance(event, GateResult):
-        # Emitted beside, not instead of, `Baseline`'s joined line and
-        # `Attempt`'s count — `cell/session.py`'s baseline block and `_judge`
-        # each write one per gate now. Still rendered on its own here too: a
-        # future consumer (a report page, `SA-0036`) reads one `GateResult`
-        # at a time.
+        # One per gate at the baseline and each attempt's suite; the line omits
+        # `against`, `attempt` and `new_failures`, so only position tells them apart.
         return f"gates: {event.gate}={event.status}"
 
     if isinstance(event, Budget):

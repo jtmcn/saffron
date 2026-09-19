@@ -2797,11 +2797,15 @@ def test_each_attempts_gate_results_carry_their_own_attempt_number(
         (2, g) for g in names2
     ]
     assert "lint" in names1 and "lint" not in names2
+    base_names = [e.gate for e in gate_events if e.against == "baseline"]
+    assert names2 == base_names and sorted(names1) == sorted([*base_names, "lint"])
     by1 = {e.gate: e for e in attempt if e.attempt == 1}
     by2 = {e.gate: e for e in attempt if e.attempt == 2}
     assert (by1["types"].status, by1["types"].new_failures) == ("fail", 0)
     assert (by1["lint"].status, by1["lint"].new_failures) == ("fail", 1)
     assert (by2["types"].status, by2["types"].new_failures) == ("fail", 0)
+    assert (by1["committed"].status, by1["committed"].new_failures) == ("pass", 0)
+    assert all(by1[g].new_failures is None for g in ("integrity", "census", "criteria"))
     # `size` is advisory at this suite's `standard` tier: a passing advisory
     # gate carries no count, unlike a passing blocking gate's measured zero.
     assert by1["size"].status == "pass" and by1["size"].new_failures is None
