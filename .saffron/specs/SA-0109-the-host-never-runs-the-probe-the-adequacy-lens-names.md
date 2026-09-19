@@ -166,7 +166,12 @@ Build the step between REVIEW and REBUT that answers it:
    *Verdict* as the critic's own at REBUT, and the ledger's `verdict` column
    holds that one (`saffron/ledger.py:781`). `review_state` and everything
    after it read the decided findings, so the ledger rows, `findings.json`,
-   the queue's concern count and REBUT's numbering all agree.
+   the queue's concern count and REBUT's numbering all agree. `blocker_lines`
+   reads `finding.probe_verdict` to decide which blockers show their probe
+   (criterion 5). That read is what keeps the new field off the `dead` gate,
+   which reports a field no scanned root loads by name. Measured on vulture
+   2.16: the field alone is `unused variable 'probe_verdict'`, and the read in
+   `rebut.py` clears it.
 4. **What it records.** Write `probes.json` in the task directory: one entry
    per probe, with the probe and every `ProbeResult` field. Each entry also
    names the findings it decided, by lens, file and line. It carries the
@@ -200,8 +205,8 @@ An infrastructure failure while probing is not the task's fault and not a
 verdict on the lens. Every probe not yet answered is `unproven` with the
 reason. The cell not coming up and the baseline reporting `error` happen before
 any probe is answered, so every finding stays as filed. A failed undo raises
-part-way through, so the verdicts already given stand, and only the probes
-after it are `unproven`.
+part-way through, so the probe verdicts already given stand. The probe whose
+undo raised, and every one after it, is `unproven`.
 
 Line numbers in `session.py` were read at `0ed431e`. `SA-0102`, the parent,
 edits that file, so expect them to differ. Find each site by name.
@@ -243,10 +248,14 @@ edits that file, so expect them to differ. Find each site by name.
   elevated diff and its ceiling is 600 lines, tests included. The helper's
   `run_gate` stub answers only calls into a `saffron-gate-` container and
   passes every other call through, as `_run_suite` routes
-  (`tests/test_session.py:889-903`). Under these witnesses nothing else reaches
-  `run_gate`, because IMPLEMENT's gates reach it inside `run_suite`
-  (`saffron/gates/suite.py:170`), which is stubbed. The pass-through is there so
-  the stub does not silently answer a call it was not written for.
+  (`tests/test_session.py:889-903`). IMPLEMENT's gates reach `run_gate` from
+  inside `run_suite` (`saffron/gates/runner.py:325`), which is stubbed, so under
+  these witnesses nothing else reaches it. `revert`'s own `run_gate`
+  (`saffron/gates/suite.py:170`) is not stubbed, and runs in a
+  `saffron-gate-` container like the probe's. It stays unreached only because
+  `revert_gate` returns `skip` before `run_tests` unless both suites enumerate
+  their tests (`saffron/gates/core/revert.py:99-106`). So the pass-through is
+  the stub refusing to answer a call it was not written for.
 - Decide the findings before `ledger.record_findings` runs. REBUT looks each
   blocker up by object identity in `recorded` (`saffron/cell/session.py:2143`),
   so a finding copied after that write raises `KeyError` there.
