@@ -1,19 +1,26 @@
 """The batch loop — a night, driven (DESIGN.md §4.2.1).
 
 `saffron queue` resolves candidates and prints them; nothing consumed the
-list. This module is the consumer: `run_batch` is a K=1 `for` loop over the
-sorted candidates `build_queue` already produced, calling an injected runner
-once per candidate and stopping five ways — the queue drains, the budget is
-gone, `--until` hits, the breaker fires, or a task comes back mid-phase
-having reached no end state at all (`INCOMPLETE`, backlog item 70).
+list. This module is the consumer: `run_batch` is a K=1 loop, driven by an
+injected runner, that stops five ways — the queue drains, the budget is gone,
+`--until` hits, the breaker fires, or a task comes back mid-phase having
+reached no end state at all (`INCOMPLETE`, backlog item 70). It runs the
+opening scan's candidates first, then — after every task, not only once the
+list runs out — rescans through an injected `rescan` callable and starts the
+first spec it offers that has not already started tonight, so a child whose
+parent packages mid-night runs the same night rather than waiting for
+tomorrow's scan (backlog item b-d6bff7).
 
-Deliberately not here: resolving the scan (`cli._queue` already does it and
-`cli.py` is forbidden to this module), driving a task (`task.run_task` owns
-that, and both commands go through it — this loop takes it as `runner` rather
-than importing it, so what a night runs stays the caller's to say), concurrency
-(K=1, §4.2.1), multi-repo (v2, §9), and stamping a corpse `ORPHANED` (that is
-the batch
-*scan*'s job, not this loop's).
+Deliberately not here: resolving the scan (`cli._resolve_queue` already does
+it and `cli.py` is forbidden to this module — `rescan` is taken the same way
+`runner` and `readiness_check` already are, an injected callable rather than
+an import), driving a task (`task.run_task` owns that, and both commands go
+through it — this loop takes it as `runner` rather than importing it, so
+what a night runs stays the caller's to say), concurrency (K=1, §4.2.1),
+multi-repo (v2, §9), and stamping a corpse `ORPHANED` (that is the batch
+*scan*'s job, not this loop's — every rescan this loop triggers passes
+`stamp_orphaned=False`, since a task this same night left in flight is not a
+corpse a dead scan left behind).
 """
 
 from __future__ import annotations
@@ -53,6 +60,7 @@ def run_batch(
     until: datetime | None,
     runner: Callable[[Candidate], CellOutcome],
     *,
+    rescan: Callable[[], Sequence[Candidate]],
     clock: Callable[[], datetime] = datetime.now,
     readiness_check: Callable[[], Readiness],
     emit: Callable[[str], None] = print,
@@ -67,15 +75,11 @@ def run_batch(
     here, which is exactly what a caller cut mid-loop would lose.
 
     `runner` takes no default, and the reason changed without the decision
-    changing. It used to be that no real default was *constructible*: building
-    a `CellSpec` from a `Candidate` needed the ceilings and stacked-on
-    resolvers, both `cli`-private and both forbidden to the spec that built
-    this loop, so a default that built one itself would pass no stacked-on
-    parent for any candidate, cutting every child of a stack from `base_sha`
-    and failing its own gates the moment it ran (§4.2.1). `task.run_task` is
-    now that driver and importable, so a real default *could* be written. It
-    is still not, for `readiness_check`'s reason rather than its own: every
-    test here supplies a fake runner, and a default would buy production
+    changing. None was once *constructible* (§4.2.1: the stacked-on resolver
+    was `cli`-private); `task.run_task` is now that driver and importable,
+    so a real default *could* be written. It is still not, for
+    `readiness_check`'s reason rather than its own: every test here supplies
+    a fake runner, and a default would buy production
     nothing — `cli` always passes the real one — while making a forgotten
     argument silent instead of a `TypeError`. `readiness_check` takes no default
     either, and for a related reason: `check_readiness` needs repo paths and a
@@ -85,6 +89,10 @@ def run_batch(
     expired token — which is precisely what §4.4 step 1 exists to prevent. A
     night with no readiness gate is now something a caller has to say out
     loud. `clock` keeps its real default, because `datetime.now` is one.
+
+    `rescan` takes no default, for `readiness_check`'s reason. Called after
+    every task, its return replaces what is left to run — `candidates` decide
+    only the first — never merged; what has started is tracked by spec id.
 
     Returns the stop reason itself, one of `DRAINED`, `BUDGET`, `UNTIL`,
     `INFRASTRUCTURE`, `INCOMPLETE` — never a boolean or an exit code.
@@ -112,6 +120,7 @@ def run_batch(
             budget_usd,
             until,
             runner,
+            rescan,
             batch_id=batch_id,
             clock=clock,
             readiness_check=readiness_check,
@@ -136,6 +145,7 @@ def _drive(
     budget_usd: float,
     until: datetime | None,
     runner: Callable[[Candidate], CellOutcome],
+    rescan: Callable[[], Sequence[Candidate]],
     *,
     batch_id: int,
     clock: Callable[[], datetime],
@@ -156,8 +166,25 @@ def _drive(
         return _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
 
     consecutive_aborts = 0
+    # By spec id, not whole `Candidate`: a re-offered spec returns as a new
+    # `Candidate` with its resumed `task_id`, and would start twice.
+    started: set[str] = set()
+    # Each rescan replaces this rather than merging, so a spec the latest
+    # scan no longer offers does not run because an earlier one did.
+    pending: Sequence[Candidate] = candidates
 
-    for candidate in candidates:
+    while True:
+        candidate = next((c for c in pending if c.spec.id not in started), None)
+        if candidate is None:
+            if consecutive_aborts >= _BREAKER_THRESHOLD:
+                # The breaker is consulted before a task, so a queue whose
+                # last candidates all aborted falls out of the loop with the
+                # count standing. Reporting `DRAINED` there would exit 0, and
+                # launchd would record a successful night in which every task
+                # died of one global condition.
+                return _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
+            return _stop(ledger, batch_id, "DRAINED", in_flight, emit)
+
         # Before each task, in this order: the deadline, then the budget,
         # then the breaker's standing count (§4.2.1's ordering, named once
         # here rather than re-derived at each check).
@@ -170,6 +197,11 @@ def _drive(
 
         if consecutive_aborts >= _BREAKER_THRESHOLD:
             return _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
+
+        # Named before it starts: the one place the log shows which candidate
+        # the latest scan chose.
+        emit(f"{candidate.spec.id:<10} starting")
+        started.add(candidate.spec.id)
 
         high_water = ledger.max_run_id()
         try:
@@ -193,41 +225,34 @@ def _drive(
             # stop reason and no traceback anywhere.
             emit(f"{candidate.spec.id:<10} raised {type(exc).__name__}: {exc}")
             ledger.attach_orphan_runs_to_batch(batch_id, high_water)
-            continue
-
-        # `create_run` mints the row with no `batch_id` (`run_one_cell`,
-        # forbidden here, passes none) — this stamps it on after the fact,
-        # the shape `record_push` and `set_task_package` already use on
-        # `tasks`: the row exists, then the fact about it arrives.
-        ledger.attach_run_to_batch(outcome.run_id, batch_id)
-
-        if outcome.state in ABORT_STATES:
-            consecutive_aborts += 1
         else:
-            # Any state a task earned resets the counter, `EXHAUSTED`
-            # included — "any terminal state" would also reset on
-            # `GATE_ERROR` and `PREFLIGHT_FAILED` themselves, and the counter
-            # would never reach two. An in-flight state resets it the same
-            # way: two provider blips in a row must not end a night that
-            # would have recovered on its third task (backlog item 70).
-            consecutive_aborts = 0
+            # `create_run` mints the row with no `batch_id` (`run_one_cell`,
+            # forbidden here, passes none) — this stamps it on after the fact,
+            # the shape `record_push` and `set_task_package` already use on
+            # `tasks`: the row exists, then the fact about it arrives.
+            ledger.attach_run_to_batch(outcome.run_id, batch_id)
 
-        if outcome.state in IN_FLIGHT_STATES:
-            # Read from `reconcile`, never copied: the next batch scan's own
-            # definition of "in flight" is what decides a corpse there, and a
-            # second list here is how the two would come to disagree about
-            # what a finished task is.
-            in_flight.append((candidate.spec.id, outcome.state))
+            if outcome.state in ABORT_STATES:
+                consecutive_aborts += 1
+            else:
+                # Any state a task earned resets the counter, `EXHAUSTED`
+                # included — "any terminal state" would also reset on
+                # `GATE_ERROR` and `PREFLIGHT_FAILED` themselves, and the counter
+                # would never reach two. An in-flight state resets it the same
+                # way: two provider blips in a row must not end a night that
+                # would have recovered on its third task (backlog item 70).
+                consecutive_aborts = 0
 
-    if consecutive_aborts >= _BREAKER_THRESHOLD:
-        # The breaker is consulted before a task, so a queue whose last
-        # candidates all aborted falls out of the loop with the count
-        # standing. Reporting `DRAINED` there would exit 0, and launchd would
-        # record a successful night in which every task died of one global
-        # condition.
-        return _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
+            if outcome.state in IN_FLIGHT_STATES:
+                # Read from `reconcile`, never copied: the next batch scan's own
+                # definition of "in flight" is what decides a corpse there, and a
+                # second list here is how the two would come to disagree about
+                # what a finished task is.
+                in_flight.append((candidate.spec.id, outcome.state))
 
-    return _stop(ledger, batch_id, "DRAINED", in_flight, emit)
+        # Rescanned after every task, success or not, so a child whose parent
+        # just packaged is reachable tonight rather than tomorrow.
+        pending = rescan()
 
 
 def _stop(

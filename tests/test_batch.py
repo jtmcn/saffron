@@ -8,7 +8,8 @@ from saffron.cell.session import CellOutcome
 from saffron.intake import Spec
 from saffron.ledger import Ledger
 from saffron.preflight import Readiness
-from saffron.scheduler import REQUEUE_STATES, Candidate
+from saffron.scheduler import REQUEUE_STATES, Candidate, build_queue
+from tests.test_scheduler import _write_spec
 
 
 @pytest.fixture
@@ -146,6 +147,7 @@ def test_a_drained_queue_runs_every_candidate_once_in_order(ledger, repo_id):
         budget_usd=50.0,
         until=None,
         runner=runner,
+        rescan=lambda: candidates,
         readiness_check=_ready,
     )
 
@@ -161,7 +163,13 @@ def test_an_empty_queue_drains_immediately(ledger):
     runner = FakeRunner([])
 
     reason = run_batch(
-        [], ledger, budget_usd=50.0, until=None, runner=runner, readiness_check=_ready
+        [],
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner,
+        rescan=lambda: [],
+        readiness_check=_ready,
     )
 
     assert reason == "DRAINED"
@@ -178,6 +186,7 @@ def test_the_budget_gate_is_one_comparison_before_each_task(ledger, repo_id):
         budget_usd=5.0,
         until=None,
         runner=runner,
+        rescan=lambda: candidates,
         readiness_check=_ready,
     )
 
@@ -191,6 +200,7 @@ def test_the_budget_gate_is_one_comparison_before_each_task(ledger, repo_id):
 def test_a_task_overshooting_its_own_budget_does_not_stop_the_batch(ledger, repo_id):
     overshooting = _candidate("TE-0001", budget_usd=5.0)
     second = _candidate("TE-0002", budget_usd=5.0)
+    candidates = [overshooting, second]
     # The first task's own attempt spends far more than its declared
     # budget_usd — the batch ceiling (30) still has plenty of room, so the
     # gate before the *second* task must still pass.
@@ -204,11 +214,12 @@ def test_a_task_overshooting_its_own_budget_does_not_stop_the_batch(ledger, repo
     )
 
     reason = run_batch(
-        [overshooting, second],
+        candidates,
         ledger,
         budget_usd=30.0,
         until=None,
         runner=runner,
+        rescan=lambda: candidates,
         readiness_check=_ready,
     )
 
@@ -229,6 +240,7 @@ def test_the_until_deadline_is_read_from_an_injected_clock(ledger, repo_id):
         until=deadline,
         runner=runner,
         clock=clock,
+        rescan=lambda: candidates,
         readiness_check=_ready,
     )
 
@@ -253,6 +265,7 @@ def test_the_clock_is_checked_before_a_task_still_inside_the_window(ledger, repo
         until=deadline,
         runner=runner,
         clock=clock,
+        rescan=lambda: candidates,
         readiness_check=_ready,
     )
 
@@ -284,6 +297,7 @@ def test_two_consecutive_aborts_fire_the_breaker(ledger, repo_id):
         budget_usd=50.0,
         until=None,
         runner=runner,
+        rescan=lambda: candidates,
         readiness_check=_ready,
     )
 
@@ -324,6 +338,7 @@ def test_an_exhausted_task_between_two_aborts_resets_the_breaker(ledger, repo_id
         budget_usd=50.0,
         until=None,
         runner=runner,
+        rescan=lambda: candidates,
         readiness_check=_ready,
     )
 
@@ -351,6 +366,7 @@ def test_a_task_left_in_flight_is_not_a_clean_drain(ledger, repo_id):
         budget_usd=50.0,
         until=None,
         runner=runner,
+        rescan=lambda: candidates,
         readiness_check=_ready,
     )
 
@@ -377,6 +393,7 @@ def test_a_task_left_in_flight_outranks_an_ordinary_stop(ledger, repo_id):
         budget_usd=5.0,
         until=None,
         runner=runner,
+        rescan=lambda: over_budget,
         readiness_check=_ready,
         emit=lines.append,
     )
@@ -390,14 +407,16 @@ def test_a_task_left_in_flight_outranks_an_ordinary_stop(ledger, repo_id):
     run_id_two = _spend(ledger, repo_id, 1.0)
     runner_two = FakeRunner([_outcome(state="REVIEWING", run_id=run_id_two)])
     clock = FakeClock([datetime(2026, 9, 5, 1, 0), deadline])
+    until_candidates = [_candidate("TE-0003"), _candidate("TE-0004")]
 
     until_reason = run_batch(
-        [_candidate("TE-0003"), _candidate("TE-0004")],
+        until_candidates,
         ledger,
         budget_usd=50.0,
         until=deadline,
         runner=runner_two,
         clock=clock,
+        rescan=lambda: until_candidates,
         readiness_check=_ready,
         emit=lines.append,
     )
@@ -434,6 +453,7 @@ def test_the_breaker_still_reports_infrastructure_over_a_task_left_in_flight(
         budget_usd=50.0,
         until=None,
         runner=runner,
+        rescan=lambda: candidates,
         readiness_check=_ready,
         emit=lines.append,
     )
@@ -461,6 +481,7 @@ def test_the_breaker_still_reports_infrastructure_over_a_task_left_in_flight(
         budget_usd=50.0,
         until=None,
         runner=runner,
+        rescan=lambda: queued,
         readiness_check=_ready,
         emit=lines.append,
     )
@@ -498,6 +519,7 @@ def test_in_flight_outcomes_do_not_fire_the_breaker(ledger, repo_id):
         budget_usd=50.0,
         until=None,
         runner=runner,
+        rescan=lambda: candidates,
         readiness_check=_ready,
     )
 
@@ -527,6 +549,7 @@ def test_a_task_left_in_flight_is_named_on_the_way_out(ledger, repo_id):
         budget_usd=50.0,
         until=None,
         runner=runner,
+        rescan=lambda: candidates,
         readiness_check=_ready,
         emit=lines.append,
     )
@@ -556,13 +579,15 @@ def test_a_night_that_raises_still_names_the_task_it_left_in_flight(
     monkeypatch.setattr(ledger, "batch_spend", _locked_on_the_second_candidate)
     run_id = _spend(ledger, repo_id, 1.0)
     lines: list[str] = []
+    locked_candidates = [_candidate("TE-0001"), _candidate("TE-0002")]
     with pytest.raises(sqlite3.OperationalError):
         run_batch(
-            [_candidate("TE-0001"), _candidate("TE-0002")],
+            locked_candidates,
             ledger,
             budget_usd=50.0,
             until=None,
             runner=FakeRunner([_outcome(state="REBUTTING", run_id=run_id)]),
+            rescan=lambda: locked_candidates,
             readiness_check=_ready,
             emit=lines.append,
         )
@@ -580,13 +605,15 @@ def test_a_night_that_raises_still_names_the_task_it_left_in_flight(
         return _outcome(state="REVIEWING", run_id=run_id)
 
     lines = []
+    interrupted_candidates = [_candidate("TE-0003"), _candidate("TE-0004")]
     with pytest.raises(KeyboardInterrupt):
         run_batch(
-            [_candidate("TE-0003"), _candidate("TE-0004")],
+            interrupted_candidates,
             ledger,
             budget_usd=50.0,
             until=None,
             runner=_interrupted_on_the_second,
+            rescan=lambda: interrupted_candidates,
             readiness_check=_ready,
             emit=lines.append,
         )
@@ -613,6 +640,7 @@ def test_every_stop_path_closes_the_batch_row_with_its_reason(ledger, repo_id):
         budget_usd=50.0,
         until=None,
         runner=FakeRunner([]),
+        rescan=lambda: [],
         readiness_check=_ready,
     )
     _assert_closed(ledger, drained, "DRAINED")
@@ -624,28 +652,33 @@ def test_every_stop_path_closes_the_batch_row_with_its_reason(ledger, repo_id):
         budget_usd=5.0,
         until=None,
         runner=FakeRunner([]),
+        rescan=lambda: over_budget,
         readiness_check=_ready,
     )
     _assert_closed(ledger, budget, "BUDGET")
 
     deadline = datetime(2026, 9, 5, 6, 30)
+    until_candidates = [_candidate("TE-0001")]
     until_reason = run_batch(
-        [_candidate("TE-0001")],
+        until_candidates,
         ledger,
         budget_usd=50.0,
         until=deadline,
         runner=FakeRunner([]),
         clock=FakeClock([deadline]),
+        rescan=lambda: until_candidates,
         readiness_check=_ready,
     )
     _assert_closed(ledger, until_reason, "UNTIL")
 
+    infrastructure_candidates = [_candidate("TE-0001")]
     infrastructure = run_batch(
-        [_candidate("TE-0001")],
+        infrastructure_candidates,
         ledger,
         budget_usd=50.0,
         until=None,
         runner=FakeRunner([]),
+        rescan=lambda: infrastructure_candidates,
         readiness_check=lambda: Readiness(False, "auth", "no token"),
     )
     _assert_closed(ledger, infrastructure, "INFRASTRUCTURE")
@@ -662,6 +695,7 @@ def test_each_run_is_attached_to_the_batch_it_ran_under(ledger, repo_id):
         budget_usd=50.0,
         until=None,
         runner=runner,
+        rescan=lambda: [candidate],
         readiness_check=_ready,
     )
 
@@ -682,6 +716,7 @@ def test_a_readiness_failure_closes_the_batch_without_starting_a_task(ledger, re
         budget_usd=50.0,
         until=None,
         runner=runner,
+        rescan=lambda: candidates,
         readiness_check=lambda: Readiness(False, "auth", "token invalid"),
     )
 
@@ -702,6 +737,7 @@ def test_a_runner_that_raises_still_closes_the_batch_row(ledger, repo_id):
         budget_usd=50.0,
         until=None,
         runner=runner,
+        rescan=lambda: candidates,
         readiness_check=_ready,
     )
 
@@ -733,6 +769,7 @@ def test_a_crash_after_real_spend_still_counts_against_the_next_budget_gate(
         budget_usd=50.0,
         until=None,
         runner=crashing,
+        rescan=lambda: candidates,
         readiness_check=_ready,
     )
 
@@ -763,6 +800,7 @@ def test_a_readiness_probe_that_raises_still_closes_the_batch_row(ledger, repo_i
             budget_usd=50.0,
             until=None,
             runner=FakeRunner([]),
+            rescan=lambda: [],
             readiness_check=_explodes,
         )
 
@@ -790,6 +828,7 @@ def test_an_interrupted_night_closes_its_row_rather_than_leaving_it_open(
             budget_usd=50.0,
             until=None,
             runner=_interrupted,
+            rescan=lambda: [_candidate("TE-0001")],
             readiness_check=_ready,
         )
 
@@ -819,6 +858,7 @@ def test_a_queue_whose_last_tasks_all_abort_is_not_a_clean_drain(ledger, repo_id
         budget_usd=50.0,
         until=None,
         runner=runner,
+        rescan=lambda: candidates,
         readiness_check=_ready,
     )
 
@@ -833,24 +873,31 @@ def test_a_runner_that_raises_says_what_died(ledger, repo_id):
     night that died from a runtime that would not start left the operator a
     stop reason and no traceback anywhere."""
     lines: list[str] = []
+    candidates = [_candidate("TE-0001")]
 
     def _explodes(_candidate):
         raise RuntimeError("cell runtime would not start")
 
     reason = run_batch(
-        [_candidate("TE-0001")],
+        candidates,
         ledger,
         budget_usd=50.0,
         until=None,
         runner=_explodes,
+        rescan=lambda: candidates,
         readiness_check=_ready,
         emit=lines.append,
     )
 
     assert reason == "DRAINED"
-    assert any("cell runtime would not start" in line for line in lines)
-    assert any("RuntimeError" in line for line in lines)
-    assert any("TE-0001" in line for line in lines)
+    # One line, not three independent checks — a "starting" line also names
+    # the spec, so three loose `any(...)` checks could pass on the wrong line.
+    assert any(
+        "TE-0001" in line
+        and "RuntimeError" in line
+        and "cell runtime would not start" in line
+        for line in lines
+    )
 
 
 def test_the_until_stored_is_utc_not_the_operators_wall_clock(
@@ -885,6 +932,7 @@ def test_the_until_stored_is_utc_not_the_operators_wall_clock(
             budget_usd=50.0,
             until=deadline,
             runner=FakeRunner([]),
+            rescan=lambda: [],
             readiness_check=_ready,
         )
     finally:
@@ -900,3 +948,141 @@ def test_the_until_stored_is_utc_not_the_operators_wall_clock(
     assert "T" not in row["until_ts"]
     assert row["until_ts"].endswith(" 13:30:00")
     assert row["started_at"] < row["until_ts"]
+
+
+class PackagingRunner:
+    """A runner that leaves the ledger the way a real task would: a run, a
+    task at the candidate's own `spec_sha`, and `READY_FOR_REVIEW` — the
+    shape `create_run` / `create_task` / `set_task_state` leave behind, with
+    none of the cell work a real `run_one_cell` + PACKAGE does in between.
+    `FakeRunner`'s own shape: records call order on `.calls`, so a test can
+    see which candidate the loop chose to run, and when."""
+
+    def __init__(self, ledger: Ledger, repo_id: int):
+        self._ledger = ledger
+        self._repo_id = repo_id
+        self.calls: list[Candidate] = []
+
+    def __call__(self, candidate: Candidate) -> CellOutcome:
+        self.calls.append(candidate)
+        run_id = self._ledger.create_run(self._repo_id, base_sha="a" * 40)
+        task_id = self._ledger.create_task(
+            run_id,
+            spec_id=candidate.spec.id,
+            spec_sha=candidate.spec_sha,
+            branch=f"saffron/{candidate.spec.id}",
+        )
+        self._ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+        return CellOutcome(
+            state="READY_FOR_REVIEW",
+            task_id=task_id,
+            run_id=run_id,
+            task_dir=Path("/tmp/nonexistent-task-dir"),
+        )
+
+
+def test_a_child_refused_at_the_opening_scan_runs_after_its_parent_packages(
+    tmp_path, ledger, repo_id
+):
+    """A spec refused at the night's opening scan because its `depends_on`
+    parent had no task starts later that night, once the parent's task
+    reaches `READY_FOR_REVIEW`: the loop rescans after every task, not only
+    once the opening list runs out, and starts the first spec the *latest*
+    rescan offers — here, right after the parent, ahead of an opening
+    candidate of lower priority. A grandchild waiting on that child starts
+    after the child, the same night. Uses the real `build_queue`, not a hand-
+    built rescan, so this proves the admission and the loop together, not
+    just the loop (backlog item b-d6bff7)."""
+    directory = tmp_path / "specs"
+    directory.mkdir()
+    _write_spec(directory, "parent.md", id="TE-0001", priority=1, touches=["a/**"])
+    _write_spec(
+        directory,
+        "child.md",
+        id="TE-0002",
+        priority=1,
+        touches=["b/**"],
+        depends_on=["TE-0001"],
+    )
+    _write_spec(
+        directory,
+        "grandchild.md",
+        id="TE-0003",
+        priority=1,
+        touches=["c/**"],
+        depends_on=["TE-0002"],
+    )
+    _write_spec(directory, "unrelated.md", id="TE-0004", priority=3, touches=["d/**"])
+
+    opening, refusals = build_queue(directory, repo_id, ledger)
+    # Today's whole defect, pinned: the child and grandchild are refused —
+    # their parent has no task yet — and only the other two run without a rescan.
+    assert [c.spec.id for c in opening] == ["TE-0001", "TE-0004"]
+    assert {r.path.name for r in refusals} == {"child.md", "grandchild.md"}
+
+    packaging = PackagingRunner(ledger, repo_id)
+    lines: list[str] = []
+    last_line_at_call: list[str] = []
+
+    def runner(candidate):
+        last_line_at_call.append(lines[-1] if lines else "")
+        return packaging(candidate)
+
+    reason = run_batch(
+        opening,
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner,
+        rescan=lambda: build_queue(directory, repo_id, ledger)[0],
+        readiness_check=_ready,
+        emit=lines.append,
+    )
+
+    assert reason == "DRAINED"
+    order = [c.spec.id for c in packaging.calls]
+    assert order == ["TE-0001", "TE-0002", "TE-0003", "TE-0004"]
+
+    # The log names each task before it starts: the last line at each call.
+    assert last_line_at_call == [f"{spec_id:<10} starting" for spec_id in order]
+
+
+def test_a_spec_the_rescan_requeues_is_not_started_twice_in_one_night(ledger, repo_id):
+    """After the first task, the latest rescan decides what runs, and a spec
+    is started at most once a night. When a rescan offers again a spec whose
+    task ended `RATE_LIMITED` earlier that night, the night does not start
+    it a second time. An opening candidate the rescan no longer offers is
+    not started at all."""
+    first = _candidate("TE-0001")
+    second = _candidate("TE-0002")
+    run_id = _spend(ledger, repo_id, 1.0)
+    runner = FakeRunner([_outcome(state="RATE_LIMITED", run_id=run_id)])
+
+    # Offers TE-0001 again as a *new* Candidate (a resumed task_id) and drops
+    # TE-0002 — comparing whole Candidates, not spec.id, would start it twice.
+    requeued = Candidate(
+        path=Path("TE-0001.md"),
+        spec=Spec(id="TE-0001", title="t", type="chore", budget_usd=10.0),
+        spec_sha="s" * 64,
+        task_id=99,
+    )
+    assert requeued != first
+    rescan_calls = {"n": 0}
+
+    def rescan() -> list[Candidate]:
+        rescan_calls["n"] += 1
+        return [requeued] if rescan_calls["n"] == 1 else []
+
+    reason = run_batch(
+        [first, second],
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner,
+        rescan=rescan,
+        readiness_check=_ready,
+    )
+
+    assert reason == "DRAINED"
+    assert runner.calls == [first]
+    assert rescan_calls["n"] == 1

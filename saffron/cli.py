@@ -380,12 +380,12 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
 
 
 def _batch_runner(
-    resolved: QueueResolution,
     *,
+    pinned: PinnedBase,
+    repo_id: Callable[[], int | None],
     repo: Path,
     ledger: Ledger,
     out_dir: Path,
-    url: str,
 ) -> Callable[[Candidate], CellOutcome]:
     """What turns a candidate into a cell (`run_batch`'s own phrase for the
     callable it takes with no default) — the adapter, and only the adapter:
@@ -395,11 +395,11 @@ def _batch_runner(
 
     Two things differ from the attended path, and only two. The spec comes
     from a candidate the scan already resolved, not a path an operator
-    typed — `resolved.mirror`, `resolved.base_sha` and `resolved.repo_id` are
-    this run's own, paid for once by `_resolve_queue` rather than once per
-    task. And the ceilings come straight off the spec's own fields: a batch
-    has no per-task flag to override them with, so there is nothing for
-    `_ceilings` to arbitrate.
+    typed — `pinned` is the night's own, shared by every scan. And the
+    ceilings come off the spec's own fields: a batch has no per-task flag, so
+    there is nothing for `_ceilings` to arbitrate. `repo_id` is read per
+    task: on a repo's first night it starts `None`, and a child must stack
+    against the row its parent's task minted.
     """
 
     def run(candidate: Candidate) -> CellOutcome:
@@ -411,10 +411,8 @@ def _batch_runner(
             spec,
             candidate.spec_sha,
             ceilings=ceilings,
-            base=PinnedBase(
-                mirror=resolved.mirror, url=url, base_sha=resolved.base_sha
-            ),
-            repo_id=resolved.repo_id,
+            base=pinned,
+            repo_id=repo_id(),
             repo=repo,
             ledger=ledger,
             out_dir=out_dir,
@@ -469,14 +467,14 @@ def _resolve_queue(
     export, never the working copy. This is the resolving half of the scan a
     batch would run tonight; printing it is the caller's job.
 
-    `stamp_orphaned` is required, not defaulted, because the two callers this
+    `stamp_orphaned` is required, not defaulted, because the callers this
     function exists for disagree about it and a default would decide for
     whichever one forgets to think about it. `True` asserts §4.2.1's
     batch-scan premise — one batch runs at a time, so an in-flight task found
     here is a corpse a dead scan left behind, and `reconcile` records it
     `ORPHANED` before this resolution filters. `False` is what `saffron
-    queue` passes: an operator can run this at will, mid-phase included, and
-    must never have a live task stamped a corpse for having been looked at.
+    queue` and `saffron batch`'s rescan pass: neither may have a live task
+    stamped a corpse for having been looked at.
 
     `pinned` is optional, and optional is the decision: given one, this uses
     it and derives nothing. Given none — `saffron queue`'s own call, always —
@@ -485,7 +483,7 @@ def _resolve_queue(
     one caller with something to share: it already paid for `ensure_mirror`,
     `real_remote` and `fetch_default_branch` inside `check_readiness`, and
     passing that answer down here is what stops this function from paying for
-    them again, seconds later, against the same remote.
+    them again, seconds later, against the same remote, or on each rescan.
 
     This writes to the ledger, which a function named for resolving a queue
     does not obviously do: `reconcile`'s pull-request half runs first, so the
@@ -633,6 +631,14 @@ def _no_candidate_should_run(candidate: Candidate) -> CellOutcome:
     )
 
 
+def _no_candidates_to_rescan() -> list[Candidate]:
+    """The rescan `_no_candidate_should_run`'s own night gets: readiness
+    failed, or the opening scan itself could not be resolved, so there is no
+    pinned base to rescan against and nothing this could offer that the loop
+    would ever reach — `_no_candidate_should_run` raises first."""
+    return []
+
+
 def _print_batch_plan(
     resolved: QueueResolution, *, budget_usd: float, until: datetime | None
 ) -> None:
@@ -675,8 +681,8 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     in-flight row found here is a corpse, not live work an operator is
     watching); binds a real readiness check to this run's own paths and
     token, never the loop's "proceed" default; builds the adapter that turns
-    a candidate into a cell (`_batch_runner`); and hands all three to
-    `saffron.batch.run_batch`, which owns the loop itself and is the only
+    a candidate into a cell (`_batch_runner`) and the rescan; and hands them
+    to `saffron.batch.run_batch`, which owns the loop itself and is the only
     thing in this module that calls `ledger.create_batch`/`close_batch` —
     true whether the night gets past readiness or not.
 
@@ -724,6 +730,8 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
 
     candidates: list[Candidate] = []
     runner: Callable[[Candidate], CellOutcome] = _no_candidate_should_run
+    # Matches `candidates`' own empty default — nothing reaches it.
+    rescan: Callable[[], Sequence[Candidate]] = _no_candidates_to_rescan
     # Set when the scan raises after readiness passed (item 95), so the raise
     # still reaches `run_batch` and its row.
     resolution_error: Exception | None = None
@@ -757,11 +765,26 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
             _print_reconcile_summary(resolved.reconciled)
             _print_batch_plan(resolved, budget_usd=args.budget, until=until)
 
-            # The same remote `readiness` already read — reused, not re-derived,
-            # for the same reason `_resolve_queue` above no longer derives it
-            # either.
+            # Updated by every rescan, so `_batch_runner`'s `repo_id`
+            # callable reads the latest answer, not the opening one.
+            latest_repo_id: list[int | None] = [resolved.repo_id]
+
+            def _rescan() -> list[Candidate]:
+                # `False`: a task left in flight tonight is live, not a
+                # corpse. `pinned`: the same base the opening scan paid for.
+                rescanned = _resolve_queue(
+                    repo, args.home, ledger, stamp_orphaned=False, pinned=pinned
+                )
+                latest_repo_id[0] = rescanned.repo_id
+                return rescanned.candidates
+
+            rescan = _rescan
             runner = _batch_runner(
-                resolved, repo=repo, ledger=ledger, out_dir=out_dir, url=pinned.url
+                pinned=pinned,
+                repo_id=lambda: latest_repo_id[0],
+                repo=repo,
+                ledger=ledger,
+                out_dir=out_dir,
             )
             candidates = resolved.candidates
 
@@ -779,6 +802,7 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
             args.budget,
             until,
             runner,
+            rescan=rescan,
             # The readiness already measured above, or the scan's raise — never
             # a second probe of the same host.
             readiness_check=_readiness_or_raise,
