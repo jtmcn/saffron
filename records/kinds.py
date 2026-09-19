@@ -124,7 +124,7 @@ class BacklogItem(Identified):
         return self
 
 
-# A to Z, then AA: letters are permanent ids, and six remain after U.
+# A to Z, then AA: letters are permanent ids.
 APPENDIX_ID = r"[A-Z]{1,2}"
 
 
