@@ -1647,7 +1647,6 @@ def test_a_proposed_scope_reaches_scope_review_and_spends_no_further_turns(
         monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PROPOSAL))]
     )
     assert outcome.state == "SCOPE_REVIEW"
-    assert outcome.scope_root_cause == _PROPOSAL["root_cause"]
     assert "infra/deploy.tf" in outcome.proposed_touches
     # Host-added, never asked of the model (§5.2's writeback rule). This repo
     # has no `.saffron/specs` at all, so it pins the *fallback* spelling; the
@@ -4700,30 +4699,6 @@ def test_a_cell_run_supplies_the_real_mutator(monkeypatch, tmp_path):
     # And it never was called: the gate skipped on an empty `declared` list
     # before `mutate` was ever reached, not because the mutator failed.
     assert cell.mutated == []
-
-
-def test_the_stub_mutator_makes_the_result_an_honest_skip():
-    """The mutator supplied is a stub that reports it cannot reach the tree:
-    no mutant is applied, `run_tests` is never invoked, and `witness_gate`
-    reports the same honest `skip` `SA-0060` built and witnessed — never a
-    verdict this stub did not reach."""
-    from saffron.gates.core.witness import witness_gate
-    from saffron.intake import Criterion, Mutant
-
-    criterion = Criterion(
-        claim="the guard rejects a negative amount",
-        witness="tests/test_x.py::test_guard",
-        mutant=Mutant(file="src/x.py", find="if amount < 0:", replace="if False:"),
-    )
-    result = witness_gate(
-        acceptance=[criterion],
-        mutate=session.stub_mutator,
-        run_tests=lambda subset: pytest.fail(
-            "the stub cannot reach the tree, so no test should ever run"
-        ),
-    )
-    assert result.status == "skip"
-    assert result.failures == []
 
 
 def test_a_witness_failure_is_advisory_at_standard_and_blocking_when_elevated(

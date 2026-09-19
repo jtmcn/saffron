@@ -37,7 +37,7 @@ from saffron.events import (
 )
 from saffron.gates.baseline import NewFailure, is_no_progress
 from saffron.gates.contract import GateResult
-from saffron.intake import Criterion, Mutant
+from saffron.intake import Criterion
 from saffron.phases import implement, rebut, review
 from saffron.phases.implement import AttemptResult
 
@@ -224,24 +224,6 @@ def terminal_for_rate_limit(status: str | None) -> str | None:
     return "RATE_LIMITED" if status == "rejected" else None
 
 
-@contextlib.contextmanager
-def stub_mutator(_mutant: Mutant) -> Iterator[str | None]:
-    """The mutator a cell run supplied before `SA-0062` — `witness.Mutated`'s
-    shape, with no tree behind it at all (backlog item 71,
-    `SA-0060`/`SA-0061`).
-
-    It reads no path, writes no byte, and reports the one honest thing it can:
-    it cannot reach the tree. Entering yields a reason rather than `None`, so
-    `witness_gate` never applies a mutant and never invokes `run_tests` —
-    `skip`, exactly as `SA-0060` built and witnessed that answer for.
-    ponytail: `worktree.source_mutated` is what `_suite` wires in its place
-    now, so this is unwired production code kept for its own test's sake —
-    `census` refuses a task that removes a test with no override, and that
-    test is this function's. It goes when that test does.
-    """
-    yield "no cell mutator is wired yet — the tree cannot be reached (SA-0062)"
-
-
 class CellSessionError(RuntimeError):
     """The session cannot go on — not the agent's failure, the driver's."""
 
@@ -336,10 +318,9 @@ class CellOutcome:
     effective_risk: str = "standard"
     advisory_gates: list[str] = field(default_factory=list)
     # Only bound on `state == "SCOPE_REVIEW"` (SA-0018): the final touches a
-    # future ratification would write back, spec path pattern included, and
-    # the root cause the proposal carried. Empty on every other path.
+    # future ratification would write back, spec path pattern included.
+    # Empty on every other path.
     proposed_touches: list[str] = field(default_factory=list)
-    scope_root_cause: str = ""
     # The implementer's own account of something it saw but was told not to
     # touch (backlog items 71/75/80, SA-0058/SA-0061/SA-0062) —
     # extracted and hashed the instant it was produced, never re-read from
@@ -1536,7 +1517,6 @@ def _drive_cell(
                 effective_risk=latest.effective_risk,
                 advisory_gates=sorted(latest.advisory_gates),
                 proposed_touches=final_touches,
-                scope_root_cause=proposal.root_cause,
             )
         except artifacts.PlanRejected as rejected:
             emit(
