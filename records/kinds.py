@@ -30,8 +30,7 @@ _COMMIT_SHA = r"^[0-9a-f]{7,40}$"
 Number = Annotated[int, Strict(), Field(ge=1)]
 
 # Items 1–177 keep their numbers; every later item takes a random id, so two
-# branches filing at once almost never claim the same one (`check_ids` catches it).
-LAST_NUMBERED = 177
+# branches filing at once almost never claim the same one.
 RANDOM_ID = r"b-[0-9a-f]{6}"
 RandomId = Annotated[str, Field(pattern=rf"^{RANDOM_ID}$")]
 ItemId = Number | RandomId

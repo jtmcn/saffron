@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-from records.check import building_pr, check_all, merged_prs
+from tests.records.check import building_pr, check_all, merged_prs
 from tests.test_citations import addresses
 
 REPO = Path(__file__).resolve().parents[2]
