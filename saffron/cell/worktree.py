@@ -165,7 +165,8 @@ DIFF_FLAGS = (
 )
 
 
-def _git(container: str, *args: str) -> runtime.Completed:
+def git_argv(*args: str) -> list[str]:
+    """`git *args` under every pin below, for a call `_git` cannot make."""
     # quotePath=false: a path outside ASCII comes back verbatim rather than
     # octal-escaped, which is what `touches` globs are written against.
     # suppressBlankEmpty=false: it strips the leading space from a blank context
@@ -182,29 +183,29 @@ def _git(container: str, *args: str) -> runtime.Completed:
     # advice.graftFileDeprecated=false: setting `GIT_GRAFT_FILE` alone makes
     # git print its eight-line "grafts is deprecated" hint on stderr on every
     # call, present or not — measured the same way as the two vars above.
-    return runtime.exec_(
-        container,
-        [
-            "env",
-            "GIT_GRAFT_FILE=/dev/null",
-            "GIT_SHALLOW_FILE=/dev/null",
-            "git",
-            "-c",
-            "core.quotePath=false",
-            "-c",
-            "diff.suppressBlankEmpty=false",
-            "-c",
-            "core.useReplaceRefs=false",
-            "-c",
-            "advice.graftFileDeprecated=false",
-            "-c",
-            "core.bigFileThreshold=2g",
-            "-c",
-            "core.attributesFile=/dev/null",
-            *args,
-        ],
-        workdir=WORKTREE_MOUNT,
-    )
+    return [
+        "env",
+        "GIT_GRAFT_FILE=/dev/null",
+        "GIT_SHALLOW_FILE=/dev/null",
+        "git",
+        "-c",
+        "core.quotePath=false",
+        "-c",
+        "diff.suppressBlankEmpty=false",
+        "-c",
+        "core.useReplaceRefs=false",
+        "-c",
+        "advice.graftFileDeprecated=false",
+        "-c",
+        "core.bigFileThreshold=2g",
+        "-c",
+        "core.attributesFile=/dev/null",
+        *args,
+    ]
+
+
+def _git(container: str, *args: str) -> runtime.Completed:
+    return runtime.exec_(container, git_argv(*args), workdir=WORKTREE_MOUNT)
 
 
 def commits_ahead(container: str, base_sha: str) -> int:

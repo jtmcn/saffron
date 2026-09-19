@@ -17,7 +17,7 @@ import pytest
 
 from saffron.agents import artifacts, context
 from saffron.cell import runtime, session
-from saffron.cell.worktree import DIFF_FLAGS
+from saffron.cell.worktree import DIFF_FLAGS, git_argv
 from saffron.events import Agent, Attempt, Baseline, PhaseStart, describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
@@ -3053,6 +3053,13 @@ _GATE_NETWORK = "saffron-gate-net-sy-1"
 _GATE_VOLUME = "saffron-gate-wt-SY-1"
 _GATE_STATE = "saffron-gate-st-SY-1"
 
+# Under `_git`'s pins, so a planted replace ref or grafts file cannot move the
+# tree the lenses read from the patch applied (backlog item 136).
+_APPLY = tuple(git_argv("apply", "--index"))
+_COMMIT = tuple(
+    git_argv("commit", "-q", "-m", "critic: exported patch, applied and committed")
+)
+
 _OUTSIDE_HUNK_FINDING = {
     "findings": [
         {
@@ -3140,8 +3147,8 @@ def test_a_finding_outside_the_diff_is_anchored_against_the_critic_cells_tree(
     # itself must reach `git apply` in the critic cell and be committed there.
     critic = [run for run in cell.execs if run[0] == _CRITIC_CONTAINER]
     assert [argv for _c, argv, _in in critic] == [
-        ("git", "apply", "--index"),
-        ("git", "commit", "-q", "-m", "critic: exported patch, applied and committed"),
+        _APPLY,
+        _COMMIT,
     ]
     assert critic[0][2] == _ANCHORING_DIFF
 
@@ -3238,7 +3245,7 @@ def test_a_commit_the_patchs_own_content_refuses_is_the_tasks_not_infrastructure
 
     def _exec(container, command, **k):
         cell.execs.append((container, tuple(command), ""))
-        if tuple(command)[:2] == ("git", "commit"):
+        if tuple(command) == _COMMIT:
             return runtime.Completed(128, "", "fatal: BOM is required in 'a.txt'")
         return runtime.Completed(0, "", "")
 
@@ -3674,8 +3681,8 @@ def test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs
     assert gate_worktree["image"] == image.cell_tag(tmp_path / "repo")
     gate_execs = [run for run in cell.execs if run[0] == _GATE_CONTAINER]
     assert [argv for _c, argv, _stdin in gate_execs] == [
-        ("git", "apply", "--index"),
-        ("git", "commit", "-q", "-m", "critic: exported patch, applied and committed"),
+        _APPLY,
+        _COMMIT,
     ]
     assert gate_execs[0][2] == _DIFF
 
@@ -4027,7 +4034,7 @@ def test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch(
     applies = [
         stdin
         for c, argv, stdin in cell.execs
-        if c == _CRITIC_CONTAINER and argv == ("git", "apply", "--index")
+        if c == _CRITIC_CONTAINER and argv == _APPLY
     ]
     assert applies == [_ANCHORING_DIFF, grown]
     # Both exports came from the critic cell, never the implementer's `.git`:
