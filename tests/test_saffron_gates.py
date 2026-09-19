@@ -1363,6 +1363,8 @@ def test_structure_errors_when_its_tool_is_present_but_not_runnable(tmp_path):
     stub.mkdir()
     (stub / "ast-grep").write_text("#!/bin/sh\necho 'ast-grep 0.0.0-stub'\n")
     (stub / "ast-grep").chmod(0o644)
+    # The gate execs `python3`, and the cell image has none in /usr/bin (item 173).
+    (stub / "python3").symlink_to(sys.executable)
     done = subprocess.run(
         [str(GATES / "structure")],
         cwd=REPO,

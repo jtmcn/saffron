@@ -169,6 +169,8 @@ log. A silent Monitor ends nothing; only the process exit does (b).
 The `baseline:` line names each gate's status on the cell's base. A `fail` there
 is red on `main`: subtraction spares the cell, and also hides that failure from
 every cell after it. Take it to the operator and keep it for step 5 (item 173).
+`prose=fail` is the exception. That gate fails at base by design, because
+subtraction counts its hits per file (`.saffron/policy.yaml`).
 
 ### b. Record it once the process exits
 
