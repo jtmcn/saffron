@@ -1,5 +1,5 @@
-"""`saffron` — cell, batch, queue, reconcile, watch, replay. `ratify` and
-`gc` are still unbuilt (§4.2.1, §4.5)."""
+"""`saffron` — cell, batch, queue, reconcile, watch, chains, replay. `ratify`
+and `gc` are still unbuilt (§4.2.1, §4.5)."""
 
 from __future__ import annotations
 
@@ -147,6 +147,12 @@ def main(argv: list[str] | None = None) -> int:
         "rather than only the newest",
     )
 
+    subcommands.add_parser(
+        "chains",
+        help="materialize the projection and run the checked walk over the "
+        "merged ledger, once (SA-0108)",
+    )
+
     args = parser.parse_args(argv)
     out_dir_arg = getattr(args, "out", None)
     out_dir = out_dir_arg or (args.home / "batches" / "v0")
@@ -166,6 +172,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "watch":
             return _watch(args, out_dir)
+
+        if args.command == "chains":
+            return _chains(args, ledger, out_dir)
 
         line = replay(
             args.repo,
@@ -910,6 +919,42 @@ def _watch(args: argparse.Namespace, out_dir: Path) -> int:
         # not on a detected finish (out of scope — the teardown event is not
         # a reliable end marker).
         pass
+    return 0
+
+
+_DIFF_LENGTH_CAVEAT = (
+    "note: an overwritten diff of the same length as the one it replaced is "
+    "not detected (SA-0107) — a zero break count is not stronger than that"
+)
+
+
+def _chains(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
+    """`saffron chains` — SA-0108: materialize the projection over the whole
+    ledger (every repo, hence no `--repo`) and run the checked walk against
+    it, once, printing the comparison. Imported here, not at module scope:
+    the graph libraries the projection needs are still `dev`-only
+    (`pyproject.toml`), and importing them unconditionally would break every
+    other command on a host that lacks them. Exits 0 whatever it found — a
+    break count is what this instrument reports, not a gate it enforces — and
+    raises no handler of its own: `main`'s catch-all already prints an
+    exception and returns 2.
+    """
+    import saffron.chain_walk as chain_walk
+
+    output_path = args.home / "projection.ttl"
+    comparison = chain_walk.materialize_and_compare(ledger, out_dir, output_path)
+
+    for one_break in comparison.breaks:
+        print(f"chains: break task {one_break.task_id} {one_break.spec_id}")
+    for reason in sorted(comparison.left_out):
+        print(
+            f"chains: {comparison.left_out[reason]} merged task(s) left out ({reason})"
+        )
+    print(
+        f"chains: {comparison.compared} merged task(s) compared, "
+        f"{len(comparison.breaks)} break(s)"
+    )
+    print(_DIFF_LENGTH_CAVEAT)
     return 0
 
 
