@@ -38,11 +38,11 @@ forbidden:
   - tests/test_corpus.py
 budget_usd: 26
 max_attempts: 3
-max_turns: 140
+max_turns: 160
 acceptance:
   - claim: >-
       An anchored adequacy finding filed as a `concern`, whose probe leaves the
-      repo's `tests` gate with no new failure against that gate's own run on the
+      repo's `tests` gate with no new failure against that gate's result on the
       unprobed tree, reaches REBUT as a blocker. The task ends `REBUTTING` or
       later, never `READY_FOR_REVIEW`, and `rebuttal.json` names that finding.
     witness: tests/test_session.py::test_a_concern_whose_probe_survives_is_rebutted_as_a_blocker
@@ -64,8 +64,8 @@ acceptance:
       replace: "new = []"
   - claim: >-
       A probe that cannot be applied leaves its finding at the severity the
-      lens filed. `probes.json` in the task directory records the probe, the
-      verdict `unproven`, and the reason the mutator gave, word for word.
+      lens filed. `probes.json` in the task directory records the probe as
+      `unproven`, with the reason the mutator gave, word for word.
     witness: tests/test_session.py::test_a_probe_that_does_not_apply_leaves_its_finding_as_filed_and_says_why
     mutant:
       file: saffron/probe.py
@@ -154,8 +154,11 @@ Build the step between REVIEW and REBUT that answers it:
    after it read the decided findings, so the ledger rows, `findings.json`,
    the queue's concern count and REBUT's numbering all agree.
 4. **What it records.** Write `probes.json` in the task directory: one entry
-   per probe, with the probe and every `ProbeResult` field. The corpus
-   driver's `_write_probes` is the precedent for the shape. `run_review`
+   per probe, with the probe and every `ProbeResult` field. Each entry also
+   names the findings it decided, by lens, file and line. It carries the
+   severity each lens filed, which no other record keeps. The
+   corpus driver's `_write_probes` is the precedent for the shape, but its
+   `verdict` key is `probe_verdict` here. `run_review`
    emits each lens's line inside the critic cell
    (`saffron/phases/review.py:319-327`). So emit one more REVIEW line after
    probing, with the survived, killed and unproven counts. Leave `_describe`
@@ -169,6 +172,11 @@ the policy's `integrity.test_paths` globs with
 rule `revert` uses. `check_probe`'s own `test_paths` compares path prefixes,
 and `saffron/probe.py` is forbidden here. So the host does this check before
 calling `check_probe`, and passes it an empty `test_paths`.
+
+When no anchored adequacy finding carries a probe, no probe cell is entered,
+no `probes.json` is written and no line is emitted. The watch golden fixture
+(`tests/fixtures/watch-golden.txt:13-16`) pins REVIEW's lines for a review
+with no findings, and it is outside `touches`.
 
 A repo that declares no `tests` gate gets no probe cell. Every probe is
 `unproven` with that reason, as the corpus driver does
@@ -212,7 +220,14 @@ edits that file, so expect them to differ. Find each site by name.
   (`:672`) stubs `runner.run_suite`, not `run_gate`. So these witnesses
   declare a `tests` gate and stub `run_gate` and `worktree.source_mutated`
   themselves. Put that in one shared helper, since `size` is blocking on this
-  elevated diff and its ceiling is 600 lines, tests included.
+  elevated diff and its ceiling is 600 lines, tests included. The helper's
+  `run_gate` stub answers only calls into a `saffron-gate-` container and
+  passes every other call through, as `_run_suite` routes
+  (`tests/test_session.py:889-903`). IMPLEMENT's own gates reach `run_gate`
+  too.
+- Decide the findings before `ledger.record_findings` runs. REBUT looks each
+  blocker up by object identity in `recorded` (`saffron/cell/session.py:2143`),
+  so a finding copied after that write raises `KeyError` there.
 - `revert` re-runs the other tests you add with the source reverted and
   blocks any that pass. Import any name you add inside the test body, not at
   module scope. A module-scope import makes the reverted run a collection
