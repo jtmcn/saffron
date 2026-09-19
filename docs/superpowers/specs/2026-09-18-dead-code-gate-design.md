@@ -149,9 +149,10 @@ Two stacked pull requests.
    version check, `make deadcode` and the backlog record. The 55 failures stay
    as baseline.
 2. **The triage.** Each of the 55 is removed, moved into a spec's
-   `pending_symbols`, or whitelisted with its reason. `harness/` functions that
-   only `docs/evidence/scripts/` calls will appear here. Each one is
-   whitelisted or its caller is moved.
+   `pending_symbols`, whitelisted with its reason, or moved into `tests/` when
+   only tests call it, since test support is not production code. `harness/`
+   functions that only `docs/evidence/scripts/` calls will appear here. Each
+   one is whitelisted or its caller is moved.
 
 ## Not in this design
 

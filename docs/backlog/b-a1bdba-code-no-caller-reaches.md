@@ -1,6 +1,6 @@
 ---
 id: b-a1bdba
-title: '46 symbols no production caller reaches, and the `dead` gate only stops new ones'
+title: 'One of 46 symbols no production caller reached is left, and the `dead` gate only stops new ones'
 status: open
 tier: 3
 filed: 2026-09-18
@@ -28,7 +28,7 @@ Rebased onto `11224ec`, twelve more dropped out: SA-0107's projection calls
 `read_log` and reads `timestamp` from ten event fields, and `conforms` in
 `.saffron/gates/shacl.py` now shares a name something on `main` reads.
 
-As of this branch, `make deadcode` reports:
+When filed, `make deadcode` reported 58:
 
 | Kind      | Count |
 | --------- | ----- |
@@ -38,11 +38,13 @@ As of this branch, `make deadcode` reports:
 | property  | 1     |
 | attribute | 1     |
 
+After the triage it reports one: `saffron/events.py::read_log`.
+
 ## Done looks like
 
 Each of the 46 is removed, listed in an open spec's `pending_symbols`, or
-whitelisted in `.saffron/deadcode-allow.py` with its reason. `make deadcode`
-reports `0 unused`.
+whitelisted in `.saffron/deadcode-allow.py` with its reason. A symbol only tests call
+moves into `tests/` instead. `make deadcode` reports `0 unused`.
 
 ## Record
 
