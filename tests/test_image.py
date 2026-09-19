@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -54,3 +55,41 @@ def test_the_cell_image_is_named_for_the_repo(tmp_path):
 def test_building_a_cell_image_without_a_dockerfile_is_an_error(tmp_path):
     with pytest.raises(runtime.CellRuntimeError):
         image.build_cell_image(tmp_path)
+
+
+def _record_builds(monkeypatch) -> list[list[str]]:
+    calls: list[list[str]] = []
+
+    def _call(argv, timeout_s):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(runtime, "call", _call)
+    return calls
+
+
+def test_a_cell_image_build_rebuilds_the_base_first(monkeypatch, tmp_path):
+    """A base built by hand once went stale: SA-0090's token fields in
+    `agent_runner.py` reached no cell for three weeks (backlog b-5e443c)."""
+    (tmp_path / ".saffron").mkdir()
+    (tmp_path / ".saffron" / "Dockerfile").write_text("FROM saffron/cell-base:python\n")
+    monkeypatch.delenv("SAFFRON_BASE_IMAGE", raising=False)
+    calls = _record_builds(monkeypatch)
+    image.build_cell_image(tmp_path)
+    tags = [argv[argv.index("-t") + 1] for argv in calls]
+    assert tags == [image.BASE_TAG, image.cell_tag(tmp_path)]
+    base = calls[0]
+    dockerfile = Path(base[base.index("-f") + 1])
+    assert dockerfile.name == "cell-base.python.Dockerfile" and dockerfile.is_file()
+    assert not any(a.startswith("--build-arg") for a in base)
+
+
+def test_a_declared_base_image_reaches_the_base_build(monkeypatch, tmp_path):
+    """A host with no registry names its own base (§5.1.2)."""
+    (tmp_path / ".saffron").mkdir()
+    (tmp_path / ".saffron" / "Dockerfile").write_text("FROM saffron/cell-base:python\n")
+    monkeypatch.setenv(image.BASE_IMAGE_ENV, "local/debootstrap:24.04")
+    calls = _record_builds(monkeypatch)
+    image.build_cell_image(tmp_path)
+    assert "--build-arg=BASE_IMAGE=local/debootstrap:24.04" in calls[0]
+    assert not any(a.startswith("--build-arg") for a in calls[1])

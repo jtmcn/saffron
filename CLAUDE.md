@@ -40,8 +40,9 @@ uv run pytest -m cell        # needs apple/container + the images below
 `prek` is a host tool, not a project dependency — `brew install prek` if `make install`
 cannot find it.
 
-Cell-marked tests need real images, built by hand once (and after editing them; a host with
-no registry adds `--build-arg BASE_IMAGE=…`, §5.1.2):
+Every `saffron cell` rebuilds the base, then the repo's image, from this checkout. A host with
+no registry sets `SAFFRON_BASE_IMAGE` (§5.1.2). Before the first cell, and for cell-marked
+tests, build them by hand (`--build-arg BASE_IMAGE=…` on such a host):
 
 ```
 <runtime> build -t saffron/cell-base:python -f images/cell-base.python.Dockerfile .
