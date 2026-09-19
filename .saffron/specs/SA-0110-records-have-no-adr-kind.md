@@ -154,6 +154,12 @@ its headings are required. Once the new field exists they are only allowed, so
 correct it. Its status-dependent rules stay in `_check_sections`.
 Keep the backlog's current behaviour exactly, which criterion 3 holds.
 
+`_sectioned`'s existing parameter is already called `required`
+(`records/load.py:114-116`) and holds the *allowed* set, which is what its
+`unknown` and `order` checks read (`:122`, `:126`). The design calls the new
+`Kind` field `required`. Rename that parameter to `allowed` in the same edit,
+or the two senses meet inside one nine-line function.
+
 **Witness modules must collect with the source reverted.** `revert` re-runs
 every added test with this diff's source reverted. A test module that imports a
 name this change adds, at module scope, then fails to collect, and `revert`
@@ -175,7 +181,8 @@ whole subset. Reach `Adr` there through `import records.kinds` too.
 
 **Fixtures.** Add `tests/records/fixtures/good/docs/adr/0001-*.md` (status
 `superseded`, `superseded_by: [2]`) and `0002-*.md` (status `accepted`,
-`supersedes: [1]`), each with every required section. Give one `principles:
+`supersedes: [1]`), each with every required section and no title line: prose
+before the first `## ` heading is refused (`records/load.py:118-120`). Give one `principles:
 [1]` with a `- **1** upholds.` bullet, and the other an empty list with the
 `Judged against no principle.` line. Their `appendices` name letters the
 fixture's `docs/appendices/` holds (A and B). Two readers scan the fixture
