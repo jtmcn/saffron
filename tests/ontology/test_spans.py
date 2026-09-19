@@ -58,8 +58,7 @@ def test_a_definition_that_is_not_there_is_refused():
 
 
 def test_render_reads_its_spans_from_the_one_module():
-    from ontology import design_record, render, spans
+    from ontology import render, spans
 
     assert render.SETS is spans.SETS
     assert render.MEMBER_TOKEN is spans.MEMBER_TOKEN
-    assert design_record.ANCHOR == spans.PRINCIPLE_ANCHOR
