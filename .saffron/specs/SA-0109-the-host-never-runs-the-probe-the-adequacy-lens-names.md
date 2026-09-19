@@ -43,8 +43,8 @@ acceptance:
   - claim: >-
       An anchored adequacy finding filed as a `concern`, whose probe leaves the
       repo's `tests` gate with no new failure against that gate's result on the
-      unprobed tree, reaches REBUT as a blocker. The task ends `REBUTTING` or
-      later, never `READY_FOR_REVIEW`. When the same review also holds a
+      unprobed tree, reaches REBUT as a blocker, so the task does not end
+      `READY_FOR_REVIEW` without REBUT running. When the same review also holds a
       correctness blocker with no probe, `rebuttal.json` names both, each
       under its own number.
     witness: tests/test_session.py::test_a_concern_whose_probe_survives_is_rebutted_as_a_blocker
@@ -92,7 +92,7 @@ acceptance:
       the error as the reason, and the mutator is never entered for a later
       one. Verdicts given before the raise stand. The task reaches the state
       those verdicts, and the other findings as filed, give it.
-    witness: tests/test_session.py::test_a_probe_that_raises_leaves_the_findings_as_filed
+    witness: tests/test_session.py::test_a_probe_that_raises_stops_probing_and_keeps_the_verdicts_given
   - claim: >-
       A blocker from a lens that carries no probe still routes to REBUT
       exactly as it does today.
@@ -149,8 +149,9 @@ Build the step between REVIEW and REBUT that answers it:
    tests are the repo's declared `tests` gate at `worktree.GATES_MOUNT`, run
    through `runner.run_gate` with a `CellExecutor`. Core invokes declared
    gates, never a tool (§2.1). This runs the whole suite, where item 117 asked
-   for the spec's witnesses and the diff's added tests. `check_probe` runs
-   the whole suite (`saffron/probe.py:197`) and is forbidden here. The whole
+   for the spec's witnesses and the diff's added tests. Narrowing it is not
+   this spec's to do: `check_probe` runs the whole suite
+   (`saffron/probe.py:197`), and that file is forbidden here. The whole
    suite is also what the corpus measures, so a lens's kill rate in a task
    and in the corpus mean the same thing.
 3. **What the verdict decides.**
@@ -165,7 +166,12 @@ Build the step between REVIEW and REBUT that answers it:
    *Verdict* as the critic's own at REBUT, and the ledger's `verdict` column
    holds that one (`saffron/ledger.py:781`). `review_state` and everything
    after it read the decided findings, so the ledger rows, `findings.json`,
-   the queue's concern count and REBUT's numbering all agree.
+   the queue's concern count and REBUT's numbering all agree. `blocker_lines`
+   reads `finding.probe_verdict` to decide which blockers show their probe
+   (criterion 5). That read is what keeps the new field off the `dead` gate,
+   which reports a field no scanned root loads by name. Measured on vulture
+   2.16: the field alone is `unused variable 'probe_verdict'`, and the read in
+   `rebut.py` clears it.
 4. **What it records.** Write `probes.json` in the task directory: one entry
    per probe, with the probe and every `ProbeResult` field. Each entry also
    names the findings it decided, by lens, file and line. It carries the
@@ -196,10 +202,11 @@ A repo that declares no `tests` gate gets no probe cell. Every probe is
 (`docs/evidence/scripts/2026-09-08-lens-corpus.py:244-252`).
 
 An infrastructure failure while probing is not the task's fault and not a
-verdict on the lens. That covers the cell not coming up, the baseline
-reporting `error`, and a failed undo raising. Every probe not yet answered is
-then `unproven` with the reason, and the task continues on the findings as
-filed.
+verdict on the lens. Every probe not yet answered is `unproven` with the
+reason. The cell not coming up and the baseline reporting `error` happen before
+any probe is answered, so every finding stays as filed. A failed undo raises
+part-way through, so the probe verdicts already given stand. The probe whose
+undo raised, and every one after it, is `unproven`.
 
 Line numbers in `session.py` were read at `0ed431e`. `SA-0102`, the parent,
 edits that file, so expect them to differ. Find each site by name.
@@ -218,6 +225,11 @@ edits that file, so expect them to differ. Find each site by name.
 
 ## Notes for the agent
 
+- **Your own injected glossary is stale here.** `CONTEXT.md` §4's *vacuity
+  probe* entry says a probe is applied "never during a task". Section 4 reaches
+  IMPLEMENT and REVIEW (`saffron/agents/context.py:28-32`). Backlog item
+  b-f2a9d1 owns that sentence, and `CONTEXT.md` is protected, so you can
+  neither edit it nor hedge the design against it.
 - This change is **new code**, so most criteria declare a witness and no
   mutant (§5.4.1). The three mutants pin `saffron/probe.py`, which already
   exists and which this spec forbids you to edit. They prove the witnesses reach
@@ -236,8 +248,14 @@ edits that file, so expect them to differ. Find each site by name.
   elevated diff and its ceiling is 600 lines, tests included. The helper's
   `run_gate` stub answers only calls into a `saffron-gate-` container and
   passes every other call through, as `_run_suite` routes
-  (`tests/test_session.py:889-903`). IMPLEMENT's own gates reach `run_gate`
-  too.
+  (`tests/test_session.py:889-903`). IMPLEMENT's gates reach `run_gate` from
+  inside `run_suite` (`saffron/gates/runner.py:325`), which is stubbed, so under
+  these witnesses nothing else reaches it. `revert`'s own `run_gate`
+  (`saffron/gates/suite.py:170`) is not stubbed, and runs in a
+  `saffron-gate-` container like the probe's. It stays unreached only because
+  `revert_gate` returns `skip` before `run_tests` unless both suites enumerate
+  their tests (`saffron/gates/core/revert.py:99-106`). So the pass-through is
+  the stub refusing to answer a call it was not written for.
 - Decide the findings before `ledger.record_findings` runs. REBUT looks each
   blocker up by object identity in `recorded` (`saffron/cell/session.py:2143`),
   so a finding copied after that write raises `KeyError` there.
@@ -252,10 +270,16 @@ edits that file, so expect them to differ. Find each site by name.
   is one that removes the finding instead of demoting it. For the test-path
   witness, it is one that hard-codes `tests/` or skips normalising. For the
   REBUT witness, it is one that shows every blocker's probe. For the raise
-  witness, it is one that lets `CellRuntimeError` end the task, or one that
-  catches it per probe and goes on probing. The raise witness therefore files
-  two probes on different files and makes the first undo raise. A failed undo
-  leaves the first edit in the tree, so a later probe runs over both edits.
+  witness, it is one that lets `CellRuntimeError` end the task. It is also one
+  that catches the raise per probe and goes on probing. It is also one that
+  answers the raise by rebuilding every entry as `unproven`. That last one dies
+  only against a probe already answered when the raise arrives. So the raise
+  witness files **three** probes on three files. The first is answered
+  `survived`, and so promotes its finding. The second's undo raises. The third
+  never reaches the mutator. Assert the first finding keeps the severity its
+  probe decided, with its `probe_verdict`. Assert the later two are `unproven`
+  naming the error, and that the mutator was entered exactly twice. A failed
+  undo leaves the second edit in the tree, so nothing after it runs clean.
 - Under the criterion-1 mutant the task still reaches `REBUTTING`, because
   the correctness blocker is there. Only `rebuttal.json` holding two blockers
   kills that mutant, so assert on it.
