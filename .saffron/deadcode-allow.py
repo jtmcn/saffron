@@ -10,6 +10,7 @@ _._file_is_named  # pydantic field_validator, saffron/intake.py
 _._find_is_not_empty  # pydantic field_validator, saffron/intake.py
 _._no_core_gate_names  # pydantic field_validator, saffron/repos/policy.py
 _.by_hand  # BacklogItem field: extra="forbid" refuses a record that sets it unless it exists
+_.related  # BacklogItem field: extra="forbid" refuses a record that sets it unless it exists
 _.envelope  # Spec field (§3.2): extra="forbid" needs it for a bug spec to parse
 _.envelope_default  # Policy field (§2.1): extra="forbid" needs it for policy.yaml to parse
 _.pending_symbols  # Spec field: pydantic validates it, and .saffron/gates/dead.py reads it from YAML
@@ -32,9 +33,6 @@ _.render_table  # docs/evidence/scripts/2026-09-07-lens-scoring.py
 _.recover_fixture  # docs/evidence/scripts/2026-09-08-recover-fixture.py
 _.FIXTURE_FILES  # docs/evidence/scripts/2026-09-08-recover-fixture.py
 _.task_results  # .claude/skills/run-saffron-spec-loop/driver.py
-_.check_all  # tests/records/test_records_integrity.py is the records check make check runs
-_.merged_prs  # tests/records/test_records_integrity.py is the records check make check runs
-_.building_pr  # tests/records/test_records_integrity.py is the records check make check runs
 
 # Documented, or edited in place by an open spec.
 _.CPU_OFFSET  # dialect value DESIGN.md §5.1 documents, read only by the cell-marked image test
