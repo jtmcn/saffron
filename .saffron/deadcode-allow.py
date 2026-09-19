@@ -36,12 +36,10 @@ _.check_all  # tests/records/test_records_integrity.py is the records check make
 _.merged_prs  # tests/records/test_records_integrity.py is the records check make check runs
 _.building_pr  # tests/records/test_records_integrity.py is the records check make check runs
 
-# Cited by name in DESIGN.md, or read as a table by a test that pins it.
-_.batch_runs  # DESIGN.md §4.2.1 lists it among the batch writers and readers
-_.CPU_OFFSET  # DESIGN.md §5.1 names it; runtime.__getattr__ serves it
-_.visible_cpus  # the cell-marked tests/test_image.py measures CPU_OFFSET with it
-_.FAMILIES  # tests/test_events.py checks every call site against it; SA-0101 and SA-0102 edit it
-_.FINDINGS  # tests/test_events.py checks every call site against it; SA-0101 edits it
+# Documented, or edited in place by an open spec.
+_.CPU_OFFSET  # dialect value DESIGN.md §5.1 documents, read only by the cell-marked image test
+_.FAMILIES  # open specs SA-0101 and SA-0102 edit this table
+_.FINDINGS  # open specs SA-0101 and SA-0102 edit this table
 
 # Kept by an operator decision.
 _.read_manifest  # harness/register_scoring.py: the pending instrument of docs/superpowers/specs/2026-09-17-prompt-change-measurement-design.md
@@ -49,3 +47,4 @@ _.per_1k  # harness/register_scoring.py: the pending instrument of docs/superpow
 _.spread  # harness/register_scoring.py: the pending instrument of docs/superpowers/specs/2026-09-17-prompt-change-measurement-design.md
 _.driver  # harness/register_scoring.py: the pending instrument of docs/superpowers/specs/2026-09-17-prompt-change-measurement-design.md
 _.baseline_results  # Ledger: the read-side partner of task_results, read by the ledger tests
+_.batch_runs  # ledger read API, kept like baseline_results by operator decision

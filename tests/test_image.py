@@ -38,10 +38,18 @@ def test_the_runner_has_an_interpreter_with_the_sdk_inside_a_repos_own_image():
     assert done.returncode == 0, done.stderr
 
 
+def _visible_cpus(tag: str, cpus: int) -> int:
+    """What `nproc` reports inside a cell allocated `cpus`."""
+    done = runtime.run_ephemeral(tag, ["nproc"], cpus=cpus, timeout_s=120)
+    if done.returncode != 0:
+        raise runtime.CellRuntimeError(f"nproc failed in {tag}: {done.stderr.strip()}")
+    return int(done.stdout.strip().splitlines()[-1])
+
+
 @pytest.mark.cell
 def test_the_cell_sees_only_the_cpus_it_has():
     """The requirement §5.1 states, with the offset Appendix G measured."""
-    assert runtime.visible_cpus(image.BASE_TAG, 1) == 1 + runtime.CPU_OFFSET
+    assert _visible_cpus(image.BASE_TAG, 1) == 1 + runtime.CPU_OFFSET
 
 
 def test_the_cell_image_is_named_for_the_repo(tmp_path):
