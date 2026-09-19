@@ -44,7 +44,9 @@ acceptance:
       An anchored adequacy finding filed as a `concern`, whose probe leaves the
       repo's `tests` gate with no new failure against that gate's result on the
       unprobed tree, reaches REBUT as a blocker. The task ends `REBUTTING` or
-      later, never `READY_FOR_REVIEW`, and `rebuttal.json` names that finding.
+      later, never `READY_FOR_REVIEW`. When the same review also holds a
+      correctness blocker with no probe, `rebuttal.json` names both, each
+      under its own number.
     witness: tests/test_session.py::test_a_concern_whose_probe_survives_is_rebutted_as_a_blocker
     mutant:
       file: saffron/probe.py
@@ -84,6 +86,12 @@ acceptance:
       the tests did not notice. A blocker whose probe was `unproven` is listed
       without its probe.
     witness: tests/test_rebut.py::test_a_blocker_whose_probe_survived_names_the_probe_to_the_implementer
+  - claim: >-
+      A probe whose undo raises `CellRuntimeError` does not end the task. That
+      probe and every later one are recorded `unproven` in `probes.json` with
+      the error as the reason, and the task reaches the state its findings as
+      filed give it.
+    witness: tests/test_session.py::test_a_probe_that_raises_leaves_the_findings_as_filed
   - claim: >-
       A blocker from a lens that carries no probe still routes to REBUT
       exactly as it does today.
@@ -139,7 +147,11 @@ Build the step between REVIEW and REBUT that answers it:
    probe. Its mutator is `worktree.source_mutated` bound to the cell. Its
    tests are the repo's declared `tests` gate at `worktree.GATES_MOUNT`, run
    through `runner.run_gate` with a `CellExecutor`. Core invokes declared
-   gates, never a tool (§2.1).
+   gates, never a tool (§2.1). This runs the whole suite, where item 117 asked
+   for the spec's witnesses and the diff's added tests. `check_probe` runs
+   the whole suite (`saffron/probe.py:197`) and is forbidden here. The whole
+   suite is also what the corpus measures, so a lens's kill rate in a task
+   and in the corpus mean the same thing.
 3. **What the verdict decides.**
    - `survived`: the finding becomes a `blocker`, whatever the lens filed.
    - `killed`: the finding becomes a `note`, whatever the lens filed. It is
@@ -213,7 +225,7 @@ edits that file, so expect them to differ. Find each site by name.
 - Because their mutants' file is outside the diff, `revert` exempts the first
   three witnesses (`saffron/gates/core/revert.py:193-209`). Nothing but their
   shape proves they depend on the new session code. So each of the five
-  session witnesses drives a task through `_drive` (`tests/test_session.py:966`)
+  new session witnesses drives a task through `_drive` (`tests/test_session.py:966`)
   and asserts on task-level output: `outcome.state`, `probes.json`,
   `findings.json`. None of them calls `check_probe` directly.
 - `_drive`'s default policy declares no gates, and `_stub_the_runtime`
@@ -234,10 +246,12 @@ edits that file, so expect them to differ. Find each site by name.
   error, which `revert` reads as `skip`.
 - Each witness is a plain `def`, never parametrised.
 - Each witness must fail on one wrong implementation. For the survived
-  witness, it is one that promotes every probed finding. For the killed
-  witness, it is one that removes the finding instead of demoting it. For the test-path
+  witness, it is one that promotes every probed finding, or one that loses
+  or renumbers the correctness blocker beside it. For the killed witness, it
+  is one that removes the finding instead of demoting it. For the test-path
   witness, it is one that hard-codes `tests/` or skips normalising. For the
-  REBUT witness, it is one that shows every blocker's probe.
+  REBUT witness, it is one that shows every blocker's probe. For the raise
+  witness, it is one that lets `CellRuntimeError` end the task.
 - In production a probe runs the repo's whole suite, about a minute in a cell.
   The witnesses stub it, so they pay none of that. That
   costs wall clock, not model spend, and REVIEW is not gated on the spend
