@@ -32,24 +32,25 @@ forbidden:
   - saffron/task.py
   - saffron/replay.py
   - saffron/events.py
-budget_usd: 17
-max_turns: 100
+budget_usd: 22
+max_turns: 120
 acceptance:
   - claim: >-
       The checked walk calls a merged task's chain whole only when its ledger
-      rows reach an attempt and a pull request, and its stored plan and diff
-      exist. A task lacking any one of the four is broken. A task lacking only
-      some other stored file is whole. The walk reads no event log and states no
-      edge.
+      rows reach an attempt holding a gate result and a pull request, and its
+      stored plan and diff exist. A task lacking any one of the four is broken.
+      A task lacking only some other stored file, or its event log, is whole.
+      The walk reads no event log and states no edge.
     witness: tests/test_chain_walk.py::test_the_checked_walk_needs_the_rows_and_the_files_and_nothing_else
   - claim: >-
-      Every merged pull request Q4 drops while the checked walk calls its chain
-      whole is printed. One whose stored file is missing is not printed, since
-      the checked walk sees it too. A task whose pull request another task
-      shares is judged on its own. Every task the projection left out, whatever
-      its reason, is counted apart by reason and never printed as a break. The
-      output states how many merged tasks were compared, so a zero over zero
-      compared cannot read as a refutation.
+      Every merged task Q4 drops while the checked walk calls its chain whole
+      is printed, naming its task id and spec id. One Q4 drops that the walk
+      also calls broken is not printed. A task whose pull request another task
+      shares is judged on its own. A merged task the projection left out,
+      including one missing a stored file, never reaches the comparison: it is
+      counted apart by reason and never printed as a break. The output states
+      how many merged tasks were compared, so a zero over zero compared cannot
+      read as a refutation.
     witness: tests/test_chain_walk.py::test_the_output_names_only_breaks_the_checked_walk_calls_whole
   - claim: >-
       `saffron chains` materializes the projection over the whole ledger,
@@ -104,16 +105,37 @@ never runs over the merged history. `main` dispatches every subcommand
 
 This spec creates `saffron/chain_walk.py` and its tests, and edits
 `saffron/cli.py`. No criterion pins text the existing code determines, so each
-declares a witness and no mutant, and `witness` will report `skip` for them.
+declares a witness, and `witness` will report `skip` for them. The second
+criterion can also declare a mutant on the parent's code: in
+`saffron/projection.py`, `diff_matches = _diff_length(diff_path) ==
+span.diff_length` replaced by `diff_matches = True` must turn its witness red.
+
+**Commit as you go.** Each turn has a 15-minute wall clock
+(`TURN_TIMEOUT_S`, `saffron/cell/session.py:58`). `SA-0107`'s first cell hit it
+with nothing committed, and the work was lost. Commit once the walk passes, and
+again each time a criterion's test passes.
+
+**The parent's API.** `materialize(ledger, out_dir, output_path, *,
+shapes_path=DEFAULT_SHAPES)` returns `Projection(kept, left_out)`. `kept` is
+`dict[int, str | None]`, task id to PullRequest IRI. `left_out` is
+`dict[int, LeftOut]`, whose reason is one of `unsupported_end_state`,
+`spec_not_found`, `spec_unusable`, `unattributable` or `missing_artifact`. It
+raises `ProjectionError`. `saffron/projection.py` does not read Q4. Load the
+query the way `tests/test_projection.py:219-220` does. Import the parent's
+builders as `from tests.test_projection import T, build, spec_text`, inside the
+test body. `build()` runs once per `tmp_path`.
 
 **The comparator.** The checked walk follows the ledger's foreign keys (the
-`runs`, `tasks` and `attempts` tables, `saffron/ledger.py:53-102`). Whole needs
-four things: a `runs` row, at least one `attempts` row, a `pr_url`, and a
-`plan.json` and `patch.diff` in the task's batch-tree directory. `_drive_cell`
-writes the two files (`saffron/cell/session.py:751,1587`). Other stored files
-are written only on some paths, so the walk does not ask for them. Appendix T
-records that narrowing. The walk must not read `events.jsonl` or compare hashes. Doing so would make it the projection, and the
-comparison would say nothing.
+`runs`, `tasks`, `attempts` and `gate_results` tables,
+`saffron/ledger.py:53-117`). Whole needs four things: a `runs` row, at least
+one `attempts` row that `gate_results.attempt_id` points at, a `pr_url`, and a
+`plan.json` and `patch.diff` in the task's batch-tree directory. The attempt
+rule matches the projection's: the last attempt holding gate results generated
+the diff. `export_patch` writes `patch.diff` (`saffron/cell/session.py:704,751`)
+and `_drive_cell` writes `plan.json` (`:1587`). Other stored files are written
+only on some paths, so the walk does not ask for them. Appendix T records that
+narrowing. The walk must not read `events.jsonl` or compare hashes. Doing so
+would make it the projection, and the comparison would say nothing.
 
 **Run Q4 yourself.** `SA-0107`'s materialization returns task ids and reasons,
 not Q4's result. Run the committed `ontology/queries/Q4-derivation-chain.rq`
@@ -123,17 +145,16 @@ over the graph it wrote. Read the query from Saffron's own source tree, the way
 `pr_url` (`saffron/scheduler.py:645-650`). `SA-0107` mints the pull request
 node per task, never from `pr_url`, and returns each kept task's IRI in its
 result, keyed by task id. Key the comparison by that mapping, and never spell
-the IRI format here. Were
-it minted from `pr_url`, a whole sibling would hide an overwritten task, which
-is why the second criterion's fixture includes a shared one.
+the IRI format here. Were it minted from `pr_url`, a whole sibling would hide
+an overwritten task, which is why the second criterion's fixture includes a
+shared one.
 
-**Compare like with like.** Run the walk over the same tasks the projection
-kept, which its materialization returns. A task the projection left out, for
-any reason, is counted apart by that reason and never printed as a break. Take
-the reasons from what `SA-0107`'s materialization returns, rather than deciding
-them again. A task missing its `plan.json` or `patch.diff` is one of them:
-`SA-0107` leaves it out with a named reason rather than raising, so old tasks
-lacking files are counted and `saffron chains` still exits 0.
+**Compare like with like.** Run the walk over the merged tasks the projection
+kept. A merged task the projection left out is counted apart by its reason and
+never printed as a break. Count only merged tasks. Take the reasons from
+`left_out`, rather than deciding them again. A task missing its `plan.json` or
+`patch.diff` is left out as `missing_artifact` rather than raising. Old tasks
+lacking files are counted, and `saffron chains` still exits 0.
 
 **Where things are.** `saffron/cli.py:152` resolves the batch tree from
 `--home`. Pass that path, the ledger and an output path under `--home` into the
@@ -154,7 +175,12 @@ exception and returns 2 (`saffron/cli.py:179-186`). The third criterion's 0
 path runs over the second criterion's fixture, so it finds at least one break.
 It asserts the break line, the count line and exit 0. An implementation that
 returns 1 when it finds breaks, copying `CELL_EXIT`'s "did not make it"
-(`saffron/cli.py:40-49`), must fail it. It must not catch `SystemExit`: with the
+(`saffron/cli.py:40-49`), must fail it. Build its fixture with
+`ledger=Ledger(home / "ledger.db")` and the batch tree at `home/batches/v0`,
+since `saffron/cli.py:152` reads it there and `build()` defaults to
+`tmp_path/"batches"`. Force the raise by monkeypatching
+`saffron.projection.materialize`, so `saffron/chain_walk.py` must call it
+through the module. It must not catch `SystemExit`: with the
 source reverted, argparse exits on the unknown subcommand, and a caught exit
 would turn the raise half green.
 
@@ -164,19 +190,23 @@ scan are not compared, so both can edit the file the same night. The placement
 above keeps the hunks apart for a rebase.
 
 **Drive every condition in the first criterion's test.** Build one task per
-missing piece: no attempt row, no `pr_url`, no `plan.json`, no `patch.diff`.
-Assert each broken. Remove an unrelated stored file from another and assert it
-whole.
+missing piece: no attempt holding a gate result, no `pr_url`, no `plan.json`,
+no `patch.diff`. Assert each broken. Remove an unrelated stored file from
+another and assert it whole. Build one whole task with no `events.jsonl` (or
+`no_ceilings=True`), so a walk that reads the log fails.
 
 **Build the second criterion's fixture with three merged tasks.** One is whole.
 One has a later task of the same spec overwriting its diff, and shares its
 `pr_url` with a whole task. One has its diff deleted. Only the second is
-printed. Add a task the projection returned as
-unattributable, and one whose `spec_sha` matches no committed version. Assert
-that both are counted by reason and neither is printed, and assert the count of
-tasks compared. Reuse the fixture builders in `tests/test_projection.py` only
-if they import as they stand. Never edit that file. Put a non-ASCII character in every fixture diff, for the reason `SA-0107`'s
-notes give.
+printed. Add a merged task with a `pr_url` and matching plan and diff lines and
+files but no attempt holding a gate result (the builder's `gate_result=False`).
+The projection keeps it and Q4 drops it, but the walk calls it broken, so it is
+not printed and it counts among tasks compared. Add a task the projection
+returned as unattributable, and one whose `spec_sha` matches no committed
+version. Assert that both are counted by reason and neither is printed, and
+assert the count of tasks compared. Never edit `tests/test_projection.py`. Put
+a non-ASCII character in every fixture diff, for the reason `SA-0107`'s notes
+give.
 
 **Import anything new inside the test body.** Module scope does not work. A
 module-scope import of a name this change adds turns `revert`'s reverted run
