@@ -271,8 +271,11 @@ order are fine, and so is one statement doing both. Add it as a new writer
 method, or as a keyword on `set_task_state` that defaults to writing nothing.
 Never as a required parameter. That signature has thirteen callers in
 `saffron/cell/session.py` and one in `saffron/replay.py`, both `forbidden`.
-Seven test files outside `touches` call it too. The state first is the one order
-that is wrong.
+Seven test files outside `touches` call it too. A new writer method writes the
+head and nothing else. The state still goes through `set_task_state`, which is
+what rolls the task's spend up from its attempts (`saffron/ledger.py:610-613`).
+A method that wrote both would be a terminal path skipping that rollup, and no
+criterion here would see it. The state first is the one order that is wrong.
 
 **Criterion 1 has three plausible wrong implementations.** All three come from
 the `HeadMoved` branch at `saffron/reconcile.py:159`, which sits right there and
