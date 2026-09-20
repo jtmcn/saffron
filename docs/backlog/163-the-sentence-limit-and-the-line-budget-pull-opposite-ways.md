@@ -2,6 +2,7 @@
 id: 163
 title: The sentence limit and the CLAUDE.md line budget move the same text in opposite directions
 status: open
+tier: 3
 filed: 2026-09-17
 by_hand: true
 specs: []

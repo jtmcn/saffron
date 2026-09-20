@@ -2,6 +2,7 @@
 id: 161
 title: A prompt added as a Python string is prose no gate reads, and the rule putting prompts in Markdown is convention
 status: open
+tier: 3
 filed: 2026-09-17
 by_hand: false
 specs: []

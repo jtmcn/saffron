@@ -2,6 +2,7 @@
 id: 170
 title: Three records of a night and no rule says which wins, so the ledger's claim to be authoritative is already false of the page an operator reads
 status: open
+tier: 1
 filed: 2026-09-17
 by_hand: true
 specs: []

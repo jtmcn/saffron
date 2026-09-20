@@ -2,6 +2,7 @@
 id: 126
 title: The REVIEW lenses may pay to write the same prompt to the cache three times
 status: partial
+tier: 3
 filed: 2026-09-14
 specs: [SA-0090]
 prs: [278]

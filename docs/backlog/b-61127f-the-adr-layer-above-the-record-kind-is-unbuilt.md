@@ -2,7 +2,7 @@
 id: b-61127f
 title: The ADR layer above the record kind is unbuilt, so nothing loads, indexes or judges a real decision
 status: open
-tier: null
+tier: 3
 filed: 2026-09-19
 by_hand: true
 specs: []

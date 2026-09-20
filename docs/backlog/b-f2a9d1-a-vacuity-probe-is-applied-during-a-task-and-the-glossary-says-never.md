@@ -2,6 +2,7 @@
 id: b-f2a9d1
 title: A vacuity probe is applied during a task once SA-0109 lands, and the glossary and §5.5.1 say it never is
 status: open
+tier: 2
 by_hand: true
 filed: 2026-09-18
 specs: [SA-0109]
