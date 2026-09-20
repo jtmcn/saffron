@@ -1820,9 +1820,9 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
     """Re-measured 2026-09-20, a forty-ninth time: `SA-0113` queued for
     backlog item b-2750d5, the edit no session names for an acceptance claim.
-    It edits `review.py`, `session.py` and their tests, and nothing else is
-    queued, so it has no `depends_on` and is the one candidate. Nothing is
-    refused.
+    It edits `review.py`, `session.py`, two new prompt files and three test
+    files, and nothing else is queued, so it has no `depends_on` and is the
+    one candidate. Nothing is refused.
 
     Re-measured 2026-09-19, a forty-eighth time: the spec loop's run 10
     merged `SA-0111` (#381) and `SA-0112` (#382), and both retire to `done/`.

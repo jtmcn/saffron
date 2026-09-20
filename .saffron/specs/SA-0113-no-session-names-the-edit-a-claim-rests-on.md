@@ -11,6 +11,7 @@ touches:
   - saffron/agents/prompts/turns/criterion-probe.md
   - tests/test_review.py
   - tests/test_session.py
+  - tests/test_context.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -58,7 +59,6 @@ forbidden:
   - saffron/agents/prompts/turns/salvage.md
   - saffron/agents/prompts/turns/verdict.md
   - tests/fixtures/**
-  - tests/test_context.py
   - tests/test_corpus.py
   - tests/test_events.py
   - tests/test_queued_specs.py
@@ -105,7 +105,10 @@ that stack, the loop's delegate mutated by hand the line each acceptance
 criterion rests on. It then ran that criterion's witness. The surviving edit was
 a witness hole in all five pull requests, and five review commits fixed them.
 
-Every sentence below about current code was read at `ca55c57e` on 2026-09-20.
+Every sentence below about current code was read at `ca55c57e` on 2026-09-20,
+and the sentences added in review were read at `8c2e7798`. That commit adds
+this spec, its backlog records and the queue smoke test's paragraph. It changes
+no line of `saffron/` and no test body.
 
 **Item 117's half of this shipped and this half did not**. `SA-0109` gave the
 host the adequacy lens's own vacuity probe. `_probe_adequacy`
@@ -205,7 +208,7 @@ stops at the record.
    with an edit and a reason. The edit is the three fields `Mutant` declares
    (`saffron/intake.py:71-89`), validated through that model. `Finding.probe`
    already uses that model for a lens-authored edit
-   (`saffron/agents/findings.py:41`). The reason is the session's own account
+   (`saffron/agents/findings.py:42`). The reason is the session's own account
    of why the edit falsifies the claim. A session that finds no such edit
    answers with no edit and a reason. That is the honest answer over a claim
    whose subject the diff never touched. The host validates and stores. It
@@ -329,6 +332,27 @@ files sit inside `.saffron/gates/prose.py`'s `INCLUDED_DIRS` (`:36-44`). So the
 `prose` gate reads them as living prose, and the `terms` gate reads them for
 avoided words.
 
+**A tenth turn prompt fails an existing test, so the registry is part of this
+change**. `TURN_PROMPTS` (`tests/test_context.py:369-378`) is a hand-written
+dict of the nine turn names and the constant that loads each.
+`test_every_turn_prompt_file_is_loaded_by_something` (`:383-384`) asserts that
+dict's keys equal the stems of `context.TURNS_DIR.glob("*.md")`. It globs the
+real tree, and no test monkeypatches it. So a tenth file with no entry fails
+the blocking `tests` gate on every attempt. That test passes at base, so the
+baseline subtracts nothing. Add the new turn name and its module constant,
+keeping the dict's shape. `tests/test_context.py` is in `touches` for that one
+edit and nothing else.
+
+Two things ride on that entry. It names a constant `review.py` only has at
+head. So under `revert` the module-scope dict raises, and every test in that
+file drops out of collection. A name missing from collection is one of the
+three answers `revert` accepts (`saffron/gates/core/revert.py:340-344`), so do
+not chase it. The second is
+`test_a_loaded_turn_prompt_keeps_no_unfilled_slot` (`:392-398`), which leaves
+the new turn file no `{lowercase}` slot of its own once `{extraction}` is
+filled. That is already the design above. The one claim reaches the session
+through the system prompt's `{spec}`, never through the turn file.
+
 **Your own injected glossary is stale here, as `SA-0109`'s was**. `CONTEXT.md`
 §4 defines *Mutant* as declared by a criterion and never chosen by the agent
 (`CONTEXT.md:335-343`). It defines *Vacuity probe* as named by a lens and
@@ -336,6 +360,15 @@ applied by the corpus harness (`:345-352`). A criterion probe is neither.
 Backlog item b-0c1d69 owns the entry that will say so. Write the prompt so the
 session it addresses is told what it is naming, in that prompt's own words. Do
 not hedge the design against a glossary line you cannot edit.
+
+**Name that tension in your notes**. `CONTEXT.md` §4 is injected into every
+REVIEW lens (`saffron/agents/context.py:28-32`). The `contract` lens is placed
+to read this diff as contradicting the design record. So write in your notes
+what the code does. Write why `DESIGN.md` §5.4.1's reason (`:972-973`) is about
+the implementer, rather than about a session shown one claim and no witness.
+Name backlog item b-0c1d69 as the owner of both lines, which no cell can land
+from here. REBUT then has the argument to hand, rather than reconstructing it
+under a blocker.
 
 **The prompt asks for an edit against the claim, never against a test**. Say in
 it that the reader holds no test runner and sees no test name. Say that the
@@ -354,7 +387,7 @@ standing record of why a written rule is not a boundary.
 machinery and the record-shaped helpers. `saffron/cell/session.py` holds the
 call site, the write and the line. That split is the one `SA-0109` left:
 `review.adequacy_probes`, `review.probe_key` and `review.describe_probes`
-(`saffron/phases/review.py:359-413`) are pure, and `_probe_adequacy`
+(`saffron/phases/review.py:359-411`) are pure, and `_probe_adequacy`
 (`saffron/cell/session.py:1255`) holds the cell. `session.py` is 2618 lines and
 `review.py` is 436. Put everything that does not need the call site in
 `review.py`.
@@ -370,18 +403,27 @@ reports a field no scanned root loads by name, which cost `SA-0109` a review
 round over `probe_verdict`. Build the record entry where the fields are read,
 and keep the entry a plain structure the JSON write consumes.
 
-**The existing session witnesses that declare criteria will change**. Ten call
-sites in `tests/test_session.py` pass `acceptance=`, and the ones reaching
-REVIEW now buy one session per criterion. `_drive`'s scripted turns run out
-after the turns a test names. Every later turn takes the fallback
-`{"findings": []}` (`tests/test_session.py:1051`), which this schema refuses.
-So those tests record an error entry per criterion, which is the expected state
-rather than a defect. Leave `_drive`'s fallback alone: criterion 3 needs an
-answer the schema refuses to stay easy to produce. Script the lens turns and
-the naming turns for any test asserting on turn counts or prompts.
+**The existing session witnesses that declare criteria buy extra sessions, and
+none of them is expected to need an edit**. Ten call sites in
+`tests/test_session.py` pass `acceptance=` (`:5068`, `:5131`, `:5181`, `:5226`,
+`:5242`, `:5291`, `:5414`, `:5434`, `:5638`, `:5671`), and each now buys one
+session per criterion. `_drive`'s scripted turns run out after the turns a test
+names. Every later turn takes the fallback `{"findings": []}`
+(`tests/test_session.py:1051`), which this schema refuses. So those drives
+record an error entry per criterion, which is the expected state rather than a
+defect. No other drive is touched. `_spec()` declares no `acceptance`
+(`tests/test_session.py:142-155`). The file's turn-count and `spent_usd`
+assertions all sit elsewhere (`:1332`, `:1374`, `:1395`, `:1423`, `:1426`,
+`:1452`, `:1656`, `:3578`, `:3620`, `:3639`, `:4897`, `:4924`). Each of those
+drives a spec with no criterion, so none of them buys a session. The one
+prompt assertion among the ten is
 `test_the_review_lens_prompt_carries_the_claim_for_a_witnessed_spec`
-(`tests/test_session.py:5654`) asserts every prompt past the first carries the
-claim. A naming prompt carries it too, so that one stands.
+(`:5654`). It asserts that every prompt past the first carries the claim. A
+naming prompt carries it too, so that one stands. Leave `_drive`'s fallback alone:
+criterion 3 needs an answer the schema refuses to stay easy to produce. Script
+the lens turns and the naming turns inside your own witnesses instead. Repair
+one of the ten only if your own design made it fail, and say in your notes
+which and why.
 
 **Two files of tests, and which witness goes where**. Criterion 3 is a unit
 witness in `tests/test_review.py`, driving the loop directly with the `_agent`
@@ -397,7 +439,8 @@ by exact string.
 **Import inside the test body, not at module scope**, for any name this change
 adds. `revert` re-runs your new tests with the source reverted. A module-scope
 import of a new name makes that run a collection error, which `revert` reads as
-`skip`.
+`skip`. `TURN_PROMPTS` is the one exception, because the dict it belongs to is
+module-scope already, and the paragraph above says what `revert` makes of it.
 
 **This step spends before REBUT's budget check** at
 `saffron/cell/session.py:2404`. A task holding a blocker and a thin remainder
@@ -409,12 +452,24 @@ second budget rule to protect REBUT.
 `.saffron/policy.yaml:36`'s `elevate_on`, so this diff auto-elevates. The
 `feature` ceiling of 600 changed lines is then blocking
 (`saffron/gates/core/size.py:25`). The estimate for this change is about 480
-lines. It is 58 of prompt text, 150 in `review.py`, 35 in `session.py`, 65 in
-`tests/test_review.py`, and 175 in `tests/test_session.py`. The last figure
-includes the repair of the existing tests named above. `SA-0109` is the
-comparable cell, at 584 lines over seven criteria and six new witnesses. This
-one has three criteria and three new witnesses. Keep the drive helper shared,
-and do not go looking for more to do.
+lines. It is 70 of prompt text, 150 in `review.py`, 35 in `session.py`, 65 in
+`tests/test_review.py`, 160 in `tests/test_session.py`, and 2 in
+`tests/test_context.py`. Two of those figures are soft, so both carry a bound.
+The prompt figure holds while the system prompt stays a page. The three lens
+prompts run 106 to 152 lines
+(`saffron/agents/prompts/review-correctness.md`, `review-contract.md`,
+`review-adequacy.md`). Each of those carries a findings table, a severity
+taxonomy and anchoring rules. This one carries a single object and none of
+that. Keep the system prompt under 60 lines. Keep the turn prompt under 10,
+where the nine existing turn prompts run 2 to 11. The `tests/test_session.py`
+figure is two witnesses and the helper they share, with no repair of the ten
+existing `acceptance=` drives. The paragraph above gives the reason. `SA-0109`
+is the comparable cell, at 584 lines over seven criteria and six new witnesses.
+Of those, 278 lines were `tests/test_session.py` and 254 were production code.
+This spec has three criteria, three new witnesses and a smaller production
+half. The two feature cells that overshot this ceiling, `SA-0106` at 633 and
+`SA-0020` at 646, each carried four criteria or more. Keep the drive helper
+shared, and do not go looking for more to do.
 
 **The `prose` gate counts comment runs and docstrings per file**. It blocks,
 with the base subtracted. Keep every comment to one or two lines and every
