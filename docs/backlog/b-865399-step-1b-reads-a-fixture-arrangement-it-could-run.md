@@ -57,3 +57,36 @@ rather than hand-scripted each time.
 - 2026-09-19: filed from the spec loop's run 10 (`SA-0112`, #382). Three
   reviews at roughly six minutes each preceded a two-minute measurement that
   settled what they were circling.
+
+- 2026-09-19: done, by hand, in the two prose files the move needs. Check 3 of
+  `.claude/agents/spec-reviewer.md` now reports a wrong implementation that
+  turns on the fixture as **unmeasured** rather than as a blocker. The reviewer
+  lists the wrong implementations the rows must exclude and names the helper.
+  That list is the measurement's input, which is why the two edits are one
+  change. Step 1b of the loop's `SKILL.md` performs the run in a throwaway
+  worktree at `base`, and dispatches no further review on that criterion.
+
+  Three decisions worth recording.
+
+  **The delegate performs it, not the reviewer.** Step 1b dispatches its
+  reviewers in parallel into the checkout the loop drives. `probe` mutates a
+  file in place before restoring it, so two reviewers probing one file corrupt
+  each other's restore. The helper is often `driver.py`, which the loop calls
+  for `next` and `status` meanwhile. Most specs pin no selection, so arming
+  every reviewer spends turns on nothing. This also cuts against item
+  **b-281f0a**'s neighbour finding, that the delegate's edits are the loop's
+  unread artifact. What the delegate adds here is printed output rather than
+  prose.
+
+  **`driver.py probe` is the mechanism, unchanged.** It already carries the
+  three guards a measurement needs: one match or refuse, confirm the edit
+  landed, always restore. The snippet must exit non-zero when the selection is
+  wrong, because `probe` reads exit 0 as `survived`. The rule says so.
+
+  **The optional driver command is declined.** A fixture is spec-specific, and
+  a command that builds rows would serve `history`-shaped specs alone. `probe`
+  covers the mutation half, which is the half carrying the hazards.
+
+  Nothing enforces either rule. The evidence that they fire is the next run's
+  feedback record. The shape to look for is a check 3 line reading `unmeasured`
+  and a round that ended on output instead of on a review.

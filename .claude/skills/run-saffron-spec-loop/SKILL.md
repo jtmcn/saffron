@@ -112,6 +112,26 @@ criteria. Until the edit merges, `hold SA-NNNN --why "#N"` keeps `next` off
 the spec, whose old text a cell would otherwise run. The re-snapshot after the
 merge releases it.
 
+**An unmeasured fixture is run, not reviewed again.**
+Check 3 reports one when a criterion pins a selection, an ordering or a cut.
+It names the wrong implementations the rows must exclude. Cut a throwaway
+worktree at the spec's `base` with `git worktree add`, then `uv sync` inside
+it. Write a snippet that builds the input the criterion describes, calls the
+helper, and exits non-zero when the selection is wrong. `driver.py probe` reads
+exit 0 as `survived`, so a snippet that only prints says nothing. Then probe
+the helper once per named wrong implementation
+(`probe <file> --find F --replace R --root <worktree> -- <snippet>`). It
+restores the file and refuses an edit that never landed. A probe that survives
+is a real hole in the rows. A probe that dies closes that arm. Report the
+output, remove the worktree, and dispatch no further review on that criterion.
+The helper is often `driver.py` itself, which is why this wants a worktree and
+not this checkout. `SA-0112` spent three reviews at roughly six minutes each on
+what a two-minute run settled (item b-865399).
+
+The round stands where there is nothing to run. The measurement needs the
+helper to exist at `base`, and check 3 raises an ordinary blocker where it does
+not.
+
 Two kinds of blocker failed the backtest, and reading the line at base does
 not filter them, because their premise holds there
 (`docs/evidence/2026-09-14-spec-reviewer-backtest.md`; BACKLOG items 123–124). One is a
@@ -127,7 +147,7 @@ there. Review it again at its parent's pushed branch
 (`base: origin/saffron/<parent id>`) before its own cell starts.
 
 **Done when** every spec in the order has a report with six check lines, and
-every verified blocker has the operator's answer.
+every verified blocker has the operator's answer. Every unmeasured fixture was run.
 
 ## 2. Run each spec
 

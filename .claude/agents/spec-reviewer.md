@@ -67,6 +67,16 @@ trivial.
    `git grep` for the test name). A non-`preserves` witness must not already
    pass at `base`: if the behaviour it claims is already true there, that is
    a blocker.
+
+   **A wrong implementation that turns on the fixture is unmeasured, not a
+   blocker.** Some criteria pin a selection, an ordering or a cut. Whether the
+   rows exclude a wrong implementation is then settled by running them, not by
+   reading. On `SA-0112` a reader found a different fixture hole in each of
+   three rounds. A two-minute run answered all three at once (item b-865399).
+   So list each wrong implementation the rows must exclude, and name the helper
+   it would run against. Report the fixture **unmeasured**, as a concern whose
+   fix is that run. Step 1b performs it. Where the helper does not exist at
+   `base` there is nothing to run, and the blocker rule above stands.
 4. **Ceilings vs history.** `history`'s last line does this comparison for
    you. Read it; do not redo it by eye — this check was promoted because a
    review made it by eye and got it wrong in both directions (backlog item
