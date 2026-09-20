@@ -61,8 +61,8 @@ acceptance:
     witness: tests/records/test_records_check.py::test_an_adr_cites_only_appendices_that_exist
   - claim: >-
       `records list adr` prints one line per ADR in id order: id, status,
-      title. It refuses `--status` and `--tier`, naming the backlog as their
-      subject. A bare `records show 1` still prints backlog item 1.
+      title. It refuses a backlog status passed as `--status`, and `--tier`,
+      naming the backlog as their subject. A bare `records show 1` still prints backlog item 1.
     witness: tests/records/test_records_cli.py::test_list_adr_prints_the_adrs_and_refuses_the_backlog_s_filters
 ---
 
@@ -70,10 +70,10 @@ acceptance:
 
 Backlog item **b-9ff0fd**: decisions have no record of their own. The design is
 `docs/superpowers/specs/2026-09-19-adrs-design.md`. Its "The record" section
-is what this spec implements, less the principles check.
-Its "What reads the records" section lands in two parts: `records list adr`
-here, and everything else, `records show --kind` included, by hand or in a
-later spec.
+is what this spec implements. Of its "What reads the records" section, three
+parts land here: `records list adr`, `check_adr_appendices`, and the
+`CITING`/`LIVE_SURFACES` entries. Deferred are `records show --kind`,
+`check_adr_principles`, the ontology reader and the citation reader.
 
 `records/` has two kinds today, `backlog` and `appendix` (`KINDS`,
 `records/kinds.py:154-169`). `Kind.sections` names the `## ` headings a body is
@@ -114,9 +114,12 @@ exactly: a digit is a backlog item, a letter an appendix.
 branch and raises `not a backlog item` (`:37-40`).
 
 **`check_adr_principles`.** The design's "Validation against the principles"
-is a later spec, for the same reason `show --kind` is. The `principles` field,
-and the `## Principles` section every ADR body must carry, stay here: criteria
-1 and 2 hold both, so the later check has records to read.
+is deferred, for the same reason `show --kind` is: its check to a later spec,
+its `.claude/agents/adr-reviewer.md` half to a by-hand commit. The `principles`
+field, and the `## Principles` section every ADR body must carry, stay here:
+criteria 1 and 2 hold both, so the later check has records to read. The
+fixtures' bullet form is written for that check. Nothing here pins it, so that
+spec edits the fixtures as well as adding the check.
 
 **Where the appendix letters come from.** `check_adr_appendices` takes the
 existing letters as an argument. A fixture passes its own small set, and the
