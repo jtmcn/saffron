@@ -271,7 +271,7 @@ order are fine, and so is one statement doing both. Add it as a new writer
 method, or as a keyword on `set_task_state` that defaults to writing nothing.
 Never as a required parameter. That signature has thirteen callers in
 `saffron/cell/session.py` and one in `saffron/replay.py`, both `forbidden`.
-Nine test files outside `touches` call it too. The state first is the one order
+Seven test files outside `touches` call it too. The state first is the one order
 that is wrong.
 
 **Criterion 1 has three plausible wrong implementations.** All three come from
