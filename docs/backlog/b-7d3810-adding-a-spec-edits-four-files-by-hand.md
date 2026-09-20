@@ -2,6 +2,7 @@
 id: b-7d3810
 title: Adding a spec edits four other files by hand, and the queue smoke test's paragraph is rewritten every time
 status: open
+tier: 2
 filed: 2026-09-20
 specs: []
 prs: []

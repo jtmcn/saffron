@@ -2,6 +2,7 @@
 id: b-ea1d13
 title: The spec writer sizes the change after drafting it, and its step 3 names a check that cannot pass
 status: open
+tier: 3
 filed: 2026-09-20
 by_hand: true
 specs: []

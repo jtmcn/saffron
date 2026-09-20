@@ -2,6 +2,7 @@
 id: b-929465
 title: Checking one file against the prose ratchet means loading the gate module by hand, and two agents wrote throwaway scripts to do it
 status: open
+tier: 2
 filed: 2026-09-20
 specs: []
 prs: []

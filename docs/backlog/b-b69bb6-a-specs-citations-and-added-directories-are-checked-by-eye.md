@@ -2,6 +2,7 @@
 id: b-b69bb6
 title: A spec's line citations and the directories it adds files to are checked by eye, and both are computable
 status: open
+tier: 2
 filed: 2026-09-20
 specs: []
 prs: []
