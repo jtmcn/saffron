@@ -17,7 +17,7 @@ class MemoryRecord:
         self._facts[task_key].append(fact)
 
     def read(self, task_key: str) -> list[Fact]:
-        return list(self._facts[task_key])
+        return list(self._facts.get(task_key, []))
 
     def task_keys(self) -> list[str]:
         return list(self._facts)

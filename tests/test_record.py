@@ -110,3 +110,9 @@ def test_a_refused_swap_leaves_the_value_alone():
     record.compare_and_swap("budget", None, "1.50")
     record.compare_and_swap("budget", "wrong", "9.99")
     assert record.compare_and_swap("budget", "1.50", "2.00") is True
+
+
+def test_reading_an_absent_task_does_not_register_it():
+    record = MemoryRecord()
+    record.read("nonexistent-key")
+    assert record.task_keys() == []
