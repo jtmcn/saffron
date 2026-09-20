@@ -367,9 +367,14 @@ place rather than contradicted from a distance.
   quantities under `risk` are separated.
 - `DESIGN.md` §4.4 — the budget is a fold, not a counter.
 - `CONTEXT.md` §8 — the **Ledger** entry stops saying "Authoritative for state".
-  A new entry names the record. Both are generated from `ontology/factory.ttl`,
-  so the vocabulary is edited and `uv run python -m ontology.render` regenerates
-  them.
+  A new **Record** entry names this one, and its _Avoid_ line separates it from
+  `records/`, the dev-only package holding Saffron's own project documents,
+  whose `records.load.Record` is a second class of that name. The two never meet
+  — `records/` imports nothing from `saffron/` and nothing under `saffron/`
+  imports it, which its own docstring states — so the collision is in the
+  vocabulary rather than in the code, and the vocabulary is where it is settled.
+  Both entries are generated from `ontology/factory.ttl`, so the vocabulary is
+  edited and `uv run python -m ontology.render` regenerates them.
 - `docs/superpowers/specs/2026-09-02-ontology-authoritative-design.md` sections
   2 and 3 — amended in place, since they assert the opposite twice.
 
