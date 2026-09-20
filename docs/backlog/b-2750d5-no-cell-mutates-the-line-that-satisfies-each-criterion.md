@@ -4,11 +4,11 @@ title: No cell mutates the line that satisfies each criterion, so a witness hole
 status: open
 tier: 1
 filed: 2026-09-19
-specs: []
+specs: [SA-0113]
 prs: []
 commits: []
 cites: [§5.4, §5.5.1]
-related: [117, 80, 79, b-f2a9d1, 97]
+related: [117, 80, 79, b-f2a9d1, 97, b-0c1d69]
 ---
 
 ## Problem
@@ -60,3 +60,11 @@ by hand.
   survived, and its concern was a real hole. On #377 the lens named a probe the
   host could not apply, which is item b-98dc4d. The Spec seat's per-criterion
   probing found four more witness holes across the two pull requests.
+- 2026-09-20: split in two, because the whole of "Done looks like" estimates
+  past the blocking `size` ceiling for one cell. `SA-0113` is the parent and
+  authors the edit: one fresh session per acceptance claim, in the critic
+  cell, with the witness withheld from it, recorded in
+  `criterion-probes.json`. The child applies each edit in a Gate-only cell,
+  runs that criterion's witness over it, and turns a surviving edit into a
+  blocker for REBUT. `b-0c1d69` holds the glossary entry and the `DESIGN.md`
+  §5.4.1 paragraph that the parent's term needs.
