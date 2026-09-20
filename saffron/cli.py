@@ -152,7 +152,9 @@ def main(argv: list[str] | None = None) -> int:
     fold_parser = subcommands.add_parser(
         "fold", help="rebuild an index from the record on refs/saffron/*"
     )
-    fold_parser.add_argument("--repo", type=Path, default=Path.cwd())
+    # Required, not `Path.cwd()`: facts live in the mirror, and a forgotten
+    # flag would fold a working checkout with no task refs and print success.
+    fold_parser.add_argument("--repo", type=Path, required=True)
     # Named, never defaulted to the home ledger: a rebuild is not a thing to
     # do to the live index by forgetting a flag.
     fold_parser.add_argument("--into", type=Path, required=True)

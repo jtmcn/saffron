@@ -92,7 +92,7 @@ class Fact:
 
 
 class Record(Protocol):
-    """Three operations and no git in any signature. `compare_and_swap` is
+    """Four operations and no git in any signature. `compare_and_swap` is
     unused on one host and is the seam a cross-host budget needs."""
 
     def append(self, task_key: str, fact: Fact) -> None: ...

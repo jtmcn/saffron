@@ -211,6 +211,19 @@ def test_an_unreadable_task_names_itself_and_folds_the_rest(tmp_path, record):
     into.close()
 
 
+def test_a_rebuttal_with_no_finding_fact_raises_under_strict(tmp_path, record):
+    # A finding row's three judgements must not silently collapse to two;
+    # unreachable today only because the map is built from this task's log.
+    a_night(tmp_path, record).close()
+    key = record.task_keys()[0]
+    record._facts[key] = [f for f in record._facts[key] if f.kind != "finding"]
+    into = Ledger(tmp_path / "into.db")
+    with pytest.raises(ValueError, match="rebuttal"):
+        fold(record, into, strict=True)
+    assert fold(record, into, strict=False) == 1
+    into.close()
+
+
 def _read(ledger, query):
     return [tuple(r) for r in ledger._db.execute(query)]
 

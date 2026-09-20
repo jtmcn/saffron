@@ -14,9 +14,17 @@ proved in two places and neither alone is enough.
   proves the rules and not the corpus. It is the half that runs in CI, because
   a unit test cannot depend on a developer's private `~/.saffron/ledger.db`.
 - `scripts/2026-09-20-fold-rebuild-time.py` carries the **real-nights** claim.
-  It ends by comparing every folded table against the ledger the facts were
-  synthesised from, as multisets, and prints the verdict. Anyone with a ledger
-  can re-run it; the table below is its output, not a transcription.
+  It ends by comparing `synth.db`, the ledger `_synthesize` built from the real
+  ledger's own write methods, against `rebuilt.db`, the fold's output, as
+  multisets, and prints the verdict. Neither is the real `~/.saffron/ledger.db`
+  copy: `record_key` alone differs on all 118 rows against that copy, so this
+  is the closest comparison the script can make, and what it proves is real —
+  118 stored tasks' shapes came back. `_SAME` (the script's own comparison
+  columns) leaves out `runs.preflight`/`status`/`ended_at`, `batches`,
+  `repos.*`, `tasks.updated_at`, `findings.adjudication`, and every parent id,
+  so `tasks 118 -> 118 identical` is not "the real ledger came back" — it is
+  "the fold's rules reproduce what `_synthesize` fed them." Anyone with a
+  ledger can re-run it; the table below is its output, not a transcription.
 
 ## Why the benchmark synthesises its own record
 

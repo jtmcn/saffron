@@ -1,5 +1,12 @@
-"""Record -> index. The ledger holds no fact of its own after this: every row
-is replayed from the task facts, so deleting it costs nothing.
+"""Record -> index. Tasks, attempts, gate results and findings are replayed
+from the task facts, so deleting those rows costs nothing (design §3).
+
+Batches and runs are not, yet: `create_run`, `finish_run`, `set_run_preflight`,
+`create_batch`, `close_batch`, `attach_run_to_batch`, `attach_orphan_runs_to_batch`
+and `upsert_repo` append no fact, so a rebuild has no `batches` row and leaves
+`runs.batch_id`/`status`/`preflight`/`ended_at` unset — `Ledger.batch_spend`
+joins `runs.batch_id`, so every batch reads as $0 spent. Design §5's gap, not
+fixed here.
 
 Replay, not snapshot: a task's state is what its facts add up to (design §3).
 """
@@ -18,7 +25,7 @@ def fold(record: Record, ledger: Ledger, strict: bool = True) -> int:
     folded = 0
     for key in _creation_order(record, strict):
         try:
-            _fold_task(ledger, key, record.read(key))
+            _fold_task(ledger, key, record.read(key), strict)
         except Exception as exc:
             _discard_task(ledger, key)
             _skipped(key, exc, strict)
@@ -57,7 +64,7 @@ def _creation_order(record: Record, strict: bool) -> list[str]:
     return [key for _, key in sorted(dated)]
 
 
-def _fold_task(ledger: Ledger, key: str, facts: list[Fact]) -> None:
+def _fold_task(ledger: Ledger, key: str, facts: list[Fact], strict: bool) -> None:
     created = next(f for f in facts if f.kind == "task_created")
     run_id = _run_for(ledger, created)
     task_id = _upsert_task(ledger, key, run_id, created)
@@ -88,7 +95,7 @@ def _fold_task(ledger: Ledger, key: str, facts: list[Fact]) -> None:
                 task_id, [_finding(fact)]
             )[0]
         elif fact.kind == "rebuttal":
-            _rebut(ledger, findings, fact)
+            _rebut(ledger, findings, fact, key, strict)
     _at(ledger, "tasks", "updated_at", "task_id", task_id, facts[-1].at)
 
 
@@ -125,7 +132,9 @@ def _finding(fact: Fact) -> Finding:
     )
 
 
-def _rebut(ledger: Ledger, findings: dict[int, int], fact: Fact) -> None:
+def _rebut(
+    ledger: Ledger, findings: dict[int, int], fact: Fact, key: str, strict: bool
+) -> None:
     # The fact names the source ledger's `finding_id`; the fold minted its own,
     # so a rebuttal is placed by the finding fact that preceded it or not at all.
     finding_id = findings.get(fact.payload["finding_id"])
@@ -134,6 +143,13 @@ def _rebut(ledger: Ledger, findings: dict[int, int], fact: Fact) -> None:
             finding_id,
             verdict=fact.payload["verdict"],
             rebuttal=fact.payload["rebuttal"],
+        )
+    elif strict:
+        # A rebuttal is one of three judgements a finding row must not
+        # collapse; dropping it silently is data loss with no signal.
+        raise ValueError(
+            f"task {key}: rebuttal for finding {fact.payload['finding_id']} "
+            "has no finding fact to attach to"
         )
 
 

@@ -95,23 +95,29 @@ no-progress detection and the flywheel's question. That is a requirement on the
 
 ## 2. The record is an interface
 
-Three operations, with no git in their signatures:
+Four operations, with no git in their signatures:
 
 - `append(task_key, fact) -> None`. Appends one fact. Never rewrites, never
   deletes, never reorders.
-- `read(task_key) -> Sequence[Fact]`. The task's whole log, in append order.
+- `read(task_key) -> list[Fact]`. The task's whole log, in append order.
+- `task_keys() -> list[str]`. Every task key the record holds, so the fold has
+  something to iterate over without git in its own signature.
 - `compare_and_swap(key, expected, new) -> bool`. Unused on one host, and the
   seam a cross-host budget needs. It is specified now so a later backend does
   not have to reshape the fold to add it.
 
-A fourth rule is a constraint rather than an operation: **the record holds facts
+A fifth rule is a constraint rather than an operation: **the record holds facts
 and content hashes, never artifacts.** `baseline.json`, `lens-gates.json` and
 transcripts stay in the batch tree, and a fact names them by hash. The
-measurement behind this is item 170's: `~/.saffron/ledger.db` is 6.7 MB for 102
-tasks, about 65 KB of facts each, while `~/.saffron/batches/v0/` is 132 MB,
-about 1.3 MB each. At ten tasks a night the artifacts are roughly 5 GB a year
-per repository before compression. Facts are three orders of magnitude cheaper
-than what produced them, and only facts go in the record.
+measurement behind this was item 170's 2026-09-17 figure: `~/.saffron/ledger.db`
+at 6.7 MB for 102 tasks, about 65 KB of facts each, against
+`~/.saffron/batches/v0/` at 132 MB, about 1.3 MB each. That per-task number is
+wrong. `docs/evidence/2026-09-20-fold-rebuild-time.md` found 287 KB of fact
+JSON per task uncompressed, four times the estimate, and one `prose` gate
+result alone weighing 1.27 MB. The conclusion still holds: packed, the same 118
+tasks compress to 2.32 MiB, about 20 KB a task, still three orders of magnitude
+below the artifacts. Facts are cheaper than what produced them, the tail is
+heavier than assumed, and only facts go in the record.
 
 Refs are the first implementation of this interface. A later store replaces the
 backend and leaves the fold alone.
@@ -121,7 +127,7 @@ backend and leaves the fold alone.
 One ref per task, in the target repository the task ran against:
 
 ```
-refs/saffron/tasks/<task_id>
+refs/saffron/tasks/<task_key>
 ```
 
 Each `append` is a commit. Its tree carries the whole log to date, one blob per
@@ -135,8 +141,8 @@ facts/0002.json
 
 Git's content addressing means every earlier blob is already stored, so the tree
 grows by one object per append. The commit message names the fact kind and the
-task, so `git log --oneline refs/saffron/tasks/SA-0099` is a readable history
-with no tool.
+task, so `git log --oneline refs/saffron/tasks/<task_key>` is a readable
+history with no tool.
 
 Reading a task means reading the latest tree once and replaying its blobs; the
 parent chain is never walked for state. What the chain carries is the append
@@ -146,7 +152,7 @@ push that is not a fast-forward is a writer that did not see every append.
 The push carries no `--force`:
 
 ```
-git push origin refs/saffron/tasks/<id>:refs/saffron/tasks/<id>
+git push origin refs/saffron/tasks/<task_key>:refs/saffron/tasks/<task_key>
 ```
 
 A non-fast-forward refusal therefore means a stale writer, which must re-read

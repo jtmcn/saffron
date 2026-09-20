@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from saffron.record.contract import Fact
-from saffron.record.refs import RefsRecord
+from saffron.record.refs import TASKS, RefsRecord
 
 
 @pytest.fixture
@@ -206,3 +206,55 @@ def test_a_corrupt_fact_blob_names_the_task_it_is_in(repo):
     )
     with pytest.raises(ValueError, match=fact.task_key):
         record.read(fact.task_key)
+
+
+def test_append_pushes_the_ref_to_the_remote(tmp_path, repo):
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    record = RefsRecord(repo, remote=str(remote))
+    fact = a_fact()
+    record.append(fact.task_key, fact)
+    local = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", f"{TASKS}/{fact.task_key}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    on_remote = subprocess.run(
+        ["git", "-C", str(remote), "rev-parse", f"{TASKS}/{fact.task_key}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert on_remote == local
+
+
+def test_a_diverged_push_is_refused_not_forced(tmp_path, repo):
+    # No `--force` anywhere in `_push`: a stale writer must see the refusal
+    # rather than overwrite what it never read (design §3).
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    fact = a_fact()
+    RefsRecord(repo, remote=str(remote)).append(fact.task_key, fact)
+    on_remote = subprocess.run(
+        ["git", "-C", str(remote), "rev-parse", f"{TASKS}/{fact.task_key}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    # A second writer that never read `repo`'s append: same task, unrelated
+    # local history, so its commit is not a descendant of what is on `remote`.
+    stale = tmp_path / "stale.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(stale)], check=True)
+    diverged = a_fact(task_key=fact.task_key, payload={"spec_id": "SA-0100"})
+    with pytest.raises(subprocess.CalledProcessError):
+        RefsRecord(stale, remote=str(remote)).append(diverged.task_key, diverged)
+
+    unchanged = subprocess.run(
+        ["git", "-C", str(remote), "rev-parse", f"{TASKS}/{fact.task_key}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert unchanged == on_remote
