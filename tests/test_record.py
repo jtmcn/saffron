@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from saffron.record.contract import KINDS, Fact, new_task_key
+from saffron.record.memory import MemoryRecord
 
 
 def a_fact(**over: Any) -> Fact:
@@ -60,3 +61,52 @@ def test_from_json_refuses_a_missing_field():
     partial = json.dumps({"kind": "task_created", "task_key": "a" * 32})
     with pytest.raises(ValueError, match="missing"):
         Fact.from_json(partial)
+
+
+def test_reading_a_task_with_no_facts_gives_an_empty_log():
+    assert MemoryRecord().read("a" * 32) == []
+
+
+def test_facts_read_back_in_append_order():
+    record = MemoryRecord()
+    first = a_fact(kind="task_created")
+    second = a_fact(kind="task_state", payload={"state": "IMPLEMENTING"})
+    record.append(first.task_key, first)
+    record.append(second.task_key, second)
+    assert record.read(first.task_key) == [first, second]
+
+
+def test_appending_the_same_fact_twice_keeps_both():
+    # Append-only means append-only: two identical gate results are two runs
+    # of one gate, not one run recorded twice.
+    record = MemoryRecord()
+    fact = a_fact(kind="gate_result")
+    record.append(fact.task_key, fact)
+    record.append(fact.task_key, fact)
+    assert len(record.read(fact.task_key)) == 2
+
+
+def test_task_keys_lists_every_task_appended_to():
+    record = MemoryRecord()
+    for key in ("a" * 32, "b" * 32):
+        record.append(key, a_fact(task_key=key))
+    assert sorted(record.task_keys()) == ["a" * 32, "b" * 32]
+
+
+def test_compare_and_swap_sets_an_absent_key():
+    record = MemoryRecord()
+    assert record.compare_and_swap("budget", None, "1.50") is True
+
+
+def test_compare_and_swap_refuses_a_stale_writer():
+    record = MemoryRecord()
+    record.compare_and_swap("budget", None, "1.50")
+    assert record.compare_and_swap("budget", "1.50", "2.00") is True
+    assert record.compare_and_swap("budget", "1.50", "9.99") is False
+
+
+def test_a_refused_swap_leaves_the_value_alone():
+    record = MemoryRecord()
+    record.compare_and_swap("budget", None, "1.50")
+    record.compare_and_swap("budget", "wrong", "9.99")
+    assert record.compare_and_swap("budget", "1.50", "2.00") is True
