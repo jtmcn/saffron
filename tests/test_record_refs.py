@@ -97,6 +97,13 @@ def test_reading_an_absent_task_gives_an_empty_log(repo):
     assert RefsRecord(repo).read("f" * 32) == []
 
 
+def test_a_broken_repository_is_not_an_empty_log(tmp_path):
+    # A repo that cannot be read is `error`, never a task with no facts.
+    broken = tmp_path / "not-a-repo"
+    with pytest.raises(subprocess.CalledProcessError):
+        RefsRecord(broken).read("a" * 32)
+
+
 def test_task_keys_lists_every_task_ref(repo):
     record = RefsRecord(repo)
     for key in ("a" * 32, "b" * 32):
@@ -149,6 +156,8 @@ def test_compare_and_swap_refuses_a_stale_writer(repo):
     assert record.compare_and_swap("budget", None, "1.50") is True
     assert record.compare_and_swap("budget", "1.50", "2.00") is True
     assert record.compare_and_swap("budget", "1.50", "9.99") is False
+    # The refused swap above must not have written "9.99" over "2.00".
+    assert record.compare_and_swap("budget", "2.00", "3.00") is True
 
 
 def test_a_corrupt_fact_blob_names_the_task_it_is_in(repo):

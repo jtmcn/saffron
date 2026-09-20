@@ -45,6 +45,8 @@ class RefsRecord:
         # `update-ref` with the old value is the local half of the same
         # compare-and-swap a push gets from git's fast-forward refusal.
         self._git("update-ref", ref, commit, parent or "")
+        # ponytail: the local ref lands before the push below, so a refused push
+        # stalls it on history the remote will never take without a rollback or a re-derive.
         remote = self._remote
         if remote:
             self._push(remote, ref)
@@ -66,9 +68,13 @@ class RefsRecord:
         self._git("push", remote, f"{ref}:{ref}")
 
     def _resolve(self, ref: str) -> str | None:
+        # Exit 1 is a genuinely absent ref; anything else is a broken repo, and
+        # collapsing that into "no facts" is the `error` != `fail` mistake.
         try:
             return self._git("rev-parse", "--verify", "-q", ref).strip()
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as exc:
+            if exc.returncode != 1:
+                raise
             return None
 
     def _blobs(self, task_key: str) -> list[tuple[int, str]]:
