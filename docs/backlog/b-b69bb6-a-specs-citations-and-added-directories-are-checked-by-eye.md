@@ -67,3 +67,13 @@ place of deriving both by hand.
   open here, as item `b-281f0a` left its own: the `spec-writer` agent running
   the command, and checks 2 and 6 reading its output, are by-hand edits after
   the cell lands.
+- 2026-09-20: `SA-0114`'s spec review sized the two halves together at about
+  540 changed lines, within 100 of the `feature` ceiling of 600. So the spec
+  was cut to the citation half, and the directory half needs a second spec
+  against this item. That half keeps the evidence gathered for the first:
+  `tests/test_context.py:382-384` is the blocking listing. The call set is
+  wider than `.glob`: `rglob`, `iterdir` and `os.walk` each enumerate a
+  directory under `tests/` today (`tests/records/check.py:335`,
+  `tests/test_cli.py:198`, `tests/test_saffron_gates.py:1009`,
+  `tests/test_citations.py:148`). A witness that exercises one spelling passes
+  an implementation knowing only that one.
