@@ -57,8 +57,8 @@ acceptance:
       never written in its place, so a row that carries a head is a head that
       was observed. A pull request that is not merged records no head either,
       whatever its state moves to: an answer that moves a row to
-      `CHANGES_REQUESTED` over a head other than the packaged commit leaves the
-      column as it was.
+      `CHANGES_REQUESTED`, and one that moves a row to `REJECTED`, each over a
+      head other than the packaged commit, leave the column exactly as it was.
     witness: tests/test_reconcile.py::test_a_head_is_recorded_only_for_an_observed_merge
   - claim: >-
       A ledger built by the previous schema opens, keeps the task rows it
@@ -78,7 +78,7 @@ whose head is not what PACKAGE pushed. The item's Record names two things
 still owed. One is the task's gates re-run over the new head. The other is a
 record. This spec is the record half. The re-gate stays open on the item.
 
-Every sentence below about current code was read at `origin/main` (`5aac71a`)
+Every sentence below about current code was read at `origin/main` (`0e84d4c3`)
 on 2026-09-19.
 
 **The head is asked for, compared, printed, and dropped.** `_pr_status` at
@@ -87,7 +87,7 @@ on 2026-09-19.
 row's `pushed_sha` at `saffron/reconcile.py:158-160`. It records a `HeadMoved`
 where both values are real shas and the two differ. `saffron/cli.py:1014-1019`
 prints one line per moved head. The comment on the `head_moved` field at
-`saffron/reconcile.py:100-102` says what happens next: "Reported, never
+`saffron/reconcile.py:100-101` says what happens next: "Reported, never
 written".
 
 **The merge path writes one column.** The single ledger call on that path is
@@ -140,12 +140,25 @@ scan, to sort a list already in memory, and the spec file yields it again on
 any later night. The head a pull request merged at is observable once, by the
 scan that sees the merge, and is gone when the branch is deleted. A column
 holding it keeps a measurement nothing else can make later, and that is the
-distinction §4.2.1 rests on.
+distinction §4.2.1 rests on. The same line says when the reader arrives: "It
+gets added the first night something reads it back." Here the reader is item
+97's other open half, the re-gate, or §6.1's merge train. Neither can be built
+without the head this column holds, so the column is what unblocks the reader
+rather than what waits on it.
 
 **The ledger section of `DESIGN.md` needs no edit.** §4.1 is `protected`. Its
-`tasks` tuple there already omits `pushed_sha` and `pr_url`, both of which
-`saffron/ledger.py:73-74` declares. A column missing from that block is the
-existing shape rather than a contradiction to resolve.
+`tasks` tuple at `DESIGN.md:305-307` already omits `pushed_sha` and `pr_url`,
+both of which `saffron/ledger.py:73-74` declares. A column missing from that
+block is the existing shape rather than a contradiction to resolve. This
+change makes the third such column, not the first.
+
+**What `SA-0099` settles, and what it does not.** The line quoted under "Out of
+scope" is about deferring the *reader*. That is the half this spec leans on.
+`runs.preflight` was already named in `DESIGN.md:303-304` and declared at
+`saffron/ledger.py:58`. So `SA-0099` wrote a column §4.1 had declared. This
+spec adds one §4.1 does not name. `pushed_sha` and `pr_url` are the precedent
+for that second half, not `SA-0099`. Put both halves in the pull request body,
+separately.
 
 ## Problem
 
@@ -220,7 +233,7 @@ method this change adds. `tasks_by_repo` at `saffron/ledger.py:361-376`
 selects six columns by name, and the new one will not be among them, so no test
 can reach it that way. Do not add a getter beside the writer either. `dead`
 blocks at `.saffron/policy.yaml:28`, `tests/` is not scanned
-(`.saffron/gates/dead.py:5`), every would-be production reader is out of scope
+(`.saffron/gates/dead.py:4-5`), every would-be production reader is out of scope
 above, and this spec declares no `pending_symbols`. A reader method is dead code
 the day it lands. The shape to copy is in the tree twice already:
 `tests/test_reconcile.py:43-46`'s `_state` helper and `tests/test_ledger.py:797`
@@ -254,8 +267,12 @@ building such a database. Copy whichever fits.
 **Write the head before the state moves.** A `MERGED` row sits outside
 `PR_PENDING_STATES` and is never asked again. A write that lands after the
 state change is one crash away from being lost for good. Two statements in that
-order are fine, and so is one statement doing both. The state first is the one
-order that is wrong.
+order are fine, and so is one statement doing both. Add it as a new writer
+method, or as a keyword on `set_task_state` that defaults to writing nothing.
+Never as a required parameter. That signature has thirteen callers in
+`saffron/cell/session.py` and one in `saffron/replay.py`, both `forbidden`.
+Nine test files outside `touches` call it too. The state first is the one order
+that is wrong.
 
 **Criterion 1 has three plausible wrong implementations.** All three come from
 the `HeadMoved` branch at `saffron/reconcile.py:159`, which sits right there and
@@ -272,7 +289,7 @@ head in each case. Do not reach for `pytest.mark.parametrize`. `criteria`
 matches a bare node id against the names the suite collected, by exact string.
 A parametrised test collects under a name no criterion can name.
 
-**Criterion 2 has two plausible wrong implementations.** The first is a
+**Criterion 2 has three plausible wrong implementations.** The first is a
 fallback. A `head or pushed`, or a `str(head)`, turns an unanswered question
 into a confident commit. An empty string is the case that catches a bare
 `isinstance(head, str)` guard, and `tests/test_reconcile.py:246-263` already
@@ -281,13 +298,20 @@ recorded as an answer in this module. The comment at
 `saffron/reconcile.py:95-98` says so for its state writes. The second wrong
 implementation writes the head beside every state move rather than beside the
 merge. `_next_state` at `saffron/reconcile.py:118-131` returns `REJECTED` and
-`CHANGES_REQUESTED` down the same path, and the head is in hand there too. So
-the witness drives four answers in one plain `def`. Three are merges, with the
-field absent, empty, and a non-string. The fourth moves a row to
-`CHANGES_REQUESTED` over a real head that differs from `pushed_sha`. Each
-leaves the column as it was. Criterion 2 on its own is
-satisfied by recording nothing at all. Criterion 1 is what makes it a real
-constraint, so both witnesses have to hold at once.
+`CHANGES_REQUESTED` down the same path, and the head is in hand there too. The
+third is that one narrowed to the two states this module already treats alike:
+`new_state in ("MERGED", "REJECTED")`. It is the reading the comment at
+`saffron/reconcile.py:45-47` invites. `REJECTED` leaves `PR_PENDING_STATES` at
+`saffron/reconcile.py:48` on the same "asked for the last time" argument this
+spec makes for `MERGED`. It is also the one wrong implementation a witness
+whose only non-merge is `CHANGES_REQUESTED` leaves alive. What it does is put a
+merged commit's name on a row that was closed unmerged. So the witness drives
+five answers in one plain `def`. Three are
+merges, with the field absent, empty, and a non-string. The fourth moves a row
+to `CHANGES_REQUESTED` and the fifth moves one to `REJECTED`, each over a real
+head that differs from `pushed_sha`. Each leaves the column as it was.
+Criterion 2 on its own is satisfied by recording nothing at all. Criterion 1 is
+what makes it a real constraint, so both witnesses have to hold at once.
 
 **One comment in the tree becomes false.** It is the only prose this change
 owes. The comment on the `head_moved` field at `saffron/reconcile.py:100-101`
