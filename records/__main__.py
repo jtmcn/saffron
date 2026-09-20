@@ -14,6 +14,7 @@ from records.kinds import (
     APPENDIX_ID,
     KINDS,
     RANDOM_ID,
+    Adr,
     Appendix,
     BacklogItem,
     Status,
@@ -58,6 +59,17 @@ def _appendix_line(record: Record) -> str:
     return f"{m.id:>8}  {revisions:<10}  {m.title}"
 
 
+def _adr(record: Record) -> Adr:
+    if not isinstance(record.model, Adr):
+        raise RecordError("not an ADR", record.path)
+    return record.model
+
+
+def _adr_line(record: Record) -> str:
+    m = _adr(record)
+    return f"{m.id!s:>8}  {m.status:<10}  {m.title}"
+
+
 def _render(record: Record, section: str | None) -> str | None:
     if section is None:
         return record.path.read_text()
@@ -81,6 +93,16 @@ def cmd_list(args: argparse.Namespace) -> int:
             return 2
         for record in load(KINDS[args.kind], args.root):
             print(_appendix_line(record))
+        return 0
+    if KINDS[args.kind].model is Adr:
+        if args.status or args.tier is not None:
+            print(
+                "--status and --tier filter backlog items, not ADRs",
+                file=sys.stderr,
+            )
+            return 2
+        for record in load(KINDS[args.kind], args.root):
+            print(_adr_line(record))
         return 0
     for record in load(KINDS[args.kind], args.root):
         m = _item(record)

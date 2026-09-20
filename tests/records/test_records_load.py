@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from records.kinds import KINDS
+from records.kinds import KINDS, Kind
 from records.load import Record, RecordError, load, parse, split_sections
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "good"
@@ -242,3 +242,94 @@ def test_the_backlog_still_refuses_prose_before_its_first_heading(tmp_path: Path
     item.write_text(text.replace("## Problem", "stray prose\n\n## Problem", 1))
     with pytest.raises(RecordError, match="prose before the first"):
         load(BACKLOG, tmp_path)
+
+
+def _adr_kind() -> Kind:
+    """`KINDS["adr"]` at call time. At module scope the lookup makes the
+    reverted run a collection error, which `revert` reads as `skip`."""
+    return KINDS["adr"]
+
+
+_ADR_BODY = (
+    "\n## Context\n\nx\n\n## Decision\n\ny\n\n"
+    "## Principles\n\nJudged against no principle.\n\n## Consequences\n\nz\n"
+)
+
+
+def _adr_text(adr_id: int, extra: str = "", status: str = "accepted") -> str:
+    return f"---\nid: {adr_id}\ntitle: T\nstatus: {status}\ndate: 2026-09-01\n{extra}---\n{_ADR_BODY}"
+
+
+def test_an_adr_loads_from_a_four_digit_prefix_and_refuses_what_it_does_not_declare(
+    tmp_path: Path,
+):
+    good = tmp_path / "good"
+    (good / "docs" / "adr").mkdir(parents=True)
+    (good / "docs" / "adr" / "0001-x.md").write_text(_adr_text(1))
+    [record] = load(_adr_kind(), good)
+    assert record.model.id == 1
+
+    short = tmp_path / "short"
+    (short / "docs" / "adr").mkdir(parents=True)
+    (short / "docs" / "adr" / "1-x.md").write_text(_adr_text(1))
+    with pytest.raises(RecordError, match="1-x.md"):
+        load(_adr_kind(), short)
+
+    long = tmp_path / "long"
+    (long / "docs" / "adr").mkdir(parents=True)
+    (long / "docs" / "adr" / "00001-x.md").write_text(_adr_text(1))
+    with pytest.raises(RecordError, match="00001-x.md"):
+        load(_adr_kind(), long)
+
+    unpadded = tmp_path / "unpadded"
+    (unpadded / "docs" / "adr").mkdir(parents=True)
+    (unpadded / "docs" / "adr" / "0002-x.md").write_text(_adr_text(1))
+    with pytest.raises(RecordError, match="0002-x.md.*id"):
+        load(_adr_kind(), unpadded)
+
+    with pytest.raises(RecordError, match="bogus_unknown_field"):
+        parse(_adr_text(1, extra="bogus_unknown_field: true\n"), _adr_kind())
+
+    with pytest.raises(RecordError, match="status"):
+        parse(_adr_text(1, status="proposed"), _adr_kind())
+
+
+def test_an_adr_body_requires_four_sections_in_order_and_allows_options_to_be_absent(
+    tmp_path,
+):
+    front = "---\nid: 1\ntitle: T\nstatus: accepted\ndate: 2026-09-01\n---\n"
+
+    with_options = (
+        "\n## Context\n\nx\n\n## Decision\n\ny\n\n## Options considered\n\no\n\n"
+        "## Principles\n\nJudged against no principle.\n\n## Consequences\n\nz\n"
+    )
+    record = parse(front + with_options, _adr_kind())
+    assert "Options considered" in record.sections
+    assert (
+        parse(front + _ADR_BODY, _adr_kind()).sections.get("Options considered") is None
+    )
+
+    missing = {
+        "Context": "\n## Decision\n\ny\n\n## Principles\n\nJudged against no principle.\n\n## Consequences\n\nz\n",
+        "Decision": "\n## Context\n\nx\n\n## Principles\n\nJudged against no principle.\n\n## Consequences\n\nz\n",
+        "Principles": "\n## Context\n\nx\n\n## Decision\n\ny\n\n## Consequences\n\nz\n",
+        "Consequences": "\n## Context\n\nx\n\n## Decision\n\ny\n\n## Principles\n\nJudged against no principle.\n",
+    }
+    for heading, body in missing.items():
+        with pytest.raises(RecordError, match=heading):
+            parse(front + body, _adr_kind())
+
+    unknown = "\n## Context\n\nx\n\n## Decision\n\ny\n\n## Notes\n\nn\n\n## Principles\n\nJudged against no principle.\n\n## Consequences\n\nz\n"
+    with pytest.raises(RecordError, match="Notes"):
+        parse(front + unknown, _adr_kind())
+
+    swapped = "\n## Decision\n\ny\n\n## Context\n\nx\n\n## Principles\n\nJudged against no principle.\n\n## Consequences\n\nz\n"
+    with pytest.raises(RecordError, match="order"):
+        parse(front + swapped, _adr_kind())
+
+    # Through `load`, because the claim says the refusal names the file.
+    adr = tmp_path / "docs" / "adr" / "0001-missing-a-heading.md"
+    adr.parent.mkdir(parents=True)
+    adr.write_text(front + missing["Decision"])
+    with pytest.raises(RecordError, match="0001-missing-a-heading.md"):
+        load(_adr_kind(), tmp_path)

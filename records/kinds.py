@@ -128,16 +128,46 @@ class BacklogItem(Identified):
 APPENDIX_ID = r"[A-Z]{1,2}"
 
 
+AppendixRef = Annotated[str, Field(pattern=rf"^{APPENDIX_ID}$")]
+
+
 class Appendix(Identified):
     """What one revision found. Never replaced, so it has no status."""
 
-    id: Annotated[str, Field(pattern=rf"^{APPENDIX_ID}$")]
+    id: AppendixRef
     title: str = Field(min_length=1)
     revisions: list[Number] = Field(min_length=1)
     question: str = Field(min_length=1)
 
 
+AdrStatus = Literal["accepted", "superseded", "deprecated"]
+
+
+class Adr(Identified):
+    """One decision, as it stands today. Never edited except to record a
+    supersession, which is written on both sides in one pull request."""
+
+    id: Number
+    title: str = Field(min_length=1)
+    status: AdrStatus
+    date: dt.date
+    supersedes: list[Number] = Field(default_factory=list)
+    superseded_by: list[Number] = Field(default_factory=list)
+    principles: list[Number] = Field(default_factory=list)
+    appendices: list[AppendixRef] = Field(default_factory=list)
+
+
 BACKLOG_SECTIONS = ("Problem", "Done looks like", "Record")
+ADR_SECTIONS = (
+    "Context",
+    "Decision",
+    "Options considered",
+    "Principles",
+    "Consequences",
+)
+# Derived, so a required heading cannot drift out of the allowed ones: a kind
+# whose `required` is not a subset makes every record of it unloadable.
+ADR_REQUIRED = tuple(s for s in ADR_SECTIONS if s != "Options considered")
 
 
 @dataclass(frozen=True)
@@ -147,8 +177,10 @@ class Kind:
     pattern: str
     model: type[Identified]
     hand_written: frozenset[str] = frozenset()
-    # Required `## ` headings, in order. Empty means the body is free prose.
+    # `## ` headings the body may use, in order. Empty means the body is free prose.
     sections: tuple[str, ...] = ()
+    # The subset of `sections` that must appear. `_sectioned` refuses a missing one.
+    required: tuple[str, ...] = ()
 
 
 KINDS: dict[str, Kind] = {
@@ -159,11 +191,20 @@ KINDS: dict[str, Kind] = {
         BacklogItem,
         frozenset({"README.md", "PRIORITY.md"}),
         sections=BACKLOG_SECTIONS,
+        required=("Problem",),
     ),
     "appendix": Kind(
         "appendix",
         "docs/appendices",
         rf"^({APPENDIX_ID})-[a-z0-9-]+\.md$",
         Appendix,
+    ),
+    "adr": Kind(
+        "adr",
+        "docs/adr",
+        r"^(\d{4})-[a-z0-9-]+\.md$",
+        Adr,
+        sections=ADR_SECTIONS,
+        required=ADR_REQUIRED,
     ),
 }

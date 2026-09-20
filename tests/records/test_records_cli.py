@@ -207,3 +207,25 @@ def test_show_an_unknown_letter_says_so():
 def test_list_appendix_refuses_a_status_filter():
     result = run("list", "appendix", "--status", "open")
     assert result.returncode == 2 and "appendices have neither" in result.stderr
+
+
+def test_list_adr_prints_the_adrs_and_refuses_the_backlog_s_filters():
+    out = run("list", "adr").stdout.splitlines()
+    assert [line.split()[0] for line in out] == ["1", "2"]
+    assert out[0].split(maxsplit=2) == [
+        "1",
+        "superseded",
+        "A fixture decision, later superseded",
+    ]
+
+    # A backlog status, or argparse refuses the choice before the branch runs.
+    status = run("list", "adr", "--status", "superseded")
+    assert status.returncode == 2 and "not ADRs" in status.stderr
+
+    tier = run("list", "adr", "--tier", "1")
+    assert tier.returncode == 2 and "not ADRs" in tier.stderr
+
+    bare = run("show", "1")
+    assert bare.returncode == 0
+    assert bare.stdout.startswith("---\nid: 1\n")
+    assert "A gate that never ran read as green" in bare.stdout

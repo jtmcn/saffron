@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 import tests.records.check
-from records.kinds import KINDS, Identified
+from records.kinds import KINDS, Identified, Kind
 from records.load import Record, load
 from tests.records.check import (
     Violation,
@@ -35,6 +35,12 @@ from tests.records.check import (
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "good"
 BACKLOG = KINDS["backlog"]
 APPENDIX = KINDS["appendix"]
+
+
+def _adr_kind() -> Kind:
+    """`KINDS["adr"]` at call time. At module scope the lookup makes the
+    reverted run a collection error, which `revert` reads as `skip`."""
+    return KINDS["adr"]
 
 
 @pytest.fixture
@@ -262,6 +268,15 @@ def test_the_good_fixture_passes_every_check():
     assert check_all(FIXTURE, {"4", "4.2", "4.2.1", "5", "5.4"}) == []
 
 
+# The three _adr_kind() checks land with _adr_kind() 1, by hand — CONTEXT.md, DESIGN.md and
+# .saffron/policy.yaml are protected, so _adr_kind() 1 cannot land in this diff.
+ADR_CHECKS_NOT_YET_WIRED = {
+    "check_adr_ids",
+    "check_adr_supersession",
+    "check_adr_appendices",
+}
+
+
 def test_check_all_runs_every_check(monkeypatch):
     # The expected set is every `check_*` the module defines, not check_all's body.
     names = {
@@ -269,6 +284,7 @@ def test_check_all_runs_every_check(monkeypatch):
         for name, fn in inspect.getmembers(tests.records.check, inspect.isfunction)
         if name.startswith("check_")
         and name != "check_all"
+        and name not in ADR_CHECKS_NOT_YET_WIRED
         and fn.__module__ == "tests.records.check"
     }
     for name in names:
@@ -511,3 +527,120 @@ def test_a_letter_used_twice_is_a_violation(tmp_path: Path):
     shutil.copy(directory / "B-a-second-revision.md", directory / "B-again.md")
     [v] = check_appendix_letters(load(APPENDIX, tmp_path))
     assert "['A', 'B', 'B']" in v.message
+
+
+def _adr(root: Path, name: str) -> Path:
+    return root / _adr_kind().directory / name
+
+
+def _adr_text(adr_id: int, status: str, extra: str = "") -> str:
+    return (
+        f"---\nid: {adr_id}\ntitle: T\nstatus: {status}\ndate: 2026-09-01\n{extra}"
+        "---\n\n## Context\n\nx\n\n## Decision\n\ny\n\n"
+        "## Principles\n\nJudged against no principle.\n\n## Consequences\n\nz\n"
+    )
+
+
+def _write_adr(root: Path, adr_id: int, status: str, extra: str = "") -> Path:
+    path = _adr(root, f"{adr_id:04d}-x.md")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_adr_text(adr_id, status, extra))
+    return path
+
+
+def test_adr_ids_run_from_one_with_no_gap_or_repeat(tmp_path: Path):
+    gap = tmp_path / "gap"
+    shutil.copytree(FIXTURE, gap)
+    assert tests.records.check.check_adr_ids(load(_adr_kind(), gap)) == []
+    directory = gap / _adr_kind().directory
+    (directory / "0002-the-fixture-decision-superseded.md").rename(
+        directory / "0003-x.md"
+    )
+    _rewrite(directory / "0003-x.md", "id: 2", "id: 3")
+    [v] = tests.records.check.check_adr_ids(load(_adr_kind(), gap))
+    assert v.field == "id" and "2" in v.message and "not contiguous" in v.message
+
+    from_two = tmp_path / "from_two"
+    _write_adr(from_two, 2, "accepted")
+    _write_adr(from_two, 3, "accepted")
+    violations = tests.records.check.check_adr_ids(load(_adr_kind(), from_two))
+    assert any(v.field == "id" and "missing [1]" in v.message for v in violations)
+
+    twice = tmp_path / "twice"
+    shutil.copytree(FIXTURE, twice)
+    shutil.copy(_adr(twice, "0001-a-fixture-decision.md"), _adr(twice, "0001-again.md"))
+    violations = tests.records.check.check_adr_ids(load(_adr_kind(), twice))
+    assert any(
+        v.field == "id" and "1 is used more than once" in v.message for v in violations
+    )
+
+
+def test_adr_supersession_is_held_equal_on_both_sides(tmp_path: Path):
+    assert tests.records.check.check_adr_supersession(load(_adr_kind(), FIXTURE)) == []
+
+    root = tmp_path / "root"
+    _write_adr(root, 1, "accepted")
+    _write_adr(root, 2, "accepted", "supersedes: [99]\n")
+    _write_adr(root, 3, "accepted", "superseded_by: [1]\n")
+    _write_adr(root, 4, "accepted", "supersedes: [5]\n")
+    _write_adr(root, 5, "accepted")
+    _write_adr(root, 6, "accepted", "supersedes: [1]\n")
+    _write_adr(root, 7, "superseded", "superseded_by: []\n")
+    _write_adr(root, 8, "deprecated", "superseded_by: [1]\n")
+    _write_adr(root, 9, "superseded", "superseded_by: [99]\n")
+
+    violations = tests.records.check.check_adr_supersession(load(_adr_kind(), root))
+    assert any(
+        v.field == "supersedes" and "99" in v.message and "does not exist" in v.message
+        for v in violations
+    )
+    assert any(
+        v.field == "supersedes" and "not lower than 4" in v.message for v in violations
+    )
+    assert any(
+        v.field == "supersedes" and "does not list 6 in superseded_by" in v.message
+        for v in violations
+    )
+    assert any(
+        v.field == "superseded_by"
+        and "status is superseded but superseded_by is empty" in v.message
+        for v in violations
+    )
+    assert any(
+        v.field == "status"
+        and "superseded_by is set but status is accepted" in v.message
+        for v in violations
+    )
+    assert any(
+        v.field == "superseded_by" and "status is deprecated but" in v.message
+        for v in violations
+    )
+    # Both cases the claim names have a `superseded_by` side too.
+    assert any(
+        v.field == "superseded_by"
+        and "99" in v.message
+        and "does not exist" in v.message
+        for v in violations
+    )
+    assert any(
+        v.field == "superseded_by" and "does not list 3 in supersedes" in v.message
+        for v in violations
+    )
+
+
+def test_an_adr_cites_only_appendices_that_exist(tmp_path: Path):
+    letters = {"A", "B"}
+    assert (
+        tests.records.check.check_adr_appendices(load(_adr_kind(), FIXTURE), letters)
+        == []
+    )
+
+    broken = tmp_path / "root"
+    shutil.copytree(FIXTURE, broken)
+    _rewrite(
+        _adr(broken, "0001-a-fixture-decision.md"),
+        "appendices: [A]",
+        "appendices: [A, Z]",
+    )
+    [v] = tests.records.check.check_adr_appendices(load(_adr_kind(), broken), letters)
+    assert v.field == "appendices" and "Z" in v.message

@@ -101,7 +101,7 @@ def parse(text: str, kind: Kind, path: Path | None = None) -> Record:
         raise RecordError(f"frontmatter is invalid: {exc}", path) from exc
 
     if kind.sections:
-        sections = _sectioned(body, kind.sections, path)
+        sections = _sectioned(body, kind.sections, kind.required, path)
     else:
         sections = split_sections(body)
     if isinstance(model, BacklogItem):
@@ -112,20 +112,27 @@ def parse(text: str, kind: Kind, path: Path | None = None) -> Record:
 
 
 def _sectioned(
-    body: str, required: tuple[str, ...], path: Path | None
+    body: str,
+    allowed: tuple[str, ...],
+    required: tuple[str, ...],
+    path: Path | None,
 ) -> dict[str, str]:
-    """A body that is `## ` sections only, drawn from `required`, in its order."""
+    """A body that is `## ` sections only, drawn from `allowed`, in its order,
+    and carrying every heading in `required`."""
     preamble = _preamble(body)
     if preamble:
         raise RecordError(f"prose before the first `## ` heading: {preamble!r}", path)
     sections = split_sections(body)
-    unknown = [s for s in sections if s not in required]
+    unknown = [s for s in sections if s not in allowed]
     if unknown:
-        raise RecordError(f"unknown section(s) {unknown}; the body is {required}", path)
-    order = [s for s in required if s in sections]
+        raise RecordError(f"unknown section(s) {unknown}; the body is {allowed}", path)
+    missing = [s for s in required if s not in sections]
+    if missing:
+        raise RecordError(f"missing required section(s) {missing}", path)
+    order = [s for s in allowed if s in sections]
     if list(sections) != order:
         raise RecordError(
-            f"sections out of order: {list(sections)}; the order is {required}", path
+            f"sections out of order: {list(sections)}; the order is {allowed}", path
         )
     return sections
 
@@ -133,8 +140,6 @@ def _sectioned(
 def _check_sections(
     model: BacklogItem, sections: dict[str, str], path: Path | None
 ) -> None:
-    if "Problem" not in sections:
-        raise RecordError("missing required `## Problem` section", path)
     status = model.status
     if status not in CLOSED and not sections.get("Done looks like"):
         raise RecordError(
