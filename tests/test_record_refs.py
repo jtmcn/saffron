@@ -1,0 +1,199 @@
+import subprocess
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from saffron.record.contract import Fact
+from saffron.record.refs import RefsRecord
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    path = tmp_path / "mirror.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(path)], check=True)
+    return path
+
+
+def a_fact(**over: Any) -> Fact:
+    base: dict[str, Any] = {
+        "kind": "task_created",
+        "task_key": "a" * 32,
+        "at": "2026-09-20T00:00:00Z",
+        "repo": "saffron",
+        "batch_key": None,
+        "payload": {"spec_id": "SA-0099"},
+    }
+    return Fact(**(base | over))
+
+
+def test_the_first_append_creates_the_ref(repo):
+    record = RefsRecord(repo)
+    fact = a_fact()
+    record.append(fact.task_key, fact)
+    out = subprocess.run(
+        ["git", "-C", str(repo), "for-each-ref", "--format=%(refname)"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert f"refs/saffron/tasks/{fact.task_key}" in out
+
+
+def test_facts_read_back_in_append_order(repo):
+    record = RefsRecord(repo)
+    first = a_fact(kind="task_created")
+    second = a_fact(kind="task_state", payload={"state": "IMPLEMENTING"})
+    record.append(first.task_key, first)
+    record.append(second.task_key, second)
+    assert record.read(first.task_key) == [first, second]
+
+
+def test_each_append_adds_one_commit(repo):
+    record = RefsRecord(repo)
+    fact = a_fact()
+    for _ in range(3):
+        record.append(fact.task_key, fact)
+    count = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "rev-list",
+            "--count",
+            f"refs/saffron/tasks/{fact.task_key}",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert count == "3"
+
+
+def test_an_earlier_fact_is_never_rewritten(repo):
+    # Append-only is the whole interface. The first commit's sha must be
+    # unchanged after later appends, or the record is a mutable store.
+    record = RefsRecord(repo)
+    fact = a_fact()
+    record.append(fact.task_key, fact)
+    ref = f"refs/saffron/tasks/{fact.task_key}"
+    first = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", ref],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    record.append(fact.task_key, a_fact(kind="task_state"))
+    root = subprocess.run(
+        ["git", "-C", str(repo), "rev-list", "--max-parents=0", ref],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert root == first
+
+
+def test_reading_an_absent_task_gives_an_empty_log(repo):
+    assert RefsRecord(repo).read("f" * 32) == []
+
+
+def test_task_keys_lists_every_task_ref(repo):
+    record = RefsRecord(repo)
+    for key in ("a" * 32, "b" * 32):
+        record.append(key, a_fact(task_key=key))
+    assert sorted(record.task_keys()) == ["a" * 32, "b" * 32]
+
+
+def test_task_keys_ignores_branches_and_tags(repo):
+    # The namespace is the record's alone: a repository's own refs must not
+    # read back as tasks.
+    record = RefsRecord(repo)
+    record.append("a" * 32, a_fact(task_key="a" * 32))
+    head = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", f"refs/saffron/tasks/{'a' * 32}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "-C", str(repo), "update-ref", "refs/heads/main", head],
+        check=True,
+    )
+    assert record.task_keys() == ["a" * 32]
+
+
+def test_the_tree_carries_every_fact_so_far(repo):
+    record = RefsRecord(repo)
+    fact = a_fact()
+    record.append(fact.task_key, fact)
+    record.append(fact.task_key, a_fact(kind="task_state"))
+    listing = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "ls-tree",
+            "-r",
+            "--name-only",
+            f"refs/saffron/tasks/{fact.task_key}",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert listing == ["facts/0001.json", "facts/0002.json"]
+
+
+def test_compare_and_swap_refuses_a_stale_writer(repo):
+    record = RefsRecord(repo)
+    assert record.compare_and_swap("budget", None, "1.50") is True
+    assert record.compare_and_swap("budget", "1.50", "2.00") is True
+    assert record.compare_and_swap("budget", "1.50", "9.99") is False
+
+
+def test_a_corrupt_fact_blob_names_the_task_it_is_in(repo):
+    # Nested mktree calls, matching `append`'s tree shape: `git mktree` refuses
+    # a flat "facts/0001.json" entry as a path containing a slash.
+    record = RefsRecord(repo)
+    fact = a_fact()
+    record.append(fact.task_key, fact)
+    blob = subprocess.run(
+        ["git", "-C", str(repo), "hash-object", "-w", "--stdin"],
+        input="{not json",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    facts_tree = subprocess.run(
+        ["git", "-C", str(repo), "mktree"],
+        input=f"100644 blob {blob}\t0001.json\n",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    tree = subprocess.run(
+        ["git", "-C", str(repo), "mktree"],
+        input=f"040000 tree {facts_tree}\tfacts\n",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    commit = subprocess.run(
+        ["git", "-C", str(repo), "commit-tree", tree, "-m", "corrupt"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "update-ref",
+            f"refs/saffron/tasks/{fact.task_key}",
+            commit,
+        ],
+        check=True,
+    )
+    with pytest.raises(ValueError, match=fact.task_key):
+        record.read(fact.task_key)
