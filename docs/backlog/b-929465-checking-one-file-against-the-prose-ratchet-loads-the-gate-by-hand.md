@@ -1,11 +1,12 @@
 ---
 id: b-929465
 title: Checking one file against the prose ratchet means loading the gate module by hand, and two agents wrote throwaway scripts to do it
-status: open
+status: done
 tier: 2
 filed: 2026-09-20
+closed: 2026-09-20
 specs: []
-prs: []
+prs: [392]
 commits: []
 cites: []
 related: [b-08a36a, 163]
@@ -41,6 +42,9 @@ is item b-08a36a's subject and stays as it is.
 
 ## Record
 
+- 2026-09-20: done by #392, by hand rather than through a cell. The file is 181
+  lines with the helpers the mode needs, so the change is `--file <path>`, a
+  shared path resolution, and six witnesses.
 - 2026-09-20: filed after two agents wrote the same throwaway script in one
   day. The `prose` rules themselves are documented in Appendix R and in
   `CLAUDE.md`, so this is the missing way to run them, not a missing rule.

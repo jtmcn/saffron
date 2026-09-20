@@ -1,12 +1,13 @@
 ---
 id: b-ea1d13
 title: The spec writer sizes the change after drafting it, and its step 3 names a check that cannot pass
-status: open
+status: done
 tier: 3
 filed: 2026-09-20
+closed: 2026-09-20
 by_hand: true
 specs: []
-prs: []
+prs: [392]
 commits: []
 cites: []
 related: [b-b69bb6, 157, 159]
@@ -41,6 +42,15 @@ until the caller commits. Both are edits to `.claude/agents/spec-writer.md`.
 
 ## Record
 
+- 2026-09-20: done by #392. Step 3 names
+  `tests/test_scheduler.py -k queue_smoke`, which drives the queue over the
+  working tree. Step 1 keeps its rule and gains where the answer goes.
+- 2026-09-20: the step 1 half above is narrower than this item claimed, and
+  #392 corrects it rather than building it. A subagent reports once, when it
+  finishes, so no estimate can reach the caller before the drafting. Children
+  carry `depends_on` the parent, so they cannot be written before it exists
+  either. What was left to fix is report ordering, and a split now leads the
+  report and names the children.
 - 2026-09-20: filed from `SA-0113`. `by_hand` because the file is the writer
   agent's own instruction surface. This repository's precedent is that a prompt
   or procedure edit is hand work, while a computed check gets a spec.
