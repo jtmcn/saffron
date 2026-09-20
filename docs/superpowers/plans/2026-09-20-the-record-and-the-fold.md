@@ -816,7 +816,7 @@ def test_creating_a_task_appends_task_created(ledger, record, task):
     assert fact.payload["risk"] == "elevated"
 
 
-def test_a_declared_risk_and_an_absent_one_are_distinguishable(ledger):
+def test_a_declared_risk_and_an_absent_one_are_distinguishable(ledger, record):
     # The defect item 170 exists to kill: `standard` by default and `standard`
     # by declaration must not read the same in the record.
     repo_id = ledger.upsert_repo("saffron", "/o", "/m.git", policy_sha="p")
@@ -824,7 +824,7 @@ def test_a_declared_risk_and_an_absent_one_are_distinguishable(ledger):
     undeclared = ledger.create_task(
         run_id, spec_id="SA-0085", spec_sha="s" * 64, branch="b",
     )
-    fact = ledger._record.read(ledger.record_key(undeclared))[0]
+    fact = record.read(ledger.record_key(undeclared))[0]
     assert fact.payload["risk"] is None
 
 
@@ -979,8 +979,31 @@ In `create_task`, mint the key before the insert and append after it:
             task_id, "task_created", spec_id=spec_id, spec_sha=spec_sha,
             branch=branch, risk=declared_risk, budget_usd=budget_usd,
             policy_sha=policy_sha, prompt_sha=prompt_sha,
+            **self._run_facts(run_id),
         )
         return task_id
+```
+
+`_run_facts` is **Ruling R1**: the fold has to insert `repos` and `runs` rows,
+and `repos.origin`, `repos.mirror_path` and `runs.base_sha` are all `NOT NULL`.
+A run is a fold over its task facts (spec §5), so the facts have to carry them:
+
+```python
+    def _run_facts(self, run_id: int) -> dict[str, Any]:
+        """What the fold needs to rebuild the `repos` and `runs` rows this task
+        hangs from. A run has no record of its own — it is a fold over the
+        tasks that name it (design §5)."""
+        row = self._db.execute(
+            """SELECT rn.base_sha, r.origin, r.mirror_path
+                 FROM runs rn JOIN repos r ON r.repo_id = rn.repo_id
+                WHERE rn.run_id = ?""",
+            (run_id,),
+        ).fetchone()
+        return {
+            "base_sha": row["base_sha"],
+            "origin": row["origin"],
+            "mirror_path": row["mirror_path"],
+        }
 ```
 
 `declared_risk` is the change that closes item 170's own defect. Give
@@ -1005,7 +1028,13 @@ different values:
 
 Then add one `self._append(...)` call at the end of each remaining write
 method, using the kind from `KINDS` and the method's own arguments as the
-payload. For the run-, batch- and repo-level methods, which have no `task_id`,
+payload.
+
+**Ruling R3, and it is exact:** `attempt_closed`'s payload is precisely
+`close_attempt`'s keyword arguments — `session_id`, `model`, `subtype`,
+`terminal_reason`, `num_turns`, `cost_usd_est` — and nothing else. Task 5's
+fold calls `ledger.close_attempt(attempt_id, **fact.payload)`, so an extra or
+renamed key is a `TypeError` at fold time. For the run-, batch- and repo-level methods, which have no `task_id`,
 append nothing in this task — they are folded from the task facts they appear
 in (spec §5), and Task 5's fold proves it.
 
