@@ -4,7 +4,7 @@ title: A spec's line citations and the directories it adds files to are checked 
 status: open
 tier: 2
 filed: 2026-09-20
-specs: []
+specs: [SA-0114]
 prs: []
 commits: []
 cites: []
@@ -58,3 +58,12 @@ place of deriving both by hand.
   with the session building 170, and a `CONTEXT.md` §8 entry separates them.
   `records/load.py:48` also holds a class `Record`, which the run record's
   protocol repeats.
+- 2026-09-20: `SA-0114` is queued for the command. It goes in the spec loop's
+  `.claude/skills/run-saffron-spec-loop/driver.py`, beside `check`, as
+  `driver.py cite <spec-path> --base <commit>`. `records/` was the other
+  candidate and is declined. It parses record frontmatter and reads no commit,
+  where the driver already reads a tree at one (`_git`, `_spec_at`). `dead`'s
+  roots cover `records/` and not `.claude/`. The prose half stays
+  open here, as item `b-281f0a` left its own: the `spec-writer` agent running
+  the command, and checks 2 and 6 reading its output, are by-hand edits after
+  the cell lands.
