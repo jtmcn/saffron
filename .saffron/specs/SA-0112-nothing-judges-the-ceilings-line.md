@@ -371,29 +371,37 @@ test collects under a name no criterion can name (backlog item 159).
 
 **Criterion 2's witness needs rows that would change the verdict if they were
 judged**. Build the shape `tests/test_spec_loop_driver.py:1197-1214` already
-builds. A cell of another type carries a peak far above the target's
-`max_turns`. Fourteen same-type rows stand against the limit of twelve, and the
-last of them, which the cut drops, carries such a peak too. Give the target
-ceilings that clear every *printed* row, and `check` returns 0 and names no
-blocker. Judging the unfiltered list is the wrong implementation this kills. It
-is also the natural one to write, because `_past_cells` hands back every cell
-in the ledger.
+builds. The rows at `:1186-1195` sit beside it. A cell of another type carries
+a peak far above the target's `max_turns`. Fourteen same-type rows stand
+against the limit of twelve. Give the target ceilings that clear every
+*printed* row, and `check` returns 0 and names no blocker. Judging the
+unfiltered list is the wrong implementation this kills. It is also the natural
+one to write, because `_past_cells` hands back every cell in the ledger.
 
-**And one row only the closeness sort can drop.** Every same-type row in that
-shape is identical in `touches` and in `criteria`
+**Two of the fourteen carry a high peak.** Every same-type row in the shape
+above is identical in `touches` and in `criteria`
 (`tests/test_spec_loop_driver.py:1203`). The sort key at
 `.claude/skills/run-saffron-spec-loop/driver.py:1618-1620` is then a total tie,
 and the sort decides nothing there. Copied as it stands, criterion 2's witness
 cannot tell a `check` that shares the whole selection from one that only
 filters and cuts. On the live ledger those two select different rows.
 `history` for a spec of this shape prints twelve rows out of more, with
-`criteria` running from 4 to 8. So one of the fourteen same-type rows is shaped
-far from the target, several away in both `touches` and `criteria`. It carries
-a peak above the target's `max_turns`, and it is placed **first** in the list
-handed to `check`. Sorted, it falls past the cut and
-`check` returns 0. Unsorted, it sits inside the first twelve and `check`
-reports a blocker on it. The other thirteen keep the target's own shape and a
-low peak, so the sort has exactly one row to move.
+`criteria` running from 4 to 8. So build the fourteen in three parts. One is
+shaped far from the target, several away in both `touches` and `criteria`, and
+carries a peak above the target's `max_turns`. Place it **first**. Twelve keep
+the target's own shape and a low peak. The fourteenth keeps the target's shape,
+carries a high peak, and goes **last**.
+
+Sorted, the far row falls to the end, and the cut drops it with the last row.
+`check` returns 0. A `check` that filters and cuts without the closeness sort
+keeps the far row inside the first twelve, and reports a blocker on it. A
+`check` that judges every row it was handed reports a blocker on the last one.
+Give all fourteen `_cell`'s default `started_at`
+(`tests/test_spec_loop_driver.py:1126`). The descending sort at
+`.claude/skills/run-saffron-spec-loop/driver.py:1617` is then a no-op, and the
+closeness sort is the only thing that can move a row. Distinct dates, which
+`tests/test_spec_loop_driver.py:1164-1175` uses, would let a `check` keeping
+only the date sort drop the far row by accident.
 
 **Criterion 3's witness drives both directions too**. A remainder that cannot
 cover the highest REVIEW-plus-REBUT among the rows draws the concern and still
