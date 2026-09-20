@@ -128,22 +128,24 @@ class BacklogItem(Identified):
 APPENDIX_ID = r"[A-Z]{1,2}"
 
 
+AppendixRef = Annotated[str, Field(pattern=rf"^{APPENDIX_ID}$")]
+
+
 class Appendix(Identified):
     """What one revision found. Never replaced, so it has no status."""
 
-    id: Annotated[str, Field(pattern=rf"^{APPENDIX_ID}$")]
+    id: AppendixRef
     title: str = Field(min_length=1)
     revisions: list[Number] = Field(min_length=1)
     question: str = Field(min_length=1)
 
 
 AdrStatus = Literal["accepted", "superseded", "deprecated"]
-_APPENDIX_REF = Annotated[str, Field(pattern=rf"^{APPENDIX_ID}$")]
 
 
 class Adr(Identified):
     """One decision, as it stands today. Never edited except to record a
-    supersession on both sides (`## Supersession` in the design record)."""
+    supersession, which is written on both sides in one pull request."""
 
     id: Number
     title: str = Field(min_length=1)
@@ -152,7 +154,7 @@ class Adr(Identified):
     supersedes: list[Number] = Field(default_factory=list)
     superseded_by: list[Number] = Field(default_factory=list)
     principles: list[Number] = Field(default_factory=list)
-    appendices: list[_APPENDIX_REF] = Field(default_factory=list)
+    appendices: list[AppendixRef] = Field(default_factory=list)
 
 
 BACKLOG_SECTIONS = ("Problem", "Done looks like", "Record")
@@ -163,7 +165,9 @@ ADR_SECTIONS = (
     "Principles",
     "Consequences",
 )
-ADR_REQUIRED = ("Context", "Decision", "Principles", "Consequences")
+# Derived, so a required heading cannot drift out of the allowed ones: a kind
+# whose `required` is not a subset makes every record of it unloadable.
+ADR_REQUIRED = tuple(s for s in ADR_SECTIONS if s != "Options considered")
 
 
 @dataclass(frozen=True)

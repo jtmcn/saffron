@@ -18,7 +18,7 @@ Replace it, recording the change on both sides.
 
 ## Options considered
 
-Leaving the first decision stand was considered and rejected, since nothing
+Letting the first decision stand was considered and rejected, since nothing
 would then hold that it changed.
 
 ## Principles

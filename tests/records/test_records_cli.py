@@ -218,11 +218,12 @@ def test_list_adr_prints_the_adrs_and_refuses_the_backlog_s_filters():
         "A fixture decision, later superseded",
     ]
 
-    status = run("list", "adr", "--status", "accepted")
-    assert status.returncode == 2 and "backlog" in status.stderr
+    # A backlog status, or argparse refuses the choice before the branch runs.
+    status = run("list", "adr", "--status", "superseded")
+    assert status.returncode == 2 and "not ADRs" in status.stderr
 
     tier = run("list", "adr", "--tier", "1")
-    assert tier.returncode == 2 and "backlog" in tier.stderr
+    assert tier.returncode == 2 and "not ADRs" in tier.stderr
 
     bare = run("show", "1")
     assert bare.returncode == 0

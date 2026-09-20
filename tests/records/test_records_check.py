@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 import tests.records.check
-from records.kinds import KINDS, Identified
+from records.kinds import KINDS, Identified, Kind
 from records.load import Record, load
 from tests.records.check import (
     Violation,
@@ -35,7 +35,12 @@ from tests.records.check import (
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "good"
 BACKLOG = KINDS["backlog"]
 APPENDIX = KINDS["appendix"]
-ADR = KINDS["adr"]
+
+
+def _adr_kind() -> Kind:
+    """`KINDS["adr"]` at call time. At module scope the lookup makes the
+    reverted run a collection error, which `revert` reads as `skip`."""
+    return KINDS["adr"]
 
 
 @pytest.fixture
@@ -263,8 +268,8 @@ def test_the_good_fixture_passes_every_check():
     assert check_all(FIXTURE, {"4", "4.2", "4.2.1", "5", "5.4"}) == []
 
 
-# The three ADR checks land with ADR 1, by hand — CONTEXT.md, DESIGN.md and
-# .saffron/policy.yaml are protected, so ADR 1 cannot land in this diff.
+# The three _adr_kind() checks land with _adr_kind() 1, by hand — CONTEXT.md, DESIGN.md and
+# .saffron/policy.yaml are protected, so _adr_kind() 1 cannot land in this diff.
 ADR_CHECKS_NOT_YET_WIRED = {
     "check_adr_ids",
     "check_adr_supersession",
@@ -525,7 +530,7 @@ def test_a_letter_used_twice_is_a_violation(tmp_path: Path):
 
 
 def _adr(root: Path, name: str) -> Path:
-    return root / ADR.directory / name
+    return root / _adr_kind().directory / name
 
 
 def _adr_text(adr_id: int, status: str, extra: str = "") -> str:
@@ -546,26 +551,32 @@ def _write_adr(root: Path, adr_id: int, status: str, extra: str = "") -> Path:
 def test_adr_ids_run_from_one_with_no_gap_or_repeat(tmp_path: Path):
     gap = tmp_path / "gap"
     shutil.copytree(FIXTURE, gap)
-    assert tests.records.check.check_adr_ids(load(ADR, gap)) == []
-    directory = gap / ADR.directory
+    assert tests.records.check.check_adr_ids(load(_adr_kind(), gap)) == []
+    directory = gap / _adr_kind().directory
     (directory / "0002-the-fixture-decision-superseded.md").rename(
         directory / "0003-x.md"
     )
     _rewrite(directory / "0003-x.md", "id: 2", "id: 3")
-    [v] = tests.records.check.check_adr_ids(load(ADR, gap))
+    [v] = tests.records.check.check_adr_ids(load(_adr_kind(), gap))
     assert v.field == "id" and "2" in v.message and "not contiguous" in v.message
+
+    from_two = tmp_path / "from_two"
+    _write_adr(from_two, 2, "accepted")
+    _write_adr(from_two, 3, "accepted")
+    violations = tests.records.check.check_adr_ids(load(_adr_kind(), from_two))
+    assert any(v.field == "id" and "missing [1]" in v.message for v in violations)
 
     twice = tmp_path / "twice"
     shutil.copytree(FIXTURE, twice)
     shutil.copy(_adr(twice, "0001-a-fixture-decision.md"), _adr(twice, "0001-again.md"))
-    violations = tests.records.check.check_adr_ids(load(ADR, twice))
+    violations = tests.records.check.check_adr_ids(load(_adr_kind(), twice))
     assert any(
         v.field == "id" and "1 is used more than once" in v.message for v in violations
     )
 
 
 def test_adr_supersession_is_held_equal_on_both_sides(tmp_path: Path):
-    assert tests.records.check.check_adr_supersession(load(ADR, FIXTURE)) == []
+    assert tests.records.check.check_adr_supersession(load(_adr_kind(), FIXTURE)) == []
 
     root = tmp_path / "root"
     _write_adr(root, 1, "accepted")
@@ -576,8 +587,9 @@ def test_adr_supersession_is_held_equal_on_both_sides(tmp_path: Path):
     _write_adr(root, 6, "accepted", "supersedes: [1]\n")
     _write_adr(root, 7, "superseded", "superseded_by: []\n")
     _write_adr(root, 8, "deprecated", "superseded_by: [1]\n")
+    _write_adr(root, 9, "superseded", "superseded_by: [99]\n")
 
-    violations = tests.records.check.check_adr_supersession(load(ADR, root))
+    violations = tests.records.check.check_adr_supersession(load(_adr_kind(), root))
     assert any(
         v.field == "supersedes" and "99" in v.message and "does not exist" in v.message
         for v in violations
@@ -600,14 +612,28 @@ def test_adr_supersession_is_held_equal_on_both_sides(tmp_path: Path):
         for v in violations
     )
     assert any(
-        v.field == "superseded_by" and "nothing replacing it" in v.message
+        v.field == "superseded_by" and "status is deprecated but" in v.message
+        for v in violations
+    )
+    # Both cases the claim names have a `superseded_by` side too.
+    assert any(
+        v.field == "superseded_by"
+        and "99" in v.message
+        and "does not exist" in v.message
+        for v in violations
+    )
+    assert any(
+        v.field == "superseded_by" and "does not list 3 in supersedes" in v.message
         for v in violations
     )
 
 
 def test_an_adr_cites_only_appendices_that_exist(tmp_path: Path):
     letters = {"A", "B"}
-    assert tests.records.check.check_adr_appendices(load(ADR, FIXTURE), letters) == []
+    assert (
+        tests.records.check.check_adr_appendices(load(_adr_kind(), FIXTURE), letters)
+        == []
+    )
 
     broken = tmp_path / "root"
     shutil.copytree(FIXTURE, broken)
@@ -616,5 +642,5 @@ def test_an_adr_cites_only_appendices_that_exist(tmp_path: Path):
         "appendices: [A]",
         "appendices: [A, Z]",
     )
-    [v] = tests.records.check.check_adr_appendices(load(ADR, broken), letters)
+    [v] = tests.records.check.check_adr_appendices(load(_adr_kind(), broken), letters)
     assert v.field == "appendices" and "Z" in v.message

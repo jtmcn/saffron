@@ -141,7 +141,8 @@ def check_adr_ids(records: list[Record]) -> list[Violation]:
     if ids:
         missing = sorted(set(range(1, max(ids) + 1)) - ids)
         if missing:
-            highest = next(r for r in records if _adr(r).id == max(ids))
+            # Named against the highest id present, the file after which the gap shows.
+            highest = _ids(records)[max(ids)]
             out.append(
                 Violation(
                     highest.path, "id", f"ids are not contiguous; missing {missing}"
@@ -154,7 +155,7 @@ def check_adr_supersession(records: list[Record]) -> list[Violation]:
     """Supersession is recorded on both sides. Not yet wired into `check_all`
     — the by-hand layer adds it with ADR 1."""
     out: list[Violation] = []
-    by_id = {r.model.id: r for r in records}
+    by_id = _ids(records)
     for r in records:
         m = _adr(r)
         for other in m.supersedes:
@@ -218,7 +219,7 @@ def check_adr_supersession(records: list[Record]) -> list[Violation]:
                 Violation(
                     r.path,
                     "superseded_by",
-                    "a deprecated ADR has nothing replacing it",
+                    f"status is deprecated but superseded_by is {m.superseded_by}",
                 )
             )
     return out
