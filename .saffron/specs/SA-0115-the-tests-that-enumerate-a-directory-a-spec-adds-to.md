@@ -50,9 +50,10 @@ acceptance:
       command prints one line counting the directories it took, the entries it
       skipped and the files it read under `tests/` at that commit, and that
       line is not itself a report. A spec whose `touches` yields no directory
-      draws no other output and exits 0. A spec path naming no file, and a
-      spec whose frontmatter intake refuses, each print a message to stderr
-      and exit 1 without reading any commit.
+      draws no other output and exits 0. A spec path naming no file, a spec
+      whose frontmatter intake refuses, and a `--base` git cannot resolve each
+      print a message to stderr and exit 1, reading no file under `tests/` and
+      raising no traceback.
     witness: tests/test_spec_loop_driver.py::test_enumerators_takes_its_directories_from_the_touches_a_commit_holds_no_file_at
   - claim: >-
       For each of those directories the command reads every Python file under
@@ -77,8 +78,8 @@ acceptance:
       `<module>.__file__` for a module that file imports and the commit holds,
       a name bound exactly once at that file's module scope or in the function
       holding the call, and an attribute of such a module bound exactly once
-      at that module's own top level. Anything else resolves to nothing, a
-      name bound more than once in the scope reached among them. A call whose
+      at that module's own top level. Anything else resolves to nothing,
+      including a name bound more than once in the scope reached. A call whose
       directory resolves to nothing, and a `.glob` whose pattern is not a
       string literal, are listed as unresolved with their file and line,
       rather than reported against a directory or dropped in silence. An
@@ -100,7 +101,12 @@ in the item's own record at
 `docs/backlog/b-b69bb6-a-specs-citations-and-added-directories-are-checked-by-eye.md:70-79`.
 For each directory a spec adds a file to, find the tests that enumerate it.
 
-Every sentence here about current code was read at `91ae49a0` on 2026-09-20.
+Every sentence here about current code was read at `cb476888` on 2026-09-20,
+the commit that adds this spec. That is not where the cell starts: `depends_on`
+cuts its worktree from `SA-0114`'s branch `joel/spec-citation-preflight`, so
+every `driver.py` line cited below moves by whatever that cell lands in the
+same file. Grep for the name a citation gives and read the line you find,
+rather than trusting the number.
 
 **The blocker this computes is in the tree**. `TURN_PROMPTS` at
 `tests/test_context.py:369-379` is a hand-written dict of nine turn prompt
@@ -112,10 +118,13 @@ path in context.TURNS_DIR.glob("*.md")}`. `TURNS_DIR` is `PROMPTS_DIR /
 `saffron/agents/context.py:21`. `SA-0113` adds a tenth file to that directory.
 `saffron/agents/prompts/turns/criterion-probe.md` is in its `touches` at
 `.saffron/specs/SA-0113-no-session-names-the-edit-a-claim-rests-on.md:11`, so
-that test fails on every attempt. It passes at base, so baseline subtraction
-absolves nothing. `tests/test_context.py` is in that spec's `forbidden` at
-`.saffron/specs/SA-0113-no-session-names-the-edit-a-claim-rests-on.md:13`, so
-the cell cannot repair it either.
+every attempt that leaves `tests/test_context.py` alone fails that test. It
+passes at base, so baseline subtraction absolves nothing. That spec was drafted
+with the file in its `forbidden`, where no cell could repair it. Its first
+review moved it into `touches`, at
+`.saffron/specs/SA-0113-no-session-names-the-edit-a-claim-rests-on.md:14`,
+which is where it sits at this base. So what the blocker cost was a review
+round.
 
 **The spec loop's driver is where a computed check for a spec review lives**.
 `cmd_check` at `.claude/skills/run-saffron-spec-loop/driver.py:1683-1712`
@@ -155,17 +164,18 @@ holds `tests/` and `.claude/`.
 `ontology`, `hooks` and `.saffron/gates`.
 
 **One file holds every caller of this driver's code**. A `git grep -l` for
-`driver.py` at this base returns forty files, the driver itself among them.
+`driver.py` at this base returns forty-one files, the driver itself among them.
 `tests/test_spec_loop_driver.py` is the only importer. It execs the driver
 through `importlib.util` at `tests/test_spec_loop_driver.py:19-26`. The other
-thirty-eight name the command in prose and call nothing. They are the two agent
-definitions, the skill's three documents, `.saffron/deadcode-allow.py`, and one
-queued spec with two retired ones. The rest are eighteen backlog records, ten
+thirty-nine name the command in prose and call nothing. They are the two agent
+definitions, the skill's three documents, `.saffron/deadcode-allow.py`, and two
+queued specs with two retired ones. This spec file is one of the two, and
+`.saffron/**` is `forbidden`. The rest are eighteen backlog records, ten
 other documents under `docs/`, and `tests/test_scheduler.py`, whose mention
 sits in the queue smoke test's docstring. The importer and the driver are in
 `touches`, and every other reader is `forbidden`.
 
-**What the command reads is bounded**. `git ls-tree -r --name-only 91ae49a0
+**What the command reads is bounded**. `git ls-tree -r --name-only cb476888
 tests` lists 81 Python files.
 
 ## Problem
@@ -174,11 +184,12 @@ A spec that adds a file to a directory some test enumerates fails that test on
 every attempt. The only thing between such a spec and a cell is a reader who
 thought to look.
 
-- **Baseline subtraction does not absolve it, and the cell cannot repair it**.
-  The test passes at base, so its failure belongs to the task. The file it
-  lives in is `forbidden` because the spec is not about it. `SA-0113` drew
-  that blocker from its first review, which is the one reason no cell paid for
-  it.
+- **Baseline subtraction does not absolve it, and a `forbidden` file leaves
+  the cell nothing to repair**. The test passes at base, so its failure
+  belongs to the task. The file it lives in is `forbidden` where the spec is
+  not about it, and `SA-0113` was drafted that way. Its first review moved
+  `tests/test_context.py` into `touches`. That review round is what the
+  blocker cost, and it is the one reason no cell paid for it.
 - **The answer is computable and nothing computes it**. Which directories a
   spec adds a file to is in its `touches`. Which tests enumerate a directory
   is an `ast` walk over `tests/` at the base commit.
@@ -361,7 +372,7 @@ at this base, and one call per file is fine.
 many files were read.
 
 **Name the wrong implementation each witness must kill**. Criterion 1 kills
-six. One reads the spec at the base commit rather than the working tree, which
+seven. One reads the spec at the base commit rather than the working tree, which
 the witness catches by never committing the spec file. One takes every
 `touches` entry as a file the spec adds: give the fixture an entry the commit
 does hold a file at, in a directory the fixture's tests enumerate, and assert
@@ -369,18 +380,31 @@ no report for it. One drops a glob entry in silence, killed by asserting the
 skipped count. One prints no count line at all, killed by asserting that line
 on stdout in the case with no directories and exit 0. One exits 1 where nothing
 was reported. One lets a spec intake refuses raise: write a second spec file
-with broken frontmatter, and assert exit 1 with a message on stderr.
+with broken frontmatter, and assert exit 1 with a message on stderr. One lets
+`_git` raise on a base no commit answers to. It raises `GitError` on a
+non-zero status (`.claude/skills/run-saffron-spec-loop/driver.py:85-89`). Pass
+`--base no-such-ref` over a valid spec, and assert the call returns 1 with a
+message on stderr rather than raising out of the command.
 
-Criterion 2 kills five. One knows only `.glob`. The fixture's tests must reach
+Criterion 2 kills seven. One knows only `.glob`. The fixture's tests must reach
 the added directory through all six spellings the claim names, each in a place
-the witness asserts on. Six calls in three short files is enough. One matches
+the witness asserts on. Six calls in three short files covers that, and the
+ancestor cases below add four more. One matches
 any `walk` at all. Put an `ast.walk(tree)` call and a locally defined `walk` in
-the fixture's tests, and assert that neither is reported. One reports every
-ancestor call: give the fixture a non-recursive `.glob("*.md")` on the parent
-directory, and assert it draws nothing. A recursive call on that same parent,
-beside it, draws a descent. One counts a descent as a defect, killed by a case
-whose only report is a descent and whose exit status is 0. One prints a file
-and line without the function holding the call.
+the fixture's tests, and assert that neither is reported. One matches the three
+`os` spellings on the bare name `os`, with no import map behind it. The module
+under any other name then goes missing. Spell one of those three calls through
+an aliased import: a fixture file with `import os as o` calling
+`o.scandir(...)` on the added directory, asserted as an enumerator report like
+the other five. That is also what forces the import map criterion 3
+needs. One reports every ancestor call: give the fixture a non-recursive
+`.glob("*.md")` on the parent directory, and assert it draws nothing. One
+treats `.rglob` as the only recursive form. Beside that `.glob`, put all three
+recursive forms on that same parent: `.rglob(...)`, `os.walk(...)`, and a
+`.glob` whose literal pattern carries `**`. The witness asserts a descent for
+each of the three. One counts a descent as a defect, killed by a case whose
+only report is a descent and whose exit status is 0. One prints a file and line
+without the function holding the call.
 
 Criterion 3 kills four. One resolves only literals. The fixture must reach its
 directory through a module-scope name, and through a name bound in the function
@@ -445,17 +469,18 @@ head, and reads a rename as a removal. The three new tests belong at the end of
 `test_only_probe_takes_a_command_after_the_separator` at
 `tests/test_spec_loop_driver.py:1821`.
 
-**The shape is about 475 changed lines, and nothing here raises the tier**.
+**The shape is about 495 changed lines, and nothing here raises the tier**.
 Neither file in `touches` sits under `.saffron/policy.yaml:34-58`'s
 `elevate_on`. So this task runs at `risk: standard`, where `size` is advisory
 against the `feature` ceiling of 600 (`saffron/gates/core/size.py:25`). The
-estimate is 225 in `driver.py` and 250 in the test file, derived per part. In
+estimate is 225 in `driver.py` and 270 in the test file, derived per part. In
 `driver.py`: 25 lines to take the directories out of `touches` and count the
 skips. 35 to find the calls and decide which of them recurse. Then 25 for the
 file's import map and the dotted-name lookup, and 90 for the resolver item 5
-bounds. Last, 45 for `cmd_enumerators` and what it prints, and 8 to register
-the subcommand. In the tests: 40 for a shared helper that builds the fixture
-repo and writes a spec file, then 65, 80 and 65 for the three witnesses. The
+bounds. Last, 45 for `cmd_enumerators` and what it prints, the `GitError`
+catch for an unresolvable `--base` among them, and 8 to register the
+subcommand. In the tests: 40 for a shared helper that builds the fixture repo
+and writes a spec file, then 70, 95 and 65 for the three witnesses. The
 derivation is measured rather than guessed. The author's prototype of the
 resolver, the call finder and the import map ran over this base's `tests/` in
 120 lines. It carried no comments, no `_fail` paths and no report. Repo style
@@ -463,8 +488,10 @@ plus the bounds above is what takes that to 225. `SA-0112` is the comparable
 cell in these same two files, at 99 lines in `driver.py` and 144 in the test
 file. That cell built one subcommand with five verdicts and four witnesses.
 This one parses Python at a commit, where that one read rows already in hand.
-475 leaves 125 lines under the ceiling that `SA-0106` (633) and `SA-0107`
-(1049) overshot. Do not go looking for more to do. The resolution set in item 5
+495 leaves 105 lines under the ceiling that `SA-0106` (633) and `SA-0107`
+(1049) overshot. The twenty over the first draft are the witness prescriptions
+this spec's review added, three ancestor calls asserted as descents and a
+`--base` case. Do not go looking for more to do. The resolution set in item 5
 is closed. A shape it does not name belongs in the unresolved list rather than
 in a seventh case.
 
