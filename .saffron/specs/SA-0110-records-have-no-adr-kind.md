@@ -56,29 +56,24 @@ acceptance:
       the good fixture, where ADR 2 supersedes ADR 1.
     witness: tests/records/test_records_check.py::test_adr_supersession_is_held_equal_on_both_sides
   - claim: >-
-      `check_adr_principles`, given the set of principle numbers that exist,
-      reports a listed principle not in that set; a `## Principles` section
-      whose bullets do not name exactly the listed set, each once; a bullet
-      whose verb is not `upholds` or `departs`; and, for an empty list, a
-      section that is not one line beginning `Judged against no principle.`
-    witness: tests/records/test_records_check.py::test_adr_principles_are_declared_and_each_is_judged
-  - claim: >-
       `check_adr_appendices`, given the appendix letters that exist, reports
       an `appendices` entry naming none of them.
     witness: tests/records/test_records_check.py::test_an_adr_cites_only_appendices_that_exist
   - claim: >-
       `records list adr` prints one line per ADR in id order: id, status,
-      title. `records show --kind adr 1` prints ADR 1, and a bare
-      `records show 1` still prints backlog item 1.
-    witness: tests/records/test_records_cli.py::test_list_adr_and_show_by_kind_leave_a_bare_number_to_the_backlog
+      title. It refuses a backlog status passed as `--status`, and `--tier`,
+      naming the backlog as their subject. A bare `records show 1` still prints backlog item 1.
+    witness: tests/records/test_records_cli.py::test_list_adr_prints_the_adrs_and_refuses_the_backlog_s_filters
 ---
 
 ## Context
 
 Backlog item **b-9ff0fd**: decisions have no record of their own. The design is
-`docs/superpowers/specs/2026-09-19-adrs-design.md`. Its "The record" and
-"Validation against the principles" sections are what this spec implements, and
-its "Readers" beyond `records/` land by hand afterwards.
+`docs/superpowers/specs/2026-09-19-adrs-design.md`. Its "The record" section
+is what this spec implements. Of its "What reads the records" section, three
+parts land here: `records list adr`, `check_adr_appendices`, and the
+`CITING`/`LIVE_SURFACES` entries. Deferred are `records show --kind`,
+`check_adr_principles`, the ontology reader and the citation reader.
 
 `records/` has two kinds today, `backlog` and `appendix` (`KINDS`,
 `records/kinds.py:154-169`). `Kind.sections` names the `## ` headings a body is
@@ -98,20 +93,37 @@ its supersession, or hold its declared principles.
 **`docs/adr/` itself, ADR 1, and wiring the new checks into `check_all`.** They
 land by hand after this merges. `CONTEXT.md` and `.saffron/policy.yaml` are
 `protected`, and the design orders ADR 1 after them. So `check_all`
-(`tests/records/check.py:445-466`) does not call the four new `check_adr_*`
+(`tests/records/check.py:445-466`) does not call the three new `check_adr_*`
 functions. `test_check_all_runs_every_check`
 (`tests/records/test_records_check.py:265`) finds every `check_*` in
 `tests.records.check` by reflection and fails on one `check_all` does not run. Give it
-an exclusion set naming exactly those four, with a one-line comment saying the
+an exclusion set naming exactly those three, with a one-line comment saying the
 by-hand layer removes it with ADR 1.
 
 **The ontology, `DESIGN.md`'s ADR index, and the citation reader for "ADR N".**
 They live in `ontology/` and `tests/test_citations.py`, and are by hand.
 
-**Where the principle numbers come from.** `check_adr_principles` and
-`check_adr_appendices` take the existing numbers and letters as arguments.
-A fixture passes its own small set, and the by-hand layer passes the live one
-in from `ontology.design_record`.
+**`records show` by kind.** A first cell planned 620 changed lines against the
+600 ceiling and was refused before it edited anything. So `--kind` and the
+id-resolution it needs are a later spec. `show` keeps today's behaviour
+exactly: a digit is a backlog item, a letter an appendix.
+
+`list adr` is not optional in the same way. `list`'s `kind` argument reads
+`choices=sorted(KINDS)` (`records/__main__.py:160`), so adding the kind makes
+`records list adr` a command. Without its own branch it falls into the backlog
+branch and raises `not a backlog item` (`:37-40`).
+
+**`check_adr_principles`.** The design's "Validation against the principles"
+is deferred, for the same reason `show --kind` is: its check to a later spec,
+its `.claude/agents/adr-reviewer.md` half to a by-hand commit. The `principles`
+field, and the `## Principles` section every ADR body must carry, stay here:
+criteria 1 and 2 hold both, so the later check has records to read. The
+fixtures' bullet form is written for that check. Nothing here pins it, so that
+spec edits the fixtures as well as adding the check.
+
+**Where the appendix letters come from.** `check_adr_appendices` takes the
+existing letters as an argument. A fixture passes its own small set, and the
+by-hand layer passes the live one in from `ontology.design_record`.
 
 ## Notes for the agent
 
@@ -129,8 +141,8 @@ fixture per case, and asserts each is reported. Criterion 1's witness also
 asserts `1-x.md` and `00001-x.md` holding `id: 1` are refused, so a pattern of
 `\d+` fails it. Criterion 2's plants each of the four required headings
 missing in turn, an unknown heading, and two headings swapped. Criterion 5's
-plants all six supersession defects, and criterion 6's all four principle
-defects. A witness that plants one case passes an implementation that checks
+plants all six supersession defects. A witness that plants one case passes an
+implementation that checks
 only that one.
 
 **The model.** Add `Adr(Identified)` in `records/kinds.py`: `id` a strict
@@ -194,20 +206,21 @@ ADRs' prose free of any citation. Each witness copies the good
 fixture to `tmp_path` and breaks one thing, as the existing appendix tests do
 (`test_a_skipped_letter_is_a_violation`, `tests/records/test_records_check.py`).
 
-**The four checks return `list[Violation]`**, like every other `check_*` in
-`tests/records/check.py`, where they go. `check_adr_principles(records, principles: set[int])` and
-`check_adr_appendices(records, letters: set[str])` take the existing sets as
-arguments. Read a bullet as `- **<n>** <verb>.` at the start of a line inside
-`record.sections["Principles"]`.
+**The three checks return `list[Violation]`**, like every other `check_*` in
+`tests/records/check.py`, where they go.
+`check_adr_appendices(records, letters: set[str])` takes the existing letters
+as an argument.
 
 **The CLI.** In `records/__main__.py`, `list` takes a kind already
 (`records/__main__.py:160`), and `cmd_list` branches on `Appendix`
-(`:74-92`). Add an ADR branch printing `id  status  title`, refusing `--status`
-and `--tier` as the appendix branch does. `show` takes no kind today
-(`:169-170`), and `cmd_show` reads a digit id as a backlog item (`:106-114`).
-Add `--kind` with choices from `KINDS`, defaulting to today's behaviour, so a
-bare `records show 1` is unchanged. `--kind adr` looks the id up among ADRs,
-and a missing one prints `no ADR <n>` and exits 1.
+(`:74-92`). Add an ADR branch printing `id  status  title`. It refuses
+`--status` and `--tier` with its own message: `--status`'s choices are the
+backlog's statuses (`:161`) and `--tier` is a backlog field. Do not widen the
+appendix branch's condition to reach it, because its message says the kind has
+no status, and an ADR has one. That is the whole CLI change. Leave
+`cmd_show` (`:95-130`) and `show`'s parser (`:169-170`) alone, and add no
+`--kind`: the criterion's witness holds a bare `records show 1` to the backlog
+item it prints today.
 
 **`CITING` and `LIVE_SURFACES` gain `"docs/adr"`** (`tests/records/check.py:22`,
 `:251`). A missing directory yields no files through `_walk`
