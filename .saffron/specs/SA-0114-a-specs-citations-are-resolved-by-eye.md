@@ -42,10 +42,12 @@ acceptance:
       from the working tree, and reads every path the spec cites at that
       commit. A citation naming a path the commit holds no file at is
       reported, and so is one whose line number lies past the end of that file
-      there. A citation resolving at that commit draws no report. A file the
-      working tree changed after the commit is judged at the commit. The
-      command exits 1 after reporting a defect and 0 after reporting none. The
-      count line it prints on every run is not a defect.
+      there. A citation whose path and line both resolve at that commit draws
+      no path-or-line report. A file the working tree changed after the commit
+      is judged at the commit. The command exits 1 after reporting a defect and
+      0 after reporting none. It prints a line counting the citations it
+      checked on every run, defect or none, and that line is not itself a
+      defect.
     witness: tests/test_spec_loop_driver.py::test_cite_resolves_a_specs_citations_at_the_base_commit
   - claim: >-
       A citation written as a line number with no path takes the path named
@@ -116,12 +118,12 @@ comment and docstring rules. `CODE_DIRS` at `:48-58` holds `tests/` and
 `ontology`, `hooks` and `.saffron/gates`.
 
 **One file holds every caller of this driver's code**. A `git grep -l` for
-`driver.py` at this base returns forty-one files, the driver itself among them.
+`driver.py` at this base returns forty files, the driver itself among them.
 `tests/test_spec_loop_driver.py` is the only importer. It execs the driver
 through `importlib.util` at `tests/test_spec_loop_driver.py:19-26`. The other
-thirty-nine name the command in prose and call nothing. They are the two agent
+thirty-eight name the command in prose and call nothing. They are the two agent
 definitions, the skill's three documents, `.saffron/deadcode-allow.py`, and
-this spec with two retired ones. The rest are nineteen backlog records, ten
+this spec with two retired ones. The rest are eighteen backlog records, ten
 other documents under `docs/`, and `tests/test_scheduler.py`, whose mention
 sits in the queue smoke test's docstring. The importer and the driver are in
 `touches`, and every other reader is `forbidden`.
@@ -191,7 +193,7 @@ what it can prove wrong.
    `saffron/agents/findings.py` drift exactly, and it names the fix as well as
    the defect.
 
-   **This half reports what it can prove and stays quiet otherwise**. Text
+   **This report names what it can prove and stays quiet otherwise**. Text
    the cited range carries suppresses the report, even where the sentence's
    other names moved. A common word carried at the cited line by accident
    suppresses it too. The direction is deliberate. A reviewer who reads a short
@@ -199,7 +201,7 @@ what it can prove wrong.
    stops reading the list.
 
 6. **What the exit status means**. 1 after reporting a defect, and 0 after
-   reporting none. The count line the notes below ask for prints on both, and
+   reporting none. The count line criterion 1 requires prints on both, and it
    is not a defect. `cmd_check` at
    `.claude/skills/run-saffron-spec-loop/driver.py:1683-1712` returns 1 the
    same way, and `_fail` at
@@ -230,22 +232,26 @@ size note below measures.
 
 **The prose half of item b-b69bb6**. The item asks that the `spec-writer` agent
 run this command before its own self-review. It asks that the `spec-reviewer`
-agent's checks 2 and 6 read its output. Both are prompts, and no test watches
-one. `.claude/agents/**` and the skill's `SKILL.md` are `forbidden` here. This
-is the order `SA-0092` and `SA-0112` took, which item b-281f0a records as
-settled: the cell ships the command, the operator wires the prose to it
-afterwards. So the command this spec adds is called by nothing the day it
-lands, and that is the expected state rather than an omission. Two lines are
-the ones to leave alone rather than the ones to fix.
+agent's checks 2 and 6 read its output. Check 2 is scope
+(`.claude/agents/spec-reviewer.md:57-63`) and check 6 is claims about current
+code (`.claude/agents/spec-reviewer.md:126-132`). The citation half this spec
+ships serves check 6 alone, and check 2 waits on the directory half. Both
+are prompts, and no test watches one. `.claude/agents/**` and the skill's
+`SKILL.md` are `forbidden` here. This is the order `SA-0092` and `SA-0112`
+took, which item b-281f0a records as settled: the cell ships the command, the
+operator wires the prose to it afterwards. So the command this spec adds is
+called by nothing the day it lands, and that is the expected state rather than
+an omission. Two lines are the ones to leave alone rather than the ones to fix.
 `.claude/agents/spec-reviewer.md:19-20` names `driver.py history <SPEC-ID>` as
 what a review runs. `.claude/agents/spec-reviewer.md:30` limits a reviewer's
 Bash to "those git commands and `driver.py history` only".
 
-**The other five checks a spec review runs**. Checks 1 to 5 stay where they
-are. Item b-281f0a owns them, it is `partial`, and its one open half is a
-parametrised-witness check in `tests/test_queued_specs.py`. That file is
-`forbidden` here. A new test there passes with this diff's source reverted,
-because that source is `driver.py`, which such a test never reads.
+**The other checks a spec review runs**. Checks 1 to 5 stay where they are,
+check 2 among them: it is the directory half that would reach it, and that half
+is out of scope above. Item b-281f0a owns them, it is `partial`, and its one
+open half is a parametrised-witness check in `tests/test_queued_specs.py`. That
+file is `forbidden` here. A new test there passes with this diff's source
+reverted, because that source is `driver.py`, which such a test never reads.
 
 **`§` citations**. `tests/test_citations.py` covers every `§N` and appendix
 citation over the whole tree, on every `make check`. Add nothing for them, and
@@ -299,15 +305,20 @@ there: `_git` and `_commit` at `tests/test_spec_loop_driver.py:116-127` and
 to the host's git config.
 
 **Name the wrong implementation each witness must kill.** Criterion 1 kills
-five. One reads the cited file from the working tree, which the witness catches
+six. One reads the cited file from the working tree, which the witness catches
 by rewriting a committed file after the commit. One reports a citation that
 resolves. One returns 0 after reporting a defect, or 1 after reporting none.
 One reports a line number equal to the file's last line, which is inside the
 file and not past its end. One treats any backticked `<text>:<n>` as a
 citation. To kill that one, put a host and port and a dotted module name in the
 clean spec. It then reports two paths the commit holds no file at, where the
-witness asserts no defect and exit 0. Drive a clean spec and a defective one in
-the same witness, so the zero case is pinned beside the one case.
+witness asserts no defect and exit 0. One prints its defects and no count line,
+which the clean case kills by asserting that line on stdout beside the exit 0.
+The clean spec must draw no moved-text report either, since that case asserts
+exit 0 and criterion 3 reports on a citation that resolves: give each clean
+sentence backticked text the cited range itself carries, or text the cited file
+carries nowhere. Drive a clean spec and a defective one in the same witness, so
+the zero case is pinned beside the one case.
 
 Criterion 2 kills four. One drops a bare line number rather than resolving it.
 One anchors only to a path written with a line number of its own, never to a
@@ -326,9 +337,9 @@ Criterion 3 kills three. One reports any citation whose range lacks the
 sentence's backticked text, which the third case kills: text the file carries
 nowhere is a name from elsewhere, not a moved line. One searches the whole file
 and never the range, which reports nothing at all. One reports the citation
-without naming the lines that carry the text, which is the half that makes the
-report worth reading. Put a second occurrence of the text in the file, so a
-report naming one line and a report naming both are distinguishable.
+without naming the lines that carry the text, which is what makes the report
+worth reading. Put a second occurrence of the text in the file, so a report
+naming one line and a report naming both are distinguishable.
 
 **Each witness is a plain `def`, never parametrised.** `criteria` matches a
 bare node id against the names the suite collected, by exact string. A
@@ -357,7 +368,7 @@ parse the frontmatter at all, and say so in your notes. `load_spec` and
 `cmd_size` does at `.claude/skills/run-saffron-spec-loop/driver.py:1346`.
 Whichever way you go, a spec that fails intake must not crash the command.
 
-**A sentence is what the drift half reads.** Split the paragraph's text on
+**A sentence is what the moved-text check reads.** Split the paragraph's text on
 sentence ends after joining its lines, because a spec wraps its prose. The
 split is approximate: an abbreviation and a section number both carry a period.
 An approximate split costs a report the command would otherwise print. It never
@@ -390,7 +401,7 @@ Neither file in `touches` sits under `.saffron/policy.yaml:34-58`'s
 against the `feature` ceiling of 600 (`saffron/gates/core/size.py:25`). The
 estimate is 190 in `driver.py` and 215 in the test file, derived per part. In
 `driver.py`: 65 lines to extract citations and anchor the bare ones, 40 to
-resolve a path and a line at base. Then 35 for the moved-text half, 40 for
+resolve a path and a line at base. Then 35 for the moved-text check, 40 for
 `cmd_cite` and what it prints, and 8 to register the subcommand. In the
 tests: 25 for a shared helper that writes a spec file and commits a fixture
 tree, then 75, 55 and 60 for the three witnesses. `SA-0112` is the comparable
@@ -398,7 +409,7 @@ cell, in these same two files. It spent 99 lines in `driver.py` and 144 in the
 test file, on one subcommand with five verdicts and four witnesses. This
 command parses prose and reads a tree at a commit, where that one read rows
 already in hand. Its witnesses build real git fixtures where that one used the
-ledger fixture. A little over twice that cell is the estimate. The directory
+ledger fixture. Two thirds more than that cell is the estimate. The directory
 half of item b-b69bb6 was cut from this spec for that reason. With it, the same
 derivation gave 540 lines, inside 100 of the ceiling that `SA-0106` (633) and
 `SA-0107` (1049) overshot. Do not go looking for more to do.
