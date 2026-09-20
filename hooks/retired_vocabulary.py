@@ -28,11 +28,13 @@ from pathlib import Path
 # "run" and "batch" settles. `[ -]` covers both separator forms that were live
 # on one line before this script existed, and `\b` after `runs?` is what keeps
 # a near miss like "gate-runner" out (the boundary fails on the trailing "ner").
+# The leading `\b` keeps out a word that merely ends in the noun: without it
+# "delegate runs" was a hit (#387).
 #
 # `re.ASCII`: pygrep matched bytes, where `\b` is ASCII-only, so a letter like
 # `é` right after the verb still ended the word there.
 RETIRED_TERMS = [
-    re.compile(r"(?i)gate[ -]runs?\b", re.ASCII),
+    re.compile(r"(?i)\bgate[ -]runs?\b", re.ASCII),
 ]
 
 # A maximal run of horizontal-or-vertical whitespace. Whether it joins, or

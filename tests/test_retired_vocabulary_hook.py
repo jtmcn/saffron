@@ -126,6 +126,24 @@ def test_a_near_miss_stays_a_near_miss_across_a_break(tmp_path):
     )
 
 
+def test_a_word_merely_ending_in_the_noun_is_not_a_hit(tmp_path):
+    module = _load_module()
+    noun, verb = _retired_words()
+    prefix = "dele"  # the noun is the tail of this word, not a word of its own
+
+    one_line = tmp_path / "one_line.md"
+    one_line.write_text(f"the {prefix}{noun} {verb}s it by hand\n")
+    assert not module.check_file(one_line), (
+        "the noun needs a word boundary in front of it, as the verb has behind it"
+    )
+
+    wrapped = tmp_path / "wrapped.md"
+    wrapped.write_text(f"the {prefix}{noun}\n{verb}s it by hand\n")
+    assert not module.check_file(wrapped), (
+        "a wrap must not manufacture a hit out of a word that only ends in the noun"
+    )
+
+
 def test_a_hit_names_the_file_and_the_line_it_starts_on(tmp_path):
     module = _load_module()
     noun, verb = _retired_words()
