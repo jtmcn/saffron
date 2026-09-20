@@ -11,6 +11,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+import records.kinds
 from records.kinds import KINDS, RANDOM_ID, BacklogItem, ItemId, as_id
 from records.load import _FRONTMATTER, Record, load, split_sections
 
@@ -19,7 +20,14 @@ LAST_NUMBERED = 177
 
 # Where a live `item N` is a promise someone can follow today. Not
 # `docs/evidence/`: dated primary records, true on their date.
-CITING = ("saffron", "tests", ".saffron/specs", "DESIGN.md", "docs/appendices")
+CITING = (
+    "saffron",
+    "tests",
+    ".saffron/specs",
+    "DESIGN.md",
+    "docs/appendices",
+    "docs/adr",
+)
 _SUFFIXES = {".py", ".md", ".yaml", ".yml", ".toml", ".sh"}
 
 # `item 33`, `items 65, 72`, `items **81**–**85**`, `BACKLOG item 118`,
@@ -55,6 +63,13 @@ def _backlog(r: Record) -> BacklogItem:
     another kind's model would silently check nothing instead of refusing it."""
     if not isinstance(r.model, BacklogItem):
         raise TypeError(f"{r.path}: not a BacklogItem")
+    return r.model
+
+
+def _adr(r: Record) -> records.kinds.Adr:
+    """Narrow a record's model to `Adr`, the same way `_backlog` does."""
+    if not isinstance(r.model, records.kinds.Adr):
+        raise TypeError(f"{r.path}: not an Adr")
     return r.model
 
 
@@ -111,6 +126,117 @@ def check_appendix_letters(records: list[Record]) -> list[Violation]:
             f"appendix letters are {ids}; they run from A with no gap or repeat: {expected}",
         )
     ]
+
+
+def check_adr_ids(records: list[Record]) -> list[Violation]:
+    """ADR ids run 1, 2, 3 … with no gap or repeat. Not yet wired into
+    `check_all` — the by-hand layer adds it with ADR 1."""
+    out: list[Violation] = []
+    counts = Counter(_adr(r).id for r in records)
+    for r in records:
+        adr_id = _adr(r).id
+        if counts[adr_id] > 1:
+            out.append(Violation(r.path, "id", f"{adr_id} is used more than once"))
+    ids = {_adr(r).id for r in records}
+    if ids:
+        missing = sorted(set(range(1, max(ids) + 1)) - ids)
+        if missing:
+            highest = next(r for r in records if _adr(r).id == max(ids))
+            out.append(
+                Violation(
+                    highest.path, "id", f"ids are not contiguous; missing {missing}"
+                )
+            )
+    return out
+
+
+def check_adr_supersession(records: list[Record]) -> list[Violation]:
+    """Supersession is recorded on both sides. Not yet wired into `check_all`
+    — the by-hand layer adds it with ADR 1."""
+    out: list[Violation] = []
+    by_id = {r.model.id: r for r in records}
+    for r in records:
+        m = _adr(r)
+        for other in m.supersedes:
+            if other not in by_id:
+                out.append(
+                    Violation(
+                        r.path, "supersedes", f"names ADR {other}, which does not exist"
+                    )
+                )
+            elif other >= m.id:
+                out.append(
+                    Violation(
+                        r.path,
+                        "supersedes",
+                        f"names ADR {other}, which is not lower than {m.id}",
+                    )
+                )
+            elif m.id not in _adr(by_id[other]).superseded_by:
+                out.append(
+                    Violation(
+                        r.path,
+                        "supersedes",
+                        f"names ADR {other}, but {other} does not list "
+                        f"{m.id} in superseded_by",
+                    )
+                )
+        for other in m.superseded_by:
+            if other not in by_id:
+                out.append(
+                    Violation(
+                        r.path,
+                        "superseded_by",
+                        f"names ADR {other}, which does not exist",
+                    )
+                )
+            elif m.id not in _adr(by_id[other]).supersedes:
+                out.append(
+                    Violation(
+                        r.path,
+                        "superseded_by",
+                        f"names ADR {other}, but {other} does not list "
+                        f"{m.id} in supersedes",
+                    )
+                )
+        if m.status == "superseded" and not m.superseded_by:
+            out.append(
+                Violation(
+                    r.path,
+                    "superseded_by",
+                    "status is superseded but superseded_by is empty",
+                )
+            )
+        if m.superseded_by and m.status != "superseded":
+            out.append(
+                Violation(
+                    r.path, "status", f"superseded_by is set but status is {m.status}"
+                )
+            )
+        if m.status == "deprecated" and m.superseded_by:
+            out.append(
+                Violation(
+                    r.path,
+                    "superseded_by",
+                    "a deprecated ADR has nothing replacing it",
+                )
+            )
+    return out
+
+
+def check_adr_appendices(records: list[Record], letters: set[str]) -> list[Violation]:
+    """An ADR's `appendices` names only letters that exist. Not yet wired into
+    `check_all` — the by-hand layer adds it with ADR 1, passing in the live
+    letters from `ontology.design_record`."""
+    out: list[Violation] = []
+    for r in records:
+        m = _adr(r)
+        bad = [a for a in m.appendices if a not in letters]
+        if bad:
+            out.append(
+                Violation(r.path, "appendices", f"names {bad}, which do not exist")
+            )
+    return out
 
 
 def check_links(records: list[Record]) -> list[Violation]:
@@ -257,6 +383,7 @@ LIVE_SURFACES = (
     "README.md",
     "docs/agents",
     "docs/appendices",
+    "docs/adr",
 )
 
 _TIER_HEADING = re.compile(r"^### Tier (\d)\b")

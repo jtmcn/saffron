@@ -137,7 +137,33 @@ class Appendix(Identified):
     question: str = Field(min_length=1)
 
 
+AdrStatus = Literal["accepted", "superseded", "deprecated"]
+_APPENDIX_REF = Annotated[str, Field(pattern=rf"^{APPENDIX_ID}$")]
+
+
+class Adr(Identified):
+    """One decision, as it stands today. Never edited except to record a
+    supersession on both sides (`## Supersession` in the design record)."""
+
+    id: Number
+    title: str = Field(min_length=1)
+    status: AdrStatus
+    date: dt.date
+    supersedes: list[Number] = Field(default_factory=list)
+    superseded_by: list[Number] = Field(default_factory=list)
+    principles: list[Number] = Field(default_factory=list)
+    appendices: list[_APPENDIX_REF] = Field(default_factory=list)
+
+
 BACKLOG_SECTIONS = ("Problem", "Done looks like", "Record")
+ADR_SECTIONS = (
+    "Context",
+    "Decision",
+    "Options considered",
+    "Principles",
+    "Consequences",
+)
+ADR_REQUIRED = ("Context", "Decision", "Principles", "Consequences")
 
 
 @dataclass(frozen=True)
@@ -147,8 +173,10 @@ class Kind:
     pattern: str
     model: type[Identified]
     hand_written: frozenset[str] = frozenset()
-    # Required `## ` headings, in order. Empty means the body is free prose.
+    # `## ` headings the body may use, in order. Empty means the body is free prose.
     sections: tuple[str, ...] = ()
+    # The subset of `sections` that must appear. `_sectioned` refuses a missing one.
+    required: tuple[str, ...] = ()
 
 
 KINDS: dict[str, Kind] = {
@@ -159,11 +187,20 @@ KINDS: dict[str, Kind] = {
         BacklogItem,
         frozenset({"README.md", "PRIORITY.md"}),
         sections=BACKLOG_SECTIONS,
+        required=("Problem",),
     ),
     "appendix": Kind(
         "appendix",
         "docs/appendices",
         rf"^({APPENDIX_ID})-[a-z0-9-]+\.md$",
         Appendix,
+    ),
+    "adr": Kind(
+        "adr",
+        "docs/adr",
+        r"^(\d{4})-[a-z0-9-]+\.md$",
+        Adr,
+        sections=ADR_SECTIONS,
+        required=ADR_REQUIRED,
     ),
 }
