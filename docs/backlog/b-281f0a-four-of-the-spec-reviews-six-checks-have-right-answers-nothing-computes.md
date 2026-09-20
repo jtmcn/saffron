@@ -130,3 +130,15 @@ matters.
   parametrised-witness check in `tests/test_queued_specs.py`. `SA-0112` could
   not carry it: `revert` passes a new test there with the diff's source
   reverted, because that source is `driver.py`, which the test does not read.
+- 2026-09-20: both parts of the prose half landed by hand, so that half is
+  closed. The ledger half closed in #382. Check 4's concern rule now names the
+  worst case among the rows, so a reader and `check` apply one rule. Step 1b
+  runs `check` over every spec in the order before dispatching a review. A
+  blocker there goes to the operator first, because it is arithmetic rather
+  than judgement. The review still gets `history: run it yourself`, since
+  check 5 reads the rows. `.claude/agents/spec-reviewer.md:30` still names
+  `driver.py history` as the only command a review runs, and whether `check`
+  joins that list is left where the entry above left it.
+- 2026-09-20: what stays open is the tree-only half, the
+  parametrised-witness check in `tests/test_queued_specs.py`. It needs its own
+  tests-only spec, or a by-hand commit, for the reason two entries above.

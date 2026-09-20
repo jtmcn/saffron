@@ -58,7 +58,29 @@ and budget, the total, and every spec it refused.
 
 ## 1b. Review each spec before its first cell
 
-Every spec in the order gets one spec review before any cell runs: one
+Run the ceilings check over every spec in the order first:
+
+```bash
+uv run .claude/skills/run-saffron-spec-loop/driver.py check SA-NNNN
+```
+
+It applies check 4's two blocker rules to the rows `history` prints, and exits
+1 on either. A blocker here is arithmetic rather than judgement, so it goes to
+the operator before the review rather than after it: raise the ceiling, run
+the spec as written, or drop it. A concern it prints is advisory and exits 0,
+and a usage error, such as a spec id no file declares, also exits 1.
+
+A spec of a shape no past cell matches prints `ceilings: no past cells of this
+shape to compare against` and exits 0, with no verdict line under it. That is
+check 4's third outcome, a note rather than a pass, and the review still owes
+you the reading. The floor caveat and the different-`type` caveat stay with
+the review too.
+
+The review runs either way and still gets `history: run it yourself`, because
+check 5 reads the rows themselves. What this buys is the arithmetic settled
+before the review spends a turn on it, and a second reader of the same line.
+
+Every spec in the order then gets one spec review before any cell runs: one
 background subagent per spec, dispatched together. Use `subagent_type:
 spec-reviewer`, or `Plan` handed the body of
 `.claude/agents/spec-reviewer.md` if the session started before that file
