@@ -42,7 +42,11 @@ carries the earned `elevated`.
   index, on one host. Cloud, the artifact content-addressed store and a
   Saffron-owned state repository are named as things the interface must not
   preclude, and are not built.
-- **Encoding.** A pure append-only event log per task. State is a replay.
+- **Encoding.** A pure append-only log of facts per task. State is a replay.
+- **The record mints its own task key**, because the ledger's `task_id` is an
+  autoincrement the fold produces.
+- **A record entry is a fact, not an event.** `saffron/events.py` owns "event"
+  for the stream §8 keeps separate.
 - **The batch is a fold, not a store.** Nothing anywhere holds a batch or a
   run. Both are derived from the task records.
 - **Migration.** All 99 tasks, unambiguous fields only. A field the ledger
@@ -93,16 +97,16 @@ no-progress detection and the flywheel's question. That is a requirement on the
 
 Three operations, with no git in their signatures:
 
-- `append(task_id, event) -> None`. Appends one event. Never rewrites, never
+- `append(task_key, fact) -> None`. Appends one fact. Never rewrites, never
   deletes, never reorders.
-- `read(task_id) -> Sequence[Event]`. The task's whole log, in append order.
+- `read(task_key) -> Sequence[Fact]`. The task's whole log, in append order.
 - `compare_and_swap(key, expected, new) -> bool`. Unused on one host, and the
   seam a cross-host budget needs. It is specified now so a later backend does
   not have to reshape the fold to add it.
 
 A fourth rule is a constraint rather than an operation: **the record holds facts
 and content hashes, never artifacts.** `baseline.json`, `lens-gates.json` and
-transcripts stay in the batch tree, and an event names them by hash. The
+transcripts stay in the batch tree, and a fact names them by hash. The
 measurement behind this is item 170's: `~/.saffron/ledger.db` is 6.7 MB for 102
 tasks, about 65 KB of facts each, while `~/.saffron/batches/v0/` is 132 MB,
 about 1.3 MB each. At ten tasks a night the artifacts are roughly 5 GB a year
@@ -121,16 +125,16 @@ refs/saffron/tasks/<task_id>
 ```
 
 Each `append` is a commit. Its tree carries the whole log to date, one blob per
-event:
+fact:
 
 ```
-events/0001.json
-events/0002.json
+facts/0001.json
+facts/0002.json
 ...
 ```
 
 Git's content addressing means every earlier blob is already stored, so the tree
-grows by one object per append. The commit message names the event kind and the
+grows by one object per append. The commit message names the fact kind and the
 task, so `git log --oneline refs/saffron/tasks/SA-0099` is a readable history
 with no tool.
 
@@ -170,22 +174,31 @@ an earlier one established, so no two commits can disagree about one.
 
 The cost is that every read of a task's state is O(its history), and the fold
 replays every task on every rebuild. At today's scale that is nothing — about
-100 tasks at roughly 15 events each is some 1,500 blob reads for a full rebuild,
+100 tasks at roughly 15 facts each is some 1,500 blob reads for a full rebuild,
 against a local object store. It is written down because it is the first thing
-that will stop being nothing: a rebuild is O(tasks x events), and the mitigation,
+that will stop being nothing: a rebuild is O(tasks x facts), and the mitigation,
 when it is needed, is the one item 170 already names — finished tasks fold into
 one history per period, which also bounds ref advertisement.
 
-### Event shape
+### Fact shape
 
-An event is a JSON object with a kind, a timestamp, the batch id, and a payload
-typed per kind. The kinds cover what the ledger's tables hold today: task
+A record entry is a **fact**, never an event. `saffron/events.py` owns "event"
+for the `events.jsonl` stream, and §8 below is about keeping the two apart; one
+word for both is where that separation would start to fail.
+
+A fact is a JSON object with a kind, a timestamp, the batch key, and a payload
+typed per kind. The kinds are a closed set covering what the ledger's tables hold today: task
 creation and each state transition, attempt open and close with its cost and
 terminal reason, gate results with their failures, findings with their three
 judgements, and decisions.
 
-Two fields are on every event and are what makes the batch a fold rather than a
-store: `batch_id` and `repo`.
+Two fields are on every fact and are what makes the batch a fold rather than a
+store: `batch_key` and `repo`.
+
+**A task's identity in the record is not the ledger's.** `tasks.task_id` is a
+SQLite autoincrement, and the fold mints it. An id the fold produces cannot name
+the ref the fold reads, so a task carries a `task_key` generated at creation,
+and the index holds it in a `record_key` column.
 
 ## 4. The fold
 
@@ -206,9 +219,9 @@ this changes nothing about them — it changes only what writes them.
 §4.4 gives a batch one budget, one concurrency pool and one `--until`, spanning
 every selected repo. Per-target refs give a task a home and give a batch none.
 
-Nothing stores a batch. Every event carries its `batch_id`, so a night's roster,
+Nothing stores a batch. Every fact carries its `batch_key`, so a night's roster,
 spend, wall clock and terminal-state counts are derived by scanning every
-enabled target's `refs/saffron/tasks/*` for events bearing that id.
+enabled target's `refs/saffron/tasks/*` for facts bearing that key.
 
 The budget follows. `batch.py:194` reads
 `budget_usd - ledger.batch_spend(batch_id)` today; it reads the same quantity
@@ -239,8 +252,8 @@ nights that already happened rather than against a fixture:
 Between steps 1 and 3 `queue.json` is a render, not a store, and is named that
 way in the code so it is not mistaken for one.
 
-**This closes item 171.** The diff stat computed at `package.py:792` becomes an
-event field, so `added` and `removed` land in the record. Today they reach
+**This closes item 171.** The diff stat computed at `package.py:792` becomes a
+fact field, so `added` and `removed` land in the record. Today they reach
 `queue.json` and no store at all — §6's own mock renders `+180/−22` from a
 number the ledger has no column for.
 
@@ -265,7 +278,7 @@ refused.
 The trailing accept rate survives the migration: it reads `MERGED`, which is
 unambiguous on all 65 rows that carry it.
 
-## 8. Two event streams, and the rule that keeps them from drifting
+## 8. Two streams, and the rule that keeps them from drifting
 
 The record is not `events.jsonl`. That file stays local and is never the record,
 because `saffron watch` tails it live and git cannot stream.
