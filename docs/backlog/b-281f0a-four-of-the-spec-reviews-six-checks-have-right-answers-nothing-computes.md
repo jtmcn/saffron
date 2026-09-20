@@ -4,7 +4,7 @@ title: Four of the spec review's six checks have right answers, and every spec p
 status: open
 tier: 2
 filed: 2026-09-19
-specs: []
+specs: [SA-0112]
 prs: []
 commits: []
 cites: []
@@ -71,3 +71,45 @@ matters.
 - 2026-09-19: filed by hand from the writer measurement above. The four specs
   and their reviews are this record's evidence and are not kept. The agent is
   `.claude/agents/spec-writer.md`.
+- 2026-09-19: `SA-0112` is queued for the ledger half. It adds
+  `driver.py check SA-NNNN`, which applies check 4's four thresholds to the
+  rows `history` prints and exits non-zero on a blocker. Two corrections to the
+  "Done looks like" above came out of writing it, and the item stays open on
+  the second.
+
+  **The `specs:` bookkeeping is already checked**, so that bullet is wrong.
+  `check_specs_name_their_items` at `tests/records/check.py:287-310` reports
+  "cites this item and is not listed". It fires for any spec whose `## Context`
+  names an item that does not list it back.
+  `tests/records/test_records_integrity.py:13-21` runs it over the live tree on
+  every `make check`. Nothing is owed there.
+
+  **The parametrised-witness check cannot ride in `SA-0112`'s diff**.
+  `tests/test_queued_specs.py` is inside `.saffron/policy.yaml:69`'s
+  `test_paths`. A test added there is a new test `revert` re-runs with the
+  diff's *source* reverted. That source is `driver.py`, which the new test does
+  not read. It would pass reverted, which `revert` blocks
+  (`saffron/gates/core/revert.py:171` is the skip for the other case, a diff
+  with no source at all). So it is either its own tests-only spec, or by hand
+  as item **152** did for the same file and the same reason. In a tests-only
+  spec `revert` skips and the anti-theater gate says nothing. `SA-0112` lists
+  the file as `forbidden` to keep a cell from reaching for it.
+- 2026-09-19: what the by-hand prose half owes, settled by the operator on
+  `SA-0112`'s fourth spec review. Two things, both after that cell lands.
+
+  **Reword check 4's concern rule to the worst case among the rows**.
+  `.claude/agents/spec-reviewer.md:90-92` asks a reader for "REVIEW and REBUT
+  at the rows' usual cost". `check` computes something narrower and sharper:
+  the highest `review_usd` plus `rebut_usd` **on one row**. That is the
+  worst-case convention the two halves of the `ceilings:` line already use. The
+  operator settled the divergence in the computed rule's favour, so the printed
+  rule is the one that moves. Until it does, the prompt and the command
+  disagree about what a concern means. That is the defect this item was filed
+  about, in miniature.
+
+  **Wire `driver.py check` into the loop's step 1b**. The command is called by
+  nothing the day `SA-0112` merges, deliberately. Run it by hand, then edit
+  `SKILL.md`. That is the order `SA-0092` and item **145** took for the
+  `ceilings:` line itself. `.claude/agents/spec-reviewer.md:19` and `:30` also
+  name `driver.py history` as the only command a review runs. Whether `check`
+  joins that list is a decision about the review rather than about the command.
