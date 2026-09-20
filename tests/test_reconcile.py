@@ -421,6 +421,10 @@ def test_a_head_is_recorded_only_for_an_observed_merge(ledger):
     assert set(result.merged) == {no_answer, empty, nonstring}
     assert result.changes_requested == [changes]
     assert result.rejected == [rejected]
+    # The claim is about the row, not the bucket: a merge with no usable head
+    # still moves, and the head alone is what goes unrecorded.
+    for task_id in (no_answer, empty, nonstring):
+        assert _state(ledger, task_id) == "MERGED"
     for task_id in (no_answer, empty, nonstring, changes, rejected):
         assert _merged_head(ledger, task_id) is None
 

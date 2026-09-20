@@ -1362,11 +1362,16 @@ def test_a_ledger_built_before_the_merged_head_column_gains_it_and_records_one(
     second = Ledger(path)
     assert [r["spec_id"] for r in second.tasks_by_repo(repo_id)] == ["TE-9001"]
     second.record_merged_head(task_id, "b" * 40)
-    row = second._db.execute(
+    second.close()
+
+    # Through a connection that never saw the write: the same one would read
+    # an uncommitted row back and a writer that never commits would pass.
+    third = Ledger(path)
+    row = third._db.execute(
         "SELECT merged_head_sha FROM tasks WHERE task_id = ?", (task_id,)
     ).fetchone()
     assert row["merged_head_sha"] == "b" * 40
-    second.close()
+    third.close()
 
 
 def test_an_attempt_records_the_model_it_ran_on(ledger, task):

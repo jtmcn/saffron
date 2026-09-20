@@ -79,6 +79,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     merged_head_sha TEXT
     -- The commit GitHub reported a merge at, written once by `reconcile`
     -- (backlog item 97). NULL until a merge for this row is observed.
+    -- Below the column, not above it like `tool`. Measured 2026-09-19: on
+    -- SQLite 3.51.0 a comment above the *last* column makes `DROP COLUMN`
+    -- rebuild an unterminated table ("incomplete input"); 3.53.1 tolerates it.
 );
 
 -- `phase` is the state the task was in when the turn started, and `n` numbers

@@ -97,8 +97,8 @@ class ReconcileResult:
     # answer is never recorded as "not merged"; the row is left exactly as it
     # was and its id recorded here.
     unasked: list[int] = field(default_factory=list)
-    # The merge path now writes a head onto `tasks.merged_head_sha` (below);
-    # `head_moved` itself is still only reported, never written.
+    # The merge path writes a head onto the ledger at the merge below;
+    # `head_moved` is reported only — the extra commits are not ours to judge.
     head_moved: list[HeadMoved] = field(default_factory=list)
 
 
