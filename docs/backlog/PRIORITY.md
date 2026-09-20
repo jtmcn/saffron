@@ -181,6 +181,9 @@ field name misleads 28 records, and an empty `## Problem` section loads clean.
 b-61127f is the ADR layer `SA-0110` stopped short of, which nothing loads or
 indexes yet. **127** and **131** were listed above with no `tier` field, so the
 index ranked neither. They now carry the 3 this list already gave them.
+**b-7d2acf**, filed the same day, is the check that was missing. Nothing
+compares the index to the records in that direction. It ranks here, beside
+128 and 129.
 
 **76 sits here rather than in tier 1** because `structure`, where the hole was
 found, is closed: it refuses every ignore source and states its own file set.
